@@ -30,8 +30,9 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="$PROJECT_ROOT/src:${PYTHONPATH}"
 export LUPIN_ROOT="$PROJECT_ROOT"
 
-# Same network guard as the Lupin unit tier (row 7c84b8b8) — count mode.
-export LUPIN_UNIT_NETWORK="${LUPIN_UNIT_NETWORK:-count}"
+# Same network guard as the Lupin unit tier (row 7c84b8b8) — BLOCK mode since
+# 2026-08-19. A unit test that dials out fails the run; `count` surveys instead.
+export LUPIN_UNIT_NETWORK="${LUPIN_UNIT_NETWORK:-block}"
 
 # Use venv pytest on host, fall back to system pytest in Docker container
 VENV_PYTEST="$PROJECT_ROOT/.venv/bin/pytest"

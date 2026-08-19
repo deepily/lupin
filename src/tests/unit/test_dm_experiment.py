@@ -357,6 +357,17 @@ def _make_send_body( **overrides ):
 _LONG_BODY = " ".join( [ "word" ] * 160 )   # 160 words > 150 threshold
 
 
+# Row ec5cf83a: grading + the corpus row it rides on run OFF the send path, on a
+# background worker. Tests that assert on the GRADE or the ROW inject this runner,
+# which executes the deferred job in the caller's thread — so the assertion reads a
+# finished job instead of racing one. Production's default refuses to defer under
+# pytest at all (dm._submit_deferred_grade's self-guard), which is what keeps a unit
+# test from ever reaching the live grader.
+def _run_deferred_inline( job ):
+    job()
+    return True
+
+
 class _ExperimentHarness( unittest.TestCase ):
 
     def setUp( self ):
@@ -381,6 +392,7 @@ class _ExperimentHarness( unittest.TestCase ):
         dm_experiment.set_policy( dm_experiment.make_policy( **kw ) )
 
     def _run( self, body, arrival=_IN_A, grader=lambda b: None, **kw ):
+        kw.setdefault( "defer_grade_fn", _run_deferred_inline )
         return self.execute(
             authenticated_user_id = "user-uuid-1",
             body                  = body,
@@ -630,7 +642,12 @@ class TestOutsideWindowUnchanged( _ExperimentHarness ):
                   "tone": { "weight": 1 }, "overall": { "weight": 1 } }
         result = self._run( _make_send_body(), arrival=out, grader=lambda b: grade )
         self.assertEqual( result[ "http_status" ], 201 )
-        self.assertIn( "quality", result )                       # baseline appends it
+        # Row ec5cf83a FLIPPED THIS ASSERTION, deliberately. It read
+        # `assertIn( "quality", result )` — the baseline path used to append the grade
+        # to the 201. It cannot any more: the grade is computed after the send returns,
+        # so the only honest response is one with no grade in it. The grade's
+        # destination is the corpus row, asserted below.
+        self.assertNotIn( "quality", result )
         row = self._row()
         self.assertIn( "arm", row )                              # legacy stamp present
         self.assertNotIn( "effective_arm", row )                 # no experiment fields

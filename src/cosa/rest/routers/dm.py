@@ -24,7 +24,9 @@ import asyncio
 import json
 import os
 import re
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import cosa.utils.util as cu
@@ -1469,9 +1471,11 @@ def _maybe_grade_dm_quality( body_text ):
         - body_text is the caller-supplied DM body string
 
     Ensures:
-        - toggle OFF (control, default): returns None — no judge call, no audit
-          tally, and execute_dm_send appends NO `quality` field (the Phase 1
-          baseline result shape, unchanged)
+        - toggle OFF (control, default): returns None — no judge call and no audit
+          tally, so the deferred job writes a corpus row with null grades
+        - THIS RUNS ON THE GRADING WORKER, not in the send (row ec5cf83a). Nothing
+          about the function changed; where it is CALLED did. No caller may put it
+          back in a request's timeline.
         - toggle ON (treatment): builds the judge lazily (once per process), grades
           the body, tallies the quality audit, and returns the quality dict
         - never raises: DmQualityJudge.judge itself never raises (a judge that
@@ -1489,6 +1493,254 @@ def _maybe_grade_dm_quality( body_text ):
     quality = _dm_quality_judge.judge( body_text )
     _record_dm_quality( quality )
     return quality
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEFERRED GRADING (row ec5cf83a — Rick's ruling 2026-08-19, mechanism picked
+# here). Grading a DM used to sit INSIDE the latency of accepting it: two live
+# model calls to :3001 before execute_dm_send returned, so a slow grader made
+# every fleet DM slow and a dead one made it slower still.
+#
+# MECHANISM AND WHY THIS ONE. A single background worker thread, fed by an
+# in-process queue, that grades and then writes the corpus row.
+#   · Not a durable queue: the grade is a measurement, not a message. Paying for
+#     durability (a table, a broker, a replay path) to protect a statistic buys a
+#     new failure surface on the fleet's comms bus to protect the least valuable
+#     thing on it.
+#   · Not a post-hoc sweep: a sweep would have to re-read the corpus and grade
+#     rows after the fact, which needs the body kept somewhere anyway — the row
+#     already carries it, so the sweep is strictly more machinery for the same
+#     result, and it grades late by design rather than by accident.
+#   · ONE worker, not a pool: grades are order-insensitive but the corpus is an
+#     append-only file, and one writer means no interleaved lines. It also caps
+#     concurrent load on :3001 at exactly one conversation.
+#
+# BOUNDED BACKLOG, and it is the part that keeps this honest under load: the
+# worker is single-threaded and each grade is two model calls, so a fleet burst
+# can outrun it. Past _DM_GRADE_MAX_PENDING the deferral is REFUSED and the
+# corpus row is written immediately WITHOUT a grade. A message with no grade yet
+# is a normal state (Mr Radio's ruling); a message with no ROW is a lost
+# measurement, which is not.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DM_GRADE_MAX_PENDING = 32
+_dm_grade_executor    = None
+_dm_grade_lock        = threading.Lock()
+_dm_grade_audit       = {
+    "accepted"             : 0,
+    "refused"              : 0,   # backlog full
+    "refused_under_pytest" : 0,   # the self-guard below
+    "pending"              : 0,
+    "failed"               : 0,
+}
+
+
+def get_dm_grade_audit():
+    """A copy of the deferred-grade counters (accepted / refused / pending /
+    failed). A copy, not the dict, so a reader cannot mutate the tally."""
+    with _dm_grade_lock:
+        return dict( _dm_grade_audit )
+
+
+def reset_dm_grade_audit():
+    """Zero the deferred-grade counters — test seam and operator reset."""
+    with _dm_grade_lock:
+        for key in _dm_grade_audit:
+            _dm_grade_audit[ key ] = 0
+
+
+def _get_dm_grade_executor():
+    """The single grading worker, built on first use so a server that never
+    sends a DM never starts a thread."""
+    global _dm_grade_executor
+    if _dm_grade_executor is None:
+        _dm_grade_executor = ThreadPoolExecutor( max_workers=1, thread_name_prefix="dm-grade" )
+    return _dm_grade_executor
+
+
+def _submit_deferred_grade( job ):
+    """
+    Hand `job` to the grading worker.
+
+    Requires:
+        - job is a 0-arg callable
+
+    Ensures:
+        - SELF-GUARD (same shape as _persist_dm_row's, row f5d6dc5e): under pytest
+          the deferral is ALWAYS refused and no worker is ever started. A unit test
+          cannot reach the live grader through this default, and no grading thread
+          can outlive the test that spawned it — which is how the toggle pins the
+          send-path tests rely on stopped working the moment grading became
+          asynchronous: the background call landed AFTER the patch context exited
+          and dialled :3001 for real. A test that WANTS to exercise grading injects
+          `defer_grade_fn` and owns the timing.
+        - returns True iff the job was accepted onto the worker
+        - returns False, and runs NOTHING, when _DM_GRADE_MAX_PENDING jobs are
+          already outstanding — the caller then writes its row ungraded
+        - a job that raises is caught, counted and printed; the worker survives
+
+    Raises:
+        - nothing
+    """
+    if _running_under_pytest():
+        with _dm_grade_lock:
+            _dm_grade_audit[ "refused_under_pytest" ] += 1
+        return False
+    with _dm_grade_lock:
+        if _dm_grade_audit[ "pending" ] >= _DM_GRADE_MAX_PENDING:
+            _dm_grade_audit[ "refused" ] += 1
+            print(
+                f"[dm-grade] WARNING: deferred grade REFUSED — {_dm_grade_audit[ 'pending' ]} "
+                f"already pending (cap {_DM_GRADE_MAX_PENDING}); the corpus row is written "
+                f"ungraded. Refused so far: {_dm_grade_audit[ 'refused' ]}."
+            )
+            return False
+        _dm_grade_audit[ "pending" ]  += 1
+        _dm_grade_audit[ "accepted" ] += 1
+
+    def _run():
+        try:
+            job()
+        except Exception as e:
+            # The grader itself is contracted never to raise; this catches the
+            # corpus write and anything a future job adds. A worker thread that
+            # dies takes every LATER grade with it, which is a silent stop.
+            with _dm_grade_lock:
+                _dm_grade_audit[ "failed" ] += 1
+            print( f"[dm-grade] WARNING: deferred grade job failed: {e}" )
+        finally:
+            with _dm_grade_lock:
+                _dm_grade_audit[ "pending" ] -= 1
+
+    _get_dm_grade_executor().submit( _run )
+    return True
+
+
+# The grade notice's identity. It comes from the JUDGE, not from the peer who was
+# messaged — a grade wearing the recipient's name would read as that peer replying.
+_DM_GRADE_SENDER_ID = "dm-quality-judge@lupin.deepily.ai"
+_DM_GRADE_PERSONA   = "DM Quality Judge"
+_DM_GRADE_ICON      = "⚖️"
+
+
+def format_dm_grade_notice( message_id, quality ):
+    """
+    The one-line grade notice pushed back to a sender.
+
+    Requires:
+        - message_id is the id of the DM being graded
+        - quality is DmQualityJudge.judge()'s dict
+
+    Ensures:
+        - NAMES THE MESSAGE IT GRADES (Mr Radio's constraint, 2026-08-19). A late
+          grade with no anchor is the same confusion arriving slower: by the time it
+          lands the sender may have sent three more DMs, and a bare "👎 too long"
+          cannot say which one it means.
+        - a dimension whose weight is None (LENGTH-ONLY mode) is shown as withheld
+          rather than as a zero
+    """
+    def dimension( name ):
+        d = quality[ name ]
+        if d[ "weight" ] is None:
+            return f"{name} —"
+        return f"{name} {d[ 'emoji' ]} {d[ 'weight' ]:+d}"
+    dimensions = " · ".join( dimension( n ) for n in ( "length", "directness", "tone", "overall" ) )
+    return f"[grade for DM {message_id}] {dimensions}"
+
+
+def push_dm_grade_to_sender( *, notification_queue, authenticated_user_id, sender_session_id,
+                             message_id, quality ):
+    """
+    Deliver a finished grade back to the seat that sent the DM.
+
+    Requires:
+        - sender_session_id is the SENDER's session id (routing is by its 8-char head,
+          the same job_id convention the DM itself uses)
+
+    Ensures:
+        - the sender keeps seeing its own grades. That feedback IS the live
+          intervention — arm `signal_only`, "grade shown, nothing refused" — so moving
+          the grade off the send path without this would have quietly ended the
+          experiment rather than relocated it.
+        - BEST-EFFORT AND SILENT (Mr Radio's constraint): a reaped seat is a normal
+          outcome, not an error. The push is fire-and-forget onto the notification
+          queue, which routes by job_id and simply reaches nobody when that seat is
+          gone; anything raised is caught and printed, never propagated. A grading
+          worker that dies on a departed recipient would take every LATER grade with it.
+        - NOT a DM. It rides push_notification directly, so it never re-enters the send
+          path — a grade delivered by dm_send would itself be graded, forever.
+        - returns True iff the notice was pushed
+
+    Raises:
+        - nothing
+    """
+    if quality is None:
+        return False
+    try:
+        notification_queue.push_notification(
+            message        = format_dm_grade_notice( message_id, quality ),
+            type           = "task",
+            priority       = "low",
+            id             = f"dm-grade-{message_id}",
+            sender_id      = _DM_GRADE_SENDER_ID,
+            job_id         = sender_session_id[ :8 ],
+            user_id        = authenticated_user_id,
+            suppress_ding  = True,
+            direction      = "ai_to_ai",
+            sender_persona = _DM_GRADE_PERSONA,
+            sender_icon    = _DM_GRADE_ICON,
+        )
+        return True
+    except Exception as e:
+        print( f"[dm-grade] WARNING: could not deliver the grade for {message_id}: {e}" )
+        return False
+
+
+def _defer_grade_and_persist( *, defer_fn, grade_quality_fn, body_text, persist_kwargs,
+                              deliver_grade_fn=None ):
+    """
+    Grade `body_text` and write its corpus row OFF the send path.
+
+    Requires:
+        - defer_fn( job ) -> bool accepts a 0-arg callable and reports whether it
+          took it (the production default is _submit_deferred_grade)
+        - persist_kwargs is every _persist_dm_row argument EXCEPT `quality`
+        - deliver_grade_fn( quality ), when given, hands the finished grade back to
+          the sender. It runs AFTER the row is written — the corpus is the durable
+          record and must not be at the mercy of a delivery — and its failures are
+          caught here as well as inside it
+
+    Ensures:
+        - the caller's timeline contains no model call: on the accepted path this
+          returns as soon as the job is queued
+        - EXACTLY ONE corpus row is written per call, whether the deferral was
+          accepted (written by the worker, with the grade) or refused (written
+          here, with quality=None)
+        - a grader that RAISES still leaves a row, ungraded. DmQualityJudge.judge
+          is contracted never to raise, and this catches it anyway: a broken
+          contract would otherwise cost the corpus its row as well as its grade,
+          and the row is the part that cannot be recomputed later
+        - a REFUSED deferral delivers no grade, because there is no grade — the row
+          is written ungraded and the sender simply hears nothing
+
+    Raises:
+        - nothing the caller must handle — _persist_dm_row is fail-soft
+    """
+    def _job():
+        try:
+            quality = grade_quality_fn( body_text )
+        except Exception as e:
+            print( f"[dm-grade] WARNING: grader raised, writing the row ungraded: {e}" )
+            quality = None
+        _persist_dm_row( quality=quality, **persist_kwargs )
+        if deliver_grade_fn is not None:
+            try:
+                deliver_grade_fn( quality )
+            except Exception as e:
+                print( f"[dm-grade] WARNING: grade delivery raised: {e}" )
+
+    if not defer_fn( _job ):
+        _persist_dm_row( quality=None, **persist_kwargs )
 
 
 def _record_dm_project( sender_session_id, sender_project ):
@@ -1634,7 +1886,7 @@ def _dispatch_outbound( *, prep, body, authenticated_user_id, notification_queue
 
 def _execute_experiment( *, body, assignment, arrival_utc, target_session_id, target_persona,
                          authenticated_user_id, notification_queue, build_sender_id, persist_fn,
-                         new_id_fn, now_fn, grade_quality_fn ):
+                         new_id_fn, now_fn, grade_quality_fn, defer_grade_fn ):
     """
     Run the in-window (experiment) send path: resolve the arm, apply the length gate,
     and write ONE corpus row that survives a crash (plan items 3/4/5).
@@ -1721,7 +1973,10 @@ def _execute_experiment( *, body, assignment, arrival_utc, target_session_id, ta
         "experiment"             : policy.experiment,
     }
 
-    quality_for_corpus = None
+    # Delivered sends get their grade DEFERRED (row ec5cf83a); every other outcome
+    # (413 refusal, delivery failure) never had a grade to defer and writes its row
+    # inline, so the crash-honest `delivery_outcome` contract below is untouched.
+    graded_delivery = False
     try:
         if length_gate == "rejected":
             # Undisclosed refusal: state the action, never the number (413, NOT 422 —
@@ -1744,21 +1999,34 @@ def _execute_experiment( *, body, assignment, arrival_utc, target_session_id, ta
         )
         row[ "delivery_outcome" ] = "delivered"
         row[ "delivered_at" ]     = datetime.now( timezone.utc ).isoformat()
-        # The judge runs in-window for the corpus + audit tally; its grade is NOT
-        # returned to the sender (quality key absent in both arms).
-        quality_for_corpus = grade_quality_fn( body.body )
+        # The judge still runs in-window for the corpus + audit tally, and its grade is
+        # still NOT returned to the sender (quality key absent in both arms) — what
+        # changed is WHEN: it now runs on the grading worker, after this returns.
+        graded_delivery = True
         return result
     finally:
-        _persist_dm_row(
-            body_text    = body.body,
-            from_persona = body.sender_persona,
-            from_session = body.sender_session_id,
-            from_project = body.sender_project,
-            to_persona   = target_persona,
-            to_session   = target_session_id,
-            quality      = quality_for_corpus,
-            experiment   = row,
-        )
+        persist_kwargs = {
+            "body_text"    : body.body,
+            "from_persona" : body.sender_persona,
+            "from_session" : body.sender_session_id,
+            "from_project" : body.sender_project,
+            "to_persona"   : target_persona,
+            "to_session"   : target_session_id,
+            "experiment"   : row,
+        }
+        if graded_delivery:
+            # NO deliver_grade_fn IN-WINDOW, deliberately. The baseline path pushes the
+            # finished grade back to its sender; doing that here would hand a blind-arm
+            # sender the very signal the arm exists to withhold, which is the same reason
+            # the in-window 201 carries no `quality` key in either arm.
+            _defer_grade_and_persist(
+                defer_fn         = defer_grade_fn,
+                grade_quality_fn = grade_quality_fn,
+                body_text        = body.body,
+                persist_kwargs   = persist_kwargs,
+            )
+        else:
+            _persist_dm_row( quality=None, **persist_kwargs )
 
 
 def execute_dm_send(
@@ -1773,6 +2041,8 @@ def execute_dm_send(
     now_fn    = None,
     grade_quality_fn = None,
     arrival_utc_fn   = None,
+    defer_grade_fn   = None,
+    deliver_grade_fn = None,
 ):
     """
     Pure-logic core for POST /api/dm/send — notification-native AI↔AI DM.
@@ -1805,8 +2075,18 @@ def execute_dm_send(
         - now_fn (if given) is a 0-arg callable returning an aware datetime — a
           TEST-ONLY seam for a deterministic stamp; production leaves it None and
           the central formatter stamps the real UTC-now instant
+        - defer_grade_fn( job ) -> bool decides WHERE the grade + corpus row run.
+          Production leaves it None → the grading worker. A test injects an inline
+          runner so the row exists by the time it asserts on it.
+        - deliver_grade_fn( quality ) is the seam for HOW the finished grade reaches
+          the sender. Production leaves it None → push_dm_grade_to_sender.
 
     Ensures:
+        - NO MODEL CALL HAPPENS IN THIS FUNCTION'S TIMELINE (row ec5cf83a). Grading
+          is queued and returns; a grader that is slow, dead or absent costs the
+          sender nothing and fails no send. The 201 therefore carries NO `quality`
+          key — the grade does not exist yet, and a message with no grade yet is a
+          normal state
         - 422 (recipient unresolved) is returned unchanged for AI self-correction
         - 201 persists + pushes the ai_to_ai notification (body EDT-prefixed in BOTH
           the persisted row and the pushed message) and returns
@@ -1828,9 +2108,15 @@ def execute_dm_send(
         new_id_fn = lambda: str( uuid.uuid4() )
     # Phase 2 DM Quality Judge seam (default = the module-level toggle-gated
     # grader). Injected for tests; production leaves it None → _maybe_grade_dm_quality,
-    # which returns None (no `quality` field) whenever the judge toggle is OFF.
+    # which returns None (null grades in the corpus row) whenever the toggle is OFF.
+    # Since row ec5cf83a this is called by the grading WORKER, never in this timeline.
     if grade_quality_fn is None:
         grade_quality_fn = _maybe_grade_dm_quality
+    # Row ec5cf83a: grading is OFF the send path. This seam decides WHERE the grade
+    # runs — production hands it to the grading worker; a test injects a runner that
+    # executes inline so the corpus row is written before the assertion reads it.
+    if defer_grade_fn is None:
+        defer_grade_fn = _submit_deferred_grade
     # Resolve the experiment arrival instant ONCE, here, before any slow resolution —
     # then thread it through the gate, logging, and response so a send that crosses an
     # hour boundary is scored against a single arm (arrival_utc_fn is the test seam).
@@ -1897,6 +2183,7 @@ def execute_dm_send(
             new_id_fn             = new_id_fn,
             now_fn                = now_fn,
             grade_quality_fn      = grade_quality_fn,
+            defer_grade_fn        = defer_grade_fn,
         )
 
     # ── BASELINE (outside the experiment window) — and, since the two-arm pilot is
@@ -1925,32 +2212,51 @@ def execute_dm_send(
         target_session_id=target_session_id, target_persona=target_persona,
     )
 
-    # Phase 2: append the judge's grade of the composed body IFF the toggle is on.
-    # OFF (control) → grade_quality_fn returns None → the result shape is the Phase 1
-    # baseline, unchanged. The judge grades body.body (the raw composed text), not the
-    # EDT-stamped outbound body — the stamp is per-DM overhead, not the sender's prose.
-    # The judge grades what was actually DELIVERED (body.body carries the tutor's
-    # rewrite when one happened). Grading the submitted text instead would score a
-    # message nobody received, and the length grade in particular would then describe
-    # the problem the tutor had just solved.
-    quality = grade_quality_fn( body.body )
-    if quality is not None:
-        result[ "quality" ] = quality
-
-    # Row 334569d6: append this SENT DM (measurements + body + grades) to the per-DM
-    # JSONL corpus. Runs AFTER delivery and rides along with the judge grades computed
-    # one line up. Fail-soft lives inside the writer. `experiment=None` → the row keeps
-    # its legacy `arm` stamp (no two-arm fields), the outside-window contract.
-    _persist_dm_row(
-        body_text      = submitted_text,
-        delivered_text = delivered_text,
-        tutor          = tutor_meta,
-        from_persona   = body.sender_persona,
-        from_session   = body.sender_session_id,
-        from_project   = body.sender_project,
-        to_persona     = target_persona,
-        to_session     = target_session_id,
-        quality        = quality,
+    # Row ec5cf83a (Rick's ruling 2026-08-19): the grade AND the corpus row it rides
+    # on now run on the grading worker, not here. The send returns on the send.
+    #
+    # WHAT THE SENDER SEES CHANGED, deliberately: the 201 no longer carries a
+    # `quality` key at all. It cannot — the grade does not exist yet when this
+    # returns, and holding the response until it did is the defect. A grade with
+    # no message to attach to is the only thing worse than a message with no grade.
+    #
+    # WHAT THE JUDGE SEES DID NOT: it still grades what was actually DELIVERED
+    # (`body.body` carries the tutor's rewrite when one happened), not the raw
+    # submission and not the EDT-stamped outbound body. Grading the submitted text
+    # would score a message nobody received, and the length grade in particular
+    # would then describe the problem the tutor had just solved.
+    #
+    # Row 334569d6's corpus row (measurements + body + grades) is written by the same
+    # deferred job, so a row and its grade still arrive together. Fail-soft lives
+    # inside the writer. `experiment=None` → the row keeps its legacy `arm` stamp (no
+    # two-arm fields), the outside-window contract.
+    #
+    # THE SENDER STILL GETS ITS GRADE, just not in the response. That feedback is the
+    # live intervention (arm `signal_only`: grade shown, nothing refused), so the
+    # worker pushes it back naming the message it graded — Mr Radio's ruling and its
+    # two constraints, 2026-08-19. It is deliberately NOT sent as a DM: a grade
+    # delivered by dm_send would itself be graded, forever.
+    _defer_grade_and_persist(
+        defer_fn         = defer_grade_fn,
+        grade_quality_fn = grade_quality_fn,
+        body_text        = body.body,
+        deliver_grade_fn = ( deliver_grade_fn if deliver_grade_fn is not None else
+                             lambda quality: push_dm_grade_to_sender(
+                                 notification_queue    = notification_queue,
+                                 authenticated_user_id = authenticated_user_id,
+                                 sender_session_id     = body.sender_session_id,
+                                 message_id            = result[ "message_id" ],
+                                 quality               = quality ) ),
+        persist_kwargs   = {
+            "body_text"      : submitted_text,
+            "delivered_text" : delivered_text,
+            "tutor"          : tutor_meta,
+            "from_persona"   : body.sender_persona,
+            "from_session"   : body.sender_session_id,
+            "from_project"   : body.sender_project,
+            "to_persona"     : target_persona,
+            "to_session"     : target_session_id,
+        },
     )
 
     return result
