@@ -18,6 +18,8 @@ from pydantic import BaseModel, Field
 from cosa.rest.auth import get_current_user
 from cosa.rest.queue_extensions import user_job_tracker
 from cosa.rest.agentic_job_factory import create_agentic_job
+from cosa.rest.pytest_args_policy import parse_and_validate
+import cosa.utils.util as cu
 
 router = APIRouter( tags=[ "test-suite" ] )
 
@@ -142,6 +144,15 @@ async def submit_test_suite(
     session_id = request_body.websocket_id or f"api-{user_id[ :8 ]}"
 
     try:
+        # Refuse a bad pytest_args string AT THE DOOR (row 60f04102). This is the
+        # usability half — the authoritative gate is in TestSuiteJob.__init__,
+        # which every execution path runs through including persistence rehydration
+        # and side-channel resubmits. Both call the same function so they cannot
+        # drift apart. PytestArgsRejected subclasses ValueError, so it lands in the
+        # 400 handler below alongside the pre-existing unbalanced-quote case.
+        if request_body.pytest_args:
+            parse_and_validate( request_body.pytest_args, cu.get_project_root() )
+
         # Build args dict for factory
         args_dict = {
             "test_types" : request_body.test_types,

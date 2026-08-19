@@ -33,6 +33,7 @@ from zoneinfo import ZoneInfo
 
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
+from cosa.rest.pytest_args_policy import validate_pytest_args
 import cosa.utils.util as cu
 
 
@@ -244,6 +245,24 @@ class TestSuiteJob( AgenticJobBase ):
 
         # Test parameters
         self.test_types          = test_types or [ "integration", "e2e" ]
+
+        # THE AUTHORITATIVE ALLOWLIST GATE (row 60f04102). It sits HERE, in the
+        # constructor, rather than only in the submit router, because EVERY path
+        # into execution runs through this constructor — HTTP submits, jobs
+        # rehydrated from persistence (job_persistence.py:765), and side channels
+        # such as capture-bounce-resubmit.py. A router-only check would leave all
+        # of those unguarded. The router calls the same function so a bad request
+        # is refused at the door with a clear 400, but that is usability; this is
+        # the control.
+        #
+        # WHY IT MATTERS: pytest_args reach subprocess.Popen at :1184 with only
+        # "--bg" stripped. There is no shell=True, so shell metacharacters are
+        # not the vector — pytest IMPORTS whatever path it is asked to collect,
+        # so an unconfined path is arbitrary code execution as the server's user.
+        #
+        # PytestArgsRejected subclasses ValueError, so the submit router's
+        # existing `except ValueError` already renders this as a 400.
+        validate_pytest_args( pytest_args or [], cu.get_project_root() )
         self.pytest_args         = pytest_args or []
         self.dry_run             = dry_run
         self.auto_fix_on_failure = auto_fix_on_failure
