@@ -1,5 +1,26 @@
 # TODO
 
+## 🔬 FINDING 2026-08-19 (Rachel 🕊️ `6dc9e44d`) — this box CANNOT produce a live Python stack, and we have wanted one three times this week
+
+**Found while diagnosing the `:7997` wedge (row `012e35a9`).** A server was burning a full core with 32 runnable threads and answering nothing. Naming the loop needed one stack dump. **Every route to one is closed on this host**, and they are closed independently, so no single fix opens them:
+
+| Route | State | Why it fails |
+|---|---|---|
+| `py-spy dump --pid` | not installed | and it would still need ptrace below |
+| `gdb -p` | installed, refused | `EPERM` — attach is blocked before it starts |
+| `/proc/<pid>/task/*/stack` | refused | `Permission denied` for a same-uid reader |
+| `perf record -p` | not installed | and `perf_event_paranoid` is **4**, which denies it anyway |
+| a signal → thread dump | nothing to signal | app registers **no `faulthandler`**; `SigCgt` covers INT/TERM/WINCH only, so a `SIGUSR1` would **kill** the process, not dump it |
+
+Root of the first three: `/proc/sys/kernel/yama/ptrace_scope` is **1** (attach only to your own descendants) and `sudo` wants a password, so an agent session can never attach to a server it did not spawn.
+
+**What it cost.** The `:7997` root cause was reached by inference — CPU-per-thread, `wchan`, per-thread syscall counters, thread ages, and reading the code — and then closed with a control test rather than a captured frame. That worked, and it took roughly 20 minutes that a `py-spy dump` would have made 20 seconds. **Mr Radio's count: three times this week.**
+
+**The cheapest durable fix is the last row of that table, and it needs no root at all.** Registering `faulthandler` on a spare signal at server startup is a handful of lines, and from then on any wedged Lupin process dumps every thread's frames on demand. Worth pairing with `py-spy` in the venv for processes that lack the hook.
+
+**Not filed as a row** (skeleton-crew no-new-rows order). **Not fixed** — recorded here on Mr Radio's instruction.
+
+
 ## 🔓 FINDING 2026-08-19 (Mr. Radio 🦉 `4c571f73`) — `--showlocals` writes the live password into a saved artifact on any auth failure
 
 **Found while diagnosing `ts-5a02a537`.** `pytest.ini:82` carries `--showlocals` in `addopts`, so a failing frame dumps every local variable into the junit XML and the run log. The frame that failed was `v2_eval._login`, whose locals include `email` and `password` — so the **live credential for `interactive.job.tester@lupin.deepily.ai` is now sitting in plaintext** in `io/test-suite/artifacts/integration-junit-*.xml`.
