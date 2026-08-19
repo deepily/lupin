@@ -1053,3 +1053,40 @@ def test_clean_v2_snapshot_store_config_check_fires_before_db_check( monkeypatch
     with pytest.raises( guard.ConfigTableMismatch ):
         ve.clean_v2_snapshot_store( conn, cfg )
     assert conn.executed == [] and conn.committed == 0
+
+
+def test_a_retry_that_dies_after_relogin_logs_attempt_2_and_reraises():
+    """
+    The 401-retry's own failure path (Chloé 🗼, row 43fca908 — uncovered at efb69f7c).
+
+    A long paired run 401s late, re-logins, and the RETRY can die too: the fresh token is
+    rejected, or the server that was slow enough to expire the JWT is now not answering at
+    all. That second call must leave the same evidence the first one does — an error row
+    naming attempt 2 and what was waited on — and re-raise unchanged.
+
+    Without it the run's only record of a dead retry is a start row with no end, identical
+    to a hang, and the post-mortem cannot tell "the retry blew up" from "the request never
+    came back". RED if the retry's try/except is dropped: the attempt-2 error row vanishes.
+    """
+    rows = []
+    def post_fn( url, json, headers, timeout ):
+        if headers[ "Authorization" ] == "Bearer stale-jwt":
+            return _FakeReply( 401, {} )
+        raise TimeoutError( "read timed out on the retry" )
+    # Scripted stopwatch: attempt-1 send at 100, its 401 back at 200, RETRY send at 300, death at 305.
+    ticks = iter( [ 100.0, 200.0, 300.0, 305.0 ] )
+    client = ve.HttpAskClient( "http://localhost:8000", bearer="stale-jwt",
+                               post_fn=post_fn, relogin_fn=lambda: "fresh-jwt",
+                               attempt_log_fn=rows.append, clock=lambda: next( ticks ),
+                               wall_clock=lambda: 2000.0 )
+    with pytest.raises( TimeoutError, match="on the retry" ):        # re-raised unchanged
+        client.ask( "what time is it" )
+
+    assert [ r[ "phase" ] for r in rows ] == [ "start", "start", "error" ]   # no "end" — it died
+    err = rows[ -1 ]
+    assert err[ "attempt" ]   == 2                                   # the RETRY's row, not the 401's
+    assert err[ "error" ]     == "TimeoutError"
+    assert err[ "utterance" ] == "what time is it"
+    # 305 - 300: measured from the RETRY's send, not the original one 205s earlier. A dead retry
+    # must not be reported as having waited through the 401 + re-login as well.
+    assert err[ "waited_s" ]  == 5.0
