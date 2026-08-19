@@ -612,6 +612,137 @@ class TestNotifyResponseRequired:
             user_service.get_user_by_email = original_get_user
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# The offline-no-default contract, pinned for EVERY response type (row ddac8b76)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# WHY THIS EXISTS. The two tests above prove the offline branch for `yes_no` and
+# only `yes_no`. That single-type coverage is what let a real incident be
+# misdiagnosed on 2026-08-19: six `ask_multiple_choice` calls returned an opaque
+# `http_error_503` while interleaved `ask_yes_no`, `notify` and `dm_send` calls
+# on the SAME server in the SAME minutes all succeeded. The obvious readings —
+# the server is down, the payload is too big, the bounce broke it — were all
+# excluded by controls, and the asymmetry looked like a defect in the menu verb.
+#
+# It was not. The user was offline, and the calls that worked SUPPLIED A DEFAULT
+# while the calls that 503'd did not. Proven live, same verb, same minute:
+# no default -> http_error_503; with a default -> the offline default came back
+# with default_used=True. The 503 at notifications.py:1236 is by design and is
+# blind to response_type; the verbs differ only in whether they pass one.
+#
+# So these tests pin BOTH directions across ALL FOUR types. A change that makes
+# the 503 conditional on response_type — the shape someone would reach for while
+# "fixing" the menu verb — turns the multiple_choice rows red instead of passing
+# quietly with yes_no still covered.
+
+_OFFLINE_TYPE_CASES = [
+    ( "yes_no",           None ),
+    ( "open_ended",       None ),
+    ( "open_ended_batch", None ),
+    # multiple_choice is refused with 400 unless response_options rides along
+    # (notifications.py:830), so the contract can only be reached with one.
+    ( "multiple_choice",  json.dumps( {
+        "questions": [ {
+            "question"    : "which?",
+            "header"      : "Pick",
+            "multi_select": False,
+            "options"     : [ { "label": "a", "description": "first" },
+                              { "label": "b", "description": "second" } ],
+        } ]
+    } ) ),
+]
+
+
+def _offline_ws_manager():
+    """A websocket manager reporting the target user as NOT connected."""
+    ws = Mock()
+    ws.is_user_connected.return_value       = False
+    ws.get_user_connection_count.return_value = 0
+    ws.user_sessions       = {}
+    ws.active_connections  = {}
+    ws.user_to_email       = {}
+    return ws
+
+
+class TestOfflineDefaultContractAcrossResponseTypes:
+    """The offline branch must behave identically for every response type."""
+
+    def _post( self, app, response_type, response_options, response_default ):
+        params = {
+            "message"           : "Test notification",
+            "type"              : "task",
+            "priority"          : "high",
+            "target_user"       : "test@example.com",
+            "response_requested": True,
+            "response_type"     : response_type,
+        }
+        if response_options is not None: params[ "response_options" ]  = response_options
+        if response_default is not None: params[ "response_default" ]  = response_default
+
+        app.dependency_overrides[ require_api_key_or_jwt ]  = lambda: "service_account_123"
+        app.dependency_overrides[ get_websocket_manager ]   = lambda: _offline_ws_manager()
+        app.dependency_overrides[ get_notification_queue ]  = lambda: Mock()
+
+        original_get_user            = user_service.get_user_by_email
+        user_service.get_user_by_email = Mock( return_value={
+            "id": "550e8400-e29b-41d4-a716-446655440000", "email": "test@example.com" } )
+        try:
+            return TestClient( app ).post(
+                "/api/notify", params=params, headers={ "X-API-Key": "claude_code_simple_key" } )
+        finally:
+            user_service.get_user_by_email = original_get_user
+
+    @pytest.mark.parametrize( "response_type,response_options", _OFFLINE_TYPE_CASES )
+    def test_offline_without_default_is_503_for_every_response_type(
+        self, app, mock_db_session, response_type, response_options
+    ):
+        """No default + offline user => 503, and the type must not change that."""
+        response = self._post( app, response_type, response_options, response_default=None )
+
+        assert response.status_code == 503, (
+            f"{response_type} did not 503 on the offline-no-default path: "
+            f"{response.status_code} {response.text[ :200 ]}"
+        )
+        assert "offline" in response.json()[ "detail" ].lower()
+
+    @pytest.mark.parametrize( "response_type,response_options", _OFFLINE_TYPE_CASES )
+    def test_offline_with_a_default_is_never_503_for_any_response_type(
+        self, app, mock_db_session, response_type, response_options
+    ):
+        """The other half, and the one the incident actually turned on: supplying a
+        default must yield the offline SSE frames rather than a 503 — for the menu
+        verb exactly as for yes/no."""
+        from unittest.mock import patch
+        import uuid as uuid_module
+
+        db_context_manager, _ = mock_db_session
+
+        with patch( 'cosa.rest.routers.notifications.get_db', return_value=db_context_manager ), \
+             patch( 'cosa.rest.routers.notifications.NotificationRepository' ) as MockRepo:
+            notification = MagicMock()
+            notification.id = uuid_module.UUID( "550e8400-e29b-41d4-a716-446655440001" )
+            repo = MagicMock()
+            repo.create_notification.return_value = notification
+            repo.update_state.return_value        = notification
+            MockRepo.return_value = repo
+
+            response = self._post( app, response_type, response_options, response_default="a" )
+
+        assert response.status_code == 200, (
+            f"{response_type} 503'd despite a default being supplied — this is the "
+            f"incident shape from row ddac8b76: {response.status_code} {response.text[ :200 ]}"
+        )
+        assert response.headers[ "content-type" ].startswith( "text/event-stream" )
+
+        frames = _parse_sse_frames( response.text )
+        assert len( frames ) == 2
+        ack, offline = frames
+        assert ack[ "status" ]          == "ack"
+        assert offline[ "status" ]      == "offline"
+        assert offline[ "response" ]    == "a"
+        assert offline[ "default_used" ] is True
+
+
 class TestSubmitNotificationResponse:
     """Test suite for POST /api/notify/response endpoint."""
 
