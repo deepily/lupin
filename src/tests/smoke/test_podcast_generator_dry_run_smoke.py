@@ -109,13 +109,21 @@ def quick_smoke_test():
         # ═══════════════════════════════════════════════════════════════════════
         print( "\nTest 3: Submitting Podcast Generator job with dry_run=true..." )
         headers = { "Authorization": f"Bearer {token}" }
+        payload = {
+            "research_source"  : research_path,
+            "target_languages" : [ "en" ],
+            "dry_run"          : True
+        }
+        # Lineage tag (bug 5ed4f187): when this smoke runs as a child pytest inside a
+        # monopolizing test-suite job, the runner exports LUPIN_TEST_MONOPOLIZE_PARENT_ID
+        # (test_suite/job.py). Threading it as parent_id_hash lets the consumer's Gate B
+        # admit this child through the monopoly hold instead of starving it 900s.
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+        if parent_id:
+            payload[ "parent_id_hash" ] = parent_id
         submit_resp = requests.post(
             f"{BASE_URL}/api/podcast-generator/submit",
-            json={
-                "research_source"  : research_path,
-                "target_languages" : [ "en" ],
-                "dry_run"          : True
-            },
+            json=payload,
             headers=headers
         )
 
