@@ -93,6 +93,17 @@ class TestSpyControl( unittest.TestCase ):
         self.assertNotEqual( spy( "sid", project="plan" ), spy( "sid", project="lupin" ) )
 
 
+# Row ec5cf83a: grading + the corpus row it rides on run OFF the send path, on a
+# background worker. Tests that assert on the GRADE or the ROW inject this runner,
+# which executes the deferred job in the caller's thread — so the assertion reads a
+# finished job instead of racing one. Production's default refuses to defer under
+# pytest at all (dm._submit_deferred_grade's self-guard), which is what keeps a unit
+# test from ever reaching the live grader.
+def _run_deferred_inline( job ):
+    job()
+    return True
+
+
 class _CoreHarness( unittest.TestCase ):
 
     def setUp( self ):
@@ -482,10 +493,11 @@ class TestDmQualityAuditIsWired( unittest.TestCase ):
 
 class TestDmQualityJudgeMergedIntoSend( _CoreHarness ):
     """
-    Phase 2: the injected grade_quality_fn seam decides whether execute_dm_send's
-    201 result carries a `quality` field. Control (grader returns None) → no field,
-    the Phase 1 baseline shape. Treatment (grader returns a grade) → the grade is
-    appended verbatim. The grader is only reached on the ACCEPTED (201) path.
+    Phase 2 seam, as amended by row ec5cf83a: the injected grade_quality_fn decides
+    what the GRADE says; it no longer decides anything about the 201, which never
+    carries a `quality` field now that grading happens after the send returns. What
+    still holds: the grader sees the delivered body, and it is reached only on the
+    ACCEPTED (201) path — a refused send pays for no judge call.
     """
 
     def _run_with_grader( self, body, grader ):
@@ -498,6 +510,7 @@ class TestDmQualityJudgeMergedIntoSend( _CoreHarness ):
             persist_fn            = self.persist,
             new_id_fn             = lambda: "fixed-msg-id",
             grade_quality_fn      = grader,
+            defer_grade_fn        = _run_deferred_inline,
         )
 
     def test_control_grader_none_appends_no_quality_field( self ):
@@ -505,7 +518,14 @@ class TestDmQualityJudgeMergedIntoSend( _CoreHarness ):
         self.assertEqual( result[ "http_status" ], 201 )
         self.assertNotIn( "quality", result )
 
-    def test_treatment_grade_is_appended_verbatim( self ):
+    def test_treatment_grade_is_NOT_in_the_response_it_is_in_the_corpus_row( self ):
+        """
+        Row ec5cf83a REPLACED test_treatment_grade_is_appended_verbatim, which asserted
+        `result["quality"] == grade`. That assertion pinned the defect: the response
+        could only carry the grade by waiting for two live model calls first. The grade
+        did not disappear — it moved to the row, which is the only reader that ever
+        used it.
+        """
         grade = {
             "length"     : { "emoji": "⭐", "weight":  2, "detail": "12 words, target ~60" },
             "directness" : { "emoji": "👍", "weight":  1, "detail": "leads with the result" },
@@ -514,7 +534,12 @@ class TestDmQualityJudgeMergedIntoSend( _CoreHarness ):
         }
         result = self._run_with_grader( _make_send_body( sender_project="plan" ), lambda body: grade )
         self.assertEqual( result[ "http_status" ], 201 )
-        self.assertEqual( result[ "quality" ], grade )
+        self.assertNotIn( "quality", result )
+        row = json.loads( open( self.corpus_path, encoding="utf-8" ).read().splitlines()[ 0 ] )
+        self.assertEqual( row[ "len_grade" ],  2 )
+        self.assertEqual( row[ "directness" ], 1 )
+        self.assertEqual( row[ "tone" ],       2 )
+        self.assertEqual( row[ "overall" ],    2 )
 
     def test_grader_receives_the_raw_body_not_the_stamped_one( self ):
         seen = {}
@@ -550,6 +575,7 @@ class TestDmTrafficJsonlCorpus( _CoreHarness ):
             persist_fn            = self.persist,
             new_id_fn             = lambda: "fixed-msg-id",
             grade_quality_fn      = grader,
+            defer_grade_fn        = _run_deferred_inline,
         )
 
     _GRADE = {
