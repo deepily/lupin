@@ -359,10 +359,15 @@ def _send_sync_notification(
             error_text = response.text if response.text else "No error message"
             print( f"✗ Failed to send notification: HTTP {response.status_code}", file=sys.stderr )
             print( f"  Error: {error_text}", file=sys.stderr )
+            # Row cd283a77: this stderr line was the ONLY place the server's reason
+            # appeared, and an MCP caller never sees stderr. Carry it on the response
+            # so the reason reaches the seat that has to act on it. `status` is left
+            # exactly as it was — callers match the bare `http_error_<code>` string.
             return NotificationResponse(
                 response_value = None,
                 exit_code      = 1,
-                status         = f"http_error_{response.status_code}"
+                status         = f"http_error_{response.status_code}",
+                error_detail   = _extract_error_detail( error_text )
             )
 
         if debug:
@@ -485,6 +490,37 @@ def _send_sync_notification(
             exit_code      = 1,
             status         = "unexpected_exception"
         )
+
+
+
+def _extract_error_detail( error_text: str, max_length: int=300 ) -> Optional[str]:
+    """
+    Pull the server's own sentence out of an error body.
+
+    Requires:
+        - error_text is the raw response body as a string
+
+    Ensures:
+        - returns FastAPI's `detail` when the body is a JSON object carrying one
+        - returns the raw body otherwise, so a non-JSON error is never swallowed
+        - truncates to max_length characters with an ellipsis
+        - returns None only for an empty/whitespace body — there is nothing to say
+        - never raises, whatever the body contains
+
+    Raises:
+        - None
+    """
+    if not error_text or not error_text.strip(): return None
+    detail = error_text
+    try:
+        parsed = json.loads( error_text )
+        if isinstance( parsed, dict ) and parsed.get( "detail" ):
+            detail = parsed[ "detail" ]
+    except ( ValueError, TypeError ):
+        pass                                   # not JSON — the raw body IS the reason
+    detail = str( detail ).strip()
+    if len( detail ) > max_length: detail = detail[ :max_length ] + "..."
+    return detail or None
 
 
 def notify_user_sync(

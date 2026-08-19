@@ -1485,6 +1485,31 @@ def notify(
     )
 
 
+def _error_dict( response ) -> dict:
+    """
+    Build the caller-facing error dict for a genuine failure.
+
+    Requires:
+        - response is a NotificationResponse from notify_user_sync
+
+    Ensures:
+        - `error` keeps the exact `error: <status>` string callers already match on
+        - `detail` carries the server's OWN sentence when it sent one, so the seat
+          reading this can act on it instead of guessing from a status code
+        - `detail` is omitted entirely when the server said nothing
+
+    Raises:
+        - None
+
+    Row cd283a77: `error: http_error_503` sent a manager hunting a broken verb for
+    six attempts across two boots while the body read "User is offline and no
+    default response provided" — the sentence that names both the cause and the fix.
+    """
+    out = { "error": f"error: {response.status}" }
+    if response.error_detail: out[ "detail" ] = response.error_detail
+    return out
+
+
 @mcp.tool
 def ask_yes_no(
     question: str,
@@ -1819,8 +1844,9 @@ def ask_multiple_choice(
         return { "error": "timeout - no response received", "timeout": True }
 
     # Genuine error (connection, HTTP, stream, unexpected) — surface the status
-    # so real failures stay visible rather than being masked by the default.
-    return { "error": f"error: {response.status}" }
+    # so real failures stay visible rather than being masked by the default,
+    # AND the server's reason with it (row cd283a77).
+    return _error_dict( response )
 
 
 def _stamp_answer_provenance( payload: dict, default_used: bool ) -> dict:
@@ -2048,7 +2074,7 @@ def ask_open_ended_batch(
     elif response.exit_code == 2:
         return { "error": "timeout - no response received", "timeout": True }
     else:
-        return { "error": f"error: {response.status}" }
+        return _error_dict( response )
 
 
 def _parse_open_ended_batch_response( response_value: Optional[ str ] ) -> dict:

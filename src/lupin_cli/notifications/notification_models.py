@@ -562,6 +562,11 @@ class NotificationResponse(BaseModel):
         description="Whether notification timed out"
     )
 
+    error_detail: Optional[str] = Field(
+        default=None,
+        description="The server's OWN sentence for a non-200, verbatim (its JSON `detail` when present, else the raw body, truncated). `status` stays the bare `http_error_<code>` string that callers match on; this carries the reason that string throws away. Row cd283a77: a 503 rendered as `error: http_error_503` cost six attempts across two boots and a P1 row, while the body had said `User is offline and no default response provided` the whole time."
+    )
+
     reattach_state: Optional[str] = Field(
         default=None,
         description="Late-answer re-attach signal (§4.5 E-c): 'reattach_armed' (stream died, poll fired against the remaining budget) | 'reattach_unavailable' (stream died but the ack id was never captured, so no re-attach was possible — the silent-no-op failure, surfaced loud) | None (no stream death). Assertable + queryable."

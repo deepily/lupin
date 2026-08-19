@@ -224,7 +224,7 @@ class TestAskMultipleChoiceDefault:
         }
     ]
 
-    def _mock_response( self, exit_code=0, response_value=None, status="", is_timeout=None, default_used=False ):
+    def _mock_response( self, exit_code=0, response_value=None, status="", is_timeout=None, default_used=False , error_detail=None ):
         """Create a mock NotificationResponse.
 
         is_timeout defaults to (exit_code == 2) to mirror notify_user_sync's real
@@ -247,6 +247,12 @@ class TestAskMultipleChoiceDefault:
         mock.status         = status
         mock.is_timeout     = is_timeout
         mock.default_used   = default_used
+        # Same MagicMock trap the docstring above names for default_used: an unset
+        # attribute is a TRUTHY Mock. `error_detail` (row cd283a77) is read by
+        # _error_dict, so leaving it unset makes every error look like it carries a
+        # server sentence. None models the honest case — a transport failure has no
+        # server body to quote; a test wanting one passes error_detail=.
+        mock.error_detail   = error_detail
         return mock
 
     @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )
@@ -533,7 +539,7 @@ class TestResponseDefaultPlumbedToRequest:
     SINGLE_QUESTION = TestAskMultipleChoiceDefault.SINGLE_QUESTION
     MULTI_QUESTION  = TestAskMultipleChoiceDefault.MULTI_QUESTION
 
-    def _resp( self, exit_code=2, response_value=None, status="", is_timeout=None, default_used=False ):
+    def _resp( self, exit_code=2, response_value=None, status="", is_timeout=None, default_used=False , error_detail=None ):
         if is_timeout is None:
             is_timeout = ( exit_code == 2 )
         mock                = MagicMock()
@@ -542,6 +548,12 @@ class TestResponseDefaultPlumbedToRequest:
         mock.status         = status
         mock.is_timeout     = is_timeout
         mock.default_used   = default_used
+        # Same MagicMock trap the docstring above names for default_used: an unset
+        # attribute is a TRUTHY Mock. `error_detail` (row cd283a77) is read by
+        # _error_dict, so leaving it unset makes every error look like it carries a
+        # server sentence. None models the honest case — a transport failure has no
+        # server body to quote; a test wanting one passes error_detail=.
+        mock.error_detail   = error_detail
         return mock
 
     def _patches( fn ):
@@ -616,7 +628,7 @@ class TestDefaultUsedLaundering:
 
     SINGLE_QUESTION = TestAskMultipleChoiceDefault.SINGLE_QUESTION
 
-    def _resp( self, exit_code=0, response_value=None, status="", is_timeout=None, default_used=False ):
+    def _resp( self, exit_code=0, response_value=None, status="", is_timeout=None, default_used=False , error_detail=None ):
         if is_timeout is None:
             is_timeout = ( exit_code == 2 )
         mock                = MagicMock()
@@ -625,6 +637,7 @@ class TestDefaultUsedLaundering:
         mock.status         = status
         mock.is_timeout     = is_timeout
         mock.default_used   = default_used          # NEVER leave this to MagicMock
+        mock.error_detail   = error_detail           # nor this (row cd283a77) — same trap
         return mock
 
     # ⚠️ Applied in REVERSE of the decorator stack the sibling class uses, because
@@ -766,7 +779,7 @@ class TestDefaultUsedLaundering:
 class TestAskYesNoLaundering:
     """Every path that returns the default must SAY it is the default."""
 
-    def _resp( self, exit_code=0, response_value=None, status="", is_timeout=None, default_used=False ):
+    def _resp( self, exit_code=0, response_value=None, status="", is_timeout=None, default_used=False , error_detail=None ):
         if is_timeout is None:
             is_timeout = ( exit_code == 2 )
         mock                = MagicMock()
@@ -775,6 +788,12 @@ class TestAskYesNoLaundering:
         mock.status         = status
         mock.is_timeout     = is_timeout
         mock.default_used   = default_used
+        # Same MagicMock trap the docstring above names for default_used: an unset
+        # attribute is a TRUTHY Mock. `error_detail` (row cd283a77) is read by
+        # _error_dict, so leaving it unset makes every error look like it carries a
+        # server sentence. None models the honest case — a transport failure has no
+        # server body to quote; a test wanting one passes error_detail=.
+        mock.error_detail   = error_detail
         return mock
 
     def _patches( fn ):
