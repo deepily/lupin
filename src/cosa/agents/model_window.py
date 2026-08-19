@@ -149,3 +149,23 @@ def clamp_max_tokens( requested: int, prompt_tokens: int, window: int, margin: i
     room = window - prompt_tokens - margin
     if requested <= room: return requested
     return max( 1, room )
+
+
+def resolve_vllm_spec( spec_value: str ) -> tuple[ str, str ]:
+    """
+    Split a vllm://host:port@model/name config value into a base URL and model name.
+
+    Requires:
+        - spec_value is a vllm:// spec as written in lupin-app.ini
+
+    Ensures:
+        - returns ( "http://host:port/v1/completions", "model/name" )
+
+    Raises:
+        - ValueError if the value is not a vllm:// spec carrying an @model part
+    """
+    if not spec_value or not spec_value.startswith( "vllm://" ) or "@" not in spec_value:
+        raise ValueError( f"not a vllm:// spec with an @model part: [{spec_value}]" )
+
+    hostport, model = spec_value[ len( "vllm://" ): ].split( "@", 1 )
+    return f"http://{hostport}/v1/completions", model

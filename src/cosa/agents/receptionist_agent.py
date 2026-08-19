@@ -9,6 +9,10 @@ from cosa.memory.input_and_output_table import InputAndOutputTable
 
 
 
+# Stand-in for "do not trim", used only when the model window cannot be read.
+_UNBOUNDED_ENTRIES_BUDGET = 10 ** 9
+
+
 def fit_fragments_to_budget( fragments: list, budget: int, count_tokens ) -> str:
     """
     Join as many of the NEWEST fragments as fit `budget` tokens, oldest last dropped.
@@ -132,7 +136,13 @@ class ReceptionistAgent( AgentBase ):
             f"<memory-fragment> <date>{row['date']}</date/> <human-queried>{row['input']}</human-queried> <ai-answered>{row['output_final']}</ai-answered> </memory-fragment>"
             for row in rows
         ]
-        entries    = fit_fragments_to_budget( fragments, self._entries_token_budget(), self._count_tokens )
+        budget     = self._entries_token_budget()
+        # An unbounded budget means the window could not be read. Join without sizing
+        # rather than calling a tokenizer we already know is unavailable.
+        entries    = (
+            "\n".join( reversed( fragments ) ) if budget >= _UNBOUNDED_ENTRIES_BUDGET
+            else fit_fragments_to_budget( fragments, budget, self._count_tokens )
+        )
         date_today = du.get_current_date()
 
         return date_today, entries
@@ -152,9 +162,10 @@ class ReceptionistAgent( AgentBase ):
         Raises:
             - RuntimeError if the model server cannot be reached
         """
-        from cosa.agents.model_window import count_tokens
+        from cosa.agents.model_window import count_tokens, resolve_vllm_spec
 
-        count, _ = count_tokens( self.llm_client.base_url, self.llm_client.model_name, text )
+        base_url, model = resolve_vllm_spec( self.config_mgr.get( self.model_name ) )
+        count, _        = count_tokens( base_url, model, text )
         return count
 
     def _entries_token_budget( self ) -> int:
@@ -176,10 +187,20 @@ class ReceptionistAgent( AgentBase ):
         Raises:
             - RuntimeError if the model server cannot be reached
         """
-        from cosa.agents.model_window import get_context_window
+        from cosa.agents.model_window import get_context_window, resolve_vllm_spec
 
-        window          = get_context_window( self.llm_client.base_url, self.llm_client.model_name )
-        template_tokens = self._count_tokens( self.prompt_template )
+        try:
+            base_url, model = resolve_vllm_spec( self.config_mgr.get( self.model_name ) )
+            window          = get_context_window( base_url, model )
+            template_tokens = self._count_tokens( self.prompt_template )
+        except ( ValueError, RuntimeError, TypeError, AttributeError ) as e:
+            # Best effort by design. This runs during __init__, and a model server that
+            # is briefly unreachable must not stop the agent being constructed. Returning
+            # an effectively unbounded budget reproduces the pre-a203d91d behaviour, and
+            # the clamp in llm_completion is still there to keep the request legal.
+            if self.debug: print( f"[BUDGET] could not size the window, leaving memory untrimmed: {e}" )
+            return _UNBOUNDED_ENTRIES_BUDGET
+
         return max( 0, window // 2 - template_tokens )
 
 
