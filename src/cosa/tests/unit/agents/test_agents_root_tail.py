@@ -183,7 +183,15 @@ def test_weather_run_code_exception_sets_error():
     with patch( "cosa.agents.weather_agent.LupinSearch", side_effect=boom ):
         out = agent.run_code()
     assert out[ "return_code" ] == -1
-    assert out[ "output" ] is boom
+    # `output` is TEXT, and this line used to assert it was the exception OBJECT —
+    # pinning the exact defect Chloé removed at 79ea2501. Everything downstream
+    # consumes this field as a string ( agent_base:447 hands it to RawOutputFormatter,
+    # which calls .replace on it; runnable_code:117 splits it on newlines ), so storing
+    # the object produced "'HTTPError' object has no attribute 'replace'" — a complaint
+    # about a string method, three frames away from the failed web search it was hiding.
+    assert isinstance( out[ "output" ], str )
+    assert "RuntimeError" in out[ "output" ] and "search-down" in out[ "output" ]
+    # The object itself is still reachable, for callers that want it.
     assert agent.error is boom
 
 
