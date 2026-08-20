@@ -16,7 +16,7 @@ Resolution reuses the existing chain machinery
 `parse_persona_chain`) and the one canonical identity normalizer
 (`lupin_mcp.persona_normalization.canonical_persona_key`, so "Mr. Radio" ==
 "mr radio") — no duplicated parser, one name at every layer. The declared
-chain entries are display form ("Mr. Radio,Tiberius,*") so the keep-spaces
+chain entries are display form ("Mr. Radio,Cheech,*") so the keep-spaces
 canonical key matches the persona's "mr radio" bridge name; the swap from the
 space-dropping match-key is symmetric on both compare sides (equivalence
 preserved) and now agrees with the store key.

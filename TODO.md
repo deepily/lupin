@@ -1,5 +1,16 @@
 # TODO
 
+## 📋 DECISIONS LOG 2026-08-19 night (Mr. Radio 🦉 `4c571f73`) — post-game of the six-seat crew run
+
+Retro: `io/post-games/2026.08.19-six-rows-and-attempt-eleven-post-game.md` (full tier, **DRAFT pending Rick's D3 approval**). 59 commits, 6 seats, unit tier green at HEAD `31899329` (24,635 passed / 0 failed).
+
+- **R-1 — the submit path must refuse a per-test timeout shorter than the suite budget it runs under.** Attempt 11 of the paired n=60 run died on `--timeout 5400` while the suite budget was correctly 30000s. `test_paired_n_fits_integration_timeout.py` guards the hazard and passes, because it compares `n` against the *suite* budget and never sees the per-test cap. Filed as store row `64677f38` (Tiberius, P1). n=60 stays unchanged — shrinking the corpus would change what is measured to dodge a typo.
+- **R-2 — open the harvest window BEFORE announcing the reap.** Six seats left **zero** rolling deposits on the commons `post-game` topic tonight (newest entry is 2026-08-17); all six left lesson-bearing mementos. `io/post-games/README.md` carries a standing note saying exactly this, and I read it after the reap. Cross-examination of tonight's crew is gone permanently.
+- **R-3 — an instrument that fails ten times is a decision for Rick, not maintenance to absorb.** Notifications returned `user_not_available` all evening and I kept re-firing per instance. Escalate the *pattern* on the second or third failure, naming it as a pattern.
+- **R-4 (NOT YET GRADUATED) — a negative result is only as wide as the path the probe exercised.** María ruled out cwd restoration from the success path only; the leak was on the error path (`80c17f29`). `post-game.md` §5.3 requires cross-examining the source before this becomes doctrine — **do not write it into a `workflow/` doc until María has had the chance to refute it.**
+
+**Still unhomed, for Rick**: should the no-new-rows ban lift for measured, reproduced defects? Three real defects tonight had nowhere to live.
+
 ## 🔬 FINDING 2026-08-19 (Rachel 🕊️ `6dc9e44d`) — this box CANNOT produce a live Python stack, and we have wanted one three times this week
 
 **Found while diagnosing the `:7997` wedge (row `012e35a9`).** A server was burning a full core with 32 runnable threads and answering nothing. Naming the loop needed one stack dump. **Every route to one is closed on this host**, and they are closed independently, so no single fix opens them:

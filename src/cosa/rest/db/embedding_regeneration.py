@@ -637,7 +637,7 @@ def remaining_ids( all_ids: Sequence[Any], done_ids: Sequence[Any] ) -> List[Any
 
 # =========================================================================== #
 # IO boundary — live DB, live embedder, argv. Excluded from coverage for the
-# same reason vector_store_backfill._run is: it needs a real session, a real
+# same reason a bulk loader's _run is: it needs a real session, a real
 # GPU-backed server, and a command line, none of which a unit test should touch.
 # =========================================================================== #
 # Selection is by SOURCE TEXT, not by vector norm. A norm cannot identify a
