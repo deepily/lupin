@@ -33,7 +33,7 @@ from zoneinfo import ZoneInfo
 
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
-from cosa.rest.pytest_args_policy import validate_pytest_args
+from cosa.rest.pytest_args_policy import validate_pytest_args, validate_timeout_against_suite_budget
 import cosa.utils.util as cu
 
 
@@ -263,6 +263,16 @@ class TestSuiteJob( AgenticJobBase ):
         # PytestArgsRejected subclasses ValueError, so the submit router's
         # existing `except ValueError` already renders this as a 400.
         validate_pytest_args( pytest_args or [], cu.get_project_root() )
+
+        # THE BUDGET-CONTRADICTION GATE (row 64677f38). Also here rather than only
+        # in the router, and for the same reason as the allowlist above: every path
+        # into execution runs through this constructor. Attempt 11 of the paired eval
+        # died because a --timeout typed into a submit request capped a single test at
+        # 90 minutes while the suite budget granted it 8.3 hours — a contradiction no
+        # file-reading test could see, because one of the two numbers was never in a file.
+        validate_timeout_against_suite_budget(
+            pytest_args or [], self.test_types, SUITE_TIMEOUTS_SECONDS, SUITE_TIMEOUT_DEFAULT_SECONDS )
+
         self.pytest_args         = pytest_args or []
         self.dry_run             = dry_run
         self.auto_fix_on_failure = auto_fix_on_failure

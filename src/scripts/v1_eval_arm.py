@@ -151,7 +151,10 @@ def assert_measured_sha( observed_sha: Any, expected: str = V1_PIN_SHA ) -> str:
         raise EvalIntegrityError(
             f"refusing to record the baseline: the RUNNING server reports sha "
             f"{observed_sha!r}, not the pinned v1 sha {expected!r}. The measured tree is "
-            f"not the tree we meant to measure — fail loud, never stamp a false baseline."
+            f"not the tree we meant to measure — fail loud, never stamp a false baseline. "
+            f"{expected!r} is pinned DELIBERATELY for tamper-evidence, not because it is the "
+            f"current v1 — see row 647f3733. So a mismatch here does not mean the pin is stale; "
+            f"it means the server you are measuring is not the pinned baseline."
         )
     return observed_sha
 

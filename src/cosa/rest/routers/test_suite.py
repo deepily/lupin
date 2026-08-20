@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from cosa.rest.auth import get_current_user
 from cosa.rest.queue_extensions import user_job_tracker
 from cosa.rest.agentic_job_factory import create_agentic_job
-from cosa.rest.pytest_args_policy import parse_and_validate
+from cosa.rest.pytest_args_policy import parse_and_validate, validate_timeout_against_suite_budget
 import cosa.utils.util as cu
 
 router = APIRouter( tags=[ "test-suite" ] )
@@ -151,7 +151,16 @@ async def submit_test_suite(
         # drift apart. PytestArgsRejected subclasses ValueError, so it lands in the
         # 400 handler below alongside the pre-existing unbalanced-quote case.
         if request_body.pytest_args:
-            parse_and_validate( request_body.pytest_args, cu.get_project_root() )
+            tokens = parse_and_validate( request_body.pytest_args, cu.get_project_root() )
+            # The per-test-timeout / suite-budget contradiction, refused AT THE DOOR
+            # (row 64677f38). The authoritative copy is in TestSuiteJob.__init__; this
+            # one exists so the submitter gets a 400 naming both numbers instead of
+            # discovering the clash hours into a run. Imported here rather than at
+            # module scope: job.py already imports this router's policy module, and
+            # the budgets live with the runner that enforces them.
+            from cosa.agents.test_suite.job import SUITE_TIMEOUTS_SECONDS, SUITE_TIMEOUT_DEFAULT_SECONDS
+            validate_timeout_against_suite_budget(
+                tokens, request_body.test_types, SUITE_TIMEOUTS_SECONDS, SUITE_TIMEOUT_DEFAULT_SECONDS )
 
         # Build args dict for factory
         args_dict = {
