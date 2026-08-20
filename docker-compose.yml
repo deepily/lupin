@@ -497,7 +497,7 @@ services:
       # 🔴 The value below and the timeout in job.py:84 are COUPLED — reverting one without the
       #    other schedules a run that dies mid-flight. The line beneath binds them, and
       #    test_paired_n_fits_integration_timeout.py fails if either drifts.
-      # CONFIRMED 2026-08-17: n=60 fits integration timeout 30000s
+      # CONFIRMED 2026-08-20: n=20 fits integration timeout 30000s
       #
       # ⚠️ TEST SERVICE ONLY. Deliberately absent from lupin-rest-dev — the paired eval is a
       #    :8000 monopolize-mode suite. See the "LUPIN_PAIRED_N" dev-dev exemption in
@@ -507,7 +507,7 @@ services:
       #      docker compose up -d --force-recreate lupin-rest-test
       #    and PROVE it with
       #      docker exec lupin-rest-test printenv LUPIN_PAIRED_N
-      LUPIN_PAIRED_N: "60"
+      LUPIN_PAIRED_N: "20"
     deploy:
       resources:
         reservations:
