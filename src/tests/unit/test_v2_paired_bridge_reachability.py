@@ -450,6 +450,21 @@ def test_unit_fixtures_cannot_publish_to_the_live_results_dir():
     assert sandbox != live
 
 
+def test_v1_artifact_lands_alone_when_the_v2_arm_has_not_returned():
+    """RED if the early v1-only dump stops working (row d8d019f6, attempt-11 lesson).
+
+    The v1 arm is ~2.5h of live traffic and returns only in-memory. The bridge now dumps it the
+    moment it returns, passing v2=None, so a death inside the v2 arm costs the v2 arm alone. If
+    the None-tolerance regresses, v1's file goes missing here and this goes red.
+    """
+    with tempfile.TemporaryDirectory() as sandbox:
+        with patch.dict( os.environ, { "LUPIN_PAIRED_ARTIFACT_DIR": sandbox } ):
+            bridge._dump_paired_artifacts( _V1_ART, None )
+        assert os.listdir( sandbox ) == [ "v1-arm-artifact.json" ]   # v1 saved, no half-written v2
+        written = json.load( open( os.path.join( sandbox, "v1-arm-artifact.json" ) ) )
+        assert "written_at" in written
+
+
 def test_artifact_dump_defaults_to_the_live_dir_when_unredirected():
     """The other half: without the env var the dump still targets the real results directory,
     so the containment above is a REDIRECT and not an accidental disabling of the insurance."""

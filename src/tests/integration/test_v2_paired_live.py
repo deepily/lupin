@@ -358,6 +358,9 @@ def _dump_paired_artifacts( v1_artifact, v2_artifact ):   # pragma: no cover - b
         # (row c9b43538). "unknown-caller" is the tell that nothing identified itself as a real run.
         written_by = os.environ.get( "LUPIN_TEST_SUITE_JOB_ID" ) or "unknown-caller"
         for name, art in ( ( "v1", v1_artifact ), ( "v2", v2_artifact ) ):
+            # None = "that arm has not returned yet" — the early v1-only call below passes
+            # v2=None so v1's hours land on disk the MOMENT they exist (row d8d019f6).
+            if art is None: continue
             stamped = dict( art )
             stamped[ "written_at" ] = datetime.datetime.now().isoformat()
             stamped[ "written_by" ] = written_by
@@ -452,6 +455,11 @@ def test_v2_paired_go_no_go_live():
     # b + c. Each arm → {metrics, provenance} (headline = the WARM pass). Live boundaries.
     v1_artifact = _run_v1_arm( corpus=corpus_name, seed=seed, n_per_command=n_per_command,
                                base_url=os.environ[ "LUPIN_V1_ARM_BASE_URL" ] )
+    # EARLY INSURANCE (row d8d019f6, attempt 11 lesson): the v1 arm is ~2.5h of live traffic and
+    # returns ONLY in-memory. Dumping it here — before the v2 arm even starts — means a death in the
+    # v2 arm costs the v2 arm alone, not both. The paired call below overwrites this with the full pair.
+    _dump_paired_artifacts( v1_artifact, None )
+
     v2_artifact = _run_v2_arm( corpus=corpus_name, seed=seed, n_per_command=n_per_command,
                                base_url=v2_base_url )
 
