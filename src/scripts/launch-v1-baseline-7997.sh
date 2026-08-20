@@ -88,11 +88,47 @@ print( sha )
 " 2>/dev/null
 }
 
+# 🔴 CREDENTIAL PARITY WITH THE MAIN TREE (row d8d019f6, 2026-08-20).
+#
+# THE RUN THIS EXISTS TO PREVENT: on 2026-08-20 the v1 arm posted a 47% failure rate and
+# lost two whole routing categories, and it read as a reliability defect in v1. It was not.
+# The worktree held TWO key files against the main tree's twelve. Every embed hit
+# "Key [openai] not found", returned nothing, and the insert died on "expected 768
+# dimensions, not 0" — 300 times. The arm was measured without its credentials, so a
+# comparison against it would have blamed an architecture for a missing file.
+#
+# WHY IT WILL HAPPEN AGAIN WITHOUT THIS: src/conf/keys/ is GITIGNORED. Every worktree is
+# born credential-less. This is not a slip in setting up one baseline — it is the default
+# state of the next one too.
+#
+# WHY A DIFF AND NOT A LIST: the check above names model-server-api because that is the key
+# somebody thought of. Enumerating keys here would repeat exactly that mistake, one key at a
+# time. Comparing the two directories catches whatever the main tree has and this one does
+# not, including keys added after this line was written.
+assert_credential_parity() {
+    local missing_keys
+    missing_keys=$( comm -23 \
+    <( ls -1 "$MAIN_ROOT/src/conf/keys" 2>/dev/null | sort ) \
+    <( ls -1 "$WORKTREE/src/conf/keys"        2>/dev/null | sort ) )
+    if [[ -z "$missing_keys" ]]; then return 0; fi
+    echo "🔴 the worktree is missing credentials the main tree has — the arm would run" >&2
+    echo "   crippled and its failure rate would be read as a v1 defect:" >&2
+    echo "$missing_keys" | sed 's/^/     · /' >&2
+    echo "   src/conf/keys is gitignored, so a fresh worktree never has them. Copy them:" >&2
+    echo "     cp -n $MAIN_ROOT/src/conf/keys/* $WORKTREE/src/conf/keys/" >&2
+    exit 1
+}
+
 # ── Already running? Verify identity; never start on top of it. ───────────────
 if identity=$( read_identity ); then
     echo "[:$PORT] already up — code-identity: $identity"
     case "$identity" in
-        "$PINNED_SHA"*) echo "[:$PORT] identity matches the pin ($PINNED_SHA). Nothing to do." ; exit 0 ;;
+        "$PINNED_SHA"*)
+            # Identity is not capability. On 2026-08-20 the arm was already up, matched the
+            # pin, and every re-check said "nothing to do" while it ran without its keys for
+            # four hours. Credentials are re-asserted here, not only on a fresh start.
+            assert_credential_parity
+            echo "[:$PORT] identity matches the pin ($PINNED_SHA). Nothing to do." ; exit 0 ;;
         *) echo "🔴 [:$PORT] REFUSING: a server holds this port and its identity is NOT $PINNED_SHA." >&2
            echo "   A paired run against an unpinned arm measures the wrong thing. Stop that process first." >&2
            exit 1 ;;
@@ -126,6 +162,8 @@ fi
 [[ -d "$WORKTREE" ]] || { echo "🔴 worktree missing: $WORKTREE" >&2; exit 1; }
 [[ -f "$WORKTREE/src/conf/keys/model-server-api" ]] \
     || { echo "🔴 model-server key missing: $WORKTREE/src/conf/keys/model-server-api" >&2; exit 1; }
+
+assert_credential_parity
 
 actual_sha=$( git -C "$WORKTREE" rev-parse --short HEAD )
 [[ "$actual_sha" == "$PINNED_SHA"* ]] \
