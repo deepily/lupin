@@ -169,11 +169,51 @@ actual_sha=$( git -C "$WORKTREE" rev-parse --short HEAD )
 [[ "$actual_sha" == "$PINNED_SHA"* ]] \
     || { echo "🔴 worktree HEAD is $actual_sha, expected $PINNED_SHA — the arm would not be the baseline." >&2; exit 1; }
 
-python3 -c "
-import urllib.request, sys
-try: urllib.request.urlopen( 'http://localhost:7998/health', timeout=5 )
-except Exception: sys.exit( 1 )
-" || { echo "🔴 model server :7998 is down — embeddings would differ from the v2 arm and un-fair the instrument." >&2; exit 1; }
+# 🔴 PROVE THE ARM CAN EMBED — one REAL embed, in the arm's OWN environment.
+#
+# This used to be a /health check on :7998, and /health was true all night on 2026-08-20
+# while every single embed failed. A liveness probe answers "is something listening"; it
+# does not answer "can THIS tree, with THESE keys, produce a vector". The credential diff
+# above is likewise a directory listing — it proves a file exists, not that it works. A
+# present-but-wrong key, a revoked key, or a model server that is up but refusing all pass
+# both of the cheaper checks and still produce the 300-failure run this precondition exists
+# to prevent.
+#
+# So: run one embed the way the ARM will run it — the worktree's code, LUPIN_ROOT pointed at
+# the worktree so its key directory is the one consulted, the same model-server env — and
+# require a real vector of the configured width back. The one thing that cannot lie about
+# whether embedding works is an embedding.
+embed_dims=$( LUPIN_ROOT="$WORKTREE" \
+    LUPIN_MODEL_SERVER_URL="http://localhost:7998" \
+    LUPIN_MODEL_SERVER_API_KEY_NAME="model-server-api" \
+    PYTHONPATH="$WORKTREE/src" \
+    "$MAIN_ROOT/.venv/bin/python" -c "
+import sys
+try:
+    from cosa.memory.embedding_manager import generate_embedding
+    vector = generate_embedding( 'precondition probe: can this arm embed at all' )
+    print( len( vector ) if vector else 0 )
+except Exception as error:
+    print( f'ERROR {type( error ).__name__}: {error}'[ :300 ] )
+" 2>/dev/null | tail -1 )
+
+expected_dims=$( "$MAIN_ROOT/.venv/bin/python" -c "
+import os, sys
+sys.path.insert( 0, os.path.join( '$MAIN_ROOT', 'src' ) )
+from cosa.config.configuration_manager import ConfigurationManager
+print( ConfigurationManager( env_var_name='LUPIN_CONFIG_MGR_CLI_ARGS' ).get( 'embedding dimensions', default='768' ) )
+" 2>/dev/null | tail -1 )
+expected_dims="${expected_dims:-768}"
+
+if [[ "$embed_dims" != "$expected_dims" ]]; then
+    echo "🔴 the v1 arm CANNOT EMBED. Expected a $expected_dims-dimension vector; got: $embed_dims" >&2
+    echo "   This is the check that /health could not make: on 2026-08-20 :7998 answered" >&2
+    echo "   healthy all night while all 300 of the arm's embeds returned nothing, and the" >&2
+    echo "   resulting 47% failure rate was nearly read as a defect in v1 itself." >&2
+    echo "   Look at the key files above, the model server on :7998, and the arm's own log." >&2
+    exit 1
+fi
+echo "[:$PORT] embed probe OK — $embed_dims dimensions from the worktree's own environment."
 
 # ── Launch ───────────────────────────────────────────────────────────────────
 echo "[:$PORT] starting pinned v1 arm from $WORKTREE ($PINNED_SHA) → $LOG"
