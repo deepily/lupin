@@ -36,6 +36,8 @@ from cosa.agents.date_and_time_agent import DateAndTimeAgent
 from cosa.agents.todo_list_agent     import TodoListAgent
 from cosa.agents.calendaring_agent   import CalendaringAgent
 from cosa.agents.weather_agent       import WeatherAgent
+from cosa.crud_for_dataframes.todo_crud_agent     import TodoCrudAgent
+from cosa.crud_for_dataframes.calendar_crud_agent import CalendarCrudAgent
 from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor      import ArgSpec
 
@@ -86,6 +88,17 @@ class AgentSpec:
     cli_style     : Optional[ str ]   = None                  # "package" | "module" — documentation only (§6)
     arg_spec      : Optional[ ArgSpec ] = None                # the expeditor's carrier, §5.1.1
     speakable     : bool              = False                 # belongs in the router prompt — RATIFIED (§2.1a), NOT derived from the template (trap 3)
+    # ── added by brain integration (row 10ef4b64, 2026-08-20) ──
+    # The VOICE surface's binding, which is NOT always the v2 one. `factory` stays
+    # pinned to the non-CRUD class (R-A3) because CRUD agents are never snapshotted
+    # and inheriting v1's fork would report 0% cache-hit forever. That pin is a
+    # REPORTING decision, so it must not silently change what a spoken command does:
+    # Rick ruled 2026-08-20 that voice keeps its current behaviour and the registry
+    # carries the flag rather than pretending the fork does not exist.
+    label         : Optional[ str ]      = None               # what the user HEARS ("new {label} job..."); None ⇒ derive
+    crud_factory  : Optional[ Callable[ ..., Any ] ] = None   # voice-only fork when `crud for dataframes agents enabled`
+    crud_label    : Optional[ str ]      = None               # the fork's spoken label
+    dings         : bool                 = True               # v1 rang the new-job gong for every conversational agent EXCEPT weather
 
     @property
     def required_args( self ) -> tuple[ str, ... ]:
@@ -116,14 +129,29 @@ class AgentSpec:
 # snapshotted — inheriting that fork would report 0% cache-hit forever and read as
 # a v2 bug. The executor calls spec.factory with the shared 11-kwarg signature and
 # the BARE question for every agent (v2 drops MathAgent's salutation quirk, risk 10).
+# ⚠️ THE FULL-FORM ALIASES ARE LOAD-BEARING, not tidiness. The v1 voice ladder
+# accepted "agent router go to date and time" and "agent router go to todo list"
+# as FULL routing strings; before row 10ef4b64 neither resolved here (measured:
+# resolve() returned None for both), so routing voice through this table without
+# them would have sent two working commands to the loud-fail branch and told the
+# user "I don't know how to run that". Pinned by
+# test_registry_voice_binding.py::test_every_v1_ladder_command_resolves.
 _CONVERSATIONAL = (
-    AgentSpec( "agent router go to math",       MathAgent,        aliases=( "math", ),             speakable=True ),
-    AgentSpec( "agent router go to calculator", CalculatorAgent,  aliases=( "calculator", ),       speakable=True ),
-    AgentSpec( "agent router go to datetime",   DateAndTimeAgent, aliases=( "datetime", ),         speakable=True ),
-    AgentSpec( "agent router go to todo",       TodoListAgent,    aliases=( "todo", "todo list" ), speakable=True ),
-    AgentSpec( "agent router go to calendar",   CalendaringAgent, aliases=( "calendar", ),         speakable=True ),
+    AgentSpec( "agent router go to math",       MathAgent,        aliases=( "math", ),             speakable=True,
+               label="math" ),
+    AgentSpec( "agent router go to calculator", CalculatorAgent,  aliases=( "calculator", ),       speakable=True,
+               label="calculator" ),
+    AgentSpec( "agent router go to datetime",   DateAndTimeAgent,
+               aliases=( "datetime", "agent router go to date and time" ), speakable=True,
+               label="date and time" ),
+    AgentSpec( "agent router go to todo",       TodoListAgent,
+               aliases=( "todo", "todo list", "agent router go to todo list" ), speakable=True,
+               label="todo list", crud_factory=TodoCrudAgent,     crud_label="todo (CRUD)" ),
+    AgentSpec( "agent router go to calendar",   CalendaringAgent, aliases=( "calendar", ),         speakable=True,
+               label="calendaring", crud_factory=CalendarCrudAgent, crud_label="calendar (CRUD)" ),
     AgentSpec( "agent router go to weather",    WeatherAgent,
-               aliases=( "weather", ), snapshotable=False, _required_args=( "location", ), speakable=True ),
+               aliases=( "weather", ), snapshotable=False, _required_args=( "location", ), speakable=True,
+               label="weather", dings=False ),
 )
 
 
@@ -305,6 +333,44 @@ def resolve( command ):
         if command in candidate.aliases:
             return candidate
     return None
+
+
+def resolve_voice( command, crud_enabled ):
+    """
+    Resolve a routing command to the VOICE surface's binding: ( factory, label, dings ).
+
+    A SEPARATE READER on the same table (the shape `resolve_agentic` established),
+    because the voice path and the v2 flow do NOT always want the same class. The
+    v2 `factory` is pinned to the non-CRUD agent on purpose (R-A3) — CRUD agents are
+    never snapshotted, so inheriting v1's fork would report 0% cache-hit forever and
+    read as a v2 bug. That pin exists for REPORTING, and Rick ruled on 2026-08-20
+    that a reporting decision must not silently change what a spoken command does.
+    So this reader applies the fork and `resolve()` does not.
+
+    Requires:
+        - command is a routing string: a full form or a registered alias
+        - crud_enabled is the live value of `crud for dataframes agents enabled`
+
+    Ensures:
+        - Returns ( factory, label, dings ) for a conversational command
+        - Applies the CRUD fork ONLY when crud_enabled is True AND the spec declares
+          a crud_factory — so a flag flip changes calendar and todo and nothing else
+        - Returns None for every non-conversational command, exactly as resolve() does
+        - Never raises on an unknown command
+
+    Args:
+        command      : The routing command string from the router.
+        crud_enabled : Whether the CRUD-for-dataframes agents are enabled.
+
+    Returns:
+        ( factory, label, dings ) or None
+    """
+    spec = resolve( command )
+    if spec is None:
+        return None
+    if crud_enabled and spec.crud_factory is not None:
+        return ( spec.crud_factory, spec.crud_label, spec.dings )
+    return ( spec.factory, spec.label, spec.dings )
 
 
 def resolve_agentic( command ):

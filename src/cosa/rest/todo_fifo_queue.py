@@ -17,6 +17,7 @@ from cosa.agents.math_agent import MathAgent
 from cosa.crud_for_dataframes.todo_crud_agent import TodoCrudAgent
 from cosa.crud_for_dataframes.calendar_crud_agent import CalendarCrudAgent
 from cosa.agents.calculator.agent import CalculatorAgent
+from cosa.rest.v2.registry import resolve, resolve_voice   # the command->agent table (row 10ef4b64)
 from cosa.agents.llm_client_factory import LlmClientFactory
 from cosa.rest.agentic_job_factory import create_agentic_job
 from cosa.memory.gister import Gister
@@ -752,38 +753,32 @@ class TodoFifoQueue( FifoQueue ):
                 self._notify( f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} I'm gonna ask our research librarian about that", target_user=user_email )
                 msg = self._search_and_summarize_safely( question_gist )
             
-            elif command == "agent router go to calendar":
-                if self._crud_agents_enabled():
-                    agent = CalendarCrudAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                    msg = starting_a_new_job.format( agent_type="calendar (CRUD)" )
-                else:
-                    agent = CalendaringAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                    msg = starting_a_new_job.format( agent_type="calendaring" )
-                ding_for_new_job = True
-            elif command == "agent router go to calculator":
-                agent = CalculatorAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                msg = starting_a_new_job.format( agent_type="calculator" )
-                ding_for_new_job = True
-            elif command == "agent router go to math":
-                agent = MathAgent( question=salutation_plus_question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                msg = starting_a_new_job.format( agent_type="math" )
-                ding_for_new_job = True
-            elif command in ( "agent router go to todo", "agent router go to todo list" ):
-                if self._crud_agents_enabled():
-                    agent = TodoCrudAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                    msg = starting_a_new_job.format( agent_type="todo (CRUD)" )
-                else:
-                    agent = TodoListAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                    msg = starting_a_new_job.format( agent_type="todo list" )
-                ding_for_new_job = True
-            elif command in [ "agent router go to date and time", "agent router go to datetime" ]:
-                agent = DateAndTimeAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                msg = starting_a_new_job.format( agent_type="date and time" )
-                ding_for_new_job = True
-            elif command == "agent router go to weather":
-                agent = WeatherAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                msg = starting_a_new_job.format( agent_type="weather" )
-                # ding_for_new_job = False
+            elif resolve( command ) is not None:
+                # ─── ONE TABLE LOOKUP, replacing six hand-written elif branches (row 10ef4b64) ───
+                # Rick, 2026-08-20: "those agents could be instantiated using a string key
+                # referencing a dictionary of prototypical Agent Objects... that doesn't take
+                # 10 elif branches." The dictionary already existed — cosa/rest/v2/registry.py —
+                # and only the HTTP route was asking it. ADDING A SEVENTH CONVERSATIONAL COMMAND
+                # NOW REQUIRES NO EDIT HERE; it is one AgentSpec row.
+                #
+                # resolve_voice, not resolve: the v2 `factory` is pinned to the non-CRUD class for
+                # cache-hit REPORTING (R-A3), and Rick ruled a reporting decision must not silently
+                # change what a spoken command does. resolve_voice applies the CRUD fork; the flag
+                # is read HERE rather than at the top of the chain so a non-conversational command
+                # still costs no config lookup, exactly as before.
+                factory, agent_label, ding_for_new_job = resolve_voice( command, self._crud_agents_enabled() )
+                agent = factory(
+                    question=question, question_gist=question_gist, last_question_asked=salutation_plus_question,
+                    push_counter=self.push_counter, user_id=user_id, user_email=user_email,
+                    session_id=websocket_id, debug=True, verbose=False,
+                    auto_debug=self.auto_debug, inject_bugs=self.inject_bugs
+                )
+                msg = starting_a_new_job.format( agent_type=agent_label )
+                # ⚠️ MathAgent used to receive `salutation_plus_question` as its `question` while
+                # every other agent received the bare `question`. Rick ruled 2026-08-20 to DROP the
+                # quirk (it matches the registry's own risk-10 ruling), so math now gets the bare
+                # question like everything else. This IS a behaviour change and is deliberate — if a
+                # math regression ever appears, look here first.
             elif command in ( "agent router go to automatic", "agent router go to automatic routing mode" ):
                 previous_mode = self.clear_user_mode( user_id )
                 if previous_mode:
