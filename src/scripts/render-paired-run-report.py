@@ -156,7 +156,23 @@ def render( art_dir, corpus_name="simple" ):
         out.append( "🔴 **A DIVERGENT row above means the delta is not readable as a like-for-like "
                     "comparison** — say which category was lost, from which arm, beside the number." )
     else:
-        out.append( "✅ No category diverged between the arms — the delta compares like with like." )
+        out.append( "✅ No category diverged between the arms — neither arm lost ground the other kept." )
+
+    # 🔴 AGREEING IS NOT THE SAME AS BEING SOUND. Two arms can lose the SAME half of the
+    # corpus and diverge not at all — the rehearsal that found this rendered a green tick over
+    # a pair that kept 53 of 100 with one category gone entirely. Divergence asks "were they
+    # scored on the same corpus"; attrition asks "was there enough corpus left to mean
+    # anything". A report that answers only the first hands a clean bill to a gutted run.
+    worst = 0.0
+    for art in ( v1, v2 ):
+        rate = ( art or {} ).get( "metrics", {} ).get( "failure_rate" )
+        if rate is not None: worst = max( worst, float( rate ) )
+    if worst >= 0.20:
+        out.append( "" )
+        out.append( f"🔴 **HIGH ATTRITION — {worst * 100:.0f}% of attempts produced no usable record.** "
+                    f"Whatever the delta says, it was measured over what survived, and what survived "
+                    f"is a selected subsample rather than the corpus that was sampled. Say why the "
+                    f"attrition happened before quoting the number." )
 
     # A category the corpus HAS but neither arm produced is invisible in a table built from
     # what survived. It is also the most complete form of the loss this report looks for.

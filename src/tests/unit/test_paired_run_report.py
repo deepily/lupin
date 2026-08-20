@@ -154,3 +154,53 @@ def test_a_category_absent_from_BOTH_arms_is_called_out( monkeypatch, tmp_path )
     text, ok = report.render( str( tmp_path ) )
     assert "Absent from BOTH arms entirely" in text
     assert "vanished" in text.split( "Absent from BOTH arms entirely" )[ 1 ]
+
+
+# ---------------------------------------------------------------------------
+# Attrition is a SEPARATE question from divergence (found in the both-arms
+# rehearsal: a pair that kept 53 of 100 with one category entirely gone still
+# rendered a green tick, because the two arms lost the SAME records).
+# ---------------------------------------------------------------------------
+def _pair( tmp_path, failure_rate, spans=None ):
+    spans = spans if spans is not None else { "a": 1.0 }
+    for name, ok_key in ( ( "v1", "ok_n" ), ( "v2", "n_ok" ) ):
+        with open( tmp_path / f"{name}-arm-artifact.json", "w" ) as fh:
+            json.dump( _artifact( spans, ok_key=ok_key, failure_rate=failure_rate ), fh )
+
+
+def _stub_deps( monkeypatch, pairs ):
+    import sys, types
+    monkeypatch.setitem( sys.modules, "v2_eval",
+                         types.SimpleNamespace( load_corpus=lambda name: pairs ) )
+    monkeypatch.setitem( sys.modules, "paired_eval", types.SimpleNamespace(
+        build_paired_verdict=lambda a, b: { "fired": False, "reason": "stub" },
+        render_paired_verdict=lambda v: "## stub verdict" ) )
+
+
+def test_high_attrition_is_flagged_even_when_the_arms_agree_perfectly( monkeypatch, tmp_path ):
+    """THE REHEARSAL DEFECT. Two arms that lose the SAME half of the corpus diverge not at
+    all, and a divergence-only report calls that like-for-like. It is — and it is still a
+    delta measured over a selected subsample. RED if the attrition line disappears."""
+    _pair( tmp_path, failure_rate=0.47 )
+    _stub_deps( monkeypatch, [ ( "a", "kept" ) ] )
+    text, _ = report.render( str( tmp_path ) )
+    assert "HIGH ATTRITION" in text
+    assert "47%" in text
+
+
+def test_a_low_attrition_run_gets_no_attrition_warning( monkeypatch, tmp_path ):
+    """The negative control — a warning that always fires is not a warning."""
+    _pair( tmp_path, failure_rate=0.02 )
+    _stub_deps( monkeypatch, [ ( "a", "kept" ) ] )
+    text, _ = report.render( str( tmp_path ) )
+    assert "HIGH ATTRITION" not in text
+
+
+def test_the_clean_tick_no_longer_claims_the_comparison_is_sound( monkeypatch, tmp_path ):
+    """The tick speaks only to divergence. It used to read "compares like with like", which
+    a reader takes as a verdict on the whole run rather than on one of its two failure modes."""
+    _pair( tmp_path, failure_rate=0.47 )
+    _stub_deps( monkeypatch, [ ( "a", "kept" ) ] )
+    text, _ = report.render( str( tmp_path ) )
+    assert "compares like with like" not in text
+    assert "neither arm lost ground the other kept" in text
