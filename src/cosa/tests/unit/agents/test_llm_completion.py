@@ -26,6 +26,8 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
+import pytest
+
 from cosa.agents.llm_completion import LlmCompletion, CompletionStreamingContext
 
 
@@ -82,6 +84,24 @@ class _FakeSession:
 
     async def __aexit__( self, *exc ):
         return False
+
+
+@pytest.fixture( autouse=True )
+def _stub_the_tokenizer():
+    """
+    Keep the max_tokens clamp off the network.
+
+    `_clamped_max_tokens` calls `model_window.count_tokens`, which POSTs to a live vLLM
+    `/tokenize`. Unmocked, seven tests in this file dialled 192.168.1.21:3000 and passed
+    only while that host answered — a green that measured the LAN rather than the code,
+    and red in CI or off-box. Patched at MODULE scope, not per-test, so a new test cannot
+    reintroduce the call by forgetting to stub it.
+
+    The pair below is a prompt that comfortably fits its window, so the clamp runs and
+    leaves the requested budget alone — the behaviour the assertions here expect.
+    """
+    with patch( "cosa.agents.model_window.count_tokens", return_value=( 10, 4096 ) ):
+        yield
 
 
 def _client( **kwargs ):
