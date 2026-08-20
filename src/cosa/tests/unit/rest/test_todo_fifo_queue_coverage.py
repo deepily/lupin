@@ -24,9 +24,20 @@ Run: PYTHONPATH=src:src/cosa/tests/unit/infrastructure \
 
 import sys
 import unittest
+from dataclasses import replace
 from unittest.mock import Mock, MagicMock, patch
 
 import cosa.rest.todo_fifo_queue as tfq
+import cosa.rest.v2.registry as reg
+from cosa.rest.v2.registry import resolve, resolve_voice
+
+# The conversational agents push_job no longer names: since row 10ef4b64 their class
+# comes from the REGISTRY, so patching the class in this module's namespace no longer
+# intercepts construction. Patch the table entry instead — see _route.
+_REGISTRY_BUILT = frozenset( {
+    "MathAgent", "CalculatorAgent", "DateAndTimeAgent", "TodoListAgent",
+    "CalendaringAgent", "WeatherAgent", "TodoCrudAgent", "CalendarCrudAgent",
+} )
 from cosa.rest.todo_fifo_queue import TodoFifoQueue, MODE_TO_AGENT, AGENTIC_MODE_MAP
 from cosa.agents.runtime_argument_expeditor.expeditor import BATCH_DECLINED, BATCH_UNREACHABLE
 from cosa.rest.queue_protocol import QueueableJob
@@ -194,6 +205,35 @@ class TestNotifyRejectionAndDumpCode( _TFQBase ):
 
 
 # ───────────────────── push_job: rejection + cache-hit paths ─────────────────────
+
+def _registry_stub( testcase, command, agent, expect, crud_enabled ):
+    """
+    Context manager: assert the registry binds `command` to `expect`, then swap that
+    entry's factories for a stub returning `agent`.
+
+    The injection point for the six conversational agents moved in row 10ef4b64 — they
+    are built from the registry table now, so `patch.object( tfq, "MathAgent", ... )`
+    misses and a REAL agent is constructed, violating this file's ZERO-real-agent
+    contract. Patch the table entry instead.
+
+    Requires:
+        - command resolves to a conversational AgentSpec
+        - expect is the class NAME the caller expects for this command
+
+    Ensures:
+        - fails the test if the registry binds command to some other class
+        - yields a patch.dict context in which push_job builds `agent`
+    """
+    factory, _label, _dings = resolve_voice( command, crud_enabled )
+    testcase.assertEqual(
+        factory.__name__, expect,
+        f"registry bound {command!r} to {factory.__name__}, expected {expect}"
+    )
+    spec = resolve( command )
+    stub = replace( spec, factory=lambda **kw: agent, crud_factory=lambda **kw: agent )
+    return patch.dict( reg.ANSWER_COMMANDS, { spec.command: stub } )
+
+
 class TestPushJobRejectionAndCache( _TFQBase ):
     """Exercises push_job rejection arms and the snapshot cache-hit branches."""
 
@@ -241,7 +281,8 @@ class TestPushJobRejectionAndCache( _TFQBase ):
         agent = Mock(); agent.id_hash = "ag1"
         with patch.object( tfq, "notify_user_sync", return_value=resp ), \
              patch.object( self.queue, "_get_routing_command", return_value=( "agent router go to math", "" ) ), \
-             patch.object( tfq, "MathAgent", return_value=agent ), \
+             _registry_stub( self, "agent router go to math", agent, "MathAgent",
+                             self.queue._crud_agents_enabled() ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), \
              patch.object( self.queue, "_dump_code" ), patch( "builtins.print" ):
             r = self.queue.push_job( "what time is it", "ws1", "u1", "u@x.com" )
@@ -261,7 +302,8 @@ class TestPushJobRejectionAndCache( _TFQBase ):
         self.snap_mgr.get_snapshots_by_question.return_value = [ ( 50.0, snap ) ]
         agent = Mock(); agent.id_hash = "ag2"
         with patch.object( self.queue, "_get_routing_command", return_value=( "agent router go to weather", "" ) ), \
-             patch.object( tfq, "WeatherAgent", return_value=agent ), \
+             _registry_stub( self, "agent router go to weather", agent, "WeatherAgent",
+                             self.queue._crud_agents_enabled() ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
             r = self.queue.push_job( "what is the weather", "ws1", "u1", "u@x.com" )
         self.assertEqual( r[ "job_id" ], "ag2" )
@@ -281,7 +323,8 @@ class TestPushJobRejectionAndCache( _TFQBase ):
     def test_refactor_skips_snapshot_search( self ):
         agent = Mock(); agent.id_hash = "ag3"
         with patch.object( self.queue, "_get_routing_command", return_value=( "agent router go to math", "" ) ), \
-             patch.object( tfq, "MathAgent", return_value=agent ), \
+             _registry_stub( self, "agent router go to math", agent, "MathAgent",
+                             self.queue._crud_agents_enabled() ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
             r = self.queue.push_job( "refactor this code", "ws1", "u1", "u@x.com" )
         self.assertEqual( r[ "job_id" ], "ag3" )
@@ -297,14 +340,48 @@ class TestPushJobRouting( _TFQBase ):
         self.snap_mgr.get_snapshots_by_question.return_value = []   # no cache → LLM routing
 
     def _route( self, command, question="do something", user_mode=None, agent_cls=None, agent_attr=None ):
+        """
+        Drive one push_job routing branch with a stub agent, and return its result.
+
+        ⚠️ TWO INJECTION POINTS, and which one applies moved in row 10ef4b64. push_job used
+        to name every agent class itself, so patching this module's namespace intercepted
+        construction. The six conversational agents now come from the REGISTRY, so that
+        patch no longer bites — it silently misses and a REAL agent gets built, breaking
+        this file's own "ZERO real agent execution" contract. That is exactly how these
+        twelve tests caught the change, and the right fix is to patch where the object is
+        looked up now, not to relax the assertion.
+
+        For a registry-built agent this is STRICTLY STRONGER than the old form: it first
+        asserts the table hands back the class the caller named, THEN swaps that entry's
+        factory for the stub. The old version only proved something got pushed; this also
+        proves the right binding was chosen, including the CRUD fork.
+
+        Requires:
+            - command is a routing string push_job can reach
+            - agent_attr, when given, names the agent class expected for this command
+
+        Ensures:
+            - returns push_job's result dict
+            - no real agent, push, or notify happens
+        """
         agent = Mock(); agent.id_hash = "ag"
-        ctx = []
         if user_mode:
             self.queue.set_user_mode( "u1", user_mode )
         with patch.object( self.queue, "_get_routing_command", return_value=( command, "" ) ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), \
              patch( "builtins.print" ):
+            if agent_attr in _REGISTRY_BUILT:
+                # ⚠️ THE EFFECTIVE COMMAND, not the one passed in. A user_mode BYPASSES the
+                #    router and push_job synthesises "agent router go to <mode>" itself, so
+                #    test_user_mode_direct_routing passes "ignored" as the command. Resolving
+                #    that would return None and the unpack below would raise — a test failing
+                #    for a reason that has nothing to do with what it checks.
+                effective = f"agent router go to {user_mode}" if user_mode else command
+                with _registry_stub( self, effective, agent, agent_attr,
+                                     self.queue._crud_agents_enabled() ):
+                    return self.queue.push_job( question, "ws1", "u1", "u@x.com" )
             if agent_attr:
+                # Still built by push_job itself (ReceptionistAgent) — namespace patch holds.
                 with patch.object( tfq, agent_attr, return_value=agent ):
                     return self.queue.push_job( question, "ws1", "u1", "u@x.com" )
             return self.queue.push_job( question, "ws1", "u1", "u@x.com" )
@@ -403,7 +480,8 @@ class TestPushJobRouting( _TFQBase ):
     def test_ding_for_new_job_emits_sound( self ):
         agent = Mock(); agent.id_hash = "ag"
         with patch.object( self.queue, "_get_routing_command", return_value=( "agent router go to math", "" ) ), \
-             patch.object( tfq, "MathAgent", return_value=agent ), \
+             _registry_stub( self, "agent router go to math", agent, "MathAgent",
+                             self.queue._crud_agents_enabled() ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
             self.queue.push_job( "add two numbers", "ws1", "u1", "u@x.com" )
         # math sets ding_for_new_job=True → websocket emits the sound update
@@ -741,7 +819,8 @@ class TestBranchFills( _TFQBase ):
         self.snap_mgr.get_snapshots_by_question.return_value = []
         agent = Mock(); agent.id_hash = "ag"
         with patch.object( self.queue, "_get_routing_command", return_value=( "agent router go to math", "" ) ), \
-             patch.object( tfq, "MathAgent", return_value=agent ), \
+             _registry_stub( self, "agent router go to math", agent, "MathAgent",
+                             self.queue._crud_agents_enabled() ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
             self.queue.push_job( "add numbers", "ws1", "u1", "u@x.com" )   # 418 else arm
 
@@ -751,7 +830,8 @@ class TestBranchFills( _TFQBase ):
         self.snap_mgr.get_snapshots_by_question.return_value = []
         agent = Mock(); agent.id_hash = "ag"
         with patch.object( self.queue, "_get_routing_command", return_value=( "agent router go to math", "" ) ), \
-             patch.object( tfq, "MathAgent", return_value=agent ), \
+             _registry_stub( self, "agent router go to math", agent, "MathAgent",
+                             self.queue._crud_agents_enabled() ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), \
              patch.object( self.queue, "_dump_code" ), patch( "builtins.print" ):
             self.queue.push_job( "add numbers", "ws1", "u1", "u@x.com" )   # 439-443 + 664 router debug
