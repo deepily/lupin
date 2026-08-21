@@ -1,10 +1,10 @@
 """The executor seam — inline now, queues later without a rewrite.
 
 CJ Flow v2 hands a piece of `Work` to an `Executor` and gets back an `Outcome`.
-Phase 1 ships `InlineExecutor`, which runs replay and agents synchronously on
-the calling thread; phase 2 will swap in a `QueuedExecutor` (a stub here that
-raises) without touching a line of the flow, because the HTTP contract already
-carries `status` and `job_id`. The executor is chosen by the INI key
+`InlineExecutor` runs replay and agents synchronously on the calling thread;
+`QueuedExecutor` hands them to the existing FIFO queue and answers `waiting`.
+Swapping one for the other touches no line of the flow, because the HTTP
+contract already carries `status` and `job_id`. The executor is chosen by the INI key
 `v2 executor` (default `inline`) via `make_executor()`.
 
 `Work.job` is duck-typed on purpose — this module imports no agent or snapshot
@@ -123,34 +123,74 @@ class InlineExecutor:
 
 
 class QueuedExecutor:
-    """Phase-2 stub. Pushing to the queue is not wired yet.
+    """Hands the work to the existing FIFO queue instead of running it here.
+
+    This is the v1 tail of `push_job` (`todo_fifo_queue.py:857-859`) and nothing
+    else: scope the job's id for user filtering, push it onto the todo queue,
+    answer `waiting`. It never runs the job, so it never produces an answer —
+    the queue consumer runs it later and the websocket carries the result.
+
+    `waiting` is a hand-off, not a failure and not a finish. The flow's two
+    status gates treat it as success-in-flight; the write-back guard does NOT,
+    because a job that has not run has no answer to cache.
+
+    Requires:
+        - todo_queue exposes push( job ) and a user_job_tracker carrying
+          register_scoped_job( base_hash, user_id, session_id ).
 
     Ensures:
-        - submit() always raises NotImplementedError; nothing here silently
-          succeeds while the queued path is absent.
+        - the job's id_hash is the SCOPED id BEFORE the push, which is v1's
+          order: a filtering read must never see an unscoped row.
+        - returns Outcome( status="waiting", job_id=<scoped id> ) with no answer.
+        - a queue that refuses the push is captured as Outcome(status="failed"),
+          the same contract InlineExecutor keeps — the flow degrades to the
+          receptionist rather than letting a 500 out of the request.
     """
 
+    def __init__( self, todo_queue: Any, debug: bool=False, verbose: bool=False ):
+        if todo_queue is None:
+            raise ValueError(
+                "QueuedExecutor needs the todo queue — pass make_executor( 'queued', "
+                "todo_queue=… ). Step 12 builds it in lifespan and hangs it on app.state."
+            )
+        self.todo_queue = todo_queue
+        self.debug      = debug
+        self.verbose    = verbose
+
     def submit( self, work: Work, trace: StageTrace ) -> Outcome:
-        """Always raises — the queued executor is deferred to phase 2."""
-        raise NotImplementedError(
-            "QueuedExecutor is a phase-2 stub — the v2 'queued' executor is not wired yet."
-        )
+        """Scope the job, push it, and answer waiting — every kind, no exceptions."""
+        try:
+            trace.mark( "t_enqueue" )
+            job         = work.job
+            job.id_hash = self.todo_queue.user_job_tracker.register_scoped_job(
+                job.id_hash, work.user_id, work.session_id
+            )
+            self.todo_queue.push( job )
+            if self.debug: print( f"[v2] queued [{work.kind}] as [{job.id_hash}]" )
+            return Outcome( status="waiting", job_id=job.id_hash )
+        except Exception as e:
+            return Outcome( status="failed", error=str( e ) )
 
 
-def make_executor( name: str="inline", debug: bool=False, verbose: bool=False ) -> Executor:
+def make_executor( name: str="inline", todo_queue: Any=None, debug: bool=False,
+                   verbose: bool=False ) -> Executor:
     """
     Build the executor named by the INI key `v2 executor`.
 
     Requires:
         - name is "inline" or "queued".
+        - todo_queue is the todo FIFO queue when name is "queued"; it is unused
+          by "inline".
 
     Ensures:
         - "inline"  -> a new InlineExecutor.
-        - "queued"  -> a new QueuedExecutor (whose submit raises).
+        - "queued"  -> a new QueuedExecutor bound to todo_queue.
+        - "queued" with no queue raises ValueError naming the fix, rather than
+          building an executor that fails later on the live path.
         - any other name raises ValueError, fail-loud rather than defaulting.
     """
     if name == "inline":
         return InlineExecutor( debug=debug, verbose=verbose )
     if name == "queued":
-        return QueuedExecutor()
+        return QueuedExecutor( todo_queue, debug=debug, verbose=verbose )
     raise ValueError( f"Unknown v2 executor [{name}] — expected 'inline' or 'queued'." )
