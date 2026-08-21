@@ -880,3 +880,42 @@ def test_a_written_back_row_is_findable_by_a_reworded_question( wired_wording_gi
 
     assert result.is_replay_hit is True, "a written-back row was unreachable by a reworded question"
     assert result.tier == "exact_gist"
+
+
+def test_an_earlier_hit_never_pays_for_the_gist( wired_wording_gist ):
+    """
+    The exact path exists to be the cheap one, and building the probe list eagerly made
+    every verbatim and normalized hit normalize a question it never looked up
+    (Pocholo). Handing back callables only helps if their KEYS are computed inside them
+    too.
+
+    RED ON REVERT: compute the gist before returning the list and this records a call
+    on a lookup that never reached tier 1c.
+    """
+    build, store = wired_wording_gist
+    cache = build()
+    store.syn_verbatim[ "What's on my todo list?" ] = "id-1"
+    store.rows[ "id-1" ] = _make_orm_row( id_hash="id-1" )
+
+    result = cache.lookup( "What's on my todo list?" )
+
+    assert result.tier == "exact_verbatim"
+    assert cache._gist_normalizer.calls == [], (
+        f"a verbatim hit computed the gist anyway: {cache._gist_normalizer.calls}"
+    )
+
+
+def test_the_gist_is_computed_when_the_probe_is_actually_reached( wired_wording_gist ):
+    """
+    The other half, so the test above cannot be satisfied by never computing it at all:
+    a lookup that falls through to tier 1c does normalize, exactly once.
+    """
+    build, store = wired_wording_gist
+    cache = build()
+    store.syn_gist[ "todo list" ] = "id-1"
+    store.rows[ "id-1" ] = _make_orm_row( id_hash="id-1" )
+
+    result = cache.lookup( "What's on my todo list?" )
+
+    assert result.tier == "exact_gist"
+    assert cache._gist_normalizer.calls == [ "What's on my todo list?" ]

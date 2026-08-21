@@ -190,10 +190,17 @@ class V2Cache( TwoTierQuestionSearch ):
         stricter, so a question that matches either matches its own row rather than
         a same-gist neighbour's.
 
-        A BLANK GIST NEVER PROBES. The gist normalizer strips a question down to its
+        A BLANK GIST NEVER MATCHES. The gist normalizer strips a question down to its
         content words, and a question made entirely of stopwords reduces to "" —
         which would equality-match every row whose gist column is also blank and
-        replay a stranger's answer. An empty gist is not a key.
+        replay a stranger's answer. An empty gist is not a key, so the probe reports a
+        miss for its tier rather than asking the question.
+
+        THE GIST IS COMPUTED INSIDE THE PROBE, not before it (Pocholo). Building the
+        list eagerly made every verbatim and normalized hit pay for a normalization it
+        never used — on the exact path that exists to be the cheap one. The whole point
+        of handing back callables is that a later probe costs nothing when an earlier
+        one hits, and computing its key up front threw that away.
 
         Requires:
             - synonyms is an open-session CanonicalSynonymRepository
@@ -201,15 +208,18 @@ class V2Cache( TwoTierQuestionSearch ):
         Ensures:
             - returns the base's two probes first, in the base's order, then the
               gist probe
-            - the gist probe is ABSENT (not merely unmatched) when the question's
+            - nothing is normalized until the gist probe is actually reached
+            - the gist probe answers None (a miss for that tier) when the question's
               gist is empty
         """
-        probes = super()._exact_probes( synonyms, question, question_normalized )
-        question_gist = self._gist_normalizer.get_normalized_gist( question )
-        if not question_gist:
-            if self.debug: print( "(v2cache) tier-1c skipped: the question has no gist to key on" )
-            return probes
-        return probes + ( ( "exact_gist", lambda: synonyms.find_exact_gist( question_gist ) ), )
+        def _gist_probe():
+            question_gist = self._gist_normalizer.get_normalized_gist( question )
+            if not question_gist:
+                if self.debug: print( "(v2cache) tier-1c skipped: the question has no gist to key on" )
+                return None
+            return synonyms.find_exact_gist( question_gist )
+
+        return super()._exact_probes( synonyms, question, question_normalized ) + ( ( "exact_gist", _gist_probe ), )
 
     def normalize( self, question: str ) -> str:
         """
