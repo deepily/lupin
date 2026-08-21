@@ -1,0 +1,436 @@
+#!/usr/bin/env python3
+"""
+Step 13 of the brain-integration plan — dump the solution cache, with receipts.
+
+Plan of record: src/rnd/v0.2.0/2026.08.21-step13-cache-dump-plan.md (row 1e597a65).
+This tool is PREP: it does nothing destructive unless --apply is passed, and it
+runs only on Cheech's explicit GO after plan steps 9a + 9b have merged.
+
+Parameterised on the three scope questions so the GO just picks values:
+  --db {dev,test,both}        which database(s) — lupin_db_dev (:7999) / lupin_db_test (:8000)
+  --synonyms / --no-synonyms  canonical_synonyms too (default ON — ruled 2026-08-21 11:39)
+  --adjacent-caches           the five adjacent caches too (default OFF — ruled OUT)
+
+Per database, in order: pg_dump backup of the in-scope tables → counts before →
+one DELETE-per-table transaction → counts after → JSON receipts. DELETE, not
+TRUNCATE (truncate takes ACCESS EXCLUSIVE and blocks every live reader).
+
+Verification (the plan's two halves): --verify-empty checks every in-scope count
+reads 0 after the dump; --verify-learn-back asks one question through
+/api/v2/ask and proves the cache still LEARNS — a snapshot row appeared, it
+passes 9a (non-blank user_id, a routed command), and a second ask RE-RUNS
+rather than replays (9b's guard holds on the fresh, unconfirmed row).
+
+Dry-run (default):
+    python3 src/scripts/dump_solution_cache.py --db both
+Apply, on the GO:
+    python3 src/scripts/dump_solution_cache.py --db both --apply --verify-empty
+Learn-back check against the dev server:
+    python3 src/scripts/dump_solution_cache.py --db dev --verify-learn-back --base-url http://localhost:7999
+"""
+import argparse
+import datetime
+import json
+import os
+import subprocess
+import sys
+
+lupin_root = os.environ.get( "LUPIN_ROOT" )
+if lupin_root is None:  # pragma: no cover — bootstrap guard; the in-process test needs LUPIN_ROOT to import cosa at all, so it is proven by a subprocess test (test_bootstrap_guard_fires_without_lupin_root) instead
+    raise RuntimeError( "LUPIN_ROOT not set — export LUPIN_ROOT=/path/to/project" )
+src_path = os.path.join( lupin_root, "src" )
+if src_path not in sys.path: sys.path.insert( 0, src_path )
+import cosa.utils.util as cu
+
+PG_CONTAINER     = "lupin-postgres"
+PG_USER          = "lupin_dev"
+DB_BY_TARGET     = {
+    "dev"  : "lupin_db_dev",
+    "test" : "lupin_db_test",
+}
+SNAPSHOT_TABLE   = "solution_snapshots"
+SYNONYM_TABLE    = "canonical_synonyms"
+ADJACENT_TABLES  = [ "gist_cache", "question_embeddings", "embedding_cache", "query_log", "input_and_output" ]
+
+
+def databases_for( target ):
+    """
+    Resolve the --db choice to the database names it covers.
+
+    Requires:
+        - target is one of "dev", "test", "both"
+
+    Ensures:
+        - returns a list of database names, dev first when both
+        - raises ValueError on any other target (never guesses a database)
+    """
+    if target == "both": return [ DB_BY_TARGET[ "dev" ], DB_BY_TARGET[ "test" ] ]
+    if target in DB_BY_TARGET: return [ DB_BY_TARGET[ target ] ]
+    raise ValueError( f"unknown --db target {target!r}; expected dev, test or both" )
+
+
+def tables_for( include_synonyms, include_adjacent ):
+    """
+    Resolve the two table flags to the in-scope table list.
+
+    Requires:
+        - include_synonyms and include_adjacent are booleans
+
+    Ensures:
+        - solution_snapshots is always first
+        - canonical_synonyms follows iff include_synonyms
+        - the five adjacent caches follow iff include_adjacent, in ADJACENT_TABLES order
+    """
+    tables = [ SNAPSHOT_TABLE ]
+    if include_synonyms: tables.append( SYNONYM_TABLE )
+    if include_adjacent: tables.extend( ADJACENT_TABLES )
+    return tables
+
+
+def psql_argv( db, sql ):
+    """
+    Build the docker-exec psql argv for one SQL string.
+
+    Requires:
+        - db is a database name; sql is a non-empty string
+
+    Ensures:
+        - returns the argv list (no shell), unaligned tuples-only output so
+          count rows parse as "a|b|c"
+    """
+    return [ "docker", "exec", PG_CONTAINER, "psql", "-U", PG_USER, "-d", db, "-At", "-c", sql ]
+
+
+def pg_dump_argv( db, tables ):
+    """
+    Build the docker-exec pg_dump argv for the in-scope tables of one database.
+
+    Requires:
+        - db is a database name; tables is a non-empty list
+
+    Ensures:
+        - returns the argv list with one -t per table, in order
+    """
+    argv = [ "docker", "exec", PG_CONTAINER, "pg_dump", "-U", PG_USER, "-d", db ]
+    for t in tables: argv.extend( [ "-t", t ] )
+    return argv
+
+
+def count_sql( tables ):
+    """
+    One SELECT returning one pipe-separated row of counts, in table order.
+
+    Requires:
+        - tables is a non-empty list of table names
+
+    Ensures:
+        - returns "SELECT (SELECT count(*) FROM a), (SELECT count(*) FROM b);"
+    """
+    parts = ", ".join( f"(SELECT count(*) FROM {t})" for t in tables )
+    return f"SELECT {parts};"
+
+
+def delete_sql( tables ):
+    """
+    One transaction that deletes every in-scope table, counts printed either side.
+
+    Requires:
+        - tables is a non-empty list of table names
+
+    Ensures:
+        - BEGIN … DELETE FROM each table … COMMIT, with a 'before' and an 'after'
+          count row so the psql output carries both
+        - uses DELETE, never TRUNCATE
+    """
+    parts   = ", ".join( f"(SELECT count(*) FROM {t})" for t in tables )
+    deletes = " ".join( f"DELETE FROM {t};" for t in tables )
+    return f"BEGIN; SELECT 'before', {parts}; {deletes} SELECT 'after', {parts}; COMMIT;"
+
+
+def run_argv( argv, runner=subprocess.run ):
+    """
+    Run one argv and return its stdout, failing loudly on a non-zero exit.
+
+    Requires:
+        - argv is a list; runner has subprocess.run's signature
+
+    Ensures:
+        - returns stdout as str
+        - raises RuntimeError naming the argv and stderr on non-zero exit
+    """
+    proc = runner( argv, capture_output=True, text=True )
+    if proc.returncode != 0:
+        raise RuntimeError( f"command failed ({proc.returncode}): {' '.join( argv )}\n{proc.stderr}" )
+    return proc.stdout
+
+
+def parse_count_row( line, tables ):
+    """
+    Turn one psql -At row ("3|3" or "before|3|3") into {table: count}.
+
+    Requires:
+        - line is a pipe-separated row whose LAST len(tables) fields are integers
+
+    Ensures:
+        - returns a dict keyed by table, in order
+        - raises ValueError if the field count is short or a field is not an int
+    """
+    fields = line.strip().split( "|" )
+    if len( fields ) < len( tables ):
+        raise ValueError( f"count row {line!r} has {len( fields )} fields, expected at least {len( tables )}" )
+    values = fields[ -len( tables ): ]
+    return { t: int( v ) for t, v in zip( tables, values ) }
+
+
+def count_rows( db, tables, runner=subprocess.run ):
+    """
+    Count every in-scope table in one database.
+
+    Requires:
+        - db is a database name; tables non-empty
+
+    Ensures:
+        - returns {table: count}
+    """
+    out   = run_argv( psql_argv( db, count_sql( tables ) ), runner=runner )
+    lines = [ l for l in out.splitlines() if l.strip() ]
+    return parse_count_row( lines[ 0 ], tables )
+
+
+def backup( db, tables, backup_dir, now, runner=subprocess.run ):
+    """
+    pg_dump the in-scope tables of one database to a timestamped file.
+
+    Requires:
+        - backup_dir is a writable directory path (created if absent)
+        - now is a datetime
+
+    Ensures:
+        - returns the backup file path; file holds pg_dump's stdout
+        - raises RuntimeError if pg_dump fails (nothing is written then)
+    """
+    os.makedirs( backup_dir, exist_ok=True )
+    ts   = now.strftime( "%Y.%m.%d-at-%H%M%S" )
+    path = os.path.join( backup_dir, f"cache-backup-{db}-{ts}.sql" )
+    out  = run_argv( pg_dump_argv( db, tables ), runner=runner )
+    with open( path, "w" ) as f:
+        f.write( out )
+    return path
+
+
+def dump( db, tables, runner=subprocess.run ):
+    """
+    Delete every in-scope table of one database inside one transaction.
+
+    Requires:
+        - a backup has already been taken by the caller
+
+    Ensures:
+        - returns ( before, after ) count dicts parsed from the transaction's own
+          'before' / 'after' rows
+        - raises RuntimeError if psql fails (the transaction then rolled back)
+        - raises ValueError if the output lacks both rows
+    """
+    out   = run_argv( psql_argv( db, delete_sql( tables ) ), runner=runner )
+    rows  = { }
+    for line in out.splitlines():
+        if line.startswith( "before|" ): rows[ "before" ] = parse_count_row( line, tables )
+        if line.startswith( "after|" ):  rows[ "after" ]  = parse_count_row( line, tables )
+    if "before" not in rows or "after" not in rows:
+        raise ValueError( f"dump output for {db} lacked a before/after row:\n{out}" )
+    return rows[ "before" ], rows[ "after" ]
+
+
+def verify_empty( after ):
+    """
+    The plan's first verification half: every in-scope count reads 0.
+
+    Requires:
+        - after is {table: count}
+
+    Ensures:
+        - returns the list of tables that are NOT empty (empty list == pass)
+    """
+    return [ t for t, n in after.items() if n != 0 ]
+
+
+def latest_snapshot_row( db, id_hash, runner=subprocess.run ):
+    """
+    Fetch the 9a-relevant columns of one snapshot row by id_hash.
+
+    Requires:
+        - id_hash is the snapshot_id the ask returned
+
+    Ensures:
+        - returns {"id_hash", "user_id", "routing_command", "answer_is_correct"}
+          with empty strings for NULLs
+        - raises ValueError if no row came back
+    """
+    sql = ( "SELECT id_hash, coalesce(user_id,''), coalesce(routing_command,''), coalesce(answer_is_correct,'') "
+            f"FROM {SNAPSHOT_TABLE} WHERE id_hash = '{id_hash}';" )
+    out   = run_argv( psql_argv( db, sql ), runner=runner )
+    lines = [ l for l in out.splitlines() if l.strip() ]
+    if not lines:
+        raise ValueError( f"no {SNAPSHOT_TABLE} row with id_hash {id_hash!r} in {db}" )
+    f = lines[ 0 ].split( "|" )
+    return { "id_hash": f[ 0 ], "user_id": f[ 1 ], "routing_command": f[ 2 ], "answer_is_correct": f[ 3 ] }
+
+
+def login( base_url, email, password, http ):
+    """
+    Log in and return the bearer token.
+
+    Requires:
+        - http has requests' post(url, json=, timeout=) signature
+
+    Ensures:
+        - returns tokens.access_token
+        - raises RuntimeError on a non-200
+    """
+    resp = http.post( f"{base_url}/auth/login", json={ "email": email, "password": password }, timeout=10 )
+    if resp.status_code != 200:
+        raise RuntimeError( f"login failed: {resp.status_code} {resp.text}" )
+    return resp.json()[ "tokens" ][ "access_token" ]
+
+
+def ask_v2( base_url, token, question, http ):
+    """
+    POST one question to /api/v2/ask and return the AskResponse dict.
+
+    Ensures:
+        - returns the JSON body
+        - raises RuntimeError on a non-200
+    """
+    resp = http.post( f"{base_url}/api/v2/ask", json={ "question": question },
+                      headers={ "Authorization": f"Bearer {token}" }, timeout=180 )
+    if resp.status_code != 200:
+        raise RuntimeError( f"/api/v2/ask failed: {resp.status_code} {resp.text}" )
+    return resp.json()
+
+
+def verify_learn_back( db, base_url, email, password, question, http, runner=subprocess.run ):
+    """
+    The plan's second verification half: the emptied cache still LEARNS, and 9b holds.
+
+    Requires:
+        - the dump has already run against db; base_url serves that db
+        - http is the requests module (or a stand-in)
+
+    Ensures:
+        - returns a receipts dict: first ask's snapshot_id/path/wrote_snapshot, the
+          row's user_id/routing_command/answer_is_correct, the second ask's
+          path/cache_hit, and a list of `failures` (empty == pass)
+        - never raises on a failed CRITERION — failures are listed; raises only on
+          transport/auth errors (RuntimeError) or a missing row (ValueError)
+    """
+    token    = login( base_url, email, password, http )
+    first    = ask_v2( base_url, token, question, http )
+    failures = [ ]
+    if not first.get( "wrote_snapshot" ): failures.append( "first ask did not write a snapshot" )
+    if not first.get( "answer" ):         failures.append( "first ask returned no answer" )
+    if first.get( "path" ) == "replay":   failures.append( "first ask replayed — cache was not empty" )
+    row = { }
+    if first.get( "snapshot_id" ):
+        row = latest_snapshot_row( db, first[ "snapshot_id" ], runner=runner )
+        if not row[ "user_id" ]:                              failures.append( "fresh row has blank user_id (fails 9a)" )
+        if not row[ "routing_command" ]:                      failures.append( "fresh row has no routing_command (fails 9a)" )
+        if row[ "answer_is_correct" ].lower() == "true":      failures.append( "fresh row already confirmed True — guard would serve it" )
+    else:
+        failures.append( "first ask returned no snapshot_id" )
+    second = ask_v2( base_url, token, question, http )
+    if second.get( "cache_hit" ) or second.get( "path" ) == "replay":
+        failures.append( "second ask replayed an unconfirmed row (fails 9b)" )
+    return {
+        "question"       : question,
+        "first_ask"      : { k: first.get( k ) for k in ( "path", "status", "wrote_snapshot", "snapshot_id", "trace_id" ) },
+        "fresh_row"      : row,
+        "second_ask"     : { k: second.get( k ) for k in ( "path", "status", "cache_hit", "trace_id" ) },
+        "failures"       : failures,
+    }
+
+
+def build_parser():
+    """
+    The CLI surface — every scope question is a flag, defaults follow the 2026-08-21 ruling.
+
+    Ensures:
+        - returns an argparse parser; nothing is parsed here
+    """
+    p = argparse.ArgumentParser( description="Step 13: dump the solution cache with backup + receipts (dry-run by default)." )
+    p.add_argument( "--db", required=True, choices=[ "dev", "test", "both" ], help="which database(s) to dump" )
+    syn = p.add_mutually_exclusive_group()
+    syn.add_argument( "--synonyms",    dest="synonyms", action="store_true",  help="include canonical_synonyms (default)" )
+    syn.add_argument( "--no-synonyms", dest="synonyms", action="store_false", help="leave canonical_synonyms alone" )
+    p.set_defaults( synonyms=True )
+    p.add_argument( "--adjacent-caches", action="store_true", help="ALSO dump gist_cache, question_embeddings, embedding_cache, query_log, input_and_output (ruled OUT — off by default)" )
+    p.add_argument( "--apply", action="store_true", help="actually back up + delete (default: dry-run, counts only)" )
+    p.add_argument( "--backup-dir", default=os.path.join( cu.get_project_root(), "io", "cache-dump-backups" ) )
+    p.add_argument( "--verify-empty", action="store_true", help="after --apply, fail if any in-scope count is not 0" )
+    p.add_argument( "--verify-learn-back", action="store_true", help="ask one question through /api/v2/ask and prove the cache still learns + 9b holds (single --db only)" )
+    p.add_argument( "--base-url", default="http://localhost:7999" )
+    p.add_argument( "--question", default="What time is it right now?" )
+    return p
+
+
+def main( argv=None, runner=subprocess.run, http=None, now=None, out=print ):
+    """
+    Entry point. Dry-run unless --apply; receipts printed as JSON on the last line.
+
+    Requires:
+        - argv is a list of CLI args or None (sys.argv)
+        - runner / http / now / out are injection seams for tests
+
+    Ensures:
+        - returns 0 on success, 2 when a verification failed
+        - raises on transport/psql errors (nothing is swallowed)
+    """
+    args   = build_parser().parse_args( argv )
+    now    = now or datetime.datetime.now()
+    tables = tables_for( args.synonyms, args.adjacent_caches )
+    dbs    = databases_for( args.db )
+    mode   = "APPLY" if args.apply else "DRY-RUN"
+    out( f"[{mode}] databases={dbs} tables={tables}" )
+
+    if args.verify_learn_back and len( dbs ) != 1:
+        raise SystemExit( "--verify-learn-back needs a single --db (dev or test), not both" )
+
+    receipts = { "mode": mode, "tables": tables, "databases": { } }
+    rc       = 0
+    for db in dbs:
+        entry  = { }
+        before = count_rows( db, tables, runner=runner )
+        entry[ "before" ] = before
+        out( f"  {db}: before {before}" )
+        if args.apply:
+            entry[ "backup" ] = backup( db, tables, args.backup_dir, now, runner=runner )
+            out( f"  {db}: backup -> {entry[ 'backup' ]}" )
+            tx_before, after = dump( db, tables, runner=runner )
+            entry[ "tx_before" ] = tx_before
+            entry[ "after" ]     = after
+            out( f"  {db}: after  {after}" )
+            if args.verify_empty:
+                leftover = verify_empty( after )
+                entry[ "verify_empty" ] = "pass" if not leftover else f"FAIL: not empty {leftover}"
+                if leftover: rc = 2
+                out( f"  {db}: verify-empty {entry[ 'verify_empty' ]}" )
+        else:
+            out( f"  {db}: would back up {tables} to {args.backup_dir} then DELETE (re-run with --apply)" )
+        if args.verify_learn_back:
+            if http is None:
+                import requests as http
+            email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+            password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
+            if not email or not password:
+                raise SystemExit( "set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD for --verify-learn-back" )
+            lb = verify_learn_back( db, args.base_url, email, password, args.question, http, runner=runner )
+            entry[ "learn_back" ] = lb
+            if lb[ "failures" ]: rc = 2
+            out( f"  {db}: learn-back {'pass' if not lb[ 'failures' ] else 'FAIL: ' + '; '.join( lb[ 'failures' ] )}" )
+        receipts[ "databases" ][ db ] = entry
+
+    out( json.dumps( receipts, indent=2, default=str ) )
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit( main() )
