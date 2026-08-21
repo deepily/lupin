@@ -177,6 +177,16 @@ class AskFlow:
             return self._receptionist( trace, question, ctx, "router_error" )
         spec = resolve( command, self.crud_enabled )
         if spec is None:
+            # THE SECOND READER, on the door a person actually talks to. `resolve()` is
+            # scoped to the conversational class (registry §5.1.3), so every agentic
+            # command lands here — and this used to answer the receptionist's "I do not
+            # understand" to a command the registry knows. Since the spoken door hands
+            # its transcription to `ask`, that made "do a deep research on the state of
+            # AI" unanswerable by voice. `submit` learned this first; the voice path had
+            # the identical gap and nothing was asking about it.
+            agentic = resolve_agentic( command )
+            if agentic is not None:
+                return self._ask_agentic( trace, agentic, command, raw_args, question, ctx, interactive )
             return self._receptionist( trace, question, ctx, "unknown_command" )
 
         # 2 — cache: replay only on a tier-1 exact hit (R-C1); below perfect, run the agent.
@@ -379,6 +389,101 @@ class AskFlow:
         return self._run_agent( trace, spec, command, question if has_question else command,
                                 final_args, ctx, "submitted",
                                 snapshotable=spec.snapshotable and has_question )
+
+    # ------------------------------------------------------- the agentic arm of ask
+    @staticmethod
+    def _split_queue_directives( args: dict ) -> tuple:
+        """
+        Pull the two runtime scheduling arguments out of a set the expeditor produced.
+
+        WHY THEY ARE IN THERE AT ALL. The expeditor treats `scheduled_at` and
+        `monopolize` as universal runtime arguments and offers them for every agentic
+        command (`expeditor.py:863`), so a spoken "run the deep research at ten
+        tomorrow" comes back as ordinary keys in the argument dictionary. They are not
+        arguments to the agent, and `create_agentic_job` reads its arguments key by name
+        and does not name these — so left in place they are dropped in silence and the
+        job runs at once. v1 took them out at exactly this point and set them on the job
+        afterwards (`todo_fifo_queue.py:1213-1223`); this is the same step, and the
+        normalisation below is v1's too, kept word for word because a user who says
+        "immediately" today must keep meaning it.
+
+        Requires:
+            - args is the argument dict the expeditor returned
+
+        Ensures:
+            - returns ( args_without_them, scheduled_at, monopolize )
+            - the input dict is NOT mutated — the caller may still want it whole
+            - "immediately" / "now" / "none" mean no schedule, not a date string
+            - "yes" / "true" / "1" mean monopolize; any other string does not
+        """
+        remaining    = { k: v for k, v in args.items() if k not in ( "scheduled_at", "monopolize" ) }
+        scheduled_at = args.get( "scheduled_at" )
+        monopolize   = args.get( "monopolize" )
+
+        if scheduled_at and str( scheduled_at ).lower() in ( "immediately", "now", "none" ):
+            scheduled_at = None
+
+        if isinstance( monopolize, str ):
+            monopolize = monopolize.lower() in ( "yes", "true", "1" )
+        else:
+            monopolize = bool( monopolize ) if monopolize else False
+
+        return remaining, scheduled_at, monopolize
+
+    def _ask_agentic(
+        self, trace: StageTrace, spec: Any, command: str, raw_args: Any,
+        question: str, ctx: tuple, interactive: bool,
+    ) -> dict:
+        """Run an agentic command the ROUTER chose, extracting its arguments from prose.
+
+        WHY THIS EXISTS. `resolve()` is scoped to the conversational class, so it returns
+        None for every agentic command and `ask` answered the receptionist's "I do not
+        understand" to a command the registry knows perfectly well — measured, not read:
+        `deep research`, `podcast generator` and `swe team` all come back None while
+        `math` returns a spec. Since the spoken door hands its transcription to `ask`,
+        that made "do a deep research on the state of AI" unanswerable by voice.
+        `submit` was taught the second reader first; this is the same lesson on the door
+        a person actually talks to.
+
+        WHAT IT DOES THAT `submit` DOES NOT: extract, and park. A `submit` caller states
+        its arguments and a missing one comes back as a refusal, because there is nobody
+        behind a service account to answer a question. `ask` was handed prose by a human
+        who is still there, so a missing argument goes through the same interview every
+        conversational command uses — the expeditor pulls what it can and the first gap
+        is asked out loud and parked for `resume`.
+
+        WHAT IT SKIPS: the cache. An agentic job is long-running work with a job id, not
+        a reusable answer to a reusable question, and `submit` skips the cache for the
+        same reason. This arm returns before the lookup rather than after it.
+
+        Requires:
+            - spec is an AGENTIC AgentSpec from resolve_agentic( command )
+            - question is the human's words; raw_args is whatever the router pulled out
+
+        Ensures:
+            - complete arguments build the job and run it through the same path a
+              submitted agentic job takes, so there is one spelling of "build this and
+              run it", not two
+            - a missing argument parks and asks when interactive, and returns the
+              question without parking when not
+            - an extraction failure degrades to the receptionist rather than raising
+        """
+        arg_spec = self._arg_spec_for( command, spec.required_args )
+        trace.mark( "t_extract" )
+        try:
+            extraction = self.expeditor.extract( command, raw_args, question, arg_spec )
+        except Exception as e:
+            trace.set( "extract_error", str( e ) )
+            return self._receptionist( trace, question, ctx, "extract_error" )
+
+        trace.update( args_known=sorted( extraction.final_args.keys() ),
+                      args_missing=list( extraction.missing ) )
+        if extraction.missing:
+            return self._needs_input( trace, command, extraction, question, ctx, interactive )
+
+        args, scheduled_at, monopolize = self._split_queue_directives( extraction.final_args )
+        return self._submit_agentic( trace, spec, command, args, question, ctx,
+                                     scheduled_at, monopolize, None )
 
     def _submit_agentic(
         self, trace: StageTrace, spec: Any, command: str, args: dict,
@@ -590,8 +695,20 @@ class AskFlow:
         self.pending.set_status( pending_id, "running" )
         spec = resolve( entry.command, self.crud_enabled )
         if spec is None:
-            self.pending.set_status( pending_id, "failed", error="unknown_command" )
-            return self._receptionist( trace, entry.question, ctx, "unknown_command" )
+            # The park that led here was made by the agentic arm of `ask`, so the command
+            # is agentic and this lookup was always going to miss. Without the fallback a
+            # user answers the one question the interview asked and is told the command
+            # is not understood — after it was understood well enough to ask.
+            agentic = resolve_agentic( entry.command )
+            if agentic is None:
+                self.pending.set_status( pending_id, "failed", error="unknown_command" )
+                return self._receptionist( trace, entry.question, ctx, "unknown_command" )
+            args, scheduled_at, monopolize = self._split_queue_directives( extraction.final_args )
+            result = self._submit_agentic( trace, agentic, entry.command, args, entry.question, ctx,
+                                           scheduled_at, monopolize, None )
+            self.pending.set_status( pending_id, result[ "status" ],
+                                     answer=result.get( "answer" ), error=result.get( "error" ) )
+            return result
         result = self._run_agent( trace, spec, entry.command, entry.question, extraction.final_args, ctx, "resumed" )
         self.pending.set_status( pending_id, result[ "status" ], answer=result.get( "answer" ), error=result.get( "error" ) )
         return result
