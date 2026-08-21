@@ -15,6 +15,7 @@ import os
 import sys
 
 import pytest
+from unittest.mock import patch
 
 _LUPIN_ROOT = os.environ.get( "LUPIN_ROOT" )
 if _LUPIN_ROOT:
@@ -192,20 +193,87 @@ def test_corpus_passes_when_disjoint_from_arg_extraction():
     assert result == _SIMPLE_CMDS
 
 
-def test_corpus_refuses_and_names_the_offending_command():
+def test_corpus_refuses_and_names_the_offending_command_and_the_leaky_pin():
+    # A LEAKY pin (b0735467 never carried bf77852b): refuse, naming the offender AND the pin.
     corpus = _SIMPLE_CMDS | { "agent router go to deep research" }
     with pytest.raises( guard.PairedCorpusExercisesLeak ) as exc:
-        guard.require_leak_free_corpus( corpus, agentic_commands=_AGENTIC_CMDS )
+        guard.require_leak_free_corpus( corpus, agentic_commands=_AGENTIC_CMDS,
+                                        pinned_sha="b0735467", pin_carries_fix=False )
     msg = str( exc.value )
-    assert "agent router go to deep research" in msg and "b0735467" in msg
+    assert "agent router go to deep research" in msg and "b0735467" in msg and guard.LEAK_FIX_SHA in msg
 
 
 def test_corpus_names_every_offender():
     corpus = { "none", "agent router go to deep research", "agent router go to claude code" }
     with pytest.raises( guard.PairedCorpusExercisesLeak ) as exc:
-        guard.require_leak_free_corpus( corpus, agentic_commands=_AGENTIC_CMDS )
+        guard.require_leak_free_corpus( corpus, agentic_commands=_AGENTIC_CMDS,
+                                        pinned_sha="b0735467", pin_carries_fix=False )
     msg = str( exc.value )
     assert "agent router go to deep research" in msg and "agent router go to claude code" in msg
+
+
+# --- pin-aware premise (row 297b1fc3): the refusal is DERIVED from the pin, not hard-coded ---
+
+def test_leak_free_pin_admits_an_arg_extracting_corpus():
+    # The same corpus that is refused at a leaky pin is ADMITTED when the pin carries bf77852b —
+    # refusing it there would cite a defect that is not present (María, 297b1fc3 finding 2).
+    corpus = _SIMPLE_CMDS | { "agent router go to deep research" }
+    result = guard.require_leak_free_corpus( corpus, agentic_commands=_AGENTIC_CMDS,
+                                             pinned_sha="15536409", pin_carries_fix=True )
+    assert result == corpus
+
+
+def test_disjoint_corpus_never_asks_about_the_pin():
+    # DISJOINT short-circuits before the pin question — the leak site is never reached, so a
+    # pin lookup that would raise must not be consulted at all.
+    def boom( *_a, **_k ): raise AssertionError( "pin consulted for a disjoint corpus" )
+    with patch.object( guard, "pin_carries_leak_fix", boom ):
+        assert guard.require_leak_free_corpus( _SIMPLE_CMDS, agentic_commands=_AGENTIC_CMDS ) == _SIMPLE_CMDS
+
+
+def test_pin_carries_leak_fix_asks_is_ancestor_with_the_fix_sha_first():
+    seen = {}
+    def fake_is_ancestor( ancestor, descendant, repo_root ):
+        seen.update( ancestor=ancestor, descendant=descendant, repo_root=repo_root )
+        return True
+    assert guard.pin_carries_leak_fix( "15536409", repo_root="/r", is_ancestor_fn=fake_is_ancestor ) is True
+    assert seen == { "ancestor": guard.LEAK_FIX_SHA, "descendant": "15536409", "repo_root": "/r" }
+    with pytest.raises( ValueError ):
+        guard.pin_carries_leak_fix( "" )
+
+
+def test_default_pin_is_read_from_v1_eval_arm_when_not_given():
+    # No pinned_sha → the guard asks about v1_eval_arm.V1_PIN_SHA, the one constant the re-pin
+    # moves; the question reaches pin_carries_leak_fix with exactly that value.
+    import v1_eval_arm
+    asked = {}
+    def fake_carries( pin_sha, **_k ):
+        asked[ "pin" ] = pin_sha
+        return True
+    with patch.object( guard, "pin_carries_leak_fix", fake_carries ):
+        guard.require_leak_free_corpus( { "agent router go to deep research" }, agentic_commands=_AGENTIC_CMDS )
+    assert asked[ "pin" ] == v1_eval_arm.V1_PIN_SHA
+
+
+def test_git_is_ancestor_reads_the_real_repo_and_refuses_to_guess():
+    # REAL git, REAL history — the three facts the whole re-pin rests on, asserted not narrated:
+    #   bf77852b (the fix) IS an ancestor of 15536409, is NOT an ancestor of b0735467,
+    #   and an unresolvable sha RAISES rather than returning either verdict.
+    assert guard._git_is_ancestor( guard.LEAK_FIX_SHA, "15536409" ) is True
+    assert guard._git_is_ancestor( guard.LEAK_FIX_SHA, "b0735467" ) is False
+    with pytest.raises( RuntimeError ):
+        guard._git_is_ancestor( guard.LEAK_FIX_SHA, "0000000000000000000000000000000000000000" )
+
+
+def test_the_shipped_pin_carries_the_leak_fix_so_the_premise_and_the_pin_agree():
+    # THE test the row asked for: goes RED the day someone moves V1_PIN_SHA below bf77852b —
+    # at which point the guard would start refusing again and the report's v1_pin_why line
+    # ("leak-free") would be false. Real git, real pin.
+    import v1_eval_arm
+    assert guard.pin_carries_leak_fix( v1_eval_arm.V1_PIN_SHA ) is True
+    # …and it is the REFACTORED path too, as the rationale says (the cost is named, not hidden):
+    assert guard._git_is_ancestor( guard.REQUEST_PATH_REFACTOR_SHA, v1_eval_arm.V1_PIN_SHA ) is True
+    assert "leak-free" in v1_eval_arm.V1_PIN_RATIONALE and "REFACTORED" in v1_eval_arm.V1_PIN_RATIONALE
 
 
 def test_agentic_command_names_reads_the_live_registry_and_simple_is_disjoint():
@@ -216,9 +284,12 @@ def test_agentic_command_names_reads_the_live_registry_and_simple_is_disjoint():
     leaky = guard.agentic_command_names()
     assert leaky                                   # registry is populated (not silently empty)
     assert _SIMPLE_CMDS.isdisjoint( leaky )        # 'simple' routes to nothing arg-extracting
-    # And the live set genuinely refuses a corpus built from it:
+    # And the live set genuinely refuses a corpus built from it AT A LEAKY PIN (the guard is
+    # pin-aware since row 297b1fc3; the shipped pin is leak-free, so the premise is pinned here):
     with pytest.raises( guard.PairedCorpusExercisesLeak ):
-        guard.require_leak_free_corpus( { next( iter( leaky ) ) } )
+        guard.require_leak_free_corpus( { next( iter( leaky ) ) }, pinned_sha="b0735467", pin_carries_fix=False )
+    # …and ADMITS the same corpus at the shipped, leak-free pin (real git answers the question):
+    assert guard.require_leak_free_corpus( { next( iter( leaky ) ) } ) == { next( iter( leaky ) ) }
 
 
 # ---------------------------------------------------------------------------

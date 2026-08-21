@@ -479,7 +479,8 @@ services:
       # writable by uid 1001; a bytecode cache needs no durability across restarts.
       PYTHONPYCACHEPREFIX: /tmp/pycache
       # v2 paired-eval live run (row d8d019f6): the v1 arm reads the pinned
-      # v1 baseline server standing on the HOST at :7997 (git_sha b0735467).
+      # v1 baseline server standing on the HOST at :7997 (git_sha = V1_PIN_SHA in
+      # src/scripts/v1_eval_arm.py — 15536409 since 2026-08-21, rows 647f3733/297b1fc3).
       # Must live on the CONTAINER env — the submit `env` field is prefix-
       # filtered to TFE_/BFE_/LUPIN_TEST_ (attestation.py:27) and would drop
       # this var silently. host.docker.internal resolves via extra_hosts host-gateway.

@@ -446,8 +446,10 @@ def test_sha_matches_variants():
     assert v1._sha_matches( "b0735467", "" ) is False                # empty expected
 
 def test_assert_measured_sha_accepts_full_and_short():
-    assert v1.assert_measured_sha( "b0735467deadbeef" ) == "b0735467deadbeef"
-    assert v1.assert_measured_sha( "b0735467" ) == "b0735467"
+    # Against the LIVE pin constant, not a literal — a re-pin must not silently leave this
+    # asserting the old sha (row 297b1fc3: 18 sites carried the old literal).
+    assert v1.assert_measured_sha( v1.V1_PIN_SHA + "deadbeef" ) == v1.V1_PIN_SHA + "deadbeef"
+    assert v1.assert_measured_sha( v1.V1_PIN_SHA ) == v1.V1_PIN_SHA
 
 def test_assert_measured_sha_raises_on_wrong_tree():
     with pytest.raises( v1.EvalIntegrityError ):
@@ -484,10 +486,10 @@ def test_read_running_server_sha_requests_code_identity_and_parses_top_level( mo
     captured = {}
     def _fake_urlopen( req, timeout=None ):
         captured[ "url" ] = req.full_url
-        return _FakeHttpResp( json.dumps( { "git_sha": "b0735467deadbeef", "git_branch": "main" } ) )
+        return _FakeHttpResp( json.dumps( { "git_sha": v1.V1_PIN_SHA + "deadbeef", "git_branch": "main" } ) )
     monkeypatch.setattr( urllib.request, "urlopen", _fake_urlopen )
     sha = v1.read_running_server_sha( "http://v1-arm:9999" )
-    assert sha == "b0735467deadbeef"                          # parsed from the TOP-LEVEL git_sha key
+    assert sha == v1.V1_PIN_SHA + "deadbeef"                  # parsed from the TOP-LEVEL git_sha key
     assert captured[ "url" ].endswith( "/api/code-identity" ) # RED if someone puts /health back
 
 def test_read_running_server_sha_returns_empty_on_health_shaped_body( monkeypatch ):

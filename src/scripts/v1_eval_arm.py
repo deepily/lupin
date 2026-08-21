@@ -35,8 +35,9 @@ gate must not be computed until both arms match.
 
 RUN CONTEXT (design §2a — enforced by the RUN wrapper, not this pure module):
     • The v1 pipeline is EXPIRING CODE; run this against a WORKTREE PINNED at
-      sha `b0735467` (the last sha carrying `todo_fifo_queue.py` +
-      `routers/queues.py`), with `LUPIN_ROOT` exported to that worktree so
+      sha `15536409` (V1_PIN_SHA — still carries `todo_fifo_queue.py` +
+      `routers/queues.py`, verified; leak-free but REFACTORED, see V1_PIN_RATIONALE
+      and rows 647f3733/297b1fc3), with `LUPIN_ROOT` exported to that worktree so
       config + corpus resolve from v1, not the dirty main tree
       (auto-memory `reference_worktree_testing_needs_lupin_root_override`).
     • The report header stamps the pin sha AND the sample seed — the two facts
@@ -102,7 +103,21 @@ from paired_eval import make_provenance   # noqa: E402
 
 # The v1 pin sha this arm is measured against (design §2a). Stamped in the report
 # header so the baseline is non-expiring and the comparison reproducible.
-V1_PIN_SHA = "b0735467"
+#
+# WHY THIS PIN (rows 647f3733 + 297b1fc3, 2026-08-21 — stated here so the report names the
+# choice AND its cost, and so the isolation guard's premise is derived from this constant
+# rather than hard-coded): 15536409 carries bf77852b, the fix for the 8aa89f42
+# fallback_defaults leak — a SEQUENTIAL-REPLAY CONTAMINANT that would corrupt the measurement
+# itself — so the arm is LEAK-FREE. It ALSO carries the 9805783d request-path refactor, so the
+# measured v1 is the REFACTORED request path, not the one Rick's criteria were written against.
+# The trade was chosen deliberately: a leak corrupts what is measured; the refactor is EXPECTED
+# — not yet measured — to change the path's structure, not the numbers reported. The other
+# pin, b0735467, is unrefactored but leaky. Moving this constant below bf77852b turns
+# test_eval_isolation_guard's premise test red on purpose.
+V1_PIN_SHA       = "15536409"
+V1_PIN_RATIONALE = ( "leak-free (carries bf77852b, the 8aa89f42 fix) but REFACTORED request path "
+                     "(carries 9805783d); the refactor's effect on the reported numbers is EXPECTED "
+                     "nil, NOT measured — rows 647f3733/297b1fc3" )
 
 # The six degradation paths that must all be present + distinct (design §7 floor).
 # v1 surfaces failures through the completion metadata's `error` / status; a v1
@@ -678,6 +693,7 @@ def build_report_header( *, seed: int, corpus: str, n_per_command: int, base_url
     return (
         f"# CJ Flow v1-arm baseline\n"
         f"v1_pin_sha : {V1_PIN_SHA}   (measured against the pinned worktree)\n"
+        f"v1_pin_why : {V1_PIN_RATIONALE}\n"
         f"seed       : {seed}\n"
         f"corpus     : {corpus}   n_per_command={n_per_command}\n"
         f"base_url   : {base_url}\n"
@@ -765,7 +781,7 @@ def run_v1_baseline( *, corpus: str = "simple", seed: int = 1024, n_per_command:
           EvalIntegrityError NAMING the sha it saw, so the run refuses before it spends —
           the guard lives on the run path, not only in a caller's precondition
         - `provenance[ "v1_arm_git_sha" ]` (half B) is that OBSERVED sha, NEVER the pin
-          constant: stamping V1_PIN_SHA would read b0735467 no matter what actually ran,
+          constant: stamping V1_PIN_SHA would read the pin no matter what actually ran,
           the exact false baseline the stamp exists to prevent
     """
     pairs             = load_corpus_fn( corpus, limit=limit )
@@ -782,7 +798,7 @@ def run_v1_baseline( *, corpus: str = "simple", seed: int = 1024, n_per_command:
     # Stamp the EXACT measured sample (the same `sampled` list run_two_pass drove), so the
     # paired provenance check binds this arm to the v2 arm by signature.
     # git_sha is the OBSERVED sha (half B), never the V1_PIN_SHA constant — a constant would
-    # read b0735467 no matter what actually served the requests. It goes in as a REQUIRED
+    # read the pin no matter what actually served the requests. It goes in as a REQUIRED
     # make_provenance argument, so an arm that never read a sha cannot reach the report at all
     # (row c9b43538: it used to be bolted on afterwards, and nothing downstream missed it).
     provenance        = make_provenance( "v1", corpus, seed, n_per_command, sampled,

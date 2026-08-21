@@ -46,7 +46,7 @@ _PAIRS_FLOOR = [ ( f"utterance {i}", f"cmd_{i % 6}" ) for i in range( pe.MIN_SHA
 
 # The two arms legitimately run DIFFERENT trees — v1 a pinned worktree, v2 whatever is
 # deployed — so these differ on purpose. The sha check is presence, never equality.
-_V1_SHA = "b0735467"
+_V1_SHA = "15536409"   # the v1 pin since 2026-08-21 (rows 647f3733/297b1fc3); fixture data, presence-checked
 _V2_SHA = "f7c5e349"
 
 

@@ -20,8 +20,8 @@ than produce an invalid or store-polluting result:
   2. V1-ARM LIVE SEAM + WORKTREE SERVER (design §9 step 1, still open). `run_v1_baseline`
      needs a `ws_recv_events(job_id)` source to capture `job_state_transition` events;
      only the consumer stub exists (`v1_eval_arm._default_collect_fn`, marked live-WS-
-     boundary). And the v1 arm must run against the PINNED worktree at b0735467 with
-     LUPIN_ROOT exported to it (design §2a) — infra that must be stood up.
+     boundary). And the v1 arm must run against the PINNED worktree (V1_PIN_SHA, 15536409
+     since 2026-08-21) with LUPIN_ROOT exported to it (design §2a) — infra that must be stood up.
 
 So today, selecting this test refuses at precondition 1 with the guard's exact reason.
 That refusal is the point: an unproven guard is the same as no guard (the guard itself
@@ -106,7 +106,7 @@ def _require_v1_live_seam_and_worktree():
         - imports the seam, so a REGRESSION that removed it fails loudly here rather than
           at run time.
         - raises PairedPreconditionMissing while LUPIN_V1_ARM_BASE_URL is unset — the
-          pinned-b0735467 worktree server must be running with LUPIN_ROOT exported to it,
+          pinned worktree server (V1_PIN_SHA) must be running with LUPIN_ROOT exported to it,
           or the v1 arm would measure the dirty main tree. The message states the seam is
           wired so no one re-builds it.
         - set-ness is NOT enough: after the var is present, PROVES the server is the
@@ -137,7 +137,7 @@ def _require_v1_live_seam_and_worktree():
     except EvalIntegrityError as e:
         raise PairedPreconditionMissing(
             f"LUPIN_V1_ARM_BASE_URL={v1_base} is set, but the server there reports sha "
-            f"{observed_sha!r}, not the pinned v1 sha {V1_PIN_SHA!r} — it is NOT the b0735467 "
+            f"{observed_sha!r}, not the pinned v1 sha {V1_PIN_SHA!r} — it is NOT the pinned "
             f"worktree. Point the var at the pinned-worktree server. Refusing the paired run."
         ) from e
 
@@ -391,8 +391,9 @@ def test_v2_paired_go_no_go_live():
 
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
-    # Precondition 0 — CORPUS: the corpus must not route to an arg-extracting command whose
-    # fallback_defaults leak (bug 8aa89f42) is unfixed at the pinned v1 sha b0735467. Runs FIRST,
+    # Precondition 0 — CORPUS: the corpus must not route to an arg-extracting command WHILE the
+    # pinned v1 sha still carries the fallback_defaults leak (bug 8aa89f42) — pin-aware since
+    # row 297b1fc3, so at a leak-free pin (15536409) it admits such a corpus. Runs FIRST,
     # BEFORE SAFETY, so it is ALWAYS reached — a guard behind a guard that refuses today never
     # runs. Corpus name from the run env (default the pure-routing 'simple'); load_corpus gives
     # the (utterance, command) pairs, and the command set is what the leak check keys on.
