@@ -180,6 +180,14 @@ DOC_CHOICE_DESCRIBE_SENTINEL = "__describe_instead__"   # helper return: user op
 # model field, no endpoint change.
 DOCUMENT_CHOICE_CARD_ID      = "document_choice"
 
+# The OPEN-ENDED half of the same conversation (row 0c280989): "which document? —
+# describe it or say the filename". Six proxy entries across six profiles were keyed on
+# its prose, and unlike the card's two they had drifted into three different wordings.
+# Same remedy, same reason. The id names the ASK, not the argument: podcast asks it for
+# `research` and presentation for `source`, and one id with arg_name riding as metadata
+# is what keeps that from becoming per-agent keying again.
+DOCUMENT_DESCRIBE_ASK_ID     = "document_describe"
+
 
 # --------------------------------------------------------------------------- #
 # Turning a failure reason into what the user hears (bug 68198c9f).
@@ -1048,7 +1056,8 @@ class RuntimeArgumentExpeditor:
 
         return "\n".join( lines )
 
-    def _ask_for_arg( self, arg_name, question, user_email, response_default=None, abstract=None ):
+    def _ask_for_arg( self, arg_name, question, user_email, response_default=None, abstract=None,
+                      card_id=None ):
         """
         Ask the user for a missing argument via synchronous notification.
 
@@ -1071,6 +1080,15 @@ class RuntimeArgumentExpeditor:
         Returns:
             str or None: User's response or None
         """
+        # An OPEN_ENDED ask carries no options, so response_options exists here ONLY to
+        # name the ask — and it is omitted entirely when there is nothing to name, so
+        # every other caller of this method sends exactly the envelope it always sent.
+        # The arg rides with the id because two agents ask this same ask for different
+        # arguments; the id says WHICH ASK, arg_name says WHICH FIELD.
+        response_options = None
+        if card_id is not None:
+            response_options = { "card_id": card_id, "arg_name": arg_name }
+
         request = NotificationRequest(
             message          = question,
             response_type    = ResponseType.OPEN_ENDED,
@@ -1082,7 +1100,8 @@ class RuntimeArgumentExpeditor:
             suppress_ding    = False,
             response_default = response_default,
             abstract         = abstract,
-            job_id           = self._job_id
+            job_id           = self._job_id,
+            response_options = response_options
         )
 
         response = notify_user_sync( request=request, debug=self.debug, bearer_token=self._bearer_token )
@@ -1155,7 +1174,13 @@ class RuntimeArgumentExpeditor:
         # routing-confirm card and every other user of this ask are byte-identical to
         # what they sent before.
         if card_id is not None:
-            response_options[ "card_id" ] = card_id
+            response_options[ "card_id" ]  = card_id
+            # The arg rides WITH the id, on both ask surfaces. The id says which ask;
+            # two agents ask the same one for different arguments (podcast's
+            # `research`, presentation's `source`), and the matcher narrows on this.
+            # Sending it from only one surface would leave that filter half-real —
+            # code with no producer, exercised only by synthetic tests (María).
+            response_options[ "arg_name" ] = arg_name
 
         request = NotificationRequest(
             message          = question,
@@ -1652,7 +1677,8 @@ class RuntimeArgumentExpeditor:
         description = self._ask_for_arg(
             arg_name,
             ask_question or "Which document should I use for the podcast? Describe it or say the filename.",
-            user_email
+            user_email,
+            card_id=DOCUMENT_DESCRIBE_ASK_ID
         )
         if not description:
             return None

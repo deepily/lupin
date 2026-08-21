@@ -10,10 +10,11 @@
             "response_types"   : [ "open_ended", "open_ended_batch" ]
         },
         {
-            "question_pattern" : "Which research document should I use?",
-            "answer"           : "latest",
-            "arg_name"         : "research",
-            "response_types"   : [ "open_ended", "open_ended_batch" ]
+            "card_id"        : "document_describe",
+            "answer"         : "latest",
+            "arg_name"       : "research",
+            "response_types" : [ "open_ended", "open_ended_batch" ],
+            "_comment"       : "The OPEN-ENDED DESCRIBE-IT ask (row 0c280989), keyed on the ask's own id rather than its wording. It is the sibling of the document_choice card: the card appears when 2..cap candidates match, this appears when the expeditor has to ask which document at all. Six copies across six profiles had drifted into three different wordings, so a change in _handle_fuzzy_file_match would have silently unanswered some and not others. The id is matched exactly, narrowed by the `agents` tag and by arg_name, before the model is asked anything. THE ANSWER IS DELIBERATELY PER-PROFILE and must not be collapsed: these are fixture choices for standalone profiles, not divergence."
         },
         {
             "question_pattern" : "Would you like to proceed with these settings?",
