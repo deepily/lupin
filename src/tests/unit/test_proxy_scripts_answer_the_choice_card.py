@@ -17,11 +17,14 @@ file carry it byte for byte. It worked, and it was the wrong shape: every new ag
 needed its own copy of an otherwise identical entry, and the pairing had to be
 re-pinned each time.
 
-The card now names itself. `card_id` rides in `response_options`, the matcher claims
-the entry on an exact id match before the model is asked anything, and ONE generic
-entry answers the card for every agent. So what is pinned here is no longer a string
-pair — it is that each profile carries the generic entry, that it says nothing about
-any particular agent, and that its answer is a sentinel rather than a filename.
+The card now names itself. `card_id` rides in `response_options` and the matcher claims
+the entry on an exact id match before the model is asked anything, so the entry is
+GENERIC — it mentions no agent and needs no wording kept in step with the code. Note
+what that does and does not buy: profiles do not inherit, so each file still carries
+its own copy; the win is that the copy is verbatim rather than re-derived per agent.
+What is pinned here is therefore no longer a string pair — it is that each profile
+carries the generic entry, that it names no agent, and that its answer is a sentinel
+rather than a filename.
 
 RED ON REVERT, per arm:
   · remove either entry        -> "podcast.json has 0 entries for the document choice card"
