@@ -345,3 +345,126 @@ def test_content_check_three_states( h, monkeypatch ):
 
     wrong = { "completion_abstract": "a lengthy podcast about amateur ham radio antennas" }
     assert h.verify_content( {}, wrong ) == h.FAIL, "real text without the planted facts must still fail"
+
+
+# ── 4. THE DOOR, AND FAILING FAST WHEN THERE IS NOTHING TO WATCH (row c84e9313) ──
+# The 2026-08-21 :8000 gate (ts-7846273a) ran this harness against the v2-cutover
+# branch, where /api/push answers 410. Stage 1 went FAIL — correctly — and then the
+# harness sat out the full TIMEOUT_S watching for a job that had never been created,
+# and the run read as a 20-minute product red. Two things changed: the harness now
+# picks its door and SAYS which contract it is testing, and a push that was rejected
+# (or a v2 body that is terminal without a job) ends the run at once.
+class _Poster:
+    """Scripts requests.post by URL suffix and records every call."""
+
+    def __init__( self, table ):
+        self.table = table
+        self.calls = []
+
+    def __call__( self, url, **kw ):
+        self.calls.append( ( url, kw.get( "json" ) ) )
+        for suffix, resp in self.table.items():
+            if url.endswith( suffix ):
+                return resp() if callable( resp ) else resp
+        return FakeResp( 200, { "job_id": None, "result": "ok", "display_name": "Podcast" } )
+
+    def hit( self, suffix ):
+        return [ c for c in self.calls if c[ 0 ].endswith( suffix ) ]
+
+
+def _straight_to_done( headers, queue, job_id ):
+    return { "job_id": job_id, "response_text": "done" } if queue == "done" else None
+
+
+def test_forced_v1_door_on_a_410_fails_stage1_and_does_not_wait( h, monkeypatch, capsys ):
+    """The exact gate failure: /api/push is 410. Stage 1 is a real FAIL — and the run
+    ends NOW, not TIMEOUT_S later."""
+    poster = _Poster( { "/api/push": FakeResp( 410, { "detail": "GONE — use /api/v2/ask" } ) } )
+    clock  = _wire( h, monkeypatch, find_job=_never_terminal, doc_stage=h.PASS, content=h.PASS,
+                    ws=FakeWs( job_id=None ) )
+    monkeypatch.setattr( h.requests, "post", poster )
+    t0 = clock.monotonic()
+
+    rc  = h.main( [ "--no-seed", "--no-mode", "--door", "v1" ] )
+    out = capsys.readouterr().out
+
+    assert rc == 1, "a rejected push is an observed negative"
+    assert "FAIL         1_push_accepted" in out
+    assert "INCONCLUSIVE 2_route_podcast" in out
+    assert clock.monotonic() - t0 < 60, f"waited {clock.monotonic() - t0:.0f}s after a rejected push — the fail-fast is not firing"
+    assert "FAIL-FAST" in out and "RETIRED" in out
+    assert not poster.hit( "/api/v2/ask" ), "a FORCED v1 door must not quietly try v2"
+
+
+def test_auto_door_switches_to_v2_on_410_and_says_so( h, monkeypatch, capsys ):
+    """auto = v1, then v2 on a 410 — logged, never silent. On a server whose ask door
+    has no agentic dispatch (bug b7fe8941) the vague question lands on the receptionist:
+    stage 1 PASS (accepted), stage 2 FAIL (no job), and NO waiting."""
+    poster = _Poster( {
+        "/api/push"   : FakeResp( 410, { "detail": "GONE — use /api/v2/ask" } ),
+        "/api/v2/ask" : FakeResp( 200, { "path": "receptionist", "status": "done", "route_reason": "unknown_command",
+                                         "command": None, "job_id": None, "pending_id": None } ),
+    } )
+    clock = _wire( h, monkeypatch, find_job=_never_terminal, doc_stage=h.PASS, content=h.PASS,
+                   ws=FakeWs( job_id=None ) )
+    monkeypatch.setattr( h.requests, "post", poster )
+    t0 = clock.monotonic()
+
+    rc  = h.main( [ "--no-seed", "--no-mode" ] )          # no --door ⇒ auto
+    out = capsys.readouterr().out
+
+    assert rc == 1
+    assert "PASS         1_push_accepted" in out, "v2 accepted the utterance (HTTP 200)"
+    assert "FAIL         2_route_podcast" in out, "receptionist + no job is an observed routing negative"
+    assert "switching to /api/v2/ask" in out, "the door switch must be stated, not assumed"
+    assert "b7fe8941" in out
+    assert clock.monotonic() - t0 < 60, "terminal-without-job must not sit out TIMEOUT_S"
+    assert len( poster.hit( "/api/push" ) ) == 1 and len( poster.hit( "/api/v2/ask" ) ) == 1
+
+
+def test_v2_parked_ask_is_resumed_with_the_vague_description_and_the_pg_job_runs_to_done( h, monkeypatch ):
+    """The v2 spelling of the 'which document?' ask is a PARK; the harness answers it
+    through /api/v2/resume with the same vague description the WS auto-answer uses,
+    and a pg- job then rides the normal poll path to green."""
+    poster = _Poster( {
+        "/api/push"      : FakeResp( 410, { "detail": "GONE" } ),
+        "/api/v2/ask"    : FakeResp( 200, { "path": "needs_input", "status": "parked", "route_reason": "args_incomplete",
+                                            "command": "agent router go to podcast generator",
+                                            "args_missing": [ "research" ], "pending_id": "p-1", "job_id": None } ),
+        "/api/v2/resume" : FakeResp( 200, { "path": "agent", "status": "waiting", "route_reason": "resumed",
+                                            "command": "agent router go to podcast generator",
+                                            "pending_id": None, "job_id": "pg-feedface" } ),
+    } )
+    _wire( h, monkeypatch, find_job=_straight_to_done, doc_stage=h.PASS, content=h.PASS,
+           ws=FakeWs( job_id=None ) )
+    monkeypatch.setattr( h.requests, "post", poster )
+
+    assert h.main( [ "--no-seed", "--no-mode" ] ) == 0
+
+    resumes = poster.hit( "/api/v2/resume" )
+    assert len( resumes ) == 1
+    assert resumes[ 0 ][ 1 ][ "pending_id" ] == "p-1"
+    assert resumes[ 0 ][ 1 ][ "answer" ] == h.VAGUE_DOC_DESC, "the park is answered vaguely — the matcher is exercised, not bypassed"
+
+
+def test_forced_v2_door_never_touches_api_push( h, monkeypatch ):
+    poster = _Poster( {
+        "/api/v2/ask": FakeResp( 200, { "path": "agent", "status": "waiting", "route_reason": "args_complete",
+                                        "command": "agent router go to podcast generator", "pending_id": None, "job_id": "pg-0001" } ),
+    } )
+    _wire( h, monkeypatch, find_job=_straight_to_done, doc_stage=h.PASS, content=h.PASS, ws=FakeWs( job_id=None ) )
+    monkeypatch.setattr( h.requests, "post", poster )
+
+    assert h.main( [ "--no-seed", "--no-mode", "--door", "v2" ] ) == 0
+    assert not poster.hit( "/api/push" )
+
+
+def test_v1_door_green_path_is_unchanged( h, monkeypatch ):
+    """CONTROL for the section: a live v1 door still reaches green exactly as before —
+    the fail-fast only fires on a rejection."""
+    poster = _Poster( { "/api/push": FakeResp( 200, { "job_id": None, "result": "ok" } ) } )
+    _wire( h, monkeypatch, find_job=_straight_to_done, doc_stage=h.PASS, content=h.PASS )   # FakeWs captures pg-deadbeef
+    monkeypatch.setattr( h.requests, "post", poster )
+
+    assert h.main( [ "--no-seed", "--no-mode", "--door", "v1" ] ) == 0
+    assert not poster.hit( "/api/v2/ask" )
