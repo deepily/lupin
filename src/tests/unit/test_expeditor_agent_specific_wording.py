@@ -21,9 +21,12 @@ Two things are asserted here, and each fails independently against the old code:
 
 Both remain asserted for the podcast path, which must be unchanged.
 
-Scope note: these cover WORDING only. The file-matching behaviour (auto-resolve
-and the first-turn choice card, both podcast-fenced) is deliberately untouched
-by the fix and is covered by test_expeditor_doc_choice.py.
+Scope note: these cover WORDING only, on the MISSING-arg path. The file-matching
+behaviour (auto-resolve and the first-turn choice card) was podcast-fenced when this
+file was written; row 5bc22180 removed that fence, and the presentation path is now
+covered by test_expeditor_presentation_fences_generalized.py. The wording on the
+present-but-unresolvable RESCUE path is covered there too — this fix never reached
+that call site.
 """
 
 import unittest

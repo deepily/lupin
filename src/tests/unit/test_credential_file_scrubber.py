@@ -331,6 +331,14 @@ def test_can_fail_control_scrubber_removes_a_planted_live_credential( tmp_path )
     scrub_file( path, [ value ] )
     assert count_value_occurrences( path, [ value ] ) == 0     # and the scrubber removes it
 
+    # THE RECORD MUST SURVIVE. Without this, a scrub_file that simply emptied the
+    # file would pass the line above — "no credential found" is also what an erased
+    # transcript looks like. Flagged by María on review. Rick's ruling was scrub IN
+    # PLACE precisely because the diagnostic record is worth keeping.
+    surviving = open( path, encoding="utf-8" ).read()
+    assert '"role":"user"' in surviving
+    assert "echo" in surviving
+
 
 def test_can_fail_control_the_same_assertion_goes_red_when_the_scrubber_is_bypassed( tmp_path ):
     """
@@ -350,3 +358,6 @@ def test_can_fail_control_the_same_assertion_goes_red_when_the_scrubber_is_bypas
         # The control must not OUTLIVE itself as a leak: pytest keeps the last three
         # tmp dirs, so a planted password left here is a new instance of this row's bug.
         scrub_file( path, [ value ] )
+    # Same survival check as arm 1, on the arm that proves the assertion can fail.
+    surviving = open( path, encoding="utf-8" ).read()
+    assert '"role":"user"' in surviving
