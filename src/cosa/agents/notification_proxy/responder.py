@@ -16,6 +16,7 @@ import time
 import requests
 from typing import Optional
 
+from cosa.agents.notification_proxy import option_sentinels
 from cosa.agents.notification_proxy.strategies.expediter_rules import ExpediterRuleStrategy
 from cosa.agents.notification_proxy.strategies.llm_fallback import LLMFallbackStrategy
 from cosa.agents.notification_proxy.strategies.llm_script_matcher import (
@@ -58,6 +59,17 @@ import cosa.utils.util as cu
 # TRADE: a hung server now stalls a response POST ~30s instead of ~10s. Not free.
 _SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
 
+
+
+# The two escapes every document choice card appends. Imported from the expeditor so
+# a rename there cannot leave this list quietly wrong — the sentinel would then be able
+# to "select" Cancel, which looks like the user declining.
+from cosa.agents.runtime_argument_expeditor.expeditor import (
+    DOC_CHOICE_CANCEL_LABEL,
+    DOC_CHOICE_DESCRIBE_LABEL,
+)
+
+CHOICE_ESCAPE_LABELS = ( DOC_CHOICE_DESCRIBE_LABEL, DOC_CHOICE_CANCEL_LABEL )
 
 
 class NotificationResponder:
@@ -322,6 +334,26 @@ class NotificationResponder:
             self.stats[ "skipped" ] += 1
             print( f"[Responder] No strategy produced an answer for: {title or message[ :50 ]}" )
             return
+
+        # A POSITIONAL SENTINEL becomes a real option label here, using the options
+        # that arrived with this notification (row 9046ef58). The document choice
+        # card's labels are run-time filenames, so no script entry can name one; the
+        # sentinel says WHICH option, and this turns it into WHAT it is called. Every
+        # ordinary answer passes through untouched.
+        if option_sentinels.is_sentinel( answer ):
+            resolved = option_sentinels.resolve(
+                answer, notification, excluded_labels=CHOICE_ESCAPE_LABELS
+            )
+            if resolved is None:
+                # Submitting the sentinel string would reach the expeditor as an
+                # unknown label and cancel the run for a reason invisible from the
+                # outside. A counted skip says so out loud instead.
+                self.stats[ "skipped" ] += 1
+                print( f"[Responder] Sentinel {answer!r} matched no selectable option "
+                       f"for: {title or message[ :50 ]}" )
+                return
+            if self.debug: print( f"[Responder] Sentinel {answer.strip()} → option {resolved!r}" )
+            answer = resolved
 
         # Submit the response
         success = self._submit_response( notification_id, answer )

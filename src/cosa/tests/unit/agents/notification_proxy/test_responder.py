@@ -328,3 +328,78 @@ class TestHumanOnlyExemption:
             self._run( r, _notif( response_type="yes_no", human_only=True ) )
         assert posted[ "called" ] is False, "a strategy answered a human_only ask — it must be skipped first"
         assert r.stats[ "skipped" ] == 1
+
+
+class TestPositionalSentinelResolution:
+    """
+    A scripted answer of __first_option__ becomes a REAL option label before it is
+    submitted (row 9046ef58).
+
+    THE FAILURE THIS REPLACES. The document choice card's labels are filenames
+    discovered while a run is in flight, so the entry first carried a prose directive
+    and trusted the matcher to turn it into a label. On a live presentation job the
+    matcher returned the prose verbatim; the expeditor saw a label the card had never
+    offered, correctly refused to guess which document was meant, and the run
+    cancelled — the exact failure the entry existed to prevent.
+    """
+
+    DESCRIBE = "Let me describe it instead"
+    CANCEL   = "Cancel"
+
+    def _run( self, r, event ):
+        asyncio.run( r._handle_notification_update( event ) )
+
+    def _card_event( self, *labels ):
+        return {
+            "id"                 : "n1",
+            "sender_id"          : EXPEDITER,
+            "response_requested" : True,
+            "response_type"      : "multiple_choice",
+            "title"              : "Missing: source",
+            "message"            : "Which document should I use for the presentation?",
+            "response_options"   : { "questions": [ { "options": [
+                { "label": l, "description": "" } for l in labels
+            ] } ] },
+        }
+
+    def test_the_sentinel_is_replaced_by_the_first_real_candidate( self ):
+        r, _, script, _ = _make_responder( debug=True )
+        script.can_handle.return_value = True
+        script.respond.return_value    = "__first_option__"
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, self._card_event( "kiss.md", "quantum.md", self.DESCRIBE, self.CANCEL ) )
+        submit.assert_called_once_with( "n1", "kiss.md" )
+        assert r.stats[ "responses_sent" ] == 1
+
+    def test_the_escapes_are_never_chosen( self ):
+        # Selecting Cancel would read to the expeditor as the user declining — a run
+        # that looks answered and did nothing.
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = "__first_option__"
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, self._card_event( self.DESCRIBE, self.CANCEL ) )
+        submit.assert_not_called()
+        assert r.stats[ "skipped" ] == 1
+
+    def test_an_unresolvable_sentinel_is_a_visible_skip_not_a_submitted_string( self ):
+        # Submitting "__first_option__" would cancel the run for a reason nobody can
+        # see from the outside. The counted skip is the whole point.
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = "__first_option__"
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, self._card_event() )
+        submit.assert_not_called()
+        assert r.stats[ "skipped" ] == 1
+        assert r.stats[ "responses_sent" ] == 0
+
+    def test_an_ordinary_answer_is_untouched( self ):
+        # The resolver sits in the hot path for EVERY answer; this is the guard that
+        # it changes nothing for the other several hundred script entries.
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = "general"
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, self._card_event( "kiss.md" ) )
+        submit.assert_called_once_with( "n1", "general" )

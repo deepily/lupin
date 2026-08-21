@@ -29,6 +29,7 @@ import os
 import unittest
 
 import cosa.utils.util as cu
+from cosa.agents.notification_proxy import option_sentinels
 from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
 
@@ -85,17 +86,24 @@ class TestEveryCardConsumerHasAnAnswer( unittest.TestCase ):
                 entry    = _choice_card_entries( _load( filename ) )[ 0 ]
                 self.assertEqual( entry[ "arg_name" ], fuzzy[ 0 ] )
 
-    def test_the_answer_is_a_directive_not_a_filename( self ):
+    def test_the_answer_is_a_positional_sentinel_not_a_filename( self ):
         # The option labels are candidate basenames discovered at run time, so a fixed
         # filename could never match one. If someone "fixes" this entry by putting a
         # path in it, the matcher returns a label the card cannot produce and the
         # expeditor rejects it as malformed — a cancel again, by a different route.
+        #
+        # It must be a SENTINEL and not merely prose. Prose was the first attempt: the
+        # entry read "Pick the first document option in the list", and on a live run
+        # the matcher returned that sentence verbatim as the answer.
         for filename in CARD_CONSUMERS:
             with self.subTest( profile=filename ):
                 answer = _choice_card_entries( _load( filename ) )[ 0 ][ "answer" ]
-                self.assertNotIn( ".md", answer )
-                self.assertNotIn( "/", answer )
-                self.assertIn( "option", answer.lower() )
+                self.assertTrue(
+                    option_sentinels.is_sentinel( answer ),
+                    f"{filename}'s choice-card answer must be one of "
+                    f"{option_sentinels.SENTINELS}, not {answer!r} — anything else is "
+                    f"submitted verbatim and rejected as an unknown label"
+                )
 
     def test_presentation_is_not_asked_about_the_podcast( self ):
         # The wording defect and the answer-file gap were one piece of work: an entry
