@@ -94,6 +94,18 @@ _POINTER_TOKEN = re.compile( _POINTER_TOKEN_SRC, re.IGNORECASE )
 # never drift apart. See is_bare_row_id for why the distinction is load-bearing.
 _BARE_ROW_ID = re.compile( rf"^{_BARE_ROW_ID_SRC}$", re.IGNORECASE )
 
+# Punctuation stripped off BOTH ENDS before the anchored test above. The anchors are
+# what make that pattern safe against a raw string, and they are also what a single
+# adjacent character defeats — "#fb9faba7" is not a match, so it sailed through the
+# guard and arrived as a bare line (María, row 68601b65). "#hash8" is live fleet
+# vocabulary, so of all the punctuated forms it is the likeliest to land in the slot.
+#
+# 🔴 HYPHEN AND UNDERSCORE ARE DELIBERATELY ABSENT. They are ordinary filename
+# characters; stripping them would start reshaping real names on their way to the test.
+# The set is punctuation that brackets or terminates a word, nothing that belongs
+# INSIDE one.
+_SLOT_PUNCTUATION = "#.,;:!?()[]{}<>\"'`*"
+
 # 🔴 THE SLASHED-PATH SHAPE ABOVE ALSO MATCHES THINGS THAT ARE NOT PATHS. The
 # repeated `[\w.@%+-]+/` group happily matches a slash-separated ENUMERATION
 # ("SCHEDULED/PAUSED", "pending/running/terminal") or a bare RATIO ("10/10",
@@ -345,18 +357,32 @@ def is_bare_row_id( value ):
     So callers holding a raw string — the tutor's path SLOT, whose contents are whatever
     the model typed — use this, which asks the question directly instead.
 
+    ⚠️ SURROUNDING PUNCTUATION IS STRIPPED FIRST, and that is a second lesson from the
+    same family (María, row 68601b65). The anchors that make this predicate safe on raw
+    input are defeated by one adjacent character: "#fb9faba7", "fb9faba7," and
+    "fb9faba7." all sailed past the guard and arrived as bare lines. Whitespace was
+    already stripped, so punctuation was simply the case `strip()` does not cover.
+
+    The trade is named rather than hidden: a hidden file literally named ".deadbeef"
+    would be suppressed. That is the guard's existing bargain — a file named "deadbeef"
+    was already unreachable — and it buys the shape the fleet actually writes.
+
     Requires:
         - value is a string ( or None )
 
     Ensures:
-        - True only for exactly 8 hex characters carrying at least one letter a-f
+        - True for exactly 8 hex characters carrying at least one letter a-f, with or
+          without surrounding whitespace and bracketing punctuation
         - False for "Makefile", "README", "src", "20260821", "src/a.py", "notes.md",
-          "", and None
+          ".gitignore", "my-notes-file", "", and None
+        - hyphen and underscore are NOT stripped — they belong inside real filenames
 
     Raises:
         - nothing
     """
-    return bool( _BARE_ROW_ID.fullmatch( ( value or "" ).strip() ) )
+    return bool( _BARE_ROW_ID.fullmatch(
+        ( value or "" ).strip().strip( _SLOT_PUNCTUATION ).strip()
+    ) )
 
 
 def restorable_pointers( text ):
