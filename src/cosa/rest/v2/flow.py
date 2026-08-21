@@ -282,6 +282,16 @@ class AskFlow:
         trace.mark( "t_recv" )
         trace.update( decision_floor=self.similarity_floor, speak=speak, interactive=False, entry="submit",
                       question=question or command or "" )
+        # WHOSE WORDS THE QUERY LOG IS ABOUT TO REPORT. A `submit` caller often has no
+        # question at all: the HTTP door names a command, and an in-process caller hands
+        # over a job it built. The line above then files the command string — or an empty
+        # string — under `query_verbatim`, and every such row went into the log typed
+        # "api", exactly like a question a person typed. Nothing downstream could tell
+        # them apart, so a routing command read as a thing somebody said (Pocholo, on the
+        # query-log commit). `input_type` is free text with no constraint, so marking it
+        # needs no migration.
+        if question is None:
+            trace.set( "verbatim_source", "command" if command is not None else "job" )
         ctx = ( user_id, user_email, session_id, websocket_id, speak )
 
         # A job handed over whole: the caller built it, so there is nothing to resolve.
@@ -502,13 +512,18 @@ class AskFlow:
             stripped   = parse_salutations( question )[ 1 ]
             timings    = trace.timings_ms()
             similarity = trace.fields.get( "similarity" )
+            verbatim_source = trace.fields.get( "verbatim_source" )
+            input_type      = "api" if verbatim_source is None else f"api-{verbatim_source}"
             self.query_log.log_query(
                 query_verbatim     = question,
                 query_normalized   = trace.fields.get( "question_normalized" ) or self.cache.normalize( stripped ),
                 query_gist         = self.cache.gist( stripped ),
                 user_id            = user_id,
                 session_id         = websocket_id,
-                input_type         = "api",
+                # 'voice' / 'text' / 'api' is v1's vocabulary (query_log_table.py:84) and
+                # the column is free text. A row whose verbatim is not a person's words
+                # says so here — "api-command" or "api-job" — rather than passing for one.
+                input_type         = input_type,
                 match_result       = {
                     "snapshot_id" : ( snapshot_id or "" ) if not cache_hit else ( trace.fields.get( "job_id" ) or snapshot_id or "" ),
                     "type"        : "exact_match" if cache_hit else "no_match_new_agent",

@@ -2109,3 +2109,100 @@ def test_replay_reports_the_routed_command_not_the_snapshots_blank_column( tmp_p
     assert notifier.requests, "a waiting replay spoke no acknowledgment"
     assert "todo" not in notifier.requests[ -1 ].message
     assert "math" in notifier.requests[ -1 ].message
+
+
+# ─────────────────────── the log says whose words the verbatim is
+
+class TestTheQueryLogSaysWhoseWordsItLogged:
+    """
+    The question-less submit above files the COMMAND STRING under `query_verbatim`,
+    which is the only true thing available — but it went into the log typed "api",
+    the same value a question a person typed carries. Two rows, identical on every
+    field, one of them a routing command and the other somebody's words. Nothing
+    downstream could separate them, and a reader counting user questions would count
+    both (Pocholo, reviewing the query-log commit).
+
+    `input_type` is free text with no constraint, so the mark needs no migration.
+    """
+
+    def _log_on( self, flow ):
+        log = FakeQueryLog()
+        flow.query_log = log
+        return log
+
+    def _flow( self, tmp_path, notifier, monkeypatch ):
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        return _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                           FakeExecutor( _outcome() ), FakePending(), notifier )
+
+    def test_a_command_fallback_row_differs_from_a_typed_question_row( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE WHOLE FINDING IN ONE TEST: the same flow, two submits, and the rows must
+        not be interchangeable.
+
+        RED ON REVERT: hard-code input_type back to "api" and the two rows match on
+        it, which is the defect — a command string reading as a thing somebody said.
+        """
+        f   = self._flow( tmp_path, notifier, monkeypatch )
+        log = self._log_on( f )
+
+        f.submit( command="agent router go to math", args={}, question="what is 2+2", **_CTX )
+        f.submit( command="agent router go to math", args={}, **_CTX )
+
+        typed, fallback = log.rows[ -2 ], log.rows[ -1 ]
+        assert typed[ "query_verbatim" ] == "what is 2+2"
+        assert fallback[ "query_verbatim" ] == "agent router go to math"
+        assert typed[ "input_type" ] != fallback[ "input_type" ], (
+            "a routing command was logged as indistinguishable from a user's words"
+        )
+        assert typed[ "input_type" ]    == "api"
+        assert fallback[ "input_type" ] == "api-command"
+
+    def test_a_prebuilt_job_submit_is_marked_too( self, tmp_path, notifier, monkeypatch ):
+        """
+        The second shape of the same hole. An in-process caller hands over a job it
+        built and names no question at all, so the verbatim is "" — and an EMPTY
+        question is something a user can genuinely send (the fitness gate rejects it,
+        and that refusal is logged). Blank-and-"api" therefore had two meanings.
+
+        RED ON REVERT: mark only the command case and this row types "api" again,
+        landing back in the same bucket as a rejected empty question.
+        """
+        f   = self._flow( tmp_path, notifier, monkeypatch )
+        log = self._log_on( f )
+
+        f.submit( job=FakeAgent( routing_command="agent router go to math" ), **_CTX )
+
+        assert log.rows[ -1 ][ "query_verbatim" ] == ""
+        assert log.rows[ -1 ][ "input_type" ]     == "api-job"
+
+    def test_ask_is_untouched_and_still_types_api( self, tmp_path, notifier, monkeypatch ):
+        """
+        NEGATIVE CONTROL. The mark keys on a missing question, not on the entry
+        point: everything that comes in through `ask` is a person's words and keeps
+        v1's value.
+
+        RED ON REVERT: key the mark on `entry` instead and an ordinary spoken
+        question starts reporting a source it does not have.
+        """
+        f   = self._flow( tmp_path, notifier, monkeypatch )
+        log = self._log_on( f )
+
+        f.ask( "what is 2+2", **_CTX )
+
+        assert log.rows[ -1 ][ "input_type" ] == "api"
+
+    def test_an_empty_question_rejection_still_types_api( self, tmp_path, notifier, monkeypatch ):
+        """
+        The row the "api-job" mark exists to be separable FROM: a user really did
+        send nothing, the fitness gate refused it, and that is a user row with a
+        blank verbatim.
+        """
+        f   = self._flow( tmp_path, notifier, monkeypatch )
+        log = self._log_on( f )
+
+        r = f.ask( "   ", **_CTX )
+
+        assert r[ "status" ] == "rejected"
+        assert log.rows[ -1 ][ "input_type" ] == "api"
