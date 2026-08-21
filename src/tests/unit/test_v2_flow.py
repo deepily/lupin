@@ -48,10 +48,11 @@ class FakeReceptionist( FakeAgent ):
 class FakeSpec:
     """Stand-in for registry.AgentSpec: the three attrs the flow reads."""
 
-    def __init__( self, required_args=(), factory=FakeAgent, snapshotable=True ):
+    def __init__( self, required_args=(), factory=FakeAgent, snapshotable=True, label="math" ):
         self.required_args = required_args
         self.factory       = factory
         self.snapshotable  = snapshotable
+        self.label         = label
 
 
 def _lookup( is_replay_hit=False, snapshot=None, tier=1, similarity=0.0, best_score=0.0,
@@ -175,6 +176,14 @@ def _make_flow( tmp_path, cache, router, expeditor, executor, pending, notifier,
         receptionist_factory=FakeReceptionist, notifier=notifier,
         trace_dir=str( tmp_path ),
     )
+
+
+# A REAL scoped job id: register_scoped_job returns "{id_hash}::{user_id}", and
+# AsyncNotificationRequest pattern-validates that shape (64-hex hash :: uuid).
+# The gate tests above never hit the validator because a waiting outcome with no
+# label speaks nothing, so nothing was built — these tests DO speak, and a
+# made-up id fails at the model before it can reach the assertion.
+_SCOPED_JOB_ID = "b" * 64 + "::11111111-2222-3333-4444-555555555555"
 
 
 _CTX = dict( user_id="u1", user_email="u@x.com", session_id="s1", websocket_id="ws1" )
@@ -1085,7 +1094,7 @@ class TestWaitingIsSuccessInFlight:
         snap  = types.SimpleNamespace( routing_command="agent router go to math" )
         cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
         exe   = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
-                                        job_id="base-9::u1" ) )
+                                        job_id=_SCOPED_JOB_ID ) )
         f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), exe, FakePending(), notifier )
 
         r = f.ask( "what is 2+2", **_CTX )
@@ -1093,7 +1102,7 @@ class TestWaitingIsSuccessInFlight:
         assert r[ "path" ]         == "replay",     "a waiting replay degraded to the receptionist"
         assert r[ "route_reason" ] == "exact_hit"
         assert r[ "status" ]       == "waiting",    "the hand-off must reach the caller as waiting"
-        assert r[ "job_id" ]       == "base-9::u1", "the caller needs the id to follow the queued job"
+        assert r[ "job_id" ]       == _SCOPED_JOB_ID, "the caller needs the id to follow the queued job"
 
     def test_gate_2_agent_waiting_is_not_an_agent_error( self, tmp_path, notifier, monkeypatch ):
         """
@@ -1106,7 +1115,7 @@ class TestWaitingIsSuccessInFlight:
         monkeypatch.setattr( flow_mod, "resolve",
                              lambda command: FakeSpec( required_args=(), snapshotable=False ) )
         exe = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
-                                      job_id="base-9::u1" ) )
+                                      job_id=_SCOPED_JOB_ID ) )
         f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe,
                           FakePending(), notifier )
 
@@ -1115,7 +1124,7 @@ class TestWaitingIsSuccessInFlight:
         assert r[ "path" ]         == "agent",      "a waiting agent degraded to the receptionist"
         assert r[ "route_reason" ] == "args_none"
         assert r[ "status" ]       == "waiting"
-        assert r[ "job_id" ]       == "base-9::u1"
+        assert r[ "job_id" ]       == _SCOPED_JOB_ID
         assert len( exe.works )    == 1,            "the receptionist ran too — the gate did not hold"
 
     def test_the_write_back_guard_still_refuses_waiting( self, tmp_path, notifier, monkeypatch ):
@@ -1136,7 +1145,7 @@ class TestWaitingIsSuccessInFlight:
         waiting_cache = FakeCache()
         f_waiting = _make_flow( tmp_path, waiting_cache, FakeRouter(), FakeExpeditor(),
                                 FakeExecutor( _outcome( status="waiting", answer=None,
-                                                        answer_raw=None, job_id="base-9::u1" ) ),
+                                                        answer_raw=None, job_id=_SCOPED_JOB_ID ) ),
                                 FakePending(), notifier, writeback_enabled=True )
         r_waiting = f_waiting.ask( "what is 2+2", **_CTX )
 
@@ -1397,3 +1406,108 @@ def test_submit_speaks_when_asked_and_stays_quiet_when_not( tmp_path, notifier, 
 
     f.submit( command="agent router go to date and time", args={}, speak=True, **_CTX )
     assert len( notifier.requests ) == 1
+
+
+# ───────────────────────────────────── the queue-time ack (row a4307873, before 6c)
+
+
+
+class TestTheFlowAcksAQueuedJob:
+    """
+    v1 tells the user it is on the job the moment it queues one — the `_notify`
+    at `todo_fifo_queue.py:855`, one line above the scope+push tail
+    `QueuedExecutor` reproduces. The flow was silent there: a waiting Outcome
+    carries no answer and `_speak` returns early on a falsy message, so with the
+    queue path wired the user would say something and hear NOTHING until the job
+    finished, where v1 answered immediately.
+
+    The ack is spoken INSTEAD of the answer, never as well as, which is what
+    holds it to exactly one spoken line per request whichever executor is wired.
+    """
+
+    def _spoken( self, notifier ):
+        return [ r.message for r in notifier.requests ]
+
+    def test_a_queued_agent_is_acked_once_in_v1s_words( self, tmp_path, notifier, monkeypatch ):
+        """
+        RED ON REVERT: drop the waiting branch from `_spoken_line` and nothing is
+        spoken at all — the silence this row exists to end.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command: FakeSpec( required_args=(), snapshotable=False,
+                                                       label="weather" ) )
+        exe = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
+                                      job_id=_SCOPED_JOB_ID ) )
+        f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe,
+                          FakePending(), notifier )
+
+        r = f.ask( "weather in Boston", **_CTX, speak=True )
+
+        assert self._spoken( notifier ) == [ "New weather job..." ], (
+            "the user must hear v1's queue-time ack, exactly once"
+        )
+        assert r[ "status" ] == "waiting"
+
+    def test_a_finished_job_is_not_acked( self, tmp_path, notifier, monkeypatch ):
+        """
+        The negative half of the bar: NO ack on done. The answer is what gets
+        spoken, and an ack alongside it would make the assistant say "New math
+        job..." about work it has already finished.
+
+        RED ON REVERT: speak the ack unconditionally instead of only on waiting.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command: FakeSpec( required_args=(), snapshotable=False,
+                                                       label="math" ) )
+        exe = FakeExecutor( _outcome( status="done", answer="4", answer_raw="4" ) )
+        f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe,
+                          FakePending(), notifier )
+
+        f.ask( "what is 2+2", **_CTX, speak=True )
+
+        spoken = self._spoken( notifier )
+        assert spoken == [ "4" ],                        "a finished job spoke something other than its answer"
+        assert not any( "New " in line for line in spoken ), "a finished job was acked as if it had just been queued"
+
+    def test_a_queued_replay_is_acked_with_the_snapshots_own_command( self, tmp_path, notifier, monkeypatch ):
+        """
+        The replay branch queues too, and its label comes from the snapshot's own
+        routing_command — not from the router, which never ran on a cache hit.
+
+        RED ON REVERT: stop resolving the snapshot's command and the ack loses its
+        name, which `_spoken_line` reports as silence rather than a wrong name.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command: FakeSpec( label="calendaring" )
+                             if command == "agent router go to calendar" else None )
+        snap  = types.SimpleNamespace( routing_command="agent router go to calendar" )
+        cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+        exe   = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
+                                        job_id=_SCOPED_JOB_ID ) )
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), exe,
+                            FakePending(), notifier )
+
+        r = f.ask( "what is on my calendar", **_CTX, speak=True )
+
+        assert self._spoken( notifier ) == [ "New calendaring job..." ]
+        assert r[ "path" ] == "replay"
+
+    def test_a_waiting_outcome_with_no_label_stays_silent( self, tmp_path, notifier, monkeypatch ):
+        """
+        The receptionist has no label in the registry and v1 does not say "New …
+        job" for it either — it speaks a random hemming-and-hawing line built from
+        word lists that live on the queue. Rather than invent a sentence or move
+        queue-owned state into the flow, an unlabelled hand-off says nothing, and
+        that is recorded here as a DECISION rather than left to be read as an
+        oversight.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command: FakeSpec( required_args=(), snapshotable=False, label=None ) )
+        exe = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None, job_id=_SCOPED_JOB_ID ) )
+        f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe,
+                          FakePending(), notifier )
+
+        r = f.ask( "what is 2+2", **_CTX, speak=True )
+
+        assert self._spoken( notifier ) == []
+        assert r[ "status" ] == "waiting"
