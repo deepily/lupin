@@ -66,19 +66,25 @@ POST_RE   = re.compile( r"""@router\.post\(\s*\n?\s*["']([^"']+)["']""", re.MULT
 
 def _lineage_models( tree ):
     """
-    The request-model classes in one router that declare the lineage field.
+    The request-model classes in one router: which declare the lineage field, and all of them.
 
     Ensures:
-        - returns a set of class names having a `parent_id_hash` annotated attribute
+        - returns ( lineage_models, all_classes ) as two sets of class names
+        - lineage_models are those with a `parent_id_hash` annotated attribute
+        - all_classes is every class defined in the module, which is what lets the caller
+          tell "this door takes a model that is not lineage-aware" (fine) from "this
+          door's body could not be read at all" (not fine — see lineage_aware_endpoints)
     """
-    models = set()
+    models  = set()
+    classes = set()
     for node in ast.walk( tree ):
         if not isinstance( node, ast.ClassDef ): continue
+        classes.add( node.name )
         for stmt in node.body:
             if isinstance( stmt, ast.AnnAssign ) and isinstance( stmt.target, ast.Name ) \
                and stmt.target.id == LINEAGE_FIELD:
                 models.add( node.name )
-    return models
+    return models, classes
 
 
 def _post_paths( decorator ):
@@ -133,28 +139,42 @@ def lineage_aware_endpoints( router_dir ):
             tree = ast.parse( text )
         except SyntaxError:                                  # pragma: no cover - no router in the tree fails to parse
             continue
-        models = _lineage_models( tree )
+        models, classes = _lineage_models( tree )
         if not models:
             unmatched.append( ( name, "mentions the field but no request model declares it" ) )
             continue
         prefix = PREFIX_RE.search( text )
         prefix = prefix.group( 1 ) if prefix else ""
-        matched = False
+        doors = 0
         for node in ast.walk( tree ):
             if not isinstance( node, ( ast.FunctionDef, ast.AsyncFunctionDef ) ): continue
+            paths = [ ]
+            for decorator in node.decorator_list:
+                if isinstance( decorator, ast.Call ): paths += _post_paths( decorator )
+            paths = [ p if p.startswith( "/api/" ) else f"{prefix}{p}" for p in paths ]
+            paths = [ p for p in paths if p.startswith( "/api/" ) ]
+            if not paths: continue
+            doors += 1
             annotated = { arg.annotation.id
                           for arg in list( node.args.args ) + list( node.args.kwonlyargs )
                           if isinstance( arg.annotation, ast.Name ) }
-            if not ( annotated & models ): continue
-            for decorator in node.decorator_list:
-                if not isinstance( decorator, ast.Call ): continue
-                for path in _post_paths( decorator ):
-                    full = path if path.startswith( "/api/" ) else f"{prefix}{path}"
-                    if full.startswith( "/api/" ):
-                        endpoints[ full ] = name
-                        matched = True
-        if not matched:
-            unmatched.append( ( name, "declares the field on a model no POST handler takes" ) )
+            if annotated & models:
+                for path in paths: endpoints[ path ] = name
+            elif not ( annotated & classes ):
+                # THE RESIDUAL, and it is per DOOR rather than per file. Keying the report
+                # on the FILE meant one readable door silenced it for every other door in
+                # that file: a second submit-shaped handler written in a different style —
+                # a string annotation, a `Body(...)`, a bare dict — could take the field
+                # and never be watched, while its neighbour's match said the file was
+                # understood. A door whose body resolves to NO class defined in this module
+                # is a door this checker could not read, and it now says so by path.
+                #
+                # A door annotated with a model that simply is not lineage-aware (`ask`
+                # taking AskRequest) is NOT this case: it was read, and the answer was no.
+                unmatched.append( ( f"{name}::{paths[ 0 ]}",
+                                    "POST handler takes no request model this checker can read" ) )
+        if not doors:
+            unmatched.append( ( name, "declares the field but has no POST door at all" ) )
     return endpoints, unmatched
 
 
@@ -258,28 +278,71 @@ def test_a_router_that_only_talks_about_the_field_contributes_nothing( tmp_path 
     assert [ f for f, _why in unmatched ] == [ "prose.py" ], "mentioning the field and yielding no door must be REPORTED, not dropped"
 
 
-def test_the_checker_reports_a_router_whose_model_no_handler_takes( tmp_path ):
+def test_the_checker_reports_a_door_it_could_not_read( tmp_path ):
     """
-    THE CONTROL FOR THE LOUD MISS. The failure mode of a DERIVED set is silence: rename
-    the model, or change which model the handler takes, and the door quietly leaves the
-    watched set while every test posting to it keeps passing — for the wrong reason.
+    THE CONTROL FOR THE LOUD MISS, and it is per DOOR. The failure mode of a derived set
+    is silence: a second submit-shaped handler written in a different style — a string
+    annotation, a `Body(...)`, a bare dict — could take the lineage field and never be
+    watched, while the readable door beside it made the FILE look understood.
 
-    RED ON REVERT: go back to `if not models: continue` with nothing recorded, and this
-    file disappears from the report with no test saying so.
+    RED ON REVERT: key the report on the file again, and `/api/two/raw` vanishes from it
+    because `/api/two/submit` matched.
     """
-    ( tmp_path / "orphan.py" ).write_text(
+    ( tmp_path / "mixed.py" ).write_text(
         "from pydantic import BaseModel\n"
         "router = APIRouter()\n"
         "class SubmitRequest( BaseModel ):\n"
         f"    {LINEAGE_FIELD} : Optional[ str ] = Field( None )\n"
-        "class SomethingElse( BaseModel ):\n"
-        "    query : str = Field( ... )\n"
-        '@router.post( "/api/orphan/submit" )\n'
-        "async def submit( request: SomethingElse ): pass\n"
+        '@router.post( "/api/two/submit" )\n'
+        "async def submit( request: SubmitRequest ): pass\n"
+        '@router.post( "/api/two/raw" )\n'
+        "async def raw( body: dict = Body( ... ) ): pass\n"
     )
     endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+
+    assert endpoints == { "/api/two/submit": "mixed.py" }
+    assert [ f for f, _why in unmatched ] == [ "mixed.py::/api/two/raw" ], (
+        "the readable door must not silence the report for the one beside it" )
+
+
+def test_a_door_taking_a_model_that_is_simply_not_lineage_aware_is_not_reported( tmp_path ):
+    """
+    The other side of that line, and the reason the check asks about ALL local classes
+    rather than only the lineage ones. `/api/v2/ask` takes AskRequest: the checker read
+    that door and the answer was no. Reporting it would be the same false accusation the
+    per-door narrowing was written to stop, wearing the loud-miss costume.
+    """
+    ( tmp_path / "siblings.py" ).write_text(
+        "from pydantic import BaseModel\n"
+        "router = APIRouter()\n"
+        "class AskRequest( BaseModel ):\n"
+        "    question : str = Field( ... )\n"
+        "class SubmitRequest( BaseModel ):\n"
+        f"    {LINEAGE_FIELD} : Optional[ str ] = Field( None )\n"
+        '@router.post( "/api/sib/ask" )\n'
+        "async def ask( request: AskRequest ): pass\n"
+        '@router.post( "/api/sib/submit" )\n'
+        "async def submit( request: SubmitRequest ): pass\n"
+    )
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+
+    assert endpoints == { "/api/sib/submit": "siblings.py" }
+    assert unmatched == []
+
+
+def test_a_router_declaring_the_field_with_no_post_door_at_all_is_reported( tmp_path ):
+    """A model carrying the field that no door accepts is dead weight, and a reader who
+    assumes it is watched is wrong. Named rather than dropped."""
+    ( tmp_path / "doorless.py" ).write_text(
+        "from pydantic import BaseModel\n"
+        "router = APIRouter()\n"
+        "class SubmitRequest( BaseModel ):\n"
+        f"    {LINEAGE_FIELD} : Optional[ str ] = Field( None )\n"
+    )
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+
     assert endpoints == {}
-    assert [ f for f, _why in unmatched ] == [ "orphan.py" ]
+    assert [ f for f, _why in unmatched ] == [ "doorless.py" ]
 
 
 def test_no_router_in_the_tree_is_unmatched():

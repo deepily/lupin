@@ -296,11 +296,19 @@ def test_router_unknown_degrades_to_receptionist( tmp_path, notifier ):
 
 
 def test_resolve_none_degrades_to_receptionist( tmp_path, notifier, monkeypatch ):
+    """A command NEITHER reader knows still reaches the receptionist.
+
+    This used to route "agent router go to deep research" and assert the receptionist,
+    which read as intent and was the defect: that command IS known, by the agentic
+    reader, and answering "I do not understand" to it is the thing the ask-side agentic
+    arm fixed. The refusal itself is real and still pinned — with a command that is
+    genuinely in neither table.
+    """
     monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
-    router = FakeRouter( command="agent router go to deep research" )
+    router = FakeRouter( command="agent router go to nowhere at all" )
     f = _make_flow( tmp_path, FakeCache(), router, FakeExpeditor(), FakeExecutor(),
                     FakePending(), notifier )
-    r = f.ask( "do deep research", **_CTX )
+    r = f.ask( "do the thing that does not exist", **_CTX )
     assert r[ "path" ] == "receptionist"
     assert r[ "route_reason" ] == "unknown_command"
 
@@ -1580,6 +1588,243 @@ class TestSubmitCarriesTheQueueDirectives:
                   scheduled_at="2026-08-22T10:30:00-04:00", **_CTX )
 
         assert self._ignored( tmp_path ) == [ None ]
+
+
+class TestAskDispatchesAnAgenticCommand:
+    """
+    THE DEFECT THIS CLOSES (bug b7fe8941, raised by María, measured by Rachel). `resolve()`
+    is scoped to the conversational class, so it returns None for every agentic command —
+    run, not read: `deep research`, `podcast generator` and `swe team` all come back None
+    while `math` returns a spec. `ask` treated that None as "I do not understand" and
+    answered the receptionist. The spoken door hands its transcription to `ask`, so "do a
+    deep research on the state of AI" was unanswerable by voice — and door 8's own tests
+    could not see it, because they prove the transcription REACHES the flow, not that the
+    flow can dispatch what it is handed.
+
+    These use the REAL registry rather than a monkeypatched `resolve`, for the same reason
+    the submit-side arm does: the defect was in the lookup, so a test that fakes the lookup
+    cannot see it come back.
+    """
+
+    def _flow( self, tmp_path, notifier, command, extraction=None, factory=None, executor=None,
+               pending=None ):
+        return _make_flow( tmp_path, FakeCache(), FakeRouter( command=command ),
+                           FakeExpeditor( extraction=extraction ),
+                           executor or FakeExecutor(), pending or FakePending(), notifier,
+                           agentic_factory=factory or _RecordingAgenticFactory() )
+
+    def test_a_spoken_agentic_command_is_dispatched_instead_of_refused( self, tmp_path, notifier ):
+        """
+        RED ON REVERT: drop the resolve_agentic fallback in `ask` and this comes back
+        path="receptionist", route_reason="unknown_command" — which is what a voice user
+        heard for every agentic command.
+        """
+        factory = _RecordingAgenticFactory()
+        f = self._flow( tmp_path, notifier, "agent router go to deep research",
+                        extraction=_extraction( final_args={ "query": "the state of AI" } ),
+                        factory=factory )
+        r = f.ask( "do a deep research on the state of AI", **_CTX )
+
+        assert r[ "path" ]         != "receptionist", r
+        assert r[ "route_reason" ] == "submitted_prebuilt"
+        assert len( factory.calls ) == 1
+        assert factory.calls[ 0 ][ "command" ]   == "agent router go to deep research"
+        assert factory.calls[ 0 ][ "args_dict" ] == { "query": "the state of AI" }
+
+    def test_the_extracted_arguments_are_the_ones_that_reach_the_factory( self, tmp_path, notifier ):
+        """`ask` was handed prose, so unlike `submit` it runs the expeditor — and what the
+        expeditor pulled out is what the job is built from."""
+        expeditor = FakeExpeditor( extraction=_extraction( final_args={ "task": "fix the parser" } ) )
+        factory   = _RecordingAgenticFactory()
+        f = _make_flow( tmp_path, FakeCache(), FakeRouter( command="agent router go to swe team" ),
+                        expeditor, FakeExecutor(), FakePending(), notifier, agentic_factory=factory )
+        f.ask( "get the swe team to fix the parser", **_CTX )
+
+        assert len( expeditor.calls ) == 1, "the agentic arm of ask must extract — the caller spoke prose"
+        assert factory.calls[ 0 ][ "args_dict" ] == { "task": "fix the parser" }
+
+    def test_a_missing_argument_parks_and_asks_rather_than_refusing( self, tmp_path, notifier ):
+        """
+        THE DIFFERENCE FROM `submit`, as a test. A submit caller is a service account, so a
+        missing argument comes back as a refusal nobody is asked to answer. `ask` was handed
+        prose by a human who is still on the line, so the gap is asked out loud and parked.
+        """
+        pending = FakePending()
+        factory = _RecordingAgenticFactory()
+        f = self._flow( tmp_path, notifier, "agent router go to deep research",
+                        extraction=_extraction( missing=[ "query" ],
+                                                fallback_questions={ "query": "What should I research?" } ),
+                        factory=factory, pending=pending )
+        r = f.ask( "do a deep research", **_CTX )
+
+        assert r[ "path" ]       == "needs_input"
+        assert r[ "status" ]     == "parked"
+        assert r[ "answer" ]     == "What should I research?"
+        assert r[ "pending_id" ] is not None, "an interactive ask parks — there is a human to answer"
+        assert factory.calls == [], "nothing may be built while an argument is still missing"
+
+    def test_a_non_interactive_agentic_ask_asks_without_parking( self, tmp_path, notifier ):
+        """The other half of the same fork: no human on the line, so no park."""
+        pending = FakePending()
+        f = self._flow( tmp_path, notifier, "agent router go to deep research",
+                        extraction=_extraction( missing=[ "query" ],
+                                                fallback_questions={ "query": "What should I research?" } ),
+                        pending=pending )
+        r = f.ask( "do a deep research", interactive=False, **_CTX )
+
+        assert r[ "path" ]       == "needs_input"
+        assert r[ "pending_id" ] is None
+        assert pending.put_calls == []
+
+    def test_an_extraction_failure_degrades_rather_than_raising( self, tmp_path, notifier ):
+        """Same rule the conversational arm follows: no stage failure leaves this door as a 500."""
+        f = _make_flow( tmp_path, FakeCache(), FakeRouter( command="agent router go to deep research" ),
+                        FakeExpeditor( raise_exc=RuntimeError( "expeditor down" ) ),
+                        FakeExecutor(), FakePending(), notifier,
+                        agentic_factory=_RecordingAgenticFactory() )
+        r = f.ask( "do a deep research on the state of AI", **_CTX )
+
+        assert r[ "path" ]         == "receptionist"
+        assert r[ "route_reason" ] == "extract_error"
+
+    def test_the_agentic_arm_of_ask_does_not_read_the_cache( self, tmp_path, notifier ):
+        """An agentic job is long-running work with a job id, not a reusable answer to a
+        reusable question. `submit` skips the cache for that reason and so does this — the
+        arm returns BEFORE the lookup, not after it."""
+        cache = FakeCache()
+        cache.lookup = lambda q: ( _ for _ in () ).throw( AssertionError( "the agentic arm must not read the cache" ) )
+        f = _make_flow( tmp_path, cache, FakeRouter( command="agent router go to deep research" ),
+                        FakeExpeditor( extraction=_extraction( final_args={ "query": "x" } ) ),
+                        FakeExecutor(), FakePending(), notifier,
+                        agentic_factory=_RecordingAgenticFactory() )
+        r = f.ask( "do a deep research on x", **_CTX )
+        assert r[ "route_reason" ] == "submitted_prebuilt"
+
+
+class TestTheVoicePathsSchedulingWordsSurvive:
+    """
+    The expeditor offers `scheduled_at` and `monopolize` for EVERY agentic command
+    (`expeditor.py:863`), so a spoken "run it at ten tomorrow" comes back as ordinary keys
+    in the argument dictionary. They are not arguments to the agent, and the factory reads
+    its arguments key by name and does not name these — so left where the expeditor put
+    them they are dropped in silence and the job runs at once. v1 took them out at exactly
+    this point (`todo_fifo_queue.py:1213-1223`); these pin that the same thing still
+    happens, and that the words a person actually says still mean what they meant.
+    """
+
+    def _ask_with_args( self, tmp_path, notifier, final_args ):
+        factory = _RecordingAgenticFactory()
+        f = _make_flow( tmp_path, FakeCache(), FakeRouter( command="agent router go to deep research" ),
+                        FakeExpeditor( extraction=_extraction( final_args=final_args ) ),
+                        FakeExecutor(), FakePending(), notifier, agentic_factory=factory )
+        f.ask( "do a deep research on the state of AI", **_CTX )
+        return factory.calls[ 0 ]
+
+    def test_a_spoken_schedule_becomes_a_directive_not_an_agent_argument( self, tmp_path, notifier ):
+        """RED ON REVERT: stop splitting them out and `scheduled_at` rides inside args_dict
+        to a factory that never names it — the job runs now, and nothing says why."""
+        call = self._ask_with_args( tmp_path, notifier,
+                                    { "query": "the state of AI",
+                                      "scheduled_at": "2026-08-22T10:30:00-04:00",
+                                      "monopolize": "yes" } )
+
+        assert call[ "args_dict" ]    == { "query": "the state of AI" }, "they are not agent arguments"
+        assert call[ "scheduled_at" ] == "2026-08-22T10:30:00-04:00"
+        assert call[ "monopolize" ]   is True
+
+    def test_immediately_means_no_schedule( self, tmp_path, notifier ):
+        """v1's normalisation, kept word for word: a user who says "immediately" is not
+        naming a date, and a date string of "immediately" would be a scheduling instruction
+        nothing can parse."""
+        for spoken in ( "immediately", "now", "none", "Immediately" ):
+            call = self._ask_with_args( tmp_path, notifier,
+                                        { "query": "x", "scheduled_at": spoken } )
+            assert call[ "scheduled_at" ] is None, f"{spoken!r} must not become a schedule"
+
+    def test_only_a_real_yes_turns_monopolize_on( self, tmp_path, notifier ):
+        """The flag holds every other job behind this one, so it turns on for "yes",
+        "true" and "1" — and for nothing else a transcription might produce."""
+        for spoken, expected in ( ( "yes", True ), ( "true", True ), ( "1", True ),
+                                  ( "no", False ), ( "nope", False ), ( "", False ) ):
+            call = self._ask_with_args( tmp_path, notifier,
+                                        { "query": "x", "monopolize": spoken } )
+            assert call[ "monopolize" ] is expected, f"{spoken!r} became {call[ 'monopolize' ]!r}"
+
+    def test_a_caller_who_said_nothing_about_scheduling_gets_the_defaults( self, tmp_path, notifier ):
+        """The ordinary case — most spoken commands mention neither."""
+        call = self._ask_with_args( tmp_path, notifier, { "query": "x" } )
+        assert call[ "scheduled_at" ] is None
+        assert call[ "monopolize" ]   is False
+
+    def test_the_split_leaves_the_original_dictionary_alone( self, tmp_path, notifier ):
+        """It returns a new dict rather than popping in place: the extraction object is
+        also what a park stores and what `resume` folds an answer into, so mutating it
+        here would edit a record another turn still reads."""
+        args = { "query": "x", "scheduled_at": "2026-08-22T10:30:00-04:00" }
+        remaining, scheduled_at, _monopolize = AskFlow._split_queue_directives( args )
+
+        assert remaining == { "query": "x" }
+        assert scheduled_at == "2026-08-22T10:30:00-04:00"
+        assert args == { "query": "x", "scheduled_at": "2026-08-22T10:30:00-04:00" }, "the input was mutated"
+
+
+class TestResumeDispatchesAnAgenticCommand:
+    """
+    The second turn of a parked agentic ask. The park that leads here was made by the
+    agentic arm, so `resolve()` was always going to miss on the way back — without the
+    same fallback a user answers the one question the interview asked and is told the
+    command is not understood, after it was understood well enough to ask.
+    """
+
+    def test_answering_the_last_question_dispatches_the_agentic_job( self, tmp_path, notifier ):
+        """RED ON REVERT: drop the resolve_agentic fallback in `resume` and this comes back
+        receptionist / unknown_command with the entry marked failed."""
+        pending = PendingRequests()
+        pid, _  = _park( pending, command="agent router go to deep research",
+                         question="do a deep research", missing=( "query", ),
+                         fallback_questions={ "query": "What should I research?" } )
+        factory = _RecordingAgenticFactory()
+        f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), FakeExecutor(),
+                        pending, notifier, agentic_factory=factory )
+        r = f.resume( pending_id=pid, answer="the state of AI", websocket_id="ws1" )
+
+        assert r[ "path" ]         != "receptionist", r
+        assert r[ "route_reason" ] == "submitted_prebuilt"
+        assert factory.calls[ 0 ][ "args_dict" ] == { "query": "the state of AI" }
+        assert pending.get( pid ).status == r[ "status" ], "the pending seam must record the real outcome"
+
+    def test_a_command_neither_reader_knows_still_fails_the_entry( self, tmp_path, notifier, monkeypatch ):
+        """The negative control: the fallback is a SECOND chance, not a replacement for the
+        refusal, and an entry that cannot run must still be marked failed rather than left
+        looking answerable."""
+        monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
+        pending = PendingRequests()
+        pid, _  = _park( pending, command="agent router go to nowhere at all" )
+        f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), FakeExecutor(),
+                        pending, notifier, agentic_factory=_RecordingAgenticFactory() )
+        r = f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
+
+        assert r[ "route_reason" ] == "unknown_command"
+        assert pending.get( pid ).status == "failed"
+
+    def test_a_schedule_spoken_in_the_first_turn_survives_the_park( self, tmp_path, notifier ):
+        """The directives were extracted before the park and folded into the stored
+        extraction, so the split has to happen on the way back out too — otherwise saying
+        "run it at ten tomorrow" works only when nothing else was missing."""
+        pending = PendingRequests()
+        pid, _  = _park( pending, command="agent router go to deep research",
+                         question="do a deep research at ten tomorrow",
+                         final_args={ "scheduled_at": "2026-08-22T10:30:00-04:00" },
+                         missing=( "query", ),
+                         fallback_questions={ "query": "What should I research?" } )
+        factory = _RecordingAgenticFactory()
+        f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), FakeExecutor(),
+                        pending, notifier, agentic_factory=factory )
+        f.resume( pending_id=pid, answer="the state of AI", websocket_id="ws1" )
+
+        call = factory.calls[ 0 ]
+        assert call[ "args_dict" ]    == { "query": "the state of AI" }
+        assert call[ "scheduled_at" ] == "2026-08-22T10:30:00-04:00"
 
 
 def test_submit_with_neither_command_nor_job_raises( tmp_path, notifier ):
