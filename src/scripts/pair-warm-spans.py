@@ -15,6 +15,14 @@ live traffic (Mr Radio, 2026-08-20). It is a RE-DERIVATION TOOL, not a second ga
       nothing, because the two arms were at different points in their own warm-up. The
       pass split is computed here, not assumed.
 
+      🔴 AND IT SPLITS ON THE ARM'S OWN `seq`, NOT ON LIST POSITION. The first version of
+      this file sliced the OK records positionally, which is wrong the moment a pass
+      contains a failure: failures are filtered out before the slice, so every ok record
+      after the first failure shifts one place earlier and some WARM records get labelled
+      COLD. v2 happened to have zero failures tonight, which is exactly the kind of luck
+      that hides a defect until the run that matters. `seq` is emitted by the arm, runs
+      1..2N monotonically across both passes, and does not move when records are dropped.
+
    2. BY CATEGORY AND POOLED. A pooled median hides a category that behaves completely
       differently — on 2026-08-20 the pooled figure was −11.2 s while `todo` alone was
       −59.9 s. The pooled number is the headline; the per-category table is what makes it
@@ -42,12 +50,14 @@ def v2_spans_by_pass( trail_path, since, n_per_pass ):
 
     Ensures:
         - returns (cold, warm) dicts of utterance -> client_span_ms over ok records only
-        - the split is POSITIONAL (the arm runs pass 1 then pass 2), never by timestamp
-          heuristics; a run that has not reached its warm pass returns an empty warm dict
-          rather than silently borrowing cold records
+        - the split is on the arm's own `seq` (1..2N, monotonic across both passes), so a
+          filtered-out failure cannot shift a warm record into the cold bucket
+        - a record with no usable `seq` is DROPPED, not guessed into a bucket
+        - a run that has not reached its warm pass returns an empty warm dict rather than
+          silently borrowing cold records
     """
-    ok_records = []
-    if not os.path.exists( trail_path ): return {}, {}
+    cold, warm = {}, {}
+    if not os.path.exists( trail_path ): return cold, warm
     with open( trail_path ) as fh:
         for line in fh:
             try: d = json.loads( line )
@@ -58,10 +68,15 @@ def v2_spans_by_pass( trail_path, since, n_per_pass ):
             except Exception: continue
             if str( d.get( "ok" ) ).lower() not in ( "true", "1" ): continue
             if d.get( "client_span_ms" ) is None: continue
-            ok_records.append( d )
-
-    cold = { d[ "utterance" ]: float( d[ "client_span_ms" ] ) for d in ok_records[ :n_per_pass ] }
-    warm = { d[ "utterance" ]: float( d[ "client_span_ms" ] ) for d in ok_records[ n_per_pass: ] }
+            try:
+                seq = int( d[ "seq" ] )
+            except ( KeyError, TypeError, ValueError ):
+                # No seq ⇒ the position this record belongs to is UNKNOWABLE. Guessing is
+                # what the positional version did; dropping it is honest and the count of
+                # survivors (which the report prints) goes down visibly.
+                continue
+            target = cold if seq <= n_per_pass else warm
+            target[ d[ "utterance" ] ] = float( d[ "client_span_ms" ] )
     return cold, warm
 
 

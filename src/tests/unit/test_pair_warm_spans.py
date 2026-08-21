@@ -27,9 +27,11 @@ def _trail( tmp_path, rows ):
     return p
 
 
-def _rec( utterance, span, ok=True, wall_ts=2000.0, phase="end" ):
-    return { "phase": phase, "utterance": utterance, "client_span_ms": span,
-             "ok": ok, "wall_ts": wall_ts }
+def _rec( utterance, span, ok=True, wall_ts=2000.0, phase="end", seq=None ):
+    r = { "phase": phase, "utterance": utterance, "client_span_ms": span,
+          "ok": ok, "wall_ts": wall_ts }
+    if seq is not None: r[ "seq" ] = seq
+    return r
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +40,7 @@ def _rec( utterance, span, ok=True, wall_ts=2000.0, phase="end" ):
 def test_the_split_is_positional_cold_then_warm( tmp_path ):
     """The arm runs pass 1 then pass 2, so the split is by POSITION. A timestamp heuristic
     would misclassify a slow cold record as warm."""
-    rows = [ _rec( f"u{i}", 100.0 + i ) for i in range( 4 ) ]
+    rows = [ _rec( f"u{i}", 100.0 + i, seq=i + 1 ) for i in range( 4 ) ]
     cold, warm = pw.v2_spans_by_pass( _trail( str( tmp_path ), rows ), since=0.0, n_per_pass=2 )
     assert sorted( cold ) == [ "u0", "u1" ]
     assert sorted( warm ) == [ "u2", "u3" ]
@@ -47,20 +49,20 @@ def test_the_split_is_positional_cold_then_warm( tmp_path ):
 def test_a_run_that_has_not_reached_warm_returns_an_EMPTY_warm( tmp_path ):
     """RED if warm ever borrows cold records. That silent borrow is exactly how a
     warm-versus-cold comparison gets quoted as a verdict."""
-    rows = [ _rec( f"u{i}", 100.0 ) for i in range( 3 ) ]
+    rows = [ _rec( f"u{i}", 100.0, seq=i + 1 ) for i in range( 3 ) ]
     cold, warm = pw.v2_spans_by_pass( _trail( str( tmp_path ), rows ), since=0.0, n_per_pass=5 )
     assert len( cold ) == 3 and warm == {}
 
 
 def test_failed_and_spanless_records_are_excluded( tmp_path ):
-    rows = [ _rec( "a", 100.0 ), _rec( "b", 200.0, ok=False ),
-             _rec( "c", None ), _rec( "d", 300.0, phase="start" ) ]
+    rows = [ _rec( "a", 100.0, seq=1 ), _rec( "b", 200.0, ok=False, seq=2 ),
+             _rec( "c", None, seq=3 ), _rec( "d", 300.0, phase="start", seq=4 ) ]
     cold, _ = pw.v2_spans_by_pass( _trail( str( tmp_path ), rows ), since=0.0, n_per_pass=10 )
     assert sorted( cold ) == [ "a" ]
 
 
 def test_records_from_an_earlier_run_are_excluded_by_since( tmp_path ):
-    rows = [ _rec( "old", 100.0, wall_ts=1000.0 ), _rec( "new", 200.0, wall_ts=3000.0 ) ]
+    rows = [ _rec( "old", 100.0, wall_ts=1000.0, seq=1 ), _rec( "new", 200.0, wall_ts=3000.0, seq=2 ) ]
     cold, _ = pw.v2_spans_by_pass( _trail( str( tmp_path ), rows ), since=2000.0, n_per_pass=10 )
     assert sorted( cold ) == [ "new" ]
 
@@ -131,3 +133,38 @@ def test_report_REFUSES_when_no_warm_warm_pairing_exists():
     assert ok is False
     assert "NO WARM-WARM PAIRING AVAILABLE" in text
     assert "No latency statement is possible" in text
+
+
+# ---------------------------------------------------------------------------
+# THE DEFECT A POSITIONAL SPLIT HAD (found 2026-08-20 when Mr Radio pushed on
+# whether records could be silently relabelled — they could).
+# ---------------------------------------------------------------------------
+def test_a_failure_in_the_cold_pass_does_NOT_shift_warm_records_into_cold( tmp_path ):
+    """THE REAL BUG. Failures are filtered out before bucketing, so a positional slice
+    moves every later ok record one place earlier — and the first warm records get
+    labelled cold. Here cold is seq 1-3 with seq 2 failing; a positional split would pull
+    w1 (seq 4, warm) back into cold. Splitting on the arm's own seq cannot do that."""
+    rows = [ _rec( "c1", 10.0, seq=1 ),
+             _rec( "c2", 20.0, seq=2, ok=False ),      # dropped by the ok filter
+             _rec( "c3", 30.0, seq=3 ),
+             _rec( "w1", 40.0, seq=4 ),
+             _rec( "w2", 50.0, seq=5 ),
+             _rec( "w3", 60.0, seq=6 ) ]
+    cold, warm = pw.v2_spans_by_pass( _trail( str( tmp_path ), rows ), since=0.0, n_per_pass=3 )
+    assert sorted( cold ) == [ "c1", "c3" ]              # NOT ["c1","c3","w1"]
+    assert sorted( warm ) == [ "w1", "w2", "w3" ]
+
+
+def test_a_record_with_no_seq_is_dropped_rather_than_guessed_into_a_bucket( tmp_path ):
+    """Guessing is what the positional version did. Dropping is honest, and the survivor
+    count the report prints goes down visibly rather than the number quietly being wrong."""
+    rows = [ _rec( "a", 10.0, seq=1 ), _rec( "b", 20.0 ) ]     # b carries no seq
+    cold, warm = pw.v2_spans_by_pass( _trail( str( tmp_path ), rows ), since=0.0, n_per_pass=5 )
+    assert sorted( cold ) == [ "a" ] and warm == {}
+
+
+def test_seq_beyond_the_cold_boundary_lands_in_warm_even_when_few_records_exist( tmp_path ):
+    """A sparse trail must not be read as "all cold" just because it is short."""
+    rows = [ _rec( "w", 10.0, seq=97 ) ]
+    cold, warm = pw.v2_spans_by_pass( _trail( str( tmp_path ), rows ), since=0.0, n_per_pass=50 )
+    assert cold == {} and sorted( warm ) == [ "w" ]
