@@ -154,24 +154,14 @@ class AskFlow:
             return self._emit( trace, path="rejected", status="rejected", route_reason=route_reason,
                                answer=reason, answer_raw=None, command=None, ctx=ctx )
 
-        # 1 — cache: replay only on a tier-1 exact hit (R-C1); below perfect, route.
-        lookup = self.cache.lookup( question )
-        self._record_lookup( trace, lookup )
-        if lookup.is_replay_hit:
-            work    = Work( "replay", lookup.snapshot, user_id, user_email, session_id, snapshotable=False )
-            outcome = self.executor.submit( work, trace )
-            # GATE 1 of 2. "waiting" means the queued executor handed the replay off —
-            # success in flight, not a failure. Narrow this back to `== "done"` and a
-            # cache hit routed through the queue reaches the user as the receptionist
-            # apologising for a question the cache could already answer.
-            if outcome.status in SUCCESS_STATUSES:
-                replay_spec = resolve( lookup.snapshot.routing_command, self.crud_enabled )
-                return self._finish( trace, "replay", "exact_hit", outcome, question, ctx,
-                                     command=lookup.snapshot.routing_command, cache_hit=True,
-                                     agent_label=replay_spec.label if replay_spec else None )
-            return self._receptionist( trace, question, ctx, "replay_error" )
-
-        # 2 — router.
+        # 1 — router, BEFORE the cache. Rick ruled the order on 2026-08-20: route first,
+        # then look up. With the lookup first the flow held no command at lookup time, so
+        # it structurally could not do what the queue does — running_fifo_queue skips the
+        # cache for CRUD commands because the data behind them is mutable. Routing costs
+        # ~22ms on a path whose cheapest observed end-to-end is over 3 seconds.
+        #
+        # A router_error now precedes any cache hit, on purpose: fail loud and bail, with
+        # no cache fallback underneath a broken router.
         trace.mark( "t_router" )
         command, raw_args = self.router.route( question )
         trace.update( command=command, raw_args=raw_args )
@@ -181,6 +171,39 @@ class AskFlow:
         spec = resolve( command, self.crud_enabled )
         if spec is None:
             return self._receptionist( trace, question, ctx, "unknown_command" )
+
+        # 2 — cache: replay only on a tier-1 exact hit (R-C1); below perfect, run the agent.
+        #
+        # A CRUD command does not read the cache at all. The condition is DERIVED FROM THE
+        # REGISTRY — a crud_factory under the live flag — not a hardcoded "todo or
+        # calendar", so a seventh CRUD command later is one AgentSpec row and no edit here.
+        #
+        # Dormant today (tier 1 needs an exact string match) and live the moment 6a lands,
+        # because gist matching is loose about wording by design: "put milk on my todo list"
+        # would gist-match an earlier "what is on my todo list", the read replays, the
+        # write never runs, and nothing errors.
+        if self.crud_enabled and spec.crud_factory is not None:
+            trace.set( "cache_skipped_crud", True )
+        else:
+            lookup = self.cache.lookup( question )
+            self._record_lookup( trace, lookup )
+            if lookup.is_replay_hit:
+                work    = Work( "replay", lookup.snapshot, user_id, user_email, session_id, snapshotable=False )
+                outcome = self.executor.submit( work, trace )
+                # GATE 1 of 2. "waiting" means the queued executor handed the replay off —
+                # success in flight, not a failure. Narrow this back to `== "done"` and a
+                # cache hit routed through the queue reaches the user as the receptionist
+                # apologising for a question the cache could already answer.
+                if outcome.status in SUCCESS_STATUSES:
+                    # Report the command the ROUTER just chose, not the matched row's
+                    # `routing_command`. That column is nullable (vector_store_models.py),
+                    # blank-defaulted in the SolutionSnapshot constructor and `or ""`-coerced
+                    # on write, so it reported an empty string for any row whose provenance
+                    # was unknown. Route-first means a real command always exists here.
+                    return self._finish( trace, "replay", "exact_hit", outcome, question, ctx,
+                                         command=command, cache_hit=True,
+                                         agent_label=spec.label )
+                return self._receptionist( trace, question, ctx, "replay_error" )
 
         # 3 — arguments.
         if not spec.required_args:

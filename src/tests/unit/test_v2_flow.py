@@ -18,6 +18,7 @@ import types
 import pytest
 
 from cosa.rest.v2 import flow as flow_mod
+from cosa.rest.v2 import registry as registry_mod
 from cosa.rest.v2.flow import AskFlow
 from cosa.rest.v2.pending import PendingRequests
 
@@ -46,13 +47,22 @@ class FakeReceptionist( FakeAgent ):
 
 
 class FakeSpec:
-    """Stand-in for registry.AgentSpec: the three attrs the flow reads."""
+    """Stand-in for registry.AgentSpec: the attrs the flow reads.
 
-    def __init__( self, required_args=(), factory=FakeAgent, snapshotable=True, label="math" ):
+    `crud_factory` is one of them since 6-pre — the flow reads it to decide whether
+    to read the cache at all. It defaults to None (a non-CRUD command) because that
+    is what every registry row but todo and calendar carries; a fake that omitted it
+    would raise AttributeError on a path production never fails on, since the real
+    AgentSpec always has the field.
+    """
+
+    def __init__( self, required_args=(), factory=FakeAgent, snapshotable=True, label="math",
+                  crud_factory=None ):
         self.required_args = required_args
         self.factory       = factory
         self.snapshotable  = snapshotable
         self.label         = label
+        self.crud_factory  = crud_factory
 
 
 def _lookup( is_replay_hit=False, snapshot=None, tier=1, similarity=0.0, best_score=0.0,
@@ -1454,27 +1464,38 @@ class TestTheFlowAcksAQueuedJob:
         assert spoken == [ "4" ],                        "a finished job spoke something other than its answer"
         assert not any( "New " in line for line in spoken ), "a finished job was acked as if it had just been queued"
 
-    def test_a_queued_replay_is_acked_with_the_snapshots_own_command( self, tmp_path, notifier, monkeypatch ):
+    def test_a_queued_replay_is_acked_with_the_ROUTED_command( self, tmp_path, notifier, monkeypatch ):
         """
-        The replay branch queues too, and its label comes from the snapshot's own
-        routing_command — not from the router, which never ran on a cache hit.
+        The replay branch queues too, and since 6-pre its label comes from the
+        command the ROUTER chose — which now always ran, because routing happens
+        before the lookup.
 
-        RED ON REVERT: stop resolving the snapshot's command and the ack loses its
-        name, which `_spoken_line` reports as silence rather than a wrong name.
+        This test used to say the opposite ("its label comes from the snapshot's own
+        routing_command — not from the router, which never ran on a cache hit"). That
+        was true of the old order and is false of this one, so the premise is
+        rewritten rather than the assertion patched. The snapshot below carries a
+        DIFFERENT command from the routed one on purpose: reading the row's column
+        would name "todo list" here, and the row's column is the nullable,
+        blank-defaulted one this plan condemns.
+
+        RED ON REVERT: resolve the snapshot's command again and the ack says "New
+        todo list job..." instead.
         """
-        monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: FakeSpec( label="calendaring" )
-                             if command == "agent router go to calendar" else None )
-        snap  = types.SimpleNamespace( routing_command="agent router go to calendar" )
+        monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled:
+                             FakeSpec( label="calendaring" ) if command == "agent router go to calendar"
+                             else FakeSpec( label="todo list" ) )
+        snap  = types.SimpleNamespace( routing_command="agent router go to todo" )
         cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
         exe   = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
                                         job_id=_SCOPED_JOB_ID ) )
-        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), exe,
-                            FakePending(), notifier )
+        f     = _make_flow( tmp_path, cache, FakeRouter( "agent router go to calendar" ),
+                            FakeExpeditor(), exe, FakePending(), notifier )
 
         r = f.ask( "what is on my calendar", **_CTX, speak=True )
 
         assert self._spoken( notifier ) == [ "New calendaring job..." ]
         assert r[ "path" ] == "replay"
+        assert r[ "command" ] == "agent router go to calendar"
 
     def test_a_waiting_outcome_with_no_label_stays_silent( self, tmp_path, notifier, monkeypatch ):
         """
@@ -1937,3 +1958,154 @@ class TestEveryEntryPointLogsItsQuestion:
         assert log.rows[ -1 ][ "query_verbatim" ] == "what is the weather", (
             "a resumed turn logged the ANSWER, or nothing, instead of the question it belongs to"
         )
+
+
+# ────────────────────────────────────────── 6-pre — route first, then the cache
+
+class SpyCache( FakeCache ):
+    """A FakeCache that records every lookup, so "never read" is provable.
+
+    Asserting the RESULT is not enough for the CRUD skip: a flow that reads the
+    cache and then throws the hit away would look identical from the outside on a
+    miss. The count is what distinguishes "did not read" from "read and ignored".
+    """
+
+    def __init__( self, **kwargs ):
+        super().__init__( **kwargs )
+        self.lookup_calls = []
+
+    def lookup( self, question ):
+        self.lookup_calls.append( question )
+        return self._lookup
+
+
+def _registry_with_fake_agent_class( monkeypatch ):
+    """Run the flow against the REAL registry, swapping only the agent CLASS.
+
+    The CRUD skip is derived from the registry — the row's `crud_factory` under the
+    live flag — so a FakeSpec here would bracket the seam instead of crossing it:
+    the test would prove the flow honours a fake attribute, not that the real todo
+    row forks. What this does replace is `factory`, which is what the flow
+    CONSTRUCTS after the decision has already been made; building a real
+    TodoCrudAgent would want config and a dataframe, and it sits downstream of
+    everything under test here.
+    """
+    from dataclasses import replace as dataclass_replace
+
+    real_resolve = registry_mod.resolve
+
+    def _resolve_with_fake_factory( command, crud_enabled ):
+        spec = real_resolve( command, crud_enabled )
+        return None if spec is None else dataclass_replace( spec, factory=FakeAgent )
+
+    monkeypatch.setattr( flow_mod, "resolve", _resolve_with_fake_factory )
+
+
+def test_a_crud_command_never_reads_the_cache( tmp_path, notifier, monkeypatch ):
+    """
+    Rick's ruling (2026-08-20): route first, then look up — so the flow can apply
+    the skip running_fifo_queue already applies. CRUD data is mutable; a cached
+    answer about it is a stale answer.
+
+    RED ON REVERT: delete the `crud_factory` branch and the todo question reads the
+    cache, hits the planted replay row, and comes back path="replay".
+    """
+    _registry_with_fake_agent_class( monkeypatch )
+    planted = types.SimpleNamespace( routing_command="agent router go to todo" )
+    cache   = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=planted ) )
+    f       = _make_flow( tmp_path, cache, FakeRouter( "agent router go to todo" ), FakeExpeditor(),
+                          FakeExecutor(), FakePending(), notifier, crud_enabled=True )
+
+    r = f.ask( "put milk on my todo list", **_CTX )
+
+    assert cache.lookup_calls == [], "a CRUD command read the cache"
+    assert r[ "path" ] == "agent", "a CRUD command replayed a cached answer"
+    assert r[ "cache_hit" ] is False
+
+
+def test_a_non_crud_command_still_reads_the_cache_with_the_flag_on( tmp_path, notifier ):
+    """
+    NEGATIVE CONTROL for the skip: the flag alone must not turn the cache off.
+
+    Same flow, same live flag, one different routed command — math has no
+    crud_factory, so it reads and replays as before.
+    """
+    planted = types.SimpleNamespace( routing_command="agent router go to math" )
+    cache   = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=planted ) )
+    f       = _make_flow( tmp_path, cache, FakeRouter( "agent router go to math" ), FakeExpeditor(),
+                          FakeExecutor(), FakePending(), notifier, crud_enabled=True )
+
+    r = f.ask( "what is 2+2", **_CTX )
+
+    assert cache.lookup_calls == [ "what is 2+2" ]
+    assert r[ "path" ] == "replay"
+
+
+def test_the_todo_command_reads_the_cache_when_the_crud_flag_is_off( tmp_path, notifier ):
+    """
+    SECOND NEGATIVE CONTROL, driving the other axis: todo is not permanently
+    excluded, it is excluded WHILE FORKED. With the flag off it resolves to the
+    ordinary TodoListAgent, whose answers are snapshotable, and the cache is read.
+
+    Together with the test above, the pair fails if either half of the condition is
+    dropped — a skip on the flag alone, or a skip on the command alone.
+    """
+    planted = types.SimpleNamespace( routing_command="agent router go to todo" )
+    cache   = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=planted ) )
+    f       = _make_flow( tmp_path, cache, FakeRouter( "agent router go to todo" ), FakeExpeditor(),
+                          FakeExecutor(), FakePending(), notifier, crud_enabled=False )
+
+    r = f.ask( "what is on my todo list", **_CTX )
+
+    assert cache.lookup_calls == [ "what is on my todo list" ]
+    assert r[ "path" ] == "replay"
+
+
+def test_a_router_error_precedes_any_cache_hit( tmp_path, notifier ):
+    """
+    Ruled with the reorder: no cache fallback underneath a broken router. A router
+    that cannot name the command has told us nothing about the question, so the
+    flow bails to the receptionist rather than serving a row it cannot vouch for.
+
+    RED ON REVERT: put the lookup back above the router and the planted replay row
+    is served, path="replay", before the router ever says "unknown".
+    """
+    planted = types.SimpleNamespace( routing_command="agent router go to math" )
+    cache   = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=planted ) )
+    f       = _make_flow( tmp_path, cache, FakeRouter( "unknown" ), FakeExpeditor(),
+                          FakeExecutor(), FakePending(), notifier )
+
+    r = f.ask( "what is 2+2", **_CTX )
+
+    assert cache.lookup_calls == [], "the cache was read underneath a failed router"
+    assert r[ "path" ] == "receptionist"
+    assert r[ "route_reason" ] == "router_error"
+
+
+def test_replay_reports_the_routed_command_not_the_snapshots_blank_column( tmp_path, notifier ):
+    """
+    The matched row's `routing_command` is nullable, blank-defaulted in the
+    SolutionSnapshot constructor and `or ""`-coerced on write, so it reported an
+    EMPTY command for any row whose provenance was unknown — and the label went out
+    as None with it. Route-first means a real command exists by the time a replay is
+    decided, so that is what `_finish` is given.
+
+    RED ON REVERT: read `lookup.snapshot.routing_command` again and this row, whose
+    column is blank, reports command="" and no label.
+    """
+    blank = types.SimpleNamespace( routing_command="" )
+    cache = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=blank ) )
+    f     = _make_flow( tmp_path, cache, FakeRouter( "agent router go to math" ), FakeExpeditor(),
+                        FakeExecutor( _outcome( status="waiting", answer=None, job_id=_SCOPED_JOB_ID ) ),
+                        FakePending(), notifier, crud_enabled=False )
+
+    r = f.ask( "what is 2+2", **_CTX )
+
+    assert r[ "path" ] == "replay"
+    assert r[ "command" ] == "agent router go to math", "the replay reported the row's blank column"
+    # The label rides the same fix: a waiting hand-off speaks v1's ack, and the ack
+    # names the agent. Resolved off the blank column there is no label and the user
+    # hears nothing at all.
+    assert notifier.requests, "a waiting replay spoke no acknowledgment"
+    assert "todo" not in notifier.requests[ -1 ].message
+    assert "math" in notifier.requests[ -1 ].message
