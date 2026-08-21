@@ -47,16 +47,18 @@ class FakeRunner:
         # model a transaction whose own 'after' row said 0 but whose COMMIT did not land.
         self.committed  = committed
         self.deleted    = False
+        self.inputs     = [ ]
 
-    def __call__( self, argv, capture_output=True, text=True ):
+    def __call__( self, argv, capture_output=True, text=True, input=None ):
         self.calls.append( argv )
+        self.inputs.append( input )
         proc = types.SimpleNamespace( returncode=0, stdout="", stderr="" )
         if "pg_dump" in argv:
             proc.returncode = self.pg_dump_rc
             proc.stdout     = "-- pg_dump output\n"
             proc.stderr     = "pg_dump: boom" if self.pg_dump_rc else ""
             return proc
-        sql = argv[ -1 ]
+        sql = input if argv[ -2: ] == [ "-f", "-" ] else argv[ -1 ]   # parameterised shape pipes the SQL
         proc.returncode = self.psql_rc
         if self.psql_rc:
             proc.stderr = "psql: boom"
@@ -72,7 +74,7 @@ class FakeRunner:
         return proc
 
     def sql_seen( self ):
-        return [ a[ -1 ] for a in self.calls if "psql" in a ]
+        return [ ( i if a[ -2: ] == [ "-f", "-" ] else a[ -1 ] ) for a, i in zip( self.calls, self.inputs ) if "psql" in a ]
 
 
 class FakeResp:
@@ -170,6 +172,39 @@ class TestBuilders( unittest.TestCase ):
         self.assertEqual( argv[ argv.index( "-d" ) + 1 ], "lupin_db_dev" )
         self.assertEqual( argv[ -1 ], "SELECT 1;" )
 
+    def test_psql_stops_on_error_so_a_half_done_transaction_cannot_report_success( self ):
+        """Pocholo round 2, finding 1: without ON_ERROR_STOP psql keeps going past a failed
+        statement and exits 0; the delete transaction must run with it set on EVERY call."""
+        argv = dsc.psql_argv( "lupin_db_dev", dsc.delete_sql( [ "a" ] ) )
+        self.assertIn( "-v", argv )
+        self.assertEqual( argv[ argv.index( "-v" ) + 1 ], "ON_ERROR_STOP=1" )
+
+    def test_psql_variables_are_passed_as_v_flags_not_spliced_into_sql( self ):
+        """Pocholo round 2, finding 2: values reach psql as `-v name=value`, the SQL goes on
+        stdin (`-f -`, because -c never interpolates) and references them as :'name' —
+        never f-stringed into the statement. `docker exec` must carry -i for stdin."""
+        argv = dsc.psql_argv( "lupin_db_dev", variables={ "id_hash": "ab'c" } )
+        self.assertIn( "id_hash=ab'c", argv )
+        self.assertEqual( argv[ argv.index( "id_hash=ab'c" ) - 1 ], "-v" )
+        self.assertEqual( argv[ -2: ], [ "-f", "-" ] )
+        self.assertEqual( argv[ :3 ], [ "docker", "exec", "-i" ] )
+        self.assertNotIn( "-c", argv )
+        # the plain shape has neither -i nor -f
+        plain = dsc.psql_argv( "lupin_db_dev", "SELECT 1;" )
+        self.assertNotIn( "-i", plain )
+        self.assertNotIn( "-f", plain )
+
+    def test_latest_snapshot_row_parameterises_the_id_hash( self ):
+        r = FakeRunner()
+        dsc.latest_snapshot_row( "db", "abc'--", runner=r )
+        argv = r.calls[ -1 ]
+        sql  = r.inputs[ -1 ]
+        self.assertEqual( argv[ -2: ], [ "-f", "-" ] )
+        self.assertNotIn( "abc'--", " ".join( argv[ argv.index( "-f" ): ] ) )
+        self.assertNotIn( "abc'--", sql )
+        self.assertIn( ":'id_hash'", sql )
+        self.assertIn( "id_hash=abc'--", argv )
+
     def test_pg_dump_argv_names_each_table_once_in_order( self ):
         argv = dsc.pg_dump_argv( "lupin_db_test", [ "a", "b" ] )
         self.assertEqual( argv[ -4: ], [ "-t", "a", "-t", "b" ] )
@@ -252,7 +287,7 @@ class TestBackupAndDump( unittest.TestCase ):
 
     def test_dump_without_both_rows_raises( self ):
         class Half( FakeRunner ):
-            def __call__( self, argv, capture_output=True, text=True ):
+            def __call__( self, argv, capture_output=True, text=True, input=None ):
                 return types.SimpleNamespace( returncode=0, stdout="before|3|3\n", stderr="" )
         with self.assertRaises( ValueError ):
             dsc.dump( "lupin_db_dev", [ "a", "b" ], runner=Half() )
