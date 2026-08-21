@@ -32,7 +32,7 @@ from cosa.memory.input_and_output_table import InputAndOutputTable
 from cosa.memory.speech_to_text_provider import SpeechToTextProvider
 from cosa.rest import multimodal_munger as mmm
 # from cosa.config.configuration_manager import ConfigurationManager
-from cosa.rest.auth import get_current_user_id
+from cosa.rest.auth import get_current_user_id, get_optional_user
 
 router = APIRouter(prefix="/api", tags=["speech"])
 
@@ -194,39 +194,48 @@ def get_active_tasks():
     import lupin_app.main as main_module
     return main_module.active_tasks
 
-def get_todo_queue():
+# `get_todo_queue` LIVED HERE and is gone with door 8 (2026-08-21). This router had
+# exactly one queue caller — the agent branch below — and it now hands its transcription
+# to the v2 ask flow instead. A resolver left behind for nobody is an invitation to wire
+# a second door onto the queue; the flow accessor beneath is the only way out of this
+# module now. Every other router keeps its own copy, unaffected.
+def get_ask_flow():
     """
-    Dependency to get todo queue from main module.
-    
-    Requires:
-        - lupin_app.main module is available
-        - main_module has jobs_todo_queue attribute
-        
+    Dependency to get the v2 AskFlow from the main module.
+
+    Door 8, 2026-08-21. Rick: there are two ways to ask — post your text to the ask
+    endpoint, or SPEAK, which gets transcribed and then passed to the ask endpoint. So
+    this route's agent branch hands the transcription to the same flow the typed door
+    uses, in-process. The route is NOT a tombstone: its other branch is dictation,
+    snapshot search and insert-at-cursor, which have no text-endpoint replacement.
+
+    Read off the module the same way the other routers read the queue, and for the
+    same reason: lifespan builds it and hangs it there.
+
     Ensures:
-        - Returns the todo queue instance
-        - Provides access to job queue management
-        
-    Raises:
-        - ImportError if main module not available
-        - AttributeError if jobs_todo_queue not found
+        - Returns the flow, or None before lifespan has finished. The agent branch
+          fails loud on None rather than falling back to a direct queue push.
     """
     import lupin_app.main as main_module
-    return main_module.jobs_todo_queue
+    return main_module.ask_flow
+
 
 @router.post(
     "/upload-and-transcribe-mp3",
     summary     = "Transcribe MP3 audio",
-    description = "Accept base64-encoded MP3, transcribe via Whisper, and queue result as a multimodal job."
+    description = "Accept base64-encoded MP3 and transcribe via Whisper. An agent request goes to the v2 ask flow (needs a signed-in user); plain dictation comes straight back."
 )
 async def upload_and_transcribe_mp3_file(
     request: Request,
     prefix: Optional[str] = Query(None),
     prompt_key: str = Query("generic"),
     prompt_verbose: str = Query("verbose"),
+    websocket_id: Optional[str] = Query(None),
     whisper_pipeline = Depends(get_whisper_pipeline),
     provider: SpeechToTextProvider = Depends(get_speech_provider),
     config_mgr = Depends(get_config_manager),
-    todo_queue = Depends(get_todo_queue)
+    ask_flow = Depends(get_ask_flow),
+    current_user: Optional[dict] = Depends(get_optional_user)
 ):
     """
     Upload and transcribe MP3 audio file using Whisper model with multimodal processing.
@@ -242,12 +251,16 @@ async def upload_and_transcribe_mp3_file(
         - Audio file is temporarily saved to docker path and processed
         - Whisper transcription is completed with chunked processing
         - MultiModalMunger processes transcription with agent detection
-        - Agent requests are pushed to todo queue with websocket tracking
-        - Non-agent requests are logged to InputAndOutputTable
+        - Agent requests go through the v2 ask flow and REQUIRE a signed-in user
+          (401 otherwise); the flow's result lands in munger.results
+        - Non-agent requests (dictation, snapshot search, insert-at-cursor) are
+          logged to InputAndOutputTable and still need no token at all
         - Response is saved to /io/last_response.json in JSON format
         - Returns JSONResponse with processed transcription results
         
     Raises:
+        - HTTPException with 401 status if the transcription is an AGENT request and
+          no signed-in user was supplied
         - HTTPException with 500 status if base64 decoding fails
         - HTTPException with 500 status if file writing fails
         - HTTPException with 500 status if Whisper transcription fails
@@ -258,6 +271,8 @@ async def upload_and_transcribe_mp3_file(
         prefix: Optional prefix for transcription processing context
         prompt_key: Configuration key for prompt selection (default: "generic")
         prompt_verbose: Verbosity level for processing (default: "verbose")
+        websocket_id: Optional session id for routing the answer's events back to
+            this client; derived from the user id when the caller does not send one
         
     Returns:
         JSONResponse: Processed transcription with munger JSON format
@@ -329,13 +344,65 @@ async def upload_and_transcribe_mp3_file(
         
         # Check if this is an agent request using munger's method
         if munger.is_agent():
-            # Push to todo queue for agent processing
+            # DOOR 8 — the spoken way in. The transcription is a BARE QUESTION, so it
+            # goes to `ask`: nothing about it has been decided, and it still needs
+            # routing and argument extraction. This used to be
+            # `todo_queue.push_job( munger.transcription )`, which passed ONE argument
+            # to a method that takes four (question, session_id, user_id, user_email) —
+            # bug ef62749e. Routing it through the flow closes that by construction:
+            # there is no four-argument call left to get wrong.
+            stage = "agent request (v2 ask flow)"
             if app_debug:
-                print(f"Munger: Posting [{munger.transcription}] to the agent's todo queue...")
-            
-            # TODO: Get websocket_id from the browser plugin request
-            # The browser plugin should be sending this as part of the request
-            munger.results = todo_queue.push_job(munger.transcription)
+                print(f"Munger: Handing [{munger.transcription}] to the v2 ask flow...")
+
+            # NO USER ⇒ REFUSE BY NAME. The other branch stays unauthenticated because
+            # dictation belongs to whoever is typing; an ASK creates work, and work
+            # without an owner is the ownerless-row shape this refactor exists to stop
+            # (step 2c, one layer up). Both browser callers already send the bearer
+            # token when they hold one — audio-recorder.js and the multiplexer's
+            # AudioRecorder.ts — this route simply never read it until now.
+            if current_user is None:
+                raise HTTPException(
+                    status_code = 401,
+                    detail      = "A spoken agent request needs a signed-in user: it creates work, "
+                                  "and work has an owner. Send the bearer token you already hold. "
+                                  "Plain dictation on this endpoint still needs no token."
+                )
+            user_id    = current_user.get( "uid" )
+            user_email = current_user.get( "email" )
+            if not user_id or not user_email:
+                raise HTTPException(
+                    status_code = 401,
+                    detail      = "The authentication token carries no user id or email, so this "
+                                  "spoken request has no owner."
+                )
+
+            if ask_flow is None:
+                raise RuntimeError(
+                    "no ask_flow — a spoken agent request cannot be answered. It is built in "
+                    "lupin_app.main's lifespan; a None here means the app has not finished booting."
+                )
+
+            # Neither browser caller sends a websocket id today, so the answer's events
+            # route to a derived session — the same `f"<prefix>-{user_id[:8]}"` shape
+            # /api/v2/ask uses for the same reason. The query parameter is here so a
+            # caller CAN name its session the moment it wants the events back on its own
+            # channel; said plainly rather than left as a TODO nobody dates.
+            session_id = websocket_id or f"mp3-{user_id[ :8 ]}"
+
+            # interactive=True: there is a human at the microphone, which is the whole
+            # reason this door survives. A missing argument is spoken back as a question
+            # and the request parks, so `pending_id` comes back in the response body for
+            # a caller that wants to resume through /api/v2/resume. Neither browser
+            # caller does that yet — today the human just speaks again, which arrives as
+            # a fresh ask.
+            munger.results = ask_flow.ask(
+                question     = munger.transcription,
+                user_id      = user_id,
+                user_email   = user_email,
+                session_id   = session_id,
+                websocket_id = session_id,
+            )
         else:
             # For non-agent requests, handle normally
             # Get the processed transcription
@@ -367,6 +434,15 @@ async def upload_and_transcribe_mp3_file(
     except torch.cuda.OutOfMemoryError:
         print( "[ERROR] MP3 transcription failed: CUDA out of memory (after retry)" )
         raise HTTPException( status_code=503, detail="Server GPU memory temporarily unavailable. Please retry in a few seconds.", headers={ "Retry-After": "5" } )
+
+    except HTTPException:
+        # A refusal this handler RAISED ON PURPOSE — today that is door 8's 401 for a
+        # spoken agent request with no signed-in user. HTTPException is an Exception, so
+        # without this line the generic handler below would catch that 401 and re-raise
+        # it as a 500 saying transcription's post-processing failed: the caller would be
+        # told the server broke when what actually happened is that it needs to send its
+        # token. Re-raise unchanged.
+        raise
 
     except Exception as e:
         # Name the STAGE. This handler spans setup, transcription and

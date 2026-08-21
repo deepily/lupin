@@ -69,6 +69,12 @@ V2_ASK = "/api/v2/ask"
 # route would take browser dictation, the admin snapshot search, and the multiplexer's
 # insert-at-cursor down with it and offer them nothing. Only its queueing TAIL belongs
 # to `ask`; that is a separate piece of work on the route itself, not a tombstone.
+#
+# ✅ THAT WORK IS DONE (door 8, 2026-08-21) AND THE ROUTE STILL SURVIVES. Its
+# `munger.is_agent()` branch hands the transcription to the v2 ask flow in-process and
+# refuses without a signed-in user; the other branch is untouched and still needs no
+# token. Rick's framing: there are two ways to ask — post your text, or speak. Both end
+# up at the same flow. Keep this path OUT of the table.
 RETIRED_DOORS = {
     "/api/push"                       : V2_ASK,
     "/api/job-history/{job_id}/retry" : V2_ASK,
