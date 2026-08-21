@@ -44,12 +44,12 @@
     },
     {
       "question_pattern": "Which document should I use for the podcast?",
-      "answer": "Pick the first document option in the list — never 'Let me describe it' and never 'Cancel'.",
+      "answer": "__first_option__",
       "arg_name": "research",
       "response_types": [
         "multiple_choice"
       ],
-      "_comment": "The DOCUMENT CHOICE CARD (row 9046ef58). It appears whenever the matcher finds 2..cap candidates, which an automated run reaches as soon as the search directory holds more than one plausible file; without this entry the proxy has nothing to answer with and the run CANCELS at the card. The answer is a DIRECTIVE, not a literal: the option labels are candidate basenames discovered at run time, so no fixed string could ever match one. The script matcher is told to pick the option label that best aligns with this answer. The question_pattern must stay byte-identical to what RuntimeArgumentExpeditor._document_choice_question returns for this agent — test_proxy_scripts_answer_the_choice_card.py pins the pair."
+      "_comment": "The DOCUMENT CHOICE CARD (row 9046ef58). It appears whenever the matcher finds 2..cap candidates, which an automated run reaches as soon as the search directory holds more than one plausible file; without this entry the proxy has nothing to answer with and the run CANCELS at the card. The answer is a POSITIONAL SENTINEL, not a value: the option labels are candidate basenames discovered at run time, so no fixed string could ever match one. cosa/agents/notification_proxy/option_sentinels.py turns it into a real label from the options that arrive with the notification, skipping the Describe and Cancel escapes. A directive in prose was tried first and the matcher returned the prose verbatim, which the expeditor rejected as an unknown label. The question_pattern must stay byte-identical to what RuntimeArgumentExpeditor._document_choice_question returns for this agent — test_proxy_scripts_answer_the_choice_card.py pins the pair."
     },
     {
       "question_pattern": "Would you like to proceed with these settings?",
