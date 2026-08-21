@@ -1173,6 +1173,37 @@ def render_report(
     return "\n".join( lines )
 
 
+def dump_records_early( out_dir: str, cold_records: List[ Dict[ str, Any ] ],
+                        warm_records: List[ Dict[ str, Any ] ] ) -> Optional[ str ]:
+    """
+    Persist the raw records the moment both passes return, BEFORE anything may refuse.
+
+    🔴 WHY (row d8d019f6, 2026-08-20). `guard_run_integrity` fires before `write_outputs`,
+    so when ts-23613e7d raised on trace-parity it destroyed the v2 arm's ENTIRE run — three
+    hours of records that had already been collected never reached disk, and no eval-<stamp>
+    directory was written at all. The v1 arm has carried this insurance since attempt 11
+    (_dump_paired_artifacts fires the moment the v1 arm returns); the v2 arm never got it.
+    A downstream refusal should cost the VERDICT, never the DATA.
+
+    Ensures:
+        - writes records.jsonl into out_dir and returns its path
+        - BEST-EFFORT: a dump failure is reported and swallowed, never allowed to mask the
+          real run outcome — insurance that can itself kill the run is not insurance
+    """
+    try:
+        os.makedirs( out_dir, exist_ok=True )
+        path = os.path.join( out_dir, "records.jsonl" )
+        with open( path, "w" ) as handle:
+            for record in list( cold_records ) + list( warm_records ):
+                handle.write( json.dumps( record ) + "\n" )
+        print( f"[v2-eval] early record dump: {len( cold_records ) + len( warm_records )} records -> {path}" )
+        return path
+    except Exception as failure:
+        print( f"[v2-eval] WARNING: early record dump failed ({type( failure ).__name__}: {failure}) — "
+               f"the run continues, but a refusal past this point will cost the records." )
+        return None
+
+
 def write_outputs(
     out_dir      : str,
     report_md    : str,
@@ -1297,6 +1328,12 @@ def main(
     probe( "between the cold and warm passes" )
     warm_records = run_pass( corpus, client.ask, "warm" )
 
+    # INSURANCE BEFORE ANY REFUSAL (row d8d019f6): both passes are done and the records are
+    # in memory only. guard_run_integrity below CAN raise, and when it did on ts-23613e7d it
+    # took three hours of already-collected v2 records with it. Land them first.
+    out_dir = os.path.join( root, "io", "v2-flow", f"eval-{stamp}" )
+    dump_records_early( out_dir, cold_records, warm_records )
+
     trace_path = os.path.join( root, "io", "v2-flow", f"trace-{stamp[ :10 ]}.jsonl" )
     # The day either side too — the writer's clock is the container's (UTC) and this
     # process's is US/Eastern, and a long run crosses midnight anyway. See
@@ -1318,8 +1355,7 @@ def main(
     report_md    = render_report( cold_metrics, warm_metrics, warm_table, delta,
                                   args.corpus, stamp, args.seed, args.n_per_command )
 
-    out_dir = os.path.join( root, "io", "v2-flow", f"eval-{stamp}" )
-    paths   = write_outputs( out_dir, report_md, cold_records, warm_records )
+    paths   = write_outputs( out_dir, report_md, cold_records, warm_records )   # out_dir set above, before the guard
 
     # The paired step (paired_eval) consumes {metrics, provenance}; write the v2 arm artifact.
     artifact_path = os.path.join( out_dir, "v2-arm-artifact.json" )

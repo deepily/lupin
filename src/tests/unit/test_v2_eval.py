@@ -1224,3 +1224,31 @@ def test_clean_v2_snapshot_store_empties_the_synonym_table_too( monkeypatch ):
     ve.clean_v2_snapshot_store( conn, _clean_cfg( "solution_snapshots" ) )
     assert len( conn.executed ) == 1                       # one statement, never half-cleared
     assert ve.SYNONYM_TABLE in conn.executed[ 0 ]
+
+
+# ---------------------------------------------------------------------------
+# the records must land BEFORE anything may refuse (row d8d019f6, 2026-08-20)
+#
+# guard_run_integrity fires before write_outputs, so when ts-23613e7d raised on
+# trace-parity it took three hours of already-collected v2 records with it — no
+# eval-<stamp> directory was written at all. The v1 arm has had this insurance
+# since attempt 11; the v2 arm never did.
+# ---------------------------------------------------------------------------
+def test_dump_records_early_writes_both_passes( tmp_path ):
+    cold = [ _rec( utterance="c1" ) ]
+    warm = [ _rec( utterance="w1" ), _rec( utterance="w2" ) ]
+    path = ve.dump_records_early( str( tmp_path / "eval-x" ), cold, warm )
+    lines = [ json.loads( line ) for line in open( path ) if line.strip() ]
+    assert [ r[ "utterance" ] for r in lines ] == [ "c1", "w1", "w2" ]
+
+
+def test_dump_records_early_creates_the_directory( tmp_path ):
+    path = ve.dump_records_early( str( tmp_path / "nested" / "eval-x" ), [ ], [ _rec() ] )
+    assert os.path.exists( path )
+
+
+def test_dump_records_early_never_kills_the_run( tmp_path ):
+    """Insurance that can itself kill the run is not insurance — a dump failure is swallowed."""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text( "i am a file" )
+    assert ve.dump_records_early( str( blocker ), [ ], [ _rec() ] ) is None
