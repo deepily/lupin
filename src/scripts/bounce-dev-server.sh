@@ -214,13 +214,34 @@ if ! docker restart "$CONTAINER" >/dev/null; then
     exit 1
 fi
 
-# ── Step 3: health poll ───────────────────────────────────────────────────────
-# Delegated to src/scripts/lib/wait-for-health.sh, which requires HEALTH_CONSECUTIVE
-# successes IN A ROW. One 200 is not proof: right after `docker restart` the OLD process
-# can still be answering (hit on :7999, 2026-08-19), and a loaded server answers in
-# bursts (measured on :8000, row 1c36199e). The helper is separate so it can be tested
-# without running this script, which restarts a container and broadcasts to the fleet —
-# see src/tests/unit/test_wait_for_health.py.
+# ── Step 3: prove it is the NEW process, then prove it is healthy ─────────────
+# TWO GUARDS, and they defend against DIFFERENT lies. Neither substitutes for the other
+# (Mr Radio caught that a count alone does not cover the first one):
+#   · TOO EARLY — the OLD process can still answer right after `docker restart` is issued.
+#     Three 200s at 0.5s spacing is a 1.5s window and the dying process can fill it. Only
+#     IDENTITY settles this: the container's own StartedAt must be at or after the moment
+#     we asked. Tiberius hit this on :7999 on 2026-08-19.
+#   · TOO NOISY — a loaded server answers in bursts, so one 200 is a coin flip (measured
+#     on :8000, row 1c36199e: /health at 0.47s, then a timeout 36s later). A streak of
+#     consecutive OKs settles this one, and no identity check would.
+# Both helpers live in src/scripts/lib/ so they can be tested without running this script,
+# which restarts a container and broadcasts to the fleet — see
+# src/tests/unit/test_wait_for_container_restart.py and test_wait_for_health.py.
+
+log "Waiting for $CONTAINER to report a restart (not before ${start_ts})..."
+restart_args=( "$CONTAINER" "$start_ts"
+               --timeout  "$TIMEOUT_SECS"
+               --interval "$POLL_INTERVAL" )
+if [ "$QUIET" -eq 1 ]; then restart_args+=( --quiet ); fi
+
+if ! "${LUPIN_ROOT}/src/scripts/lib/wait-for-container-restart.sh" "${restart_args[@]}"; then
+    echo "ERROR: $CONTAINER never reported a start newer than the restart we issued." >&2
+    echo "       A health check now could be answered by the OLD process. Investigate." >&2
+    echo "--- docker logs --tail 50 $CONTAINER ---" >&2
+    docker logs --tail 50 "$CONTAINER" >&2 || true
+    exit 1
+fi
+
 log "Polling $HEALTH_URL (need ${HEALTH_CONSECUTIVE} consecutive OKs, timeout ${TIMEOUT_SECS}s)..."
 
 health_args=( "$HEALTH_URL"
