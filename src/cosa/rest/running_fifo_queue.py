@@ -311,14 +311,30 @@ class RunningFifoQueue( FifoQueue ):
                             if self.debug: print( f"[CACHE] EXACT HIT: score {score:.1f}% from {cached_snapshot.run_date}" )
                             running_job = self._format_cached_result( cached_snapshot, running_job, truncated_question, run_timer )
 
-                        elif score >= self.threshold_confirmation:
-                            # Above floor — accept (push_job already handled user confirmation)
-                            if self.debug: print( f"[CACHE] THRESHOLD ACCEPT: score {score:.1f}% >= {self.threshold_confirmation}% from {cached_snapshot.run_date}" )
-                            running_job = self._format_cached_result( cached_snapshot, running_job, truncated_question, run_timer )
-
                         else:
-                            # Below threshold — reject, route to agent
-                            print( f"[CACHE] THRESHOLD REJECT: score {score:.1f}% < {self.threshold_confirmation}% floor — routing to agent" )
+                            # ── the ACCEPT-ABOVE-FLOOR branch was DELETED here (step 7b) ──
+                            #
+                            # WHAT IT WAS: `elif score >= self.threshold_confirmation:` —
+                            # anything from 90% up was served from the cache without asking
+                            # anybody. WHY IT WAS BAD: its own comment said why it was
+                            # allowed — "push_job already handled user confirmation". That
+                            # was true while push_job asked. push_job is dead (step 6c: the
+                            # doors were retired, the internal callers moved, and door 8
+                            # hands the transcription to the flow), so the confirmation this
+                            # branch leaned on had already stopped happening — and a
+                            # 90-to-99% match was being replayed with nobody asked. Exactly
+                            # the silent wrong-but-close answer the plan says we would never
+                            # have, arriving as a side effect of a cutover rather than a
+                            # decision.
+                            #
+                            # WHAT CARRIES CONFIRMATION NOW: AskFlow's near-match ask (step
+                            # 6b) — the same question, the same 30 seconds, the same default
+                            # of "no" — which runs BEFORE the job is ever queued. A second,
+                            # silent accept behind it would answer a question the user had
+                            # already been asked about and may have declined.
+                            #
+                            # Below an exact hit, this now routes to the agent.
+                            print( f"[CACHE] BELOW EXACT: score {score:.1f}% — routing to agent (the flow already asked)" )
                             running_job = self._handle_base_agent( running_job, truncated_question, run_timer )
                     else:
                         # CACHE MISS - Continue with normal agent execution
