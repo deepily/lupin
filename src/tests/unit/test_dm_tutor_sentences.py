@@ -12,7 +12,7 @@ its token lifted out and restored.
 
 import unittest
 
-from cosa.agents.dm_tutor.sentences import pointer_tokens, count_sentences
+from cosa.agents.dm_tutor.sentences import pointer_tokens, count_sentences, is_bare_identifier, restorable_pointers
 
 
 class TestPointerTokens( unittest.TestCase ):
@@ -159,6 +159,87 @@ class TestWholeLinePointerIsStructure( unittest.TestCase ):
                       "running_fifo_queue.py:422\n"
                       "e0bb5a94" )
         self.assertEqual( count_sentences( delivered ), 3 )
+
+
+class TestRestorablePointersIsNarrowerThanPointerTokens( unittest.TestCase ):
+    """
+    Two selectors, and keeping them SEPARATE is the whole design (row a0151611).
+
+    `pointer_tokens` is the body of the whole-line structure rule, so narrowing it
+    would silently change the sentence counter — a delivered pointer line would start
+    counting as a claim and a repaired message could re-trigger the tutor. Only the
+    RESTORE path is narrowed, and this class pins both halves: what the counter sees is
+    unchanged, and what comes back after a rewrite is paths only.
+    """
+
+    _BODY = ( "The leak is in running_fifo_queue.py:422 and the probe is at "
+              "/tmp/claude-1001/scratchpad/repro.py, recording to row e0bb5a94.\n"
+              "See https://example.com/x for the write-up." )
+
+    def test_a_bare_row_id_is_a_bare_identifier( self ):
+        self.assertTrue( is_bare_identifier( "e0bb5a94" ) )
+
+    def test_paths_urls_and_filenames_are_not( self ):
+        for token in ( "/tmp/claude-1001/scratchpad/repro.py", "running_fifo_queue.py:422",
+                       "job.py", "https://example.com/x", "src/rnd/note.md" ):
+            with self.subTest( token=token ):
+                self.assertFalse( is_bare_identifier( token ),
+                                  f"{token} says where to look — it must stay restorable" )
+
+    def test_restorable_pointers_drops_the_id_and_keeps_the_rest( self ):
+        self.assertEqual( restorable_pointers( self._BODY ),
+                          [ "running_fifo_queue.py:422", "/tmp/claude-1001/scratchpad/repro.py",
+                            "https://example.com/x" ] )
+
+    def test_pointer_tokens_still_sees_the_id( self ):
+        """
+        THE CONTROL FOR THE TRAP. If this ever goes red, someone narrowed
+        `pointer_tokens` in place and the sentence counter moved with it.
+        """
+        self.assertIn( "e0bb5a94", pointer_tokens( self._BODY ) )
+
+    def test_a_body_of_only_ids_is_restorable_by_nothing( self ):
+        self.assertEqual( restorable_pointers( "Rows a0151611 and adf5c1a1 are open." ), [] )
+
+    def test_a_body_with_no_pointer_at_all( self ):
+        self.assertEqual( restorable_pointers( "Plain prose with no pointer." ), [] )
+
+    def test_a_RUN_of_pointers_on_one_line_is_structure( self ):
+        """
+        The shape the restore now emits when a rewrite drops two paths. A line of
+        nothing but pointers asserts nothing however many it carries — and if the
+        counter disagreed, the repair would push the message one claim over the
+        trigger and the tutor could re-fire on the line it had just appended.
+        """
+        three = ( "Verdict.\nSupport one.\nSupport two.\n"
+                  "src/a.py src/b.py https://example.com/x" )
+        self.assertEqual( count_sentences( three ), 3 )
+
+    def test_the_run_rule_does_not_stall_on_a_long_near_miss( self ):
+        """
+        The widened rule repeats a group, which is the shape that goes exponential when
+        a long line ALMOST matches and the engine backtracks through every split. The
+        near-miss is the case to fear: 120 real paths followed by one token that is not
+        a pointer, so the whole line must be rejected. Measured at ~0.0002s; the ceiling
+        below is three orders of magnitude of headroom, so it fails on a stall, not on a
+        slow machine.
+        """
+        import time
+        near_miss = " ".join( f"src/a{i}.py" for i in range( 120 ) ) + " not-a-pointer!"
+        started   = time.time()
+        self.assertEqual( count_sentences( near_miss ), 1 )   # prose, not structure
+        self.assertLess( time.time() - started, 2.0,
+                         "the pointer-run rule backtracked instead of failing fast" )
+
+    def test_a_long_run_of_real_paths_is_still_structure( self ):
+        """The other end of the same shape: it must match, and match fast."""
+        run = " ".join( f"src/a{i}.py" for i in range( 200 ) )
+        self.assertEqual( count_sentences( f"Verdict.\n{run}" ), 1 )
+
+    def test_a_line_of_PROSE_is_not_rescued_by_the_run_rule( self ):
+        """CONTROL. Widening the rule must not turn a claim into structure."""
+        self.assertEqual( count_sentences( "Verdict.\nSupport one.\n"
+                                           "The fix landed in src/a.py and src/b.py." ), 3 )
 
 
 if __name__ == "__main__":

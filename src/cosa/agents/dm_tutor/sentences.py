@@ -80,13 +80,33 @@ _QUOTE      = re.compile( r"^\s*>\s?" )
 # the body (pointer_tokens). The 8-hex form requires at least one hex LETTER so a plain
 # 8-digit number (a year, a count) is never mistaken for a row id.
 _CODE_EXT = r"py|md|ini|sh|json|ya?ml|txt|js|jsx|ts|tsx|html|css|sql|toml|cfg|xml"
+_BARE_ROW_ID_SRC = r"(?=[0-9a-f]*[a-f])[0-9a-f]{8}"   # >=1 hex letter, so "20260821" is a number
 _POINTER_TOKEN_SRC = (
     r"(?:[A-Za-z][A-Za-z0-9+.-]*://[^\s)]+"         # a URL — https:// , vllm:// , file://
     r"|~?/?(?:[\w.@%+-]+/)+[\w.@%+#?=&-]*(?::\d+)?" # a slashed path, optional :line
     rf"|\b[\w-]+\.(?:{_CODE_EXT})\b(?::\d+)?"       # a bare filename.ext, optional :line
-    r"|\b(?=[0-9a-f]*[a-f])[0-9a-f]{8}\b)"          # a bare 8-hex row id (>=1 hex letter)
+    rf"|\b{_BARE_ROW_ID_SRC}\b)"                    # a bare 8-hex row id
 )
 _POINTER_TOKEN = re.compile( _POINTER_TOKEN_SRC, re.IGNORECASE )
+
+# The SAME row-id shape, ANCHORED, for callers holding a raw string rather than a token
+# the pointer grammar already matched. Built from the one source above so the two can
+# never drift apart. See is_bare_row_id for why the distinction is load-bearing.
+_BARE_ROW_ID = re.compile( rf"^{_BARE_ROW_ID_SRC}$", re.IGNORECASE )
+
+# Punctuation stripped off BOTH ENDS before the anchored test above. The anchors are
+# what make that pattern safe against a raw string, and they are also what a single
+# adjacent character defeats — "#fb9faba7" is not a match, so it sailed through the
+# guard and arrived as a bare line (María, row 68601b65). "#hash8" is live fleet
+# vocabulary, so of all the punctuated forms it is the likeliest to land in the slot.
+#
+# HYPHEN AND UNDERSCORE ARE IN THE SET, on María's ruling (row 68601b65). I left them
+# out first, reasoning they are ordinary filename characters — but that reasoning
+# confused "appears in filenames" with "reachable by this test". A real hyphen or
+# underscore filename carries an EXTENSION, so once stripped it is still not eight hex
+# characters and the anchored pattern cannot match it either way. Leaving them out
+# bought no safety and left "-fb9faba7" and "__fb9faba7__" arriving as bare lines.
+_SLOT_PUNCTUATION = "#.,;:!?()[]{}<>\"'`*-_"
 
 # 🔴 THE SLASHED-PATH SHAPE ABOVE ALSO MATCHES THINGS THAT ARE NOT PATHS. The
 # repeated `[\w.@%+-]+/` group happily matches a slash-separated ENUMERATION
@@ -138,9 +158,18 @@ _POINTER_LEAD_IN = r"(?:(?:see|details?|detail|path|more|here|full\s+detail)\s*:
 # line is a pointer, so the target only has to contain a slash — it does not have to
 # survive the stricter path shape above. A doc-viewer link carries `?path=…&…`, which
 # the bare-path pattern deliberately does not admit.
+_POINTER_OR_LINK = rf"(?:\[[^\]]*\]\(\s*[^\s)]*/[^\s)]*\s*\)|{_POINTER_TOKEN_SRC})"
+
+# A RUN of pointers on one line is structure too (row a0151611, Rick's ruling
+# 2026-08-21). The restore now puts every dropped path back on a SINGLE line, so that
+# line can carry two or three of them. By this module's own rule that is still
+# structure — a line of nothing but pointers asserts nothing, however many it holds —
+# and if the rule did not say so, a repaired message would read as one claim over and
+# the tutor could re-trigger on the very line it just added. The single-pointer case is
+# byte-for-byte what it always was; only the run is new.
 _ATTACHMENT = re.compile(
-    rf"^\s*{_POINTER_LEAD_IN}"
-    rf"(?:\[[^\]]*\]\(\s*[^\s)]*/[^\s)]*\s*\)|{_POINTER_TOKEN_SRC})"
+    rf"^\s*{_POINTER_LEAD_IN}{_POINTER_OR_LINK}"
+    rf"(?:[,;]?\s+{_POINTER_OR_LINK})*"
     rf"[.,;]?\s*$",
     re.IGNORECASE,
 )
@@ -284,6 +313,107 @@ def pointer_tokens( text ):
         if not _is_real_pointer( token ): continue
         found.append( token )
     return found
+
+
+def is_bare_identifier( token ):
+    """
+    True when a pointer token is a bare identifier — an id with nowhere to look.
+
+    WHY THE DISTINCTION EXISTS (Rick, 2026-08-21, row a0151611): "What is obviously
+    pointless and nonsensical is 10 to 12 lines of hashes. A standalone nonsensical
+    out-of-context hash has no place there." A path, a URL and a bare filename each
+    tell a reader WHERE TO LOOK, and survive the loss of the sentence around them. An
+    8-hex row id does not: once the sentence that gave it meaning is rewritten away,
+    the id is eight characters of nothing.
+
+    The test is structural, not a second pattern to keep in sync: by construction of
+    _POINTER_TOKEN, a token with neither a slash nor a dot can only be the bare 8-hex
+    row-id shape — a URL carries "://", a slashed path carries "/", and a bare
+    filename carries its extension's dot.
+
+    Requires:
+        - token is a non-empty string produced by _POINTER_TOKEN
+
+    Ensures:
+        - True for a bare 8-hex row id ("e0bb5a94")
+        - False for URLs, slashed paths and bare filenames ("job.py:1163")
+
+    Raises:
+        - nothing
+    """
+    return "/" not in token and "." not in token
+
+
+def is_bare_row_id( value ):
+    """
+    True when a RAW string is exactly an 8-hex row id. Safe on untrusted input.
+
+    🔴 WHY THIS EXISTS AND `is_bare_identifier` COULD NOT BE USED (María, row 6dbba874).
+    That function's precondition is "a token produced by _POINTER_TOKEN" — given one,
+    "no slash and no dot" can only be the row-id shape. Handed a RAW value it degenerates
+    into exactly that test and eats every extensionless real filename: Makefile, README,
+    LICENSE, Dockerfile, src, io. Three of those are tracked files in this repo. A
+    precondition is not a suggestion, and borrowing a filter across the line where its
+    precondition holds is how a narrow guard silently becomes a wide one.
+
+    So callers holding a raw string — the tutor's path SLOT, whose contents are whatever
+    the model typed — use this, which asks the question directly instead.
+
+    ⚠️ SURROUNDING PUNCTUATION IS STRIPPED FIRST, and that is a second lesson from the
+    same family (María, row 68601b65). The anchors that make this predicate safe on raw
+    input are defeated by one adjacent character: "#fb9faba7", "fb9faba7," and
+    "fb9faba7." all sailed past the guard and arrived as bare lines. Whitespace was
+    already stripped, so punctuation was simply the case `strip()` does not cover.
+
+    The trade is named rather than hidden: a hidden file literally named ".deadbeef"
+    would be suppressed. That is the guard's existing bargain — a file named "deadbeef"
+    was already unreachable — and it buys the shape the fleet actually writes.
+
+    Requires:
+        - value is a string ( or None )
+
+    Ensures:
+        - True for exactly 8 hex characters carrying at least one letter a-f, with or
+          without surrounding whitespace and bracketing punctuation
+        - False for "Makefile", "README", "src", "20260821", "src/a.py", "notes.md",
+          ".gitignore", "my-notes-file", "", and None
+        - False for "my-file.md", "_private.py", "a_b-c.txt" — a real hyphen or
+          underscore name carries an extension, so stripping those characters cannot
+          bring it within reach of the pattern
+
+    Raises:
+        - nothing
+    """
+    return bool( _BARE_ROW_ID.fullmatch(
+        ( value or "" ).strip().strip( _SLOT_PUNCTUATION ).strip()
+    ) )
+
+
+def restorable_pointers( text ):
+    """
+    The pointer tokens worth putting BACK when a rewrite drops them — paths only.
+
+    🔴 THIS IS A SEPARATE SELECTOR ON PURPOSE — DO NOT NARROW `pointer_tokens` TO GET
+    THE SAME EFFECT. That function is used two ways that must not disagree (its own
+    docstring says so): it is the body of the whole-line structure rule _ATTACHMENT,
+    so a restored line counts as structure and repairing a message can never push it
+    back over the trigger. Narrowing it would ALSO change the sentence counter, and a
+    bare id line would start counting as a claim.
+
+    So the structure rule keeps seeing all four pointer shapes, and only the RESTORE
+    path is narrowed — which is the only place Rick's complaint lives.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns pointer_tokens( text ) minus every bare identifier, same order
+        - returns [] when the body carries none, or carries only bare identifiers
+
+    Raises:
+        - nothing
+    """
+    return [ token for token in pointer_tokens( text ) if not is_bare_identifier( token ) ]
 
 
 def count_sentences( text ):

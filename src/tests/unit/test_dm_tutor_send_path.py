@@ -466,13 +466,30 @@ class TestMidSentencePointersSurvive( unittest.TestCase ):
         "The leak is in the running queue module; tell me if you agree."
     )
 
-    def test_all_four_mid_sentence_pointers_are_restored( self ):
+    def test_a_mid_sentence_PATH_is_still_restored( self ):
+        """
+        NARROWED 2026-08-21 (row a0151611). This used to assert all four pointers came
+        back, each on its own line — which is precisely the run of bare lines Rick
+        objected to. A path still comes back, because it still says where to look; the
+        first-seen restorable pointer is the one restored, and only one line is added.
+        """
         text, meta = self.apply( self._WITH_MID, config=_cfg(),
                                  rewrite_fn=lambda b: self._ATE_THEM )
         self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
-        for pointer in ( "/tmp/claude-1001/scratchpad/repro.py",
-                         "running_fifo_queue.py:422", "job.py", "e0bb5a94" ):
-            self.assertIn( pointer, text, f"{pointer} was not restored" )
+        self.assertIn( "/tmp/claude-1001/scratchpad/repro.py", text,
+                       "the mid-sentence path was not restored" )
+        # All three restorable pointers come back, and they share ONE line.
+        body = text.split( "This DM was condensed" )[ 0 ].rstrip()
+        self.assertEqual( body.splitlines()[ -1 ],
+                          "/tmp/claude-1001/scratchpad/repro.py running_fifo_queue.py:422 job.py" )
+        self.assertEqual( len( body.splitlines() ), len( self._ATE_THEM.splitlines() ) + 1 )
+
+    def test_the_dropped_row_id_does_NOT_come_back( self ):
+        """The half of the old behaviour that produced the hash lines."""
+        text, _ = self.apply( self._WITH_MID, config=_cfg(),
+                              rewrite_fn=lambda b: self._ATE_THEM )
+        self.assertNotIn( "e0bb5a94", text,
+                          "a bare row id was restored as a standalone line" )
 
     def test_the_instrument_can_fail( self ):
         """CONTROL — the fixture must actually DROP every pointer, or this proves nothing."""
@@ -490,9 +507,10 @@ class TestMidSentencePointersSurvive( unittest.TestCase ):
 
     def test_restoring_mid_sentence_pointers_cannot_re_trigger( self ):
         """
-        Each restored token is appended as its OWN line, which _ATTACHMENT now reads as
-        a whole-line pointer — so a bare filename or row id is structure once alone, and
-        the repair can never push the message back over the trigger.
+        The ONE restored pointer is appended as its own line, which _ATTACHMENT reads
+        as a whole-line pointer — so the repair can never push the message back over
+        the trigger. Joining two pointers onto that line would break this: the line
+        stops being nothing-but-a-pointer and counts as a claim again.
         """
         from cosa.agents.dm_tutor.sentences import count_sentences
         _, meta = self.apply( self._WITH_MID, config=_cfg(),
@@ -500,10 +518,13 @@ class TestMidSentencePointersSurvive( unittest.TestCase ):
         self.assertEqual( meta[ "tutor_claims_out" ], count_sentences( self._ATE_THEM ) )
         self.assertLessEqual( meta[ "tutor_claims_out" ], _cfg()[ "trigger_claims" ] )
 
-    def test_a_restored_row_id_is_not_read_as_fabricated( self ):
+    def test_a_dropped_row_id_costs_the_message_nothing_else( self ):
         """
-        The restore runs BEFORE the fabrication check on purpose — a row id we put back
-        came from the original, so it must never be flagged as an invented hex id.
+        RE-POINTED 2026-08-21 (row a0151611). This used to prove a RESTORED row id was
+        not read as fabricated. Ids are no longer restored, so the question it now has
+        to answer is the one that replaced it: dropping the id must not cost the
+        recipient the rewrite — it is still delivered, and the fabrication guard, which
+        only ever objected to hex the model INVENTED, still has nothing to say.
         """
         text, meta = self.apply( self._WITH_MID, config=_cfg(),
                                  rewrite_fn=lambda b: self._ATE_THEM )
@@ -1137,6 +1158,115 @@ class TestSlashEnumerationsAreNotRestoredAsPointers( unittest.TestCase ):
                                  rewrite_fn=lambda b: self._FAITHFUL_REWRITE )
         self.assertIn( "src/rnd/v0.2.0/cascade-r2.md", text )
         self.assertNotIn( "training/", text )
+
+
+class TestABareHashListIsNeverDelivered( unittest.TestCase ):
+    """
+    🔴 THE SHAPE RICK NAMED (2026-08-21, row a0151611): "What is obviously pointless
+    and nonsensical is 10 to 12 lines of hashes. That should never be allowed. A
+    standalone nonsensical out-of-context hash has no place there."
+
+    Every recipient saw it the same day. The DM carried a dozen task-store row ids in
+    its prose, the rewrite understandably kept none of them, and `_restore_dropped_
+    pointers` appended EVERY ONE as its own bare line — so a three-sentence
+    distillation arrived with twelve lines of hex under it. The ids were real and the
+    guard was working as written; the output was still useless, because an id whose
+    sentence has been rewritten away says nothing about where to look.
+
+    The fixture is that message's shape: twelve bare row ids buried mid-sentence, one
+    real path, and a rewrite that drops all thirteen.
+    """
+
+    _IDS = [ "a0151611", "adf5c1a1", "054207ce", "0c280989", "a1420538", "e0bb5a94",
+             "206dd6ea", "a74f2176", "fe375cf6", "9bf1dc4a", "b2228d79", "1d49707b" ]
+
+    def setUp( self ):
+        from cosa.rest.routers.dm import _apply_dm_tutor, _restore_dropped_pointers, DM_TUTOR_NOTICE
+        self.apply   = _apply_dm_tutor
+        self.restore = _restore_dropped_pointers
+        self.notice  = DM_TUTOR_NOTICE
+        self.with_ids = (
+            "Three pieces of work need attention before the merge.\n"
+            + "".join( f"Row {i} is still open and owed by somebody.\n" for i in self._IDS )
+            + "The write-up is at src/rnd/v0.2.0/cascade-r2.md if you want the detail.\n"
+            "Piece three requires a decision from you today."
+        )
+        self.rewrite = (
+            "Three pieces of work need attention before the merge.\n"
+            "Twelve rows are still open and owed.\n"
+            "The third needs a decision from you today."
+        )
+
+    def test_not_one_bare_id_survives_as_a_line( self ):
+        text, meta = self.apply( self.with_ids, config=_cfg(),
+                                 rewrite_fn=lambda b: self.rewrite )
+        self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
+        body = text.split( self.notice )[ 0 ]
+        offenders = [ line for line in body.splitlines() if line.strip() in self._IDS ]
+        self.assertEqual( offenders, [], f"bare identifier lines were delivered: {offenders}" )
+
+    def test_the_path_still_comes_back_on_one_line( self ):
+        """The narrowing must not cost the guard its reason for existing."""
+        text, _ = self.apply( self.with_ids, config=_cfg(),
+                              rewrite_fn=lambda b: self.rewrite )
+        body = text.split( self.notice )[ 0 ].rstrip()
+        self.assertEqual( body.splitlines()[ -1 ], "src/rnd/v0.2.0/cascade-r2.md" )
+        self.assertEqual( len( body.splitlines() ), len( self.rewrite.splitlines() ) + 1,
+                          "the restore appended more than one line" )
+
+    def test_two_dropped_paths_come_back_on_the_SAME_line( self ):
+        """
+        RICK'S RULING (2026-08-21): discarding a real pointer is the defect this guard
+        exists to prevent, so every dropped path comes back — but still on ONE line.
+        """
+        two_paths = self.with_ids + "\nand the older note lives at src/rnd/v0.1.7/older.md too."
+        text, _ = self.apply( two_paths, config=_cfg(), rewrite_fn=lambda b: self.rewrite )
+        body = text.split( self.notice )[ 0 ].rstrip()
+        self.assertEqual( body.splitlines()[ -1 ],
+                          "src/rnd/v0.2.0/cascade-r2.md src/rnd/v0.1.7/older.md" )
+        self.assertEqual( len( body.splitlines() ), len( self.rewrite.splitlines() ) + 1,
+                          "two paths were split across two lines" )
+
+    def test_a_two_path_restored_line_is_still_STRUCTURE( self ):
+        """
+        THE COST OF THE RULING, PAID. A line of two pointers did not match the
+        counter's whole-line rule, so a compliant three-claim rewrite plus a two-path
+        line counted FOUR and the repair could re-trigger the tutor on its own
+        appended line. _ATTACHMENT now reads a RUN of pointers as structure.
+        """
+        from cosa.agents.dm_tutor.sentences import count_sentences
+        two_paths = self.with_ids + "\nand the older note lives at src/rnd/v0.1.7/older.md too."
+        _, meta = self.apply( two_paths, config=_cfg(), rewrite_fn=lambda b: self.rewrite )
+        # The appended line must add NOTHING to the count. `assertLessEqual(..., trigger)`
+        # would not bite here: the rewrite carries 3 claims and the trigger is 4, so a
+        # line that DID count still slipped under it.
+        self.assertEqual( meta[ "tutor_claims_out" ], count_sentences( self.rewrite ) )
+
+    def test_the_instrument_can_fail( self ):
+        """
+        CONTROL, and it is the red-on-revert arm. The fixture must carry ids the OLD
+        selector would have restored, and the rewrite must drop them — otherwise both
+        assertions above pass on unfixed code. Point `_restore_dropped_pointers` back at
+        `pointer_tokens` and join with newlines, and twelve bare lines reappear.
+        """
+        from cosa.agents.dm_tutor.sentences import pointer_tokens
+        lifted = pointer_tokens( self.with_ids )
+        for row_id in self._IDS:
+            self.assertIn( row_id, lifted,
+                           f"fixture lost {row_id} — this suite proves nothing" )
+            self.assertNotIn( row_id, self.rewrite,
+                              f"the rewrite fixture kept {row_id} — nothing to restore" )
+
+    def test_the_repaired_message_is_still_under_the_trigger( self ):
+        """One appended pointer line is structure, so the repair cannot re-trigger."""
+        _, meta = self.apply( self.with_ids, config=_cfg(),
+                              rewrite_fn=lambda b: self.rewrite )
+        self.assertLessEqual( meta[ "tutor_claims_out" ], _cfg()[ "trigger_claims" ] )
+
+    def test_a_body_of_nothing_but_ids_appends_nothing( self ):
+        """No restorable pointer at all is the empty case, not a reason to append hex."""
+        ids_only = "".join( f"Row {i} is open.\n" for i in self._IDS )
+        self.assertEqual( self.restore( ids_only, self.rewrite ), self.rewrite )
 
 
 if __name__ == "__main__":
