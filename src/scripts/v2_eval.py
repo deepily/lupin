@@ -384,22 +384,53 @@ def response_similarity( record: Dict[ str, Any ] ) -> Optional[ float ]:
     return None if value is None else float( value )
 
 
-def _is_cacheable_command( command: Optional[ str ] ) -> bool:
+def _crud_agents_enabled() -> bool:
+    """
+    The live value of `crud for dataframes agents enabled` (lupin-app.ini:1915).
+
+    Read, not asserted. The reader used to pass crud_enabled=True into resolve(),
+    which is the CONFIGURED value today and not the same statement — with the flag
+    off, calendar and todo do not fork, they ARE snapshotable, and excluding them
+    would drop real cache misses out of the denominator and report a rate that
+    flatters the cache.
+
+    Same key and same missing-means-enabled default the v1 queue uses
+    (todo_fifo_queue._crud_agents_enabled) and the flow's construction site reads,
+    so all three surfaces cannot disagree about which agents ran.
+
+    A missing or unreadable config answers True, matching that default rather than
+    inventing a quieter one.
+    """
+    try:
+        from cosa.config.configuration_manager import ConfigurationManager
+        value = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get(
+            "crud for dataframes agents enabled", default="true"
+        )
+    except Exception:
+        return True
+    return str( value ).strip().lower() == "true"
+
+
+def _is_cacheable_command( command: Optional[ str ], crud_enabled: Optional[ bool ]=None ) -> bool:
     """
     Could a request that routed to `command` ever have been a cache hit?
 
     Asks the registry, not a hand-list: a command whose spec says snapshotable=False
-    is never written back, so it can never replay. Under the single CRUD-aware
-    resolver (step 2b) that is exactly the forked calendar and todo pair, plus
-    weather, which was never snapshotable either.
+    is never written back, so it can never replay. With the CRUD flag ON that is the
+    forked calendar and todo pair plus weather; with it OFF it is weather alone.
 
     An unknown or non-conversational command answers True — it is not excluded by
     THIS rule, and silently dropping it here would hide it from the denominator for
     a reason that has nothing to do with caching.
+
+    crud_enabled is read from config when not supplied; the parameter exists so a
+    test can state the flag instead of depending on the machine's INI.
     """
     if command is None:
         return True
-    spec = resolve( command, crud_enabled=True )
+    if crud_enabled is None:
+        crud_enabled = _crud_agents_enabled()
+    spec = resolve( command, crud_enabled=crud_enabled )
     if spec is None:
         return True
     return spec.snapshotable
@@ -540,9 +571,10 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
     #
     # `snapshotable` says what the WRITER will write from here on. It cannot say what
     # the store already holds.
+    crud_enabled = _crud_agents_enabled()     # read ONCE per run, not once per record
     cacheable = [
         r for r in ok
-        if response_path( r ) == PATH_REPLAY or _is_cacheable_command( matched_command( r ) )
+        if response_path( r ) == PATH_REPLAY or _is_cacheable_command( matched_command( r ), crud_enabled )
     ]
 
     # ERROR RATES ARE COUNTED OVER EVERY ANSWERED REQUEST, NOT OVER `ok` (row d8d019f6,
