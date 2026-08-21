@@ -394,6 +394,20 @@ class TestPositionalSentinelResolution:
         assert r.stats[ "skipped" ] == 1
         assert r.stats[ "responses_sent" ] == 0
 
+    def test_a_typod_sentinel_is_a_loud_skip_not_a_dead_proxy( self ):
+        # The resolver REFUSES to forward a typo as a literal (it raises). The proxy
+        # must not die of it either: one bad entry in a script file would otherwise
+        # take down a run that had nothing to do with it. Counted skip, reason on
+        # stdout, run continues.
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = "__frist_option__"
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, self._card_event( "kiss.md", "quantum.md" ) )
+        submit.assert_not_called()
+        assert r.stats[ "skipped" ] == 1
+        assert r.stats[ "responses_sent" ] == 0
+
     def test_an_ordinary_answer_is_untouched( self ):
         # The resolver sits in the hot path for EVERY answer; this is the guard that
         # it changes nothing for the other several hundred script entries.

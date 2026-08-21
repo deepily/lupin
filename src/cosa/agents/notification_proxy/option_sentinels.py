@@ -25,10 +25,17 @@ runs in a path a human's answer travels.
 """
 
 
+import re
+
+
 FIRST_OPTION = "__first_option__"
 LAST_OPTION  = "__last_option__"
 
 SENTINELS = ( FIRST_OPTION, LAST_OPTION )
+
+# Anything SHAPED like a sentinel. A value matching this but absent from SENTINELS is a
+# typo or a case variant, and it must never be forwarded as a literal — see resolve().
+_SENTINEL_SHAPE = re.compile( r"^__\w+__$" )
 
 
 def is_sentinel( answer ):
@@ -39,14 +46,33 @@ def is_sentinel( answer ):
         - answer is any value; a non-string is simply not a sentinel
 
     Ensures:
-        - returns True only for an exact match against SENTINELS, after stripping
-          surrounding whitespace — a sentinel is a token, not a phrase, so
-          "pick __first_option__" is deliberately NOT one
+        - returns True only for an EXACT, CASE-SENSITIVE match against SENTINELS,
+          after stripping surrounding whitespace
+        - a sentinel is a token, not prose: "pick __first_option__" is NOT one
+        - "__FIRST_OPTION__" is NOT one either. Case-folding would turn a value whose
+          entire job is to be unambiguous into a fuzzy match — and the near-miss does
+          not pass quietly, because resolve() raises on it.
 
     Raises:
         - nothing
     """
     return isinstance( answer, str ) and answer.strip() in SENTINELS
+
+
+def looks_like_a_sentinel( answer ):
+    """
+    Whether a value is SHAPED like a sentinel, valid or not.
+
+    Requires:
+        - answer is any value; a non-string never looks like one
+
+    Ensures:
+        - returns True for any stripped "__word__", typos and case variants included
+
+    Raises:
+        - nothing
+    """
+    return isinstance( answer, str ) and bool( _SENTINEL_SHAPE.match( answer.strip() ) )
 
 
 def option_labels( notification ):
@@ -94,8 +120,17 @@ def resolve( answer, notification, excluded_labels=() ):
           see from the outside.
 
     Raises:
-        - nothing
+        - ValueError when the answer is SHAPED like a sentinel but is not one —
+          "__frist_option__", "__FIRST_OPTION__". Returning it unchanged would forward
+          the literal string to the card, which is the SAME defect the sentinels
+          replaced (prose submitted as a label) wearing a new name. A typo in a config
+          file must not degrade into a cancelled run whose cause is invisible.
     """
+    if looks_like_a_sentinel( answer ) and not is_sentinel( answer ):
+        raise ValueError(
+            f"{answer.strip()!r} is shaped like a positional sentinel but is not one; "
+            f"valid sentinels are {SENTINELS} and the match is case-sensitive"
+        )
     if not is_sentinel( answer ):
         return answer
 

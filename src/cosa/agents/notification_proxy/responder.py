@@ -340,10 +340,20 @@ class NotificationResponder:
         # card's labels are run-time filenames, so no script entry can name one; the
         # sentinel says WHICH option, and this turns it into WHAT it is called. Every
         # ordinary answer passes through untouched.
-        if option_sentinels.is_sentinel( answer ):
-            resolved = option_sentinels.resolve(
-                answer, notification, excluded_labels=CHOICE_ESCAPE_LABELS
-            )
+        if option_sentinels.looks_like_a_sentinel( answer ):
+            try:
+                resolved = option_sentinels.resolve(
+                    answer, notification, excluded_labels=CHOICE_ESCAPE_LABELS
+                )
+            except ValueError as error:
+                # A typo'd or mis-cased sentinel in a script file. The resolver refuses
+                # to forward it as a literal, and this refuses to take the whole proxy
+                # down for one bad entry: the run continues, this notification is a
+                # counted skip, and the reason is on stdout rather than inferred later
+                # from a cancelled job.
+                self.stats[ "skipped" ] += 1
+                print( f"[Responder] Bad sentinel in the Q&A script: {error}" )
+                return
             if resolved is None:
                 # Submitting the sentinel string would reach the expeditor as an
                 # unknown label and cancel the run for a reason invisible from the

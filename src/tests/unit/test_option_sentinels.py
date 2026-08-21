@@ -44,6 +44,15 @@ class TestIsSentinel( unittest.TestCase ):
         self.assertFalse( sentinels.is_sentinel( "pick __first_option__ please" ) )
         self.assertFalse( sentinels.is_sentinel( "Pick the first document option in the list" ) )
 
+    def test_the_match_is_case_sensitive( self ):
+        # MARÍA'S POINT. A sentinel's entire job is to be unambiguous; case-folding
+        # would make it a fuzzy match on a token. The near-miss is not merely "not a
+        # sentinel" — resolve() raises on it, asserted below.
+        # RED ON REVERT (case-folding restored): AssertionError: True is not false
+        for variant in ( "__FIRST_OPTION__", "__First_Option__", "__LAST_OPTION__" ):
+            with self.subTest( variant=variant ):
+                self.assertFalse( sentinels.is_sentinel( variant ) )
+
     def test_ordinary_answers_are_not_sentinels( self ):
         for answer in ( "general", "default", "yes", "", None, 7, [ "__first_option__" ] ):
             with self.subTest( answer=answer ):
@@ -80,6 +89,26 @@ class TestOptionLabels( unittest.TestCase ):
         self.assertEqual( sentinels.option_labels( card ), [ "a.md", "b.md" ] )
 
 
+class TestLooksLikeASentinel( unittest.TestCase ):
+
+    def test_typos_and_case_variants_still_look_like_sentinels( self ):
+        # This is what lets a typo be CAUGHT rather than forwarded: the shape is
+        # recognised even when the token is not.
+        for value in ( "__frist_option__", "__FIRST_OPTION__", "__second_option__" ):
+            with self.subTest( value=value ):
+                self.assertTrue( sentinels.looks_like_a_sentinel( value ) )
+
+    def test_real_sentinels_look_like_sentinels( self ):
+        for value in sentinels.SENTINELS:
+            with self.subTest( value=value ):
+                self.assertTrue( sentinels.looks_like_a_sentinel( value ) )
+
+    def test_ordinary_answers_do_not( self ):
+        for value in ( "general", "", None, 7, "__not closed", "pick __first_option__" ):
+            with self.subTest( value=value ):
+                self.assertFalse( sentinels.looks_like_a_sentinel( value ) )
+
+
 class TestResolve( unittest.TestCase ):
 
     def test_an_ordinary_answer_passes_straight_through( self ):
@@ -112,6 +141,21 @@ class TestResolve( unittest.TestCase ):
 
     def test_with_no_exclusions_every_label_is_fair_game( self ):
         self.assertEqual( sentinels.resolve( "__first_option__", _card( "a.md", "b.md" ) ), "a.md" )
+
+    def test_a_typod_sentinel_raises_rather_than_forwarding_a_literal( self ):
+        # MARÍA'S SECOND POINT, and it is defect #2 under a new name: an unrecognised
+        # __…__ value falling through as a literal is exactly the prose-submitted-as-a-
+        # label failure the sentinels were introduced to kill.
+        # RED ON REVERT (raise removed): the call returns '__frist_option__' and
+        # assertRaises fails with "ValueError not raised".
+        for bad in ( "__frist_option__", "__FIRST_OPTION__", "__second_option__" ):
+            with self.subTest( bad=bad ):
+                with self.assertRaises( ValueError ) as caught:
+                    sentinels.resolve( bad, _card( "a.md" ) )
+                # The message must name the offending value AND the valid set, so the
+                # fix is obvious from the log line alone.
+                self.assertIn( bad, str( caught.exception ) )
+                self.assertIn( "__first_option__", str( caught.exception ) )
 
     def test_an_unresolvable_sentinel_returns_none_not_the_sentinel( self ):
         # THE IMPORTANT ONE. Returning the sentinel string would submit
