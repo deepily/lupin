@@ -125,12 +125,41 @@ class TestModeBranchNeverCallsTheRouter( _PushJobHarness ):
         self.assertEqual( handle.call_args[ 0 ][ 0 ], command )
 
     def test_every_mode_key_reaches_one_of_the_two_bypasses( self ):
-        """No mode key falls through to the router — checked over the real maps, not a mirror."""
+        """
+        No mode key falls through to the router — every key DRIVEN THROUGH push_job.
+
+        The first version of this test only asserted that set_user_mode accepted the
+        key, which is true whether or not push_job then consults the router — the exact
+        vacuous shape this file exists to replace. Pocholo caught it on review. Each key
+        now runs the real method and the assertion is the absence.
+        """
+        agent = Mock(); agent.id_hash = "ag"
         for mode in list( AGENTIC_MODE_MAP ) + list( MODE_TO_AGENT ):
             with self.subTest( mode=mode ):
                 self.queue.set_user_mode( "u1", mode )
                 self.assertIsNotNone( self.queue.get_user_mode( "u1" ),
                                       f"set_user_mode rejected {mode!r} — it is in a routing map" )
+                with patch.object( self.queue, "_get_routing_command" ) as router, \
+                     patch.object( self.queue, "_handle_agentic_command", return_value="ok" ), \
+                     patch.object( self.queue, "_confirm_agentic_routing", return_value=None ), \
+                     patch.object( tfq, "ReceptionistAgent", return_value=agent ), \
+                     patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), \
+                     patch( "builtins.print" ):
+                    # The conversational modes build a real agent from the registry;
+                    # stub whichever command this mode synthesises so nothing heavy runs.
+                    # "receptionist" is the one mode whose command resolve() returns None
+                    # for (it is CommandClass.NONE), so push_job builds the agent itself
+                    # from this module's namespace — hence the ReceptionistAgent patch
+                    # above. Without it this test opens a real outbound connection and
+                    # the unit tier's network guard fails the whole run.
+                    command = AGENTIC_MODE_MAP.get( mode ) or f"agent router go to {mode}"
+                    spec    = resolve( command )
+                    if spec is not None:
+                        with self._stub_registry_entry( command, agent ):
+                            self.queue.push_job( "do the thing", "ws1", "u1", "u@x.com" )
+                    else:
+                        self.queue.push_job( "do the thing", "ws1", "u1", "u@x.com" )
+                    router.assert_not_called()
 
 
 class TestAgenticEarlyReturn( _PushJobHarness ):
