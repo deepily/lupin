@@ -86,7 +86,9 @@ class BrokenReplaySnapshot( FakeSnapshot ):
 class FakeAgent:
     """Duck-typed AgentBase: do_all() sets answer_conversational and returns it."""
 
-    def __init__( self, answer: str="agent-raw", conversational: str="agent-pretty", boom: bool=False ) -> None:
+    def __init__( self, answer: str="agent-raw", conversational: str="agent-pretty", boom: bool=False,
+                  id_hash: str="job-1" ) -> None:
+        self.id_hash               = id_hash
         self.answer                = answer
         self.answer_conversational = None
         self._conversational       = conversational
@@ -97,6 +99,32 @@ class FakeAgent:
             raise RuntimeError( "agent boom" )
         self.answer_conversational = self._conversational
         return self._conversational
+
+
+class FakeTodoQueue:
+    """Duck-typed TodoFifoQueue: a user_job_tracker that scopes, and push().
+
+    It records the job's id_hash AS SEEN AT PUSH TIME, which is the only way to
+    tell scoping-before-push from scoping-after-push — both leave the same final
+    state on the job.
+    """
+
+    def __init__( self, boom: bool=False ) -> None:
+        self.scoped        = []                 # (base_hash, user_id, session_id)
+        self.pushed        = []                 # the job objects
+        self.id_hash_at_push = []               # what the id looked like when pushed
+        self._boom         = boom
+        self.user_job_tracker = self
+
+    def register_scoped_job( self, base_hash: str, user_id: str, session_id: str=None ) -> str:
+        self.scoped.append( ( base_hash, user_id, session_id ) )
+        return f"{base_hash}::{user_id}"
+
+    def push( self, job: object ) -> None:
+        if self._boom:
+            raise RuntimeError( "queue refused the push" )
+        self.id_hash_at_push.append( job.id_hash )
+        self.pushed.append( job )
 
 
 def _work( kind: str, job: object, snapshotable: bool=True ) -> Work:
@@ -225,7 +253,7 @@ class TestWorkAndOutcome:
 
     def test_executors_satisfy_protocol( self ) -> None:
         assert isinstance( InlineExecutor(), Executor )
-        assert isinstance( QueuedExecutor(), Executor )
+        assert isinstance( QueuedExecutor( FakeTodoQueue() ), Executor )
 
 
 # --------------------------------------------------------------------------- #
@@ -295,17 +323,87 @@ class TestInlineExecutor:
 # --------------------------------------------------------------------------- #
 class TestQueuedAndFactory:
 
-    def test_queued_stub_raises( self ) -> None:
+    def test_submit_scopes_pushes_and_answers_waiting( self ) -> None:
+        """
+        The whole step-2 contract in one run: the job is scoped for user
+        filtering, pushed onto the todo queue, and the answer is "waiting"
+        carrying the SCOPED id — never an answer, because nothing ran.
+
+        RED ON REVERT: return Outcome( status="done" ) and the status assertion
+        fails; drop the push and `pushed` is empty.
+        """
+        queue = FakeTodoQueue()
         trace = StageTrace( trace_dir="/tmp/unused" )
-        with pytest.raises( NotImplementedError, match="phase-2 stub" ):
-            QueuedExecutor().submit( _work( "agent", FakeAgent() ), trace )
+        agent = FakeAgent( id_hash="base-9" )
+
+        out = QueuedExecutor( queue ).submit( _work( "agent", agent ), trace )
+
+        assert out.status  == "waiting"
+        assert out.job_id  == "base-9::u-1"
+        assert out.answer  is None,     "a queued job has not run, so it has no answer to carry"
+        assert out.error   is None
+        assert queue.scoped == [ ( "base-9", "u-1", "s-1" ) ]
+        assert queue.pushed == [ agent ]
+
+    def test_the_job_is_scoped_before_it_is_pushed( self ) -> None:
+        """
+        v1's order, kept (`todo_fifo_queue.py:857-859`): scope, THEN push. A job
+        pushed first is visible to a user-filtering read for the window before
+        its id is scoped, and that read cannot tell whose job it is.
+
+        RED ON REVERT: swap the two lines in QueuedExecutor.submit — the final
+        state of the job is identical either way, so only this assertion, taken
+        at push time, can tell the two orders apart.
+        """
+        queue = FakeTodoQueue()
+        trace = StageTrace( trace_dir="/tmp/unused" )
+
+        QueuedExecutor( queue ).submit( _work( "agent", FakeAgent( id_hash="base-9" ) ), trace )
+
+        assert queue.id_hash_at_push == [ "base-9::u-1" ], (
+            "the job reached the queue carrying an UNSCOPED id — it was pushed before it was scoped"
+        )
+
+    def test_push_failure_is_captured_not_raised( self ) -> None:
+        """A queue that refuses is a failed outcome, same contract as InlineExecutor."""
+        trace = StageTrace( trace_dir="/tmp/unused" )
+        out   = QueuedExecutor( FakeTodoQueue( boom=True ) ).submit( _work( "agent", FakeAgent() ), trace )
+        assert out.status == "failed"
+        assert "queue refused the push" in out.error
+
+    @pytest.mark.parametrize( "kind", [ "agent", "replay", "receptionist" ] )
+    def test_every_kind_is_queued( self, kind: str ) -> None:
+        """No per-kind policy lives here: what the flow hands over gets queued.
+
+        InlineExecutor dispatches by kind because replay and agents run
+        differently. Queueing does not — the consumer already dispatches by
+        type, so a kind fork here would be a second place to disagree with it.
+        """
+        queue = FakeTodoQueue()
+        trace = StageTrace( trace_dir="/tmp/unused" )
+        out   = QueuedExecutor( queue ).submit( _work( kind, FakeAgent() ), trace )
+        assert out.status == "waiting"
+        assert len( queue.pushed ) == 1
 
     def test_make_executor_inline( self ) -> None:
         assert isinstance( make_executor( "inline" ), InlineExecutor )
         assert isinstance( make_executor(), InlineExecutor )        # default
 
     def test_make_executor_queued( self ) -> None:
-        assert isinstance( make_executor( "queued" ), QueuedExecutor )
+        queue    = FakeTodoQueue()
+        executor = make_executor( "queued", todo_queue=queue )
+        assert isinstance( executor, QueuedExecutor )
+        assert executor.todo_queue is queue
+
+    def test_make_executor_queued_without_a_queue_raises( self ) -> None:
+        """
+        Fail at construction, not on the live path. Today `get_ask_flow` calls
+        make_executor with the INI name alone, so flipping `v2 executor` to
+        "queued" before step 12 wires the queue in lifespan raises HERE, naming
+        the fix — rather than building an executor that dies on a user's question.
+        """
+        with pytest.raises( ValueError, match="needs the todo queue" ):
+            make_executor( "queued" )
 
     def test_make_executor_unknown_raises( self ) -> None:
         with pytest.raises( ValueError, match="Unknown v2 executor" ):

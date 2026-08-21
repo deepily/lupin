@@ -1052,3 +1052,100 @@ def test_degrade_with_no_primary_error_still_reports_the_fallback_error( tmp_pat
                        primary_error=None,
                        fallback_outcome=_outcome( status="failed", error="receptionist boom" ) )
     assert r[ "error" ] == "receptionist boom"
+
+
+# ──────────────────────────────────────────── steps 2+3 — the two "waiting" gates
+
+class TestWaitingIsSuccessInFlight:
+    """
+    A queued executor answers `waiting`: the work was handed off, not finished
+    and not failed. Exactly TWO status gates accept it — the replay branch in
+    `run()` and `_run_agent` — and the write-back guard deliberately does NOT.
+
+    One test per gate, each red when its OWN gate is narrowed back, plus the
+    third holding the guard that must not move. Written together because the
+    two gates ship in one commit: with only one widened, every queued job
+    reaches the user as the receptionist while the real agent runs behind it.
+    """
+
+    def test_gate_1_replay_waiting_is_not_a_replay_error( self, tmp_path, notifier ):
+        """
+        GATE 1 — `flow.py`'s replay branch.
+
+        RED ON REVERT: narrow that gate back to `outcome.status == "done"` and
+        this returns the receptionist with route_reason "replay_error" — a cache
+        hit apologising for a question the cache could already answer.
+        """
+        snap  = types.SimpleNamespace( routing_command="agent router go to math" )
+        cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+        exe   = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
+                                        job_id="base-9::u1" ) )
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), exe, FakePending(), notifier )
+
+        r = f.run( "what is 2+2", **_CTX )
+
+        assert r[ "path" ]         == "replay",     "a waiting replay degraded to the receptionist"
+        assert r[ "route_reason" ] == "exact_hit"
+        assert r[ "status" ]       == "waiting",    "the hand-off must reach the caller as waiting"
+        assert r[ "job_id" ]       == "base-9::u1", "the caller needs the id to follow the queued job"
+
+    def test_gate_2_agent_waiting_is_not_an_agent_error( self, tmp_path, notifier, monkeypatch ):
+        """
+        GATE 2 — `_run_agent`.
+
+        RED ON REVERT: narrow that gate back to `outcome.status != "done"` and
+        EVERY queued job degrades to the receptionist the moment it is handed
+        off, while the real agent still runs behind it.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command: FakeSpec( required_args=(), snapshotable=False ) )
+        exe = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
+                                      job_id="base-9::u1" ) )
+        f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe,
+                          FakePending(), notifier )
+
+        r = f.run( "what is 2+2", **_CTX )
+
+        assert r[ "path" ]         == "agent",      "a waiting agent degraded to the receptionist"
+        assert r[ "route_reason" ] == "args_none"
+        assert r[ "status" ]       == "waiting"
+        assert r[ "job_id" ]       == "base-9::u1"
+        assert len( exe.works )    == 1,            "the receptionist ran too — the gate did not hold"
+
+    def test_the_write_back_guard_still_refuses_waiting( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE GATE THAT MUST NOT MOVE — `_maybe_write_back`, still `"done"` alone.
+
+        A waiting job has not run, so it has no answer. Widening this one too
+        would write a cache row carrying None, which later replays to a user as
+        a real answer. The positive control below is what makes the refusal
+        meaningful: the same flow, same cache, same snapshotable spec, and only
+        the outcome status different, DOES write back.
+
+        RED ON REVERT: add "waiting" to the guard and the first half fails.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command: FakeSpec( required_args=(), snapshotable=True ) )
+
+        waiting_cache = FakeCache()
+        f_waiting = _make_flow( tmp_path, waiting_cache, FakeRouter(), FakeExpeditor(),
+                                FakeExecutor( _outcome( status="waiting", answer=None,
+                                                        answer_raw=None, job_id="base-9::u1" ) ),
+                                FakePending(), notifier, writeback_enabled=True )
+        r_waiting = f_waiting.run( "what is 2+2", **_CTX )
+
+        assert r_waiting[ "status" ] == "waiting"
+        assert waiting_cache.snapshot_calls   == [], "a job that never ran was turned into a snapshot"
+        assert waiting_cache.write_back_calls == [], "a job that never ran was written to the cache"
+        assert r_waiting[ "snapshot_id" ] is None
+
+        # Positive control — without it, a cache that simply never writes would
+        # make the assertions above pass while proving nothing.
+        done_cache = FakeCache()
+        f_done = _make_flow( tmp_path, done_cache, FakeRouter(), FakeExpeditor(),
+                             FakeExecutor( _outcome( status="done", answer="4", answer_raw="4" ) ),
+                             FakePending(), notifier, writeback_enabled=True )
+        r_done = f_done.run( "what is 2+2", **_CTX )
+
+        assert len( done_cache.write_back_calls ) == 1, "the control never wrote back — the refusal above proves nothing"
+        assert r_done[ "snapshot_id" ] == "snap-123"

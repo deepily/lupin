@@ -36,6 +36,15 @@ from lupin_cli.notifications.notify_user_async import notify_user_async
 from lupin_cli.notifications.notification_models import AsyncNotificationRequest
 
 
+# The two status gates below treat these as success. A queued executor answers
+# "waiting": the work was handed off, not finished and not failed.
+#
+# The write-back guard in _maybe_write_back is deliberately NOT one of them — it
+# stays on "done" alone. A waiting job has not run, so it has no answer, and a
+# cache row written from one would be an empty answer that later replays as real.
+SUCCESS_STATUSES = ( "done", "waiting" )
+
+
 class AskFlow:
     """Runs one v2 request through the four branches and returns a result dict.
 
@@ -97,7 +106,11 @@ class AskFlow:
         if lookup.is_replay_hit:
             work    = Work( "replay", lookup.snapshot, user_id, user_email, session_id, snapshotable=False )
             outcome = self.executor.submit( work, trace )
-            if outcome.status == "done":
+            # GATE 1 of 2. "waiting" means the queued executor handed the replay off —
+            # success in flight, not a failure. Narrow this back to `== "done"` and a
+            # cache hit routed through the queue reaches the user as the receptionist
+            # apologising for a question the cache could already answer.
+            if outcome.status in SUCCESS_STATUSES:
                 return self._finish( trace, "replay", "exact_hit", outcome, question, ctx,
                                      command=lookup.snapshot.routing_command, cache_hit=True )
             return self._receptionist( trace, question, ctx, "replay_error" )
@@ -280,7 +293,10 @@ class AskFlow:
         work           = Work( "agent", self._build_agent( spec.factory, agent_question, ctx ),
                                ctx[ 0 ], ctx[ 1 ], ctx[ 2 ], snapshotable=spec.snapshotable )
         outcome        = self.executor.submit( work, trace )
-        if outcome.status != "done":
+        # GATE 2 of 2. Same reason as gate 1, on the ordinary path: narrow this back
+        # to `!= "done"` and EVERY queued job degrades to the receptionist the moment
+        # it is handed off, while the real agent still runs behind it.
+        if outcome.status not in SUCCESS_STATUSES:
             return self._receptionist( trace, question, ctx, "agent_error", primary_error=outcome.error )
         return self._finish( trace, "agent", route_reason, outcome, question, ctx,
                              command=command, snapshotable=spec.snapshotable,
