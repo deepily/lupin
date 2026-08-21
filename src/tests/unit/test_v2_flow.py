@@ -18,6 +18,7 @@ import types
 import pytest
 
 from cosa.rest.v2 import flow as flow_mod
+from cosa.rest.v2 import registry as registry_mod
 from cosa.rest.v2.flow import AskFlow
 from cosa.rest.v2.pending import PendingRequests
 
@@ -46,13 +47,22 @@ class FakeReceptionist( FakeAgent ):
 
 
 class FakeSpec:
-    """Stand-in for registry.AgentSpec: the three attrs the flow reads."""
+    """Stand-in for registry.AgentSpec: the attrs the flow reads.
 
-    def __init__( self, required_args=(), factory=FakeAgent, snapshotable=True, label="math" ):
+    `crud_factory` is one of them since 6-pre — the flow reads it to decide whether
+    to read the cache at all. It defaults to None (a non-CRUD command) because that
+    is what every registry row but todo and calendar carries; a fake that omitted it
+    would raise AttributeError on a path production never fails on, since the real
+    AgentSpec always has the field.
+    """
+
+    def __init__( self, required_args=(), factory=FakeAgent, snapshotable=True, label="math",
+                  crud_factory=None ):
         self.required_args = required_args
         self.factory       = factory
         self.snapshotable  = snapshotable
         self.label         = label
+        self.crud_factory  = crud_factory
 
 
 def _lookup( is_replay_hit=False, snapshot=None, tier=1, similarity=0.0, best_score=0.0,
@@ -95,6 +105,9 @@ class FakeCache:
         self.gist_calls.append( question )
         return f"gist:{question}"
 
+    def normalize( self, question ):
+        return question.lower()
+
     def snapshot_from_result( self, **kwargs ):
         self.snapshot_calls.append( kwargs )
         return types.SimpleNamespace( tag="snap-object" )
@@ -112,6 +125,9 @@ class CacheNoWriteBack:
 
     def gist( self, question ):
         return f"gist:{question}"
+
+    def normalize( self, question ):
+        return question.lower()
 
 
 class FakeRouter:
@@ -1448,27 +1464,38 @@ class TestTheFlowAcksAQueuedJob:
         assert spoken == [ "4" ],                        "a finished job spoke something other than its answer"
         assert not any( "New " in line for line in spoken ), "a finished job was acked as if it had just been queued"
 
-    def test_a_queued_replay_is_acked_with_the_snapshots_own_command( self, tmp_path, notifier, monkeypatch ):
+    def test_a_queued_replay_is_acked_with_the_ROUTED_command( self, tmp_path, notifier, monkeypatch ):
         """
-        The replay branch queues too, and its label comes from the snapshot's own
-        routing_command — not from the router, which never ran on a cache hit.
+        The replay branch queues too, and since 6-pre its label comes from the
+        command the ROUTER chose — which now always ran, because routing happens
+        before the lookup.
 
-        RED ON REVERT: stop resolving the snapshot's command and the ack loses its
-        name, which `_spoken_line` reports as silence rather than a wrong name.
+        This test used to say the opposite ("its label comes from the snapshot's own
+        routing_command — not from the router, which never ran on a cache hit"). That
+        was true of the old order and is false of this one, so the premise is
+        rewritten rather than the assertion patched. The snapshot below carries a
+        DIFFERENT command from the routed one on purpose: reading the row's column
+        would name "todo list" here, and the row's column is the nullable,
+        blank-defaulted one this plan condemns.
+
+        RED ON REVERT: resolve the snapshot's command again and the ack says "New
+        todo list job..." instead.
         """
-        monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: FakeSpec( label="calendaring" )
-                             if command == "agent router go to calendar" else None )
-        snap  = types.SimpleNamespace( routing_command="agent router go to calendar" )
+        monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled:
+                             FakeSpec( label="calendaring" ) if command == "agent router go to calendar"
+                             else FakeSpec( label="todo list" ) )
+        snap  = types.SimpleNamespace( routing_command="agent router go to todo" )
         cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
         exe   = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
                                         job_id=_SCOPED_JOB_ID ) )
-        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), exe,
-                            FakePending(), notifier )
+        f     = _make_flow( tmp_path, cache, FakeRouter( "agent router go to calendar" ),
+                            FakeExpeditor(), exe, FakePending(), notifier )
 
         r = f.ask( "what is on my calendar", **_CTX, speak=True )
 
         assert self._spoken( notifier ) == [ "New calendaring job..." ]
         assert r[ "path" ] == "replay"
+        assert r[ "command" ] == "agent router go to calendar"
 
     def test_a_waiting_outcome_with_no_label_stays_silent( self, tmp_path, notifier, monkeypatch ):
         """
@@ -1678,3 +1705,574 @@ class TestAgentConstructionParity:
         """Without this, every assertion above would be vacuously true on an empty dict."""
         seen = self._built( tmp_path, notifier, monkeypatch )
         assert seen, "no agent was constructed"
+
+
+# ───────────────────────── the fitness gate at the flow head (Rick's ruling 1)
+
+class TestTheFlowRefusesAnUnfitQuestion:
+    """
+    v1 rejected empty / over-long / "invalid"-prefixed questions before anything
+    else touched them (`todo_fifo_queue._is_fit` and its reason ladder). The flow
+    had no gate at all, so after 6c an empty question would reach the router and
+    route somewhere.
+
+    The wording is v1's, kept verbatim: a user who hears a refusal today hears the
+    same one after the switch.
+    """
+
+    def _flow( self, tmp_path, notifier ):
+        return _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                           FakeExecutor( _outcome() ), FakePending(), notifier )
+
+    @pytest.mark.parametrize( "question,reason,route_reason", [
+        ( "",            "Question cannot be empty",                 "empty_question"    ),
+        ( "   ",         "Question cannot be empty",                 "empty_question"    ),
+        ( "x" * 1001,    "Question too long (max 1000 characters)",  "question_too_long" ),
+        ( "invalid stuff", "Question contains invalid content",      "invalid_content"   ),
+    ] )
+    def test_each_rule_refuses_in_v1s_words( self, tmp_path, notifier, question, reason, route_reason ):
+        """
+        RED ON REVERT: drop any rule from _unfit_reason and its row routes instead
+        of refusing; change any message and its row fails on the text.
+        """
+        r = self._flow( tmp_path, notifier ).ask( question, **_CTX )
+        assert r[ "status" ]       == "rejected"
+        assert r[ "route_reason" ] == route_reason
+        assert r[ "answer" ]       == reason
+
+    def test_the_gate_runs_BEFORE_the_router( self, tmp_path, notifier ):
+        """
+        The point of a gate at the HEAD. A router that never ran cannot have routed
+        an empty question anywhere.
+
+        RED ON REVERT: move the gate below the cache/router block and the router
+        records a call.
+        """
+        class _LoudRouter( FakeRouter ):
+            def __init__( self ):
+                super().__init__()
+                self.calls = 0
+
+            def route( self, question ):
+                self.calls += 1
+                return super().route( question )
+
+        router = _LoudRouter()
+        cache  = FakeCache()
+        f      = _make_flow( tmp_path, cache, router, FakeExpeditor(),
+                             FakeExecutor( _outcome() ), FakePending(), notifier )
+
+        f.ask( "", **_CTX )
+
+        assert router.calls == 0,        "the router saw an unfit question"
+        assert cache.gist_calls == [],   "the cache was consulted for a question that was refused"
+
+    def test_a_fit_question_is_not_refused( self, tmp_path, notifier, monkeypatch ):
+        """The control. Without it, a gate that refused EVERYTHING would pass above."""
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        r = self._flow( tmp_path, notifier ).ask( "what is 2+2", **_CTX )
+        assert r[ "status" ] != "rejected"
+
+    def test_exactly_1000_characters_is_fit( self, tmp_path, notifier, monkeypatch ):
+        """The boundary v1 drew: >1000 is refused, 1000 is not."""
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        r = self._flow( tmp_path, notifier ).ask( "x" * 1000, **_CTX )
+        assert r[ "status" ] != "rejected"
+
+
+# ───────────────────────── the query log gets written again (Rick's ruling 19)
+
+class FakeQueryLog:
+    def __init__( self ):
+        self.rows = []
+
+    def log_query( self, **kwargs ):
+        self.rows.append( kwargs )
+        return "qid-1"
+
+
+class TestTheFlowWritesTheQueryLog:
+    """
+    v1 wrote the query log from five places inside push_job. v2 wrote it from
+    none, so once 6c lands the table simply stops growing for voice traffic and
+    nothing raises about it — the failure this closes.
+
+    ONE call site, at the terminal chokepoint every exit funnels through.
+    """
+
+    def _run( self, tmp_path, notifier, monkeypatch, question="hey what is 2+2", **flow_kw ):
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        log = FakeQueryLog()
+        f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                          FakeExecutor( _outcome() ), FakePending(), notifier, **flow_kw )
+        f.query_log = log
+        r = f.ask( question, **_CTX )
+        return log, r
+
+    def test_an_answered_question_is_logged( self, tmp_path, notifier, monkeypatch ):
+        """
+        RED ON REVERT: delete the _log_query call from _emit and nothing is written.
+        """
+        log, _r = self._run( tmp_path, notifier, monkeypatch )
+
+        assert len( log.rows ) == 1, "the query log was not written exactly once"
+        row = log.rows[ 0 ]
+        assert row[ "query_verbatim" ]   == "hey what is 2+2",  "the log must keep what the user actually said"
+        assert row[ "query_gist" ]       == "gist:what is 2+2", "the gist is computed on the STRIPPED question"
+        assert row[ "user_id" ]          == _CTX[ "user_id" ]
+        assert row[ "session_id" ]       == _CTX[ "websocket_id" ]
+        assert row[ "match_result" ][ "type" ] == "no_match_new_agent"
+
+    def test_a_refused_question_is_logged_too( self, tmp_path, notifier, monkeypatch ):
+        """
+        v1's five call sites missed paths; one chokepoint does not. A refusal is
+        exactly the traffic an analytics table wants and the easiest to lose.
+        """
+        log, r = self._run( tmp_path, notifier, monkeypatch, question="invalid thing" )
+        assert r[ "status" ]     == "rejected"
+        assert len( log.rows )   == 1
+        assert log.rows[ 0 ][ "query_verbatim" ] == "invalid thing"
+
+    def test_a_cache_hit_is_logged_as_an_exact_match( self, tmp_path, notifier, monkeypatch ):
+        """The match_result v1 wrote on its replay path, carried over."""
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( label="math" ) )
+        snap  = types.SimpleNamespace( routing_command="agent router go to math" )
+        cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap, similarity=100.0 ) )
+        log   = FakeQueryLog()
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( _outcome( status="done", answer="4", answer_raw="4" ) ),
+                            FakePending(), notifier )
+        f.query_log = log
+
+        f.ask( "what is 2+2", **_CTX )
+
+        assert log.rows[ 0 ][ "match_result" ][ "type" ]       == "exact_match"
+        assert log.rows[ 0 ][ "match_result" ][ "confidence" ] == 100.0
+
+    def test_a_logging_failure_never_breaks_the_request( self, tmp_path, notifier, monkeypatch ):
+        """
+        v1 swallowed a log failure with a debug print, and so does this. A user's
+        question must not 500 because an analytics row could not be written.
+
+        RED ON REVERT: remove the try/except and this raises instead of answering.
+        """
+        class _BrokenLog:
+            def log_query( self, **kwargs ):
+                raise RuntimeError( "the log table is down" )
+
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                        FakeExecutor( _outcome() ), FakePending(), notifier )
+        f.query_log = _BrokenLog()
+
+        r = f.ask( "what is 2+2", **_CTX )     # must not raise
+
+        assert r[ "status" ] == "done"
+
+    def test_no_log_configured_is_not_an_error( self, tmp_path, notifier, monkeypatch ):
+        """Every test double runs without one; that must stay a no-op, not a crash."""
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                        FakeExecutor( _outcome() ), FakePending(), notifier )
+        assert f.query_log is None
+        assert f.ask( "what is 2+2", **_CTX )[ "status" ] == "done"
+
+
+class TestEveryEntryPointLogsItsQuestion:
+    """
+    Pocholo on 58f73b32: only `ask` stamped the question on the trace, so the
+    query log wrote a BLANK question for every submit and every resumed turn —
+    where v1 logged it on all three paths. The rows were being written; they were
+    being written empty, which is worse than not writing them, because the table
+    looks populated.
+
+    The gap survived my own tests because none of them asserted the logged
+    question on a submit- or resume-shaped row. One per path, here.
+    """
+
+    def _log_on( self, flow ):
+        log = FakeQueryLog()
+        flow.query_log = log
+        return log
+
+    def test_submit_logs_the_question_the_caller_supplied( self, tmp_path, notifier, monkeypatch ):
+        """
+        RED ON REVERT: drop `question=` from submit's trace.update and the logged
+        question is "".
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                          FakeExecutor( _outcome() ), FakePending(), notifier )
+        log = self._log_on( f )
+
+        f.submit( command="agent router go to math", args={}, question="what is 2+2", **_CTX )
+
+        assert log.rows, "the submit path logged nothing at all"
+        assert log.rows[ -1 ][ "query_verbatim" ] == "what is 2+2"
+
+    def test_a_question_less_submit_logs_the_command_it_named( self, tmp_path, notifier, monkeypatch ):
+        """
+        An internal caller submits a command with no prose. Logging "" there would
+        make the row unattributable; the command is the only true thing available,
+        and it is what `_run_agent` already files the row under.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                          FakeExecutor( _outcome() ), FakePending(), notifier )
+        log = self._log_on( f )
+
+        f.submit( command="agent router go to math", args={}, **_CTX )
+
+        assert log.rows[ -1 ][ "query_verbatim" ] == "agent router go to math"
+
+    def test_resume_logs_the_original_question( self, tmp_path, notifier, monkeypatch ):
+        """
+        The resumed turn belongs to the question that started the interview, not to
+        the one-word answer that finished it.
+
+        RED ON REVERT: drop the trace.update in resume and the logged question is "".
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=( "location", ), snapshotable=False ) )
+        pending    = PendingRequests()
+        expeditor  = FakeExpeditor( _extraction( final_args={ "location": "Boston" }, missing=[] ) )
+        f          = _make_flow( tmp_path, FakeCache(), FakeRouter(), expeditor,
+                                 FakeExecutor( _outcome() ), pending, notifier )
+        pending_id = pending.put( extraction=_extraction( final_args={}, missing=[ "location" ] ),
+                                  user_email=_CTX[ "user_email" ], session_id=_CTX[ "session_id" ],
+                                  user_id=_CTX[ "user_id" ], command="agent router go to weather",
+                                  question="what is the weather" )
+        log = self._log_on( f )
+
+        f.resume( pending_id=pending_id, answer="Boston", websocket_id=_CTX[ "websocket_id" ] )
+
+        assert log.rows, "the resume path logged nothing at all"
+        assert log.rows[ -1 ][ "query_verbatim" ] == "what is the weather", (
+            "a resumed turn logged the ANSWER, or nothing, instead of the question it belongs to"
+        )
+
+
+# ────────────────────────────────────────── 6-pre — route first, then the cache
+
+class SpyCache( FakeCache ):
+    """A FakeCache that records every lookup, so "never read" is provable.
+
+    Asserting the RESULT is not enough for the CRUD skip: a flow that reads the
+    cache and then throws the hit away would look identical from the outside on a
+    miss. The count is what distinguishes "did not read" from "read and ignored".
+    """
+
+    def __init__( self, **kwargs ):
+        super().__init__( **kwargs )
+        self.lookup_calls = []
+
+    def lookup( self, question ):
+        self.lookup_calls.append( question )
+        return self._lookup
+
+
+def _registry_with_fake_agent_class( monkeypatch ):
+    """Run the flow against the REAL registry, swapping only the agent CLASS.
+
+    The CRUD skip is derived from the registry — the row's `crud_factory` under the
+    live flag — so a FakeSpec here would bracket the seam instead of crossing it:
+    the test would prove the flow honours a fake attribute, not that the real todo
+    row forks. What this does replace is `factory`, which is what the flow
+    CONSTRUCTS after the decision has already been made; building a real
+    TodoCrudAgent would want config and a dataframe, and it sits downstream of
+    everything under test here.
+    """
+    from dataclasses import replace as dataclass_replace
+
+    real_resolve = registry_mod.resolve
+
+    def _resolve_with_fake_factory( command, crud_enabled ):
+        spec = real_resolve( command, crud_enabled )
+        return None if spec is None else dataclass_replace( spec, factory=FakeAgent )
+
+    monkeypatch.setattr( flow_mod, "resolve", _resolve_with_fake_factory )
+
+
+def test_a_crud_command_never_reads_the_cache( tmp_path, notifier, monkeypatch ):
+    """
+    Rick's ruling (2026-08-20): route first, then look up — so the flow can apply
+    the skip running_fifo_queue already applies. CRUD data is mutable; a cached
+    answer about it is a stale answer.
+
+    RED ON REVERT: delete the `crud_factory` branch and the todo question reads the
+    cache, hits the planted replay row, and comes back path="replay".
+    """
+    _registry_with_fake_agent_class( monkeypatch )
+    planted = types.SimpleNamespace( routing_command="agent router go to todo" )
+    cache   = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=planted ) )
+    f       = _make_flow( tmp_path, cache, FakeRouter( "agent router go to todo" ), FakeExpeditor(),
+                          FakeExecutor(), FakePending(), notifier, crud_enabled=True )
+
+    r = f.ask( "put milk on my todo list", **_CTX )
+
+    assert cache.lookup_calls == [], "a CRUD command read the cache"
+    assert r[ "path" ] == "agent", "a CRUD command replayed a cached answer"
+    assert r[ "cache_hit" ] is False
+
+
+def test_a_non_crud_command_still_reads_the_cache_with_the_flag_on( tmp_path, notifier ):
+    """
+    NEGATIVE CONTROL for the skip: the flag alone must not turn the cache off.
+
+    Same flow, same live flag, one different routed command — math has no
+    crud_factory, so it reads and replays as before.
+    """
+    planted = types.SimpleNamespace( routing_command="agent router go to math" )
+    cache   = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=planted ) )
+    f       = _make_flow( tmp_path, cache, FakeRouter( "agent router go to math" ), FakeExpeditor(),
+                          FakeExecutor(), FakePending(), notifier, crud_enabled=True )
+
+    r = f.ask( "what is 2+2", **_CTX )
+
+    assert cache.lookup_calls == [ "what is 2+2" ]
+    assert r[ "path" ] == "replay"
+
+
+def test_the_todo_command_reads_the_cache_when_the_crud_flag_is_off( tmp_path, notifier ):
+    """
+    SECOND NEGATIVE CONTROL, driving the other axis: todo is not permanently
+    excluded, it is excluded WHILE FORKED. With the flag off it resolves to the
+    ordinary TodoListAgent, whose answers are snapshotable, and the cache is read.
+
+    Together with the test above, the pair fails if either half of the condition is
+    dropped — a skip on the flag alone, or a skip on the command alone.
+    """
+    planted = types.SimpleNamespace( routing_command="agent router go to todo" )
+    cache   = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=planted ) )
+    f       = _make_flow( tmp_path, cache, FakeRouter( "agent router go to todo" ), FakeExpeditor(),
+                          FakeExecutor(), FakePending(), notifier, crud_enabled=False )
+
+    r = f.ask( "what is on my todo list", **_CTX )
+
+    assert cache.lookup_calls == [ "what is on my todo list" ]
+    assert r[ "path" ] == "replay"
+
+
+def test_a_router_error_precedes_any_cache_hit( tmp_path, notifier ):
+    """
+    Ruled with the reorder: no cache fallback underneath a broken router. A router
+    that cannot name the command has told us nothing about the question, so the
+    flow bails to the receptionist rather than serving a row it cannot vouch for.
+
+    RED ON REVERT: put the lookup back above the router and the planted replay row
+    is served, path="replay", before the router ever says "unknown".
+    """
+    planted = types.SimpleNamespace( routing_command="agent router go to math" )
+    cache   = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=planted ) )
+    f       = _make_flow( tmp_path, cache, FakeRouter( "unknown" ), FakeExpeditor(),
+                          FakeExecutor(), FakePending(), notifier )
+
+    r = f.ask( "what is 2+2", **_CTX )
+
+    assert cache.lookup_calls == [], "the cache was read underneath a failed router"
+    assert r[ "path" ] == "receptionist"
+    assert r[ "route_reason" ] == "router_error"
+
+
+def test_replay_reports_the_routed_command_not_the_snapshots_blank_column( tmp_path, notifier ):
+    """
+    The matched row's `routing_command` is nullable, blank-defaulted in the
+    SolutionSnapshot constructor and `or ""`-coerced on write, so it reported an
+    EMPTY command for any row whose provenance was unknown — and the label went out
+    as None with it. Route-first means a real command exists by the time a replay is
+    decided, so that is what `_finish` is given.
+
+    RED ON REVERT: read `lookup.snapshot.routing_command` again and this row, whose
+    column is blank, reports command="" and no label.
+    """
+    blank = types.SimpleNamespace( routing_command="" )
+    cache = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=blank ) )
+    f     = _make_flow( tmp_path, cache, FakeRouter( "agent router go to math" ), FakeExpeditor(),
+                        FakeExecutor( _outcome( status="waiting", answer=None, job_id=_SCOPED_JOB_ID ) ),
+                        FakePending(), notifier, crud_enabled=False )
+
+    r = f.ask( "what is 2+2", **_CTX )
+
+    assert r[ "path" ] == "replay"
+    assert r[ "command" ] == "agent router go to math", "the replay reported the row's blank column"
+    # The label rides the same fix: a waiting hand-off speaks v1's ack, and the ack
+    # names the agent. Resolved off the blank column there is no label and the user
+    # hears nothing at all.
+    assert notifier.requests, "a waiting replay spoke no acknowledgment"
+    assert "todo" not in notifier.requests[ -1 ].message
+    assert "math" in notifier.requests[ -1 ].message
+
+
+# ─────────────────────── the log says whose words the verbatim is
+
+class TestTheQueryLogSaysWhoseWordsItLogged:
+    """
+    The question-less submit above files the COMMAND STRING under `query_verbatim`,
+    which is the only true thing available — but it went into the log typed "api",
+    the same value a question a person typed carries. Two rows, identical on every
+    field, one of them a routing command and the other somebody's words. Nothing
+    downstream could separate them, and a reader counting user questions would count
+    both (Pocholo, reviewing the query-log commit).
+
+    `input_type` is free text with no constraint, so the mark needs no migration.
+    """
+
+    def _log_on( self, flow ):
+        log = FakeQueryLog()
+        flow.query_log = log
+        return log
+
+    def _flow( self, tmp_path, notifier, monkeypatch ):
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        return _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                           FakeExecutor( _outcome() ), FakePending(), notifier )
+
+    def test_a_command_fallback_row_differs_from_a_typed_question_row( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE WHOLE FINDING IN ONE TEST: the same flow, two submits, and the rows must
+        not be interchangeable.
+
+        RED ON REVERT: hard-code input_type back to "api" and the two rows match on
+        it, which is the defect — a command string reading as a thing somebody said.
+        """
+        f   = self._flow( tmp_path, notifier, monkeypatch )
+        log = self._log_on( f )
+
+        f.submit( command="agent router go to math", args={}, question="what is 2+2", **_CTX )
+        f.submit( command="agent router go to math", args={}, **_CTX )
+
+        typed, fallback = log.rows[ -2 ], log.rows[ -1 ]
+        assert typed[ "query_verbatim" ] == "what is 2+2"
+        assert fallback[ "query_verbatim" ] == "agent router go to math"
+        assert typed[ "input_type" ] != fallback[ "input_type" ], (
+            "a routing command was logged as indistinguishable from a user's words"
+        )
+        assert typed[ "input_type" ]    == "api"
+        assert fallback[ "input_type" ] == "api-command"
+
+    def test_a_prebuilt_job_submit_is_marked_too( self, tmp_path, notifier, monkeypatch ):
+        """
+        The second shape of the same hole. An in-process caller hands over a job it
+        built and names no question at all, so the verbatim is "" — and an EMPTY
+        question is something a user can genuinely send (the fitness gate rejects it,
+        and that refusal is logged). Blank-and-"api" therefore had two meanings.
+
+        RED ON REVERT: mark only the command case and this row types "api" again,
+        landing back in the same bucket as a rejected empty question.
+        """
+        f   = self._flow( tmp_path, notifier, monkeypatch )
+        log = self._log_on( f )
+
+        f.submit( job=FakeAgent( routing_command="agent router go to math" ), **_CTX )
+
+        assert log.rows[ -1 ][ "query_verbatim" ] == ""
+        assert log.rows[ -1 ][ "input_type" ]     == "api-job"
+
+    def test_ask_is_untouched_and_still_types_api( self, tmp_path, notifier, monkeypatch ):
+        """
+        NEGATIVE CONTROL. The mark keys on a missing question, not on the entry
+        point: everything that comes in through `ask` is a person's words and keeps
+        v1's value.
+
+        RED ON REVERT: key the mark on `entry` instead and an ordinary spoken
+        question starts reporting a source it does not have.
+        """
+        f   = self._flow( tmp_path, notifier, monkeypatch )
+        log = self._log_on( f )
+
+        f.ask( "what is 2+2", **_CTX )
+
+        assert log.rows[ -1 ][ "input_type" ] == "api"
+
+    def test_an_empty_question_rejection_still_types_api( self, tmp_path, notifier, monkeypatch ):
+        """
+        The row the "api-job" mark exists to be separable FROM: a user really did
+        send nothing, the fitness gate refused it, and that is a user row with a
+        blank verbatim.
+        """
+        f   = self._flow( tmp_path, notifier, monkeypatch )
+        log = self._log_on( f )
+
+        r = f.ask( "   ", **_CTX )
+
+        assert r[ "status" ] == "rejected"
+        assert log.rows[ -1 ][ "input_type" ] == "api"
+
+
+class TestAnEmptyQuestionIsNoQuestion:
+    """
+    The door's `question` field has no min_length, so "" is a legal thing to send —
+    and `question or command` has always treated it as absent, filing the COMMAND
+    under query_verbatim. Both guards downstream tested for None, so an ""-submit
+    was typed "api" like a person's words, and wrote a cache row keyed on a routing
+    command that `ask` can never match (Pocholo). Nothing covered the empty string.
+    """
+
+    def _log_on( self, flow ):
+        log = FakeQueryLog()
+        flow.query_log = log
+        return log
+
+    def test_an_empty_question_submit_is_marked_as_the_command_it_named( self, tmp_path, notifier, monkeypatch ):
+        """
+        RED ON REVERT: restore `if question is None:` and this row types "api" —
+        indistinguishable from a question somebody typed.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=True ) )
+        f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                          FakeExecutor( _outcome() ), FakePending(), notifier )
+        log = self._log_on( f )
+
+        f.submit( command="agent router go to math", args={}, question="", **_CTX )
+
+        assert log.rows[ -1 ][ "query_verbatim" ] == "agent router go to math"
+        assert log.rows[ -1 ][ "input_type" ]     == "api-command"
+
+    def test_an_empty_question_submit_writes_no_cache_row( self, tmp_path, notifier, monkeypatch ):
+        """
+        The row would be filed under the command string, and `ask` looks rows up by
+        the user's words — nobody says "agent router go to math". A row that can
+        never be hit is landfill that still costs a read on every lookup.
+
+        RED ON REVERT: restore `question is not None` and the write-back fires, with
+        the registry saying snapshotable=True.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=True ) )
+        cache = FakeCache()
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( _outcome() ), FakePending(), notifier,
+                            writeback_enabled=True )
+
+        f.submit( command="agent router go to math", args={}, question="", **_CTX )
+
+        assert cache.write_back_calls == [], "an empty-question submit wrote a cache row keyed on the command"
+
+    def test_a_real_question_submit_still_writes_and_still_types_api( self, tmp_path, notifier, monkeypatch ):
+        """
+        NEGATIVE CONTROL on both lines at once: widen either guard past "no question"
+        — to `not question.strip()`, say, or to the entry point — and a genuine
+        submitted question stops being cached and starts being marked.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=True ) )
+        cache = FakeCache()
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( _outcome() ), FakePending(), notifier,
+                            writeback_enabled=True )
+        log   = self._log_on( f )
+
+        f.submit( command="agent router go to math", args={}, question="what is 2+2", **_CTX )
+
+        assert cache.write_back_calls, "a genuine submitted question was not cached"
+        assert log.rows[ -1 ][ "input_type" ] == "api"

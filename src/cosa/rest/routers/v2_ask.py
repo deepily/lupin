@@ -147,6 +147,7 @@ def build_ask_flow( config_mgr: Any, todo_queue: Any=None ) -> tuple:
     """
     # Lazy — heavy singletons (embedding provider, LLM factory) build only here.
     from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
+    from cosa.memory.query_log_table import QueryLogTable
     from cosa.rest.v2.cache          import V2Cache
     from cosa.rest.v2.executor       import make_executor
     from cosa.rest.v2.flow           import AskFlow
@@ -174,6 +175,7 @@ def build_ask_flow( config_mgr: Any, todo_queue: Any=None ) -> tuple:
         executor          = make_executor( executor_name, todo_queue=todo_queue ),
         pending           = PendingRequests(),
         crud_enabled      = crud_enabled,
+        query_log         = QueryLogTable(),
         auto_debug        = auto_debug,
         inject_bugs       = inject_bugs,
         similarity_floor  = similarity_floor,

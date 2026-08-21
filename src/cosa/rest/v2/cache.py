@@ -156,6 +156,15 @@ class V2Cache( TwoTierQuestionSearch ):
             session_id=session_id,
         )
 
+    def normalize( self, question: str ) -> str:
+        """
+        The normalized form of a question, from the SAME normalizer the store is
+        keyed by — the companion to gist(), and for the same reason: the query log
+        records this field, and a second normalizer would write a form that no
+        lookup would ever match.
+        """
+        return self._normalizer.normalize( question )
+
     def gist( self, question: str ) -> str:
         """
         The normalized gist of a question, from the SAME normalizer the store is

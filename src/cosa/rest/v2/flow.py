@@ -52,6 +52,16 @@ SUCCESS_STATUSES = ( "done", "waiting" )
 # job finished.
 STARTING_A_NEW_JOB = "New {agent_type} job..."
 
+# The fitness gate, ported from the queue (`todo_fifo_queue._is_fit` at :364-370 and
+# the reason ladder at :434-443). Rick's ruling 1: the gate moves to the flow head
+# with the SAME rejection messages, and the API's 4000-char Field cap stays as the
+# outer cap — this is the inner one, and it is the one the user hears about.
+MAX_QUESTION_CHARS = 1000
+
+REJECTION_EMPTY    = "Question cannot be empty"
+REJECTION_TOO_LONG = "Question too long (max 1000 characters)"
+REJECTION_INVALID  = "Question contains invalid content"
+
 
 class AskFlow:
     """Runs one v2 request through the four branches and returns a result dict.
@@ -75,6 +85,7 @@ class AskFlow:
     def __init__(
         self, cache: Any, router: Any, expeditor: Any, executor: Any, pending: Any, *,
         crud_enabled      : bool,
+        query_log         : Any                      = None,
         auto_debug        : bool                     = False,
         inject_bugs       : bool                     = False,
         similarity_floor  : float                    = 100.0,
@@ -98,6 +109,9 @@ class AskFlow:
         self.crud_enabled         = crud_enabled
         # The same two INI keys the queue reads (`debug auto`, `debug inject bugs`),
         # so an agent built here gets the flags it would have got via push_job.
+        # None means "do not log" — the default for every test double. Production
+        # wires the real QueryLogTable in get_ask_flow.
+        self.query_log            = query_log
         self.auto_debug           = auto_debug
         self.inject_bugs          = inject_bugs
         self.similarity_floor     = similarity_floor
@@ -125,27 +139,29 @@ class AskFlow:
         """
         trace = StageTrace( trace_dir=self.trace_dir )
         trace.mark( "t_recv" )
-        trace.update( decision_floor=self.similarity_floor, speak=speak, interactive=interactive )
+        trace.update( decision_floor=self.similarity_floor, speak=speak, interactive=interactive,
+                      question=question )
         ctx = ( user_id, user_email, session_id, websocket_id, speak )
 
-        # 1 — cache: replay only on a tier-1 exact hit (R-C1); below perfect, route.
-        lookup = self.cache.lookup( question )
-        self._record_lookup( trace, lookup )
-        if lookup.is_replay_hit:
-            work    = Work( "replay", lookup.snapshot, user_id, user_email, session_id, snapshotable=False )
-            outcome = self.executor.submit( work, trace )
-            # GATE 1 of 2. "waiting" means the queued executor handed the replay off —
-            # success in flight, not a failure. Narrow this back to `== "done"` and a
-            # cache hit routed through the queue reaches the user as the receptionist
-            # apologising for a question the cache could already answer.
-            if outcome.status in SUCCESS_STATUSES:
-                replay_spec = resolve( lookup.snapshot.routing_command, self.crud_enabled )
-                return self._finish( trace, "replay", "exact_hit", outcome, question, ctx,
-                                     command=lookup.snapshot.routing_command, cache_hit=True,
-                                     agent_label=replay_spec.label if replay_spec else None )
-            return self._receptionist( trace, question, ctx, "replay_error" )
+        # 0 — the fitness gate, before the cache, the router or the expeditor sees it.
+        # v1 rejected here and so does the flow; without it, 6c would put an unfiltered
+        # question in front of the router and an empty one would route somewhere.
+        rejection = self._unfit_reason( question )
+        if rejection is not None:
+            reason, route_reason = rejection
+            trace.set( "rejected", route_reason )
+            self._speak( trace, reason, None, ctx )
+            return self._emit( trace, path="rejected", status="rejected", route_reason=route_reason,
+                               answer=reason, answer_raw=None, command=None, ctx=ctx )
 
-        # 2 — router.
+        # 1 — router, BEFORE the cache. Rick ruled the order on 2026-08-20: route first,
+        # then look up. With the lookup first the flow held no command at lookup time, so
+        # it structurally could not do what the queue does — running_fifo_queue skips the
+        # cache for CRUD commands because the data behind them is mutable. Routing costs
+        # ~22ms on a path whose cheapest observed end-to-end is over 3 seconds.
+        #
+        # A router_error now precedes any cache hit, on purpose: fail loud and bail, with
+        # no cache fallback underneath a broken router.
         trace.mark( "t_router" )
         command, raw_args = self.router.route( question )
         trace.update( command=command, raw_args=raw_args )
@@ -155,6 +171,39 @@ class AskFlow:
         spec = resolve( command, self.crud_enabled )
         if spec is None:
             return self._receptionist( trace, question, ctx, "unknown_command" )
+
+        # 2 — cache: replay only on a tier-1 exact hit (R-C1); below perfect, run the agent.
+        #
+        # A CRUD command does not read the cache at all. The condition is DERIVED FROM THE
+        # REGISTRY — a crud_factory under the live flag — not a hardcoded "todo or
+        # calendar", so a seventh CRUD command later is one AgentSpec row and no edit here.
+        #
+        # Dormant today (tier 1 needs an exact string match) and live the moment 6a lands,
+        # because gist matching is loose about wording by design: "put milk on my todo list"
+        # would gist-match an earlier "what is on my todo list", the read replays, the
+        # write never runs, and nothing errors.
+        if self.crud_enabled and spec.crud_factory is not None:
+            trace.set( "cache_skipped_crud", True )
+        else:
+            lookup = self.cache.lookup( question )
+            self._record_lookup( trace, lookup )
+            if lookup.is_replay_hit:
+                work    = Work( "replay", lookup.snapshot, user_id, user_email, session_id, snapshotable=False )
+                outcome = self.executor.submit( work, trace )
+                # GATE 1 of 2. "waiting" means the queued executor handed the replay off —
+                # success in flight, not a failure. Narrow this back to `== "done"` and a
+                # cache hit routed through the queue reaches the user as the receptionist
+                # apologising for a question the cache could already answer.
+                if outcome.status in SUCCESS_STATUSES:
+                    # Report the command the ROUTER just chose, not the matched row's
+                    # `routing_command`. That column is nullable (vector_store_models.py),
+                    # blank-defaulted in the SolutionSnapshot constructor and `or ""`-coerced
+                    # on write, so it reported an empty string for any row whose provenance
+                    # was unknown. Route-first means a real command always exists here.
+                    return self._finish( trace, "replay", "exact_hit", outcome, question, ctx,
+                                         command=command, cache_hit=True,
+                                         agent_label=spec.label )
+                return self._receptionist( trace, question, ctx, "replay_error" )
 
         # 3 — arguments.
         if not spec.required_args:
@@ -231,7 +280,23 @@ class AskFlow:
 
         trace = StageTrace( trace_dir=self.trace_dir )
         trace.mark( "t_recv" )
-        trace.update( decision_floor=self.similarity_floor, speak=speak, interactive=False, entry="submit" )
+        trace.update( decision_floor=self.similarity_floor, speak=speak, interactive=False, entry="submit",
+                      question=question or command or "" )
+        # WHOSE WORDS THE QUERY LOG IS ABOUT TO REPORT. A `submit` caller often has no
+        # question at all: the HTTP door names a command, and an in-process caller hands
+        # over a job it built. The line above then files the command string — or an empty
+        # string — under `query_verbatim`, and every such row went into the log typed
+        # "api", exactly like a question a person typed. Nothing downstream could tell
+        # them apart, so a routing command read as a thing somebody said (Pocholo, on the
+        # query-log commit). `input_type` is free text with no constraint, so marking it
+        # needs no migration.
+        # NOT `is None`. The door's `question` field has no min_length, so "" arrives
+        # as a legal value — and `question or command` above already treats it as no
+        # question, filing the command string under query_verbatim. Testing for None
+        # here would type that row "api" while the row it logs is a routing command
+        # (Pocholo, on the mark itself).
+        if not question:
+            trace.set( "verbatim_source", "command" if command is not None else "job" )
         ctx = ( user_id, user_email, session_id, websocket_id, speak )
 
         # A job handed over whole: the caller built it, so there is nothing to resolve.
@@ -255,7 +320,7 @@ class AskFlow:
         # A row that can never be hit is not a cache entry, it is landfill — and it
         # still costs a read on every lookup. (Pocholo, reviewing step 10.)
         return self._run_agent( trace, spec, command, question or command, final_args, ctx,
-                                "submitted", snapshotable=spec.snapshotable and question is not None )
+                                "submitted", snapshotable=spec.snapshotable and bool( question ) )
 
     def _submit_prebuilt( self, trace: StageTrace, job: Any, question: str, ctx: tuple ) -> dict:
         """Run a job the caller already built. No registry lookup, no argument work.
@@ -337,6 +402,11 @@ class AskFlow:
                                pending_id=pending_id )
 
         ctx = ( entry.user_id, entry.user_email, entry.session_id, websocket_id, speak )
+        # The question lives on the pending entry, so this is the FIRST point in resume
+        # where there is one to stamp. Without it the query log writes a blank question
+        # for every resumed turn (Pocholo, on 58f73b32) — v1 logged it on this path too.
+        # The expired-refusal exit above is the one case with genuinely nothing to name.
+        trace.update( question=entry.question )
 
         # Claim the whole TURN atomically. Everything below is a read-modify-write on
         # the entry's extraction, and it must have exactly one owner.
@@ -393,6 +463,82 @@ class AskFlow:
         return result
 
     # ---------------------------------------------------------------- helpers
+    @staticmethod
+    def _unfit_reason( question: str ):
+        """
+        Why this question is refused, or None if it is fit to process.
+
+        The three rules and their wording are v1's, kept verbatim so a user who
+        hears a refusal today hears the same one after the switch. Returns the
+        spoken reason AND a route_reason, so the trace records WHICH rule fired
+        rather than a single flat "rejected".
+        """
+        if not question or not question.strip():
+            return ( REJECTION_EMPTY, "empty_question" )
+        if len( question ) > MAX_QUESTION_CHARS:
+            return ( REJECTION_TOO_LONG, "question_too_long" )
+        if question.lower().startswith( "invalid" ):
+            return ( REJECTION_INVALID, "invalid_content" )
+        return None
+
+    def _log_query( self, trace: StageTrace, ctx: tuple, snapshot_id, cache_hit: bool ) -> None:
+        """
+        Write this request to the query log — v1's `_log_query_with_results`, which
+        had five call sites in push_job and no v2 equivalent at all.
+
+        Rick's ruling 19: the flow writes it. Without this the query log stops being
+        written for voice traffic the moment 6c lands, and nothing would say so — the
+        table would simply stop growing.
+
+        ONE call site, at the terminal chokepoint, where v1 had five. Every exit
+        funnels through _emit, so a refusal, a needs-input park and an answered
+        question are all logged, which v1's five scattered calls did not manage.
+
+        A logging failure NEVER breaks a request: v1 swallowed with a debug print and
+        so does this. A user's question must not 500 because an analytics row could
+        not be written.
+
+        TWO FIELDS ARE DELIBERATELY ABSENT, and both are recorded here rather than
+        filled with something that would read as fact:
+
+          · `embeddings` — CacheLookup does not return the vectors, and v2 skips
+            embedding entirely on a tier-1 exact hit. Generating them to log them
+            would re-add the exact cost v2 exists to avoid.
+          · `cache_hits` — v1's two flags mean "an embedding was generated and came
+            back non-empty", which is NOT what v2's `embed_cached` reports. Putting
+            one fact under the other's column name is the same class of quiet
+            wrongness as a question_gist that is really the question.
+        """
+        if self.query_log is None:
+            return
+        try:
+            user_id, _user_email, _session_id, websocket_id, _speak = ctx
+            question   = trace.fields.get( "question" ) or ""
+            stripped   = parse_salutations( question )[ 1 ]
+            timings    = trace.timings_ms()
+            similarity = trace.fields.get( "similarity" )
+            verbatim_source = trace.fields.get( "verbatim_source" )
+            input_type      = "api" if verbatim_source is None else f"api-{verbatim_source}"
+            self.query_log.log_query(
+                query_verbatim     = question,
+                query_normalized   = trace.fields.get( "question_normalized" ) or self.cache.normalize( stripped ),
+                query_gist         = self.cache.gist( stripped ),
+                user_id            = user_id,
+                session_id         = websocket_id,
+                # 'voice' / 'text' / 'api' is v1's vocabulary (query_log_table.py:84) and
+                # the column is free text. A row whose verbatim is not a person's words
+                # says so here — "api-command" or "api-job" — rather than passing for one.
+                input_type         = input_type,
+                match_result       = {
+                    "snapshot_id" : ( snapshot_id or "" ) if not cache_hit else ( trace.fields.get( "job_id" ) or snapshot_id or "" ),
+                    "type"        : "exact_match" if cache_hit else "no_match_new_agent",
+                    "confidence"  : similarity if cache_hit and similarity is not None else 0.0,
+                },
+                processing_time_ms = int( timings.get( "t_complete" ) or 0 ),
+            )
+        except Exception as e:
+            if self.debug: print( f"[v2] query log write failed: {e}" )
+
     def _record_lookup( self, trace: StageTrace, lookup: Any ) -> None:
         """Stamp the cache's own timings + score fields onto the trace."""
         trace.update(
@@ -636,6 +782,7 @@ class AskFlow:
         trace.update( path=path, status=status, route_reason=route_reason, cache_hit=cache_hit,
                       wrote_snapshot=snapshot_id is not None )
         trace.write()
+        self._log_query( trace, ctx, snapshot_id=snapshot_id, cache_hit=cache_hit )
         return {
             "path"        : path,           "status"       : status,        "route_reason" : route_reason,
             "answer"      : answer,         "answer_raw"   : answer_raw,     "command"      : command,

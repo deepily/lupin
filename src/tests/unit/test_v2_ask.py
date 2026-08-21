@@ -342,6 +342,8 @@ def test_build_ask_flow_wires_from_ini( monkeypatch ):
         # let a literal False in build_ask_flow pass as though it had read the key.
         "debug auto"                     : True,
         "debug inject bugs"              : True,
+        # ⚠️ these two being EQUAL is why the companion test below exists — a swap
+        # between them is invisible here (Pocholo, on 54c71571).
         "crud for dataframes agents enabled" : "false",
     } )
     flow, enabled = v2_ask.build_ask_flow( cfg )
@@ -371,6 +373,29 @@ def test_build_ask_flow_hands_the_queue_to_the_executor( monkeypatch ):
     v2_ask.build_ask_flow( cfg, todo_queue=queue )
     assert captured[ "executor" ].tag   == "exe:queued"
     assert captured[ "executor" ].queue is queue
+
+
+@pytest.mark.parametrize( "auto,inject", [ ( True, False ), ( False, True ) ] )
+def test_the_two_debug_keys_are_not_cross_wired( monkeypatch, auto, inject ):
+    """
+    The companion to test_build_ask_flow_wires_from_ini, which sets both keys True —
+    so SWAPPING the two reads passes there and only there (Pocholo, on 54c71571).
+    Here they always differ, in both directions, so a swap fails one row or the other.
+
+    RED ON REVERT: read `debug inject bugs` into auto_debug and vice versa.
+    """
+    captured = {}
+    _patch_stack( monkeypatch, captured )
+    cfg = _FakeConfig( {
+        "v2 flow enabled"    : True,
+        "v2 executor"        : "inline",
+        "v2 trace dir"       : "",
+        "debug auto"         : auto,
+        "debug inject bugs"  : inject,
+    } )
+    v2_ask.build_ask_flow( cfg )
+    assert captured[ "kwargs" ][ "auto_debug" ]  is auto
+    assert captured[ "kwargs" ][ "inject_bugs" ] is inject
 
 
 def test_build_ask_flow_disabled_flag( monkeypatch ):
