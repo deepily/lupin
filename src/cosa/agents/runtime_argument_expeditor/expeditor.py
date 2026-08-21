@@ -1693,7 +1693,10 @@ class RuntimeArgumentExpeditor:
         # first-match fallback below is unreachable on the podcast path.
         if use_choice_card:
             if not card_shown and len( matches ) <= MAX_CHOICE_OPTIONS:
-                chosen = self._choose_document_from_matches( matches, docs_map, user_email )
+                chosen = self._choose_document_from_matches(
+                    matches, docs_map, user_email,
+                    arg_name=arg_name, agent_display_name=agent_display_name
+                )
                 if chosen != DOC_CHOICE_DESCRIBE_SENTINEL:
                     return chosen   # abs path, or None on Cancel/failure
             return self._ask_for_arg(
