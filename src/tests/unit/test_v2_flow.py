@@ -86,9 +86,14 @@ class FakeCache:
         self._write_back_id = write_back_id
         self.snapshot_calls = []
         self.write_back_calls = []
+        self.gist_calls     = []
 
     def lookup( self, question ):
         return self._lookup
+
+    def gist( self, question ):
+        self.gist_calls.append( question )
+        return f"gist:{question}"
 
     def snapshot_from_result( self, **kwargs ):
         self.snapshot_calls.append( kwargs )
@@ -104,6 +109,9 @@ class CacheNoWriteBack:
 
     def lookup( self, question ):
         return _lookup()
+
+    def gist( self, question ):
+        return f"gist:{question}"
 
 
 class FakeRouter:
@@ -1578,3 +1586,95 @@ class TestTheWriteBackNamesItsOwner:
                 question="q", answer="a", answer_conversational="c",
                 routing_command="agent router go to math", user_id="",
             )
+
+
+# ─────────────────────────────── step 4 — the flow builds the agent the queue builds
+
+class TestAgentConstructionParity:
+    """
+    Finding 3: the flow and push_job built the same agent class with different
+    kwargs, and nothing raised about it. All EIGHT differences are pinned here —
+    five as parity, three as deliberate non-matches with their reasons, so a
+    reader can tell a ruling from an oversight without re-deriving either.
+
+    `question_gist` is the one with teeth: the query log reads that field, so a
+    gist that is really the raw question makes every logged row wrong in a way
+    nothing raises about.
+    """
+
+    def _built( self, tmp_path, notifier, monkeypatch, question="hey what is the weather" ):
+        """Run one request and hand back the kwargs the agent was constructed with."""
+        seen = {}
+
+        class _Recording:
+            def __init__( self, **kwargs ):
+                seen.update( kwargs )
+                self.answer                = "sunny"
+                self.answer_conversational = "It is sunny."
+
+            def do_all( self ):
+                return self.answer_conversational
+
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=( "location", ),
+                                                                     factory=_Recording, snapshotable=False ) )
+        expeditor = FakeExpeditor( _extraction( final_args={ "location": "Boston" }, missing=[] ) )
+        f = _make_flow( tmp_path, FakeCache(), FakeRouter(), expeditor,
+                        FakeExecutor( _outcome() ), FakePending(), notifier )
+        f.auto_debug  = True      # the queue's flags, set to NON-defaults so a
+        f.inject_bugs = True      # hardcoded False cannot pass here by coincidence
+        f.ask( question, **_CTX )
+        return seen
+
+    def test_the_five_parity_kwargs( self, tmp_path, notifier, monkeypatch ):
+        """
+        RED ON REVERT: put back question_gist=agent_question, debug=self.debug,
+        verbose=self.verbose, auto_debug=False or inject_bugs=False, and that row
+        fails.
+        """
+        seen = self._built( tmp_path, notifier, monkeypatch )
+
+        # The gist is computed from the SALUTATION-STRIPPED question, as v1 does —
+        # not from the raw text, and not from the composed one.
+        assert seen[ "question_gist" ] == "gist:what is the weather"
+        assert seen[ "debug" ]         is True,  "v1 hardcodes debug=True; an agent that ran verbose must keep doing so"
+        assert seen[ "verbose" ]       is False
+        assert seen[ "auto_debug" ]    is True,  "the flow's own auto_debug did not reach the agent"
+        assert seen[ "inject_bugs" ]   is True,  "the flow's own inject_bugs did not reach the agent"
+
+    def test_the_three_ruled_non_matches( self, tmp_path, notifier, monkeypatch ):
+        """
+        Each of these DIFFERS from push_job on purpose. Pinned so the difference
+        stays a decision: an unpinned non-match is indistinguishable from a bug.
+        """
+        seen = self._built( tmp_path, notifier, monkeypatch )
+
+        # 1. question — composed, not bare. Bare parity would drop the expeditor's
+        #    extracted args, since v1 never ran the expeditor for conversational
+        #    commands and the agent re-parsed the raw text itself.
+        assert seen[ "question" ] != "hey what is the weather", (
+            "the flow passed the BARE question — the expeditor's extracted location is gone"
+        )
+        assert "Boston" in seen[ "question" ]
+
+        # 2. last_question_asked — the INTENDED form. v1 builds it from the ORIGINAL
+        #    question, which still contains the salutation, so v1 says it twice.
+        assert seen[ "last_question_asked" ] == "hey what is the weather"
+        assert not seen[ "last_question_asked" ].startswith( "hey hey" ), (
+            "the flow copied v1's doubled salutation instead of the intended form"
+        )
+
+        # 3. push_counter — v1's lives on the queue singleton the flow cannot see.
+        assert seen[ "push_counter" ] == -1
+
+    def test_the_identity_three_still_agree( self, tmp_path, notifier, monkeypatch ):
+        """The three that already matched must not drift while the other eight move."""
+        seen = self._built( tmp_path, notifier, monkeypatch )
+        assert seen[ "user_id" ]    == _CTX[ "user_id" ]
+        assert seen[ "user_email" ] == _CTX[ "user_email" ]
+        assert seen[ "session_id" ] == _CTX[ "websocket_id" ], "v1 passes the WEBSOCKET id as session_id"
+
+    def test_an_agent_was_actually_built( self, tmp_path, notifier, monkeypatch ):
+        """Without this, every assertion above would be vacuously true on an empty dict."""
+        seen = self._built( tmp_path, notifier, monkeypatch )
+        assert seen, "no agent was constructed"

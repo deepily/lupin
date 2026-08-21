@@ -156,6 +156,19 @@ class V2Cache( TwoTierQuestionSearch ):
             session_id=session_id,
         )
 
+    def gist( self, question: str ) -> str:
+        """
+        The normalized gist of a question, from the SAME normalizer the store is
+        keyed by.
+
+        The flow needs this to build the agent the queue builds (step 4): v1 passes
+        a real computed gist as `question_gist`, and the query log reads that field.
+        A second normalizer instance would answer differently for the same question
+        and every logged row would be quietly wrong, so the flow asks the cache
+        rather than growing its own.
+        """
+        return self._gist_normalizer.get_normalized_gist( question )
+
     # -------------------------------------------------------------- write-back
 
     def write_back( self, snapshot: SolutionSnapshot, writeback_enabled: bool=True,
