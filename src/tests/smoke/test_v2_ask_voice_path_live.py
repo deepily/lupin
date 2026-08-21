@@ -12,31 +12,43 @@ WHAT THIS PROVES, and why it is not covered by anything else in the pyramid.
     confirm the job card appears, the answer arrives over the websocket, and the CRUD
     agent handled the todo."*
 
+VENUE: `:8000`, EVERY VARIANT. NOT `:7999`.
+    🔴 CORRECTED 2026-08-21 — my first version of this file claimed the read-shaped todo
+    kept the run `:7999`-legal. That was WRONG, and the reason is worth stating because
+    it defeats the obvious reasoning: **EVERY ask writes a snapshot row, whatever the
+    question was.** `flow._maybe_write_back` (`flow.py:287-300`) writes when
+    `snapshotable and outcome.status == "done"`, and `snapshotable` defaults to **True**
+    on the registry entry (`registry.py:82`). So the math question writes. The weather
+    question writes. A "read-shaped" todo writes. Shaping the QUESTION to avoid a
+    mutation cannot work when the mutation belongs to the FLOW, not to the agent.
+    (Found by Pocholo 📣 on review; verified here at `flow.py:291` / `registry.py:82`.)
+
+    ⇒ CLAUDE.md routes by what a run MUTATES, so this file is `:8000` work, full stop.
+    It runs on the gate rig post-merge, which is where it was always going to run.
+
+    ⚠️ AND NOT BY DISABLING WRITE-BACK. `writeback_enabled` would make the run
+    `:7999`-legal and worthless: it would exercise a configuration production does not
+    run, which is a different system from the one the gate is meant to clear.
+    (Cheech's ruling, 2026-08-21.)
+
 WHEN IT MEANS ANYTHING — read this before running it.
-    ⚠️ `:7999` serves the MAIN CHECKOUT, not the integration branch (Cheech,
-    2026-08-21). Running this before the build merges to the working branch and the
-    server is bounced tests the OLD code and proves nothing about this work. Run it
-    AFTER the final merge AND after `src/scripts/bounce-dev-server.sh` — a saved file
-    is not a served file, and auto-reload is off.
+    ⚠️ Neither server serves the integration branch by default: `:7999` mounts the MAIN
+    CHECKOUT, and so does `:8000` (`./src` in `docker-compose.yml`). Running this against
+    either as they stand tests the OLD code and proves nothing about this work. Run it
+    on the GATE RIG — `:8000` recreated against a worktree checked out at the gate sha —
+    or after the final merge to the working branch AND a bounce. A saved file is not a
+    served file; auto-reload is off.
 
-VENUE, AND THE ONE JUDGEMENT CALL IN THIS FILE.
-    CLAUDE.md routes by what a run MUTATES. Two of the three questions are read-only,
-    but a todo that INSERTS leaves a row behind, which by the rubric forces `:8000`.
-    The plan puts this check on `:7999` after the bounce.
-
-    ⇒ The todo scenario is READ-SHAPED by default ("what is on my todo list"), which
-    still proves the CRUD agent handled it — the assertion is on WHICH AGENT RAN, not
-    on a row appearing. `--insert-todo` switches to a writing todo for anyone who wants
-    the stronger check, and that variant belongs on `:8000` because it mutates.
-    Named here rather than decided silently.
-
-USAGE
-    python src/tests/smoke/test_v2_ask_voice_path_live.py                # read-shaped todo, :7999
-    python src/tests/smoke/test_v2_ask_voice_path_live.py --insert-todo  # writes a row -> :8000
+USAGE — on `:8000`, once the gate rig is up
+    python src/tests/smoke/test_v2_ask_voice_path_live.py                # read-shaped todo
+    python src/tests/smoke/test_v2_ask_voice_path_live.py --insert-todo  # writing todo
     python src/tests/smoke/test_v2_ask_voice_path_live.py -q 1           # math only
 
+    The flag changes the SHAPE of the todo question, not the venue — both write snapshot
+    rows, and both are `:8000`.
+
 Requires:
-    - a server on :7999 carrying the merged code (see WHEN IT MEANS ANYTHING above)
+    - a server carrying the code under test (see WHEN IT MEANS ANYTHING above)
     - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD in the environment
 
 No curl anywhere: submission and polling go through requests via LivePipelineTestBase,
@@ -95,7 +107,7 @@ class V2AskVoicePathLiveTest( LivePipelineTestBase ):
     Three questions through /api/v2/ask on a running server, checked by AGENT and ANSWER.
 
     Requires:
-        - a bounced server carrying the merged build
+        - a :8000 server carrying the code under test (gate rig, or post-merge + bounce)
         - test credentials in the environment
 
     Ensures:
@@ -114,7 +126,8 @@ class V2AskVoicePathLiveTest( LivePipelineTestBase ):
         parser.add_argument( "--queries", "-q", type=str, default=None,
                              help="Comma-separated scenario indices (e.g. '0,2'). Default: all." )
         parser.add_argument( "--insert-todo", action="store_true", default=False,
-                             help="Use a WRITING todo instead of a reading one. Mutates state -> run on :8000." )
+                             help="Use a WRITING todo instead of a reading one. Venue is :8000 either way — "
+                                  "every ask writes a snapshot row (flow.py:291, registry.py:82)." )
         return parser
 
     def get_scenario_indices( self, args ):
