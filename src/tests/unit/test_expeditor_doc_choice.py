@@ -213,7 +213,13 @@ class TestHandleFuzzyChoiceCardWiring( unittest.TestCase ):
         ask_calls    = []
         choose_calls = []
         o._ask_for_arg = lambda arg, q, email, **k: ask_calls.append( q ) or "typed description"
-        o._choose_document_from_matches = lambda matches, docs, email: choose_calls.append( list( matches ) ) or choose_return
+        # The stub records the KWARGS too: the card now speaks as the calling agent
+        # (row 9046ef58), so "who did the caller say it was" is part of the wiring
+        # this class exists to pin, not an incidental argument.
+        def _fake_choose( matches, docs, email, **kwargs ):
+            choose_calls.append( { "matches": list( matches ), **kwargs } )
+            return choose_return
+        o._choose_document_from_matches = _fake_choose
 
         with patch( "cosa.config.configuration_manager.ConfigurationManager" ) as CM, \
              patch.object( ex_mod.cu, "get_project_root", return_value="/root" ), \
@@ -238,6 +244,9 @@ class TestHandleFuzzyChoiceCardWiring( unittest.TestCase ):
             use_choice_card=True, choose_return="/abs/a.md",
         )
         self.assertEqual( len( obs[ "choose_calls" ] ), 1, "card must be shown on the first turn" )
+        # The caller hands its own identity down, so the card can ask in its terms.
+        self.assertEqual( obs[ "choose_calls" ][ 0 ][ "arg_name" ], "research" )
+        self.assertEqual( obs[ "choose_calls" ][ 0 ][ "agent_display_name" ], "podcast generator" )
         self.assertEqual( obs[ "ask_qs" ], [], "no open question when the card resolves" )
         self.assertEqual( obs[ "result" ], "/abs/a.md" )
 

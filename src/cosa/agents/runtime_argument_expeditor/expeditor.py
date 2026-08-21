@@ -1186,17 +1186,63 @@ class RuntimeArgumentExpeditor:
         m = re.match( r"(\d{4})\.(\d{2})\.(\d{2})", os.path.basename( rel_path ) )
         return f"{folder} · {m.group( 1 )}-{m.group( 2 )}-{m.group( 3 )}" if m else folder
 
-    def _choose_document_from_matches( self, matches, docs_map, user_email ):
+    @staticmethod
+    def _document_choice_question( agent_display_name ):
+        """
+        The spoken question on the document choice card, in the calling agent's terms.
+
+        ⚠️ THE PROXY ANSWER FILES MATCH ON THIS STRING. src/conf/notification-proxy-scripts/
+        keys its entries by question_pattern, so changing the wording here without
+        updating podcast.json / presentation.json makes an automated run hang at the
+        card with nothing able to answer it.
+
+        Requires:
+            - agent_display_name is the registry display name, or None
+
+        Ensures:
+            - returns the podcast wording verbatim when the name is missing, so the
+              podcast card is byte-identical to what it has always said
+            - otherwise names the calling agent, lower-cased so it reads as prose
+
+        Raises:
+            - nothing
+        """
+        if not agent_display_name:
+            return "Which document should I use for the podcast?"
+        # "Podcast Generator" -> "podcast", "Presentation Generator" -> "presentation".
+        # The trailing word is dropped for TWO reasons, and the first is the load-bearing
+        # one: it makes the podcast card come out BYTE-IDENTICAL to the string it has
+        # always said, so this fix changes nothing a podcast user sees. It also reads
+        # better — "for the presentation" is how a person would ask.
+        subject = agent_display_name.lower()
+        if subject.endswith( " generator" ):
+            subject = subject[ : -len( " generator" ) ]
+        return f"Which document should I use for the {subject}?"
+
+
+    def _choose_document_from_matches( self, matches, docs_map, user_email,
+                                       arg_name="research", agent_display_name=None ):
         """
         Present 2..MAX_CHOICE_OPTIONS candidate documents as the standard choice
-        card and map the pick back to an absolute path. The one doc-choice surface
-        the podcast ambiguity path uses.
+        card and map the pick back to an absolute path. The doc-choice surface every
+        fuzzy_file_match consumer uses, once the podcast fence came off (row 5bc22180).
+
+        THE CARD SPEAKS AS THE CALLING AGENT. It used to hardcode the arg name
+        "research" and the question "Which document should I use for the podcast?",
+        which was invisible while podcast was the only consumer. Row 5bc22180 gave
+        presentation the card, and the hardcoding immediately became a presentation
+        user being asked about the podcast under a card titled "Missing: research" —
+        the same defect row ea184d06 fixed on the OTHER two asks and never reached
+        here. The defaults keep podcast's wording verbatim, so its card does not move.
 
         Requires:
             - matches is a list of relative-path keys into docs_map (caller has
               already enforced 2..MAX_CHOICE_OPTIONS)
             - docs_map maps relative_path -> absolute_path
             - user_email is the target user's email
+            - arg_name is the calling agent's own argument name
+            - agent_display_name is the calling agent's display name, or None to
+              keep the podcast phrasing
 
         Ensures:
             - Returns the chosen candidate's ABSOLUTE path on a pick
@@ -1224,8 +1270,8 @@ class RuntimeArgumentExpeditor:
         options.append( { "label": DOC_CHOICE_CANCEL_LABEL,   "description": "Cancel this request" } )
 
         chosen = self._ask_choice_for_arg(
-            "research",
-            "Which document should I use for the podcast?",
+            arg_name,
+            self._document_choice_question( agent_display_name ),
             options,
             user_email
         )
@@ -1559,7 +1605,10 @@ class RuntimeArgumentExpeditor:
             # None; "describe instead" falls through to the open ask below.
             if use_choice_card and auto_status in ( "exact", "fuzzy" ) and 2 <= len( auto_matches ) <= MAX_CHOICE_OPTIONS:
                 if self.debug: print( f"[Expeditor] {len( auto_matches )} first-turn matches — showing choice card" )
-                chosen     = self._choose_document_from_matches( auto_matches, docs_map, user_email )
+                chosen     = self._choose_document_from_matches(
+                    auto_matches, docs_map, user_email,
+                    arg_name=arg_name, agent_display_name=agent_display_name
+                )
                 card_shown = True
                 if chosen != DOC_CHOICE_DESCRIBE_SENTINEL:
                     return chosen   # abs path, or None on Cancel/failure
