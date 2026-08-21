@@ -15,18 +15,25 @@ Per database, in order: pg_dump backup of the in-scope tables → counts before 
 one DELETE-per-table transaction → counts after → JSON receipts. DELETE, not
 TRUNCATE (truncate takes ACCESS EXCLUSIVE and blocks every live reader).
 
-Verification (the plan's two halves): --verify-empty checks every in-scope count
-reads 0 after the dump; --verify-learn-back asks one question through
-/api/v2/ask and proves the cache still LEARNS — a snapshot row appeared, it
-passes 9a (non-blank user_id, a routed command), and a second ask RE-RUNS
+Verification (the plan's two halves): --verify-empty re-counts every in-scope
+table with a FRESH psql call after the delete transaction has returned — never
+the transaction's own 'after' row, which is pre-commit (Pocholo, review of
+0e6d3b33) — and fails on any non-zero; --verify-learn-back asks one question
+through /api/v2/ask and proves the cache still LEARNS — a snapshot row appeared,
+it passes 9a (non-blank user_id, a routed command), and a second ask RE-RUNS
 rather than replays (9b's guard holds on the fresh, unconfirmed row).
+
+DRY-RUN IS THE DEFAULT AND TOUCHES NOTHING LIVE: counts only — no pg_dump, no
+DELETE, and no HTTP (the learn-back logs in and asks a question that WRITES a
+snapshot, so it runs only under --apply; without --apply it is described, not
+sent).
 
 Dry-run (default):
     python3 src/scripts/dump_solution_cache.py --db both
 Apply, on the GO:
     python3 src/scripts/dump_solution_cache.py --db both --apply --verify-empty
-Learn-back check against the dev server:
-    python3 src/scripts/dump_solution_cache.py --db dev --verify-learn-back --base-url http://localhost:7999
+Apply + learn-back check against the dev server (single --db):
+    python3 src/scripts/dump_solution_cache.py --db dev --apply --verify-empty --verify-learn-back --base-url http://localhost:7999
 """
 import argparse
 import datetime
@@ -227,7 +234,9 @@ def dump( db, tables, runner=subprocess.run ):
 
     Ensures:
         - returns ( before, after ) count dicts parsed from the transaction's own
-          'before' / 'after' rows
+          'before' / 'after' rows — the 'after' row is read INSIDE the transaction,
+          i.e. pre-commit; callers that need proof of the committed state must
+          re-count with count_rows() after this returns (main() does)
         - raises RuntimeError if psql fails (the transaction then rolled back)
         - raises ValueError if the output lacks both rows
     """
@@ -246,7 +255,8 @@ def verify_empty( after ):
     The plan's first verification half: every in-scope count reads 0.
 
     Requires:
-        - after is {table: count}
+        - after is {table: count} from an INDEPENDENT read taken after the delete
+          transaction returned (count_rows), not the transaction's own 'after' row
 
     Ensures:
         - returns the list of tables that are NOT empty (empty list == pass)
@@ -365,8 +375,8 @@ def build_parser():
     p.add_argument( "--adjacent-caches", action="store_true", help="ALSO dump gist_cache, question_embeddings, embedding_cache, query_log, input_and_output (ruled OUT — off by default)" )
     p.add_argument( "--apply", action="store_true", help="actually back up + delete (default: dry-run, counts only)" )
     p.add_argument( "--backup-dir", default=os.path.join( cu.get_project_root(), "io", "cache-dump-backups" ) )
-    p.add_argument( "--verify-empty", action="store_true", help="after --apply, fail if any in-scope count is not 0" )
-    p.add_argument( "--verify-learn-back", action="store_true", help="ask one question through /api/v2/ask and prove the cache still learns + 9b holds (single --db only)" )
+    p.add_argument( "--verify-empty", action="store_true", help="after --apply, re-count with a fresh psql call and fail if any in-scope count is not 0" )
+    p.add_argument( "--verify-learn-back", action="store_true", help="with --apply: ask one question through /api/v2/ask and prove the cache still learns + 9b holds (single --db only; writes a snapshot, so it never runs in dry-run)" )
     p.add_argument( "--base-url", default="http://localhost:7999" )
     p.add_argument( "--question", default="What time is it right now?" )
     return p
@@ -382,6 +392,9 @@ def main( argv=None, runner=subprocess.run, http=None, now=None, out=print ):
 
     Ensures:
         - returns 0 on success, 2 when a verification failed
+        - without --apply: ONLY count queries run — no pg_dump, no DELETE, no HTTP
+        - with --apply + --verify-empty: the verdict comes from a fresh count_rows()
+          call made after the delete transaction returned, never the tx's own row
         - raises on transport/psql errors (nothing is swallowed)
     """
     args   = build_parser().parse_args( argv )
@@ -404,10 +417,12 @@ def main( argv=None, runner=subprocess.run, http=None, now=None, out=print ):
         if args.apply:
             entry[ "backup" ] = backup( db, tables, args.backup_dir, now, runner=runner )
             out( f"  {db}: backup -> {entry[ 'backup' ]}" )
-            tx_before, after = dump( db, tables, runner=runner )
+            tx_before, tx_after = dump( db, tables, runner=runner )
             entry[ "tx_before" ] = tx_before
-            entry[ "after" ]     = after
-            out( f"  {db}: after  {after}" )
+            entry[ "tx_after" ]  = tx_after     # the transaction's own row — pre-commit, kept for the record, not trusted
+            after = count_rows( db, tables, runner=runner )   # independent read AFTER the transaction returned
+            entry[ "after" ] = after
+            out( f"  {db}: after  {after} (fresh count; tx row said {tx_after})" )
             if args.verify_empty:
                 leftover = verify_empty( after )
                 entry[ "verify_empty" ] = "pass" if not leftover else f"FAIL: not empty {leftover}"
@@ -415,7 +430,10 @@ def main( argv=None, runner=subprocess.run, http=None, now=None, out=print ):
                 out( f"  {db}: verify-empty {entry[ 'verify_empty' ]}" )
         else:
             out( f"  {db}: would back up {tables} to {args.backup_dir} then DELETE (re-run with --apply)" )
-        if args.verify_learn_back:
+        if args.verify_learn_back and not args.apply:
+            out( f"  {db}: DRY-RUN — would log in and ask {args.question!r} through /api/v2/ask (writes a snapshot); nothing sent. Learn-back runs only with --apply." )
+            entry[ "learn_back" ] = "skipped: dry-run"
+        elif args.verify_learn_back:
             if http is None:
                 import requests as http
             email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )

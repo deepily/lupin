@@ -35,13 +35,18 @@ import dump_solution_cache as dsc
 class FakeRunner:
     """Routes argv to canned stdout and records every argv it saw."""
 
-    def __init__( self, counts=( 3, 3 ), after=( 0, 0 ), row="abc|u-1|agent router go to todo|", pg_dump_rc=0, psql_rc=0 ):
+    def __init__( self, counts=( 3, 3 ), after=( 0, 0 ), row="abc|u-1|agent router go to todo|", pg_dump_rc=0, psql_rc=0, committed=None ):
         self.calls      = [ ]
         self.counts     = counts
         self.after      = after
         self.row        = row
         self.pg_dump_rc = pg_dump_rc
         self.psql_rc    = psql_rc
+        # `committed` is what an INDEPENDENT count (a fresh psql call AFTER the delete
+        # transaction returned) reports. None → same as `after`. Set it differently to
+        # model a transaction whose own 'after' row said 0 but whose COMMIT did not land.
+        self.committed  = committed
+        self.deleted    = False
 
     def __call__( self, argv, capture_output=True, text=True ):
         self.calls.append( argv )
@@ -57,11 +62,13 @@ class FakeRunner:
             proc.stderr = "psql: boom"
             return proc
         if sql.startswith( "BEGIN;" ):
+            self.deleted = True
             proc.stdout = "before|" + "|".join( str( c ) for c in self.counts ) + "\n" + "after|" + "|".join( str( c ) for c in self.after ) + "\n"
         elif sql.startswith( "SELECT id_hash" ):
             proc.stdout = ( self.row + "\n" ) if self.row is not None else ""
         else:
-            proc.stdout = "|".join( str( c ) for c in self.counts ) + "\n"
+            now = ( self.committed if self.committed is not None else self.after ) if self.deleted else self.counts
+            proc.stdout = "|".join( str( c ) for c in now ) + "\n"
         return proc
 
     def sql_seen( self ):
@@ -342,7 +349,7 @@ class TestMain( unittest.TestCase ):
             rc, lines, r = _run_main( [ "--db", "test", "--apply", "--verify-empty", "--backup-dir", d ] )
             self.assertEqual( rc, 0 )
             kinds = [ "pg_dump" if "pg_dump" in a else ( "delete" if a[ -1 ].startswith( "BEGIN;" ) else "count" ) for a in r.calls ]
-            self.assertEqual( kinds, [ "count", "pg_dump", "delete" ] )
+            self.assertEqual( kinds, [ "count", "pg_dump", "delete", "count" ] )   # backup BEFORE delete; a fresh count AFTER
             entry = json.loads( lines[ -1 ] )[ "databases" ][ "lupin_db_test" ]
             self.assertEqual( entry[ "verify_empty" ], "pass" )
             self.assertTrue( entry[ "backup" ].startswith( d ) )
@@ -354,6 +361,36 @@ class TestMain( unittest.TestCase ):
             rc, lines, _ = _run_main( [ "--db", "dev", "--apply", "--verify-empty", "--backup-dir", d ], runner=FakeRunner( after=( 0, 1 ) ) )
             self.assertEqual( rc, 2 )
             self.assertIn( "FAIL: not empty ['canonical_synonyms']", json.loads( lines[ -1 ] )[ "databases" ][ "lupin_db_dev" ][ "verify_empty" ] )
+
+    def test_verify_empty_reads_an_independent_count_after_the_transaction_returns( self ):
+        """Pocholo's finding 2: the transaction's own 'after' row is PRE-commit. The check must
+        come from a fresh psql call made after the delete call returned, and must fail when
+        that read disagrees with the transaction's row."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            r = FakeRunner( after=( 0, 0 ), committed=( 0, 3 ) )   # tx said empty; the independent read says 3 synonyms remain
+            rc, lines, _ = _run_main( [ "--db", "dev", "--apply", "--verify-empty", "--backup-dir", d ], runner=r )
+            self.assertEqual( rc, 2 )
+            entry = json.loads( lines[ -1 ] )[ "databases" ][ "lupin_db_dev" ]
+            self.assertIn( "FAIL", entry[ "verify_empty" ] )
+            self.assertEqual( entry[ "after" ], { "solution_snapshots": 0, "canonical_synonyms": 3 } )   # the independent read
+            self.assertEqual( entry[ "tx_after" ], { "solution_snapshots": 0, "canonical_synonyms": 0 } ) # the tx row, kept but not trusted
+            kinds = [ "pg_dump" if "pg_dump" in a else ( "delete" if a[ -1 ].startswith( "BEGIN;" ) else "count" ) for a in r.calls ]
+            self.assertEqual( kinds, [ "count", "pg_dump", "delete", "count" ] )   # a count AFTER the delete call
+
+    def test_dry_run_with_learn_back_sends_nothing( self ):
+        """Pocholo's finding 1: dry-run must touch nothing live — no login, no /api/v2/ask
+        (which writes a snapshot). Without --apply the learn-back is described, not run."""
+        env  = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "p" }
+        stub = FakeHttp( [ _ask(), _ask() ] )
+        rc, lines, r = _run_main( [ "--db", "dev", "--verify-learn-back" ], http=stub, env=env )
+        self.assertEqual( rc, 0 )
+        self.assertEqual( stub.posts, [ ] )
+        self.assertFalse( any( "pg_dump" in a for a in r.calls ) )
+        self.assertFalse( any( s.startswith( "BEGIN;" ) for s in r.sql_seen() ) )
+        entry = json.loads( lines[ -1 ] )[ "databases" ][ "lupin_db_dev" ]
+        self.assertEqual( entry[ "learn_back" ], "skipped: dry-run" )
+        self.assertTrue( any( "would" in l and "/api/v2/ask" in l for l in lines ) )
 
     def test_apply_without_verify_empty_skips_the_check( self ):
         import tempfile
@@ -367,25 +404,31 @@ class TestMain( unittest.TestCase ):
             _run_main( [ "--db", "both", "--verify-learn-back" ] )
 
     def test_learn_back_needs_credentials( self ):
-        with self.assertRaises( SystemExit ):
-            _run_main( [ "--db", "dev", "--verify-learn-back" ], http=FakeHttp( [ ] ) )
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises( SystemExit ):
+                _run_main( [ "--db", "dev", "--apply", "--backup-dir", d, "--verify-learn-back" ], http=FakeHttp( [ ] ) )
 
     def test_learn_back_pass_and_fail_drive_the_exit_code( self ):
+        import tempfile
         env = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "p" }
-        rc, lines, _ = _run_main( [ "--db", "dev", "--verify-learn-back" ], http=FakeHttp( [ _ask(), _ask() ] ), env=env )
-        self.assertEqual( rc, 0 )
-        self.assertEqual( json.loads( lines[ -1 ] )[ "databases" ][ "lupin_db_dev" ][ "learn_back" ][ "failures" ], [ ] )
-        rc, lines, _ = _run_main( [ "--db", "dev", "--verify-learn-back" ], http=FakeHttp( [ _ask(), _ask( cache_hit=True ) ] ), env=env )
-        self.assertEqual( rc, 2 )
-        self.assertTrue( any( "learn-back FAIL" in l for l in lines ) )
+        with tempfile.TemporaryDirectory() as d:
+            rc, lines, _ = _run_main( [ "--db", "dev", "--apply", "--backup-dir", d, "--verify-learn-back" ], http=FakeHttp( [ _ask(), _ask() ] ), env=env )
+            self.assertEqual( rc, 0 )
+            self.assertEqual( json.loads( lines[ -1 ] )[ "databases" ][ "lupin_db_dev" ][ "learn_back" ][ "failures" ], [ ] )
+            rc, lines, _ = _run_main( [ "--db", "dev", "--apply", "--backup-dir", d, "--verify-learn-back" ], http=FakeHttp( [ _ask(), _ask( cache_hit=True ) ] ), env=env )
+            self.assertEqual( rc, 2 )
+            self.assertTrue( any( "learn-back FAIL" in l for l in lines ) )
 
     def test_learn_back_imports_requests_when_no_http_given( self ):
+        import tempfile
         env   = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "p" }
         stub  = FakeHttp( [ _ask(), _ask() ] )
         saved = sys.modules.get( "requests" )
         sys.modules[ "requests" ] = stub
         try:
-            rc, _, _ = _run_main( [ "--db", "dev", "--verify-learn-back" ], http=None, env=env )
+            with tempfile.TemporaryDirectory() as d:
+                rc, _, _ = _run_main( [ "--db", "dev", "--apply", "--backup-dir", d, "--verify-learn-back" ], http=None, env=env )
         finally:
             if saved is None: sys.modules.pop( "requests", None )
             else:             sys.modules[ "requests" ] = saved
