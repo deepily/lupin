@@ -94,18 +94,41 @@ def tables_for( include_synonyms, include_adjacent ):
     return tables
 
 
-def psql_argv( db, sql ):
+def psql_argv( db, sql=None, variables=None ):
     """
-    Build the docker-exec psql argv for one SQL string.
+    Build the docker-exec psql argv for one SQL statement.
+
+    Two shapes, chosen by whether the SQL carries parameters:
+      · no variables → `-c sql` (sql is the last argv element)
+      · variables    → `-v name=value` per parameter and `-f -`, and the CALLER
+        pipes the SQL on stdin (run_argv(..., stdin=sql)), referencing each
+        parameter as :'name', which psql quotes as a SQL literal. This is the
+        only way: psql performs NO variable interpolation inside `-c` (measured
+        live: "syntax error at or near ':'"), so the value is never spliced into
+        the statement and never reaches the statement through -c either.
 
     Requires:
-        - db is a database name; sql is a non-empty string
+        - db is a database name
+        - without variables: sql is a non-empty string
+        - with variables: {name: value}; sql is NOT part of the argv
 
     Ensures:
         - returns the argv list (no shell), unaligned tuples-only output so
           count rows parse as "a|b|c"
+        - ON_ERROR_STOP=1 on every call: a failed statement makes psql exit 3
+          instead of running on, so a half-done transaction can never be
+          reported as success (Pocholo, review of c298ca02)
+        - with variables the argv ends with `-f -` and `docker exec` carries `-i`
+          so stdin reaches psql
     """
-    return [ "docker", "exec", PG_CONTAINER, "psql", "-U", PG_USER, "-d", db, "-At", "-c", sql ]
+    argv = [ "docker", "exec" ] + ( [ "-i" ] if variables else [ ] ) + [ PG_CONTAINER, "psql", "-U", PG_USER, "-d", db, "-At", "-v", "ON_ERROR_STOP=1" ]
+    if variables:
+        for name, value in variables.items():
+            argv.extend( [ "-v", f"{name}={value}" ] )
+        argv.extend( [ "-f", "-" ] )
+    else:
+        argv.extend( [ "-c", sql ] )
+    return argv
 
 
 def pg_dump_argv( db, tables ):
@@ -154,18 +177,19 @@ def delete_sql( tables ):
     return f"BEGIN; SELECT 'before', {parts}; {deletes} SELECT 'after', {parts}; COMMIT;"
 
 
-def run_argv( argv, runner=subprocess.run ):
+def run_argv( argv, runner=subprocess.run, stdin=None ):
     """
     Run one argv and return its stdout, failing loudly on a non-zero exit.
 
     Requires:
         - argv is a list; runner has subprocess.run's signature
+        - stdin, if given, is text piped to the process (the parameterised psql shape)
 
     Ensures:
         - returns stdout as str
         - raises RuntimeError naming the argv and stderr on non-zero exit
     """
-    proc = runner( argv, capture_output=True, text=True )
+    proc = runner( argv, capture_output=True, text=True, input=stdin )
     if proc.returncode != 0:
         raise RuntimeError( f"command failed ({proc.returncode}): {' '.join( argv )}\n{proc.stderr}" )
     return proc.stdout
@@ -276,9 +300,12 @@ def latest_snapshot_row( db, id_hash, runner=subprocess.run ):
           with empty strings for NULLs
         - raises ValueError if no row came back
     """
+    # id_hash travels as a psql variable (-v) and is quoted by psql as :'id_hash'; the
+    # SQL goes on stdin because -c never interpolates — the value is never spliced
+    # into the statement (Pocholo, review of c298ca02).
     sql = ( "SELECT id_hash, coalesce(user_id,''), coalesce(routing_command,''), coalesce(answer_is_correct,'') "
-            f"FROM {SNAPSHOT_TABLE} WHERE id_hash = '{id_hash}';" )
-    out   = run_argv( psql_argv( db, sql ), runner=runner )
+            f"FROM {SNAPSHOT_TABLE} WHERE id_hash = :'id_hash';" )
+    out   = run_argv( psql_argv( db, variables={ "id_hash": id_hash } ), runner=runner, stdin=sql )
     lines = [ l for l in out.splitlines() if l.strip() ]
     if not lines:
         raise ValueError( f"no {SNAPSHOT_TABLE} row with id_hash {id_hash!r} in {db}" )
