@@ -19,6 +19,23 @@ from typing import Optional
 # Agent Registry
 # ============================================================================
 
+# The two per-user directories every file-typed argument is searched in. They are
+# shared because they describe the USER's document library, not any one agent's taste:
+# both the podcast and the presentation generator scan both today. An agent that needs
+# somewhere else declares its own tuple; this is a default, not a rule.
+#
+# `{user_email}` is filled in at resolve time. Extensions are per-root because the
+# presentations directory holds re-renderable YAML intermediates and nothing else — a
+# .md in there would be a rendered output, not a source.
+DEFAULT_FILE_SEARCH_ROOTS = (
+    { "path": "io/deep-research/{user_email}" },
+    { "path": "io/presentations/{user_email}", "extensions": ( ".yaml", ".yml" ) },
+)
+
+# What a file-typed argument is searched for when its root does not narrow it.
+DEFAULT_FILE_EXTENSIONS = ( ".md", ".yaml", ".yml", ".txt" )
+
+
 JOB_ARG_CONTRACTS = {
     "agent router go to deep research" : {
         "job_prefix"         : "dr",
@@ -73,6 +90,19 @@ JOB_ARG_CONTRACTS = {
         },
         "special_handlers"   : {
             "research" : "fuzzy_file_match",
+        },
+        # WHAT KIND OF THING THIS ARGUMENT IS, said once (row a1420538). The expeditor
+        # used to learn "research is a file" from the handler tag above and then work
+        # out WHERE to look by building a config key from the display name, falling
+        # back to the podcast's key when that key was absent — so every other agent's
+        # file argument was searched using the podcast's configuration. The roots are
+        # declared here instead, beside the argument they belong to.
+        "file_args"          : {
+            "research" : {
+                "kind"             : "file",
+                "search_roots"     : DEFAULT_FILE_SEARCH_ROOTS,
+                "search_paths_key" : "podcast generator source search paths",
+            },
         },
     },
     "agent router go to research to podcast" : {
@@ -166,6 +196,13 @@ JOB_ARG_CONTRACTS = {
         },
         "special_handlers" : {
             "source" : "fuzzy_file_match",
+        },
+        "file_args"        : {
+            "source" : {
+                "kind"             : "file",
+                "search_roots"     : DEFAULT_FILE_SEARCH_ROOTS,
+                "search_paths_key" : "presentation generator source search paths",
+            },
         },
     },
     "agent router go to research to presentation" : {

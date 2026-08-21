@@ -63,13 +63,39 @@ If the field is missing from a script file, the proxy falls back to the default 
 
 ### Entry Fields
 
+An entry is keyed on ONE of two things, and which one decides what else it needs.
+
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `question_pattern` | string | Yes | The question text to match against (semantic, not exact) |
+| `question_pattern` | string | Prose entries | The question text to match against (semantic, not exact) |
+| `card_id` | string | Card entries | The id the card names itself by. Matched EXACTLY, before the model is asked anything |
 | `answer` | string | Yes | The scripted answer to return when matched |
-| `arg_name` | string | Yes | The CLI argument name this answers |
+| `arg_name` | string | Prose entries | The CLI argument name this answers |
 | `response_types` | array | Yes | Which response types this entry applies to: `open_ended`, `open_ended_batch`, `multiple_choice`, `yes_no` |
 | `agents` | array | No | Agent names this entry applies to (for multi-agent scripts only) |
+
+### Prose entries vs card entries
+
+A **prose entry** matches on `question_pattern` and names the argument it fills. The
+match is semantic, done by the model.
+
+A **card entry** matches on `card_id`. Some cards are shown by many agents and phrase
+their question in the calling agent's own terms — the document choice card asks "…for
+the podcast" or "…for the presentation" depending on who is asking. Keying those on
+prose meant one byte-identical entry per agent, and a wording change in the code left
+every card unanswered with no error anywhere. A card entry carries no
+`question_pattern` and no `arg_name`: the id says which card, and the answer says what
+to do. The id is compared exactly and claims the entry before any model call, so
+nothing about it is fuzzy.
+
+⚠️ **Profiles do not inherit.** Each profile file still needs its own copy of the
+entry — a new agent copies the generic entry VERBATIM into its profile. What the id
+buys is that the copy is identical rather than re-derived: no per-agent question to
+keep in step with the code, and nothing to get wrong except forgetting it, which
+`test_file_arg_card_contract.py` fails on.
+
+The document choice card's id is `document_choice`, defined as
+`DOCUMENT_CHOICE_CARD_ID` in `cosa/agents/runtime_argument_expeditor/expeditor.py`.
 
 ## Profile-to-Script Mapping
 

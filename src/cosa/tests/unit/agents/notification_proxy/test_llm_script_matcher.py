@@ -194,6 +194,119 @@ class TestHandleSingle:
         assert out is None
 
 
+class TestCardIdClaim:
+    """
+    Row a1420538. A card that names itself is matched, not guessed at.
+
+    The document choice card's QUESTION is derived per calling agent — "for the
+    podcast", "for the presentation" — so keying the proxy entry on that prose forced
+    one byte-identical copy per agent and let a wording change silently unanswer the
+    card. `card_id` rides in response_options, the entry declares the same id, and the
+    match is exact and happens BEFORE the model is asked anything. That also takes the
+    model out of the path that produced the original defect: asked to pick an option
+    label, it returned the script's directive verbatim.
+    """
+
+    CARD_SCRIPT = {
+        "entries": [
+            { "question_pattern": "Who is the target audience?", "answer": "general" },
+            { "card_id": "document_choice", "answer": "__first_option__",
+              "response_types": [ "multiple_choice" ] },
+        ],
+        "sender_ids"   : [ EXPEDITER ],
+        "profile_name" : "presentation",
+    }
+
+    def _card( self, card_id="document_choice" ):
+        notif = {
+            "response_type"    : "multiple_choice",
+            "message"          : "Which document should I use for the presentation?",
+            "title"            : "Missing: source",
+            "response_options" : { "questions": [ { "options": [ { "label": "kiss.md" } ] } ] },
+        }
+        if card_id is not None:
+            notif[ "response_options" ][ "card_id" ] = card_id
+        return notif
+
+    def test_a_declared_id_answers_without_asking_the_model( self ):
+        s, client = _make_matcher( script=self.CARD_SCRIPT, debug=True )
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( self._card() )
+        assert out == "__first_option__"
+        client.run.assert_not_called()
+
+    def test_the_wording_no_longer_matters( self ):
+        # The point of the id. The same entry answers a card whose question names a
+        # different agent, which under prose keying needed its own copy.
+        s, client = _make_matcher( script=self.CARD_SCRIPT )
+        notif = self._card()
+        notif[ "message" ] = "Which document should I use for the podcast?"
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( notif )
+        assert out == "__first_option__"
+        client.run.assert_not_called()
+
+    def test_the_id_match_is_exact( self ):
+        # An id is a token. A near miss must fall through to the ordinary path rather
+        # than claim the card, or the id stops being an identifier.
+        s, client = _make_matcher( script=self.CARD_SCRIPT )
+        client.run.return_value = SINGLE_MATCH_XML
+        s._processor.process_template.return_value = "{response_type}{title}{incoming_question}{options_section}{script_entries}"
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( self._card( card_id="Document_Choice" ) )
+        assert out == "academic"
+        client.run.assert_called_once()
+
+    def test_a_card_naming_no_id_takes_the_ordinary_path( self ):
+        s, client = _make_matcher( script=self.CARD_SCRIPT )
+        client.run.return_value = SINGLE_MATCH_XML
+        s._processor.process_template.return_value = "{response_type}{title}{incoming_question}{options_section}{script_entries}"
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( self._card( card_id=None ) )
+        assert out == "academic"
+
+    def test_an_id_no_entry_declares_takes_the_ordinary_path( self ):
+        # Adding an id to a card must never make a previously-answered card
+        # unanswerable. No entry claims it, so the prose path still gets its turn.
+        s, client = _make_matcher( script=self.CARD_SCRIPT )
+        client.run.return_value = SINGLE_MATCH_XML
+        s._processor.process_template.return_value = "{response_type}{title}{incoming_question}{options_section}{script_entries}"
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( self._card( card_id="some_other_card" ) )
+        assert out == "academic"
+
+    def test_an_entry_with_an_id_but_no_answer_is_not_a_match( self ):
+        # A half-written entry would otherwise claim the card and answer it with None,
+        # which reads downstream as "no strategy produced an answer" — true, but it
+        # would have silently blocked the strategies that could have.
+        script = { "entries": [ { "card_id": "document_choice" } ],
+                   "sender_ids": [ EXPEDITER ], "profile_name": "presentation" }
+        s, client = _make_matcher( script=script )
+        client.run.return_value = SINGLE_MATCH_XML
+        s._processor.process_template.return_value = "{response_type}{title}{incoming_question}{options_section}{script_entries}"
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( self._card() )
+        assert out == "academic"
+
+    def test_a_card_id_entry_is_kept_out_of_the_prompt( self ):
+        # It has no question to match on. Listing it would put a BLANK question in
+        # front of the model with a real answer attached — an invitation to answer the
+        # next unrelated question with "__first_option__".
+        s, _ = _make_matcher( script=self.CARD_SCRIPT )
+        formatted = s._format_entries( self.CARD_SCRIPT[ "entries" ] )
+        assert "Who is the target audience?" in formatted
+        assert "__first_option__" not in formatted
+
+    def test_an_entry_carrying_both_an_id_and_a_question_still_reaches_the_prompt( self ):
+        # The exclusion is for entries with NOTHING to match on. One that carries both
+        # is still usable by the prose path and must not be dropped from it.
+        entries   = [ { "card_id": "x", "question_pattern": "Who is the target audience?",
+                        "answer": "general" } ]
+        s, _      = _make_matcher( script=self.CARD_SCRIPT )
+        formatted = s._format_entries( entries )
+        assert "Who is the target audience?" in formatted
+
+
 class TestHandleBatch:
 
     def _process( self, s ):

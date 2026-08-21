@@ -52,13 +52,12 @@
       ]
     },
     {
-      "question_pattern": "Which document should I use for the presentation?",
+      "card_id": "document_choice",
       "answer": "__first_option__",
-      "arg_name": "source",
       "response_types": [
         "multiple_choice"
       ],
-      "_comment": "The DOCUMENT CHOICE CARD (row 9046ef58). It appears whenever the matcher finds 2..cap candidates, which an automated run reaches as soon as the search directory holds more than one plausible file; without this entry the proxy has nothing to answer with and the run CANCELS at the card. The answer is a POSITIONAL SENTINEL, not a value: the option labels are candidate basenames discovered at run time, so no fixed string could ever match one. cosa/agents/notification_proxy/option_sentinels.py turns it into a real label from the options that arrive with the notification, skipping the Describe and Cancel escapes. A directive in prose was tried first and the matcher returned the prose verbatim, which the expeditor rejected as an unknown label. The question_pattern must stay byte-identical to what RuntimeArgumentExpeditor._document_choice_question returns for this agent — test_proxy_scripts_answer_the_choice_card.py pins the pair."
+      "_comment": "The DOCUMENT CHOICE CARD, keyed on the card's own id rather than its wording (row a1420538). This entry is GENERIC: every agent with a file-typed argument shows the same card, and the card names itself via card_id in response_options, so nothing here mentions podcasts or presentations and a new agent needs no new entry. It used to key on question_pattern — the question the expeditor derives per calling agent — which forced one byte-identical copy per agent and meant a wording change silently left the card unanswered. The match on card_id is exact and happens BEFORE the model is asked anything. The answer is a POSITIONAL SENTINEL, not a value: option labels are candidate basenames discovered at run time, so no fixed string could ever equal one; cosa/agents/notification_proxy/option_sentinels.py turns it into a real label from the options that arrive with the notification, skipping the Describe and Cancel escapes."
     },
     {
       "question_pattern": "Would you like to proceed with these settings?",

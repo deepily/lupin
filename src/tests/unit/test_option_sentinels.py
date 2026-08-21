@@ -20,6 +20,16 @@ DESCRIBE = "Let me describe it instead"
 CANCEL   = "Cancel"
 ESCAPES  = ( DESCRIBE, CANCEL )
 
+# Answer payloads in the JSON shape _ask_choice_for_arg parses beside a raw label.
+JSON_GOOD              = '{"answers": {"source": "kiss.md"}}'
+JSON_MADE_UP           = '{"answers": {"source": "made-up.md"}}'
+JSON_NUMBER_VALUE      = '{"answers": {"source": 7}}'
+JSON_WRONG_KEY         = '{"picked": "kiss.md"}'
+JSON_ANSWERS_IS_A_LIST = '{"answers": ["kiss.md"]}'
+JSON_TOP_LEVEL_LIST    = '{"a": 1}[0]'
+JSON_BROKEN            = '{"answers": {"source": }'
+JSON_EMPTY_MAP         = '{"answers": {}}'
+
 
 def _card( *labels ):
     """A notification shaped like the multiple-choice card the expeditor sends."""
@@ -164,6 +174,114 @@ class TestResolve( unittest.TestCase ):
         # report a skip out loud.
         self.assertIsNone( sentinels.resolve( "__first_option__", {} ) )
         self.assertNotEqual( sentinels.resolve( "__first_option__", {} ), "__first_option__" )
+
+
+def _card_with( questions ):
+    """A notification whose questions are given whole (multi_select, options, ...)."""
+    return { "response_options": { "questions": questions } }
+
+
+class TestUnofferedValues( unittest.TestCase ):
+    """
+    Row a1420538. The sentinel resolver only ever looked at sentinel-SHAPED answers,
+    so anything the script matcher, the rule strategy or the cloud LLM produced went
+    to the card unchecked. That left the prose-as-a-label failure reachable by three
+    other routes, and one of them was live: a prediction hint still carrying the
+    retired directive at confidence 0.9 against an auto-submit floor of 0.9.
+    """
+
+    def test_an_offered_label_is_not_a_violation( self ):
+        self.assertEqual( sentinels.unoffered_values( "kiss.md", _card( "kiss.md", "quantum.md" ) ), [] )
+
+    def test_the_retired_prose_is_caught( self ):
+        # The exact string the CBR hint still carries. It is not a label; it never was.
+        prose = "Pick the first document option in the list - never 'Let me describe it' and never 'Cancel'."
+        self.assertEqual(
+            sentinels.unoffered_values( prose, _card( "kiss.md", DESCRIBE, CANCEL ) ), [ prose ] )
+
+    def test_the_escapes_are_offered_and_so_are_not_violations( self ):
+        # The sentinel resolver refuses to SELECT them; that is a different question
+        # from whether the card offered them. Reporting Cancel as unoffered would be
+        # a false accusation - the user can pick it.
+        self.assertEqual( sentinels.unoffered_values( CANCEL, _card( "kiss.md", CANCEL ) ), [] )
+
+    def test_the_comparison_is_exact_after_stripping( self ):
+        # The expeditor maps the pick back to a file with an exact lookup, so a looser
+        # match here would wave through a value it then refuses - a cancelled run
+        # instead of a caught answer.
+        card = _card( "kiss.md" )
+        self.assertEqual( sentinels.unoffered_values( "  kiss.md  ", card ), [] )
+        self.assertEqual( sentinels.unoffered_values( "KISS.md", card ),     [ "KISS.md" ] )
+        self.assertEqual( sentinels.unoffered_values( "kiss", card ),        [ "kiss" ] )
+
+    def test_a_json_answers_map_is_read_the_way_the_card_reads_it( self ):
+        # _ask_choice_for_arg parses { "answers": { header: label } } alongside a raw
+        # label, so validation has to see the label inside, not the JSON text.
+        card = _card( "kiss.md", "quantum.md" )
+        self.assertEqual( sentinels.unoffered_values( JSON_GOOD, card ), [] )
+        self.assertEqual( sentinels.unoffered_values( JSON_MADE_UP, card ), [ "made-up.md" ] )
+
+    def test_unparseable_json_is_reported_rather_than_swallowed( self ):
+        # It is not a label the card offered either. Pretending it parsed would hide
+        # that the answer is malformed.
+        self.assertEqual( sentinels.unoffered_values( JSON_BROKEN, _card( "kiss.md" ) ), [ JSON_BROKEN ] )
+
+    def test_an_empty_answers_map_is_reported_not_vacuously_accepted( self ):
+        # MARÍA'S CATCH. The map parses, carries no values, and the comprehension
+        # yields nothing — so "no violations" would be true for the wrong reason and
+        # the raw JSON would be submitted as a label. An answer with no label in it is
+        # not an offered label.
+        # RED ON REVERT (the `and answers` guard removed): [] != the JSON text.
+        self.assertEqual( sentinels.unoffered_values( JSON_EMPTY_MAP, _card( "kiss.md" ) ),
+                          [ JSON_EMPTY_MAP ] )
+
+    def test_json_that_is_not_an_answers_map_is_reported( self ):
+        card = _card( "kiss.md" )
+        for text in ( JSON_WRONG_KEY, JSON_ANSWERS_IS_A_LIST ):
+            with self.subTest( text=text ):
+                self.assertEqual( sentinels.unoffered_values( text, card ), [ text ] )
+
+    def test_a_json_value_with_no_get_is_reported_rather_than_crashing( self ):
+        # json.loads succeeds and returns a list, which has no .get - the AttributeError
+        # arm. A crash here would take down a proxy run over one bad answer.
+        self.assertEqual( sentinels.unoffered_values( JSON_TOP_LEVEL_LIST, _card( "kiss.md" ) ),
+                          [ JSON_TOP_LEVEL_LIST ] )
+
+    def test_a_non_string_answer_is_rejected_not_waved_through( self ):
+        card = _card( "kiss.md" )
+        self.assertEqual( sentinels.unoffered_values( 7, card ), [ 7 ] )
+        self.assertEqual( sentinels.unoffered_values( { "a": 1 }, card ), [ { "a": 1 } ] )
+
+    def test_a_non_string_value_inside_the_answers_map_is_rejected( self ):
+        self.assertEqual( sentinels.unoffered_values( JSON_NUMBER_VALUE, _card( "kiss.md" ) ), [ 7 ] )
+
+    def test_a_card_offering_nothing_rejects_everything( self ):
+        # The expeditor would refuse any answer to an option-less card. A visible
+        # rejection says so; a submitted value would not.
+        self.assertEqual( sentinels.unoffered_values( "anything", {} ), [ "anything" ] )
+
+    def test_a_multi_select_card_is_left_alone( self ):
+        # How a multi-select answer encodes several picks in one string is pinned
+        # nowhere. Rejecting on a guess would turn tfe.json's working "Select fixes to
+        # apply" entry into a skip, which is a worse outcome than the one being fixed.
+        card = _card_with( [ {
+            "multi_select" : True,
+            "options"      : [ { "label": "fix-1" }, { "label": "fix-2" } ],
+        } ] )
+        self.assertEqual( sentinels.unoffered_values( "fix-1, fix-2", card ), [] )
+        self.assertEqual( sentinels.unoffered_values( "__all__", card ),      [] )
+
+    def test_multi_select_on_any_question_spares_the_whole_card( self ):
+        card = _card_with( [
+            { "options": [ { "label": "a" } ] },
+            { "multi_select": True, "options": [ { "label": "b" } ] },
+        ] )
+        self.assertEqual( sentinels.unoffered_values( "not an option", card ), [] )
+
+    def test_has_a_multi_select_question_on_a_malformed_card( self ):
+        self.assertFalse( sentinels.has_a_multi_select_question( {} ) )
+        self.assertFalse( sentinels.has_a_multi_select_question( { "response_options": None } ) )
+        self.assertFalse( sentinels.has_a_multi_select_question( { "response_options": { "questions": None } } ) )
 
 
 if __name__ == "__main__":

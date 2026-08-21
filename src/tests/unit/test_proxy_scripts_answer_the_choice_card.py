@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Every agent that can be shown the document choice card has an answer for it (row 9046ef58).
+Every agent that can be shown the document choice card has an answer for it
+(row 9046ef58, re-keyed on the card's own id by row a1420538).
 
 THE FAILURE THIS PREVENTS, observed rather than imagined: on 2026-08-21 a live
 presentation job on :7999 reached the card and the run CANCELLED at it —
@@ -8,20 +9,28 @@ presentation job on :7999 reached the card and the run CANCELLED at it —
 file had no entry matching the question. Nothing was broken; the proxy simply had
 nothing to say, and a cancel looks exactly like a user declining.
 
-WHY A TEST AND NOT A NOTE. The answer files match on `question_pattern`, a plain
-string. Nothing in the code refers to those files, so the wording and the key can
-drift apart silently and the only symptom is an automated run that cancels for no
-visible reason. This test is the link: it derives the question from the CODE and
-demands the FILE carry it.
+WHAT CHANGED, AND WHY THE TEST CHANGED WITH IT. The entries used to be keyed on
+`question_pattern` — the question the expeditor DERIVES per calling agent, "for the
+podcast" or "for the presentation". That made prose the join key between code and
+config, so this test's job was to derive the question from the code and demand the
+file carry it byte for byte. It worked, and it was the wrong shape: every new agent
+needed its own copy of an otherwise identical entry, and the pairing had to be
+re-pinned each time.
+
+The card now names itself. `card_id` rides in `response_options` and the matcher claims
+the entry on an exact id match before the model is asked anything, so the entry is
+GENERIC — it mentions no agent and needs no wording kept in step with the code. Note
+what that does and does not buy: profiles do not inherit, so each file still carries
+its own copy; the win is that the copy is verbatim rather than re-derived per agent.
+What is pinned here is therefore no longer a string pair — it is that each profile
+carries the generic entry, that it names no agent, and that its answer is a sentinel
+rather than a filename.
 
 RED ON REVERT, per arm:
-  · remove either entry            -> "podcast.json has no entry for the document choice card"
-  · change the wording in the code -> the derived question stops matching the file's key
-  · change the key in the file     -> same failure from the other side
-
-⚠️ Podcast's entry is NEW too. It has had the card since row bd0ce120 and never had an
-answer for it; nobody hit it because a run must land on 2-to-cap matches to see the
-card. This row's live cancel was presentation's, but the hole was already there.
+  · remove either entry        -> "podcast.json has 0 entries for the document choice card"
+  · re-key one on prose        -> the id lookup finds nothing; same failure
+  · put a path in the answer   -> "must be one of ('__first_option__', '__last_option__')"
+  · name an agent in the entry -> "the generic entry must not mention 'podcast'"
 """
 
 import json
@@ -30,17 +39,17 @@ import unittest
 
 import cosa.utils.util as cu
 from cosa.agents.notification_proxy import option_sentinels
-from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
-from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
+from cosa.agents.runtime_argument_expeditor.expeditor import DOCUMENT_CHOICE_CARD_ID
 
 
 SCRIPT_DIR = "/src/conf/notification-proxy-scripts"
 
-# profile file -> the command whose card it must answer
-CARD_CONSUMERS = {
-    "podcast.json"      : "agent router go to podcast generator",
-    "presentation.json" : "agent router go to presentation generator",
-}
+# The profile files whose agent can reach the card. Row a1420538 piece 4 replaces this
+# literal with an iteration over every file-typed argument in the registry.
+CARD_CONSUMERS = ( "podcast.json", "presentation.json" )
+
+# Words that would mean the entry had drifted back to being agent-specific.
+AGENT_WORDS = ( "podcast", "presentation" )
 
 
 def _load( filename ):
@@ -49,9 +58,7 @@ def _load( filename ):
 
 
 def _choice_card_entries( script ):
-    return [ e for e in script[ "entries" ]
-             if "multiple_choice" in e.get( "response_types", [] )
-             and e[ "question_pattern" ].startswith( "Which document should I use" ) ]
+    return [ e for e in script[ "entries" ] if e.get( "card_id" ) == DOCUMENT_CHOICE_CARD_ID ]
 
 
 class TestEveryCardConsumerHasAnAnswer( unittest.TestCase ):
@@ -64,33 +71,43 @@ class TestEveryCardConsumerHasAnAnswer( unittest.TestCase ):
                     len( entries ), 1,
                     f"{filename} has {len( entries )} entries for the document choice card; "
                     f"expected exactly 1 — with none the proxy cancels at the card, "
-                    f"with two the matcher is given contradictory guidance"
+                    f"with two the matcher claims whichever comes first"
                 )
 
-    def test_the_key_equals_what_the_code_actually_asks( self ):
-        # THE LINK. The question is derived from the code, not retyped here, so a
-        # wording change in either place fails this rather than silently unanswering
-        # a card.
-        for filename, command in CARD_CONSUMERS.items():
+    def test_the_id_is_the_one_the_code_actually_sends( self ):
+        # THE LINK, in its new form. The id is imported from the expeditor rather than
+        # retyped, so renaming it there fails this instead of silently unanswering the
+        # card in every profile at once.
+        for filename in CARD_CONSUMERS:
             with self.subTest( profile=filename ):
-                display  = JOB_ARG_CONTRACTS[ command ][ "display_name" ]
-                expected = RuntimeArgumentExpeditor._document_choice_question( display )
-                entry    = _choice_card_entries( _load( filename ) )[ 0 ]
-                self.assertEqual( entry[ "question_pattern" ], expected )
+                entry = _choice_card_entries( _load( filename ) )[ 0 ]
+                self.assertEqual( entry[ "card_id" ], DOCUMENT_CHOICE_CARD_ID )
 
-    def test_the_entry_names_the_agents_own_argument( self ):
-        for filename, command in CARD_CONSUMERS.items():
+    def test_the_entry_is_generic( self ):
+        # The whole point of the id. An entry that names an agent — in its key, its
+        # arg_name, or its comment — is one that has to be copied for the next agent,
+        # which is the duplication this row removed.
+        for filename in CARD_CONSUMERS:
             with self.subTest( profile=filename ):
-                handlers = JOB_ARG_CONTRACTS[ command ][ "special_handlers" ]
-                fuzzy    = [ arg for arg, h in handlers.items() if h == "fuzzy_file_match" ]
-                entry    = _choice_card_entries( _load( filename ) )[ 0 ]
-                self.assertEqual( entry[ "arg_name" ], fuzzy[ 0 ] )
+                entry = _choice_card_entries( _load( filename ) )[ 0 ]
+                self.assertNotIn( "question_pattern", entry,
+                                  "the card is claimed by id; a prose key would take precedence "
+                                  "in the reader's mind and drift from the code again" )
+                self.assertNotIn( "arg_name", entry,
+                                  "the arg differs per agent — naming one makes the entry "
+                                  "agent-specific again" )
+                for word in AGENT_WORDS:
+                    self.assertNotIn(
+                        word, entry.get( "_comment", "" ).lower().replace( "podcasts", "" )
+                              .replace( "presentations", "" ),
+                        f"the generic entry must not mention {word!r}" )
 
     def test_the_answer_is_a_positional_sentinel_not_a_filename( self ):
         # The option labels are candidate basenames discovered at run time, so a fixed
         # filename could never match one. If someone "fixes" this entry by putting a
-        # path in it, the matcher returns a label the card cannot produce and the
-        # expeditor rejects it as malformed — a cancel again, by a different route.
+        # path in it, the answer reaches the card as a label it never offered — which
+        # the responder now refuses outright (row a1420538 piece 3), so the run takes a
+        # visible skip instead of a mystery cancel. Still wrong; just no longer silent.
         #
         # It must be a SENTINEL and not merely prose. Prose was the first attempt: the
         # entry read "Pick the first document option in the list", and on a live run
@@ -105,11 +122,39 @@ class TestEveryCardConsumerHasAnAnswer( unittest.TestCase ):
                     f"submitted verbatim and rejected as an unknown label"
                 )
 
-    def test_presentation_is_not_asked_about_the_podcast( self ):
-        # The wording defect and the answer-file gap were one piece of work: an entry
-        # keyed to the old hardcoded question would have been a test of the bug.
-        entry = _choice_card_entries( _load( "presentation.json" ) )[ 0 ]
-        self.assertNotIn( "podcast", entry[ "question_pattern" ].lower() )
+    def test_the_entry_is_scoped_to_multiple_choice( self ):
+        # The card is a multiple-choice ask. Leaving the type off would let this entry
+        # claim the OPEN-ENDED "describe the document" ask as well, whose legitimate
+        # answer is a file path — and a sentinel submitted there resolves against a
+        # card with no options at all.
+        for filename in CARD_CONSUMERS:
+            with self.subTest( profile=filename ):
+                entry = _choice_card_entries( _load( filename ) )[ 0 ]
+                self.assertEqual( entry[ "response_types" ], [ "multiple_choice" ] )
+
+    def test_no_profile_still_keys_a_document_choice_card_on_prose( self ):
+        # The straggler guard. A prose-keyed multiple-choice entry for this card is the
+        # shape that had to be duplicated per agent; if one reappears anywhere in the
+        # directory, it fails here rather than hanging a smoke run.
+        #
+        # SCOPED TO multiple_choice DELIBERATELY. Six OPEN-ENDED entries across the
+        # directory legitimately ask "Which research document should I use…" and answer
+        # with a file path — that is the describe-it ask, a different surface. Widening
+        # this check to every response type would false-accuse all six.
+        directory = cu.get_project_root() + SCRIPT_DIR
+        offenders = []
+        for filename in sorted( os.listdir( directory ) ):
+            if not filename.endswith( ".json" ):
+                continue
+            for entry in _load( filename ).get( "entries", [] ):
+                if "multiple_choice" not in entry.get( "response_types", [] ):
+                    continue
+                question = entry.get( "question_pattern", "" )
+                if question.lower().startswith( "which document should i use" ):
+                    offenders.append( f"{filename}: {question!r}" )
+        self.assertEqual( offenders, [],
+                          "these entries key the document choice card on its wording; "
+                          "key them on card_id instead" )
 
     def test_every_profile_file_still_parses( self ):
         # Cheap whole-directory guard: these are hand-edited JSON, and a trailing
