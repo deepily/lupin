@@ -62,7 +62,7 @@ def _canned_artifact( arm, *, spans, pairs=_PAIRS ):
         "metrics"    : { count_key: len( spans ), "spans_by_utterance": dict( spans ) },
         # Each arm records the tree it measured (row c9b43538); the two differ by design.
         "provenance" : paired_eval.make_provenance( arm, "simple", 1024, 60, pairs,
-                                                    git_sha="b0735467" if arm == "v1" else "f7c5e349" ),
+                                                    git_sha="15536409" if arm == "v1" else "f7c5e349" ),
     }
 
 
@@ -122,16 +122,38 @@ def test_bridge_never_reaches_validity_when_safety_refuses():
 def test_bridge_refuses_a_leaky_corpus_at_precondition_0_before_safety():
     """Precondition 0 (CORPUS) runs BEFORE SAFETY: a corpus routing to an arg-extracting command
     refuses at the leak check, and SAFETY is never even consulted. This is what makes the guard
-    a real precondition and not a note — it fires first, on the shipped default path."""
+    a real precondition and not a note — it fires first, on the shipped default path.
+
+    The guard is pin-aware since row 297b1fc3: it refuses only while the pin LACKS the leak fix.
+    The shipped pin (15536409) carries it, so this arm pins the premise to "leaky" explicitly —
+    the ORDER (corpus before safety) is what this test proves, not the pin."""
     safety_spy = MagicMock( return_value=_V2_STORE )
     with patch( "cosa.config.configuration_manager.ConfigurationManager", MagicMock() ), \
          patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to deep research" ) ] ), \
+         patch.object( guard, "pin_carries_leak_fix", return_value=False ), \
          patch.object( guard, "require_isolated_snapshot_table", safety_spy ):
         with pytest.raises( guard.PairedCorpusExercisesLeak ) as exc:
             bridge.test_v2_paired_go_no_go_live()
         assert "agent router go to deep research" in str( exc.value )
 
     safety_spy.assert_not_called()   # precondition 0 refused before SAFETY was reached
+
+
+def test_bridge_admits_an_arg_extracting_corpus_at_a_leak_free_pin_and_reaches_safety():
+    """Inverse control for the pin-aware guard (row 297b1fc3): with the pin carrying the leak
+    fix, the same arg-extracting corpus is ADMITTED at precondition 0 and SAFETY IS consulted —
+    the bridge no longer refuses citing a defect the pin does not have. SAFETY itself is made
+    to refuse so the run stops there, proving the spy was reached and nothing past it ran."""
+    class _StopAtSafety( RuntimeError ): pass
+    safety_spy = MagicMock( side_effect=_StopAtSafety( "stop here" ) )
+    with patch( "cosa.config.configuration_manager.ConfigurationManager", MagicMock() ), \
+         patch( "v2_eval.load_corpus", return_value=[ ( "u", "agent router go to deep research" ) ] ), \
+         patch.object( guard, "pin_carries_leak_fix", return_value=True ), \
+         patch.object( guard, "require_isolated_snapshot_table", safety_spy ):
+        with pytest.raises( _StopAtSafety ):
+            bridge.test_v2_paired_go_no_go_live()
+
+    safety_spy.assert_called_once()   # precondition 0 admitted the corpus; SAFETY was reached
 
 
 # ---------------------------------------------------------------------------

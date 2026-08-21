@@ -15,7 +15,9 @@
 #   bash src/scripts/launch-v1-baseline-7997.sh --check    # verify only, never start
 #
 # 🔴 THE IDENTITY GATE IS THE POINT (María, 2026-08-19): code-identity must read
-# b0735467 BEFORE a single utterance runs. The v1 arm is a BASELINE — its whole
+# the pin (15536409 since 2026-08-21, rows 647f3733/297b1fc3 — leak-free but
+# refactored; see V1_PIN_RATIONALE in v1_eval_arm.py) BEFORE a single utterance
+# runs. The v1 arm is a BASELINE — its whole
 # job is to be the fixed thing the v2 delta is measured against. An arm serving
 # any other sha is not a baseline, and a delta computed against it is a number
 # with nothing behind it. So this script REFUSES rather than starting, or
@@ -48,8 +50,10 @@
 
 set -euo pipefail
 
-WORKTREE="/mnt/DATA01/include/www.deepily.ai/projects/lupin-v1-baseline-b0735467"
-PINNED_SHA="b0735467"
+# The worktree directory name CONTAINS the pin on purpose (tamper-evidence, see the
+# read_identity note below) — re-pinning means RENAMING the worktree, not editing one line.
+WORKTREE="/mnt/DATA01/include/www.deepily.ai/projects/lupin-v1-baseline-15536409"
+PINNED_SHA="15536409"
 PORT=7997
 MAIN_ROOT="${LUPIN_ROOT:?LUPIN_ROOT must be set (the MAIN tree — its venv runs this)}"
 LOG="/tmp/v1-baseline-7997.log"
@@ -64,7 +68,7 @@ check_only=0
 # and fell back to json.dumps(d), which the callers then SUBSTRING-matched against
 # the pin. The record's real field is `git_sha`, and when git cannot read a HEAD the
 # record says so in `git_sha_source`: "UNAVAILABLE: git could not read a HEAD sha at
-# /…/lupin-v1-baseline-b0735467". That string CONTAINS b0735467 — the worktree is
+# /…/lupin-v1-baseline-<pin>". That string CONTAINS the pin — the worktree is
 # named after the pin. So the gate passed, loudest and most convincingly, in precisely
 # the case where the sha was explicitly UNAVAILABLE. A gate that can pass without
 # reading the value it gates on is not a gate.

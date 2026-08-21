@@ -77,17 +77,28 @@ class NotAMeasurementDatabase( RuntimeError ):
 
 
 class PairedCorpusExercisesLeak( RuntimeError ):
-    """CORPUS failure — the corpus routes to an arg-extracting command whose fallback_defaults
-    leak (bug 8aa89f42, fixed at bf77852b) is UNFIXED at the pinned v1 sha b0735467.
+    """CORPUS failure — the corpus routes to an arg-extracting command while the PINNED v1 sha
+    still carries the fallback_defaults leak (bug 8aa89f42, fixed at bf77852b).
 
-    The v1 arm runs against a worktree pinned at b0735467 (design §2a) — the last sha before the
-    9805783d request-path refactor, and bf77852b (the leak fix) sits on top of that refactor, so
-    the fix cannot be taken without changing the very path being measured. That leaves the leak
-    live at the pin: the runtime-argument expeditor hands out a registry entry's OWN
+    THE PREMISE IS DERIVED FROM THE PIN, NOT HARD-CODED (row 297b1fc3, María 2026-08-21): the
+    leak is live at a pin iff bf77852b is NOT an ancestor of it (`pin_carries_leak_fix`). The
+    leak itself: the runtime-argument expeditor hands out a registry entry's OWN
     fallback_defaults dict, so the first replayed body's extracted arg STICKS as every later
-    body's default for the process life — a cross-body contaminant in a SEQUENTIAL replay. The
-    'simple' corpus is safe because its commands are pure routing and never reach arg extraction;
-    a corpus containing any JOB_ARG_CONTRACTS command is not. Raised loudly, naming the offender.
+    body's default for the process life — a cross-body contaminant in a SEQUENTIAL replay, i.e.
+    it corrupts the measurement itself. While the pin was b0735467 (until 2026-08-21) the leak
+    was live and any arg-extracting corpus had to be refused; the 'simple' corpus was safe only
+    because its commands are pure routing and never reach arg extraction.
+
+    THE CHOSEN PIN AND ITS COST, so neither this docstring nor the report asserts the other
+    horn's premise: V1_PIN_SHA is 15536409 (row 647f3733 ruling, Cheech agreeing). It carries
+    bf77852b, so the arm is LEAK-FREE and an arg-extracting corpus is ADMITTED — refusing it
+    there would cite a defect that is not present and quietly force the baseline onto 'simple',
+    below the row's own n=60-over-all-commands spec. It ALSO carries the 9805783d request-path
+    refactor, so the measured v1 is the REFACTORED request path, not the one Rick's criteria were
+    written against (the other pin, b0735467, is unrefactored but leaky). The trade was chosen
+    because a leak corrupts what is measured; the refactor is EXPECTED — not yet measured — to
+    change the path's structure, not the numbers reported. Raised loudly, naming the offenders
+    AND the pin.
     """
 
 
@@ -395,34 +406,100 @@ def agentic_command_names() -> Set[ str ]:
     return set( JOB_ARG_CONTRACTS.keys() )
 
 
-def require_leak_free_corpus( corpus_commands, *, agentic_commands: Optional[ Set[ str ] ] = None ) -> Set[ str ]:
+LEAK_FIX_SHA              = "bf77852b"   # the fix for the 8aa89f42 fallback_defaults leak
+REQUEST_PATH_REFACTOR_SHA = "9805783d"   # the v1 request-path refactor the fix sits on top of
+
+
+def _git_is_ancestor( ancestor: str, descendant: str, repo_root: Optional[ str ] = None ) -> bool:
     """
-    Refuse a paired run whose corpus routes to any arg-extracting command (the leak site).
+    Ask git whether `ancestor` is reachable from `descendant` in the project repo.
+
+    Requires:
+        - both are sha prefixes git can resolve in the repo at repo_root (default: the
+          project root from cu.get_project_root(), i.e. LUPIN_ROOT)
+
+    Ensures:
+        - True when `git merge-base --is-ancestor` exits 0, False when it exits 1
+        - raises RuntimeError on any other exit (an unresolvable sha, a missing repo) —
+          NEVER guesses: an unanswerable question must not read as "leak-free" or as "leaky"
+    """
+    import subprocess
+    if repo_root is None:
+        import cosa.utils.util as cu
+        repo_root = cu.get_project_root()
+    proc = subprocess.run( [ "git", "-C", repo_root, "merge-base", "--is-ancestor", ancestor, descendant ],
+                           capture_output=True, text=True )
+    if proc.returncode == 0: return True
+    if proc.returncode == 1: return False
+    raise RuntimeError(
+        f"git merge-base --is-ancestor {ancestor} {descendant} failed ({proc.returncode}) in "
+        f"{repo_root}: {proc.stderr.strip()}"
+    )
+
+
+def pin_carries_leak_fix( pin_sha: str, *, repo_root: Optional[ str ] = None, is_ancestor_fn=None ) -> bool:
+    """
+    Does the pinned v1 sha carry the 8aa89f42 leak fix (bf77852b)? — the guard's whole premise.
+
+    Requires:
+        - pin_sha is a non-empty sha prefix
+        - is_ancestor_fn, when given, has _git_is_ancestor's signature (injected in tests);
+          when None the real git is asked
+
+    Ensures:
+        - returns True iff LEAK_FIX_SHA is an ancestor of pin_sha
+        - raises ValueError on an empty pin (a blank pin is a configuration error, not a verdict)
+    """
+    if not pin_sha:
+        raise ValueError( "pin_carries_leak_fix needs a non-empty pin sha" )
+    fn = is_ancestor_fn if is_ancestor_fn is not None else _git_is_ancestor
+    return bool( fn( LEAK_FIX_SHA, pin_sha, repo_root ) )
+
+
+def require_leak_free_corpus( corpus_commands, *, agentic_commands: Optional[ Set[ str ] ] = None,
+                              pinned_sha: Optional[ str ] = None,
+                              pin_carries_fix: Optional[ bool ] = None ) -> Set[ str ]:
+    """
+    Refuse a paired run whose corpus routes to an arg-extracting command WHILE the pinned v1
+    sha still carries the fallback_defaults leak (bug 8aa89f42). Pin-aware (row 297b1fc3).
 
     Requires:
         - corpus_commands is an iterable of the router command strings the corpus's utterances
           resolve to (the second element of each (utterance, command) pair from load_corpus).
         - agentic_commands, when given, is the leak-carrying command set (injected in tests);
           when None it is read LIVE from the registry via agentic_command_names().
+        - pinned_sha, when given, is the v1 pin to judge; when None it is v1_eval_arm.V1_PIN_SHA.
+        - pin_carries_fix, when given, overrides the git question (injected in tests); when
+          None it is pin_carries_leak_fix( pinned_sha ).
 
     Ensures:
         - returns the corpus_commands as a set, unchanged, when it is DISJOINT from the
-          arg-extracting commands — the fallback_defaults leak is never reached.
-        - raises PairedCorpusExercisesLeak, NAMING every offending command (sorted), when the
-          corpus routes to one or more arg-extracting commands: at the pinned v1 sha b0735467
-          that leak is unfixed and would contaminate the sequential replay.
+          arg-extracting commands — the leak site is never reached, whatever the pin.
+        - returns the set, unchanged, when it intersects but the pin CARRIES the fix — there
+          is no leak to refuse; refusing would cite a defect that is not present and force
+          the baseline onto a pure-routing corpus below its own spec.
+        - raises PairedCorpusExercisesLeak, NAMING every offending command (sorted) AND the
+          pin, when it intersects and the pin LACKS the fix: the leak would contaminate the
+          sequential replay.
 
     Raises:
-        - PairedCorpusExercisesLeak on any non-empty intersection.
+        - PairedCorpusExercisesLeak on a non-empty intersection at a leaky pin.
     """
     commands = set( corpus_commands )
     leaky    = agentic_commands if agentic_commands is not None else agentic_command_names()
     tripped  = sorted( commands & leaky )
-    if tripped:
-        raise PairedCorpusExercisesLeak(
-            "corpus routes to arg-extracting command(s) whose fallback_defaults leak (bug "
-            "8aa89f42) is UNFIXED at the pinned v1 sha b0735467 and would contaminate the "
-            "sequential replay: " + ", ".join( tripped ) + ". Use a pure-routing corpus (e.g. "
-            "'simple'). Refusing (corpus)."
-        )
-    return commands
+    if not tripped:
+        return commands
+    if pinned_sha is None:
+        from v1_eval_arm import V1_PIN_SHA   # lazy: v1_eval_arm -> paired_eval -> v2_eval -> this module
+        pinned_sha = V1_PIN_SHA
+    carries = pin_carries_fix if pin_carries_fix is not None else pin_carries_leak_fix( pinned_sha )
+    if carries:
+        return commands   # the leak is fixed at this pin — an arg-extracting corpus is admitted
+    raise PairedCorpusExercisesLeak(
+        "corpus routes to arg-extracting command(s) whose fallback_defaults leak (bug 8aa89f42, "
+        f"fixed at {LEAK_FIX_SHA}) is UNFIXED at the pinned v1 sha {pinned_sha} and would "
+        "contaminate the sequential replay: " + ", ".join( tripped ) + ". Either move the pin "
+        f"to a sha that carries {LEAK_FIX_SHA} or use a pure-routing corpus (e.g. 'simple'). "
+        "Refusing (corpus)."
+    )
