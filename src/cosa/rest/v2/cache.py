@@ -103,7 +103,9 @@ class V2Cache( TwoTierQuestionSearch ):
 
     def snapshot_from_result( self, question: str, answer: str, answer_conversational: str,
                               routing_command: str, user_id: str, agent_class_name: str="",
-                              session_id: str="" ) -> SolutionSnapshot:
+                              session_id: str="", code: Optional[ list ]=None,
+                              code_example: Optional[ str ]=None,
+                              code_returns: Optional[ str ]=None ) -> SolutionSnapshot:
         """
         Build a replay-shaped SolutionSnapshot from a flow result's raw fields.
 
@@ -136,6 +138,15 @@ class V2Cache( TwoTierQuestionSearch ):
 
         `session_id` keeps its default: a write can legitimately have no live
         session behind it, but it can never have no owner.
+
+        THE CODE IS NOT OPTIONAL DECORATION. v1's create_from_agent copies code,
+        code_example and code_returns off the agent; this built rows without them, and
+        SolutionSnapshot.run_code() raises "Cannot execute empty code list" for every
+        class outside CODELESS_AGENT_CLASSES — so a v2-written MathAgent row was
+        written and could never be served (bug 38815328). Each stays None-by-default
+        and is only passed on when it is not None, so the constructor's own defaults
+        stand for an agent that produced no code rather than being overwritten with a
+        null.
         """
         if not question:
             raise ValueError( "snapshot_from_result requires a non-empty question" )
@@ -144,6 +155,10 @@ class V2Cache( TwoTierQuestionSearch ):
                 "snapshot_from_result requires a non-empty user_id — a snapshot nobody owns "
                 "cannot be filtered, attributed, or deleted by its owner"
             )
+        generated = { name: value for name, value in ( ( "code", code ),
+                                                       ( "code_example", code_example ),
+                                                       ( "code_returns", code_returns ) )
+                      if value is not None }
         return self._snapshot_factory(
             question=question,
             question_normalized=self._normalizer.normalize( question ),
@@ -154,6 +169,7 @@ class V2Cache( TwoTierQuestionSearch ):
             last_question_asked=question,
             user_id=user_id,
             session_id=session_id,
+            **generated,
         )
 
     # ------------------------------------------------------------------ lookup

@@ -20,6 +20,25 @@ from cosa.memory.embedding_provider import get_embedding_provider
 from cosa.memory.normalizer import Normalizer
 from cosa.rest.job_state import JobState
 
+# Classes whose snapshots are REPLAYABLE WITHOUT CODE: the answer was computed by
+# pure-Python helpers, not by Python source we can re-run, so run_code() serves the
+# cached answer instead of executing. Named here rather than spelled inside run_code
+# because a writer has to ask the same question — "can this row ever be served?" —
+# before it writes a row that cannot be (bug 38815328).
+#
+# NOT the same list as the already-formatted set in run_formatter(): that one asks
+# whether the conversational answer needs an LLM pass, which is a different question
+# about a different field, and merging them would couple two unrelated decisions.
+CODELESS_AGENT_CLASSES = ( "CalculatorAgent", )
+
+# Both spellings of the todo command map to the todo dataframe. v1 wrote
+# "agent router go to todo list"; the v2 registry's full form is "agent router go to
+# todo" and carries the longer one as an alias, so rows written by the two flows
+# disagree on the string while meaning the same command. Keying on one of them leaves
+# the other's replays running without their dataframe.
+TODO_ROUTING_COMMANDS = ( "agent router go to todo list", "agent router go to todo" )
+
+
 class SolutionSnapshot( RunnableCode ):
     """
     Captures and persists a complete solution to a question.
@@ -880,7 +899,7 @@ class SolutionSnapshot( RunnableCode ):
         # agent) saves snapshots with empty code by design — its answer was computed by
         # pure-Python helpers, not Python source we can re-run. Short-circuit to return
         # the cached answer in the code_response_dict shape that downstream code expects.
-        if self.agent_class_name == "CalculatorAgent":
+        if self.agent_class_name in CODELESS_AGENT_CLASSES:
             if self.answer:
                 self.code_response_dict = { "return_code": 0, "output": self.answer }
                 return self.code_response_dict
@@ -894,7 +913,7 @@ class SolutionSnapshot( RunnableCode ):
         if not self.code or all( line.strip() == "" for line in self.code ):
             raise ValueError( "Cannot execute empty code list — snapshot has no executable code" )
 
-        if self.routing_command == "agent router go to todo list":
+        if self.routing_command in TODO_ROUTING_COMMANDS:
             path_to_df = "/src/conf/long-term-memory/todo.csv"
         elif self.routing_command == "agent router go to calendar":
             path_to_df = "/src/conf/long-term-memory/events.csv"

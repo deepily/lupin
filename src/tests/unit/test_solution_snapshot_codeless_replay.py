@@ -131,3 +131,79 @@ def test_unknown_agent_empty_code_still_raises():
     )
     with pytest.raises( ValueError, match="Cannot execute empty code list" ):
         snap.run_code()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Bug 38815328 — both spellings of the todo command reach the todo dataframe
+# ─────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize( "routing_command", [
+    "agent router go to todo list",   # what v1 wrote
+    "agent router go to todo",        # the v2 registry's full form
+] )
+def test_both_todo_commands_get_the_todo_dataframe( monkeypatch, routing_command ):
+    """
+    v1 wrote "agent router go to todo list"; the v2 registry's full form is "agent
+    router go to todo" and carries the longer one only as an alias. Keying the
+    dataframe path on one spelling leaves the other's replays running WITHOUT their
+    data — the code executes, reads no todo list, and answers about nothing.
+
+    RED ON REVERT: key on the single v1 string again and the v2 spelling gets
+    path_to_df=None.
+    """
+    import cosa.memory.solution_snapshot as snapshot_mod
+
+    seen = {}
+
+    def _fake_run( code, code_example, solution_code_returns=None, path_to_df=None, debug=False ):
+        seen[ "path_to_df" ] = path_to_df
+        return { "return_code": 0, "output": "milk" }
+
+    monkeypatch.setattr( snapshot_mod.ucr, "assemble_and_run_solution", _fake_run )
+    snap                 = _make_snapshot_no_init( agent_class_name="TodoListAgent",
+                                                   code=[ "solution = read_todo()" ] )
+    snap.routing_command = routing_command
+
+    snap.run_code()
+
+    assert seen[ "path_to_df" ] == "/src/conf/long-term-memory/todo.csv"
+
+
+def test_a_non_todo_command_still_gets_no_dataframe( monkeypatch ):
+    """
+    NEGATIVE CONTROL: widening the todo match must not hand the todo csv to
+    everything. A math replay still runs with no dataframe.
+    """
+    import cosa.memory.solution_snapshot as snapshot_mod
+
+    seen = {}
+
+    def _fake_run( code, code_example, solution_code_returns=None, path_to_df=None, debug=False ):
+        seen[ "path_to_df" ] = path_to_df
+        return { "return_code": 0, "output": "4" }
+
+    monkeypatch.setattr( snapshot_mod.ucr, "assemble_and_run_solution", _fake_run )
+    snap                 = _make_snapshot_no_init( agent_class_name="MathAgent",
+                                                   code=[ "solution = 2 + 2" ] )
+    snap.routing_command = "agent router go to math"
+
+    snap.run_code()
+
+    assert seen[ "path_to_df" ] is None
+
+
+def test_the_codeless_set_is_what_run_code_reads():
+    """
+    The v2 writer refuses to write a row that run_code() could never serve, and it
+    decides that by reading CODELESS_AGENT_CLASSES. If run_code stopped reading the
+    same tuple the two would drift — the writer would refuse rows run_code can serve,
+    or write rows it cannot.
+
+    RED ON REVERT: spell "CalculatorAgent" inline in run_code again and adding a class
+    to the tuple stops changing what run_code does.
+    """
+    from cosa.memory.solution_snapshot import CODELESS_AGENT_CLASSES
+
+    snap = _make_snapshot_no_init( agent_class_name=CODELESS_AGENT_CLASSES[ 0 ], code=[], answer="42" )
+
+    assert snap.run_code() == { "return_code": 0, "output": "42" }

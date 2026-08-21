@@ -63,6 +63,16 @@ class Outcome:
     answer_raw : Optional[ str ] = None
     job_id     : Optional[ str ] = None
     error      : Optional[ str ] = None
+    # THE CODE THE AGENT GENERATED, carried out so the write-back can persist it.
+    # Without these three the cache wrote rows with empty code, and SolutionSnapshot's
+    # run_code() raises "Cannot execute empty code list" for every class but the
+    # codeless ones — so a v2-written MathAgent row could be written and never served
+    # (bug 38815328: 117 of 300 warm-pass requests came back as the receptionist).
+    # None means "this agent produced no code", which is not the same as an empty list:
+    # the snapshot constructor's own defaults stand rather than being overwritten.
+    code         : Optional[ list ] = None
+    code_example : Optional[ str ]  = None
+    code_returns : Optional[ str ]  = None
 
 
 @runtime_checkable
@@ -112,12 +122,34 @@ class InlineExecutor:
         except Exception as e:
             return Outcome( status="failed", error=str( e ) )
 
+    @staticmethod
+    def _generated_code( job: Any ) -> tuple:
+        """The (code, example, returns) this agent produced, or three Nones.
+
+        v1's `SolutionSnapshot.create_from_agent` reads exactly these three keys off
+        `prompt_response_dict`, and the v2 write-back read none of them — which is why
+        every v2-written row had empty code and only CalculatorAgent snapshots could
+        ever be replayed.
+
+        `prompt_response_dict` is set by `AgentBase.run_prompt()`, not by `__init__`,
+        so an agent that answered without running a prompt genuinely does not have one.
+        That is a stated condition rather than attribute fishing, and it yields no code
+        instead of turning a successful run into a failed one — reading the attribute
+        unguarded would raise inside the try below and report the agent as broken.
+        """
+        if not hasattr( job, "prompt_response_dict" ):
+            return ( None, None, None )
+        response = job.prompt_response_dict
+        return ( response.get( "code" ), response.get( "example" ), response.get( "returns" ) )
+
     def _run_agent( self, work: Work, trace: StageTrace ) -> Outcome:
         """Run an agent (or the receptionist) end-to-end via do_all()."""
         try:
             trace.mark( "t_agent" )
             answer = work.job.do_all()
-            return Outcome( status="done", answer=answer, answer_raw=work.job.answer )
+            code, code_example, code_returns = self._generated_code( work.job )
+            return Outcome( status="done", answer=answer, answer_raw=work.job.answer,
+                            code=code, code_example=code_example, code_returns=code_returns )
         except Exception as e:
             return Outcome( status="failed", error=str( e ) )
 

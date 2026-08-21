@@ -21,6 +21,7 @@ from cosa.rest.v2 import flow as flow_mod
 from cosa.rest.v2 import registry as registry_mod
 from cosa.rest.v2.flow import AskFlow
 from cosa.rest.v2.pending import PendingRequests
+from cosa.rest.v2.executor import InlineExecutor
 
 
 # ────────────────────────────────────────────────────────────── fakes
@@ -76,9 +77,20 @@ def _lookup( is_replay_hit=False, snapshot=None, tier=1, similarity=0.0, best_sc
     )
 
 
-def _outcome( status="done", answer="the answer", answer_raw="raw", job_id=None, error=None ):
+def _outcome( status="done", answer="the answer", answer_raw="raw", job_id=None, error=None,
+              code=None, code_example="solution = do_something()", code_returns="string" ):
+    """A stand-in Outcome.
+
+    `code` defaults to a real one-line solution because that is what a done outcome
+    from a code-generating agent carries — the executor now copies the agent's code out
+    so the write-back can persist it. A default of None would make every write-back
+    test in this file exercise the unreplayable-row path instead of the one it is
+    about; the tests that DO want that path pass code=None explicitly.
+    """
     return types.SimpleNamespace( status=status, answer=answer, answer_raw=answer_raw,
-                                  job_id=job_id, error=error )
+                                  job_id=job_id, error=error,
+                                  code=[ "solution = 4" ] if code is None else code,
+                                  code_example=code_example, code_returns=code_returns )
 
 
 def _extraction( final_args=None, missing=(), fallback_questions=None ):
@@ -2461,3 +2473,180 @@ class TestAnEmptyQuestionIsNoQuestion:
                              lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
         return _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
                            FakeExecutor( _outcome() ), FakePending(), notifier )
+
+
+# ─────────────── bug 38815328 — a written row that could never be served
+
+class TestAWrittenRowCanActuallyBeReplayed:
+    """
+    Mr Radio measured it on the 2026-08-21 warm pass: 117 of 300 requests came back
+    as the receptionist with error=null. The v2 write-back copied question, answer,
+    routing_command and class off the result and NOTHING ELSE, so every row it wrote
+    had empty code — and SolutionSnapshot.run_code() raises "Cannot execute empty
+    code list" for every class outside CODELESS_AGENT_CLASSES. Calculator rows
+    replayed 60/60; MathAgent rows were written and could never be served.
+
+    Three parts, all pinned here: the code travels out of the agent, the write-back
+    persists it, and a row that still could not be served is not written at all.
+    """
+
+    class _PromptlessAgent( FakeAgent ):
+        """An agent that answered without ever running a prompt.
+
+        It carries `answer` because the executor reads that off every job — a fake
+        missing it fails in the executor for an unrelated reason and would let the
+        guard under test pass vacuously.
+        """
+
+        def __init__( self, **kwargs ):
+            super().__init__( **kwargs )
+            self.answer = "4"
+
+        def do_all( self ):
+            return "4"
+
+    class _CodingAgent( FakeAgent ):
+        """An agent that ran a prompt, as every code-generating agent does."""
+
+        def __init__( self, **kwargs ):
+            super().__init__( **kwargs )
+            self.answer               = "4"
+            self.prompt_response_dict = {
+                "code"    : [ "solution = 2 + 2" ],
+                "example" : "solution = 2 + 2",
+                "returns" : "int",
+            }
+
+        def do_all( self ):
+            return "4"
+
+    def _flow_with( self, tmp_path, notifier, monkeypatch, factory, **flow_kw ):
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=True,
+                                                                     factory=factory ) )
+        cache = FakeCache()
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            InlineExecutor(), FakePending(), notifier,
+                            writeback_enabled=True, **flow_kw )
+        return f, cache
+
+    def test_the_agents_code_reaches_the_written_snapshot( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE WHOLE BUG, end to end and through the REAL executor: agent → Outcome →
+        write-back. A test that handed the flow a pre-built Outcome would prove the
+        second half only, and the first half is where the code was being dropped.
+
+        RED ON REVERT: stop copying prompt_response_dict in InlineExecutor._run_agent,
+        or stop passing code= at the snapshot_from_result call, and the written
+        snapshot has no code — which is a row run_code() can never execute.
+        """
+        f, cache = self._flow_with( tmp_path, notifier, monkeypatch, self._CodingAgent )
+
+        f.ask( "what is 2+2", **_CTX )
+
+        assert cache.snapshot_calls, "nothing was written back at all"
+        written = cache.snapshot_calls[ -1 ]
+        assert written[ "code" ]         == [ "solution = 2 + 2" ]
+        assert written[ "code_example" ] == "solution = 2 + 2"
+        assert written[ "code_returns" ] == "int"
+
+    def test_an_agent_that_never_ran_a_prompt_is_not_reported_as_broken( self, tmp_path, notifier, monkeypatch ):
+        """
+        `prompt_response_dict` is set by AgentBase.run_prompt(), not by __init__, so an
+        agent that answered without running a prompt does not have one. Reading it
+        unguarded raises INSIDE the executor's try — turning a successful agent run
+        into Outcome(failed) and sending the user the receptionist.
+
+        RED ON REVERT: drop the hasattr guard in _generated_code.
+        """
+        f, _cache = self._flow_with( tmp_path, notifier, monkeypatch, self._PromptlessAgent )
+
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "path" ] == "agent", "an agent with no prompt_response_dict was reported as failed"
+        assert r[ "status" ] == "done"
+
+    def test_a_row_that_could_never_be_served_is_not_written( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE SAFETY NET. The agent above produced no code and FakeAgent is not a
+        codeless class, so a row written from it would raise "Cannot execute empty code
+        list" on every hit — dead on arrival, and still costing a read on every lookup.
+
+        RED ON REVERT: delete the _is_replayable check in _maybe_write_back.
+        """
+        f, cache = self._flow_with( tmp_path, notifier, monkeypatch, self._PromptlessAgent )
+
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "path" ] == "agent", "the agent did not even run — this proves nothing about the writer"
+        assert cache.write_back_calls == [], "a row with no code was written for a class that needs code"
+
+    def test_a_codeless_class_is_still_written_without_code( self, tmp_path, notifier, monkeypatch ):
+        """
+        NEGATIVE CONTROL, and the reason the guard reads the shared set instead of
+        just asking "is there code": CalculatorAgent snapshots are codeless BY DESIGN —
+        run_code() serves their cached answer. Refusing to write them would empty the
+        one category that was replaying 60/60.
+
+        RED ON REVERT: make the guard `bool( outcome.code )` alone and calculator
+        results stop being cached.
+        """
+        class _CalculatorAgent( self._PromptlessAgent ):
+            pass
+        _CalculatorAgent.__name__ = "CalculatorAgent"
+
+        f, cache = self._flow_with( tmp_path, notifier, monkeypatch, _CalculatorAgent )
+
+        f.ask( "what is 2+2", **_CTX )
+
+        assert cache.write_back_calls, "a codeless-by-design class stopped being cached"
+
+    def test_whitespace_only_code_does_not_count_as_code( self, tmp_path, notifier, monkeypatch ):
+        """
+        run_code() rejects a code list whose lines are all blank with the same error as
+        an empty one, so the writer has to agree with it. A row full of empty strings
+        is as dead as a row with none.
+
+        RED ON REVERT: test `outcome.code is not None` instead of looking at the lines.
+        """
+        class _BlankCodeAgent( self._CodingAgent ):
+            def __init__( self, **kwargs ):
+                super().__init__( **kwargs )
+                self.prompt_response_dict = { "code": [ "", "   " ], "example": "", "returns": "" }
+
+        f, cache = self._flow_with( tmp_path, notifier, monkeypatch, _BlankCodeAgent )
+
+        f.ask( "what is 2+2", **_CTX )
+
+        assert cache.write_back_calls == [], "a row of blank code lines was written"
+
+    def test_a_failed_replay_now_says_why( self, tmp_path, notifier, monkeypatch ):
+        """
+        115 of the 117 failures reached the client with error=null, so the eval could
+        not say what went wrong. The agent path has always passed primary_error; the
+        replay path dropped it.
+
+        RED ON REVERT: drop primary_error= from the replay degrade and the emitted
+        error is the receptionist's own, which is None.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        snap     = types.SimpleNamespace( routing_command="agent router go to math" )
+        cache    = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+        outcomes = [ _outcome( status="failed", answer=None,
+                               error="Cannot execute empty code list — snapshot has no executable code" ),
+                     _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work )
+                return outcomes.pop( 0 )
+
+        f = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), _SeqExecutor(),
+                        FakePending(), notifier )
+
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "route_reason" ] == "replay_error"
+        assert r[ "error" ] is not None, "a failed replay still reached the client with error=null"
+        assert "empty code list" in r[ "error" ]

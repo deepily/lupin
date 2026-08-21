@@ -26,6 +26,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from cosa.agents.receptionist_agent import ReceptionistAgent
+from cosa.memory.solution_snapshot import CODELESS_AGENT_CLASSES
 from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor import ArgSpec
 from cosa.rest.v2.executor import Work
@@ -209,7 +210,13 @@ class AskFlow:
                     return self._finish( trace, "replay", "exact_hit", outcome, question, ctx,
                                          command=command, cache_hit=True,
                                          agent_label=spec.label )
-                return self._receptionist( trace, question, ctx, "replay_error" )
+                # primary_error, like the agent path at the bottom of _run_agent. Without
+                # it the receptionist's own (absent) error is all that is emitted, so a
+                # replay that died of "Cannot execute empty code list" reached the client
+                # as error=null — 115 of 117 failures in the 2026-08-21 warm pass could
+                # not say why (bug 38815328).
+                return self._receptionist( trace, question, ctx, "replay_error",
+                                           primary_error=outcome.error )
 
         # 3 — arguments.
         if not spec.required_args:
@@ -796,16 +803,39 @@ class AskFlow:
         """
         if not ( snapshotable and outcome.status == "done" ):
             return None
+        if not self._is_replayable( outcome, agent_class_name ):
+            trace.set( "writeback_skipped_unreplayable", agent_class_name )
+            if self.debug: print( f"[v2] not writing back {agent_class_name}: no code, and run_code cannot serve it codeless" )
+            return None
         user_id, user_email, session_id, websocket_id, _speak = ctx
         snapshot    = self.cache.snapshot_from_result(
             question=question, answer=outcome.answer_raw, answer_conversational=outcome.answer,
             routing_command=command, agent_class_name=agent_class_name,
             user_id=user_id, session_id=session_id,
+            code=outcome.code, code_example=outcome.code_example, code_returns=outcome.code_returns,
         )
         snapshot_id = self.cache.write_back( snapshot, writeback_enabled=self.writeback_enabled )
         if snapshot_id is not None:
             trace.mark( "t_writeback" )
         return snapshot_id
+
+    @staticmethod
+    def _is_replayable( outcome: Any, agent_class_name: str ) -> bool:
+        """Whether a row written from this outcome could ever be served back.
+
+        THE SAFETY NET UNDER THE CODE FIX, not a second copy of it. Persisting the
+        agent's code is what makes v2 rows replayable; this refuses to write the ones
+        that still could not be — an agent that produced no code and whose class
+        run_code() cannot serve codeless. Such a row is dead on arrival: every hit on
+        it raises "Cannot execute empty code list", degrades to the receptionist, and
+        the row sits in the table costing a read forever.
+
+        The codeless set is imported from the module that DECIDES it, so the writer and
+        run_code cannot drift into disagreeing about which classes need code.
+        """
+        if agent_class_name in CODELESS_AGENT_CLASSES:
+            return True
+        return bool( outcome.code ) and not all( str( line ).strip() == "" for line in outcome.code )
 
     def _finish(
         self, trace: StageTrace, path: str, route_reason: str, outcome: Any, question: str, ctx: tuple,
