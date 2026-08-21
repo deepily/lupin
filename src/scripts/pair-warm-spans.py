@@ -102,13 +102,37 @@ def summarise( v1_spans, v2_spans, keys ):
     }
 
 
-def render( v1_spans, v2_warm, mapping, n_per_command, sampled_commands ):
-    """Render the pooled + per-category table with the surviving counts stated."""
+def render( v1_spans, v2_warm, mapping, n_per_command, sampled_commands, v2_cold=None ):
+    """Render the pooled + per-category table with the surviving counts stated.
+
+    Ensures:
+        - a refusal SAYS WHY IT IS ZERO. "0 shared" on its own reads as a broken tool,
+          while 49 shared from the WRONG pairing reads as a healthy sample — the numbers
+          give the opposite impression to the truth, so the refusal must distinguish
+          "the run has not got there yet" from "something is broken".
+    """
     lines = [ "# v1-WARM vs v2-WARM paired spans", "" ]
     keys  = pair( v1_spans, v2_warm )
     if not keys:
-        lines.append( "**NO WARM-WARM PAIRING AVAILABLE** — the v2 arm has not produced warm "
-                      "records for any utterance v1 also kept. No latency statement is possible." )
+        lines.append( "**NO WARM-WARM PAIRING AVAILABLE — no latency statement is possible.**" )
+        lines.append( "" )
+        n_cold = len( v2_cold ) if v2_cold is not None else None
+        if n_cold and not v2_warm:
+            per_pass = n_per_command * len( sampled_commands ) if sampled_commands else "?"
+            lines.append( f"**This is the run not being ready, NOT a broken tool.** The v2 arm has "
+                          f"{n_cold} COLD spans and 0 WARM: it is still inside its first pass of "
+                          f"{per_pass}. v1 has {len( v1_spans )} warm spans waiting for it." )
+        elif not v1_spans:
+            lines.append( "The v1 arm has no spans at all — check that its artifact is the one you meant." )
+        else:
+            lines.append( f"v1 has {len( v1_spans )} warm spans and v2 has {len( v2_warm )}, but they "
+                          f"share no utterance. That is NOT a not-ready run — the two arms measured "
+                          f"different utterances, which is a provenance problem, not a timing one." )
+        lines.append( "" )
+        lines.append( "⚠️ Do not reach for the cold pass to fill the gap. A cold-warm pairing yields a "
+                      "plausible-looking sample and a meaningless number: on 2026-08-20 it gave 49 "
+                      "shared utterances and a −11.2 s \"delta\" that compared two arms at different "
+                      "points in their own warm-up." )
         return "\n".join( lines ), False
 
     sampled = n_per_command * len( sampled_commands ) if sampled_commands else None
@@ -160,7 +184,7 @@ def main( argv=None ):
     v1_spans = json.load( open( args.v1_artifact ) )[ "metrics" ][ "spans_by_utterance" ]
     _cold, warm = v2_spans_by_pass( args.trail, args.since, args.n_per_command * len( commands ) )
 
-    text, ok = render( v1_spans, warm, mapping, args.n_per_command, commands )
+    text, ok = render( v1_spans, warm, mapping, args.n_per_command, commands, v2_cold=_cold )
     print( text )
     return 0 if ok else 1
 

@@ -132,7 +132,7 @@ def test_report_REFUSES_when_no_warm_warm_pairing_exists():
     text, ok = pw.render( { "a": 100.0 }, {}, { "a": "math" }, 20, [ "math" ] )
     assert ok is False
     assert "NO WARM-WARM PAIRING AVAILABLE" in text
-    assert "No latency statement is possible" in text
+    assert "no latency statement is possible" in text.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -168,3 +168,43 @@ def test_seq_beyond_the_cold_boundary_lands_in_warm_even_when_few_records_exist(
     rows = [ _rec( "w", 10.0, seq=97 ) ]
     cold, warm = pw.v2_spans_by_pass( _trail( str( tmp_path ), rows ), since=0.0, n_per_pass=50 )
     assert cold == {} and sorted( warm ) == [ "w" ]
+
+
+# ---------------------------------------------------------------------------
+# A refusal must say WHY it is zero. "0 shared" reads as a broken tool, while 49
+# shared from the WRONG pairing reads as a healthy sample — the numbers give the
+# opposite impression to the truth (Mr Radio, 2026-08-20).
+# ---------------------------------------------------------------------------
+def test_a_not_ready_run_says_so_rather_than_looking_broken():
+    text, ok = pw.render( { "a": 100.0 }, {}, { "a": "math" }, 20, [ "math" ],
+                          v2_cold={ "a": 90.0, "b": 80.0 } )
+    assert ok is False
+    assert "NOT a broken tool" in text
+    assert "2 COLD spans and 0 WARM" in text
+    assert "still inside its first pass of 20" in text
+
+
+def test_two_arms_that_measured_DIFFERENT_utterances_is_named_as_provenance_not_timing():
+    """Both arms have warm spans but share nothing. That is a different failure from a
+    not-ready run and must not be reported as one."""
+    text, ok = pw.render( { "a": 100.0 }, { "z": 50.0 }, { "a": "math", "z": "math" }, 20, [ "math" ],
+                          v2_cold={} )
+    assert ok is False
+    assert "provenance problem, not a timing one" in text
+    assert "NOT a broken tool" not in text
+
+
+def test_an_empty_v1_side_points_at_the_artifact():
+    text, ok = pw.render( {}, {}, {}, 20, [ "math" ], v2_cold={} )
+    assert ok is False
+    assert "no spans at all" in text
+
+
+def test_every_refusal_warns_against_reaching_for_the_cold_pass():
+    """The tempting wrong move, with the receipt attached so nobody re-derives it."""
+    for v1, warm, cold in ( ( { "a": 1.0 }, {}, { "a": 1.0 } ),
+                            ( { "a": 1.0 }, { "z": 1.0 }, {} ),
+                            ( {}, {}, {} ) ):
+        text, _ = pw.render( v1, warm, { "a": "math", "z": "math" }, 20, [ "math" ], v2_cold=cold )
+        assert "Do not reach for the cold pass" in text
+        assert "49 shared utterances" in text
