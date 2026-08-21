@@ -344,3 +344,35 @@ def test_the_presentation_orchestrator_diagnoses_its_own_not_executed_tiers():
 
     assert "pytest_collection_diagnosis.py" in text
     assert "--exit-code" in text
+
+
+# ── 7. THE RUNNERS MUST FIND THEIR OWN REPO ────────────────────────────────
+# Section 6 reads each runner's TEXT, so it passes whether or not the script can run at
+# all. run-serial-bridge-guard.sh computed its project root as SCRIPT_DIR/.. — one level
+# short, because the script lives at src/scripts/ — and so sourced
+# <root>/src/src/scripts/lib/pytest-with-diagnosis.sh, exited 1, and ran ZERO tests. The
+# text census stayed green through every bit of it. This runs the script.
+def test_the_serial_bridge_guard_runner_finds_its_own_repo():
+    """
+    Requires:
+        - src/scripts/run-serial-bridge-guard.sh exists and is executable.
+
+    Ensures:
+        - the runner exits 0 collecting its two guard tests, which is only possible if
+          PROJECT_ROOT resolved to the repo root.
+        - a root resolved one level short goes RED here: the source fails and the exit
+          code is 1 with no tests collected.
+
+    Collection only — nothing is executed, so no bridge is written and the box does not
+    need to be quiescent for this test.
+    """
+    script = os.path.join( PROJECT_ROOT, "src", "scripts", "run-serial-bridge-guard.sh" )
+    result = subprocess.run(
+        [ script, "--collect-only", "-q", "-p", "no:cacheprovider" ],
+        capture_output=True, text=True, timeout=180,
+    )
+    combined = result.stdout + result.stderr
+
+    assert "No such file or directory" not in combined, f"the runner could not resolve its own tree:\n{combined}"
+    assert result.returncode == 0, f"runner exited {result.returncode}:\n{combined}"
+    assert "test_the_real_bridge_dir_is_untouched_SERIAL_GATE" in combined, f"the two guard tests were not collected:\n{combined}"
