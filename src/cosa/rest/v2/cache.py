@@ -102,8 +102,8 @@ class V2Cache( TwoTierQuestionSearch ):
     # ------------------------------------------------------------ construction
 
     def snapshot_from_result( self, question: str, answer: str, answer_conversational: str,
-                              routing_command: str, agent_class_name: str="",
-                              user_id: str="", session_id: str="" ) -> SolutionSnapshot:
+                              routing_command: str, user_id: str, agent_class_name: str="",
+                              session_id: str="" ) -> SolutionSnapshot:
         """
         Build a replay-shaped SolutionSnapshot from a flow result's raw fields.
 
@@ -115,6 +115,7 @@ class V2Cache( TwoTierQuestionSearch ):
 
         Requires:
             - question is a non-empty string
+            - user_id is a non-empty string — a row nobody owns is not writable
 
         Ensures:
             - returns a SolutionSnapshot with question_normalized derived via the
@@ -123,9 +124,26 @@ class V2Cache( TwoTierQuestionSearch ):
 
         Raises:
             - ValueError if question is empty
+            - ValueError if user_id is empty
+
+        `user_id` has no default, and blank is refused. Rick, 2026-08-20: a caller
+        "cannot file without providing a valid user ID." It used to default to "",
+        and the flow called this passing NEITHER user_id nor session_id while
+        holding both in scope — so v2's own write-back manufactured ownerless rows,
+        the same shape as the 63-of-64 already on disk. A default that produces an
+        unowned row is not a convenience; the precedent for refusing it is one line
+        below, where an empty question already raises.
+
+        `session_id` keeps its default: a write can legitimately have no live
+        session behind it, but it can never have no owner.
         """
         if not question:
             raise ValueError( "snapshot_from_result requires a non-empty question" )
+        if not user_id:
+            raise ValueError(
+                "snapshot_from_result requires a non-empty user_id — a snapshot nobody owns "
+                "cannot be filtered, attributed, or deleted by its owner"
+            )
         return self._snapshot_factory(
             question=question,
             question_normalized=self._normalizer.normalize( question ),

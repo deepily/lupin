@@ -1526,3 +1526,55 @@ class TestTheFlowStatesTheCrudFlag:
         with pytest.raises( TypeError, match="crud_enabled" ):
             AskFlow( FakeCache(), FakeRouter(), FakeExpeditor(), FakeExecutor(), FakePending(),
                      notifier=notifier, trace_dir=str( tmp_path ) )
+
+
+# ──────────────────────────── step 2c — the write-back carries its owner
+
+class TestTheWriteBackNamesItsOwner:
+    """
+    v2's own write-back was manufacturing ownerless rows — the same shape as the
+    63-of-64 already on disk. `_maybe_write_back` held ctx and called
+    snapshot_from_result passing NEITHER user_id nor session_id, so the cache's
+    (then-defaulted) empty strings were written through.
+
+    The cache now refuses a blank owner. This is the other half: the flow hands
+    over the identity it has had in scope all along.
+    """
+
+    def test_the_snapshot_carries_the_callers_identity( self, tmp_path, notifier, monkeypatch ):
+        """
+        RED ON REVERT: stop passing user_id/session_id at the call site and the
+        cache raises for a blank owner instead — which is the fail-loud half doing
+        its job, and still a failure here.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=True ) )
+        cache = FakeCache()
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( _outcome( status="done", answer="4", answer_raw="4" ) ),
+                            FakePending(), notifier, writeback_enabled=True )
+
+        f.ask( "what is 2+2", **_CTX )
+
+        assert cache.snapshot_calls, "nothing was written — this proves nothing about ownership"
+        written = cache.snapshot_calls[ -1 ]
+        assert written[ "user_id" ]    == _CTX[ "user_id" ],    "the row was written with someone else's owner, or none"
+        assert written[ "session_id" ] == _CTX[ "session_id" ]
+
+    def test_an_ownerless_write_cannot_pass_silently( self, tmp_path, notifier, monkeypatch ):
+        """
+        The two halves together: with a REAL V2Cache the flow cannot write an
+        unowned row even if a future edit drops the identity, because the cache
+        refuses it rather than defaulting.
+
+        A test that only asserted a populated write works would have passed before
+        this change, which is why the assertion is on the refusal.
+        """
+        from cosa.rest.v2.cache import V2Cache
+
+        with pytest.raises( ValueError, match="non-empty user_id" ):
+            V2Cache.snapshot_from_result(
+                object.__new__( V2Cache ),
+                question="q", answer="a", answer_conversational="c",
+                routing_command="agent router go to math", user_id="",
+            )

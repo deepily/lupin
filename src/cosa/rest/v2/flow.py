@@ -492,14 +492,22 @@ class AskFlow:
                            args_known=sorted( extraction.final_args.keys() ) )
 
     def _maybe_write_back(
-        self, trace: StageTrace, question: str, command: str, outcome: Any, snapshotable: bool, agent_class_name: str,
+        self, trace: StageTrace, question: str, command: str, outcome: Any, snapshotable: bool,
+        agent_class_name: str, ctx: tuple,
     ) -> Optional[ str ]:
-        """Write a v2-tagged snapshot when snapshotable+done; write_back owns the flag."""
+        """Write a v2-tagged snapshot when snapshotable+done; write_back owns the flag.
+
+        ctx carries the identity this write belongs to. It was always in scope at
+        the call site and simply was not passed, so every v2 write-back produced a
+        row with no owner.
+        """
         if not ( snapshotable and outcome.status == "done" ):
             return None
+        user_id, user_email, session_id, websocket_id, _speak = ctx
         snapshot    = self.cache.snapshot_from_result(
             question=question, answer=outcome.answer_raw, answer_conversational=outcome.answer,
             routing_command=command, agent_class_name=agent_class_name,
+            user_id=user_id, session_id=session_id,
         )
         snapshot_id = self.cache.write_back( snapshot, writeback_enabled=self.writeback_enabled )
         if snapshot_id is not None:
@@ -513,7 +521,7 @@ class AskFlow:
     ) -> dict:
         """Stamp first-useful, write back, speak, and emit the terminal result."""
         trace.mark( "t_first_useful" )
-        snapshot_id = self._maybe_write_back( trace, question, command, outcome, snapshotable, agent_class_name )
+        snapshot_id = self._maybe_write_back( trace, question, command, outcome, snapshotable, agent_class_name, ctx )
         self._speak( trace, self._spoken_line( outcome, agent_label ), outcome.job_id, ctx )
         return self._emit(
             trace, path=path, status=outcome.status, route_reason=route_reason, answer=outcome.answer,

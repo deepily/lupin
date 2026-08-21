@@ -536,9 +536,9 @@ def test_snapshot_from_result_builds_with_normalized_question( wired ):
 def test_snapshot_from_result_empty_question_raises( wired ):
     build, _store = wired
     cache, _p, _f = build()
-    with pytest.raises( ValueError ):
+    with pytest.raises( ValueError, match="non-empty question" ):
         cache.snapshot_from_result( question="", answer="a", answer_conversational="c",
-                                    routing_command="cmd", agent_class_name="Cls" )
+                                    routing_command="cmd", agent_class_name="Cls", user_id="u1" )
 
 
 # ───────────────────────────────────────────── write-back kill-switch
@@ -648,3 +648,38 @@ def test_ms_since_is_nonnegative():
     import time
     cache = _bare_cache()
     assert cache._ms_since( time.perf_counter_ns() ) >= 0.0
+
+
+# ─────────────────────────── step 2c — a snapshot nobody owns is not writable
+
+def test_snapshot_from_result_blank_user_id_raises( wired ):
+    """
+    Rick, 2026-08-20: a caller "cannot file without providing a valid user ID."
+
+    ⚠️ THE TEST HAS TO BE THIS ONE. A test asserting that a POPULATED write works
+    would have passed before the change too — user_id defaulted to "" and was
+    simply written through. The only assertion that can tell the two versions
+    apart is that a BLANK owner is refused.
+
+    RED ON REVERT: delete the user_id raise in snapshot_from_result and a
+    blank-user write succeeds.
+    """
+    build, _store = wired
+    cache, _p, _f = build()
+    with pytest.raises( ValueError, match="non-empty user_id" ):
+        cache.snapshot_from_result( question="q", answer="a", answer_conversational="c",
+                                    routing_command="agent router go to math", user_id="" )
+
+
+def test_snapshot_from_result_will_not_default_the_owner( wired ):
+    """
+    The parameter has no default either, so a caller cannot omit it and get an
+    ownerless row by silence — which is exactly how the flow was producing them.
+
+    RED ON REVERT: give user_id a default and this stops raising.
+    """
+    build, _store = wired
+    cache, _p, _f = build()
+    with pytest.raises( TypeError, match="user_id" ):
+        cache.snapshot_from_result( question="q", answer="a", answer_conversational="c",
+                                    routing_command="agent router go to math" )

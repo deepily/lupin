@@ -1369,3 +1369,44 @@ def test_unknown_commands_stay_in_the_denominator():
     """
     assert ve._is_cacheable_command( "agent router go to nowhere at all" ) is True
     assert ve._is_cacheable_command( None ) is True
+
+
+def test_the_exclusion_follows_the_crud_flag_instead_of_asserting_it():
+    """
+    Pocholo on 8f826c5a: the reader hardcoded crud_enabled=True, which is the
+    CONFIGURED value today and not the same statement.
+
+    It matters in one direction. With the flag OFF, calendar and todo do NOT fork,
+    they ARE snapshotable, and excluding them would drop real cache misses out of
+    the denominator — a rate that flatters the cache for a reason unrelated to the
+    cache.
+
+    RED ON REVERT: put crud_enabled=True back in place of the config read and the
+    flag-off half fails.
+    """
+    assert ve._is_cacheable_command( "agent router go to todo", crud_enabled=True )  is False
+    assert ve._is_cacheable_command( "agent router go to todo", crud_enabled=False ) is True
+
+    # weather is not the fork's doing — it is excluded either way
+    assert ve._is_cacheable_command( "agent router go to weather", crud_enabled=True )  is False
+    assert ve._is_cacheable_command( "agent router go to weather", crud_enabled=False ) is False
+
+
+def test_an_unreadable_config_answers_the_ini_default( monkeypatch ):
+    """
+    The key's default is missing-means-ENABLED (lupin-app.ini:1915), and the v1
+    queue and the flow's construction site both read it that way. An eval run on a
+    box with no readable config must not quietly pick the other answer.
+
+    RED ON REVERT: return False from the except branch and this fails.
+    """
+    import builtins
+    real_import = builtins.__import__
+
+    def _boom( name, *a, **kw ):
+        if name == "cosa.config.configuration_manager":
+            raise RuntimeError( "no config on this box" )
+        return real_import( name, *a, **kw )
+
+    monkeypatch.setattr( builtins, "__import__", _boom )
+    assert ve._crud_agents_enabled() is True
