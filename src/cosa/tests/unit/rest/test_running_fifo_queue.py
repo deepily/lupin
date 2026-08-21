@@ -1210,42 +1210,18 @@ class TestFormatCachedResult( _RFQBase ):
         rq._format_cached_result( cached, original, "q", rfq.sw.Stopwatch( "t" ) )
 
 
-# ── _process_fast_lane ──────────────────────────────────────────────────────
-class TestProcessFastLane( _RFQBase ):
-
-    def test_crud_skips_cache( self ):
-        rq = self.build( **{ "app debug": True } ); rq._handle_base_agent = MagicMock( return_value="a" )
-        rq._process_fast_lane( _CrudFake() )
-        rq._handle_base_agent.assert_called_once()
-
-    def test_agent_exact_hit( self ):
-        rq = self.build( **{ "app debug": True } ); rq._format_cached_result = MagicMock( return_value="c" )
-        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 100.0, _SnapFake( run_date="d" ) ) ]
-        rq._process_fast_lane( _AgentBaseFake() )
-        rq._format_cached_result.assert_called_once()
-
-    def test_agent_threshold_accept( self ):
-        rq = self.build(); rq._format_cached_result = MagicMock( return_value="c" )
-        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 95.0, _SnapFake( run_date="d" ) ) ]
-        rq._process_fast_lane( _AgentBaseFake() )
-        rq._format_cached_result.assert_called_once()
-
-    def test_agent_threshold_reject( self ):
-        rq = self.build(); rq._handle_base_agent = MagicMock( return_value="a" )
-        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 10.0, _SnapFake( run_date="d" ) ) ]
-        rq._process_fast_lane( _AgentBaseFake() )
-        rq._handle_base_agent.assert_called_once()
-
-    def test_agent_miss( self ):
-        rq = self.build( **{ "app debug": True } ); rq._handle_base_agent = MagicMock( return_value="a" )
-        rq.snapshot_mgr.get_snapshots_by_question.return_value = []
-        rq._process_fast_lane( _AgentBaseFake() )
-        rq._handle_base_agent.assert_called_once()
-
-    def test_snapshot_dispatch( self ):
-        rq = self.build(); rq._handle_solution_snapshot = MagicMock( return_value="s" )
-        rq._process_fast_lane( _SnapFake() )
-        rq._handle_solution_snapshot.assert_called_once()
+# ── _process_fast_lane: METHOD AND TESTS DELETED (step 7a, 2026-08-21) ──────
+#
+# Six tests lived here, pinning a method with no production caller — `_process_job`
+# inlines the same cache / CRUD / snapshot logic itself. They are gone WITH it, on
+# Rick's ruling: keeping tests for code nobody runs is what made the method look
+# maintained, and it is the reason the plan called removing one branch of it
+# "tidying a room nobody enters".
+#
+# The behaviour they described is not lost — it is covered where it actually runs,
+# in the _process_job tests above, and the three helpers they mocked
+# (_handle_base_agent, _format_cached_result, _handle_solution_snapshot) keep their
+# own tests because all three are live.
 
 
 # ── _handle_agentic_job (legacy/dead-code path, still covered) ───────────────
