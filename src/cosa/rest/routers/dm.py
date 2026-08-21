@@ -772,25 +772,48 @@ def _restore_dropped_pointers( original, rewritten ):
     Requires:
         - original and rewritten are strings
 
+    ⚠️ ONLY PATHS COME BACK, AND ONLY ONE LINE OF THEM (Rick, 2026-08-21, row
+    a0151611). This guard used to append EVERY dropped pointer token as its own line,
+    8-hex row ids included, so a DM carrying fifteen identifiers was delivered with a
+    run of bare hashes under it: "what is obviously pointless and nonsensical is 10 to
+    12 lines of hashes… a standalone nonsensical out-of-context hash has no place
+    there." A path survives losing the sentence around it — it still says where to
+    look. An id does not. So the restore selects on `restorable_pointers`, which drops
+    the bare-identifier shape, and appends at most ONE line.
+
+    ONE LINE, EVERY DROPPED PATH ON IT (Rick's ruling, 2026-08-21). Discarding a real
+    pointer is the exact defect this guard was built for, so the rare message that
+    loses two paths gets both back — joined by a space, on the one appended line, in
+    first-seen order. That cost one thing and it was paid rather than absorbed: a
+    multi-pointer line did NOT match the counter's whole-line structure rule, so a
+    compliant three-claim rewrite plus a two-path line counted FOUR. `_ATTACHMENT` now
+    recognises a RUN of pointers as structure, which is what this module's own rule
+    ("a line that asserts nothing is structure") always implied.
+
+    Requires:
+        - original and rewritten are strings
+
     Ensures:
-        - every pointer TOKEN present in `original` is present in the result — a path,
-          URL, bare filename OR 8-hex row id, whether it stood on its own line in the
-          original or was buried mid-sentence (row a74f2176)
+        - a path, URL or bare filename present in `original` and absent from the
+          rewrite is restored, whether it stood on its own line in the original or was
+          buried mid-sentence (row a74f2176)
+        - a BARE 8-hex row id is never restored — dropped by the model, it stays gone
         - a pointer the rewrite ALREADY kept is not duplicated — membership is checked
           against the rewrite's whole text, so a path the model correctly carried
           through inline (not as its own line) still counts as kept
-        - returns `rewritten` unchanged when nothing was dropped
-        - restored pointers are appended as their own lines, which the counter treats
-          as structure, so repairing a message can never push it back over the trigger
+        - returns `rewritten` unchanged when nothing restorable was dropped
+        - at most ONE line is appended, carrying every dropped path joined by a space,
+          which the counter treats as structure, so repairing a message can never push
+          it back over the trigger
 
     Raises:
         - nothing
     """
     try:
-        from cosa.agents.dm_tutor.sentences import pointer_tokens
-        dropped = [ p for p in pointer_tokens( original ) if p not in rewritten ]
+        from cosa.agents.dm_tutor.sentences import restorable_pointers
+        dropped = [ p for p in restorable_pointers( original ) if p not in rewritten ]
         if not dropped: return rewritten
-        return rewritten.rstrip() + "\n" + "\n".join( dropped )
+        return rewritten.rstrip() + "\n" + " ".join( dropped )
     except Exception:
         # A repair that raises must never cost the caller the rewrite it already has.
         return rewritten

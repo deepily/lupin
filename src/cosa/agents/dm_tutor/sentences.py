@@ -138,9 +138,18 @@ _POINTER_LEAD_IN = r"(?:(?:see|details?|detail|path|more|here|full\s+detail)\s*:
 # line is a pointer, so the target only has to contain a slash — it does not have to
 # survive the stricter path shape above. A doc-viewer link carries `?path=…&…`, which
 # the bare-path pattern deliberately does not admit.
+_POINTER_OR_LINK = rf"(?:\[[^\]]*\]\(\s*[^\s)]*/[^\s)]*\s*\)|{_POINTER_TOKEN_SRC})"
+
+# A RUN of pointers on one line is structure too (row a0151611, Rick's ruling
+# 2026-08-21). The restore now puts every dropped path back on a SINGLE line, so that
+# line can carry two or three of them. By this module's own rule that is still
+# structure — a line of nothing but pointers asserts nothing, however many it holds —
+# and if the rule did not say so, a repaired message would read as one claim over and
+# the tutor could re-trigger on the very line it just added. The single-pointer case is
+# byte-for-byte what it always was; only the run is new.
 _ATTACHMENT = re.compile(
-    rf"^\s*{_POINTER_LEAD_IN}"
-    rf"(?:\[[^\]]*\]\(\s*[^\s)]*/[^\s)]*\s*\)|{_POINTER_TOKEN_SRC})"
+    rf"^\s*{_POINTER_LEAD_IN}{_POINTER_OR_LINK}"
+    rf"(?:[,;]?\s+{_POINTER_OR_LINK})*"
     rf"[.,;]?\s*$",
     re.IGNORECASE,
 )
@@ -284,6 +293,62 @@ def pointer_tokens( text ):
         if not _is_real_pointer( token ): continue
         found.append( token )
     return found
+
+
+def is_bare_identifier( token ):
+    """
+    True when a pointer token is a bare identifier — an id with nowhere to look.
+
+    WHY THE DISTINCTION EXISTS (Rick, 2026-08-21, row a0151611): "What is obviously
+    pointless and nonsensical is 10 to 12 lines of hashes. A standalone nonsensical
+    out-of-context hash has no place there." A path, a URL and a bare filename each
+    tell a reader WHERE TO LOOK, and survive the loss of the sentence around them. An
+    8-hex row id does not: once the sentence that gave it meaning is rewritten away,
+    the id is eight characters of nothing.
+
+    The test is structural, not a second pattern to keep in sync: by construction of
+    _POINTER_TOKEN, a token with neither a slash nor a dot can only be the bare 8-hex
+    row-id shape — a URL carries "://", a slashed path carries "/", and a bare
+    filename carries its extension's dot.
+
+    Requires:
+        - token is a non-empty string produced by _POINTER_TOKEN
+
+    Ensures:
+        - True for a bare 8-hex row id ("e0bb5a94")
+        - False for URLs, slashed paths and bare filenames ("job.py:1163")
+
+    Raises:
+        - nothing
+    """
+    return "/" not in token and "." not in token
+
+
+def restorable_pointers( text ):
+    """
+    The pointer tokens worth putting BACK when a rewrite drops them — paths only.
+
+    🔴 THIS IS A SEPARATE SELECTOR ON PURPOSE — DO NOT NARROW `pointer_tokens` TO GET
+    THE SAME EFFECT. That function is used two ways that must not disagree (its own
+    docstring says so): it is the body of the whole-line structure rule _ATTACHMENT,
+    so a restored line counts as structure and repairing a message can never push it
+    back over the trigger. Narrowing it would ALSO change the sentence counter, and a
+    bare id line would start counting as a claim.
+
+    So the structure rule keeps seeing all four pointer shapes, and only the RESTORE
+    path is narrowed — which is the only place Rick's complaint lives.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns pointer_tokens( text ) minus every bare identifier, same order
+        - returns [] when the body carries none, or carries only bare identifiers
+
+    Raises:
+        - nothing
+    """
+    return [ token for token in pointer_tokens( text ) if not is_bare_identifier( token ) ]
 
 
 def count_sentences( text ):
