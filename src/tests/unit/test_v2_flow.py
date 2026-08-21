@@ -2417,3 +2417,47 @@ class TestAnEmptyQuestionIsNoQuestion:
 
         assert cache.write_back_calls, "a genuine submitted question was not cached"
         assert log.rows[ -1 ][ "input_type" ] == "api"
+
+    def test_a_whitespace_only_question_is_no_question_either( self, tmp_path, notifier, monkeypatch ):
+        """
+        `bool( question )` admits "   " (Pocholo, on the fix for the empty string).
+        `ask`'s fitness gate has always called blank-or-whitespace no question at all;
+        `submit` has no gate, so it borrows the same rule instead of growing a looser
+        one — otherwise a row is filed under three spaces, typed as a person's words,
+        and cached under a key nobody will ever say.
+
+        RED ON REVERT: swap _has_question back for `bool( question )` and this row
+        types "api", logs "   ", and writes.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=True ) )
+        cache = FakeCache()
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( _outcome() ), FakePending(), notifier,
+                            writeback_enabled=True )
+        log   = self._log_on( f )
+
+        f.submit( command="agent router go to math", args={}, question="   ", **_CTX )
+
+        assert log.rows[ -1 ][ "query_verbatim" ] == "agent router go to math"
+        assert log.rows[ -1 ][ "input_type" ]     == "api-command"
+        assert cache.write_back_calls == [], "a whitespace-only question was cached"
+
+    def test_one_rule_decides_it_for_ask_and_submit_alike( self, tmp_path, notifier, monkeypatch ):
+        """
+        The two doors must not disagree about what a question is. `ask` refuses the
+        same whitespace `submit` declines to attribute or cache.
+
+        RED ON REVERT: give either door its own test for emptiness and one of these
+        two assertions stops holding.
+        """
+        f = self._flow_for_ask( tmp_path, notifier, monkeypatch )
+
+        assert AskFlow._has_question( "   " ) is False
+        assert f.ask( "   ", **_CTX )[ "route_reason" ] == "empty_question"
+
+    def _flow_for_ask( self, tmp_path, notifier, monkeypatch ):
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        return _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                           FakeExecutor( _outcome() ), FakePending(), notifier )

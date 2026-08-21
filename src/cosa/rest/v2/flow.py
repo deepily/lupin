@@ -286,8 +286,14 @@ class AskFlow:
 
         trace = StageTrace( trace_dir=self.trace_dir )
         trace.mark( "t_recv" )
+        # ONE definition of "there is a question here", used by all three sites below:
+        # what gets logged as the verbatim, whether the row says those words are a
+        # person's, and whether the result may be cached. `ask`'s fitness gate already
+        # says a blank-or-whitespace question is no question; `submit` has no gate, so
+        # it borrows the same rule rather than growing a second, looser one.
+        has_question = self._has_question( question )
         trace.update( decision_floor=self.similarity_floor, speak=speak, interactive=False, entry="submit",
-                      question=question or command or "" )
+                      question=question if has_question else ( command or "" ) )
         # WHOSE WORDS THE QUERY LOG IS ABOUT TO REPORT. A `submit` caller often has no
         # question at all: the HTTP door names a command, and an in-process caller hands
         # over a job it built. The line above then files the command string — or an empty
@@ -301,7 +307,7 @@ class AskFlow:
         # question, filing the command string under query_verbatim. Testing for None
         # here would type that row "api" while the row it logs is a routing command
         # (Pocholo, on the mark itself).
-        if not question:
+        if not has_question:
             trace.set( "verbatim_source", "command" if command is not None else "job" )
         ctx = ( user_id, user_email, session_id, websocket_id, speak )
 
@@ -337,8 +343,9 @@ class AskFlow:
         # looks rows up by the user's words, and no user says "agent router go to math".
         # A row that can never be hit is not a cache entry, it is landfill — and it
         # still costs a read on every lookup. (Pocholo, reviewing step 10.)
-        return self._run_agent( trace, spec, command, question or command, final_args, ctx,
-                                "submitted", snapshotable=spec.snapshotable and bool( question ) )
+        return self._run_agent( trace, spec, command, question if has_question else command,
+                                final_args, ctx, "submitted",
+                                snapshotable=spec.snapshotable and has_question )
 
     def _submit_agentic(
         self, trace: StageTrace, spec: Any, command: str, args: dict,
@@ -545,6 +552,18 @@ class AskFlow:
 
     # ---------------------------------------------------------------- helpers
     @staticmethod
+    def _has_question( question: Optional[ str ] ) -> bool:
+        """Whether `question` is a question at all — the rule `_unfit_reason` uses.
+
+        Blank, absent, or nothing but whitespace all mean the same thing, and they have
+        to mean it in ONE place: the three sites in `submit` that ask this would
+        otherwise drift apart, and a looser one of them is how a routing command gets
+        logged as a person's words, or written into the cache under a key nobody will
+        ever say.
+        """
+        return bool( question and question.strip() )
+
+    @staticmethod
     def _unfit_reason( question: str ):
         """
         Why this question is refused, or None if it is fit to process.
@@ -554,7 +573,7 @@ class AskFlow:
         spoken reason AND a route_reason, so the trace records WHICH rule fired
         rather than a single flat "rejected".
         """
-        if not question or not question.strip():
+        if not AskFlow._has_question( question ):
             return ( REJECTION_EMPTY, "empty_question" )
         if len( question ) > MAX_QUESTION_CHARS:
             return ( REJECTION_TOO_LONG, "question_too_long" )
