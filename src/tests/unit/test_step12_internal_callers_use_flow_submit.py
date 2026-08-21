@@ -8,6 +8,18 @@ process. They must reach `flow.submit()` like everyone else, and `job_persistenc
 caller least likely to be noticed misbehaving: startup, unattended, re-enqueueing work
 an interruption left behind."*
 
+⚠️ RUN THIS FILE SCOPED — `pytest src/tests/unit/...`, never a bare `pytest` from the
+repo root. An unscoped run collects `src/tmp/`, and `src/tmp/test_fastapi_integration.py`
+calls `sys.exit( 1 )` from an `except ImportError` handler AT IMPORT TIME, which pytest
+reports as INTERNALERROR before any test runs. The import it fails on is
+`from fastapi_app.main import lifespan` — a module that no longer exists under that name
+— so the exit is guaranteed, not occasional. `src/tmp/` is UNTRACKED scratch (git ls-files
+returns nothing for it); it is present in a worktree only because the git-ignored files
+have to be copied in for eleven unit tests to pass. The project's own tier command already
+scopes to `src/tests/unit`, so this bites only ad-hoc runs. (Rachel, 2026-08-21;
+verified here.) The sweep below walks the tree itself and excludes `tmp` explicitly, so
+the test is unaffected either way.
+
 HELD OUT OF THE SUITE until step 12 lands: `flow.submit()` does not exist yet, so every
 assertion here is red today. It goes in with the step-12 sha.
 
