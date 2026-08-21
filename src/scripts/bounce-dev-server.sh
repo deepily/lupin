@@ -228,13 +228,19 @@ fi
 # which restarts a container and broadcasts to the fleet — see
 # src/tests/unit/test_wait_for_container_restart.py and test_wait_for_health.py.
 
+# Resolve the helpers RELATIVE TO THIS SCRIPT, not via LUPIN_ROOT. They ship alongside
+# it; LUPIN_ROOT is a project pointer that legitimately points elsewhere (the busy-guard
+# test aims it at a temp tree holding only stubs), and resolving through it made both
+# waits unreachable there — which is how the guard test caught this.
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
+
 log "Waiting for $CONTAINER to report a restart (not before ${start_ts})..."
 restart_args=( "$CONTAINER" "$start_ts"
                --timeout  "$TIMEOUT_SECS"
                --interval "$POLL_INTERVAL" )
 if [ "$QUIET" -eq 1 ]; then restart_args+=( --quiet ); fi
 
-if ! "${LUPIN_ROOT}/src/scripts/lib/wait-for-container-restart.sh" "${restart_args[@]}"; then
+if ! "${SCRIPT_DIR}/lib/wait-for-container-restart.sh" "${restart_args[@]}"; then
     echo "ERROR: $CONTAINER never reported a start newer than the restart we issued." >&2
     echo "       A health check now could be answered by the OLD process. Investigate." >&2
     echo "--- docker logs --tail 50 $CONTAINER ---" >&2
@@ -252,7 +258,7 @@ health_args=( "$HEALTH_URL"
 # QUIET is 0 and kills the script right here, one line before the poll.
 if [ "$QUIET" -eq 1 ]; then health_args+=( --quiet ); fi
 
-if "${LUPIN_ROOT}/src/scripts/lib/wait-for-health.sh" "${health_args[@]}"; then
+if "${SCRIPT_DIR}/lib/wait-for-health.sh" "${health_args[@]}"; then
     elapsed=$(( $( date +%s ) - start_ts ))
     if [ "$QUIET" -eq 1 ]; then
         echo "bounced ${CONTAINER} in ${elapsed}s (all-clear emitted by server startup)"
