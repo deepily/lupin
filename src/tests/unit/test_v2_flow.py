@@ -95,6 +95,9 @@ class FakeCache:
         self.gist_calls.append( question )
         return f"gist:{question}"
 
+    def normalize( self, question ):
+        return question.lower()
+
     def snapshot_from_result( self, **kwargs ):
         self.snapshot_calls.append( kwargs )
         return types.SimpleNamespace( tag="snap-object" )
@@ -112,6 +115,9 @@ class CacheNoWriteBack:
 
     def gist( self, question ):
         return f"gist:{question}"
+
+    def normalize( self, question ):
+        return question.lower()
 
 
 class FakeRouter:
@@ -1678,3 +1684,180 @@ class TestAgentConstructionParity:
         """Without this, every assertion above would be vacuously true on an empty dict."""
         seen = self._built( tmp_path, notifier, monkeypatch )
         assert seen, "no agent was constructed"
+
+
+# ───────────────────────── the fitness gate at the flow head (Rick's ruling 1)
+
+class TestTheFlowRefusesAnUnfitQuestion:
+    """
+    v1 rejected empty / over-long / "invalid"-prefixed questions before anything
+    else touched them (`todo_fifo_queue._is_fit` and its reason ladder). The flow
+    had no gate at all, so after 6c an empty question would reach the router and
+    route somewhere.
+
+    The wording is v1's, kept verbatim: a user who hears a refusal today hears the
+    same one after the switch.
+    """
+
+    def _flow( self, tmp_path, notifier ):
+        return _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                           FakeExecutor( _outcome() ), FakePending(), notifier )
+
+    @pytest.mark.parametrize( "question,reason,route_reason", [
+        ( "",            "Question cannot be empty",                 "empty_question"    ),
+        ( "   ",         "Question cannot be empty",                 "empty_question"    ),
+        ( "x" * 1001,    "Question too long (max 1000 characters)",  "question_too_long" ),
+        ( "invalid stuff", "Question contains invalid content",      "invalid_content"   ),
+    ] )
+    def test_each_rule_refuses_in_v1s_words( self, tmp_path, notifier, question, reason, route_reason ):
+        """
+        RED ON REVERT: drop any rule from _unfit_reason and its row routes instead
+        of refusing; change any message and its row fails on the text.
+        """
+        r = self._flow( tmp_path, notifier ).ask( question, **_CTX )
+        assert r[ "status" ]       == "rejected"
+        assert r[ "route_reason" ] == route_reason
+        assert r[ "answer" ]       == reason
+
+    def test_the_gate_runs_BEFORE_the_router( self, tmp_path, notifier ):
+        """
+        The point of a gate at the HEAD. A router that never ran cannot have routed
+        an empty question anywhere.
+
+        RED ON REVERT: move the gate below the cache/router block and the router
+        records a call.
+        """
+        class _LoudRouter( FakeRouter ):
+            def __init__( self ):
+                super().__init__()
+                self.calls = 0
+
+            def route( self, question ):
+                self.calls += 1
+                return super().route( question )
+
+        router = _LoudRouter()
+        cache  = FakeCache()
+        f      = _make_flow( tmp_path, cache, router, FakeExpeditor(),
+                             FakeExecutor( _outcome() ), FakePending(), notifier )
+
+        f.ask( "", **_CTX )
+
+        assert router.calls == 0,        "the router saw an unfit question"
+        assert cache.gist_calls == [],   "the cache was consulted for a question that was refused"
+
+    def test_a_fit_question_is_not_refused( self, tmp_path, notifier, monkeypatch ):
+        """The control. Without it, a gate that refused EVERYTHING would pass above."""
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        r = self._flow( tmp_path, notifier ).ask( "what is 2+2", **_CTX )
+        assert r[ "status" ] != "rejected"
+
+    def test_exactly_1000_characters_is_fit( self, tmp_path, notifier, monkeypatch ):
+        """The boundary v1 drew: >1000 is refused, 1000 is not."""
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        r = self._flow( tmp_path, notifier ).ask( "x" * 1000, **_CTX )
+        assert r[ "status" ] != "rejected"
+
+
+# ───────────────────────── the query log gets written again (Rick's ruling 19)
+
+class FakeQueryLog:
+    def __init__( self ):
+        self.rows = []
+
+    def log_query( self, **kwargs ):
+        self.rows.append( kwargs )
+        return "qid-1"
+
+
+class TestTheFlowWritesTheQueryLog:
+    """
+    v1 wrote the query log from five places inside push_job. v2 wrote it from
+    none, so once 6c lands the table simply stops growing for voice traffic and
+    nothing raises about it — the failure this closes.
+
+    ONE call site, at the terminal chokepoint every exit funnels through.
+    """
+
+    def _run( self, tmp_path, notifier, monkeypatch, question="hey what is 2+2", **flow_kw ):
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        log = FakeQueryLog()
+        f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                          FakeExecutor( _outcome() ), FakePending(), notifier, **flow_kw )
+        f.query_log = log
+        r = f.ask( question, **_CTX )
+        return log, r
+
+    def test_an_answered_question_is_logged( self, tmp_path, notifier, monkeypatch ):
+        """
+        RED ON REVERT: delete the _log_query call from _emit and nothing is written.
+        """
+        log, _r = self._run( tmp_path, notifier, monkeypatch )
+
+        assert len( log.rows ) == 1, "the query log was not written exactly once"
+        row = log.rows[ 0 ]
+        assert row[ "query_verbatim" ]   == "hey what is 2+2",  "the log must keep what the user actually said"
+        assert row[ "query_gist" ]       == "gist:what is 2+2", "the gist is computed on the STRIPPED question"
+        assert row[ "user_id" ]          == _CTX[ "user_id" ]
+        assert row[ "session_id" ]       == _CTX[ "websocket_id" ]
+        assert row[ "match_result" ][ "type" ] == "no_match_new_agent"
+
+    def test_a_refused_question_is_logged_too( self, tmp_path, notifier, monkeypatch ):
+        """
+        v1's five call sites missed paths; one chokepoint does not. A refusal is
+        exactly the traffic an analytics table wants and the easiest to lose.
+        """
+        log, r = self._run( tmp_path, notifier, monkeypatch, question="invalid thing" )
+        assert r[ "status" ]     == "rejected"
+        assert len( log.rows )   == 1
+        assert log.rows[ 0 ][ "query_verbatim" ] == "invalid thing"
+
+    def test_a_cache_hit_is_logged_as_an_exact_match( self, tmp_path, notifier, monkeypatch ):
+        """The match_result v1 wrote on its replay path, carried over."""
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( label="math" ) )
+        snap  = types.SimpleNamespace( routing_command="agent router go to math" )
+        cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap, similarity=100.0 ) )
+        log   = FakeQueryLog()
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( _outcome( status="done", answer="4", answer_raw="4" ) ),
+                            FakePending(), notifier )
+        f.query_log = log
+
+        f.ask( "what is 2+2", **_CTX )
+
+        assert log.rows[ 0 ][ "match_result" ][ "type" ]       == "exact_match"
+        assert log.rows[ 0 ][ "match_result" ][ "confidence" ] == 100.0
+
+    def test_a_logging_failure_never_breaks_the_request( self, tmp_path, notifier, monkeypatch ):
+        """
+        v1 swallowed a log failure with a debug print, and so does this. A user's
+        question must not 500 because an analytics row could not be written.
+
+        RED ON REVERT: remove the try/except and this raises instead of answering.
+        """
+        class _BrokenLog:
+            def log_query( self, **kwargs ):
+                raise RuntimeError( "the log table is down" )
+
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                        FakeExecutor( _outcome() ), FakePending(), notifier )
+        f.query_log = _BrokenLog()
+
+        r = f.ask( "what is 2+2", **_CTX )     # must not raise
+
+        assert r[ "status" ] == "done"
+
+    def test_no_log_configured_is_not_an_error( self, tmp_path, notifier, monkeypatch ):
+        """Every test double runs without one; that must stay a no-op, not a crash."""
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                        FakeExecutor( _outcome() ), FakePending(), notifier )
+        assert f.query_log is None
+        assert f.ask( "what is 2+2", **_CTX )[ "status" ] == "done"
