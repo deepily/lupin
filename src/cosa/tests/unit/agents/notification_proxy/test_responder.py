@@ -411,9 +411,94 @@ class TestPositionalSentinelResolution:
     def test_an_ordinary_answer_is_untouched( self ):
         # The resolver sits in the hot path for EVERY answer; this is the guard that
         # it changes nothing for the other several hundred script entries.
+        #
+        # The card now offers "general" as well. It used to offer only "kiss.md",
+        # which passed because nothing downstream checked — an answer the card had
+        # never offered went straight to the expeditor, which is the defect row
+        # a1420538 closes. Pass-through is still what is being tested; the fixture
+        # now describes a card the answer legitimately belongs to.
         r, _, script, _ = _make_responder()
         script.can_handle.return_value = True
         script.respond.return_value    = "general"
         with patch.object( r, "_submit_response", return_value=True ) as submit:
-            self._run( r, self._card_event( "kiss.md" ) )
+            self._run( r, self._card_event( "kiss.md", "general" ) )
         submit.assert_called_once_with( "n1", "general" )
+
+    def test_an_answer_the_card_never_offered_is_a_visible_skip( self ):
+        # Row a1420538. The sentinel block above only inspects sentinel-SHAPED
+        # values, so an ordinary-looking answer from any strategy reached the card
+        # unchecked. The expeditor rejects a label it never offered and the run
+        # cancels, which from the outside is indistinguishable from a user declining.
+        # RED ON REVERT (validation removed): submit is called with the prose and
+        # "Expected 'assert_not_called' to not have been called" fails.
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = "made-up.md"
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, self._card_event( "kiss.md", "quantum.md" ) )
+        submit.assert_not_called()
+        assert r.stats[ "skipped" ] == 1
+        assert r.stats[ "responses_sent" ] == 0
+
+    def test_the_retired_prose_at_confidence_equal_to_the_floor_is_not_submitted( self ):
+        # THE ROW'S OWN CASE, at the boundary María named. On the live run the hint
+        # carried the retired directive at confidence 0.9 against an auto-submit floor
+        # of 0.9. The floor is INCLUSIVE — the client's reject test is
+        # `confidence < floor`, pinned by "gate OPENS at exactly the floor (>= is
+        # inclusive)" in src/tests/unit/notifications_js/batch_prediction_prefill.test.ts
+        # — so equal ADMITS, and a test at 0.95 would prove nothing about it.
+        #
+        # The assertion is not that the gate admits equal (it does, and that is the
+        # premise). It is that when the prose gets through at exactly-equal
+        # confidence, the answer submitted is a real label or a visible skip, and
+        # never the prose.
+        prose = ( "Pick the first document option in the list - never "
+                  "'Let me describe it' and never 'Cancel'." )
+        hint  = {
+            "auto_submit_enabled"                  : True,
+            "auto_submit_min_confidence_threshold" : 0.9,
+            "confidence"                           : 0.9,
+            "predicted_value"                      : { "answers": { "_other": prose } },
+        }
+        # The premise, stated so the test cannot quietly become vacuous: equal is
+        # at-or-above, so this hint IS eligible to reach the card.
+        assert hint[ "confidence" ] >= hint[ "auto_submit_min_confidence_threshold" ]
+
+        event = self._card_event( "kiss.md", "quantum.md", self.DESCRIBE, self.CANCEL )
+        event[ "prediction_hint" ] = hint
+
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = prose
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, event )
+        submit.assert_not_called()
+        assert r.stats[ "skipped" ] == 1
+        assert r.stats[ "responses_sent" ] == 0
+
+    def test_a_non_choice_card_is_not_option_checked( self ):
+        # The check is scoped to multiple_choice. An open-ended ask has no options to
+        # validate against, and validating one would reject every free-text answer.
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = "/tmp/mock-research-document.md"
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, _notif( response_type="open_ended" ) )
+        submit.assert_called_once_with( "n-123", "/tmp/mock-research-document.md" )
+
+    def test_the_rejection_names_the_strategy_and_the_value( self, capsys ):
+        # The printed line has to BE the fix: which path produced the answer, and what
+        # it actually said. Without both, the reader sees a skip and has to reconstruct
+        # the cause from a run that already ended.
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = "made-up.md"
+        with patch.object( r, "_submit_response", return_value=True ):
+            self._run( r, self._card_event( "kiss.md" ) )
+        printed = capsys.readouterr().out
+        # "never offered" is asserted because the SUCCESS line also carries the
+        # strategy name and the answer — without it this test stays green with the
+        # check removed, which is the one thing it must not do.
+        assert "never offered"  in printed
+        assert "script_matcher" in printed
+        assert "made-up.md"     in printed

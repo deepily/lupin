@@ -365,6 +365,26 @@ class NotificationResponder:
             if self.debug: print( f"[Responder] Sentinel {answer.strip()} → option {resolved!r}" )
             answer = resolved
 
+        # EVERY multiple-choice answer is now checked against the options that
+        # arrived with THIS card, whatever produced it (row a1420538). The sentinel
+        # block above only inspects sentinel-shaped values, so an answer from the
+        # script matcher, the rule strategy or the cloud LLM reached the card
+        # unchecked — which is how the prose the sentinels replaced could still be
+        # submitted by a different route. The live leftover was a prediction hint
+        # carrying that retired directive at confidence 0.9 against an auto-submit
+        # floor of 0.9; the floor is inclusive, so equal passes and nothing
+        # downstream was looking. A label the card never offered reads to the
+        # expeditor as an unknown pick and cancels the run, so this is a counted,
+        # printed skip instead — the same trade the unresolvable sentinel makes.
+        if notification.get( "response_type" ) == "multiple_choice":
+            unoffered = option_sentinels.unoffered_values( answer, notification )
+            if unoffered:
+                self.stats[ "skipped" ] += 1
+                print( f"[Responder] {strategy_name} answered with something the card "
+                       f"never offered — not submitting {unoffered!r} for: "
+                       f"{title or message[ :50 ]}" )
+                return
+
         # Submit the response
         success = self._submit_response( notification_id, answer )
 
