@@ -95,9 +95,64 @@ def _post_paths( decorator ):
              if isinstance( a, ast.Constant ) and isinstance( a.value, str ) ]
 
 
+FRAMEWORK_PARAMS = { "Request", "Response", "BackgroundTasks", "WebSocket", "UploadFile" }
+
+
+def _takes_an_unreadable_body( node, classes ):
+    """
+    Whether this handler accepts a body parameter this checker cannot resolve.
+
+    THE DISTINCTION THAT MATTERS, and getting it wrong in either direction breaks the
+    check. A tombstone takes NO parameters at all — it reads nothing, so there is no body
+    for a lineage field to hide in and it must stay silent. A handler that takes
+    `body: dict = Body( ... )` and digs `parent_id_hash` out of it by hand is the real
+    hole: it accepts the field, this checker cannot see that it does, and the door
+    silently leaves the watched set.
+
+    Requires:
+        - node is a FunctionDef / AsyncFunctionDef carrying a @router.post decorator
+        - classes is the set of class names defined in the same module
+
+    Ensures:
+        - False when no parameter could carry a body — no parameters at all, or every
+          parameter is a Depends() injection or a framework type
+        - False when some parameter is annotated with a class defined in this module —
+          that body WAS read, whatever the answer turned out to be
+        - True otherwise: something body-shaped arrives here and this checker cannot say
+          what is in it
+    """
+    for arg, default in _params_with_defaults( node ):
+        annotation = arg.annotation
+        if isinstance( annotation, ast.Name ):
+            if annotation.id in classes:         return False      # read, and understood
+            if annotation.id in FRAMEWORK_PARAMS: continue         # not a body
+        if isinstance( default, ast.Call ) and _callee_name( default ) == "Depends":
+            continue                                               # an injection, not a body
+        if annotation is None and default is None:
+            continue                                               # bare positional, nothing to read
+        return True
+    return False
+
+
+def _params_with_defaults( node ):
+    """Pair every parameter with its default, or None — defaults are right-aligned."""
+    args     = list( node.args.args ) + list( node.args.kwonlyargs )
+    defaults = ( [ None ] * ( len( node.args.args ) - len( node.args.defaults ) ) ) + list( node.args.defaults )
+    defaults += list( node.args.kw_defaults )
+    return list( zip( args, defaults + [ None ] * ( len( args ) - len( defaults ) ) ) )
+
+
+def _callee_name( call ):
+    """The bare name of whatever a Call node calls, or None."""
+    func = call.func
+    if isinstance( func, ast.Name ):      return func.id
+    if isinstance( func, ast.Attribute ): return func.attr
+    return None
+
+
 def lineage_aware_endpoints( router_dir ):
     """
-    Every POST path whose OWN request model declares the lineage field.
+    Every POST path whose own handler takes a request model declaring the lineage field.
 
     ⚠️ THIS USED TO BE A PER-FILE CHECK, AND THAT WENT WRONG THE DAY A ROUTER GREW A
     SECOND DOOR. The rule was "any router mentioning `parent_id_hash` is lineage-aware,
@@ -105,54 +160,49 @@ def lineage_aware_endpoints( router_dir ):
     single submit endpoint, which was true of all six when this was written. `v2_ask.py`
     has three doors and only `/api/v2/submit` takes the field, so the old rule accused
     nine test files of failing to tag `/api/v2/ask` with a field that endpoint does not
-    accept and would reject. A checker that names innocent files teaches people to
-    ignore it, which costs more than the gap it was watching for.
+    accept and would reject. A checker that names innocent files teaches people to ignore
+    it, which costs more than the gap it was watching for.
 
-    So the question is asked per ENDPOINT: does the model in THIS handler's signature
-    declare the field? A router-wide mention is not evidence about any one door.
+    So the question is asked per DOOR: does the model in THIS handler's signature declare
+    the field? A router-wide mention is not evidence about any one door.
+
+    ⚠️ AND THE SECOND RETURN VALUE IS ALSO PER DOOR, for a reason worth stating because
+    an earlier version of this function got it wrong twice. The failure mode of a derived
+    set is silence: a door whose model was renamed, or that takes `body: dict = Body(...)`
+    and reads the field out by hand, simply stops contributing — it leaves the watched set
+    and every test posting to it passes for the wrong reason. Keying that report on the
+    FILE hid it whenever a readable door sat beside it; gating it on the file declaring a
+    lineage model hid it whenever such a door was the file's ONLY evidence, which is
+    precisely the door class it exists for (Pocholo, twice).
 
     Requires:
         - router_dir holds FastAPI router modules
-
-    IT REPORTS WHAT IT COULD NOT MATCH, because the failure mode of a derived set is
-    silence. A router that mentions the field but whose model was renamed, or whose
-    handler stopped taking that model, would simply stop contributing a door — the
-    endpoint quietly leaves the watched set and every test posting to it passes for the
-    wrong reason. So the second return value names each such file, and the test below
-    fails on it by name (Pocholo, reviewing the per-door narrowing).
 
     Ensures:
         - returns ( endpoints, unmatched )
         - endpoints is { full_path: router_filename } for each POST handler whose
           annotated request model declares `parent_id_hash`, joining `prefix=` to the
           post path; a router with no prefix contributes its post paths verbatim
-        - unmatched is [ ( filename, why ) ] for each router that mentions the field
-          and yields no door at all — never dropped in silence
+        - unmatched is [ ( "file::path", why ) ] per DOOR that accepts a body this
+          checker cannot read — never per file, never gated on the file's models
+        - a handler taking no body at all (a tombstone) is silent, and so is a file that
+          merely mentions the field in prose
     """
     endpoints = {}
     unmatched = [ ]
     for name in sorted( os.listdir( router_dir ) ):
         if not name.endswith( ".py" ) or name.startswith( "._" ): continue   # ._ = AppleDouble sidecar, not source
         with open( os.path.join( router_dir, name ), "r", errors="ignore" ) as f: text = f.read()
+        # The outer filter: a file that never mentions the field owns no lineage-aware
+        # door and cannot hide one, so the per-door scan below stays narrow.
         if LINEAGE_FIELD not in text: continue
         try:
             tree = ast.parse( text )
         except SyntaxError:                                  # pragma: no cover - no router in the tree fails to parse
             continue
         models, classes = _lineage_models( tree )
-        if not models:
-            # PROSE IS NOT A SIGNAL, and reporting it was a false accusation this file
-            # caught on its own author: the very commit that retired the first
-            # submit-shaped door wrote a tombstone comment naming the three fields a
-            # caller now sends to /api/v2/submit, and that mention alone put
-            # bug_fix_expediter.py in this report — a router whose only route is a
-            # tombstone that reads no body at all. A file with no model declaring the
-            # field owns no lineage-aware door, so there is nothing here to watch.
-            # What IS worth reporting is below: a door whose body cannot be read.
-            continue
         prefix = PREFIX_RE.search( text )
         prefix = prefix.group( 1 ) if prefix else ""
-        doors = 0
         for node in ast.walk( tree ):
             if not isinstance( node, ( ast.FunctionDef, ast.AsyncFunctionDef ) ): continue
             paths = [ ]
@@ -161,27 +211,14 @@ def lineage_aware_endpoints( router_dir ):
             paths = [ p if p.startswith( "/api/" ) else f"{prefix}{p}" for p in paths ]
             paths = [ p for p in paths if p.startswith( "/api/" ) ]
             if not paths: continue
-            doors += 1
             annotated = { arg.annotation.id
                           for arg in list( node.args.args ) + list( node.args.kwonlyargs )
                           if isinstance( arg.annotation, ast.Name ) }
             if annotated & models:
                 for path in paths: endpoints[ path ] = name
-            elif not ( annotated & classes ):
-                # THE RESIDUAL, and it is per DOOR rather than per file. Keying the report
-                # on the FILE meant one readable door silenced it for every other door in
-                # that file: a second submit-shaped handler written in a different style —
-                # a string annotation, a `Body(...)`, a bare dict — could take the field
-                # and never be watched, while its neighbour's match said the file was
-                # understood. A door whose body resolves to NO class defined in this module
-                # is a door this checker could not read, and it now says so by path.
-                #
-                # A door annotated with a model that simply is not lineage-aware (`ask`
-                # taking AskRequest) is NOT this case: it was read, and the answer was no.
+            elif _takes_an_unreadable_body( node, classes ):
                 unmatched.append( ( f"{name}::{paths[ 0 ]}",
-                                    "POST handler takes no request model this checker can read" ) )
-        if not doors:
-            unmatched.append( ( name, "declares the field but has no POST door at all" ) )
+                                    "POST handler takes a body this checker cannot read" ) )
     return endpoints, unmatched
 
 
@@ -340,19 +377,68 @@ def test_a_door_taking_a_model_that_is_simply_not_lineage_aware_is_not_reported(
     assert unmatched == []
 
 
-def test_a_router_declaring_the_field_with_no_post_door_at_all_is_reported( tmp_path ):
-    """A model carrying the field that no door accepts is dead weight, and a reader who
-    assumes it is watched is wrong. Named rather than dropped."""
-    ( tmp_path / "doorless.py" ).write_text(
-        "from pydantic import BaseModel\n"
+def test_a_lone_unreadable_door_is_reported_even_with_no_model_in_the_file( tmp_path ):
+    """
+    THE CASE THE PREVIOUS FIX RE-OPENED, and the reason the per-door scan is no longer
+    behind a "does this file declare a lineage model" gate. A handler that takes
+    `body: dict = Body( ... )` and digs the field out by hand IS a lineage-aware door —
+    it just is not one this checker can read. Gating the scan on the file declaring a
+    model meant that door was reported only when some OTHER model in the same file
+    happened to declare the field, and was silent when it was the file's only evidence,
+    which is precisely the door class the check exists for (Pocholo, measured).
+
+    RED ON REVERT: put `if not models: continue` back above the door loop and this goes
+    silent while every other test here stays green.
+    """
+    ( tmp_path / "lone_raw.py" ).write_text(
+        "from fastapi import APIRouter, Body\n"
         "router = APIRouter()\n"
-        "class SubmitRequest( BaseModel ):\n"
-        f"    {LINEAGE_FIELD} : Optional[ str ] = Field( None )\n"
+        '@router.post( "/api/lone/submit" )\n'
+        "async def submit( body: dict = Body( ... ) ):\n"
+        f'    parent = body.get( "{LINEAGE_FIELD}" )\n'
+        "    return parent\n"
     )
     endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
 
     assert endpoints == {}
-    assert [ f for f, _why in unmatched ] == [ "doorless.py" ]
+    assert [ f for f, _why in unmatched ] == [ "lone_raw.py::/api/lone/submit" ]
+
+
+def test_a_tombstone_that_reads_no_body_is_silent( tmp_path ):
+    """
+    The other half, and it is the half a blunt fix breaks. A retired door takes NO
+    parameters at all: there is no body for the field to hide in, so it must stay quiet —
+    even though its tombstone comment names the field, which is exactly what the first
+    submit-shaped retirement wrote and what put this checker onto its own author.
+    """
+    ( tmp_path / "tombstone.py" ).write_text(
+        "from fastapi import APIRouter\n"
+        "router = APIRouter()\n"
+        f"# the caller now sends {LINEAGE_FIELD} to /api/v2/submit instead\n"
+        '@router.post( "/api/dead/submit" )\n'
+        "async def dead(): pass\n"
+    )
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+
+    assert endpoints == {}
+    assert unmatched == []
+
+
+def test_a_door_taking_only_injected_dependencies_is_silent( tmp_path ):
+    """A handler whose every parameter is a Depends() injection reads no body either.
+    Without this, hoisting the scan would flood the report with routers that never took
+    a body at all."""
+    ( tmp_path / "injected.py" ).write_text(
+        "from fastapi import APIRouter, Depends\n"
+        "router = APIRouter()\n"
+        f"# mentions {LINEAGE_FIELD} in passing\n"
+        '@router.post( "/api/inject/go" )\n'
+        "async def go( current_user: dict = Depends( get_current_user ), q = Depends( get_queue ) ): pass\n"
+    )
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+
+    assert endpoints == {}
+    assert unmatched == []
 
 
 def test_no_router_in_the_tree_is_unmatched():
