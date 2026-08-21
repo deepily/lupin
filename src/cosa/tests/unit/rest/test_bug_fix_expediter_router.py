@@ -1,219 +1,111 @@
 """
-Unit tests for the Bug Fix Expediter router (`cosa.rest.routers.bug_fix_expediter`).
+Unit tests for the retired Bug Fix Expediter router (`cosa.rest.routers.bug_fix_expediter`).
 
-Covers:
-- `get_todo_queue` — pulls jobs_todo_queue off `lupin_app.main` (dual-key patched).
-- `submit_bug_fix` — missing-uid 400, missing-email 400, session-id fallback,
-  success (minimal + every optional arm: extra_context / dry_run / scheduled_at /
-  monopolize / provided websocket_id), factory-None 500 (re-raised through the
-  `except HTTPException` arm), and push-failure 500 (generic `except`).
+WHAT THIS FILE USED TO TEST, AND WHY IT DOES NOT ANY MORE. It covered `submit_bug_fix` —
+the missing-uid 400, the missing-email 400, the session-id fallback, the success arms for
+every optional field, the factory-None 500, the push-failure 500. That handler is gone:
+`/api/bug-fix-expediter/submit` is a tombstone answering 410 and naming `/api/v2/submit`,
+so every one of those tests exercised code that no longer exists. They are not rewritten
+into equivalents here, because there is nothing to rewrite them INTO — the behaviour did
+not move to a new home in this module, it moved to a door with its own suite.
 
-Zero external dependencies — create_agentic_job, user_job_tracker, and the todo
-queue are all boundary-mocked. No real jobs, no LLM, no queue, no network. Auth is
-bypassed by passing current_user explicitly (Depends not exercised).
+WHAT REPLACES THEM. The generic tombstone checks live in
+`src/tests/unit/test_retired_queue_doors_410.py`, which is parametrised over the whole
+`RETIRED_DOORS` table and asserts the table's exact contents, so this door cannot fall out
+of coverage quietly. What that file cannot see is anything specific to THIS module, and
+that is what is left here: the route is mounted at the path the table names, the module no
+longer carries the machinery of a live door, and its refusal names the submit door rather
+than the ask door.
+
+Venue: :7999-eligible. Pure in-process; no queue, no LLM, no network, no auth.
 """
 
 import unittest
-from unittest.mock import Mock, MagicMock, patch
-import asyncio
-import sys
-import time
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
-from cosa.rest.routers.bug_fix_expediter import (
-    get_todo_queue,
-    submit_bug_fix,
-    BugFixExpediterSubmitRequest,
-    BugFixExpediterSubmitResponse,
-)
+import cosa.rest.routers.bug_fix_expediter as bfe
+from cosa.rest.routers._retired_doors import RETIRED_DOORS, V2_SUBMIT
+
+PATH = "/api/bug-fix-expediter/submit"
 
 
-def _patch_fastapi_main( mock_main ):
-    """Dual-key patch for `lupin_app.main` (Gotcha 1)."""
-    pkg = Mock()
-    pkg.main = mock_main
-    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
+def _client():
+    app = FastAPI()
+    app.include_router( bfe.router )
+    return TestClient( app, raise_server_exceptions=False )
 
 
-def _job( id_hash="init_hash", last_q="fix the thing" ):
-    """A BugFixExpediterJob stand-in with the attributes the endpoint reads."""
-    job = MagicMock()
-    job.id_hash             = id_hash
-    job.last_question_asked = last_q
-    return job
-
-
-class TestGetTodoQueue( unittest.TestCase ):
+class TestTheDoorIsRetired( unittest.TestCase ):
     """
-    Ensures:
-        - get_todo_queue returns main_module.jobs_todo_queue
+    The tombstone, checked where it lives rather than only in the table.
     """
 
-    def test_returns_main_module_todo_queue( self ):
-        """Ensures: dependency reads jobs_todo_queue off lupin_app.main."""
-        mock_main = MagicMock()
-        mock_main.jobs_todo_queue = "Q"
-        with _patch_fastapi_main( mock_main ):
-            self.assertEqual( get_todo_queue(), "Q" )
+    def test_the_route_is_still_mounted_at_its_old_path( self ):
+        """
+        A DELETED route would be invisible, and invisible is exactly what a tombstone is
+        for avoiding: nothing would stop someone re-adding this path next year because
+        the product needs it. It stays mounted so it can say it was retired on purpose.
+        """
+        paths = { route.path for route in _client().app.routes
+                  if "POST" in getattr( route, "methods", set() ) }
+        self.assertIn( PATH, paths )
+
+    def test_it_answers_410_and_names_the_submit_door( self ):
+        response = _client().post( PATH, json={ "dead_job_id": "d-1" } )
+        self.assertEqual( response.status_code, 410 )
+        self.assertIn( V2_SUBMIT, response.json()[ "detail" ] )
+
+    def test_it_refuses_an_unauthenticated_caller_the_same_way( self ):
+        """
+        No auth dependency on a tombstone, on purpose. With `Depends( get_current_user )`
+        still on it, a stale client would get a 401 — which teaches nobody anything and
+        reads like a credentials problem rather than a retired door.
+        """
+        response = _client().post( PATH, json={ } )   # no token, no valid body
+        self.assertEqual( response.status_code, 410 )
+
+    def test_a_body_that_would_once_have_been_rejected_still_gets_the_410( self ):
+        """`dead_job_id` was a required, min-length-1 field. A tombstone must not answer
+        422 to a caller sending the old body wrong — the body is not read at all now, and
+        the caller's real problem is that the door is gone."""
+        response = _client().post( PATH, json={ "dead_job_id": "" } )
+        self.assertEqual( response.status_code, 410 )
+
+    def test_the_table_says_this_door_retires_into_submit_not_ask( self ):
+        """The two doors are not interchangeable: `ask` takes a bare question and works
+        out what it means, `submit` takes work whose command is already decided. This one
+        named its own command, so it is submit-shaped."""
+        self.assertEqual( RETIRED_DOORS[ PATH ], V2_SUBMIT )
 
 
-class TestSubmitBugFix( unittest.TestCase ):
+class TestTheModuleNoLongerCarriesALiveDoor( unittest.TestCase ):
     """
-    Unit tests for `submit_bug_fix`.
-
-    Requires:
-        - create_agentic_job + user_job_tracker boundary-mocked
-
-    Ensures:
-        - validations (400s), session fallback, success arms, factory-None 500,
-          push-failure 500
+    The half the generic table-driven suite cannot see: a tombstone that still imports the
+    job factory and the queue looks, to the next reader, like a door that was disabled
+    rather than retired — and unreachable machinery is code nobody can test and everybody
+    must still read.
     """
 
-    def setUp( self ):
-        """Ensures: a default authenticated user + mocked queue per test."""
-        self.user  = { "uid": "user_1234567890", "email": "u@test.com" }
-        self.queue = MagicMock()
+    def test_the_handler_only_refuses( self ):
+        """RED ON REVERT: give the handler a body again and it stops raising."""
+        with self.assertRaises( HTTPException ) as caught:
+            import asyncio
+            asyncio.run( bfe.submit_bug_fix() )
+        self.assertEqual( caught.exception.status_code, 410 )
 
-    def _call( self, body ):
-        return asyncio.run( submit_bug_fix(
-            request_body = body,
-            current_user = self.user,
-            todo_queue   = self.queue,
-        ) )
+    def test_the_job_building_machinery_is_gone_from_this_module( self ):
+        for name in ( "create_agentic_job", "user_job_tracker", "get_todo_queue" ):
+            self.assertFalse( hasattr( bfe, name ),
+                              f"{name} survives in a module whose only route is a tombstone" )
 
-    def test_missing_uid_400( self ):
-        """Ensures: a token without uid raises 400."""
-        self.user = { "email": "u@test.com" }
-        with self.assertRaises( HTTPException ) as ctx:
-            self._call( BugFixExpediterSubmitRequest( dead_job_id="d-1" ) )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "User ID not found", ctx.exception.detail )
-
-    def test_missing_email_400( self ):
-        """Ensures: a token without email raises 400."""
-        self.user = { "uid": "user_1234567890" }
-        with self.assertRaises( HTTPException ) as ctx:
-            self._call( BugFixExpediterSubmitRequest( dead_job_id="d-1" ) )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "User email not found", ctx.exception.detail )
-
-    def test_success_minimal_session_fallback( self ):
-        """Ensures: minimal body queues a job; websocket_id None → api-<uid8> session fallback."""
-        self.queue.size.return_value = 3
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "bfe-scoped"
-        with patch( "cosa.rest.routers.bug_fix_expediter.create_agentic_job",
-                    return_value=_job() ) as m_create, \
-             patch( "cosa.rest.routers.bug_fix_expediter.user_job_tracker", tracker ):
-            result = self._call( BugFixExpediterSubmitRequest( dead_job_id="dead-123" ) )
-
-        self.assertIsInstance( result, BugFixExpediterSubmitResponse )
-        self.assertEqual( result.status, "queued" )
-        self.assertEqual( result.job_id, "bfe-scoped" )
-        self.assertEqual( result.queue_position, 3 )
-        self.assertIn( "Bug Fix Expediter job queued", result.message )
-
-        # session_id derived from uid (no websocket_id), args_dict minimal
-        _, kwargs = m_create.call_args
-        self.assertEqual( kwargs[ "session_id" ], "api-user_123" )
-        self.assertEqual( kwargs[ "args_dict" ], { "dead_job_id": "dead-123" } )
-        self.assertNotIn( "extra_context", kwargs[ "args_dict" ] )
-        self.queue.push.assert_called_once()
-
-    def test_success_all_optional_arms( self ):
-        """Ensures: extra_context + dry_run + provided websocket_id + scheduled_at + monopolize all thread through."""
-        self.queue.size.return_value = 7
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "bfe-2"
-        job = _job()
-        body = BugFixExpediterSubmitRequest(
-            dead_job_id   = "dead-999",
-            extra_context = "stack trace here",
-            dry_run       = True,
-            websocket_id  = "ws-xyz",
-            scheduled_at  = "2026-01-01T00:00:00",
-            monopolize    = True,
-        )
-        with patch( "cosa.rest.routers.bug_fix_expediter.create_agentic_job",
-                    return_value=job ) as m_create, \
-             patch( "cosa.rest.routers.bug_fix_expediter.user_job_tracker", tracker ):
-            result = self._call( body )
-
-        self.assertEqual( result.status, "queued" )
-        self.assertEqual( result.job_id, "bfe-2" )
-        _, kwargs = m_create.call_args
-        self.assertEqual( kwargs[ "session_id" ], "ws-xyz" )          # provided websocket_id used
-        self.assertEqual( kwargs[ "args_dict" ][ "extra_context" ], "stack trace here" )
-        self.assertTrue( kwargs[ "args_dict" ][ "dry_run" ] )
-        self.assertEqual( job.scheduled_at, "2026-01-01T00:00:00" )
-        self.assertTrue( job.monopolize )
-
-    def test_factory_none_500( self ):
-        """Ensures: create_agentic_job None → 500 (re-raised cleanly through except HTTPException)."""
-        tracker = MagicMock()
-        with patch( "cosa.rest.routers.bug_fix_expediter.create_agentic_job", return_value=None ), \
-             patch( "cosa.rest.routers.bug_fix_expediter.user_job_tracker", tracker ):
-            with self.assertRaises( HTTPException ) as ctx:
-                self._call( BugFixExpediterSubmitRequest( dead_job_id="d-1" ) )
-        self.assertEqual( ctx.exception.status_code, 500 )
-        self.assertIn( "Failed to create Bug Fix Expediter job", ctx.exception.detail )
-        self.queue.push.assert_not_called()
-
-    def test_push_failure_500( self ):
-        """Ensures: an exception during job push maps to 500 via the generic except."""
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "h"
-        self.queue.push.side_effect = RuntimeError( "queue down" )
-        with patch( "cosa.rest.routers.bug_fix_expediter.create_agentic_job", return_value=_job() ), \
-             patch( "cosa.rest.routers.bug_fix_expediter.user_job_tracker", tracker ):
-            with self.assertRaises( HTTPException ) as ctx:
-                self._call( BugFixExpediterSubmitRequest( dead_job_id="d-1" ) )
-        self.assertEqual( ctx.exception.status_code, 500 )
-        self.assertIn( "Failed to submit Bug Fix Expediter job", ctx.exception.detail )
-
-
-def isolated_unit_test():
-    """
-    Run the bug-fix-expediter router unit tests in isolation.
-
-    Ensures:
-        - Executes all TestCases and reports (success, duration, message)
-    """
-    import cosa.utils.util as du
-
-    start_time = time.time()
-    try:
-        loader = unittest.TestLoader()
-        suite  = unittest.TestSuite()
-        for tc in ( TestGetTodoQueue, TestSubmitBugFix ):
-            suite.addTests( loader.loadTestsFromTestCase( tc ) )
-        result = unittest.TextTestRunner( verbosity=2 ).run( suite )
-
-        duration  = time.time() - start_time
-        tests_run = result.testsRun
-        failures  = len( result.failures )
-        errors    = len( result.errors )
-
-        success = failures == 0 and errors == 0
-        if success:
-            du.print_banner( "✅ ALL BUG-FIX-EXPEDITER ROUTER TESTS PASSED", prepend_nl=True )
-            message = f"All {tests_run} tests passed successfully in {duration:.3f}s"
-        else:
-            du.print_banner( "❌ SOME BUG-FIX-EXPEDITER ROUTER TESTS FAILED", prepend_nl=True )
-            message = f"{failures} failures, {errors} errors out of {tests_run} tests"
-
-        return success, duration, message
-
-    except Exception as e:
-        duration  = time.time() - start_time
-        error_msg = f"Unit test execution failed: {str( e )}"
-        du.print_banner( f"💥 BUG-FIX-EXPEDITER ROUTER TEST ERROR: {error_msg}", prepend_nl=True )
-        return False, duration, error_msg
+    def test_the_request_and_response_models_are_gone( self ):
+        """A Pydantic model no route reads is a shape a caller can still find and
+        reasonably believe in."""
+        for name in ( "BugFixExpediterSubmitRequest", "BugFixExpediterSubmitResponse" ):
+            self.assertFalse( hasattr( bfe, name ), f"{name} describes a body nothing accepts" )
 
 
 if __name__ == "__main__":
-    success, duration, message = isolated_unit_test()
-    status = "✅ PASS" if success else "❌ FAIL"
-    print( f"\n{status} Bug-fix-expediter router unit tests completed in {duration:.3f}s" )
-    print( f"Result: {message}" )
+    unittest.main()

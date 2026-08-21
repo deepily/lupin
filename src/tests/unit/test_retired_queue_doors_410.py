@@ -5,14 +5,13 @@ RICK'S RULING, 2026-08-21: the doors are *"gone permanently, with the new door n
 dead by the end of the year."* Each route stays registered and refuses; the refusal
 names its replacement and says REMOVE BY 2026-12-31 out loud.
 
-WHY TWO AND NOT SIXTEEN. `/api/v2/submit` is not built yet, so the twelve
-submit-shaped doors would refuse by naming a route that answers 404 — Cheech,
-2026-08-21: *"a 410 that names a door that does not exist yet is a refusal pointing at
-nothing."* They land with the commit that builds `submit`. And a third door,
-`/api/upload-and-transcribe-mp3`, came back out on inspection: it is a speech-to-text
-endpoint that queues only on its `munger.is_agent()` branch, so `/api/v2/ask` — which
-takes text, not audio — cannot replace it. The set is asserted below, so a table that
-quietly grows fails here.
+WHY NOT ALL SIXTEEN AT ONCE. The submit-shaped doors could not retire while
+`/api/v2/submit` did not exist — Cheech, 2026-08-21: *"a 410 that names a door that
+does not exist yet is a refusal pointing at nothing."* They arrive one commit per door
+now that it does, and now that it can BUILD what they hand over, which took wiring the
+agentic reader into the flow: a door that exists is not a door that works. The set is
+asserted below, so a table that quietly grows fails here, and the count test lists what
+is still deliberately out.
 
 ONE TEST PER DOOR, ON PURPOSE. The plan's words: *"a loop that silently covers fifteen
 is how door 8 stayed invisible for a day."* Every check is parametrised over
@@ -31,10 +30,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from cosa.rest.routers._retired_doors import REMOVE_BY, RETIRED_DOORS, V2_ASK
-from cosa.rest.routers import queues, v2_ask
+from cosa.rest.routers._retired_doors import REMOVE_BY, RETIRED_DOORS, V2_ASK, V2_SUBMIT
+from cosa.rest.routers import bug_fix_expediter, queues, v2_ask
 
-_ROUTER_MODULES = ( queues, v2_ask )
+_ROUTER_MODULES = ( bug_fix_expediter, queues, v2_ask )
 
 
 def _app():
@@ -63,22 +62,36 @@ def _concrete( path ):
 
 # ── the count, stated once so a growing table cannot pass quietly ────────────
 
-def test_exactly_two_doors_are_retired_in_this_commit():
+def test_exactly_three_doors_are_retired_at_this_commit():
     """
-    Only the question-shaped doors retire here, because only their replacement exists.
+    THE COUNT IS RESTATED BY HAND ON PURPOSE, and it is the third of the three edits
+    every new door costs (table row, this set, this name). A loop that silently covered
+    whatever the table happened to hold is how door 8 stayed invisible for a day —
+    clearing a red here by widening this into something derived removes the guard rather
+    than satisfying it.
 
-    Eighteen doors put work on the queue and sixteen die, but twelve of those sixteen
-    hand over work whose command is already decided — they belong to `/api/v2/submit`,
-    which is not built yet. `/api/upload-and-transcribe-mp3` is out for a different
-    reason: it transcribes audio and queues only when the munger says the transcription
-    is an agent request, so `ask` cannot stand in for it. The Claude Code pair
-    (`/api/claude-code/submit` and its alias `/api/claude-code/queue/submit`, one
-    handler) is held for a third: Rick ruled the same day that a Claude Code job must be
-    UPGRADED to the v2 front door, not left to die on the vine.
+    Two question-shaped doors retired first, when `ask` was the only live replacement.
+    `/api/bug-fix-expediter/submit` is the first submit-shaped one, now that
+    `/api/v2/submit` both exists AND can build an agentic job — it could not until the
+    agentic reader was wired into the flow, and a refusal naming a door that answers "I
+    do not understand" is a refusal pointing at nothing.
+
+    STILL OUT, each for its own reason, because a door absent from this set should never
+    read as one nobody got to:
+      · `/api/upload-and-transcribe-mp3` — a speech-to-text endpoint that queues only on
+        its agent branch; `ask` takes text, not audio, so it survives (door 8).
+      · `/api/mock-job/submit` — its command exists in neither JOB_ARG_CONTRACTS nor the
+        factory; the router builds MockAgenticJob itself, so `submit` cannot build one.
+      · the two resume-from doors — they rebuild a job from server-side state, and a
+        SubmitRequest can say command and args but never "resume job X".
+      · `/api/test-suite/submit` — how the gate rig schedules a :8000 run, so retiring it
+        early would take away the ability to gate. It lands last.
+      · the Claude Code pair — Rick ruled it an UPGRADE to the v2 door, not a tombstone.
     """
     assert set( RETIRED_DOORS ) == {
         "/api/push",
         "/api/job-history/{job_id}/retry",
+        "/api/bug-fix-expediter/submit",
     }, sorted( RETIRED_DOORS )
 
 
@@ -151,7 +164,15 @@ def test_every_refusal_names_the_door_that_replaces_it( path, client ):
     assert RETIRED_DOORS[ path ] in detail, (
         f"{path}'s refusal does not name {RETIRED_DOORS[ path ]}: {detail!r}"
     )
-    assert RETIRED_DOORS[ path ] == V2_ASK
+    # Two replacements exist now, and which one a door gets is a real distinction rather
+    # than bookkeeping: `ask` takes a bare question and works out what it means, `submit`
+    # takes work whose command the caller already chose. This used to read
+    # `== V2_ASK`, which was true when every retired door was question-shaped and would
+    # have gone red the moment a submit-shaped one arrived — correctly, but by failing a
+    # test rather than by saying what it meant.
+    assert RETIRED_DOORS[ path ] in ( V2_ASK, V2_SUBMIT ), (
+        f"{path} retires into {RETIRED_DOORS[ path ]!r}, which is neither v2 door"
+    )
 
 
 # The date, written out. NOT `REMOVE_BY` — asserting the constant appears in a string the

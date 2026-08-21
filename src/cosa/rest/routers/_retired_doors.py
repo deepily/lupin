@@ -44,7 +44,8 @@ from fastapi import HTTPException
 # The date, stated once. It appears in every refusal body.
 REMOVE_BY = "2026-12-31"
 
-V2_ASK = "/api/v2/ask"
+V2_ASK    = "/api/v2/ask"
+V2_SUBMIT = "/api/v2/submit"
 
 
 # path -> the door that replaces it.
@@ -75,9 +76,34 @@ V2_ASK = "/api/v2/ask"
 # refuses without a signed-in user; the other branch is untouched and still needs no
 # token. Rick's framing: there are two ways to ask — post your text, or speak. Both end
 # up at the same flow. Keep this path OUT of the table.
+#
+# ── THE SUBMIT-SHAPED DOORS START ARRIVING (11b) ──
+#
+# `/api/v2/submit` exists now, and — this is the part worth stating, because it was very
+# nearly not true — it can BUILD what these doors hand over. `resolve()` is scoped to the
+# conversational class and returns None for every agentic command, so `submit` reached the
+# receptionist for all of them until the agentic reader was wired in. A tombstone pointing
+# at a door that answers "I do not understand" teaches a caller less than the handler it
+# replaced, which is the same mistake as pointing at a 404, one layer deeper.
+#
+# 🔴 `/api/mock-job/submit` IS NOT HERE, AND NOT BY OVERSIGHT. Its command exists nowhere:
+# there is no "mock job" entry in JOB_ARG_CONTRACTS and no branch for it in
+# `create_agentic_job` — the router builds `MockAgenticJob` itself (mock_job.py:170). So
+# `submit` cannot build one, and retiring that door would point its refusal at a door that
+# refuses back. It waits for a mock-job command, or it stays (Cheech, 2026-08-21: a
+# test-harness door with test-only callers does not justify teaching the registry a
+# mock-job command tonight).
+#
+# Also still out, each for its own stated reason: the two resume-from doors
+# (`/api/jobs/{id_hash}/resume-from-checkpoint`, `/api/test-fix-expediter/resume-from`)
+# rebuild a job from server-side state, and an HTTP `SubmitRequest` can say command and
+# args but never "resume job X"; `/api/test-suite/submit` is how the gate rig schedules a
+# :8000 run, so it lands last, after that gate is green; and the Claude Code pair is an
+# UPGRADE to the v2 door, not a tombstone (Rick).
 RETIRED_DOORS = {
     "/api/push"                       : V2_ASK,
     "/api/job-history/{job_id}/retry" : V2_ASK,
+    "/api/bug-fix-expediter/submit"   : V2_SUBMIT,
 }
 
 

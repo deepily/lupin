@@ -141,7 +141,14 @@ def lineage_aware_endpoints( router_dir ):
             continue
         models, classes = _lineage_models( tree )
         if not models:
-            unmatched.append( ( name, "mentions the field but no request model declares it" ) )
+            # PROSE IS NOT A SIGNAL, and reporting it was a false accusation this file
+            # caught on its own author: the very commit that retired the first
+            # submit-shaped door wrote a tombstone comment naming the three fields a
+            # caller now sends to /api/v2/submit, and that mention alone put
+            # bug_fix_expediter.py in this report — a router whose only route is a
+            # tombstone that reads no body at all. A file with no model declaring the
+            # field owns no lineage-aware door, so there is nothing here to watch.
+            # What IS worth reporting is below: a door whose body cannot be read.
             continue
         prefix = PREFIX_RE.search( text )
         prefix = prefix.group( 1 ) if prefix else ""
@@ -275,7 +282,10 @@ def test_a_router_that_only_talks_about_the_field_contributes_nothing( tmp_path 
     )
     endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
     assert endpoints == {}
-    assert [ f for f, _why in unmatched ] == [ "prose.py" ], "mentioning the field and yielding no door must be REPORTED, not dropped"
+    assert unmatched == [], (
+        "a file that only TALKS about the field owns no lineage-aware door — reporting it "
+        "is the false accusation this checker exists to avoid, and a tombstone comment "
+        "naming the field is enough to trigger it" )
 
 
 def test_the_checker_reports_a_door_it_could_not_read( tmp_path ):
