@@ -30,6 +30,7 @@ from cosa.agents.runtime_argument_expeditor.expeditor import (
     DOC_CHOICE_DESCRIBE_SENTINEL,
     BATCH_DECLINED,
     BATCH_MALFORMED,
+    DOCUMENT_CHOICE_CARD_ID,
 )
 
 
@@ -74,6 +75,33 @@ class TestAskChoiceForArg( unittest.TestCase ):
         with patch.object( ex_mod, "notify_user_sync", side_effect=_fake_notify ):
             out = o._ask_choice_for_arg( "research", "Which document?", self.OPTIONS, "u@e.com" )
         return out, captured.get( "request" ), o
+
+    def _ask_with_card_id( self, card_id ):
+        o = _mk_expeditor()
+        captured = {}
+        def _fake_notify( request=None, debug=False, bearer_token=None ):
+            captured[ "request" ] = request
+            return _Resp( response_value="a.md" )
+        with patch.object( ex_mod, "notify_user_sync", side_effect=_fake_notify ):
+            o._ask_choice_for_arg( "research", "Which document?", self.OPTIONS, "u@e.com",
+                                   card_id=card_id )
+        return captured[ "request" ]
+
+    def test_a_named_card_stamps_its_id_beside_the_questions( self ):
+        # Row a1420538. The id names the CARD, so it rides beside `questions` rather
+        # than inside one — a question-level key would read as a property of that
+        # question and would have to be repeated if the card ever grew a second.
+        request = self._ask_with_card_id( DOCUMENT_CHOICE_CARD_ID )
+        self.assertEqual( request.response_options[ "card_id" ], DOCUMENT_CHOICE_CARD_ID )
+        self.assertIn( "questions", request.response_options )
+
+    def test_an_unnamed_card_carries_no_id_at_all( self ):
+        # The routing-confirm card and every other user of this ask must send exactly
+        # what they sent before. An id of None would still be a new key on the wire,
+        # which is a different envelope even if nothing reads it.
+        # RED ON REVERT (stamping unconditionally): "card_id" unexpectedly found.
+        _out, request, _o = self._ask( _Resp( response_value="a.md" ) )
+        self.assertNotIn( "card_id", request.response_options )
 
     def test_builds_multiple_choice_request_shape( self ):
         _out, request, _o = self._ask( _Resp( response_value="a.md" ) )
@@ -145,15 +173,25 @@ class TestChooseDocumentFromMatches( unittest.TestCase ):
     def _choose( self, choice_return ):
         o = _mk_expeditor()
         captured = {}
-        def _fake_choice( arg_name, question, options, user_email, abstract=None ):
+        def _fake_choice( arg_name, question, options, user_email, abstract=None, card_id=None ):
             captured[ "options" ] = options
+            captured[ "card_id" ] = card_id
             return choice_return
         o._ask_choice_for_arg = _fake_choice
         out = o._choose_document_from_matches( list( self.DOCS.keys() ), self.DOCS, "u@e.com" )
-        return out, captured.get( "options" ), o
+        return out, captured.get( "options" ), o, captured.get( "card_id" )
+
+    def test_the_caller_names_the_card_it_is_showing( self ):
+        # Row a1420538. The stub's signature broke when card_id was added; widening it
+        # silently would have left nothing checking that the doc-choice caller actually
+        # passes the id — and without the id the proxy's generic entry never claims the
+        # card, which is a run that hangs at a prompt nothing can answer.
+        # RED ON REVERT (card_id dropped at the call site): None != 'document_choice'.
+        _out, _options, _o, card_id = self._choose( "2026.07.25-kiss.md" )
+        self.assertEqual( card_id, DOCUMENT_CHOICE_CARD_ID )
 
     def test_options_carry_candidates_plus_two_escapes_last( self ):
-        _out, options, _o = self._choose( "2026.07.25-kiss.md" )
+        _out, options, _o, _card_id = self._choose( "2026.07.25-kiss.md" )
         labels = [ opt[ "label" ] for opt in options ]
         # two candidates then Describe then Cancel, in that order
         self.assertEqual( labels[ -2: ], [ DOC_CHOICE_DESCRIBE_LABEL, DOC_CHOICE_CANCEL_LABEL ] )
@@ -161,19 +199,19 @@ class TestChooseDocumentFromMatches( unittest.TestCase ):
         self.assertIn( "2026.08.04-kiss.md", labels )
 
     def test_pick_maps_label_to_abs_path( self ):
-        out, _opts, _o = self._choose( "2026.08.04-kiss.md" )
+        out, _opts, _o, _card_id = self._choose( "2026.08.04-kiss.md" )
         self.assertEqual( out, "/abs/kiss-b.md" )
 
     def test_cancel_returns_none( self ):
-        out, _opts, _o = self._choose( None )
+        out, _opts, _o, _card_id = self._choose( None )
         self.assertIsNone( out )
 
     def test_describe_returns_sentinel( self ):
-        out, _opts, _o = self._choose( DOC_CHOICE_DESCRIBE_SENTINEL )
+        out, _opts, _o, _card_id = self._choose( DOC_CHOICE_DESCRIBE_SENTINEL )
         self.assertEqual( out, DOC_CHOICE_DESCRIBE_SENTINEL )
 
     def test_label_outside_option_set_never_guesses( self ):
-        out, _opts, o = self._choose( "not-a-candidate.md" )
+        out, _opts, o, _card_id = self._choose( "not-a-candidate.md" )
         self.assertIsNone( out )
         self.assertEqual( o._last_expedite_reason, BATCH_MALFORMED )
 
@@ -184,7 +222,7 @@ class TestChooseDocumentFromMatches( unittest.TestCase ):
             "io/deep-research/u/b/report.md" : "/abs/b/report.md",
         }
         captured = {}
-        def _fake_choice( arg_name, question, options, user_email, abstract=None ):
+        def _fake_choice( arg_name, question, options, user_email, abstract=None, card_id=None ):
             captured[ "options" ] = options
             return "io/deep-research/u/b/report.md"
         o._ask_choice_for_arg = _fake_choice

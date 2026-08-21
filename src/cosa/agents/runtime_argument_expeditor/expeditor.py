@@ -1063,21 +1063,6 @@ class RuntimeArgumentExpeditor:
         Returns:
             str or None: User's response or None
         """
-        response_options = {
-            "questions": [ {
-                "question"     : question,
-                "header"       : arg_name,
-                "multi_select" : False,
-                "options"      : options
-            } ]
-        }
-        # The id rides BESIDE questions, not inside one: it names the card, not a
-        # question on it. Omitted entirely when the caller does not name one, so the
-        # routing-confirm card and every other user of this ask are byte-identical to
-        # what they sent before.
-        if card_id is not None:
-            response_options[ "card_id" ] = card_id
-
         request = NotificationRequest(
             message          = question,
             response_type    = ResponseType.OPEN_ENDED,
@@ -1149,6 +1134,21 @@ class RuntimeArgumentExpeditor:
         Returns:
             str or None: chosen label, DOC_CHOICE_DESCRIBE_SENTINEL, or None
         """
+        response_options = {
+            "questions": [ {
+                "question"     : question,
+                "header"       : arg_name,
+                "multi_select" : False,
+                "options"      : options
+            } ]
+        }
+        # The id rides BESIDE questions, not inside one: it names the card, not a
+        # question on it. Omitted entirely when the caller does not name one, so the
+        # routing-confirm card and every other user of this ask are byte-identical to
+        # what they sent before.
+        if card_id is not None:
+            response_options[ "card_id" ] = card_id
+
         request = NotificationRequest(
             message          = question,
             response_type    = ResponseType.MULTIPLE_CHOICE,
