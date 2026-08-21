@@ -46,6 +46,7 @@ from cosa.rest.auth import (
     get_current_user_id,
     get_optional_user,
 )
+from cosa.rest.user_id_generator import email_to_user_uuid
 
 
 class _FirebaseStateMixin:
@@ -450,17 +451,25 @@ class TestVerifyMockToken( unittest.IsolatedAsyncioTestCase ):
     async def test_email_format_known_user_merges_uid( self ):
         """
         Ensures:
-            - A valid email token converts to a system id, looks up the user, and merges uid
+            - A valid email token converts to a system id, looks up the user, and returns
+              the UUID minted from that user's email as uid/sub
+
+        UPDATED for row befeba88: uid and sub used to be the system id ( "alice_sys" ),
+        which is not a UUID, so the scoped job id "{sha256}::alice_sys" failed
+        AsyncNotificationRequest validation and every queue notification under mock auth
+        was dropped. The system id is still what get_user_info is keyed on — asserted
+        below — but the id handed OUT is now a UUID, matching what JWT auth returns.
         """
         with patch( "cosa.rest.auth.email_to_system_id", return_value="alice_sys" ) as mock_e2s, \
              patch( "cosa.rest.auth.get_user_info",
-                    return_value={ "email": "alice@example.com", "email_verified": True, "name": "Alice" } ):
+                    return_value={ "email": "alice@example.com", "email_verified": True, "name": "Alice" } ) as mock_lookup:
             result = await verify_mock_token( "mock_token_email_alice@example.com" )
         mock_e2s.assert_called_once_with( "alice@example.com" )
-        self.assertEqual( result[ "uid" ], "alice_sys" )
+        mock_lookup.assert_called_once_with( "alice_sys" )
+        self.assertEqual( result[ "uid" ], email_to_user_uuid( "alice@example.com" ) )
         self.assertEqual( result[ "email" ], "alice@example.com" )
         self.assertEqual( result[ "name" ], "Alice" )
-        self.assertEqual( result[ "sub" ], "alice_sys" )
+        self.assertEqual( result[ "sub" ], result[ "uid" ] )
 
     async def test_legacy_unknown_id_generates_default_user( self ):
         """
@@ -469,7 +478,8 @@ class TestVerifyMockToken( unittest.IsolatedAsyncioTestCase ):
         """
         with patch( "cosa.rest.auth.get_user_info", return_value=None ):
             result = await verify_mock_token( "mock_token_charlie_dev" )
-        self.assertEqual( result[ "uid" ], "charlie_dev" )
+        # The generated email is what the id is minted from ( row befeba88 ).
+        self.assertEqual( result[ "uid" ], email_to_user_uuid( "charlie_dev@generated.local" ) )
         self.assertEqual( result[ "email" ], "charlie_dev@generated.local" )
         self.assertEqual( result[ "name" ], "Charlie" )
         self.assertFalse( result[ "email_verified" ] )
@@ -482,7 +492,7 @@ class TestVerifyMockToken( unittest.IsolatedAsyncioTestCase ):
         with patch( "cosa.rest.auth.get_user_info",
                     return_value={ "email": "dora@x.io", "email_verified": True, "name": "Dora" } ):
             result = await verify_mock_token( "mock_token_dora_sys" )
-        self.assertEqual( result[ "uid" ], "dora_sys" )
+        self.assertEqual( result[ "uid" ], email_to_user_uuid( "dora@x.io" ) )
         self.assertEqual( result[ "email" ], "dora@x.io" )
 
 
