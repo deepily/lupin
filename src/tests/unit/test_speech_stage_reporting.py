@@ -71,7 +71,8 @@ async def test_post_transcription_failure_is_not_blamed_on_transcription( capsys
                 whisper_pipeline = None,
                 provider         = provider,
                 config_mgr       = _config_mgr(),
-                todo_queue       = MagicMock(),
+                ask_flow         = MagicMock(),
+                current_user     = { "uid": "u1", "email": "t@t.com" },
             )
 
     assert exc.value.status_code == 500
@@ -101,7 +102,8 @@ async def test_transcription_failure_is_still_reported_as_transcription( capsys 
             whisper_pipeline = None,
             provider         = provider,
             config_mgr       = _config_mgr(),
-            todo_queue       = MagicMock(),
+            ask_flow         = MagicMock(),
+            current_user     = { "uid": "u1", "email": "t@t.com" },
         )
 
     assert exc.value.status_code == 500
@@ -125,7 +127,8 @@ async def test_setup_failure_names_setup_not_transcription( capsys ):
             whisper_pipeline = None,
             provider         = provider,
             config_mgr       = bad_cfg,
-            todo_queue       = MagicMock(),
+            ask_flow         = MagicMock(),
+            current_user     = { "uid": "u1", "email": "t@t.com" },
         )
 
     logged = capsys.readouterr().out
