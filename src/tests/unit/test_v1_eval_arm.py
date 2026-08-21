@@ -666,5 +666,47 @@ def test_clean_step_still_refuses_a_wrong_db_before_touching_either_table():
     assert conn.executed == [ ]
 
 
+# ─────────────── the mode-switch discriminator, pinned to the REAL server payload
+#
+# The first version of this branch keyed on a `message` field. The live :7997 server does
+# not return one — it returns `result` — so the branch never fired once and all 20
+# `automatic` utterances were still scored push_failed through the whole of ts-e0311090.
+# A fix that is present in the code path and matches nothing is indistinguishable from no
+# fix at all, which is why this test carries the VERBATIM observed payload rather than a
+# hand-written approximation of it.
+_LIVE_MODE_SWITCH_PUSH = {
+    "status"       : "queued",              # NOTE: "queued" on a real job push too — useless as a discriminator
+    "websocket_id" : "probe",
+    "user_id"      : "interactive_job_tester_8e32",
+    "job_id"       : None,
+    "result"       : "Automatic routing is already active.",
+}
+
+def test_the_live_servers_mode_switch_payload_is_scored_ok():
+    r = v1.assemble_v1_record( "Switch back to automatic mode", "agent go calendar",
+                               _LIVE_MODE_SWITCH_PUSH, { }, MAP, send_ts=1.0, recv_ts=1.4 )
+    assert r.ok is True and r.mode_switch is True and r.failure is None
+
+
+def test_a_message_shaped_payload_still_works_so_the_fix_is_not_narrowed():
+    r = v1.assemble_v1_record( "u", "agent go calendar", { "message": "mode set" }, { }, MAP,
+                               send_ts=1.0, recv_ts=1.4 )
+    assert r.ok is True and r.mode_switch is True
+
+
+def test_a_job_less_push_with_neither_field_is_still_a_push_failure():
+    """status alone must NOT satisfy it — a real job push carries status='queued' as well."""
+    r = v1.assemble_v1_record( "u", "agent go calendar", { "status": "queued", "job_id": None }, { }, MAP,
+                               send_ts=1.0, recv_ts=1.4 )
+    assert r.ok is False and r.failure == "push_failed"
+
+
+def test_a_result_carrying_payload_that_also_errors_is_a_push_failure():
+    r = v1.assemble_v1_record( "u", "agent go calendar",
+                               { "job_id": None, "result": "nope", "error": "boom" }, { }, MAP,
+                               send_ts=1.0, recv_ts=1.4 )
+    assert r.ok is False and r.failure == "push_failed"
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

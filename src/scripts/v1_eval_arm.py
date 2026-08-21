@@ -278,8 +278,9 @@ def assemble_v1_record( utterance: str, expected_command: str, push_result: Dict
           from routing (F2), never a forced miss. Defaults to the map's own values.
 
     Ensures:
-        - no job_id AND no inline `message` ⇒ ok=False, failure="push_failed"
-        - no job_id BUT an inline `message` and no `error` ⇒ a MODE SWITCH: ok=True with
+        - no job_id AND no inline `result`/`message` ⇒ ok=False, failure="push_failed"
+        - no job_id BUT an inline `result` (the live server's field) or `message`, and no
+          `error` ⇒ a MODE SWITCH: ok=True with
           the real client span, mode_switch=True, and routing_eligible=False (no router
           decision was made, so it is excluded from routing rather than scored). Such
           commands spawn no job by design and scoring them as failures graded v1 down
@@ -310,10 +311,19 @@ def assemble_v1_record( utterance: str, expected_command: str, push_result: Dict
         # genuine push failure returns falsy, or carries `error`; an inline-handled command
         # returns a dict with a human-readable `message` and no error. Anything else stays
         # push_failed — this must not become a catch-all that swallows real failures.
+        # 🔴 THE FIELD IS `result`, NOT `message` — verified against the LIVE :7997 server on
+        # 2026-08-20, not inferred. A real mode-switch push returns exactly:
+        #   {"status": "queued", "websocket_id": ..., "user_id": ..., "job_id": null,
+        #    "result": "Automatic routing is already active."}
+        # There is NO `message` key at all. The first version of this branch keyed on
+        # `message`, so it never fired once, and all 20 `automatic` utterances went on being
+        # scored push_failed through the whole of ts-e0311090 — a fix that was present in the
+        # code path and matched nothing. `status` is useless as a discriminator: it reads
+        # "queued" here exactly as it does on a real job push.
         inline_handled = (
             isinstance( push_result, dict )
             and not push_result.get( "error" )
-            and bool( push_result.get( "message" ) )
+            and bool( push_result.get( "result" ) or push_result.get( "message" ) )
         )
         if not inline_handled:
             rec.failure = "push_failed"
