@@ -54,7 +54,7 @@ class ResumeRequest( BaseModel ):
 class AskResponse( BaseModel ):
     """The §8 terminal result of one v2 request."""
     path           : str                 = Field( ..., description="replay | agent | needs_input | receptionist" )
-    status         : str                 = Field( ..., description="done | parked | needs_input | failed" )
+    status         : str                 = Field( ..., description="done | waiting | parked | needs_input | expired | failed" )
     route_reason   : str                 = Field( ..., description="Why this branch was taken" )
     answer         : Optional[ str ]     = Field( None, description="The conversational answer (or first question)" )
     answer_raw     : Optional[ str ]     = Field( None, description="The unformatted answer" )

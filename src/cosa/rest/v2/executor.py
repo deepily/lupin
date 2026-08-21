@@ -49,11 +49,16 @@ class Work:
 class Outcome:
     """The terminal result of an executor.submit() call.
 
-    status is "done" when an answer was produced, "parked" when a queued
+    status is "done" when an answer was produced, "waiting" when a queued
     executor handed work off (phase 2), "failed" when replay or the agent threw.
+
+    "waiting" is deliberately not "parked". A job sitting in the queue is waiting
+    its turn — nobody suspended it and nothing is owed to it. "parked" is kept for
+    the flow's needs-input path, where a request really is suspended pending an
+    answer from the user. Two different situations were reading as one word.
     """
 
-    status     : Literal[ "done", "parked", "failed" ]
+    status     : Literal[ "done", "waiting", "failed" ]
     answer     : Optional[ str ] = None
     answer_raw : Optional[ str ] = None
     job_id     : Optional[ str ] = None
