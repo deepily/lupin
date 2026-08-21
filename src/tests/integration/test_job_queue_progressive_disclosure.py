@@ -31,14 +31,12 @@ def unique_email( prefix ):
     return f"{prefix}_{uuid.uuid4().hex[:8]}@test.com"
 
 
-# SKIPPED 2026-08-21, and NOT because the tests are wrong — they are right about a
-# capability that does not exist between step 11a and the queued path. Every test here
-# submits and then asserts the job is COUNTED IN A QUEUE (`data["status"] == "queued"`,
-# then totals across todo/run/done). /api/push, which put it there, is now a 410
-# tombstone, and /api/v2/ask does not queue: with `v2 executor = inline` the agent runs
-# on the request thread and flow.py never touches a queue. Cutting the submit over would
-# make these fail for a reason that has nothing to do with progressive disclosure.
-@pytest.mark.skip( reason="needs a job to LAND IN A QUEUE — /api/push was retired 2026-08-21 and /api/v2/ask runs inline (InlineExecutor, no queue write at all). Re-enable the moment step 10's /api/v2/submit and the QueuedExecutor merge; tracked in the task store, and Maya's post-step-12 integration gate must show this un-skipped." )
+# UN-SKIPPED 2026-08-21 (store row bc2eab45). Skipped for one shift, between /api/push
+# becoming a 410 tombstone and the queued path existing: every test here submits and
+# then asserts the job is COUNTED IN A QUEUE, and in between nothing could put it there.
+# Submission now goes through /api/v2/ask on the QueuedExecutor, which pushes onto the
+# todo queue and answers `waiting` — so the counts are real again. The expected status
+# is "waiting", not "queued": that is the flow's word for the same hand-off.
 @pytest.mark.xfail( reason="Jobs require server-side queue processing — timing-dependent, may not complete within test window" )
 class TestJobQueueProgressiveDisclosure:
     """Integration tests for job queue progressive disclosure UI."""
@@ -77,7 +75,11 @@ class TestJobQueueProgressiveDisclosure:
 
     def _submit_job( self, token, question, websocket_id ):
         """
-        Submit a job to the queue.
+        Submit a job to the queue through the one surviving front door.
+
+        `/api/push` was retired 2026-08-21 (410, naming /api/v2/ask). Same body shape,
+        different answer: push said `status: "queued"`, the flow says `status: "waiting"`
+        for the same hand-off to the queue.
 
         Args:
             token: User access token
@@ -88,7 +90,7 @@ class TestJobQueueProgressiveDisclosure:
             Response object
         """
         return requests.post(
-            f"{BASE_URL}/api/push",
+            f"{BASE_URL}/api/v2/ask",
             json={
                 "question": question,
                 "websocket_id": websocket_id
@@ -189,12 +191,13 @@ class TestJobQueueProgressiveDisclosure:
             # Small delay to avoid overwhelming the server
             time.sleep( 0.05 )
 
-        # Verify all submissions were accepted
+        # Verify all submissions were accepted and handed to the queue
         for i, response in enumerate( responses ):
             assert response.status_code == 200, f"Job {i} submission failed: {response.text}"
             data = response.json()
-            assert data[ "status" ] == "queued"
-            print( f"Job {i}: {data[ 'result' ]}" )
+            assert data[ "status" ] == "waiting", \
+                f"Job {i} was not handed to the queue: {data[ 'status' ]} / {data[ 'route_reason' ]}"
+            print( f"Job {i}: {data[ 'job_id' ]}" )
 
         # Query queue counts immediately
         counts = self._get_all_queue_counts( token )

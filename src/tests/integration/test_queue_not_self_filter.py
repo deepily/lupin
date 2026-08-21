@@ -88,16 +88,22 @@ def relogin( email, password ):
 
 def push_job( token, question, session_id="test_session" ):
     """
-    Submit a job to the todo queue.
+    Submit a job to the todo queue through the one surviving front door.
+
+    `/api/push` was retired 2026-08-21 (410, naming /api/v2/ask). The body is the same
+    shape; the ANSWER is not. `/api/push` returned {status: "queued", job_id}; the flow
+    returns its §8 result, and the job id lives under the same `job_id` key — which is
+    what every caller of this helper reads.
 
     Requires:
         - Valid auth token
+        - `v2 executor = queued`, or nothing lands in a queue for the tests below to see
 
     Ensures:
-        - Returns response from /api/push
+        - Returns the response from /api/v2/ask
     """
     return requests.post(
-        f"{BASE_URL}/api/push",
+        f"{BASE_URL}/api/v2/ask",
         json={ "question": question, "websocket_id": session_id },
         headers={ "Authorization": f"Bearer {token}" }
     )
@@ -189,13 +195,13 @@ class TestNotSelfFilterAuthorization:
 # !self Filter Data Correctness Tests
 # ---------------------------------------------------------------------------
 
-# SKIPPED 2026-08-21 — same precondition as test_job_queue_progressive_disclosure. These
-# assert that specific job ids appear in queue listings and that "own" and "!self" do not
-# overlap, which requires jobs to be sitting in a queue. /api/push is a 410 tombstone and
-# /api/v2/ask answers inline without queueing, so there is nothing to list. The sibling
-# TestNotSelfFilterAuthorization class is deliberately NOT skipped: it checks 403/200 and
-# the filtered_by shape, which hold with an empty queue.
-@pytest.mark.skip( reason="needs a job to LAND IN A QUEUE — /api/push was retired 2026-08-21 and /api/v2/ask runs inline (InlineExecutor, no queue write at all). Re-enable the moment step 10's /api/v2/submit and the QueuedExecutor merge; tracked in the task store, and Maya's post-step-12 integration gate must show this un-skipped." )
+# UN-SKIPPED 2026-08-21 (store row bc2eab45). These were skipped for one shift, between
+# /api/push becoming a 410 tombstone and the queued path existing: they assert that
+# specific job ids appear in queue listings and that "own" and "!self" do not overlap,
+# and nothing could put a job in a queue in between. The QueuedExecutor and the v2 doors
+# have landed, so submission goes through /api/v2/ask and the jobs are back in the queue.
+# The sibling TestNotSelfFilterAuthorization class was never skipped: it checks 403/200
+# and the filtered_by shape, which hold with an empty queue.
 class TestNotSelfFilterData:
     """Tests that !self filter returns correct job sets."""
 
