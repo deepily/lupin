@@ -211,6 +211,36 @@ class DmTutorResponse( BaseXMLModel ):
         if is_bare_identifier( value ):  return ""
         return value
 
+    @property
+    def pointer_cleared( self ):
+        """
+        The value the pointer slot was REFUSED for holding, or "" when nothing was.
+
+        A SUPPRESSION NOBODY CAN SEE IS AN UNAUDITABLE ONE (María's second requirement
+        on row 56a3c48d). `pointer` above silently drops a bare identifier, which is
+        the right delivery behaviour and the wrong logging behaviour: the next reader
+        asking "why did this DM have no path" would have nothing to read. This names
+        the refused value so the agent can log it.
+
+        Null-words are NOT reported — "N/A" is the model correctly saying it has no
+        path, not a refusal, and reporting it would bury the real case in noise.
+
+        Requires:
+            - nothing
+
+        Ensures:
+            - returns the stripped value when it was refused as a bare identifier
+            - returns "" for a real pointer, a blank slot and every null-word
+
+        Raises:
+            - nothing
+        """
+        from cosa.agents.dm_tutor.sentences import is_bare_identifier
+
+        value = ( self.file_path_or_url or "" ).strip()
+        if value.lower() in NULL_ISH: return ""
+        return value if is_bare_identifier( value ) else ""
+
     def to_delivery( self ):
         """
         Assemble the lines a recipient would actually see.

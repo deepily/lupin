@@ -224,6 +224,22 @@ class TestPointerAndDelivery:
         """
         assert _response( file_path_or_url=real ).pointer == real
 
+    def test_the_refused_value_is_named_for_the_log( self ):
+        """
+        A suppression nobody can see is unauditable (María's second requirement). The
+        slot drops the id; this says WHICH id, so the reader asking "why did this DM
+        carry no path" has something to read.
+        """
+        assert _response( file_path_or_url="fb9faba7" ).pointer_cleared == "fb9faba7"
+
+    @pytest.mark.parametrize( "quiet", [ "src/a.py:12", "https://example.com/x", "", "N/A", "none" ] )
+    def test_nothing_is_reported_when_nothing_was_refused( self, quiet ):
+        """
+        A real pointer is not a refusal, and neither is a null-word — "N/A" is the model
+        correctly saying it has no path. Reporting either would bury the real case.
+        """
+        assert _response( file_path_or_url=quiet ).pointer_cleared == ""
+
     def test_delivery_is_three_lines_without_a_pointer( self ):
         lines = _response().to_delivery().splitlines()
         assert lines == [ "The headline", "First support", "Second support" ]
