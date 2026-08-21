@@ -35,7 +35,8 @@ from cosa.rest.v2.registry import resolve, resolve_agentic
 from cosa.rest.v2.trace import StageTrace
 
 from lupin_cli.notifications.notify_user_async import notify_user_async
-from lupin_cli.notifications.notification_models import AsyncNotificationRequest
+from lupin_cli.notifications.notify_user_sync import notify_user_sync
+from lupin_cli.notifications.notification_models import AsyncNotificationRequest, NotificationRequest, ResponseType
 
 
 # The two status gates below treat these as success. A queued executor answers
@@ -58,6 +59,11 @@ STARTING_A_NEW_JOB = "New {agent_type} job..."
 # with the SAME rejection messages, and the API's 4000-char Field cap stays as the
 # outer cap — this is the inner one, and it is the one the user hears about.
 MAX_QUESTION_CHARS = 1000
+
+# The near-match confirmation, verbatim from the queue (todo_fifo_queue.py:620-643):
+# same sentence, same YES_NO shape, same 30s timeout defaulting to "no", same retry
+# ladder. A user who hears this prompt today must hear the same one after the switch.
+CONFIRMATION_QUESTION = "Is that the same as: {question}?"
 
 REJECTION_EMPTY    = "Question cannot be empty"
 REJECTION_TOO_LONG = "Question too long (max 1000 characters)"
@@ -86,6 +92,9 @@ class AskFlow:
     def __init__(
         self, cache: Any, router: Any, expeditor: Any, executor: Any, pending: Any, *,
         crud_enabled      : bool,
+        confirmation_threshold : Optional[ float ]   = None,
+        confirmation_enabled   : bool                = True,
+        confirmer         : Callable[ ..., Any ]     = notify_user_sync,
         query_log         : Any                      = None,
         auto_debug        : bool                     = False,
         inject_bugs       : bool                     = False,
@@ -113,6 +122,14 @@ class AskFlow:
         # so an agent built here gets the flags it would have got via push_job.
         # None means "do not log" — the default for every test double. Production
         # wires the real QueryLogTable in get_ask_flow.
+        # The near-match branch (step 6b). `confirmation_threshold` None means the branch
+        # does not exist for this flow — no ask and no auto-accept, so a caller that
+        # forgets to wire it gets v2's behaviour up to now (route below a perfect hit)
+        # rather than a new replay nobody asked for. Failing closed is the only safe
+        # direction for a guard whose job is to decide whether to serve a near answer.
+        self.confirmation_threshold = confirmation_threshold
+        self.confirmation_enabled   = confirmation_enabled
+        self.confirmer              = confirmer
         self.query_log            = query_log
         self.auto_debug           = auto_debug
         self.inject_bugs          = inject_bugs
@@ -215,6 +232,23 @@ class AskFlow:
                 # replay that died of "Cannot execute empty code list" reached the client
                 # as error=null — 115 of 117 failures in the 2026-08-21 warm pass could
                 # not say why (bug 38815328).
+                return self._receptionist( trace, question, ctx, "replay_error",
+                                           primary_error=outcome.error )
+
+            # 2b — the NEAR match. Above the confirmation threshold but short of exact,
+            # so the flow asks the user the question the voice path asks today and
+            # replays only on a yes. Rick ruled on 2026-08-20 that the brain gets the ask.
+            #
+            # Without it, 7b would delete the queue's copy and leave running_fifo_queue's
+            # accept-above-the-floor — which is safe ONLY because the upstream ask
+            # happened — and a 90-to-99% match would replay an answer nobody confirmed.
+            near_match, near_reason = self._near_match_replay( trace, lookup, ctx )
+            if near_match is not None:
+                work    = Work( "replay", near_match, user_id, user_email, session_id, snapshotable=False )
+                outcome = self.executor.submit( work, trace )
+                if outcome.status in SUCCESS_STATUSES:
+                    return self._finish( trace, "replay", near_reason, outcome, question, ctx,
+                                         command=command, cache_hit=True, agent_label=spec.label )
                 return self._receptionist( trace, question, ctx, "replay_error",
                                            primary_error=outcome.error )
 
@@ -645,6 +679,87 @@ class AskFlow:
             )
         except Exception as e:
             if self.debug: print( f"[v2] query log write failed: {e}" )
+
+    def _near_match_replay( self, trace: StageTrace, lookup: Any, ctx: tuple ) -> tuple:
+        """Decide whether a below-exact candidate may be replayed, and under what reason.
+
+        Returns ( snapshot, route_reason ) to replay, or ( None, None ) to route on.
+
+        THREE BRANCHES, and v1 has all three (todo_fifo_queue.py:583-693):
+
+          · the score is OUT OF RANGE — below 0 or above 100. v1 refuses the
+            MEASUREMENT and routes (bug 78f21b1b). This was unreachable in v2 until
+            now: a replay needed a tier-1 exact hit, so no float ever decided one. The
+            gist tier and this branch are exactly what re-open that door, which is why
+            the guard arrives with them instead of after the defect comes back.
+          · confirmation ON — ask "Is that the same as: …?" and replay only on a yes.
+            Anything else, a timeout included, routes: the prompt defaults to "no"
+            because the cost of a wrong replay is a confident answer to a question
+            nobody asked.
+          · confirmation OFF (`similarity confirmation enabled = false`) — auto-accept
+            with no prompt, which is what v1 does. The Sequence's step 6b describes the
+            ask and says nothing about the key that turns the ask off; leaving that
+            undefined would be two behaviours in one step, so both are here and each is
+            named in the emitted route_reason.
+
+        The ask BLOCKS this thread for the length of the retry ladder, exactly as v1's
+        does. That is affordable because the handler runs off the event loop through
+        run_in_threadpool — it would not be if it ran on the loop.
+        """
+        if self.confirmation_threshold is None:
+            return ( None, None )
+        candidate = lookup.best_candidate
+        score     = lookup.best_score
+        if candidate is None or score is None:
+            return ( None, None )
+        if score < 0 or score > 100:
+            trace.set( "similarity_out_of_range", score )
+            if self.debug: print( f"[v2] refusing a similarity of {score} — out of range; routing" )
+            return ( None, None )
+        if score < self.confirmation_threshold:
+            return ( None, None )
+
+        if not self.confirmation_enabled:
+            trace.set( "near_match_auto_accepted", score )
+            return ( candidate, "near_match_auto_accepted" )
+
+        if self._user_confirms( candidate, score, ctx ):
+            trace.set( "near_match_confirmed", score )
+            return ( candidate, "near_match_confirmed" )
+        trace.set( "near_match_declined", score )
+        return ( None, None )
+
+    def _user_confirms( self, candidate: Any, score: float, ctx: tuple ) -> bool:
+        """Ask the user whether the near match is the same question. Yes, or route.
+
+        The request is the queue's, field for field. A confirmer that RAISES is a no:
+        the notification path failing is not evidence that two questions are the same,
+        and a replay served because the ask broke is the silent wrong-but-close answer
+        this branch exists to prevent.
+        """
+        _user_id, user_email, _session_id, _websocket_id, _speak = ctx
+        request = NotificationRequest(
+            message          = CONFIRMATION_QUESTION.format( question=candidate.question ),
+            response_type    = ResponseType.YES_NO,
+            response_default = "no",
+            timeout_seconds  = 30,
+            priority         = "high",
+            suppress_ding    = True,
+            target_user      = user_email,
+            # The same sender the flow already speaks as (_speak, below). The field is
+            # pattern-validated: lowercase dot-separated words only, so "v2.ask" is
+            # rejected at the model — a made-up id passes only until something speaks.
+            sender_id        = "ask.flow@lupin.deepily.ai",
+        )
+        try:
+            response = self.confirmer( request, retry_on_timeout=True, max_attempts=3,
+                                       backoff_multiplier=2.0 )
+        except Exception as e:
+            if self.debug: print( f"[v2] near-match confirmation failed ({e}) — treating as no" )
+            return False
+        confirmed = response.status == "responded" and response.response_value == "yes"
+        if self.debug: print( f"[v2] near match at {score:.1f}%: user said {response.status}:{response.response_value}" )
+        return confirmed
 
     def _record_lookup( self, trace: StageTrace, lookup: Any ) -> None:
         """Stamp the cache's own timings + score fields onto the trace."""

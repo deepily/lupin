@@ -345,6 +345,12 @@ def test_build_ask_flow_wires_from_ini( monkeypatch ):
         # ⚠️ these two being EQUAL is why the companion test below exists — a swap
         # between them is invisible here (Pocholo, on 54c71571).
         "crud for dataframes agents enabled" : "false",
+        # NON-DEFAULT on both, for the same reason: the threshold's default is 90.0 and
+        # the enable flag's is True, so the shipped values would let a literal pass as a
+        # read key. The pair is what ARMS the near-match ask (step 6b) — a build that
+        # dropped them would leave every request routing past a 95% match in silence.
+        "similarity threshold confirmation"  : 77.5,
+        "similarity confirmation enabled"    : False,
     } )
     flow, enabled = v2_ask.build_ask_flow( cfg )
     assert enabled is True
@@ -359,6 +365,8 @@ def test_build_ask_flow_wires_from_ini( monkeypatch ):
     assert captured[ "kwargs" ][ "auto_debug" ]   is True,  "the flow ignored `debug auto`"
     assert captured[ "kwargs" ][ "inject_bugs" ]  is True,  "the flow ignored `debug inject bugs`"
     assert captured[ "kwargs" ][ "crud_enabled" ] is False, "the flow ignored `crud for dataframes agents enabled`"
+    assert captured[ "kwargs" ][ "confirmation_threshold" ] == 77.5, "the flow ignored `similarity threshold confirmation`"
+    assert captured[ "kwargs" ][ "confirmation_enabled" ]   is False, "the flow ignored `similarity confirmation enabled`"
 
 
 def test_build_ask_flow_hands_the_queue_to_the_executor( monkeypatch ):

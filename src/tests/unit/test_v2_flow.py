@@ -2650,3 +2650,258 @@ class TestAWrittenRowCanActuallyBeReplayed:
         assert r[ "route_reason" ] == "replay_error"
         assert r[ "error" ] is not None, "a failed replay still reached the client with error=null"
         assert "empty code list" in r[ "error" ]
+
+
+# ────────────────────────────── 6b — the near-match ask
+
+class _FakeConfirmer:
+    """Stands in for notify_user_sync: records the request, answers a scripted reply."""
+
+    def __init__( self, status="responded", response_value="yes", raises=None ):
+        self.requests = []
+        self.kwargs   = []
+        self._status  = status
+        self._value   = response_value
+        self._raises  = raises
+
+    def __call__( self, request, **kwargs ):
+        self.requests.append( request )
+        self.kwargs.append( kwargs )
+        if self._raises is not None:
+            raise self._raises
+        return types.SimpleNamespace( status=self._status, response_value=self._value )
+
+
+class TestTheFlowAsksAboutANearMatch:
+    """
+    Rick's ruling, 2026-08-20: the brain gets the near-match ask. Above the
+    confirmation threshold but short of exact, the flow asks the same question the
+    voice path asks today and replays only on a yes.
+
+    This is not a nicety. 7b deletes the queue's copy of the ask, and
+    running_fifo_queue's accept-above-the-floor is safe ONLY because that upstream ask
+    happened — so without this branch a 90-to-99% match would replay an answer nobody
+    confirmed, arriving as a side effect of a deletion rather than a decision.
+    """
+
+    def _flow( self, tmp_path, notifier, monkeypatch, confirmer, score=95.0,
+               threshold=90.0, enabled=True, candidate_question="what is on my todo list" ):
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        candidate = types.SimpleNamespace( question=candidate_question, id_hash="near-1" )
+        cache     = FakeCache( lookup_result=_lookup( is_replay_hit=False, best_candidate=candidate,
+                                                      best_score=score, similarity=score, tier="ann" ) )
+        return AskFlow(
+            cache, FakeRouter(), FakeExpeditor(), FakeExecutor( _outcome() ), FakePending(),
+            crud_enabled=False, confirmation_threshold=threshold, confirmation_enabled=enabled,
+            confirmer=confirmer, receptionist_factory=FakeReceptionist, notifier=notifier,
+            trace_dir=str( tmp_path ),
+        )
+
+    def test_a_near_match_asks_before_it_replays( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE PIN. The user is asked, says yes, and the cached answer is served.
+
+        RED ON REVERT: delete the near-match branch and a 95% match routes to the agent
+        with nothing asked — the answer is re-derived and the prompt never happens.
+        """
+        confirmer = _FakeConfirmer( response_value="yes" )
+        f         = self._flow( tmp_path, notifier, monkeypatch, confirmer )
+
+        r = f.ask( "what's on my todo list", **_CTX )
+
+        assert confirmer.requests, "a near match replayed without asking anybody"
+        assert r[ "path" ] == "replay"
+        assert r[ "route_reason" ] == "near_match_confirmed"
+        assert r[ "cache_hit" ] is True
+
+    def test_the_question_is_the_one_the_voice_path_asks( self, tmp_path, notifier, monkeypatch ):
+        """
+        Same sentence, same YES_NO shape, same 30s default-to-no, same retry ladder as
+        the queue's. A user who hears this prompt today must hear the same one after
+        the switch.
+
+        RED ON REVERT: reword the prompt, or default it to anything but "no", and the
+        behaviour a listener relies on changes silently.
+        """
+        confirmer = _FakeConfirmer()
+        f         = self._flow( tmp_path, notifier, monkeypatch, confirmer,
+                                candidate_question="what is on my todo list" )
+
+        f.ask( "what's on my todo list", **_CTX )
+
+        request = confirmer.requests[ -1 ]
+        assert request.message          == "Is that the same as: what is on my todo list?"
+        assert request.response_default == "no"
+        assert request.timeout_seconds  == 30
+        assert request.target_user      == _CTX[ "user_email" ]
+        assert confirmer.kwargs[ -1 ] == { "retry_on_timeout": True, "max_attempts": 3,
+                                           "backoff_multiplier": 2.0 }
+
+    def test_a_no_routes_instead_of_replaying( self, tmp_path, notifier, monkeypatch ):
+        """The whole point of asking is that the answer can be no."""
+        confirmer = _FakeConfirmer( response_value="no" )
+        f         = self._flow( tmp_path, notifier, monkeypatch, confirmer )
+
+        r = f.ask( "what's on my todo list", **_CTX )
+
+        assert r[ "path" ] == "agent", "a declined near match replayed anyway"
+        assert r[ "cache_hit" ] is False
+
+    def test_a_timeout_routes_too( self, tmp_path, notifier, monkeypatch ):
+        """
+        Silence is not consent. The prompt defaults to "no" because the cost of a wrong
+        replay is a confident answer to a question nobody asked.
+
+        RED ON REVERT: treat anything but an explicit "no" as a yes.
+        """
+        confirmer = _FakeConfirmer( status="timeout", response_value="no" )
+        f         = self._flow( tmp_path, notifier, monkeypatch, confirmer )
+
+        assert f.ask( "what's on my todo list", **_CTX )[ "path" ] == "agent"
+
+    def test_a_yes_that_did_not_come_from_the_user_is_not_a_yes( self, tmp_path, notifier, monkeypatch ):
+        """
+        BOTH halves of the check, and the reason this test exists separately: the case
+        above pairs a timeout with the value "no", so it stays green even if the STATUS
+        is ignored and only the value is read. Pairing a non-responded status with the
+        value "yes" is what tells the two apart.
+
+        A "yes" the user never said — a stale value, a default, a replayed payload —
+        must not license a replay.
+
+        RED ON REVERT: check only `response_value == "yes"` and this replays.
+        """
+        confirmer = _FakeConfirmer( status="timeout", response_value="yes" )
+        f         = self._flow( tmp_path, notifier, monkeypatch, confirmer )
+
+        assert f.ask( "what's on my todo list", **_CTX )[ "path" ] == "agent"
+
+    def test_a_broken_confirmer_is_a_no( self, tmp_path, notifier, monkeypatch ):
+        """
+        The notification path failing is not evidence that two questions are the same.
+        A replay served because the ask BROKE is exactly the silent wrong-but-close
+        answer this branch exists to prevent.
+
+        RED ON REVERT: let the exception propagate (the request 500s) or swallow it and
+        proceed — either is worse than routing.
+        """
+        confirmer = _FakeConfirmer( raises=RuntimeError( "notification service down" ) )
+        f         = self._flow( tmp_path, notifier, monkeypatch, confirmer )
+
+        assert f.ask( "what's on my todo list", **_CTX )[ "path" ] == "agent"
+
+    def test_below_the_threshold_nobody_is_asked( self, tmp_path, notifier, monkeypatch ):
+        """
+        NEGATIVE CONTROL on the threshold: a weak match routes silently, as it does
+        today. Asking about every candidate would make the assistant interrogate the
+        user about questions that merely share a word.
+        """
+        confirmer = _FakeConfirmer()
+        f         = self._flow( tmp_path, notifier, monkeypatch, confirmer, score=72.0 )
+
+        r = f.ask( "what's on my todo list", **_CTX )
+
+        assert confirmer.requests == [], "the user was asked about a 72% match"
+        assert r[ "path" ] == "agent"
+
+    @pytest.mark.parametrize( "score", [ -1.0, 101.0 ] )
+    def test_an_out_of_range_score_is_refused_not_trusted( self, tmp_path, notifier, monkeypatch, score ):
+        """
+        Bug 78f21b1b, ported with the branch that re-opens the door to it. A similarity
+        outside 0-100 is a broken MEASUREMENT, and 101% would otherwise sail past a 90%
+        threshold and replay without even being asked about.
+
+        v1 has this guard; v2 did not need it while a replay required a tier-1 exact
+        hit, so no float ever decided one. The gist tier and this branch are what
+        change that, which is why the guard arrives WITH them.
+
+        RED ON REVERT: drop the range check and 101.0 replays.
+        """
+        confirmer = _FakeConfirmer()
+        f         = self._flow( tmp_path, notifier, monkeypatch, confirmer, score=score )
+
+        r = f.ask( "what's on my todo list", **_CTX )
+
+        assert confirmer.requests == []
+        assert r[ "path" ] == "agent"
+        assert r[ "cache_hit" ] is False
+
+    def test_with_confirmation_disabled_the_match_is_auto_accepted( self, tmp_path, notifier, monkeypatch ):
+        """
+        `similarity confirmation enabled = false` — v1 auto-accepts the best semantic
+        match with no prompt, and so does this. The Sequence's step 6b describes the
+        ask and says nothing about the key that turns the ask off; two behaviours in
+        one step is how one of them ends up unbuilt.
+
+        The route_reason NAMES which one happened, so a log can tell an answer the user
+        confirmed from one the configuration accepted on their behalf.
+        """
+        confirmer = _FakeConfirmer()
+        f         = self._flow( tmp_path, notifier, monkeypatch, confirmer, enabled=False )
+
+        r = f.ask( "what's on my todo list", **_CTX )
+
+        assert confirmer.requests == [], "confirmation is off but the user was asked anyway"
+        assert r[ "path" ] == "replay"
+        assert r[ "route_reason" ] == "near_match_auto_accepted"
+
+    def test_a_flow_with_no_threshold_has_no_near_match_behaviour( self, tmp_path, notifier, monkeypatch ):
+        """
+        FAIL CLOSED. A caller that never wires the threshold gets what v2 did before
+        this branch existed — route below a perfect hit — rather than a new replay
+        nobody asked for. An omission must not be able to arm a guard.
+
+        RED ON REVERT: default the threshold to 90.0 in the constructor and every flow
+        in the process silently gains the behaviour.
+        """
+        confirmer = _FakeConfirmer()
+        f         = self._flow( tmp_path, notifier, monkeypatch, confirmer, threshold=None )
+
+        r = f.ask( "what's on my todo list", **_CTX )
+
+        assert confirmer.requests == []
+        assert r[ "path" ] == "agent"
+
+    def test_an_exact_hit_is_never_put_to_the_user( self, tmp_path, notifier, monkeypatch ):
+        """
+        NEGATIVE CONTROL at the top end: tier 1 already decided. Asking "is that the
+        same as" about the user's own words verbatim would be absurd, and it is the
+        mistake a branch ordered after the exact check cannot make — this test is what
+        keeps that ordering.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        confirmer = _FakeConfirmer()
+        snap      = types.SimpleNamespace( routing_command="agent router go to math", question="what is 2+2" )
+        cache     = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap,
+                                                      best_candidate=snap, best_score=100.0 ) )
+        f = AskFlow( cache, FakeRouter(), FakeExpeditor(), FakeExecutor( _outcome() ), FakePending(),
+                     crud_enabled=False, confirmation_threshold=90.0, confirmer=confirmer,
+                     receptionist_factory=FakeReceptionist, notifier=notifier, trace_dir=str( tmp_path ) )
+
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert confirmer.requests == [], "an exact hit was put to the user for confirmation"
+        assert r[ "route_reason" ] == "exact_hit"
+
+    def test_a_crud_command_is_never_offered_a_near_match( self, tmp_path, notifier, monkeypatch ):
+        """
+        6-pre and 6b compose: a CRUD command reads no cache at all, so there is no
+        candidate to ask about. Confirming a stale todo list with the user would not
+        make it any less stale.
+        """
+        confirmer = _FakeConfirmer()
+        candidate = types.SimpleNamespace( question="what is on my todo list", id_hash="near-1" )
+        cache     = SpyCache( lookup_result=_lookup( is_replay_hit=False, best_candidate=candidate,
+                                                     best_score=95.0, tier="ann" ) )
+        _registry_with_fake_agent_class( monkeypatch )
+        f = AskFlow( cache, FakeRouter( "agent router go to todo" ), FakeExpeditor(),
+                     FakeExecutor( _outcome() ), FakePending(), crud_enabled=True,
+                     confirmation_threshold=90.0, confirmer=confirmer,
+                     receptionist_factory=FakeReceptionist, notifier=notifier, trace_dir=str( tmp_path ) )
+
+        f.ask( "put milk on my todo list", **_CTX )
+
+        assert cache.lookup_calls == []
+        assert confirmer.requests == []
