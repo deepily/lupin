@@ -2965,8 +2965,16 @@ class NotificationsUI {
             // Ensure token is valid before API call (auto-refresh if expired)
             await this.ensureValidToken();
 
-            // Submit to /api/push endpoint (POST request with JSON body)
-            const url = `/api/push`;
+            // Submit to /api/v2/ask (POST request with JSON body).
+            // /api/push was retired 2026-08-21 and answers 410 naming this door. The
+            // body is the same shape — question + websocket_id — but the RESULT is not:
+            // /api/push queued the job and returned {status: "queued", job_id, ...} for
+            // the WebSocket to follow up on, while /api/v2/ask answers the question
+            // synchronously and returns the answer itself. Nothing below depends on the
+            // queued shape (the response is stringified into the response pane as-is),
+            // which is why this cutover is a one-line change here and would not be
+            // everywhere.
+            const url = `/api/v2/ask`;
             const response = await fetch( url, {
                 method: 'POST',
                 headers: {
@@ -6836,16 +6844,22 @@ class NotificationsUI {
          *
          * Ensures:
          *     - Prompts user for confirmation before retrying
-         *     - Sends POST /api/job-history/{jobId}/retry with websocket_id
+         *     - Re-asks the stored question via POST /api/v2/ask with websocket_id
+         *       (the /api/job-history/{jobId}/retry door was retired 2026-08-21)
          *     - Refreshes history and live queues on success
          */
         if ( !confirm( `Retry this job?\n\n"${questionText}"` ) ) return;
 
         try {
-            const response = await this.authedFetch( `/api/job-history/${jobId}/retry`, {
+            // /api/job-history/{id}/retry was retired 2026-08-21 (410, names this door).
+            // It was a queue door wearing a job-history URL: the server read the stored
+            // question off the row and re-asked it. Now the CLIENT re-asks, which it can
+            // do because it already has the text — `questionText` is the same value shown
+            // in the confirm dialog above.
+            const response = await this.authedFetch( `/api/v2/ask`, {
                 method  : 'POST',
                 headers : { 'Content-Type': 'application/json' },
-                body    : JSON.stringify( { websocket_id: this.queueSessionId } )
+                body    : JSON.stringify( { question: questionText, websocket_id: this.queueSessionId } )
             } );
 
             if ( !response.ok ) throw new Error( `HTTP ${response.status}` );

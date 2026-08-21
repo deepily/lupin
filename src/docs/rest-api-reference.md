@@ -1,6 +1,6 @@
 # Lupin REST API Quick Reference
 
-> **Last Updated**: 2026.06.12
+> **Last Updated**: 2026.08.21
 >
 > For detailed request/response schemas, see the interactive API docs at `/docs` (Swagger UI) or `/redoc` (ReDoc).
 
@@ -14,6 +14,58 @@
 | **JWT** | Bearer token in `Authorization: Bearer <token>` header |
 | **Admin** | JWT + `admin` role required |
 | **API Key** | `X-API-Key` header |
+
+---
+
+## 🪦 Retired queue doors — GONE (410), REMOVE BY 2026-12-31
+
+Rick ruled 2026-08-21: **one entry point, and it is v2.** Eighteen routes used to put work
+on the queue; sixteen die. Each retired route stays registered on purpose and answers
+**410 Gone** with a body naming its replacement — a deleted route is invisible, and nothing
+would stop someone re-adding it next year because the product needs it. **These stubs are
+themselves dead by the end of 2026.**
+
+**The survivors**: `POST /api/v2/ask` (a bare question — route it), `POST /api/v2/submit`
+(work whose command is already decided), `POST /api/v2/resume` (resume a parked question).
+
+**Retired so far — the question-shaped doors, whose replacement is live today:**
+
+| Retired door | Use instead |
+|---|---|
+| `POST /api/push` | `/api/v2/ask` |
+| `POST /api/job-history/{job_id}/retry` | `/api/v2/ask` |
+
+**Still live, retiring next**: the twelve submit-shaped doors —
+`/api/push-agentic`, `/api/jobs/{id_hash}/resume-from-checkpoint`,
+`/api/test-fix-expediter/resume-from`, `/api/bug-fix-expediter/submit`,
+`/api/deep-research/submit`, `/api/deep-research-to-podcast/submit`,
+`/api/deep-research-to-presentation/submit`, `/api/mock-job/submit`,
+`/api/podcast-generator/submit`, `/api/presentation-generator/submit`,
+`/api/swe-team/submit`, `/api/test-suite/submit`. They wait because **`/api/v2/submit`
+does not exist yet**, and a 410 naming a route that answers 404 teaches a caller less than
+the error it replaced. They retire in the commit that builds it.
+
+**Two more are held for their own reasons.** The Claude Code pair
+(`/api/claude-code/submit` and its alias `/api/claude-code/queue/submit`, one handler) is
+being *upgraded* to the v2 front door rather than retired. And
+`/api/upload-and-transcribe-mp3` is not a queue door at all — it transcribes audio and
+enqueues only on the `munger.is_agent()` branch, so it keeps serving dictation, the admin
+snapshot search and the multiplexer's insert-at-cursor; only its enqueue branch moves to
+the ask flow.
+
+**Two separately-managed repos still call the retired doors** — `src/lupin-mobile` and
+`src/lupin-plugin-firefox`. Neither can be edited from this repo; their cutover is owed
+work resident in each repo. The 410 body names the replacement, so the fix is discoverable
+from the failure — that is the mitigation, and it is the whole of it.
+
+⚠️ **`/api/v2/ask` is not a drop-in for `/api/push`.** `push` queued the job and returned
+`{status: "queued", job_id, …}` for the WebSocket to follow up on; `ask` answers
+synchronously and returns an `AskResponse`. It also validates with a Pydantic model, so a
+malformed body comes back **422, not 400**. A caller cutting over changes how it reads the
+result, not only where it posts.
+
+**Table of record**: `src/cosa/rest/routers/_retired_doors.py`. **Test**:
+`src/tests/unit/test_retired_queue_doors_410.py`.
 
 ---
 
@@ -66,7 +118,7 @@
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| POST | `/api/push` | JWT | Submit question to processing queue |
+| POST | `/api/push` | — | 🪦 **GONE (410)** — use `/api/v2/ask`. REMOVE BY 2026-12-31. |
 | GET | `/api/get-queue/{queue_name}` | JWT | Get queue contents (user-filtered) |
 | GET | `/api/queue/pool-status` | JWT | CJ Flow agentic-pool state + per-provider API contention (Phase 2 core + Phase 3 `api_resource_manager` enrichment) |
 | POST | `/api/reset-queues` | JWT | Clear all queues for current user |
@@ -75,7 +127,7 @@
 | GET | `/api/job-history` | JWT | Paginated job history (days, status, job_type, exclude_ids filters) |
 | GET | `/api/job-history/{job_id}` | JWT | Single job detail by ID hash |
 | DELETE | `/api/job-history/{job_id}` | JWT | Delete job from history (admin or owner) |
-| POST | `/api/job-history/{job_id}/retry` | JWT | Retry failed/interrupted job |
+| POST | `/api/job-history/{job_id}/retry` | — | 🪦 **GONE (410)** — use `/api/v2/ask`. REMOVE BY 2026-12-31. |
 
 ## 5. Notifications (`/api/notify/*`)
 
@@ -195,27 +247,27 @@
 |--------|------|------|---------|
 | POST | `/api/test-suite/submit` | JWT | Submit test suite job to queue (always monopolize). Accepts `test_types` (comma-separated or list), `pytest_args`, `scheduled_at` (ISO datetime), `dry_run`. Returns `{ job_id, status, scheduled_at, test_types, monopolize }`. Produces a remediation snapshot JSON + Markdown report at completion. |
 
-## 17a. Bug Fix Expediter (`/api/push` with BFE command)
+## 17a. Bug Fix Expediter (`/api/v2/ask` with BFE command)
 
 > **Deep-dive**: See [`agents/bug-fix-expediter-guide.md`](agents/bug-fix-expediter-guide.md)
 
-BFE is submitted via the generic `/api/push` endpoint using the agent router command string. Used manually when curating which dead jobs get auto-recovery; automatic dispatch happens via the `DeadQueueWatchdog` when `bug fix expediter enabled = true` in INI.
+BFE is submitted via the generic `/api/v2/ask` endpoint using the agent router command string (`/api/push` was retired 2026-08-21 and answers 410). Used manually when curating which dead jobs get auto-recovery; automatic dispatch happens via the `DeadQueueWatchdog` when `bug fix expediter enabled = true` in INI.
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| POST | `/api/push` | JWT | Submit BFE job with `question = "agent router go to bug fix expediter"` and `args = { dead_job_id, extra_context (optional), dry_run (optional) }`. Returns `{ job_id }` with `bfe-` prefix. |
+| POST | `/api/v2/ask` | JWT | Submit BFE job with `question = "agent router go to bug fix expediter"` and `args = { dead_job_id, extra_context (optional), dry_run (optional) }`. Returns `{ job_id }` with `bfe-` prefix. |
 
 Watchdog auto-dispatch: requires `bug fix expediter enabled = true` in `lupin-app.ini`. See the BFE guide for full INI reference, trust-to-git mapping, and Phase 6 automated repair loop configuration.
 
-## 17b. Test Fix Expediter (`/api/push` with TFE command)
+## 17b. Test Fix Expediter (`/api/v2/ask` with TFE command)
 
 > **Deep-dive**: See [`agents/test-fix-expediter-guide.md`](agents/test-fix-expediter-guide.md)
 
-TFE is submitted via the generic `/api/push` endpoint using the agent router command string. Normally invoked automatically by `TestSuiteCompletionWatchdog` when a `TestSuiteJob` completes with failures; manual submission is supported for curated fix runs.
+TFE is submitted via the generic `/api/v2/ask` endpoint using the agent router command string (`/api/push` was retired 2026-08-21 and answers 410). Normally invoked automatically by `TestSuiteCompletionWatchdog` when a `TestSuiteJob` completes with failures; manual submission is supported for curated fix runs.
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| POST | `/api/push` | JWT | Submit TFE job with `question = "agent router go to test fix expediter"` and `args = { remediation_snapshot_path, source_test_suite_job_id, original_test_types (comma-separated), original_pytest_args (optional), dry_run (optional) }`. Returns `{ job_id }` with `tfe-` prefix. |
+| POST | `/api/v2/ask` | JWT | Submit TFE job with `question = "agent router go to test fix expediter"` and `args = { remediation_snapshot_path, source_test_suite_job_id, original_test_types (comma-separated), original_pytest_args (optional), dry_run (optional) }`. Returns `{ job_id }` with `tfe-` prefix. |
 
 Watchdog auto-dispatch: requires `test fix expediter auto fix enabled = true` in `lupin-app.ini`. See the TFE guide for full INI reference (16 keys), six-phase pipeline, and the `TestSuiteCompletionWatchdog` eligibility gates.
 
@@ -377,8 +429,8 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 | `cc-` | Claude Code | `/api/claude-code/queue/submit` |
 | `swe-` | SWE Team | `/api/swe-team/submit` |
 | `ts-` | Test Suite | `/api/test-suite/submit` |
-| `bfe-` | Bug Fix Expediter | `/api/push` with `"agent router go to bug fix expediter"` |
-| `tfe-` | Test Fix Expediter | `/api/push` with `"agent router go to test fix expediter"` |
+| `bfe-` | Bug Fix Expediter | `/api/v2/ask` with `"agent router go to bug fix expediter"` (`/api/push` is now 410) |
+| `tfe-` | Test Fix Expediter | `/api/v2/ask` with `"agent router go to test fix expediter"` (`/api/push` is now 410) |
 | `mock-` | Mock Job | `/api/mock-job/submit` |
 
 ---
