@@ -110,15 +110,26 @@ def _stamp_queue_directives( job, scheduled_at, monopolize, spawned_by_id_hash )
     over them would let a submission that said nothing about scheduling overwrite a
     job class that had an opinion.
 
+    A NONE JOB IS A REAL CASE ON ONE OF THE TWO CALL PATHS, and it is why this starts
+    with a guard rather than trusting its caller. `resume_job` returns None when the
+    checkpoint read finds no row, or a row with no routing command — so a caller asking
+    to resume a job that is not there gets None back, and stamping a schedule onto None
+    raises AttributeError out of the door instead of the "no such job" the caller can
+    act on. The factory's own contract is that an unknown command returns None; this
+    keeps that answer intact rather than converting it into a crash (Pocholo, reviewing
+    the commit that added the stamping).
+
     Requires:
-        - job is a constructed AgenticJobBase subclass instance
+        - job is a constructed AgenticJobBase subclass instance, or None
 
     Ensures:
+        - returns None unchanged when handed None — the caller's "no such job" answer
         - sets job.scheduled_at only when scheduled_at is truthy
         - sets job.monopolize only when monopolize is truthy
         - sets job.spawned_by_id_hash only when spawned_by_id_hash is truthy
         - returns the same job object it was handed
     """
+    if job is None:        return None
     if scheduled_at:       job.scheduled_at       = scheduled_at
     if monopolize:         job.monopolize         = monopolize
     if spawned_by_id_hash: job.spawned_by_id_hash = spawned_by_id_hash

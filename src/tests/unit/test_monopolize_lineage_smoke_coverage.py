@@ -108,14 +108,23 @@ def lineage_aware_endpoints( router_dir ):
     Requires:
         - router_dir holds FastAPI router modules
 
+    IT REPORTS WHAT IT COULD NOT MATCH, because the failure mode of a derived set is
+    silence. A router that mentions the field but whose model was renamed, or whose
+    handler stopped taking that model, would simply stop contributing a door — the
+    endpoint quietly leaves the watched set and every test posting to it passes for the
+    wrong reason. So the second return value names each such file, and the test below
+    fails on it by name (Pocholo, reviewing the per-door narrowing).
+
     Ensures:
-        - returns { full_path: router_filename } for each POST handler whose annotated
-          request model declares `parent_id_hash`, joining `prefix=` to the post path
-        - a router with no prefix contributes its post paths verbatim (they are absolute)
-        - a router that mentions the field only in prose or on a different door
-          contributes nothing for that door
+        - returns ( endpoints, unmatched )
+        - endpoints is { full_path: router_filename } for each POST handler whose
+          annotated request model declares `parent_id_hash`, joining `prefix=` to the
+          post path; a router with no prefix contributes its post paths verbatim
+        - unmatched is [ ( filename, why ) ] for each router that mentions the field
+          and yields no door at all — never dropped in silence
     """
     endpoints = {}
+    unmatched = [ ]
     for name in sorted( os.listdir( router_dir ) ):
         if not name.endswith( ".py" ) or name.startswith( "._" ): continue   # ._ = AppleDouble sidecar, not source
         with open( os.path.join( router_dir, name ), "r", errors="ignore" ) as f: text = f.read()
@@ -125,9 +134,12 @@ def lineage_aware_endpoints( router_dir ):
         except SyntaxError:                                  # pragma: no cover - no router in the tree fails to parse
             continue
         models = _lineage_models( tree )
-        if not models: continue
+        if not models:
+            unmatched.append( ( name, "mentions the field but no request model declares it" ) )
+            continue
         prefix = PREFIX_RE.search( text )
         prefix = prefix.group( 1 ) if prefix else ""
+        matched = False
         for node in ast.walk( tree ):
             if not isinstance( node, ( ast.FunctionDef, ast.AsyncFunctionDef ) ): continue
             annotated = { arg.annotation.id
@@ -138,8 +150,12 @@ def lineage_aware_endpoints( router_dir ):
                 if not isinstance( decorator, ast.Call ): continue
                 for path in _post_paths( decorator ):
                     full = path if path.startswith( "/api/" ) else f"{prefix}{path}"
-                    if full.startswith( "/api/" ): endpoints[ full ] = name
-    return endpoints
+                    if full.startswith( "/api/" ):
+                        endpoints[ full ] = name
+                        matched = True
+        if not matched:
+            unmatched.append( ( name, "declares the field on a model no POST handler takes" ) )
+    return endpoints, unmatched
 
 
 def _code_only( text ):
@@ -192,7 +208,9 @@ def test_a_router_without_the_field_is_not_lineage_aware( tmp_path ):
     ( tmp_path / "plain.py" ).write_text(
         'router = APIRouter( prefix="/api/plain" )\n@router.post( "/submit" )\ndef go(): pass\n'
     )
-    assert lineage_aware_endpoints( str( tmp_path ) ) == {}
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+    assert endpoints == {}
+    assert unmatched == [], "a router that never mentions the field is not a miss, it is out of scope"
 
 
 def test_only_the_door_whose_model_declares_the_field_is_lineage_aware( tmp_path ):
@@ -217,7 +235,9 @@ def test_only_the_door_whose_model_declares_the_field_is_lineage_aware( tmp_path
         '@router.post( "/api/two/resume" )\n'
         "async def resume( request: AskRequest ): pass\n"
     )
-    assert lineage_aware_endpoints( str( tmp_path ) ) == { "/api/two/submit": "two_doors.py" }
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+    assert endpoints == { "/api/two/submit": "two_doors.py" }
+    assert unmatched == [], "one door matched, so the file is understood — the other two are simply not doors"
 
 
 def test_a_router_that_only_talks_about_the_field_contributes_nothing( tmp_path ):
@@ -233,7 +253,47 @@ def test_a_router_that_only_talks_about_the_field_contributes_nothing( tmp_path 
         f'    """Someday this may carry {LINEAGE_FIELD}, but today it does not."""\n'
         "    pass\n"
     )
-    assert lineage_aware_endpoints( str( tmp_path ) ) == {}
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+    assert endpoints == {}
+    assert [ f for f, _why in unmatched ] == [ "prose.py" ], "mentioning the field and yielding no door must be REPORTED, not dropped"
+
+
+def test_the_checker_reports_a_router_whose_model_no_handler_takes( tmp_path ):
+    """
+    THE CONTROL FOR THE LOUD MISS. The failure mode of a DERIVED set is silence: rename
+    the model, or change which model the handler takes, and the door quietly leaves the
+    watched set while every test posting to it keeps passing — for the wrong reason.
+
+    RED ON REVERT: go back to `if not models: continue` with nothing recorded, and this
+    file disappears from the report with no test saying so.
+    """
+    ( tmp_path / "orphan.py" ).write_text(
+        "from pydantic import BaseModel\n"
+        "router = APIRouter()\n"
+        "class SubmitRequest( BaseModel ):\n"
+        f"    {LINEAGE_FIELD} : Optional[ str ] = Field( None )\n"
+        "class SomethingElse( BaseModel ):\n"
+        "    query : str = Field( ... )\n"
+        '@router.post( "/api/orphan/submit" )\n'
+        "async def submit( request: SomethingElse ): pass\n"
+    )
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+    assert endpoints == {}
+    assert [ f for f, _why in unmatched ] == [ "orphan.py" ]
+
+
+def test_no_router_in_the_tree_is_unmatched():
+    """
+    Against the REAL tree: every router that mentions the field must yield at least one
+    door. A name in this failure is not a style complaint — it is an endpoint that has
+    silently stopped being watched.
+    """
+    _endpoints, unmatched = lineage_aware_endpoints( ROUTER_DIR )
+    assert not unmatched, (
+        "these routers mention " + LINEAGE_FIELD + " but yield no lineage-aware door, so any "
+        "endpoint they own has left the watched set without a word: "
+        + "; ".join( f"{f} ({why})" for f, why in unmatched )
+    )
 
 
 def test_the_v2_submit_door_is_lineage_aware_and_its_siblings_are_not():
@@ -242,7 +302,7 @@ def test_the_v2_submit_door_is_lineage_aware_and_its_siblings_are_not():
     when the nine retiring doors' scheduling and lineage moved onto it; `/api/v2/ask` and
     `/api/v2/resume` never took it and must not be held to it.
     """
-    endpoints = lineage_aware_endpoints( ROUTER_DIR )
+    endpoints, _unmatched = lineage_aware_endpoints( ROUTER_DIR )
 
     assert endpoints.get( "/api/v2/submit" ) == "v2_ask.py"
     assert "/api/v2/ask"    not in endpoints
@@ -306,7 +366,7 @@ def test_the_derivation_finds_the_lineage_aware_routers():
     Ensures:
         - the derived set is non-empty and contains the two endpoints row 7451bebe named
     """
-    endpoints = lineage_aware_endpoints( ROUTER_DIR )
+    endpoints, _unmatched = lineage_aware_endpoints( ROUTER_DIR )
     assert endpoints, "derived ZERO lineage-aware endpoints — the router parse has rotted"
     assert "/api/deep-research/submit" in endpoints
     assert "/api/podcast-generator/submit" in endpoints
@@ -320,7 +380,7 @@ def test_every_lineage_aware_caller_threads_the_parent_id():
         - the offender list is empty
         - the failure message names file and endpoint, and points at the pattern to copy
     """
-    endpoints = lineage_aware_endpoints( ROUTER_DIR )
+    endpoints, _unmatched = lineage_aware_endpoints( ROUTER_DIR )
     offenders = untagged_callers( endpoints, PROJECT_ROOT, TEST_DIRS )
     assert not offenders, (
         "these submit to a lineage-aware endpoint without threading "

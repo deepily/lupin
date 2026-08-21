@@ -476,6 +476,18 @@ class TestStampQueueDirectives( unittest.TestCase ):
         self.assertTrue( job.monopolize, "an unset monopolize must not disarm a job that set it" )
         self.assertEqual( job.spawned_by_id_hash, "ts-its-own" )
 
+    def test_a_none_job_comes_back_as_none_rather_than_crashing( self ):
+        """
+        `resume_job` returns None on two paths — no checkpoint row, or a row with no
+        routing command — so a caller asking to resume a job that is not there gets None.
+        Stamping a schedule onto None raises AttributeError out of the door, turning the
+        factory's own "no such job" answer into a crash.
+
+        RED ON REVERT: drop the `if job is None` guard and this raises AttributeError
+        (Pocholo, on the commit that added the stamping).
+        """
+        self.assertIsNone( ajf._stamp_queue_directives( None, "2026-08-22T10:30:00-04:00", True, "ts-parent" ) )
+
     def test_it_returns_the_same_object( self ):
         """Not a copy: the caller returns what comes back, and a copy would strand the
         constructor's work on an object nobody keeps."""
@@ -545,6 +557,26 @@ class TestCreateAgenticJobCarriesTheDirectives( unittest.TestCase ):
         self.assertIs( job, resumed )
         self.assertEqual( job.scheduled_at, "2026-08-22T10:30:00-04:00" )
         self.assertTrue( job.monopolize )
+
+    def test_a_resume_that_finds_no_job_still_answers_none( self ):
+        """The whole path, not just the helper: a resume whose checkpoint read comes back
+        empty must return the factory's ordinary None, which the flow degrades on, rather
+        than raising past it.
+
+        RED ON REVERT: drop the None guard in the stamp and this raises AttributeError.
+        """
+        with patch( "cosa.agents.test_fix_expediter.resume_resolver.resolve_resume_target" ) as resolver, \
+             patch.object( ajf, "resume_job", return_value=None ):
+            resolver.return_value = MagicMock( job_id="tfe-123" )
+            job = create_agentic_job(
+                command      = "agent router go to test fix expediter resume",
+                args_dict    = { "resume_from": "a job that is not there" },
+                user_id      = "u1",
+                user_email   = "u@test.com",
+                session_id   = "s1",
+                scheduled_at = "2026-08-22T10:30:00-04:00",
+            )
+        self.assertIsNone( job )
 
     def test_a_caller_that_names_no_directive_changes_nothing( self ):
         """The default path — every existing caller of this factory, which passes none of
