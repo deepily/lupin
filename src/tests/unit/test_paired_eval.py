@@ -508,3 +508,70 @@ def test_main_default_out_path_and_du_fallbacks( tmp_path, monkeypatch ):
     result = pe.main( argv=[ "--v1-artifact", "a-v1.json", "--v2-artifact", "b-v2.json" ], load_fn=_load )
     expected = os.path.join( str( tmp_path ), "io", "v2-flow", "paired-verdict-STAMPED.md" )
     assert result[ "out_path" ] == expected and os.path.exists( expected )
+
+
+# ---------------------------------------------------------------------------
+# the readability block (5dfe0d43's ruling, finally implemented)
+#
+# "The report must carry the per-arm failure rate and each arm's surviving category
+# composition beside the median delta, or the number is not readable at any n."
+# The report carried none of it, so a bare delta over survivors read as a verdict.
+# ---------------------------------------------------------------------------
+_V1_M = { "n": 100, "ok_n": 72, "failure_rate": 0.28,
+          "spans_by_utterance": { "turn on the lights": 120.0, "what time is it": 130.0 } }
+_V2_M = { "n": 100, "n_ok": 94, "cache_hit_rate": 0.61,
+          "spans_by_utterance": { "turn on the lights": 40.0 } }
+_MAP  = { "turn on the lights": "cmd_lights", "what time is it": "cmd_time" }
+
+
+def test_failure_rate_prefers_the_arms_own_published_value():
+    assert pe._arm_failure_rate( _V1_M ) == 0.28
+
+
+def test_failure_rate_is_derived_when_the_arm_publishes_only_a_count():
+    """v1 emits ok_n, v2 emits n_ok — reading one key only is how ts-217961e6 KeyError'd."""
+    assert pe._arm_failure_rate( _V2_M ) == 0.06
+    assert pe._arm_failure_rate( { "n": 10, "ok_n": 8 } ) == 0.2
+
+
+def test_failure_rate_is_none_rather_than_a_fabricated_zero():
+    assert pe._arm_failure_rate( { } )                 is None
+    assert pe._arm_failure_rate( { "n": 0, "n_ok": 0 } ) is None
+
+
+def test_readability_block_carries_both_failure_rates_and_the_cache_hit_rate():
+    block = pe.render_readability_block( _V1_M, _V2_M, _MAP )
+    assert "28.0%" in block and "6.0%" in block      # the two failure rates
+    assert "61.0%" in block                          # v2's cache-hit rate — the mechanism under test
+
+
+def test_readability_block_says_not_reported_rather_than_inventing_a_number():
+    block = pe.render_readability_block( { }, { }, None )
+    assert "not reported" in block
+    assert "0.0%" not in block
+
+
+def test_readability_block_counts_survivors_per_command():
+    block = pe.render_readability_block( _V1_M, _V2_M, _MAP )
+    assert "| cmd_lights | 1 | 1 |" in block
+    assert "| cmd_time | 1 | 0 |" in block           # a category v2 lost entirely
+
+
+def test_readability_block_says_composition_not_computed_without_a_mapping():
+    """An absent composition must read as 'not computed', never as an empty one."""
+    block = pe.render_readability_block( _V1_M, _V2_M, None )
+    assert "NOT COMPUTED" in block
+    assert "v1 survived" not in block
+
+
+def test_report_carries_the_readability_block_when_metrics_are_supplied():
+    report = pe.render_paired_report( { "fired": False, "reason": "r" }, _prov( "v1" ), _prov( "v2" ), "TS",
+                                      v1_metrics=_V1_M, v2_metrics=_V2_M, mapping=_MAP )
+    assert "Is this delta readable?" in report
+    assert "28.0%" in report and "61.0%" in report
+
+
+def test_report_without_metrics_is_unchanged_for_existing_callers():
+    report = pe.render_paired_report( { "fired": False, "reason": "r" }, _prov( "v1" ), _prov( "v2" ), "TS" )
+    assert "Is this delta readable?" not in report
+    assert "DECLINED" in report
