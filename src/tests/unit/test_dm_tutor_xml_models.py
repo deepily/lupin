@@ -214,15 +214,26 @@ class TestPointerAndDelivery:
         assert _response( file_path_or_url=identifier ).pointer == ""
 
     @pytest.mark.parametrize( "real", [ "src/a.py:12", "job.py", "running_fifo_queue.py:422",
-                                        "https://example.com/x", "/tmp/probe.py", "src/rnd/note.md" ] )
+                                        "https://example.com/x", "/tmp/probe.py", "src/rnd/note.md",
+                                        # 🔴 María's refutation, row 6dbba874. The first cut asked
+                                        # is_bare_identifier — whose precondition is a token the
+                                        # pointer grammar already matched — about the RAW slot
+                                        # value, where it degenerates to "no dot and no slash" and
+                                        # ate every extensionless real filename. Three of these six
+                                        # are tracked files in this repo.
+                                        "Makefile", "README", "LICENSE", "Dockerfile", "src", "io" ] )
     def test_a_real_pointer_is_still_delivered( self, real ):
         """
-        CONTROL. The suppression must not over-reach — every one of these says where to
-        look and survives losing the sentence around it, which is the whole distinction.
-        Delete the is_bare_identifier guard and the test above goes red; widen it to
-        anything without a slash and this one does.
+        CONTROL, and the one that catches an over-wide guard. Every value here says
+        where to look. Delete the row-id guard and the suppression tests go red; widen
+        it back to "anything without a slash" and the last six of these do.
         """
         assert _response( file_path_or_url=real ).pointer == real
+
+    @pytest.mark.parametrize( "real", [ "Makefile", "README", "LICENSE", "Dockerfile", "src", "io" ] )
+    def test_an_extensionless_filename_is_not_reported_as_refused_either( self, real ):
+        """The disclosure must agree with the delivery — nothing was refused here."""
+        assert _response( file_path_or_url=real ).pointer_cleared == ""
 
     def test_the_refused_value_is_named_for_the_log( self ):
         """

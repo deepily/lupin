@@ -180,6 +180,22 @@ class TestRewriteSucceeds:
             agent.rewrite()
             assert "pointer_slot_cleared" not in capsys.readouterr().out
 
+    @pytest.mark.parametrize( "real", [ "Makefile", "README", "LICENSE", "Dockerfile", "src", "io" ] )
+    def test_an_extensionless_filename_is_delivered_and_never_announced( self, real, monkeypatch, capsys ):
+        """
+        🔴 María's refutation end to end (row 6dbba874). These six have no dot and no
+        slash, so the first cut suppressed them as row ids. They must arrive as the
+        fourth line AND draw no disclosure — a refusal notice for something that was
+        not refused is as misleading as the silence it replaced.
+        """
+        agent = DmTutorAgent( dm_body=BODY )
+        monkeypatch.setattr( agent, "run_prompt", lambda **kw: _fields( file_path_or_url=real ) )
+
+        lines = agent.rewrite().splitlines()
+        assert lines[ -1 ] == real
+        assert len( lines ) == 4
+        assert "pointer_slot_cleared" not in capsys.readouterr().out
+
     def test_the_parsed_response_is_kept_for_inspection( self, monkeypatch ):
         agent = DmTutorAgent( dm_body=BODY )
         monkeypatch.setattr( agent, "run_prompt", lambda **kw: _fields() )

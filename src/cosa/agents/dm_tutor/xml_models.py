@@ -199,16 +199,17 @@ class DmTutorResponse( BaseXMLModel ):
 
         Ensures:
             - returns "" for a blank slot or any of the NULL_ISH null-words
-            - returns "" for a bare identifier — no slash, no dot — which by the
-              pointer grammar is the 8-hex row-id shape
+            - returns "" for a bare 8-hex row id, tested DIRECTLY rather than through
+              is_bare_identifier, whose precondition is a token the pointer grammar
+              already matched and which on a raw value eats Makefile, README and src
             - returns the stripped value otherwise, so a real path, a bare
               filename.ext and a URL are all delivered unchanged
         """
-        from cosa.agents.dm_tutor.sentences import is_bare_identifier
+        from cosa.agents.dm_tutor.sentences import is_bare_row_id
 
         value = ( self.file_path_or_url or "" ).strip()
-        if value.lower() in NULL_ISH:    return ""
-        if is_bare_identifier( value ):  return ""
+        if value.lower() in NULL_ISH: return ""
+        if is_bare_row_id( value ):   return ""
         return value
 
     @property
@@ -235,11 +236,11 @@ class DmTutorResponse( BaseXMLModel ):
         Raises:
             - nothing
         """
-        from cosa.agents.dm_tutor.sentences import is_bare_identifier
+        from cosa.agents.dm_tutor.sentences import is_bare_row_id
 
         value = ( self.file_path_or_url or "" ).strip()
         if value.lower() in NULL_ISH: return ""
-        return value if is_bare_identifier( value ) else ""
+        return value if is_bare_row_id( value ) else ""
 
     def to_delivery( self ):
         """
