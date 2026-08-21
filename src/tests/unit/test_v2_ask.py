@@ -152,6 +152,58 @@ def test_submit_does_not_require_a_question():
     assert flow.submit_calls[ 0 ][ "args" ] == {}
 
 
+def test_submit_carries_the_three_queue_directives_to_the_flow():
+    """
+    Seven of the nine endpoints retiring into this door declared `scheduled_at` and
+    `monopolize` as their own request fields; six also carried `parent_id_hash`. They are
+    top-level fields rather than keys inside `args` because `args` is checked against the
+    command's own argument contract, and a scheduling instruction is in no agent's
+    contract — putting it there would mean writing it into one as though the agent took it.
+
+    RED ON REVERT: drop any of the three from the flow.submit call and its assert fails.
+    """
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    resp = client.post( "/api/v2/submit",
+                        json={ "command": "agent router go to deep research",
+                               "args": { "query": "state of AI" },
+                               "scheduled_at": "2026-08-22T10:30:00-04:00",
+                               "monopolize": True,
+                               "parent_id_hash": "ts-parent" } )
+    assert resp.status_code == 200
+    call = flow.submit_calls[ 0 ]
+    assert call[ "scheduled_at" ]   == "2026-08-22T10:30:00-04:00"
+    assert call[ "monopolize" ]     is True
+    assert call[ "parent_id_hash" ] == "ts-parent"
+
+
+def test_submit_defaults_the_three_directives_when_the_body_omits_them():
+    """
+    Every existing caller sends none of them, and must keep getting exactly what it got.
+    The defaults are stated here rather than assumed, because `monopolize` defaulting to
+    True by accident would hold every other job behind an ordinary submission.
+    """
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    client.post( "/api/v2/submit", json={ "command": "agent router go to date and time" } )
+    call = flow.submit_calls[ 0 ]
+    assert call[ "scheduled_at" ]   is None
+    assert call[ "monopolize" ]     is False
+    assert call[ "parent_id_hash" ] is None
+
+
+def test_submit_refuses_a_non_boolean_monopolize():
+    """The model validates it, so a typo cannot arrive as a truthy string and hold the
+    whole queue. `args` could not have given us this — it is a bare dict."""
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    resp = client.post( "/api/v2/submit",
+                        json={ "command": "agent router go to date and time",
+                               "monopolize": "sure, why not" } )
+    assert resp.status_code == 422
+    assert flow.submit_calls == [], "an unvalidatable directive must never reach the flow"
+
+
 def test_submit_with_no_user_id_in_the_token_is_401():
     flow = FakeFlow()
     client = TestClient( _app( { "email": "u@x.com" }, flow ) )

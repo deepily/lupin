@@ -49,15 +49,26 @@ class SubmitRequest( BaseModel ):
     between the two doors. `ask` is handed prose and has to work out what it means;
     `submit` is handed the answer to that question up front, so the text is only carried
     along for the record and for anything downstream that shows the user what ran.
+
+    THE LAST THREE FIELDS ARE QUEUE DIRECTIVES, NOT ARGUMENTS, and that is why they are
+    top-level fields rather than keys inside `args`. `args` is checked against the
+    command's own argument contract, so a scheduling instruction put in there would have
+    to be written into some agent's contract as though the agent took it — and no agent
+    does. Each retiring door declared these same three on its own request model and set
+    them on the job after building it; they arrive here for the same reason and are
+    passed on only when the caller actually set one.
     """
-    command      : str            = Field( ..., min_length=1, max_length=200,
-                                           description="The routing command, e.g. 'agent router go to weather'" )
-    args         : dict           = Field( default_factory=dict,
-                                           description="Every argument the command requires — no extraction is performed" )
-    question     : Optional[ str ] = Field( None, max_length=4000,
-                                           description="Optional human-readable text for the record" )
-    websocket_id : Optional[ str ] = Field( None, description="WebSocket session ID for TTS routing" )
-    speak        : bool           = Field( True, description="Dispatch the answer as a TTS notification" )
+    command        : str            = Field( ..., min_length=1, max_length=200,
+                                             description="The routing command, e.g. 'agent router go to weather'" )
+    args           : dict           = Field( default_factory=dict,
+                                             description="Every argument the command requires — no extraction is performed" )
+    question       : Optional[ str ] = Field( None, max_length=4000,
+                                             description="Optional human-readable text for the record" )
+    websocket_id   : Optional[ str ] = Field( None, description="WebSocket session ID for TTS routing" )
+    speak          : bool           = Field( True, description="Dispatch the answer as a TTS notification" )
+    scheduled_at   : Optional[ str ] = Field( None, description="ISO datetime to defer execution to (None = run when the queue reaches it). The off-peak scheduling rule is built on this field" )
+    monopolize     : bool           = Field( False, description="Run exclusively, holding every other job until this one finishes" )
+    parent_id_hash : Optional[ str ] = Field( None, description="id_hash of the monopolize job that SPAWNED this one. When it matches the pool's active monopolizer, the consumer's Gate B admits this child THROUGH the intake hold instead of deferring it as a foreign writer (bugs 3a14292b, 5ed4f187). Reaches the job as spawned_by_id_hash" )
 
 
 class ResumeRequest( BaseModel ):
@@ -284,6 +295,9 @@ async def v2_submit(
         - user_id / user_email come from the token, never the client body.
         - a command missing arguments comes back status='needs_input' with args_missing
           filled in, and is NEVER parked: there is no human behind a submit to answer it.
+        - scheduled_at / monopolize / parent_id_hash reach the built job only on the
+          agentic path, which is the only path that builds one; on the other paths the
+          flow records that they were dropped rather than discarding them in silence.
     """
     user_id    = current_user.get( "uid" )
     user_email = current_user.get( "email" )
@@ -299,14 +313,17 @@ async def v2_submit(
     # holds a worker thread instead.
     result = await run_in_threadpool(
         lambda: flow.submit(
-            command      = request.command,
-            args         = request.args,
-            question     = request.question,
-            user_id      = user_id,
-            user_email   = user_email,
-            session_id   = session_id,
-            websocket_id = request.websocket_id or session_id,
-            speak        = request.speak,
+            command        = request.command,
+            args           = request.args,
+            question       = request.question,
+            user_id        = user_id,
+            user_email     = user_email,
+            session_id     = session_id,
+            websocket_id   = request.websocket_id or session_id,
+            speak          = request.speak,
+            scheduled_at   = request.scheduled_at,
+            monopolize     = request.monopolize,
+            parent_id_hash = request.parent_id_hash,
         )
     )
     return AskResponse( **result )
