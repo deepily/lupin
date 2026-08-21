@@ -21,7 +21,7 @@ import tokenize
 
 import pytest
 
-from cosa.rest.v2.registry import resolve, resolve_voice
+from cosa.rest.v2.registry import resolve
 from cosa.agents.math_agent          import MathAgent
 from cosa.agents.calculator.agent    import CalculatorAgent
 from cosa.agents.date_and_time_agent import DateAndTimeAgent
@@ -85,7 +85,7 @@ class TestEveryV1CommandStillResolves:
         for that command — which is exactly the state the tree was in before
         row 10ef4b64. Measured, not assumed: resolve() returned None for both.
         """
-        assert resolve( command ) is not None, (
+        assert resolve( command, crud_enabled=False ) is not None, (
             f"{command!r} routed to an agent under the v1 ladder and now resolves "
             f"nowhere — it would reach the loud-fail branch and tell the user the "
             f"command is unknown"
@@ -93,12 +93,11 @@ class TestEveryV1CommandStillResolves:
 
     @pytest.mark.parametrize( "command", _V1_LADDER_COMMANDS )
     def test_every_v1_ladder_command_has_a_voice_binding( self, command ):
-        """resolve_voice must answer for everything resolve() answers for."""
-        binding = resolve_voice( command, crud_enabled=False )
+        """Every ladder command still resolves, with a callable and a spoken label."""
+        binding = resolve( command, crud_enabled=False )
         assert binding is not None
-        factory, label, _dings = binding
-        assert callable( factory )
-        assert label, f"{command!r} has no spoken label — the user hears 'New  job...'"
+        assert callable( binding.factory )
+        assert binding.label, f"{command!r} has no spoken label — the user hears 'New  job...'"
 
 
 class TestCrudForkIsCarriedByTheRegistry:
@@ -115,24 +114,33 @@ class TestCrudForkIsCarriedByTheRegistry:
     ] )
     def test_fork_follows_the_flag( self, command, crud_cls, plain_cls ):
         """
-        RED ON REVERT: make resolve_voice ignore crud_enabled and always return
+        RED ON REVERT: make resolve() ignore crud_enabled and always return
         spec.factory, and the crud_enabled=True half fails — which is the v2 pin
         leaking onto the voice path, the exact regression Rick ruled against.
         """
-        assert resolve_voice( command, crud_enabled=True  )[ 0 ] is crud_cls
-        assert resolve_voice( command, crud_enabled=False )[ 0 ] is plain_cls
+        assert resolve( command, crud_enabled=True  ).factory is crud_cls
+        assert resolve( command, crud_enabled=False ).factory is plain_cls
 
-    def test_v2_factory_is_never_the_crud_class( self ):
+    def test_the_forked_spec_says_it_is_not_cacheable( self ):
         """
-        The other direction, and it is the one that protects the eval: resolve() —
-        what AskFlow and the v2 executor call — must keep returning the non-CRUD
-        class no matter what the voice fork does.
+        Step 2d, and it replaces the old R-A3 pin rather than re-pointing it. That
+        pin held resolve() to the non-CRUD class so a v2 report would not read 0%
+        cache-hit; the exclusion now lives in the reader (v2_eval), and what the
+        table owes instead is the truth about the forked class.
 
-        RED ON REVERT: point spec.factory at the CRUD class and this fails. That
-        change would report 0% cache-hit forever and read as a v2 bug.
+        The writer refuses to serialize CRUD agents (running_fifo_queue:1563), so a
+        forked spec claiming snapshotable=True would be two sources of truth
+        disagreeing by construction — a flag saying "cache this" about a class the
+        writer will not cache.
+
+        RED ON REVERT: drop snapshotable=False from the fork in resolve() and this
+        fails.
         """
-        assert resolve( "agent router go to todo"     ).factory is TodoListAgent
-        assert resolve( "agent router go to calendar" ).factory is CalendaringAgent
+        for command in ( "agent router go to todo", "agent router go to calendar" ):
+            forked = resolve( command, crud_enabled=True )
+            plain  = resolve( command, crud_enabled=False )
+            assert forked.snapshotable is False, f"{command} forked to CRUD and still claims it caches"
+            assert plain.snapshotable is True,   f"{command} unforked lost its cacheability"
 
     @pytest.mark.parametrize( "command", [
         "agent router go to math", "agent router go to calculator",
@@ -144,8 +152,8 @@ class TestCrudForkIsCarriedByTheRegistry:
 
         RED ON REVERT: give any of these four a crud_factory and it fails.
         """
-        assert resolve_voice( command, crud_enabled=True )[ 0 ] is \
-               resolve_voice( command, crud_enabled=False )[ 0 ]
+        assert resolve( command, crud_enabled=True ).factory is \
+               resolve( command, crud_enabled=False ).factory
 
 
 class TestSpokenLabelsAndTheGong:
@@ -168,7 +176,7 @@ class TestSpokenLabelsAndTheGong:
         strings are read verbatim off the deleted ladder's
         starting_a_new_job.format( agent_type=... ) calls.
         """
-        assert resolve_voice( command, crud_enabled )[ 1 ] == expected
+        assert resolve( command, crud_enabled ).label == expected
 
     def test_weather_alone_does_not_ring_the_gong( self ):
         """
@@ -177,11 +185,11 @@ class TestSpokenLabelsAndTheGong:
         RED ON REVERT: flip weather's `dings` to True (or drop the field and default
         every agent to one value) and this fails.
         """
-        assert resolve_voice( "agent router go to weather", False )[ 2 ] is False
+        assert resolve( "agent router go to weather", False ).dings is False
         for command in ( "agent router go to math", "agent router go to calculator",
                          "agent router go to todo", "agent router go to calendar",
                          "agent router go to datetime" ):
-            assert resolve_voice( command, False )[ 2 ] is True, command
+            assert resolve( command, False ).dings is True, command
 
 
 class TestTheLadderIsGoneAndStaysGone:
@@ -211,17 +219,22 @@ class TestTheLadderIsGoneAndStaysGone:
             )
 
     def test_push_job_asks_the_registry( self ):
-        """RED ON REVERT: delete the resolve_voice call and this fails."""
+        """RED ON REVERT: delete the resolve() call and this fails.
+
+        The pin follows the fold: there is one resolver now, so the name to look
+        for changed. Step 6c invalidates this again when push_job stops resolving
+        at all.
+        """
         from cosa.rest.todo_fifo_queue import TodoFifoQueue
         source = inspect.getsource( TodoFifoQueue.push_job )
-        assert "resolve_voice(" in source
+        assert "resolve(" in source
 
     def test_a_new_command_needs_no_queue_edit( self ):
         """
         The claim stated as an executable check: a command registered ONLY in the
         table resolves through the voice reader without push_job knowing its name.
 
-        RED ON REVERT: make resolve_voice consult a hard-coded command list instead
+        RED ON REVERT: make resolve() consult a hard-coded command list instead
         of the table and this fails.
         """
         from cosa.rest.v2 import registry as reg
@@ -230,9 +243,9 @@ class TestTheLadderIsGoneAndStaysGone:
         saved = dict( reg.ANSWER_COMMANDS )
         reg.ANSWER_COMMANDS[ spec.command ] = spec
         try:
-            binding = resolve_voice( "agent router go to seventh thing", crud_enabled=True )
+            binding = resolve( "agent router go to seventh thing", crud_enabled=True )
             assert binding is not None, "a table-only command did not resolve"
-            assert binding[ 1 ] == "seventh thing"
+            assert binding.label == "seventh thing"
         finally:
             reg.ANSWER_COMMANDS.clear()
             reg.ANSWER_COMMANDS.update( saved )
@@ -246,11 +259,11 @@ class TestUnroutableStillFailsLoud:
 
     def test_unknown_command_resolves_to_nothing( self ):
         """
-        RED ON REVERT: give resolve_voice a receptionist default instead of None and
+        RED ON REVERT: give resolve() a receptionist default instead of None and
         this fails — which would restore the silent-smoothing defect 720ce725 fixed.
         """
-        assert resolve_voice( "agent router go to something nobody wired", True ) is None
-        assert resolve_voice( "", True ) is None
+        assert resolve( "agent router go to something nobody wired", True ) is None
+        assert resolve( "", True ) is None
 
     def test_agentic_and_control_are_not_voice_conversational( self ):
         """
@@ -261,5 +274,32 @@ class TestUnroutableStillFailsLoud:
 
         RED ON REVERT: widen resolve() to the whole REGISTRY and this fails.
         """
-        assert resolve_voice( "agent router go to automatic", True ) is None
-        assert resolve_voice( "agent router go to receptionist", True ) is None
+        assert resolve( "agent router go to automatic", True ) is None
+        assert resolve( "agent router go to receptionist", True ) is None
+
+
+class TestTheSecondResolverIsGone:
+    """
+    2b's deletion, stated as a check. `resolve_voice()` existed only to apply the
+    CRUD fork beside a resolver pinned against it; with one resolver there is
+    nothing for it to do, and leaving it importable would let a caller keep using
+    the two-reader shape the fold removes.
+    """
+
+    def test_resolve_voice_no_longer_exists( self ):
+        """RED ON REVERT: put resolve_voice back and this fails."""
+        from cosa.rest.v2 import registry as reg
+        assert not hasattr( reg, "resolve_voice" ), (
+            "resolve_voice is back — there is one CRUD-aware resolver now, and a second "
+            "reader is how the wrong class gets reached again"
+        )
+
+    def test_resolve_will_not_answer_without_the_flag( self ):
+        """
+        The flag is required, not defaulted, for the same reason the second resolver
+        is gone: a caller that omits it would silently get the un-forked class.
+
+        RED ON REVERT: give crud_enabled a default in resolve().
+        """
+        with pytest.raises( TypeError ):
+            resolve( "agent router go to todo" )

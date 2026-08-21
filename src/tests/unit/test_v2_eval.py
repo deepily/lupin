@@ -1312,3 +1312,60 @@ def test_the_accessor_layer_can_read_an_errored_records_reason():
 def test_reported_route_reason_is_none_for_a_transport_failure():
     assert ve.reported_route_reason( _rec( ok=False, status=502 ) ) is None
     assert ve.reported_route_reason( { "status_code": 200, "payload": None } ) is None
+
+
+# ---------------------------------------------------------------------------
+# step 2b — the CRUD exclusion lives in THIS reader now
+# ---------------------------------------------------------------------------
+def test_uncacheable_commands_leave_the_cache_hit_denominator():
+    """
+    Rick's ruling, 2026-08-21: the routing table stops carrying a reporting
+    constraint and the reader takes it. A command the writer refuses to serialize
+    can never replay, so counting it as a cache MISS reports a failure that did not
+    happen.
+
+    RED ON REVERT: put n_ok back as the denominator and the rate becomes 1/3.
+    """
+    records = [
+        _rec( path="replay", similarity=100.0, command="agent router go to math" ),
+        _rec( path="agent",  command="agent router go to todo" ),      # CRUD fork: never cached
+        _rec( path="agent",  command="agent router go to weather" ),   # never snapshotable either
+    ]
+    m = ve.compute_metrics( records )
+    assert m[ "cache_hit_denominator" ] == 1
+    assert m[ "cache_excluded_n" ]      == 2
+    assert m[ "cache_hit_rate" ]        == 1.0
+
+
+def test_a_record_that_replayed_is_never_excluded():
+    """
+    The correction that mattered, and a test found it rather than reasoning did.
+    `snapshotable` says what the WRITER will write from here on; it cannot say what
+    the store already HOLDS. Excluding on the table alone dropped weather replays
+    from the denominator while they stayed in the numerator, so a weather-only run
+    reported cache_hit_rate None — and guard_cold_start, which raises when a cold
+    pass reports any replay at all, went blind to a pre-warmed store.
+
+    RED ON REVERT: drop the `response_path( r ) == PATH_REPLAY or` clause from the
+    cacheable filter and the rate here goes None.
+    """
+    records = [ _rec( path="replay", similarity=100.0, command="agent router go to weather" ) ]
+    m = ve.compute_metrics( records )
+    assert m[ "cache_hit_denominator" ] == 1
+    assert m[ "cache_hit_rate" ]        == 1.0
+
+    # The guard is the reason this matters, so assert the guard, not just the rate:
+    # it must still RAISE on a "cold" pass that replayed. With the exclusion broadened
+    # wrongly, the rate was None here and the guard returned quietly.
+    with pytest.raises( ve.EvalIntegrityError, match="cold-start integrity failed" ):
+        ve.guard_cold_start( m )
+
+
+def test_unknown_commands_stay_in_the_denominator():
+    """
+    An unknown or non-conversational command is not excluded by THIS rule. Dropping
+    it here would hide it from the denominator for a reason that has nothing to do
+    with caching.
+    """
+    assert ve._is_cacheable_command( "agent router go to nowhere at all" ) is True
+    assert ve._is_cacheable_command( None ) is True

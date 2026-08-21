@@ -159,5 +159,5 @@ def test_the_flows_ingredients_import_without_any_app_state():
     from cosa.rest.v2.cache    import V2Cache          # noqa: F401  (import is the assertion)
 
     assert REGISTRY, "the command registry is empty at import time"
-    assert resolve( "agent router go to todo" ) is not None
+    assert resolve( "agent router go to todo", crud_enabled=False ) is not None
     assert make_executor( "inline" ) is not None

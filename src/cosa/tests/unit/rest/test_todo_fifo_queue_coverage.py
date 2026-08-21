@@ -29,7 +29,7 @@ from unittest.mock import Mock, MagicMock, patch
 
 import cosa.rest.todo_fifo_queue as tfq
 import cosa.rest.v2.registry as reg
-from cosa.rest.v2.registry import resolve, resolve_voice
+from cosa.rest.v2.registry import resolve
 
 # The conversational agents push_job no longer names: since row 10ef4b64 their class
 # comes from the REGISTRY, so patching the class in this module's namespace no longer
@@ -224,12 +224,14 @@ def _registry_stub( testcase, command, agent, expect, crud_enabled ):
         - fails the test if the registry binds command to some other class
         - yields a patch.dict context in which push_job builds `agent`
     """
-    factory, _label, _dings = resolve_voice( command, crud_enabled )
+    # One resolver now (step 2b): the same call answers what the fork produces AND
+    # what gets patched, so the check and the patch can no longer drift apart.
+    forked = resolve( command, crud_enabled )
     testcase.assertEqual(
-        factory.__name__, expect,
-        f"registry bound {command!r} to {factory.__name__}, expected {expect}"
+        forked.factory.__name__, expect,
+        f"registry bound {command!r} to {forked.factory.__name__}, expected {expect}"
     )
-    spec = resolve( command )
+    spec = resolve( command, crud_enabled=False )
     stub = replace( spec, factory=lambda **kw: agent, crud_factory=lambda **kw: agent )
     return patch.dict( reg.ANSWER_COMMANDS, { spec.command: stub } )
 

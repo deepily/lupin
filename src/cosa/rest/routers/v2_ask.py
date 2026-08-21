@@ -126,6 +126,10 @@ def build_ask_flow( config_mgr: Any ) -> tuple:
     writeback_enabled = config_mgr.get( "v2 snapshot writeback enabled", default=False,   return_type="boolean" )
     similarity_floor  = config_mgr.get( "v2 similarity floor",          default=100.0,    return_type="float"   )
     trace_dir         = config_mgr.get( "v2 trace dir",                 default=None,     return_type="string"  ) or None
+    # The SAME key and the SAME default the v1 queue reads (todo_fifo_queue._crud_agents_enabled):
+    # missing means enabled. resolve() applies the CRUD fork for every caller now, so the
+    # flow has to know, and reading it anywhere else would let the two surfaces disagree.
+    crud_enabled      = config_mgr.get( "crud for dataframes agents enabled", default="true", return_type="string" ).strip().lower() == "true"
 
     flow = AskFlow(
         cache             = V2Cache(),
@@ -133,6 +137,7 @@ def build_ask_flow( config_mgr: Any ) -> tuple:
         expeditor         = RuntimeArgumentExpeditor( config_mgr ),
         executor          = make_executor( executor_name ),
         pending           = PendingRequests(),
+        crud_enabled      = crud_enabled,
         similarity_floor  = similarity_floor,
         writeback_enabled = writeback_enabled,
         trace_dir         = trace_dir,

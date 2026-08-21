@@ -73,6 +73,7 @@ class AskFlow:
 
     def __init__(
         self, cache: Any, router: Any, expeditor: Any, executor: Any, pending: Any, *,
+        crud_enabled      : bool,
         similarity_floor  : float                    = 100.0,
         writeback_enabled : bool                     = False,
         receptionist_factory : Callable[ ..., Any ]  = ReceptionistAgent,
@@ -88,6 +89,10 @@ class AskFlow:
         self.expeditor            = expeditor
         self.executor             = executor
         self.pending              = pending
+        # REQUIRED, not defaulted. resolve() applies the CRUD fork and needs the live
+        # flag; a default here would decide calendar and todo routing by omission,
+        # which is the failure the single resolver exists to remove.
+        self.crud_enabled         = crud_enabled
         self.similarity_floor     = similarity_floor
         self.writeback_enabled    = writeback_enabled
         self.receptionist_factory = receptionist_factory
@@ -127,7 +132,7 @@ class AskFlow:
             # cache hit routed through the queue reaches the user as the receptionist
             # apologising for a question the cache could already answer.
             if outcome.status in SUCCESS_STATUSES:
-                replay_spec = resolve( lookup.snapshot.routing_command )
+                replay_spec = resolve( lookup.snapshot.routing_command, self.crud_enabled )
                 return self._finish( trace, "replay", "exact_hit", outcome, question, ctx,
                                      command=lookup.snapshot.routing_command, cache_hit=True,
                                      agent_label=replay_spec.label if replay_spec else None )
@@ -140,7 +145,7 @@ class AskFlow:
         if command == "unknown":
             trace.set( "router_error", True )
             return self._receptionist( trace, question, ctx, "router_error" )
-        spec = resolve( command )
+        spec = resolve( command, self.crud_enabled )
         if spec is None:
             return self._receptionist( trace, question, ctx, "unknown_command" )
 
@@ -226,7 +231,7 @@ class AskFlow:
         if job is not None:
             return self._submit_prebuilt( trace, job, question or "", ctx )
 
-        spec = resolve( command )
+        spec = resolve( command, self.crud_enabled )
         if spec is None:
             trace.set( "unknown_command", command )
             return self._receptionist( trace, question or command, ctx, "unknown_command" )
@@ -372,7 +377,7 @@ class AskFlow:
         # turn already owns the conversation (claimed above), so no second claim is
         # needed here; "answering" advances to "running".
         self.pending.set_status( pending_id, "running" )
-        spec = resolve( entry.command )
+        spec = resolve( entry.command, self.crud_enabled )
         if spec is None:
             self.pending.set_status( pending_id, "failed", error="unknown_command" )
             return self._receptionist( trace, entry.question, ctx, "unknown_command" )

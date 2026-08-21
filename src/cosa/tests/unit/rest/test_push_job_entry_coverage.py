@@ -30,7 +30,7 @@ from unittest.mock import Mock, patch
 import cosa.rest.todo_fifo_queue as tfq
 import cosa.rest.v2.registry as reg
 from cosa.rest.todo_fifo_queue import TodoFifoQueue, MODE_TO_AGENT, AGENTIC_MODE_MAP
-from cosa.rest.v2.registry import resolve, resolve_voice
+from cosa.rest.v2.registry import resolve
 
 
 _CONFIG = {
@@ -88,7 +88,7 @@ class _PushJobHarness( unittest.TestCase ):
     # ---------------------------------------------------------------- helpers
     def _stub_registry_entry( self, command, agent ):
         """Swap the registry entry for `command` so no real agent is constructed."""
-        spec = resolve( command )
+        spec = resolve( command, crud_enabled=False )
         self.assertIsNotNone( spec, f"{command!r} does not resolve — the test's premise is wrong" )
         stub = replace( spec, factory=lambda **kw: agent, crud_factory=lambda **kw: agent )
         return patch.dict( reg.ANSWER_COMMANDS, { spec.command: stub } )
@@ -140,7 +140,7 @@ class TestModeBranchNeverCallsTheRouter( _PushJobHarness ):
         """
         agent = Mock(); agent.id_hash = "ag"
         self.queue.set_user_mode( "u1", "receptionist" )
-        self.assertIsNone( resolve( "agent router go to receptionist" ),
+        self.assertIsNone( resolve( "agent router go to receptionist", crud_enabled=False ),
                            "premise broken: resolve() now returns a spec for the receptionist" )
         with patch.object( self.queue, "_get_routing_command" ) as router, \
              patch.object( tfq, "ReceptionistAgent", return_value=agent ) as receptionist, \
@@ -180,7 +180,7 @@ class TestModeBranchNeverCallsTheRouter( _PushJobHarness ):
                     # above. Without it this test opens a real outbound connection and
                     # the unit tier's network guard fails the whole run.
                     command = AGENTIC_MODE_MAP.get( mode ) or f"agent router go to {mode}"
-                    spec    = resolve( command )
+                    spec    = resolve( command, crud_enabled=False )
                     if spec is not None:
                         with self._stub_registry_entry( command, agent ):
                             self.queue.push_job( "do the thing", "ws1", "u1", "u@x.com" )

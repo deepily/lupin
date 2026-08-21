@@ -18,7 +18,7 @@ from cosa.agents.math_agent import MathAgent
 from cosa.crud_for_dataframes.todo_crud_agent import TodoCrudAgent
 from cosa.crud_for_dataframes.calendar_crud_agent import CalendarCrudAgent
 from cosa.agents.calculator.agent import CalculatorAgent
-from cosa.rest.v2.registry import resolve, resolve_voice   # the command->agent table (row 10ef4b64)
+from cosa.rest.v2.registry import resolve   # the command->agent table (row 10ef4b64)
 from cosa.agents.llm_client_factory import LlmClientFactory
 from cosa.rest.agentic_job_factory import create_agentic_job
 from cosa.memory.gister import Gister
@@ -765,7 +765,7 @@ class TodoFifoQueue( FifoQueue ):
                 self._notify( f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} I'm gonna ask our research librarian about that", target_user=user_email )
                 msg = self._search_and_summarize_safely( question_gist )
             
-            elif resolve( command ) is not None:
+            elif resolve( command, self._crud_agents_enabled() ) is not None:
                 # ─── ONE TABLE LOOKUP, replacing six hand-written elif branches (row 10ef4b64) ───
                 # Rick, 2026-08-20: "those agents could be instantiated using a string key
                 # referencing a dictionary of prototypical Agent Objects... that doesn't take
@@ -773,12 +773,11 @@ class TodoFifoQueue( FifoQueue ):
                 # and only the HTTP route was asking it. ADDING A SEVENTH CONVERSATIONAL COMMAND
                 # NOW REQUIRES NO EDIT HERE; it is one AgentSpec row.
                 #
-                # resolve_voice, not resolve: the v2 `factory` is pinned to the non-CRUD class for
-                # cache-hit REPORTING (R-A3), and Rick ruled a reporting decision must not silently
-                # change what a spoken command does. resolve_voice applies the CRUD fork; the flag
-                # is read HERE rather than at the top of the chain so a non-conversational command
+                # ONE resolver, and it applies the CRUD fork itself (2b). The flag is read
+                # HERE rather than at the top of the chain so a non-conversational command
                 # still costs no config lookup, exactly as before.
-                factory, agent_label, ding_for_new_job = resolve_voice( command, self._crud_agents_enabled() )
+                voice_spec = resolve( command, self._crud_agents_enabled() )
+                factory, agent_label, ding_for_new_job = voice_spec.factory, voice_spec.label, voice_spec.dings
                 agent = factory(
                     question=question, question_gist=question_gist, last_question_asked=salutation_plus_question,
                     push_counter=self.push_counter, user_id=user_id, user_email=user_email,
