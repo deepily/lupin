@@ -58,7 +58,7 @@ def _spec( entry ):
         - entry is a dict (may be partial — any JOB_ARG_CONTRACTS key may be absent)
 
     Ensures:
-        - returns an ArgSpec whose 8 fields mirror entry (missing keys → empty)
+        - returns an ArgSpec whose 9 fields mirror entry (missing keys → empty)
         - fallback_defaults is a COPY, matching ArgSpec.from_entry semantics
     """
     return ArgSpec(
@@ -70,6 +70,7 @@ def _spec( entry ):
         special_handlers   = entry.get( "special_handlers", {} ),
         display_name       = entry.get( "display_name" ),
         cli_module         = entry.get( "cli_module" ),
+        file_args          = entry.get( "file_args", {} ),
     )
 
 

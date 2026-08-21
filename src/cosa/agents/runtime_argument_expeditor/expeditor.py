@@ -14,7 +14,7 @@ Scope: Deep Research, Podcast Generator, Research-to-Podcast (3 agents).
 import json
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 import cosa.utils.util as cu
@@ -121,7 +121,7 @@ class ArgSpec:
     special_handlers   : dict
     display_name       : str
     cli_module         : str
-    file_args          : dict = field( default_factory=dict )
+    file_args          : dict
 
     @classmethod
     def from_entry( cls, entry ):
