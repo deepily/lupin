@@ -409,6 +409,29 @@ class TodoFifoQueue( FifoQueue ):
         """
         Push a new job onto the queue based on the question.
 
+        🔴 DEAD AS OF STEP 6c (2026-08-21) — NOTHING IN PRODUCTION CALLS THIS.
+
+        This was the live voice path: a question came in, and everything below decided
+        what to do with it — fitness, cache, confirmation, routing, agent construction,
+        the queue push. All of that now lives in `AskFlow` (`cosa/rest/v2/flow.py`), and
+        the switch happened by CUTOVER rather than by this method delegating to it:
+
+            · 11a / 11b retired the router doors that called it; they answer 410.
+            · step 12 moved the seven internal callers to flow.submit() / flow.ask().
+            · door 8 — /api/upload-and-transcribe-mp3, the SPOKEN way in — hands the
+              transcription to the flow in-process (routers/speech.py).
+
+        The body survives only because steps 7b and 7c delete its internals next, and
+        the queue's own coverage suite still drives it. Do not add a caller: a sweep
+        (`src/tests/unit/test_6c_push_job_has_no_production_caller.py`) fails if any
+        production module calls `push_job(` again.
+
+        THE REASON THIS PARAGRAPH EXISTS rather than the deadness just being true: the
+        plan's step 0 closed a trap where `grep "def save_snapshot"` returned the
+        DEPRECATED manager first, and a reader followed it into code nobody runs. A
+        440-line `push_job` that still reads as the live voice path is that same trap,
+        set for the next person who greps for how a spoken question is handled.
+
         Requires:
             - question is a non-empty string
             - websocket_id is a non-empty string
