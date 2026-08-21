@@ -255,7 +255,9 @@ class ProxyIntegrationTest( InteractiveSmokeTest ):
     BASE_URL        = "http://localhost:7999"
     DEFAULT_TIMEOUT = 120
     REQUEST_TIMEOUT = 600
-    SUBMIT_ENDPOINT = "/api/push"
+    # /api/push retired 2026-08-21; the base class branches on the RESPONSE, so a
+    # terminal v2 answer is read directly and a queued one is still polled.
+    SUBMIT_ENDPOINT = "/api/v2/ask"
     PROXY_PROFILE   = "proxy_integration_test"
     PROXY_STRATEGY  = "llm_script"
 
@@ -336,7 +338,7 @@ class ProxyIntegrationTest( InteractiveSmokeTest ):
         """
         Route submission based on scenario group.
 
-        Calculator and CRUD use /api/push with poll-done-queue pattern.
+        Calculator and CRUD submit via /api/v2/ask; the base class reads a terminal answer directly and still polls the done queue for a queued one.
         Expediter uses /api/mock-job/submit (synchronous, no polling).
 
         Requires:

@@ -124,6 +124,33 @@ class TestModeBranchNeverCallsTheRouter( _PushJobHarness ):
         handle.assert_called_once()
         self.assertEqual( handle.call_args[ 0 ][ 0 ], command )
 
+    def test_receptionist_mode_runs_the_receptionist_and_still_skips_the_router( self ):
+        """
+        The one MODE_TO_AGENT key that takes a different branch from the other six.
+
+        "receptionist" synthesises "agent router go to receptionist", which resolve()
+        returns None for by design (CommandClass.NONE, registry.py:234), so push_job
+        falls past the conversational arm to its own receptionist branch at
+        todo_fifo_queue.py:791 and builds the agent there. That is correct today and it
+        is audit row 13 — after 6c the same None sends AskFlow to _receptionist under
+        route_reason "unknown_command", the right agent under a reason that says the
+        router failed when it did not.
+
+        Covered here, not fixed here: the mode still has to skip the router.
+        """
+        agent = Mock(); agent.id_hash = "ag"
+        self.queue.set_user_mode( "u1", "receptionist" )
+        self.assertIsNone( resolve( "agent router go to receptionist" ),
+                           "premise broken: resolve() now returns a spec for the receptionist" )
+        with patch.object( self.queue, "_get_routing_command" ) as router, \
+             patch.object( tfq, "ReceptionistAgent", return_value=agent ) as receptionist, \
+             patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), \
+             patch( "builtins.print" ):
+            result = self.queue.push_job( "who are you", "ws1", "u1", "u@x.com" )
+        router.assert_not_called()                       # THE pin
+        receptionist.assert_called_once()                # and it really was the receptionist
+        self.assertEqual( result[ "job_id" ], "ag" )
+
     def test_every_mode_key_reaches_one_of_the_two_bypasses( self ):
         """
         No mode key falls through to the router — every key DRIVEN THROUGH push_job.

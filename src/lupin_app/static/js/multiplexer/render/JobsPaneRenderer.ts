@@ -578,14 +578,30 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     const idHash = card.getAttribute("data-id-hash");
     /* c8 ignore next */ // defensive: every .job-card carries data-id-hash per Pass 1 F12.
     if (idHash === null) return;
-    if (!globalThis.confirm("Retry this job?")) return;
+    // The question is the retry. `/api/job-history/{id}/retry` was retired 2026-08-21
+    // (410, naming /api/v2/ask): it was a queue door wearing a job-history URL — the
+    // server read `question_text` off the stored row and re-asked it. Now the client
+    // re-asks, so it has to hold the text. History rows keep the whole server row in
+    // `meta` (JobStore.normalizeRaw), which is where `question_text` lives.
+    const job      = this.stores.jobs.getById(idHash);
+    const question = typeof job?.meta["question_text"] === "string" ? job.meta["question_text"] : "";
+    if (question === "") {
+      // A job whose row carries no question cannot be re-asked, and posting an empty
+      // one would fail validation at the door with nothing useful to show the user.
+      // Say so instead of sending a request that cannot work. This is reachable for a
+      // card built from a WebSocket event rather than a hydrated history row — those
+      // carry event metadata, not the stored row.
+      console.warn("JobsPaneRenderer: cannot retry", idHash, "— its row carries no question text");
+      return;
+    }
 
-    // POST the retry with this client's WS id so the server routes the re-queued
-    // job's events back here. On 2xx the WS `job_state_transition` repopulates the
-    // live buckets automatically; we additionally refresh the current history
-    // window so the terminal row reflects the retry. A failure logs (nothing was
-    // optimistically changed).
-    this.api.post<unknown>(`/api/job-history/${idHash}/retry`, { websocket_id: this.websocketId ?? "" })
+    if (!globalThis.confirm(`Retry this job?\n\n"${question}"`)) return;
+
+    // Re-ask with this client's WS id so the answer's events route back here. On 2xx the
+    // WS `job_state_transition` repopulates the live buckets automatically; we
+    // additionally refresh the current history window so the terminal row reflects the
+    // retry. A failure logs (nothing was optimistically changed).
+    this.api.post<unknown>(`/api/v2/ask`, { question, websocket_id: this.websocketId ?? "" })
       .then(() => {
         this.hydrateWithFailureSignal({ days: this.stores.jobs.historyWindowDays(), append: false });
       })

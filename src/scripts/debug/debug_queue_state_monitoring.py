@@ -61,7 +61,8 @@ async def test_queue_state_monitoring_debug():
                 "websocket_id": session_id
             }
 
-            url = f"{server_url}/api/push"
+            # /api/push was retired 2026-08-21 (410, names this door).
+            url = f"{server_url}/api/v2/ask"
             print(f"   Submitting job {i+1}: {job_message}")
 
             try:

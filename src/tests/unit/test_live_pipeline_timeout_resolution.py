@@ -27,7 +27,9 @@ class _Harness( LivePipelineTestBase ):
     BASE_URL        = "http://test-server"
     POLL_INTERVAL   = 1
     REQUEST_TIMEOUT = 5
-    SUBMIT_ENDPOINT = "/api/push"
+    # /api/push retired 2026-08-21. These tests drive the POLLING arm, which the
+    # base class still takes for any response that is not terminal.
+    SUBMIT_ENDPOINT = "/api/v2/ask"
 
     def __init__( self ):
         pass  # deliberately skip base setup (login/config) — we test polling only
@@ -153,3 +155,88 @@ def test_timeout_absent_reports_not_found():
     job, err = _run_submit_and_wait( {}, timeout=2 )
     assert job is None
     assert "NOT FOUND in any queue" in err
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# The v2 cutover — BOTH ARMS (2026-08-21)
+#
+# `/api/push` queued the work and answered `{status: "queued", job_id}`, so the harness
+# submitted and polled. `/api/v2/ask` does not queue: with `v2 executor = inline` the
+# agent runs on the request thread and the response IS the terminal result. Polling such
+# a job waits out the whole timeout and then reports a job that finished before the first
+# poll.
+#
+# The branch is on the RESPONSE, not the endpoint, and both arms are pinned here. Once
+# the queued executor lands, an agentic job comes back "waiting" with a job_id through
+# the SAME door and must still be polled — an endpoint-only branch would be correct
+# today and wrong the moment that merges. That is the case the second half covers.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_a_terminal_v2_answer_is_the_result_and_nothing_is_polled():
+    h = _Harness()
+    body = { "status": "done", "path": "agent", "answer": "the answer", "trace_id": "t1" }
+    with patch.object( lpb.requests, "post", return_value=_resp( 200, body ) ), \
+         patch.object( lpb.requests, "get", side_effect=AssertionError( "must not poll a finished job" ) ):
+        job, err = h._submit_and_wait( SCENARIO, HEADERS, "ws-1", timeout=1 )
+
+    assert err is None
+    # Mapped onto the key every validator already reads, so no scenario file changes.
+    assert job[ "response_text" ] == "the answer"
+
+
+def test_a_waiting_v2_response_still_polls_the_done_queue():
+    """
+    The arm that keeps this honest after Krishna's queued executor merges. Same door,
+    same harness — a job that went to a queue answers "waiting" with a job_id, and the
+    old submit-then-poll path has to run for it.
+    """
+    h = _Harness()
+    body = { "status": "waiting", "job_id": "pr-x", "trace_id": "t2" }
+    with patch.object( lpb.requests, "post", return_value=_resp( 200, body ) ), \
+         patch.object( lpb.requests, "get", side_effect=_queue_getter( { "done": [ JOB ] } ) ):
+        job, err = h._submit_and_wait( SCENARIO, HEADERS, "ws-1", timeout=5 )
+
+    assert err is None
+    assert job == JOB, "a waiting response must be resolved by polling, not read as an answer"
+
+
+def test_a_failed_v2_flow_is_reported_as_a_failure_not_an_empty_answer():
+    h = _Harness()
+    body = { "status": "failed", "error": "router exploded", "trace_id": "t3" }
+    with patch.object( lpb.requests, "post", return_value=_resp( 200, body ) ):
+        job, err = h._submit_and_wait( SCENARIO, HEADERS, "ws-1", timeout=1 )
+
+    assert job is None
+    assert "router exploded" in err
+
+
+def test_a_flow_that_stops_to_ask_is_a_failure_not_a_pass():
+    """
+    A scenario that parks never ran to an answer. Reporting it as a pass with an empty
+    answer would be worse than reporting a failure — the validators keyword-match on
+    `response_text`, and an empty string quietly matches nothing while the run reads green
+    for anything with no expected keywords.
+    """
+    h = _Harness()
+    body = { "status": "needs_input", "args_missing": [ "date" ], "trace_id": "t4" }
+    with patch.object( lpb.requests, "post", return_value=_resp( 200, body ) ):
+        job, err = h._submit_and_wait( SCENARIO, HEADERS, "ws-1", timeout=1 )
+
+    assert job is None
+    assert "needs_input" in err and "date" in err
+
+
+def test_an_old_style_queued_response_is_untouched():
+    """
+    The legacy shape carries no `status` this branch recognises, so it falls straight
+    through to polling — which is what every pre-cutover caller and the pinned v1 eval
+    server still produce.
+    """
+    h = _Harness()
+    body = { "status": "queued", "job_id": "pr-x", "websocket_id": "ws-1" }
+    with patch.object( lpb.requests, "post", return_value=_resp( 200, body ) ), \
+         patch.object( lpb.requests, "get", side_effect=_queue_getter( { "done": [ JOB ] } ) ):
+        job, err = h._submit_and_wait( SCENARIO, HEADERS, "ws-1", timeout=5 )
+
+    assert err is None
+    assert job == JOB

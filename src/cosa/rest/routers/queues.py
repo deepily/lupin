@@ -19,6 +19,8 @@ from pydantic import BaseModel
 
 import cosa.utils.util as cu
 
+from cosa.rest.routers._retired_doors import gone, tombstone_description
+
 # Import dependencies
 from cosa.rest.auth import get_current_user
 from cosa.rest.queue_auth import authorize_queue_filter
@@ -157,102 +159,32 @@ def _count_interactions_for_jobs( job_ids ):
         print( f"[WARN] _count_interactions_for_jobs failed: {e}" )
         return {}
 
+
+# ── TOMBSTONE — /api/push ──
+#   GONE. Work now enters through /api/v2/ask. REMOVE BY 2026-12-31.
+#   What was here: a handler that took a bare question and handed it to push_job.
+#   Why that was bad: eighteen doors into one queue meant eighteen places a guard
+#   would have to be installed, and the read guard could not cover them all. Rick,
+#   2026-08-21: ONE entry point, and it is v2.
+#   The body is DELETED rather than left unreachable below a raise: unreachable code
+#   is code nobody can test and everybody must still read. Recover it from git if any
+#   of its handling turns out to be worth carrying into /api/v2/ask.
 @router.post(
     "/push",
-    summary     = "Push job to queue",
-    description = "Submit a new job to the todo queue. Requires question and websocket_id in request body."
+    deprecated  = True,
+    status_code = 410,
+    summary     = "GONE — use /api/v2/ask",
+    description = tombstone_description( "/api/push" )
 )
-async def push(
-    request: Request,
-    current_user: dict = Depends(get_current_user),
-    todo_queue = Depends(get_todo_queue)
-):
+async def push():
     """
-    Add a question to the todo queue with required websocket tracking and user authentication.
-    
-    Requires:
-        - request body contains JSON with "question" and "websocket_id" fields
-        - question is a non-empty string query to process
-        - websocket_id is a valid WebSocket identifier from /api/get-session-id
-        - current_user is authenticated with valid token containing uid
-        - todo_queue is initialized and accessible
-        
+    Refuse this retired door with 410 Gone.
+
     Ensures:
-        - Question added to todo queue with metadata
-        - WebSocket ID and user ID properly associated with the job
-        - Returns confirmation with status and routing information
-        - Logs the push operation for debugging
-        
-    Raises:
-        - HTTPException with 400 status if request body is malformed
-        - HTTPException with 400 status if required fields are missing
-        - HTTPException if authentication fails
-        - Exception if queue push operation fails
-        
-    Args:
-        request: FastAPI request containing JSON body with question and websocket_id
-        current_user: Authenticated user info from token
-        todo_queue: Todo queue instance for job management
-        
-    Returns:
-        dict: Status, websocket_id, user_id, and result from queue push
+        - never returns; raises HTTPException( 410 ) naming /api/v2/ask
+          and the REMOVE BY 2026-12-31 date
     """
-    try:
-        # Parse JSON request body
-        request_data = await request.json()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON in request body: {str(e)}")
-    
-    # Validate required fields
-    if not isinstance(request_data, dict):
-        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
-    
-    question = request_data.get("question")
-    websocket_id = request_data.get("websocket_id")
-    
-    if not question:
-        raise HTTPException(status_code=400, detail="Missing required field: question")
-    
-    if not websocket_id:
-        raise HTTPException(status_code=400, detail="Missing required field: websocket_id")
-    
-    # Validate field types
-    if not isinstance(question, str):
-        raise HTTPException(status_code=400, detail="Field 'question' must be a string")
-    
-    if not isinstance(websocket_id, str):
-        raise HTTPException(status_code=400, detail="Field 'websocket_id' must be a string")
-    
-    # Validate field content
-    question = question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Field 'question' cannot be empty")
-    
-    websocket_id = websocket_id.strip()
-    if not websocket_id:
-        raise HTTPException(status_code=400, detail="Field 'websocket_id' cannot be empty")
-    
-    user_id    = current_user["uid"]
-    user_email = current_user["email"]
-    print( f"[API] /api/push called - question: '{question}', websocket_id: {websocket_id}, user_id: {user_id}, user_email: {user_email}" )
-
-    # Push to queue with websocket_id, user_id, and user_email for TTS routing
-    try:
-        result = await asyncio.to_thread( todo_queue.push_job, question, websocket_id, user_id, user_email )
-        print(f"[API] /api/push successful - result: {result}")
-    except Exception as e:
-        print(f"[API] /api/push failed - error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to push job to queue: {str(e)}")
-
-    return {
-        "status"       : "queued",
-        "websocket_id" : websocket_id,
-        "user_id"      : user_id,
-        "job_id"       : result.get( "job_id" ) if isinstance( result, dict ) else None,
-        "result"       : result.get( "message", str( result ) ) if isinstance( result, dict ) else str( result )
-    }
+    gone( "/api/push" )
 
 
 @router.post(
@@ -1539,77 +1471,35 @@ async def delete_job_history_endpoint(
     return { "status": "deleted", "job_id": job_id }
 
 
+# ── TOMBSTONE — /api/job-history/{job_id}/retry ──
+#   GONE. Work now enters through /api/v2/ask. REMOVE BY 2026-12-31.
+#   What was here: a queue door wearing a job-history URL. It read `question_text` off
+#   the stored row and called push_job with it — its own comment said "the same pattern
+#   as POST /api/push". The client sent only a websocket_id, so the CALLER now has to
+#   hold the question: notifications.js already did (it shows it in the confirm dialog),
+#   and JobsPaneRenderer.ts reads it off the hydrated history row's meta.
+#   Why that was bad: eighteen doors into one queue meant eighteen places a guard
+#   would have to be installed, and the read guard could not cover them all. Rick,
+#   2026-08-21: ONE entry point, and it is v2.
+#   The body is DELETED rather than left unreachable below a raise: unreachable code
+#   is code nobody can test and everybody must still read. Recover it from git if any
+#   of its handling turns out to be worth carrying into /api/v2/ask.
 @router.post(
     "/job-history/{job_id}/retry",
-    summary     = "Retry a failed or interrupted job",
-    description = "Re-submit a failed or interrupted job to the todo queue as a new job."
+    deprecated  = True,
+    status_code = 410,
+    summary     = "GONE — use /api/v2/ask",
+    description = tombstone_description( "/api/job-history/{job_id}/retry" )
 )
-async def retry_job_history(
-    job_id: str,
-    request: Request,
-    current_user: dict = Depends( get_current_user ),
-    todo_queue         = Depends( get_todo_queue )
-):
+async def retry_job_history():
     """
-    Re-submit a failed/interrupted job to the CJ Flow todo queue.
-
-    Requires:
-        - Authenticated user (Bearer token)
-        - job_id is a valid id_hash of a failed or interrupted job
-        - Request body contains JSON with "websocket_id" field
-        - User must be admin or the job's owner
+    Refuse this retired door with 410 Gone.
 
     Ensures:
-        - Creates a new todo entry with the original question_text
-        - Returns { status: "retried", original_job_id: str }
-        - 404 if job not found
-        - 403 if unauthorized
-        - 400 if job status is not failed or interrupted
-        - 400 if websocket_id missing from request body
+        - never returns; raises HTTPException( 410 ) naming /api/v2/ask
+          and the REMOVE BY 2026-12-31 date
     """
-    import asyncio
-    from cosa.rest.job_persistence import get_job_by_id_hash
-
-    job = get_job_by_id_hash( job_id )
-
-    if job is None:
-        raise HTTPException( status_code=404, detail=f"Job not found: {job_id}" )
-
-    # Authorization: regular users can only retry their own jobs
-    if not is_admin( current_user ) and job.get( "user_id" ) != current_user[ "uid" ]:
-        raise HTTPException( status_code=403, detail="Not authorized to retry this job" )
-
-    # Only allow retry of terminal failure states
-    if job.get( "status" ) not in ( "failed", "interrupted" ):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot retry job with status '{job.get( 'status' )}'. Only failed or interrupted jobs can be retried."
-        )
-
-    # Parse request body for websocket_id
-    try:
-        request_data = await request.json()
-    except Exception as e:
-        raise HTTPException( status_code=400, detail=f"Invalid JSON in request body: {str( e )}" )
-
-    websocket_id = request_data.get( "websocket_id" )
-    if not websocket_id or not isinstance( websocket_id, str ):
-        raise HTTPException( status_code=400, detail="Missing required field: websocket_id" )
-
-    question     = job.get( "question_text", "" )
-    user_id      = current_user[ "uid" ]
-    user_email   = current_user[ "email" ]
-
-    print( f"[API] /api/job-history/{job_id}/retry - re-submitting: '{question[:80]}', user: {user_id}" )
-
-    # Push to todo queue using the same pattern as POST /api/push
-    result = await asyncio.to_thread( todo_queue.push_job, question, websocket_id, user_id, user_email )
-
-    return {
-        "status"          : "retried",
-        "original_job_id" : job_id,
-        "result"          : result
-    }
+    gone( "/api/job-history/{job_id}/retry" )
 
 
 # =============================================================================

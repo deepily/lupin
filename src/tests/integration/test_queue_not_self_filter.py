@@ -189,6 +189,13 @@ class TestNotSelfFilterAuthorization:
 # !self Filter Data Correctness Tests
 # ---------------------------------------------------------------------------
 
+# SKIPPED 2026-08-21 — same precondition as test_job_queue_progressive_disclosure. These
+# assert that specific job ids appear in queue listings and that "own" and "!self" do not
+# overlap, which requires jobs to be sitting in a queue. /api/push is a 410 tombstone and
+# /api/v2/ask answers inline without queueing, so there is nothing to list. The sibling
+# TestNotSelfFilterAuthorization class is deliberately NOT skipped: it checks 403/200 and
+# the filtered_by shape, which hold with an empty queue.
+@pytest.mark.skip( reason="needs a job to LAND IN A QUEUE — /api/push was retired 2026-08-21 and /api/v2/ask runs inline (InlineExecutor, no queue write at all). Re-enable the moment step 10's /api/v2/submit and the QueuedExecutor merge; tracked in the task store, and Maya's post-step-12 integration gate must show this un-skipped." )
 class TestNotSelfFilterData:
     """Tests that !self filter returns correct job sets."""
 

@@ -34,8 +34,11 @@ class TestQueueFilteringIntegration:
         )
         user_token = login_response.json()["tokens"]["access_token"]
 
-        # Push a job as this user
-        push_response = requests.post( f"{BASE_URL}/api/push",
+        # Ask a question as this user. /api/push was retired 2026-08-21 (410, names this
+        # door). The swap is safe here because this test never depended on the job
+        # LANDING in the queue — it asserts total_jobs >= 0 and validates the filtering
+        # response shape, as its own comment below says.
+        push_response = requests.post( f"{BASE_URL}/api/v2/ask",
             json={
                 "question": "What is 2+2?",
                 "websocket_id": "test_session_1"
@@ -142,8 +145,8 @@ class TestQueueFilteringIntegration:
         user_token = login_response.json()["tokens"]["access_token"]
         target_user_id = login_response.json()["user"]["id"]
 
-        # Push job as target user
-        requests.post( f"{BASE_URL}/api/push",
+        # Ask as the target user (/api/push retired 2026-08-21).
+        requests.post( f"{BASE_URL}/api/v2/ask",
             json={
                 "question": "Target user question",
                 "websocket_id": "target_session"
