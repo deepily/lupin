@@ -1313,6 +1313,18 @@ class TestQAScriptFormat:
                 # Skip confirmation entries — not in TEST_PROFILES
                 if arg_name == "confirmation":
                     continue
+                # SELECTION entries are not VALUE entries (row 9046ef58). An entry
+                # answerable ONLY as a choice card — the document choice card, TFE's
+                # two — carries a directive telling the matcher WHICH OPTION to pick,
+                # because its option labels are discovered at run time and no fixed
+                # value could match one. Comparing that directive to a profile value
+                # is comparing two different kinds of thing. The distinction is
+                # `response_types == ["multiple_choice"]` exactly: an entry that also
+                # accepts open_ended (like `audience`) does carry a real value, and is
+                # still checked. The document card entries have their own test,
+                # test_proxy_scripts_answer_the_choice_card.py.
+                if entry.get( "response_types" ) == [ "multiple_choice" ]:
+                    continue
                 if arg_name in profile:
                     assert entry[ "answer" ] == profile[ arg_name ], \
                         f"{profile_name}: script answer for '{arg_name}' ({entry[ 'answer' ]}) != " \
