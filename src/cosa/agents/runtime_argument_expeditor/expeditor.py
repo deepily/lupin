@@ -164,6 +164,16 @@ DOC_CHOICE_DESCRIBE_LABEL    = "Let me describe it instead"
 DOC_CHOICE_CANCEL_LABEL      = "Cancel"
 DOC_CHOICE_DESCRIBE_SENTINEL = "__describe_instead__"   # helper return: user opted for the open ask
 
+# WHAT THIS CARD IS, said once and stably (row a1420538). The card's QUESTION is
+# derived per calling agent — "for the podcast", "for the presentation" — which is
+# right for the user and wrong as an identifier: the decision proxy's answer files
+# matched on that prose, so every new agent needed its own byte-identical entry and a
+# wording change silently left the card unanswered. The id says WHICH CARD this is
+# regardless of who is asking, and rides in response_options, which the API carries
+# through as an opaque dict (notifications.py json.loads it and passes it on) — no new
+# model field, no endpoint change.
+DOCUMENT_CHOICE_CARD_ID      = "document_choice"
+
 
 # --------------------------------------------------------------------------- #
 # Turning a failure reason into what the user hears (bug 68198c9f).
@@ -1053,6 +1063,21 @@ class RuntimeArgumentExpeditor:
         Returns:
             str or None: User's response or None
         """
+        response_options = {
+            "questions": [ {
+                "question"     : question,
+                "header"       : arg_name,
+                "multi_select" : False,
+                "options"      : options
+            } ]
+        }
+        # The id rides BESIDE questions, not inside one: it names the card, not a
+        # question on it. Omitted entirely when the caller does not name one, so the
+        # routing-confirm card and every other user of this ask are byte-identical to
+        # what they sent before.
+        if card_id is not None:
+            response_options[ "card_id" ] = card_id
+
         request = NotificationRequest(
             message          = question,
             response_type    = ResponseType.OPEN_ENDED,
@@ -1087,7 +1112,8 @@ class RuntimeArgumentExpeditor:
         self._last_expedite_reason = self._classify_ask_failure( response )
         return None
 
-    def _ask_choice_for_arg( self, arg_name, question, options, user_email, abstract=None ):
+    def _ask_choice_for_arg( self, arg_name, question, options, user_email, abstract=None,
+                             card_id=None ):
         """
         Ask the user to pick a value for a missing arg from a fixed list, using the
         SAME multiple-choice card the routing confirm uses — no new card, renderer,
@@ -1134,14 +1160,7 @@ class RuntimeArgumentExpeditor:
             suppress_ding    = False,
             abstract         = abstract,
             job_id           = self._job_id,
-            response_options = {
-                "questions": [ {
-                    "question"     : question,
-                    "header"       : arg_name,
-                    "multi_select" : False,
-                    "options"      : options
-                } ]
-            }
+            response_options = response_options
         )
 
         response = notify_user_sync( request=request, debug=self.debug, bearer_token=self._bearer_token )
@@ -1273,7 +1292,8 @@ class RuntimeArgumentExpeditor:
             arg_name,
             self._document_choice_question( agent_display_name ),
             options,
-            user_email
+            user_email,
+            card_id=DOCUMENT_CHOICE_CARD_ID
         )
         if chosen is None or chosen == DOC_CHOICE_DESCRIBE_SENTINEL:
             return chosen

@@ -28,6 +28,7 @@ JSON_WRONG_KEY         = '{"picked": "kiss.md"}'
 JSON_ANSWERS_IS_A_LIST = '{"answers": ["kiss.md"]}'
 JSON_TOP_LEVEL_LIST    = '{"a": 1}[0]'
 JSON_BROKEN            = '{"answers": {"source": }'
+JSON_EMPTY_MAP         = '{"answers": {}}'
 
 
 def _card( *labels ):
@@ -224,6 +225,15 @@ class TestUnofferedValues( unittest.TestCase ):
         # It is not a label the card offered either. Pretending it parsed would hide
         # that the answer is malformed.
         self.assertEqual( sentinels.unoffered_values( JSON_BROKEN, _card( "kiss.md" ) ), [ JSON_BROKEN ] )
+
+    def test_an_empty_answers_map_is_reported_not_vacuously_accepted( self ):
+        # MARÍA'S CATCH. The map parses, carries no values, and the comprehension
+        # yields nothing — so "no violations" would be true for the wrong reason and
+        # the raw JSON would be submitted as a label. An answer with no label in it is
+        # not an offered label.
+        # RED ON REVERT (the `and answers` guard removed): [] != the JSON text.
+        self.assertEqual( sentinels.unoffered_values( JSON_EMPTY_MAP, _card( "kiss.md" ) ),
+                          [ JSON_EMPTY_MAP ] )
 
     def test_json_that_is_not_an_answers_map_is_reported( self ):
         card = _card( "kiss.md" )

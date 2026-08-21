@@ -212,9 +212,13 @@ def _answer_values( answer ):
             answers = json.loads( text ).get( "answers", None )
         except ( json.JSONDecodeError, AttributeError ):
             return [ text ]
-        if isinstance( answers, dict ):
+        if isinstance( answers, dict ) and answers:
             return [ value.strip() if isinstance( value, str ) else value
                      for value in answers.values() ]
+        # An EMPTY answers map carries no label, and "no values" must not read as "no
+        # violations" — that would make the check vacuously pass and submit the raw
+        # JSON, which is exactly the unknown-label failure it exists to stop. Reported
+        # as itself, like unparseable JSON.
         return [ text ]
     return [ text ]
 
