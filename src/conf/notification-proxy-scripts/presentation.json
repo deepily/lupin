@@ -1,43 +1,72 @@
 {
-    "profile_name"  : "presentation",
-    "description"   : "Q&A script for presentation generator expediter questions",
-    "sender_ids"    : [ "arg.expeditor@lupin.deepily.ai" ],
-    "entries" : [
-        {
-            "question_pattern" : "Which document should I convert to a presentation? Describe it or say the filename.",
-            "answer"           : "/tmp/mock-source-document.md",
-            "arg_name"         : "source",
-            "response_types"   : [ "open_ended", "open_ended_batch" ]
-        },
-        {
-            "question_pattern" : "How long should the presentation be in minutes? Say a number, or 'default' for 15 minutes.",
-            "answer"           : "default",
-            "arg_name"         : "target_duration_minutes",
-            "response_types"   : [ "open_ended", "open_ended_batch" ]
-        },
-        {
-            "question_pattern" : "Who is the target audience? Options: beginner, general, expert, or academic.",
-            "answer"           : "general",
-            "arg_name"         : "audience",
-            "response_types"   : [ "open_ended", "open_ended_batch", "multiple_choice" ]
-        },
-        {
-            "question_pattern" : "Any additional context about the audience? Say 'none' to skip.",
-            "answer"           : "none",
-            "arg_name"         : "audience_context",
-            "response_types"   : [ "open_ended", "open_ended_batch" ]
-        },
-        {
-            "question_pattern" : "Which presentation theme? Say 'default' or a theme name.",
-            "answer"           : "default",
-            "arg_name"         : "theme",
-            "response_types"   : [ "open_ended", "open_ended_batch" ]
-        },
-        {
-            "question_pattern" : "Would you like to proceed with these settings?",
-            "answer"           : "yes",
-            "arg_name"         : "confirmation",
-            "response_types"   : [ "yes_no" ]
-        }
-    ]
+  "profile_name": "presentation",
+  "description": "Q&A script for presentation generator expediter questions",
+  "sender_ids": [
+    "arg.expeditor@lupin.deepily.ai"
+  ],
+  "entries": [
+    {
+      "question_pattern": "Which document should I convert to a presentation? Describe it or say the filename.",
+      "answer": "/tmp/mock-source-document.md",
+      "arg_name": "source",
+      "response_types": [
+        "open_ended",
+        "open_ended_batch"
+      ]
+    },
+    {
+      "question_pattern": "How long should the presentation be in minutes? Say a number, or 'default' for 15 minutes.",
+      "answer": "default",
+      "arg_name": "target_duration_minutes",
+      "response_types": [
+        "open_ended",
+        "open_ended_batch"
+      ]
+    },
+    {
+      "question_pattern": "Who is the target audience? Options: beginner, general, expert, or academic.",
+      "answer": "general",
+      "arg_name": "audience",
+      "response_types": [
+        "open_ended",
+        "open_ended_batch",
+        "multiple_choice"
+      ]
+    },
+    {
+      "question_pattern": "Any additional context about the audience? Say 'none' to skip.",
+      "answer": "none",
+      "arg_name": "audience_context",
+      "response_types": [
+        "open_ended",
+        "open_ended_batch"
+      ]
+    },
+    {
+      "question_pattern": "Which presentation theme? Say 'default' or a theme name.",
+      "answer": "default",
+      "arg_name": "theme",
+      "response_types": [
+        "open_ended",
+        "open_ended_batch"
+      ]
+    },
+    {
+      "question_pattern": "Which document should I use for the presentation?",
+      "answer": "Pick the first document option in the list — never 'Let me describe it' and never 'Cancel'.",
+      "arg_name": "source",
+      "response_types": [
+        "multiple_choice"
+      ],
+      "comment": "The DOCUMENT CHOICE CARD (row 9046ef58). It appears whenever the matcher finds 2..cap candidates, which an automated run reaches as soon as the search directory holds more than one plausible file; without this entry the proxy has nothing to answer with and the run CANCELS at the card. The answer is a DIRECTIVE, not a literal: the option labels are candidate basenames discovered at run time, so no fixed string could ever match one. The script matcher is told to pick the option label that best aligns with this answer. The question_pattern must stay byte-identical to what RuntimeArgumentExpeditor._document_choice_question returns for this agent — test_proxy_scripts_answer_the_choice_card.py pins the pair."
+    },
+    {
+      "question_pattern": "Would you like to proceed with these settings?",
+      "answer": "yes",
+      "arg_name": "confirmation",
+      "response_types": [
+        "yes_no"
+      ]
+    }
+  ]
 }
