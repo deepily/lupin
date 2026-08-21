@@ -266,6 +266,58 @@ def _answer_values( answer ):
     return [ text ]
 
 
+def unasked_headers( answer, notification ):
+    """
+    Every header the answer keys a value under that this card never asked under.
+
+    THE FOURTH CASE FROM ROW adf5c1a1, and the one element-wise comparison structurally
+    cannot catch: in `{"answers": {"Wrong": ["c1: fix one"]}}` the LABEL is perfectly
+    valid — the card did offer it — and the defect is the KEY.
+
+    It matters for the same reason the whole 054207ce chain does. The reader looks the
+    answer up under the question's own header (voice_io.read_gate_answer). A header the
+    card never asked under is therefore not a wrong answer, it is NO answer: the real
+    header reads as absent, the reader falls to its unattended_default, and the agent
+    concludes the user chose nothing. Silent, and indistinguishable from a human
+    declining — the exact failure shape this family of rows keeps producing.
+
+    Requires:
+        - answer is the value about to be submitted
+        - notification is the card it answers
+
+    Ensures:
+        - returns [] for an answer that is not a JSON answers map — a bare label has no
+          header to be wrong, and unoffered_values is what judges it
+        - returns [] when the card asks under no headers at all; there is then nothing
+          to check against, and inventing a rule would reject every answer to a
+          malformed card twice over
+        - the comparison is EXACT after stripping, like every other match in this module
+
+    Raises:
+        - nothing
+    """
+    if not isinstance( answer, str ):
+        return []
+
+    text = answer.strip()
+    if not text.startswith( "{" ):
+        return []
+    try:
+        answers = json.loads( text ).get( "answers", None )
+    except ( json.JSONDecodeError, AttributeError ):
+        return []
+    if not isinstance( answers, dict ) or not answers:
+        return []
+
+    questions = ( notification.get( "response_options" ) or {} ).get( "questions" ) or []
+    asked     = { ( q.get( "header" ) or "" ).strip() for q in questions }
+    asked.discard( "" )
+    if not asked:
+        return []
+
+    return [ header for header in answers if header.strip() not in asked ]
+
+
 def unoffered_values( answer, notification ):
     """
     Every value in `answer` that this card never offered as an option.

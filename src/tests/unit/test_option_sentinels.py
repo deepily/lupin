@@ -278,6 +278,66 @@ class TestAllOptions( unittest.TestCase ):
             sentinels.resolve( "__everything__", _multi_card( "a" ) )
 
 
+class TestUnaskedHeaders( unittest.TestCase ):
+    """
+    Row adf5c1a1's FOURTH measured case — the one element-wise label comparison
+    structurally cannot catch, because the label is valid and the KEY is wrong.
+
+    A header the card never asked under is NO answer rather than a wrong one: the
+    reader looks under the question's own header, finds it absent, falls to its
+    unattended_default, and the agent reports that the user chose nothing. Silent, and
+    indistinguishable from a human declining.
+    """
+
+    CARD = { "response_options": { "questions": [
+        { "header": "Fixes", "multi_select": True,
+          "options": [ { "label": "c1: fix one" }, { "label": "c2: fix two" } ] } ] } }
+
+    def test_the_cards_own_header_is_fine( self ):
+        self.assertEqual(
+            sentinels.unasked_headers( '{"answers": {"Fixes": ["c1: fix one"]}}', self.CARD ), [] )
+
+    def test_a_header_the_card_never_asked_is_reported( self ):
+        # RED ON REVERT (the check removed): the responder submits it, and the agent
+        # reads it as the user having selected nothing.
+        self.assertEqual(
+            sentinels.unasked_headers( '{"answers": {"Wrong": ["c1: fix one"]}}', self.CARD ),
+            [ "Wrong" ] )
+
+    def test_a_valid_label_does_not_excuse_a_wrong_header( self ):
+        # The whole reason this is a separate check: unoffered_values sees a label the
+        # card really did offer and correctly reports nothing.
+        payload = '{"answers": {"Wrong": ["c1: fix one"]}}'
+        self.assertEqual( sentinels.unoffered_values( payload, self.CARD ), [] )
+        self.assertTrue( sentinels.unasked_headers( payload, self.CARD ) )
+
+    def test_a_bare_label_has_no_header_to_be_wrong( self ):
+        # unoffered_values is what judges a bare answer; this must not double-reject it.
+        self.assertEqual( sentinels.unasked_headers( "c1: fix one", self.CARD ), [] )
+        self.assertEqual( sentinels.unasked_headers( 7, self.CARD ), [] )
+
+    def test_malformed_payloads_are_left_to_the_value_check( self ):
+        for payload in ( JSON_BROKEN, JSON_WRONG_KEY, JSON_ANSWERS_IS_A_LIST,
+                         JSON_EMPTY_MAP, JSON_TOP_LEVEL_LIST ):
+            with self.subTest( payload=payload ):
+                self.assertEqual( sentinels.unasked_headers( payload, self.CARD ), [] )
+
+    def test_a_card_asking_under_no_header_checks_nothing( self ):
+        # Nothing to compare against. Inventing a rule here would reject every answer to
+        # a malformed card twice — once for the header, once for the label.
+        for card in ( {}, { "response_options": { "questions": [ { "options": [] } ] } } ):
+            with self.subTest( card=card ):
+                self.assertEqual(
+                    sentinels.unasked_headers( '{"answers": {"Fixes": ["a"]}}', card ), [] )
+
+    def test_the_comparison_tolerates_padding_but_not_a_rename( self ):
+        self.assertEqual(
+            sentinels.unasked_headers( '{"answers": {"  Fixes  ": ["c1: fix one"]}}', self.CARD ), [] )
+        self.assertEqual(
+            sentinels.unasked_headers( '{"answers": {"fixes": ["c1: fix one"]}}', self.CARD ),
+            [ "fixes" ] )
+
+
 class TestUnofferedValues( unittest.TestCase ):
     """
     Row a1420538. The sentinel resolver only ever looked at sentinel-SHAPED answers,

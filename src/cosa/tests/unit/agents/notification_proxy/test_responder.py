@@ -498,6 +498,31 @@ class TestPositionalSentinelResolution:
         submit.assert_called_once()
         assert r.stats[ "responses_sent" ] == 1
 
+    def test_an_answer_under_a_header_the_card_never_asked_is_a_counted_skip( self ):
+        # The label is one the card really did offer, so the label check passes it.
+        # Submitting it means the agent looks under its own header, finds nothing, and
+        # reports that the user selected no fixes.
+        # RED ON REVERT (the header check removed): submit is called with the payload.
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = json.dumps(
+            { "answers": { "Wrong": [ "c1: widen the timeout" ] } } )
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, self._multi_card_event( "c1: widen the timeout", "c2: fix the import" ) )
+        submit.assert_not_called()
+        assert r.stats[ "skipped" ] == 1
+
+    def test_the_header_rejection_names_the_strategy_and_the_header( self, capsys ):
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = json.dumps( { "answers": { "Wrong": [ "c1: widen the timeout" ] } } )
+        with patch.object( r, "_submit_response", return_value=True ):
+            self._run( r, self._multi_card_event( "c1: widen the timeout" ) )
+        printed = capsys.readouterr().out
+        assert "never asked" in printed
+        assert "script_matcher" in printed
+        assert "Wrong" in printed
+
     def test_an_ordinary_answer_is_untouched( self ):
         # The resolver sits in the hot path for EVERY answer; this is the guard that
         # it changes nothing for the other several hundred script entries.
