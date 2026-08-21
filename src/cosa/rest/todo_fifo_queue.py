@@ -18,6 +18,7 @@ from cosa.agents.math_agent import MathAgent
 from cosa.crud_for_dataframes.todo_crud_agent import TodoCrudAgent
 from cosa.crud_for_dataframes.calendar_crud_agent import CalendarCrudAgent
 from cosa.agents.calculator.agent import CalculatorAgent
+from cosa.rest.salutations import SALUTATIONS, parse_salutations
 from cosa.rest.v2.registry import resolve   # the command->agent table (row 10ef4b64)
 from cosa.agents.llm_client_factory import LlmClientFactory
 from cosa.rest.agentic_job_factory import create_agentic_job
@@ -208,12 +209,10 @@ class TodoFifoQueue( FifoQueue ):
 
         if self.debug: print( "TodoFifoQueue: Text processors and three-level architecture components initialized" )
         
-        # Salutations to be stripped by a brute force method until the router parses them off for us
-        self.salutations = [ "computer", "little", "buddy", "pal", "ai", "jarvis", "alexa", "siri", "hal", "einstein",
-            "jeeves", "alfred", "watson", "samwise", "sam", "hawkeye", "oye", "hey", "there", "you", "yo",
-            "hi", "hello", "hola", "good", "morning", "afternoon", "evening", "night", "buenas", "buenos", "buen", "tardes",
-            "noches", "dias", "día", "tarde", "greetings", "my", "dear", "dearest", "esteemed", "assistant", "receptionist", "friend"
-        ]
+        # Salutations to be stripped by a brute force method until the router parses
+        # them off for us. The list moved to cosa.rest.salutations so the v2 flow reads
+        # the SAME one — two copies is how two surfaces disagree about what a greeting is.
+        self.salutations = SALUTATIONS
         self.hemming_and_hawing = [
             "", "", "", "umm...", "hmm...", "hmm...", "well...", "ahem..."
         ]
@@ -246,24 +245,9 @@ class TodoFifoQueue( FifoQueue ):
         Raises:
             - None
         """
-        # Normalize the transcription by removing extra spaces after punctuation
-        # From: https://chat.openai.com/share/5783e1d5-c9ce-4503-9338-270a4c9095b2
-        words = transcription.split()
-        prefix_holder = [ ]
-        
-        # Find the index where salutations stop
-        index = 0
-        for word in words:
-            if word.strip( ',.:;!?' ).lower() in self.salutations:
-                prefix_holder.append( word )
-                index += 1
-            else:
-                break
-        
-        # Get the remaining string after salutations
-        remaining_string = ' '.join( words[ index: ] )
-
-        return ' '.join( prefix_holder ), remaining_string
+        # The implementation moved to cosa.rest.salutations; this stays as the queue's
+        # door onto it, and honours self.salutations so a test can still swap the list.
+        return parse_salutations( transcription, self.salutations )
 
     # ========================================================================
     # User Mode Management Methods

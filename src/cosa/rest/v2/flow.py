@@ -29,6 +29,7 @@ from cosa.agents.receptionist_agent import ReceptionistAgent
 from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor import ArgSpec
 from cosa.rest.v2.executor import Work
+from cosa.rest.salutations import parse_salutations
 from cosa.rest.v2.registry import resolve
 from cosa.rest.v2.trace import StageTrace
 
@@ -74,6 +75,8 @@ class AskFlow:
     def __init__(
         self, cache: Any, router: Any, expeditor: Any, executor: Any, pending: Any, *,
         crud_enabled      : bool,
+        auto_debug        : bool                     = False,
+        inject_bugs       : bool                     = False,
         similarity_floor  : float                    = 100.0,
         writeback_enabled : bool                     = False,
         receptionist_factory : Callable[ ..., Any ]  = ReceptionistAgent,
@@ -93,6 +96,10 @@ class AskFlow:
         # flag; a default here would decide calendar and todo routing by omission,
         # which is the failure the single resolver exists to remove.
         self.crud_enabled         = crud_enabled
+        # The same two INI keys the queue reads (`debug auto`, `debug inject bugs`),
+        # so an agent built here gets the flags it would have got via push_job.
+        self.auto_debug           = auto_debug
+        self.inject_bugs          = inject_bugs
         self.similarity_floor     = similarity_floor
         self.writeback_enabled    = writeback_enabled
         self.receptionist_factory = receptionist_factory
@@ -415,14 +422,53 @@ class AskFlow:
             file_args          = {},   # weather takes no file-typed argument
         )
 
-    def _build_agent( self, agent_class: Callable, agent_question: str, ctx: tuple ) -> Any:
-        """Construct an agent on the shared 11-kwarg signature, bare question."""
+    def _build_agent( self, agent_class: Callable, agent_question: str, ctx: tuple,
+                      question: Optional[ str ]=None ) -> Any:
+        """Construct an agent the way the queue constructs one (step 4 parity).
+
+        `question` is the user's ORIGINAL text; `agent_question` is that text with
+        the expeditor's extracted values folded in. Both are needed: the gist and
+        the salutation are read off the original, while the agent itself is asked
+        the composed one.
+
+        Five kwargs are real parity with push_job (`todo_fifo_queue.py:782-787`):
+        question_gist, debug, verbose, auto_debug, inject_bugs. THREE are deliberate
+        non-matches, each ruled and each recorded here so nobody has to re-derive
+        why the table does not line up:
+
+          · `question` — the flow passes the COMPOSED question. Bare parity would
+            drop the arguments the expeditor extracted, because v1 never ran the
+            expeditor for conversational commands and the agent re-parsed the raw
+            text itself. Matching here would regress R-B4.
+
+          · `last_question_asked` — the flow passes the INTENDED form, salutation
+            plus the stripped question. v1 builds `salutations + " " + question`
+            from the ORIGINAL, which still contains the salutation, so "hey what is
+            the weather" reaches every agent as "hey hey what is the weather".
+            Measured against the real method, not read off the source. Parity here
+            would mean copying a defect.
+
+          · `push_counter` — v1's counter lives on the queue singleton, which the
+            flow cannot see without reading through the executor into its queue —
+            the coupling the executor seam exists to prevent, and absent entirely on
+            the inline executor. Stays -1; it rides to step 12 with the lifespan
+            wiring.
+
+        `debug=True` / `verbose=False` are v1's literals, not the flow's own flags:
+        push_job hardcodes them and ignores the queue's, so an agent that ran
+        verbose under v1 must keep running verbose here.
+        """
         user_id, user_email, session_id, websocket_id, _speak = ctx
+        original            = question if question is not None else agent_question
+        salutation, stripped = parse_salutations( original )
         return agent_class(
-            question            = agent_question, question_gist=agent_question,
-            last_question_asked = agent_question, push_counter=-1,
+            question            = agent_question,
+            question_gist       = self.cache.gist( stripped ),
+            last_question_asked = f"{salutation} {stripped}".strip(),
+            push_counter        = -1,
             user_id             = user_id, user_email=user_email, session_id=websocket_id,
-            debug               = self.debug, verbose=self.verbose, auto_debug=False, inject_bugs=False,
+            debug               = True, verbose=False,
+            auto_debug          = self.auto_debug, inject_bugs=self.inject_bugs,
         )
 
     def _compose_question( self, question: str, final_args: dict ) -> str:
@@ -445,7 +491,7 @@ class AskFlow:
         """
         may_cache      = spec.snapshotable if snapshotable is None else snapshotable
         agent_question = self._compose_question( question, final_args )
-        work           = Work( "agent", self._build_agent( spec.factory, agent_question, ctx ),
+        work           = Work( "agent", self._build_agent( spec.factory, agent_question, ctx, question ),
                                ctx[ 0 ], ctx[ 1 ], ctx[ 2 ], snapshotable=may_cache )
         outcome        = self.executor.submit( work, trace )
         # GATE 2 of 2. Same reason as gate 1, on the ordinary path: narrow this back

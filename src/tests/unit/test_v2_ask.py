@@ -338,12 +338,25 @@ def test_build_ask_flow_wires_from_ini( monkeypatch ):
         "v2 snapshot writeback enabled"  : True,
         "v2 similarity floor"            : 90.0,
         "v2 trace dir"                   : "",     # empty → coerced to None
+        # NON-DEFAULT on purpose. Both default to False, so leaving them out would
+        # let a literal False in build_ask_flow pass as though it had read the key.
+        "debug auto"                     : True,
+        "debug inject bugs"              : True,
+        "crud for dataframes agents enabled" : "false",
     } )
     flow, enabled = v2_ask.build_ask_flow( cfg )
     assert enabled is True
     assert captured[ "kwargs" ][ "writeback_enabled" ] is True
     assert captured[ "kwargs" ][ "similarity_floor" ] == 90.0
     assert captured[ "kwargs" ][ "trace_dir" ] is None   # "" coerced
+
+    # THE INI→FLOW HALF. The step-4 parity fixture sets auto_debug/inject_bugs on
+    # the flow object directly, so it proves flow→agent and never crosses this half:
+    # replacing these two reads with literal False left the whole suite green
+    # (Pocholo, on 91f2e09b). Same for the CRUD flag, which is read right beside them.
+    assert captured[ "kwargs" ][ "auto_debug" ]   is True,  "the flow ignored `debug auto`"
+    assert captured[ "kwargs" ][ "inject_bugs" ]  is True,  "the flow ignored `debug inject bugs`"
+    assert captured[ "kwargs" ][ "crud_enabled" ] is False, "the flow ignored `crud for dataframes agents enabled`"
 
 
 def test_build_ask_flow_hands_the_queue_to_the_executor( monkeypatch ):
