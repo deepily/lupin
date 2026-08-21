@@ -139,6 +139,23 @@ def render( v1_spans, v2_warm, mapping, n_per_command, sampled_commands, v2_cold
     lines.append( f"**Surviving into the warm-warm pairing: {len( keys )}"
                   + ( f" of {sampled} sampled**" if sampled else "**" ) )
     lines.append( "" )
+
+    # 🔴 THE SAME FLOOR THE REAL GATE USES, imported rather than re-invented — a second
+    # copy of a threshold is a second thing to drift. paired_eval.MIN_SHARED_PAIRS exists
+    # because a median will happily compute over two points and mean nothing by it; this
+    # tool fired at n=2 on 2026-08-20 the instant the warm pass began, which is how a
+    # "ready" signal turns into a number nobody should quote.
+    try:
+        from paired_eval import MIN_SHARED_PAIRS as _floor
+    except Exception:
+        _floor = 30
+    below_floor = len( keys ) < _floor
+    if below_floor:
+        lines.append( f"🔴 **BELOW THE {_floor}-PAIR FLOOR — this is not yet a number.** "
+                      f"{len( keys )} shared utterance(s) is enough to compute a median and not "
+                      f"enough to mean anything. The figures below are shown so progress is "
+                      f"visible, NOT so they can be quoted." )
+        lines.append( "" )
     lines.append( "⚠️ Survivors are a SELECTED set, not the sample: the arms do not score `ok` at "
                   "the same bar (v2 = HTTP 200; v1 = observed terminal completion), so an utterance "
                   "can drop out of one arm for reasons unrelated to how fast it was." )
@@ -161,7 +178,7 @@ def render( v1_spans, v2_warm, mapping, n_per_command, sampled_commands, v2_cold
 
     lines.append( "" )
     lines.append( "A pooled median hides a category that behaves differently — report both." )
-    return "\n".join( lines ), True
+    return "\n".join( lines ), not below_floor
 
 
 def main( argv=None ):

@@ -99,11 +99,14 @@ def test_pair_is_the_intersection_only():
 # What the rendered report must say
 # ---------------------------------------------------------------------------
 def test_report_states_the_surviving_count_and_the_selection_caveat():
-    v1 = { "a": 100.0, "b": 200.0 }
-    v2 = { "a": 50.0,  "b": 100.0 }
-    text, ok = pw.render( v1, v2, { "a": "todo", "b": "todo" }, 20, [ "todo", "math" ] )
+    """Uses a pairing ABOVE the floor: below it the report is deliberately not-ok, and
+    that is asserted separately."""
+    v1 = { f"u{i}": 100.0 for i in range( 30 ) }
+    v2 = { f"u{i}":  50.0 for i in range( 30 ) }
+    mapping = { f"u{i}": "todo" for i in range( 30 ) }
+    text, ok = pw.render( v1, v2, mapping, 20, [ "todo", "math" ] )
     assert ok
-    assert "Surviving into the warm-warm pairing: 2 of 40" in text
+    assert "Surviving into the warm-warm pairing: 30 of 40" in text
     assert "SELECTED set, not the sample" in text
 
 
@@ -208,3 +211,49 @@ def test_every_refusal_warns_against_reaching_for_the_cold_pass():
         text, _ = pw.render( v1, warm, { "a": "math", "z": "math" }, 20, [ "math" ], v2_cold=cold )
         assert "Do not reach for the cold pass" in text
         assert "49 shared utterances" in text
+
+
+# ---------------------------------------------------------------------------
+# The sample-size floor. The tool fired at n=2 the instant v2's warm pass began
+# on 2026-08-20 — a median over two points, offered as if it were a result.
+# ---------------------------------------------------------------------------
+def _many( n, v1_ms, v2_ms ):
+    return ( { f"u{i}": float( v1_ms ) for i in range( n ) },
+             { f"u{i}": float( v2_ms ) for i in range( n ) },
+             { f"u{i}": "math" for i in range( n ) } )
+
+
+def test_a_pairing_below_the_floor_is_flagged_and_returns_not_ok():
+    v1, v2, mapping = _many( 2, 3484, 22227 )
+    text, ok = pw.render( v1, v2, mapping, 20, [ "math" ], v2_cold={} )
+    assert ok is False                                   # exit code must not read as success
+    assert "BELOW THE 30-PAIR FLOOR" in text
+    assert "not yet a number" in text
+    assert "NOT so they can be quoted" in text
+
+
+def test_the_figures_are_still_shown_below_the_floor_so_progress_is_visible():
+    """Hiding them entirely would make a growing run look identical to a broken one —
+    the same mistake as a bare zero."""
+    v1, v2, mapping = _many( 2, 3484, 22227 )
+    text, _ = pw.render( v1, v2, mapping, 20, [ "math" ], v2_cold={} )
+    assert "**POOLED**" in text and "3484 ms" in text
+
+
+def test_a_pairing_at_the_floor_is_accepted():
+    v1, v2, mapping = _many( 30, 1000, 500 )
+    text, ok = pw.render( v1, v2, mapping, 20, [ "math" ], v2_cold={} )
+    assert ok is True
+    assert "BELOW THE" not in text
+
+
+def test_the_floor_is_the_REAL_gate_s_floor_not_a_second_copy():
+    """A threshold duplicated is a threshold that drifts. RED if this tool ever stops
+    agreeing with the gate that actually decides go/no-go."""
+    import paired_eval
+    v1, v2, mapping = _many( paired_eval.MIN_SHARED_PAIRS - 1, 1000, 500 )
+    _text, ok = pw.render( v1, v2, mapping, 20, [ "math" ], v2_cold={} )
+    assert ok is False
+    v1, v2, mapping = _many( paired_eval.MIN_SHARED_PAIRS, 1000, 500 )
+    _text, ok = pw.render( v1, v2, mapping, 20, [ "math" ], v2_cold={} )
+    assert ok is True
