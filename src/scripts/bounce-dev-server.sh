@@ -47,6 +47,12 @@ CONTAINER="lupin-rest-dev"
 HEALTH_URL="http://localhost:7999/health"
 TIMEOUT_SECS=60           # sized for the slower (recreate) path, not just restart
 POLL_INTERVAL=0.5
+# A SINGLE health 200 does not mean the new process is up. Two ways it lies: the OLD
+# process can still be answering in the moment after `docker restart` is issued (Tiberius
+# hit exactly this on 2026-08-19 and required three 200s by hand before believing it), and
+# a loaded server answers in bursts, so one call is a coin flip (row 1c36199e measured
+# /health at 0.47s and then timing out 36s later on :8000). Require consecutive successes.
+HEALTH_CONSECUTIVE="${HEALTH_CONSECUTIVE:-3}"     # env-overridable; tests set 1
 QUIET=0
 FORCE=0
 UNWARNED_PAUSE_SECS="${UNWARNED_PAUSE_SECS:-5}"   # env-overridable (tests set 0)
@@ -209,25 +215,34 @@ if ! docker restart "$CONTAINER" >/dev/null; then
 fi
 
 # ── Step 3: health poll ───────────────────────────────────────────────────────
-log "Polling $HEALTH_URL (timeout ${TIMEOUT_SECS}s)..."
-deadline=$(( start_ts + TIMEOUT_SECS ))
-while :; do
-    now=$(date +%s)
-    if [ "$now" -ge "$deadline" ]; then
-        echo "ERROR: $CONTAINER did not become healthy within ${TIMEOUT_SECS}s — server may be DOWN." >&2
-        echo "       The startup all-clear will NOT have fired. Investigate before assuming it is up." >&2
-        echo "--- docker logs --tail 50 $CONTAINER ---" >&2
-        docker logs --tail 50 "$CONTAINER" >&2 || true
-        exit 1
+# Delegated to src/scripts/lib/wait-for-health.sh, which requires HEALTH_CONSECUTIVE
+# successes IN A ROW. One 200 is not proof: right after `docker restart` the OLD process
+# can still be answering (hit on :7999, 2026-08-19), and a loaded server answers in
+# bursts (measured on :8000, row 1c36199e). The helper is separate so it can be tested
+# without running this script, which restarts a container and broadcasts to the fleet —
+# see src/tests/unit/test_wait_for_health.py.
+log "Polling $HEALTH_URL (need ${HEALTH_CONSECUTIVE} consecutive OKs, timeout ${TIMEOUT_SECS}s)..."
+
+health_args=( "$HEALTH_URL"
+              --consecutive "$HEALTH_CONSECUTIVE"
+              --timeout     "$TIMEOUT_SECS"
+              --interval    "$POLL_INTERVAL" )
+# NOT `[ ... ] && health_args+=(...)` — under `set -e` that whole list returns 1 when
+# QUIET is 0 and kills the script right here, one line before the poll.
+if [ "$QUIET" -eq 1 ]; then health_args+=( --quiet ); fi
+
+if "${LUPIN_ROOT}/src/scripts/lib/wait-for-health.sh" "${health_args[@]}"; then
+    elapsed=$(( $( date +%s ) - start_ts ))
+    if [ "$QUIET" -eq 1 ]; then
+        echo "bounced ${CONTAINER} in ${elapsed}s (all-clear emitted by server startup)"
+    else
+        log "OK: $CONTAINER healthy in ${elapsed}s — ${HEALTH_CONSECUTIVE} consecutive health checks. The server's startup hook emits the all-clear."
     fi
-    if curl -fsS --max-time 2 "$HEALTH_URL" >/dev/null 2>&1; then
-        elapsed=$(( now - start_ts ))
-        if [ "$QUIET" -eq 1 ]; then
-            echo "bounced ${CONTAINER} in ${elapsed}s (all-clear emitted by server startup)"
-        else
-            log "OK: $CONTAINER healthy in ${elapsed}s. The server's startup hook emits the all-clear."
-        fi
-        exit 0
-    fi
-    sleep "$POLL_INTERVAL"
-done
+    exit 0
+fi
+
+echo "ERROR: $CONTAINER did not become healthy within ${TIMEOUT_SECS}s — server may be DOWN." >&2
+echo "       The startup all-clear will NOT have fired. Investigate before assuming it is up." >&2
+echo "--- docker logs --tail 50 $CONTAINER ---" >&2
+docker logs --tail 50 "$CONTAINER" >&2 || true
+exit 1
