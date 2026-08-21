@@ -235,6 +235,88 @@ class TestChooseDocumentFromMatches( unittest.TestCase ):
 
 
 # ── 4. _handle_fuzzy_file_match wiring ──────────────────────────────────────
+class TestSearchRootsComeFromTheDeclaration( unittest.TestCase ):
+    """
+    Row a1420538. WHERE a file argument's candidates live used to be written into
+    _handle_fuzzy_file_match — two per-user directories and four extensions, the same
+    for everyone — and the extra config key was BUILT from the display name, falling
+    back to the podcast's key when the agent had none of its own. So an agent with no
+    key silently searched wherever the podcast happened to be configured to look. The
+    roots and the key are declared beside the argument now.
+    """
+
+    EMAIL = "u@example.com"
+
+    def _docs_map( self, file_arg, listing, exists=True ):
+        """Run the scan and report what it found, without going near the LLM."""
+        o = _mk_expeditor()
+        seen_keys = []
+        captured  = {}
+        def _fake_ask( arg, question, email, **k ):
+            captured[ "asked" ] = question
+            return None
+        o._ask_for_arg = _fake_ask
+
+        listdir = listing if callable( listing ) else ( lambda path: list( listing ) )
+        with patch( "cosa.config.configuration_manager.ConfigurationManager" ) as CM, \
+             patch.object( ex_mod.cu, "get_project_root", return_value="/root" ), \
+             patch.object( ex_mod.os.path, "exists", side_effect=lambda p: exists( p ) if callable( exists ) else exists ), \
+             patch.object( ex_mod.os, "listdir", side_effect=listdir ), \
+             patch.object( ex_mod.os, "walk", return_value=[] ), \
+             patch.object( o, "_match_description_to_files", return_value=( "fuzzy", [] ) ) as matcher:
+            def _record( key, default=None, **kw ):
+                seen_keys.append( key )
+                return default
+            CM.return_value.get.side_effect = _record
+            o._handle_fuzzy_file_match(
+                self.EMAIL, "presentation generator",
+                original_question="anything", use_choice_card=False,
+                arg_name="source", file_arg=file_arg,
+            )
+        docs_map = matcher.call_args[ 0 ][ 1 ] if matcher.call_args else {}
+        return docs_map, seen_keys
+
+    def test_a_declared_root_is_the_one_searched( self ):
+        declaration = { "kind": "file",
+                        "search_roots": ( { "path": "io/somewhere-else/{user_email}" }, ) }
+        docs_map, _keys = self._docs_map( declaration, [ "a.md" ] )
+        self.assertIn( f"io/somewhere-else/{self.EMAIL}/a.md", docs_map )
+        self.assertEqual( docs_map[ f"io/somewhere-else/{self.EMAIL}/a.md" ],
+                          f"/root/io/somewhere-else/{self.EMAIL}/a.md" )
+
+    def test_declaring_nothing_searches_what_it_always_searched( self ):
+        # A not-yet-migrated caller must be unchanged. Both shared roots, same rules.
+        docs_map, _keys = self._docs_map( None, [ "a.md", "b.yaml" ] )
+        self.assertIn( f"io/deep-research/{self.EMAIL}/a.md", docs_map )
+        self.assertIn( f"io/presentations/{self.EMAIL}/b.yaml", docs_map )
+        # The presentations root takes YAML only: a .md in there is a rendered output,
+        # not a source, and pulling it in would offer the user their own output back.
+        self.assertNotIn( f"io/presentations/{self.EMAIL}/a.md", docs_map )
+
+    def test_a_root_that_does_not_exist_is_skipped_not_fatal( self ):
+        # A user with no presentations directory is the ordinary case, not an error.
+        missing = f"/root/io/presentations/{self.EMAIL}"
+        docs_map, _keys = self._docs_map(
+            None, [ "a.md" ], exists=lambda path: path != missing )
+        self.assertIn( f"io/deep-research/{self.EMAIL}/a.md", docs_map )
+        self.assertNotIn( f"io/presentations/{self.EMAIL}/a.md", docs_map )
+
+    def test_the_extra_paths_key_is_the_declared_one( self ):
+        declaration = { "kind": "file",
+                        "search_roots": ( { "path": "io/deep-research/{user_email}" }, ),
+                        "search_paths_key": "presentation generator source search paths" }
+        _docs_map, keys = self._docs_map( declaration, [ "a.md" ] )
+        self.assertIn( "presentation generator source search paths", keys )
+        self.assertNotIn( "podcast generator source search paths", keys )
+
+    def test_an_undeclared_key_still_falls_back_to_the_podcast_one( self ):
+        # Characterisation, not endorsement: this is what an argument declaring no key
+        # gets today, and it is the behaviour the declared key exists to replace. Pinned
+        # so that changing it is a decision somebody makes, not a silent drift.
+        _docs_map, keys = self._docs_map( None, [ "a.md" ] )
+        self.assertIn( "podcast generator source search paths", keys )
+
+
 class TestHandleFuzzyChoiceCardWiring( unittest.TestCase ):
 
     EMAIL = "u@example.com"
