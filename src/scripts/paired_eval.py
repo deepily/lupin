@@ -479,27 +479,143 @@ def render_provenance_block(
     return "\n".join( lines )
 
 
+def _arm_failure_rate( metrics: Dict[ str, Any ] ) -> Optional[ float ]:
+    """
+    One arm's failure rate, from whichever count key that arm publishes.
+
+    THE TWO ARMS NAME IT DIFFERENTLY and always have: v1's compute_v1_metrics emits
+    `ok_n` (and a ready-made `failure_rate`), v2's compute_metrics emits `n_ok`. That
+    asymmetry already caused a live KeyError once (ts-217961e6), so this reads both
+    rather than assuming either.
+
+    Ensures:
+        - returns v1's published failure_rate when present
+        - else derives (n - ok) / n from whichever of ok_n / n_ok the arm carries
+        - returns None when the arm publishes neither, or n is 0 — never a fabricated 0.0
+    """
+    if metrics.get( "failure_rate" ) is not None:
+        return metrics[ "failure_rate" ]
+    n  = metrics.get( "n" )
+    ok = metrics.get( "ok_n" ) if metrics.get( "ok_n" ) is not None else metrics.get( "n_ok" )
+    if not n or ok is None:
+        return None
+    return round( ( n - ok ) / n, 4 )
+
+
+def _surviving_composition( metrics: Dict[ str, Any ],
+                            mapping: Optional[ Dict[ str, str ] ] ) -> Optional[ Dict[ str, int ] ]:
+    """
+    How many utterances of each command SURVIVED in this arm.
+
+    Requires:
+        - mapping is {utterance: expected_command} for the sampled corpus, or None
+
+    Ensures:
+        - returns {command: surviving_count} counted over the arm's own
+          spans_by_utterance (the records that actually produced a usable span)
+        - returns None when no mapping is available — an absent composition must read
+          as "not computed", never as an empty one
+    """
+    spans = metrics.get( "spans_by_utterance" )
+    if not mapping or not isinstance( spans, dict ):
+        return None
+    counts : Dict[ str, int ] = { }
+    for utterance in spans:
+        command = mapping.get( utterance, "unmapped" )
+        counts[ command ] = counts.get( command, 0 ) + 1
+    return counts
+
+
+def render_readability_block( v1_metrics : Dict[ str, Any ],
+                              v2_metrics : Dict[ str, Any ],
+                              mapping    : Optional[ Dict[ str, str ] ] = None ) -> str:
+    """
+    The numbers WITHOUT WHICH THE DELTA IS NOT READABLE, rendered beside it.
+
+    WHY THIS EXISTS. Commit 5dfe0d43 dropped the sample to n=20 on Rick's call and ruled,
+    in as many words: "The report must carry the per-arm failure rate and each arm's
+    surviving category composition beside the median delta, or the number is not readable
+    at any n." That ruling was never implemented — the report rendered the provenance block
+    and the verdict and nothing else, so the delta landed stripped of the three things that
+    say whether it means anything.
+
+    They are not decoration:
+      - FAILURE RATES: a delta computed over survivors is a SELECTED-sample delta. An arm
+        failing half its utterances is not being compared like for like, and the reader
+        cannot know that from the delta alone.
+      - COMPOSITION: a pooled median hides a category that behaves completely differently;
+        on 2026-08-20 math ran -9.7 s while todo ran -60.0 s.
+      - CACHE-HIT RATE: v2's speed claim RESTS on replay. A v2 measured at a 0% hit rate is
+        v2 without the mechanism under test, which is exactly what happened before the
+        clean-step fix, and a delta that omits it invites the wrong reading.
+
+    Ensures:
+        - always renders both arms' failure rates and v2's cache-hit rate, printing
+          "not reported" for any the artifacts do not carry (never a fabricated number)
+        - renders the per-arm composition table only when a mapping is available, and says
+          so plainly when it is not
+    """
+    def _pct( value ):
+        return "not reported" if value is None else f"{round( value * 100, 1 )}%"
+
+    lines = [ "## Is this delta readable?", "",
+              "A paired median over survivors is a SELECTED-sample number. These are the "
+              "figures that say whether it means anything - see 5dfe0d43.", "",
+              "| figure | v1 | v2 |", "|---|---|---|",
+              f"| failure rate | {_pct( _arm_failure_rate( v1_metrics ) )} | {_pct( _arm_failure_rate( v2_metrics ) )} |",
+              f"| cache-hit rate | n/a (no replay path) | {_pct( v2_metrics.get( 'cache_hit_rate' ) )} |" ]
+
+    v1_composition = _surviving_composition( v1_metrics, mapping )
+    v2_composition = _surviving_composition( v2_metrics, mapping )
+    lines.append( "" )
+    if v1_composition is None or v2_composition is None:
+        lines.append( "> **Surviving composition NOT COMPUTED** - no utterance-to-command mapping was "
+                      "supplied to this render. Recover it with `src/scripts/pair-warm-spans.py`, which "
+                      "reloads the corpus and reports pooled AND per-category." )
+        return "\n".join( lines )
+
+    lines.append( "**Surviving utterances per command** - a pooled median hides a category that behaves differently." )
+    lines.append( "" )
+    lines.append( "| command | v1 survived | v2 survived |" )
+    lines.append( "|---|---:|---:|" )
+    for command in sorted( set( v1_composition ) | set( v2_composition ) ):
+        lines.append( f"| {command} | {v1_composition.get( command, 0 )} | {v2_composition.get( command, 0 )} |" )
+    return "\n".join( lines )
+
+
 def render_paired_report(
     verdict       : Dict[ str, Any ],
     v1_provenance : Dict[ str, Any ],
     v2_provenance : Dict[ str, Any ],
     timestamp     : str,
+    v1_metrics    : Optional[ Dict[ str, Any ] ] = None,
+    v2_metrics    : Optional[ Dict[ str, Any ] ] = None,
+    mapping       : Optional[ Dict[ str, str ] ] = None,
 ) -> str:
     """
-    The full paired-verdict markdown: title, provenance block, then the gate verdict.
+    The full paired-verdict markdown: title, provenance, readability block, gate verdict.
 
     Ensures:
         - returns a markdown string that ALWAYS carries the provenance block and the
           verdict rendered by render_paired_verdict (fired or DECLINED).
+        - carries the READABILITY block (per-arm failure rates, cache-hit rate, and the
+          surviving composition when a mapping is given) whenever both metrics dicts are
+          supplied - the 5dfe0d43 ruling. Omitting it is what made a bare delta look like
+          a verdict.
+        - both metrics default to None so every existing caller keeps working unchanged.
     """
-    return "\n".join( [
+    sections = [
         f"# CJ Flow paired v1-vs-v2 latency verdict — {timestamp}",
         "",
         render_provenance_block( v1_provenance, v2_provenance ),
         "",
-        render_paired_verdict( verdict ),
-        "",
-    ] )
+    ]
+    if v1_metrics is not None and v2_metrics is not None:
+        sections.append( render_readability_block( v1_metrics, v2_metrics, mapping ) )
+        sections.append( "" )
+    sections.append( render_paired_verdict( verdict ) )
+    sections.append( "" )
+    return "\n".join( sections )
 
 
 def load_arm_artifact( path: str ) -> Dict[ str, Any ]:
@@ -532,6 +648,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _load_corpus_mapping( args: Any ) -> Optional[ Dict[ str, str ] ]:
+    """
+    The {utterance: command} mapping the composition table needs, or None.
+
+    BEST-EFFORT BY DESIGN: the composition is a readability aid, so a corpus that cannot be
+    loaded must degrade to "not computed" and let the verdict through - never take the
+    verdict down with it. The block says plainly when the mapping is absent.
+    """
+    try:
+        import v2_eval
+        corpus = v2_eval.load_corpus( getattr( args, "corpus", "simple" ) )
+        return { utterance: command for utterance, command in corpus }
+    except Exception as failure:              # pragma: no cover - corpus-load seam
+        print( f"[paired-eval] composition mapping unavailable ({type( failure ).__name__}: {failure}) - "
+               f"the readability block will say so rather than omit it silently." )
+        return None
+
+
 def main(
     argv         : Optional[ List[ str ] ] = None,
     load_fn      : Callable[ [ str ], Dict[ str, Any ] ] = load_arm_artifact,
@@ -559,7 +693,12 @@ def main(
     v2_artifact = load_fn( args.v2_artifact )
 
     verdict = build_paired_verdict( v1_artifact, v2_artifact )
-    report  = render_paired_report( verdict, v1_artifact[ "provenance" ], v2_artifact[ "provenance" ], stamp )
+    # The delta alone is not a readable number (5dfe0d43) - hand the renderer both arms'
+    # metrics so the failure rates, the cache-hit rate and the composition land beside it.
+    report  = render_paired_report( verdict, v1_artifact[ "provenance" ], v2_artifact[ "provenance" ], stamp,
+                                    v1_metrics=v1_artifact.get( "metrics" ),
+                                    v2_metrics=v2_artifact.get( "metrics" ),
+                                    mapping=_load_corpus_mapping( args ) )
 
     out_path = args.out if args.out is not None else os.path.join(
         root, "io", "v2-flow", f"paired-verdict-{stamp}.md"

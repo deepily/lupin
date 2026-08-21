@@ -299,6 +299,7 @@ claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.p
 - [Novelty-Check Casefold: Premise Check](src/rnd/v0.2.0/2026.08.17-novelty-check-casefold-premise-check.md) — the check was already case-insensitive, so casefolding drops zero rejections; the words being flagged as invented names are ordinary English, and excluding them takes Flash-Lite from 130 blocks to 40
 - [Lane-2 Harness Observability](src/rnd/v0.2.0/2026.08.17-lane2-harness-observability-row-1cd30181.md) — the E2E harness stopped watching 13 seconds before the product finished and called it a failure; stages now start INCONCLUSIVE so a red has to be earned too
 - [A Collection Error Is Silence](src/rnd/v0.2.0/2026.08.17-pytest-collection-error-is-silence-row-bc83f2df.md) — two shapes wearing one word: an error in a test module read as a plain FAILED, while one in a conftest fired no hook at all and only the exit code could see it
+- [Bounded Retry: One Helper, and the Seven Loops That Could Use It](src/rnd/v0.2.0/2026.08.20-bounded-retry-helper-and-migration-candidates.md) — a shared sync+async bounded-retry primitive built from the union of seven hand-rolled loops, wired to the one call that had none (the Kagi search behind the weather agent), plus the migration candidates and what makes each one risky (row 3598c1d3)
 
 ### Agentic jobs, recovery & test scheduling
 

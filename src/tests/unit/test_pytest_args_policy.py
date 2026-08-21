@@ -221,3 +221,24 @@ def test_bare_flag_given_a_value_is_refused( project_root ):
     with pytest.raises( PytestArgsRejected ) as caught:
         validate_pytest_args( [ "--auto-proxy=1" ], project_root )
     assert "takes no value" in str( caught.value )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Two branches the original suite left uncovered (found while adding the
+# timeout/budget guard, row 64677f38). Both are refusal paths, which are exactly
+# the ones an untested allowlist gets wrong.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_a_value_flag_with_an_empty_equals_value_is_refused( project_root ):
+    """`--tb=` parses as a single token with an empty value. Passing it through would
+    hand pytest a flag with no argument and fail at run time instead of at the door."""
+    with pytest.raises( PytestArgsRejected ) as caught:
+        parse_and_validate( "--tb=", project_root )
+    assert "empty value" in str( caught.value )
+
+
+def test_a_node_id_with_no_path_half_is_refused( project_root ):
+    """"::TestThing::test_x" has an empty path half. It must not resolve to the project
+    root and sneak through confinement as a directory that obviously is inside it."""
+    with pytest.raises( PytestArgsRejected ):
+        parse_and_validate( "::TestThing::test_x", project_root )

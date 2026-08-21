@@ -42,6 +42,7 @@ import os
 import random
 import sys
 import time
+from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 # ---------------------------------------------------------------------------
@@ -85,6 +86,40 @@ ROUTE_AGENT_ERROR   = "agent_error"
 ROUTE_ROUTER_ERROR  = "router_error"
 ROUTE_EXTRACT_ERROR = "extract_error"
 ROUTE_REPLAY_ERROR  = "replay_error"
+
+# The four route reasons that mean the work did NOT complete. A 200 carrying one of these
+# is a REPORTED FAILURE, not a success — see is_completed_ok below.
+ROUTE_ERROR_REASONS = frozenset( {
+    ROUTE_AGENT_ERROR, ROUTE_ROUTER_ERROR, ROUTE_EXTRACT_ERROR, ROUTE_REPLAY_ERROR,
+} )
+
+
+def is_completed_ok( status_code, payload ):
+    """
+    Did this call COMPLETE the work — the same question v1's arm is made to answer.
+
+    🔴 WHY THIS EXISTS (row d8d019f6, 2026-08-20). `ok` was `status_code == 200` and the
+    payload was never inspected, while v1_eval_arm.py:314 required a job_id, an OBSERVED
+    terminal completion, a completed_ts, and a computable span. So v2 was graded on "did
+    the server answer" and v1 on "did the work finish end to end" — two different questions
+    whose failure rates were then compared as though they were one. A v2 response of 200
+    carrying route_reason="agent_error" counted as a SUCCESS.
+
+    Requires:
+        - status_code is the HTTP status; payload is the decoded body (or falsy)
+
+    Ensures:
+        - False unless the status is 200 (unchanged)
+        - False when the body reports one of ROUTE_ERROR_REASONS — the server answered,
+          and what it said was that the work failed
+        - True otherwise, INCLUDING a body with no route_reason at all: absence of a
+          reported error is not evidence of one, and this predicate must not invent
+          failures v1 would not have counted either
+    """
+    if status_code != 200: return False
+    if not isinstance( payload, dict ): return False
+    return payload.get( "route_reason" ) not in ROUTE_ERROR_REASONS
+
 
 # The mark whose offset from the anchor is "latency to first useful response".
 FIRST_USEFUL_MARK = "t_first_useful"
@@ -315,6 +350,31 @@ def response_route_reason( record: Dict[ str, Any ] ) -> Optional[ str ]:
     return record[ "payload" ].get( "route_reason" )
 
 
+def reported_route_reason( record: Dict[ str, Any ] ) -> Optional[ str ]:
+    """
+    The `route_reason` a 200 CARRIES, whether or not the work completed.
+
+    🔴 THE SECOND LAYER OF THE STRUCTURAL ZERO (row d8d019f6, 2026-08-20). Moving the error
+    rates onto an `answered` denominator was not enough, because response_route_reason
+    GATES ON `ok` and returns None for exactly the records that carry an error. Once
+    is_completed_ok made `ok` mean "the work completed", the accessor stopped being able to
+    read the errored records at all — so the rates still came out 0.0 with a correct
+    denominator. The instrument refused to look at its own evidence at two independent
+    layers, and either one alone was enough to silence it.
+
+    response_route_reason keeps its ok-gated meaning for the cache/candidate views, which
+    legitimately describe completed work only. This is its peer for the error views.
+
+    Ensures:
+        - returns the body's route_reason for any request that returned 200, errored or not
+        - returns None for a non-200 (no body was answered) or an unparseable payload
+    """
+    if record.get( "status_code" ) != 200:
+        return None
+    payload = record.get( "payload" )
+    return payload.get( "route_reason" ) if isinstance( payload, dict ) else None
+
+
 def response_similarity( record: Dict[ str, Any ] ) -> Optional[ float ]:
     """The §8 `similarity` (best score) for a record, or None when absent/failed."""
     if not record[ "ok" ]:
@@ -402,19 +462,34 @@ def route_matches( actual: Optional[ str ], expected: str ) -> bool:
     return actual.strip().lower() == expected.strip().lower()
 
 
-def compute_metrics( records: List[ Dict[ str, Any ] ] ) -> Dict[ str, Any ]:
+def compute_metrics( records: List[ Dict[ str, Any ] ],
+                     mappable_commands: Optional[ Sequence[ str ] ] = None ) -> Dict[ str, Any ]:
     """
     The full metric set for one pass over the corpus.
 
     Requires:
         - records is a list of per-request dicts, each {utterance, expected_command,
           ok, status_code, payload}.
+        - mappable_commands is the set of routing commands the arms CAN score — the
+          same set v1_eval_arm.compute_v1_metrics excludes on. None means no
+          restriction (every utterance eligible), which is the pre-2026-08-20
+          behaviour and is retained only for callers that do not score routing.
 
     Ensures:
         - returns a dict of counts, rates (None when the denominator is 0), latency
           percentiles, routing accuracy, the would-be-wrong count, and by_path counts.
-        - a rate's denominator is the count of 200-returning requests, so a failed
-          HTTP call can never inflate a numerator.
+        - a rate's denominator is the count of completed requests, so a failed
+          call can never inflate a numerator.
+        - routing_accuracy is scored over ELIGIBLE ok records only, and the exclusion
+          is published as routing_eligible_n / routing_excluded_n /
+          routing_excluded_share so it is auditable rather than silent.
+
+    🔴 WHY mappable_commands EXISTS (row d8d019f6, 2026-08-20). v1_eval_arm.py:440 says
+    in as many words "The v2 arm must exclude the SAME utterances", and this module had
+    ZERO occurrences of the word "eligible". v1 excluded 40% of the corpus from its
+    routing denominator as unmappable; v2 excluded nothing and scored those same
+    utterances as routing misses. The two routing-accuracy numbers were then printed
+    side by side as though they answered one question.
     """
     n        = len( records )
     ok       = [ r for r in records if r[ "ok" ] ]
@@ -422,10 +497,28 @@ def compute_metrics( records: List[ Dict[ str, Any ] ] ) -> Dict[ str, Any ]:
 
     cache_hits      = [ r for r in ok if response_path( r ) == PATH_REPLAY ]
     cache_candidates = [ r for r in ok if response_similarity( r ) is not None ]
-    replay_failures = [ r for r in ok if response_route_reason( r ) == ROUTE_REPLAY_ERROR ]
-    router_errors   = [ r for r in ok if response_route_reason( r ) == ROUTE_ROUTER_ERROR ]
-    extract_errors  = [ r for r in ok if response_route_reason( r ) == ROUTE_EXTRACT_ERROR ]
-    agent_errors    = [ r for r in ok if response_route_reason( r ) == ROUTE_AGENT_ERROR ]
+
+    # ERROR RATES ARE COUNTED OVER EVERY ANSWERED REQUEST, NOT OVER `ok` (row d8d019f6,
+    # 2026-08-20). They used to read `ok`, which was harmless while `ok` meant "the server
+    # answered" - an errored 200 was still in that set, so it could still be counted. The
+    # moment is_completed_ok made `ok` mean "the work completed", every errored record left
+    # the set these rates measure over, and all four went STRUCTURALLY ZERO: they could no
+    # longer report the thing they are named for.
+    #
+    # ts-e0311090 is the receipt. The artifact published replay_failure_rate 0.0 while the
+    # raw records show 42 of 100 warm responses returning replay_error and 5 agent_error -
+    # every one an HTTP 200. A rate of 0.0 read as "replay is healthy" while replay was
+    # failing 42% of the time.
+    #
+    # `answered` is the right denominator: every request the server responded to, whether or
+    # not the work completed. On a clean run it equals the old set exactly, so nothing that
+    # used to report correctly changes.
+    answered        = [ r for r in records if r[ "status_code" ] == 200 ]
+    n_answered      = len( answered )
+    replay_failures = [ r for r in answered if reported_route_reason( r ) == ROUTE_REPLAY_ERROR ]
+    router_errors   = [ r for r in answered if reported_route_reason( r ) == ROUTE_ROUTER_ERROR ]
+    extract_errors  = [ r for r in answered if reported_route_reason( r ) == ROUTE_EXTRACT_ERROR ]
+    agent_errors    = [ r for r in answered if reported_route_reason( r ) == ROUTE_AGENT_ERROR ]
 
     latencies = [ v for v in ( first_useful_ms( r ) for r in ok ) if v is not None ]
 
@@ -438,7 +531,15 @@ def compute_metrics( records: List[ Dict[ str, Any ] ] ) -> Dict[ str, Any ]:
     # the two arms can be aligned; provenance guarantees both measured the same utterance set.
     spans_by_utterance = { r[ "utterance" ]: r[ "client_span_ms" ] for r in ok if r.get( "client_span_ms" ) is not None }
 
-    routed_right = [ r for r in ok if route_matches( matched_command( r ), r[ "expected_command" ] ) ]
+    # F2 parity with the v1 arm: routing is scored ONLY over utterances whose expected
+    # command is mappable. An unmappable utterance is EXCLUDED from the denominator, never
+    # counted as a forced miss.
+    mappable     = set( mappable_commands ) if mappable_commands is not None else None
+    def _eligible( record ):
+        return mappable is None or record[ "expected_command" ] in mappable
+    eligible     = [ r for r in ok if _eligible( r ) ]
+    excluded_n   = sum( 1 for r in records if not _eligible( r ) )
+    routed_right = [ r for r in eligible if route_matches( matched_command( r ), r[ "expected_command" ] ) ]
 
     would_be_wrong = [
         r for r in cache_hits
@@ -455,13 +556,17 @@ def compute_metrics( records: List[ Dict[ str, Any ] ] ) -> Dict[ str, Any ]:
         "n"                   : n,
         "n_ok"                : n_ok,
         "n_http_error"        : n - n_ok,
+        "n_answered"          : n_answered,   # the four error rates are over THIS, not n_ok
         "cache_hit_rate"      : _rate( len( cache_hits ),       n_ok ),
         "cache_candidate_rate": _rate( len( cache_candidates ), n_ok ),
-        "replay_failure_rate" : _rate( len( replay_failures ),  n_ok ),
-        "router_error_rate"   : _rate( len( router_errors ),    n_ok ),
-        "extract_error_rate"  : _rate( len( extract_errors ),   n_ok ),
-        "agent_error_rate"    : _rate( len( agent_errors ),     n_ok ),
-        "routing_accuracy"    : _rate( len( routed_right ),     n_ok ),
+        "replay_failure_rate" : _rate( len( replay_failures ),  n_answered ),
+        "router_error_rate"   : _rate( len( router_errors ),    n_answered ),
+        "extract_error_rate"  : _rate( len( extract_errors ),   n_answered ),
+        "agent_error_rate"    : _rate( len( agent_errors ),     n_answered ),
+        "routing_eligible_n"  : len( eligible ),
+        "routing_excluded_n"  : excluded_n,
+        "routing_excluded_share" : _rate( excluded_n, n ),
+        "routing_accuracy"    : _rate( len( routed_right ),     len( eligible ) ),
         "p50_first_useful_ms" : percentile( latencies, 50 ),
         "p95_first_useful_ms" : percentile( latencies, 95 ),
         # F1 client-send instrument. `client_p50_ms`/`client_p95_ms` are the arm's
@@ -578,7 +683,11 @@ def guard_run_integrity(
     """
     violations : List[ str ] = []
 
-    http_errors = [ r for r in records if not r[ "ok" ] ]
+    # TRANSPORT, not completion. `ok` now means "the work completed" (is_completed_ok),
+    # so reading it here would abort the whole run on the very route errors this eval
+    # exists to COUNT — and abort it with a message claiming a non-200 that never
+    # happened. This check owns one question only: did the server answer at all.
+    http_errors = [ r for r in records if r[ "status_code" ] != 200 ]
     if http_errors:
         violations.append(
             f"http-all-ok: {len( http_errors )} of {len( records )} requests did not return 200"
@@ -653,6 +762,63 @@ def read_jsonl_trace_ids( trace_path: str ) -> List[ str ]:
     return ids
 
 
+def neighbouring_trace_paths( trace_path: str ) -> List[ str ]:
+    """
+    The trace file named, plus the day either side of it.
+
+    🔴 WHY (row d8d019f6, 2026-08-20). The 3-hour run `ts-23613e7d` died at the verdict
+    step with "trace-parity: 100 of 100 traces are absent from the authoritative JSONL",
+    and the traces were not absent — they were in the NEXT DAY'S FILE. Two causes, either
+    one fatal on its own:
+
+      1. TWO CLOCKS. The writer (cosa/rest/v2/trace.py:161) names the file from
+         `datetime.now()`, which inside the container is UTC. The reader named it from
+         `du.get_current_datetime_raw()`, which is US/Eastern. Every run started after
+         8 PM EDT therefore read a file the writer was not writing — a guaranteed
+         100%-missing verdict, every night, forever.
+      2. MIDNIGHT. Even on one clock, a multi-hour run that crosses the writer's midnight
+         has its traces split across two files, so reading any single day is short.
+
+    Reading the neighbours removes both. A trace id is a 32-hex random, so widening the
+    haystack cannot manufacture a false match; it can only stop inventing false misses.
+
+    Requires:
+        - trace_path ends in "trace-YYYY-MM-DD.jsonl"
+
+    Ensures:
+        - returns [ path ] unchanged when the name does not carry a parseable date —
+          a rename must degrade to the old single-file behaviour, never crash a run
+        - otherwise returns the previous day, the named day, and the next day, in order
+    """
+    directory = os.path.dirname( trace_path )
+    name      = os.path.basename( trace_path )
+    prefix, suffix = "trace-", ".jsonl"
+    if not ( name.startswith( prefix ) and name.endswith( suffix ) ):
+        return [ trace_path ]
+    try:
+        day = datetime.strptime( name[ len( prefix ) : -len( suffix ) ], "%Y-%m-%d" )
+    except ValueError:
+        return [ trace_path ]
+    return [
+        os.path.join( directory, f"{prefix}{( day + timedelta( days=offset ) ).strftime( '%Y-%m-%d' )}{suffix}" )
+        for offset in ( -1, 0, 1 )
+    ]
+
+
+def read_trace_ids_around( trace_path: str ) -> List[ str ]:
+    """
+    Every trace id in the named day's file and the day either side.
+
+    Ensures:
+        - returns the concatenated ids of whichever of those files exist (absent files
+          contribute nothing, exactly as read_jsonl_trace_ids already allows)
+    """
+    ids : List[ str ] = []
+    for path in neighbouring_trace_paths( trace_path ):
+        ids.extend( read_jsonl_trace_ids( path ) )
+    return ids
+
+
 # ---------------------------------------------------------------------------
 # Per-arm clean-step (design §4, decision B). The v2 peer of v1_eval_arm.truncate_snapshots.
 #
@@ -664,6 +830,9 @@ def read_jsonl_trace_ids( trace_path: str ) -> List[ str ]:
 # call happens. Do not claim it "wired" on a green unit suite — that is the exact orphan defect
 # (row d8d019f6 / require_arms_distinct_and_clean) this row is closing, and it must not recur here.
 # ---------------------------------------------------------------------------
+SYNONYM_TABLE = "canonical_synonyms"   # tier-1 lookup table — the other half of the cache
+
+
 def clean_v2_snapshot_store( connection: Any, config_mgr: Any ) -> str:
     """
     Empty v2's snapshot table so the cold pass starts genuinely cold — TWO guards fire first.
@@ -687,7 +856,16 @@ def clean_v2_snapshot_store( connection: Any, config_mgr: Any ) -> str:
           assertion (raises NotAMeasurementDatabase on a wrong db) — connection.execute is
           NEVER called if either raises.
         - on a measurement db with a matching config, TRUNCATEs the ORM write target (the value
-          the cross-check returned) and returns its table name.
+          the cross-check returned) **together with the tier-1 synonym table** in one statement,
+          and returns the snapshot table's name.
+
+    🔴 WHY THE SYNONYM TABLE GOES TOO (row d8d019f6, 2026-08-20). Emptying snapshots alone
+    leaves every synonym from every prior run pointing at a row that is gone. Tier 1 matches
+    one of those ghosts by verbatim text, dereferences it to nothing and reports a MISS, so
+    the cache cannot hit however well replay works. Measured on lupin_db_test after
+    ts-23613e7d: 124 snapshots against 1,021 v2-written synonyms, 897 dangling, and every
+    synonym matching a live question resolving to a ghost — v2 was graded at a 0% hit rate
+    with a 65% candidate rate. The two tables are one cache.
 
     Raises:
         - ConfigTableMismatch when the declared table does not equal the ORM write target.
@@ -697,7 +875,8 @@ def clean_v2_snapshot_store( connection: Any, config_mgr: Any ) -> str:
 
     target = require_config_table_matches_write_target( config_mgr )   # raises on config drift
     assert_measurement_db( str( connection.engine.url ) )              # raises on a wrong db
-    connection.execute( text( f"TRUNCATE TABLE {target}" ) )           # identifier = resolved __tablename__
+    # identifiers: the resolved __tablename__ + a module constant — neither caller-supplied
+    connection.execute( text( f"TRUNCATE TABLE {target}, {SYNONYM_TABLE}" ) )
     connection.commit()   # SQLAlchemy 2.x is commit-as-you-go: without this the TRUNCATE rolls back on close (the store stays dirty)
     return target
 
@@ -834,8 +1013,11 @@ class HttpAskClient:
                                    error=type( failure ).__name__, detail=str( failure ) )
                 raise
             recv_ts     = self.clock()
-        ok      = ( reply.status_code == 200 )
-        payload = reply.json() if ok else {}
+        # ALIGNED WITH v1's BAR (row d8d019f6): a 200 whose body reports a route error is a
+        # failure here, exactly as an errored job is a failure in the v1 arm. Parse first,
+        # then judge — the old order could not inspect a body it had already discarded.
+        payload = reply.json() if reply.status_code == 200 else {}
+        ok      = is_completed_ok( reply.status_code, payload )
         span_ms = ( recv_ts - send_ts ) * 1000.0                 # F1 client-send instrument
         self._log_attempt( phase="end", seq=seq, utterance=question, ok=ok,
                            status_code=reply.status_code, client_span_ms=span_ms )
@@ -869,6 +1051,28 @@ def read_running_server_sha( base_url: str ) -> str:   # pragma: no cover - live
     return data.get( "git_sha", "" )
 
 
+def load_mappable_commands() -> Optional[ List[ str ] ]:
+    """
+    The routing commands both arms can score, from the live v1 registry.
+
+    Ensures:
+        - returns the class_to_command VALUES (the same list v1_eval_arm hands its own
+          assemble step), or None when the registry cannot be read
+        - a None return is announced on stdout, never silent: an unrestricted denominator
+          is the very asymmetry this exists to close, so a reader must see it happened
+        - never raises
+    """
+    try:
+        from v1_eval_arm import load_v1_class_to_command      # lazy: v1 imports v2
+        class_to_command, _ambiguous = load_v1_class_to_command()
+        return list( class_to_command.values() )
+    except Exception as failure:                              # pragma: no cover - live-registry seam
+        print( f"[v2-eval] WARNING: could not read the v1 routing registry ({type( failure ).__name__}: "
+               f"{failure}) — routing accuracy will be scored over the FULL corpus, which is NOT "
+               f"comparable to the v1 arm's eligible-only denominator." )
+        return None
+
+
 def run_pass(
     corpus    : List[ Tuple[ str, str ] ],
     ask       : Callable[ [ str ], Dict[ str, Any ] ],
@@ -900,7 +1104,10 @@ def run_pass(
         record[ "expected_command" ] = expected
         record[ "pass_kind" ]        = pass_kind
         records.append( record )
-        if fail_fast and index == 0 and not record[ "ok" ]:
+        # Same split as guard_run_integrity: fail-fast owns "is the endpoint broken",
+        # which is a transport question. A first utterance that returns 200 and reports
+        # agent_error is a result to record, not a reason to abandon the corpus.
+        if fail_fast and index == 0 and record[ "status_code" ] != 200:
             raise EvalIntegrityError(
                 f"fail-fast: first {pass_kind} request returned "
                 f"{record[ 'status_code' ]}, not 200 — aborting before spending the corpus"
@@ -959,6 +1166,8 @@ def render_report(
         ( "extract-error rate",    "extract_error_rate" ),
         ( "agent-error rate",      "agent_error_rate" ),
         ( "routing accuracy",      "routing_accuracy" ),
+        ( "routing eligible (n)",  "routing_eligible_n" ),
+        ( "routing excluded (n)",  "routing_excluded_n" ),
         ( "p50 first-useful (ms)", "p50_first_useful_ms" ),
         ( "p95 first-useful (ms)", "p95_first_useful_ms" ),
         ( "p50 client-send (ms)",  "client_p50_ms" ),
@@ -967,6 +1176,13 @@ def render_report(
     ]
     for label, key in rows:
         lines.append( f"| {label} | {_fmt( cold_metrics[ key ] )} | {_fmt( warm_metrics[ key ] )} |" )
+    lines.append( "" )
+    lines.append(
+        "> **routing accuracy is scored over the ELIGIBLE rows only** — utterances whose "
+        "expected command is not mappable are EXCLUDED from the denominator, not counted "
+        "as misses, and the excluded count is in the table above. This is the same "
+        "exclusion the v1 arm applies, so the two arms' routing numbers answer one question."
+    )
     lines.append( "" )
     lines.append(
         "> instruments: **first-useful** is v2's server-stamped mark (routing→answer, "
@@ -999,6 +1215,37 @@ def render_report(
         lines.append( f"- `{label}`: {warm_metrics[ 'by_path' ][ label ]}" )
     lines.append( "" )
     return "\n".join( lines )
+
+
+def dump_records_early( out_dir: str, cold_records: List[ Dict[ str, Any ] ],
+                        warm_records: List[ Dict[ str, Any ] ] ) -> Optional[ str ]:
+    """
+    Persist the raw records the moment both passes return, BEFORE anything may refuse.
+
+    🔴 WHY (row d8d019f6, 2026-08-20). `guard_run_integrity` fires before `write_outputs`,
+    so when ts-23613e7d raised on trace-parity it destroyed the v2 arm's ENTIRE run — three
+    hours of records that had already been collected never reached disk, and no eval-<stamp>
+    directory was written at all. The v1 arm has carried this insurance since attempt 11
+    (_dump_paired_artifacts fires the moment the v1 arm returns); the v2 arm never got it.
+    A downstream refusal should cost the VERDICT, never the DATA.
+
+    Ensures:
+        - writes records.jsonl into out_dir and returns its path
+        - BEST-EFFORT: a dump failure is reported and swallowed, never allowed to mask the
+          real run outcome — insurance that can itself kill the run is not insurance
+    """
+    try:
+        os.makedirs( out_dir, exist_ok=True )
+        path = os.path.join( out_dir, "records.jsonl" )
+        with open( path, "w" ) as handle:
+            for record in list( cold_records ) + list( warm_records ):
+                handle.write( json.dumps( record ) + "\n" )
+        print( f"[v2-eval] early record dump: {len( cold_records ) + len( warm_records )} records -> {path}" )
+        return path
+    except Exception as failure:
+        print( f"[v2-eval] WARNING: early record dump failed ({type( failure ).__name__}: {failure}) — "
+               f"the run continues, but a refusal past this point will cost the records." )
+        return None
 
 
 def write_outputs(
@@ -1125,12 +1372,26 @@ def main(
     probe( "between the cold and warm passes" )
     warm_records = run_pass( corpus, client.ask, "warm" )
 
+    # INSURANCE BEFORE ANY REFUSAL (row d8d019f6): both passes are done and the records are
+    # in memory only. guard_run_integrity below CAN raise, and when it did on ts-23613e7d it
+    # took three hours of already-collected v2 records with it. Land them first.
+    out_dir = os.path.join( root, "io", "v2-flow", f"eval-{stamp}" )
+    dump_records_early( out_dir, cold_records, warm_records )
+
     trace_path = os.path.join( root, "io", "v2-flow", f"trace-{stamp[ :10 ]}.jsonl" )
-    landed     = read_jsonl_trace_ids( trace_path )
+    # The day either side too — the writer's clock is the container's (UTC) and this
+    # process's is US/Eastern, and a long run crosses midnight anyway. See
+    # neighbouring_trace_paths for the run this cost.
+    landed     = read_trace_ids_around( trace_path )
     guard_run_integrity( warm_records, landed, max_router_error_rate=args.max_router_error_rate )
 
-    cold_metrics = compute_metrics( cold_records )
-    warm_metrics = compute_metrics( warm_records )
+    # The routing denominator must be the SAME set of utterances the v1 arm scores on
+    # (row d8d019f6). Derived from the LIVE registry here, exactly as the v1 arm derives
+    # it, and imported lazily because v1_eval_arm imports THIS module — a module-level
+    # import would close the cycle.
+    mappable = load_mappable_commands()
+    cold_metrics = compute_metrics( cold_records, mappable_commands=mappable )
+    warm_metrics = compute_metrics( warm_records, mappable_commands=mappable )
     if not args.allow_warm_cold:
         guard_cold_start( cold_metrics )          # F3: a contaminated cold baseline raises, never reports clean
     warm_table   = threshold_table( warm_records )
@@ -1138,8 +1399,7 @@ def main(
     report_md    = render_report( cold_metrics, warm_metrics, warm_table, delta,
                                   args.corpus, stamp, args.seed, args.n_per_command )
 
-    out_dir = os.path.join( root, "io", "v2-flow", f"eval-{stamp}" )
-    paths   = write_outputs( out_dir, report_md, cold_records, warm_records )
+    paths   = write_outputs( out_dir, report_md, cold_records, warm_records )   # out_dir set above, before the guard
 
     # The paired step (paired_eval) consumes {metrics, provenance}; write the v2 arm artifact.
     artifact_path = os.path.join( out_dir, "v2-arm-artifact.json" )

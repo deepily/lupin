@@ -272,3 +272,103 @@ def parse_and_validate( pytest_args_string, project_root ):
 
     validate_pytest_args( tokens, project_root )
     return tokens
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# The per-test timeout / suite budget contradiction guard (row 64677f38)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# WHAT KILLED ATTEMPT 11 OF THE PAIRED RUN: the submit carried `--timeout 5400`
+# as ordinary hygiene. pytest-timeout is PER TEST, so it capped the paired test
+# at 90 minutes — a test the operator had deliberately granted 8.3 hours by
+# raising SUITE_TIMEOUTS_SECONDS["integration"] to 30000s for exactly that run.
+# ~4.8 hours of live traffic died at the 90-minute mark.
+#
+# 🔴 WHY NO EXISTING TEST COULD HAVE CAUGHT IT, and this is the reusable part:
+# test_paired_n_fits_integration_timeout.py guards this hazard and PASSES. It
+# compares the corpus size against the SUITE budget — both of which live in
+# files it can read. The 90-minute cap was never in a file. It was typed into a
+# submit request. The run had eight hours of permission and was handed a
+# ninety-minute stopwatch at the door, with nothing watching the door.
+#
+# ⇒ THE GUARD BELONGS AT THE DOOR, not in a file-reading test.
+#
+# ⚠️ THE COST OF THIS RULE, stated rather than discovered later: it refuses a
+# genuinely reasonable thing — a short per-test cap on a long suite, reached for
+# to get a traceback out of one hung test instead of a killed suite. That is a
+# real use and this guard costs it. It is refused anyway because the two numbers
+# together state two contradictory intentions: a suite budget of N seconds says
+# "some test here may legitimately run N seconds", and a per-test cap below N
+# says "no test here may". Somebody must say which they meant, and the cheapest
+# moment to make them say it is before the run, not four hours in.
+
+def find_per_test_timeout( tokens ):
+    """
+    Return the caller's `--timeout` value in seconds, or None if absent.
+
+    Requires:
+        - tokens is a list of already-shlex-split argument strings
+
+    Ensures:
+        - handles BOTH spellings: `--timeout 5400` and `--timeout=5400`
+        - returns a float, or None when the flag is absent
+        - returns None for a non-numeric value rather than raising — the
+          allowlist owns argument WELL-FORMEDNESS; this function owns only the
+          budget contradiction, and two guards that both police the same thing
+          drift apart
+    """
+    for i, token in enumerate( tokens ):
+        if _flag_name( token ) != "--timeout": continue
+        raw = token.split( "=", 1 )[ 1 ] if "=" in token else (
+            tokens[ i + 1 ] if i + 1 < len( tokens ) else None )
+        if raw is None: return None
+        try:
+            return float( raw )
+        except ValueError:
+            return None
+    return None
+
+
+def validate_timeout_against_suite_budget( tokens, test_types, suite_budgets, default_budget ):
+    """
+    Refuse a per-test timeout shorter than the budget of any suite it will run under.
+
+    Requires:
+        - tokens is a list of already-shlex-split argument strings
+        - test_types is a comma-separated string OR a list of suite names
+        - suite_budgets maps suite name -> whole-suite timeout in seconds
+        - default_budget is the seconds applied to a suite absent from the map
+
+    Ensures:
+        - returns None when there is no `--timeout`, or when it is >= every
+          budget it runs under (the common case costs one dict lookup)
+        - raises PytestArgsRejected naming BOTH numbers, the suite they clash
+          on, and the two ways forward — a refusal that does not say what to do
+          instead just gets worked around
+
+    Raises:
+        - PytestArgsRejected
+    """
+    per_test = find_per_test_timeout( tokens )
+    if per_test is None: return None
+
+    if isinstance( test_types, str ):
+        suites = [ s.strip() for s in test_types.split( "," ) if s.strip() ]
+    else:
+        suites = [ str( s ).strip() for s in ( test_types or [] ) if str( s ).strip() ]
+
+    for suite in suites:
+        budget = suite_budgets.get( suite, default_budget )
+        if per_test < budget:
+            raise PytestArgsRejected(
+                f"refusing this submit: --timeout {per_test:.0f} is a PER-TEST cap, and it is "
+                f"shorter than the {budget:.0f}s whole-suite budget the '{suite}' suite runs "
+                f"under. Those two numbers contradict each other — the suite budget says a test "
+                f"here may legitimately run {budget:.0f}s, and the per-test cap says none may. "
+                f"This is what killed attempt 11 of the paired eval: a 5400s cap silently "
+                f"truncated a run that had been granted 30000s, ~4.8 hours in. "
+                f"Either drop --timeout (the suite budget already stops a runaway run), or raise "
+                f"it to at least {budget:.0f}, or lower the '{suite}' suite budget if the shorter "
+                f"cap is what you actually meant."
+            )
+    return None

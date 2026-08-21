@@ -8,6 +8,16 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.20 - Session f14d7ec6 (Krishna 🦚, for Cheech 🌿) | A red that only appeared under a relative PYTHONPATH, and a flag the poke told you to use
+
+**Row `19a417fa` — the unit tier swept end to end under a correct environment: 16,006 passed / 0 failed, cosa 8,750 / 0.** Tiberius's earlier full run used a relative `PYTHONPATH=src` and stopped at `-x`, so his 10,408/1 was superseded rather than wrong. All six "pre-existing" failures are green — five compose/env-contract arms caught up, and the sixth passes now that `b00b4d7a`'s `_subprocess_env()` stops it depending on how its caller was invoked. Zero failures meant no clean-HEAD comparison was needed.
+
+**Bug `1dcaf65c` — the sanctioned hold CLI could not set the field its own poke names** (`422f954e`). The Stop hook says *"stamp `last_looked_in_on_workers_ts`"*; `write_hold` has taken it as a kwarg since A1 and `get_last_looked_in_ts` reads it — but `write` exposed no flag, so a manager obeying the poke was pushed toward the hand-written JSON CLAUDE.md bans and row `011f1f90` counts 33 of. All three stamps had the hole; `--looked-in` / `--spinup-check` / `--surfaced-questions` close it.
+
+**Cheech ruled against the first cut, and the ruling is the durable part.** It normalized a zone-less timestamp to UTC — which picks a timezone the caller never gave. A wrong guess there is neither rejected nor obviously bad: it is off by the host offset, which reads as a plausible timestamp and debounces the wrong way. Measured, the same naive string dates **14,400 s apart** depending on whether `_parse_iso` or `_iso_age_seconds` asks. Zone-less is now refused at exit 2 with nothing written; offsets are preserved, not re-zoned. Receipts: **39 red on clean HEAD → 108 green**, 100% lines+branches, full tier 16,122 / 0 against a 16,006 baseline, and a test proving the artifact lands in `fleet_data_root()` and **not** the repo root. Left open deliberately — a write that *omits* the flags still wipes a prior stamp, pinned with a characterization test rather than changed unasked.
+
+**Also landed John 🏄🏽's LoRA precondition audit** (`7a26e52a`, row `c4837011`), after proving it was not mid-write: mtime unchanged across two stats 24 minutes apart, fences balanced, all seven sections complete. Checking a file *could not* be changing beats assuming it was not.
+
 ### 2026.08.18 - Session 89a34076 (Mr. Radio 🦉) | A natural experiment, and the column that could not answer it
 
 **Rick's hypothesis**: the DM tutor taught Claude shorter DMs, and Claude generalized it to the spoken notifications he receives. Natural experiment against the live `notifications` table (317,509 rows), cutover 2026-08-13 14:14 EDT. **Answer: half right.** Equal 8-day windows — p90 **1009 → 738 chars (−27%)**, median **272 → 287 (+6%)**, mean 380 → 345. The distribution did not shift down; its right tail was cut. Replicated per project (`lupin` p90 1109→802, `plan` 905→554). Doc `9bc17152`, six query scripts now tracked beside it.

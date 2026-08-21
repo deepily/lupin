@@ -1014,7 +1014,10 @@ def test_clean_v2_snapshot_store_truncates_after_both_guards( monkeypatch ):
     result = ve.clean_v2_snapshot_store( conn, cfg )
     assert result == "solution_snapshots"
     # The TRUNCATE identifier is the RESOLVED target, never the raw config string.
-    assert conn.executed == [ "TRUNCATE TABLE solution_snapshots" ]
+    # The snapshot identifier is the RESOLVED target, never the raw config string — and the
+    # tier-1 synonym table goes with it, in ONE statement. Emptying half a cache leaves the
+    # half that lies: see clean_v2_snapshot_store for the run this cost.
+    assert conn.executed == [ f"TRUNCATE TABLE solution_snapshots, {ve.SYNONYM_TABLE}" ]
     # And it is COMMITTED: SQLAlchemy 2.x is commit-as-you-go, so an uncommitted TRUNCATE rolls
     # back on close and the store stays dirty (9b90ae5d). RED if connection.commit() is removed.
     assert conn.committed == 1
@@ -1090,3 +1093,222 @@ def test_a_retry_that_dies_after_relogin_logs_attempt_2_and_reraises():
     # 305 - 300: measured from the RETRY's send, not the original one 205s earlier. A dead retry
     # must not be reported as having waited through the 401 + re-login as well.
     assert err[ "waited_s" ]  == 5.0
+
+
+# ---------------------------------------------------------------------------
+# scorer alignment with the v1 arm (row d8d019f6, 2026-08-20)
+#
+# Each test below FAILS against the pre-alignment code. That is the point: the fixes
+# they cover are corrections to how the two arms GRADE, and a test that passes either
+# way would prove nothing about whether the grading changed.
+# ---------------------------------------------------------------------------
+def test_two_hundred_reporting_a_route_error_is_not_a_success():
+    """A 200 whose body says the work failed is a failure — v1's bar, now v2's too."""
+    for reason in ( "agent_error", "router_error", "extract_error", "replay_error" ):
+        assert ve.is_completed_ok( 200, { "route_reason": reason } ) is False, reason
+
+
+def test_two_hundred_with_no_reported_error_is_still_a_success():
+    """Absence of a reported error is not evidence of one — no invented failures."""
+    assert ve.is_completed_ok( 200, { "route_reason": "replay" } ) is True
+    assert ve.is_completed_ok( 200, {} )                           is True
+
+
+def test_non_two_hundred_and_unparseable_body_are_failures():
+    assert ve.is_completed_ok( 500, { } )   is False
+    assert ve.is_completed_ok( 200, None )  is False
+
+
+def test_routing_denominator_excludes_unmappable_utterances():
+    """
+    v1 excludes unmappable utterances from routing; v2 used to score them as misses.
+    One right, one unmappable ⇒ 1.0 over 1 eligible, NOT 0.5 over 2.
+    """
+    right      = _rec( expected="agent router go to math", command="agent router go to math" )
+    unmappable = _rec( expected="agent router go to weather", command="agent router go to math" )
+    m = ve.compute_metrics( [ right, unmappable ],
+                            mappable_commands=[ "agent router go to math" ] )
+    assert m[ "routing_accuracy" ]       == 1.0
+    assert m[ "routing_eligible_n" ]     == 1
+    assert m[ "routing_excluded_n" ]     == 1
+    assert m[ "routing_excluded_share" ] == 0.5
+
+
+def test_routing_denominator_unrestricted_when_no_mappable_set_given():
+    """The old behaviour is retained for callers that do not score routing."""
+    right = _rec( expected="agent router go to math", command="agent router go to math" )
+    wrong = _rec( expected="agent router go to weather", command="agent router go to math" )
+    m = ve.compute_metrics( [ right, wrong ] )
+    assert m[ "routing_accuracy" ]   == 0.5
+    assert m[ "routing_excluded_n" ] == 0
+
+
+def test_run_integrity_counts_transport_failures_not_route_errors():
+    """
+    `ok` now means "completed", so a route error must NOT trip the transport guard —
+    it would abort the run on exactly the results the eval exists to count.
+    """
+    errored = _rec( ok=False, status=200, route_reason="agent_error", trace_id="t1" )
+    ve.guard_run_integrity( [ errored ], [ "t1" ], max_router_error_rate=1.0 )   # must not raise
+
+
+def test_run_integrity_still_raises_on_a_real_non_two_hundred():
+    broken = _rec( ok=False, status=500, trace_id="t1" )
+    try:
+        ve.guard_run_integrity( [ broken ], [ "t1" ], max_router_error_rate=1.0 )
+    except ve.EvalIntegrityError as failure:
+        assert "http-all-ok" in str( failure )
+    else:
+        raise AssertionError( "a 500 must still fail run integrity" )
+
+
+def test_fail_fast_tolerates_a_route_error_on_the_first_utterance():
+    """A first-request agent_error is a result to record, not a broken endpoint."""
+    records = ve.run_pass( [ ( "u", "agent router go to math" ) ],
+                           lambda q: _rec( ok=False, status=200, route_reason="agent_error" ),
+                           "cold", fail_fast=True )
+    assert len( records ) == 1
+
+
+def test_fail_fast_still_aborts_on_a_real_non_two_hundred():
+    try:
+        ve.run_pass( [ ( "u", "agent router go to math" ) ],
+                     lambda q: _rec( ok=False, status=502 ), "cold", fail_fast=True )
+    except ve.EvalIntegrityError as failure:
+        assert "fail-fast" in str( failure )
+    else:
+        raise AssertionError( "a 502 on the first request must still abort" )
+
+
+# ---------------------------------------------------------------------------
+# trace-parity across the day boundary (row d8d019f6, 2026-08-20)
+#
+# ts-23613e7d — three hours of live traffic — died at the verdict step reporting
+# "100 of 100 traces are absent". They were in the next day's file: the writer names
+# it from the container clock (UTC), the reader named it from US/Eastern.
+# ---------------------------------------------------------------------------
+def test_neighbouring_trace_paths_spans_the_day_either_side():
+    paths = ve.neighbouring_trace_paths( "/io/v2-flow/trace-2026-08-20.jsonl" )
+    assert [ p.split( "/" )[ -1 ] for p in paths ] == [
+        "trace-2026-08-19.jsonl", "trace-2026-08-20.jsonl", "trace-2026-08-21.jsonl",
+    ]
+
+
+def test_neighbouring_trace_paths_degrades_to_one_file_on_an_unparseable_name():
+    assert ve.neighbouring_trace_paths( "/io/v2-flow/trace-not-a-date.jsonl" ) == [ "/io/v2-flow/trace-not-a-date.jsonl" ]
+    assert ve.neighbouring_trace_paths( "/io/v2-flow/other.txt" )             == [ "/io/v2-flow/other.txt" ]
+
+
+def test_read_trace_ids_around_finds_ids_written_after_the_writers_midnight( tmp_path ):
+    ( tmp_path / "trace-2026-08-20.jsonl" ).write_text( '{"trace_id": "before"}\n' )
+    ( tmp_path / "trace-2026-08-21.jsonl" ).write_text( '{"trace_id": "after"}\n' )
+    ids = ve.read_trace_ids_around( str( tmp_path / "trace-2026-08-20.jsonl" ) )
+    assert sorted( ids ) == [ "after", "before" ]
+
+
+def test_read_trace_ids_around_tolerates_absent_neighbours( tmp_path ):
+    ( tmp_path / "trace-2026-08-20.jsonl" ).write_text( '{"trace_id": "only"}\n' )
+    assert ve.read_trace_ids_around( str( tmp_path / "trace-2026-08-20.jsonl" ) ) == [ "only" ]
+
+
+def test_clean_v2_snapshot_store_empties_the_synonym_table_too( monkeypatch ):
+    """
+    RED before the fix. Ghost synonyms from prior runs shadow the fresh ones by verbatim
+    text, dereference to nothing, and report a miss — so the cache cannot hit however well
+    replay works. lupin_db_test after ts-23613e7d: 897 of 1,021 v2 synonyms dangling, 0%
+    hit rate on a 65% candidate rate.
+    """
+    import eval_isolation_guard as guard
+    monkeypatch.setattr( guard, "resolve_write_target", lambda: "solution_snapshots" )
+    conn = _FakeConnection( "postgresql://u:p@h/lupin_db_test" )
+    ve.clean_v2_snapshot_store( conn, _clean_cfg( "solution_snapshots" ) )
+    assert len( conn.executed ) == 1                       # one statement, never half-cleared
+    assert ve.SYNONYM_TABLE in conn.executed[ 0 ]
+
+
+# ---------------------------------------------------------------------------
+# the records must land BEFORE anything may refuse (row d8d019f6, 2026-08-20)
+#
+# guard_run_integrity fires before write_outputs, so when ts-23613e7d raised on
+# trace-parity it took three hours of already-collected v2 records with it — no
+# eval-<stamp> directory was written at all. The v1 arm has had this insurance
+# since attempt 11; the v2 arm never did.
+# ---------------------------------------------------------------------------
+def test_dump_records_early_writes_both_passes( tmp_path ):
+    cold = [ _rec( utterance="c1" ) ]
+    warm = [ _rec( utterance="w1" ), _rec( utterance="w2" ) ]
+    path = ve.dump_records_early( str( tmp_path / "eval-x" ), cold, warm )
+    lines = [ json.loads( line ) for line in open( path ) if line.strip() ]
+    assert [ r[ "utterance" ] for r in lines ] == [ "c1", "w1", "w2" ]
+
+
+def test_dump_records_early_creates_the_directory( tmp_path ):
+    path = ve.dump_records_early( str( tmp_path / "nested" / "eval-x" ), [ ], [ _rec() ] )
+    assert os.path.exists( path )
+
+
+def test_dump_records_early_never_kills_the_run( tmp_path ):
+    """Insurance that can itself kill the run is not insurance — a dump failure is swallowed."""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text( "i am a file" )
+    assert ve.dump_records_early( str( blocker ), [ ], [ _rec() ] ) is None
+
+
+# ---------------------------------------------------------------------------
+# error rates must count over ANSWERED, not over ok (row d8d019f6, 2026-08-20)
+#
+# These rates read `ok`, which was harmless while `ok` meant "the server answered".
+# is_completed_ok changed `ok` to mean "the work completed", which moved every errored
+# record out of the set the rates measure over — so all four went structurally zero at
+# exactly the moment they had something to report. ts-e0311090 published
+# replay_failure_rate 0.0 while 42 of 100 warm responses came back replay_error.
+# ---------------------------------------------------------------------------
+def test_replay_failures_are_counted_even_though_they_are_not_ok():
+    """THE DIRTY CASE: old denominator reads 0.0, new one reads the truth."""
+    records  = [ _rec( ok=False, route_reason="replay_error" ) for _ in range( 42 ) ]
+    records += [ _rec( path="replay" ) for _ in range( 58 ) ]
+    m = ve.compute_metrics( records )
+    assert m[ "replay_failure_rate" ] == 0.42, "0.0 read as 'replay is healthy' while replay was failing"
+    assert m[ "n_answered" ] == 100
+
+
+def test_every_route_error_rate_counts_over_answered():
+    for reason, key in ( ( "router_error",  "router_error_rate"  ),
+                         ( "extract_error", "extract_error_rate" ),
+                         ( "agent_error",   "agent_error_rate"   ) ):
+        records = [ _rec( ok=False, route_reason=reason ) ] + [ _rec() for _ in range( 3 ) ]
+        assert ve.compute_metrics( records )[ key ] == 0.25, key
+
+
+def test_a_non_two_hundred_is_excluded_from_the_error_denominator():
+    """`answered` means the server responded — a transport failure was never answered."""
+    records = [ _rec( ok=False, status=500 ), _rec( ok=False, route_reason="replay_error" ) ]
+    m = ve.compute_metrics( records )
+    assert m[ "n_answered" ] == 1
+    assert m[ "replay_failure_rate" ] == 1.0
+
+
+def test_a_clean_run_reports_exactly_what_it_always_did():
+    """THE CLEAN CASE: no errors anywhere, so answered == ok and the denominator is identical."""
+    records = [ _rec() for _ in range( 5 ) ]
+    m = ve.compute_metrics( records )
+    assert m[ "n_answered" ] == m[ "n_ok" ] == 5      # the two denominators coincide exactly
+    assert m[ "replay_failure_rate" ] == 0.0
+    assert m[ "router_error_rate" ]   == 0.0
+
+
+def test_the_accessor_layer_can_read_an_errored_records_reason():
+    """
+    THE SECOND LAYER. Fixing the denominator alone left the rates at 0.0, because
+    response_route_reason gates on `ok` and returned None for exactly the records carrying
+    an error. The instrument refused to look at its own evidence at two independent layers,
+    and either one alone was enough to silence it.
+    """
+    errored = _rec( ok=False, status=200, route_reason="replay_error" )
+    assert ve.response_route_reason( errored ) is None          # ok-gated view, unchanged on purpose
+    assert ve.reported_route_reason( errored ) == "replay_error"  # the view the error rates use
+
+
+def test_reported_route_reason_is_none_for_a_transport_failure():
+    assert ve.reported_route_reason( _rec( ok=False, status=502 ) ) is None
+    assert ve.reported_route_reason( { "status_code": 200, "payload": None } ) is None
