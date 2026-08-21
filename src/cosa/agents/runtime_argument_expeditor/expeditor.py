@@ -548,15 +548,15 @@ class RuntimeArgumentExpeditor:
             for arg_name in special:
                 handler = special_handlers[ arg_name ]
                 if handler == "fuzzy_file_match":
-                    # Auto-resolve (row bd0ce120) is SCOPED to the podcast route only.
-                    # Only the podcast command forwards original_question; every other
-                    # fuzzy_file_match consumer (e.g. the presentation generator's
-                    # `source` arg) receives None, so its auto pre-step can never fire
-                    # and its behaviour is STRUCTURALLY unchanged — not changed-and-tested.
-                    is_podcast     = command == "agent router go to podcast generator"
-                    fuzzy_original = original_question if is_podcast else None
-                    # The first-turn choice card is podcast-only — the SAME command
-                    # fence as fuzzy_original, so presentation's `source` is untouched.
+                    # Auto-resolve (row bd0ce120) and the first-turn choice card were
+                    # both gated on `command == podcast` while the behaviour was proven
+                    # on that one route. Row 5bc22180 removes the gate: EVERY
+                    # fuzzy_file_match consumer forwards the utterance and opts into the
+                    # card, because nothing in either step is podcast-specific — they
+                    # are generic file resolution. The presentation generator's `source`
+                    # was the degraded member; TFE's `resume_from` is untouched because
+                    # it routes through a different handler on the elif below, not
+                    # because a command check protects it.
                     #
                     # arg_name/ask_question carry the CALLING agent's own identity into
                     # the prompt. Previously both were hardcoded to the podcast's, so a
@@ -566,7 +566,7 @@ class RuntimeArgumentExpeditor:
                     fuzzy_question = spec.fallback_questions.get( arg_name )
                     value = self._handle_fuzzy_file_match(
                         user_email, spec.display_name,
-                        original_question=fuzzy_original, use_choice_card=is_podcast,
+                        original_question=original_question, use_choice_card=True,
                         arg_name=arg_name, ask_question=fuzzy_question
                     )
                     # Auto-detect YAML → set render_only flag
@@ -591,29 +591,40 @@ class RuntimeArgumentExpeditor:
         # downstream where a file path is expected and the job dies with
         # FileNotFoundError at runtime (podcast_generator/job.py:216-223). Treat a
         # present-but-non-existing-path value as UNRESOLVED and run the same fuzzy
-        # matcher the missing case uses. SCOPED to the podcast command so the
-        # presentation generator's `source` arg (also a fuzzy_file_match consumer)
-        # is STRUCTURALLY untouched — same command fence as the auto-resolve
-        # pre-step. The matcher SEED is original_question (the full utterance, the
-        # validated input), not the bare pre-filled value; a zero-or-2+ match
-        # falls through to the "which document?" prompt inside
+        # matcher the missing case uses. The matcher SEED is original_question (the
+        # full utterance, the validated input), not the bare pre-filled value; a
+        # zero-or-2+ match falls through to the "which document?" prompt inside
         # _handle_fuzzy_file_match, never a crash.
-        if command == "agent router go to podcast generator":
-            for arg_name, handler in special_handlers.items():
-                if handler != "fuzzy_file_match":                          continue
-                if arg_name in missing:                                    continue  # the missing-loop above already ran its handler — never re-resolve
-                if arg_name not in final_args:                             continue  # not present at all — nothing to resolve
-                if self._value_is_existing_path( final_args[ arg_name ] ): continue  # already a real path — leave it
-                if self.debug: print( f"[Expeditor] Present-but-unresolvable '{arg_name}'={final_args[ arg_name ]!r} → running fuzzy resolve" )
-                # Inside the podcast-only fence (L404) → opt into the choice card.
-                value = self._handle_fuzzy_file_match( user_email, spec.display_name, original_question=original_question, use_choice_card=True )
-                if value is None:
-                    print( f"[Expeditor] User cancelled resolving present-but-unresolvable arg '{arg_name}'" )
-                    return None
-                final_args[ arg_name ] = value
-                if value.lower().endswith( ( ".yaml", ".yml" ) ):
-                    final_args[ "render_only" ] = "true"
-                    if self.debug: print( f"[Expeditor] YAML detected → render_only=true" )
+        #
+        # Row 5bc22180 removed the `command == podcast` gate that used to wrap this
+        # loop. The presentation generator hit the SAME defect through `source`, one
+        # step earlier: presentation_generator/job.py pre-validates the path and
+        # raises FileNotFoundError("Source document not found: KISS") before the
+        # orchestrator is built, so the job ended FAILED. Nothing in the loop is
+        # podcast-specific — the `handler != "fuzzy_file_match"` line is what keeps
+        # TFE's `resume_from` out, and that line does the job on its own.
+        for arg_name, handler in special_handlers.items():
+            if handler != "fuzzy_file_match":                          continue
+            if arg_name in missing:                                    continue  # the missing-loop above already ran its handler — never re-resolve
+            if arg_name not in final_args:                             continue  # not present at all — nothing to resolve
+            if self._value_is_existing_path( final_args[ arg_name ] ): continue  # already a real path — leave it
+            if self.debug: print( f"[Expeditor] Present-but-unresolvable '{arg_name}'={final_args[ arg_name ]!r} → running fuzzy resolve" )
+            # The caller's OWN arg name and question, exactly as the missing-arg loop
+            # passes them. Omitting them here left the rescue on the handler's podcast
+            # defaults, which is how a presentation job came to ask about "the podcast"
+            # under a card titled "Missing: research" (job pr-a10a55aa).
+            value = self._handle_fuzzy_file_match(
+                user_email, spec.display_name,
+                original_question=original_question, use_choice_card=True,
+                arg_name=arg_name, ask_question=spec.fallback_questions.get( arg_name )
+            )
+            if value is None:
+                print( f"[Expeditor] User cancelled resolving present-but-unresolvable arg '{arg_name}'" )
+                return None
+            final_args[ arg_name ] = value
+            if value.lower().endswith( ( ".yaml", ".yml" ) ):
+                final_args[ "render_only" ] = "true"
+                if self.debug: print( f"[Expeditor] YAML detected → render_only=true" )
 
         if self.debug: print( f"[Expeditor] Final args: {final_args}" )
 

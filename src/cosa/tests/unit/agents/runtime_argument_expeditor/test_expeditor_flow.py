@@ -224,18 +224,23 @@ class TestExpediteFlow( unittest.TestCase ):
             o.expedite( PG, "", "u@x", "s", "uid", "make a podcast about KISS" )
         self.assertEqual( fuzzy.call_args.kwargs[ "original_question" ], "make a podcast about KISS" )
 
-    def test_auto_resolve_fence_presentation_gets_none( self ):
-        # SCOPE FENCE (row bd0ce120): the presentation command MUST pass
-        # original_question=None so its auto pre-step can NEVER fire — behaviour
-        # structurally unchanged, not changed-and-tested. This is the control that
-        # keeps the shared handler from silently altering the presentation surface.
+    def test_auto_resolve_reaches_presentation_too( self ):
+        # WAS test_auto_resolve_fence_presentation_gets_none, and it asserted the
+        # OPPOSITE: that presentation received original_question=None. That fence was
+        # deliberate and temporary — row bd0ce120 held presentation out while the
+        # behaviour was proven on podcast, and row 5bc22180 (Rick's go, Approach A)
+        # removed it. Keeping the old assertion would have pinned the fence as if it
+        # were the requirement, so it is INVERTED here rather than deleted: the same
+        # call site, the opposite expectation.
+        # Full presentation coverage lives in
+        # test_expeditor_presentation_fences_generalized.py.
         o = _mk_expeditor()
         with _FlowFixture( o, user_visible=[ "source" ], parsed=_expeditor_resp() ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/deck.md" ) as fuzzy, \
              patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
             o.expedite( PR, "", "u@x", "s", "uid", "make a deck about KISS" )
-        self.assertIsNone( fuzzy.call_args.kwargs[ "original_question" ] )
+        self.assertEqual( fuzzy.call_args.kwargs[ "original_question" ], "make a deck about KISS" )
 
     def test_special_tfe_checkpoint_match( self ):
         o = _mk_expeditor()
@@ -300,8 +305,9 @@ class TestPresentButUnresolvedFixB( unittest.TestCase ):
     not an existing path (a bare topic word "KISS" from a natural utterance), the
     expeditor must run the SAME fuzzy matcher rather than hand the topic downstream
     where the podcast job treats it as a file path and dies with FileNotFoundError
-    (job.py:216-223). SCOPED to the podcast command — presentation's `source` arg
-    (also fuzzy_file_match) must be structurally untouched.
+    (job.py:216-223). Originally SCOPED to the podcast command; row 5bc22180 removed
+    that scope, so presentation's `source` gets the same rescue — its own failure was
+    the same bug one step earlier, in the job's path pre-validation.
 
     Each behaviour test is control-proven: the docstring predicts the exact failure
     text if the guarded code is mutated away, so a green here is a proof, not a claim.
@@ -353,12 +359,14 @@ class TestPresentButUnresolvedFixB( unittest.TestCase ):
         self.assertEqual( out[ "research" ], "io/deep-research/u/report.md" )
         fuzzy.assert_not_called()
 
-    def test_present_unresolvable_scoped_to_podcast_presentation_untouched( self ):
-        # SCOPE CONTROL (Rio's leak check). presentation `source` present="KISS",
-        # not a path — my Fix-B block is fenced to the podcast command, so it must
-        # NOT fire here; presentation is structurally unchanged, source stays "KISS".
-        # CONTROL — remove the `command == PG` fence: source would resolve and this
-        #   fails AssertionError: '/io/x/deck.md' != 'KISS'  (and fuzzy.assert_not_called fails)
+    def test_present_unresolvable_source_is_rescued_for_presentation_too( self ):
+        # WAS test_present_unresolvable_scoped_to_podcast_presentation_untouched, and
+        # it asserted the OPPOSITE: that `source="KISS"` stayed the bare topic. That
+        # was the fence, not the goal — the bare topic then reached
+        # presentation_generator/job.py, which raised
+        # FileNotFoundError("Source document not found: KISS") and ended the job
+        # FAILED. Row 5bc22180 removed the fence, so the assertion is INVERTED rather
+        # than deleted: the topic now resolves.
         o = _mk_expeditor()
         with _FlowFixture( o, user_visible=[ "source" ],
                            parsed=_expeditor_resp( present="source=KISS" ) ), \
@@ -366,8 +374,8 @@ class TestPresentButUnresolvedFixB( unittest.TestCase ):
              patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/deck.md" ) as fuzzy, \
              patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
             out = o.expedite( PR, "", "u@x", "s", "uid", "make a deck on KISS" )
-        self.assertEqual( out[ "source" ], "KISS" )   # untouched — Fix B does not widen presentation
-        fuzzy.assert_not_called()
+        self.assertEqual( out[ "source" ], "/io/x/deck.md" )   # resolved, not the bare topic
+        fuzzy.assert_called_once()
 
     def test_present_unresolvable_cancel_returns_none( self ):
         # No-crash contract: when the fuzzy resolve's fall-through prompt is
