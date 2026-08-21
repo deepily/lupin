@@ -26,6 +26,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from cosa.agents.receptionist_agent import ReceptionistAgent
+from cosa.memory.solution_snapshot import CODELESS_AGENT_CLASSES
 from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor import ArgSpec
 from cosa.rest.v2.executor import Work
@@ -209,7 +210,13 @@ class AskFlow:
                     return self._finish( trace, "replay", "exact_hit", outcome, question, ctx,
                                          command=command, cache_hit=True,
                                          agent_label=spec.label )
-                return self._receptionist( trace, question, ctx, "replay_error" )
+                # primary_error, like the agent path at the bottom of _run_agent. Without
+                # it the receptionist's own (absent) error is all that is emitted, so a
+                # replay that died of "Cannot execute empty code list" reached the client
+                # as error=null — 115 of 117 failures in the 2026-08-21 warm pass could
+                # not say why (bug 38815328).
+                return self._receptionist( trace, question, ctx, "replay_error",
+                                           primary_error=outcome.error )
 
         # 3 — arguments.
         if not spec.required_args:
@@ -286,8 +293,14 @@ class AskFlow:
 
         trace = StageTrace( trace_dir=self.trace_dir )
         trace.mark( "t_recv" )
+        # ONE definition of "there is a question here", used by all three sites below:
+        # what gets logged as the verbatim, whether the row says those words are a
+        # person's, and whether the result may be cached. `ask`'s fitness gate already
+        # says a blank-or-whitespace question is no question; `submit` has no gate, so
+        # it borrows the same rule rather than growing a second, looser one.
+        has_question = self._has_question( question )
         trace.update( decision_floor=self.similarity_floor, speak=speak, interactive=False, entry="submit",
-                      question=question or command or "" )
+                      question=question if has_question else ( command or "" ) )
         # WHOSE WORDS THE QUERY LOG IS ABOUT TO REPORT. A `submit` caller often has no
         # question at all: the HTTP door names a command, and an in-process caller hands
         # over a job it built. The line above then files the command string — or an empty
@@ -301,7 +314,7 @@ class AskFlow:
         # question, filing the command string under query_verbatim. Testing for None
         # here would type that row "api" while the row it logs is a routing command
         # (Pocholo, on the mark itself).
-        if not question:
+        if not has_question:
             trace.set( "verbatim_source", "command" if command is not None else "job" )
         ctx = ( user_id, user_email, session_id, websocket_id, speak )
 
@@ -337,8 +350,9 @@ class AskFlow:
         # looks rows up by the user's words, and no user says "agent router go to math".
         # A row that can never be hit is not a cache entry, it is landfill — and it
         # still costs a read on every lookup. (Pocholo, reviewing step 10.)
-        return self._run_agent( trace, spec, command, question or command, final_args, ctx,
-                                "submitted", snapshotable=spec.snapshotable and bool( question ) )
+        return self._run_agent( trace, spec, command, question if has_question else command,
+                                final_args, ctx, "submitted",
+                                snapshotable=spec.snapshotable and has_question )
 
     def _submit_agentic(
         self, trace: StageTrace, spec: Any, command: str, args: dict,
@@ -545,6 +559,18 @@ class AskFlow:
 
     # ---------------------------------------------------------------- helpers
     @staticmethod
+    def _has_question( question: Optional[ str ] ) -> bool:
+        """Whether `question` is a question at all — the rule `_unfit_reason` uses.
+
+        Blank, absent, or nothing but whitespace all mean the same thing, and they have
+        to mean it in ONE place: the three sites in `submit` that ask this would
+        otherwise drift apart, and a looser one of them is how a routing command gets
+        logged as a person's words, or written into the cache under a key nobody will
+        ever say.
+        """
+        return bool( question and question.strip() )
+
+    @staticmethod
     def _unfit_reason( question: str ):
         """
         Why this question is refused, or None if it is fit to process.
@@ -554,7 +580,7 @@ class AskFlow:
         spoken reason AND a route_reason, so the trace records WHICH rule fired
         rather than a single flat "rejected".
         """
-        if not question or not question.strip():
+        if not AskFlow._has_question( question ):
             return ( REJECTION_EMPTY, "empty_question" )
         if len( question ) > MAX_QUESTION_CHARS:
             return ( REJECTION_TOO_LONG, "question_too_long" )
@@ -777,16 +803,39 @@ class AskFlow:
         """
         if not ( snapshotable and outcome.status == "done" ):
             return None
+        if not self._is_replayable( outcome, agent_class_name ):
+            trace.set( "writeback_skipped_unreplayable", agent_class_name )
+            if self.debug: print( f"[v2] not writing back {agent_class_name}: no code, and run_code cannot serve it codeless" )
+            return None
         user_id, user_email, session_id, websocket_id, _speak = ctx
         snapshot    = self.cache.snapshot_from_result(
             question=question, answer=outcome.answer_raw, answer_conversational=outcome.answer,
             routing_command=command, agent_class_name=agent_class_name,
             user_id=user_id, session_id=session_id,
+            code=outcome.code, code_example=outcome.code_example, code_returns=outcome.code_returns,
         )
         snapshot_id = self.cache.write_back( snapshot, writeback_enabled=self.writeback_enabled )
         if snapshot_id is not None:
             trace.mark( "t_writeback" )
         return snapshot_id
+
+    @staticmethod
+    def _is_replayable( outcome: Any, agent_class_name: str ) -> bool:
+        """Whether a row written from this outcome could ever be served back.
+
+        THE SAFETY NET UNDER THE CODE FIX, not a second copy of it. Persisting the
+        agent's code is what makes v2 rows replayable; this refuses to write the ones
+        that still could not be — an agent that produced no code and whose class
+        run_code() cannot serve codeless. Such a row is dead on arrival: every hit on
+        it raises "Cannot execute empty code list", degrades to the receptionist, and
+        the row sits in the table costing a read forever.
+
+        The codeless set is imported from the module that DECIDES it, so the writer and
+        run_code cannot drift into disagreeing about which classes need code.
+        """
+        if agent_class_name in CODELESS_AGENT_CLASSES:
+            return True
+        return bool( outcome.code ) and not all( str( line ).strip() == "" for line in outcome.code )
 
     def _finish(
         self, trace: StageTrace, path: str, route_reason: str, outcome: Any, question: str, ctx: tuple,

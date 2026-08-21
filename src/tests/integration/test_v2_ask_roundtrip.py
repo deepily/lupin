@@ -26,6 +26,8 @@ import uuid
 import pytest
 import requests
 
+from tests.integration.v2_queued import assert_handed_off, snapshot_id_for_question, wait_for_done
+
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
@@ -83,28 +85,54 @@ def _cleanup_snapshot( snapshot_id ):
 
 
 def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_headers ):
-    """First call routes + writes back (cold miss); second identical call replays it."""
+    """First ask queues, runs and writes back (cold miss); the second identical ask replays it.
+
+    THE ROUND TRIP IS UNCHANGED; WHERE THE ANSWER ARRIVES IS NOT. This used to assert
+    `status == "done"` from a single POST, which is what the INLINE executor did. The
+    product's executor is the queued one: the flow hands the job to the FIFO queue and
+    answers `waiting` with a job_id, and the queue produces the answer behind the
+    response (row ce29cd20). The old assertion was pinning the executor the product
+    stopped using — so the test follows the product rather than the INI being flipped
+    back to inline to keep it green.
+
+    The write-back still happens; it is the QUEUE that does it, before the job reaches
+    the done queue. That ordering is what makes the second ask a fair test: by the time
+    the first job is observable as done, its row is already in the table.
+    """
     question, _expected_sum = _unique_math_question()
     body = { "question": question, "speak": False, "interactive": False }
-    snapshot_id = None
     try:
-        # ── first call: cold. Routes to an agent, runs, writes back. NOT a cache hit.
+        # ── first ask: cold. Routed, then HANDED OFF — not run on this thread.
         r1 = requests.post( _ASK, json=body, headers=auth_headers, timeout=120 )
         assert r1.status_code == 200, f"first call: {r1.status_code} {r1.text}"
         first = r1.json()
-        assert first[ "cache_hit" ] is False, f"cold question replayed on first call: {first}"
-        assert first[ "path" ] == "agent", f"expected agent route on first call, got {first[ 'path' ]}: {first}"
-        assert first[ "status" ] == "done", f"first call did not complete: {first}"
-        snapshot_id = first[ "snapshot_id" ]
-        assert snapshot_id, f"snapshotable+done but nothing written back — write-back is off: {first}"
-        assert first[ "wrote_snapshot" ] is True, f"wrote_snapshot False despite a snapshot id: {first}"
+        assert_handed_off( first, expect_cache_hit=False, expect_path="agent" )
+        assert first[ "wrote_snapshot" ] is False, (
+            f"a queued hand-off wrote a snapshot before the job ran — the row would carry "
+            f"no answer: {first}"
+        )
 
-        # ── second call: identical. MUST be a tier-1 exact replay from the write-back.
+        # ── the queue runs it. Landing in the done queue means the write-back has landed.
+        done = wait_for_done( BASE_URL, first[ "job_id" ], auth_headers )
+        assert done, f"first job completed with no metadata: {done}"
+
+        snapshot_id = snapshot_id_for_question( question )
+        assert snapshot_id, (
+            f"the job finished but nothing was filed under {question!r} — write-back is off, "
+            f"or the row was written under a key `ask` cannot look up"
+        )
+
+        # ── second ask: identical. MUST be a tier-1 exact replay of that row.
         r2 = requests.post( _ASK, json=body, headers=auth_headers, timeout=120 )
         assert r2.status_code == 200, f"second call: {r2.status_code} {r2.text}"
         second = r2.json()
-        assert second[ "cache_hit" ] is True, f"second identical request did NOT replay — round-trip broken: {second}"
-        assert second[ "path" ] == "replay", f"expected replay path on second call, got {second[ 'path' ]}: {second}"
-        assert second[ "status" ] == "done", f"replay did not complete: {second}"
+        assert_handed_off( second, expect_cache_hit=True, expect_path="replay" )
+
+        # ── and the replay itself reaches a terminal answer, which is the point of a cache.
+        replayed = wait_for_done( BASE_URL, second[ "job_id" ], auth_headers )
+        assert replayed.get( "response_text" ) or replayed.get( "answer" ), (
+            f"the replay completed with no answer — a cache hit that serves nothing is a "
+            f"miss with extra steps: {replayed}"
+        )
     finally:
-        _cleanup_snapshot( snapshot_id )
+        _cleanup_snapshot( snapshot_id_for_question( question ) )
