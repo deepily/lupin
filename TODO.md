@@ -1,5 +1,404 @@
 # TODO
 
+## 🕳️ PATTERN 2026-08-20 (Tiberius 👑, recorded by Mr. Radio 🦉 `f60b686e`) — AN INSTRUMENT THAT ERASES ITS OWN WITNESS: three sightings in one night, so design against it rather than fix it three times
+
+**The general form**: *a measurement whose population excludes failures cannot report failure.* Each sighting below looked healthy — that is the whole problem. None of the three announced anything; a person noticed the number was wrong.
+
+### The three, tonight
+
+| # | instrument | how it erased its witness |
+|---|---|---|
+| 1 | the v1/v2 scorer | booked correct v1 behaviour as failure — same 20 utterances scored **20/20 for v2, 0/20 for v1**, both arms behaving correctly |
+| 2 | `render_paired_report` | emitted provenance and a **bare delta** — a median over whichever utterances survived would have read as a verdict on the whole corpus (`5dfe0d43` ruled otherwise; never implemented until `0b3a08f2`) |
+| 3 | the four route-error rates | computed over the **`ok` set**, and `is_completed_ok` moved errored records *out* of `ok` — so all four went **structurally zero at the exact moment they mattered**. `replay_failure_rate` read `0.0` while 42% of warm responses were failing |
+
+Adjacent sightings from the same week, same shape: a websocket suite reporting green over **4 of ~50** tests; `/health` answering 200 while every embed returned nothing; `n=49` from a pairing that compared nothing.
+
+### The design rule this argues for
+
+**Before trusting a rate, ask what its denominator excludes.** If the excluded set is where the failures go, the rate is structurally incapable of reporting them — and it will report `0.0`, which reads as good news. A zero from a healthy system and a zero from an erased denominator are indistinguishable at the point of reading.
+
+⇒ Concretely: **an error rate must be computed over every ANSWERED request, never over the successful subset.** That is the fix Tiberius applied — with the control that proves it (dirty case red on the old code and `0.42` on the new; clean case denominators coincide exactly, so nothing that reported correctly changes).
+
+⚠️ **Demanding the receipt is what found the second layer.** He had a working fix for the one metric and would have shipped it; being asked to *prove* "nothing that reported correctly changes" surfaced that the cache views legitimately want the ok-gated denominator and the error views do not. **The proof was not a formality — it was the thing that found the rest of the defect.**
+
+### Not yet owed
+No row, per the standing no-new-rows order. The candidate work is a sweep for other rates computed over a success-filtered population, and a test convention that pins each rate's denominator explicitly.
+
+
+## 🔁 BACKLOG 2026-08-20 (Chloé 🗼, handed back to Mr. Radio 🦉 `f60b686e`) — six hand-rolled retry loops now have a shared helper to move onto, and two of them must not be moved blind
+
+**Not owed yet — no row, per Rick's no-new-rows order. This is the hand-back so it does not evaporate with the seat.**
+
+The shared helper exists and is in use: `src/cosa/utils/bounded_retry.py` (sync `retry_call` + async `retry_call_async`, attempt count, wall-clock deadline, exponential backoff, exception filtering, optional predicate, `on_retry` hook, retry-on-returned-value). Landed at **`8fab39fe`** with 100% lines AND branches, first caller `search_kagi.py:search_fastgpt()`. Full unit sweep after it: **16,065 passed, 0 failed**.
+
+**Why the helper was worth building at all**: there was no shared retry helper and no retry library in the tree — no `tenacity`, no `backoff` in any requirements file — and six independent loops had each solved it again.
+
+### The six candidates, per-loop risk in the writeup
+`src/rnd/v0.2.0/2026.08.20-bounded-retry-helper-and-migration-candidates.md`
+
+⚠️ **Two must be read before they are touched** — Chloé's call, and it is the reason this is a backlog note rather than a mechanical sweep:
+
+| loop | why it is not mechanical |
+|---|---|
+| `agents/dm_quality_judge/` (`judge.py`, `judge_v2.py`) | the prompt **changes between attempts** to break a degenerate mode — a generic retry that replays the same call defeats the point of retrying |
+| `memory/embedding_provider.py` | the exception **types** drive whether the caller retries by shrinking the batch (bug `13b35b37`) — a helper that normalises or swallows the type breaks the caller's decision |
+
+The other four (`podcast_generator/tts_client.py`, `notification_proxy/verification.py`, `memory/speech_to_text_provider.py`, `rest/db/auto_migrate.py`) look closer to mechanical, but `auto_migrate` is deadline-shaped and was the model the helper was built from, so it may be better left as the reference.
+
+**Anyone taking this**: migrate one loop per commit with its own tests, never a sweep. The fence on the original row existed because a P3 that grows into a six-file refactor stops being reviewable.
+
+
+## 🐢 FINDING 2026-08-20 (Mr. Radio 🦉 `f60b686e`, at Rick's request) — v2's CACHE NEVER HITS: the synonym row points at a snapshot id that does not exist
+
+**Rick asked where v2's latency lives, and guessed a blocking embed plus a slow DB write. Both measured, both cheap.** Analysis only — **nothing was changed.**
+
+### Where the time actually goes (median per phase, 191 traces)
+
+| Phase | todo | math | calculator |
+|---|---:|---:|---:|
+| router | 22 ms | 23 ms | 22 ms |
+| agent invoked | 831 ms | 901 ms | 807 ms |
+| **first useful output** | **62,217 ms** | **9,222 ms** | **3,126 ms** |
+| writeback complete | 62,930 ms | 9,435 ms | 3,235 ms |
+
+**Embedding 1.6 ms · ANN 1.7 ms · exact lookup 11.9 ms · DB write-back 110–710 ms.** ⇒ **~100% of the time is agent execution**, before anything is written anywhere.
+
+### The reason the agent runs at all: the cache never hits
+
+**0 cache hits in 193 requests, including 93 warm-pass repeats.** Cold median 8,520 ms, warm median 8,473 ms — **the warm pass buys nothing**. 59 of 74 ANN lookups scored **exactly 100.0** and none replayed (by design, `flow.py:95` — only a tier-1 exact match replays). Tier 1b `exact_normalized`, the *designated* warm-pass replay signal, fired **0** times.
+
+### 🔴 THE MECHANISM — GHOST POINTERS (Tiberius's diagnosis; mine below was WRONG)
+
+**The clean step truncates `solution_snapshots` and leaves `canonical_synonyms` standing.** So every run begins holding *prior runs'* synonym rows pointing at snapshot rows that no longer exist. Tier 1 matches a ghost by verbatim text, dereferences it to nothing, and reports a **miss**.
+
+⇒ **That explains both halves of the signature at once**: a **0% hit rate** against a **65% candidate rate** is what a lookup looks like when it *finds* something and then dereferences to nothing. Receipt from `lupin_db_test` after `ts-23613e7d`: **124 snapshots, 1,021 v2-written synonyms, 897 dangling**, and every synonym matching a live question resolved to a ghost.
+
+**Fix**: both clean steps now empty the two tables in one statement, with tests that go red on the old code.
+
+**⚠️ MY DIAGNOSIS BELOW WAS WRONG AND THE ERROR IS INSTRUCTIVE.** I compared a synonym row against a snapshot for the same question *text* and concluded write-back computed two different ids. **They came from different GENERATIONS** — the synonym survived an earlier run, the snapshot was written by this one. Same question, different run, different row; the ids disagree for a reason that has nothing to do with the write path. **I asserted a mechanism from two values without checking they were contemporaries.** An id bug explains neither half of the signature; ghost pointers explain both. Kept below as the record of a tested-and-failed hypothesis, not deleted.
+
+### ~~The mechanism — two different ids for the same question~~ (WITHDRAWN, see above)
+
+Queried `lupin_db_test` (the isolated store the run actually writes; **my first query hit `lupin_db_dev` and returned a misleading 0/25 — the wrong-database mistake, caught before it was claimed**):
+
+| Check | Result |
+|---|---|
+| Tonight's repeated questions with a `canonical_synonyms` row | **23 / 25** |
+| Same questions present in `solution_snapshots` (by text) | **23 / 25** |
+| Same questions whose synonym `snapshot_id` **resolves** to a snapshot | **0 / 25** |
+| Synonym rows store-wide whose `snapshot_id` does not resolve | **924 / 1,048** |
+
+For `'update the priority of paint bedroom on my task list'`:
+- `canonical_synonyms.snapshot_id` = `44933b7331defafcb145f6f61e7907d38b666b40da67a4bd47ddea25f2cbd4a2`
+- `solution_snapshots.id_hash` for that same question = `0958b48a7435b70834def2de787ca0ce93aae95f8ed2c795c83d40ad9502…`
+
+⇒ **Write-back stores the snapshot under one id and the synonym under a different one.** The exact tier finds the synonym, follows the pointer, finds nothing, falls through to ANN — which by design never replays — so **the full agent runs on every repeat**, and a duplicate snapshot is written (57 of 59 perfect-similarity records did exactly that).
+
+### ⚠️ THIS PARTLY REVERSES TONIGHT'S HEADLINE
+
+If v1's warm pass replays from a working cache (~3.5 s) while v2 re-runs the full agent every time, then the measured **"v1 is 3.9× faster" is largely cached-vs-uncached, not architecture** — the benchmark compared **v1-with-a-working-cache against v2-with-a-broken-one**. The comparison may be **understating** v2 substantially.
+
+### ✅ FIXED AND PROVEN LIVE — then Rick ordered the cache fixed BEFORE the rerun
+
+**Rick's ruling ~21:12** (four-option ask, answered, not a default): *"Fix the cache first, then rerun."* He had ordered the rerun an hour earlier, before either of us knew the cache was dead; shown the new evidence, he changed the order. The submit was held ~10 minutes while he decided.
+
+**Live two-call proof on `:8000`, after running the real guarded clean step** — not a unit test:
+
+| | |
+|---|---|
+| Call 1 — agent path, no hit | **11,148 ms** |
+| Call 2 — replay path, `cache_hit` true, similarity 100.0 | **24.6 ms** |
+| Ratio | **~450×** |
+
+Store finished with 1 snapshot, 1 synonym, **0 dangling**; the clean step cleared all 1,048 real synonyms including the 924 ghosts. ⚠️ **Held loosely: one utterance, one pair — a mechanism demonstration, not a distribution.**
+
+**Blast-radius check before commit** (asked, because a helper that empties a table gets reused somewhere it shouldn't six months later): both truncate functions live in `src/scripts`, no application module imports them, and each **refuses unless the EXECUTING connection's own database name** is exactly `lupin_db_test` or `lupin_db_v1baseline` — frozenset equality, not substring, read off the live connection so a passed argument cannot lie about the target. Only the table list inside that already-guarded statement was widened.
+
+### 🔄 AND THIS REVERSES THE STANDING HEADLINE
+
+**"v1 is 3.9× faster" was measured against a v2 whose cache could not hit once** — it was never a comparison of the two designs. With v1 replaying warm in ~3,500 ms and v2 in tens of milliseconds, the aligned rerun may land the opposite way. **Nobody should quote the old number as though it still stands.**
+
+**In flight**: `ts-e0311090`, n=20, submitted 21:26 — the first run tonight with **aligned scorers AND a working cache**. Gate cleared properly: unit suite **16,003 passed / 0 failed, exit code 0 read directly rather than through a pipe**; six fixes at `4ec69f42`; `:8000` verified idle; n=20 confirmed in compose *and* the container's own env. Rick confirmed he is keeping the box up past the ~23:00 landing.
+
+
+## ⚖️ RULED 2026-08-20 (Mr. Radio 🦉 `f60b686e`, found by Tiberius 👑) — REFUSE THE NUMBER: THE TWO ARMS WERE NEVER SCORED BY THE SAME RULES
+
+**Row `d8d019f6` closes on "a real median-delta number, OR a refusal with a reason someone can point at." This is that refusal**, and it is worth more than the delta would have been: a delta gets argued with, a broken instrument gets fixed.
+
+### 🔴 THE ONE EXAMPLE THAT SETTLES IT — same 20 utterances, both arms behaving CORRECTLY, opposite verdicts
+
+The identical 20 `automatic` mode-switch utterances, same corpus, same night, **neither arm misbehaving**:
+
+| Arm | What it does | What its scorer says |
+|---|---|---|
+| **v1** | answers the mode switch **instantly**, returns `job_id: None` (correct — a mode switch spawns no job) | `failure="push_failed"` ⇒ **0 of 20** |
+| **v2** | answers the mode switch, returns 200 | `ok=True` ⇒ **20 of 20** |
+
+**One category, two verdicts, zero difference in behaviour.** Lead with this if anyone asks why the comparison cannot stand.
+
+### Three independent asymmetries. Each one alone invalidates the comparison.
+
+**(1) The two arms do not define "ok" at the same bar** — read at both lines, not taken on report:
+
+| Arm | The line that decides success | What it requires |
+|---|---|---|
+| **v2** | `v2_eval.py:837` — `ok = ( reply.status_code == 200 )` | **The HTTP call returned 200.** Nothing about content: an empty or useless body scores as a success. |
+| **v1** | `v1_eval_arm.py:314` — `rec.ok = rec.client_span_ms is not None` | Reachable only after job id, metadata **and** `completed_ts` all exist. **The work finished end to end and the client observed it.** |
+
+⇒ *"Did the server answer?"* and *"did the work finish?"* are different questions. A v1 job that ran perfectly but whose completion event the client missed scores as a **failure**; a v2 call returning an empty 200 scores as a **success**.
+
+**(2) A correct mode switch is booked as a v1 failure — 40 occurrences.** Asymmetries 1 and 2 fire together on the same twenty rows above. **That is the entire "automatic 0 of 20."** v1's honest failure rate is **~35%, not 48%** — and still not comparable to v2's until the bars match.
+
+**(3) The routing denominators differ — and the contract for it was written into the wrong file.** `v1_eval_arm.py:440` excludes routing-ineligible utterances from its denominator (~40% of the corpus) and says, verbatim:
+
+> `# … and their count + corpus share are reported so the exclusion`
+> `# is auditable, never silent. The v2 arm must exclude the SAME utterances.`
+
+**The string `eligible` appears 12 times in `v1_eval_arm.py` and ZERO times in `v2_eval.py`.** Verified by grep. So v1 scores routing over ~60% of the corpus and v2 over 100%.
+
+⇒ **THE LESSON IS SHARPER THAN THE DEFECT.** Somebody knew the requirement precisely enough to write it down — **in the wrong component's comments, addressed to code that was never going to read it.** *A cross-component contract living in one component's comments is not a contract, it is a wish.*
+
+### ⇒ This upgrades the verdict from "tonight's run is unreadable" to "no run from this harness was ever readable."
+
+**Artifacts preserved deliberately, as EVIDENCE FOR THE REFUSAL rather than as a result.** The `ok`-scoring is broken; the client spans were recorded independently of it, so once both scorers agree on a bar a valid delta may be **re-derivable from tonight's data without another 70-minute run**.
+
+**The pre-existing asymmetry stays disclosed and is NOT part of this**: v1's client span includes full FIFO queue-dwell by design, and that was chosen, documented, and printed in the instrument string. **These three were not chosen.**
+
+### ⏳ PENDING — Rick did not answer (the ask timed out; no response at all)
+
+Asked ~20:24: fix the scorers and rerun **tomorrow morning** (my recommendation), rerun **tonight**, or **stop and take the defects**. **Nothing is authorized and nothing was done.** The run was left to finish for its artifacts. Re-ask tomorrow.
+
+### 🧵 THE SENTENCE THAT TIES THE WHOLE NIGHT TOGETHER (Tiberius, 20:33)
+
+> **"The wrong pairing does not look wrong, it looks well-powered."**
+
+Pairing v1-warm against v2-cold would have yielded **49 shared utterances** — a perfectly plausible sample size. That is how the meaningless −11.2s delta got produced. The **correct** pairing yields **0** and the tool refuses. ⇒ **The broken-looking output was the honest one.**
+
+**Every finding tonight has this shape — the failing state looked healthier than the true state:**
+
+| Instrument | Looked like | Actually was |
+|---|---|---|
+| Bare `pytest` over `websocket_smoke` | "5 passed" — a green tier | 4 of ~50 tests |
+| `/health` on the v1 arm | 200, all night | every embed returning nothing |
+| v1's scorer on a mode switch | `push_failed` ×20 | correct behaviour, mis-booked |
+| Cold-vs-warm pairing | n=49, well-powered | not a comparison at all |
+| Unit suite over `running_fifo_queue` | green | a mock implementing a method the real class lacks |
+
+⇒ **A number that looks reasonable is not evidence the measurement was reasonable.** The only defence that worked all night was asking one more discriminating question before publishing.
+
+**And the design lesson underneath it** (from the seq-split fix, `4366749f`): an **assertion detects a mislabelling after it happens; splitting on the arm's own monotonic counter means there is nothing to detect.** Correct-by-construction beats correct-and-checked. Three separate fixes tonight ended up taking that shape.
+
+### 🔬 THE PATTERN THAT SAVED THIS, WORTH MORE THAN ANY SINGLE FINDING
+
+Tonight produced **five confident answers** to "why does v1 fail ~half the time," and **four were wrong**:
+
+| # | Answer | How it died |
+|---|---|---|
+| 1 | Missing credentials cripple the baseline | **Disproved by its own test** — 48% credentialed vs 47% crippled |
+| 2 | v1 is genuinely unreliable; v2 wins on reliability | Withdrawn — it would have been published at 19:31 |
+| 3 | Three distinct v1 defects | Partly right; one is shared with main, one is a harness artifact |
+| 4 | The instrument mis-scores mode switches | True, but not the whole story |
+| 5 | **The two scorers never asked the same question** | Current, and it dissolves the rest |
+
+**Each was stated confidently. Each died to one more discriminating question asked before publishing.** Tiberius withdrew his credential theory *explicitly* in the write-up rather than letting it fade — "tested and failed" and "superseded" leave the next reader in completely different positions. **Two of the wrong calls were mine** (the direction of the notify bias; the blast radius of the mock-auth defect), both corrected by the worker holding the measurement.
+
+
+## 🪞 FINDING 2026-08-20 (Mr. Radio 🦉 `f60b686e`) — A TEST MOCK IMPLEMENTS A METHOD THE REAL CLASS DOES NOT HAVE, and it is live on main right now
+
+**`set_solution_summary_gist` is called in production and defined nowhere in production.**
+
+| Where | What |
+|---|---|
+| `src/cosa/rest/running_fifo_queue.py:1579` and **`:1730`** (MAIN tree, today) | **calls** `running_job.set_solution_summary_gist( … )` |
+| same file, pinned worktree `b0735467`, `:1579` and `:1744` | **calls** it |
+| `src/cosa/memory/solution_snapshot.py`, either tree | **no definition** |
+| anywhere in production code, either tree | **no definition** |
+| `src/cosa/tests/unit/rest/test_running_fifo_queue.py:65` | **`def set_solution_summary_gist( self, v ): self.solution_summary_gist = v`** — on a **test double** |
+| `src/cosa/history/2025-11-08-to-2026-02-03-history.md:746` | a markdown record of a method that once existed |
+
+⇒ **THE MOCK IS MORE CAPABLE THAN THE REAL CLASS.** The unit suite passes because the double implements a method `SolutionSnapshot` does not have, so production raises `AttributeError` at a line the suite believes it covers. **This is at HEAD, not only in the pinned baseline** — it is a live defect on the working branch.
+
+**Observed cost**: 42 occurrences of `'SolutionSnapshot' object has no attribute 'set_solution_summary_gist'` in one v1 arm run.
+
+**⚠️ AND IT IS NOT A v1-vs-v2 DIFFERENTIATOR, WHICH IS THE TRAP.** It is one **shared** bug that only v1's code path reaches. Read naively it inflates v1's failure count and looks like evidence that v2 is more reliable by design. It is not.
+
+**This is the third time tonight the cause of v1's ~48% failure rate has moved**: missing credentials → *(disproved, 48% vs 47% after provisioning)* → genuine v1 unreliability → *(now)* three separate defects, at least one of them shared with main and one of them a harness artifact. **Each attribution was stated confidently and each was wrong.** The pattern that keeps saving it is refusing to publish until one more discriminating question is answered.
+
+**Status of the other two failure classes in the credentialed run:**
+- **49 × `User not found: interactive_job_tester_8e32@generated.local`** — the *same* mock-auth id as the notify finding above. The v1 launcher sets `AUTH_MODE=mock` while dev and test run `jwt`, so this is a **mock user never provisioned in the DB — harness artifact**, not a v1 defect.
+- **28 × `EmbeddingProvider HTTP fallback returned 422 — String should have at least 1 character, input: ''`** — **v1 is embedding an empty string.** No read yet on whether the empty value is the utterance itself or a derived field v1 fails to populate. **This one may be genuine.**
+
+**Not filed as store rows** (no-new-rows order). The mock/real mismatch deserves a P1 when it lifts — a passing test suite is currently asserting the existence of a method that does not exist.
+
+
+## ♻️ FINDING 2026-08-20 (Tiberius 👑, error owned by Mr. Radio 🦉 `f60b686e`) — A CONTAINER RECREATE DOES NOT KILL A RUNNING JOB, IT REHYDRATES IT
+
+**I told Tiberius "force-recreating the test container is what ended `ts-7b9a6b87`." That was wrong**, and it nearly cost the rerun.
+
+**What actually happens**: the recreate applies env changes and the persisted job comes **back**. His log: `[CJ-PERSIST] Restored immediate job: ts-346cab2d`, restarted **19:46:33**. His "job gone" check landed in the few seconds before rehydration completed, read empty, and he then relaunched the v1 arm **underneath a live run** at 19:48:59.
+
+⇒ **What ends it**: killing the pytest process **inside** the container, which dead-letters the job and frees the monopolize slot. The recreate is the sanctioned path for applying env changes — it is **not** a kill. The two look identical for about ten seconds.
+
+**⚠️ AND THIS REFINES A DOCUMENTED RULE, which is why it belongs here and not only on a row.** The `schedule-tests` skill states — correctly, measured 2026-08-15 — that **a bounce DESTROYS the queue**: `todo`, `run`, `done`, `dead` all came back empty and two queued jobs were lost. **Both facts are true at once**: a **QUEUED** job is lost, a **RUNNING immediate** job **rehydrates**.
+
+**The trap is the inference, not either fact.** A reader who knows "a bounce destroys the queue" naturally concludes "so a bounce kills the running job too" — and gets tonight's outcome: a baseline server relaunched under a run that was still going. **That inference is nowhere written down as false.** Worth adding to the skill next to the existing warning.
+
+**Also fixed tonight, `f86ee2d7` — a green tick that meant the wrong thing.** Tiberius's report tool rendered **PASS** on a synthetic pair that kept 53 of 100 with one category entirely absent, because **both arms lost the same records** so nothing *diverged*. **Divergence and attrition are different questions and it only asked the first.** A green reading "the arms agree" when the honest statement is "the arms agree about half a corpus." He found it by rehearsing the tool on a synthetic pair rather than waiting for live data to expose it.
+
+**Status**: `ts-23613e7d` running since 19:50:20 — the first properly credentialed run tonight. Verified independently: 11 keys in the worktree, **zero** key-not-found lines in the fresh arm log, pin still `b0735467` with an empty porcelain.
+
+
+## 📨 FINDING 2026-08-20 (Mr. Radio 🦉 `f60b686e`) — THE DM CONDENSER DROPPED AN AUTHORIZATION LINE, three times, and each drop cost ~5 minutes of a live run
+
+**What happened.** Tiberius correctly refused to kill a live job without Rick's direct word. I sent it three times. My 19:40 DM **opened with the literal words "RICK'S WORD: KILL IT"**, followed by the provenance: the 19:32 four-option ask, his selection of *"Kill it, fix the credentials, rerun now"*, `answered=true`, `default_used=false`. His reply came back: **"You have said three times to kill it but not once that you have his word."**
+
+⇒ **He is not wrong about what he received.** The DM condenser summarised my message and **dropped the authorization sentence** — the one load-bearing line — while keeping the surrounding operational detail. Every one of those DMs carries the marker `This DM was condensed in transit`.
+
+**THE SHAPE**: the condenser optimises for *information density*, and a short declarative authorization ("I have his word") is low-density next to a paragraph of mechanics. So it compresses away **precisely the sentence a permission gate is waiting on**, and leaves the instructions it was gating. The receiver then sees an order with no authority behind it — which is exactly what a careful worker is built to refuse.
+
+**Cost tonight**: ~15 minutes across three round-trips, while a run that could not produce a number kept burning the box.
+
+**Workaround used**: send the authorization **alone**, in a message short enough that there is nothing to condense. That worked.
+
+⇒ **The fix worth building**: authorization lines must be exempt from condensation, or the condenser must never drop a sentence naming a person's decision. A comms layer that summarises away consent is a comms layer that manufactures refusals. Related but distinct from `b1f3d2df` (condenser inventing a noun) and `206dd6ea` (truncated body, fallback did not fire) — both already closed, both the same family.
+
+**Not filed as a store row** (no-new-rows order). Worth a P1 when it lifts — this one silently breaks the fleet's permission model.
+
+
+## 🔑 FINDING 2026-08-20 (Tiberius 👑, verified by Mr. Radio 🦉 `f60b686e`) — EVERY WORKTREE IS BORN WITHOUT CREDENTIALS, and four gates said the server was fine
+
+**Attempt 12 could not produce a number, and the reason is not the code.** The pinned v1 baseline worktree holds **2 API key files**; the main tree holds **11**. Verified independently by listing both directories:
+
+```
+main tree:  anthropic-api-key-firewalled eleven11 gemini google groq huggingface
+            kagi mistral model-server-api notification-api-claude-code-dev openai
+worktree:   model-server-api notification-api-claude-code-dev
+```
+
+**The causal chain appears ~300 times in the v1 arm log**: `Key [openai] not found at …/lupin-v1-baseline-b0735467/src/conf/keys/openai` → `EMBEDDING API ERROR` → sqlalchemy `expected 768 dimensions, not 0`. Plus 28 where the HTTP fallback to the model server 422'd on empty text, and 27 jobs ending `Confirmation timeout/error — defaulting to cancel`. **Only 18 of 320 pushes returned 500** ⇒ these are jobs that were **accepted and then died on a missing credential**, not rejected requests.
+
+⇒ **v1 kept 53 of 100 warm-pass records, with `automatic` at 0/20 and `calculator` at 3/20.** A delta computed on that compares v2 against a v1 that could not embed.
+
+**🔴 THE FINDING WE NEARLY PUBLISHED INSTEAD.** v1 at 53/100 against v2 at 22/22 reads as *"v2 is dramatically more reliable"* — and I had already told Tiberius to put that comparison on the first screen of the report, above the latency delta, because it answered Rick's question more decisively. **It would have been false.** The gap is a provisioning error in one worktree, not a property of either codebase. What caught it was asking one question before publishing: *are these real request failures, or records that never got written?* Neither of us knew, and the answer was neither.
+
+**⚠️ ROOT CAUSE, AND IT OUTLIVES THIS RUN: keys are gitignored, so every worktree is born credential-less and nothing warns.** The baseline server came up, answered `/health` 200, **passed its code-identity gate**, and accepted work — then failed on the first embed. It ran that way for four hours.
+
+⇒ **IDENTITY IS NOT CAPABILITY.** Every gate this crew has built checks *which code is running*; none checked *whether the environment can do the work*. Second instance in one day — the 18:07 reboot killed both vLLM model servers and `:7997`, and only `:7997` was written down.
+
+**FIXED, by Tiberius, `ee221b71`** — and both design choices matter:
+- It is a **DIFF of the two key directories, not an enumeration**. The launcher already checked `model-server-api`, which is exactly how this was missed — enumerating repeats the mistake one key at a time, while a diff catches whatever the main tree has and the worktree lacks, **including keys added later**.
+- It sits on the **already-up path**, which is the half that actually bit us: every re-check tonight said *"identity matches, nothing to do."*
+- Proven red against the live crippled arm; names all nine missing keys and prints the copy command; exit 1.
+
+**Rick's ruling, 19:33 EDT**: kill, fix the credentials, rerun at n=20 now. Answered off a four-option ask, not a default. **On the pin**: keys are not code, `b0735467`'s tree is unchanged, so provisioning credentials does not weaken the tamper-evident baseline — stated on the row so a later reader does not mistake it for tampering.
+
+**AND THE EMBED PROBE LANDED, `5ecee90e` — built as a DISCRIMINATOR, not a check that passes.** The identical probe returns **0 from the crippled worktree and 768 from the main tree**, same code and same model server, differing only in which key directory is on the path. That negative control is what separates an instrument from a decoration: a probe nobody has ever seen fail is an assumption with a green tick.
+
+It **replaces the `/health` call outright** — `/health` answered all night while all 300 embeds returned nothing.
+
+⇒ **BOTH CHECKS STAY, because they fail on different things**: the **diff** catches a key that is *absent* and names which files to copy; the **probe** catches a key that is present but wrong, revoked, or pointing at nothing. The diff proves a file exists, which is the same shape of gap as `/health` proving a port answers — that argues for the probe being the gate, not for dropping the cheaper check.
+
+**Provenance verified three ways rather than asserted** (row event 8217, written *before* the copy): `.gitignore:71` excludes `src/conf/keys/**`, so the keys were never in `b0735467`'s tree and cannot be; the worktree is clean at `b0735467`; and after the copy both `rev-parse` and the code-identity gate still read `b0735467`. **Tiberius's sentence, which settles it: *"Provisioning restores the intended baseline; the tampering would have been publishing a delta against an arm we knew could not embed."***
+
+
+## 🚦 FINDING 2026-08-20 (Mr. Radio 🦉 `f60b686e`, with María 🌸) — the websocket tier CANNOT do its job where the merge checklist puts it, and it reports green anyway
+
+**Two defects, and the second is the one that matters.**
+
+**(1) The directory answers to bare pytest and lies.** `python -m pytest src/tests/websocket_smoke/ -q` returns **5 passed, 1 skipped** — and reads as a passing tier. The real suite is ~50 tests and does **not** run under pytest collection: it lives behind a custom runner, `python -m tests.websocket_smoke.infrastructure.smoke_test_runner`, invoked by `src/scripts/run-websocket-smoke-tests.sh`. Counted in the tree: **4 pytest-collectable test functions** across the whole `websocket_smoke/` directory. ⇒ **A green covering roughly a twelfth of the suite, with nothing in the output saying so.** Caught tonight when María reported "websocket smoke 5 passed 1 skipped" and the number didn't match what CLAUDE.md says that tier is. She retracted within two minutes of being asked which command she ran.
+
+**(2) THE GATE ORDER ITSELF IS WRONG FOR WORKTREE BRANCHES — María's point, and it is worth more than the miss.** The websocket suite drives a **live server**. On a worktree branch it therefore tests **whatever `:7999` is currently serving**, which is not the branch's code. The PR merge checklist places it *before* the merge. ⇒ **In that position, for any worktree branch, it cannot do its job — it produces a green about code that isn't under test.**
+
+⇒ **THE SPLIT, applied to María's brain-integration merge tonight**: unit and cosa are meaningful **pre-merge** on the worktree (she has both — 15,937 passed with 11 failures proven identical on a clean control at `a657e88e`; cosa 8,750 / 0). **Websocket smoke, E2E UI and integration are all server-dependent ⇒ post-merge, post-bounce**: release `:8000` → merge → bounce `:7999` with the sanctioned script → run websocket smoke **through the shell script** → then take `:8000` for the last two.
+
+**Not filed as a store row** (no-new-rows order). Worth one when it lifts — probably as a pytest collection guard that fails loudly if the websocket directory is invoked directly, since a suite that answers to the wrong command with a green is the failure mode here, not the runner.
+
+
+## 🔔 FINDING 2026-08-20 (Mr. Radio 🦉 `f60b686e`, corrected by Tiberius 👑) — v1's notifications fail validation 530 times and nobody has ever seen it
+
+**Found by reading the v1 arm's log during attempt 12, not by looking for it.** `/tmp/v1-baseline-7997.log` carries **530 × `[ERROR] _notify() failed: 1 validation error for AsyncNotificationRequest`**. The cause is not a network problem: `job_id` fails the model's pattern `^([a-z]+-[a-f0-9]{8}…`. It is **caught, logged, and non-fatal**, so every run completes and nothing visibly breaks. **v2 has 0** of these in a live container log of 1,516 lines.
+
+**I called the direction of the bias wrong and Tiberius corrected it — the correction is the useful part.** I assumed a failing notify *added* latency to v1's measured span, making v1 look slow and flattering v2. The opposite is true: the exception is raised **constructing** `AsyncNotificationRequest`, which happens **before** `notify_user_async` is ever called — and that function is a **synchronous `requests.post` with retry sleeps**. So the failure **skips an HTTP round trip a healthy v1 would pay**, at ~**1.66 skipped notifies per push**.
+
+⇒ It is genuinely inside the measured span (`running_fifo_queue.py:1687` calls `_notify`, and the run-to-done event the client blocks on is emitted after it). ⇒ **A repaired v1 would measure SLOWER, so tonight's delta is CONSERVATIVE toward v2, not inflated by it.** That sentence goes beside the number in the report rather than being left as an unexplained asterisk.
+
+**✅ ANSWERED — and the answer is "neither", which is why asking was worth it.** I framed it as a binary: harness artifact, or a product bug dropping real users' notifications. Tiberius established it is **the ordinary path carrying a harness-shaped value**, so it is a real defect with a much narrower blast radius than I feared.
+
+**The mechanism**: the id is not synthesized by the eval harness — it is `job.id_hash`, scoped by the ordinary `register_scoped_job` into `"sha256::user_id"`. The notification pattern accepts that form **only when `user_id` is a UUID**.
+
+**Established with a negative control, four real values tested rather than one:**
+
+| Value | Against the pattern |
+|---|---|
+| mock-auth id the v1 arm actually produces (`interactive_job_tester_8e32@generated.local`) | ❌ **REJECTED** |
+| a real JWT `user_id` (a UUID) | ✅ matches |
+| a bare sha256 | ✅ matches |
+| an agentic id | ✅ matches |
+
+⇒ **A genuine logged-in user's notifications validate fine.**
+
+**🔴 I THEN OVERSTATED THE BLAST RADIUS AND TIBERIUS NARROWED IT AGAIN — with receipts.** I wrote that it hits "every deployment running `AUTH_MODE=mock`… our whole dev and test fleet," and that notifications had therefore been silently failing across the environments where people debug by watching them. **That was wrong**, and the correction is measured, not argued:
+
+- `auth mode = jwt` is set once in `[Lupin: Baseline]`, which **Development and Testing both inherit**
+- **neither container overrides `AUTH_MODE`**; the live dev container reports `jwt` when asked directly
+- **dev and test logged ZERO of these failures** while carrying real traffic
+- the **only** `AUTH_MODE=mock` in play anywhere is the **v1 baseline arm's own launcher, line 145** — even `run-websocket-smoke-tests.sh` dropped its mock override, with a comment that the server runs JWT now
+
+⇒ **Scope is the pinned v1 eval arm, not the fleet. Nobody has been debugging blind.** Filed as row `befeba88` (Tiberius had already filed it before the no-new-rows order reached him; kept queued — it costs nothing there and dropping a measured defect to satisfy a workload order would lose it). Scope corrected inside the row so it does not stand as a fleet-wide claim.
+
+**⚠️ THE PATTERN WORTH KEEPING FROM THIS EXCHANGE — it happened twice in ten minutes, both times to me.** I got the *direction* of the latency bias backwards, and then I got the *breadth* of the defect wrong. Both times a worker holding the actual measurement corrected me, and both times my error was the same move: taking a real finding and stating it one step wider than the evidence carried. The finding survived both corrections and got sharper each time.
+
+**Deliberately NOT fixed tonight**: a fix would change v1 **mid-measurement**, the one thing this crew has been careful not to do.
+
+**Two lower-priority items seen in the same log, recorded so nobody re-derives them**: 622 splainer warnings for a missing `model tokenizer map` key, and an XML parser stripping 96 chars before the root tag. Neither looks load-bearing. Not chased.
+
+**Not filed as a store row** (Rick's no-new-rows order still stands).
+
+
+## ⏳ PENDING DECISION 2026-08-20 (Mr. Radio 🦉 `f60b686e`) — the off-peak window is wrong AGAIN, and this is the third version of the same rule
+
+**Asked, not answered.** Rick was asked and replied about something else; the question stands. **Do not treat the current CLAUDE.md text as settled — it is measurably wrong right now.**
+
+**What CLAUDE.md says** (§ COST MODEL → Off-peak scheduling rule): host up from ~7:17 AM, and **7:30–10 AM EDT is "OPTIMAL — schedule batch work here."**
+
+**What the box actually does.** Measured from `last -x reboot`, the 12 morning boots since Aug 4:
+
+`08:52 · 09:27 · 07:17 · 09:14 · 09:52 · 09:56 · 09:20 · 10:52 · 09:48 · 09:03 · 09:17 · 09:43`
+
+**Median 09:24. Eleven of twelve are after 08:52.** The 07:17 the rule rests on is a single day (Aug 6). ⇒ **a job placed at 7:30 sits dead ~1.5–2.5h on almost every day.**
+
+**This is the second correction of the same rule, failing the same way.** The original pointed at hours the box was OFF. The 2026-08-17 correction replaced it with hours the box is *usually not up yet* — and it was written in the same doc that says *"a copied example is how a bad window propagates faster than the prose that describes it."* Both versions were derived from too few boots.
+
+⇒ **Proposed: 10 AM – 1 PM**, with the measurement command written beside it so the next reader re-derives the window instead of trusting the sentence:
+```bash
+last -x reboot | head -20      # then read the morning boot times yourself
+```
+
+⚠️ **The one thing that would make this wrong, and only Rick can answer it**: this is derived from boot *history*. If he powers the box on deliberately and would just as happily boot at 7:30 when a job needs it, then this is a record of habit rather than a constraint, and the rule should stay as written. **Ask before editing CLAUDE.md.**
+
+**Live receipt that the window is not academic**: the box was down 14:34–18:07 today and booted at 18:07, so no morning window existed at all. Attempt 12 ran in the evening on Rick's direct approval instead.
+
+
+## 🌙 TONIGHT 2026-08-20 (Mr. Radio 🦉 `f60b686e`, with Tiberius 👑 and María 🌸) — attempt 12 is live, and two of my own claims were wrong
+
+**Attempt 12 = `ts-7b9a6b87`, live 18:36:15 EDT**, n=60, **no `--timeout`**, auto-fix off, `:8000` verified idle at submit. Lands ~23:25. Rick is leaving the box up. Row `d8d019f6`; it closes on a median-delta number or a refusal someone can point at, and nothing less.
+
+**🔴 TWO CARRIED-FORWARD CLAIMS OF MINE, BOTH FALSE, BOTH CORRECTED WITH MEASUREMENTS.** Same shape both times: a true-when-taken measurement restated as a present-tense fact days later, without re-measuring.
+1. **"The test credentials are set nowhere on this box"** — repeated in history.md and used to describe four rows as blocked. **Rick challenged it directly and was right.** They are at `~/.bashrc:147-148` and live in the shell; `docker compose config` → **exit 0, 554 lines, empty stderr**. `--force-recreate` was never blocked. None of those four rows had the credential in `blocked_by` — the block existed only in prose.
+2. **The 7:30 AM window** — see the pending decision above.
+
+**Attempt 12 refused once before it ran, and the refusal was the system working.** First submit `ts-06e1d1a6` died in **2.3 seconds**: the two vLLM servers at `192.168.1.21:3000/:3001` had been dead since the 18:07 reboot, and the liveness guard **refused rather than measure against dead infrastructure**. Nothing ran, nothing was falsified. ⇒ **Three things die on a reboot, not one** — `:7997` *and* both model servers — and only `:7997` was written down anywhere. Tiberius relaunched both from Rick's own aliases and resubmitted.
+
+**María's guardrail is armed and PROVEN, not asserted** — `src/scripts/watch-paired-block-failure-rate.py`, committed rather than scratchpad. Her 08-17 finding (row `2ebe4ccb`): a paired run can degrade **categorically**, not randomly — failures by block ran 10/10/4/38/94% — and because the corpus is **ordered by category**, one whole category went 94% absent from v2 while v1 kept it. Accuracy is scored over `ok` records only, so **the arm that loses its hardest category scores better**, and the floor of 30 does not catch it (~300 pairs survive a 32% failure rate). Replayed against her own file the script reproduces 12/10/4/38/94/62 and fires on blocks 4–6; it stays **quiet on a uniformly-bad run**, because flatness is what it tests. The report will carry **per-arm failure rate and each arm's surviving category composition beside the delta**.
+
+**⚖️ RULED (Mr. Radio, María concurring) — the v1 pin stays `b0735467` for this run.** `v1_eval_arm.py:105` pins the pre-drift sha for tamper-evidence (Sam's design, Cheech-ratified 08-15), which is in genuine tension with my own 08-14 ruling on `647f3733` to baseline against v1 as of the harness landing. **Changing the referent mid-flight makes tonight's number incomparable to all eleven prior attempts.** The honest fix is not moving the pin but *naming* it: the reason now lives **in the assert's own message**, not only in the report, so the next reader sees a referent somebody chose rather than a check that happens to pass. Committed `a657e88e`, 169 unit tests green.
+
+**⚖️ RULED (Mr. Radio) — row `3598c1d3` (weather search) is a missing retry, not a mystery.** Chloé and Sam each named two closing events and each correctly declined the second as a manager's call. Taking it: `KagiSearch.search_fastgpt()` is a **bare single call** — no retry, no backoff, no exception handling — so one momentary upstream blip becomes a user-visible failure with certainty. What happened at 18:54 on 08-19 is now **accepted as permanently unknown**. Row un-parked to `queued` as defined work: bounded retry + backoff, **without swallowing the final status code** (Sam proved that property with a control test at `79ea2501` — run it before and after).
+
+**Staffing**: Rick's skeleton-crew hold stands. He approved **exactly one** seat by name — Tiberius, for this run. A second seat for the P3 was offered and declined by me: a P3 does not warrant source edits on the same box during a 4.8-hour measurement.
+
+
 ## 📋 DECISIONS LOG 2026-08-19 night (Mr. Radio 🦉 `4c571f73`) — post-game of the six-seat crew run
 
 Retro: `io/post-games/2026.08.19-six-rows-and-attempt-eleven-post-game.md` (full tier, **DRAFT pending Rick's D3 approval**). 59 commits, 6 seats, unit tier green at HEAD `31899329` (24,635 passed / 0 failed).
