@@ -31,6 +31,7 @@ from cosa.agents.runtime_argument_expeditor.expeditor import (
     BATCH_DECLINED,
     BATCH_MALFORMED,
     DOCUMENT_CHOICE_CARD_ID,
+    DOCUMENT_DESCRIBE_ASK_ID,
 )
 
 
@@ -102,6 +103,15 @@ class TestAskChoiceForArg( unittest.TestCase ):
         # RED ON REVERT (stamping unconditionally): "card_id" unexpectedly found.
         _out, request, _o = self._ask( _Resp( response_value="a.md" ) )
         self.assertNotIn( "card_id", request.response_options )
+
+    def test_a_named_card_stamps_the_argument_beside_the_id( self ):
+        # MARÍA'S POINT, and it was a real gap: the matcher narrows an id match by
+        # arg_name, and for one commit NOTHING sent arg_name — the filter was reachable
+        # only from tests. Both ask surfaces stamp it now, and each has a falsifier.
+        # RED ON REVERT (the arg_name line dropped from _ask_choice_for_arg):
+        # KeyError: 'arg_name'.
+        request = self._ask_with_card_id( DOCUMENT_CHOICE_CARD_ID )
+        self.assertEqual( request.response_options[ "arg_name" ], "research" )
 
     def test_builds_multiple_choice_request_shape( self ):
         _out, request, _o = self._ask( _Resp( response_value="a.md" ) )
@@ -235,6 +245,60 @@ class TestChooseDocumentFromMatches( unittest.TestCase ):
 
 
 # ── 4. _handle_fuzzy_file_match wiring ──────────────────────────────────────
+class TestTheDescribeAskNamesItself( unittest.TestCase ):
+    """
+    Row 0c280989. The open-ended "which document? describe it" ask had six proxy
+    entries keyed on its prose, in three different wordings. It carries an id now, the
+    same way the card does.
+    """
+
+    def _ask( self, **kwargs ):
+        o = _mk_expeditor()
+        captured = {}
+        def _fake_notify( request=None, debug=False, bearer_token=None ):
+            captured[ "request" ] = request
+            return _Resp( response_value="my document" )
+        with patch.object( ex_mod, "notify_user_sync", side_effect=_fake_notify ):
+            o._ask_for_arg( "source", "Which document?", "u@e.com", **kwargs )
+        return captured[ "request" ]
+
+    def test_a_named_ask_carries_its_id_and_its_argument( self ):
+        # RED ON REVERT (the arg_name line dropped from _ask_for_arg): KeyError.
+        request = self._ask( card_id=DOCUMENT_DESCRIBE_ASK_ID )
+        self.assertEqual( request.response_options[ "card_id" ],  DOCUMENT_DESCRIBE_ASK_ID )
+        self.assertEqual( request.response_options[ "arg_name" ], "source" )
+
+    def test_an_unnamed_ask_sends_no_response_options_at_all( self ):
+        # _ask_for_arg has a dozen other callers and an OPEN_ENDED ask carries no
+        # options. They must send the envelope they always sent — an empty dict would
+        # still be a new key on the wire.
+        # RED ON REVERT (stamping unconditionally): {} is not None.
+        self.assertIsNone( self._ask().response_options )
+
+    def test_the_describe_ask_in_the_fuzzy_handler_names_itself( self ):
+        # The wiring, not just the helper: this is the ask the six migrated proxy
+        # entries answer, so if the call site stops naming the id they all stop
+        # matching and an automated run hangs at a prompt nothing can answer.
+        # RED ON REVERT (card_id dropped at the call site): None != 'document_describe'.
+        o = _mk_expeditor()
+        seen = {}
+        def _fake_ask( arg, question, email, **kwargs ):
+            seen.setdefault( "card_ids", [] ).append( kwargs.get( "card_id" ) )
+            return None
+        o._ask_for_arg = _fake_ask
+        with patch( "cosa.config.configuration_manager.ConfigurationManager" ) as CM, \
+             patch.object( ex_mod.cu, "get_project_root", return_value="/root" ), \
+             patch.object( ex_mod.os.path, "exists", return_value=True ), \
+             patch.object( ex_mod.os, "listdir", return_value=[ "a.md", "b.md" ] ), \
+             patch.object( ex_mod.os, "walk", return_value=[] ), \
+             patch.object( o, "_match_description_to_files", return_value=( "fuzzy", [] ) ):
+            CM.return_value.get.side_effect = lambda key, default=None, **kw: default
+            o._handle_fuzzy_file_match( "u@e.com", "presentation generator",
+                                        original_question="anything", use_choice_card=False,
+                                        arg_name="source" )
+        self.assertIn( DOCUMENT_DESCRIBE_ASK_ID, seen[ "card_ids" ] )
+
+
 class TestSearchRootsComeFromTheDeclaration( unittest.TestCase ):
     """
     Row a1420538. WHERE a file argument's candidates live used to be written into
