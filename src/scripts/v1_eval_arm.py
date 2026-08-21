@@ -216,6 +216,9 @@ class V1Record:
     server_wall_ms    : Optional[float]          = None  # completed_ts - queued_ts  (queue dwell included)
     ok                : bool                     = False
     failure           : Optional[str]            = None
+    # True when the utterance was handled INLINE with no job spawned (a mode switch).
+    # Recorded rather than inferred, so "ok with no job_id" is auditable at a glance.
+    mode_switch       : bool                     = False
     degradation       : Optional[str]            = None
 
 
@@ -275,7 +278,12 @@ def assemble_v1_record( utterance: str, expected_command: str, push_result: Dict
           from routing (F2), never a forced miss. Defaults to the map's own values.
 
     Ensures:
-        - no job_id ⇒ ok=False, failure="push_failed"
+        - no job_id AND no inline `message` ⇒ ok=False, failure="push_failed"
+        - no job_id BUT an inline `message` and no `error` ⇒ a MODE SWITCH: ok=True with
+          the real client span, mode_switch=True, and routing_eligible=False (no router
+          decision was made, so it is excluded from routing rather than scored). Such
+          commands spawn no job by design and scoring them as failures graded v1 down
+          for correct behaviour
         - no terminal completion ⇒ ok=False, failure="no_completion"
         - a completed job ⇒ ok iff the client span (recv-send) is computable;
           records actual_command, is_cache_hit, routing_eligible, the comparable
@@ -289,7 +297,39 @@ def assemble_v1_record( utterance: str, expected_command: str, push_result: Dict
 
     job_id = push_result.get( "job_id" ) if isinstance( push_result, dict ) else None
     if not job_id:
-        rec.failure = "push_failed"
+        # 🔴 A MODE SWITCH IS NOT A PUSH FAILURE (row d8d019f6, 2026-08-20). Some commands
+        # spawn no job BY DESIGN — "agent router go to automatic" flips a routing mode and
+        # v1 answers it inline, correctly and instantly, returning a message with job_id
+        # None. This branch used to call that push_failed, so on 2026-08-20 all 20 automatic
+        # utterances per pass — A FIFTH OF THE CORPUS — were scored as v1 failures for doing
+        # exactly the right thing, while v2 scored the identical 20 as successes because its
+        # bar is an HTTP 200. That single category moved v1's reported failure rate from
+        # ~35% to 48%.
+        #
+        # THE DISCRIMINATOR IS A MESSAGE WITHOUT AN ERROR, not the absence of a job_id. A
+        # genuine push failure returns falsy, or carries `error`; an inline-handled command
+        # returns a dict with a human-readable `message` and no error. Anything else stays
+        # push_failed — this must not become a catch-all that swallows real failures.
+        inline_handled = (
+            isinstance( push_result, dict )
+            and not push_result.get( "error" )
+            and bool( push_result.get( "message" ) )
+        )
+        if not inline_handled:
+            rec.failure = "push_failed"
+            return rec
+
+        # The operation completed end to end from the caller's point of view, and the span
+        # is REAL: send_ts to recv_ts encloses the whole thing. That is the same quantity
+        # v2 measures for the same utterance, which is the point.
+        # ROUTING-INELIGIBLE, NOT A FREE WIN. No router decision was made here — the
+        # command was handled inline — so this record is EXCLUDED from the routing
+        # denominator rather than scored as a correct route. actual_command stays None.
+        rec.mode_switch       = True
+        rec.routing_eligible  = False
+        rec.client_span_ms = span_ms_between( rec.send_ts, rec.recv_ts )
+        rec.ok             = rec.client_span_ms is not None
+        if not rec.ok: rec.failure = "bad_span"
         return rec
     rec.job_id     = job_id
     rec.queued_ts  = transitions.get( "queued_ts" )
@@ -750,6 +790,15 @@ def run_v1_baseline( *, corpus: str = "simple", seed: int = 1024, n_per_command:
 # ───────────────────────── cold-start truncation (F3, :8000-guarded)
 
 SNAPSHOT_TABLE = "solution_snapshots"   # the fixed Postgres snapshot table (ORM __tablename__)
+# 🔴 THE OTHER HALF OF THE CACHE (row d8d019f6, 2026-08-20). Emptying snapshots alone leaves
+# every synonym from every prior run pointing at a row that no longer exists. The tier-1
+# lookup matches one of those ghosts by verbatim text, dereferences it to nothing, and
+# reports a MISS — so the cache cannot hit no matter how well it works. Measured on
+# lupin_db_test after ts-23613e7d: 124 snapshots, 1,021 v2-written synonyms, 897 of them
+# dangling, and every synonym matching a live question resolved to a ghost. v2 was graded
+# at a 0% cache-hit rate with a 65% candidate rate — not because replay failed, but because
+# the run started with a poisoned cache. The two tables ARE one cache; empty them together.
+SYNONYM_TABLE  = "canonical_synonyms"   # the tier-1 lookup table (ORM __tablename__)
 
 # The measurement databases the destructive cold-truncate MAY target — exactly
 # these two, matched on the url's db NAME (not a substring), so dev/prod/unparented
@@ -828,13 +877,15 @@ def truncate_snapshots( connection: Any ) -> str:
         - the guard url is DERIVED from `connection` (no decoupled db_url can lie
           about the target); assert_test_db runs FIRST — on a wrong target it
           RAISES and connection.execute is NEVER called (no TRUNCATE on the wrong DB)
-        - on the test DB, truncates the FIXED SNAPSHOT_TABLE (a constant, never a
-          caller-supplied identifier → no injection surface) and returns its name
+        - on the test DB, truncates the FIXED SNAPSHOT_TABLE **and SYNONYM_TABLE** in ONE
+          statement (both constants, never caller-supplied identifiers → no injection
+          surface) and returns the snapshot table's name. Both, because half a cache is
+          worse than none: see the SYNONYM_TABLE comment for the run this cost.
     """
     from sqlalchemy import text   # SQLAlchemy 2.x rejects a raw string here — statements must be executable
 
     assert_test_db( _connection_url( connection ) )   # url derived from the executing connection
-    connection.execute( text( f"TRUNCATE TABLE {SNAPSHOT_TABLE}" ) )
+    connection.execute( text( f"TRUNCATE TABLE {SNAPSHOT_TABLE}, {SYNONYM_TABLE}" ) )
     connection.commit()   # SQLAlchemy 2.x is commit-as-you-go: without this the TRUNCATE rolls back on close (the store stays dirty)
     return SNAPSHOT_TABLE
 

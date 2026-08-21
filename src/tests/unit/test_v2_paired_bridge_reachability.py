@@ -189,7 +189,10 @@ def test_bridge_reaches_and_fires_v2_clean_step():
     ( truncate_stmt, ), _kwargs = fake_conn.execute.call_args
     from sqlalchemy.sql.elements import TextClause
     assert isinstance( truncate_stmt, TextClause ), f"TRUNCATE must be a text() clause, got {type( truncate_stmt )}"
-    assert str( truncate_stmt ) == "TRUNCATE TABLE solution_snapshots"
+    # Both halves of the cache, in one statement: emptying snapshots alone leaves prior runs'
+    # synonyms pointing at rows that are gone, and a ghost match is reported as a cache MISS
+    # (row d8d019f6 — 897 of 1,021 dangling on lupin_db_test, 0% hit rate on 65% candidates).
+    assert str( truncate_stmt ) == "TRUNCATE TABLE solution_snapshots, canonical_synonyms"
     # The TRUNCATE must be COMMITTED — SQLAlchemy 2.x is commit-as-you-go, so without an explicit
     # commit the truncate rolls back on close and the live store stays dirty (the VALIDITY guard
     # then refuses the run). A MagicMock swallows the omission; asserting commit here is the control
@@ -260,7 +263,10 @@ def test_bridge_reaches_and_fires_the_v1_clean_step():
     ( truncate_stmt, ), _kwargs = fake_conn.execute.call_args
     from sqlalchemy.sql.elements import TextClause
     assert isinstance( truncate_stmt, TextClause ), f"TRUNCATE must be a text() clause, got {type( truncate_stmt )}"
-    assert str( truncate_stmt ) == "TRUNCATE TABLE solution_snapshots"
+    # Both halves of the cache, in one statement: emptying snapshots alone leaves prior runs'
+    # synonyms pointing at rows that are gone, and a ghost match is reported as a cache MISS
+    # (row d8d019f6 — 897 of 1,021 dangling on lupin_db_test, 0% hit rate on 65% candidates).
+    assert str( truncate_stmt ) == "TRUNCATE TABLE solution_snapshots, canonical_synonyms"
     # Commit-as-you-go: without this the TRUNCATE rolls back on close and the store stays dirty —
     # which is the whole failure this row is about, so it is asserted rather than assumed.
     fake_conn.commit.assert_called_once()

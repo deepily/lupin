@@ -525,7 +525,7 @@ def test_truncate_snapshots_derives_url_and_runs_on_test_db():
     conn  = _FakeConn( "postgresql://u:p@localhost/lupin_db_test" )
     table = v1.truncate_snapshots( conn )
     assert table == v1.SNAPSHOT_TABLE
-    assert conn.executed == [ f"TRUNCATE TABLE {v1.SNAPSHOT_TABLE}" ]
+    assert conn.executed == [ f"TRUNCATE TABLE {v1.SNAPSHOT_TABLE}, {v1.SYNONYM_TABLE}" ]
 
 def test_truncate_snapshots_uses_text_and_commits():
     # The sibling of 291fb3fa + 9b90ae5d, on the v1 arm. Both defects are INVISIBLE to a fake
@@ -538,7 +538,7 @@ def test_truncate_snapshots_uses_text_and_commits():
     assert conn.committed == 1                                     # RED without connection.commit()
     # RED without text(): the fake raises TypeError on a bare string, exactly as the live
     # SQLAlchemy 2.x connection does.
-    assert conn.executed == [ str( text( f"TRUNCATE TABLE {v1.SNAPSHOT_TABLE}" ) ) ]
+    assert conn.executed == [ str( text( f"TRUNCATE TABLE {v1.SNAPSHOT_TABLE}, {v1.SYNONYM_TABLE}" ) ) ]
 
 def test_truncate_snapshots_never_executes_on_wrong_db():
     conn = _FakeConn( "postgresql://u:p@localhost/lupin_db_dev" )
@@ -595,6 +595,75 @@ def test_arg_parser_defaults_and_overrides():
     args = v1.build_arg_parser().parse_args( [ "--seed", "99", "--n-per-command", "30", "--base-url", "http://h" ] )
     assert args.seed == 99 and args.n_per_command == 30 and args.base_url == "http://h"
     assert args.corpus == "simple" and args.limit is None
+
+
+# ───────────────────────────────────── mode switch is not a push failure (row d8d019f6)
+#
+# These FAIL against the pre-alignment arm, where every job-less push was push_failed.
+# On 2026-08-20 that scored all 20 `automatic` utterances per pass — a fifth of the
+# corpus — as v1 failures for behaving correctly, while v2 scored the same 20 as wins.
+def test_assemble_inline_mode_switch_is_ok_with_a_real_span():
+    push = { "message": "Router mode set to automatic" }      # no job_id, no error
+    r = v1.assemble_v1_record( "agent router go to automatic", "agent go calendar", push, { }, MAP,
+                               send_ts=1.0, recv_ts=1.4 )
+    assert r.ok is True
+    assert r.failure is None
+    assert r.mode_switch is True
+    assert round( r.client_span_ms, 3 ) == 400.0
+
+
+def test_inline_mode_switch_is_excluded_from_routing_not_scored_as_a_win():
+    """No router decision was made, so it leaves the denominator — it does not win it."""
+    push = { "message": "Router mode set to automatic" }
+    r = v1.assemble_v1_record( "u", "agent go calendar", push, { }, MAP, send_ts=1.0, recv_ts=1.4 )
+    assert r.routing_eligible is False
+    assert r.actual_command   is None
+
+
+def test_a_job_less_push_carrying_an_error_is_still_a_push_failure():
+    """The discriminator is a message WITHOUT an error — this must not swallow real failures."""
+    r = v1.assemble_v1_record( "u", "agent go calendar", { "error": "boom", "message": "boom" }, { }, MAP,
+                               send_ts=1.0, recv_ts=1.4 )
+    assert r.ok is False and r.failure == "push_failed"
+
+
+def test_a_job_less_push_with_no_message_at_all_is_still_a_push_failure():
+    r = v1.assemble_v1_record( "u", "agent go calendar", { "detail": "nope" }, { }, MAP,
+                               send_ts=1.0, recv_ts=1.4 )
+    assert r.ok is False and r.failure == "push_failed"
+
+
+def test_mode_switch_without_a_computable_span_fails_loudly():
+    push = { "message": "Router mode set to automatic" }
+    r = v1.assemble_v1_record( "u", "agent go calendar", push, { }, MAP, send_ts=None, recv_ts=1.4 )
+    assert r.ok is False and r.failure == "bad_span"
+
+
+# ───────────────────────────── the clean step must empty BOTH halves of the cache
+#
+# RED before the fix: the old clean emptied solution_snapshots and left canonical_synonyms
+# standing, so every run began with prior runs' synonyms pointing at rows that no longer
+# existed. Measured on lupin_db_test after ts-23613e7d: 124 snapshots, 1,021 v2-written
+# synonyms, 897 dangling — v2 scored a 0% cache-hit rate on a 65% candidate rate.
+def test_clean_step_empties_the_synonym_table_too():
+    conn = _FakeConn( "postgresql://u:p@localhost/lupin_db_test" )
+    v1.truncate_snapshots( conn )
+    assert v1.SYNONYM_TABLE in conn.executed[ 0 ], "a ghost synonym shadows the fresh one and the cache can never hit"
+
+
+def test_clean_step_empties_both_tables_in_one_statement():
+    """One statement, so the two halves can never be left half-cleared by a mid-way failure."""
+    conn = _FakeConn( "postgresql://u:p@localhost/lupin_db_test" )
+    v1.truncate_snapshots( conn )
+    assert len( conn.executed ) == 1
+    assert conn.executed[ 0 ] == f"TRUNCATE TABLE {v1.SNAPSHOT_TABLE}, {v1.SYNONYM_TABLE}"
+
+
+def test_clean_step_still_refuses_a_wrong_db_before_touching_either_table():
+    conn = _FakeConn( "postgresql://u:p@localhost/lupin_db_dev" )
+    with pytest.raises( v1.EvalIntegrityError ):
+        v1.truncate_snapshots( conn )
+    assert conn.executed == [ ]
 
 
 if __name__ == "__main__":
