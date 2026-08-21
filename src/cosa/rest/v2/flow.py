@@ -290,7 +290,12 @@ class AskFlow:
         # them apart, so a routing command read as a thing somebody said (Pocholo, on the
         # query-log commit). `input_type` is free text with no constraint, so marking it
         # needs no migration.
-        if question is None:
+        # NOT `is None`. The door's `question` field has no min_length, so "" arrives
+        # as a legal value — and `question or command` above already treats it as no
+        # question, filing the command string under query_verbatim. Testing for None
+        # here would type that row "api" while the row it logs is a routing command
+        # (Pocholo, on the mark itself).
+        if not question:
             trace.set( "verbatim_source", "command" if command is not None else "job" )
         ctx = ( user_id, user_email, session_id, websocket_id, speak )
 
@@ -315,7 +320,7 @@ class AskFlow:
         # A row that can never be hit is not a cache entry, it is landfill — and it
         # still costs a read on every lookup. (Pocholo, reviewing step 10.)
         return self._run_agent( trace, spec, command, question or command, final_args, ctx,
-                                "submitted", snapshotable=spec.snapshotable and question is not None )
+                                "submitted", snapshotable=spec.snapshotable and bool( question ) )
 
     def _submit_prebuilt( self, trace: StageTrace, job: Any, question: str, ctx: tuple ) -> dict:
         """Run a job the caller already built. No registry lookup, no argument work.

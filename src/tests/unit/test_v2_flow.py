@@ -2206,3 +2206,73 @@ class TestTheQueryLogSaysWhoseWordsItLogged:
 
         assert r[ "status" ] == "rejected"
         assert log.rows[ -1 ][ "input_type" ] == "api"
+
+
+class TestAnEmptyQuestionIsNoQuestion:
+    """
+    The door's `question` field has no min_length, so "" is a legal thing to send —
+    and `question or command` has always treated it as absent, filing the COMMAND
+    under query_verbatim. Both guards downstream tested for None, so an ""-submit
+    was typed "api" like a person's words, and wrote a cache row keyed on a routing
+    command that `ask` can never match (Pocholo). Nothing covered the empty string.
+    """
+
+    def _log_on( self, flow ):
+        log = FakeQueryLog()
+        flow.query_log = log
+        return log
+
+    def test_an_empty_question_submit_is_marked_as_the_command_it_named( self, tmp_path, notifier, monkeypatch ):
+        """
+        RED ON REVERT: restore `if question is None:` and this row types "api" —
+        indistinguishable from a question somebody typed.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=True ) )
+        f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                          FakeExecutor( _outcome() ), FakePending(), notifier )
+        log = self._log_on( f )
+
+        f.submit( command="agent router go to math", args={}, question="", **_CTX )
+
+        assert log.rows[ -1 ][ "query_verbatim" ] == "agent router go to math"
+        assert log.rows[ -1 ][ "input_type" ]     == "api-command"
+
+    def test_an_empty_question_submit_writes_no_cache_row( self, tmp_path, notifier, monkeypatch ):
+        """
+        The row would be filed under the command string, and `ask` looks rows up by
+        the user's words — nobody says "agent router go to math". A row that can
+        never be hit is landfill that still costs a read on every lookup.
+
+        RED ON REVERT: restore `question is not None` and the write-back fires, with
+        the registry saying snapshotable=True.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=True ) )
+        cache = FakeCache()
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( _outcome() ), FakePending(), notifier,
+                            writeback_enabled=True )
+
+        f.submit( command="agent router go to math", args={}, question="", **_CTX )
+
+        assert cache.write_back_calls == [], "an empty-question submit wrote a cache row keyed on the command"
+
+    def test_a_real_question_submit_still_writes_and_still_types_api( self, tmp_path, notifier, monkeypatch ):
+        """
+        NEGATIVE CONTROL on both lines at once: widen either guard past "no question"
+        — to `not question.strip()`, say, or to the entry point — and a genuine
+        submitted question stops being cached and starts being marked.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=True ) )
+        cache = FakeCache()
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( _outcome() ), FakePending(), notifier,
+                            writeback_enabled=True )
+        log   = self._log_on( f )
+
+        f.submit( command="agent router go to math", args={}, question="what is 2+2", **_CTX )
+
+        assert cache.write_back_calls, "a genuine submitted question was not cached"
+        assert log.rows[ -1 ][ "input_type" ] == "api"
