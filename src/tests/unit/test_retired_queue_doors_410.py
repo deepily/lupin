@@ -154,8 +154,24 @@ def test_every_refusal_names_the_door_that_replaces_it( path, client ):
     assert RETIRED_DOORS[ path ] == V2_ASK
 
 
+# The date, written out. NOT `REMOVE_BY` — asserting the constant appears in a string the
+# constant was interpolated into is a tautology: Pocholo mutated REMOVE_BY to "" and the
+# test stayed green, because "" is a substring of every string. The plan's verification row
+# says the BODY contains the date, so the test says the date.
+REMOVAL_DATE = "2026-12-31"
+
+
+def test_the_constant_still_holds_the_date_this_suite_checks_for():
+    """
+    The one place the constant is compared to the literal, so the two cannot drift apart
+    silently. If the removal date is ever moved, this fails and points at every other
+    assertion that needs updating with it.
+    """
+    assert REMOVE_BY == REMOVAL_DATE
+
+
 @pytest.mark.parametrize( "path", sorted( RETIRED_DOORS ), ids=sorted( RETIRED_DOORS ) )
 def test_every_refusal_says_the_removal_date_out_loud( path, client ):
     detail = client.post( _concrete( path ), json={} ).json()[ "detail" ]
-    assert REMOVE_BY in detail, f"{path}'s refusal omits {REMOVE_BY}: {detail!r}"
+    assert REMOVAL_DATE in detail, f"{path}'s refusal omits {REMOVAL_DATE}: {detail!r}"
     assert "REMOVE BY" in detail, f"{path}'s refusal omits the words REMOVE BY: {detail!r}"
