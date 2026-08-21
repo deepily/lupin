@@ -11,64 +11,76 @@ from cosa.memory.question_embeddings_table import QuestionEmbeddingsTable
 
 class SolutionSnapshotManager:
     """
-    DEPRECATED: Use SolutionSnapshotManagerFactory.create_manager() instead.
+    DEAD. Cannot be constructed — __init__ raises NotImplementedError.
 
-    This class is deprecated as of 2025.09.17 and will be removed in a future version.
-    The factory pattern with FileBasedSolutionManager provides better architecture
-    with interface compliance and performance monitoring.
+    Deprecated 2025.09.17. Every method below manages solution snapshots stored as
+    JSON files, and NONE of them can run, because there is no way to get an
+    instance.
 
-    Legacy class that manages solution snapshots stored as JSON files.
-    Handles loading, searching, and managing solution snapshots with
-    embedding-based similarity search capabilities.
+    READ THIS BEFORE TRUSTING A GREP. `grep "def save_snapshot"` finds this class
+    first and its methods describe file-based storage. That is not how production
+    works and never was: main.py:706 raises for any `solution snapshots manager
+    type` but "postgres". Believing this docstring is what led a reviewer to
+    report that the queue writes snapshots to files while the brain reads
+    Postgres — two stores, neither real.
 
-    Migration path:
-        # OLD (deprecated):
-        manager = SolutionSnapshotManager(path, debug=True)
+    The factory's "file_based" branch does NOT build this class. It builds
+    FileBasedSolutionManager, a separate implementation in
+    cosa.memory.file_based_solution_manager.
 
-        # NEW (recommended):
+    What to use instead:
         from cosa.memory.solution_manager_factory import SolutionSnapshotManagerFactory
-        config = {"path": path}
-        manager = SolutionSnapshotManagerFactory.create_manager("file_based", config, debug=True)
-    """
-    def __init__( self, path: str, debug: bool=False, verbose: bool=False ) -> None:
-        """
-        DEPRECATED: Initialize the solution snapshot manager.
+        manager = SolutionSnapshotManagerFactory.create_manager( "postgres", config )
 
-        Use SolutionSnapshotManagerFactory.create_manager("file_based", config) instead.
+    Every method below carries `# pragma: no cover` because none of them can be
+    entered. __init__ carries none: it runs, it raises, and a pin test proves it.
+    The class is kept only until its deletion is ruled on — that call is Rick's,
+    and it is step 0 commit 4 of the brain-integration plan.
+    """
+    def __init__( self, *args: Any, **kwargs: Any ) -> None:
+        """
+        REFUSES. This class cannot be constructed, by any call shape.
+
+        The signature is deliberately *args/**kwargs rather than the historical
+        ( path, debug, verbose ). With a required `path`, a no-argument call died
+        in Python's own argument binding with "missing 1 required positional
+        argument" — before this body ran, so the reader was told they had called
+        it wrong when the truth is that there is no right way to call it. That is
+        the exact call the deleted dependencies/config.get_snapshot_manager() made.
+
+        It emitted a DeprecationWarning here for a year and nobody saw it, because
+        warnings are only visible to whoever is already looking. The class stayed
+        dead code that reads as live code, and that costs real time: a grep for
+        `def save_snapshot` finds THIS class first, its docstring says it saves to
+        files, and the reader concludes the queue writes snapshots to disk while
+        the brain reads Postgres. Two stores, neither of which exists. That
+        misreading was made and acted on during the brain-integration review.
+
+        Nothing in production could ever have reached this. main.py:706 raises for
+        any `solution snapshots manager type` but "postgres", so the file backend
+        cannot be built; and the factory's own file_based branch builds
+        FileBasedSolutionManager, a different class entirely, not this one.
 
         Requires:
-            - path is a valid directory path
-            - Directory contains JSON snapshot files
+            - nothing. There is no valid call, and no argument shape is rejected
+              earlier than the refusal below.
 
         Ensures:
-            - Loads all snapshots from directory
-            - Creates lookup dictionaries by question and gist
-            - Initializes embeddings table
+            - never returns an instance.
 
         Raises:
-            - OSError if directory doesn't exist
+            - NotImplementedError, always, naming the supported construction.
         """
-        import warnings
-        warnings.warn(
-            "SolutionSnapshotManager is deprecated. Use SolutionSnapshotManagerFactory.create_manager('file_based', config) instead.",
-            DeprecationWarning,
-            stacklevel=2
+        raise NotImplementedError(
+            "SolutionSnapshotManager cannot be constructed — it is deprecated dead code, "
+            "kept only until its deletion is ruled on. Use "
+            "SolutionSnapshotManagerFactory.create_manager( \"postgres\", config ) instead; "
+            "\"postgres\" is the only manager type main.py accepts (main.py:706 raises for "
+            "any other). The file backend it advertises is FileBasedSolutionManager, "
+            "a different class, and it is unreachable in production."
         )
-        
-        self.debug                              = debug
-        self.verbose                            = verbose
-        self.path                               = path
-        self._embedding_mgr                     = EmbeddingManager( debug=debug, verbose=verbose )
-        self._normalizer                        = Normalizer()  # For consistent normalization
 
-        self._snapshots_by_question             = None
-        self._snapshots_by_synonymous_questions = None
-        self._snapshots_by_question_gist        = None
-        self._question_embeddings_tbl           = None
-
-        self.load_snapshots()
-        
-    def load_snapshots( self ) -> None:
+    def load_snapshots( self ) -> None:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Load all snapshots from the directory.
         
@@ -93,7 +105,7 @@ class SolutionSnapshotManager:
             print( self )
             if self.verbose: self.print_snapshots()
         
-    def _load_snapshots_by_question( self ) -> dict[str, Any]:
+    def _load_snapshots_by_question( self ) -> dict[str, Any]:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Load snapshots indexed by question.
         
@@ -134,7 +146,7 @@ class SolutionSnapshotManager:
     
         return snapshots_by_question
     
-    def _load_snapshots_by_gist( self, snapshots_by_question: dict[str, Any] ) -> dict[str, tuple[float, Any]]:
+    def _load_snapshots_by_gist( self, snapshots_by_question: dict[str, Any] ) -> dict[str, tuple[float, Any]]:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Create gist-based index of snapshots.
         
@@ -163,7 +175,7 @@ class SolutionSnapshotManager:
         print()
         return snapshots_by_gist
     
-    def _load_snapshots_by_synonymous_questions( self, snapshots_by_question: dict[str, Any] ) -> dict[str, tuple[float, Any]]:
+    def _load_snapshots_by_synonymous_questions( self, snapshots_by_question: dict[str, Any] ) -> dict[str, tuple[float, Any]]:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Create synonymous question index.
         
@@ -192,7 +204,7 @@ class SolutionSnapshotManager:
         print()
         return snapshots_by_synomymous_questions
     
-    def save_snapshot( self, snapshot: ss.SolutionSnapshot ) -> bool:
+    def save_snapshot( self, snapshot: ss.SolutionSnapshot ) -> bool:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Save snapshot to file-based storage using upsert semantics.
 
@@ -214,7 +226,7 @@ class SolutionSnapshotManager:
         snapshot.write_current_state_to_file()
         return True
     
-    def _question_exists( self, question: str ) -> bool:
+    def _question_exists( self, question: str ) -> bool:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Check if exact question exists.
         
@@ -230,7 +242,7 @@ class SolutionSnapshotManager:
         """
         return question in self._snapshots_by_question
     
-    def _synonymous_question_exists( self, question: str ) -> bool:
+    def _synonymous_question_exists( self, question: str ) -> bool:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Check if synonymous question exists.
         
@@ -246,7 +258,7 @@ class SolutionSnapshotManager:
         """
         return question in self._snapshots_by_synonymous_questions
     
-    def _question_gist_exists( self, question_gist: Optional[str] ) -> bool:
+    def _question_gist_exists( self, question_gist: Optional[str] ) -> bool:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Check if question gist exists.
         
@@ -263,7 +275,7 @@ class SolutionSnapshotManager:
         if self.debug: print( f"question_gist is not None: {question_gist is not None} and question_gist in self._snapshots_by_question_gist: {question_gist in self._snapshots_by_question_gist} " )
         return question_gist is not None and question_gist in self._snapshots_by_question_gist
     
-    def get_gists( self ) -> list[str]:
+    def get_gists( self ) -> list[str]:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Get all question gists.
         
@@ -278,7 +290,7 @@ class SolutionSnapshotManager:
         """
         return list(self._snapshots_by_question_gist.keys())
     
-    def delete_snapshot( self, question: str, delete_file: bool=False ) -> bool:
+    def delete_snapshot( self, question: str, delete_file: bool=False ) -> bool:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Delete a snapshot by question.
         
@@ -310,7 +322,7 @@ class SolutionSnapshotManager:
             print( f"Snapshot with question [{question}] does not exist!" )
             return False
         
-    def _get_snapshots_by_question_similarity( self, question: str, question_gist: Optional[str]=None, threshold_question: float=100.0, threshold_gist: float=100.0, limit: int=7, exclude_non_synonymous_questions: bool=True ) -> list[tuple[float, Any]]:
+    def _get_snapshots_by_question_similarity( self, question: str, question_gist: Optional[str]=None, threshold_question: float=100.0, threshold_gist: float=100.0, limit: int=7, exclude_non_synonymous_questions: bool=True ) -> list[tuple[float, Any]]:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Find similar snapshots using embeddings.
         
@@ -371,7 +383,7 @@ class SolutionSnapshotManager:
         
         return similar_snapshots[ :limit ]
     
-    def get_snapshots_by_code_similarity( self, exemplar_snapshot: ss.SolutionSnapshot, threshold: float=85.0, limit: int=-1 ) -> list[tuple[float, Any]]:
+    def get_snapshots_by_code_similarity( self, exemplar_snapshot: ss.SolutionSnapshot, threshold: float=85.0, limit: int=-1 ) -> list[tuple[float, Any]]:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Find snapshots with similar code.
         
@@ -424,7 +436,7 @@ class SolutionSnapshotManager:
         else:
             return similar_snapshots[ :limit ]
     
-    def get_snapshots_by_question( self, question: str, question_gist: Optional[str]=None, threshold_question: float=100.0, threshold_gist: float=100.0, limit: int=7, debug: bool=False ) -> list[tuple[float, Any]]:
+    def get_snapshots_by_question( self, question: str, question_gist: Optional[str]=None, threshold_question: float=100.0, threshold_gist: float=100.0, limit: int=7, debug: bool=False ) -> list[tuple[float, Any]]:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Find snapshots matching a question.
         
@@ -485,7 +497,7 @@ class SolutionSnapshotManager:
             
         return similar_snapshots
         
-    def __str__( self ) -> str:
+    def __str__( self ) -> str:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         String representation of manager.
         
@@ -500,7 +512,7 @@ class SolutionSnapshotManager:
         """
         return f"[{len( self._snapshots_by_question )}] snapshots by question loaded from [{self.path}]"
 
-    def print_snapshots( self ) -> None:
+    def print_snapshots( self ) -> None:  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
         """
         Print all loaded snapshots.
         
@@ -520,42 +532,22 @@ class SolutionSnapshotManager:
             
         print()
 
-def quick_smoke_test():
-    """Quick smoke test to validate SolutionSnapshotManager functionality."""
+def quick_smoke_test():  # pragma: no cover - unreachable: __init__ raises, so no instance of this class exists
+    """Smoke test: prove the deprecated manager refuses to be constructed.
+
+    This used to load real snapshots off disk. It cannot any more, and that is the
+    point of the test — the only behaviour this class still has is its refusal.
+    """
     du.print_banner( "SolutionSnapshotManager Smoke Test", prepend_nl=True )
-    
-    path_to_snapshots = du.get_project_root() + "/src/conf/long-term-memory/solutions/"
-    
+
     try:
-        snapshot_mgr = SolutionSnapshotManager( path_to_snapshots, debug=False )
-        print( f"✓ SolutionSnapshotManager loaded from: {path_to_snapshots}" )
-        print( f"✓ Loaded snapshots count: {len( snapshot_mgr._snapshots_by_question )}" )
-        
-        # Test question similarity search
-        test_questions = [
-            "what day is today?",
-            "What's today's date?",
-            "what time is it?"
-        ]
-        
-        for question in test_questions:
-            print( f"\nTesting question: '{question}'" )
-            try:
-                similar_snapshots = snapshot_mgr.get_snapshots_by_question( question )
-                if len( similar_snapshots ) > 0:
-                    print( f"✓ Found {len( similar_snapshots )} similar snapshot(s)" )
-                    # Show first match details
-                    first_match = similar_snapshots[ 0 ][ 1 ]
-                    print( f"  Best match ID: {first_match.id_hash}" )
-                else:
-                    print( "  No similar snapshots found" )
-            except Exception as e:
-                print( f"✗ Error searching for question: {e}" )
-        
-    except Exception as e:
-        print( f"✗ Error initializing SolutionSnapshotManager: {e}" )
-    
-    print( "\n✓ SolutionSnapshotManager smoke test completed" )
+        SolutionSnapshotManager( du.get_project_root() + "/src/conf/long-term-memory/solutions/" )
+        print( "\u2717 FAIL: the deprecated manager was constructed; __init__ should have raised" )
+    except NotImplementedError as e:
+        print( "\u2713 SolutionSnapshotManager refused construction, as it must" )
+        print( f"  {e}" )
+
+    print( "\n\u2713 SolutionSnapshotManager smoke test completed" )
 
 
 if __name__ == "__main__":

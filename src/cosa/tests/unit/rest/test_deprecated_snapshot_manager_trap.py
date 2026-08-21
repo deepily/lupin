@@ -13,10 +13,36 @@ text, so they stay meaningful if the imports move or are re-worded.
 Plan: src/rnd/v0.2.0/2026.08.20-brain-integration-cascade-review-plan.md, step 0.
 """
 
+import inspect
+import io
+import tokenize
 import unittest
 
 import cosa.rest.dependencies.config as dependencies_config
 import cosa.rest.routers.system as system_router
+
+
+def _code_only( source ):
+    """
+    Strip comments from a source block, keeping the code.
+
+    Borrowed in shape from test_registry_voice_binding.py. Needed here for the
+    same reason it was needed there: the module is allowed to TALK about the
+    deprecated manager in a comment — a note saying "we deliberately do not
+    import this" is documentation worth keeping — while still being forbidden to
+    import it. Scanning raw text would force a choice between the two.
+
+    Requires:
+        - source is a syntactically valid Python block
+
+    Ensures:
+        - returns the source with every COMMENT token removed
+    """
+    out    = []
+    reader = io.StringIO( source ).readline
+    for token in tokenize.generate_tokens( reader ):
+        if token.type != tokenize.COMMENT: out.append( token.string )
+    return "".join( out )
 
 
 class TestSystemRouterDoesNotCarryTheTrap( unittest.TestCase ):
@@ -44,13 +70,36 @@ class TestSystemRouterDoesNotCarryTheTrap( unittest.TestCase ):
         Ensures:
             - `get_snapshot_manager` is not bound in the system router's
               namespace. The dependencies/config getter it named constructs
-              SolutionSnapshotManager() with no `path`, which its __init__
-              requires, so calling it would raise TypeError.
+              SolutionSnapshotManager() with no `path`. That construction now
+              raises NotImplementedError for every call shape (step 0 commit 3);
+              before that it raised TypeError. Either way it could not work.
         """
         self.assertFalse(
             hasattr( system_router, "get_snapshot_manager" ),
             "routers/system.py re-imported get_snapshot_manager; nothing there calls it "
-            "and the function it names cannot be called without raising TypeError."
+            "and the function it names cannot be called at all."
+        )
+
+    def test_the_module_source_never_names_the_deprecated_module( self ):
+        """
+        Ensures:
+            - `solution_snapshot_mgr` appears nowhere in the router's CODE.
+
+            The two hasattr pins above read the module NAMESPACE, so they catch
+            `from ... import SolutionSnapshotManager` and miss
+            `... import SolutionSnapshotManager as _mgr`, which re-opens the trap
+            under a name they never look for. This reads the source instead, so
+            an aliased re-import is caught by the module path it must still spell.
+
+            RED ON REVERT: add any import of cosa.memory.solution_snapshot_mgr
+            back to routers/system.py, aliased or not, and this fails.
+        """
+        source = _code_only( inspect.getsource( system_router ) )
+        self.assertNotIn(
+            "solution_snapshot_mgr", source,
+            "routers/system.py names the deprecated snapshot module in its code. "
+            "It has no caller there; an import — under any alias — is what makes "
+            "the dead class look live to the next reader."
         )
 
     def test_the_getters_system_actually_uses_are_still_bound( self ):
@@ -75,15 +124,16 @@ class TestDependenciesConfigHasNoSnapshotGetter( unittest.TestCase ):
         """
         Ensures:
             - dependencies/config exposes no get_snapshot_manager. It built
-              SolutionSnapshotManager() with no `path`, which __init__ requires,
-              so it raised TypeError on any call. routers/admin.py:34 defines its
-              own same-named dependency returning main's Postgres singleton, and
+              SolutionSnapshotManager() with no `path`, which raises on any call
+              shape (TypeError before step 0 commit 3, NotImplementedError after).
+              routers/admin.py:34 defines its own same-named dependency returning
+              main's Postgres singleton, and
               that shadowing is why nobody noticed this one could not work.
         """
         self.assertFalse(
             hasattr( dependencies_config, "get_snapshot_manager" ),
             "dependencies/config.py grew back get_snapshot_manager; it cannot be called "
-            "without raising TypeError, and admin.py already supplies the working one."
+            "without raising, and admin.py already supplies the working one."
         )
 
     def test_its_cached_global_is_gone_too( self ):
