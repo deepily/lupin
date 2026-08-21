@@ -257,7 +257,8 @@ class AskFlow:
 
         trace = StageTrace( trace_dir=self.trace_dir )
         trace.mark( "t_recv" )
-        trace.update( decision_floor=self.similarity_floor, speak=speak, interactive=False, entry="submit" )
+        trace.update( decision_floor=self.similarity_floor, speak=speak, interactive=False, entry="submit",
+                      question=question or command or "" )
         ctx = ( user_id, user_email, session_id, websocket_id, speak )
 
         # A job handed over whole: the caller built it, so there is nothing to resolve.
@@ -363,6 +364,11 @@ class AskFlow:
                                pending_id=pending_id )
 
         ctx = ( entry.user_id, entry.user_email, entry.session_id, websocket_id, speak )
+        # The question lives on the pending entry, so this is the FIRST point in resume
+        # where there is one to stamp. Without it the query log writes a blank question
+        # for every resumed turn (Pocholo, on 58f73b32) — v1 logged it on this path too.
+        # The expired-refusal exit above is the one case with genuinely nothing to name.
+        trace.update( question=entry.question )
 
         # Claim the whole TURN atomically. Everything below is a read-modify-write on
         # the entry's extraction, and it must have exactly one owner.

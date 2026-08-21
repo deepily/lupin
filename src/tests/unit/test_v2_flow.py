@@ -1861,3 +1861,79 @@ class TestTheFlowWritesTheQueryLog:
                         FakeExecutor( _outcome() ), FakePending(), notifier )
         assert f.query_log is None
         assert f.ask( "what is 2+2", **_CTX )[ "status" ] == "done"
+
+
+class TestEveryEntryPointLogsItsQuestion:
+    """
+    Pocholo on 58f73b32: only `ask` stamped the question on the trace, so the
+    query log wrote a BLANK question for every submit and every resumed turn —
+    where v1 logged it on all three paths. The rows were being written; they were
+    being written empty, which is worse than not writing them, because the table
+    looks populated.
+
+    The gap survived my own tests because none of them asserted the logged
+    question on a submit- or resume-shaped row. One per path, here.
+    """
+
+    def _log_on( self, flow ):
+        log = FakeQueryLog()
+        flow.query_log = log
+        return log
+
+    def test_submit_logs_the_question_the_caller_supplied( self, tmp_path, notifier, monkeypatch ):
+        """
+        RED ON REVERT: drop `question=` from submit's trace.update and the logged
+        question is "".
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                          FakeExecutor( _outcome() ), FakePending(), notifier )
+        log = self._log_on( f )
+
+        f.submit( command="agent router go to math", args={}, question="what is 2+2", **_CTX )
+
+        assert log.rows, "the submit path logged nothing at all"
+        assert log.rows[ -1 ][ "query_verbatim" ] == "what is 2+2"
+
+    def test_a_question_less_submit_logs_the_command_it_named( self, tmp_path, notifier, monkeypatch ):
+        """
+        An internal caller submits a command with no prose. Logging "" there would
+        make the row unattributable; the command is the only true thing available,
+        and it is what `_run_agent` already files the row under.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(),
+                          FakeExecutor( _outcome() ), FakePending(), notifier )
+        log = self._log_on( f )
+
+        f.submit( command="agent router go to math", args={}, **_CTX )
+
+        assert log.rows[ -1 ][ "query_verbatim" ] == "agent router go to math"
+
+    def test_resume_logs_the_original_question( self, tmp_path, notifier, monkeypatch ):
+        """
+        The resumed turn belongs to the question that started the interview, not to
+        the one-word answer that finished it.
+
+        RED ON REVERT: drop the trace.update in resume and the logged question is "".
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=( "location", ), snapshotable=False ) )
+        pending    = PendingRequests()
+        expeditor  = FakeExpeditor( _extraction( final_args={ "location": "Boston" }, missing=[] ) )
+        f          = _make_flow( tmp_path, FakeCache(), FakeRouter(), expeditor,
+                                 FakeExecutor( _outcome() ), pending, notifier )
+        pending_id = pending.put( extraction=_extraction( final_args={}, missing=[ "location" ] ),
+                                  user_email=_CTX[ "user_email" ], session_id=_CTX[ "session_id" ],
+                                  user_id=_CTX[ "user_id" ], command="agent router go to weather",
+                                  question="what is the weather" )
+        log = self._log_on( f )
+
+        f.resume( pending_id=pending_id, answer="Boston", websocket_id=_CTX[ "websocket_id" ] )
+
+        assert log.rows, "the resume path logged nothing at all"
+        assert log.rows[ -1 ][ "query_verbatim" ] == "what is the weather", (
+            "a resumed turn logged the ANSWER, or nothing, instead of the question it belongs to"
+        )
