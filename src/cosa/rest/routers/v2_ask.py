@@ -42,6 +42,24 @@ class AskRequest( BaseModel ):
     interactive  : bool           = Field( True, description="Park + resume on a missing argument (else return needs_input)" )
 
 
+class SubmitRequest( BaseModel ):
+    """Request body for POST /api/v2/submit — work whose command is already decided.
+
+    `question` is OPTIONAL here and required on `ask`, which is the whole difference
+    between the two doors. `ask` is handed prose and has to work out what it means;
+    `submit` is handed the answer to that question up front, so the text is only carried
+    along for the record and for anything downstream that shows the user what ran.
+    """
+    command      : str            = Field( ..., min_length=1, max_length=200,
+                                           description="The routing command, e.g. 'agent router go to weather'" )
+    args         : dict           = Field( default_factory=dict,
+                                           description="Every argument the command requires — no extraction is performed" )
+    question     : Optional[ str ] = Field( None, max_length=4000,
+                                           description="Optional human-readable text for the record" )
+    websocket_id : Optional[ str ] = Field( None, description="WebSocket session ID for TTS routing" )
+    speak        : bool           = Field( True, description="Dispatch the answer as a TTS notification" )
+
+
 class ResumeRequest( BaseModel ):
     """Request body for POST /api/v2/resume — the second turn of a parked flow."""
     pending_id   : str            = Field( ..., min_length=1,
@@ -170,13 +188,13 @@ async def v2_ask(
         raise HTTPException( status_code=401, detail="User email not found in authentication token." )
 
     session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
-    # flow.run() is SYNCHRONOUS and takes as long as the agent takes — measured at
+    # flow.ask() is SYNCHRONOUS and takes as long as the agent takes — measured at
     # ~70s for a single ask on :8000, of which routing is ~1s (row 1c36199e). Called
     # directly from this coroutine it holds the event loop for that whole span, and
     # with workers=1 that means /health times out and every other request waits. Off
     # the loop it holds a worker thread instead, which is what a slow call should hold.
     result = await run_in_threadpool(
-        lambda: flow.run(
+        lambda: flow.ask(
             question    = request.question,
             user_id     = user_id,
             user_email  = user_email,
@@ -184,6 +202,57 @@ async def v2_ask(
             websocket_id= request.websocket_id or session_id,
             speak       = request.speak,
             interactive = request.interactive,
+        )
+    )
+    return AskResponse( **result )
+
+
+@router.post( "/api/v2/submit", response_model=AskResponse )
+async def v2_submit(
+    request      : SubmitRequest,
+    current_user : dict = Depends( get_current_user ),
+    flow         : Any  = Depends( get_ask_flow ),
+) -> AskResponse:
+    """Run work whose command is already decided — the door beside /api/v2/ask.
+
+    Rick's entry-point ruling, 2026-08-21: two doors survive at v2. `ask` takes a bare
+    question and works out what it is; `submit` takes work whose command the caller has
+    already chosen, so it skips routing and argument extraction entirely.
+
+    Requires:
+        - an authenticated user (get_current_user) carrying uid + email.
+        - request.command is a non-empty routing command (Field-validated), and
+          request.args carries every argument that command requires.
+
+    Ensures:
+        - returns AskResponse; never 500 for a routing or agent failure — the flow
+          degrades to the receptionist exactly as it does on `ask`.
+        - user_id / user_email come from the token, never the client body.
+        - a command missing arguments comes back status='needs_input' with args_missing
+          filled in, and is NEVER parked: there is no human behind a submit to answer it.
+    """
+    user_id    = current_user.get( "uid" )
+    user_email = current_user.get( "email" )
+    if not user_id:
+        raise HTTPException( status_code=401, detail="User id not found in authentication token." )
+    if not user_email:
+        raise HTTPException( status_code=401, detail="User email not found in authentication token." )
+
+    session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
+    # Same reason as /api/v2/ask: submit skips the head (no routing, no cache read)
+    # but still RUNS THE AGENT, so it holds the caller for the agent's full span.
+    # On the loop that starves /health with workers=1 (row 1c36199e); off it, it
+    # holds a worker thread instead.
+    result = await run_in_threadpool(
+        lambda: flow.submit(
+            command      = request.command,
+            args         = request.args,
+            question     = request.question,
+            user_id      = user_id,
+            user_email   = user_email,
+            session_id   = session_id,
+            websocket_id = request.websocket_id or session_id,
+            speak        = request.speak,
         )
     )
     return AskResponse( **result )

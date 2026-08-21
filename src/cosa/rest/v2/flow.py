@@ -90,11 +90,20 @@ class AskFlow:
         self.verbose              = verbose
 
     # ---------------------------------------------------------------- the flow
-    def run(
+    def ask(
         self, question: str, user_id: str, user_email: str, session_id: str, websocket_id: str,
         speak: bool=True, interactive: bool=True,
     ) -> dict:
-        """Route one question through cache → router → args → executor."""
+        """Route one question through cache → router → args → executor.
+
+        Renamed from `run()` (Rick's entry-point ruling, 2026-08-21): the endpoint has
+        been `/api/v2/ask` all along and the method finally matches its own door. The
+        rename earns its churn now that `submit()` sits beside it — with two entry points
+        on one flow, a method called `run` says nothing about WHICH one you are on.
+
+        This is the only path that may reach needs-input: it is the one with a human
+        waiting at the other end.
+        """
         trace = StageTrace( trace_dir=self.trace_dir )
         trace.mark( "t_recv" )
         trace.update( decision_floor=self.similarity_floor, speak=speak, interactive=interactive )
@@ -140,6 +149,131 @@ class AskFlow:
         if extraction.missing:
             return self._needs_input( trace, command, extraction, question, ctx, interactive )
         return self._run_agent( trace, spec, command, question, extraction.final_args, ctx, "args_complete" )
+
+    # ---------------------------------------------------------------- the other door
+    def submit(
+        self, user_id: str, user_email: str, session_id: str, websocket_id: str,
+        command: Optional[ str ]=None, args: Optional[ dict ]=None, question: Optional[ str ]=None,
+        job: Any=None, speak: bool=True,
+    ) -> dict:
+        """Run work whose command is already decided — the door beside `ask`.
+
+        WHAT IT SKIPS, AND WHY THAT IS THE DEFINITION RATHER THAN A SHORTCUT. `ask` takes
+        a bare question and has to work out what it is: cache lookup, LLM routing, then
+        the expeditor to pull arguments out of prose. A `submit` caller has ALREADY
+        decided — it names the command and hands over the arguments, or hands over a job
+        it built itself. So the whole head is skipped and this drops straight onto the
+        spine `ask` shares: build, run, guarded write-back, notify. Routing a request
+        whose command is already known would be paying an LLM to re-derive a fact the
+        caller stated.
+
+        TWO SHAPES, because two kinds of caller exist:
+          • a NEW named job — `command` plus `args`, which is what the HTTP door sends.
+          • a SAVED job being continued — `job`, an already-constructed agent, which is
+            what the in-process callers hand over (a watchdog restoring from a checkpoint,
+            an expediter resuming its own work). They are holding the object; making them
+            describe it in a command string so this method could rebuild it would be a
+            round trip through a lossy format for no gain.
+
+        IT NEVER PARKS. `ask` may park a needs-input question because there is a human at
+        the other end who will answer it. A `submit` caller is usually a service account
+        or a background watchdog; parking a question at one of those means storing a
+        question nobody will ever read and calling the request handled. Missing arguments
+        come back as `status="needs_input"` with `args_missing` filled in — a refusal the
+        caller can act on, not a suspension. **Only `ask` may reach needs-input.**
+
+        Requires:
+            - exactly one of (`command`, `job`) is supplied.
+            - when `command` is supplied it resolves in the registry, and `args` carries
+              every one of that command's required arguments.
+
+        Ensures:
+            - returns the same terminal dict shape `ask` returns; never raises for a
+              routing or agent failure.
+            - `status="waiting"` is a SUCCESS, not a degrade — a queued executor returning
+              "waiting" with a job_id means the work was accepted and is running behind
+              the response.
+            - a snapshotable, completed result is written back through the same guarded
+              path `ask` uses.
+
+        Raises:
+            - ValueError when neither or both of (`command`, `job`) are supplied. That is
+              a caller bug, not a runtime condition, and a flow that guessed which one you
+              meant would run the wrong work silently.
+        """
+        if ( command is None ) == ( job is None ):
+            raise ValueError(
+                "AskFlow.submit() takes exactly one of `command` (a new named job) or "
+                f"`job` (a saved job being continued) — got command={command!r}, "
+                f"job={job!r}."
+            )
+
+        trace = StageTrace( trace_dir=self.trace_dir )
+        trace.mark( "t_recv" )
+        trace.update( decision_floor=self.similarity_floor, speak=speak, interactive=False, entry="submit" )
+        ctx = ( user_id, user_email, session_id, websocket_id, speak )
+
+        # A job handed over whole: the caller built it, so there is nothing to resolve.
+        if job is not None:
+            return self._submit_prebuilt( trace, job, question or "", ctx )
+
+        spec = resolve( command )
+        if spec is None:
+            trace.set( "unknown_command", command )
+            return self._receptionist( trace, question or command, ctx, "unknown_command" )
+
+        final_args = dict( args or {} )
+        missing    = [ arg for arg in spec.required_args if not final_args.get( arg ) ]
+        if missing:
+            return self._submit_needs_input( trace, command, missing, sorted( final_args ), ctx )
+
+        # NO QUESTION ⇒ NOT CACHEABLE, whatever the registry says about the command.
+        # `question or command` below files the row under the command string, so a
+        # question-less submit would write a cache row nothing can ever match: `ask`
+        # looks rows up by the user's words, and no user says "agent router go to math".
+        # A row that can never be hit is not a cache entry, it is landfill — and it
+        # still costs a read on every lookup. (Pocholo, reviewing step 10.)
+        return self._run_agent( trace, spec, command, question or command, final_args, ctx,
+                                "submitted", snapshotable=spec.snapshotable and question is not None )
+
+    def _submit_prebuilt( self, trace: StageTrace, job: Any, question: str, ctx: tuple ) -> dict:
+        """Run a job the caller already built. No registry lookup, no argument work.
+
+        Snapshotable is False on purpose: a caller handing over a constructed job has not
+        told us the result is a reusable answer to a reusable question, and writing one
+        back on a guess would put rows in the cache that `ask` would later replay.
+        """
+        work    = Work( "agent", job, ctx[ 0 ], ctx[ 1 ], ctx[ 2 ], snapshotable=False )
+        outcome = self.executor.submit( work, trace )
+        # ONE spelling of the outcome test across this file, not three. This used to read
+        # `== "failed"`, which is the same idea said a third way and drifts the first time
+        # a new non-success status appears — it would fall through as a success here while
+        # both gates above refused it.
+        if outcome.status not in SUCCESS_STATUSES:
+            return self._receptionist( trace, question, ctx, "agent_error", primary_error=outcome.error )
+        # `routing_command` is REQUIRED by the QueueableJob protocol (queue_protocol.py:61),
+        # so read it. It used to be a getattr with an "" fallback, which would have turned a
+        # job that violates the protocol into a row with a blank command — silently, and into
+        # exactly the nullable blank-defaulted column this plan condemns elsewhere.
+        return self._finish( trace, "agent", "submitted_prebuilt", outcome, question, ctx,
+                             command=job.routing_command )
+
+    def _submit_needs_input( self, trace: StageTrace, command: str, missing: list,
+                             known: list, ctx: tuple ) -> dict:
+        """Refuse an under-specified submit — WITHOUT parking it.
+
+        `ask`'s `_needs_input` stores a pending entry and asks the human the first
+        question. Doing that here would park a question at a service account: the entry
+        would sit until it expired, the caller would get a `pending_id` it has no way to
+        answer, and the request would read as handled. So this returns the same shape
+        minus the park — no `pending_id`, nothing stored, `status="needs_input"`.
+        """
+        trace.mark( "t_first_useful" )
+        trace.update( args_missing=missing, args_known=known )
+        return self._emit( trace, path="needs_input", status="needs_input",
+                           route_reason="args_incomplete_no_park", answer=None, answer_raw=None,
+                           command=command, ctx=ctx, pending_id=None,
+                           args_missing=missing, args_known=known )
 
     # ---------------------------------------------------------------- the second turn
     def resume( self, pending_id: str, answer: str, websocket_id: str, speak: bool=True ) -> dict:
@@ -286,12 +420,18 @@ class AskFlow:
 
     def _run_agent(
         self, trace: StageTrace, spec: Any, command: str, question: str, final_args: dict,
-        ctx: tuple, route_reason: str,
+        ctx: tuple, route_reason: str, snapshotable: Optional[ bool ]=None,
     ) -> dict:
-        """Build + run a pre-existing agent; degrade to the receptionist on failure."""
+        """Build + run a pre-existing agent; degrade to the receptionist on failure.
+
+        `snapshotable` defaults to the registry's answer for this command. A caller
+        passes it only to say NO more strongly than the registry does — `submit`
+        does that when it has no question to file the row under.
+        """
+        may_cache      = spec.snapshotable if snapshotable is None else snapshotable
         agent_question = self._compose_question( question, final_args )
         work           = Work( "agent", self._build_agent( spec.factory, agent_question, ctx ),
-                               ctx[ 0 ], ctx[ 1 ], ctx[ 2 ], snapshotable=spec.snapshotable )
+                               ctx[ 0 ], ctx[ 1 ], ctx[ 2 ], snapshotable=may_cache )
         outcome        = self.executor.submit( work, trace )
         # GATE 2 of 2. Same reason as gate 1, on the ordinary path: narrow this back
         # to `!= "done"` and EVERY queued job degrades to the receptionist the moment
@@ -299,7 +439,7 @@ class AskFlow:
         if outcome.status not in SUCCESS_STATUSES:
             return self._receptionist( trace, question, ctx, "agent_error", primary_error=outcome.error )
         return self._finish( trace, "agent", route_reason, outcome, question, ctx,
-                             command=command, snapshotable=spec.snapshotable,
+                             command=command, snapshotable=may_cache,
                              agent_class_name=spec.factory.__name__ )
 
     def _receptionist( self, trace: StageTrace, question: str, ctx: tuple, route_reason: str,

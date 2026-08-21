@@ -26,10 +26,16 @@ from cosa.rest.v2.pending import PendingRequests
 
 class FakeAgent:
     """Constructible on the shared 11-kwarg signature; never actually run (the
-    executor is faked, so do_all() is never reached from the flow's view)."""
+    executor is faked, so do_all() is never reached from the flow's view).
+
+    Carries `routing_command` because the QueueableJob protocol requires it
+    (queue_protocol.py:61) and `_submit_prebuilt` now READS it rather than
+    getattr-ing past its absence. A fake that omits a required attribute is a
+    fake that lets a protocol violation pass in production."""
 
     def __init__( self, **kwargs ):
-        self.kwargs = kwargs
+        self.kwargs          = kwargs
+        self.routing_command = kwargs.get( "routing_command", "agent router go to fake" )
 
     def do_all( self ):                       # pragma: no cover - executor is faked
         return "unused"
@@ -203,7 +209,7 @@ def test_replay_hit_done_returns_replay_result( tmp_path, notifier ):
     cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
     exe   = FakeExecutor( _outcome( status="done", answer="4", answer_raw="4" ) )
     f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), exe, FakePending(), notifier )
-    r = f.run( "what is 2+2", **_CTX, speak=True, interactive=True )
+    r = f.ask( "what is 2+2", **_CTX, speak=True, interactive=True )
     assert r[ "path" ] == "replay"
     assert r[ "route_reason" ] == "exact_hit"
     assert r[ "cache_hit" ] is True
@@ -225,7 +231,7 @@ def test_replay_hit_failed_degrades_to_receptionist( tmp_path, notifier ):
 
     exe = _SeqExecutor()
     f   = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), exe, FakePending(), notifier )
-    r = f.run( "what is 2+2", **_CTX )
+    r = f.ask( "what is 2+2", **_CTX )
     assert r[ "path" ] == "receptionist"
     assert r[ "route_reason" ] == "replay_error"
 
@@ -236,7 +242,7 @@ def test_router_unknown_degrades_to_receptionist( tmp_path, notifier ):
     router = FakeRouter( command="unknown", raw_args="" )
     f = _make_flow( tmp_path, FakeCache(), router, FakeExpeditor(), FakeExecutor(),
                     FakePending(), notifier )
-    r = f.run( "gibberish", **_CTX )
+    r = f.ask( "gibberish", **_CTX )
     assert r[ "path" ] == "receptionist"
     assert r[ "route_reason" ] == "router_error"
 
@@ -246,7 +252,7 @@ def test_resolve_none_degrades_to_receptionist( tmp_path, notifier, monkeypatch 
     router = FakeRouter( command="agent router go to deep research" )
     f = _make_flow( tmp_path, FakeCache(), router, FakeExpeditor(), FakeExecutor(),
                     FakePending(), notifier )
-    r = f.run( "do deep research", **_CTX )
+    r = f.ask( "do deep research", **_CTX )
     assert r[ "path" ] == "receptionist"
     assert r[ "route_reason" ] == "unknown_command"
 
@@ -259,7 +265,7 @@ def test_args_none_runs_agent_directly( tmp_path, notifier, monkeypatch ):
     exe = FakeExecutor( _outcome( status="done", answer="42", answer_raw="42" ) )
     f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe,
                     FakePending(), notifier )
-    r = f.run( "what time is it", **_CTX )
+    r = f.ask( "what time is it", **_CTX )
     assert r[ "path" ] == "agent"
     assert r[ "route_reason" ] == "args_none"
     assert exe.works[ 0 ].kind == "agent"
@@ -274,7 +280,7 @@ def test_extract_exception_degrades_to_receptionist( tmp_path, notifier, monkeyp
     expeditor = FakeExpeditor( raise_exc=RuntimeError( "extractor blew up" ) )
     f = _make_flow( tmp_path, FakeCache(), router, expeditor, FakeExecutor(),
                     FakePending(), notifier )
-    r = f.run( "weather", **_CTX )
+    r = f.ask( "weather", **_CTX )
     assert r[ "path" ] == "receptionist"
     assert r[ "route_reason" ] == "extract_error"
 
@@ -290,7 +296,7 @@ def test_needs_input_interactive_parks_and_returns_first_question( tmp_path, not
     expeditor = FakeExpeditor( extraction=extraction )
     pending   = FakePending()
     f = _make_flow( tmp_path, FakeCache(), router, expeditor, FakeExecutor(), pending, notifier )
-    r = f.run( "what's the weather", **_CTX, interactive=True )
+    r = f.ask( "what's the weather", **_CTX, interactive=True )
     assert r[ "path" ] == "needs_input"
     assert r[ "status" ] == "parked"
     assert r[ "answer" ] == "Which city?"
@@ -307,7 +313,7 @@ def test_needs_input_non_interactive_does_not_park( tmp_path, notifier, monkeypa
     expeditor  = FakeExpeditor( extraction=extraction )
     pending    = FakePending()
     f = _make_flow( tmp_path, FakeCache(), router, expeditor, FakeExecutor(), pending, notifier )
-    r = f.run( "what's the weather", **_CTX, interactive=False )
+    r = f.ask( "what's the weather", **_CTX, interactive=False )
     assert r[ "path" ] == "needs_input"
     assert r[ "status" ] == "needs_input"
     assert r[ "pending_id" ] is None
@@ -342,7 +348,7 @@ def test_non_interactive_spawns_no_background_thread( tmp_path, notifier, monkey
     f = _make_flow( tmp_path, FakeCache(), router, expeditor, FakeExecutor(), pending, notifier )
 
     before = { t.ident for t in threading.enumerate() }
-    r      = f.run( "what's the weather", **_CTX, interactive=False )
+    r      = f.ask( "what's the weather", **_CTX, interactive=False )
     after  = { t.ident for t in threading.enumerate() }
 
     assert r[ "status" ] == "needs_input"
@@ -364,7 +370,7 @@ def test_args_complete_runs_agent_and_writes_back( tmp_path, notifier, monkeypat
     exe        = FakeExecutor( _outcome( status="done", answer="sunny", answer_raw="sunny raw" ) )
     f = _make_flow( tmp_path, cache, router, expeditor, exe, FakePending(), notifier,
                     writeback_enabled=True )
-    r = f.run( "weather in Chicago", **_CTX )
+    r = f.ask( "weather in Chicago", **_CTX )
     assert r[ "path" ] == "agent"
     assert r[ "route_reason" ] == "args_complete"
     assert r[ "snapshot_id" ] == "snap-999"
@@ -386,7 +392,7 @@ def test_agent_failure_degrades_to_receptionist( tmp_path, notifier, monkeypatch
     exe = _SeqExecutor()
     f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe,
                     FakePending(), notifier )
-    r = f.run( "do a thing", **_CTX )
+    r = f.ask( "do a thing", **_CTX )
     assert r[ "path" ] == "receptionist"
     assert r[ "route_reason" ] == "agent_error"
 
@@ -399,7 +405,7 @@ def test_no_write_back_when_agent_not_snapshotable( tmp_path, notifier, monkeypa
     cache = FakeCache()
     f = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), FakeExecutor(),
                     FakePending(), notifier, writeback_enabled=True )
-    r = f.run( "do a thing", **_CTX )
+    r = f.ask( "do a thing", **_CTX )
     assert r[ "path" ] == "agent"
     assert r[ "snapshot_id" ] is None
     assert r[ "wrote_snapshot" ] is False
@@ -414,7 +420,7 @@ def test_write_back_returning_none_marks_no_snapshot( tmp_path, notifier, monkey
     cache = FakeCache( write_back_id=None )
     f = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), FakeExecutor(),
                     FakePending(), notifier, writeback_enabled=True )
-    r = f.run( "do a thing", **_CTX )
+    r = f.ask( "do a thing", **_CTX )
     assert r[ "snapshot_id" ] is None
     assert r[ "wrote_snapshot" ] is False
     assert len( cache.snapshot_calls ) == 1
@@ -427,7 +433,7 @@ def test_speak_off_dispatches_no_notification( tmp_path, notifier, monkeypatch )
                          lambda command: FakeSpec( required_args=() ) )
     f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), FakeExecutor(),
                     FakePending(), notifier )
-    r = f.run( "do a thing", **_CTX, speak=False )
+    r = f.ask( "do a thing", **_CTX, speak=False )
     assert notifier.requests == []
     assert r[ "spoke" ] is False
 
@@ -438,7 +444,7 @@ def test_speak_on_with_answer_dispatches_notification( tmp_path, notifier, monke
     exe = FakeExecutor( _outcome( status="done", answer="hello", answer_raw="hello" ) )
     f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe,
                     FakePending(), notifier )
-    r = f.run( "do a thing", **_CTX, speak=True )
+    r = f.ask( "do a thing", **_CTX, speak=True )
     assert len( notifier.requests ) == 1
     assert r[ "spoke" ] is True
 
@@ -449,7 +455,7 @@ def test_speak_on_but_empty_message_dispatches_nothing( tmp_path, notifier, monk
     exe = FakeExecutor( _outcome( status="done", answer=None, answer_raw=None ) )
     f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe,
                     FakePending(), notifier )
-    r = f.run( "do a thing", **_CTX, speak=True )
+    r = f.ask( "do a thing", **_CTX, speak=True )
     assert notifier.requests == []
     assert r[ "spoke" ] is False
 
@@ -477,7 +483,7 @@ def test_compose_question_appends_missing_skips_present_and_empty( tmp_path, not
                                                    snapshotable=False ) )
     f = _make_flow( tmp_path, FakeCache(), router, expeditor, FakeExecutor(),
                     FakePending(), notifier )
-    f.run( "weather in already", **_CTX )
+    f.ask( "weather in already", **_CTX )
     q = captured[ "question" ]
     assert "Boston" in q            # truthy + absent → appended
     assert q.lower().count( "already" ) == 1  # present already → not re-appended
@@ -854,7 +860,7 @@ def test_the_flow_never_routes_through_the_expeditors_stateful_half( tmp_path, n
     f = _make_flow( tmp_path, FakeCache(), FakeRouter(), stub,
                     FakeExecutor( _outcome( status="done", answer="sunny", answer_raw="raw" ) ),
                     PendingRequests(), notifier )
-    f.run( question="weather in Boston", user_id="u1", user_email="u@x", session_id="s1",
+    f.ask( question="weather in Boston", user_id="u1", user_email="u@x", session_id="s1",
            websocket_id="ws1", speak=False, interactive=False )
 
     # Anti-vacuity control. Without this, a request that reached NO expeditor
@@ -947,7 +953,7 @@ def test_agent_path_stamps_t_complete_after_first_useful( tmp_path, notifier, mo
     exe = FakeExecutor( _outcome( status="done", answer="42", answer_raw="42" ) )
     f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe,
                     FakePending(), notifier )
-    r = f.run( "what time is it", **_CTX )
+    r = f.ask( "what time is it", **_CTX )
     timings = r[ "timings_ms" ]
     assert "t_complete" in timings                              # the completion bookend exists
     assert timings[ "t_complete" ] >= timings[ "t_first_useful" ]  # after the useful answer
@@ -959,7 +965,7 @@ def test_replay_path_stamps_t_complete( tmp_path, notifier ):
     cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
     exe   = FakeExecutor( _outcome( status="done", answer="4", answer_raw="4" ) )
     f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), exe, FakePending(), notifier )
-    r = f.run( "what is 2+2", **_CTX )
+    r = f.ask( "what is 2+2", **_CTX )
     assert "t_complete" in r[ "timings_ms" ]
     assert r[ "timings_ms" ][ "t_complete" ] >= r[ "timings_ms" ][ "t_first_useful" ]
 
@@ -972,7 +978,7 @@ def test_needs_input_path_stamps_t_complete( tmp_path, notifier, monkeypatch ):
                               fallback_questions={ "location": "Which city?" } )
     expeditor  = FakeExpeditor( extraction=extraction )
     f = _make_flow( tmp_path, FakeCache(), router, expeditor, FakeExecutor(), FakePending(), notifier )
-    r = f.run( "what's the weather", **_CTX, interactive=True )
+    r = f.ask( "what's the weather", **_CTX, interactive=True )
     timings = r[ "timings_ms" ]
     assert r[ "path" ] == "needs_input"
     assert "t_complete" in timings                              # needs_input turn is bookended too
@@ -1024,7 +1030,7 @@ def _degrade_flow( tmp_path, notifier, monkeypatch, primary_error, fallback_outc
 
     f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), _SeqExecutor(),
                     FakePending(), notifier )
-    return f.run( "do a thing", **_CTX )
+    return f.ask( "do a thing", **_CTX )
 
 
 def test_degrade_keeps_the_primary_agent_error_when_receptionist_succeeds( tmp_path, notifier, monkeypatch ):
@@ -1082,7 +1088,7 @@ class TestWaitingIsSuccessInFlight:
                                         job_id="base-9::u1" ) )
         f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), exe, FakePending(), notifier )
 
-        r = f.run( "what is 2+2", **_CTX )
+        r = f.ask( "what is 2+2", **_CTX )
 
         assert r[ "path" ]         == "replay",     "a waiting replay degraded to the receptionist"
         assert r[ "route_reason" ] == "exact_hit"
@@ -1104,7 +1110,7 @@ class TestWaitingIsSuccessInFlight:
         f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe,
                           FakePending(), notifier )
 
-        r = f.run( "what is 2+2", **_CTX )
+        r = f.ask( "what is 2+2", **_CTX )
 
         assert r[ "path" ]         == "agent",      "a waiting agent degraded to the receptionist"
         assert r[ "route_reason" ] == "args_none"
@@ -1132,7 +1138,7 @@ class TestWaitingIsSuccessInFlight:
                                 FakeExecutor( _outcome( status="waiting", answer=None,
                                                         answer_raw=None, job_id="base-9::u1" ) ),
                                 FakePending(), notifier, writeback_enabled=True )
-        r_waiting = f_waiting.run( "what is 2+2", **_CTX )
+        r_waiting = f_waiting.ask( "what is 2+2", **_CTX )
 
         assert r_waiting[ "status" ] == "waiting"
         assert waiting_cache.snapshot_calls   == [], "a job that never ran was turned into a snapshot"
@@ -1145,7 +1151,249 @@ class TestWaitingIsSuccessInFlight:
         f_done = _make_flow( tmp_path, done_cache, FakeRouter(), FakeExpeditor(),
                              FakeExecutor( _outcome( status="done", answer="4", answer_raw="4" ) ),
                              FakePending(), notifier, writeback_enabled=True )
-        r_done = f_done.run( "what is 2+2", **_CTX )
+        r_done = f_done.ask( "what is 2+2", **_CTX )
 
         assert len( done_cache.write_back_calls ) == 1, "the control never wrote back — the refusal above proves nothing"
         assert r_done[ "snapshot_id" ] == "snap-123"
+# ══════════════════════════════════════════════════════════════════════════════
+# submit() — the door beside ask (step 10, Rick's entry-point ruling 2026-08-21)
+#
+# What distinguishes it is what it does NOT do. `ask` is handed prose and has to work
+# out what it means: cache lookup, LLM routing, argument extraction. A `submit` caller
+# has already decided, so the whole head is skipped. These tests pin the skipping —
+# a submit that quietly routed would still return a plausible answer, which is exactly
+# the kind of defect that survives a happy-path test.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _submit_flow( tmp_path, notifier, executor=None, cache=None, **kw ):
+    return _make_flow( tmp_path, cache or FakeCache(), FakeRouter(), FakeExpeditor(),
+                       executor or FakeExecutor(), FakePending(), notifier, **kw )
+
+
+def test_submit_runs_a_named_command_without_routing_or_extracting( tmp_path, notifier, monkeypatch ):
+    """
+    The definition of the door, as a test. The router and expeditor are handed fakes that
+    RECORD their calls; both lists must stay empty. If either fires, `submit` has become
+    a slower `ask`.
+    """
+    router    = FakeRouter()
+    expeditor = FakeExpeditor()
+    router.route = lambda q: ( _ for _ in () ).throw( AssertionError( "submit must not route" ) )
+    monkeypatch.setattr( flow_mod, "resolve", lambda c: FakeSpec( required_args=( "location", ) ) )
+
+    f = _make_flow( tmp_path, FakeCache(), router, expeditor, FakeExecutor(), FakePending(), notifier )
+    r = f.submit( command="agent router go to weather", args={ "location": "Boston" }, **_CTX )
+
+    assert r[ "status" ]       == "done"
+    assert r[ "route_reason" ] == "submitted"
+    assert expeditor.calls == [], "submit must not run the expeditor — the caller supplied the args"
+
+
+def test_submit_never_reads_the_cache( tmp_path, notifier, monkeypatch ):
+    """
+    A submit names its command, so there is nothing for a cache lookup to decide. Reading
+    it anyway would let a stale replay answer a request that asked for fresh work.
+    """
+    cache = FakeCache()
+    cache.lookup = lambda q: ( _ for _ in () ).throw( AssertionError( "submit must not read the cache" ) )
+    monkeypatch.setattr( flow_mod, "resolve", lambda c: FakeSpec( required_args=() ) )
+
+    f = _submit_flow( tmp_path, notifier, cache=cache )
+    assert f.submit( command="agent router go to date and time", args={}, **_CTX )[ "status" ] == "done"
+
+
+def test_submit_with_a_prebuilt_job_skips_the_registry_entirely( tmp_path, notifier, monkeypatch ):
+    """
+    The second shape: an in-process caller hands over a job it already constructed — a
+    watchdog restoring a checkpoint, an expediter resuming its own work. Making it
+    describe that object in a command string so the flow could rebuild it would be a
+    round trip through a lossy format.
+    """
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda c: ( _ for _ in () ).throw( AssertionError( "must not resolve a prebuilt job" ) ) )
+    executor = FakeExecutor()
+    job      = FakeAgent( question="already built" )
+
+    f = _submit_flow( tmp_path, notifier, executor=executor )
+    r = f.submit( job=job, question="already built", **_CTX )
+
+    assert r[ "route_reason" ] == "submitted_prebuilt"
+    assert executor.works[ 0 ].job is job, "the caller's own object must be run, not a rebuild"
+
+
+def test_a_prebuilt_job_missing_routing_command_fails_loud( tmp_path, notifier ):
+    """The protocol REQUIRES routing_command (queue_protocol.py:61), so a job without
+    one is a broken caller, not a case to paper over.
+
+    This used to be `getattr( job, "routing_command", "" ) or ""`, which turned that
+    broken caller into a finished result carrying a BLANK command — the same nullable,
+    blank-defaulted column this plan condemns in the cache. Loud beats blank.
+
+    RED ON REVERT: restore the getattr fallback and this passes silently with command=""."""
+    class JobWithoutRoutingCommand:
+        def do_all( self ): return "unused"                # pragma: no cover - executor faked
+
+    f = _submit_flow( tmp_path, notifier )
+    with pytest.raises( AttributeError, match="routing_command" ):
+        f.submit( job=JobWithoutRoutingCommand(), **_CTX )
+
+
+def test_a_prebuilt_job_is_never_written_back( tmp_path, notifier ):
+    """
+    A caller handing over a constructed job has not said its result is a reusable answer
+    to a reusable question. Writing one back on that guess would put a row in the cache
+    that `ask` would later replay to somebody else.
+    """
+    cache = FakeCache()
+    f = _submit_flow( tmp_path, notifier, cache=cache, writeback_enabled=True )
+    f.submit( job=FakeAgent(), question="q", **_CTX )
+    assert cache.write_back_calls == []
+
+
+def test_submit_needs_input_does_not_park( tmp_path, notifier, monkeypatch ):
+    """
+    THE RULE THAT ONLY EXISTS ON THIS DOOR. `ask` parks a needs-input question because a
+    human is waiting to answer it. A submit caller is a service account or a watchdog —
+    parking there stores a question nobody will read and reports the request as handled.
+    """
+    monkeypatch.setattr( flow_mod, "resolve", lambda c: FakeSpec( required_args=( "location", ) ) )
+    pending = FakePending()
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), FakeExecutor(),
+                    pending, notifier )
+
+    r = f.submit( command="agent router go to weather", args={}, **_CTX )
+
+    assert r[ "status" ]       == "needs_input"
+    assert r[ "pending_id" ]   is None, "a submit must never hand back an id nobody can answer"
+    assert r[ "args_missing" ] == [ "location" ]
+    assert pending.put_calls   == [], "nothing may be stored — that is the whole difference"
+
+
+def test_submit_needs_input_reports_which_args_were_supplied( tmp_path, notifier, monkeypatch ):
+    """A refusal the caller can act on names both halves: what is missing AND what landed."""
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda c: FakeSpec( required_args=( "location", "when" ) ) )
+    f = _submit_flow( tmp_path, notifier )
+    r = f.submit( command="agent router go to weather", args={ "location": "Boston" }, **_CTX )
+
+    assert r[ "args_missing" ] == [ "when" ]
+    assert r[ "args_known" ]   == [ "location" ]
+
+
+def test_an_empty_string_argument_counts_as_missing( tmp_path, notifier, monkeypatch ):
+    """
+    A key present with no value is not a supplied argument. Treating it as one sends the
+    agent off with a blank where it needed a place or a date, and the failure surfaces
+    much later as a bad answer rather than here as a refusal.
+    """
+    monkeypatch.setattr( flow_mod, "resolve", lambda c: FakeSpec( required_args=( "location", ) ) )
+    f = _submit_flow( tmp_path, notifier )
+    r = f.submit( command="agent router go to weather", args={ "location": "" }, **_CTX )
+    assert r[ "status" ] == "needs_input"
+
+
+def test_submit_treats_waiting_as_a_success_not_a_degrade( tmp_path, notifier, monkeypatch ):
+    """
+    A queued executor returns status="waiting" with a job_id: the work was ACCEPTED and is
+    running behind the response. Reading that as a failure would answer every queued
+    submit with a receptionist reply while the real job ran on unseen.
+    """
+    monkeypatch.setattr( flow_mod, "resolve", lambda c: FakeSpec( required_args=() ) )
+    executor = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None, job_id="j-1" ) )
+    f = _submit_flow( tmp_path, notifier, executor=executor )
+
+    r = f.submit( job=FakeAgent(), question="q", **_CTX )
+
+    assert r[ "status" ] == "waiting"
+    assert r[ "job_id" ] == "j-1"
+    assert r[ "path" ]   != "receptionist", "waiting is an accepted job, not a failed one"
+
+
+def test_a_prebuilt_job_that_fails_degrades_to_the_receptionist( tmp_path, notifier ):
+    """The complement — a real failure must still degrade, or 'waiting is fine' would be
+    satisfiable by treating everything as fine."""
+    executor = FakeExecutor( _outcome( status="failed", answer=None, error="boom" ) )
+    f = _submit_flow( tmp_path, notifier, executor=executor )
+    r = f.submit( job=FakeAgent(), question="q", **_CTX )
+    assert r[ "path" ] == "receptionist"
+    assert "boom" in ( r[ "error" ] or "" )
+
+
+def test_submit_with_an_unknown_command_degrades_to_the_receptionist( tmp_path, notifier, monkeypatch ):
+    monkeypatch.setattr( flow_mod, "resolve", lambda c: None )
+    f = _submit_flow( tmp_path, notifier )
+    r = f.submit( command="agent router go to nowhere", args={}, **_CTX )
+    assert r[ "path" ]         == "receptionist"
+    assert r[ "route_reason" ] == "unknown_command"
+
+
+def test_submit_with_neither_command_nor_job_raises( tmp_path, notifier ):
+    """
+    A caller bug, not a runtime condition. A flow that guessed which shape you meant would
+    run the wrong work silently, so it refuses loudly instead.
+    """
+    f = _submit_flow( tmp_path, notifier )
+    with pytest.raises( ValueError, match="exactly one" ):
+        f.submit( **_CTX )
+
+
+def test_submit_with_both_command_and_job_raises( tmp_path, notifier ):
+    f = _submit_flow( tmp_path, notifier )
+    with pytest.raises( ValueError, match="exactly one" ):
+        f.submit( command="agent router go to weather", job=FakeAgent(), **_CTX )
+
+
+def test_submit_writes_back_a_snapshotable_result( tmp_path, notifier, monkeypatch ):
+    """The spine `ask` shares: a snapshotable, completed result goes through the same
+    guarded write-back, so a submitted answer is replayable later.
+
+    The question is REQUIRED for the write — see the test below. This one used to
+    omit it and still assert a write, which is the defect that test now pins."""
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda c: FakeSpec( required_args=(), snapshotable=True ) )
+    cache = FakeCache()
+    f = _submit_flow( tmp_path, notifier, cache=cache, writeback_enabled=True )
+    r = f.submit( command="agent router go to date and time", args={},
+                  question="what time is it", **_CTX )
+
+    assert len( cache.write_back_calls ) == 1
+    assert r[ "wrote_snapshot" ] is True
+
+
+def test_submit_without_a_question_writes_no_snapshot( tmp_path, notifier, monkeypatch ):
+    """NO QUESTION ⇒ NO CACHE ROW, even for a command the registry calls snapshotable.
+
+    `ask` looks rows up by the user's words. A question-less submit would file the row
+    under the command string — "agent router go to math" — which no user will ever say,
+    so the row can never be matched and only costs a read on every lookup.
+
+    RED ON REVERT: drop the `and question is not None` in `submit`'s _run_agent call and
+    the write happens, failing both assertions here.
+
+    ⚠️ The absence is the assertion, at TWO depths. `wrote_snapshot is False` alone would
+    pass with write-back merely disabled, so the cache is asserted untouched — and
+    `snapshot_calls` is checked as well as `write_back_calls`, so the test stays red if the
+    guard ever slides down to write_back and a snapshot object is built and then discarded.
+    (Pocholo's addition: the cheaper guard is the one further up.)"""
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda c: FakeSpec( required_args=(), snapshotable=True ) )
+    cache = FakeCache()
+    f = _submit_flow( tmp_path, notifier, cache=cache, writeback_enabled=True )
+    r = f.submit( command="agent router go to math", args={}, **_CTX )
+
+    assert cache.snapshot_calls   == [], "a snapshot object was BUILT and thrown away"
+    assert cache.write_back_calls == []
+    assert r[ "wrote_snapshot" ] is False
+    assert r[ "snapshot_id" ] is None
+    assert r[ "status" ] == "done", "the work still RAN — only the cache row is refused"
+
+
+def test_submit_speaks_when_asked_and_stays_quiet_when_not( tmp_path, notifier, monkeypatch ):
+    monkeypatch.setattr( flow_mod, "resolve", lambda c: FakeSpec( required_args=() ) )
+    f = _submit_flow( tmp_path, notifier )
+
+    f.submit( command="agent router go to date and time", args={}, speak=False, **_CTX )
+    assert notifier.requests == []
+
+    f.submit( command="agent router go to date and time", args={}, speak=True, **_CTX )
+    assert len( notifier.requests ) == 1

@@ -39,15 +39,20 @@ def _full_result( **overrides ):
 class FakeFlow:
     def __init__( self, result=None ):
         self._result      = result if result is not None else _full_result()
-        self.run_calls    = []
+        self.ask_calls    = []
         self.resume_calls = []
+        self.submit_calls = []
 
-    def run( self, **kwargs ):
-        self.run_calls.append( kwargs )
+    def ask( self, **kwargs ):
+        self.ask_calls.append( kwargs )
         return self._result
 
     def resume( self, **kwargs ):
         self.resume_calls.append( kwargs )
+        return self._result
+
+    def submit( self, **kwargs ):
+        self.submit_calls.append( kwargs )
         return self._result
 
 
@@ -61,6 +66,124 @@ def _app( current_user, flow ):
 
 # ────────────────────────────────────────────────────────────── endpoint
 
+# ── /api/v2/submit — the door beside ask (step 10, Rick's entry-point ruling) ──
+
+def test_submit_happy_path_returns_full_response():
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    resp = client.post( "/api/v2/submit",
+                        json={ "command": "agent router go to weather",
+                               "args": { "location": "Boston" } } )
+    assert resp.status_code == 200
+    assert resp.json()[ "path" ] == "agent"
+
+
+def test_submit_passes_the_command_and_args_through_untouched():
+    """
+    The point of this door: the caller has already decided, so nothing re-derives it.
+    A submit that quietly re-routed would be paying an LLM to recompute a stated fact.
+    """
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    client.post( "/api/v2/submit",
+                 json={ "command": "agent router go to weather",
+                        "args": { "location": "Boston" },
+                        "question": "what is the weather in Boston" } )
+    call = flow.submit_calls[ 0 ]
+    assert call[ "command" ]  == "agent router go to weather"
+    assert call[ "args" ]     == { "location": "Boston" }
+    assert call[ "question" ] == "what is the weather in Boston"
+
+
+def test_submit_takes_identity_from_the_token_not_the_body():
+    """
+    Same rule as ask, and it matters more here: a submit body is machine-written, so a
+    caller that could name its own user_id would be an impersonation door.
+    """
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    client.post( "/api/v2/submit",
+                 json={ "command": "agent router go to weather", "args": {},
+                        "user_id": "someone-else", "user_email": "attacker@x.com" } )
+    call = flow.submit_calls[ 0 ]
+    assert call[ "user_id" ]    == "u1"
+    assert call[ "user_email" ] == "u@x.com"
+
+
+def test_submit_defaults_the_session_id_when_no_websocket_is_supplied():
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    client.post( "/api/v2/submit", json={ "command": "agent router go to weather", "args": {} } )
+    call = flow.submit_calls[ 0 ]
+    assert call[ "session_id" ]   == "api-u1"
+    assert call[ "websocket_id" ] == "api-u1"
+
+
+def test_submit_uses_a_supplied_websocket_id_for_both():
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    client.post( "/api/v2/submit",
+                 json={ "command": "agent router go to weather", "args": {},
+                        "websocket_id": "wise-penguin" } )
+    call = flow.submit_calls[ 0 ]
+    assert call[ "session_id" ]   == "wise-penguin"
+    assert call[ "websocket_id" ] == "wise-penguin"
+
+
+def test_submit_without_a_command_is_rejected_by_the_model():
+    """`command` is required here where `question` is required on ask — that IS the door."""
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    resp = client.post( "/api/v2/submit", json={ "args": { "location": "Boston" } } )
+    assert resp.status_code == 422
+    assert flow.submit_calls == [], "a body with no command must never reach the flow"
+
+
+def test_submit_does_not_require_a_question():
+    """
+    The difference from ask, stated as a test. ask cannot work without prose; submit was
+    handed the conclusion that prose would have produced.
+    """
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    resp = client.post( "/api/v2/submit", json={ "command": "agent router go to date and time" } )
+    assert resp.status_code == 200
+    assert flow.submit_calls[ 0 ][ "question" ] is None
+    assert flow.submit_calls[ 0 ][ "args" ] == {}
+
+
+def test_submit_with_no_user_id_in_the_token_is_401():
+    flow = FakeFlow()
+    client = TestClient( _app( { "email": "u@x.com" }, flow ) )
+    resp = client.post( "/api/v2/submit", json={ "command": "agent router go to weather", "args": {} } )
+    assert resp.status_code == 401
+    assert flow.submit_calls == []
+
+
+def test_submit_with_no_email_in_the_token_is_401():
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1" }, flow ) )
+    resp = client.post( "/api/v2/submit", json={ "command": "agent router go to weather", "args": {} } )
+    assert resp.status_code == 401
+    assert flow.submit_calls == []
+
+
+def test_submit_and_ask_are_separate_doors_on_the_same_flow():
+    """
+    Neither call may leak into the other's list. They share a flow and a response model,
+    which is exactly the condition under which a wiring slip goes unnoticed.
+    """
+    flow = FakeFlow()
+    client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
+    client.post( "/api/v2/ask",    json={ "question": "weather in Boston" } )
+    client.post( "/api/v2/submit", json={ "command": "agent router go to weather", "args": {} } )
+    assert len( flow.ask_calls )    == 1
+    assert len( flow.submit_calls ) == 1
+    assert "command"  not in flow.ask_calls[ 0 ]
+    assert "question" in flow.submit_calls[ 0 ]
+
+
+
 def test_ask_happy_path_returns_full_response():
     flow = FakeFlow()
     client = TestClient( _app( { "uid": "u1", "email": "u@x.com" }, flow ) )
@@ -71,10 +194,10 @@ def test_ask_happy_path_returns_full_response():
     assert body[ "snapshot_id" ] == "snap-1"
     assert body[ "trace_id" ] == "abc123"
     # token-sourced identity, not the client body
-    assert flow.run_calls[ 0 ][ "user_id" ] == "u1"
-    assert flow.run_calls[ 0 ][ "user_email" ] == "u@x.com"
+    assert flow.ask_calls[ 0 ][ "user_id" ] == "u1"
+    assert flow.ask_calls[ 0 ][ "user_email" ] == "u@x.com"
     # no websocket_id supplied → session_id synthesized from uid
-    assert flow.run_calls[ 0 ][ "session_id" ] == "api-u1"
+    assert flow.ask_calls[ 0 ][ "session_id" ] == "api-u1"
 
 
 def test_ask_uses_supplied_websocket_id():
@@ -83,7 +206,7 @@ def test_ask_uses_supplied_websocket_id():
     resp = client.post( "/api/v2/ask",
                         json={ "question": "hi", "websocket_id": "ws-42", "speak": False, "interactive": False } )
     assert resp.status_code == 200
-    call = flow.run_calls[ 0 ]
+    call = flow.ask_calls[ 0 ]
     assert call[ "session_id" ] == "ws-42"
     assert call[ "websocket_id" ] == "ws-42"
     assert call[ "speak" ] is False
@@ -280,7 +403,8 @@ class ThreadRecordingFlow:
         self.flow_thread = self._threading.get_ident()
         return self._result
 
-    run    = _record
+    ask    = _record
+    submit = _record
     resume = _record
 
 
@@ -334,10 +458,23 @@ def _assert_flow_ran_off_the_loop( fire_request ):
 
 
 def test_ask_runs_the_flow_off_the_event_loop():
-    """RED ON REVERT: call flow.run() directly in the handler and the flow body
+    """RED ON REVERT: call flow.ask() directly in the handler and the flow body
     executes on the loop's own thread, so the identities match and this fails."""
     _assert_flow_ran_off_the_loop(
         lambda c: c.post( "/api/v2/ask", json={ "question": "weather in Boston" } ) )
+
+
+def test_submit_runs_the_flow_off_the_event_loop():
+    """MECHANISM arm for the second front door.
+
+    `submit` skips the head — no routing, no expeditor, no cache read — but it
+    still RUNS THE AGENT, so it holds the caller for the agent's full span. The
+    head is the cheap part; skipping it does not make the call short.
+
+    RED ON REVERT: restore the direct flow.submit() call and the flow body runs on
+    the loop's own thread, so the identities match and this fails."""
+    _assert_flow_ran_off_the_loop(
+        lambda c: c.post( "/api/v2/submit", json={ "command": "agent router go to weather" } ) )
 
 
 def test_resume_runs_the_flow_off_the_event_loop():
@@ -364,7 +501,8 @@ class BlockingFlow:
         self.release.wait( timeout=15 )
         return self._result
 
-    run    = _block
+    ask    = _block
+    submit = _block
     resume = _block
 
 
@@ -433,11 +571,20 @@ def _health_codes_during( path, payload ):
 @pytest.mark.timeout( 120 )
 def test_health_still_answers_while_an_ask_is_in_flight():
     """
-    RED ON REVERT: call flow.run() directly in the handler and every probe here
+    RED ON REVERT: call flow.ask() directly in the handler and every probe here
     returns TIMEOUT instead of 200 — measured, not asserted from theory.
     """
     codes = _health_codes_during( "/api/v2/ask", { "question": "weather in Boston" } )
     assert codes == [ 200 ] * 5, f"/health degraded while an ask was in flight: {codes}"
+
+
+@pytest.mark.timeout( 120 )
+def test_health_still_answers_while_a_submit_is_in_flight():
+    """SYMPTOM arm for /api/v2/submit. The two arms are not interchangeable: work
+    moved to another thread that still starves the loop passes the identity check
+    and fails this one."""
+    codes = _health_codes_during( "/api/v2/submit", { "command": "agent router go to weather" } )
+    assert codes == [ 200 ] * 5, f"/health degraded while a submit was in flight: {codes}"
 
 
 @pytest.mark.timeout( 120 )
