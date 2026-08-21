@@ -21,6 +21,8 @@ import cosa.utils.util as cu
 
 from cosa.agents.runtime_argument_expeditor.agent_registry import (
     JOB_ARG_CONTRACTS,
+    DEFAULT_FILE_EXTENSIONS,
+    DEFAULT_FILE_SEARCH_ROOTS,
     get_cli_help,
     get_user_visible_args
 )
@@ -101,6 +103,8 @@ class ArgSpec:
           COPY of the registry entry's dict per bug 8aa89f42, so extract()'s
           in-place seeding never leaks one user's default to the next)
         - special_handlers maps arg-name -> handler tag
+        - file_args maps arg-name -> its typed declaration ({ kind, search_roots,
+          search_paths_key }); empty for an agent with no file-typed argument
         - display_name is the human agent name, or None (derived from cli_module)
         - cli_module is the agent's CLI module path, or None (test_suite has none
           by design — invoked via API, not CLI)
@@ -117,6 +121,7 @@ class ArgSpec:
     special_handlers   : dict
     display_name       : str
     cli_module         : str
+    file_args          : dict
 
     @classmethod
     def from_entry( cls, entry ):
@@ -147,6 +152,7 @@ class ArgSpec:
             special_handlers   = entry.get( "special_handlers", {} ),
             display_name       = entry.get( "display_name" ),
             cli_module         = entry.get( "cli_module" ),
+            file_args          = entry.get( "file_args", {} ),
         )
 
 
@@ -163,6 +169,24 @@ MAX_CHOICE_OPTIONS           = 5
 DOC_CHOICE_DESCRIBE_LABEL    = "Let me describe it instead"
 DOC_CHOICE_CANCEL_LABEL      = "Cancel"
 DOC_CHOICE_DESCRIBE_SENTINEL = "__describe_instead__"   # helper return: user opted for the open ask
+
+# WHAT THIS CARD IS, said once and stably (row a1420538). The card's QUESTION is
+# derived per calling agent — "for the podcast", "for the presentation" — which is
+# right for the user and wrong as an identifier: the decision proxy's answer files
+# matched on that prose, so every new agent needed its own byte-identical entry and a
+# wording change silently left the card unanswered. The id says WHICH CARD this is
+# regardless of who is asking, and rides in response_options, which the API carries
+# through as an opaque dict (notifications.py json.loads it and passes it on) — no new
+# model field, no endpoint change.
+DOCUMENT_CHOICE_CARD_ID      = "document_choice"
+
+# The OPEN-ENDED half of the same conversation (row 0c280989): "which document? —
+# describe it or say the filename". Six proxy entries across six profiles were keyed on
+# its prose, and unlike the card's two they had drifted into three different wordings.
+# Same remedy, same reason. The id names the ASK, not the argument: podcast asks it for
+# `research` and presentation for `source`, and one id with arg_name riding as metadata
+# is what keeps that from becoming per-agent keying again.
+DOCUMENT_DESCRIBE_ASK_ID     = "document_describe"
 
 
 # --------------------------------------------------------------------------- #
@@ -548,15 +572,15 @@ class RuntimeArgumentExpeditor:
             for arg_name in special:
                 handler = special_handlers[ arg_name ]
                 if handler == "fuzzy_file_match":
-                    # Auto-resolve (row bd0ce120) is SCOPED to the podcast route only.
-                    # Only the podcast command forwards original_question; every other
-                    # fuzzy_file_match consumer (e.g. the presentation generator's
-                    # `source` arg) receives None, so its auto pre-step can never fire
-                    # and its behaviour is STRUCTURALLY unchanged — not changed-and-tested.
-                    is_podcast     = command == "agent router go to podcast generator"
-                    fuzzy_original = original_question if is_podcast else None
-                    # The first-turn choice card is podcast-only — the SAME command
-                    # fence as fuzzy_original, so presentation's `source` is untouched.
+                    # Auto-resolve (row bd0ce120) and the first-turn choice card were
+                    # both gated on `command == podcast` while the behaviour was proven
+                    # on that one route. Row 5bc22180 removes the gate: EVERY
+                    # fuzzy_file_match consumer forwards the utterance and opts into the
+                    # card, because nothing in either step is podcast-specific — they
+                    # are generic file resolution. The presentation generator's `source`
+                    # was the degraded member; TFE's `resume_from` is untouched because
+                    # it routes through a different handler on the elif below, not
+                    # because a command check protects it.
                     #
                     # arg_name/ask_question carry the CALLING agent's own identity into
                     # the prompt. Previously both were hardcoded to the podcast's, so a
@@ -566,8 +590,9 @@ class RuntimeArgumentExpeditor:
                     fuzzy_question = spec.fallback_questions.get( arg_name )
                     value = self._handle_fuzzy_file_match(
                         user_email, spec.display_name,
-                        original_question=fuzzy_original, use_choice_card=is_podcast,
-                        arg_name=arg_name, ask_question=fuzzy_question
+                        original_question=original_question, use_choice_card=True,
+                        arg_name=arg_name, ask_question=fuzzy_question,
+                        file_arg=spec.file_args.get( arg_name )
                     )
                     # Auto-detect YAML → set render_only flag
                     if value and value.lower().endswith( ( ".yaml", ".yml" ) ):
@@ -591,29 +616,41 @@ class RuntimeArgumentExpeditor:
         # downstream where a file path is expected and the job dies with
         # FileNotFoundError at runtime (podcast_generator/job.py:216-223). Treat a
         # present-but-non-existing-path value as UNRESOLVED and run the same fuzzy
-        # matcher the missing case uses. SCOPED to the podcast command so the
-        # presentation generator's `source` arg (also a fuzzy_file_match consumer)
-        # is STRUCTURALLY untouched — same command fence as the auto-resolve
-        # pre-step. The matcher SEED is original_question (the full utterance, the
-        # validated input), not the bare pre-filled value; a zero-or-2+ match
-        # falls through to the "which document?" prompt inside
+        # matcher the missing case uses. The matcher SEED is original_question (the
+        # full utterance, the validated input), not the bare pre-filled value; a
+        # zero-or-2+ match falls through to the "which document?" prompt inside
         # _handle_fuzzy_file_match, never a crash.
-        if command == "agent router go to podcast generator":
-            for arg_name, handler in special_handlers.items():
-                if handler != "fuzzy_file_match":                          continue
-                if arg_name in missing:                                    continue  # the missing-loop above already ran its handler — never re-resolve
-                if arg_name not in final_args:                             continue  # not present at all — nothing to resolve
-                if self._value_is_existing_path( final_args[ arg_name ] ): continue  # already a real path — leave it
-                if self.debug: print( f"[Expeditor] Present-but-unresolvable '{arg_name}'={final_args[ arg_name ]!r} → running fuzzy resolve" )
-                # Inside the podcast-only fence (L404) → opt into the choice card.
-                value = self._handle_fuzzy_file_match( user_email, spec.display_name, original_question=original_question, use_choice_card=True )
-                if value is None:
-                    print( f"[Expeditor] User cancelled resolving present-but-unresolvable arg '{arg_name}'" )
-                    return None
-                final_args[ arg_name ] = value
-                if value.lower().endswith( ( ".yaml", ".yml" ) ):
-                    final_args[ "render_only" ] = "true"
-                    if self.debug: print( f"[Expeditor] YAML detected → render_only=true" )
+        #
+        # Row 5bc22180 removed the `command == podcast` gate that used to wrap this
+        # loop. The presentation generator hit the SAME defect through `source`, one
+        # step earlier: presentation_generator/job.py pre-validates the path and
+        # raises FileNotFoundError("Source document not found: KISS") before the
+        # orchestrator is built, so the job ended FAILED. Nothing in the loop is
+        # podcast-specific — the `handler != "fuzzy_file_match"` line is what keeps
+        # TFE's `resume_from` out, and that line does the job on its own.
+        for arg_name, handler in special_handlers.items():
+            if handler != "fuzzy_file_match":                          continue
+            if arg_name in missing:                                    continue  # the missing-loop above already ran its handler — never re-resolve
+            if arg_name not in final_args:                             continue  # not present at all — nothing to resolve
+            if self._value_is_existing_path( final_args[ arg_name ] ): continue  # already a real path — leave it
+            if self.debug: print( f"[Expeditor] Present-but-unresolvable '{arg_name}'={final_args[ arg_name ]!r} → running fuzzy resolve" )
+            # The caller's OWN arg name and question, exactly as the missing-arg loop
+            # passes them. Omitting them here left the rescue on the handler's podcast
+            # defaults, which is how a presentation job came to ask about "the podcast"
+            # under a card titled "Missing: research" (job pr-a10a55aa).
+            value = self._handle_fuzzy_file_match(
+                user_email, spec.display_name,
+                original_question=original_question, use_choice_card=True,
+                arg_name=arg_name, ask_question=spec.fallback_questions.get( arg_name ),
+                file_arg=spec.file_args.get( arg_name )
+            )
+            if value is None:
+                print( f"[Expeditor] User cancelled resolving present-but-unresolvable arg '{arg_name}'" )
+                return None
+            final_args[ arg_name ] = value
+            if value.lower().endswith( ( ".yaml", ".yml" ) ):
+                final_args[ "render_only" ] = "true"
+                if self.debug: print( f"[Expeditor] YAML detected → render_only=true" )
 
         if self.debug: print( f"[Expeditor] Final args: {final_args}" )
 
@@ -1019,7 +1056,8 @@ class RuntimeArgumentExpeditor:
 
         return "\n".join( lines )
 
-    def _ask_for_arg( self, arg_name, question, user_email, response_default=None, abstract=None ):
+    def _ask_for_arg( self, arg_name, question, user_email, response_default=None, abstract=None,
+                      card_id=None ):
         """
         Ask the user for a missing argument via synchronous notification.
 
@@ -1042,6 +1080,15 @@ class RuntimeArgumentExpeditor:
         Returns:
             str or None: User's response or None
         """
+        # An OPEN_ENDED ask carries no options, so response_options exists here ONLY to
+        # name the ask — and it is omitted entirely when there is nothing to name, so
+        # every other caller of this method sends exactly the envelope it always sent.
+        # The arg rides with the id because two agents ask this same ask for different
+        # arguments; the id says WHICH ASK, arg_name says WHICH FIELD.
+        response_options = None
+        if card_id is not None:
+            response_options = { "card_id": card_id, "arg_name": arg_name }
+
         request = NotificationRequest(
             message          = question,
             response_type    = ResponseType.OPEN_ENDED,
@@ -1053,7 +1100,8 @@ class RuntimeArgumentExpeditor:
             suppress_ding    = False,
             response_default = response_default,
             abstract         = abstract,
-            job_id           = self._job_id
+            job_id           = self._job_id,
+            response_options = response_options
         )
 
         response = notify_user_sync( request=request, debug=self.debug, bearer_token=self._bearer_token )
@@ -1076,7 +1124,8 @@ class RuntimeArgumentExpeditor:
         self._last_expedite_reason = self._classify_ask_failure( response )
         return None
 
-    def _ask_choice_for_arg( self, arg_name, question, options, user_email, abstract=None ):
+    def _ask_choice_for_arg( self, arg_name, question, options, user_email, abstract=None,
+                             card_id=None ):
         """
         Ask the user to pick a value for a missing arg from a fixed list, using the
         SAME multiple-choice card the routing confirm uses — no new card, renderer,
@@ -1112,6 +1161,27 @@ class RuntimeArgumentExpeditor:
         Returns:
             str or None: chosen label, DOC_CHOICE_DESCRIBE_SENTINEL, or None
         """
+        response_options = {
+            "questions": [ {
+                "question"     : question,
+                "header"       : arg_name,
+                "multi_select" : False,
+                "options"      : options
+            } ]
+        }
+        # The id rides BESIDE questions, not inside one: it names the card, not a
+        # question on it. Omitted entirely when the caller does not name one, so the
+        # routing-confirm card and every other user of this ask are byte-identical to
+        # what they sent before.
+        if card_id is not None:
+            response_options[ "card_id" ]  = card_id
+            # The arg rides WITH the id, on both ask surfaces. The id says which ask;
+            # two agents ask the same one for different arguments (podcast's
+            # `research`, presentation's `source`), and the matcher narrows on this.
+            # Sending it from only one surface would leave that filter half-real —
+            # code with no producer, exercised only by synthetic tests (María).
+            response_options[ "arg_name" ] = arg_name
+
         request = NotificationRequest(
             message          = question,
             response_type    = ResponseType.MULTIPLE_CHOICE,
@@ -1123,14 +1193,7 @@ class RuntimeArgumentExpeditor:
             suppress_ding    = False,
             abstract         = abstract,
             job_id           = self._job_id,
-            response_options = {
-                "questions": [ {
-                    "question"     : question,
-                    "header"       : arg_name,
-                    "multi_select" : False,
-                    "options"      : options
-                } ]
-            }
+            response_options = response_options
         )
 
         response = notify_user_sync( request=request, debug=self.debug, bearer_token=self._bearer_token )
@@ -1175,17 +1238,63 @@ class RuntimeArgumentExpeditor:
         m = re.match( r"(\d{4})\.(\d{2})\.(\d{2})", os.path.basename( rel_path ) )
         return f"{folder} · {m.group( 1 )}-{m.group( 2 )}-{m.group( 3 )}" if m else folder
 
-    def _choose_document_from_matches( self, matches, docs_map, user_email ):
+    @staticmethod
+    def _document_choice_question( agent_display_name ):
+        """
+        The spoken question on the document choice card, in the calling agent's terms.
+
+        ⚠️ THE PROXY ANSWER FILES MATCH ON THIS STRING. src/conf/notification-proxy-scripts/
+        keys its entries by question_pattern, so changing the wording here without
+        updating podcast.json / presentation.json makes an automated run hang at the
+        card with nothing able to answer it.
+
+        Requires:
+            - agent_display_name is the registry display name, or None
+
+        Ensures:
+            - returns the podcast wording verbatim when the name is missing, so the
+              podcast card is byte-identical to what it has always said
+            - otherwise names the calling agent, lower-cased so it reads as prose
+
+        Raises:
+            - nothing
+        """
+        if not agent_display_name:
+            return "Which document should I use for the podcast?"
+        # "Podcast Generator" -> "podcast", "Presentation Generator" -> "presentation".
+        # The trailing word is dropped for TWO reasons, and the first is the load-bearing
+        # one: it makes the podcast card come out BYTE-IDENTICAL to the string it has
+        # always said, so this fix changes nothing a podcast user sees. It also reads
+        # better — "for the presentation" is how a person would ask.
+        subject = agent_display_name.lower()
+        if subject.endswith( " generator" ):
+            subject = subject[ : -len( " generator" ) ]
+        return f"Which document should I use for the {subject}?"
+
+
+    def _choose_document_from_matches( self, matches, docs_map, user_email,
+                                       arg_name="research", agent_display_name=None ):
         """
         Present 2..MAX_CHOICE_OPTIONS candidate documents as the standard choice
-        card and map the pick back to an absolute path. The one doc-choice surface
-        the podcast ambiguity path uses.
+        card and map the pick back to an absolute path. The doc-choice surface every
+        fuzzy_file_match consumer uses, once the podcast fence came off (row 5bc22180).
+
+        THE CARD SPEAKS AS THE CALLING AGENT. It used to hardcode the arg name
+        "research" and the question "Which document should I use for the podcast?",
+        which was invisible while podcast was the only consumer. Row 5bc22180 gave
+        presentation the card, and the hardcoding immediately became a presentation
+        user being asked about the podcast under a card titled "Missing: research" —
+        the same defect row ea184d06 fixed on the OTHER two asks and never reached
+        here. The defaults keep podcast's wording verbatim, so its card does not move.
 
         Requires:
             - matches is a list of relative-path keys into docs_map (caller has
               already enforced 2..MAX_CHOICE_OPTIONS)
             - docs_map maps relative_path -> absolute_path
             - user_email is the target user's email
+            - arg_name is the calling agent's own argument name
+            - agent_display_name is the calling agent's display name, or None to
+              keep the podcast phrasing
 
         Ensures:
             - Returns the chosen candidate's ABSOLUTE path on a pick
@@ -1213,10 +1322,11 @@ class RuntimeArgumentExpeditor:
         options.append( { "label": DOC_CHOICE_CANCEL_LABEL,   "description": "Cancel this request" } )
 
         chosen = self._ask_choice_for_arg(
-            "research",
-            "Which document should I use for the podcast?",
+            arg_name,
+            self._document_choice_question( agent_display_name ),
             options,
-            user_email
+            user_email,
+            card_id=DOCUMENT_CHOICE_CARD_ID
         )
         if chosen is None or chosen == DOC_CHOICE_DESCRIBE_SENTINEL:
             return chosen
@@ -1424,7 +1534,7 @@ class RuntimeArgumentExpeditor:
 
         return answers, BATCH_ANSWERED
 
-    def _handle_fuzzy_file_match( self, user_email, agent_display_name=None, original_question=None, use_choice_card=False, arg_name="research", ask_question=None ):
+    def _handle_fuzzy_file_match( self, user_email, agent_display_name=None, original_question=None, use_choice_card=False, arg_name="research", ask_question=None, file_arg=None ):
         """
         Use fuzzy file matching to find a document by user description.
 
@@ -1459,6 +1569,11 @@ class RuntimeArgumentExpeditor:
                 normally the registry's fallback_questions entry for arg_name.
                 None falls back to the podcast phrasing (row ea184d06: this used
                 to be hardcoded, so a presentation job asked about "the podcast").
+            file_arg: the argument's own typed declaration from the registry
+                ({ kind, search_roots, search_paths_key }) — row a1420538. It says
+                WHERE this argument's files live. None keeps the shared default
+                roots and the podcast config key, which is what every caller got
+                before any argument declared anything.
 
         Returns:
             str or None: Full path to selected document
@@ -1469,37 +1584,36 @@ class RuntimeArgumentExpeditor:
         config_mgr   = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         project_root = cu.get_project_root()
 
-        # Build docs_map: { relative_path → abs_path } from all search dirs
-        docs_map = {}
+        # Build docs_map: { relative_path → abs_path } from the argument's OWN roots
+        # (row a1420538). The two per-user directories and the four extensions used to
+        # be written into this method, so "where a file argument lives" was a property
+        # of the expeditor rather than of the argument. They come from the declaration
+        # now; an argument that declares nothing gets the same defaults, so a
+        # not-yet-migrated caller searches exactly what it searched before.
+        declaration = file_arg or {}
+        search_roots = declaration.get( "search_roots" ) or DEFAULT_FILE_SEARCH_ROOTS
+        docs_map     = {}
 
-        # Supported file extensions for source documents and YAML intermediates
-        source_extensions = ( ".md", ".yaml", ".yml", ".txt" )
+        for root in search_roots:
+            rel_root   = root[ "path" ].format( user_email=user_email )
+            extensions = tuple( root.get( "extensions" ) or DEFAULT_FILE_EXTENSIONS )
+            abs_root   = f"{project_root}/{rel_root}"
+            if not os.path.exists( abs_root ):
+                continue
+            for f in os.listdir( abs_root ):
+                if f.endswith( extensions ):
+                    docs_map[ f"{rel_root}/{f}" ] = f"{abs_root}/{f}"
 
-        # Source 1: Deep research directory
-        research_dir = project_root + f"/io/deep-research/{user_email}"
-        if os.path.exists( research_dir ):
-            for f in os.listdir( research_dir ):
-                if f.endswith( source_extensions ):
-                    rel_path = f"io/deep-research/{user_email}/{f}"
-                    docs_map[ rel_path ] = f"{research_dir}/{f}"
-
-        # Source 1b: Presentations directory (YAML intermediates for re-render)
-        presentations_dir = project_root + f"/io/presentations/{user_email}"
-        if os.path.exists( presentations_dir ):
-            for f in os.listdir( presentations_dir ):
-                if f.endswith( ( ".yaml", ".yml" ) ):
-                    rel_path = f"io/presentations/{user_email}/{f}"
-                    docs_map[ rel_path ] = f"{presentations_dir}/{f}"
-
-        # Source 2: Additional search paths from config (agent-specific key, fallback to podcast)
-        search_paths_raw = None
-        if agent_display_name:
-            agent_key = f"{agent_display_name.lower()} source search paths"
-            search_paths_raw = config_mgr.get( agent_key, default=None )
-            if self.debug and search_paths_raw: print( f"[Expeditor] Using agent-specific search paths: {agent_key}" )
-        if search_paths_raw is None:
-            search_paths_raw = config_mgr.get( "podcast generator source search paths", default="/src" )
+        # Extra directories from config, walked recursively. THE KEY IS DECLARED, not
+        # derived: it used to be built from the display name — "presentation generator
+        # source search paths" — and fell back to the PODCAST's key when that one was
+        # absent, so an agent with no key of its own silently searched wherever the
+        # podcast was configured to look.
+        search_paths_key = declaration.get( "search_paths_key" ) or "podcast generator source search paths"
+        search_paths_raw = config_mgr.get( search_paths_key, default="/src" )
+        if self.debug: print( f"[Expeditor] Extra search paths from {search_paths_key!r}" )
         search_dirs = [ d.strip() for d in search_paths_raw.split( "," ) if d.strip() ]
+        source_extensions = DEFAULT_FILE_EXTENSIONS
 
         for search_dir in search_dirs:
             abs_search_dir = project_root + search_dir
@@ -1548,7 +1662,10 @@ class RuntimeArgumentExpeditor:
             # None; "describe instead" falls through to the open ask below.
             if use_choice_card and auto_status in ( "exact", "fuzzy" ) and 2 <= len( auto_matches ) <= MAX_CHOICE_OPTIONS:
                 if self.debug: print( f"[Expeditor] {len( auto_matches )} first-turn matches — showing choice card" )
-                chosen     = self._choose_document_from_matches( auto_matches, docs_map, user_email )
+                chosen     = self._choose_document_from_matches(
+                    auto_matches, docs_map, user_email,
+                    arg_name=arg_name, agent_display_name=agent_display_name
+                )
                 card_shown = True
                 if chosen != DOC_CHOICE_DESCRIBE_SENTINEL:
                     return chosen   # abs path, or None on Cancel/failure
@@ -1560,7 +1677,8 @@ class RuntimeArgumentExpeditor:
         description = self._ask_for_arg(
             arg_name,
             ask_question or "Which document should I use for the podcast? Describe it or say the filename.",
-            user_email
+            user_email,
+            card_id=DOCUMENT_DESCRIBE_ASK_ID
         )
         if not description:
             return None
@@ -1601,7 +1719,10 @@ class RuntimeArgumentExpeditor:
         # first-match fallback below is unreachable on the podcast path.
         if use_choice_card:
             if not card_shown and len( matches ) <= MAX_CHOICE_OPTIONS:
-                chosen = self._choose_document_from_matches( matches, docs_map, user_email )
+                chosen = self._choose_document_from_matches(
+                    matches, docs_map, user_email,
+                    arg_name=arg_name, agent_display_name=agent_display_name
+                )
                 if chosen != DOC_CHOICE_DESCRIBE_SENTINEL:
                     return chosen   # abs path, or None on Cancel/failure
             return self._ask_for_arg(

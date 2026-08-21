@@ -73,7 +73,11 @@ def main() -> int:
     # dirty file gets told during the ack window even when the bouncer is a non-TTY
     # agent whose confirmation prompt was skipped.
     dirty_files = os.environ.get( "BOUNCE_DIRTY_FILES" ) or None
-    message  = build_bounce_message( "warning", dirty_files=dirty_files )
+    # BOUNCE_REASON (Cheech, 2026-08-21): the broadcast said WHAT a bounce deploys but
+    # never WHY it was happening, so a peer holding armed probes could not tell a needed
+    # bounce from a casual one without asking. Same env-var seam as the dirty list.
+    reason      = os.environ.get( "BOUNCE_REASON" ) or None
+    message  = build_bounce_message( "warning", dirty_files=dirty_files, reason=reason )
     ack_deadline_s, ack_poll_s = _ack_timing()
 
     # Post the warning. require_ack=True so each recipient's listener writes an

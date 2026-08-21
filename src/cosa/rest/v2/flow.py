@@ -412,6 +412,7 @@ class AskFlow:
             special_handlers   = {},
             display_name       = command.replace( "agent router go to ", "" ).title(),
             cli_module         = None,
+            file_args          = {},   # weather takes no file-typed argument
         )
 
     def _build_agent( self, agent_class: Callable, agent_question: str, ctx: tuple ) -> Any:

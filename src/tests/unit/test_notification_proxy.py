@@ -1293,14 +1293,26 @@ class TestQAScriptFormat:
             assert len( script[ "entries" ] ) > 0, f"{profile} has no entries"
 
     def test_entries_have_required_fields( self ):
-        """All script entries have question_pattern, answer, arg_name, response_types."""
+        """
+        Every entry is keyed on something and answers with something.
+
+        TWO KINDS OF KEY (row a1420538). A PROSE entry matches on question_pattern and
+        names the arg it fills. A CARD entry matches on card_id — the card names itself,
+        so the entry carries no question and no arg, which is the whole point: one
+        generic entry answers the same card for every agent that shows it, whatever
+        that agent calls its argument or phrases its question. Demanding a
+        question_pattern of a card entry would be demanding back the duplication the id
+        removed.
+        """
         for profile in [ "deep_research", "podcast", "research_to_podcast", "all_agents", "minimal" ]:
             script = self._load_script( profile )
             for i, entry in enumerate( script[ "entries" ] ):
-                assert "question_pattern" in entry, f"{profile} entry {i} missing question_pattern"
                 assert "answer" in entry, f"{profile} entry {i} missing answer"
-                assert "arg_name" in entry, f"{profile} entry {i} missing arg_name"
                 assert "response_types" in entry, f"{profile} entry {i} missing response_types"
+                if "card_id" in entry:
+                    continue
+                assert "question_pattern" in entry, f"{profile} entry {i} missing question_pattern"
+                assert "arg_name" in entry, f"{profile} entry {i} missing arg_name"
 
     def test_scripts_match_test_profiles( self ):
         """Q&A script answers are consistent with TEST_PROFILES values."""
@@ -1309,9 +1321,26 @@ class TestQAScriptFormat:
             profile  = TEST_PROFILES[ profile_name ]
 
             for entry in script[ "entries" ]:
+                # A card entry names no arg (row a1420538) — it answers a card, not a
+                # field, so there is no profile value to compare it against. Checked
+                # BEFORE the arg is read, because reading it is what raised KeyError.
+                if "card_id" in entry:
+                    continue
                 arg_name = entry[ "arg_name" ]
                 # Skip confirmation entries — not in TEST_PROFILES
                 if arg_name == "confirmation":
+                    continue
+                # SELECTION entries are not VALUE entries (row 9046ef58). An entry
+                # answerable ONLY as a choice card — the document choice card, TFE's
+                # two — carries a directive telling the matcher WHICH OPTION to pick,
+                # because its option labels are discovered at run time and no fixed
+                # value could match one. Comparing that directive to a profile value
+                # is comparing two different kinds of thing. The distinction is
+                # `response_types == ["multiple_choice"]` exactly: an entry that also
+                # accepts open_ended (like `audience`) does carry a real value, and is
+                # still checked. The document card entries have their own test,
+                # test_proxy_scripts_answer_the_choice_card.py.
+                if entry.get( "response_types" ) == [ "multiple_choice" ]:
                     continue
                 if arg_name in profile:
                     assert entry[ "answer" ] == profile[ arg_name ], \

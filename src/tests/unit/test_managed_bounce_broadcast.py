@@ -777,3 +777,44 @@ class SettleDeadlineFallbackPinTests( unittest.TestCase ):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# WHY a bounce is happening — Cheech, 2026-08-21
+# ─────────────────────────────────────────────────────────────────────────────────────
+#
+# After three :7999 bounces in twenty minutes he asked who had done the third and why:
+# the broadcast names the files a bounce DEPLOYS but never says why it is happening, so a
+# peer holding armed probes cannot tell a needed bounce from a casual one without asking.
+
+def test_a_warning_states_the_reason_when_one_is_given():
+    message = build_bounce_message( "warning", reason="deploying the fences fix for a live enqueue proof" )
+    assert "Reason: deploying the fences fix for a live enqueue proof." in message
+
+
+def test_the_reason_comes_before_the_file_list_not_after_it():
+    """
+    A reader decides whether to object BEFORE reading ten file paths. A reason appended
+    after a long dirty blob is one nobody reads, so position is the requirement, not
+    mere presence.
+    """
+    message = build_bounce_message(
+        "warning", reason="picking up new hook code", dirty_files="M src/a.py\nM src/b.py"
+    )
+    assert message.index( "Reason:" ) < message.index( "src/a.py" )
+
+
+def test_a_warning_without_a_reason_is_unchanged():
+    """An omitted reason must cost nothing — otherwise callers pay for a field they skip."""
+    assert build_bounce_message( "warning" ) == build_bounce_message( "warning", reason=None )
+    assert build_bounce_message( "warning" ) == build_bounce_message( "warning", reason="   " )
+
+
+def test_the_all_clear_ignores_a_reason():
+    """The reason belongs to the warning. An all-clear that carries it is repeating stale news."""
+    plain = build_bounce_message( "all-clear", boot_id=96, boot_started="2026-08-21T16:43:38", uptime_seconds=10.6 )
+    with_reason = build_bounce_message(
+        "all-clear", boot_id=96, boot_started="2026-08-21T16:43:38", uptime_seconds=10.6,
+        reason="picking up new hook code",
+    )
+    assert plain == with_reason

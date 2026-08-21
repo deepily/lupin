@@ -209,6 +209,22 @@ class LlmScriptMatcherStrategy:
         message = notification.get( "message", "" )
         title   = notification.get( "title", "" )
 
+        # A CARD THAT NAMES ITSELF IS MATCHED, NOT GUESSED AT (row a1420538). When the
+        # notification carries a card_id and an entry declares the same one, that entry
+        # IS the answer — no prompt, no model, no fuzzy match on prose. This is what
+        # lets one generic entry serve every agent that can show the card: the id is
+        # stable while the question is derived per caller ("for the podcast", "for the
+        # presentation"), which is why prose-keyed entries had to be duplicated and
+        # went stale. It also takes the model out of the path that produced the
+        # original defect — asked to pick a label, it returned the directive verbatim.
+        entry = self._entry_for_card_id( notification, self._filter_entries_by_agent( notification ) )
+        if entry is not None:
+            answer = entry.get( "answer" )
+            if self.debug:
+                print( f"[LlmScriptMatcher] Card id {entry.get( 'card_id' )!r} matched "
+                       f"exactly → {answer!r} (no LLM call)" )
+            return answer
+
         # Filter entries by agent context if available
         entries = self._filter_entries_by_agent( notification )
 
@@ -345,6 +361,56 @@ class LlmScriptMatcherStrategy:
             print( f"[LlmScriptMatcher] Batch LLM error: {e}" )
             return None
 
+    def _entry_for_card_id( self, notification, entries ):
+        """
+        The script entry that declares this notification's card_id, if any.
+
+        ⚠️ IT SEARCHES THE ENTRIES IT IS GIVEN, and the caller gives it the
+        AGENT-FILTERED list. This method used to iterate self._entries and return
+        before _filter_entries_by_agent ever ran, so an id-matched entry was never
+        scoped to the calling agent — the `agents` tag was silently ignored on the id
+        path (María, row 0c280989). Nothing broke while every card_id entry happened
+        to be untagged; the first tagged one would have had its scope dropped without
+        a word. An id says WHICH ASK; the tag says WHOSE. Both, or neither is
+        trustworthy.
+
+        Requires:
+            - notification is a dict; a missing or malformed response_options is
+              simply no id, and no id is no match
+            - entries is the candidate list, already narrowed to this agent
+
+        Ensures:
+            - Returns the FIRST candidate whose card_id equals the notification's,
+              compared exactly — an id is a token, and a loose match on one would
+              reintroduce the fuzziness the id exists to remove
+            - When the notification names an arg_name, an entry that names a
+              DIFFERENT one is skipped. Two asks can share an id and differ by the
+              argument they fill; an entry naming no arg matches any, so this only
+              ever narrows a choice that would otherwise have been made by position.
+            - Returns None when the card names no id, when no candidate declares it,
+              or when the matching entry carries no answer to give. A None sends the
+              caller down the ordinary prose-matching path rather than answering with
+              nothing, so adding an id can never make a previously-answered card
+              unanswerable.
+
+        Raises:
+            - nothing
+        """
+        options = notification.get( "response_options" ) or {}
+        card_id = options.get( "card_id" )
+        if not card_id:
+            return None
+
+        asked_arg = options.get( "arg_name" )
+        for entry in entries:
+            if entry.get( "card_id" ) != card_id:      continue
+            if entry.get( "answer" ) is None:          continue
+            entry_arg = entry.get( "arg_name" )
+            if asked_arg and entry_arg and entry_arg != asked_arg:
+                continue
+            return entry
+        return None
+
     def _filter_entries_by_agent( self, notification ):
         """
         Filter script entries by agent context from notification abstract.
@@ -414,6 +480,13 @@ class LlmScriptMatcherStrategy:
         """
         lines = []
         for i, entry in enumerate( entries ):
+            # A card_id entry has no question_pattern to match on — it is claimed
+            # exactly, before the model is asked anything. Listing it here would put a
+            # blank question in front of the model with a real answer attached to it,
+            # which is an invitation to match the next unrelated question to
+            # "__first_option__".
+            if entry.get( "card_id" ) and not entry.get( "question_pattern" ):
+                continue
             question = entry.get( "question_pattern", "" )
             answer   = entry.get( "answer", "" )
             arg      = entry.get( "arg_name", "" )

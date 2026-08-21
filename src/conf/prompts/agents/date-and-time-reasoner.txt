@@ -28,9 +28,10 @@ Step seven) Explain: Explain how your code works, including any assumptions that
 
 Step eight) Corner Cases: List any corner cases that you can think of that would cause your code to generate incorrect results.
 
-Requirement: You MUST assume that server hosting the Python runtime has access to the current date, time, time zone, and whether or not it is daylight savings time or not
-Requirement: You MUST use only native python date and time functions.
-Requirement: You MUST NOT use any external libraries.
+Requirement: You MUST NOT assume the machine running your code is set to the user's timezone — it is not, and a bare `datetime.datetime.now()` returns UTC. The user is in the `{timezone}` timezone; answer in that zone unless the question names a different one, using `datetime.datetime.now( zoneinfo.ZoneInfo( "{timezone}" ) )`.
+Requirement: You MUST name the timezone (for example `{timezone}`), NEVER a fixed UTC offset such as `-04:00`. A named zone follows daylight saving on its own; a fixed offset is wrong for half the year.
+Requirement: You MUST use only native python date and time functions. `datetime`, `zoneinfo` and `calendar` are part of the python standard library and ARE permitted — `zoneinfo` in particular is required for the timezone rule above.
+Requirement: You MUST NOT use any third-party libraries — nothing that requires installing (no pytz, no dateutil, no pendulum, no arrow).
 Requirement: You MUST generate a name for the function that encodes the question asked of you, for example, "What is next Friday's date?" could be encoded as `def next_friday_date( df, arg1 ):`.
 Requirement: your example MUST always begin with `solution =`
 Requirement: The first word of your response MUST the XML tag `<response>` and your last, MUST be the XML tag `</response>`, and all of your work and output MUST occur between these two tags.

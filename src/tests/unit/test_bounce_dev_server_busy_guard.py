@@ -67,12 +67,23 @@ def _run( busy_rc=None, warn_rc=0, extra_args=(), pause_secs="0", real_probe_url
         "import os, sys\nsys.exit( int( os.environ[ 'FAKE_WARN_RC' ] ) )\n"
     )
     # Fake docker + curl so `docker restart` and the health poll succeed at once.
+    #
+    # docker CANNOT be a bare `exit 0` any more. Since 2026-08-21 the script also waits for
+    # the container's own StartedAt to be newer than the restart it issued (the identity
+    # guard, row 1c36199e) — a bare stub prints nothing, the wait can never be satisfied,
+    # and every arm below fails for a reason that has nothing to do with the busy guard.
+    # So the stub answers `inspect` with a start time of NOW, which is what a real restart
+    # would report, and keeps exiting 0 for `restart` and `logs`.
     fakebin = Path( tmp ) / "bin"
     fakebin.mkdir()
-    for name in ( "docker", "curl" ):
-        p = fakebin / name
-        p.write_text( "#!/bin/sh\nexit 0\n" )
-        p.chmod( 0o755 )
+    ( fakebin / "docker" ).write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"inspect\" ]; then date -u +%Y-%m-%dT%H:%M:%S.000000000Z; fi\n"
+        "exit 0\n"
+    )
+    ( fakebin / "docker" ).chmod( 0o755 )
+    ( fakebin / "curl" ).write_text( "#!/bin/sh\nexit 0\n" )
+    ( fakebin / "curl" ).chmod( 0o755 )
 
     env = dict( os.environ )
     env[ "LUPIN_ROOT" ]          = tmp

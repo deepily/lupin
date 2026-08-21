@@ -30,6 +30,8 @@ from cosa.agents.runtime_argument_expeditor.expeditor import (
     DOC_CHOICE_DESCRIBE_SENTINEL,
     BATCH_DECLINED,
     BATCH_MALFORMED,
+    DOCUMENT_CHOICE_CARD_ID,
+    DOCUMENT_DESCRIBE_ASK_ID,
 )
 
 
@@ -74,6 +76,42 @@ class TestAskChoiceForArg( unittest.TestCase ):
         with patch.object( ex_mod, "notify_user_sync", side_effect=_fake_notify ):
             out = o._ask_choice_for_arg( "research", "Which document?", self.OPTIONS, "u@e.com" )
         return out, captured.get( "request" ), o
+
+    def _ask_with_card_id( self, card_id ):
+        o = _mk_expeditor()
+        captured = {}
+        def _fake_notify( request=None, debug=False, bearer_token=None ):
+            captured[ "request" ] = request
+            return _Resp( response_value="a.md" )
+        with patch.object( ex_mod, "notify_user_sync", side_effect=_fake_notify ):
+            o._ask_choice_for_arg( "research", "Which document?", self.OPTIONS, "u@e.com",
+                                   card_id=card_id )
+        return captured[ "request" ]
+
+    def test_a_named_card_stamps_its_id_beside_the_questions( self ):
+        # Row a1420538. The id names the CARD, so it rides beside `questions` rather
+        # than inside one — a question-level key would read as a property of that
+        # question and would have to be repeated if the card ever grew a second.
+        request = self._ask_with_card_id( DOCUMENT_CHOICE_CARD_ID )
+        self.assertEqual( request.response_options[ "card_id" ], DOCUMENT_CHOICE_CARD_ID )
+        self.assertIn( "questions", request.response_options )
+
+    def test_an_unnamed_card_carries_no_id_at_all( self ):
+        # The routing-confirm card and every other user of this ask must send exactly
+        # what they sent before. An id of None would still be a new key on the wire,
+        # which is a different envelope even if nothing reads it.
+        # RED ON REVERT (stamping unconditionally): "card_id" unexpectedly found.
+        _out, request, _o = self._ask( _Resp( response_value="a.md" ) )
+        self.assertNotIn( "card_id", request.response_options )
+
+    def test_a_named_card_stamps_the_argument_beside_the_id( self ):
+        # MARÍA'S POINT, and it was a real gap: the matcher narrows an id match by
+        # arg_name, and for one commit NOTHING sent arg_name — the filter was reachable
+        # only from tests. Both ask surfaces stamp it now, and each has a falsifier.
+        # RED ON REVERT (the arg_name line dropped from _ask_choice_for_arg):
+        # KeyError: 'arg_name'.
+        request = self._ask_with_card_id( DOCUMENT_CHOICE_CARD_ID )
+        self.assertEqual( request.response_options[ "arg_name" ], "research" )
 
     def test_builds_multiple_choice_request_shape( self ):
         _out, request, _o = self._ask( _Resp( response_value="a.md" ) )
@@ -145,15 +183,25 @@ class TestChooseDocumentFromMatches( unittest.TestCase ):
     def _choose( self, choice_return ):
         o = _mk_expeditor()
         captured = {}
-        def _fake_choice( arg_name, question, options, user_email, abstract=None ):
+        def _fake_choice( arg_name, question, options, user_email, abstract=None, card_id=None ):
             captured[ "options" ] = options
+            captured[ "card_id" ] = card_id
             return choice_return
         o._ask_choice_for_arg = _fake_choice
         out = o._choose_document_from_matches( list( self.DOCS.keys() ), self.DOCS, "u@e.com" )
-        return out, captured.get( "options" ), o
+        return out, captured.get( "options" ), o, captured.get( "card_id" )
+
+    def test_the_caller_names_the_card_it_is_showing( self ):
+        # Row a1420538. The stub's signature broke when card_id was added; widening it
+        # silently would have left nothing checking that the doc-choice caller actually
+        # passes the id — and without the id the proxy's generic entry never claims the
+        # card, which is a run that hangs at a prompt nothing can answer.
+        # RED ON REVERT (card_id dropped at the call site): None != 'document_choice'.
+        _out, _options, _o, card_id = self._choose( "2026.07.25-kiss.md" )
+        self.assertEqual( card_id, DOCUMENT_CHOICE_CARD_ID )
 
     def test_options_carry_candidates_plus_two_escapes_last( self ):
-        _out, options, _o = self._choose( "2026.07.25-kiss.md" )
+        _out, options, _o, _card_id = self._choose( "2026.07.25-kiss.md" )
         labels = [ opt[ "label" ] for opt in options ]
         # two candidates then Describe then Cancel, in that order
         self.assertEqual( labels[ -2: ], [ DOC_CHOICE_DESCRIBE_LABEL, DOC_CHOICE_CANCEL_LABEL ] )
@@ -161,19 +209,19 @@ class TestChooseDocumentFromMatches( unittest.TestCase ):
         self.assertIn( "2026.08.04-kiss.md", labels )
 
     def test_pick_maps_label_to_abs_path( self ):
-        out, _opts, _o = self._choose( "2026.08.04-kiss.md" )
+        out, _opts, _o, _card_id = self._choose( "2026.08.04-kiss.md" )
         self.assertEqual( out, "/abs/kiss-b.md" )
 
     def test_cancel_returns_none( self ):
-        out, _opts, _o = self._choose( None )
+        out, _opts, _o, _card_id = self._choose( None )
         self.assertIsNone( out )
 
     def test_describe_returns_sentinel( self ):
-        out, _opts, _o = self._choose( DOC_CHOICE_DESCRIBE_SENTINEL )
+        out, _opts, _o, _card_id = self._choose( DOC_CHOICE_DESCRIBE_SENTINEL )
         self.assertEqual( out, DOC_CHOICE_DESCRIBE_SENTINEL )
 
     def test_label_outside_option_set_never_guesses( self ):
-        out, _opts, o = self._choose( "not-a-candidate.md" )
+        out, _opts, o, _card_id = self._choose( "not-a-candidate.md" )
         self.assertIsNone( out )
         self.assertEqual( o._last_expedite_reason, BATCH_MALFORMED )
 
@@ -184,7 +232,7 @@ class TestChooseDocumentFromMatches( unittest.TestCase ):
             "io/deep-research/u/b/report.md" : "/abs/b/report.md",
         }
         captured = {}
-        def _fake_choice( arg_name, question, options, user_email, abstract=None ):
+        def _fake_choice( arg_name, question, options, user_email, abstract=None, card_id=None ):
             captured[ "options" ] = options
             return "io/deep-research/u/b/report.md"
         o._ask_choice_for_arg = _fake_choice
@@ -197,6 +245,142 @@ class TestChooseDocumentFromMatches( unittest.TestCase ):
 
 
 # ── 4. _handle_fuzzy_file_match wiring ──────────────────────────────────────
+class TestTheDescribeAskNamesItself( unittest.TestCase ):
+    """
+    Row 0c280989. The open-ended "which document? describe it" ask had six proxy
+    entries keyed on its prose, in three different wordings. It carries an id now, the
+    same way the card does.
+    """
+
+    def _ask( self, **kwargs ):
+        o = _mk_expeditor()
+        captured = {}
+        def _fake_notify( request=None, debug=False, bearer_token=None ):
+            captured[ "request" ] = request
+            return _Resp( response_value="my document" )
+        with patch.object( ex_mod, "notify_user_sync", side_effect=_fake_notify ):
+            o._ask_for_arg( "source", "Which document?", "u@e.com", **kwargs )
+        return captured[ "request" ]
+
+    def test_a_named_ask_carries_its_id_and_its_argument( self ):
+        # RED ON REVERT (the arg_name line dropped from _ask_for_arg): KeyError.
+        request = self._ask( card_id=DOCUMENT_DESCRIBE_ASK_ID )
+        self.assertEqual( request.response_options[ "card_id" ],  DOCUMENT_DESCRIBE_ASK_ID )
+        self.assertEqual( request.response_options[ "arg_name" ], "source" )
+
+    def test_an_unnamed_ask_sends_no_response_options_at_all( self ):
+        # _ask_for_arg has a dozen other callers and an OPEN_ENDED ask carries no
+        # options. They must send the envelope they always sent — an empty dict would
+        # still be a new key on the wire.
+        # RED ON REVERT (stamping unconditionally): {} is not None.
+        self.assertIsNone( self._ask().response_options )
+
+    def test_the_describe_ask_in_the_fuzzy_handler_names_itself( self ):
+        # The wiring, not just the helper: this is the ask the six migrated proxy
+        # entries answer, so if the call site stops naming the id they all stop
+        # matching and an automated run hangs at a prompt nothing can answer.
+        # RED ON REVERT (card_id dropped at the call site): None != 'document_describe'.
+        o = _mk_expeditor()
+        seen = {}
+        def _fake_ask( arg, question, email, **kwargs ):
+            seen.setdefault( "card_ids", [] ).append( kwargs.get( "card_id" ) )
+            return None
+        o._ask_for_arg = _fake_ask
+        with patch( "cosa.config.configuration_manager.ConfigurationManager" ) as CM, \
+             patch.object( ex_mod.cu, "get_project_root", return_value="/root" ), \
+             patch.object( ex_mod.os.path, "exists", return_value=True ), \
+             patch.object( ex_mod.os, "listdir", return_value=[ "a.md", "b.md" ] ), \
+             patch.object( ex_mod.os, "walk", return_value=[] ), \
+             patch.object( o, "_match_description_to_files", return_value=( "fuzzy", [] ) ):
+            CM.return_value.get.side_effect = lambda key, default=None, **kw: default
+            o._handle_fuzzy_file_match( "u@e.com", "presentation generator",
+                                        original_question="anything", use_choice_card=False,
+                                        arg_name="source" )
+        self.assertIn( DOCUMENT_DESCRIBE_ASK_ID, seen[ "card_ids" ] )
+
+
+class TestSearchRootsComeFromTheDeclaration( unittest.TestCase ):
+    """
+    Row a1420538. WHERE a file argument's candidates live used to be written into
+    _handle_fuzzy_file_match — two per-user directories and four extensions, the same
+    for everyone — and the extra config key was BUILT from the display name, falling
+    back to the podcast's key when the agent had none of its own. So an agent with no
+    key silently searched wherever the podcast happened to be configured to look. The
+    roots and the key are declared beside the argument now.
+    """
+
+    EMAIL = "u@example.com"
+
+    def _docs_map( self, file_arg, listing, exists=True ):
+        """Run the scan and report what it found, without going near the LLM."""
+        o = _mk_expeditor()
+        seen_keys = []
+        captured  = {}
+        def _fake_ask( arg, question, email, **k ):
+            captured[ "asked" ] = question
+            return None
+        o._ask_for_arg = _fake_ask
+
+        listdir = listing if callable( listing ) else ( lambda path: list( listing ) )
+        with patch( "cosa.config.configuration_manager.ConfigurationManager" ) as CM, \
+             patch.object( ex_mod.cu, "get_project_root", return_value="/root" ), \
+             patch.object( ex_mod.os.path, "exists", side_effect=lambda p: exists( p ) if callable( exists ) else exists ), \
+             patch.object( ex_mod.os, "listdir", side_effect=listdir ), \
+             patch.object( ex_mod.os, "walk", return_value=[] ), \
+             patch.object( o, "_match_description_to_files", return_value=( "fuzzy", [] ) ) as matcher:
+            def _record( key, default=None, **kw ):
+                seen_keys.append( key )
+                return default
+            CM.return_value.get.side_effect = _record
+            o._handle_fuzzy_file_match(
+                self.EMAIL, "presentation generator",
+                original_question="anything", use_choice_card=False,
+                arg_name="source", file_arg=file_arg,
+            )
+        docs_map = matcher.call_args[ 0 ][ 1 ] if matcher.call_args else {}
+        return docs_map, seen_keys
+
+    def test_a_declared_root_is_the_one_searched( self ):
+        declaration = { "kind": "file",
+                        "search_roots": ( { "path": "io/somewhere-else/{user_email}" }, ) }
+        docs_map, _keys = self._docs_map( declaration, [ "a.md" ] )
+        self.assertIn( f"io/somewhere-else/{self.EMAIL}/a.md", docs_map )
+        self.assertEqual( docs_map[ f"io/somewhere-else/{self.EMAIL}/a.md" ],
+                          f"/root/io/somewhere-else/{self.EMAIL}/a.md" )
+
+    def test_declaring_nothing_searches_what_it_always_searched( self ):
+        # A not-yet-migrated caller must be unchanged. Both shared roots, same rules.
+        docs_map, _keys = self._docs_map( None, [ "a.md", "b.yaml" ] )
+        self.assertIn( f"io/deep-research/{self.EMAIL}/a.md", docs_map )
+        self.assertIn( f"io/presentations/{self.EMAIL}/b.yaml", docs_map )
+        # The presentations root takes YAML only: a .md in there is a rendered output,
+        # not a source, and pulling it in would offer the user their own output back.
+        self.assertNotIn( f"io/presentations/{self.EMAIL}/a.md", docs_map )
+
+    def test_a_root_that_does_not_exist_is_skipped_not_fatal( self ):
+        # A user with no presentations directory is the ordinary case, not an error.
+        missing = f"/root/io/presentations/{self.EMAIL}"
+        docs_map, _keys = self._docs_map(
+            None, [ "a.md" ], exists=lambda path: path != missing )
+        self.assertIn( f"io/deep-research/{self.EMAIL}/a.md", docs_map )
+        self.assertNotIn( f"io/presentations/{self.EMAIL}/a.md", docs_map )
+
+    def test_the_extra_paths_key_is_the_declared_one( self ):
+        declaration = { "kind": "file",
+                        "search_roots": ( { "path": "io/deep-research/{user_email}" }, ),
+                        "search_paths_key": "presentation generator source search paths" }
+        _docs_map, keys = self._docs_map( declaration, [ "a.md" ] )
+        self.assertIn( "presentation generator source search paths", keys )
+        self.assertNotIn( "podcast generator source search paths", keys )
+
+    def test_an_undeclared_key_still_falls_back_to_the_podcast_one( self ):
+        # Characterisation, not endorsement: this is what an argument declaring no key
+        # gets today, and it is the behaviour the declared key exists to replace. Pinned
+        # so that changing it is a decision somebody makes, not a silent drift.
+        _docs_map, keys = self._docs_map( None, [ "a.md" ] )
+        self.assertIn( "podcast generator source search paths", keys )
+
+
 class TestHandleFuzzyChoiceCardWiring( unittest.TestCase ):
 
     EMAIL = "u@example.com"
@@ -213,7 +397,13 @@ class TestHandleFuzzyChoiceCardWiring( unittest.TestCase ):
         ask_calls    = []
         choose_calls = []
         o._ask_for_arg = lambda arg, q, email, **k: ask_calls.append( q ) or "typed description"
-        o._choose_document_from_matches = lambda matches, docs, email: choose_calls.append( list( matches ) ) or choose_return
+        # The stub records the KWARGS too: the card now speaks as the calling agent
+        # (row 9046ef58), so "who did the caller say it was" is part of the wiring
+        # this class exists to pin, not an incidental argument.
+        def _fake_choose( matches, docs, email, **kwargs ):
+            choose_calls.append( { "matches": list( matches ), **kwargs } )
+            return choose_return
+        o._choose_document_from_matches = _fake_choose
 
         with patch( "cosa.config.configuration_manager.ConfigurationManager" ) as CM, \
              patch.object( ex_mod.cu, "get_project_root", return_value="/root" ), \
@@ -238,6 +428,9 @@ class TestHandleFuzzyChoiceCardWiring( unittest.TestCase ):
             use_choice_card=True, choose_return="/abs/a.md",
         )
         self.assertEqual( len( obs[ "choose_calls" ] ), 1, "card must be shown on the first turn" )
+        # The caller hands its own identity down, so the card can ask in its terms.
+        self.assertEqual( obs[ "choose_calls" ][ 0 ][ "arg_name" ], "research" )
+        self.assertEqual( obs[ "choose_calls" ][ 0 ][ "agent_display_name" ], "podcast generator" )
         self.assertEqual( obs[ "ask_qs" ], [], "no open question when the card resolves" )
         self.assertEqual( obs[ "result" ], "/abs/a.md" )
 

@@ -43,6 +43,7 @@ def _spec( **kw ):
         special_handlers   = {},
         display_name       = None,
         cli_module         = None,
+        file_args          = {},
     )
     base.update( kw )
     return ArgSpec( **base )

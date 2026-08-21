@@ -1,0 +1,43 @@
+{
+  "_note": "Verbatim result of Mr Radio's dismiss_sessions() call, 2026-08-21 ~15:27:05Z (11:27 EDT). Written 15:37Z at Cheech's request as the negative-arm receipt for his worker-seat loss at ~15:28Z. Timeline datum: Mr Radio's spawn_sessions at 15:29:38Z was allocated persona Rio, so the Rio slot was already free by then.",
+  "dismissed": [
+    { "session_name": "cc-reviewer-mr-radio-1", "status": "killed" },
+    { "session_name": "cc-reviewer-mr-radio-2", "status": "killed" },
+    { "session_name": "cc-reviewer-mr-radio-3", "status": "killed" }
+  ],
+  "manager_session_id": "e9a672a2-6447-4006-99d4-9b66756f7a28",
+  "reason": "Rick's voice order 11:25 EDT: spin the held reviewers down until a case is made for a new SWE team. Seats were fresh re-spins, no rows, no memento owed.",
+  "write_memento": false,
+  "memento_alarm": null,
+  "memento_outcomes": {
+    "cc-reviewer-mr-radio-1": { "status": "not_requested", "reason": "write_memento=False — no memento asked for" },
+    "cc-reviewer-mr-radio-2": { "status": "not_requested", "reason": "write_memento=False — no memento asked for" },
+    "cc-reviewer-mr-radio-3": { "status": "not_requested", "reason": "write_memento=False — no memento asked for" }
+  },
+  "remaining": [],
+  "bridges_deleted": 3,
+  "holds_cleared": 3,
+  "reconciliation": {
+    "closed": [],
+    "reassigned": [ "7451bebe-38c9-4999-8b8b-98dd8dff729d" ],
+    "unclassifiable": []
+  },
+  "retained_owner_personas": [],
+  "retained_unmatched": [],
+  "_seats_at_kill_time": {
+    "cc-reviewer-mr-radio-1": { "persona": "Tiberius", "session": "74e34741" },
+    "cc-reviewer-mr-radio-2": { "persona": "chloe",    "session": "6d080ccc" },
+    "cc-reviewer-mr-radio-3": { "persona": "Krishna",  "session": "ea7e6107" }
+  },
+  "_tmux_ls_at_15.36Z": [
+    "_keepalive (09:19:37)",
+    "cc-author-cheech-3 (11:31:14)",
+    "cc-author-cheech-4 (11:33:01)",
+    "cc-author-mr-radio-1 (11:29:38)",
+    "cc-observer-cheech-2 (11:35:16)",
+    "cc-reviewer-cheech-1 (11:00:39)",
+    "cc-tmux-session-1575a426 (10:49:38, attached)",
+    "cc-tmux-session-47d38b03 (09:29:29, attached)",
+    "cc-tmux-session-b9206db0 (09:29:38, attached)"
+  ]
+}

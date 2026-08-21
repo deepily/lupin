@@ -30,6 +30,25 @@ from cosa.agents.token_counter import TokenCounter
 from cosa.agents.heartbeat_poker_job import HeartbeatPokerJob
 
 
+# The zone the stubbed config hands back. DELIBERATELY NOT the production default
+# ("America/New_York"): seed the same string the code falls back to and the timezone
+# assertion below passes whether or not the agent ever consults config, which is the
+# one thing it exists to prove.
+_STUB_TIMEZONE = "Europe/Madrid"
+
+
+def _stub_config_mgr():
+    """A config_mgr that answers `app timezone` and defers everything else to its default.
+
+    Real AgentBase.__init__ builds a ConfigurationManager (agent_base.py:141) and ten
+    agents read config during __init__, so a stub that omits it is not hermetic — it is
+    incomplete. Keyed rather than blanket so the other tail agents sharing this stub keep
+    getting their own declared defaults.
+    """
+    return Mock( get=Mock( side_effect=lambda key, *a, **kw:
+                           _STUB_TIMEZONE if key == "app timezone" else kw.get( "default" ) ) )
+
+
 def _seed_init( self, *args, **kwargs ):
     """AgentBase.__init__ stub seeding only what the tail agents read in __init__."""
     self.prompt_template     = "PROMPT[{question}]"
@@ -37,6 +56,7 @@ def _seed_init( self, *args, **kwargs ):
     self.last_question_asked = kwargs.get( "last_question_asked" ) or kwargs.get( "question", "" )
     self.debug               = kwargs.get( "debug", False )
     self.verbose             = kwargs.get( "verbose", False )
+    self.config_mgr          = _stub_config_mgr()
 
 
 # ===========================================================================
@@ -49,6 +69,10 @@ def test_date_and_time_init_builds_prompt_and_tags():
         agent = DateAndTimeAgent( question="what time is it" )
     assert agent.prompt == "PROMPT[what time is it]"
     assert agent.xml_response_tag_names == [ "thoughts", "brainstorm", "evaluation", "code", "example", "returns", "explanation" ]
+    # The zone is READ FROM CONFIG, not hardcoded (ddb4f4e7). Asserting the stub's
+    # distinctive value rather than the production default is what makes this fail if
+    # the config read is ever replaced by a literal.
+    assert agent.timezone == _STUB_TIMEZONE
 
 
 def test_date_and_time_restore_not_implemented():

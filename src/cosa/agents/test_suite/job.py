@@ -462,6 +462,68 @@ class TestSuiteJob( AgenticJobBase ):
             return "NOT EXECUTED"
         return "PASSED"
 
+
+    def _suite_abstract_line( self, suite_type: str, result: dict ) -> str:
+        """
+        One suite's line in the completion card the user actually reads.
+
+        Extracted from do_all so it can be tested directly (row 24a85385): the card
+        is the only place most readers ever learn what a run did, and nothing was
+        covering what it says.
+
+        Requires:
+            - result carries passed / failed / errors / skipped counts.
+
+        Ensures:
+            - always opens with the outcome icon and the counts.
+            - appends the startup-crash line when startup_crash_output is present.
+            - appends the FIRST failure's message when failure_details is non-empty,
+              plus an "and N more" tail — the message is the notice, the junit XML
+              stays the receipt.
+            - never raises on a missing or malformed failure_details entry; a card
+              that cannot be built is worse than a card missing one detail.
+
+        Raises:
+            - nothing
+        """
+        icon = self._OUTCOME_ICON[ self._classify_outcome(
+            result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
+            result.get( "not_executed", 0 ),
+            collection_error = result.get( "collection_diagnosis" ) is not None
+        ) ]
+        ne  = result.get( "not_executed", 0 )
+        des = result.get( "deselected", 0 )
+        line = ( f"- **{suite_type}**: {icon} — "
+                 f"{result[ 'passed' ]} passed, {result[ 'failed' ]} failed, "
+                 f"{result[ 'errors' ]} errors, {result[ 'skipped' ]} skipped"
+                 + ( f", {ne} not executed" if ne else "" )
+                 + ( f", {des} deselected" if des else "" ) )
+
+        crash_output = result.get( "startup_crash_output" )
+        if crash_output:
+            line += f"\n  **STARTUP CRASH** (exit={result[ 'exit_code' ]}): `{crash_output[ :500 ]}`"
+
+        # WHY THE COUNTS ALONE ARE NOT ENOUGH (row 24a85385). The junit XML has carried
+        # the failure message all along — _parse_junit_xml puts it in failure_details —
+        # but THIS CARD is what a human reads, and it said only "1 failed". On
+        # 2026-08-21 an eval run died on an integrity guard and the reader had to open
+        # the XML to learn it was not a broken assertion. The XML is the receipt; this
+        # is the notice.
+        #
+        # FIRST failure only, plus a count of the rest: this string is spoken aloud and
+        # rendered on a card, so a full list would bury the one line that says what
+        # happened. Same truncation discipline as the crash line above.
+        details = result.get( "failure_details" ) or []
+        if details:
+            first    = details[ 0 ] if isinstance( details[ 0 ], dict ) else {}
+            message  = ( first.get( "message" ) or "" ).strip()
+            headline = message.splitlines()[ 0 ] if message else "(no message on the failure element)"
+            line    += ( f"\n  **{first.get( 'type', 'FAILED' )}** "
+                         f"{first.get( 'name', '?' )}: `{headline[ :300 ]}`" )
+            if len( details ) > 1:
+                line += f"\n  …and {len( details ) - 1} more"
+        return line
+
     async def _execute( self ) -> str:
         """
         Internal async test suite execution.
@@ -772,24 +834,8 @@ class TestSuiteJob( AgenticJobBase ):
                 self.artifacts[ "remediation_snapshot" ]      = snapshot
 
             # ─── Build abstract with summary ───
-            suite_lines = []
-            for suite_type, result in self.suite_results.items():
-                icon = self._OUTCOME_ICON[ self._classify_outcome(
-                    result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
-                    result.get( "not_executed", 0 ),
-                    collection_error = result.get( "collection_diagnosis" ) is not None
-                ) ]
-                ne  = result.get( "not_executed", 0 )
-                des = result.get( "deselected", 0 )
-                line = ( f"- **{suite_type}**: {icon} — "
-                         f"{result[ 'passed' ]} passed, {result[ 'failed' ]} failed, "
-                         f"{result[ 'errors' ]} errors, {result[ 'skipped' ]} skipped"
-                         + ( f", {ne} not executed" if ne else "" )
-                         + ( f", {des} deselected" if des else "" ) )
-                crash_output = result.get( "startup_crash_output" )
-                if crash_output:
-                    line += f"\n  **STARTUP CRASH** (exit={result[ 'exit_code' ]}): `{crash_output[ :500 ]}`"
-                suite_lines.append( line )
+            suite_lines = [ self._suite_abstract_line( suite_type, result )
+                            for suite_type, result in self.suite_results.items() ]
 
             abstract = ( f"**Test Suite Results: {overall}{header_scope}**\n\n"
                          + "\n".join( suite_lines )
