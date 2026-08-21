@@ -15,6 +15,7 @@ Plan: src/rnd/v0.2.0/2026.08.20-brain-integration-cascade-review-plan.md, step 0
 
 import unittest
 
+import cosa.rest.dependencies.config as dependencies_config
 import cosa.rest.routers.system as system_router
 
 
@@ -61,6 +62,61 @@ class TestSystemRouterDoesNotCarryTheTrap( unittest.TestCase ):
         """
         self.assertTrue( hasattr( system_router, "get_config_manager" ) )
         self.assertTrue( hasattr( system_router, "get_id_generator" ) )
+
+
+class TestDependenciesConfigHasNoSnapshotGetter( unittest.TestCase ):
+    """
+    Ensures:
+        - the unreachable get_snapshot_manager is gone from dependencies/config,
+          along with the module global that cached its result.
+    """
+
+    def test_the_unreachable_getter_is_gone( self ):
+        """
+        Ensures:
+            - dependencies/config exposes no get_snapshot_manager. It built
+              SolutionSnapshotManager() with no `path`, which __init__ requires,
+              so it raised TypeError on any call. routers/admin.py:34 defines its
+              own same-named dependency returning main's Postgres singleton, and
+              that shadowing is why nobody noticed this one could not work.
+        """
+        self.assertFalse(
+            hasattr( dependencies_config, "get_snapshot_manager" ),
+            "dependencies/config.py grew back get_snapshot_manager; it cannot be called "
+            "without raising TypeError, and admin.py already supplies the working one."
+        )
+
+    def test_its_cached_global_is_gone_too( self ):
+        """
+        Ensures:
+            - the _snapshot_mgr module global is removed with its only writer.
+              A surviving global is what lets the getter be restored by halves.
+        """
+        self.assertFalse(
+            hasattr( dependencies_config, "_snapshot_mgr" ),
+            "dependencies/config.py still carries the _snapshot_mgr global with no writer."
+        )
+
+    def test_the_deprecated_class_is_not_imported_here( self ):
+        """
+        Ensures:
+            - the module no longer imports SolutionSnapshotManager at all, so a
+              reader following imports out of the dependency layer is not led to
+              the deprecated class.
+        """
+        self.assertFalse(
+            hasattr( dependencies_config, "SolutionSnapshotManager" ),
+            "dependencies/config.py re-imported the deprecated SolutionSnapshotManager."
+        )
+
+    def test_the_two_live_getters_survive( self ):
+        """
+        Ensures:
+            - only the snapshot getter was removed. This fails if someone deletes
+              the module's other two dependencies along with it.
+        """
+        self.assertTrue( hasattr( dependencies_config, "get_config_manager" ) )
+        self.assertTrue( hasattr( dependencies_config, "get_id_generator" ) )
 
 
 if __name__ == "__main__":
