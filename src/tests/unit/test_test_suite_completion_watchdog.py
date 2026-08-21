@@ -104,6 +104,7 @@ class TestGate1Enabled:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         job = _make_completed_job()
         # Should dispatch (or at least attempt — the MagicMock todo_queue accepts any push)
@@ -186,6 +187,7 @@ class TestGate4RecursionGuard:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         job = _make_completed_job(
             metadata={ "triggered_by_tfe": "tfe-parent-job" },
@@ -196,6 +198,7 @@ class TestGate4RecursionGuard:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         job = _make_completed_job( metadata=None )
         result = watchdog.evaluate( job )
@@ -205,6 +208,7 @@ class TestGate4RecursionGuard:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         job = _make_completed_job( metadata={} )
         result = watchdog.evaluate( job )
@@ -214,6 +218,7 @@ class TestGate4RecursionGuard:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         job = _make_completed_job( metadata={ "some_other_key": "value" } )
         result = watchdog.evaluate( job )
@@ -226,6 +231,7 @@ class TestGate5FailureCap:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True, max_failures=5 ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         snapshot = _make_valid_snapshot( n_failures=10 )
         job = _make_completed_job( snapshot=snapshot )
@@ -235,6 +241,7 @@ class TestGate5FailureCap:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True, max_failures=50 ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         snapshot = _make_valid_snapshot( n_failures=10 )
         job = _make_completed_job( snapshot=snapshot )
@@ -245,6 +252,7 @@ class TestGate5FailureCap:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True, max_failures=5 ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         snapshot = _make_valid_snapshot( n_failures=5 )
         job = _make_completed_job( snapshot=snapshot )
@@ -261,6 +269,7 @@ class TestGate6RepairTracker:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
             repair_tracker=tracker,
         )
         job = _make_completed_job()
@@ -274,6 +283,7 @@ class TestGate6RepairTracker:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
             repair_tracker=tracker,
         )
         job = _make_completed_job()
@@ -285,6 +295,7 @@ class TestGate6RepairTracker:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
             repair_tracker=None,
         )
         job = _make_completed_job()
@@ -299,6 +310,7 @@ class TestGate6RepairTracker:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
             repair_tracker=tracker,
         )
         job = _make_completed_job()
@@ -313,11 +325,18 @@ class TestGate6RepairTracker:
 
 class TestDispatch:
 
-    def test_dispatch_constructs_tfe_and_pushes( self ):
+    def test_dispatch_constructs_tfe_and_submits( self ):
+        """Step 12: the dispatch goes through flow.submit(), not queue.push().
+
+        Every assertion below is unchanged — same job, same fields — because the job
+        being handed over is the same job. Only who it is handed to moved.
+        """
         queue = MagicMock()
+        flow  = MagicMock()
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=queue,
+            ask_flow=flow,
         )
         job = _make_completed_job( job_id="ts-xyz98765" )
 
@@ -325,8 +344,9 @@ class TestDispatch:
 
         assert result is not None
         assert result.startswith( "tfe-" )
-        queue.push.assert_called_once()
-        pushed_tfe = queue.push.call_args[ 0 ][ 0 ]
+        queue.push.assert_not_called()          # no private door onto the queue
+        flow.submit.assert_called_once()
+        pushed_tfe = flow.submit.call_args.kwargs[ "job" ]
         assert pushed_tfe.source_test_suite_job_id == "ts-xyz98765"
         assert pushed_tfe.remediation_snapshot_path == "test-suite/fake-remediation.json"
         assert pushed_tfe.user_id == "u1"
@@ -345,6 +365,7 @@ class TestDispatch:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         snapshot = _make_valid_snapshot()
         job = _make_completed_job( snapshot=snapshot )
@@ -359,16 +380,34 @@ class TestDispatch:
         job = _make_completed_job()
         assert watchdog.evaluate( job ) is None
 
-    def test_queue_push_raises_returns_none( self ):
-        queue = MagicMock()
-        queue.push = MagicMock( side_effect=RuntimeError( "queue broken" ) )
+    def test_flow_submit_raises_returns_none( self ):
+        flow = MagicMock()
+        flow.submit = MagicMock( side_effect=RuntimeError( "flow broken" ) )
 
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
-            todo_queue=queue,
+            todo_queue=MagicMock(),
+            ask_flow=flow,
         )
         job = _make_completed_job()
         assert watchdog.evaluate( job ) is None
+
+    def test_no_ask_flow_returns_none( self ):
+        """A queue but no flow is a wiring bug, and it must not fall back to a push.
+
+        The watchdog reaches the dispatch — every gate passes — and then has nowhere
+        to send the job. It logs and returns None rather than reaching for the queue
+        it is still holding.
+        """
+        queue = MagicMock()
+        watchdog = TestSuiteCompletionWatchdog(
+            config_mgr=_make_config_mgr( enabled=True ),
+            todo_queue=queue,
+            ask_flow=None,
+        )
+        job = _make_completed_job()
+        assert watchdog.evaluate( job ) is None
+        queue.push.assert_not_called()
 
     def test_repair_tracker_records_on_dispatch( self ):
         tracker = MagicMock()
@@ -378,6 +417,7 @@ class TestDispatch:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
             repair_tracker=tracker,
         )
         job = _make_completed_job()
@@ -444,12 +484,12 @@ class TestSingletonHelpers:
 
     def test_init_and_get( self ):
         cm = _make_config_mgr( enabled=True )
-        watchdog = init_watchdog( cm, todo_queue=MagicMock() )
+        watchdog = init_watchdog( cm, todo_queue=MagicMock(), ask_flow=MagicMock() )
         assert isinstance( watchdog, TestSuiteCompletionWatchdog )
         assert get_watchdog() is watchdog
 
     def test_reset_clears( self ):
-        init_watchdog( _make_config_mgr(), todo_queue=MagicMock() )
+        init_watchdog( _make_config_mgr(), todo_queue=MagicMock(), ask_flow=MagicMock() )
         assert get_watchdog() is not None
         reset_watchdog()
         assert get_watchdog() is None
@@ -473,6 +513,7 @@ class TestPerRunOverride:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         job = _make_completed_job( auto_fix_on_failure=False )
         assert watchdog.evaluate( job ) is None
@@ -482,6 +523,7 @@ class TestPerRunOverride:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=False ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         job = _make_completed_job( auto_fix_on_failure=True )
         result = watchdog.evaluate( job )
@@ -493,6 +535,7 @@ class TestPerRunOverride:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         job = _make_completed_job( auto_fix_on_failure=None )
         assert watchdog.evaluate( job ) is not None
@@ -502,6 +545,7 @@ class TestPerRunOverride:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=False ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         job = _make_completed_job( auto_fix_on_failure=None )
         assert watchdog.evaluate( job ) is None
@@ -511,6 +555,7 @@ class TestPerRunOverride:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         job = _make_completed_job( auto_fix_on_failure=True )
         assert watchdog.evaluate( job ) is not None
@@ -520,6 +565,7 @@ class TestPerRunOverride:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=False ),
             todo_queue=MagicMock(),
+            ask_flow=MagicMock(),
         )
         job = _make_completed_job( auto_fix_on_failure=False )
         assert watchdog.evaluate( job ) is None

@@ -530,7 +530,6 @@ class BugFixExpediterJob( AgenticJobBase ):
 
         try:
             from cosa.rest.agentic_job_factory import create_agentic_job
-            from cosa.rest.queue_extensions import user_job_tracker
 
             # Use the original routing command to reconstruct the job
             routing_command = ctx.routing_command
@@ -568,22 +567,29 @@ class BugFixExpediterJob( AgenticJobBase ):
                 )
                 return None
 
-            # Register scoped ID and push to todo queue
-            new_job.id_hash = user_job_tracker.register_scoped_job(
-                new_job.id_hash, ctx.user_id, ctx.session_id
-            )
-
-            # Get the todo queue from the app module singleton
+            # Step 12: the resubmit goes through the v2 flow, not onto the queue
+            # directly. Read from the app module singleton the same way this function
+            # already read jobs_todo_queue — same pattern, one object over.
+            # The scoping that used to happen here belongs to the flow's queued
+            # executor now; doing it in both places would be two owners of one rule.
             import lupin_app.main as main_module
-            todo_queue = main_module.jobs_todo_queue
-            if todo_queue is None:
+            ask_flow = main_module.ask_flow
+            if ask_flow is None:
                 await voice_io.notify(
-                    "Resubmit failed: todo queue not available.",
+                    "Resubmit failed: the ask flow is not available.",
                     priority="high", job_id=self.id_hash, queue_name="run"
                 )
                 return None
 
-            todo_queue.push( new_job )
+            # A PREBUILT JOB goes to `submit` — the factory above already named the
+            # command, so routing it again would pay an LLM to re-derive it.
+            ask_flow.submit(
+                job          = new_job,
+                user_id      = ctx.user_id,
+                user_email   = ctx.user_email,
+                session_id   = ctx.session_id,
+                websocket_id = ctx.session_id,
+            )
 
             await voice_io.notify(
                 f"Original job resubmitted as {new_job.id_hash}. Notifications will route to your UI.",

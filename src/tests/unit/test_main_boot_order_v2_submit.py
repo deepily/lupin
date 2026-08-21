@@ -139,16 +139,32 @@ def test_if_the_flow_is_built_in_lifespan_it_is_built_before_the_restore():
     )
 
 
-def test_build_ask_flow_needs_only_the_config_manager():
+def test_build_ask_flow_takes_the_queue_it_hands_work_to():
     """
-    The restore can construct the flow itself only if the flow's construction needs
-    nothing that lifespan builds. Its signature is the falsifiable form of that.
+    THE TRIPWIRE FIRED, AND THE ANSWER IS THE STEP — recorded rather than deleted.
+
+    This test used to assert `params == ["config_mgr"]`, with the reasoning that the
+    restore could construct the flow itself only if construction needed nothing
+    lifespan builds. It told whoever landed step 12 to re-read main.py's construction
+    order first. Step 12 did, and took the other branch: `v2 executor = queued` means
+    the flow hands work to the live todo queue, so it genuinely DOES depend on
+    something lifespan builds. Rather than keeping the flow independent, construction
+    MOVED into lifespan, after the queues and before every boot-time caller.
+
+    So the pin changes shape rather than dying. It now says: the queue is the only new
+    dependency, it is optional at the signature level (an inline executor needs none),
+    and the ordering test above is what makes the dependency safe.
     """
     from cosa.rest.routers.v2_ask import build_ask_flow
     params = list( inspect.signature( build_ask_flow ).parameters )
-    assert params == [ "config_mgr" ], (
-        f"build_ask_flow now takes {params} — a new dependency may not exist at "
-        f"restore time; re-read main.py's construction order before step 12 lands"
+    assert params == [ "config_mgr", "todo_queue" ], (
+        f"build_ask_flow now takes {params} — a THIRD dependency arrived. Every one of "
+        f"them must exist in lifespan before the flow is built, which is before the "
+        f"catch-up restore; re-read main.py's construction order before adding it."
+    )
+    assert inspect.signature( build_ask_flow ).parameters[ "todo_queue" ].default is None, (
+        "todo_queue lost its default — an inline executor needs no queue, and a "
+        "required queue would make the flow unbuildable outside a booted app"
     )
 
 

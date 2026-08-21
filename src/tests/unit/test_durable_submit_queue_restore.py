@@ -287,14 +287,25 @@ class _FakeJob:
         self.state        = JobState.QUEUED
 
 
-class _FakeQueue:
-    def __init__( self ):
-        self.pushed        = []
-        self.state_at_push = []   # job.state captured AT push time (race guard)
+class _FakeFlow:
+    """The v2 AskFlow seam (step 12).
 
-    def push( self, job ):
-        self.pushed.append( job )
-        self.state_at_push.append( job.state )
+    This used to be `_FakeQueue`, with a `push` method, because the restore pushed
+    onto the todo queue itself. It goes through `flow.submit()` now — Rick ruled this
+    caller in by name — so the fake changes shape, but every assertion below is the
+    same one: what arrived, in what state, at the moment of hand-off. The push still
+    happens; it happens inside QueuedExecutor, one layer down.
+    """
+    def __init__( self ):
+        self.submitted        = []
+        self.state_at_submit  = []   # job.state captured AT hand-off (race guard)
+        self.kwargs           = []
+
+    def submit( self, job=None, **kwargs ):
+        self.submitted.append( job )
+        self.state_at_submit.append( job.state )
+        self.kwargs.append( kwargs )
+        return { "status": "waiting", "job_id": getattr( job, "id_hash", None ) }
 
 
 class _RecordingFactory:
@@ -332,32 +343,32 @@ class TestRestorePendingJobs:
 
     def test_reuses_original_id_hash( self ):
         """The rebuilt job must carry the ORIGINAL id_hash, not the factory's fresh one."""
-        q   = _FakeQueue()
-        n   = restore_pending_jobs( [ _restorable( "ts-orig" ) ], _factory_ok, q )
+        flow = _FakeFlow()
+        n   = restore_pending_jobs( [ _restorable( "ts-orig" ) ], _factory_ok, flow )
         assert n == 1
-        assert q.pushed[ 0 ].id_hash == "ts-orig"        # not "FRESH-mint"
+        assert flow.submitted[ 0 ].id_hash == "ts-orig"        # not "FRESH-mint"
 
     def test_immediate_scheduled_at_none( self ):
-        q = _FakeQueue()
-        restore_pending_jobs( [ _restorable( "ts-1", scheduled_at=None ) ], _factory_ok, q )
-        assert q.pushed[ 0 ].scheduled_at is None
+        flow = _FakeFlow()
+        restore_pending_jobs( [ _restorable( "ts-1", scheduled_at=None ) ], _factory_ok, flow )
+        assert flow.submitted[ 0 ].scheduled_at is None
 
     def test_scheduled_at_rides_through( self ):
-        q = _FakeQueue()
-        restore_pending_jobs( [ _restorable( "ts-1", scheduled_at="2026-08-16T02:00:00-04:00" ) ], _factory_ok, q )
-        assert q.pushed[ 0 ].scheduled_at == "2026-08-16T02:00:00-04:00"
+        flow = _FakeFlow()
+        restore_pending_jobs( [ _restorable( "ts-1", scheduled_at="2026-08-16T02:00:00-04:00" ) ], _factory_ok, flow )
+        assert flow.submitted[ 0 ].scheduled_at == "2026-08-16T02:00:00-04:00"
 
     def test_monopolize_carried( self ):
-        q = _FakeQueue()
-        restore_pending_jobs( [ _restorable( "ts-1", monopolize=True ) ], _factory_ok, q )
-        assert q.pushed[ 0 ].monopolize is True
+        flow = _FakeFlow()
+        restore_pending_jobs( [ _restorable( "ts-1", monopolize=True ) ], _factory_ok, flow )
+        assert flow.submitted[ 0 ].monopolize is True
 
     def test_paused_job_reheld( self ):
         """A paused job is pushed AND its state set to PAUSED (re-held, not running)."""
-        q = _FakeQueue()
-        restore_pending_jobs( [ _restorable( "ts-1", paused=True ) ], _factory_ok, q )
-        assert len( q.pushed ) == 1
-        assert q.pushed[ 0 ].state == JobState.PAUSED
+        flow = _FakeFlow()
+        restore_pending_jobs( [ _restorable( "ts-1", paused=True ) ], _factory_ok, flow )
+        assert len( flow.submitted ) == 1
+        assert flow.submitted[ 0 ].state == JobState.PAUSED
 
     def test_paused_set_BEFORE_push_no_consumer_race( self ):
         """
@@ -365,9 +376,9 @@ class TestRestorePendingJobs:
         RUNNING because push notifies the consumer and the state was set after.
         Delete the reorder and this goes RED: the state captured AT push time is PAUSED.
         """
-        q = _FakeQueue()
-        restore_pending_jobs( [ _restorable( "ts-1", paused=True ) ], _factory_ok, q )
-        assert q.state_at_push[ 0 ] == JobState.PAUSED   # paused already at the moment of push
+        flow = _FakeFlow()
+        restore_pending_jobs( [ _restorable( "ts-1", paused=True ) ], _factory_ok, flow )
+        assert flow.state_at_submit[ 0 ] == JobState.PAUSED   # paused already at the moment of hand-off
 
     def test_rebuilds_from_original_args_not_envelope( self ):
         """
@@ -376,39 +387,39 @@ class TestRestorePendingJobs:
         real 'integration, e2e' run because the args were lost to defaults.
         """
         fac = _RecordingFactory()
-        q   = _FakeQueue()
+        flow = _FakeFlow()
         orig = { "test_types": "unit", "dry_run": True }
-        restore_pending_jobs( [ _restorable( "ts-1", original_args=orig ) ], fac, q )
+        restore_pending_jobs( [ _restorable( "ts-1", original_args=orig ) ], fac, flow )
         assert fac.seen_args[ 0 ] == orig
 
     def test_missing_original_args_falls_back_to_empty( self ):
         """No original_args (older row) → factory gets {} and defaults apply, no crash."""
         fac = _RecordingFactory()
-        q   = _FakeQueue()
-        restore_pending_jobs( [ _restorable( "ts-1" ) ], fac, q )
+        flow = _FakeFlow()
+        restore_pending_jobs( [ _restorable( "ts-1" ) ], fac, flow )
         assert fac.seen_args[ 0 ] == {}
 
     def test_unpaused_job_not_held( self ):
-        q = _FakeQueue()
-        restore_pending_jobs( [ _restorable( "ts-1", paused=False ) ], _factory_ok, q )
-        assert q.pushed[ 0 ].state != JobState.PAUSED
+        flow = _FakeFlow()
+        restore_pending_jobs( [ _restorable( "ts-1", paused=False ) ], _factory_ok, flow )
+        assert flow.submitted[ 0 ].state != JobState.PAUSED
 
     def test_skips_missing_routing_command( self ):
-        q = _FakeQueue()
-        n = restore_pending_jobs( [ _restorable( "ts-1", routing_command="" ) ], _factory_ok, q )
+        flow = _FakeFlow()
+        n = restore_pending_jobs( [ _restorable( "ts-1", routing_command="" ) ], _factory_ok, flow )
         assert n == 0
-        assert q.pushed == []
+        assert flow.submitted == []
 
     def test_skips_when_factory_returns_none( self ):
-        q = _FakeQueue()
-        n = restore_pending_jobs( [ _restorable( "ts-1" ) ], lambda **kw: None, q )
+        flow = _FakeFlow()
+        n = restore_pending_jobs( [ _restorable( "ts-1" ) ], lambda **kw: None, flow )
         assert n == 0
-        assert q.pushed == []
+        assert flow.submitted == []
 
     def test_returns_count_of_pushed( self ):
-        q = _FakeQueue()
+        flow = _FakeFlow()
         jobs = [ _restorable( "a" ), _restorable( "b", routing_command="" ), _restorable( "c" ) ]
-        assert restore_pending_jobs( jobs, _factory_ok, q ) == 2   # a + c; b skipped
+        assert restore_pending_jobs( jobs, _factory_ok, flow ) == 2   # a + c; b skipped
 
     def test_registers_in_tracker_for_visibility( self ):
         """
@@ -420,14 +431,34 @@ class TestRestorePendingJobs:
         def _register( base, user, session ):
             calls.append( ( base, user, session ) )
             return base   # verb strips+re-appends; already-scoped id returns unchanged
-        q = _FakeQueue()
-        restore_pending_jobs( [ _restorable( "ts-1" ) ], _factory_ok, q, register_scoped_job=_register )
+        flow = _FakeFlow()
+        restore_pending_jobs( [ _restorable( "ts-1" ) ], _factory_ok, flow, register_scoped_job=_register )
         assert calls == [ ( "ts-1", "u1", "sess" ) ]
-        assert q.pushed[ 0 ].id_hash == "ts-1"
+        assert flow.submitted[ 0 ].id_hash == "ts-1"
 
     def test_no_registrar_still_restores( self ):
         """register_scoped_job is optional — omitting it still pushes (back-compat)."""
-        q = _FakeQueue()
-        n = restore_pending_jobs( [ _restorable( "ts-1" ) ], _factory_ok, q, register_scoped_job=None )
+        flow = _FakeFlow()
+        n = restore_pending_jobs( [ _restorable( "ts-1" ) ], _factory_ok, flow, register_scoped_job=None )
         assert n == 1
-        assert q.pushed[ 0 ].id_hash == "ts-1"
+        assert flow.submitted[ 0 ].id_hash == "ts-1"
+
+    def test_the_restore_never_touches_the_queue_itself( self ):
+        """The whole point of routing this caller through the flow.
+
+        A restore that kept a private door onto the queue would pass every assertion
+        above — they only check what came out the other end. This one checks HOW: the
+        flow is the only thing the restore is given, and the identity fields it hands
+        over are the ones off the stored row, not blanks.
+        """
+        flow = _FakeFlow()
+        restore_pending_jobs( [ _restorable( "ts-1" ) ], _factory_ok, flow )
+        assert len( flow.kwargs ) == 1
+        sent = flow.kwargs[ 0 ]
+        assert sent[ "user_id" ]      == "u1"
+        assert sent[ "user_email" ]   == "u1@example.com"
+        assert sent[ "session_id" ]   == "sess"
+        assert sent[ "websocket_id" ] == "sess"
+        # A boot-time catch-up must not announce itself: a user coming back to a
+        # bounced box would hear a burst of TTS about work they did not just ask for.
+        assert sent[ "speak" ] is False
