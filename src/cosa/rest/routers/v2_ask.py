@@ -39,7 +39,11 @@ class AskRequest( BaseModel ):
                                            description="The user's natural-language question" )
     websocket_id : Optional[ str ] = Field( None, description="WebSocket session ID for TTS routing" )
     speak        : bool           = Field( True, description="Dispatch the answer as a TTS notification" )
-    interactive  : bool           = Field( True, description="Park + resume on a missing argument (else return needs_input)" )
+    interactive  : bool           = Field( True,
+                                           description="Whether a human is there to answer. Two effects: a missing "
+                                                       "argument parks and asks (else the call returns needs_input), and a "
+                                                       "near-match cache hit is confirmed before it is replayed (else the "
+                                                       "match is declined and the question is routed normally)" )
 
 
 class SubmitRequest( BaseModel ):

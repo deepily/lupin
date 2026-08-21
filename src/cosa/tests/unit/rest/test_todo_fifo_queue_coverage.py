@@ -13,7 +13,7 @@ plus `parse_salutations`, the user-mode methods, `_is_fit`, `_notify_rejection`,
 Boundary-mock discipline: every heavy constructor dependency (LlmClientFactory,
 Gister, GistNormalizer, Normalizer, QueryLogTable, EmbeddingManager,
 get_embedding_provider) is patched at import-site; the concrete agent classes,
-ConfirmationDialogue, RuntimeArgumentExpeditor, LupinSearch, create_agentic_job,
+RuntimeArgumentExpeditor, LupinSearch, create_agentic_job,
 notify_user_sync, emit_job_state_transition, and the FifoQueue notify path are
 all patched per-test. ZERO real LLM/embedding/DB/network/agent execution.
 
@@ -309,18 +309,6 @@ class TestPushJobRejectionAndCache( _TFQBase ):
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
             r = self.queue.push_job( "what is the weather", "ws1", "u1", "u@x.com" )
         self.assertEqual( r[ "job_id" ], "ag2" )
-
-    def test_not_accepting_jobs_confirmation_runs_snapshot( self ):
-        # queue not accepting → ConfirmationDialogue confirms → run previous best
-        snap = Mock(); snap.id_hash = "snap1"
-        self.queue.push_blocking_object( { "best_snapshot": snap, "question": "orig q" } )
-        conf = Mock(); conf.confirmed.return_value = True
-        with patch.object( tfq, "ConfirmationDialogue", return_value=conf ), \
-             patch.object( self.queue, "_queue_best_snapshot", return_value={ "message": "q", "job_id": "j4" } ) as mk, \
-             patch.object( self.queue, "_dump_code" ), patch( "builtins.print" ):
-            r = self.queue.push_job( "yes please", "ws1", "u1", "u@x.com" )
-        self.assertEqual( r[ "job_id" ], "j4" )
-        mk.assert_called_once()
 
     def test_refactor_skips_snapshot_search( self ):
         agent = Mock(); agent.id_hash = "ag3"

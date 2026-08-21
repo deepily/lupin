@@ -5,9 +5,7 @@ from typing import Any, Optional, Dict, Type, List
 
 import requests
 
-from cosa.agents.confirmation_dialog import ConfirmationDialogue
 from cosa.rest.fifo_queue import FifoQueue  # CJ Flow ingress queue — receives all incoming jobs
-import cosa.rest._unreachability_probe as _probe  # ⚠️ TEMPORARY — step B0(iii), remove with the probes
 
 from cosa.agents.date_and_time_agent import DateAndTimeAgent
 from cosa.agents.receptionist_agent import ReceptionistAgent
@@ -452,7 +450,6 @@ class TodoFifoQueue( FifoQueue ):
         Raises:
             - None (exceptions handled internally)
         """
-        run_previous_best_snapshot = False
         similar_snapshots = [ ]
         
         # NEW: Pre-processing and validation
@@ -504,80 +501,53 @@ class TodoFifoQueue( FifoQueue ):
             print( f"  Gist:       '{query_gist}'" )
             print( f"Embeddings generated - V:{len( embedding_verbatim )} N:{len( embedding_normalized )}" )
 
-        # check to see if the queue isn't accepting jobs (because it's waiting for response to a previous request)
+        # ⚰️ REMOVED — step 7c, 2026-08-21: the two-turn confirmation dialogue.
         #
-        # ⚠️ TEMPORARY PROBE (step B0(iii), 2026-08-21) — REMOVE WITH THIS BRANCH.
-        # Step 7c deletes the two-turn confirmation on a STATIC finding: nothing in the
-        # running system arms a blocking object, so this gate is said never to go false.
-        # The trips below record it if it ever does. Positive control:
-        # test_todo_fifo_queue_coverage.py pushes a blocking object and drives this path.
-        if not self.is_accepting_jobs():
-            _probe.trip( _probe.BLOCKING_GATE, f"question={question[ :40 ]!r}" )
-            
-            msg = f"The human responded '{question}'"
-            du.print_banner( msg )
-            confirmation_llm_spec      = self.config_mgr.get( "llm spec key for confirmation dialog" )
-            run_previous_best_snapshot = ConfirmationDialogue( confirmation_llm_spec, debug=self.debug, verbose=self.verbose ).confirmed( question )
-            
-        if run_previous_best_snapshot:
+        # WHAT WAS HERE: an `is_accepting_jobs()` gate, and behind it a `ConfirmationDialogue`
+        # LLM call that read the user's NEXT spoken question as a yes/no answer about the
+        # PREVIOUS one, then replayed a stashed "blocking object" snapshot at a hard-coded
+        # score of 100.0. It depended on `FifoQueue.push_blocking_object()` setting
+        # `_accepting_jobs = False`, which is why that method, `pop_blocking_object()` and
+        # `is_accepting_jobs()` were deleted with it.
+        #
+        # WHY IT WAS BAD: nothing in the running system ever armed a blocking object, so the
+        # gate never went false and the branch never ran — but everyone who touched push_job
+        # still had to read it and reason about it. And on the paths where it WOULD have run
+        # it was wrong twice over: it treated a fresh question as an answer to an older one,
+        # and it recorded a guessed match as a perfect 100.0.
+        #
+        # WHAT CARRIES CONFIRMATION NOW: AskFlow's near-match ask (step 6b) — a targeted
+        # yes/no about one named snapshot, where both "no" and a timeout fall through to
+        # ordinary routing.
+        #
+        # PROVED UNREACHABLE BEFORE DELETING, not just argued: a probe recorded every trip of
+        # the gate and the branch over 2026-08-21 16:30Z–23:07Z — six boots, 65
+        # /api/upload-and-transcribe-mp3 + 2 /api/v2/ask + 1 /api/push — and logged nothing,
+        # with a positive control proving the probe could fire. Caveat the window does not
+        # cover: both probes sat inside `push_job`, which step 6c pinned as having zero
+        # production callers, so the silence re-proves the cutover at least as much as the
+        # branch. The probe module retired with this block.
 
-            # ⚠️ TEMPORARY PROBE (step B0(iii)) — REMOVE WITH THIS BRANCH. This is the
-            # branch step 7c removes; the gate above is what makes it reachable at all.
-            _probe.trip( _probe.BLOCKING_BRANCH, f"question={question[ :40 ]!r}" )
+        # DEMO KLUDGE: if the question doesn't start with "refactor", then we're going to search for similar snapshots
+        if not question.lower().strip().startswith( "refactor " ):
 
-            blocking_object = self.pop_blocking_object()
-            
-            # unpack the blocking object, setting best score to 100 because the user has confirmed that it is an exact semantic match
-            best_score          = 100.0
-            best_snapshot       = blocking_object[ "best_snapshot" ]
-            last_question_asked = blocking_object[ "question" ]
-            
-            # update last question asked before we throw it on the queue
-            best_snapshot.last_question_asked = last_question_asked
+            # salutations, question = self.parse_salutations( question )
+            # question_gist = self.get_gist( question )
 
-            # Log query with match results (confirmed snapshot)
-            match_result = {
-                'snapshot_id': best_snapshot.id_hash,
-                'type': 'confirmed_match',
-                'confidence': 100.0
-            }
-            embeddings = {
-                'verbatim'   : embedding_verbatim,
-                'normalized' : embedding_normalized
-            }
-            self._log_query_with_results(
-                query_verbatim, query_normalized, query_gist,
-                user_id, websocket_id, embeddings, cache_hits, match_result
-            )
+            du.print_banner( f"push_job( '{( salutations + ' ' + question ).strip()}' )", prepend_nl=True )
+            # Top-1 + confirm strategy: no threshold filtering — all results returned by manager
+            # threshold_question = self.config_mgr.get( "similarity_threshold_question",      default=98.0, return_type="float" )  # OBSOLETE
+            # threshold_gist     = self.config_mgr.get( "similarity_threshold_question_gist", default=95.0, return_type="float" )  # OBSOLETE
+            threshold_confirmation = self.config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float" )
+            print( f"push_job(): Top-1 + confirm strategy (ask floor: {threshold_confirmation}%)" )
 
-            self._dump_code( best_snapshot )
-            return self._queue_best_snapshot( best_snapshot, best_score, user_id, user_email )
-
-        # if we're not running the previous best snapshot, then we need to find a similar one before queuing the job
+            # We're searching for similar snapshots without any salutations prepended to the question.
+            # The snapshot manager internally handles hierarchical search (exact matches first, then similarity)
+            similar_snapshots = self.snapshot_mgr.get_snapshots_by_question( parsed_question, question_gist=question_gist )
+            print()
         else:
-
-            # make sure to remove a possible blocking object
-            self.pop_blocking_object()
-            # DEMO KLUDGE: if the question doesn't start with "refactor", then we're going to search for similar snapshots
-            if not question.lower().strip().startswith( "refactor " ):
-
-                # salutations, question = self.parse_salutations( question )
-                # question_gist = self.get_gist( question )
-
-                du.print_banner( f"push_job( '{( salutations + ' ' + question ).strip()}' )", prepend_nl=True )
-                # Top-1 + confirm strategy: no threshold filtering — all results returned by manager
-                # threshold_question = self.config_mgr.get( "similarity_threshold_question",      default=98.0, return_type="float" )  # OBSOLETE
-                # threshold_gist     = self.config_mgr.get( "similarity_threshold_question_gist", default=95.0, return_type="float" )  # OBSOLETE
-                threshold_confirmation = self.config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float" )
-                print( f"push_job(): Top-1 + confirm strategy (ask floor: {threshold_confirmation}%)" )
-
-                # We're searching for similar snapshots without any salutations prepended to the question.
-                # The snapshot manager internally handles hierarchical search (exact matches first, then similarity)
-                similar_snapshots = self.snapshot_mgr.get_snapshots_by_question( parsed_question, question_gist=question_gist )
-                print()
-            else:
-                print( "push_job(): Skipping snapshot search..." )
-                similar_snapshots = [ ]
+            print( "push_job(): Skipping snapshot search..." )
+            similar_snapshots = [ ]
         
         # Flag to track if we need LLM routing (set when no cache match or user declines confirmation)
         needs_llm_routing = False

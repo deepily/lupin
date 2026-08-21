@@ -189,7 +189,6 @@ class TestConstruction( _RFQBase ):
         rq = self.build( config_mgr=None )
         self.assertFalse( rq.auto_debug )
         self.assertFalse( rq.inject_bugs )
-        self.assertEqual( rq.threshold_confirmation, 90.0 )
         self.assertEqual( rq._pool_max_workers, 1 )
         self.assertEqual( rq._consumer_stall_threshold_seconds, 120 )
 

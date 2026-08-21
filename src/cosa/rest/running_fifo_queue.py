@@ -13,7 +13,6 @@ from cosa.memory.solution_snapshot import SolutionSnapshot
 from cosa.memory.gist_normalizer import GistNormalizer
 
 import cosa.utils.util as du
-import cosa.rest._unreachability_probe as _probe
 import cosa.utils.util_stopwatch as sw
 import time
 
@@ -101,7 +100,6 @@ class RunningFifoQueue( FifoQueue ):
         self.inject_bugs             = False if config_mgr is None else config_mgr.get( "debug inject bugs", default=False, return_type="boolean" )
         self.debug                   = False if config_mgr is None else config_mgr.get( "app debug",   default=False, return_type="boolean" )
         self.verbose                 = False if config_mgr is None else config_mgr.get( "app verbose", default=False, return_type="boolean" )
-        self.threshold_confirmation  = 90.0  if config_mgr is None else config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float" )
         self.io_tbl                  = InputAndOutputTable()
         self.gist_normalizer         = GistNormalizer( debug=self.debug, verbose=self.verbose )
 
@@ -316,7 +314,8 @@ class RunningFifoQueue( FifoQueue ):
                             #
                             # WHAT IT WAS: `elif score >= self.threshold_confirmation:` —
                             # anything from 90% up was served from the cache without asking
-                            # anybody. WHY IT WAS BAD: its own comment said why it was
+                            # anybody. (The `self.threshold_confirmation` attribute itself
+                            # went in step 7c, once nothing but this tombstone read it.) WHY IT WAS BAD: its own comment said why it was
                             # allowed — "push_job already handled user confirmation". That
                             # was true while push_job asked. push_job is dead (step 6c: the
                             # doors were retired, the internal callers moved, and door 8
