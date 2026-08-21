@@ -315,14 +315,16 @@ def _patch_stack( monkeypatch, captured ):
     modules so build_ask_flow wires fakes — no live Postgres/model server."""
     class _FakeAskFlow:
         def __init__( self, cache, router, expeditor, executor, pending, **kwargs ):
-            captured[ "kwargs" ] = kwargs
-            captured[ "cache" ]  = cache
+            captured[ "kwargs" ]   = kwargs
+            captured[ "cache" ]    = cache
+            captured[ "executor" ] = executor
 
     monkeypatch.setattr( "cosa.rest.v2.cache.V2Cache", lambda *a, **k: types.SimpleNamespace( tag="cache" ) )
     monkeypatch.setattr( "cosa.rest.v2.router_client.RouterClient", lambda *a, **k: types.SimpleNamespace( tag="router" ) )
     monkeypatch.setattr( "cosa.agents.runtime_argument_expeditor.expeditor.RuntimeArgumentExpeditor",
                          lambda *a, **k: types.SimpleNamespace( tag="expeditor" ) )
-    monkeypatch.setattr( "cosa.rest.v2.executor.make_executor", lambda name: types.SimpleNamespace( tag=f"exe:{name}" ) )
+    monkeypatch.setattr( "cosa.rest.v2.executor.make_executor",
+                         lambda name, todo_queue=None: types.SimpleNamespace( tag=f"exe:{name}", queue=todo_queue ) )
     monkeypatch.setattr( "cosa.rest.v2.pending.PendingRequests", lambda *a, **k: types.SimpleNamespace( tag="pending" ) )
     monkeypatch.setattr( "cosa.rest.v2.flow.AskFlow", _FakeAskFlow )
 
@@ -342,6 +344,20 @@ def test_build_ask_flow_wires_from_ini( monkeypatch ):
     assert captured[ "kwargs" ][ "writeback_enabled" ] is True
     assert captured[ "kwargs" ][ "similarity_floor" ] == 90.0
     assert captured[ "kwargs" ][ "trace_dir" ] is None   # "" coerced
+
+
+def test_build_ask_flow_hands_the_queue_to_the_executor( monkeypatch ):
+    """Step 12: `v2 executor = queued` needs the live todo queue, and build_ask_flow
+    is the only place it can arrive. A build that read the name and dropped the queue
+    would raise inside make_executor at boot — or, worse, silently build an inline
+    executor and run every watchdog's job on the watchdog's own thread."""
+    captured = {}
+    _patch_stack( monkeypatch, captured )
+    cfg   = _FakeConfig( { "v2 flow enabled": True, "v2 executor": "queued", "v2 trace dir": "" } )
+    queue = types.SimpleNamespace( tag="todo-queue" )
+    v2_ask.build_ask_flow( cfg, todo_queue=queue )
+    assert captured[ "executor" ].tag   == "exe:queued"
+    assert captured[ "executor" ].queue is queue
 
 
 def test_build_ask_flow_disabled_flag( monkeypatch ):

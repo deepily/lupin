@@ -740,7 +740,7 @@ def get_restorable_jobs():
         return []
 
 
-def restore_pending_jobs( restorable, job_factory, todo_queue, register_scoped_job=None, debug=False ):
+def restore_pending_jobs( restorable, job_factory, ask_flow, register_scoped_job=None, debug=False ):
     """
     Rebuild and re-enqueue the jobs get_restorable_jobs() returned (row 2817b0f5).
 
@@ -751,7 +751,15 @@ def restore_pending_jobs( restorable, job_factory, todo_queue, register_scoped_j
         - restorable is a list of dicts from get_restorable_jobs()
         - job_factory( command, args_dict, user_id, user_email, session_id, debug )
           returns a job object (or None on failure) — normally create_agentic_job
-        - todo_queue exposes push( job )
+        - ask_flow exposes submit( job=..., user_id=..., user_email=...,
+          session_id=..., websocket_id=..., speak=... ) — the v2 AskFlow. This used
+          to be the todo queue and the line below used to be `todo_queue.push( job )`.
+          Rick ruled this caller IN by name (step 12): it is the one least likely to
+          be noticed misbehaving — startup, unattended, re-enqueueing work an
+          interruption left behind — so it must not keep a private door onto the
+          queue while every other caller goes through the guarded one. There is no
+          fallback to a direct push: a fallback is how a caller quietly keeps its
+          old door
         - register_scoped_job, if given, is user_job_tracker.register_scoped_job
           (base_hash, user_id, session_id) -> scoped_hash. The user-job tracker is
           NOT rebuilt at startup, so WITHOUT this a restored job still runs (the
@@ -827,7 +835,23 @@ def restore_pending_jobs( restorable, job_factory, todo_queue, register_scoped_j
         if job_data.get( "paused" ):
             job.state = JobState.PAUSED
 
-        todo_queue.push( job )
+        # Step 12: through the flow, like every other caller. `submit` with a prebuilt
+        # job skips routing entirely — the command came off the stored row, so there is
+        # nothing to re-derive — and the queued executor does the scope-and-push this
+        # line used to do inline. The re-registration above still runs: the tracker is
+        # not rebuilt at boot, and the scoper is idempotent, so doing it twice returns
+        # the same id.
+        # speak=False: this is a silent boot-time catch-up. Announcing every restored
+        # job would greet a returning user with a burst of TTS about work they did not
+        # just ask for.
+        ask_flow.submit(
+            job          = job,
+            user_id      = job_data[ "user_id" ],
+            user_email   = job_data[ "user_email" ],
+            session_id   = job_data[ "session_id" ],
+            websocket_id = job_data[ "session_id" ],
+            speak        = False,
+        )
 
         restored += 1
         kind = "immediate" if job_data[ "scheduled_at" ] is None else "scheduled"

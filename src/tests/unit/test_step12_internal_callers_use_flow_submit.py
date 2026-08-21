@@ -20,8 +20,9 @@ scopes to `src/tests/unit`, so this bites only ad-hoc runs. (Rachel, 2026-08-21;
 verified here.) The sweep below walks the tree itself and excludes `tmp` explicitly, so
 the test is unaffected either way.
 
-HELD OUT OF THE SUITE until step 12 lands: `flow.submit()` does not exist yet, so every
-assertion here is red today. It goes in with the step-12 sha.
+LIVE AS OF STEP 12 (2026-08-21). The three skip marks came off with the commit that
+routed the seven sites; the file was written held-out because every assertion was red
+until `flow.submit()` / `flow.ask()` existed and the flow was built in lifespan.
 
 THE SIX, RE-VERIFIED AT HEAD `efadc2bc` RATHER THAN COPIED FROM THE PLAN — the plan's
 line numbers were written this morning and one path in it was wrong:
@@ -77,8 +78,10 @@ stayed invisible for a day"* — and this list already grew from six to seven on
 """
 
 import ast
+import io
 import os
 import re
+import tokenize
 
 import pytest
 
@@ -121,6 +124,32 @@ def _read( rel ):
         return fh.read()
 
 
+def _code_only( source ):
+    """Return `source` with every comment and string literal blanked out.
+
+    THE SWEEP USED TO BE A RAW TEXT SEARCH, and it accused a DOCSTRING. When
+    `restore_pending_jobs` moved onto the flow, its contract said in prose that the
+    third argument "used to be the todo queue and the line below used to be
+    todo_queue.push( job )" — which is exactly the sentence a later reader needs, and
+    the sweep read it as a live call. The fix is not to delete the sentence: a module
+    that cannot name what it replaced is worse documented because of its own guard.
+    Blank the strings and comments, keep every real call. Tokenising cannot miss a
+    call the regex would have caught — a call is never a STRING or a COMMENT token.
+    """
+    out = [ ]
+    try:
+        tokens = list( tokenize.generate_tokens( io.StringIO( source ).readline ) )
+    except ( tokenize.TokenError, IndentationError, SyntaxError ):
+        return source          # unparseable: fall back to the raw text, never quieter
+    for tok in tokens:
+        if tok.type in ( tokenize.STRING, tokenize.COMMENT ):
+            # Preserve the line/column shape so nothing else shifts; the CONTENT goes.
+            out.append( re.sub( r"\S", " ", tok.string ) )
+        else:
+            out.append( tok.string )
+    return "".join( out )
+
+
 def test_the_site_table_still_holds_the_ruled_population():
     """SEVEN sites, not six. This fails if anyone trims the table back to one row per file.
 
@@ -136,7 +165,6 @@ def test_the_site_table_still_holds_the_ruled_population():
     assert sum( 1 for _r, shape, _t, _l in INTERNAL_CALL_SITES if shape == "job" ) == 6
 
 
-@pytest.mark.skip( reason="DRAFT — lands with step 12; red until flow.submit()/flow.ask() exist" )
 @pytest.mark.parametrize( "rel,shape,target,label", INTERNAL_CALL_SITES,
                           ids=[ label for _r, _s, _t, label in INTERNAL_CALL_SITES ] )
 def test_each_internal_call_site_reaches_the_flow_by_its_shape( rel, shape, target, label ):
@@ -146,7 +174,7 @@ def test_each_internal_call_site_reaches_the_flow_by_its_shape( rel, shape, targ
     must reach `ask` (it still needs routing). Getting this backwards is SILENT — both
     paths still produce an answer, and only the routing differs.
     """
-    source = _read( rel )
+    source = _code_only( _read( rel ) )
     assert not _SHAPE_PATTERN[ shape ].search( source ), (
         f"{rel} still makes a {shape}-shaped call onto the todo queue directly; step 12 "
         f"routes it through flow.{target}() so the guarded write-back applies to it too"
@@ -157,29 +185,39 @@ def test_each_internal_call_site_reaches_the_flow_by_its_shape( rel, shape, targ
     )
 
 
-@pytest.mark.skip( reason="DRAFT — lands with step 12; red until flow.submit()/flow.ask() exist" )
 def test_no_internal_caller_still_reaches_the_queue_directly():
     """POPULATION CHECK — the guard a hand-list of six cannot give you.
 
     Sweeps the whole tree for `todo_queue.push(` and allows it ONLY in the retired-door
-    routers (step 11 tombstones them) and in tests/scratch. Anything else is an internal
-    caller that step 12 missed — including one added AFTER this file was written, which
-    is exactly the case a fixed list of six would sail past.
+    routers (step 11 tombstones them), in tests/scratch, and in the ONE place the push
+    now lives. Anything else is an internal caller that step 12 missed — including one
+    added AFTER this file was written, which is exactly the case a fixed list of six
+    would sail past.
+
+    🔴 `src/cosa/rest/v2/executor.py` IS THE ALLOWED SITE, and allowing it is the point
+    of the step rather than a hole in the test. Step 12 does not abolish the push; it
+    moves it from seven scattered callers into `QueuedExecutor.submit`, which scopes the
+    id and pushes exactly as the v1 tail did. One pushing site is the property this
+    sweep is really asserting — so it is named here, as a single file, and a second one
+    appearing anywhere still fails.
     """
     root      = _repo_root()
     offenders = []
+    allowed   = { os.path.join( "src", "cosa", "rest", "v2", "executor.py" ) }
     for dirpath, dirnames, filenames in os.walk( os.path.join( root, "src" ) ):
         dirnames[ : ] = [ d for d in dirnames if d not in ( "__pycache__", "tmp", "tests", ".git" ) ]
         if f"{os.sep}routers" in dirpath: continue          # the retired doors — step 11's job
         for name in filenames:
             if not name.endswith( ".py" ): continue
             full = os.path.join( dirpath, name )
+            rel  = os.path.relpath( full, root )
+            if rel in allowed: continue
             with open( full, errors="ignore" ) as fh:
-                source = fh.read()
+                source = _code_only( fh.read() )
             # BOTH shapes — the population grew from six to seven the moment anyone
             # looked for the second one.
             if _PUSH_CALL.search( source ) or _PUSH_JOB_CALL.search( source ):
-                offenders.append( os.path.relpath( full, root ) )
+                offenders.append( rel )
     assert not offenders, (
         f"these modules still reach the todo queue directly — todo_queue.push( ... ) or "
         f"todo_queue.push_job( ... ) — instead of going through flow.submit()/flow.ask(): "
@@ -187,9 +225,24 @@ def test_no_internal_caller_still_reaches_the_queue_directly():
     )
 
 
+def test_the_one_allowed_pushing_site_actually_pushes():
+    """The allowance above is only safe while the thing it allows is doing the pushing.
+
+    Without this, deleting the push out of `QueuedExecutor` — and with it every
+    caller's route to the queue — would leave the sweep green: it only looks for
+    pushes it does NOT want. An allow-list nobody checks is a hole with a comment
+    on it.
+    """
+    source = _code_only( _read( os.path.join( "src", "cosa", "rest", "v2", "executor.py" ) ) )
+    assert _PUSH_CALL.search( source ), (
+        "QueuedExecutor no longer pushes onto the todo queue. Step 12 routed seven "
+        "callers through it; if the push is gone, none of them reach the queue at all "
+        "and the sweep above would still pass."
+    )
+
+
 # ── the boot-order precondition, which the plan calls a precondition and not a nicety ──
 
-@pytest.mark.skip( reason="DRAFT — lands with step 12; red until the flow is built in lifespan" )
 def test_the_flow_exists_before_the_catch_up_restore_runs():
     """`job_persistence:830` restores jobs at BOOT. If the flow is not built yet, it has
     nothing to submit to.

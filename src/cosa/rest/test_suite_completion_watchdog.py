@@ -46,10 +46,16 @@ class TestSuiteCompletionWatchdog:
         repair_tracker=None,
         debug: bool = False,
         verbose: bool = False,
+        ask_flow=None,
     ):
+        # ask_flow: the v2 AskFlow the TFE dispatch submits through (step 12). Injected
+        # like todo_queue and repair_tracker, because every test of this class supplies
+        # fakes for those and needs the same seam here. Defaults to None so those tests
+        # keep working; the dispatch path raises by name if it is reached without one.
         self.config_mgr      = config_mgr
         self.todo_queue      = todo_queue
         self.repair_tracker  = repair_tracker
+        self.ask_flow        = ask_flow
         self.debug           = debug
         self.verbose         = verbose
 
@@ -278,11 +284,27 @@ class TestSuiteCompletionWatchdog:
             )
             return None
 
+        # A PREBUILT JOB goes through `flow.submit()` — step 12. The command was decided
+        # by the factory call above, so there is nothing to route; the flow scopes the id
+        # and hands it to the todo queue through its queued executor, which is what the
+        # direct push did.
+        if self.ask_flow is None:
+            logger.error(
+                "[TestSuiteCompletionWatchdog] no ask_flow — cannot dispatch TFE. It is "
+                "built in lupin_app.main's lifespan and passed through init_watchdogs()."
+            )
+            return None
         try:
-            self.todo_queue.push( tfe_job )
+            self.ask_flow.submit(
+                job          = tfe_job,
+                user_id      = user_id,
+                user_email   = user_email,
+                session_id   = session_id,
+                websocket_id = session_id,
+            )
         except Exception as e:
             logger.error(
-                f"[TestSuiteCompletionWatchdog] push to todo queue failed: {e}"
+                f"[TestSuiteCompletionWatchdog] submit to the ask flow failed: {e}"
             )
             return None
 
@@ -333,6 +355,7 @@ def init_watchdog(
     repair_tracker=None,
     debug: bool = False,
     verbose: bool = False,
+    ask_flow=None,
 ) -> TestSuiteCompletionWatchdog:
     """
     Initialize the singleton TestSuiteCompletionWatchdog instance.
@@ -346,6 +369,7 @@ def init_watchdog(
         repair_tracker=repair_tracker,
         debug=debug,
         verbose=verbose,
+        ask_flow=ask_flow,
     )
     return _watchdog_instance
 

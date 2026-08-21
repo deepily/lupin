@@ -98,13 +98,45 @@ class AskResponse( BaseModel ):
 
 _ASK_FLOW_CACHE: dict = {}   # id(config_mgr) -> ( AskFlow, enabled: bool )
 
+# The process-wide flow the SERVER runs on, handed here by lifespan (step 12).
+# None until install_ask_flow() is called, which is the state every unit-test app
+# is in: those build their own bare FastAPI and never run lifespan, so get_ask_flow
+# falls back to building from INI exactly as it did before step 12.
+_INSTALLED_FLOW: Optional[ tuple ] = None   # ( AskFlow, enabled: bool )
 
-def build_ask_flow( config_mgr: Any ) -> tuple:
+
+def install_ask_flow( flow: Any, enabled: bool ) -> None:
+    """
+    Hand `get_ask_flow` the flow lifespan built, so the door and the in-process
+    callers share ONE object.
+
+    WHY THIS EXISTS AT ALL. Before step 12 the flow was built by the request-time
+    dependency and memoised per config-manager. That is one flow per process only
+    because ConfigurationManager is a @singleton — an accident that happened to
+    hold, not a guarantee. It also meant the flow did not exist until the first
+    HTTP request, and the boot-time catch-up restore runs long before that. Step 12
+    builds it in lifespan instead; this is how the already-built object reaches the
+    route rather than being rebuilt behind it.
+
+    Requires:
+        - flow is the AskFlow lifespan constructed, enabled is `v2 flow enabled`.
+
+    Ensures:
+        - get_ask_flow() serves this flow, and applies the same 503 gate to it.
+    """
+    global _INSTALLED_FLOW
+    _INSTALLED_FLOW = ( flow, enabled )
+
+
+def build_ask_flow( config_mgr: Any, todo_queue: Any=None ) -> tuple:
     """
     Build the v2 AskFlow with its real collaborator stack from INI.
 
     Requires:
         - config_mgr exposes .get( key, default, return_type ) for the v2 keys.
+        - todo_queue is the live TodoFifoQueue when `v2 executor` is "queued";
+          make_executor raises by name if it is missing, rather than building an
+          executor that fails later on the live path.
 
     Ensures:
         - returns ( AskFlow, enabled ) where enabled reflects `v2 flow enabled`.
@@ -135,7 +167,7 @@ def build_ask_flow( config_mgr: Any ) -> tuple:
         cache             = V2Cache(),
         router            = RouterClient( config_mgr ),
         expeditor         = RuntimeArgumentExpeditor( config_mgr ),
-        executor          = make_executor( executor_name ),
+        executor          = make_executor( executor_name, todo_queue=todo_queue ),
         pending           = PendingRequests(),
         crud_enabled      = crud_enabled,
         similarity_floor  = similarity_floor,
@@ -147,17 +179,26 @@ def build_ask_flow( config_mgr: Any ) -> tuple:
 
 def get_ask_flow() -> Any:
     """
-    FastAPI dependency: the process-wide AskFlow, built once from INI.
+    FastAPI dependency: the process-wide AskFlow.
 
     Ensures:
-        - builds the flow on first use and caches it keyed by config-mgr identity.
-        - raises HTTP 503 when `v2 flow enabled` is off — the feature gate.
+        - serves the flow lifespan installed, when there is one. On the server there
+          always is, and it is the SAME object the in-process callers submit to —
+          which is the point: one flow means one guarded write-back path.
+        - otherwise builds from INI and caches it keyed by config-mgr identity. That
+          is the pre-step-12 behaviour, kept for apps that never run lifespan (every
+          unit-test app builds a bare FastAPI and overrides this dependency anyway).
+        - raises HTTP 503 when `v2 flow enabled` is off — the feature gate, applied
+          to both paths.
     """
-    config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-    key        = id( config_mgr )
-    if key not in _ASK_FLOW_CACHE:
-        _ASK_FLOW_CACHE[ key ] = build_ask_flow( config_mgr )
-    flow, enabled = _ASK_FLOW_CACHE[ key ]
+    if _INSTALLED_FLOW is not None:
+        flow, enabled = _INSTALLED_FLOW
+    else:
+        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        key        = id( config_mgr )
+        if key not in _ASK_FLOW_CACHE:
+            _ASK_FLOW_CACHE[ key ] = build_ask_flow( config_mgr )
+        flow, enabled = _ASK_FLOW_CACHE[ key ]
     if not enabled:
         raise HTTPException( status_code=503, detail="CJ Flow v2 is disabled (v2 flow enabled = False)." )
     return flow
