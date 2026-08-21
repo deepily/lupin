@@ -431,6 +431,15 @@ def v2_route_verdict( body, results ):
     status = body.get( "status" )
     cmd    = body.get( "command" ) or ""
     job_id = body.get( "job_id" ) or ""
+    if status == "parked":
+        # push_v2 answers a park up to four times; a body still parked here means the
+        # resume turn budget is EXHAUSTED and no job will ever exist. The doc-resolution
+        # ask never closed — that is stage 3, observed. (Pocholo, reviewing 472c9ea7.)
+        log( f"PARKED after the resume turn budget: still asking for {body.get('args_missing')} "
+             f"(pending_id={body.get('pending_id')}) — the vague description never resolved; NO job was created." )
+        results[ "2_route_podcast" ] = PASS if cmd == "agent router go to podcast generator" else FAIL
+        results[ "3_doc_resolved" ]  = FAIL
+        return True
     if path == "receptionist" or status in ( "rejected", "failed", "expired", "needs_input" ):
         log( f"ROUTING: v2 returned path={path} status={status} route_reason={body.get('route_reason')} "
              f"command={cmd!r} — NO job was created. (On a server whose ask door has no agentic "

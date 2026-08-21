@@ -447,6 +447,35 @@ def test_v2_parked_ask_is_resumed_with_the_vague_description_and_the_pg_job_runs
     assert resumes[ 0 ][ 1 ][ "answer" ] == h.VAGUE_DOC_DESC, "the park is answered vaguely — the matcher is exercised, not bypassed"
 
 
+def test_v2_still_parked_after_the_resume_budget_is_terminal_and_does_not_wait( h, monkeypatch, capsys ):
+    """Pocholo, reviewing 472c9ea7: a body still 'parked' after push_v2's four resume
+    turns has no job behind it and never will. Before this clause the harness treated
+    it as 'waiting' and sat out TIMEOUT_S. It is an observed stage-3 negative — the
+    vague description never resolved — and the run ends at once."""
+    parked = { "path": "needs_input", "status": "parked", "route_reason": "args_incomplete",
+               "command": "agent router go to podcast generator", "args_missing": [ "research" ],
+               "pending_id": "p-stuck", "job_id": None }
+    poster = _Poster( {
+        "/api/push"      : FakeResp( 410, { "detail": "GONE" } ),
+        "/api/v2/ask"    : FakeResp( 200, dict( parked ) ),
+        "/api/v2/resume" : FakeResp( 200, dict( parked ) ),
+    } )
+    clock = _wire( h, monkeypatch, find_job=_never_terminal, doc_stage=h.PASS, content=h.PASS,
+                   ws=FakeWs( job_id=None ) )
+    monkeypatch.setattr( h.requests, "post", poster )
+    t0 = clock.monotonic()
+
+    rc  = h.main( [ "--no-seed", "--no-mode" ] )
+    out = capsys.readouterr().out
+
+    assert rc == 1
+    assert len( poster.hit( "/api/v2/resume" ) ) == 4, "the resume budget is four turns, then stop"
+    assert "FAIL         3_doc_resolved" in out
+    assert "PASS         2_route_podcast" in out, "the router DID pick the podcast generator — only resolution failed"
+    assert "INCONCLUSIVE 5_job_done" in out
+    assert clock.monotonic() - t0 < 60, "a park that will never close must not sit out TIMEOUT_S"
+
+
 def test_forced_v2_door_never_touches_api_push( h, monkeypatch ):
     poster = _Poster( {
         "/api/v2/ask": FakeResp( 200, { "path": "agent", "status": "waiting", "route_reason": "args_complete",
