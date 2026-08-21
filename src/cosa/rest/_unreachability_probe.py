@@ -3,8 +3,9 @@ A temporary tripwire on two branches the plan says nothing reaches. DELETE WITH 
 BRANCHES — this module exists to answer one question and then go away (step B0(iii)).
 
 WHY IT EXISTS. Steps 7a and 7c delete code on the strength of a STATIC search: grep found
-no production caller of `RunningFifoQueue._process_fast_lane`, and nothing that arms a
-blocking object, so `is_accepting_jobs()` is said never to go false. A static search cannot
+no production caller of `RunningFifoQueue._process_fast_lane` (deleted by 7a on
+2026-08-21, on this probe's evidence), and nothing that arms a blocking object, so
+`is_accepting_jobs()` is said never to go false. A static search cannot
 see a caller assembled at runtime — a getattr by name, a registry lookup, a string in a
 config. Pocholo's order, and the reason for this file: arm the probe, watch the positive
 control go RED so the wiring is proven, run a live-traffic window, and only then delete.
@@ -33,12 +34,16 @@ import time
 import cosa.utils.util as du
 
 
-# The two branches under test, named once so a typo cannot invent a third.
-FAST_LANE       = "running_fifo_queue._process_fast_lane"
+# The branches under test, named once so a typo cannot invent another.
+#
+# FAST_LANE ("running_fifo_queue._process_fast_lane") was RETIRED with step 7a on
+# 2026-08-21: the method it watched is deleted, and a probe name with no call site is a
+# name whose control cannot be kept honest. Its window did what it was built for — zero
+# trips against 65 spoken requests, with the positive control proving it was armed.
 BLOCKING_GATE   = "todo_fifo_queue.is_accepting_jobs() returned False"
 BLOCKING_BRANCH = "todo_fifo_queue.push_job: run_previous_best_snapshot branch"
 
-PROBE_NAMES = ( FAST_LANE, BLOCKING_GATE, BLOCKING_BRANCH )
+PROBE_NAMES = ( BLOCKING_GATE, BLOCKING_BRANCH )
 
 
 def probe_path():

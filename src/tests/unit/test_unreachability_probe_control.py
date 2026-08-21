@@ -82,10 +82,10 @@ def test_the_default_path_is_under_io_and_not_projects_data( monkeypatch ):
 
 
 def test_a_trip_is_recorded_and_readable( probe_log ):
-    probe.trip( probe.FAST_LANE, "detail=x" )
+    probe.trip( probe.BLOCKING_GATE, "detail=x" )
     lines = probe.trips()
     assert len( lines ) == 1
-    assert probe.FAST_LANE in lines[ 0 ]
+    assert probe.BLOCKING_GATE in lines[ 0 ]
     assert "detail=x"      in lines[ 0 ]
 
 
@@ -106,11 +106,11 @@ def test_a_write_failure_never_breaks_the_code_being_watched( probe_log, monkeyp
     at an unwritable path and it must still return normally.
     """
     monkeypatch.setenv( "LUPIN_UNREACHABILITY_PROBE_PATH", "/proc/nonexistent/probe.log" )
-    assert probe.trip( probe.FAST_LANE, "boom" ) is None
+    assert probe.trip( probe.BLOCKING_GATE, "boom" ) is None
 
 
 def test_reset_clears_the_window( probe_log ):
-    probe.trip( probe.FAST_LANE )
+    probe.trip( probe.BLOCKING_GATE )
     assert probe.trips()
     probe.reset()
     assert probe.trips() == []
@@ -118,34 +118,10 @@ def test_reset_clears_the_window( probe_log ):
 
 # ── the armed branches — drive the REAL code, assert the probe saw it ────────
 
-def test_the_fast_lane_probe_fires_when_the_method_runs( probe_log ):
-    """
-    Positive control for 7a. Disarm `_process_fast_lane` and this goes red.
-
-    The method is driven with a job that takes its shortest branch — a CRUD agent, which
-    skips the cache and hands straight off — because what is under test is that the probe
-    fires on ENTRY, not what the method then does.
-    """
-    from cosa.rest.running_fifo_queue import RunningFifoQueue
-    from cosa.crud_for_dataframes.agent import CrudForDataFramesAgent
-
-    class _CrudFake( CrudForDataFramesAgent ):
-        # The real base wants a live agent's constructor args; the probe fires on entry,
-        # before any of that is touched, so a bare subclass with the one attribute the
-        # first line reads is enough — and keeps this control free of agent machinery.
-        def __init__( self ): self.last_question_asked = "delete my 3pm"
-
-    rq = MagicMock( spec=RunningFifoQueue )
-    rq.debug = False
-    rq._handle_base_agent = MagicMock( return_value="handled" )
-
-    RunningFifoQueue._process_fast_lane( rq, _CrudFake() )
-
-    recorded = probe.trips()
-    assert any( probe.FAST_LANE in line for line in recorded ), (
-        f"the fast-lane probe did not fire — it is disarmed, and a quiet live window "
-        f"would prove nothing. Recorded: {recorded}"
-    )
+# The fast-lane positive control was DELETED with `_process_fast_lane` itself (step 7a,
+# 2026-08-21). It had done its job: it proved the probe FIRES when the method runs, which
+# is what made the quiet live window mean something rather than nothing. A control for a
+# method that no longer exists cannot be kept honest, and the probe name went with it.
 
 
 def test_the_blocking_gate_and_branch_probes_fire_when_a_blocking_object_is_armed( probe_log ):
@@ -212,7 +188,7 @@ def test_every_named_probe_is_covered_by_this_file():
     A probe added to PROBE_NAMES without a control here would ship uninstrumented and its
     silence would be read as evidence. Fail instead.
     """
-    covered = { probe.FAST_LANE, probe.BLOCKING_GATE, probe.BLOCKING_BRANCH }
+    covered = { probe.BLOCKING_GATE, probe.BLOCKING_BRANCH }
     assert set( probe.PROBE_NAMES ) == covered, (
         f"probe(s) with no control in this file: {set( probe.PROBE_NAMES ) - covered}"
     )

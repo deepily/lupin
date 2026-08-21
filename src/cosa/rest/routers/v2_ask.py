@@ -178,6 +178,13 @@ def build_ask_flow( config_mgr: Any, todo_queue: Any=None ) -> tuple:
     # by the flow gets the debug flags it would have got via push_job.
     auto_debug        = config_mgr.get( "debug auto",        default=False, return_type="boolean" )
     inject_bugs       = config_mgr.get( "debug inject bugs", default=False, return_type="boolean" )
+    # The near-match ask (step 6b), from the SAME two keys the queue reads
+    # (todo_fifo_queue push_job's confirmation branch) and with the same defaults, so
+    # the prompt a user hears does not change with the door they came through. The
+    # threshold is what ARMS the branch: AskFlow treats None as "no near-match
+    # behaviour at all", which is what an app that never reads INI keeps getting.
+    confirmation_threshold = config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float"   )
+    confirmation_enabled   = config_mgr.get( "similarity confirmation enabled",   default=True, return_type="boolean" )
 
     flow = AskFlow(
         cache             = V2Cache(),
@@ -186,6 +193,8 @@ def build_ask_flow( config_mgr: Any, todo_queue: Any=None ) -> tuple:
         executor          = make_executor( executor_name, todo_queue=todo_queue ),
         pending           = PendingRequests(),
         crud_enabled      = crud_enabled,
+        confirmation_threshold = confirmation_threshold,
+        confirmation_enabled   = confirmation_enabled,
         query_log         = QueryLogTable(),
         auto_debug        = auto_debug,
         inject_bugs       = inject_bugs,

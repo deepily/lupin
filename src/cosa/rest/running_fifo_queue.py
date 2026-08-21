@@ -311,14 +311,30 @@ class RunningFifoQueue( FifoQueue ):
                             if self.debug: print( f"[CACHE] EXACT HIT: score {score:.1f}% from {cached_snapshot.run_date}" )
                             running_job = self._format_cached_result( cached_snapshot, running_job, truncated_question, run_timer )
 
-                        elif score >= self.threshold_confirmation:
-                            # Above floor — accept (push_job already handled user confirmation)
-                            if self.debug: print( f"[CACHE] THRESHOLD ACCEPT: score {score:.1f}% >= {self.threshold_confirmation}% from {cached_snapshot.run_date}" )
-                            running_job = self._format_cached_result( cached_snapshot, running_job, truncated_question, run_timer )
-
                         else:
-                            # Below threshold — reject, route to agent
-                            print( f"[CACHE] THRESHOLD REJECT: score {score:.1f}% < {self.threshold_confirmation}% floor — routing to agent" )
+                            # ── the ACCEPT-ABOVE-FLOOR branch was DELETED here (step 7b) ──
+                            #
+                            # WHAT IT WAS: `elif score >= self.threshold_confirmation:` —
+                            # anything from 90% up was served from the cache without asking
+                            # anybody. WHY IT WAS BAD: its own comment said why it was
+                            # allowed — "push_job already handled user confirmation". That
+                            # was true while push_job asked. push_job is dead (step 6c: the
+                            # doors were retired, the internal callers moved, and door 8
+                            # hands the transcription to the flow), so the confirmation this
+                            # branch leaned on had already stopped happening — and a
+                            # 90-to-99% match was being replayed with nobody asked. Exactly
+                            # the silent wrong-but-close answer the plan says we would never
+                            # have, arriving as a side effect of a cutover rather than a
+                            # decision.
+                            #
+                            # WHAT CARRIES CONFIRMATION NOW: AskFlow's near-match ask (step
+                            # 6b) — the same question, the same 30 seconds, the same default
+                            # of "no" — which runs BEFORE the job is ever queued. A second,
+                            # silent accept behind it would answer a question the user had
+                            # already been asked about and may have declined.
+                            #
+                            # Below an exact hit, this now routes to the agent.
+                            print( f"[CACHE] BELOW EXACT: score {score:.1f}% — routing to agent (the flow already asked)" )
                             running_job = self._handle_base_agent( running_job, truncated_question, run_timer )
                     else:
                         # CACHE MISS - Continue with normal agent execution
@@ -922,56 +938,28 @@ class RunningFifoQueue( FifoQueue ):
             except Exception as e:
                 if self.debug: print( f"[AGENTIC-POOL] auto-fix eval skipped: {e}" )
 
-    def _process_fast_lane( self, job: Any ) -> Any:
-        """
-        Inline processing for non-agentic jobs (AgentBase, SolutionSnapshot).
-        Preserves today's cache-check + CRUD sub-branch + snapshot dispatch.
-
-        Runs on the consumer thread — not the pool. Fast-lane is UNBLOCKED by
-        the pool: while agentic jobs execute concurrently in pool workers, the
-        consumer thread continues popping todo queue and running fast-lane jobs
-        synchronously.
-
-        ⚠️ TEMPORARY PROBE (step B0(iii), 2026-08-21) — REMOVE WITH THIS METHOD.
-        Step 7a deletes this method on a STATIC finding: grep says it has no production
-        caller, and `_process_job` inlines the same logic itself. A grep cannot see a
-        caller assembled at runtime, so the trip below records it if one exists. The seven
-        tests at test_running_fifo_queue.py:1213-1247 call this method directly and are
-        the positive control — they must make it fire, or the probe proves nothing.
-        """
-        _probe.trip( _probe.FAST_LANE, f"job={type( job ).__name__}" )
-
-        truncated_question = du.truncate_string( job.last_question_asked, max_len=64 )
-        run_timer          = sw.Stopwatch( "Starting job run timer..." )
-
-        if isinstance( job, AgentBase ):
-            if isinstance( job, CrudForDataFramesAgent ):
-                # CRUD agents: skip cache — data is mutable, snapshots go stale
-                if self.debug: print( "[CACHE] Skipping cache for CRUD agent (mutable data)" )
-                return self._handle_base_agent( job, truncated_question, run_timer )
-
-            # Check cache BEFORE agent execution
-            question        = job.last_question_asked
-            if self.debug: print( f"[CACHE] Checking cache for question: {question}" )
-            cached_snapshots = self.snapshot_mgr.get_snapshots_by_question( question )
-
-            if cached_snapshots and len( cached_snapshots ) > 0:
-                score, cached_snapshot = cached_snapshots[ 0 ]
-                if score >= 100.0:
-                    if self.debug: print( f"[CACHE] EXACT HIT: score {score:.1f}% from {cached_snapshot.run_date}" )
-                    return self._format_cached_result( cached_snapshot, job, truncated_question, run_timer )
-                elif score >= self.threshold_confirmation:
-                    if self.debug: print( f"[CACHE] THRESHOLD ACCEPT: score {score:.1f}% >= {self.threshold_confirmation}% from {cached_snapshot.run_date}" )
-                    return self._format_cached_result( cached_snapshot, job, truncated_question, run_timer )
-                else:
-                    print( f"[CACHE] THRESHOLD REJECT: score {score:.1f}% < {self.threshold_confirmation}% floor — routing to agent" )
-                    return self._handle_base_agent( job, truncated_question, run_timer )
-            else:
-                if self.debug: print( "[CACHE] MISS: Running agent for new question" )
-                return self._handle_base_agent( job, truncated_question, run_timer )
-
-        # SolutionSnapshot fast-lane
-        return self._handle_solution_snapshot( job, truncated_question, run_timer )
+    # ── _process_fast_lane was DELETED here (step 7a, 2026-08-21) ──────────────────
+    #
+    # WHAT IT WAS: ~40 lines that ran a non-agentic job inline — cache check, CRUD
+    # sub-branch, snapshot dispatch — with a docstring saying it ran on the consumer
+    # thread. WHY IT WAS BAD: nothing called it. `_process_job` inlines the same logic
+    # itself (the cache branch above), so two copies of one decision sat side by side
+    # and only one of them ever ran. Anyone looking for how a fast-lane job is handled
+    # found this one first, complete with a confident docstring, and could change it all
+    # day without changing what the server does. SIX tests pinned it, which is what
+    # made it look maintained. (The plan and the row both said seven; the seventh grep
+    # hit was the section header comment above them. Six is what was deleted.)
+    #
+    # HOW WE KNEW, because grep alone was not allowed to decide it: a temporary probe
+    # recorded any entry to a file; its positive control proved the probe FIRES when the
+    # method runs — a probe never seen to fire and a probe never reached leave identical
+    # silence; and a live window on :7999 recorded zero trips. That window ran
+    # 2026-08-21 16:30Z to 23:07Z, fragmented by six boots, and carried 65 requests on
+    # /api/upload-and-transcribe-mp3, 2 on /api/v2/ask and 1 on /api/push. Real spoken
+    # traffic went through this queue and none of it entered this method.
+    #
+    # The three helpers it called — _handle_base_agent, _format_cached_result,
+    # _handle_solution_snapshot — are LIVE and stay: _process_job calls all three.
 
     def get_pool_status( self ) -> dict:
         """

@@ -935,11 +935,42 @@ class TestProcessJob( _RFQBase ):
         rq._process_job( _AgentBaseFake() )
         rq._format_cached_result.assert_called_once()
 
-    def test_agent_cache_threshold_accept( self ):
-        rq = self.build(); rq._format_cached_result = MagicMock( return_value="c" )
+    def test_a_near_match_is_no_longer_accepted_without_asking( self ):
+        """
+        INVERTED BY STEP 7b, not deleted. This used to assert that a 95% match was
+        served from the cache — allowed only because push_job had asked the user
+        first. push_job is dead (step 6c), so that confirmation had stopped happening
+        and a 90-to-99% match was being replayed with nobody asked.
+
+        The ask now lives in AskFlow (step 6b) and runs before the job is queued, so
+        below an exact hit this routes to the agent.
+
+        RED ON REVERT: restore the accept-above-floor branch and the cached result is
+        served again, silently.
+        """
+        rq = self.build()
+        rq._format_cached_result = MagicMock( return_value="c" )
+        rq._handle_base_agent    = MagicMock( return_value="a" )
         snap = _SnapFake( run_date="2026" )
         rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 95.0, snap ) ]
+
         rq._process_job( _AgentBaseFake() )
+
+        rq._format_cached_result.assert_not_called()
+        rq._handle_base_agent.assert_called_once()
+
+    def test_an_exact_hit_is_still_served( self ):
+        """
+        NEGATIVE CONTROL for the deletion: 100% is a deterministic exact match, it needs
+        no confirmation, and 7b does not touch it. A change that removed the whole second
+        cache read instead of the unconfirmed branch would go red here.
+        """
+        rq = self.build()
+        rq._format_cached_result = MagicMock( return_value="c" )
+        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 100.0, _SnapFake( run_date="2026" ) ) ]
+
+        rq._process_job( _AgentBaseFake() )
+
         rq._format_cached_result.assert_called_once()
 
     def test_agent_cache_threshold_reject_routes_to_agent( self ):
@@ -1210,42 +1241,18 @@ class TestFormatCachedResult( _RFQBase ):
         rq._format_cached_result( cached, original, "q", rfq.sw.Stopwatch( "t" ) )
 
 
-# ── _process_fast_lane ──────────────────────────────────────────────────────
-class TestProcessFastLane( _RFQBase ):
-
-    def test_crud_skips_cache( self ):
-        rq = self.build( **{ "app debug": True } ); rq._handle_base_agent = MagicMock( return_value="a" )
-        rq._process_fast_lane( _CrudFake() )
-        rq._handle_base_agent.assert_called_once()
-
-    def test_agent_exact_hit( self ):
-        rq = self.build( **{ "app debug": True } ); rq._format_cached_result = MagicMock( return_value="c" )
-        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 100.0, _SnapFake( run_date="d" ) ) ]
-        rq._process_fast_lane( _AgentBaseFake() )
-        rq._format_cached_result.assert_called_once()
-
-    def test_agent_threshold_accept( self ):
-        rq = self.build(); rq._format_cached_result = MagicMock( return_value="c" )
-        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 95.0, _SnapFake( run_date="d" ) ) ]
-        rq._process_fast_lane( _AgentBaseFake() )
-        rq._format_cached_result.assert_called_once()
-
-    def test_agent_threshold_reject( self ):
-        rq = self.build(); rq._handle_base_agent = MagicMock( return_value="a" )
-        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 10.0, _SnapFake( run_date="d" ) ) ]
-        rq._process_fast_lane( _AgentBaseFake() )
-        rq._handle_base_agent.assert_called_once()
-
-    def test_agent_miss( self ):
-        rq = self.build( **{ "app debug": True } ); rq._handle_base_agent = MagicMock( return_value="a" )
-        rq.snapshot_mgr.get_snapshots_by_question.return_value = []
-        rq._process_fast_lane( _AgentBaseFake() )
-        rq._handle_base_agent.assert_called_once()
-
-    def test_snapshot_dispatch( self ):
-        rq = self.build(); rq._handle_solution_snapshot = MagicMock( return_value="s" )
-        rq._process_fast_lane( _SnapFake() )
-        rq._handle_solution_snapshot.assert_called_once()
+# ── _process_fast_lane: METHOD AND TESTS DELETED (step 7a, 2026-08-21) ──────
+#
+# Six tests lived here, pinning a method with no production caller — `_process_job`
+# inlines the same cache / CRUD / snapshot logic itself. They are gone WITH it, on
+# Rick's ruling: keeping tests for code nobody runs is what made the method look
+# maintained, and it is the reason the plan called removing one branch of it
+# "tidying a room nobody enters".
+#
+# The behaviour they described is not lost — it is covered where it actually runs,
+# in the _process_job tests above, and the three helpers they mocked
+# (_handle_base_agent, _format_cached_result, _handle_solution_snapshot) keep their
+# own tests because all three are live.
 
 
 # ── _handle_agentic_job (legacy/dead-code path, still covered) ───────────────
