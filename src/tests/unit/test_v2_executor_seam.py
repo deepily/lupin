@@ -20,6 +20,7 @@ import json
 
 import pytest
 
+import cosa.rest.v2.executor as executor_module
 from cosa.rest.v2.executor import (
     Executor,
     InlineExecutor,
@@ -394,3 +395,98 @@ class TestPendingRequests:
         assert entry.status == "pending"
         assert entry.answer is None
         assert entry.error is None
+
+
+class TestOutcomeStatusVocabulary:
+    """
+    Step 1 of the brain-integration plan: `Outcome.status` says "waiting", not
+    "parked", for a queued hand-off.
+
+    Rick's ruling: a queued job is waiting its turn, not paused. "parked" stays
+    for the flow's needs-input path, which is a genuine suspension — a request
+    held pending an answer from the user. The two situations were reading as one
+    word, and the word described only one of them.
+
+    Nothing emits the queued value yet (`QueuedExecutor.submit` still raises;
+    the executor is built in step 2), so the field's declared vocabulary is the
+    only surface a test can hold. That is enough: the rename exists to stop the
+    wrong word entering the type in the first place.
+    """
+
+    def _status_options( self ):
+        """The declared member set of Outcome.status, read off the dataclass."""
+        import typing
+        hints = typing.get_type_hints( Outcome )
+        return set( typing.get_args( hints[ "status" ] ) )
+
+    def test_waiting_is_a_member( self ) -> None:
+        """
+        RED ON REVERT: put "parked" back in the Literal in place of "waiting"
+        and this fails.
+        """
+        assert "waiting" in self._status_options()
+
+    def test_parked_is_not_a_member( self ) -> None:
+        """
+        The other half of the rename. Without this, a Literal listing BOTH words
+        passes the test above while leaving the ambiguity exactly where it was.
+        """
+        assert "parked" not in self._status_options()
+
+    def test_the_rest_of_the_vocabulary_is_unchanged( self ) -> None:
+        """
+        Ensures the rename touched one member and not the others — this fails if
+        someone rewrites the whole Literal while renaming.
+        """
+        assert self._status_options() == { "done", "waiting", "failed" }
+
+    def test_no_outcome_is_built_with_a_status_outside_the_literal( self ) -> None:
+        """
+        The reviewer's falsifier, made executable.
+
+        Pocholo's step-1 finding was that narrowing this Literal would make the
+        type lie, because the flow emits "parked". It does not: the flow passes
+        "parked" as a plain string to `_emit( status: str )`, and no Outcome is
+        ever constructed with it. But "no Outcome is built with a value outside
+        the Literal" is the right thing to hold, and holding it by hand means
+        re-deriving it every time someone adds a branch.
+
+        So this reads every `Outcome( status="..." )` in the v2 package and
+        checks each against the Literal ITSELF, not a copy of it. If someone adds
+        an executor that returns "parked" — the thing that would genuinely make
+        the narrow Literal a lie — this fails and names the value.
+
+        RED ON REVERT: add `Outcome( status="parked" )` anywhere under
+        cosa/rest/v2 and this fails.
+        """
+        import pathlib
+        import re
+
+        allowed = self._status_options()
+        v2_dir  = pathlib.Path( executor_module.__file__ ).parent
+        built   = []
+        for path in sorted( v2_dir.glob( "*.py" ) ):
+            for found in re.findall( r'Outcome\(\s*status\s*=\s*"([^"]+)"', path.read_text() ):
+                built.append( ( path.name, found ) )
+
+        assert built, "found no Outcome constructions at all — this test has gone vacuous"
+        offenders = [ ( name, value ) for name, value in built if value not in allowed ]
+        assert not offenders, (
+            f"Outcome built with a status outside the Literal {sorted( allowed )}: {offenders}. "
+            f"Either the executor is wrong or the Literal needs widening — but they must agree."
+        )
+
+    def test_the_needs_input_path_still_says_parked( self ) -> None:
+        """
+        The rename must NOT reach the flow. `flow.py` uses "parked" as the
+        RESPONSE status when a request is suspended awaiting the user, which is
+        the one place the word is accurate.
+
+        RED ON REVERT: rename those too, and this fails — which is the point,
+        because a blanket search-and-replace is the likely way to get step 1
+        wrong.
+        """
+        import inspect
+        from cosa.rest.v2 import flow as flow_module
+        source = inspect.getsource( flow_module )
+        assert 'status="parked"' in source
