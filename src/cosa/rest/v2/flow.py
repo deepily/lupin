@@ -44,6 +44,13 @@ from lupin_cli.notifications.notification_models import AsyncNotificationRequest
 # cache row written from one would be an empty answer that later replays as real.
 SUCCESS_STATUSES = ( "done", "waiting" )
 
+# v1's queue-time ack, verbatim from todo_fifo_queue.py:754 (formatted at :788 and
+# spoken by _notify at :855). v1 says this the moment it queues a job; the flow was
+# silent at hand-off, because a waiting Outcome carries no answer and _speak returns
+# early on a falsy message — so the user said something and heard nothing until the
+# job finished.
+STARTING_A_NEW_JOB = "New {agent_type} job..."
+
 
 class AskFlow:
     """Runs one v2 request through the four branches and returns a result dict.
@@ -120,8 +127,10 @@ class AskFlow:
             # cache hit routed through the queue reaches the user as the receptionist
             # apologising for a question the cache could already answer.
             if outcome.status in SUCCESS_STATUSES:
+                replay_spec = resolve( lookup.snapshot.routing_command )
                 return self._finish( trace, "replay", "exact_hit", outcome, question, ctx,
-                                     command=lookup.snapshot.routing_command, cache_hit=True )
+                                     command=lookup.snapshot.routing_command, cache_hit=True,
+                                     agent_label=replay_spec.label if replay_spec else None )
             return self._receptionist( trace, question, ctx, "replay_error" )
 
         # 2 — router.
@@ -440,7 +449,7 @@ class AskFlow:
             return self._receptionist( trace, question, ctx, "agent_error", primary_error=outcome.error )
         return self._finish( trace, "agent", route_reason, outcome, question, ctx,
                              command=command, snapshotable=may_cache,
-                             agent_class_name=spec.factory.__name__ )
+                             agent_class_name=spec.factory.__name__, agent_label=spec.label )
 
     def _receptionist( self, trace: StageTrace, question: str, ctx: tuple, route_reason: str,
                        primary_error: Optional[ str ]=None ) -> dict:
@@ -495,12 +504,12 @@ class AskFlow:
     def _finish(
         self, trace: StageTrace, path: str, route_reason: str, outcome: Any, question: str, ctx: tuple,
         command: str, cache_hit: bool=False, snapshotable: bool=False, agent_class_name: str="",
-        primary_error: Optional[ str ]=None,
+        primary_error: Optional[ str ]=None, agent_label: Optional[ str ]=None,
     ) -> dict:
         """Stamp first-useful, write back, speak, and emit the terminal result."""
         trace.mark( "t_first_useful" )
         snapshot_id = self._maybe_write_back( trace, question, command, outcome, snapshotable, agent_class_name )
-        self._speak( trace, outcome.answer, outcome.job_id, ctx )
+        self._speak( trace, self._spoken_line( outcome, agent_label ), outcome.job_id, ctx )
         return self._emit(
             trace, path=path, status=outcome.status, route_reason=route_reason, answer=outcome.answer,
             answer_raw=outcome.answer_raw, command=command, ctx=ctx, job_id=outcome.job_id,
@@ -514,6 +523,27 @@ class AskFlow:
         if not primary_error: return fallback_error
         if not fallback_error: return f"primary agent failed: {primary_error}"
         return f"primary agent failed: {primary_error} | receptionist: {fallback_error}"
+
+    @staticmethod
+    def _spoken_line( outcome: Any, agent_label: Optional[ str ] ) -> Optional[ str ]:
+        """What this exit says out loud: the answer, or v1's ack when the work was queued.
+
+        A queued job has no answer yet, so `waiting` speaks the ack INSTEAD of the
+        answer — never as well as. That is what keeps it to exactly one spoken line
+        per request whichever executor is wired.
+
+        Returns None when a waiting outcome has no label to name. The receptionist
+        is the case: v1 does not say "New … job" for it either — it speaks a random
+        hemming-and-hawing line built from word lists that live on the queue
+        (todo_fifo_queue.py:217-220, spoken at :807 and :837). Reproducing that here
+        would move queue-owned state into the flow, so it is left for its own
+        decision rather than invented.
+        """
+        if outcome.status != "waiting":
+            return outcome.answer
+        if not agent_label:
+            return None
+        return STARTING_A_NEW_JOB.format( agent_type=agent_label )
 
     def _speak( self, trace: StageTrace, message: Optional[ str ], job_id: Optional[ str ], ctx: tuple ) -> None:
         """Dispatch TTS via the injected notifier when speak is on; stamp t_tts_dispatch."""
