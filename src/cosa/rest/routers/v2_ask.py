@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from cosa.config.configuration_manager import ConfigurationManager
@@ -169,14 +170,21 @@ async def v2_ask(
         raise HTTPException( status_code=401, detail="User email not found in authentication token." )
 
     session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
-    result = flow.run(
-        question    = request.question,
-        user_id     = user_id,
-        user_email  = user_email,
-        session_id  = session_id,
-        websocket_id= request.websocket_id or session_id,
-        speak       = request.speak,
-        interactive = request.interactive,
+    # flow.run() is SYNCHRONOUS and takes as long as the agent takes — measured at
+    # ~70s for a single ask on :8000, of which routing is ~1s (row 1c36199e). Called
+    # directly from this coroutine it holds the event loop for that whole span, and
+    # with workers=1 that means /health times out and every other request waits. Off
+    # the loop it holds a worker thread instead, which is what a slow call should hold.
+    result = await run_in_threadpool(
+        lambda: flow.run(
+            question    = request.question,
+            user_id     = user_id,
+            user_email  = user_email,
+            session_id  = session_id,
+            websocket_id= request.websocket_id or session_id,
+            speak       = request.speak,
+            interactive = request.interactive,
+        )
     )
     return AskResponse( **result )
 
@@ -197,7 +205,8 @@ async def v2_resume(
     Ensures:
         - returns AskResponse; an expired/unknown pending_id degrades to a
           needs_input refusal (status='expired'), never a 500.
-        - resume runs synchronously — no background thread is ever spawned.
+        - resume runs OFF the event loop, in a worker thread. It used to run on
+          the loop itself; that is what made /health time out during a call.
     """
     user_id    = current_user.get( "uid" )
     user_email = current_user.get( "email" )
@@ -207,10 +216,15 @@ async def v2_resume(
         raise HTTPException( status_code=401, detail="User email not found in authentication token." )
 
     session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
-    result = flow.resume(
-        pending_id   = request.pending_id,
-        answer       = request.answer,
-        websocket_id = request.websocket_id or session_id,
-        speak        = request.speak,
+    # Same shape as v2_ask above, and the same reason. resume is the SECOND turn of
+    # every disambiguation, so a blocked loop here stalls exactly the conversations a
+    # user is already waiting on.
+    result = await run_in_threadpool(
+        lambda: flow.resume(
+            pending_id   = request.pending_id,
+            answer       = request.answer,
+            websocket_id = request.websocket_id or session_id,
+            speak        = request.speak,
+        )
     )
     return AskResponse( **result )
