@@ -40,6 +40,47 @@ def probe_log( tmp_path, monkeypatch ):
 
 # ── the instrument itself ────────────────────────────────────────────────────
 
+def test_the_default_path_is_under_io_and_not_projects_data( monkeypatch ):
+    """
+    THE DEFAULT WRITE PATH, exercised with the override UNSET — the one thing every other
+    test in this file hides.
+
+    Each test below points the probe at a tmp_path via LUPIN_UNREACHABILITY_PROBE_PATH,
+    which is right for isolation and wrong as the only coverage: it means the real
+    path-derivation is never run, and the bug it had could come back invisibly.
+
+    THE BUG THIS GUARDS. The first version derived `projects-data/<repo>/` by walking up
+    from the project root and across to the sibling data dir, the way the heartbeat holds
+    do. On the host that resolves correctly. Inside the dev container `get_project_root()`
+    is /var/lupin, so the identical arithmetic produced `/projects-data/lupin/`, which
+    nothing mounts — every trip would have landed in the container's throwaway layer, and
+    the host would have shown an empty file that reads as "no trips." That is the exact
+    false negative this probe exists to rule out: the instrument would have reported
+    success by failing.
+
+    So: the path must sit under `get_project_root()`, which is bind-mounted in the
+    container and therefore the same file on both sides.
+    """
+    monkeypatch.delenv( "LUPIN_UNREACHABILITY_PROBE_PATH", raising=False )
+
+    import cosa.utils.util as du
+    resolved = probe.probe_path()
+
+    assert resolved.endswith( "/io/unreachability-probe.log" ), (
+        f"probe writes to {resolved!r}, which is not the io/ file the container and the "
+        f"host share"
+    )
+    assert resolved.startswith( du.get_project_root().rstrip( "/" ) + "/" ), (
+        f"probe writes to {resolved!r}, which is OUTSIDE the project root — in the dev "
+        f"container that means an unmounted directory, and every trip is silently lost"
+    )
+    assert "projects-data" not in resolved, (
+        f"probe writes to {resolved!r} — projects-data/ is the host-only derivation that "
+        f"resolved to an unmounted path inside the container"
+    )
+
+
+
 def test_a_trip_is_recorded_and_readable( probe_log ):
     probe.trip( probe.FAST_LANE, "detail=x" )
     lines = probe.trips()
