@@ -258,8 +258,10 @@ class TestPointerAndDelivery:
         """
         CONTROL, and the one that bounds the strip. ".gitignore" is a real file and a
         strip that ate a leading dot would take it; it survives because what remains is
-        not the row-id shape. Hyphen and underscore are excluded from the strip set on
-        purpose — they belong INSIDE filenames.
+        not the row-id shape. Hyphen and underscore ARE stripped, and these names
+        survive that for the same reason: a real name carrying either one has an
+        extension, so what remains is never eight hex characters and the anchored
+        pattern cannot reach it.
         """
         assert _response( file_path_or_url=real ).pointer == real
 
