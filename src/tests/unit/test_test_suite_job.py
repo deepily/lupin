@@ -1216,3 +1216,88 @@ class TestArtifactRootIsCreated:
 
         assert isinstance( result, dict )
         assert "log_path" in result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# The completion card (row 24a85385)
+#
+# The junit XML always carried the failure message; the card a human reads did not.
+# On 2026-08-21 an eval run died on an integrity guard and the card said "1 failed",
+# so the reader had to open the XML to learn it was not a broken assertion.
+# ═══════════════════════════════════════════════════════════════════════════════
+def _line( **result ):
+    """Build one suite line without constructing a whole job."""
+    base = { "passed": 0, "failed": 0, "errors": 0, "skipped": 0 }
+    base.update( result )
+    return TestSuiteJob._suite_abstract_line( TestSuiteJob, "integration", base )
+
+
+def test_the_card_carries_the_failure_message_not_just_the_count():
+    """
+    RED ON REVERT: drop the failure_details block and this fails — the line is back
+    to counts alone, which is exactly the state that cost an afternoon.
+    """
+    line = _line( failed=1, failure_details=[ {
+        "type": "FAILED", "name": "test_v2_eval_two_pass_live",
+        "message": "v2_eval.EvalIntegrityError: run integrity failed — http-all-ok: 1 of 300",
+    } ] )
+    assert "1 failed" in line
+    assert "EvalIntegrityError" in line
+    assert "http-all-ok" in line
+    assert "test_v2_eval_two_pass_live" in line
+
+
+def test_a_clean_suite_line_gains_nothing():
+    """The control: no failures, no appended detail — the card must not grow noise."""
+    line = _line( passed=12 )
+    assert "12 passed" in line
+    assert "FAILED" not in line
+    assert "…and" not in line
+
+
+def test_only_the_first_failure_is_shown_and_the_rest_are_counted():
+    """
+    The card is spoken aloud and rendered in a box. A full list buries the one line
+    that says what happened, so the rest become a count.
+    """
+    details = [ { "type": "FAILED", "name": f"test_{i}", "message": f"boom {i}" }
+                for i in range( 4 ) ]
+    line = _line( failed=4, failure_details=details )
+    assert "boom 0" in line
+    assert "boom 1" not in line
+    assert "…and 3 more" in line
+
+
+def test_a_multi_line_message_is_reduced_to_its_first_line():
+    """A pytest message can carry a whole assertion dump; the card takes the headline."""
+    line = _line( failed=1, failure_details=[ {
+        "type": "FAILED", "name": "test_x",
+        "message": "AssertionError: the headline\n  plus a second line\n  and a third",
+    } ] )
+    assert "the headline" in line
+    assert "second line" not in line
+
+
+def test_a_very_long_message_is_truncated():
+    line = _line( failed=1, failure_details=[ {
+        "type": "FAILED", "name": "test_x", "message": "x" * 900,
+    } ] )
+    assert len( line ) < 600
+
+
+def test_a_failure_with_no_message_says_so_rather_than_showing_an_empty_box():
+    """
+    Silence in the card must not look like a missing failure. If the XML gave us no
+    message, the card says that plainly instead of rendering an empty code span.
+    """
+    line = _line( failed=1, failure_details=[ { "type": "ERROR", "name": "test_x" } ] )
+    assert "no message on the failure element" in line
+
+
+def test_a_malformed_failure_detail_does_not_break_the_card():
+    """
+    A card that cannot be built is worse than a card missing one detail — the reader
+    would get nothing at all about a run that did happen.
+    """
+    line = _line( failed=1, failure_details=[ "not-a-dict" ] )
+    assert "1 failed" in line
