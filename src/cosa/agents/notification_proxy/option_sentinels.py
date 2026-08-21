@@ -31,8 +31,9 @@ import re
 
 FIRST_OPTION = "__first_option__"
 LAST_OPTION  = "__last_option__"
+ALL_OPTIONS  = "__all__"
 
-SENTINELS = ( FIRST_OPTION, LAST_OPTION )
+SENTINELS = ( FIRST_OPTION, LAST_OPTION, ALL_OPTIONS )
 
 # Anything SHAPED like a sentinel. A value matching this but absent from SENTINELS is a
 # typo or a case variant, and it must never be forwarded as a literal — see resolve().
@@ -141,7 +142,56 @@ def resolve( answer, notification, excluded_labels=() ):
     if not labels:
         return None
 
-    return labels[ 0 ] if answer.strip() == FIRST_OPTION else labels[ -1 ]
+    token = answer.strip()
+    if token == ALL_OPTIONS:
+        return encode_multi_select( labels, notification )
+    return labels[ 0 ] if token == FIRST_OPTION else labels[ -1 ]
+
+
+def encode_multi_select( labels, notification ):
+    """
+    Every label, in the wire format a multi-select card's reader expects.
+
+    ⚠️ THIS FORMAT IS NOT A GUESS — it is what the HUMAN path produces, read off both
+    ends before this was written (row 054207ce):
+
+      · the browser builds `{ header, value }` with `value = multi_select ? answers :
+        answers[0]`, collects those into `{ <header>: <value> }`, and submits
+        `JSON.stringify( { answers: … } )` — notifications.js
+        getCurrentQuestionAnswer / submitAllMultipleChoiceAnswers.
+      · the agent side json.loads() that and reads `answers[<header>]`, accepting a
+        list or a bare string — agent_notification_dispatcher.present_choices,
+        voice_io.read_gate_answer, TFE's _aggregate_voice_gate.
+
+    A BARE LABEL STRING SELECTS NOTHING, and that is why "__all__" never worked. A
+    non-JSON response_value is wrapped as `{"answers": {"response": <raw>}}` — header
+    "response", not the card's — so read_gate_answer sees an ABSENT header, falls to
+    its unattended_default of [], and the run reports that the user picked no fixes.
+    Silent, and indistinguishable from a human declining.
+
+    Requires:
+        - labels is the selectable labels, escapes already removed
+        - notification carries exactly one question; its header is the answer's key
+
+    Ensures:
+        - returns a JSON string `{"answers": {"<header>": [labels…]}}`
+        - returns None when the card has no single header to key the answer under —
+          zero questions, more than one, or a question with no header. "Select
+          everything" has no unambiguous meaning across several questions, and
+          guessing a key produces the absent-header silence described above.
+
+    Raises:
+        - nothing
+    """
+    questions = ( notification.get( "response_options" ) or {} ).get( "questions" ) or []
+    if len( questions ) != 1:
+        return None
+
+    header = ( questions[ 0 ].get( "header" ) or "" ).strip()
+    if not header:
+        return None
+
+    return json.dumps( { "answers": { header: labels } } )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

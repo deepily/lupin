@@ -408,6 +408,65 @@ class TestPositionalSentinelResolution:
         assert r.stats[ "skipped" ] == 1
         assert r.stats[ "responses_sent" ] == 0
 
+    def _multi_card_event( self, *labels ):
+        return {
+            "id"                 : "n1",
+            "sender_id"          : EXPEDITER,
+            "response_requested" : True,
+            "response_type"      : "multiple_choice",
+            "title"              : "TFE Proposal",
+            "message"            : "Select fixes to apply (2 proposals):",
+            "response_options"   : { "questions": [ {
+                "question"     : "Select fixes to apply (2 proposals):",
+                "header"       : "Fixes",
+                "multi_select" : True,
+                "options"      : [ { "label": l, "description": "" } for l in labels ],
+            } ] },
+        }
+
+    def test_all_submits_every_label_in_the_shape_the_reader_expects( self ):
+        # Row 054207ce. tfe.json has answered its proposal gate with "__all__" since it
+        # was written and the token was never implemented, so the resolver raised and
+        # the gate was never auto-answered. What is submitted is the format the HUMAN
+        # path produces — a bare label string would be wrapped under the header
+        # "response", the card's real header would read as absent, and TFE would report
+        # that the user selected no fixes.
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = "__all__"
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, self._multi_card_event( "c1: widen the timeout", "c2: fix the import" ) )
+        submit.assert_called_once()
+        notification_id, answer = submit.call_args[ 0 ]
+        assert notification_id == "n1"
+        assert json.loads( answer ) == {
+            "answers": { "Fixes": [ "c1: widen the timeout", "c2: fix the import" ] } }
+        assert r.stats[ "responses_sent" ] == 1
+
+    def test_all_on_a_card_offering_only_escapes_is_a_visible_skip( self ):
+        # An empty selection is read upstream as a no-response TIMEOUT, so submitting
+        # one would misreport a gate that had nothing to offer.
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = "__all__"
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, self._multi_card_event( self.DESCRIBE, self.CANCEL ) )
+        submit.assert_not_called()
+        assert r.stats[ "skipped" ] == 1
+
+    def test_the_multi_select_answer_is_not_rejected_by_the_option_check( self ):
+        # The two features have to coexist: the strategy-agnostic validator (row
+        # a1420538) skips multi-select cards on purpose, and this is what proves the
+        # JSON envelope survives it rather than being refused as "a label the card
+        # never offered".
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = "__all__"
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, self._multi_card_event( "c1: only fix" ) )
+        submit.assert_called_once()
+        assert r.stats[ "skipped" ] == 0
+
     def test_an_ordinary_answer_is_untouched( self ):
         # The resolver sits in the hot path for EVERY answer; this is the guard that
         # it changes nothing for the other several hundred script entries.
