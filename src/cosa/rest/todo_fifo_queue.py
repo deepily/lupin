@@ -7,6 +7,7 @@ import requests
 
 from cosa.agents.confirmation_dialog import ConfirmationDialogue
 from cosa.rest.fifo_queue import FifoQueue  # CJ Flow ingress queue — receives all incoming jobs
+import cosa.rest._unreachability_probe as _probe  # ⚠️ TEMPORARY — step B0(iii), remove with the probes
 
 from cosa.agents.date_and_time_agent import DateAndTimeAgent
 from cosa.agents.receptionist_agent import ReceptionistAgent
@@ -497,7 +498,14 @@ class TodoFifoQueue( FifoQueue ):
             print( f"Embeddings generated - V:{len( embedding_verbatim )} N:{len( embedding_normalized )}" )
 
         # check to see if the queue isn't accepting jobs (because it's waiting for response to a previous request)
+        #
+        # ⚠️ TEMPORARY PROBE (step B0(iii), 2026-08-21) — REMOVE WITH THIS BRANCH.
+        # Step 7c deletes the two-turn confirmation on a STATIC finding: nothing in the
+        # running system arms a blocking object, so this gate is said never to go false.
+        # The trips below record it if it ever does. Positive control:
+        # test_todo_fifo_queue_coverage.py pushes a blocking object and drives this path.
         if not self.is_accepting_jobs():
+            _probe.trip( _probe.BLOCKING_GATE, f"question={question[ :40 ]!r}" )
             
             msg = f"The human responded '{question}'"
             du.print_banner( msg )
@@ -505,7 +513,11 @@ class TodoFifoQueue( FifoQueue ):
             run_previous_best_snapshot = ConfirmationDialogue( confirmation_llm_spec, debug=self.debug, verbose=self.verbose ).confirmed( question )
             
         if run_previous_best_snapshot:
-                
+
+            # ⚠️ TEMPORARY PROBE (step B0(iii)) — REMOVE WITH THIS BRANCH. This is the
+            # branch step 7c removes; the gate above is what makes it reachable at all.
+            _probe.trip( _probe.BLOCKING_BRANCH, f"question={question[ :40 ]!r}" )
+
             blocking_object = self.pop_blocking_object()
             
             # unpack the blocking object, setting best score to 100 because the user has confirmed that it is an exact semantic match
