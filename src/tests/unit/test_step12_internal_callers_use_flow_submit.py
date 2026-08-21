@@ -24,13 +24,44 @@ line numbers were written this morning and one path in it was wrong:
 ⚠️ `arbiter_bootstrap.py` lives under `src/cosa/rest/`, NOT `src/lupin_app/`. Every
 other line number checked out exactly.
 
-🔴 AND THE SIX ARE THE WHOLE POPULATION — measured, not taken on faith. A repo-wide
-sweep for `todo_queue.push(` outside routers and tests returns exactly these six. The
-other nineteen call sites are the RETIRED DOORS themselves (`routers/*.py`), which step
-11 tombstones, and `src/tmp/*` scratch files. That measurement is why
-`test_no_internal_caller_still_pushes_directly` below is a POPULATION check rather than
-a list check: the plan's own lesson is that *"a loop that silently covers fifteen is how
-door 8 stayed invisible for a day"*, and a hand-list of six rots the same way.
+🔴 IT IS SEVEN SITES, NOT SIX, AND THEY ARE TWO SHAPES — Rachel's recon, ruled by Cheech
+2026-08-21 13:04, and measured here independently at HEAD before being written down. The
+plan counts SIX because it counts FILES; `dead_queue_watchdog` carries ONE OF EACH SHAPE.
+
+    SHAPE A — a PREBUILT JOB, `todo_queue.push( job )` => becomes `flow.submit()`
+        dead_queue_watchdog.py:486            self.todo_queue.push( bfe_job )
+        test_suite_completion_watchdog.py:282 self.todo_queue.push( tfe_job )
+        job_persistence.py:830                todo_queue.push( job )
+        arbiter_bootstrap.py:184              todo_queue.push( job )        [src/cosa/rest/]
+        tfe/orchestrator.py:2174              todo_queue.push( validation_job )
+        bfe/job.py:586                        todo_queue.push( new_job )
+
+    SHAPE B — a BARE QUESTION, `push_job( question, session_id, user_id, user_email )`
+              => becomes `flow.ask()`, NOT submit. The door-5 ruling: a bare question with
+              nothing decided is exactly what `ask` takes.
+        dead_queue_watchdog.py:401            self.todo_queue.push_job( question, ... )
+
+⚠️ THE TARGET IS DECIDED BY THE SHAPE OF THE CALL, NOT BY THE FILE. Sending shape B to
+`submit()` would skip the routing a bare question needs; sending shape A to `ask()` would
+re-route work whose command was already decided. Both still produce an answer, so getting
+it backwards is SILENT — which is why the table below is keyed on ( file, shape, target )
+and never on the file alone.
+
+📏 Measured, so a later reader can refute rather than re-derive: shape A outside
+routers/tests = 6 sites, shape B = 1 site. The only other `push_job(` in the tree is
+`routers/speech.py:338` — door 8, excluded by the router rule and separately broken (one
+argument against four required). Everything else the grep turns up in `todo_fifo_queue.py`
+is print text, not a call.
+
+⚠️ THE PIPELINE-INTERNAL PUSHES NEED NO FILENAME EXCLUSION, and deliberately do not get
+one. `running_fifo_queue.py` and `queue_consumer.py` push onto `running_queue`,
+`jobs_done_queue` and `jobs_dead_queue` — never `todo_queue` — so the patterns below miss
+them by construction. Excluding those files BY NAME would also hide a real
+`todo_queue.push(` added to them later, which is the failure this sweep exists to prevent.
+
+That measurement is why the sweep below is a POPULATION check over BOTH shapes rather than
+a list check. The plan's own lesson: *"a loop that silently covers fifteen is how door 8
+stayed invisible for a day"* — and this list already grew from six to seven once.
 """
 
 import ast
@@ -39,18 +70,32 @@ import re
 
 import pytest
 
-# ( repo-relative path, the local name the call is made on )
-SIX_INTERNAL_CALLERS = [
-    ( "src/cosa/rest/dead_queue_watchdog.py",                    "dead_queue_watchdog" ),
-    ( "src/cosa/rest/test_suite_completion_watchdog.py",         "test_suite_completion_watchdog" ),
-    ( "src/cosa/rest/job_persistence.py",                        "job_persistence" ),
-    ( "src/cosa/rest/arbiter_bootstrap.py",                      "arbiter_bootstrap" ),
-    ( "src/cosa/agents/test_fix_expediter/orchestrator.py",      "tfe_orchestrator" ),
-    ( "src/cosa/agents/bug_fix_expediter/job.py",                "bfe_job" ),
+# ( repo-relative path, shape, the flow method it must reach, label )
+#   shape "job"      — a prebuilt job  -> flow.submit()
+#   shape "question" — a bare question -> flow.ask()   (door-5 ruling)
+INTERNAL_CALL_SITES = [
+    ( "src/cosa/rest/dead_queue_watchdog.py",               "job",      "submit", "dead_queue_watchdog_prebuilt_job" ),
+    ( "src/cosa/rest/dead_queue_watchdog.py",               "question", "ask",    "dead_queue_watchdog_bare_question" ),
+    ( "src/cosa/rest/test_suite_completion_watchdog.py",    "job",      "submit", "test_suite_completion_watchdog" ),
+    ( "src/cosa/rest/job_persistence.py",                   "job",      "submit", "job_persistence" ),
+    ( "src/cosa/rest/arbiter_bootstrap.py",                 "job",      "submit", "arbiter_bootstrap" ),
+    ( "src/cosa/agents/test_fix_expediter/orchestrator.py", "job",      "submit", "tfe_orchestrator" ),
+    ( "src/cosa/agents/bug_fix_expediter/job.py",           "job",      "submit", "bfe_job" ),
 ]
 
-_PUSH_CALL = re.compile( r"todo_queue\s*\.\s*push\s*\(" )
-_SUBMIT_CALL = re.compile( r"\.submit\s*\(" )
+EXPECTED_SITE_COUNT = 7
+
+# SHAPE A: a prebuilt job handed to the todo queue.
+_PUSH_CALL     = re.compile( r"todo_queue\s*\.\s*push\s*\(" )
+# SHAPE B: a bare question. Anchored on `push_job(` with the paren, so it cannot also
+# match `push_job_agentic(` — a THIRD shape step 12 does not touch, and a sweep that
+# swept it up would fail against code nobody asked to change.
+_PUSH_JOB_CALL = re.compile( r"todo_queue\s*\.\s*push_job\s*\(" )
+_SUBMIT_CALL   = re.compile( r"\.submit\s*\(" )
+_ASK_CALL      = re.compile( r"\.ask\s*\(" )
+
+_SHAPE_PATTERN  = { "job": _PUSH_CALL, "question": _PUSH_JOB_CALL }
+_TARGET_PATTERN = { "submit": _SUBMIT_CALL, "ask": _ASK_CALL }
 
 
 def _repo_root():
@@ -64,20 +109,44 @@ def _read( rel ):
         return fh.read()
 
 
-@pytest.mark.skip( reason="DRAFT — lands with step 12; red until flow.submit() exists" )
-@pytest.mark.parametrize( "rel,label", SIX_INTERNAL_CALLERS, ids=[ label for _r, label in SIX_INTERNAL_CALLERS ] )
-def test_each_internal_caller_submits_through_the_flow( rel, label ):
-    """One reported case per caller — a loop reporting one aggregate hides the fifth."""
-    source = _read( rel )
-    assert not _PUSH_CALL.search( source ), (
-        f"{rel} still calls todo_queue.push( ... ) directly; step 12 routes every internal "
-        f"caller through flow.submit() so the guarded write-back applies to it too"
+def test_the_site_table_still_holds_the_ruled_population():
+    """SEVEN sites, not six. This fails if anyone trims the table back to one row per file.
+
+    NOT skipped — it checks this file's own table, not the code under construction, so it
+    is meaningful today and guards the count while step 12 is still being built.
+    """
+    assert len( INTERNAL_CALL_SITES ) == EXPECTED_SITE_COUNT, (
+        f"the table holds {len( INTERNAL_CALL_SITES )} sites; the ruled population is "
+        f"{EXPECTED_SITE_COUNT}. dead_queue_watchdog carries TWO — a prebuilt job at :486 "
+        f"and a bare question at :401 — so a row-per-file table is short by one."
     )
-    assert _SUBMIT_CALL.search( source ), f"{rel} no longer pushes, but nothing in it submits either"
+    assert sum( 1 for _r, shape, _t, _l in INTERNAL_CALL_SITES if shape == "question" ) == 1
+    assert sum( 1 for _r, shape, _t, _l in INTERNAL_CALL_SITES if shape == "job" ) == 6
 
 
-@pytest.mark.skip( reason="DRAFT — lands with step 12; red until flow.submit() exists" )
-def test_no_internal_caller_still_pushes_directly():
+@pytest.mark.skip( reason="DRAFT — lands with step 12; red until flow.submit()/flow.ask() exist" )
+@pytest.mark.parametrize( "rel,shape,target,label", INTERNAL_CALL_SITES,
+                          ids=[ label for _r, _s, _t, label in INTERNAL_CALL_SITES ] )
+def test_each_internal_call_site_reaches_the_flow_by_its_shape( rel, shape, target, label ):
+    """One reported case per SITE, and the target asserted by SHAPE.
+
+    A prebuilt job must reach `submit` (its command is already decided); a bare question
+    must reach `ask` (it still needs routing). Getting this backwards is SILENT — both
+    paths still produce an answer, and only the routing differs.
+    """
+    source = _read( rel )
+    assert not _SHAPE_PATTERN[ shape ].search( source ), (
+        f"{rel} still makes a {shape}-shaped call onto the todo queue directly; step 12 "
+        f"routes it through flow.{target}() so the guarded write-back applies to it too"
+    )
+    assert _TARGET_PATTERN[ target ].search( source ), (
+        f"{rel} no longer makes the {shape}-shaped queue call, but nothing in it reaches "
+        f"flow.{target}() either"
+    )
+
+
+@pytest.mark.skip( reason="DRAFT — lands with step 12; red until flow.submit()/flow.ask() exist" )
+def test_no_internal_caller_still_reaches_the_queue_directly():
     """POPULATION CHECK — the guard a hand-list of six cannot give you.
 
     Sweeps the whole tree for `todo_queue.push(` and allows it ONLY in the retired-door
@@ -94,11 +163,15 @@ def test_no_internal_caller_still_pushes_directly():
             if not name.endswith( ".py" ): continue
             full = os.path.join( dirpath, name )
             with open( full, errors="ignore" ) as fh:
-                if _PUSH_CALL.search( fh.read() ):
-                    offenders.append( os.path.relpath( full, root ) )
+                source = fh.read()
+            # BOTH shapes — the population grew from six to seven the moment anyone
+            # looked for the second one.
+            if _PUSH_CALL.search( source ) or _PUSH_JOB_CALL.search( source ):
+                offenders.append( os.path.relpath( full, root ) )
     assert not offenders, (
-        f"these modules still push onto the queue directly instead of going through "
-        f"flow.submit(): {sorted( offenders )}"
+        f"these modules still reach the todo queue directly — todo_queue.push( ... ) or "
+        f"todo_queue.push_job( ... ) — instead of going through flow.submit()/flow.ask(): "
+        f"{sorted( offenders )}"
     )
 
 
