@@ -20,9 +20,9 @@ TWO THINGS THIS MODULE ADDS, neither of which belongs in the redaction vocabular
      values handed to grep on STDIN — never in argv, which is row 4996e41c's exact
      defect (argv is readable through `ps` and `/proc`).
 
-  2. REWRITE IN PLACE, SAFELY. The rewrite goes to a temp file in the same directory
-     and is renamed over the original, so a crash mid-write cannot leave a truncated
-     transcript. File mode is carried across, and a file modified in the last few
+  2. REWRITE IN PLACE, SAFELY. The rewrite goes to a temp file in the same directory,
+     is fsync'd, and is then renamed over the original, so neither a crash mid-write
+     nor a power loss can leave a truncated transcript. File mode is carried across, and a file modified in the last few
      minutes is SKIPPED and REPORTED rather than rewritten — a live session appends to
      its transcript, and a rename underneath it would drop whatever it wrote next.
 
@@ -133,8 +133,9 @@ def scrub_file( path, values ):
     Ensures:
         - returns {"path", "before", "after", "changed"} — counts of verbatim value
           occurrences before and after; `changed` is True iff the text differs
-        - the rewrite is atomic: a temp file in the same directory, renamed over the
-          original, so a crash cannot truncate the file
+        - the rewrite is atomic: a temp file in the same directory, fsync'd and then
+          renamed over the original, so neither a process crash nor a power loss can
+          leave a truncated file
         - the original file mode is preserved
         - the file is left untouched when redaction changes nothing
         - both rules of cosa.utils.secret_redaction apply — by value AND by
@@ -164,6 +165,12 @@ def scrub_file( path, values ):
     try:
         with os.fdopen( handle_fd, "w", encoding="utf-8", errors="surrogateescape" ) as temp_handle:
             temp_handle.write( scrubbed )
+            temp_handle.flush()
+            # fsync BEFORE the rename, or the atomicity is only against a process
+            # crash: the rename can reach disk while the temp file's contents are
+            # still in the page cache, and a power loss then leaves the original
+            # replaced by an empty file. Flagged by María on review.
+            os.fsync( temp_handle.fileno() )
         os.chmod( temp_path, mode )
         os.replace( temp_path, path )
     except BaseException:
