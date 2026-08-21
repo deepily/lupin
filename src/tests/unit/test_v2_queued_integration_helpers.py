@@ -195,3 +195,20 @@ def test_a_snapshot_lookup_failure_returns_none_rather_than_masking_the_test( mo
     monkeypatch.setattr( database_mod, "get_db", _boom )
 
     assert v2_queued.snapshot_id_for_question( "what is 2+2" ) is None
+
+
+def test_a_job_found_dead_on_the_final_sweep_reports_dead( monkeypatch, no_sleep ):
+    """
+    The sweep has to say what the loop says. A job that died during the last interval
+    was found by the sweep and reported as "still in the 'dead' queue... it did not
+    fail, the test stopped waiting" — which is the opposite of what happened, and sends
+    the reader hunting a slow queue instead of the error the job already carries
+    (Pocholo).
+
+    RED ON REVERT: drop the sweep's dead branch and this reports a stop, not a death.
+    """
+    fake = _FakeRequests( [ { "done": [], "dead": [ { "job_id": "mine::u1", "error": "boom" } ] } ] )
+    monkeypatch.setattr( v2_queued, "requests", fake )
+
+    with pytest.raises( AssertionError, match="DEAD queue: boom" ):
+        v2_queued.wait_for_done( "http://x", "mine::u1", {}, timeout=0 )

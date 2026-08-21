@@ -89,13 +89,23 @@ def wait_for_done( base_url, job_id, headers, timeout=DEFAULT_TIMEOUT ):
 
     for queue_name in ( "done", "dead", "run", "todo" ):
         found = _find_in_queue( base_url, job_id, queue_name, headers )
-        if found is not None:
-            if queue_name == "done":
-                return found                       # it finished inside the last interval
+        if found is None:
+            continue
+        if queue_name == "done":
+            return found                           # it finished inside the last interval
+        if queue_name == "dead":
+            # The sweep has to say the same thing the loop says. A job found DEAD here
+            # is a job that failed, and reporting it as "the test stopped waiting" would
+            # send the reader to look for a slow queue instead of the error the job
+            # already carries (Pocholo).
             raise AssertionError(
-                f"job {job_id} was still in the '{queue_name}' queue after {timeout}s — "
-                f"it did not fail, the test stopped waiting"
+                f"job {job_id} landed in the DEAD queue: "
+                f"{found.get( 'error' ) or found.get( 'response_text' ) or '(no error detail)'}"
             )
+        raise AssertionError(
+            f"job {job_id} was still in the '{queue_name}' queue after {timeout}s — "
+            f"it did not fail, the test stopped waiting"
+        )
     raise AssertionError(
         f"job {job_id} is in NO queue (done/dead/run/todo) after {timeout}s — state "
         f"indeterminate; check the server log for this job id"
