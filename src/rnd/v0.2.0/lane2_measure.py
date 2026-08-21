@@ -60,6 +60,13 @@ def push( jwt, sid ):
                            headers={ "Authorization": f"Bearer {jwt}", "Content-Type": "application/json" }, timeout=240 )
         push_result[ "status" ] = r.status_code
         push_result[ "body" ]   = r.text[ :600 ]
+        if r.status_code == 410:
+            # v2 cutover retired /api/push (410 → /api/v2/ask). This probe measures the v1
+            # expeditor's asks over the WS, which the v2 door does not emit — port before reuse.
+            # The capture loop ends as soon as `status` is set, so this run stops here
+            # instead of sitting out its deadline (row c84e9313).
+            push_result[ "retired_door" ] = "/api/push is RETIRED (410 → /api/v2/ask); port this probe to the v2 door before reuse"
+            log( "PUSH: /api/push is RETIRED on this server (410 → /api/v2/ask) — this probe must be ported before reuse; ending." )
     except Exception as e:
         push_result[ "error" ] = repr( e )
 

@@ -5,7 +5,13 @@ Row 68198c9f (Thursday demo acceptance gate). Author: Tiffany 💍.
 
 Drives the ACTUAL demo path on :7999:
   POST /api/mode/current {mode:"podcast"}  (the "Podcast Generator" dropdown)
-  → POST /api/push {question, websocket_id}
+  → POST through the live DOOR (LANE2_DOOR / --door: auto|v1|v2, default auto):
+      v1 = /api/push {question, websocket_id}   (retired on the v2-cutover branch → 410)
+      v2 = /api/v2/ask {question, websocket_id, interactive} — a parked ask is
+           answered through /api/v2/resume with the same vague doc description
+      auto = v1, and on a 410 switch to v2 and SAY SO. A rejected push fails
+           stage 1 and ends the run at once (row c84e9313: the old loop waited
+           the full 1200s on a job that was never created).
   → auto-answers every interactive ask over a LIVE websocket (the thing a
     remote voice user provides and the test-user account normally lacks)
   → polls to terminal, verifies the artifact is genuinely about the seed.
@@ -340,6 +346,121 @@ class WsAutoAnswer:
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 LOGS = []
+class _FailFast( Exception ):
+    """Raised when the run has already earned its verdict and there is nothing left
+    to watch — a rejected push, or a v2 body that is terminal without a job. The
+    pre-c84e9313 harness sat out the full TIMEOUT_S after a 410, then reported the
+    wait as if it had been watching something."""
+
+
+def push_v1( question, headers ):
+    """POST /api/push (the v1 door). Returns ( status_code, body )."""
+    r = requests.post( f"{BASE_HTTP}/api/push",
+                       json={ "question": question, "websocket_id": SESSION_ID },
+                       headers=headers, timeout=180 )
+    try:
+        body = r.json()
+    except ValueError:
+        body = {}
+    log( f"push[v1 /api/push]: {r.status_code} job_id={body.get('job_id')} "
+         f"result={str( body.get( 'result', body.get( 'detail', '' ) ) )[:100]}" )
+    return r.status_code, body
+
+
+def push_v2( question, headers ):
+    """POST /api/v2/ask (the v2 door), interactive. Returns ( status_code, body ).
+
+    The v2 flow does not run the v1 expeditor's websocket asks; a missing argument
+    PARKS the request (status='parked', pending_id). That park is the v2 spelling of
+    the "which document?" ask, so it is answered the same way the WS auto-answer
+    does — with VAGUE_DOC_DESC, still no path and no exact filename — through
+    /api/v2/resume, up to four turns.
+    """
+    r = requests.post( f"{BASE_HTTP}/api/v2/ask",
+                       json={ "question": question, "websocket_id": SESSION_ID,
+                              "interactive": True, "speak": False },
+                       headers=headers, timeout=180 )
+    try:
+        body = r.json()
+    except ValueError:
+        body = {}
+    log( f"push[v2 /api/v2/ask]: {r.status_code} path={body.get('path')} status={body.get('status')} "
+         f"route_reason={body.get('route_reason')} command={body.get('command')} job_id={body.get('job_id')}" )
+    turns = 0
+    while r.status_code == 200 and body.get( "status" ) == "parked" and body.get( "pending_id" ) and turns < 4:
+        turns += 1
+        log( f"  parked on {body.get('args_missing')} → /api/v2/resume answer={VAGUE_DOC_DESC!r}" )
+        r = requests.post( f"{BASE_HTTP}/api/v2/resume",
+                           json={ "pending_id": body[ "pending_id" ], "answer": VAGUE_DOC_DESC, "speak": False },
+                           headers=headers, timeout=180 )
+        try:
+            body = r.json()
+        except ValueError:
+            body = {}
+        log( f"  resume[{turns}]: {r.status_code} path={body.get('path')} status={body.get('status')} "
+             f"route_reason={body.get('route_reason')} command={body.get('command')} job_id={body.get('job_id')}" )
+    return r.status_code, body
+
+
+def push_through_door( door, question, headers ):
+    """Post the utterance through the selected door. Returns ( body, status_code, door_used ).
+
+    door: "v1" | "v2" | "auto". auto = v1 first; a 410 means the server has retired
+    /api/push, so the harness switches to /api/v2/ask and logs the switch — it never
+    silently assumes which contract it is testing.
+    """
+    if door == "v2":
+        sc, body = push_v2( question, headers )
+        return body, sc, "v2"
+    sc, body = push_v1( question, headers )
+    if sc == 410 and door == "auto":
+        log( "door: /api/push is RETIRED on this server (410) — switching to /api/v2/ask (LANE2_DOOR=auto)" )
+        sc, body = push_v2( question, headers )
+        return body, sc, "v2"
+    if sc == 410:
+        log( "door: /api/push is RETIRED on this server (410) and the v1 door was FORCED — the instrument "
+             "is pointed at a door that no longer exists. Re-run with LANE2_DOOR=auto or --door v2." )
+    return body, sc, "v1"
+
+
+def v2_route_verdict( body, results ):
+    """Read stage 2 off the synchronous v2 body. Returns True when the body is
+    TERMINAL WITHOUT A JOB — nothing will ever appear in a queue, so the caller
+    must not sit out TIMEOUT_S waiting for it."""
+    path   = body.get( "path" )
+    status = body.get( "status" )
+    cmd    = body.get( "command" ) or ""
+    job_id = body.get( "job_id" ) or ""
+    if status == "parked":
+        # push_v2 answers a park up to four times; a body still parked here means the
+        # resume turn budget is EXHAUSTED and no job will ever exist. The doc-resolution
+        # ask never closed — that is stage 3, observed. (Pocholo, reviewing 472c9ea7.)
+        log( f"PARKED after the resume turn budget: still asking for {body.get('args_missing')} "
+             f"(pending_id={body.get('pending_id')}) — the vague description never resolved; NO job was created." )
+        results[ "2_route_podcast" ] = PASS if cmd == "agent router go to podcast generator" else FAIL
+        results[ "3_doc_resolved" ]  = FAIL
+        return True
+    if path == "receptionist" or status in ( "rejected", "failed", "expired", "needs_input" ):
+        log( f"ROUTING: v2 returned path={path} status={status} route_reason={body.get('route_reason')} "
+             f"command={cmd!r} — NO job was created. (On a server whose ask door has no agentic "
+             f"dispatch yet — bug b7fe8941 — a vague podcast question lands exactly here.)" )
+        results[ "2_route_podcast" ] = FAIL
+        return True
+    if cmd == "agent router go to research to podcast":
+        log( f"ROUTING MISS: v2 routed to research-to-podcast, NOT podcast generator (job_id={job_id or None})" )
+        results[ "2_route_podcast" ] = FAIL
+        return not job_id
+    if cmd and cmd != "agent router go to podcast generator":
+        log( f"ROUTING MISS: v2 routed to {cmd!r}, NOT podcast generator (job_id={job_id or None})" )
+        results[ "2_route_podcast" ] = FAIL
+        return not job_id
+    if status == "done" and not job_id:
+        log( "ROUTING: v2 answered 'done' inline with no job — the router did not hand this to the podcast generator" )
+        results[ "2_route_podcast" ] = FAIL
+        return True
+    return False
+
+
 def log( m ):
     ts = time.strftime( "%H:%M:%S" )
     line = f"{ts} {m}"
@@ -441,6 +562,7 @@ def main( argv ):
     ap.add_argument( "--no-mode",  action="store_true", help="PURE-VOICE path: do NOT set the dropdown mode (the actual Thursday demo path)" )
     ap.add_argument( "--question", default=VAGUE_QUESTION, help="override the posted utterance (use Rachel's measured no-mode candidate)" )
     ap.add_argument( "--base-url", default=None, help="target server, e.g. http://localhost:8000 (overrides LUPIN_API_URL; default :7999)" )
+    ap.add_argument( "--door", choices=[ "auto", "v1", "v2" ], default=None, help="which push door to test: v1=/api/push, v2=/api/v2/ask, auto=v1 then v2 on a 410 (default; or env LANE2_DOOR)" )
     args = ap.parse_args( argv )
 
     if args.base_url:
@@ -457,6 +579,8 @@ def main( argv ):
     # actual configuration and every confirmed option visible in the run log.
     log( "═══ HARNESS CONFIG ═══" )
     log( f"  PATH        : {'PURE VOICE (no mode) — the Thursday demo path' if args.no_mode else 'DROPDOWN (mode=' + MODE + ')'}" )
+    door = ( args.door or os.environ.get( "LANE2_DOOR", "auto" ) ).lower()
+    log( f"  DOOR        : {door} (v1=/api/push · v2=/api/v2/ask · auto=v1, then v2 on a 410)" )
     log( f"  QUESTION    : {args.question[:80]}" )
     log( f"  SEED        : {'OFF (--no-seed)' if args.no_seed else 'ON (' + SEED_FILENAME + ')'}" )
     log( f"  CONFIRM     : multiple_choice → prefer 'Doc-to-Pod' (podcast generator); open_ended_batch → defaults, languages=en" )
@@ -498,12 +622,13 @@ def main( argv ):
             m = requests.post( f"{BASE_HTTP}/api/mode/current", json={ "mode": MODE }, headers=headers, timeout=10 )
             log( f"mode set: {m.status_code} {m.json().get('display_name','?')}" )
 
-        r = requests.post( f"{BASE_HTTP}/api/push",
-                           json={ "question": args.question, "websocket_id": SESSION_ID },
-                           headers=headers, timeout=180 )
-        push = r.json()
-        log( f"push: {r.status_code} job_id={push.get('job_id')} result={push.get('result','')[:80]}" )
-        results[ "1_push_accepted" ] = PASS if r.status_code == 200 else FAIL
+        push, push_status, door_used = push_through_door( door, args.question, headers )
+        results[ "1_push_accepted" ] = PASS if push_status == 200 else FAIL
+        if results[ "1_push_accepted" ] == FAIL:
+            # Nothing was accepted, so nothing will ever reach a queue. Waiting TIMEOUT_S
+            # here is what turned a 410 into a 1200-second "product" red (row c84e9313).
+            raise _FailFast( f"push rejected by the {door_used} door: HTTP {push_status}" )
+        terminal_without_job = door_used == "v2" and v2_route_verdict( push, results )
 
         # The push response's job_id is often null even though the job exists;
         # the AUTHORITATIVE id for THIS run is the one the ws watched get created.
@@ -526,6 +651,8 @@ def main( argv ):
             # No job id at all. We never saw the router decide, so we do not know
             # what it decided. That is not a routing failure.
             log( "no job_id captured — routing was never observed" )
+        if terminal_without_job and not job_id:
+            raise _FailFast( "the v2 door answered terminally without creating a job — there is nothing in any queue to watch" )
 
         # Poll for terminal — scoped to THIS run's exact job_id.
         #
@@ -629,6 +756,8 @@ def main( argv ):
                          f"so this red is not trustworthy" )
                     results[ k ] = INCONCLUSIVE
 
+    except _FailFast as e:
+        log( f"FAIL-FAST: {e} — ending the run now instead of watching for {TIMEOUT_S}s" )
     finally:
         ws.stop()
         try:
