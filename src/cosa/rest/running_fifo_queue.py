@@ -946,8 +946,9 @@ class RunningFifoQueue( FifoQueue ):
     # itself (the cache branch above), so two copies of one decision sat side by side
     # and only one of them ever ran. Anyone looking for how a fast-lane job is handled
     # found this one first, complete with a confident docstring, and could change it all
-    # day without changing what the server does. Seven tests pinned it, which is what
-    # made it look maintained.
+    # day without changing what the server does. SIX tests pinned it, which is what
+    # made it look maintained. (The plan and the row both said seven; the seventh grep
+    # hit was the section header comment above them. Six is what was deleted.)
     #
     # HOW WE KNEW, because grep alone was not allowed to decide it: a temporary probe
     # recorded any entry to a file; its positive control proved the probe FIRES when the
