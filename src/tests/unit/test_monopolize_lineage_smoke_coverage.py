@@ -17,11 +17,17 @@ site and silent about the population is how this class of gap survives a green s
 
 WHAT THIS ASSERTS
 -----------------
-The endpoint set is DERIVED, never hand-listed: any router declaring `parent_id_hash` is
-lineage-aware, and its submit path is read off its own `prefix=` / `@router.post` lines. Any
-test file that POSTs to one of those paths must also read `LUPIN_TEST_MONOPOLIZE_PARENT_ID`.
-Add a seventh lineage-aware router tomorrow, or a new smoke against an existing one, and this
-holds the line without anyone remembering to update a list.
+The endpoint set is DERIVED, never hand-listed: a POST door is lineage-aware when the
+request model in ITS OWN handler signature declares `parent_id_hash`. Any test file that
+POSTs to one of those doors must also read `LUPIN_TEST_MONOPOLIZE_PARENT_ID`. Add a seventh
+lineage-aware door tomorrow, or a new smoke against an existing one, and this holds the line
+without anyone remembering to update a list.
+
+⚠️ The question is asked PER DOOR because it used to be asked per FILE — "any router
+mentioning the field is lineage-aware, and every `@router.post` in it is one of its doors".
+That held while each router had exactly one submit endpoint. `v2_ask.py` has three and only
+`/api/v2/submit` takes the field, so the file-level rule accused nine test files of failing
+to tag `/api/v2/ask` with a field that door does not accept. See `lineage_aware_endpoints`.
 
 SCOPE — two things a green here does NOT mean.
   · It proves the tag is THREADED, not that Gate B ADMITS the child. That is the :8000
@@ -39,6 +45,7 @@ waiver came off the same evening it went on. A non-strict marker would still be 
 
 Venue: :7999-eligible. Pure file reads; no server, no docker, no network.
 """
+import ast
 import os
 import re
 
@@ -57,28 +64,81 @@ PREFIX_RE = re.compile( r"""prefix\s*=\s*["']([^"']+)["']""" )
 POST_RE   = re.compile( r"""@router\.post\(\s*\n?\s*["']([^"']+)["']""", re.MULTILINE )
 
 
+def _lineage_models( tree ):
+    """
+    The request-model classes in one router that declare the lineage field.
+
+    Ensures:
+        - returns a set of class names having a `parent_id_hash` annotated attribute
+    """
+    models = set()
+    for node in ast.walk( tree ):
+        if not isinstance( node, ast.ClassDef ): continue
+        for stmt in node.body:
+            if isinstance( stmt, ast.AnnAssign ) and isinstance( stmt.target, ast.Name ) \
+               and stmt.target.id == LINEAGE_FIELD:
+                models.add( node.name )
+    return models
+
+
+def _post_paths( decorator ):
+    """Every literal path on one `@router.post( ... )` decorator, or [] if it is not one."""
+    func = decorator.func
+    if not ( isinstance( func, ast.Attribute ) and func.attr == "post" ): return [ ]
+    return [ a.value for a in decorator.args
+             if isinstance( a, ast.Constant ) and isinstance( a.value, str ) ]
+
+
 def lineage_aware_endpoints( router_dir ):
     """
-    Every submit path whose router declares the lineage field.
+    Every POST path whose OWN request model declares the lineage field.
+
+    ⚠️ THIS USED TO BE A PER-FILE CHECK, AND THAT WENT WRONG THE DAY A ROUTER GREW A
+    SECOND DOOR. The rule was "any router mentioning `parent_id_hash` is lineage-aware,
+    and every `@router.post` in it is one of its doors" — fine while each router had a
+    single submit endpoint, which was true of all six when this was written. `v2_ask.py`
+    has three doors and only `/api/v2/submit` takes the field, so the old rule accused
+    nine test files of failing to tag `/api/v2/ask` with a field that endpoint does not
+    accept and would reject. A checker that names innocent files teaches people to
+    ignore it, which costs more than the gap it was watching for.
+
+    So the question is asked per ENDPOINT: does the model in THIS handler's signature
+    declare the field? A router-wide mention is not evidence about any one door.
 
     Requires:
         - router_dir holds FastAPI router modules
 
     Ensures:
-        - returns a dict of { full_path: router_filename } for each router mentioning
-          `parent_id_hash`, joining `prefix=` to each `@router.post` path
+        - returns { full_path: router_filename } for each POST handler whose annotated
+          request model declares `parent_id_hash`, joining `prefix=` to the post path
         - a router with no prefix contributes its post paths verbatim (they are absolute)
+        - a router that mentions the field only in prose or on a different door
+          contributes nothing for that door
     """
     endpoints = {}
     for name in sorted( os.listdir( router_dir ) ):
         if not name.endswith( ".py" ) or name.startswith( "._" ): continue   # ._ = AppleDouble sidecar, not source
         with open( os.path.join( router_dir, name ), "r", errors="ignore" ) as f: text = f.read()
         if LINEAGE_FIELD not in text: continue
+        try:
+            tree = ast.parse( text )
+        except SyntaxError:                                  # pragma: no cover - no router in the tree fails to parse
+            continue
+        models = _lineage_models( tree )
+        if not models: continue
         prefix = PREFIX_RE.search( text )
         prefix = prefix.group( 1 ) if prefix else ""
-        for path in POST_RE.findall( text ):
-            full = path if path.startswith( "/api/" ) else f"{prefix}{path}"
-            if full.startswith( "/api/" ): endpoints[ full ] = name
+        for node in ast.walk( tree ):
+            if not isinstance( node, ( ast.FunctionDef, ast.AsyncFunctionDef ) ): continue
+            annotated = { arg.annotation.id
+                          for arg in list( node.args.args ) + list( node.args.kwonlyargs )
+                          if isinstance( arg.annotation, ast.Name ) }
+            if not ( annotated & models ): continue
+            for decorator in node.decorator_list:
+                if not isinstance( decorator, ast.Call ): continue
+                for path in _post_paths( decorator ):
+                    full = path if path.startswith( "/api/" ) else f"{prefix}{path}"
+                    if full.startswith( "/api/" ): endpoints[ full ] = name
     return endpoints
 
 
@@ -133,6 +193,63 @@ def test_a_router_without_the_field_is_not_lineage_aware( tmp_path ):
         'router = APIRouter( prefix="/api/plain" )\n@router.post( "/submit" )\ndef go(): pass\n'
     )
     assert lineage_aware_endpoints( str( tmp_path ) ) == {}
+
+
+def test_only_the_door_whose_model_declares_the_field_is_lineage_aware( tmp_path ):
+    """
+    THE CONTROL FOR THE PER-ENDPOINT NARROWING. A router with three doors where only one
+    takes the field — the shape of `v2_ask.py`, which is what broke the old per-file rule.
+
+    RED ON REVERT: go back to "every post path in a router that mentions the field" and
+    all three doors come back, which is the false accusation this fixed.
+    """
+    ( tmp_path / "two_doors.py" ).write_text(
+        "from pydantic import BaseModel\n"
+        "router = APIRouter()\n"
+        "class AskRequest( BaseModel ):\n"
+        "    question : str = Field( ... )\n"
+        "class SubmitRequest( BaseModel ):\n"
+        f"    {LINEAGE_FIELD} : Optional[ str ] = Field( None )\n"
+        '@router.post( "/api/two/ask" )\n'
+        "async def ask( request: AskRequest ): pass\n"
+        '@router.post( "/api/two/submit" )\n'
+        "async def submit( request: SubmitRequest ): pass\n"
+        '@router.post( "/api/two/resume" )\n'
+        "async def resume( request: AskRequest ): pass\n"
+    )
+    assert lineage_aware_endpoints( str( tmp_path ) ) == { "/api/two/submit": "two_doors.py" }
+
+
+def test_a_router_that_only_talks_about_the_field_contributes_nothing( tmp_path ):
+    """The same lesson as the comment-only control below, one level up: a docstring
+    naming the field is not a door that accepts it."""
+    ( tmp_path / "prose.py" ).write_text(
+        "from pydantic import BaseModel\n"
+        "router = APIRouter()\n"
+        "class SubmitRequest( BaseModel ):\n"
+        "    query : str = Field( ... )\n"
+        '@router.post( "/api/prose/submit" )\n'
+        "async def submit( request: SubmitRequest ):\n"
+        f'    """Someday this may carry {LINEAGE_FIELD}, but today it does not."""\n'
+        "    pass\n"
+    )
+    assert lineage_aware_endpoints( str( tmp_path ) ) == {}
+
+
+def test_the_v2_submit_door_is_lineage_aware_and_its_siblings_are_not():
+    """
+    Against the REAL router tree, not a synthetic one. `/api/v2/submit` gained the field
+    when the nine retiring doors' scheduling and lineage moved onto it; `/api/v2/ask` and
+    `/api/v2/resume` never took it and must not be held to it.
+    """
+    endpoints = lineage_aware_endpoints( ROUTER_DIR )
+
+    assert endpoints.get( "/api/v2/submit" ) == "v2_ask.py"
+    assert "/api/v2/ask"    not in endpoints
+    assert "/api/v2/resume" not in endpoints
+    # and the six v1 doors this file was written for are still watched
+    assert endpoints.get( "/api/deep-research/submit" ) == "deep_research.py"
+    assert endpoints.get( "/api/swe-team/submit" )      == "swe_team.py"
 
 
 def test_the_checker_flags_a_smoke_that_skips_the_tag( tmp_path ):

@@ -238,6 +238,8 @@ class AskFlow:
         self, user_id: str, user_email: str, session_id: str, websocket_id: str,
         command: Optional[ str ]=None, args: Optional[ dict ]=None, question: Optional[ str ]=None,
         job: Any=None, speak: bool=True,
+        scheduled_at: Optional[ str ]=None, monopolize: bool=False,
+        parent_id_hash: Optional[ str ]=None,
     ) -> dict:
         """Run work whose command is already decided — the door beside `ask`.
 
@@ -264,6 +266,15 @@ class AskFlow:
         question nobody will ever read and calling the request handled. Missing arguments
         come back as `status="needs_input"` with `args_missing` filled in — a refusal the
         caller can act on, not a suspension. **Only `ask` may reach needs-input.**
+
+        THE THREE QUEUE DIRECTIVES ARE NOT AGENT ARGUMENTS. `scheduled_at`, `monopolize`
+        and `parent_id_hash` say WHEN and HOW the queue should run the work, not what the
+        agent should do with it. Every retiring door carried them as its own request
+        fields and set them on the job by hand after building it; `args` could not carry
+        them in their place, because `args` is checked against the command's argument
+        contract and these are in no command's contract. They reach the job through the
+        factory, and they mean something only on the agentic path — see the note where
+        they are dropped for the other two.
 
         Requires:
             - exactly one of (`command`, `job`) is supplied.
@@ -318,8 +329,20 @@ class AskFlow:
             trace.set( "verbatim_source", "command" if command is not None else "job" )
         ctx = ( user_id, user_email, session_id, websocket_id, speak )
 
+        # WHEN A QUEUE DIRECTIVE HAS NOWHERE TO GO, SAY SO IN THE TRACE. Only the
+        # agentic path builds a job this method can stamp. A caller handing over a job
+        # it built itself has already set whatever it wanted on that object, and a
+        # conversational command runs inline on this thread, where "run it at ten in the
+        # morning" has no meaning at all. Neither case is worth refusing the work over —
+        # but silently dropping a `scheduled_at` would let a job the caller believes is
+        # deferred run immediately with nothing anywhere saying why.
+        directives = { "scheduled_at": scheduled_at, "monopolize": monopolize,
+                       "parent_id_hash": parent_id_hash }
+        directives_set = sorted( k for k, v in directives.items() if v )
+
         # A job handed over whole: the caller built it, so there is nothing to resolve.
         if job is not None:
+            if directives_set: trace.set( "queue_directives_ignored", ",".join( directives_set ) )
             return self._submit_prebuilt( trace, job, question or "", ctx )
 
         spec = resolve( command, self.crud_enabled )
@@ -335,9 +358,12 @@ class AskFlow:
             # endpoints are about to name in their refusals.
             agentic = resolve_agentic( command )
             if agentic is not None:
-                return self._submit_agentic( trace, agentic, command, dict( args or {} ), question, ctx )
+                return self._submit_agentic( trace, agentic, command, dict( args or {} ), question, ctx,
+                                             scheduled_at, monopolize, parent_id_hash )
             trace.set( "unknown_command", command )
             return self._receptionist( trace, question or command, ctx, "unknown_command" )
+
+        if directives_set: trace.set( "queue_directives_ignored", ",".join( directives_set ) )
 
         final_args = dict( args or {} )
         missing    = [ arg for arg in spec.required_args if not final_args.get( arg ) ]
@@ -357,6 +383,8 @@ class AskFlow:
     def _submit_agentic(
         self, trace: StageTrace, spec: Any, command: str, args: dict,
         question: Optional[ str ], ctx: tuple,
+        scheduled_at: Optional[ str ]=None, monopolize: bool=False,
+        parent_id_hash: Optional[ str ]=None,
     ) -> dict:
         """Build an agentic job from ( command, args ) and run it like any other submit.
 
@@ -369,6 +397,14 @@ class AskFlow:
         THE ARGUMENT CHECK IS THE SPEC'S, NOT A LIST WRITTEN HERE. `spec.required_args`
         comes off the same JOB_ARG_CONTRACTS entry the expeditor reads, so a job that
         gains a required argument gains it here with no edit.
+
+        THE QUEUE DIRECTIVES RIDE ALONG TO THE FACTORY. `scheduled_at` and `monopolize`
+        are what the off-peak scheduling rule and the exclusive-run flag are made of, and
+        `parent_id_hash` becomes the job's `spawned_by_id_hash`, which is how the queue
+        consumer's Gate B tells a monopolizing sweep's OWN children from a foreign writer
+        and admits them through the hold (bugs 3a14292b and 5ed4f187). Six of the retiring
+        doors stamped that last one by hand; a v2 door that dropped it would leave a
+        sweep's children deferred outside their parent's window with nothing to show why.
 
         Requires:
             - spec is an AGENTIC AgentSpec from resolve_agentic( command )
@@ -395,13 +431,16 @@ class AskFlow:
         user_id, user_email, session_id, _websocket_id, _speak = ctx
         try:
             job = factory(
-                command    = command,
-                args_dict  = args,
-                user_id    = user_id,
-                user_email = user_email,
-                session_id = session_id,
-                debug      = self.debug,
-                verbose    = self.verbose,
+                command            = command,
+                args_dict          = args,
+                user_id            = user_id,
+                user_email         = user_email,
+                session_id         = session_id,
+                debug              = self.debug,
+                verbose            = self.verbose,
+                scheduled_at       = scheduled_at,
+                monopolize         = monopolize,
+                spawned_by_id_hash = parent_id_hash,
             )
         except Exception as e:
             trace.set( "agentic_build_error", str( e ) )

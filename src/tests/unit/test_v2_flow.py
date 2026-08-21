@@ -1486,6 +1486,102 @@ def test_a_command_neither_reader_knows_still_reaches_the_receptionist( tmp_path
     assert r[ "route_reason" ] == "unknown_command"
 
 
+class TestSubmitCarriesTheQueueDirectives:
+    """
+    THE DEFECT THIS CLOSES. Seven of the nine endpoints retiring into `/api/v2/submit`
+    declared `scheduled_at` and `monopolize` on their own request models and set them on
+    the job by hand after building it; six also stamped `parent_id_hash` onto the job's
+    `spawned_by_id_hash`. `create_agentic_job` mentioned none of the three and read its
+    arguments key by name, so anything it did not name was dropped without a word. A door
+    that retired into `submit` before this landed would have taken a deferred job and run
+    it at once, and taken a sweep's own child and left it outside its parent's window.
+
+    `scheduled_at` is the load-bearing one: the off-peak scheduling rule is built on it,
+    and the box is powered off for much of the night.
+    """
+
+    def test_all_three_directives_reach_the_factory( self, tmp_path, notifier ):
+        """RED ON REVERT: drop any of the three from the factory call and its assert fails."""
+        factory = _RecordingAgenticFactory()
+        f = _submit_flow( tmp_path, notifier, agentic_factory=factory )
+        f.submit( command="agent router go to podcast generator",
+                  args={ "research": "io/x.md" },
+                  scheduled_at="2026-08-22T10:30:00-04:00", monopolize=True,
+                  parent_id_hash="ts-parent", **_CTX )
+
+        assert len( factory.calls ) == 1
+        call = factory.calls[ 0 ]
+        assert call[ "scheduled_at" ] == "2026-08-22T10:30:00-04:00"
+        assert call[ "monopolize" ]   is True
+        # The factory parameter is named for what it becomes ON THE JOB, which is what
+        # Gate B reads; the door field is named for what the CALLER knows. The rename
+        # happens here, once, and this asserts it happened.
+        assert call[ "spawned_by_id_hash" ] == "ts-parent"
+
+    def test_a_caller_that_sets_none_of_them_says_so( self, tmp_path, notifier ):
+        """The unset case is not absent — the factory is told None/False explicitly, so
+        its own truthiness guard leaves the job class's own defaults alone."""
+        factory = _RecordingAgenticFactory()
+        f = _submit_flow( tmp_path, notifier, agentic_factory=factory )
+        f.submit( command="agent router go to podcast generator",
+                  args={ "research": "io/x.md" }, **_CTX )
+
+        call = factory.calls[ 0 ]
+        assert call[ "scheduled_at" ]       is None
+        assert call[ "monopolize" ]         is False
+        assert call[ "spawned_by_id_hash" ] is None
+
+    def _ignored( self, tmp_path ):
+        """The one field the flow writes when a directive has nowhere to go."""
+        import glob, json
+        rows = [ ]
+        for path in sorted( glob.glob( str( tmp_path / "trace-*.jsonl" ) ) ):
+            with open( path ) as handle:
+                rows += [ json.loads( line ) for line in handle if line.strip() ]
+        return [ r.get( "queue_directives_ignored" ) for r in rows ]
+
+    def test_a_directive_on_a_conversational_command_is_recorded_not_swallowed( self, tmp_path, notifier, monkeypatch ):
+        """A conversational command runs inline on this thread, where run-it-at-ten cannot
+        mean anything. Refusing the work over it would be worse than running it — but a
+        scheduled_at that vanishes leaves a caller believing its job is deferred with
+        nothing anywhere to contradict that.
+
+        RED ON REVERT: delete the trace.set on the conversational path and this is empty.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=() ) )
+        f = _submit_flow( tmp_path, notifier )
+        r = f.submit( command="agent router go to math", args={},
+                      scheduled_at="2026-08-22T10:30:00-04:00", **_CTX )
+
+        assert r[ "status" ] == "done", "the work still runs — this is a note, not a refusal"
+        assert self._ignored( tmp_path ) == [ "scheduled_at" ]
+
+    def test_a_directive_on_a_prebuilt_job_is_recorded_too( self, tmp_path, notifier ):
+        """A caller handing over a whole job already set what it wanted on that object,
+        so there is nothing here to stamp — and the same silence would mislead."""
+        f = _submit_flow( tmp_path, notifier )
+        f.submit( job=FakeAgent(), monopolize=True, parent_id_hash="ts-parent", **_CTX )
+
+        assert self._ignored( tmp_path ) == [ "monopolize,parent_id_hash" ]
+
+    def test_nothing_is_recorded_when_nothing_was_dropped( self, tmp_path, notifier ):
+        """The negative control. Without it, a field written unconditionally would pass
+        every assert above while claiming a drop on traffic that dropped nothing."""
+        f = _submit_flow( tmp_path, notifier )
+        f.submit( job=FakeAgent(), **_CTX )
+
+        assert self._ignored( tmp_path ) == [ None ]
+
+    def test_the_agentic_path_records_no_drop( self, tmp_path, notifier ):
+        """The directives were honoured here, so nothing was ignored."""
+        f = _submit_flow( tmp_path, notifier, agentic_factory=_RecordingAgenticFactory() )
+        f.submit( command="agent router go to podcast generator", args={ "research": "io/x.md" },
+                  scheduled_at="2026-08-22T10:30:00-04:00", **_CTX )
+
+        assert self._ignored( tmp_path ) == [ None ]
+
+
 def test_submit_with_neither_command_nor_job_raises( tmp_path, notifier ):
     """
     A caller bug, not a runtime condition. A flow that guessed which shape you meant would
