@@ -593,6 +593,316 @@ def test_resume_expired_entry_refuses( tmp_path, notifier ):
     assert r[ "route_reason" ] == "pending_expired"
 
 
+def test_second_resume_of_one_conversation_is_refused_as_already_resumed( tmp_path, notifier, monkeypatch ):
+    """
+    A second resume that loses the claim is refused, and says WHY in its own words.
+
+    The first resume runs the agent and drives the entry to done; the second finds
+    it no longer "pending" and must not run the agent again. Before claim(), the
+    liveness read and the "running" write were two separate lock acquisitions with
+    the agent run between them, so a second caller could pass the check and run a
+    duplicate agent on the same conversation — unreachable while the handler was on
+    the event loop, reachable the moment it moved to a worker thread.
+
+    RED ON REVERT: put `self.pending.set_status( pending_id, "running" )` back in
+    place of the claim() guard and the second resume runs the agent again.
+    """
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda command: FakeSpec( required_args=( "location", ), snapshotable=False ) )
+    pending = PendingRequests()
+    pid, _  = _park( pending )
+    exe     = FakeExecutor( _outcome( status="done", answer="sunny", answer_raw="sunny raw" ) )
+    f       = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe, pending, notifier )
+
+    first = f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
+    assert first[ "status" ] == "done"
+    assert len( exe.works ) == 1
+
+    second = f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
+    assert second[ "route_reason" ] == "already_resumed"
+    assert second[ "path" ] == "needs_input"
+    assert second[ "answer" ] is None
+    assert len( exe.works ) == 1, "the losing resume ran the agent a second time on one conversation"
+
+
+def test_second_resume_never_raises_indexerror( tmp_path, notifier, monkeypatch ):
+    """
+    The 500 this route used to return, pinned by its exception type.
+
+    At HEAD a second resume of a completed conversation reached
+    `extraction.missing[ 0 ]` (flow.py:163) on a list the FIRST resume had already
+    emptied, and raised IndexError — a 500 out of the one path whose docstring
+    promises "never a 500". Nothing checked whether the conversation had already
+    been answered. It needed no concurrency: the entry lives in the store until its
+    TTL, so a retry or a double-clicked answer reached it on the single event loop.
+
+    The sibling tests assert the REFUSAL; this one asserts the ABSENCE OF THE
+    CRASH. They are not the same claim — a future edit could return a well-formed
+    refusal on one branch and still raise on another, and only this test would say
+    so.
+
+    RED ON REVERT: remove the `entry.status != "pending"` early refusal and this
+    raises IndexError instead of failing an assertion.
+    """
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda command: FakeSpec( required_args=( "location", ), snapshotable=False ) )
+    pending = PendingRequests()
+    pid, _  = _park( pending )
+    exe     = FakeExecutor( _outcome( status="done", answer="sunny", answer_raw="sunny raw" ) )
+    f       = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe, pending, notifier )
+    f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
+
+    try:
+        second = f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
+    except IndexError as e:
+        raise AssertionError(
+            f"second resume raised IndexError ({e}) — the 500 is back; the route's "
+            f"contract says it degrades to a needs_input refusal, never a 500."
+        )
+    assert second[ "status" ] == "expired"
+    assert second[ "path" ]   == "needs_input"
+
+
+def test_a_second_resume_cannot_enter_the_interview_while_one_is_inside_it( tmp_path, notifier, monkeypatch ):
+    """
+    Two resumes must never both be inside the extraction mutation.
+
+    María found this (row b28be422) and my first attempt to pin it FAILED TO
+    DISCRIMINATE: racing two whole resumes, guarded and unguarded gave identical
+    results in 30 runs each, because the critical section is a few statements wide
+    and the threads almost never interleave inside it. I nearly reported the race
+    as unobservable on that evidence.
+
+    Holding one resume INSIDE the section makes it deterministic. `final_args` is a
+    dict subclass whose first write parks until released, so the second resume
+    arrives while the first is provably mid-mutation. Measured both ways:
+
+        guarded   -> second refused "already_resumed"; writes = [ location ]
+        unguarded -> second proceeds;                  writes = [ location, location ]
+
+    Two writes to the SAME slot is one user's answer silently overwritten by
+    another's. Not reachable while resume ran on the event loop; reachable the
+    moment it moved to a worker thread — this commit.
+
+    RED ON REVERT: drop the claim()/release_turn() pair from flow.resume and the
+    second resume writes "location" a second time.
+    """
+    import threading
+
+    inside  = threading.Event()
+    hold    = threading.Event()
+    writes  = []
+
+    class ParkingArgs( dict ):
+        """final_args whose FIRST write parks inside the critical section."""
+        def __setitem__( self, key, value ):
+            writes.append( key )
+            if len( writes ) == 1:
+                inside.set()
+                hold.wait( timeout=5 )
+            super().__setitem__( key, value )
+
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda command: FakeSpec( required_args=( "location", "date" ), snapshotable=False ) )
+    pending = PendingRequests()
+    pid, _  = _park( pending )
+    entry   = pending.get( pid )
+    entry.extraction.missing    = [ "location", "date" ]
+    entry.extraction.final_args = ParkingArgs()
+
+    exe = FakeExecutor( _outcome( status="done", answer="sunny", answer_raw="raw" ) )
+    f   = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe, pending, notifier )
+
+    first = threading.Thread(
+        target=lambda: f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" ) )
+    first.start()
+    assert inside.wait( timeout=5 ), "the first resume never entered the mutation — nothing was tested"
+
+    second = f.resume( pending_id=pid, answer="Tuesday", websocket_id="ws1" )
+
+    hold.set()
+    first.join( timeout=5 )
+
+    assert second[ "route_reason" ] == "already_resumed", second
+    assert writes == [ "location" ], (
+        f"both resumes wrote into the interview: {writes} — the second overwrote the "
+        f"first caller's answer in the same slot."
+    )
+
+
+def test_the_flow_never_routes_through_the_expeditors_stateful_half( tmp_path, notifier, monkeypatch ):
+    """
+    TRIPWIRE: the shared expeditor must stay stateless across a v2 request.
+
+    `RuntimeArgumentExpeditor` keeps per-call state on the instance —
+    `_job_id`, `_bearer_token`, `_last_expedite_reason` (expeditor.py:309-311) —
+    and the flow holds ONE expeditor. Those writes live in `expedite()` and
+    `collect()`; `extract()`, which is all the flow calls (flow.py:121), writes
+    none of them. Verified by walking the call graph, not by grep: `extract()`
+    touches none of the three even transitively.
+
+    So there is no bearer-token crossover on the v2 path today. But the handlers
+    now run OFF the event loop, so two v2 requests can be in the flow at once —
+    and if anyone ever routes the flow through the stateful half, one user's
+    bearer token becomes readable by another's request. That is a security-shaped
+    failure that no existing test would notice, because every functional
+    assertion would still pass.
+
+    This test is the tripwire for that day. It does not test today's behaviour so
+    much as pin the boundary that makes today's behaviour safe.
+
+    It compares the expeditor's ENTIRE __dict__ before and after, rather than a
+    list of the attribute names known today. A hand-list would pass the day
+    someone adds a fifth per-call attribute — exactly the change worth catching.
+
+    RED ON REVERT — the exact mutation, which was run: in `flow.py`, replace
+    `self.expeditor.extract( command, raw_args, question, arg_spec )` with
+    `self.expeditor.expedite( command, raw_args, ctx[ 1 ], ctx[ 2 ], ctx[ 0 ], question,
+    job_id="job-1", bearer_token="tok-1" )`. `expedite` stamps `_job_id`,
+    `_bearer_token` and `_last_expedite_reason` on the instance before it does
+    anything else (`expeditor.py:309-311`), so the sentinels come back changed.
+
+    ⚠️ TWO THINGS MAKE THAT MUTATION ACTUALLY BITE, and without either one this
+    test passes under its own named revert:
+      1. The stub below carries `expedite()` and `collect()`, not `extract()`
+         alone. A stub missing the method answers `AttributeError`, which
+         `flow.py`'s `except Exception` folds into the receptionist path — the
+         real instance is never touched and the comparison stays green.
+      2. The real instance is wired far enough for `extract()` to RUN. Built by
+         `__new__` alone it raises at `self.debug` (`expeditor.py:367`) before
+         reaching a line that could write anything, so the delegation proved
+         nothing. It gets the five wiring attributes `extract()` reads, with a
+         fake LLM client and a fake template read: no config, no network, and
+         still the real code path.
+    """
+    import cosa.agents.runtime_argument_expeditor.expeditor as expeditor_mod
+    from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
+
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda command: FakeSpec( required_args=( "location", ), snapshotable=False ) )
+
+    class FakeLlmClient:
+        def run( self, prompt ):
+            return ( "<response><all_required_met>true</all_required_met>"
+                     "<args_present>location=Boston</args_present>"
+                     "<args_missing></args_missing></response>" )
+
+    # Fake the template read rather than depend on a real prompt file's brace
+    # content — the LLM call and the file read are the only two things standing
+    # between this test and the real extract() body.
+    monkeypatch.setattr(
+        expeditor_mod.cu, "get_file_as_string",
+        lambda path: "SYS {system_args} HELP {help_text} Q {voice_command} "
+                     "EXTRACTED {extracted_args} REQUIRED {required_args}"
+    )
+
+    real = RuntimeArgumentExpeditor.__new__( RuntimeArgumentExpeditor )   # no __init__: no config, no network
+    real.debug                = False
+    real.verbose              = False
+    real.prompt_template_path = "/unused — the read above is faked"
+    real.llm_spec_key         = "fake-llm"
+    real.llm_factory          = types.SimpleNamespace(
+        get_client=lambda key, debug=False, verbose=False: FakeLlmClient()
+    )
+
+    # Sentinel the WHOLE instance state, not a hand-list of the names I happen to
+    # know about. A list of four would pass the day someone adds a fifth per-call
+    # attribute — which is precisely the change this tripwire needs to catch.
+    for name in ( "_job_id", "_bearer_token", "_last_expedite_reason",
+                  "_last_notification_status" ):
+        setattr( real, name, f"SENTINEL-{name}" )
+    before = dict( real.__dict__ )
+
+    class DelegatingExpeditor:
+        """Delegates EVERY method the flow could reach to the real class, so a
+        change of which method the flow calls is felt on the real instance.
+
+        A stub carrying extract() alone was not enough, and made this test
+        vacuous under its own named mutation: point the flow at expedite() and
+        the stub answers AttributeError, which flow.py:123's `except Exception`
+        turns into the receptionist path — the real instance is never touched
+        and the sentinel comparison below passes while the boundary it exists to
+        guard is gone. Each name is appended AFTER the real call returns, so
+        `delegated` records methods that actually RAN, not merely ones that were
+        entered.
+        """
+
+        def __init__( self ):
+            self.delegated = []
+
+        def extract( self, command, raw_args, question, spec ):
+            RuntimeArgumentExpeditor.extract( real, command, raw_args, question, spec )
+            self.delegated.append( "extract" )
+            return _extraction( final_args={ "location": "Boston" }, missing=[] )
+
+        def expedite( self, command, raw_args, user_email, session_id, user_id, original_question,
+                      job_id=None, bearer_token=None ):
+            RuntimeArgumentExpeditor.expedite( real, command, raw_args, user_email, session_id,
+                                               user_id, original_question,
+                                               job_id=job_id, bearer_token=bearer_token )
+            self.delegated.append( "expedite" )
+            return _extraction( final_args={ "location": "Boston" }, missing=[] )
+
+        def collect( self, extraction, command, original_question, spec,
+                     user_email, session_id, user_id ):
+            RuntimeArgumentExpeditor.collect( real, extraction, command, original_question, spec,
+                                              user_email, session_id, user_id )
+            self.delegated.append( "collect" )
+            return _extraction( final_args={ "location": "Boston" }, missing=[] )
+
+    stub = DelegatingExpeditor()
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), stub,
+                    FakeExecutor( _outcome( status="done", answer="sunny", answer_raw="raw" ) ),
+                    PendingRequests(), notifier )
+    f.run( question="weather in Boston", user_id="u1", user_email="u@x", session_id="s1",
+           websocket_id="ws1", speak=False, interactive=False )
+
+    # Anti-vacuity control. Without this, a request that reached NO expeditor
+    # method at all — or one whose real implementation threw before writing
+    # anything — would leave the sentinels untouched and read as a pass.
+    assert stub.delegated == [ "extract" ], (
+        f"the flow ran {stub.delegated} to completion on the real expeditor. Empty means "
+        f"no real method ran at all and the sentinel comparison below is vacuous; anything "
+        f"other than ['extract'] means the flow has reached the stateful half"
+    )
+
+    after   = dict( real.__dict__ )
+    changed = { k for k in set( before ) | set( after ) if before.get( k, object() ) != after.get( k, object() ) }
+    assert not changed, (
+        f"a v2 request wrote {sorted( changed )} on the SHARED expeditor. Both handlers "
+        f"now run off the event loop, so two concurrent requests would read each other's "
+        f"values — for _bearer_token that is one user's credential reaching another."
+    )
+
+
+def test_already_resumed_is_distinguishable_from_pending_expired( tmp_path, notifier, monkeypatch ):
+    """
+    The two refusals must not share a route_reason.
+
+    They are the same SHAPE — status "expired", path needs_input, no answer — so a
+    test asserting only the shape would pass with one reason serving both. A log
+    that cannot tell a lost race from a timed-out conversation sends the reader
+    looking at TTLs for a concurrency bug.
+
+    RED ON REVERT: give the claim refusal route_reason="pending_expired" and this
+    fails while every shape assertion above still passes.
+    """
+    monkeypatch.setattr( flow_mod, "resolve",
+                         lambda command: FakeSpec( required_args=( "location", ), snapshotable=False ) )
+    pending = PendingRequests()
+    pid, _  = _park( pending )
+    exe     = FakeExecutor( _outcome( status="done", answer="sunny", answer_raw="sunny raw" ) )
+    f       = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe, pending, notifier )
+    f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
+
+    lost_race = f.resume( pending_id=pid, answer="Boston", websocket_id="ws1" )
+    dead_id   = f.resume( pending_id="does-not-exist", answer="Boston", websocket_id="ws1" )
+
+    assert lost_race[ "route_reason" ] == "already_resumed"
+    assert dead_id[ "route_reason" ]   == "pending_expired"
+    assert lost_race[ "route_reason" ] != dead_id[ "route_reason" ]
+
+
 def test_resume_unknown_command_degrades_and_marks_failed( tmp_path, notifier, monkeypatch ):
     monkeypatch.setattr( flow_mod, "resolve", lambda command: None )   # command no longer resolvable
     pending = PendingRequests()

@@ -397,6 +397,153 @@ class TestPendingRequests:
         assert entry.error is None
 
 
+class TestClaimIsAtomic:
+    """
+    `claim()` is the guard that makes threading the resume handler safe.
+
+    The race it closes: `flow.resume` reads the entry (flow.py:153) and writes it
+    later (:181/:184/:187), each call taking the RLock on its own with the agent
+    run in between. A lock around a dictionary keeps the dictionary sound; it does
+    not make a read-modify-write pair atomic. Two resumes could both pass the
+    liveness check and both run the agent on one conversation.
+
+    It is unreachable while the handler sits on the event loop, because one loop
+    cannot interleave two resumes. Moving the handler to a worker thread is what
+    makes it reachable, so these tests ship in the same commit as that move.
+    """
+
+    def _parked( self ):
+        pend = PendingRequests()
+        pid  = pend.put( extraction=None, user_email="u@x", session_id="s", user_id="u" )
+        return pend, pid
+
+    def test_first_claim_wins_and_marks_answering( self ) -> None:
+        """The claim marks the turn "answering", not "running" — the agent has not
+        started yet, and the interview-continue path hands the turn back without one
+        ever running."""
+        pend, pid = self._parked()
+        entry = pend.claim( pid )
+        assert entry is not None
+        assert entry.status == "answering"
+
+    def test_release_turn_makes_it_answerable_again( self ) -> None:
+        """A multi-turn interview claims each turn and releases it; without this the
+        second turn of every disambiguation would be refused as already_resumed."""
+        pend, pid = self._parked()
+        assert pend.claim( pid ) is not None
+        assert pend.claim( pid ) is None              # held
+        assert pend.release_turn( pid ) is True
+        assert pend.claim( pid ) is not None          # answerable again
+
+    def test_release_turn_refuses_to_revive_a_terminal_entry( self ) -> None:
+        """release_turn only un-claims a turn it owns. A done conversation must not
+        be dragged back into an answerable state by a stray release."""
+        pend, pid = self._parked()
+        pend.claim( pid )
+        pend.set_status( pid, "done", answer="sunny" )
+        assert pend.release_turn( pid ) is False
+        assert pend.get( pid ).status == "done"
+
+    def test_second_claim_returns_none( self ) -> None:
+        """
+        RED ON REVERT: make claim() a plain get() — or restore
+        get-then-set_status — and the second caller gets an entry too.
+        """
+        pend, pid = self._parked()
+        assert pend.claim( pid ) is not None
+        assert pend.claim( pid ) is None
+
+    def test_missing_and_expired_also_return_none( self ) -> None:
+        """
+        All three losing cases are indistinguishable ON PURPOSE: missing, expired
+        and already-claimed all mean "this resume does not own the conversation",
+        and a caller that treats them differently is inventing a distinction the
+        guard does not make.
+        """
+        pend, _ = self._parked()
+        assert pend.claim( "no-such-id" ) is None
+
+        clock   = FakeClock()
+        expiring = PendingRequests( ttl_seconds=1.0, clock=clock )
+        pid      = expiring.put( extraction=None, user_email="u@x", session_id="s", user_id="u" )
+        clock.advance( 2_000_000_000 )
+        assert expiring.claim( pid ) is None
+
+    def test_only_one_of_many_concurrent_claims_wins( self ) -> None:
+        """
+        The property under real threads, not simulated turn-taking.
+
+        Twelve threads race for one pending_id behind a barrier so they arrive
+        together. Exactly one must come away with the entry. A sequential test
+        cannot show this: the guard could be broken and still look correct when
+        the calls never overlap, which is precisely the state of the code before
+        the handler moves off the event loop.
+        """
+        import threading
+
+        pend, pid = self._parked()
+        winners   = []
+        lock      = threading.Lock()
+        barrier   = threading.Barrier( 12 )
+
+        def racer():
+            barrier.wait()
+            got = pend.claim( pid )
+            if got is not None:
+                with lock: winners.append( got )
+
+        threads = [ threading.Thread( target=racer ) for _ in range( 12 ) ]
+        for t in threads: t.start()
+        for t in threads: t.join()
+
+        assert len( winners ) == 1, f"{len( winners )} callers claimed one pending_id — the guard is not atomic"
+
+
+class TestTraceFileUnderConcurrency:
+    """
+    Corruption B: the trace FILE, which is the only part of tracing two callers share.
+
+    The audit changed what this test is worth. `StageTrace` is per-request — the
+    flow builds a fresh one at flow.py:88 and :149 — so two callers cannot corrupt
+    each other's marks or fields. What they share is the day's file, appended to by
+    `write()` (trace.py:163-165).
+
+    So this is EXPECTED TO PASS, and it is written down as expected rather than
+    discovered afterwards. It is kept because "expected to pass" is a prediction,
+    and an unrun prediction is an opinion. If it ever goes red, interleaved appends
+    are corrupting records and the flow needs a lock it does not have today.
+    """
+
+    def test_concurrent_writes_produce_intact_records( self, tmp_path ) -> None:
+        import json as _json
+        import threading
+
+        writers = 16
+        barrier = threading.Barrier( writers )
+
+        def write_one( n ):
+            trace = StageTrace( trace_dir=str( tmp_path ) )
+            trace.mark( "t_recv" )
+            trace.set( "who", f"caller-{n}" )
+            barrier.wait()
+            trace.write()
+
+        threads = [ threading.Thread( target=write_one, args=( n, ) ) for n in range( writers ) ]
+        for t in threads: t.start()
+        for t in threads: t.join()
+
+        files = list( tmp_path.glob( "trace-*.jsonl" ) )
+        assert len( files ) == 1, f"expected one day-file, got {[ f.name for f in files ]}"
+        lines = [ l for l in files[ 0 ].read_text().splitlines() if l.strip() ]
+
+        assert len( lines ) == writers, f"{len( lines )} records for {writers} concurrent writers — appends were lost or split"
+        whos = set()
+        for line in lines:
+            record = _json.loads( line )      # a torn line raises here, which is the point
+            whos.add( record[ "who" ] )
+        assert whos == { f"caller-{n}" for n in range( writers ) }, "records were interleaved or overwritten"
+
+
 class TestOutcomeStatusVocabulary:
     """
     Step 1 of the brain-integration plan: `Outcome.status` says "waiting", not

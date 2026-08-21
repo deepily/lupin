@@ -9,8 +9,9 @@ Four terminal paths, in order:
     receptionist  the else — unascertainable intent, or a degraded failure
 
 The endpoint never waits for a human (plan §5): a missing argument parks the
-request and returns the first question immediately; the human round-trip runs on
-a background thread. An agent or replay that fails degrades to the receptionist
+request and returns the first question immediately; the human round-trip happens
+across two HTTP calls (ask then resume), each of which the router runs off the
+event loop via run_in_threadpool. An agent or replay that fails degrades to the receptionist
 with a distinct route_reason — never a 500, which would abort an eval run.
 
 Every collaborator (cache, router, expeditor, executor, pending, notifier) is
@@ -130,9 +131,18 @@ class AskFlow:
     # ---------------------------------------------------------------- the second turn
     def resume( self, pending_id: str, answer: str, websocket_id: str, speak: bool=True ) -> dict:
         """Fold a human's answer into a parked request and drive it to a terminal
-        result — SYNCHRONOUSLY. There is no background thread; that absence is a
-        permanent invariant of the design (the park site was storing a receipt,
-        not a continuation, until this second turn existed).
+        result, on the caller's thread.
+
+        This method spawns NO background thread of its own, and that remains a
+        design invariant: the park site stores a continuation, and this second turn
+        runs it to completion rather than handing it to a worker and returning early.
+
+        What CHANGED is the caller: routers/v2_ask.py now awaits this through
+        run_in_threadpool, so it executes on a worker thread instead of the event
+        loop. The docstring used to say "SYNCHRONOUSLY... no background thread",
+        which read as a promise that no thread is involved anywhere — untrue the
+        moment the handler moved off the loop, and exactly the kind of stale
+        sentence a reader trusts.
 
         Requires:
             - pending_id identifies a parked entry; answer is the human's reply to
@@ -158,7 +168,29 @@ class AskFlow:
                                command=None, ctx=( "", "", "", websocket_id, speak ),
                                pending_id=pending_id )
 
-        ctx        = ( entry.user_id, entry.user_email, entry.session_id, websocket_id, speak )
+        ctx = ( entry.user_id, entry.user_email, entry.session_id, websocket_id, speak )
+
+        # Claim the whole TURN atomically. Everything below is a read-modify-write on
+        # the entry's extraction, and it must have exactly one owner.
+        #
+        # Two things go wrong without this, and only the first needs concurrency.
+        # (a) A SECOND resume of a COMPLETED conversation reached
+        #     `extraction.missing[ 0 ]` on an empty list and raised IndexError — a
+        #     500 from the one path whose contract says it never 500s. Reachable at
+        #     HEAD with no threading at all: the entry lives until its TTL, so a
+        #     retry or a double-clicked answer hit it.
+        # (b) Two CONCURRENT resumes of a multi-argument interview both fold an
+        #     answer into the same extraction. That does not merely lose an answer,
+        #     it puts answers in the WRONG SLOTS: racing a location+date interview
+        #     produced {"location": "Tuesday", "date": "Boston"} in four runs of six.
+        #     Unreachable while this handler ran on the event loop; reachable the
+        #     moment it moved to a worker thread, which is this same commit.
+        if self.pending.claim( pending_id ) is None:
+            trace.set( "resume_error", "already_resumed" )
+            return self._emit( trace, path="needs_input", status="expired",
+                               route_reason="already_resumed", answer=None, answer_raw=None,
+                               command=entry.command, ctx=ctx, pending_id=pending_id )
+
         extraction = entry.extraction
         first_arg  = extraction.missing[ 0 ]
         extraction.final_args[ first_arg ] = answer
@@ -171,13 +203,18 @@ class AskFlow:
             next_q   = extraction.fallback_questions.get( next_arg ) or f"What {next_arg} would you like?"
             trace.mark( "t_first_useful" )
             self._speak( trace, next_q, None, ctx )
+            # The turn is over and the conversation is answerable again — hand it
+            # back, or every turn after the first would be refused as already_resumed.
+            self.pending.release_turn( pending_id )
             return self._emit( trace, path="needs_input", status="parked",
                                route_reason="args_incomplete", answer=next_q, answer_raw=None,
                                command=entry.command, ctx=ctx, pending_id=pending_id,
                                args_missing=list( extraction.missing ),
                                args_known=sorted( extraction.final_args.keys() ) )
 
-        # Complete — run the agent to a terminal result, advancing the seam.
+        # Complete — run the agent to a terminal result, advancing the seam. This
+        # turn already owns the conversation (claimed above), so no second claim is
+        # needed here; "answering" advances to "running".
         self.pending.set_status( pending_id, "running" )
         spec = resolve( entry.command )
         if spec is None:

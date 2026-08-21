@@ -65,6 +65,8 @@ class PendingRequests:
         - put() stores an entry and returns its pending_id.
         - get() returns a live entry or None, evicting it first if expired.
         - set_status() advances a live entry's status/answer/error.
+        - claim() atomically takes a live, still-pending entry and marks it
+          running, so only one caller can own a resume.
         - sweep() evicts every expired entry and returns the count evicted.
         - the store never retains a dict/list handed in by reference.
     """
@@ -137,6 +139,71 @@ class PendingRequests:
             if self._expired( entry ):
                 del self._entries[ pending_id ]
                 return None
+            return entry
+
+    def release_turn( self, pending_id: str ) -> bool:
+        """
+        Hand a claimed conversation back to "pending" for its next turn.
+
+        The interview-continue path calls this: it asked the next question and is
+        done for now, so the entry must be answerable again. Without it, a
+        multi-turn interview would claim on turn one and refuse every turn after.
+
+        Ensures:
+            - returns True and restores "pending" iff the entry is live and
+              currently "answering"; returns False otherwise, so a terminal entry
+              is never dragged back into an answerable state.
+        """
+        with self._lock:
+            entry = self.get( pending_id )
+            if entry is None or entry.status != "answering":
+                return False
+            entry.status = "pending"
+            return True
+
+    def claim( self, pending_id: str ) -> Optional[ PendingEntry ]:
+        """
+        Atomically take ownership of a parked entry for one resume TURN.
+
+        This exists because a resume TURN is a read-modify-write spread over
+        several calls: read the entry, fold the answer into its extraction, then
+        either re-ask or run the agent. The RLock keeps the dictionary
+        structurally sound; it does NOT make that sequence atomic.
+
+        Two concurrent resumes on one pending_id could both pass the liveness
+        check and both fold an answer into the SAME extraction object. On a
+        two-argument interview that does not merely lose an answer — it puts the
+        answers in the WRONG SLOTS, because each caller takes `missing[ 0 ]` at a
+        different moment. Measured, not theorised: racing two resumes of a
+        location+date interview produced {"location": "Tuesday", "date":
+        "Boston"} in four runs out of six.
+
+        That race is NOT reachable while the resume handler runs on the event
+        loop — one loop cannot interleave two of them. It becomes reachable the
+        moment the handler moves to a worker thread, which is the change this
+        method ships alongside, so the guard lands with the thing that creates
+        the need for it rather than after.
+
+        Requires:
+            - pending_id is the id returned by a prior put().
+
+        Ensures:
+            - returns the entry with status "answering" iff it was live AND
+              still had status "pending"; the whole check-and-set happens under
+              ONE lock acquisition. The caller owns the turn until it either
+              release_turn()s (interview continues) or advances the status
+              (the agent runs).
+            - returns None if the entry is missing, expired, or ALREADY claimed —
+              the caller cannot distinguish those, and must not: all three mean
+              "this resume does not own the conversation".
+        """
+        with self._lock:
+            entry = self.get( pending_id )
+            if entry is None:
+                return None
+            if entry.status != "pending":
+                return None
+            entry.status = "answering"
             return entry
 
     def set_status(
