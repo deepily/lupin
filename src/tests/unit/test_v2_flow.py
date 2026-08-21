@@ -2852,11 +2852,23 @@ class TestTheFlowAsksAboutANearMatch:
         this branch existed — route below a perfect hit — rather than a new replay
         nobody asked for. An omission must not be able to arm a guard.
 
-        RED ON REVERT: default the threshold to 90.0 in the constructor and every flow
-        in the process silently gains the behaviour.
+        ⚠️ THE ARGUMENT IS OMITTED, NOT PASSED AS None, and that is the whole test.
+        Passing `confirmation_threshold=None` explicitly proves only that the branch
+        honours a None it was handed; a constructor that DEFAULTED the parameter to 90.0
+        would leave this green while every flow in the process silently gained the
+        behaviour. The first version of this test did exactly that (Pocholo).
+
+        RED ON REVERT: default `confirmation_threshold` to 90.0 in AskFlow.__init__.
         """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
         confirmer = _FakeConfirmer()
-        f         = self._flow( tmp_path, notifier, monkeypatch, confirmer, threshold=None )
+        candidate = types.SimpleNamespace( question="what is on my todo list", id_hash="near-1" )
+        cache     = FakeCache( lookup_result=_lookup( is_replay_hit=False, best_candidate=candidate,
+                                                      best_score=95.0, similarity=95.0, tier="ann" ) )
+        f = AskFlow( cache, FakeRouter(), FakeExpeditor(), FakeExecutor( _outcome() ), FakePending(),
+                     crud_enabled=False, confirmer=confirmer,     # <- no confirmation_threshold
+                     receptionist_factory=FakeReceptionist, notifier=notifier, trace_dir=str( tmp_path ) )
 
         r = f.ask( "what's on my todo list", **_CTX )
 
@@ -2884,6 +2896,41 @@ class TestTheFlowAsksAboutANearMatch:
 
         assert confirmer.requests == [], "an exact hit was put to the user for confirmation"
         assert r[ "route_reason" ] == "exact_hit"
+
+    def test_a_non_interactive_caller_is_never_asked( self, tmp_path, notifier, monkeypatch ):
+        """
+        `interactive=False` says nobody is at the other end — dead_queue_watchdog's retry
+        is one such caller. Asking anyway sends a prompt to a user who never sees it,
+        holds the calling thread through the whole 30/60/120s retry ladder, and then
+        defaults to "no". Same answer, three minutes later, on a watchdog's thread.
+
+        It DECLINES rather than accepting: an unattended caller cannot consent.
+
+        RED ON REVERT: drop the interactive check and the confirmer is called.
+        """
+        confirmer = _FakeConfirmer( response_value="yes" )
+        f         = self._flow( tmp_path, notifier, monkeypatch, confirmer )
+
+        r = f.ask( "what's on my todo list", **_CTX, interactive=False )
+
+        assert confirmer.requests == [], "a caller with no human on it was put to the user"
+        assert r[ "path" ] == "agent", "the near match was accepted without consent"
+
+    def test_confirmation_off_still_auto_accepts_for_a_non_interactive_caller( self, tmp_path, notifier, monkeypatch ):
+        """
+        The two flags say different things and must not be collapsed. `interactive=False`
+        means nobody can answer; `similarity confirmation enabled = false` means nobody
+        should be asked at all — and under that setting v1 serves the match. Declining
+        here would take the cache away from every unattended caller on a configuration
+        that never wanted a prompt in the first place.
+        """
+        confirmer = _FakeConfirmer()
+        f         = self._flow( tmp_path, notifier, monkeypatch, confirmer, enabled=False )
+
+        r = f.ask( "what's on my todo list", **_CTX, interactive=False )
+
+        assert confirmer.requests == []
+        assert r[ "route_reason" ] == "near_match_auto_accepted"
 
     def test_a_crud_command_is_never_offered_a_near_match( self, tmp_path, notifier, monkeypatch ):
         """

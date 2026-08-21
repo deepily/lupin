@@ -242,7 +242,7 @@ class AskFlow:
             # Without it, 7b would delete the queue's copy and leave running_fifo_queue's
             # accept-above-the-floor — which is safe ONLY because the upstream ask
             # happened — and a 90-to-99% match would replay an answer nobody confirmed.
-            near_match, near_reason = self._near_match_replay( trace, lookup, ctx )
+            near_match, near_reason = self._near_match_replay( trace, lookup, ctx, interactive )
             if near_match is not None:
                 work    = Work( "replay", near_match, user_id, user_email, session_id, snapshotable=False )
                 outcome = self.executor.submit( work, trace )
@@ -680,7 +680,7 @@ class AskFlow:
         except Exception as e:
             if self.debug: print( f"[v2] query log write failed: {e}" )
 
-    def _near_match_replay( self, trace: StageTrace, lookup: Any, ctx: tuple ) -> tuple:
+    def _near_match_replay( self, trace: StageTrace, lookup: Any, ctx: tuple, interactive: bool ) -> tuple:
         """Decide whether a below-exact candidate may be replayed, and under what reason.
 
         Returns ( snapshot, route_reason ) to replay, or ( None, None ) to route on.
@@ -704,7 +704,8 @@ class AskFlow:
 
         The ask BLOCKS this thread for the length of the retry ladder, exactly as v1's
         does. That is affordable because the handler runs off the event loop through
-        run_in_threadpool — it would not be if it ran on the loop.
+        run_in_threadpool — it would not be if it ran on the loop. It is NOT affordable
+        when nobody is listening, which is what `interactive` decides below.
         """
         if self.confirmation_threshold is None:
             return ( None, None )
@@ -722,6 +723,21 @@ class AskFlow:
         if not self.confirmation_enabled:
             trace.set( "near_match_auto_accepted", score )
             return ( candidate, "near_match_auto_accepted" )
+
+        # NOBODY IS THERE TO ASK ⇒ DO NOT ASK (Pocholo, on 1b7310ce). `interactive=False`
+        # says the caller is a service account or a watchdog — dead_queue_watchdog's retry
+        # is one — so the prompt would go to a user who never sees it, hold this thread
+        # through the whole 30/60/120s retry ladder, and then default to "no" anyway. The
+        # answer is the same; the wait is not.
+        #
+        # It DECLINES rather than accepts: an unattended caller cannot consent, and
+        # `interactive` says whether a human can answer, not whether the match is good.
+        # Confirmation being OFF is a different statement — that nobody should be asked at
+        # all — which is why the auto-accept above is untouched by this.
+        if not interactive:
+            trace.set( "near_match_declined_non_interactive", score )
+            if self.debug: print( f"[v2] near match at {score:.1f}% declined unasked — no human on this call" )
+            return ( None, None )
 
         if self._user_confirms( candidate, score, ctx ):
             trace.set( "near_match_confirmed", score )
