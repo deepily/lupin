@@ -30,7 +30,7 @@ from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRA
 from cosa.agents.runtime_argument_expeditor.expeditor import ArgSpec
 from cosa.rest.v2.executor import Work
 from cosa.rest.salutations import parse_salutations
-from cosa.rest.v2.registry import resolve
+from cosa.rest.v2.registry import resolve, resolve_agentic
 from cosa.rest.v2.trace import StageTrace
 
 from lupin_cli.notifications.notify_user_async import notify_user_async
@@ -92,6 +92,7 @@ class AskFlow:
         writeback_enabled : bool                     = False,
         receptionist_factory : Callable[ ..., Any ]  = ReceptionistAgent,
         notifier          : Callable[ [ Any ], Any ] = notify_user_async,
+        agentic_factory   : Optional[ Callable[ ..., Any ] ] = None,
         trace_dir         : Optional[ str ]          = None,
         debug             : bool                     = False,
         verbose           : bool                     = False,
@@ -117,6 +118,11 @@ class AskFlow:
         self.similarity_floor     = similarity_floor
         self.writeback_enabled    = writeback_enabled
         self.receptionist_factory = receptionist_factory
+        # Builds an AGENTIC job from ( command, args ). None ⇒ lazily import the
+        # factory every existing door already calls, so there is one place that knows
+        # how to turn a command into a podcast job. Injectable because the real one
+        # imports ten job classes and their whole dependency stacks.
+        self.agentic_factory      = agentic_factory
         self.notifier             = notifier
         self.trace_dir            = trace_dir
         self.debug                = debug
@@ -305,6 +311,18 @@ class AskFlow:
 
         spec = resolve( command, self.crud_enabled )
         if spec is None:
+            # AGENTIC COMMANDS LIVE ON A SECOND READER, and `submit` could not reach it.
+            # `resolve()` is scoped to the CONVERSATIONAL class on purpose (registry
+            # §5.1.3) and returns None for every agentic command — measured, not read:
+            # `podcast generator`, `deep research`, `swe team` and `bug fix expediter`
+            # all come back None while `math` returns a spec. So every agentic submit
+            # fell straight through to the receptionist saying it did not understand a
+            # command the registry knows perfectly well. That made `/api/v2/submit`
+            # unable to build a single agentic job — and it is the door eleven retiring
+            # endpoints are about to name in their refusals.
+            agentic = resolve_agentic( command )
+            if agentic is not None:
+                return self._submit_agentic( trace, agentic, command, dict( args or {} ), question, ctx )
             trace.set( "unknown_command", command )
             return self._receptionist( trace, question or command, ctx, "unknown_command" )
 
@@ -321,6 +339,69 @@ class AskFlow:
         # still costs a read on every lookup. (Pocholo, reviewing step 10.)
         return self._run_agent( trace, spec, command, question or command, final_args, ctx,
                                 "submitted", snapshotable=spec.snapshotable and bool( question ) )
+
+    def _submit_agentic(
+        self, trace: StageTrace, spec: Any, command: str, args: dict,
+        question: Optional[ str ], ctx: tuple,
+    ) -> dict:
+        """Build an agentic job from ( command, args ) and run it like any other submit.
+
+        This is what every `/submit` endpoint did in its own handler: check the
+        arguments the command declares, hand them to `create_agentic_job`, and put the
+        result on the queue. Doing it here instead means the eleven doors can retire
+        into one, and — the reason it matters beyond tidiness — the guarded write-back
+        and the single entry point cover agentic work too.
+
+        THE ARGUMENT CHECK IS THE SPEC'S, NOT A LIST WRITTEN HERE. `spec.required_args`
+        comes off the same JOB_ARG_CONTRACTS entry the expeditor reads, so a job that
+        gains a required argument gains it here with no edit.
+
+        Requires:
+            - spec is an AGENTIC AgentSpec from resolve_agentic( command )
+
+        Ensures:
+            - missing arguments return the same non-parking needs_input refusal a
+              conversational submit returns; nothing is built and nothing is queued
+            - a factory that cannot build the command degrades to the receptionist
+              rather than raising out of the door
+            - a built job runs through the SAME path as a job handed over whole, so
+              there is one spelling of "run this and report it", not two
+        """
+        missing = [ arg for arg in spec.required_args if not args.get( arg ) ]
+        if missing:
+            return self._submit_needs_input( trace, command, missing, sorted( args ), ctx )
+
+        factory = self.agentic_factory
+        if factory is None:
+            # Lazy: the real factory imports ten job classes. Kept out of module scope
+            # so flow.py stays importable without every agent's dependency stack.
+            from cosa.rest.agentic_job_factory import create_agentic_job
+            factory = create_agentic_job
+
+        user_id, user_email, session_id, _websocket_id, _speak = ctx
+        try:
+            job = factory(
+                command    = command,
+                args_dict  = args,
+                user_id    = user_id,
+                user_email = user_email,
+                session_id = session_id,
+                debug      = self.debug,
+                verbose    = self.verbose,
+            )
+        except Exception as e:
+            trace.set( "agentic_build_error", str( e ) )
+            return self._receptionist( trace, question or command, ctx, "agentic_build_error",
+                                       primary_error=str( e ) )
+        if job is None:
+            # The factory returns None for a command it does not know. The registry said
+            # it was agentic, so the two tables disagree — say which command, because a
+            # bare receptionist here would send the next reader hunting.
+            trace.set( "agentic_build_error", f"factory returned None for {command}" )
+            return self._receptionist( trace, question or command, ctx, "agentic_build_error",
+                                       primary_error=f"factory returned None for {command}" )
+
+        return self._submit_prebuilt( trace, job, question or command, ctx )
 
     def _submit_prebuilt( self, trace: StageTrace, job: Any, question: str, ctx: tuple ) -> dict:
         """Run a job the caller already built. No registry lookup, no argument work.

@@ -193,12 +193,14 @@ def notifier():
 
 
 def _make_flow( tmp_path, cache, router, expeditor, executor, pending, notifier,
-                *, writeback_enabled=False, similarity_floor=100.0, crud_enabled=False ):
+                *, writeback_enabled=False, similarity_floor=100.0, crud_enabled=False,
+                agentic_factory=None ):
     return AskFlow(
         cache, router, expeditor, executor, pending,
         crud_enabled=crud_enabled,
         similarity_floor=similarity_floor, writeback_enabled=writeback_enabled,
         receptionist_factory=FakeReceptionist, notifier=notifier,
+        agentic_factory=agentic_factory,
         trace_dir=str( tmp_path ),
     )
 
@@ -1329,6 +1331,145 @@ def test_submit_with_an_unknown_command_degrades_to_the_receptionist( tmp_path, 
     monkeypatch.setattr( flow_mod, "resolve", lambda c, crud_enabled: None )
     f = _submit_flow( tmp_path, notifier )
     r = f.submit( command="agent router go to nowhere", args={}, **_CTX )
+    assert r[ "path" ]         == "receptionist"
+    assert r[ "route_reason" ] == "unknown_command"
+
+
+# ── the agentic arm of submit ─────────────────────────────────────────────────
+#
+# WHY THIS BLOCK EXISTS. `resolve()` is scoped to the CONVERSATIONAL class, so it
+# returns None for every agentic command and `submit` fell straight through to the
+# receptionist — measured before the fix: `podcast generator`, `deep research`,
+# `swe team` and `bug fix expediter` all came back None while `math` returned a spec.
+# `/api/v2/submit` therefore could not build a single agentic job, which is exactly
+# what eleven retiring endpoints are about to name in their refusals.
+#
+# The tests below use the REAL registry rather than a monkeypatched `resolve`. That is
+# deliberate: the defect WAS in the registry lookup, so a test that fakes the lookup
+# cannot see it come back.
+
+class _RecordingAgenticFactory:
+    """Records what the flow asked it to build, and hands back a job."""
+
+    def __init__( self, job=None ):
+        self.calls = [ ]
+        self._job  = job if job is not None else FakeAgent( routing_command="agent router go to podcast generator" )
+
+    def __call__( self, **kwargs ):
+        self.calls.append( kwargs )
+        return self._job
+
+
+def test_submit_builds_an_agentic_job_from_a_command_the_registry_knows( tmp_path, notifier ):
+    """The whole point: an agentic command reaches its factory instead of the receptionist.
+
+    Uses the real registry. Before the fix this returned path="receptionist",
+    route_reason="unknown_command" for a command the registry knows perfectly well.
+    """
+    factory  = _RecordingAgenticFactory()
+    executor = FakeExecutor()
+    f = _submit_flow( tmp_path, notifier, executor=executor, agentic_factory=factory )
+    r = f.submit( command="agent router go to podcast generator",
+                  args={ "research": "io/x.md" }, **_CTX )
+
+    assert r[ "path" ]         != "receptionist", r
+    assert r[ "route_reason" ] == "submitted_prebuilt"
+    assert len( factory.calls ) == 1
+    assert factory.calls[ 0 ][ "command" ]    == "agent router go to podcast generator"
+    assert factory.calls[ 0 ][ "args_dict" ]  == { "research": "io/x.md" }
+    assert factory.calls[ 0 ][ "user_id" ]    == "u1"
+    assert executor.works[ 0 ].job is factory._job, "the built job must be what runs"
+
+
+def test_submit_checks_the_agentic_commands_own_required_args( tmp_path, notifier ):
+    """The argument check is the SPEC's, not a list written in the flow.
+
+    Nothing is built and nothing is queued — asserted as an absence, because a
+    factory that was called and then discarded looks identical in the response.
+    """
+    factory  = _RecordingAgenticFactory()
+    executor = FakeExecutor()
+    f = _submit_flow( tmp_path, notifier, executor=executor, agentic_factory=factory )
+    r = f.submit( command="agent router go to podcast generator", args={}, **_CTX )
+
+    assert r[ "status" ]       == "needs_input"
+    assert r[ "route_reason" ] == "args_incomplete_no_park"
+    assert r[ "pending_id" ]   is None, "a submit must never park — nobody is there to answer"
+    assert r[ "args_missing" ]
+    assert factory.calls == [], "an under-specified command must not reach the factory"
+    assert executor.works == [], "and must not reach the queue"
+
+
+def test_submit_degrades_when_the_factory_cannot_build_the_command( tmp_path, notifier ):
+    """The registry said agentic and the factory said no — the two tables disagree.
+
+    Degrade rather than raise out of the door, and NAME the command, because a bare
+    receptionist here would send the next reader hunting.
+    """
+    f = _submit_flow( tmp_path, notifier, agentic_factory=lambda **kw: None )
+    r = f.submit( command="agent router go to podcast generator",
+                  args={ "research": "io/x.md" }, **_CTX )
+
+    assert r[ "path" ]         == "receptionist"
+    assert r[ "route_reason" ] == "agentic_build_error"
+    assert "podcast generator" in ( r[ "error" ] or "" )
+
+
+def test_submit_degrades_when_the_factory_raises( tmp_path, notifier ):
+    """A factory that throws must not become a 500 out of /api/v2/submit."""
+    def _boom( **kw ):
+        raise RuntimeError( "factory exploded" )
+    f = _submit_flow( tmp_path, notifier, agentic_factory=_boom )
+    r = f.submit( command="agent router go to podcast generator",
+                  args={ "research": "io/x.md" }, **_CTX )
+
+    assert r[ "path" ]         == "receptionist"
+    assert r[ "route_reason" ] == "agentic_build_error"
+    assert "factory exploded" in ( r[ "error" ] or "" )
+
+
+def test_the_agentic_arm_does_not_route_or_read_the_cache_either( tmp_path, notifier ):
+    """Everything `submit` skips, it skips on this arm too — otherwise the agentic
+    path would be a slower `ask` wearing the submit name."""
+    router = FakeRouter()
+    cache  = FakeCache()
+    router.route  = lambda q: ( _ for _ in () ).throw( AssertionError( "submit must not route" ) )
+    cache.lookup  = lambda q: ( _ for _ in () ).throw( AssertionError( "submit must not read the cache" ) )
+    expeditor     = FakeExpeditor()
+
+    f = _make_flow( tmp_path, cache, router, expeditor, FakeExecutor(), FakePending(), notifier,
+                    agentic_factory=_RecordingAgenticFactory() )
+    r = f.submit( command="agent router go to podcast generator",
+                  args={ "research": "io/x.md" }, **_CTX )
+
+    assert r[ "route_reason" ] == "submitted_prebuilt"
+    assert expeditor.calls == []
+
+
+def test_with_no_factory_injected_the_flow_reaches_the_real_one( tmp_path, notifier, monkeypatch ):
+    """The default is a LAZY IMPORT, and a lazy import is exactly the kind of wiring
+    that is never exercised because every test injects a fake.
+
+    Patched at its source module so the flow's `from ... import create_agentic_job`
+    picks up the fake; the assertion is that the flow got there at all.
+    """
+    seen = [ ]
+    def _fake( **kwargs ):
+        seen.append( kwargs[ "command" ] )
+        return FakeAgent( routing_command=kwargs[ "command" ] )
+    monkeypatch.setattr( "cosa.rest.agentic_job_factory.create_agentic_job", _fake )
+
+    f = _submit_flow( tmp_path, notifier )          # no agentic_factory
+    r = f.submit( command="agent router go to deep research", args={ "query": "q" }, **_CTX )
+
+    assert seen == [ "agent router go to deep research" ]
+    assert r[ "route_reason" ] == "submitted_prebuilt"
+
+
+def test_a_command_neither_reader_knows_still_reaches_the_receptionist( tmp_path, notifier ):
+    """The agentic lookup is a SECOND chance, not a replacement for the refusal."""
+    f = _submit_flow( tmp_path, notifier, agentic_factory=_RecordingAgenticFactory() )
+    r = f.submit( command="agent router go to nowhere at all", args={}, **_CTX )
     assert r[ "path" ]         == "receptionist"
     assert r[ "route_reason" ] == "unknown_command"
 
