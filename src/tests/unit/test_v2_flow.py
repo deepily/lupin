@@ -755,15 +755,55 @@ def test_the_flow_never_routes_through_the_expeditors_stateful_half( tmp_path, n
     list of the attribute names known today. A hand-list would pass the day
     someone adds a fifth per-call attribute — exactly the change worth catching.
 
-    RED ON REVERT: point the flow at `expedite()` (or otherwise let a request
-    write instance state) and the sentinels below come back changed.
+    RED ON REVERT — the exact mutation, which was run: in `flow.py`, replace
+    `self.expeditor.extract( command, raw_args, question, arg_spec )` with
+    `self.expeditor.expedite( command, raw_args, ctx[ 1 ], ctx[ 2 ], ctx[ 0 ], question,
+    job_id="job-1", bearer_token="tok-1" )`. `expedite` stamps `_job_id`,
+    `_bearer_token` and `_last_expedite_reason` on the instance before it does
+    anything else (`expeditor.py:309-311`), so the sentinels come back changed.
+
+    ⚠️ TWO THINGS MAKE THAT MUTATION ACTUALLY BITE, and without either one this
+    test passes under its own named revert:
+      1. The stub below carries `expedite()` and `collect()`, not `extract()`
+         alone. A stub missing the method answers `AttributeError`, which
+         `flow.py`'s `except Exception` folds into the receptionist path — the
+         real instance is never touched and the comparison stays green.
+      2. The real instance is wired far enough for `extract()` to RUN. Built by
+         `__new__` alone it raises at `self.debug` (`expeditor.py:367`) before
+         reaching a line that could write anything, so the delegation proved
+         nothing. It gets the five wiring attributes `extract()` reads, with a
+         fake LLM client and a fake template read: no config, no network, and
+         still the real code path.
     """
+    import cosa.agents.runtime_argument_expeditor.expeditor as expeditor_mod
     from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
 
     monkeypatch.setattr( flow_mod, "resolve",
                          lambda command: FakeSpec( required_args=( "location", ), snapshotable=False ) )
 
+    class FakeLlmClient:
+        def run( self, prompt ):
+            return ( "<response><all_required_met>true</all_required_met>"
+                     "<args_present>location=Boston</args_present>"
+                     "<args_missing></args_missing></response>" )
+
+    # Fake the template read rather than depend on a real prompt file's brace
+    # content — the LLM call and the file read are the only two things standing
+    # between this test and the real extract() body.
+    monkeypatch.setattr(
+        expeditor_mod.cu, "get_file_as_string",
+        lambda path: "SYS {system_args} HELP {help_text} Q {voice_command} "
+                     "EXTRACTED {extracted_args} REQUIRED {required_args}"
+    )
+
     real = RuntimeArgumentExpeditor.__new__( RuntimeArgumentExpeditor )   # no __init__: no config, no network
+    real.debug                = False
+    real.verbose              = False
+    real.prompt_template_path = "/unused — the read above is faked"
+    real.llm_spec_key         = "fake-llm"
+    real.llm_factory          = types.SimpleNamespace(
+        get_client=lambda key, debug=False, verbose=False: FakeLlmClient()
+    )
 
     # Sentinel the WHOLE instance state, not a hand-list of the names I happen to
     # know about. A list of four would pass the day someone adds a fifth per-call
@@ -773,18 +813,58 @@ def test_the_flow_never_routes_through_the_expeditors_stateful_half( tmp_path, n
         setattr( real, name, f"SENTINEL-{name}" )
     before = dict( real.__dict__ )
 
-    class ExtractOnly:
-        """Delegates extract() to the real class, so a change of what extract()
-        touches is felt here — a hand-written stub would hide exactly that."""
+    class DelegatingExpeditor:
+        """Delegates EVERY method the flow could reach to the real class, so a
+        change of which method the flow calls is felt on the real instance.
+
+        A stub carrying extract() alone was not enough, and made this test
+        vacuous under its own named mutation: point the flow at expedite() and
+        the stub answers AttributeError, which flow.py:123's `except Exception`
+        turns into the receptionist path — the real instance is never touched
+        and the sentinel comparison below passes while the boundary it exists to
+        guard is gone. Each name is appended AFTER the real call returns, so
+        `delegated` records methods that actually RAN, not merely ones that were
+        entered.
+        """
+
+        def __init__( self ):
+            self.delegated = []
+
         def extract( self, command, raw_args, question, spec ):
             RuntimeArgumentExpeditor.extract( real, command, raw_args, question, spec )
+            self.delegated.append( "extract" )
             return _extraction( final_args={ "location": "Boston" }, missing=[] )
 
-    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), ExtractOnly(),
+        def expedite( self, command, raw_args, user_email, session_id, user_id, original_question,
+                      job_id=None, bearer_token=None ):
+            RuntimeArgumentExpeditor.expedite( real, command, raw_args, user_email, session_id,
+                                               user_id, original_question,
+                                               job_id=job_id, bearer_token=bearer_token )
+            self.delegated.append( "expedite" )
+            return _extraction( final_args={ "location": "Boston" }, missing=[] )
+
+        def collect( self, extraction, command, original_question, spec,
+                     user_email, session_id, user_id ):
+            RuntimeArgumentExpeditor.collect( real, extraction, command, original_question, spec,
+                                              user_email, session_id, user_id )
+            self.delegated.append( "collect" )
+            return _extraction( final_args={ "location": "Boston" }, missing=[] )
+
+    stub = DelegatingExpeditor()
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter(), stub,
                     FakeExecutor( _outcome( status="done", answer="sunny", answer_raw="raw" ) ),
                     PendingRequests(), notifier )
     f.run( question="weather in Boston", user_id="u1", user_email="u@x", session_id="s1",
            websocket_id="ws1", speak=False, interactive=False )
+
+    # Anti-vacuity control. Without this, a request that reached NO expeditor
+    # method at all — or one whose real implementation threw before writing
+    # anything — would leave the sentinels untouched and read as a pass.
+    assert stub.delegated == [ "extract" ], (
+        f"the flow ran {stub.delegated} to completion on the real expeditor. Empty means "
+        f"no real method ran at all and the sentinel comparison below is vacuous; anything "
+        f"other than ['extract'] means the flow has reached the stateful half"
+    )
 
     after   = dict( real.__dict__ )
     changed = { k for k in set( before ) | set( after ) if before.get( k, object() ) != after.get( k, object() ) }
