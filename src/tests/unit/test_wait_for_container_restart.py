@@ -11,6 +11,7 @@ Identity does: the container's own StartedAt must be newer than the moment we as
 `docker` is stubbed on PATH, so nothing here starts, stops or inspects a real container.
 """
 import os
+import re
 import subprocess
 import textwrap
 
@@ -99,3 +100,48 @@ def test_bad_usage_is_refused( tmp_path, bad ):
     env = _docker_stub( tmp_path, 'echo "2026-08-21T16:00:00.000000000Z"' )
     result = _run( env, bad[ 0 ], bad[ 1 ], "--timeout", "2" )
     assert result.returncode == 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────
+# The invariant that lives in the CALLER, not the helper (Mr Radio, 2026-08-21)
+# ─────────────────────────────────────────────────────────────────────────────────────
+
+BOUNCE = os.path.join( os.environ[ "LUPIN_ROOT" ], "src/scripts/bounce-dev-server.sh" )
+
+
+def test_the_bounce_script_stamps_the_clock_before_it_restarts():
+    """
+    NOT_BEFORE must be captured BEFORE `docker restart` is issued, never after.
+
+    Read the ordering out of the script rather than trusting a comment: if someone moves
+    the stamp below the restart, a fast restart looks "old" to the identity guard and the
+    wait spins to its timeout on a bounce that actually worked. Nothing else in the suite
+    would catch that, because the helper is correct either way — the defect is in the
+    order the caller does two right things.
+    """
+    with open( BOUNCE, encoding="utf-8" ) as handle:
+        lines = handle.read().splitlines()
+
+    # Match the INVOCATION, not the log line that mentions it and not the header comments.
+    invocation = re.compile( r"^(if\s+!\s+)?docker\s+restart\b" )
+    stamp   = next( i for i, l in enumerate( lines ) if l.strip().startswith( "start_ts=$(date" ) )
+    restart = next( i for i, l in enumerate( lines ) if invocation.match( l.strip() ) )
+    assert stamp < restart, (
+        f"start_ts is stamped at line {stamp + 1}, after `docker restart` at line {restart + 1} — "
+        "a fast restart will read as the old process and the wait will spin to timeout"
+    )
+
+
+def test_a_same_second_restart_is_accepted_not_refused( tmp_path ):
+    """
+    The comparison is `>=`, and that is deliberate: `date +%s` has second resolution, so a
+    restart completing inside the same second as the stamp is the COMMON case, and `>`
+    would fail every one of them. The cost is a false-pass window of up to one second —
+    a container that started slightly BEFORE we asked, in the same second, is accepted.
+    Pinned here so the trade is a decision on the record rather than an accident.
+    """
+    env = _docker_stub( tmp_path, """
+        echo "2026-08-21T16:00:00.000000000Z"
+    """ )
+    result = _run( env, "lupin-rest-dev", "1787328000", "--timeout", "2" )   # exactly equal
+    assert result.returncode == 0, "an equal-second restart was refused; the >= is what makes the common case work"
