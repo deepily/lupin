@@ -1410,3 +1410,35 @@ def test_an_unreadable_config_answers_the_ini_default( monkeypatch ):
 
     monkeypatch.setattr( builtins, "__import__", _boom )
     assert ve._crud_agents_enabled() is True
+
+
+def test_the_summary_itself_follows_the_flag( monkeypatch ):
+    """
+    THROUGH the reader, which is the gap Pocholo found in my first pair of tests:
+    one passed crud_enabled= explicitly and the other called _crud_agents_enabled()
+    alone, so hardcoding crud_enabled=True back inside compute_metrics left all of
+    them green. Neither ran the path that reads the flag.
+
+    With the flag OFF, todo does not fork, it IS snapshotable, and a todo request
+    that did not replay is a REAL cache miss — it must stay in the denominator.
+    Dropping it would report a rate that flatters the cache.
+
+    RED ON REVERT: hardcode crud_enabled=True at the compute_metrics call site and
+    the denominator falls to 1.
+    """
+    monkeypatch.setattr( ve, "_crud_agents_enabled", lambda: False )
+    records = [
+        _rec( path="replay", similarity=100.0, command="agent router go to math" ),
+        _rec( path="agent",  command="agent router go to todo" ),   # a real miss when the flag is OFF
+    ]
+    m = ve.compute_metrics( records )
+    assert m[ "cache_hit_denominator" ] == 2, "a cacheable miss was excluded — the reader ignored the flag"
+    assert m[ "cache_excluded_n" ]      == 0
+    assert m[ "cache_hit_rate" ]        == 0.5
+
+    # The other side of the same call, so the assertion above cannot pass by the
+    # reader ignoring the flag in BOTH directions.
+    monkeypatch.setattr( ve, "_crud_agents_enabled", lambda: True )
+    m_on = ve.compute_metrics( records )
+    assert m_on[ "cache_hit_denominator" ] == 1
+    assert m_on[ "cache_excluded_n" ]      == 1
