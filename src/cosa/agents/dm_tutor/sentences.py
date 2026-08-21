@@ -286,6 +286,62 @@ def pointer_tokens( text ):
     return found
 
 
+def is_bare_identifier( token ):
+    """
+    True when a pointer token is a bare identifier — an id with nowhere to look.
+
+    WHY THE DISTINCTION EXISTS (Rick, 2026-08-21, row a0151611): "What is obviously
+    pointless and nonsensical is 10 to 12 lines of hashes. A standalone nonsensical
+    out-of-context hash has no place there." A path, a URL and a bare filename each
+    tell a reader WHERE TO LOOK, and survive the loss of the sentence around them. An
+    8-hex row id does not: once the sentence that gave it meaning is rewritten away,
+    the id is eight characters of nothing.
+
+    The test is structural, not a second pattern to keep in sync: by construction of
+    _POINTER_TOKEN, a token with neither a slash nor a dot can only be the bare 8-hex
+    row-id shape — a URL carries "://", a slashed path carries "/", and a bare
+    filename carries its extension's dot.
+
+    Requires:
+        - token is a non-empty string produced by _POINTER_TOKEN
+
+    Ensures:
+        - True for a bare 8-hex row id ("e0bb5a94")
+        - False for URLs, slashed paths and bare filenames ("job.py:1163")
+
+    Raises:
+        - nothing
+    """
+    return "/" not in token and "." not in token
+
+
+def restorable_pointers( text ):
+    """
+    The pointer tokens worth putting BACK when a rewrite drops them — paths only.
+
+    🔴 THIS IS A SEPARATE SELECTOR ON PURPOSE — DO NOT NARROW `pointer_tokens` TO GET
+    THE SAME EFFECT. That function is used two ways that must not disagree (its own
+    docstring says so): it is the body of the whole-line structure rule _ATTACHMENT,
+    so a restored line counts as structure and repairing a message can never push it
+    back over the trigger. Narrowing it would ALSO change the sentence counter, and a
+    bare id line would start counting as a claim.
+
+    So the structure rule keeps seeing all four pointer shapes, and only the RESTORE
+    path is narrowed — which is the only place Rick's complaint lives.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns pointer_tokens( text ) minus every bare identifier, same order
+        - returns [] when the body carries none, or carries only bare identifiers
+
+    Raises:
+        - nothing
+    """
+    return [ token for token in pointer_tokens( text ) if not is_bare_identifier( token ) ]
+
+
 def count_sentences( text ):
     """
     Count the claim-carrying sentences in a DM body.

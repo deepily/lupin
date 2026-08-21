@@ -12,7 +12,7 @@ its token lifted out and restored.
 
 import unittest
 
-from cosa.agents.dm_tutor.sentences import pointer_tokens, count_sentences
+from cosa.agents.dm_tutor.sentences import pointer_tokens, count_sentences, is_bare_identifier, restorable_pointers
 
 
 class TestPointerTokens( unittest.TestCase ):
@@ -159,6 +159,50 @@ class TestWholeLinePointerIsStructure( unittest.TestCase ):
                       "running_fifo_queue.py:422\n"
                       "e0bb5a94" )
         self.assertEqual( count_sentences( delivered ), 3 )
+
+
+class TestRestorablePointersIsNarrowerThanPointerTokens( unittest.TestCase ):
+    """
+    Two selectors, and keeping them SEPARATE is the whole design (row a0151611).
+
+    `pointer_tokens` is the body of the whole-line structure rule, so narrowing it
+    would silently change the sentence counter — a delivered pointer line would start
+    counting as a claim and a repaired message could re-trigger the tutor. Only the
+    RESTORE path is narrowed, and this class pins both halves: what the counter sees is
+    unchanged, and what comes back after a rewrite is paths only.
+    """
+
+    _BODY = ( "The leak is in running_fifo_queue.py:422 and the probe is at "
+              "/tmp/claude-1001/scratchpad/repro.py, recording to row e0bb5a94.\n"
+              "See https://example.com/x for the write-up." )
+
+    def test_a_bare_row_id_is_a_bare_identifier( self ):
+        self.assertTrue( is_bare_identifier( "e0bb5a94" ) )
+
+    def test_paths_urls_and_filenames_are_not( self ):
+        for token in ( "/tmp/claude-1001/scratchpad/repro.py", "running_fifo_queue.py:422",
+                       "job.py", "https://example.com/x", "src/rnd/note.md" ):
+            with self.subTest( token=token ):
+                self.assertFalse( is_bare_identifier( token ),
+                                  f"{token} says where to look — it must stay restorable" )
+
+    def test_restorable_pointers_drops_the_id_and_keeps_the_rest( self ):
+        self.assertEqual( restorable_pointers( self._BODY ),
+                          [ "running_fifo_queue.py:422", "/tmp/claude-1001/scratchpad/repro.py",
+                            "https://example.com/x" ] )
+
+    def test_pointer_tokens_still_sees_the_id( self ):
+        """
+        THE CONTROL FOR THE TRAP. If this ever goes red, someone narrowed
+        `pointer_tokens` in place and the sentence counter moved with it.
+        """
+        self.assertIn( "e0bb5a94", pointer_tokens( self._BODY ) )
+
+    def test_a_body_of_only_ids_is_restorable_by_nothing( self ):
+        self.assertEqual( restorable_pointers( "Rows a0151611 and adf5c1a1 are open." ), [] )
+
+    def test_a_body_with_no_pointer_at_all( self ):
+        self.assertEqual( restorable_pointers( "Plain prose with no pointer." ), [] )
 
 
 if __name__ == "__main__":
