@@ -33,6 +33,8 @@ import os
 import pytest
 import requests
 
+from tests.integration.v2_queued import assert_handed_off, wait_for_done
+
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
@@ -100,7 +102,13 @@ def test_v2_ask_parks_then_resume_reaches_terminal_done( auth_headers ):
         assert pending_id, f"parked but no pending_id to resume: {ask}"
         assert ask[ "wrote_snapshot" ] is False, f"a parked ask must not write back: {ask}"
 
-        # ── resume: fold the answer. MUST drive to a terminal done, synchronously.
+        # ── resume: fold the answer. The work is HANDED OFF to the queue, not run here.
+        #
+        # This used to assert `status == "done"` off this response, which is what the
+        # INLINE executor did — it ran the agent on the request thread. The product's
+        # executor is the queued one, so resume answers `waiting` with a job_id and the
+        # queue produces the answer behind it (row ce29cd20). What the test is FOR is
+        # unchanged: a parked flow must terminate. It just terminates in the queue.
         r2 = requests.post(
             _RESUME,
             json    = { "pending_id": pending_id, "answer": "Boston", "speak": False },
@@ -109,10 +117,20 @@ def test_v2_ask_parks_then_resume_reaches_terminal_done( auth_headers ):
         )
         assert r2.status_code == 200, f"resume: {r2.status_code} {r2.text}"
         res = r2.json()
-        snapshot_id = res.get( "snapshot_id" )
-        assert res[ "status" ] == "done", f"resume did not reach a terminal done — parked flow never terminated: {res}"
+        job_id = assert_handed_off( res, expect_path="agent" )
         assert res[ "route_reason" ] == "resumed", f"expected route_reason='resumed', got {res[ 'route_reason' ]}: {res}"
-        assert res[ "path" ] == "agent", f"expected agent path on resume, got {res[ 'path' ]}: {res}"
-        assert res[ "answer" ], f"resume completed with no answer: {res}"
+        assert res[ "wrote_snapshot" ] is False, (
+            f"a queued hand-off wrote a snapshot before the agent ran: {res}"
+        )
+
+        # ── the queue runs the weather agent and the resumed flow reaches its answer.
+        done = wait_for_done( BASE_URL, job_id, auth_headers )
+        assert done.get( "response_text" ) or done.get( "answer" ), (
+            f"the resumed job completed with no answer — the parked flow never produced "
+            f"one, which is the DoD-4 failure this test guards: {done}"
+        )
     finally:
+        # WeatherAgent results are not serialized by the queue (running_fifo_queue
+        # excludes it, and the registry marks weather snapshotable=False), so there is
+        # normally nothing to clean up — the call stays as a guard in case that changes.
         _cleanup_snapshot( snapshot_id )
