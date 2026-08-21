@@ -80,13 +80,19 @@ _QUOTE      = re.compile( r"^\s*>\s?" )
 # the body (pointer_tokens). The 8-hex form requires at least one hex LETTER so a plain
 # 8-digit number (a year, a count) is never mistaken for a row id.
 _CODE_EXT = r"py|md|ini|sh|json|ya?ml|txt|js|jsx|ts|tsx|html|css|sql|toml|cfg|xml"
+_BARE_ROW_ID_SRC = r"(?=[0-9a-f]*[a-f])[0-9a-f]{8}"   # >=1 hex letter, so "20260821" is a number
 _POINTER_TOKEN_SRC = (
     r"(?:[A-Za-z][A-Za-z0-9+.-]*://[^\s)]+"         # a URL — https:// , vllm:// , file://
     r"|~?/?(?:[\w.@%+-]+/)+[\w.@%+#?=&-]*(?::\d+)?" # a slashed path, optional :line
     rf"|\b[\w-]+\.(?:{_CODE_EXT})\b(?::\d+)?"       # a bare filename.ext, optional :line
-    r"|\b(?=[0-9a-f]*[a-f])[0-9a-f]{8}\b)"          # a bare 8-hex row id (>=1 hex letter)
+    rf"|\b{_BARE_ROW_ID_SRC}\b)"                    # a bare 8-hex row id
 )
 _POINTER_TOKEN = re.compile( _POINTER_TOKEN_SRC, re.IGNORECASE )
+
+# The SAME row-id shape, ANCHORED, for callers holding a raw string rather than a token
+# the pointer grammar already matched. Built from the one source above so the two can
+# never drift apart. See is_bare_row_id for why the distinction is load-bearing.
+_BARE_ROW_ID = re.compile( rf"^{_BARE_ROW_ID_SRC}$", re.IGNORECASE )
 
 # 🔴 THE SLASHED-PATH SHAPE ABOVE ALSO MATCHES THINGS THAT ARE NOT PATHS. The
 # repeated `[\w.@%+-]+/` group happily matches a slash-separated ENUMERATION
@@ -322,6 +328,35 @@ def is_bare_identifier( token ):
         - nothing
     """
     return "/" not in token and "." not in token
+
+
+def is_bare_row_id( value ):
+    """
+    True when a RAW string is exactly an 8-hex row id. Safe on untrusted input.
+
+    🔴 WHY THIS EXISTS AND `is_bare_identifier` COULD NOT BE USED (María, row 6dbba874).
+    That function's precondition is "a token produced by _POINTER_TOKEN" — given one,
+    "no slash and no dot" can only be the row-id shape. Handed a RAW value it degenerates
+    into exactly that test and eats every extensionless real filename: Makefile, README,
+    LICENSE, Dockerfile, src, io. Three of those are tracked files in this repo. A
+    precondition is not a suggestion, and borrowing a filter across the line where its
+    precondition holds is how a narrow guard silently becomes a wide one.
+
+    So callers holding a raw string — the tutor's path SLOT, whose contents are whatever
+    the model typed — use this, which asks the question directly instead.
+
+    Requires:
+        - value is a string ( or None )
+
+    Ensures:
+        - True only for exactly 8 hex characters carrying at least one letter a-f
+        - False for "Makefile", "README", "src", "20260821", "src/a.py", "notes.md",
+          "", and None
+
+    Raises:
+        - nothing
+    """
+    return bool( _BARE_ROW_ID.fullmatch( ( value or "" ).strip() ) )
 
 
 def restorable_pointers( text ):

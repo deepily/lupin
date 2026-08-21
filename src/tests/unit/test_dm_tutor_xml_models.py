@@ -194,6 +194,63 @@ class TestPointerAndDelivery:
     def test_null_word_matching_ignores_case_and_padding( self, null_word ):
         assert _response( file_path_or_url=null_word ).pointer == ""
 
+    def test_a_bare_row_id_in_the_slot_is_not_a_pointer( self ):
+        """
+        🔴 THE LIVE ONE (row 56a3c48d). a0151611 stopped the prompt ordering hash lists
+        and stopped the restore appending row ids, and a DM STILL arrived as three
+        sentences and a bare line reading "fb9faba7" — the model had put the id in the
+        PATH slot, which nothing checked. The id is treated like "N/A": a pointer the
+        model signalled and does not have.
+        """
+        assert _response( file_path_or_url="fb9faba7" ).pointer == ""
+
+    def test_the_delivered_message_gains_no_bare_id_line( self ):
+        """The end-to-end shape a recipient sees. This is the assertion Rick's rule is."""
+        lines = _response( file_path_or_url="fb9faba7" ).to_delivery().splitlines()
+        assert lines == [ "The headline", "First support", "Second support" ]
+
+    @pytest.mark.parametrize( "identifier", [ "fb9faba7", "a0151611", "e0bb5a94", "FB9FABA7" ] )
+    def test_every_row_id_shape_is_suppressed( self, identifier ):
+        assert _response( file_path_or_url=identifier ).pointer == ""
+
+    @pytest.mark.parametrize( "real", [ "src/a.py:12", "job.py", "running_fifo_queue.py:422",
+                                        "https://example.com/x", "/tmp/probe.py", "src/rnd/note.md",
+                                        # 🔴 María's refutation, row 6dbba874. The first cut asked
+                                        # is_bare_identifier — whose precondition is a token the
+                                        # pointer grammar already matched — about the RAW slot
+                                        # value, where it degenerates to "no dot and no slash" and
+                                        # ate every extensionless real filename. Three of these six
+                                        # are tracked files in this repo.
+                                        "Makefile", "README", "LICENSE", "Dockerfile", "src", "io" ] )
+    def test_a_real_pointer_is_still_delivered( self, real ):
+        """
+        CONTROL, and the one that catches an over-wide guard. Every value here says
+        where to look. Delete the row-id guard and the suppression tests go red; widen
+        it back to "anything without a slash" and the last six of these do.
+        """
+        assert _response( file_path_or_url=real ).pointer == real
+
+    @pytest.mark.parametrize( "real", [ "Makefile", "README", "LICENSE", "Dockerfile", "src", "io" ] )
+    def test_an_extensionless_filename_is_not_reported_as_refused_either( self, real ):
+        """The disclosure must agree with the delivery — nothing was refused here."""
+        assert _response( file_path_or_url=real ).pointer_cleared == ""
+
+    def test_the_refused_value_is_named_for_the_log( self ):
+        """
+        A suppression nobody can see is unauditable (María's second requirement). The
+        slot drops the id; this says WHICH id, so the reader asking "why did this DM
+        carry no path" has something to read.
+        """
+        assert _response( file_path_or_url="fb9faba7" ).pointer_cleared == "fb9faba7"
+
+    @pytest.mark.parametrize( "quiet", [ "src/a.py:12", "https://example.com/x", "", "N/A", "none" ] )
+    def test_nothing_is_reported_when_nothing_was_refused( self, quiet ):
+        """
+        A real pointer is not a refusal, and neither is a null-word — "N/A" is the model
+        correctly saying it has no path. Reporting either would bury the real case.
+        """
+        assert _response( file_path_or_url=quiet ).pointer_cleared == ""
+
     def test_delivery_is_three_lines_without_a_pointer( self ):
         lines = _response().to_delivery().splitlines()
         assert lines == [ "The headline", "First support", "Second support" ]

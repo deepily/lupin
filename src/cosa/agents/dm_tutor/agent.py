@@ -152,6 +152,16 @@ class DmTutorAgent( AgentBase ):
         try:
             fields        = self.run_prompt()
             self.response = DmTutorResponse( **fields )
+
+            # A REFUSED PATH SLOT IS ANNOUNCED, not silently dropped (row 56a3c48d).
+            # `pointer` discards a bare identifier because delivering it is the shape
+            # Rick banned — but a reader later asking "why did this DM carry no path"
+            # would find nothing at all to read. Printed unconditionally rather than
+            # behind self.debug: the whole point is that it is visible where the DM was
+            # processed, and it fires only on the refusal, never on an ordinary send.
+            cleared = self.response.pointer_cleared
+            if cleared: print( f"[dm-tutor] pointer_slot_cleared={cleared}" )
+
             return self.response.to_delivery()
         except Exception as e:
             # Deliberately broad. This sits in the DM delivery path, where the
