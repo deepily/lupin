@@ -1252,3 +1252,63 @@ def test_dump_records_early_never_kills_the_run( tmp_path ):
     blocker = tmp_path / "not-a-dir"
     blocker.write_text( "i am a file" )
     assert ve.dump_records_early( str( blocker ), [ ], [ _rec() ] ) is None
+
+
+# ---------------------------------------------------------------------------
+# error rates must count over ANSWERED, not over ok (row d8d019f6, 2026-08-20)
+#
+# These rates read `ok`, which was harmless while `ok` meant "the server answered".
+# is_completed_ok changed `ok` to mean "the work completed", which moved every errored
+# record out of the set the rates measure over — so all four went structurally zero at
+# exactly the moment they had something to report. ts-e0311090 published
+# replay_failure_rate 0.0 while 42 of 100 warm responses came back replay_error.
+# ---------------------------------------------------------------------------
+def test_replay_failures_are_counted_even_though_they_are_not_ok():
+    """THE DIRTY CASE: old denominator reads 0.0, new one reads the truth."""
+    records  = [ _rec( ok=False, route_reason="replay_error" ) for _ in range( 42 ) ]
+    records += [ _rec( path="replay" ) for _ in range( 58 ) ]
+    m = ve.compute_metrics( records )
+    assert m[ "replay_failure_rate" ] == 0.42, "0.0 read as 'replay is healthy' while replay was failing"
+    assert m[ "n_answered" ] == 100
+
+
+def test_every_route_error_rate_counts_over_answered():
+    for reason, key in ( ( "router_error",  "router_error_rate"  ),
+                         ( "extract_error", "extract_error_rate" ),
+                         ( "agent_error",   "agent_error_rate"   ) ):
+        records = [ _rec( ok=False, route_reason=reason ) ] + [ _rec() for _ in range( 3 ) ]
+        assert ve.compute_metrics( records )[ key ] == 0.25, key
+
+
+def test_a_non_two_hundred_is_excluded_from_the_error_denominator():
+    """`answered` means the server responded — a transport failure was never answered."""
+    records = [ _rec( ok=False, status=500 ), _rec( ok=False, route_reason="replay_error" ) ]
+    m = ve.compute_metrics( records )
+    assert m[ "n_answered" ] == 1
+    assert m[ "replay_failure_rate" ] == 1.0
+
+
+def test_a_clean_run_reports_exactly_what_it_always_did():
+    """THE CLEAN CASE: no errors anywhere, so answered == ok and the denominator is identical."""
+    records = [ _rec() for _ in range( 5 ) ]
+    m = ve.compute_metrics( records )
+    assert m[ "n_answered" ] == m[ "n_ok" ] == 5      # the two denominators coincide exactly
+    assert m[ "replay_failure_rate" ] == 0.0
+    assert m[ "router_error_rate" ]   == 0.0
+
+
+def test_the_accessor_layer_can_read_an_errored_records_reason():
+    """
+    THE SECOND LAYER. Fixing the denominator alone left the rates at 0.0, because
+    response_route_reason gates on `ok` and returned None for exactly the records carrying
+    an error. The instrument refused to look at its own evidence at two independent layers,
+    and either one alone was enough to silence it.
+    """
+    errored = _rec( ok=False, status=200, route_reason="replay_error" )
+    assert ve.response_route_reason( errored ) is None          # ok-gated view, unchanged on purpose
+    assert ve.reported_route_reason( errored ) == "replay_error"  # the view the error rates use
+
+
+def test_reported_route_reason_is_none_for_a_transport_failure():
+    assert ve.reported_route_reason( _rec( ok=False, status=502 ) ) is None
+    assert ve.reported_route_reason( { "status_code": 200, "payload": None } ) is None

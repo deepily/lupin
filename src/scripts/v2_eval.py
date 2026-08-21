@@ -350,6 +350,31 @@ def response_route_reason( record: Dict[ str, Any ] ) -> Optional[ str ]:
     return record[ "payload" ].get( "route_reason" )
 
 
+def reported_route_reason( record: Dict[ str, Any ] ) -> Optional[ str ]:
+    """
+    The `route_reason` a 200 CARRIES, whether or not the work completed.
+
+    🔴 THE SECOND LAYER OF THE STRUCTURAL ZERO (row d8d019f6, 2026-08-20). Moving the error
+    rates onto an `answered` denominator was not enough, because response_route_reason
+    GATES ON `ok` and returns None for exactly the records that carry an error. Once
+    is_completed_ok made `ok` mean "the work completed", the accessor stopped being able to
+    read the errored records at all — so the rates still came out 0.0 with a correct
+    denominator. The instrument refused to look at its own evidence at two independent
+    layers, and either one alone was enough to silence it.
+
+    response_route_reason keeps its ok-gated meaning for the cache/candidate views, which
+    legitimately describe completed work only. This is its peer for the error views.
+
+    Ensures:
+        - returns the body's route_reason for any request that returned 200, errored or not
+        - returns None for a non-200 (no body was answered) or an unparseable payload
+    """
+    if record.get( "status_code" ) != 200:
+        return None
+    payload = record.get( "payload" )
+    return payload.get( "route_reason" ) if isinstance( payload, dict ) else None
+
+
 def response_similarity( record: Dict[ str, Any ] ) -> Optional[ float ]:
     """The §8 `similarity` (best score) for a record, or None when absent/failed."""
     if not record[ "ok" ]:
@@ -472,10 +497,28 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
 
     cache_hits      = [ r for r in ok if response_path( r ) == PATH_REPLAY ]
     cache_candidates = [ r for r in ok if response_similarity( r ) is not None ]
-    replay_failures = [ r for r in ok if response_route_reason( r ) == ROUTE_REPLAY_ERROR ]
-    router_errors   = [ r for r in ok if response_route_reason( r ) == ROUTE_ROUTER_ERROR ]
-    extract_errors  = [ r for r in ok if response_route_reason( r ) == ROUTE_EXTRACT_ERROR ]
-    agent_errors    = [ r for r in ok if response_route_reason( r ) == ROUTE_AGENT_ERROR ]
+
+    # ERROR RATES ARE COUNTED OVER EVERY ANSWERED REQUEST, NOT OVER `ok` (row d8d019f6,
+    # 2026-08-20). They used to read `ok`, which was harmless while `ok` meant "the server
+    # answered" - an errored 200 was still in that set, so it could still be counted. The
+    # moment is_completed_ok made `ok` mean "the work completed", every errored record left
+    # the set these rates measure over, and all four went STRUCTURALLY ZERO: they could no
+    # longer report the thing they are named for.
+    #
+    # ts-e0311090 is the receipt. The artifact published replay_failure_rate 0.0 while the
+    # raw records show 42 of 100 warm responses returning replay_error and 5 agent_error -
+    # every one an HTTP 200. A rate of 0.0 read as "replay is healthy" while replay was
+    # failing 42% of the time.
+    #
+    # `answered` is the right denominator: every request the server responded to, whether or
+    # not the work completed. On a clean run it equals the old set exactly, so nothing that
+    # used to report correctly changes.
+    answered        = [ r for r in records if r[ "status_code" ] == 200 ]
+    n_answered      = len( answered )
+    replay_failures = [ r for r in answered if reported_route_reason( r ) == ROUTE_REPLAY_ERROR ]
+    router_errors   = [ r for r in answered if reported_route_reason( r ) == ROUTE_ROUTER_ERROR ]
+    extract_errors  = [ r for r in answered if reported_route_reason( r ) == ROUTE_EXTRACT_ERROR ]
+    agent_errors    = [ r for r in answered if reported_route_reason( r ) == ROUTE_AGENT_ERROR ]
 
     latencies = [ v for v in ( first_useful_ms( r ) for r in ok ) if v is not None ]
 
@@ -513,12 +556,13 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
         "n"                   : n,
         "n_ok"                : n_ok,
         "n_http_error"        : n - n_ok,
+        "n_answered"          : n_answered,   # the four error rates are over THIS, not n_ok
         "cache_hit_rate"      : _rate( len( cache_hits ),       n_ok ),
         "cache_candidate_rate": _rate( len( cache_candidates ), n_ok ),
-        "replay_failure_rate" : _rate( len( replay_failures ),  n_ok ),
-        "router_error_rate"   : _rate( len( router_errors ),    n_ok ),
-        "extract_error_rate"  : _rate( len( extract_errors ),   n_ok ),
-        "agent_error_rate"    : _rate( len( agent_errors ),     n_ok ),
+        "replay_failure_rate" : _rate( len( replay_failures ),  n_answered ),
+        "router_error_rate"   : _rate( len( router_errors ),    n_answered ),
+        "extract_error_rate"  : _rate( len( extract_errors ),   n_answered ),
+        "agent_error_rate"    : _rate( len( agent_errors ),     n_answered ),
         "routing_eligible_n"  : len( eligible ),
         "routing_excluded_n"  : excluded_n,
         "routing_excluded_share" : _rate( excluded_n, n ),
