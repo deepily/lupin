@@ -1312,3 +1312,96 @@ def test_the_accessor_layer_can_read_an_errored_records_reason():
 def test_reported_route_reason_is_none_for_a_transport_failure():
     assert ve.reported_route_reason( _rec( ok=False, status=502 ) ) is None
     assert ve.reported_route_reason( { "status_code": 200, "payload": None } ) is None
+
+
+# ---------------------------------------------------------------------------
+# Cold-store fail-fast (row a77a7906)
+#
+# guard_cold_start already REFUSES a contaminated baseline, but only after the
+# whole corpus has run. On 2026-08-21 that meant a warm store would have cost two
+# hours of inference before anyone was told. These arms pin the incremental check:
+# same predicate, earlier moment.
+# ---------------------------------------------------------------------------
+def test_cold_pass_aborts_on_the_first_replayed_answer():
+    def ask( q ):
+        return _rec( utterance=q, path="replay" )
+    with pytest.raises( ve.EvalIntegrityError ) as excinfo:
+        ve.run_pass( [ ( "u1", "cmd-a" ), ( "u2", "cmd-b" ) ], ask, "cold" )
+    assert "cold-start integrity failed" in str( excinfo.value )
+
+
+def test_cold_abort_happens_EARLY_not_after_the_corpus():
+    """
+    THE ARM THAT CARRIES THIS FIX. The value is entirely in WHEN it raises: an
+    end-of-pass check already exists (guard_cold_start). Re-implement this as a
+    post-loop scan and this test goes red while every other arm stays green.
+    """
+    calls = []
+    def ask( q ):
+        calls.append( q )
+        # cold and clean for two calls, then the store turns out to be warm
+        return _rec( utterance=q, path="replay" if len( calls ) == 3 else "agent" )
+    corpus = [ ( f"u{i}", "cmd" ) for i in range( 50 ) ]
+    with pytest.raises( ve.EvalIntegrityError ):
+        ve.run_pass( corpus, ask, "cold" )
+    assert len( calls ) == 3, f"aborted after {len( calls )} of 50 calls — it must stop AT the hit"
+
+
+def test_a_clean_cold_pass_is_not_aborted():
+    """The control: without a replay the same code path must run the corpus to the end."""
+    def ask( q ):
+        return _rec( utterance=q, path="agent" )
+    records = ve.run_pass( [ ( "u1", "cmd-a" ), ( "u2", "cmd-b" ) ], ask, "cold" )
+    assert len( records ) == 2
+
+
+def test_the_warm_pass_replays_freely():
+    """
+    Replay is the POINT of the warm pass. If this ever goes red the guard has
+    stopped being keyed on pass_kind and is refusing the measurement it exists for.
+    """
+    def ask( q ):
+        return _rec( utterance=q, path="replay" )
+    records = ve.run_pass( [ ( "u1", "cmd-a" ), ( "u2", "cmd-b" ) ], ask, "warm" )
+    assert len( records ) == 2
+
+
+def test_a_failed_cold_request_that_reports_replay_does_not_abort():
+    """
+    The predicate is `ok AND path == replay`, matching compute_metrics' own
+    cache_hits set. A transport failure carrying a stale payload is not evidence
+    that the store is warm, and must not be read as one.
+    """
+    def ask( q ):
+        return _rec( utterance=q, ok=False, status=502, path="replay" )
+    records = ve.run_pass( [ ( "u1", "cmd-a" ), ( "u2", "cmd-b" ) ], ask, "cold" )
+    assert len( records ) == 2
+
+
+def test_the_cold_abort_message_names_the_remedy_and_forbids_a_hand_truncate():
+    """
+    The failure has to tell the reader what to do. Deriving "who may clear the
+    store" from scratch is what cost an afternoon on 2026-08-21.
+    """
+    def ask( q ):
+        return _rec( utterance=q, path="replay" )
+    with pytest.raises( ve.EvalIntegrityError ) as excinfo:
+        ve.run_pass( [ ( "u1", "cmd-a" ) ], ask, "cold" )
+    message = str( excinfo.value )
+    assert "step-13" in message
+    assert "hand-truncate" in message
+
+
+def test_allow_warm_cold_suppresses_the_early_abort_too():
+    """
+    ONE FLAG, ONE MEANING. --allow-warm-cold already suppresses guard_cold_start at
+    the end of the run; adding an early abort that ignored it would have half-broken
+    a documented escape hatch — the run would die at request 1 while the flag still
+    claimed to permit exactly that. Caught by test_main_allow_warm_cold_skips_the_guard
+    going red, not by review.
+    """
+    def ask( q ):
+        return _rec( utterance=q, path="replay" )
+    records = ve.run_pass( [ ( "u1", "cmd-a" ), ( "u2", "cmd-b" ) ], ask, "cold",
+                           allow_warm_cold=True )
+    assert len( records ) == 2

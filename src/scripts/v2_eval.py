@@ -1074,10 +1074,11 @@ def load_mappable_commands() -> Optional[ List[ str ] ]:
 
 
 def run_pass(
-    corpus    : List[ Tuple[ str, str ] ],
-    ask       : Callable[ [ str ], Dict[ str, Any ] ],
-    pass_kind : str,
-    fail_fast : bool = False,
+    corpus          : List[ Tuple[ str, str ] ],
+    ask             : Callable[ [ str ], Dict[ str, Any ] ],
+    pass_kind       : str,
+    fail_fast       : bool = False,
+    allow_warm_cold : bool = False,
 ) -> List[ Dict[ str, Any ] ]:
     """
     Run one pass over the corpus, attaching the expected command to each record.
@@ -1094,9 +1095,15 @@ def run_pass(
           immediately — a broken endpoint costs one request, not the whole corpus
           (Cheech, thread 4fb7f475). The first real utterance doubles as the smoke,
           so no extra probe request is spent.
+        - on a COLD pass, raises at the FIRST replayed answer — a pre-warmed store
+          costs the calls made so far, not the whole corpus (row a77a7906).
+        - when allow_warm_cold is True that abort is SUPPRESSED, matching the
+          --allow-warm-cold escape hatch that already suppresses guard_cold_start.
+          One flag, one meaning, both ends of the run.
 
     Raises:
         - EvalIntegrityError if fail_fast and the first request is not ok.
+        - EvalIntegrityError on the first cold-pass cache hit, unless allow_warm_cold.
     """
     records : List[ Dict[ str, Any ] ] = []
     for index, ( utterance, expected ) in enumerate( corpus ):
@@ -1111,6 +1118,30 @@ def run_pass(
             raise EvalIntegrityError(
                 f"fail-fast: first {pass_kind} request returned "
                 f"{record[ 'status_code' ]}, not 200 — aborting before spending the corpus"
+            )
+        # COLD-STORE FAIL-FAST (row a77a7906). guard_cold_start already refuses a
+        # contaminated baseline, but it runs AFTER the whole corpus, so on 2026-08-21
+        # a warm store would have cost two hours of inference before saying so. This
+        # is the SAME predicate evaluated incrementally: guard_cold_start raises when
+        # cold cache_hit_rate > 0, which is true exactly when at least one cold record
+        # replays. Detecting it here changes WHEN we learn, never WHAT counts.
+        #
+        # It reads the store THROUGH THE EVAL'S OWN CALLS — the reply the flow just
+        # sent — so it cannot drift onto a different database, and it cannot read
+        # empty while the server's in-memory cache is warm. A row count queried
+        # anywhere else could do both (Mr Radio's refutation bar, 2026-08-21).
+        #
+        # NOT a replacement for guard_cold_start: a store warm only for utterances
+        # this pass never reaches is invisible here and is still caught at the end.
+        if ( pass_kind == "cold" and not allow_warm_cold
+             and record[ "ok" ] and response_path( record ) == PATH_REPLAY ):
+            raise EvalIntegrityError(
+                f"cold-start integrity failed at request {index + 1} of {len( corpus )}: "
+                f"the store was already warm — {record[ 'utterance' ]!r} came back as a "
+                f"REPLAY, so this pass is not a cold baseline. Aborting rather than "
+                f"spending the rest of the corpus. The store must be cleared before a "
+                f"cold pass, and v2_eval cannot clear it: that is the step-13 cache dump, "
+                f"legal only after 9a and 9b merge. Do NOT hand-truncate the test DB."
             )
     return records
 
@@ -1365,7 +1396,8 @@ def main(
     probe = probe_models_fn if probe_models_fn is not None else _default_model_probe
     probe( "before the cold pass" )
 
-    cold_records = run_pass( corpus, client.ask, "cold", fail_fast=True )
+    cold_records = run_pass( corpus, client.ask, "cold", fail_fast=True,
+                             allow_warm_cold=args.allow_warm_cold )
     # AGAIN between the passes. A long run can OUTLIVE its dependency: the box can die at
     # minute ten as easily as before minute zero, and the warm pass is the expensive half.
     # The pass boundary is the cheapest point where a mid-run death is still catchable.
