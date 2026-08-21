@@ -32,6 +32,9 @@ JSON_ANSWERS_IS_A_LIST = '{"answers": ["kiss.md"]}'
 JSON_TOP_LEVEL_LIST    = '{"a": 1}[0]'
 JSON_BROKEN            = '{"answers": {"source": }'
 JSON_EMPTY_MAP         = '{"answers": {}}'
+# Multi-select payloads: the picks ride as a LIST under the question's header.
+JSON_BOTH_OFFERED      = '{"answers": {"Fixes": ["fix-1", "fix-2"]}}'
+JSON_ONE_BOGUS         = '{"answers": {"Fixes": ["fix-1", "NOT OFFERED"]}}'
 
 
 def _card( *labels ):
@@ -275,6 +278,66 @@ class TestAllOptions( unittest.TestCase ):
             sentinels.resolve( "__everything__", _multi_card( "a" ) )
 
 
+class TestUnaskedHeaders( unittest.TestCase ):
+    """
+    Row adf5c1a1's FOURTH measured case — the one element-wise label comparison
+    structurally cannot catch, because the label is valid and the KEY is wrong.
+
+    A header the card never asked under is NO answer rather than a wrong one: the
+    reader looks under the question's own header, finds it absent, falls to its
+    unattended_default, and the agent reports that the user chose nothing. Silent, and
+    indistinguishable from a human declining.
+    """
+
+    CARD = { "response_options": { "questions": [
+        { "header": "Fixes", "multi_select": True,
+          "options": [ { "label": "c1: fix one" }, { "label": "c2: fix two" } ] } ] } }
+
+    def test_the_cards_own_header_is_fine( self ):
+        self.assertEqual(
+            sentinels.unasked_headers( '{"answers": {"Fixes": ["c1: fix one"]}}', self.CARD ), [] )
+
+    def test_a_header_the_card_never_asked_is_reported( self ):
+        # RED ON REVERT (the check removed): the responder submits it, and the agent
+        # reads it as the user having selected nothing.
+        self.assertEqual(
+            sentinels.unasked_headers( '{"answers": {"Wrong": ["c1: fix one"]}}', self.CARD ),
+            [ "Wrong" ] )
+
+    def test_a_valid_label_does_not_excuse_a_wrong_header( self ):
+        # The whole reason this is a separate check: unoffered_values sees a label the
+        # card really did offer and correctly reports nothing.
+        payload = '{"answers": {"Wrong": ["c1: fix one"]}}'
+        self.assertEqual( sentinels.unoffered_values( payload, self.CARD ), [] )
+        self.assertTrue( sentinels.unasked_headers( payload, self.CARD ) )
+
+    def test_a_bare_label_has_no_header_to_be_wrong( self ):
+        # unoffered_values is what judges a bare answer; this must not double-reject it.
+        self.assertEqual( sentinels.unasked_headers( "c1: fix one", self.CARD ), [] )
+        self.assertEqual( sentinels.unasked_headers( 7, self.CARD ), [] )
+
+    def test_malformed_payloads_are_left_to_the_value_check( self ):
+        for payload in ( JSON_BROKEN, JSON_WRONG_KEY, JSON_ANSWERS_IS_A_LIST,
+                         JSON_EMPTY_MAP, JSON_TOP_LEVEL_LIST ):
+            with self.subTest( payload=payload ):
+                self.assertEqual( sentinels.unasked_headers( payload, self.CARD ), [] )
+
+    def test_a_card_asking_under_no_header_checks_nothing( self ):
+        # Nothing to compare against. Inventing a rule here would reject every answer to
+        # a malformed card twice — once for the header, once for the label.
+        for card in ( {}, { "response_options": { "questions": [ { "options": [] } ] } } ):
+            with self.subTest( card=card ):
+                self.assertEqual(
+                    sentinels.unasked_headers( '{"answers": {"Fixes": ["a"]}}', card ), [] )
+
+    def test_the_comparison_tolerates_padding_but_not_a_rename( self ):
+        self.assertEqual(
+            sentinels.unasked_headers( '{"answers": {"  Fixes  ": ["c1: fix one"]}}', self.CARD ), [] )
+        self.assertEqual(
+            sentinels.unasked_headers( '{"answers": {"fixes": ["c1: fix one"]}}', self.CARD ),
+            [ "fixes" ] )
+
+
 class TestUnofferedValues( unittest.TestCase ):
     """
     Row a1420538. The sentinel resolver only ever looked at sentinel-SHAPED answers,
@@ -354,28 +417,27 @@ class TestUnofferedValues( unittest.TestCase ):
         # rejection says so; a submitted value would not.
         self.assertEqual( sentinels.unoffered_values( "anything", {} ), [ "anything" ] )
 
-    def test_a_multi_select_card_is_left_alone( self ):
-        # How a multi-select answer encodes several picks in one string is pinned
-        # nowhere. Rejecting on a guess would turn tfe.json's working "Select fixes to
-        # apply" entry into a skip, which is a worse outcome than the one being fixed.
+    def test_a_multi_select_answer_is_checked_one_pick_at_a_time( self ):
+        # THE CARVE-OUT THIS ROW REMOVED. These two used to return [] for any
+        # multi-select card, on the premise that the encoding was pinned nowhere.
+        # encode_multi_select pinned it, so the picks are checked individually now.
         card = _card_with( [ {
+            "header"       : "Fixes",
             "multi_select" : True,
             "options"      : [ { "label": "fix-1" }, { "label": "fix-2" } ],
         } ] )
-        self.assertEqual( sentinels.unoffered_values( "fix-1, fix-2", card ), [] )
-        self.assertEqual( sentinels.unoffered_values( "__all__", card ),      [] )
+        self.assertEqual(
+            sentinels.unoffered_values( JSON_BOTH_OFFERED, card ), [] )
+        self.assertEqual(
+            sentinels.unoffered_values( JSON_ONE_BOGUS, card ), [ "NOT OFFERED" ] )
 
-    def test_multi_select_on_any_question_spares_the_whole_card( self ):
+    def test_a_multi_select_card_no_longer_spares_a_bad_single_answer( self ):
         card = _card_with( [
-            { "options": [ { "label": "a" } ] },
-            { "multi_select": True, "options": [ { "label": "b" } ] },
+            { "header": "A", "options": [ { "label": "a" } ] },
+            { "header": "B", "multi_select": True, "options": [ { "label": "b" } ] },
         ] )
-        self.assertEqual( sentinels.unoffered_values( "not an option", card ), [] )
-
-    def test_has_a_multi_select_question_on_a_malformed_card( self ):
-        self.assertFalse( sentinels.has_a_multi_select_question( {} ) )
-        self.assertFalse( sentinels.has_a_multi_select_question( { "response_options": None } ) )
-        self.assertFalse( sentinels.has_a_multi_select_question( { "response_options": { "questions": None } } ) )
+        self.assertEqual( sentinels.unoffered_values( "not an option", card ),
+                          [ "not an option" ] )
 
 
 if __name__ == "__main__":

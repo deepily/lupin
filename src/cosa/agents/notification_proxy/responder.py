@@ -377,6 +377,19 @@ class NotificationResponder:
         # expeditor as an unknown pick and cancels the run, so this is a counted,
         # printed skip instead — the same trade the unresolvable sentinel makes.
         if notification.get( "response_type" ) == "multiple_choice":
+            # A header the card never asked under is NO answer rather than a wrong one:
+            # the reader looks under the question's own header, finds it absent, and
+            # falls to its default — the agent then reports that the user chose nothing
+            # (row adf5c1a1). Checked alongside the labels because a valid label under
+            # the wrong key passes the label check by construction.
+            unasked = option_sentinels.unasked_headers( answer, notification )
+            if unasked:
+                self.stats[ "skipped" ] += 1
+                print( f"[Responder] {strategy_name} answered under a header the card "
+                       f"never asked — not submitting {unasked!r} for: "
+                       f"{title or message[ :50 ]}" )
+                return
+
             unoffered = option_sentinels.unoffered_values( answer, notification )
             if unoffered:
                 self.stats[ "skipped" ] += 1

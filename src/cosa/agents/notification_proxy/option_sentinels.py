@@ -215,23 +215,6 @@ def encode_multi_select( labels, notification ):
 # than a caught one.
 
 
-def has_a_multi_select_question( notification ):
-    """
-    Whether any question on this card lets the user pick more than one option.
-
-    Requires:
-        - notification is a dict; a missing or malformed response_options is False
-
-    Ensures:
-        - returns True when at least one question carries a truthy multi_select
-
-    Raises:
-        - nothing
-    """
-    questions = ( notification.get( "response_options" ) or {} ).get( "questions" ) or []
-    return any( question.get( "multi_select" ) for question in questions )
-
-
 def _answer_values( answer ):
     """
     The label (or labels) an answer carries, read the way the card's reader reads it.
@@ -263,14 +246,76 @@ def _answer_values( answer ):
         except ( json.JSONDecodeError, AttributeError ):
             return [ text ]
         if isinstance( answers, dict ) and answers:
-            return [ value.strip() if isinstance( value, str ) else value
-                     for value in answers.values() ]
+            values = []
+            for value in answers.values():
+                # A MULTI-SELECT ANSWER CARRIES ITS PICKS AS A LIST under the
+                # question's header — the shape encode_multi_select emits and the
+                # browser submits. Flattened ONE level so each pick is checked on its
+                # own; without this the whole list arrives as a single value, matches
+                # no label, and would be reported as one giant unoffered blob.
+                if isinstance( value, list ):
+                    values.extend( v.strip() if isinstance( v, str ) else v for v in value )
+                else:
+                    values.append( value.strip() if isinstance( value, str ) else value )
+            return values
         # An EMPTY answers map carries no label, and "no values" must not read as "no
         # violations" — that would make the check vacuously pass and submit the raw
         # JSON, which is exactly the unknown-label failure it exists to stop. Reported
         # as itself, like unparseable JSON.
         return [ text ]
     return [ text ]
+
+
+def unasked_headers( answer, notification ):
+    """
+    Every header the answer keys a value under that this card never asked under.
+
+    THE FOURTH CASE FROM ROW adf5c1a1, and the one element-wise comparison structurally
+    cannot catch: in `{"answers": {"Wrong": ["c1: fix one"]}}` the LABEL is perfectly
+    valid — the card did offer it — and the defect is the KEY.
+
+    It matters for the same reason the whole 054207ce chain does. The reader looks the
+    answer up under the question's own header (voice_io.read_gate_answer). A header the
+    card never asked under is therefore not a wrong answer, it is NO answer: the real
+    header reads as absent, the reader falls to its unattended_default, and the agent
+    concludes the user chose nothing. Silent, and indistinguishable from a human
+    declining — the exact failure shape this family of rows keeps producing.
+
+    Requires:
+        - answer is the value about to be submitted
+        - notification is the card it answers
+
+    Ensures:
+        - returns [] for an answer that is not a JSON answers map — a bare label has no
+          header to be wrong, and unoffered_values is what judges it
+        - returns [] when the card asks under no headers at all; there is then nothing
+          to check against, and inventing a rule would reject every answer to a
+          malformed card twice over
+        - the comparison is EXACT after stripping, like every other match in this module
+
+    Raises:
+        - nothing
+    """
+    if not isinstance( answer, str ):
+        return []
+
+    text = answer.strip()
+    if not text.startswith( "{" ):
+        return []
+    try:
+        answers = json.loads( text ).get( "answers", None )
+    except ( json.JSONDecodeError, AttributeError ):
+        return []
+    if not isinstance( answers, dict ) or not answers:
+        return []
+
+    questions = ( notification.get( "response_options" ) or {} ).get( "questions" ) or []
+    asked     = { ( q.get( "header" ) or "" ).strip() for q in questions }
+    asked.discard( "" )
+    if not asked:
+        return []
+
+    return [ header for header in answers if header.strip() not in asked ]
 
 
 def unoffered_values( answer, notification ):
@@ -287,11 +332,14 @@ def unoffered_values( answer, notification ):
           expeditor does when it maps the pick back to a file; a looser match here
           would pass values the expeditor then refuses, turning a caught answer
           into a cancelled run
-        - returns [] for a card carrying a multi-select question. How a multi-select
-          answer encodes several picks in one string is pinned nowhere, so rejecting
-          on a guess would turn working runs (tfe.json's "Select fixes to apply")
-          into skips. Single-select is what the document choice card is, and what
-          this row is about.
+        - checks a MULTI-SELECT answer too, one pick at a time. This used to return []
+          for any multi-select card, because the encoding was pinned nowhere and a
+          rejection would have been a guess. encode_multi_select pinned it (row
+          054207ce), which retired the reason — and a carve-out whose reason expired
+          reads exactly like one that still has a reason, so it was measured and
+          removed rather than left (row adf5c1a1). An answer whose picks are all
+          offered is unaffected; __all__ emits the card's own labels and cannot fail
+          this.
         - a card offering NO options rejects everything: the expeditor would refuse
           any answer to it, and a visible skip says so where a submitted value would
           not
@@ -299,8 +347,5 @@ def unoffered_values( answer, notification ):
     Raises:
         - nothing
     """
-    if has_a_multi_select_question( notification ):
-        return []
-
     offered = option_labels( notification )
     return [ value for value in _answer_values( answer ) if value not in offered ]
