@@ -156,6 +156,46 @@ class TestRewriteSucceeds:
 
         assert len( agent.rewrite().splitlines() ) == 3
 
+    def test_a_bare_id_pointer_is_dropped_AND_announced( self, monkeypatch, capsys ):
+        """
+        Row 56a3c48d. Dropping the id is the delivery fix; SAYING SO is the second half
+        — a suppression nobody can see is one nobody can audit, and the reader asking
+        "why did this DM carry no path" would otherwise find nothing to read.
+        """
+        agent = DmTutorAgent( dm_body=BODY )
+        monkeypatch.setattr( agent, "run_prompt", lambda **kw: _fields( file_path_or_url="fb9faba7" ) )
+
+        assert len( agent.rewrite().splitlines() ) == 3
+        assert "[dm-tutor] pointer_slot_cleared=fb9faba7" in capsys.readouterr().out
+
+    def test_an_ordinary_send_says_nothing_about_the_slot( self, monkeypatch, capsys ):
+        """
+        CONTROL. The line must fire on the refusal ONLY. A notice printed on every send
+        is noise, and noise is how the real one gets missed — so a real path and a
+        null-word both stay quiet.
+        """
+        for value in ( "src/cosa/rest/queue.py:412", "N/A" ):
+            agent = DmTutorAgent( dm_body=BODY )
+            monkeypatch.setattr( agent, "run_prompt", lambda **kw: _fields( file_path_or_url=value ) )
+            agent.rewrite()
+            assert "pointer_slot_cleared" not in capsys.readouterr().out
+
+    @pytest.mark.parametrize( "real", [ "Makefile", "README", "LICENSE", "Dockerfile", "src", "io" ] )
+    def test_an_extensionless_filename_is_delivered_and_never_announced( self, real, monkeypatch, capsys ):
+        """
+        🔴 María's refutation end to end (row 6dbba874). These six have no dot and no
+        slash, so the first cut suppressed them as row ids. They must arrive as the
+        fourth line AND draw no disclosure — a refusal notice for something that was
+        not refused is as misleading as the silence it replaced.
+        """
+        agent = DmTutorAgent( dm_body=BODY )
+        monkeypatch.setattr( agent, "run_prompt", lambda **kw: _fields( file_path_or_url=real ) )
+
+        lines = agent.rewrite().splitlines()
+        assert lines[ -1 ] == real
+        assert len( lines ) == 4
+        assert "pointer_slot_cleared" not in capsys.readouterr().out
+
     def test_the_parsed_response_is_kept_for_inspection( self, monkeypatch ):
         agent = DmTutorAgent( dm_body=BODY )
         monkeypatch.setattr( agent, "run_prompt", lambda **kw: _fields() )

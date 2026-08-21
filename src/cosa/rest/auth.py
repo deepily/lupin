@@ -4,7 +4,7 @@ from typing import Dict, Optional
 import asyncio
 import os
 from jwt.exceptions import ExpiredSignatureError
-from .user_id_generator import get_user_info, email_to_system_id
+from .user_id_generator import get_user_info, email_to_system_id, email_to_user_uuid
 
 
 class TokenExpiredException( HTTPException ):
@@ -283,10 +283,33 @@ async def verify_mock_token(token: str) -> Dict:
         else:
             # Add uid field for Firebase compatibility
             user_data["uid"] = system_id
-            
+
+        # 🔴 THE USER ID IS A UUID UNDER MOCK AUTH TOO (row befeba88). It used to be the
+        # system id — "interactive_job_tester_8e32" — and the ordinary API path scopes a
+        # job id as "{sha256}::{user_id}", which AsyncNotificationRequest only accepts
+        # with a UUID after the "::". So every queue notification under mock auth raised
+        # a validation error that was caught, printed and dropped, and the environment
+        # looked like it had working notifications when it had none.
+        #
+        # Minted from the RESOLVED email — the one on the user record, which for an
+        # unknown system id is the generated "{system_id}@generated.local" — so both
+        # token formats reach it the same way. It matches what JWT auth returns in
+        # shape: there, the user id is the database row's UUID. The system id is
+        # unchanged and still what get_user_info is keyed on; only the id handed OUT
+        # is a UUID now.
+        #
+        # ⚠️ THE TWO TOKEN FORMATS DO NOT REACH THE SAME USER, and this comment said
+        # they did until María caught it (row 10153719). They never have: the email
+        # form runs its address through email_to_system_id FIRST, which appends its own
+        # 4-hex suffix, so "…_8e32@generated.local" resolves to system id "…_8e32_7cf9"
+        # and mints a different UUID than the legacy form for "…_8e32". Pre-existing,
+        # not introduced here, and asserted by test_the_legacy_token_format_mints_a_
+        # uuid_too, which this comment contradicted.
+        user_uuid = email_to_user_uuid( user_data["email"] )
+
         # Return mock decoded token with real user structure
         decoded_token = {
-            "uid": user_data["uid"],
+            "uid": user_uuid,
             "email": user_data["email"],
             "email_verified": user_data["email_verified"],
             "name": user_data["name"],
@@ -294,8 +317,8 @@ async def verify_mock_token(token: str) -> Dict:
             "iss": "https://securetoken.google.com/mock-project",
             "aud": "mock-project",
             "auth_time": 1234567890,
-            "user_id": user_data["uid"],  # Legacy field for compatibility
-            "sub": user_data["uid"],
+            "user_id": user_uuid,  # Legacy field for compatibility
+            "sub": user_uuid,
             "iat": 1234567890,
             "exp": 9999999999,  # Far future
             "firebase": {
@@ -304,7 +327,7 @@ async def verify_mock_token(token: str) -> Dict:
             }
         }
 
-        print(f"[AUTH] Mock token verified for user: [{user_data['name']}] ({user_data['uid']})")
+        print(f"[AUTH] Mock token verified for user: [{user_data['name']}] ({user_uuid}, system id {user_data['uid']})")
         return decoded_token
 
     except Exception as e:

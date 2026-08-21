@@ -252,6 +252,7 @@ def test_compute_metrics_all_branches():
     assert m[ "n" ]            == 8
     assert m[ "n_ok" ]        == 7
     assert m[ "n_http_error" ] == 1
+    assert m[ "n_incomplete" ] == 1   # the one 400 is also the only incomplete one here
     assert m[ "cache_hits" ]  == 2
     assert m[ "cache_hit_rate" ]       == round( 2 / 7, 4 )
     assert m[ "cache_candidate_rate" ] == round( 3 / 7, 4 )   # sims: 100, 99, 95
@@ -264,6 +265,53 @@ def test_compute_metrics_all_branches():
     assert m[ "p50_first_useful_ms" ]  == 20.0
     assert m[ "by_path" ][ "unknown" ] == 1
     assert m[ "by_path" ][ "replay" ]  == 2
+
+
+def test_http_errors_and_incomplete_are_different_counts_and_can_differ():
+    """
+    Row 48312293: the report row labelled "HTTP errors" was n - n_ok, i.e. "work did
+    not finish" — every replay_error/agent_error that came back HTTP 200 was counted
+    as an HTTP failure (47 on the 08-20 artifact, all of them 200s). The two counts
+    must be able to DIFFER; collapsing n_http_error back to n - n_ok turns this red.
+    """
+    records = [
+        _rec( path="agent", command="agent router go to math" ),                          # completed, 200
+        _rec( ok=False, status=200, path="agent", route_reason="agent_error" ),            # answered 200, work failed
+        _rec( ok=False, status=200, path="agent", route_reason="replay_error" ),           # answered 200, work failed
+        _rec( ok=False, status=503 ),                                                      # server did NOT answer
+    ]
+    m = ve.compute_metrics( records )
+    assert m[ "n" ]            == 4
+    assert m[ "n_ok" ]         == 1
+    assert m[ "n_http_error" ] == 1, "only the 503 is an HTTP error"
+    assert m[ "n_incomplete" ] == 3, "the 503 plus the two errored-200s did not finish"
+    assert m[ "n_http_error" ] != m[ "n_incomplete" ]
+    assert m[ "n_answered" ]   == 3
+    # Completed-but-errored 200s drive the error RATES (answered denominator), not the HTTP row.
+    assert m[ "agent_error_rate" ]    == round( 1 / 3, 4 )
+    assert m[ "replay_failure_rate" ] == round( 1 / 3, 4 )
+
+
+def test_http_errors_zero_when_every_request_answered_even_if_work_failed():
+    # The 08-20 shape: 200 requests all HTTP 200, 47 of them failed work. HTTP errors must read 0.
+    records = [ _rec( path="agent", command="agent router go to math" ) ] * 3 \
+            + [ _rec( ok=False, status=200, path="agent", route_reason="replay_error" ) ] * 2
+    m = ve.compute_metrics( records )
+    assert m[ "n_http_error" ] == 0
+    assert m[ "n_incomplete" ] == 2
+
+
+def test_report_shows_both_rows_with_their_own_values():
+    # An "unreachable server" artifact: one 503 plus one errored-200 → HTTP errors 1, incomplete 2.
+    records = [ _rec( path="agent", command="agent router go to math" ),
+                _rec( ok=False, status=200, path="agent", route_reason="agent_error" ),
+                _rec( ok=False, status=503 ) ]
+    m = ve.compute_metrics( records )
+    report = ve.render_report( m, m, ve.threshold_table( records ), { "p50_delta_ms": None, "p95_delta_ms": None },
+                               "simple", "2026-08-21-00-00-00", seed=1, n_per_command=1 )
+    assert "| HTTP errors (non-200) | 1 | 1 |" in report
+    assert "| incomplete (work did not finish) | 2 | 2 |" in report
+    assert "| HTTP errors | " not in report, "the old mislabelled row is gone"
 
 
 def test_compute_metrics_empty_rates_are_none():

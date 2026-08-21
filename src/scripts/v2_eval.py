@@ -593,6 +593,16 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
     # not the work completed. On a clean run it equals the old set exactly, so nothing that
     # used to report correctly changes.
     answered        = [ r for r in records if r[ "status_code" ] == 200 ]
+
+    # TWO different failure counts, kept apart on purpose (row 48312293, 2026-08-21).
+    # `n_incomplete` = n - n_ok: requests whose WORK did not complete — every replay_error
+    # / agent_error that came back as a perfectly good HTTP 200 lands here. `n_http_error`
+    # = requests the server did NOT answer (status != 200) — the same predicate the
+    # run-integrity guard uses. The old report printed the first number under the label
+    # "HTTP errors": 47 on the 08-20 artifact, all of them HTTP 200 (42 replay_error +
+    # 5 agent_error). A reader wants both numbers, and they must be able to DIFFER.
+    n_http_error    = len( records ) - len( answered )
+    n_incomplete    = n - n_ok
     n_answered      = len( answered )
     replay_failures = [ r for r in answered if reported_route_reason( r ) == ROUTE_REPLAY_ERROR ]
     router_errors   = [ r for r in answered if reported_route_reason( r ) == ROUTE_ROUTER_ERROR ]
@@ -634,8 +644,11 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
     return {
         "n"                   : n,
         "n_ok"                : n_ok,
-        "n_http_error"        : n - n_ok,
-        "n_answered"          : n_answered,   # the four error rates are over THIS, not n_ok
+        # Merge of wip e9fdddfd (María: HTTP errors split from incomplete) with the branch's
+        # cacheable-denominator change (Krishna 2b/2c) — BOTH kept (row 4d88e790, Cheech's ruling).
+        "n_http_error"        : n_http_error,   # status_code != 200 — transport, not completion
+        "n_incomplete"        : n_incomplete,   # n - n_ok — work did not finish (HTTP errors included)
+        "n_answered"          : n_answered,     # the four error rates are over THIS, not n_ok
         "cache_hit_rate"      : _rate( len( cache_hits ),       len( cacheable ) ),
         "cache_hit_denominator": len( cacheable ),   # NOT n_ok — see _is_cacheable_command
         "cache_excluded_n"    : n_ok - len( cacheable ),
@@ -1270,7 +1283,8 @@ def render_report(
     lines.append( "|---|---|---|" )
     rows = [
         ( "requests (n)",          "n" ),
-        ( "HTTP errors",           "n_http_error" ),
+        ( "HTTP errors (non-200)", "n_http_error" ),
+        ( "incomplete (work did not finish)", "n_incomplete" ),
         ( "cache-hit rate",        "cache_hit_rate" ),
         ( "cache-candidate rate",  "cache_candidate_rate" ),
         ( "replay-failure rate",   "replay_failure_rate" ),
