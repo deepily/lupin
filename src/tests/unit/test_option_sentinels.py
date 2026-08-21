@@ -11,7 +11,10 @@ to guess which document was meant, and the run cancelled. These tests pin the re
 that replaced it.
 """
 
+import json
 import unittest
+
+import cosa.utils.util as cu
 
 from cosa.agents.notification_proxy import option_sentinels as sentinels
 
@@ -176,9 +179,100 @@ class TestResolve( unittest.TestCase ):
         self.assertNotEqual( sentinels.resolve( "__first_option__", {} ), "__first_option__" )
 
 
+def _multi_card( *labels, header="Fixes", questions=None ):
+    """A multi-select card shaped like TFE's aggregate proposal gate."""
+    if questions is None:
+        questions = [ { "header": header, "multi_select": True,
+                        "options": [ { "label": l } for l in labels ] } ]
+    return { "response_options": { "questions": questions } }
+
+
 def _card_with( questions ):
     """A notification whose questions are given whole (multi_select, options, ...)."""
     return { "response_options": { "questions": questions } }
+
+
+class TestAllOptions( unittest.TestCase ):
+    """
+    Row 054207ce. tfe.json has answered its multi-select proposal gate with "__all__"
+    since it was written, and the token was never implemented: resolve() recognised the
+    __word__ SHAPE, found it absent from SENTINELS, and raised — so the responder
+    counted a skip and the gate was never auto-answered. The entry has never worked.
+
+    THE ENCODING WAS PINNED BEFORE THE CODE, off both ends of the human path, because
+    a bare label string here selects NOTHING: a non-JSON response_value is wrapped
+    under the header "response", read_gate_answer finds the card's real header absent,
+    and TFE reports that the user chose no fixes. Silent, and identical in appearance
+    to a human declining.
+    """
+
+    def test_all_returns_every_label_under_the_cards_own_header( self ):
+        resolved = sentinels.resolve( "__all__", _multi_card( "c1: fix a", "c2: fix b" ) )
+        self.assertEqual( json.loads( resolved ),
+                          { "answers": { "Fixes": [ "c1: fix a", "c2: fix b" ] } } )
+
+    def test_all_is_a_sentinel_and_no_longer_raises( self ):
+        # RED ON REVERT (ALL_OPTIONS removed from SENTINELS): the shape check fires and
+        # this raises ValueError — which is exactly the live behaviour being fixed.
+        self.assertTrue( sentinels.is_sentinel( "__all__" ) )
+        self.assertIsNotNone( sentinels.resolve( "__all__", _multi_card( "a" ) ) )
+
+    def test_the_escapes_are_excluded_from_all_too( self ):
+        # "Everything" must never quietly include Cancel — that reads as the user
+        # declining while looking like a full selection.
+        resolved = sentinels.resolve(
+            "__all__", _multi_card( "c1: fix a", DESCRIBE, CANCEL ), excluded_labels=ESCAPES )
+        self.assertEqual( json.loads( resolved )[ "answers" ][ "Fixes" ], [ "c1: fix a" ] )
+
+    def test_all_with_nothing_selectable_is_a_skip_not_an_empty_selection( self ):
+        # An empty answers payload is read upstream as a no-response TIMEOUT, so
+        # submitting one would misreport a run that had nothing to offer.
+        self.assertIsNone( sentinels.resolve( "__all__", _multi_card( DESCRIBE, CANCEL ),
+                                              excluded_labels=ESCAPES ) )
+
+    def test_all_refuses_a_card_with_more_than_one_question( self ):
+        # "Select everything" has no unambiguous meaning across several questions, and
+        # keying the answer under a guessed header produces the absent-header silence
+        # this whole row is about.
+        two = _card_with( [ { "header": "Fixes", "multi_select": True, "options": [ { "label": "a" } ] },
+                            { "header": "Other", "multi_select": True, "options": [ { "label": "b" } ] } ] )
+        self.assertIsNone( sentinels.resolve( "__all__", two ) )
+
+    def test_all_refuses_a_card_with_no_question_at_all( self ):
+        self.assertIsNone( sentinels.resolve( "__all__", {} ) )
+
+    def test_all_refuses_a_question_with_no_header( self ):
+        # The header IS the key the reader looks under. Without one there is nothing to
+        # key the answer to, and a blank key is an absent key.
+        headerless = _multi_card( questions=[ { "multi_select": True, "options": [ { "label": "a" } ] } ] )
+        self.assertIsNone( sentinels.resolve( "__all__", headerless ) )
+        blank = _multi_card( questions=[ { "header": "   ", "multi_select": True,
+                                           "options": [ { "label": "a" } ] } ] )
+        self.assertIsNone( sentinels.resolve( "__all__", blank ) )
+
+    def test_the_tfe_entry_as_written_resolves(  self ):
+        # THE ROW'S OWN CASE, driven from the shipped config rather than a fixture, so
+        # this fails if the entry is edited to something the resolver cannot honour.
+        script = json.load( open( cu.get_project_root()
+                                  + "/src/conf/notification-proxy-scripts/tfe.json",
+                                  encoding="utf-8" ) )
+        entries = [ e for e in script[ "entries" ]
+                    if e.get( "question_pattern" ) == "Select fixes to apply" ]
+        self.assertEqual( len( entries ), 1 )
+        answer = entries[ 0 ][ "answer" ]
+
+        card     = _multi_card( "cluster-1: widen the timeout", "cluster-2: fix the import" )
+        resolved = sentinels.resolve( answer, card, excluded_labels=ESCAPES )
+        self.assertIsNotNone( resolved,
+                              f"tfe.json answers the proposal gate with {answer!r} and the "
+                              f"resolver cannot turn it into a selection" )
+        self.assertEqual( json.loads( resolved )[ "answers" ][ "Fixes" ],
+                          [ "cluster-1: widen the timeout", "cluster-2: fix the import" ] )
+
+    def test_a_still_unknown_sentinel_shape_keeps_raising( self ):
+        # Implementing one token must not soften the guard that catches the next typo.
+        with self.assertRaises( ValueError ):
+            sentinels.resolve( "__everything__", _multi_card( "a" ) )
 
 
 class TestUnofferedValues( unittest.TestCase ):

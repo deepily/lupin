@@ -97,6 +97,36 @@ keep in step with the code, and nothing to get wrong except forgetting it, which
 The document choice card's id is `document_choice`, defined as
 `DOCUMENT_CHOICE_CARD_ID` in `cosa/agents/runtime_argument_expeditor/expeditor.py`.
 
+### Positional answers (sentinels)
+
+Some cards cannot be answered with a fixed string, because their option labels are
+discovered while the run is in flight — the document choice card offers whatever
+filenames matched, and TFE's proposal gate offers whatever fixes it proposed. A
+**sentinel** names a POSITION instead of a value, and
+`cosa/agents/notification_proxy/option_sentinels.py` turns it into real labels using
+the options that arrive with the notification.
+
+| Sentinel | Means | Submits |
+|---|---|---|
+| `__first_option__` | the first selectable option | that option's label |
+| `__last_option__` | the last selectable option | that option's label |
+| `__all__` | every selectable option (multi-select cards) | `{"answers": {"<header>": [labels…]}}` |
+
+The Describe and Cancel escapes are never selectable by any of them — picking Cancel
+would read as the user declining, a run that looks answered and did nothing.
+
+**The match is exact and case-sensitive.** A value that merely LOOKS like a sentinel —
+`__frist_option__`, `__FIRST_OPTION__` — is refused rather than forwarded as a literal,
+because forwarding it reaches the card as a label it never offered.
+
+⚠️ **`__all__` submits a JSON envelope, not a joined string, and that is load-bearing.**
+A multi-select card's reader looks the answer up under the question's own `header`; a
+non-JSON value is wrapped under the header `"response"` instead, so the real header
+reads as ABSENT and the agent concludes the user selected nothing. Silent, and
+indistinguishable from a human declining. `__all__` is refused (a visible skip) on a
+card with more than one question or a question with no header, because there is then no
+unambiguous key to answer under.
+
 ## Profile-to-Script Mapping
 
 The `--profile` flag maps to script files by replacing underscores with dashes:
