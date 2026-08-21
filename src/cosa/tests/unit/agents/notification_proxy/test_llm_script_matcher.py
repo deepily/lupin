@@ -288,6 +288,92 @@ class TestCardIdClaim:
             out = s.respond( self._card() )
         assert out == "academic"
 
+    # ── the tag says WHOSE, the id says WHICH (María, row 0c280989) ──────────
+    SCOPED_SCRIPT = {
+        "entries": [
+            { "card_id": "document_describe", "answer": "/tmp/mock-research-document.md",
+              "agents": [ "podcast" ], "response_types": [ "open_ended" ] },
+            { "card_id": "document_describe", "answer": "/tmp/mock-source-document.md",
+              "agents": [ "presentation" ], "response_types": [ "open_ended" ] },
+        ],
+        "sender_ids"   : [ EXPEDITER ],
+        "profile_name" : "all_agents",
+    }
+
+    def _ask_from( self, agent_name, card_id="document_describe", arg_name=None ):
+        options = { "questions": [ { "options": [] } ], "card_id": card_id }
+        if arg_name is not None:
+            options[ "arg_name" ] = arg_name
+        return {
+            "response_type"    : "open_ended",
+            "message"          : "Which document should I use?",
+            "title"            : "Missing: research",
+            "abstract"         : f"Agent: {agent_name}",
+            "response_options" : options,
+        }
+
+    def test_the_id_lookup_honours_the_agent_tag( self ):
+        # THE HOLE MARÍA FOUND, and it was live in the merged card path: the id lookup
+        # returned before _filter_entries_by_agent ever ran and iterated the UNFILTERED
+        # list, so a tagged entry answered every agent. With one id per ask and two
+        # agents in one profile, the podcast's entry would have fed its mock research
+        # path to the presentation agent's `source` argument.
+        # RED ON REVERT (searching self._entries again): the presentation ask gets
+        # '/tmp/mock-research-document.md'.
+        s, client = _make_matcher( script=self.SCOPED_SCRIPT )
+        with patch.object( sm, "cu", _patch_cu() ):
+            podcast      = s.respond( self._ask_from( "podcast" ) )
+            presentation = s.respond( self._ask_from( "presentation" ) )
+        assert podcast      == "/tmp/mock-research-document.md"
+        assert presentation == "/tmp/mock-source-document.md"
+        client.run.assert_not_called()
+
+    def test_an_untagged_entry_still_answers_any_agent( self ):
+        # Narrowing must not become a requirement to tag. Most profiles are
+        # single-agent and carry no tags at all.
+        script = { "entries": [ { "card_id": "document_describe", "answer": "latest",
+                                  "response_types": [ "open_ended" ] } ],
+                   "sender_ids": [ EXPEDITER ], "profile_name": "minimal" }
+        s, _ = _make_matcher( script=script )
+        with patch.object( sm, "cu", _patch_cu() ):
+            assert s.respond( self._ask_from( "podcast" ) )      == "latest"
+            assert s.respond( self._ask_from( "presentation" ) ) == "latest"
+
+    def test_an_agent_with_no_entry_of_its_own_falls_through( self ):
+        # A third agent in a profile that scopes both its entries has no answer here,
+        # and must reach the strategies that might. Answering it from someone else's
+        # entry is the behaviour change this narrowing exists to prevent.
+        s, client = _make_matcher( script=self.SCOPED_SCRIPT )
+        client.run.return_value = SINGLE_MATCH_XML
+        s._processor.process_template.return_value = "{response_type}{title}{incoming_question}{options_section}{script_entries}"
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( self._ask_from( "deep_research" ) )
+        assert out == "academic"
+
+    def test_arg_name_narrows_two_entries_sharing_an_id( self ):
+        # An id names the ASK; two agents can ask it for different arguments. Where the
+        # notification names its arg, an entry naming a different one is not a match —
+        # otherwise the choice falls to whichever comes first in the file.
+        script = { "entries": [
+            { "card_id": "document_describe", "arg_name": "research",
+              "answer": "latest", "response_types": [ "open_ended" ] },
+            { "card_id": "document_describe", "arg_name": "source",
+              "answer": "/tmp/mock-source-document.md", "response_types": [ "open_ended" ] },
+        ], "sender_ids": [ EXPEDITER ], "profile_name": "all_agents" }
+        s, _ = _make_matcher( script=script )
+        with patch.object( sm, "cu", _patch_cu() ):
+            assert s.respond( self._ask_from( "podcast", arg_name="research" ) ) == "latest"
+            assert s.respond( self._ask_from( "presentation", arg_name="source" ) ) == "/tmp/mock-source-document.md"
+
+    def test_an_entry_naming_no_arg_answers_an_ask_that_names_one( self ):
+        # Narrowing only ever removes candidates. A generic entry stays generic.
+        script = { "entries": [ { "card_id": "document_describe", "answer": "latest",
+                                  "response_types": [ "open_ended" ] } ],
+                   "sender_ids": [ EXPEDITER ], "profile_name": "minimal" }
+        s, _ = _make_matcher( script=script )
+        with patch.object( sm, "cu", _patch_cu() ):
+            assert s.respond( self._ask_from( "podcast", arg_name="research" ) ) == "latest"
+
     def test_a_card_id_entry_is_kept_out_of_the_prompt( self ):
         # It has no question to match on. Listing it would put a BLANK question in
         # front of the model with a real answer attached — an invitation to answer the
