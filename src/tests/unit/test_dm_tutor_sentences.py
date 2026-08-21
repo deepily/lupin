@@ -215,6 +215,27 @@ class TestRestorablePointersIsNarrowerThanPointerTokens( unittest.TestCase ):
                   "src/a.py src/b.py https://example.com/x" )
         self.assertEqual( count_sentences( three ), 3 )
 
+    def test_the_run_rule_does_not_stall_on_a_long_near_miss( self ):
+        """
+        The widened rule repeats a group, which is the shape that goes exponential when
+        a long line ALMOST matches and the engine backtracks through every split. The
+        near-miss is the case to fear: 120 real paths followed by one token that is not
+        a pointer, so the whole line must be rejected. Measured at ~0.0002s; the ceiling
+        below is three orders of magnitude of headroom, so it fails on a stall, not on a
+        slow machine.
+        """
+        import time
+        near_miss = " ".join( f"src/a{i}.py" for i in range( 120 ) ) + " not-a-pointer!"
+        started   = time.time()
+        self.assertEqual( count_sentences( near_miss ), 1 )   # prose, not structure
+        self.assertLess( time.time() - started, 2.0,
+                         "the pointer-run rule backtracked instead of failing fast" )
+
+    def test_a_long_run_of_real_paths_is_still_structure( self ):
+        """The other end of the same shape: it must match, and match fast."""
+        run = " ".join( f"src/a{i}.py" for i in range( 200 ) )
+        self.assertEqual( count_sentences( f"Verdict.\n{run}" ), 1 )
+
     def test_a_line_of_PROSE_is_not_rescued_by_the_run_rule( self ):
         """CONTROL. Widening the rule must not turn a claim into structure."""
         self.assertEqual( count_sentences( "Verdict.\nSupport one.\n"
