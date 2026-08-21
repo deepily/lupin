@@ -100,11 +100,13 @@ _BARE_ROW_ID = re.compile( rf"^{_BARE_ROW_ID_SRC}$", re.IGNORECASE )
 # guard and arrived as a bare line (María, row 68601b65). "#hash8" is live fleet
 # vocabulary, so of all the punctuated forms it is the likeliest to land in the slot.
 #
-# 🔴 HYPHEN AND UNDERSCORE ARE DELIBERATELY ABSENT. They are ordinary filename
-# characters; stripping them would start reshaping real names on their way to the test.
-# The set is punctuation that brackets or terminates a word, nothing that belongs
-# INSIDE one.
-_SLOT_PUNCTUATION = "#.,;:!?()[]{}<>\"'`*"
+# HYPHEN AND UNDERSCORE ARE IN THE SET, on María's ruling (row 68601b65). I left them
+# out first, reasoning they are ordinary filename characters — but that reasoning
+# confused "appears in filenames" with "reachable by this test". A real hyphen or
+# underscore filename carries an EXTENSION, so once stripped it is still not eight hex
+# characters and the anchored pattern cannot match it either way. Leaving them out
+# bought no safety and left "-fb9faba7" and "__fb9faba7__" arriving as bare lines.
+_SLOT_PUNCTUATION = "#.,;:!?()[]{}<>\"'`*-_"
 
 # 🔴 THE SLASHED-PATH SHAPE ABOVE ALSO MATCHES THINGS THAT ARE NOT PATHS. The
 # repeated `[\w.@%+-]+/` group happily matches a slash-separated ENUMERATION
@@ -375,7 +377,9 @@ def is_bare_row_id( value ):
           without surrounding whitespace and bracketing punctuation
         - False for "Makefile", "README", "src", "20260821", "src/a.py", "notes.md",
           ".gitignore", "my-notes-file", "", and None
-        - hyphen and underscore are NOT stripped — they belong inside real filenames
+        - False for "my-file.md", "_private.py", "a_b-c.txt" — a real hyphen or
+          underscore name carries an extension, so stripping those characters cannot
+          bring it within reach of the pattern
 
     Raises:
         - nothing

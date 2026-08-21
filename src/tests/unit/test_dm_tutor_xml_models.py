@@ -231,7 +231,12 @@ class TestPointerAndDelivery:
         assert _response( file_path_or_url=real ).pointer == real
 
     @pytest.mark.parametrize( "punctuated", [ "#fb9faba7", "fb9faba7,", "fb9faba7.",
-                                              "(fb9faba7)", '"fb9faba7"', " fb9faba7 " ] )
+                                              "(fb9faba7)", '"fb9faba7"', " fb9faba7 ",
+                                              # María's ruling: hyphen and underscore
+                                              # are stripped too. A real name carrying
+                                              # either has an extension, so the anchored
+                                              # test cannot reach it either way.
+                                              "-fb9faba7", "__fb9faba7__" ] )
     def test_one_punctuation_mark_does_not_smuggle_an_id_through( self, punctuated ):
         """
         🔴 María, row 68601b65. The anchors that make the row-id test safe on a raw
@@ -247,7 +252,8 @@ class TestPointerAndDelivery:
         assert _response( file_path_or_url=punctuated ).pointer_cleared == punctuated
 
     @pytest.mark.parametrize( "real", [ ".gitignore", "src/a.py,", "my-notes-file",
-                                        ".dockerignore", "notes.md." ] )
+                                        ".dockerignore", "notes.md.",
+                                        "my-file.md", "_private.py", "a_b-c.txt", "src/a.py" ] )
     def test_the_strip_does_not_eat_a_real_name( self, real ):
         """
         CONTROL, and the one that bounds the strip. ".gitignore" is a real file and a
