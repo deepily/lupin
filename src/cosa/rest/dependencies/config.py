@@ -1,18 +1,23 @@
 """
 Configuration and shared service dependencies for FastAPI application.
 
-Provides singleton pattern for shared services including configuration management,
-solution snapshot management, and ID generation. These dependencies are injected
-into FastAPI endpoints to ensure consistent service access across the application.
+Provides singleton pattern for shared services including configuration management
+and ID generation. These dependencies are injected into FastAPI endpoints to
+ensure consistent service access across the application.
+
+Snapshot management is deliberately absent. A get_snapshot_manager() lived here
+until step 0 of the brain-integration plan; it constructed the deprecated
+SolutionSnapshotManager with no `path`, which its __init__ requires, so any call
+raised TypeError. Nothing reached it: routers/admin.py:34 defines its own
+same-named dependency returning main's Postgres singleton, and that is the one
+the app uses. Ask main for the snapshot manager, not this module.
 """
 
 from cosa.config.configuration_manager import ConfigurationManager
-from cosa.memory.solution_snapshot_mgr import SolutionSnapshotManager
 from cosa.agents.two_word_id_generator import TwoWordIdGenerator
 
 # Global instances (initialized once)
 _config_mgr = None
-_snapshot_mgr = None
 _id_generator = None
 
 def get_config_manager():
@@ -37,29 +42,6 @@ def get_config_manager():
     if _config_mgr is None:
         _config_mgr = ConfigurationManager(env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS")
     return _config_mgr
-
-def get_snapshot_manager():
-    """
-    Dependency to get snapshot manager singleton.
-    
-    Requires:
-        - SolutionSnapshotManager class is available
-        - Solution snapshot directory exists and is accessible
-        
-    Ensures:
-        - Returns singleton SolutionSnapshotManager instance
-        - Creates instance on first call with default configuration
-        - Returns same instance on subsequent calls
-        - Instance is loaded with existing snapshots from disk
-        
-    Raises:
-        - ImportError if SolutionSnapshotManager not available
-        - FileNotFoundError if snapshot directory not accessible
-    """
-    global _snapshot_mgr
-    if _snapshot_mgr is None:
-        _snapshot_mgr = SolutionSnapshotManager()
-    return _snapshot_mgr
 
 def get_id_generator():
     """

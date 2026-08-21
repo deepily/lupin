@@ -1,9 +1,14 @@
 """
 Unit tests for cosa.rest.dependencies.config.
 
-The three getters are lazy singletons backed by module globals. Each underlying
-class ( ConfigurationManager / SolutionSnapshotManager / TwoWordIdGenerator ) is
-patched so NO real config file / snapshot disk load / word-list load occurs.
+The two getters are lazy singletons backed by module globals. Each underlying
+class ( ConfigurationManager / TwoWordIdGenerator ) is patched so NO real config
+file / word-list load occurs.
+
+A third getter, get_snapshot_manager, was covered here until step 0 of the
+brain-integration plan deleted it. Its two tests went with it: they asserted the
+lazy-singleton behaviour of a function that could not be called without raising
+TypeError, so they proved the mock worked, not that the code did.
 
 Covers both branches of every getter: first call (global is None → construct)
 and subsequent call (global set → reuse, no re-construction).
@@ -55,44 +60,6 @@ class TestGetConfigManager( unittest.TestCase ):
         with patch.object( cfg, "ConfigurationManager", return_value=sentinel ) as klass:
             first  = cfg.get_config_manager()
             second = cfg.get_config_manager()
-        self.assertIs( first, second )
-        klass.assert_called_once()
-
-
-class TestGetSnapshotManager( unittest.TestCase ):
-    """
-    Tests for get_snapshot_manager.
-
-    Ensures:
-        - Lazy single construction + reuse semantics
-    """
-
-    def setUp( self ):
-        cfg._snapshot_mgr = None
-
-    def tearDown( self ):
-        cfg._snapshot_mgr = None
-
-    def test_first_call_constructs( self ):
-        """
-        Ensures:
-            - First call constructs SolutionSnapshotManager and returns it
-        """
-        sentinel = MagicMock( name="snapshot_mgr" )
-        with patch.object( cfg, "SolutionSnapshotManager", return_value=sentinel ) as klass:
-            result = cfg.get_snapshot_manager()
-        self.assertIs( result, sentinel )
-        klass.assert_called_once_with()
-
-    def test_second_call_reuses_singleton( self ):
-        """
-        Ensures:
-            - Second call returns the cached instance, no reconstruction
-        """
-        sentinel = MagicMock( name="snapshot_mgr" )
-        with patch.object( cfg, "SolutionSnapshotManager", return_value=sentinel ) as klass:
-            first  = cfg.get_snapshot_manager()
-            second = cfg.get_snapshot_manager()
         self.assertIs( first, second )
         klass.assert_called_once()
 
