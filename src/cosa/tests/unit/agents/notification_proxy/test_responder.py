@@ -467,6 +467,37 @@ class TestPositionalSentinelResolution:
         submit.assert_called_once()
         assert r.stats[ "skipped" ] == 0
 
+    def test_a_multi_select_answer_with_one_bogus_label_is_a_counted_skip( self ):
+        # MARÍA'S FALSIFIER, and she named why it has to be this one: __all__ emits the
+        # card's own labels and is correct by construction, so a test that only checks
+        # __all__ still passes cannot fail and is not a guard. The guard is worth having
+        # for every OTHER producer of a multi-select answer — a hand-written script
+        # entry, the rule strategy, the cloud LLM — because an unoffered label reaches
+        # the agent as a pick it never offered.
+        # RED ON REVERT (the multi-select carve-out restored): submit is called with
+        # the payload and assert_not_called fails.
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = json.dumps(
+            { "answers": { "Fixes": [ "c1: widen the timeout", "NOT OFFERED" ] } } )
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, self._multi_card_event( "c1: widen the timeout", "c2: fix the import" ) )
+        submit.assert_not_called()
+        assert r.stats[ "skipped" ] == 1
+        assert r.stats[ "responses_sent" ] == 0
+
+    def test_a_multi_select_answer_whose_picks_were_all_offered_still_submits( self ):
+        # The other half of the falsifier: the guard must not simply reject everything
+        # multi-select, which would trade a silent bad submit for a silent skip.
+        r, _, script, _ = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = json.dumps(
+            { "answers": { "Fixes": [ "c1: widen the timeout" ] } } )
+        with patch.object( r, "_submit_response", return_value=True ) as submit:
+            self._run( r, self._multi_card_event( "c1: widen the timeout", "c2: fix the import" ) )
+        submit.assert_called_once()
+        assert r.stats[ "responses_sent" ] == 1
+
     def test_an_ordinary_answer_is_untouched( self ):
         # The resolver sits in the hot path for EVERY answer; this is the guard that
         # it changes nothing for the other several hundred script entries.

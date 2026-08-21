@@ -32,6 +32,9 @@ JSON_ANSWERS_IS_A_LIST = '{"answers": ["kiss.md"]}'
 JSON_TOP_LEVEL_LIST    = '{"a": 1}[0]'
 JSON_BROKEN            = '{"answers": {"source": }'
 JSON_EMPTY_MAP         = '{"answers": {}}'
+# Multi-select payloads: the picks ride as a LIST under the question's header.
+JSON_BOTH_OFFERED      = '{"answers": {"Fixes": ["fix-1", "fix-2"]}}'
+JSON_ONE_BOGUS         = '{"answers": {"Fixes": ["fix-1", "NOT OFFERED"]}}'
 
 
 def _card( *labels ):
@@ -354,28 +357,27 @@ class TestUnofferedValues( unittest.TestCase ):
         # rejection says so; a submitted value would not.
         self.assertEqual( sentinels.unoffered_values( "anything", {} ), [ "anything" ] )
 
-    def test_a_multi_select_card_is_left_alone( self ):
-        # How a multi-select answer encodes several picks in one string is pinned
-        # nowhere. Rejecting on a guess would turn tfe.json's working "Select fixes to
-        # apply" entry into a skip, which is a worse outcome than the one being fixed.
+    def test_a_multi_select_answer_is_checked_one_pick_at_a_time( self ):
+        # THE CARVE-OUT THIS ROW REMOVED. These two used to return [] for any
+        # multi-select card, on the premise that the encoding was pinned nowhere.
+        # encode_multi_select pinned it, so the picks are checked individually now.
         card = _card_with( [ {
+            "header"       : "Fixes",
             "multi_select" : True,
             "options"      : [ { "label": "fix-1" }, { "label": "fix-2" } ],
         } ] )
-        self.assertEqual( sentinels.unoffered_values( "fix-1, fix-2", card ), [] )
-        self.assertEqual( sentinels.unoffered_values( "__all__", card ),      [] )
+        self.assertEqual(
+            sentinels.unoffered_values( JSON_BOTH_OFFERED, card ), [] )
+        self.assertEqual(
+            sentinels.unoffered_values( JSON_ONE_BOGUS, card ), [ "NOT OFFERED" ] )
 
-    def test_multi_select_on_any_question_spares_the_whole_card( self ):
+    def test_a_multi_select_card_no_longer_spares_a_bad_single_answer( self ):
         card = _card_with( [
-            { "options": [ { "label": "a" } ] },
-            { "multi_select": True, "options": [ { "label": "b" } ] },
+            { "header": "A", "options": [ { "label": "a" } ] },
+            { "header": "B", "multi_select": True, "options": [ { "label": "b" } ] },
         ] )
-        self.assertEqual( sentinels.unoffered_values( "not an option", card ), [] )
-
-    def test_has_a_multi_select_question_on_a_malformed_card( self ):
-        self.assertFalse( sentinels.has_a_multi_select_question( {} ) )
-        self.assertFalse( sentinels.has_a_multi_select_question( { "response_options": None } ) )
-        self.assertFalse( sentinels.has_a_multi_select_question( { "response_options": { "questions": None } } ) )
+        self.assertEqual( sentinels.unoffered_values( "not an option", card ),
+                          [ "not an option" ] )
 
 
 if __name__ == "__main__":

@@ -215,23 +215,6 @@ def encode_multi_select( labels, notification ):
 # than a caught one.
 
 
-def has_a_multi_select_question( notification ):
-    """
-    Whether any question on this card lets the user pick more than one option.
-
-    Requires:
-        - notification is a dict; a missing or malformed response_options is False
-
-    Ensures:
-        - returns True when at least one question carries a truthy multi_select
-
-    Raises:
-        - nothing
-    """
-    questions = ( notification.get( "response_options" ) or {} ).get( "questions" ) or []
-    return any( question.get( "multi_select" ) for question in questions )
-
-
 def _answer_values( answer ):
     """
     The label (or labels) an answer carries, read the way the card's reader reads it.
@@ -263,8 +246,18 @@ def _answer_values( answer ):
         except ( json.JSONDecodeError, AttributeError ):
             return [ text ]
         if isinstance( answers, dict ) and answers:
-            return [ value.strip() if isinstance( value, str ) else value
-                     for value in answers.values() ]
+            values = []
+            for value in answers.values():
+                # A MULTI-SELECT ANSWER CARRIES ITS PICKS AS A LIST under the
+                # question's header — the shape encode_multi_select emits and the
+                # browser submits. Flattened ONE level so each pick is checked on its
+                # own; without this the whole list arrives as a single value, matches
+                # no label, and would be reported as one giant unoffered blob.
+                if isinstance( value, list ):
+                    values.extend( v.strip() if isinstance( v, str ) else v for v in value )
+                else:
+                    values.append( value.strip() if isinstance( value, str ) else value )
+            return values
         # An EMPTY answers map carries no label, and "no values" must not read as "no
         # violations" — that would make the check vacuously pass and submit the raw
         # JSON, which is exactly the unknown-label failure it exists to stop. Reported
@@ -287,11 +280,14 @@ def unoffered_values( answer, notification ):
           expeditor does when it maps the pick back to a file; a looser match here
           would pass values the expeditor then refuses, turning a caught answer
           into a cancelled run
-        - returns [] for a card carrying a multi-select question. How a multi-select
-          answer encodes several picks in one string is pinned nowhere, so rejecting
-          on a guess would turn working runs (tfe.json's "Select fixes to apply")
-          into skips. Single-select is what the document choice card is, and what
-          this row is about.
+        - checks a MULTI-SELECT answer too, one pick at a time. This used to return []
+          for any multi-select card, because the encoding was pinned nowhere and a
+          rejection would have been a guess. encode_multi_select pinned it (row
+          054207ce), which retired the reason — and a carve-out whose reason expired
+          reads exactly like one that still has a reason, so it was measured and
+          removed rather than left (row adf5c1a1). An answer whose picks are all
+          offered is unaffected; __all__ emits the card's own labels and cannot fail
+          this.
         - a card offering NO options rejects everything: the expeditor would refuse
           any answer to it, and a visible skip says so where a submitted value would
           not
@@ -299,8 +295,5 @@ def unoffered_values( answer, notification ):
     Raises:
         - nothing
     """
-    if has_a_multi_select_question( notification ):
-        return []
-
     offered = option_labels( notification )
     return [ value for value in _answer_values( answer ) if value not in offered ]
