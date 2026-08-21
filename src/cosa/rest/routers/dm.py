@@ -781,14 +781,14 @@ def _restore_dropped_pointers( original, rewritten ):
     look. An id does not. So the restore selects on `restorable_pointers`, which drops
     the bare-identifier shape, and appends at most ONE line.
 
-    WHY ONE LINE MEANS ONE POINTER, measured rather than assumed: the counter treats a
-    whole-line pointer as structure only when the line is nothing BUT that pointer
-    (_ATTACHMENT). Joining two paths onto one line makes it prose again — a compliant
-    three-claim rewrite plus a two-path line counts FOUR — so the promise below that
-    repairing a message can never push it back over the trigger would stop holding.
-    The first-seen restorable pointer is the one restored; "most relevant" is the
-    model's job in the fifth slot, and first-seen is the deterministic stand-in when
-    the model dropped it.
+    ONE LINE, EVERY DROPPED PATH ON IT (Rick's ruling, 2026-08-21). Discarding a real
+    pointer is the exact defect this guard was built for, so the rare message that
+    loses two paths gets both back — joined by a space, on the one appended line, in
+    first-seen order. That cost one thing and it was paid rather than absorbed: a
+    multi-pointer line did NOT match the counter's whole-line structure rule, so a
+    compliant three-claim rewrite plus a two-path line counted FOUR. `_ATTACHMENT` now
+    recognises a RUN of pointers as structure, which is what this module's own rule
+    ("a line that asserts nothing is structure") always implied.
 
     Requires:
         - original and rewritten are strings
@@ -802,9 +802,9 @@ def _restore_dropped_pointers( original, rewritten ):
           against the rewrite's whole text, so a path the model correctly carried
           through inline (not as its own line) still counts as kept
         - returns `rewritten` unchanged when nothing restorable was dropped
-        - at most ONE line is appended, carrying exactly one pointer, which the counter
-          treats as structure, so repairing a message can never push it back over the
-          trigger
+        - at most ONE line is appended, carrying every dropped path joined by a space,
+          which the counter treats as structure, so repairing a message can never push
+          it back over the trigger
 
     Raises:
         - nothing
@@ -813,7 +813,7 @@ def _restore_dropped_pointers( original, rewritten ):
         from cosa.agents.dm_tutor.sentences import restorable_pointers
         dropped = [ p for p in restorable_pointers( original ) if p not in rewritten ]
         if not dropped: return rewritten
-        return rewritten.rstrip() + "\n" + dropped[ 0 ]
+        return rewritten.rstrip() + "\n" + " ".join( dropped )
     except Exception:
         # A repair that raises must never cost the caller the rewrite it already has.
         return rewritten

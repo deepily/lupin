@@ -204,6 +204,22 @@ class TestRestorablePointersIsNarrowerThanPointerTokens( unittest.TestCase ):
     def test_a_body_with_no_pointer_at_all( self ):
         self.assertEqual( restorable_pointers( "Plain prose with no pointer." ), [] )
 
+    def test_a_RUN_of_pointers_on_one_line_is_structure( self ):
+        """
+        The shape the restore now emits when a rewrite drops two paths. A line of
+        nothing but pointers asserts nothing however many it carries — and if the
+        counter disagreed, the repair would push the message one claim over the
+        trigger and the tutor could re-fire on the line it had just appended.
+        """
+        three = ( "Verdict.\nSupport one.\nSupport two.\n"
+                  "src/a.py src/b.py https://example.com/x" )
+        self.assertEqual( count_sentences( three ), 3 )
+
+    def test_a_line_of_PROSE_is_not_rescued_by_the_run_rule( self ):
+        """CONTROL. Widening the rule must not turn a claim into structure."""
+        self.assertEqual( count_sentences( "Verdict.\nSupport one.\n"
+                                           "The fix landed in src/a.py and src/b.py." ), 3 )
+
 
 if __name__ == "__main__":
     unittest.main()

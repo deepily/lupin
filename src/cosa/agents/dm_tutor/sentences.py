@@ -138,9 +138,18 @@ _POINTER_LEAD_IN = r"(?:(?:see|details?|detail|path|more|here|full\s+detail)\s*:
 # line is a pointer, so the target only has to contain a slash — it does not have to
 # survive the stricter path shape above. A doc-viewer link carries `?path=…&…`, which
 # the bare-path pattern deliberately does not admit.
+_POINTER_OR_LINK = rf"(?:\[[^\]]*\]\(\s*[^\s)]*/[^\s)]*\s*\)|{_POINTER_TOKEN_SRC})"
+
+# A RUN of pointers on one line is structure too (row a0151611, Rick's ruling
+# 2026-08-21). The restore now puts every dropped path back on a SINGLE line, so that
+# line can carry two or three of them. By this module's own rule that is still
+# structure — a line of nothing but pointers asserts nothing, however many it holds —
+# and if the rule did not say so, a repaired message would read as one claim over and
+# the tutor could re-trigger on the very line it just added. The single-pointer case is
+# byte-for-byte what it always was; only the run is new.
 _ATTACHMENT = re.compile(
-    rf"^\s*{_POINTER_LEAD_IN}"
-    rf"(?:\[[^\]]*\]\(\s*[^\s)]*/[^\s)]*\s*\)|{_POINTER_TOKEN_SRC})"
+    rf"^\s*{_POINTER_LEAD_IN}{_POINTER_OR_LINK}"
+    rf"(?:[,;]?\s+{_POINTER_OR_LINK})*"
     rf"[.,;]?\s*$",
     re.IGNORECASE,
 )

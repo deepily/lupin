@@ -478,6 +478,11 @@ class TestMidSentencePointersSurvive( unittest.TestCase ):
         self.assertEqual( meta[ "tutor_outcome" ], "rewritten" )
         self.assertIn( "/tmp/claude-1001/scratchpad/repro.py", text,
                        "the mid-sentence path was not restored" )
+        # All three restorable pointers come back, and they share ONE line.
+        body = text.split( "This DM was condensed" )[ 0 ].rstrip()
+        self.assertEqual( body.splitlines()[ -1 ],
+                          "/tmp/claude-1001/scratchpad/repro.py running_fifo_queue.py:422 job.py" )
+        self.assertEqual( len( body.splitlines() ), len( self._ATE_THEM.splitlines() ) + 1 )
 
     def test_the_dropped_row_id_does_NOT_come_back( self ):
         """The half of the old behaviour that produced the hash lines."""
@@ -1208,6 +1213,34 @@ class TestABareHashListIsNeverDelivered( unittest.TestCase ):
         self.assertEqual( body.splitlines()[ -1 ], "src/rnd/v0.2.0/cascade-r2.md" )
         self.assertEqual( len( body.splitlines() ), len( self.rewrite.splitlines() ) + 1,
                           "the restore appended more than one line" )
+
+    def test_two_dropped_paths_come_back_on_the_SAME_line( self ):
+        """
+        RICK'S RULING (2026-08-21): discarding a real pointer is the defect this guard
+        exists to prevent, so every dropped path comes back — but still on ONE line.
+        """
+        two_paths = self.with_ids + "\nand the older note lives at src/rnd/v0.1.7/older.md too."
+        text, _ = self.apply( two_paths, config=_cfg(), rewrite_fn=lambda b: self.rewrite )
+        body = text.split( self.notice )[ 0 ].rstrip()
+        self.assertEqual( body.splitlines()[ -1 ],
+                          "src/rnd/v0.2.0/cascade-r2.md src/rnd/v0.1.7/older.md" )
+        self.assertEqual( len( body.splitlines() ), len( self.rewrite.splitlines() ) + 1,
+                          "two paths were split across two lines" )
+
+    def test_a_two_path_restored_line_is_still_STRUCTURE( self ):
+        """
+        THE COST OF THE RULING, PAID. A line of two pointers did not match the
+        counter's whole-line rule, so a compliant three-claim rewrite plus a two-path
+        line counted FOUR and the repair could re-trigger the tutor on its own
+        appended line. _ATTACHMENT now reads a RUN of pointers as structure.
+        """
+        from cosa.agents.dm_tutor.sentences import count_sentences
+        two_paths = self.with_ids + "\nand the older note lives at src/rnd/v0.1.7/older.md too."
+        _, meta = self.apply( two_paths, config=_cfg(), rewrite_fn=lambda b: self.rewrite )
+        # The appended line must add NOTHING to the count. `assertLessEqual(..., trigger)`
+        # would not bite here: the rewrite carries 3 claims and the trigger is 4, so a
+        # line that DID count still slipped under it.
+        self.assertEqual( meta[ "tutor_claims_out" ], count_sentences( self.rewrite ) )
 
     def test_the_instrument_can_fail( self ):
         """
