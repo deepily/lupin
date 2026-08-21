@@ -194,6 +194,36 @@ class TestPointerAndDelivery:
     def test_null_word_matching_ignores_case_and_padding( self, null_word ):
         assert _response( file_path_or_url=null_word ).pointer == ""
 
+    def test_a_bare_row_id_in_the_slot_is_not_a_pointer( self ):
+        """
+        🔴 THE LIVE ONE (row 56a3c48d). a0151611 stopped the prompt ordering hash lists
+        and stopped the restore appending row ids, and a DM STILL arrived as three
+        sentences and a bare line reading "fb9faba7" — the model had put the id in the
+        PATH slot, which nothing checked. The id is treated like "N/A": a pointer the
+        model signalled and does not have.
+        """
+        assert _response( file_path_or_url="fb9faba7" ).pointer == ""
+
+    def test_the_delivered_message_gains_no_bare_id_line( self ):
+        """The end-to-end shape a recipient sees. This is the assertion Rick's rule is."""
+        lines = _response( file_path_or_url="fb9faba7" ).to_delivery().splitlines()
+        assert lines == [ "The headline", "First support", "Second support" ]
+
+    @pytest.mark.parametrize( "identifier", [ "fb9faba7", "a0151611", "e0bb5a94", "FB9FABA7" ] )
+    def test_every_row_id_shape_is_suppressed( self, identifier ):
+        assert _response( file_path_or_url=identifier ).pointer == ""
+
+    @pytest.mark.parametrize( "real", [ "src/a.py:12", "job.py", "running_fifo_queue.py:422",
+                                        "https://example.com/x", "/tmp/probe.py", "src/rnd/note.md" ] )
+    def test_a_real_pointer_is_still_delivered( self, real ):
+        """
+        CONTROL. The suppression must not over-reach — every one of these says where to
+        look and survives losing the sentence around it, which is the whole distinction.
+        Delete the is_bare_identifier guard and the test above goes red; widen it to
+        anything without a slash and this one does.
+        """
+        assert _response( file_path_or_url=real ).pointer == real
+
     def test_delivery_is_three_lines_without_a_pointer( self ):
         lines = _response().to_delivery().splitlines()
         assert lines == [ "The headline", "First support", "Second support" ]

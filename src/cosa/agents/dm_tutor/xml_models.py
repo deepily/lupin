@@ -180,17 +180,36 @@ class DmTutorResponse( BaseXMLModel ):
     @property
     def pointer( self ):
         """
-        The path/URL slot, or "" when the model signalled "no path".
+        The path/URL slot, or "" when it holds nothing worth delivering.
+
+        🔴 A BARE IDENTIFIER IN THIS SLOT IS NOT A POINTER, and it was the last door
+        the banned shape came through (row 56a3c48d). Row a0151611 stopped the prompt
+        ordering hash lists and stopped the restore appending row ids — and a DM still
+        arrived as three sentences and a bare line reading "fb9faba7", because the
+        model had put the id in the PATH slot and `to_delivery` appends this slot as
+        its own line by design. Nothing here checked that the value was a path; the
+        slot only ever stripped null-words like "N/A".
+
+        Rick's rule reads the same whichever door it comes through: "a standalone
+        nonsensical out-of-context hash has no place there." So an id here is treated
+        exactly like "N/A" — the model signalled a pointer it does not have.
 
         Requires:
             - nothing
 
         Ensures:
             - returns "" for a blank slot or any of the NULL_ISH null-words
-            - returns the stripped value otherwise
+            - returns "" for a bare identifier — no slash, no dot — which by the
+              pointer grammar is the 8-hex row-id shape
+            - returns the stripped value otherwise, so a real path, a bare
+              filename.ext and a URL are all delivered unchanged
         """
+        from cosa.agents.dm_tutor.sentences import is_bare_identifier
+
         value = ( self.file_path_or_url or "" ).strip()
-        return "" if value.lower() in NULL_ISH else value
+        if value.lower() in NULL_ISH:    return ""
+        if is_bare_identifier( value ):  return ""
+        return value
 
     def to_delivery( self ):
         """
