@@ -188,15 +188,14 @@ class TwoTierQuestionSearch:
             snapshots = self._snapshot_repo_cls( session )
             synonyms  = self._synonym_repo_cls( session )
 
-            # Tier 1a — exact verbatim.
-            snapshot = self._resolve_exact( snapshots, synonyms.find_exact_verbatim( question ) )
-            if snapshot is not None:
-                return self._exact_hit( snapshot, "exact_verbatim", question_normalized, t_exact_start )
-
-            # Tier 1b — exact normalized (R-C1: THIS is the warm-pass replay signal).
-            snapshot = self._resolve_exact( snapshots, synonyms.find_exact_normalized( question_normalized ) )
-            if snapshot is not None:
-                return self._exact_hit( snapshot, "exact_normalized", question_normalized, t_exact_start )
+            # Tier 1 — the exact probes, in order (R-C1: THIS is the warm-pass replay
+            # signal). The list is a method so a subclass can add a probe of its own
+            # without copying the whole lookup; the two below are the base's contract
+            # and their order is part of it.
+            for tier_name, probe in self._exact_probes( synonyms, question, question_normalized ):
+                snapshot = self._resolve_exact( snapshots, probe() )
+                if snapshot is not None:
+                    return self._exact_hit( snapshot, tier_name, question_normalized, t_exact_start )
 
             t_exact_ms = self._ms_since( t_exact_start )
 
@@ -232,6 +231,31 @@ class TwoTierQuestionSearch:
                 similarity=best_score, best_score=best_score, question_normalized=question_normalized,
                 t_exact_ms=t_exact_ms, t_embed_ms=t_embed_ms, t_ann_ms=t_ann_ms, embed_cached=embed_cached,
             )
+
+    def _exact_probes( self, synonyms: Any, question: str, question_normalized: str ) -> tuple:
+        """
+        The tier-1 probes this search runs, in order — (tier name, callable).
+
+        A SEAM, not a refactor for its own sake: v2's cache adds a gist probe after
+        these two, and the alternative was copying the whole of ``lookup`` into the
+        subclass to insert one line — where the copy would then drift from this one
+        silently. Each probe is a callable so a later probe costs nothing when an
+        earlier one hits.
+
+        Requires:
+            - synonyms is an open-session CanonicalSynonymRepository
+
+        Ensures:
+            - returns exact-match probes ONLY: each is deterministic and returns a
+              snapshot_id or None, never a score. A probe that ranked by similarity
+              would make ``is_replay_hit`` a float comparison, which is what R-C1
+              forbids.
+            - the base returns verbatim then normalized, in that order
+        """
+        return (
+            ( "exact_verbatim",   lambda: synonyms.find_exact_verbatim( question ) ),
+            ( "exact_normalized", lambda: synonyms.find_exact_normalized( question_normalized ) ),
+        )
 
     def _resolve_exact( self, snapshots: Any, snapshot_id: Optional[str] ) -> Optional[SolutionSnapshot]:
         """

@@ -33,6 +33,7 @@ class _Store:
         self.rows             = {}   # id_hash -> fake ORM row
         self.syn_verbatim     = {}   # question -> snapshot_id
         self.syn_normalized   = {}   # normalized -> snapshot_id
+        self.syn_gist         = {}   # gist -> snapshot_id
         self.embeddings       = {}   # question -> vector
         self.ann_result       = []   # list[ (pct, row) ]
         self.upserts          = []   # list[ (id_hash, fields) ]
@@ -66,16 +67,25 @@ class _FakeSynRepo:
         return self.store.syn_verbatim.get( question )
     def find_exact_normalized( self, question_normalized ):
         return self.store.syn_normalized.get( question_normalized )
+    def find_exact_gist( self, question_gist ):
+        # The real CanonicalSynonymRepository has had this since it was written; the
+        # fake omitted it because nothing read it yet. A fake that is missing a method
+        # the real class has does not fail where the real one would — it fails
+        # everywhere, on a path the real one handles fine.
+        return self.store.syn_gist.get( question_gist )
     def delete_by_snapshot_id( self, snapshot_id ):
         self.store.deleted_synonyms.append( snapshot_id )
         # idempotent re-registration: drop any prior keys for this snapshot
         self.store.syn_verbatim   = { q: s for q, s in self.store.syn_verbatim.items()   if s != snapshot_id }
         self.store.syn_normalized = { q: s for q, s in self.store.syn_normalized.items() if s != snapshot_id }
+        self.store.syn_gist       = { q: s for q, s in self.store.syn_gist.items()       if s != snapshot_id }
         return 0
     def add_synonym( self, **kwargs ):
         self.store.added_synonyms.append( kwargs )
         self.store.syn_verbatim[   kwargs[ "question_verbatim" ] ]   = kwargs[ "snapshot_id" ]
         self.store.syn_normalized[ kwargs[ "question_normalized" ] ] = kwargs[ "snapshot_id" ]
+        if kwargs.get( "question_gist" ):
+            self.store.syn_gist[ kwargs[ "question_gist" ] ] = kwargs[ "snapshot_id" ]
         return kwargs
 
 
@@ -683,3 +693,190 @@ def test_snapshot_from_result_will_not_default_the_owner( wired ):
     with pytest.raises( TypeError, match="user_id" ):
         cache.snapshot_from_result( question="q", answer="a", answer_conversational="c",
                                     routing_command="agent router go to math" )
+
+
+# ────────────────────────────────── 6a — tier 1c, the gist probe
+
+class _WordingGist:
+    """A gist normalizer that actually collapses WORDING, which is the point.
+
+    `_FakeGist` above prefixes the text and so answers differently for every
+    phrasing — fine for the field it was written for, useless for a tier that only
+    exists because two wordings should meet. This one lowercases, drops punctuation
+    and a small stopword list, and keeps the content words, so "What's on my todo
+    list?" and "what is on my todo list" both reduce to "todo list" — and a question
+    made only of stopwords reduces to "", which is the case tier 1c must refuse.
+    """
+
+    _STOPWORDS = { "what", "whats", "is", "on", "my", "the", "a", "it", "s" }
+
+    def __init__( self ):
+        self.calls = []
+
+    def get_normalized_gist( self, text ):
+        self.calls.append( text )
+        cleaned = "".join( c if c.isalnum() or c.isspace() else " " for c in text.lower() )
+        return " ".join( w for w in cleaned.split() if w not in self._STOPWORDS )
+
+
+@pytest.fixture
+def wired_wording_gist( monkeypatch ):
+    """The `wired` rig with a gist normalizer that collapses wording."""
+    store = _Store()
+    monkeypatch.setattr( cache_mod, "SolutionSnapshotRepository", _FakeSnapshotRepo )
+    monkeypatch.setattr( cache_mod, "CanonicalSynonymRepository", _FakeSynRepo )
+    monkeypatch.setattr( cache_mod, "QuestionEmbeddingRepository", _FakeQEmbRepo )
+
+    def _build( *, debug=False ):
+        return V2Cache(
+            embedding_provider=_FakeProvider( [ 0.2 ] * 4 ), snapshot_factory=_RecordingFactory(),
+            normalizer=_FakeNormalizer(), gist_normalizer=_WordingGist(),
+            db_scope=_db_scope_for( store ), query_floor=70.0, ann_limit=7,
+            embedding_dim=4, debug=debug, verbose=debug,
+        )
+
+    return _build, store
+
+
+def test_a_reworded_question_replays_on_its_gist( wired_wording_gist ):
+    """
+    THE POINT OF 6a. One row was written for "what is on my todo list"; the user
+    now says "What's on my todo list?". Verbatim differs, normalized differs (the
+    apostrophe and the question mark survive normalization), gist is the same.
+
+    RED ON REVERT: drop the gist probe from _exact_probes and this falls through to
+    tier 2, where there is no ANN result — a miss, and the agent re-runs a question
+    already answered.
+    """
+    build, store = wired_wording_gist
+    cache = build()
+    store.syn_gist[ "todo list" ] = "id-1"
+    store.rows[ "id-1" ]          = _make_orm_row( id_hash="id-1" )
+
+    result = cache.lookup( "What's on my todo list?" )
+
+    assert result.is_replay_hit is True, "a reworded repeat did not replay"
+    assert result.tier         == "exact_gist"
+    assert result.similarity   == 100.0
+
+
+def test_the_gist_probe_costs_no_embedding( wired_wording_gist ):
+    """
+    Tier 1c is a tier-1 probe, not a cheap second ANN pass: one indexed equality
+    lookup, no vector. That is what keeps `is_replay_hit` deterministic under R-C1
+    and what makes the tier worth having at all.
+
+    RED ON REVERT: implement the gist match by embedding the gist and probing ANN —
+    the timings below stop being None and the tier reports a float score.
+    """
+    build, store = wired_wording_gist
+    cache = build()
+    store.syn_gist[ "todo list" ] = "id-1"
+    store.rows[ "id-1" ]          = _make_orm_row( id_hash="id-1" )
+
+    result = cache.lookup( "What's on my todo list?" )
+
+    assert result.is_replay_hit is True
+    assert result.t_embed_ms is None, "the gist tier embedded the question"
+    assert result.t_ann_ms   is None, "the gist tier ran an ANN probe"
+
+
+def test_a_stricter_probe_wins_over_the_gist( wired_wording_gist ):
+    """
+    ORDER. Verbatim and normalized are stricter, so a question that matches either
+    gets ITS OWN row — never a same-gist neighbour's. Both rows below share the gist
+    "todo list"; the verbatim probe must decide.
+
+    RED ON REVERT: put the gist probe first in _exact_probes and the verbatim
+    question replays id-2, the neighbour.
+    """
+    build, store = wired_wording_gist
+    cache = build()
+    store.syn_verbatim[ "What's on my todo list?" ] = "id-1"
+    store.syn_gist[ "todo list" ]                   = "id-2"
+    store.rows[ "id-1" ] = _make_orm_row( id_hash="id-1" )
+    store.rows[ "id-2" ] = _make_orm_row( id_hash="id-2" )
+
+    result = cache.lookup( "What's on my todo list?" )
+
+    assert result.tier == "exact_verbatim"
+    assert result.snapshot.id_hash == "id-1"
+
+
+@pytest.mark.parametrize( "debug", [ False, True ] )
+def test_a_question_with_no_gist_never_probes_the_gist_tier( wired_wording_gist, debug ):
+    """
+    A question made entirely of stopwords reduces to "". Equality on "" would match
+    every row whose gist column is also blank — and replay a stranger's answer to a
+    question that has nothing in common with this one. An empty gist is not a key.
+
+    RED ON REVERT: drop the blank-gist guard and this replays id-blank.
+    """
+    build, store = wired_wording_gist
+    cache = build( debug=debug )
+    store.syn_gist[ "" ]     = "id-blank"
+    store.rows[ "id-blank" ] = _make_orm_row( id_hash="id-blank" )
+
+    result = cache.lookup( "what is it?" )
+
+    assert result.is_replay_hit is False, "a question with no gist replayed a blank-gist row"
+    assert result.tier == "miss"
+
+
+def test_a_ghost_gist_synonym_falls_through_rather_than_replaying( wired_wording_gist ):
+    """
+    The same ghost rule the other two exact probes already obey: a synonym row
+    pointing at a snapshot that is gone is a MISS for that tier, not a crash and not
+    a replay of nothing. Tier 1c inherits it by going through _resolve_exact — this
+    is the test that says so rather than assuming it.
+    """
+    build, store = wired_wording_gist
+    cache = build()
+    store.syn_gist[ "todo list" ] = "ghost-id"      # no matching row in store.rows
+
+    result = cache.lookup( "What's on my todo list?" )
+
+    assert result.is_replay_hit is False
+    assert result.tier == "miss"
+
+
+def test_the_shared_base_search_did_not_gain_the_tier():
+    """
+    BLAST RADIUS. TwoTierQuestionSearch is shared with the snapshot manager's own
+    shim, so the gist tier had to land in V2Cache and nowhere else. The seam in the
+    base is a hook with no behaviour of its own.
+
+    RED ON REVERT: move the gist probe up into the base and the shared search starts
+    replaying on gist for every caller, silently.
+    """
+    from cosa.memory.two_tier_question_search import TwoTierQuestionSearch
+
+    base_probes = TwoTierQuestionSearch._exact_probes(
+        types.SimpleNamespace(), types.SimpleNamespace(), "q", "q"
+    )
+
+    assert [ name for name, _probe in base_probes ] == [ "exact_verbatim", "exact_normalized" ]
+
+
+def test_a_written_back_row_is_findable_by_a_reworded_question( wired_wording_gist ):
+    """
+    THE ROUND TRIP, which is the only version of this that proves the tier is
+    reachable in production: write_back registers the synonym row (gist column
+    included, and it always did), and a differently-worded question finds it.
+
+    A test that planted `store.syn_gist` by hand — as the ones above do — proves the
+    READ half only. If the write ever stopped filling question_gist, every test but
+    this one would stay green.
+    """
+    build, store = wired_wording_gist
+    cache = build()
+    # question_gist left EMPTY on purpose: write_back computes it from the same gist
+    # normalizer the lookup uses, which is the half this test is here to close.
+    cache.write_back( _make_snapshot( question="what is on my todo list",
+                                      question_normalized="what is on my todo list",
+                                      question_gist="" ), writeback_enabled=True )
+
+    result = cache.lookup( "What's on my todo list?" )
+
+    assert result.is_replay_hit is True, "a written-back row was unreachable by a reworded question"
+    assert result.tier == "exact_gist"

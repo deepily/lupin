@@ -156,6 +156,45 @@ class V2Cache( TwoTierQuestionSearch ):
             session_id=session_id,
         )
 
+    # ------------------------------------------------------------------ lookup
+
+    def _exact_probes( self, synonyms: Any, question: str, question_normalized: str ) -> tuple:
+        """
+        The base's two exact probes, plus v2's THIRD: exact match on the gist.
+
+        WHY IT IS A TIER-1 PROBE AND NOT A SECOND ANN PASS. The gist is already
+        written for every row — write_back computes it and registers it on the
+        canonical-synonym row — and `find_exact_gist` was already on the repository
+        with nothing calling it. So this is one indexed equality lookup, no embedding
+        and no float comparison, which is what keeps `is_replay_hit` deterministic
+        under R-C1. What it buys is the wording: "what's on my todo list" and "what
+        is on my todo list" normalize apart and gist together.
+
+        ORDER MATTERS AND IT IS LAST OF THE THREE. Verbatim and normalized are
+        stricter, so a question that matches either matches its own row rather than
+        a same-gist neighbour's.
+
+        A BLANK GIST NEVER PROBES. The gist normalizer strips a question down to its
+        content words, and a question made entirely of stopwords reduces to "" —
+        which would equality-match every row whose gist column is also blank and
+        replay a stranger's answer. An empty gist is not a key.
+
+        Requires:
+            - synonyms is an open-session CanonicalSynonymRepository
+
+        Ensures:
+            - returns the base's two probes first, in the base's order, then the
+              gist probe
+            - the gist probe is ABSENT (not merely unmatched) when the question's
+              gist is empty
+        """
+        probes = super()._exact_probes( synonyms, question, question_normalized )
+        question_gist = self._gist_normalizer.get_normalized_gist( question )
+        if not question_gist:
+            if self.debug: print( "(v2cache) tier-1c skipped: the question has no gist to key on" )
+            return probes
+        return probes + ( ( "exact_gist", lambda: synonyms.find_exact_gist( question_gist ) ), )
+
     def normalize( self, question: str ) -> str:
         """
         The normalized form of a question, from the SAME normalizer the store is
