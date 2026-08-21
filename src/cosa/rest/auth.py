@@ -291,10 +291,20 @@ async def verify_mock_token(token: str) -> Dict:
         # a validation error that was caught, printed and dropped, and the environment
         # looked like it had working notifications when it had none.
         #
-        # Minted from the EMAIL rather than the system id so both token formats reach
-        # the same id, and so it matches what JWT auth returns in shape: there, the user
-        # id is the database row's UUID. The system id is unchanged and still what
-        # get_user_info is keyed on — only the id handed OUT is a UUID now.
+        # Minted from the RESOLVED email — the one on the user record, which for an
+        # unknown system id is the generated "{system_id}@generated.local" — so both
+        # token formats reach it the same way. It matches what JWT auth returns in
+        # shape: there, the user id is the database row's UUID. The system id is
+        # unchanged and still what get_user_info is keyed on; only the id handed OUT
+        # is a UUID now.
+        #
+        # ⚠️ THE TWO TOKEN FORMATS DO NOT REACH THE SAME USER, and this comment said
+        # they did until María caught it (row 10153719). They never have: the email
+        # form runs its address through email_to_system_id FIRST, which appends its own
+        # 4-hex suffix, so "…_8e32@generated.local" resolves to system id "…_8e32_7cf9"
+        # and mints a different UUID than the legacy form for "…_8e32". Pre-existing,
+        # not introduced here, and asserted by test_the_legacy_token_format_mints_a_
+        # uuid_too, which this comment contradicted.
         user_uuid = email_to_user_uuid( user_data["email"] )
 
         # Return mock decoded token with real user structure
