@@ -56,11 +56,18 @@ HEALTH_CONSECUTIVE="${HEALTH_CONSECUTIVE:-3}"     # env-overridable; tests set 1
 QUIET=0
 FORCE=0
 UNWARNED_PAUSE_SECS="${UNWARNED_PAUSE_SECS:-5}"   # env-overridable (tests set 0)
+# --reason="..." says WHY this bounce is happening, and it rides the warning broadcast
+# next to the dirty-file list. Cheech asked for it after three bounces in twenty minutes:
+# the broadcast named the files each one deployed but never why, so a peer holding armed
+# probes could not tell a needed bounce from a casual one. Optional — an omitted reason
+# leaves the message exactly as it was.
+BOUNCE_REASON="${BOUNCE_REASON:-}"
 
 for arg in "$@"; do
     case "$arg" in
         --quiet|-q) QUIET=1 ;;
         --force|-f) FORCE=1 ;;
+        --reason=*) BOUNCE_REASON="${arg#--reason=}" ;;
         -h|--help)
             sed -n '2,27p' "$0"
             exit 0
@@ -185,7 +192,7 @@ esac
 # with --force) to give a human the beat to abort; 1 proceeds directly.
 log "Warning the fleet before the bounce..."
 warn_rc=0
-python3 "${LUPIN_ROOT}/src/scripts/bounce_dev_warn.py" || warn_rc=$?
+BOUNCE_REASON="$BOUNCE_REASON" python3 "${LUPIN_ROOT}/src/scripts/bounce_dev_warn.py" || warn_rc=$?
 case "$warn_rc" in
     0)
         log "Warning confirmed reached the fleet."
