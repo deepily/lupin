@@ -187,109 +187,59 @@ async def push():
     gone( "/api/push" )
 
 
+# ── TOMBSTONE — /api/push-agentic ──
+#
+#   What was here: the unattended, service-to-service twin of /api/push. The caller
+#   supplied a routing_command and a fully-specified args dict, and it went straight to
+#   the queue with no expeditor, no LORA parsing and no interactive Q&A — deliberately,
+#   because an unattended submitter cannot answer a question.
+#
+#   WHY THIS ONE IS THE EASIEST OF THE NINE, AND WHY THAT IS WORTH SAYING. Every other
+#   retired door named its own command and had to be told which one it was. This door
+#   already took the command as a parameter, which is exactly the shape of
+#   /api/v2/submit — a command string, an args dict, and the queue directives beside
+#   them. It was not a door that needed converting; it was /api/v2/submit with a
+#   different name and a worse contract.
+#
+#     POST /api/v2/submit
+#     { "command": "agent router go to deep research",
+#       "args"   : { "query": "..." },
+#       "question": "...", "websocket_id": "...",
+#       "scheduled_at": null, "monopolize": false }
+#
+#   The renames a caller has to make, stated so nobody has to diff two schemas:
+#   `routing_command` becomes `command`, and `websocket_id` — required here — is
+#   optional there. `args`, `question`, `scheduled_at` and `monopolize` keep their names
+#   and their meanings, and `parent_id_hash` is available now where it was not before.
+#
+#   The 400s this door raised by hand are not lost, they are Pydantic's now: a missing
+#   or non-string command, a non-object args, a body that is not a JSON object. It
+#   validated those itself because it read the raw request; SubmitRequest is a model.
+#
+#   WARNING: `todo_queue.push_job_agentic` HAS NO PRODUCTION CALLER AFTER THIS COMMIT —
+#   this door was its only one. That is the same state `push_job` reached at the end of
+#   the cutover, and it is recorded here rather than acted on: pinning it as dead is its
+#   own piece of work, the way 6c was for push_job, and the method's own coverage still
+#   stands under the unit suite.
+#
+#   The body is DELETED rather than left unreachable below a raise: unreachable code is
+#   code nobody can test and everybody must still read.
 @router.post(
     "/push-agentic",
-    summary     = "Submit agentic job without the runtime argument expeditor",
-    description = "Unattended / service-to-service agentic job submission. Caller supplies routing_command + explicit args dict. No voice-path LORA parsing, no interactive Q&A. Flexible passthrough args support current and future agents."
+    deprecated  = True,
+    status_code = 410,
+    summary     = "GONE — use /api/v2/submit",
+    description = tombstone_description( "/api/push-agentic" )
 )
-async def push_agentic(
-    request      : Request,
-    current_user : dict = Depends( get_current_user ),
-    todo_queue         = Depends( get_todo_queue )
-):
+async def push_agentic():
     """
-    Submit a fully-specified agentic job to the todo queue.
+    Refuse this retired door with 410 Gone.
 
-    Request body (JSON):
-        routing_command (str, required): e.g. "agent router go to deep research".
-            Must be one of the commands supported by create_agentic_job.
-        websocket_id (str, required): session routing id (same format + validation as /api/push).
-        args (dict, optional): fully-specified agent args. Passthrough — agent constructor validates.
-        question (str, optional): display-only text for the UI history card.
-        scheduled_at (str, optional): ISO-8601 timestamp for delayed execution.
-        monopolize (bool, optional): request a monopolized execution slot.
-
-    Contrast with POST /api/push: this endpoint bypasses the runtime argument
-    expeditor entirely. If args are incomplete, the agent constructor fails
-    explicitly rather than silently waiting for an interactive reply that
-    unattended submitters cannot provide.
-
-    Auth: same as /api/push (JWT or API key via get_current_user).
-
-    Returns:
-        { status, routing_command, websocket_id, user_id, job_id, result }
-
-    Raises:
-        HTTPException 400 on invalid body / missing fields / unknown routing_command.
+    Ensures:
+        - never returns; raises HTTPException( 410 ) naming /api/v2/submit
+          and the REMOVE BY 2026-12-31 date
     """
-    try:
-        body = await request.json()
-    except Exception as e:
-        raise HTTPException( status_code=400, detail=f"Invalid JSON in request body: {e}" )
-
-    if not isinstance( body, dict ):
-        raise HTTPException( status_code=400, detail="Request body must be a JSON object" )
-
-    routing_command = body.get( "routing_command" )
-    websocket_id    = body.get( "websocket_id" )
-    args_dict       = body.get( "args", { } ) or { }
-    question        = body.get( "question" )
-    scheduled_at    = body.get( "scheduled_at" )
-    monopolize      = bool( body.get( "monopolize", False ) )
-
-    # Validate required string fields
-    for field_name, field_value in (
-        ( "routing_command", routing_command ),
-        ( "websocket_id",    websocket_id ),
-    ):
-        if not field_value:
-            raise HTTPException( status_code=400, detail=f"Missing required field: {field_name}" )
-        if not isinstance( field_value, str ):
-            raise HTTPException( status_code=400, detail=f"Field {field_name!r} must be a string" )
-
-    routing_command = routing_command.strip()
-    websocket_id    = websocket_id.strip()
-    if not routing_command or not websocket_id:
-        raise HTTPException( status_code=400, detail="routing_command / websocket_id cannot be empty" )
-
-    if not isinstance( args_dict, dict ):
-        raise HTTPException( status_code=400, detail="Field 'args' must be a JSON object" )
-
-    user_id    = current_user[ "uid" ]
-    user_email = current_user[ "email" ]
-    print( f"[API] /api/push-agentic - command: {routing_command!r}, ws: {websocket_id}, user: {user_email}, args_keys: {list( args_dict.keys() )}" )
-
-    try:
-        result = await asyncio.to_thread(
-            todo_queue.push_job_agentic,
-            routing_command,
-            args_dict,
-            websocket_id,
-            user_id,
-            user_email,
-            question,
-            scheduled_at,
-            monopolize,
-        )
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException( status_code=500, detail=f"push-agentic failed: {e}" )
-
-    job_id = result.get( "job_id" ) if isinstance( result, dict ) else None
-    if job_id is None:
-        # Unknown command or construction failure bubbles up as a 400 so the
-        # caller can distinguish "submitted, await outcome" from "rejected".
-        raise HTTPException( status_code=400, detail=result.get( "message" ) if isinstance( result, dict ) else str( result ) )
-
-    return {
-        "status"          : "queued",
-        "routing_command" : routing_command,
-        "websocket_id"    : websocket_id,
-        "user_id"         : user_id,
-        "job_id"          : job_id,
-        "result"          : result.get( "message" ),
-    }
+    gone( "/api/push-agentic" )
 
 
 @router.get(

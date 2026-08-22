@@ -68,7 +68,7 @@ def _concrete( path ):
 
 # ── the count, stated once so a growing table cannot pass quietly ────────────
 
-def test_exactly_nine_doors_are_retired_at_this_commit():
+def test_exactly_ten_doors_are_retired_at_this_commit():
     """
     THE COUNT IS RESTATED BY HAND ON PURPOSE, and it is the third of the three edits
     every new door costs (table row, this set, this name). A loop that silently covered
@@ -102,6 +102,10 @@ def test_exactly_nine_doors_are_retired_at_this_commit():
     `parent_id_hash` so Gate B admits it through the monopoly hold; `/api/v2/submit` carries
     that field top-level and stamps it in the factory, so the sweep keeps working.
 
+    `/api/push-agentic` came tenth and last of this run. It is the one door that was
+    already the right shape: it took the routing command as a parameter instead of naming
+    its own, so retiring it is a rename of the fields rather than a change of contract.
+
     STILL OUT, each for its own reason, because a door absent from this set should never
     read as one nobody got to:
       · `/api/upload-and-transcribe-mp3` — a speech-to-text endpoint that queues only on
@@ -124,6 +128,7 @@ def test_exactly_nine_doors_are_retired_at_this_commit():
         "/api/presentation-generator/submit",
         "/api/podcast-generator/submit",
         "/api/swe-team/submit",
+        "/api/push-agentic",
     }, sorted( RETIRED_DOORS )
 
 

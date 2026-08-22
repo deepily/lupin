@@ -41,6 +41,7 @@ themselves dead by the end of 2026.**
 | `POST /api/presentation-generator/submit` | `/api/v2/submit` |
 | `POST /api/podcast-generator/submit` | `/api/v2/ask` |
 | `POST /api/swe-team/submit` | `/api/v2/submit` |
+| `POST /api/push-agentic` | `/api/v2/submit` |
 
 The two question-shaped doors went first, when `/api/v2/ask` was the only live
 replacement. The submit-shaped ones could not follow until `/api/v2/submit` both existed
@@ -52,8 +53,7 @@ rather than `submit`: its description flow asked the user which document they me
 what languages and audience they wanted, and could answer "cancelled" — a conversation,
 which is what `ask` does and what `submit` refuses to do by design.
 
-**Still live, retiring next**: `/api/push-agentic`,
-`/api/mock-job/submit`, `/api/test-suite/submit`,
+**Still live, retiring next**: `/api/mock-job/submit`, `/api/test-suite/submit`,
 `/api/jobs/{id_hash}/resume-from-checkpoint`, `/api/test-fix-expediter/resume-from`. The
 last three are held for stated reasons rather than left over: `/api/test-suite/submit` is
 how the gate rig schedules a :8000 run, so it lands only once that gate is green; the two

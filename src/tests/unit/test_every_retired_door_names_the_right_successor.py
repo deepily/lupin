@@ -53,6 +53,8 @@ EXPECTED_SUCCESSORS = {
     "/api/deep-research-to-presentation/submit" : V2_SUBMIT,
     "/api/presentation-generator/submit"        : V2_SUBMIT,
     "/api/swe-team/submit"                      : V2_SUBMIT,
+    # Already took the command as a parameter — the new door's shape under an old name.
+    "/api/push-agentic"                         : V2_SUBMIT,
 }
 
 
@@ -106,7 +108,7 @@ class TestEveryRetiredDoorNamesTheRightSuccessor( unittest.TestCase ):
 
     def test_the_guard_is_not_vacuous( self ):
         """Without this, a day when both dicts empty out would pass every check above."""
-        self.assertGreaterEqual( len( EXPECTED_SUCCESSORS ), 9 )
+        self.assertGreaterEqual( len( EXPECTED_SUCCESSORS ), 10 )
         self.assertIn( V2_ASK,    EXPECTED_SUCCESSORS.values() )
         self.assertIn( V2_SUBMIT, EXPECTED_SUCCESSORS.values() )
 

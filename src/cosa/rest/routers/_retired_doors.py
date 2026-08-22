@@ -131,6 +131,12 @@ RETIRED_DOORS = {
     # admits it through the monopoly hold; `/api/v2/submit` carries that field top-level
     # and stamps it in the factory, so the sweep keeps working after this row lands.
     "/api/swe-team/submit"                        : V2_SUBMIT,
+    # ── the unattended door, and the closest thing to submit that already existed ──
+    # It took the routing command as a PARAMETER rather than naming its own, which is
+    # exactly `/api/v2/submit`'s shape — a command string, an args dict, and the queue
+    # directives beside them. It was not a door that needed converting; it was the new
+    # door with a different name and a worse contract.
+    "/api/push-agentic"                           : V2_SUBMIT,
 }
 
 

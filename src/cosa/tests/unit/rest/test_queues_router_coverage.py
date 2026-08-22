@@ -151,87 +151,47 @@ class TestPushIsRetired( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( ctx.exception.status_code, 410 )
 
 
-class TestPushAgentic( unittest.IsolatedAsyncioTestCase ):
-    """Coverage for POST /api/push-agentic."""
+class TestPushAgenticIsRetired( unittest.IsolatedAsyncioTestCase ):
+    """
+    WHAT USED TO BE HERE: nine tests over the handler's hand-rolled validation — invalid
+    JSON, a body that was not an object, a missing or non-string routing_command, blanks
+    after stripping, a non-object args, the success shape, the construction 500 and the
+    unknown-command 400.
 
-    def setUp( self ):
-        self.user = { "uid": "u1", "email": "u1@x.com", "roles": [ "user" ] }
-        self.q    = Mock()
+    Those 400s are not lost, they moved: this door read the raw request and validated it
+    by hand, and `/api/v2/submit` takes a Pydantic model, so the same bad bodies now come
+    back as 422s from the model rather than 400s from a handler. That is a REAL change
+    visible to every caller — 400 becomes 422, and `websocket_id` goes from required to
+    optional — and it belongs in the cutover notes rather than in a silent deletion.
+    """
 
-    async def test_invalid_json_400( self ):
+    async def test_the_door_is_gone_and_says_where_to_go( self ):
         with self.assertRaises( HTTPException ) as ctx:
-            await push_agentic( request=_async_json_request( exc=ValueError( "x" ) ),
-                                current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
+            await push_agentic()
+        self.assertEqual( ctx.exception.status_code, 410 )
+        self.assertIn( "/api/v2/submit", ctx.exception.detail )
+        self.assertIn( "REMOVE BY",      ctx.exception.detail )
 
-    async def test_body_not_dict_400( self ):
+    async def test_it_names_submit_and_not_ask( self ):
+        """
+        This door is submit-shaped in the most literal way of any of the ten — it already
+        took the command as a parameter. Pointing it at `ask` would send an unattended,
+        service-to-service caller to the door whose whole job is to ask questions back.
+        """
+        from cosa.rest.routers._retired_doors import RETIRED_DOORS, V2_SUBMIT, V2_ASK
+        self.assertEqual( RETIRED_DOORS[ "/api/push-agentic" ], V2_SUBMIT )
+        self.assertNotEqual( RETIRED_DOORS[ "/api/push-agentic" ], V2_ASK )
+
+    async def test_it_refuses_before_touching_the_queue( self ):
+        """
+        The tombstone takes no queue dependency at all, which is the point: a refusal that
+        still resolved `get_todo_queue` would keep a dead door coupled to live
+        infrastructure. `push_agentic()` accepting zero arguments is the proof — this call
+        would raise TypeError, not 410, if a dependency came back.
+        """
         with self.assertRaises( HTTPException ) as ctx:
-            await push_agentic( request=_async_json_request( value="nope" ),
-                                current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "must be a JSON object", ctx.exception.detail )
-
-    async def test_missing_routing_command_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push_agentic( request=_async_json_request( value={ "websocket_id": "w" } ),
-                                current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "Missing required field: routing_command", ctx.exception.detail )
-
-    async def test_nonstring_field_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push_agentic( request=_async_json_request( value={ "routing_command": 5, "websocket_id": "w" } ),
-                                current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "must be a string", ctx.exception.detail )
-
-    async def test_blank_after_strip_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push_agentic( request=_async_json_request( value={ "routing_command": "  ", "websocket_id": "  " } ),
-                                current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "cannot be empty", ctx.exception.detail )
-
-    async def test_args_not_dict_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push_agentic( request=_async_json_request(
-                                    value={ "routing_command": "go", "websocket_id": "w", "args": [ 1 ] } ),
-                                current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "'args' must be a JSON object", ctx.exception.detail )
-
-    async def test_success( self ):
-        self.q.push_job_agentic.return_value = { "job_id": "dr-a1b2c3d4", "message": "queued" }
-        with patch( "builtins.print" ):
-            out = await push_agentic( request=_async_json_request(
-                                          value={ "routing_command": "agent router go to deep research",
-                                                  "websocket_id": "w", "args": { "x": 1 },
-                                                  "question": "Q", "monopolize": True } ),
-                                      current_user=self.user, todo_queue=self.q )
-        self.assertEqual( out[ "status" ], "queued" )
-        self.assertEqual( out[ "job_id" ], "dr-a1b2c3d4" )
-        self.assertEqual( out[ "result" ], "queued" )
-
-    async def test_push_job_agentic_raises_500( self ):
-        self.q.push_job_agentic.side_effect = Exception( "construct fail" )
-        with patch( "builtins.print" ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await push_agentic( request=_async_json_request(
-                                        value={ "routing_command": "go", "websocket_id": "w" } ),
-                                    current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 500 )
-        self.assertIn( "push-agentic failed", ctx.exception.detail )
-
-    async def test_no_job_id_400( self ):
-        # result is a dict without job_id → rejected as 400 with message
-        self.q.push_job_agentic.return_value = { "message": "unknown command" }
-        with patch( "builtins.print" ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await push_agentic( request=_async_json_request(
-                                        value={ "routing_command": "bogus", "websocket_id": "w" } ),
-                                    current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "unknown command", ctx.exception.detail )
+            await push_agentic()
+        self.assertEqual( ctx.exception.status_code, 410 )
 
 
 class TestPoolStatus( unittest.IsolatedAsyncioTestCase ):
