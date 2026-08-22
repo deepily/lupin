@@ -104,6 +104,13 @@ RETIRED_DOORS = {
     "/api/push"                       : V2_ASK,
     "/api/job-history/{job_id}/retry" : V2_ASK,
     "/api/bug-fix-expediter/submit"   : V2_SUBMIT,
+    # ── the research trio, retired together ──
+    # One UI function submits to all three: `submitResearchJob` in notifications.js picks
+    # between them off two checkboxes. Retiring them one at a time would have meant editing
+    # that same function three times, each edit leaving it half cut over.
+    "/api/deep-research/submit"                  : V2_SUBMIT,
+    "/api/deep-research-to-podcast/submit"       : V2_SUBMIT,
+    "/api/deep-research-to-presentation/submit"  : V2_SUBMIT,
 }
 
 
@@ -125,8 +132,16 @@ def refusal_detail( path: str ) -> str:
           plausible-looking refusal that names the wrong replacement
     """
     replacement = RETIRED_DOORS[ path ]
+    # THE SENTENCE HAS TO MATCH THE DOOR IT NAMES. This read "Every question now enters
+    # through …" for every row, which was true while both retired doors were
+    # question-shaped and `ask` was the only replacement. Said about `/api/v2/submit` it
+    # is simply wrong — submit is the door for work whose command the caller already
+    # chose, and telling someone to send a question there sends them to the wrong one of
+    # two doors that both exist and both answer.
+    entering = ( "Every question now enters through" if replacement == V2_ASK
+                 else "Work whose command is already decided now enters through" )
     return (
-        f"{path} is GONE. Every question now enters through {replacement}. "
+        f"{path} is GONE. {entering} {replacement}. "
         f"This route is a tombstone that answers 410 and nothing else — "
         f"REMOVE BY {REMOVE_BY}, it is dead by the end of the year."
     )

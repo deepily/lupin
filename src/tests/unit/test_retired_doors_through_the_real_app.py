@@ -92,7 +92,8 @@ def test_the_real_app_still_mounts_the_door_every_refusal_names( real_app, retir
         )
 
 
-@pytest.mark.parametrize( "door_index", [ 0, 1, 2 ], ids=[ "door_0", "door_1", "door_2" ] )
+@pytest.mark.parametrize( "door_index", [ 0, 1, 2, 3, 4, 5 ],
+                          ids=[ "door_0", "door_1", "door_2", "door_3", "door_4", "door_5" ] )
 def test_each_retired_door_refuses_through_the_real_app( door_index, real_client, retired_doors ):
     """410, and a body that both names the replacement and says the removal date.
 
@@ -127,7 +128,7 @@ def test_every_retired_door_is_covered_by_a_case( retired_doors ):
     table-driven loop grows silently and covers the new door with no new reported
     case. This test fails the moment the table outgrows the cases, naming the gap.
     """
-    assert len( retired_doors ) == 3, (
+    assert len( retired_doors ) == 6, (
         f"the tombstone table now holds {len( retired_doors )} doors: {sorted( retired_doors )}. "
         f"Add a case id to test_each_retired_door_refuses_through_the_real_app for each new door, "
         f"then update this count — do NOT widen the parametrisation into an open loop."

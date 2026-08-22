@@ -3078,11 +3078,11 @@ class NotificationsUI {
     // ========================================
 
     /**
-     * Submit a Deep Research job (with optional podcast generation).
+     * Submit a Deep Research job (optionally chained to a podcast or a presentation).
      *
-     * If "Also generate podcast" checkbox is checked, submits to
-     * /api/deep-research-to-podcast/submit endpoint.
-     * Otherwise, submits to /api/deep-research/submit endpoint.
+     * Always posts to /api/v2/submit. The two checkboxes pick which routing command goes
+     * in the body — plain research, research→podcast, or research→presentation. The three
+     * endpoints this used to choose between are retired and answer 410.
      */
     async submitResearchJob() {
         const topicInput = document.getElementById( 'research-topic' );
@@ -3116,25 +3116,33 @@ class NotificationsUI {
             // Ensure token is valid before API call
             await this.ensureValidToken();
 
-            // Choose endpoint based on checkboxes (mutually exclusive)
-            let endpoint = '/api/deep-research/submit';
+            // ONE DOOR NOW, AND THE CHECKBOXES CHOOSE A COMMAND RATHER THAN A URL.
+            // The three research endpoints this used to pick between are retired: they
+            // answer 410 naming /api/v2/submit, which takes the command as a string and
+            // the agent's own arguments in `args`. What used to be three routes is one
+            // route and three command strings.
+            let command = 'agent router go to deep research';
             if ( withPresentation ) {
-                endpoint = '/api/deep-research-to-presentation/submit';
+                command = 'agent router go to research to presentation';
             } else if ( withPodcast ) {
-                endpoint = '/api/deep-research-to-podcast/submit';
+                command = 'agent router go to research to podcast';
             }
 
+            // scheduled_at and monopolize stay OUTSIDE args on purpose: they tell the
+            // queue when and how to run the work, and `args` is checked against the
+            // command's own argument contract, which neither of them is in.
             const schedulingParams = this._getSchedulingParams( 'research' );
-            let body = { query: topic, budget: budget, dry_run: dryRun, ...schedulingParams };
+            let args = { query: topic, budget: budget, dry_run: dryRun };
             if ( withPodcast ) {
-                body.target_languages = [ 'en', 'es-MX' ];
+                args.target_languages = [ 'en', 'es-MX' ];
             } else if ( withPresentation ) {
-                body.target_duration_minutes = 15;
+                args.target_duration_minutes = 15;
             }
+            const body = { command: command, args: args, question: topic, ...schedulingParams };
 
-            this.log( `Submitting research job to ${endpoint}: ${topic.substring( 0, 50 )}...` );
+            this.log( `Submitting research job as ${command}: ${topic.substring( 0, 50 )}...` );
 
-            const response = await fetch( endpoint, {
+            const response = await fetch( '/api/v2/submit', {
                 method: 'POST',
                 headers: {
                     'Authorization': this.getAuthHeader(),
@@ -3153,8 +3161,13 @@ class NotificationsUI {
             this.log( "Research job submitted:", result );
 
             // Success feedback
-            const jobType = withPodcast ? 'Research→Podcast' : 'Research';
-            statusDiv.textContent = `✓ ${jobType} job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
+            // NO POSITION ANY MORE, and that is deliberate rather than an omission. The v2
+            // response carries no queue_position and is not being widened for one: a place
+            // in the queue changes as the queue moves, so a number frozen at the instant of
+            // submission was stale the moment it was printed. The job card learns its real
+            // place from the queue websocket events.
+            const jobType = withPresentation ? 'Research→Presentation' : ( withPodcast ? 'Research→Podcast' : 'Research' );
+            statusDiv.textContent = `✓ ${jobType} job submitted! Job ID: ${result.job_id}`;
             statusDiv.style.color = '#28a745';
 
             // Clear input
