@@ -204,7 +204,8 @@ class AskFlow:
             agentic = resolve_agentic( command )
             if agentic is not None:
                 return self._ask_agentic( trace, agentic, command, raw_args, question, ctx, interactive )
-            return self._receptionist( trace, question, ctx, "unknown_command" )
+            return self._receptionist( trace, question, ctx,
+                                       self._unresolved_route_reason( command ) )
 
         # 2 — cache: replay only on a tier-1 exact hit (R-C1); below perfect, run the agent.
         #
@@ -411,8 +412,9 @@ class AskFlow:
             if agentic is not None:
                 return self._submit_agentic( trace, agentic, command, dict( args or {} ), question, ctx,
                                              scheduled_at, monopolize, parent_id_hash )
-            trace.set( "unknown_command", command )
-            return self._receptionist( trace, question or command, ctx, "unknown_command" )
+            route_reason = self._unresolved_route_reason( command )
+            if route_reason == "unknown_command": trace.set( "unknown_command", command )
+            return self._receptionist( trace, question or command, ctx, route_reason )
 
         if directives_set: trace.set( "queue_directives_ignored", ",".join( directives_set ) )
 
@@ -1110,6 +1112,50 @@ class AskFlow:
     # ask, and resume only folds in the answer to the argument it was missing.
     _ROUTER_CHOSE = frozenset( { "args_none", "args_complete", "resumed" } )
 
+    # THE RECEPTIONIST IS A DESTINATION, NOT ONLY A FALLBACK.
+    #
+    # "agent router go to receptionist" is a SELECTABLE command — it sits in the served
+    # command list and carries its own training utterances ("Switch to receptionist",
+    # "Receptionist, please"). But its spec is cls=CommandClass.NONE with factory=None,
+    # so `resolve()` returns None and `resolve_agentic()` does not serve it either, and
+    # the flow reached the receptionist through the DEGRADE door answering
+    # route_reason="unknown_command".
+    #
+    # So a user who ASKED FOR the receptionist was answered as though routing had FAILED,
+    # and a deliberate pick, a garbage command and an unroutable question were identical
+    # on path, route_reason AND command — `_receptionist` overwrites the caller's command
+    # with its own on the way out, so the emitted command cannot tell them apart either.
+    # `path` is what the notification card renders on, which makes the conflation
+    # user-visible rather than merely internal.
+    #
+    # The fix is a LABEL, not a route: same path, same receptionist, a route_reason that
+    # says which door was used. Giving the receptionist a factory was considered and
+    # rejected — that would change what cls=NONE MEANS and pull it inside the write-back
+    # guard, a semantics change bought to fix a labelling problem.
+    RECEPTIONIST_COMMAND = "agent router go to receptionist"
+
+    @classmethod
+    def _unresolved_route_reason( cls, command: str ) -> str:
+        """Why an unresolvable command is going to the receptionist.
+
+        Requires:
+            - command is the command the ROUTER or the CALLER named
+
+        Ensures:
+            - returns "user_picked_receptionist" only when that command IS the
+              receptionist, i.e. somebody asked for it on purpose
+            - returns "unknown_command" otherwise
+
+        🔴 READS THE INCOMING COMMAND, NEVER THE EMITTED ONE. Every degrade emits
+        command="agent router go to receptionist" because `_receptionist` rewrites it,
+        so deriving the marker from the emitted command would set it on every degrade —
+        a marker both doors can set is worse than no marker, because it looks like a
+        distinction. The degrade callers pass their own literal reason and never reach
+        this helper at all, which is what makes the marker unfakeable by construction.
+        """
+
+        return "user_picked_receptionist" if command == cls.RECEPTIONIST_COMMAND else "unknown_command"
+
     @classmethod
     def _write_guard( cls, trace: StageTrace, spec: Any, route_reason: str, may_cache: bool ) -> bool:
         """Step 9a — the WRITE guard. Two refusals, both narrowing `may_cache`, never widening it.
@@ -1173,7 +1219,7 @@ class AskFlow:
                        ctx[ 0 ], ctx[ 1 ], ctx[ 2 ], snapshotable=False )
         outcome = self.executor.submit( work, trace )
         return self._finish( trace, "receptionist", route_reason, outcome, question, ctx,
-                             command="agent router go to receptionist", primary_error=primary_error )
+                             command=self.RECEPTIONIST_COMMAND, primary_error=primary_error )
 
     def _needs_input(
         self, trace: StageTrace, command: str, extraction: Any, question: str,
