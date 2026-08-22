@@ -17,8 +17,8 @@ So the live test keeps what the box can show, and it is the more interesting hal
 anyway: the live router PARKS a location-less weather question, and a resume with
 a city is accepted and reaches the queue as a real job under the id it returned.
 What is lost is the terminal answer — the resumed flow producing a weather result
-end to end — which is skipped by name below and is NOT covered anywhere else at
-this tier. The unit tier proves resume closes the loop against a fake executor
+end to end — which is marked xfail(strict=True) by name below and is NOT covered
+anywhere else at this tier. The unit tier proves resume closes the loop against a fake executor
 (test_v2_flow.py:538); nothing now proves the shipped app does.
 
 Fail-first: the ask MUST park (status='parked', a pending_id, 'location' missing) —
@@ -46,7 +46,8 @@ import pytest
 import requests
 
 from tests.integration.v2_queued import (
-    DRAIN_UNOBSERVABLE, assert_handed_off, assert_queued_in_todo, wait_for_done,
+    DRAIN_UNOBSERVABLE, DRAIN_XFAIL_TIMEOUT, assert_handed_off, assert_queued_in_todo,
+    drop_from_todo, wait_for_done,
 )
 
 
@@ -106,6 +107,7 @@ def test_v2_ask_parks_then_resume_reaches_the_queue( auth_headers ):
     RED ON REVERT: stop parking a question with a missing required arg and the first block
     fails; break resume's hand-off and the job never reaches the board.
     """
+    job_id = None
     try:
         r1 = requests.post(
             _ASK,
@@ -139,23 +141,28 @@ def test_v2_ask_parks_then_resume_reaches_the_queue( auth_headers ):
         queued = assert_queued_in_todo( BASE_URL, job_id, auth_headers )
         assert queued, f"the queue reported the resumed job with no metadata: {queued}"
     finally:
+        # Row ff4166d9 — take back the job this test queued rather than leaving it to run
+        # hours after the suite that made it.
+        drop_from_todo( BASE_URL, job_id, auth_headers )
         # WeatherAgent results are not serialized by the queue (running_fifo_queue
         # excludes it, and the registry marks weather snapshotable=False), so there is
         # normally nothing to clean up — the call stays as a guard in case that changes.
         _cleanup_snapshot( None )
 
 
-@pytest.mark.skip( reason=DRAIN_UNOBSERVABLE )
+@pytest.mark.xfail( reason=DRAIN_UNOBSERVABLE, strict=True )
 def test_v2_ask_parks_then_resume_reaches_terminal_done( auth_headers ):
     """A location-less weather question parks; resuming with a city drives to a terminal done.
 
-    🔴 SKIPPED, NOT DELETED — row ce29cd20. This is the only end-to-end proof that a parked
-    flow, resumed, produces a real agent answer on the shipped app; the unit tier does it
-    with a fake executor. It is kept intact so that the day the run has a consumer which is
-    not the test itself, the skip comes off and it runs as written. Everything below is the
-    original test, unchanged.
+    🔴 STRICT XFAIL, NOT SKIP, AND NOT DELETED — row ce29cd20. This is the only end-to-end
+    proof that a parked flow, resumed, produces a real agent answer on the shipped app; the
+    unit tier does it with a fake executor. Strict xfail keeps it running, so the day the
+    run has a consumer which is not the test itself it XPASSes and the gate goes red rather
+    than staying quiet. Its wait is bounded (DRAIN_XFAIL_TIMEOUT) because a body that runs
+    every gate costs every gate. Everything below is the original test, unchanged.
     """
     snapshot_id = None
+    job_id      = None
     try:
         # ── ask: interactive. A missing required arg (location) MUST park — not execute.
         r1 = requests.post(
@@ -195,12 +202,14 @@ def test_v2_ask_parks_then_resume_reaches_terminal_done( auth_headers ):
         )
 
         # ── the queue runs the weather agent and the resumed flow reaches its answer.
-        done = wait_for_done( BASE_URL, job_id, auth_headers )
+        done = wait_for_done( BASE_URL, job_id, auth_headers, timeout=DRAIN_XFAIL_TIMEOUT )
         assert done.get( "response_text" ) or done.get( "answer" ), (
             f"the resumed job completed with no answer — the parked flow never produced "
             f"one, which is the DoD-4 failure this test guards: {done}"
         )
     finally:
+        # Row ff4166d9 — the resumed job does not drain under monopolize; take it back out.
+        drop_from_todo( BASE_URL, job_id, auth_headers )
         # WeatherAgent results are not serialized by the queue (running_fifo_queue
         # excludes it, and the registry marks weather snapshotable=False), so there is
         # normally nothing to clean up — the call stays as a guard in case that changes.

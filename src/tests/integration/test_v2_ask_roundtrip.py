@@ -17,7 +17,7 @@ by maya against pool-status.
 
 So the live test keeps what the box can show: the ask is a cold MISS handed off to
 the queue, and the queue actually has it under the id the API returned. The drain
-and the replay are skipped here by name and pinned a tier down —
+and the replay are marked xfail(strict=True) here by name and pinned a tier down —
 `src/tests/unit/test_write_back_lands_before_the_job_is_done.py` drives the
 ordering the round trip rested on. This is a real loss of coverage, not a
 relabelling: nothing on :8000 now proves the shipped app replays a row it wrote.
@@ -41,8 +41,8 @@ import pytest
 import requests
 
 from tests.integration.v2_queued import (
-    DRAIN_UNOBSERVABLE, assert_handed_off, assert_queued_in_todo,
-    snapshot_id_for_question, wait_for_done,
+    DRAIN_UNOBSERVABLE, DRAIN_XFAIL_TIMEOUT, assert_handed_off, assert_queued_in_todo,
+    drop_from_todo, snapshot_id_for_question, wait_for_done,
 )
 
 
@@ -113,7 +113,8 @@ def test_v2_ask_hands_a_cold_question_to_the_queue( auth_headers ):
     from a slow consumer.
     """
     question, _expected_sum = _unique_math_question()
-    body = { "question": question, "speak": False, "interactive": False }
+    body   = { "question": question, "speak": False, "interactive": False }
+    job_id = None
     try:
         r1 = requests.post( _ASK, json=body, headers=auth_headers, timeout=120 )
         assert r1.status_code == 200, f"first call: {r1.status_code} {r1.text}"
@@ -127,39 +128,45 @@ def test_v2_ask_hands_a_cold_question_to_the_queue( auth_headers ):
         queued = assert_queued_in_todo( BASE_URL, job_id, auth_headers )
         assert queued, f"the queue reported the job with no metadata: {queued}"
     finally:
-        # Under monopolize the job never runs, so there is normally nothing written. The
+        # Row ff4166d9: the job this test queued will NOT drain while the suite holds the
+        # consumer, so leaving it behind means it runs hours later and pads the board for
+        # everyone after. Take it back out.
+        drop_from_todo( BASE_URL, job_id, auth_headers )
+        # Under monopolize the job never ran, so there is normally nothing written. The
         # cleanup stays because on a box with a free consumer it WILL have run by now.
         _cleanup_snapshot( snapshot_id_for_question( question ) )
 
 
-@pytest.mark.skip( reason=DRAIN_UNOBSERVABLE )
+@pytest.mark.xfail( reason=DRAIN_UNOBSERVABLE, strict=True )
 def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_headers ):
     """First ask queues, runs and writes back (cold miss); the second identical ask replays it.
 
-    🔴 SKIPPED, NOT DELETED, AND THE DIFFERENCE MATTERS. This is the only end-to-end proof
-    that the shipped app writes a row and then serves it; nothing else covers it. It is
-    kept intact so that the day there is a consumer which is not the test itself — a
-    :7999 probe, a second server, or a suite that does not monopolize — the skip comes off
-    and the test runs as written. Deleting it would quietly turn a blocked claim into an
-    unmade one.
+    🔴 STRICT XFAIL, NOT SKIP, AND NOT DELETED. This is the only end-to-end proof that the
+    shipped app writes a row and then serves it; nothing else covers it. Strict xfail keeps
+    it RUNNING: the day the box gains a consumer which is not the test itself — a :7999
+    probe, a second server, a suite that does not monopolize — it XPASSes and the gate goes
+    RED, and somebody comes and takes the mark off. A skip would sit quiet forever, which is
+    how a blocked claim turns into an unmade one without anybody deciding to drop it.
 
-    Everything below is the original test, unchanged.
+    Its waits are bounded well under the usual ladder (DRAIN_XFAIL_TIMEOUT) — a body that
+    runs every gate costs every gate. Everything else below is the original test, unchanged.
     """
     question, _expected_sum = _unique_math_question()
-    body = { "question": question, "speak": False, "interactive": False }
+    body       = { "question": question, "speak": False, "interactive": False }
+    queued_ids = [ ]
     try:
         # ── first ask: cold. Routed, then HANDED OFF — not run on this thread.
         r1 = requests.post( _ASK, json=body, headers=auth_headers, timeout=120 )
         assert r1.status_code == 200, f"first call: {r1.status_code} {r1.text}"
         first = r1.json()
-        assert_handed_off( first, expect_cache_hit=False, expect_path="agent" )
+        queued_ids.append( assert_handed_off( first, expect_cache_hit=False, expect_path="agent" ) )
         assert first[ "wrote_snapshot" ] is False, (
             f"a queued hand-off wrote a snapshot before the job ran — the row would carry "
             f"no answer: {first}"
         )
 
         # ── the queue runs it. Landing in the done queue means the write-back has landed.
-        done = wait_for_done( BASE_URL, first[ "job_id" ], auth_headers )
+        done = wait_for_done( BASE_URL, first[ "job_id" ], auth_headers, timeout=DRAIN_XFAIL_TIMEOUT )
         assert done, f"first job completed with no metadata: {done}"
 
         snapshot_id = snapshot_id_for_question( question )
@@ -172,13 +179,15 @@ def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_hea
         r2 = requests.post( _ASK, json=body, headers=auth_headers, timeout=120 )
         assert r2.status_code == 200, f"second call: {r2.status_code} {r2.text}"
         second = r2.json()
-        assert_handed_off( second, expect_cache_hit=True, expect_path="replay" )
+        queued_ids.append( assert_handed_off( second, expect_cache_hit=True, expect_path="replay" ) )
 
         # ── and the replay itself reaches a terminal answer, which is the point of a cache.
-        replayed = wait_for_done( BASE_URL, second[ "job_id" ], auth_headers )
+        replayed = wait_for_done( BASE_URL, second[ "job_id" ], auth_headers, timeout=DRAIN_XFAIL_TIMEOUT )
         assert replayed.get( "response_text" ) or replayed.get( "answer" ), (
             f"the replay completed with no answer — a cache hit that serves nothing is a "
             f"miss with extra steps: {replayed}"
         )
     finally:
+        for queued_id in queued_ids:
+            drop_from_todo( BASE_URL, queued_id, auth_headers )
         _cleanup_snapshot( snapshot_id_for_question( question ) )

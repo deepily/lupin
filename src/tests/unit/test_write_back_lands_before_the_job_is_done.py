@@ -12,7 +12,8 @@ at all: the test-suite job is itself the queue's monopolizer, so a job submitted
 inside a suite run sits in `todo` until the suite ends and can never be observed draining
 (row `ce29cd20`, confirmed on the box by maya). The integration tests keep the halves the
 box can show — the hand-off, and the job's presence in `todo` under the id the API
-returned — and the drain half is skipped there and pinned HERE, against a fake consumer.
+returned — and the drain half is marked xfail(strict=True) there and pinned HERE, against
+a fake consumer.
 
 WHAT IT DOES NOT CLAIM. Only `_handle_base_agent` — the path a cold v2 ask takes — is
 covered. `_handle_solution_snapshot`, the replay path, pushes to done first and saves
