@@ -1,5 +1,21 @@
 # TODO
 
+## 🌿 TONIGHT 2026-08-21 (Cheech 🌿 `5c04b97c`, nine re-spins; crew Krishna · Rachel · Pocholo · maya) — brain integration BUILT: `/api/v2 ask|submit`, ten doors retired, three tiers green at `8657cfa9`
+
+**Landed** on `wt-brain-integration-10ef4b64` (tip `7c00c787`, pushed): steps 1–9b, all ten doors (each deletes its own accordion card — Rick 20:44; Re-render button stays), door 8 voice→ask, step 12, class delete 7a20a09d, Mr Radio's B/C/D. Gate ts-6eaebff8 @888754f1 = no code regression; final tiers @8657cfa9 unit 16,876/0 · cosa 8,622/0 · guard 2/0 (María reproduced). Plan: `src/rnd/v0.2.0/2026.08.20-brain-integration-cascade-review-plan.md` § "Manager rulings after the 11:43 re-spin" (end-of-night fold).
+
+**Pending decision (Rick) — `83fe98aa`, chase 10:00 EDT**: (1) merge integration → wip now (recommended); (2) close B0(iii) window + Rachel reverts the UNCOMMITTED probe patch on the main checkout (`running_fifo_queue.py`, `todo_fifo_queue.py`, `_unreachability_probe.py`) — REQUIRED before the wip merge because 7c deleted `push_job`'s body. Four asks 20:52–21:29 timed out. Bounce `:7999` + push remain his word.
+
+**Tomorrow's order**: re-ask → revert + 0d4bc1ff closes → merge into wip → next `:8000` gate at that head (everything since 888754f1 rides it; maya rig, idle check §1a, E2E + integration, diff vs ts-6eaebff8) → bounce + push on Rick's word → step 13 (1e597a65, maya dry-run, Cheech GO) → María d212f54b eval → Mr Radio cdfedc41 (1447261b) → María's rename branch.
+
+**Follow-ups (backlog — rows at 10:00; none tonight per Rick's no-new-bugs order)**:
+- [ ] Order-effect unit reds (pass alone, fail in full run): `test_spoken_char_cap_helper::test_returns_default_on_constructor_exception` (SystemExit:0), presentation dry-run banner, v2 cache lancedb closure, `test_lupin_arbiter_app_fleet_arbiter_loop::test_runner_swallows_job_error` — Pocholo root cause: reads live fleet state, stub `hold_roots_fn`/`live_session_ids_fn` as at :247 (a40e462c event 8851).
+- [ ] `self_respin` fired `/clear` but the wake prompt never arrived (Pocholo 21:26 → hand-typed 21:46); Krishna's successor rehydrated from a stale `~/.claude/mementos` copy — the re-spin path needs a wake check + pointer-first read.
+- [ ] Gate rig: a fresh worktree needs gitignored state copied in (`src/conf/keys`, terraform provider cache, `cloud-run.env`) or 11 credential tests read as code reds (María, Tiberius, maya ×3 tonight) — add to `io/brain-integration-gate/RIG-PROCEDURE.md`.
+- [ ] Mock-job door retire (held with the two resume-from doors — `mock_job.py:170` constructs directly, no registry command); `test_data_types_and_exceptions.py` module self-skip (7 tests never counted); Pocholo's sweep: 5 non-strict xfail blankets + 24 grep-shaped tests (on a40e462c).
+- [ ] cosa collected 8,647 vs ran 8,648 at 8657cfa9 (one test materialises at run time) — low priority (maya).
+- [ ] Three concurrent unit tiers on one box contend (free-port probe + tree-sweep tests) — serialise tier runs per head, or mark those tests.
+
 ## ☕ TONIGHT 2026-08-21 (Mr. Radio 🦉 `e9a672a2`, crew of six) — four branches landed, board to zero; follow-ups kept OUT of the store per Rick's no-new-BUG-rows order
 
 **Landed**: A router-label-fix → wip `decae6c7` (0 corpus lines move; rule doc + `router_label_audit.py` + lint test) · B claude-code v2 submit → integration `1c319db0` · C expeditor per-call state → `24c3b3ba` · D xfail-blanket strip → `af9f557d` (and fixed dead Replay on done jobs). Rows 0795b5d8 · 14172091 · 10c60712 · 82fb9fcb · 25ff8360 closed with receipts.
