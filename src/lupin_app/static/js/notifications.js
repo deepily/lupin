@@ -10352,21 +10352,22 @@ class NotificationsUI {
          * Handle done queue update with enhanced structured job metadata.
          * 
          * Requires:
-         *     - data contains done_jobs (HTML list) and done_jobs_metadata (structured data)
+         *     - data contains done_jobs_metadata (the structured rows the API serves)
          *     - JobCompletionCache and audio cache are initialized
          *     
          * Ensures:
          *     - Job metadata stored for replay functionality
          *     - Audio cache availability checked and indicated
-         *     - Enhanced HTML generated with proper replay button states
-         *     - Backward compatibility maintained with original HTML format
+         *     - Enhanced HTML generated for any row that still carries an html field
          */
         try {
-            this.log( `Processing ${data.done_jobs?.length || 0} done jobs with metadata enhancement` );
-            
-            // Use structured metadata if available, fallback to HTML parsing
+            // GET /api/get-queue/done serves ONLY done_jobs_metadata (queues.py:480).
+            // This loop used to be driven by data.done_jobs, an HTML list the API no
+            // longer returns — so it never ran, doneJobsMetadata stayed empty, and
+            // replayJobAudio could not find any job to replay.
             const jobsMetadata = data.done_jobs_metadata || [];
-            const jobsHtml = data.done_jobs || [];
+            
+            this.log( `Processing ${jobsMetadata.length} done jobs with metadata enhancement` );
             
             // Store job metadata for replay functionality
             this.doneJobsMetadata = new Map();
@@ -10374,9 +10375,8 @@ class NotificationsUI {
             // Process each job and check audio cache availability
             const enhancedJobs = [];
             
-            for ( let i = 0; i < jobsHtml.length; i++ ) {
-                const jobHtml = jobsHtml[i];
-                const jobMetadata = jobsMetadata[i] || this.parseJobMetadataFromHtml( jobHtml, i );
+            for ( let i = 0; i < jobsMetadata.length; i++ ) {
+                const jobMetadata = jobsMetadata[i];
                 
                 // Check if audio is available in cache
                 jobMetadata.has_audio_cache = await this.checkJobAudioCacheAvailability( jobMetadata );
@@ -10384,9 +10384,13 @@ class NotificationsUI {
                 // Store metadata for replay access
                 this.doneJobsMetadata.set( jobMetadata.job_id, jobMetadata );
                 
-                // Generate enhanced HTML with proper replay button state
-                const enhancedJobHtml = this.generateEnhancedJobHtml( jobMetadata );
-                enhancedJobs.push( enhancedJobHtml );
+                // Generate enhanced HTML with proper replay button state. The metadata
+                // rows carry no html field today, so this is skipped and the cards are
+                // rendered from queueCategoryState.done.jobs instead; it stays here so
+                // the enhancement survives if the field ever comes back.
+                if ( jobMetadata.html ) {
+                    enhancedJobs.push( this.generateEnhancedJobHtml( jobMetadata ) );
+                }
                 
                 this.log( `Job ${jobMetadata.job_id}: cache=${jobMetadata.has_audio_cache ? '✓' : '✗'}` );
             }
@@ -10394,13 +10398,12 @@ class NotificationsUI {
             // Store enhanced HTML for rendering
             this.enhancedDoneListHtml = enhancedJobs.join( "" );
             
-            this.log( `✅ Processed ${enhancedJobs.length} done jobs with replay metadata` );
+            this.log( `✅ Processed ${jobsMetadata.length} done jobs with replay metadata` );
             
         } catch ( error ) {
             this.error( "Error processing done queue metadata:", error );
             
-            // Fallback to basic HTML rendering
-            this.enhancedDoneListHtml = data.done_jobs?.join( "" ) || "";
+            this.enhancedDoneListHtml = "";
             this.doneJobsMetadata = new Map();
         }
     }
