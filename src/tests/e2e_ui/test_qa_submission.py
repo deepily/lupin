@@ -161,21 +161,37 @@ class TestQAInputInteraction:
 
     def test_can_change_agent_mode( self, logged_in_page ):
         """
-        User can change the agent mode selector.
+        User can change the agent selector, and the change sticks for that request.
+
+        ⚠️ REWRITTEN 2026-08-22 (Q&A card phase 3), for two reasons.
+
+        (1) The options are now fetched from GET /api/v2/agents after auth rather than
+        shipped in the HTML, so `networkidle` can land before the render. The wait is
+        now on a specific option being attached.
+
+        (2) The old body was `if visible: if count >= 2: select_option(index=1)` with
+        NO assertion after it. An empty select made both guards false and the test
+        passed having checked nothing — which is precisely the failure the async render
+        would have produced, reported green. It now asserts the resulting value.
 
         Requires:
             - Authenticated session
 
         Ensures:
-            - Mode selector value changes after selection
+            - the select renders a real agent option and selecting it changes the value
+            - the default is the Auto-Route sentinel, so a plain question auto-routes
         """
         logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )
-        if mode_select.is_visible():
-            options = mode_select.locator( "option" )
-            if options.count() >= 2:
-                # Select the second option
-                mode_select.select_option( index=1 )
-                logged_in_page.wait_for_timeout( 300 )
+        logged_in_page.locator(
+            "#agent-mode option[value='agent router go to math']"
+        ).wait_for( state="attached", timeout=10_000 )
+
+        assert mode_select.input_value() == "__auto_route__", (
+            "the card did not come up auto-routing — a question would submit as a job"
+        )
+
+        mode_select.select_option( "agent router go to math" )
+        assert mode_select.input_value() == "agent router go to math"
