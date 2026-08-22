@@ -192,3 +192,61 @@ def test_the_sweep_can_actually_fail( tmp_path ):
         f"the sweep accused the live factory, whose name merely CONTAINS the deleted one: "
         f"{offenders}"
     )
+
+
+def test_the_splainer_does_not_offer_the_retired_backend():
+    """
+    THE OPERATOR-FACING HALF. The sweep above reads code; this reads the text a human reads
+    BEFORE setting the key. Four docstrings were corrected when the backend was deleted and
+    this line was missed, so it still told an operator that 'file_based' was selectable and
+    was the Default — advice that now produces a ValueError at startup.
+
+    It is deliberately NOT a ban on the string: the line is allowed — encouraged — to name
+    'file_based' in order to say it is REFUSED. What it must never do again is present it as
+    a choosable value or as the default.
+
+    RED ON REVERT: restore "or 'file_based' (JSON files)" or "Default: file_based".
+    """
+    splainer = os.path.join( _repo_root(), "src", "conf", "lupin-app-splainer.ini" )
+    with open( splainer ) as fh:
+        line = [ ln for ln in fh if ln.startswith( "solution snapshots manager type" ) ]
+
+    assert len( line ) == 1, f"expected exactly one splainer line for the key, found {len( line )}"
+    line = line[ 0 ]
+
+    assert "Default: postgres" in line, (
+        "the splainer no longer advertises postgres as the default for "
+        "'solution snapshots manager type'"
+    )
+    assert "Default: file_based" not in line, (
+        "the splainer advertises the deleted file_based backend as the DEFAULT"
+    )
+    assert "or 'file_based'" not in line, (
+        "the splainer offers 'file_based' as a selectable value alongside postgres"
+    )
+    assert "ONLY legal value" in line, (
+        "the splainer no longer states that postgres is the only legal value"
+    )
+
+
+def test_main_does_not_default_to_the_retired_backend():
+    """
+    THE UNCONFIGURED-BOX PATH. `main.py` reads the key with a default, and that default was
+    still the deleted name — so a box whose INI omits the key asked the factory for a backend
+    whose classes are gone and died on a ValueError instead of doing the sane thing.
+
+    Dead in practice (lupin-app.ini sets postgres at :15 and :473), which is exactly why no
+    tier caught it. Asserted here rather than trusted to the config file.
+
+    RED ON REVERT: put default="file_based" back at main.py:680.
+    """
+    main_py = os.path.join( _repo_root(), "src", "lupin_app", "main.py" )
+    with open( main_py ) as fh:
+        src = fh.read()
+
+    assert 'config_mgr.get( "solution snapshots manager type", default="postgres" )' in src, (
+        "main.py no longer defaults the snapshot-manager key to postgres"
+    )
+    assert 'default="file_based"' not in src, (
+        "main.py still defaults some key to the deleted file_based backend"
+    )

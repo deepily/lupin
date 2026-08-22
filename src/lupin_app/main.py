@@ -677,7 +677,7 @@ async def lifespan( app: FastAPI ):
     id_generator = TwoWordIdGenerator()
 
     # Initialize solution snapshot manager using factory pattern
-    manager_type = config_mgr.get( "solution snapshots manager type", default="file_based" )
+    manager_type = config_mgr.get( "solution snapshots manager type", default="postgres" )
     
     if manager_type.lower() == "postgres":
         # The Postgres-native manager (row 5ff7b8f5, 2026-08-17). No storage location
