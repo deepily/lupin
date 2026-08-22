@@ -3450,9 +3450,13 @@ def test_a_deliberate_pick_is_not_filed_in_the_trace_as_an_unknown_command( tmp_
     """
     monkeypatch.setattr( flow_mod, "resolve", lambda c, crud_enabled: None )
 
+    # Capture the UNPATCHED method ONCE. Re-reading it inside the helper would wrap the
+    # PREVIOUS run's spy, so the second call would also append to the first run's list —
+    # and the test would report the degrade's fault key against the deliberate pick.
+    real_set = flow_mod.StageTrace.set
+
     def _keys_set_during( command ):
-        seen     = []
-        real_set = flow_mod.StageTrace.set
+        seen = []
         monkeypatch.setattr( flow_mod.StageTrace, "set",
                              lambda self, key, value: ( seen.append( key ), real_set( self, key, value ) )[ 1 ] )
         result = _submit_flow( tmp_path, notifier ).submit( command=command, args={}, **_CTX )
