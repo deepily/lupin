@@ -9,6 +9,7 @@ Requires:
     - Clean test database (via logged_in_page fixture)
 """
 
+from .agent_select_contract import checked_in_option_values, option_value_drift
 from .conftest import BASE_URL
 
 
@@ -35,23 +36,32 @@ class TestQAInterfaceLayout:
         mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )
         assert mode_select.count() > 0
 
-    def test_mode_selector_has_options( self, logged_in_page ):
+    def test_mode_selector_renders_exactly_the_expected_option_values( self, logged_in_page ):
         """
-        Agent mode dropdown has multiple agent options.
+        The agent mode dropdown renders exactly the option values it is supposed to.
+
+        Was `assert options.count() >= 2` — a count, which the retirement plan's §6
+        disqualifies, and which passes on an EMPTY select once phase 3 makes this
+        list JS-populated from `GET /api/v2/agents`. Now a set-equality against the
+        checked-in options, via the shared `option_value_drift` predicate whose
+        must-fail control is test_agent_select_contract_control.py.
 
         Requires:
             - Authenticated session
 
         Ensures:
-            - Mode select has multiple options (Math, Calendar, etc.)
+            - the rendered option values equal the expected set, with no missing,
+              phantom, or blank values, and an empty select is a FAILURE not a pass
         """
         logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )
         options     = mode_select.locator( "option" )
+        rendered    = [ options.nth( i ).get_attribute( "value" ) for i in range( options.count() ) ]
 
-        assert options.count() >= 2, f"Expected >=2 agent mode options, got {options.count()}"
+        problems = option_value_drift( rendered, expected=checked_in_option_values() )
+        assert problems == [], "#agent-mode option drift:\n  " + "\n  ".join( problems )
 
     def test_question_input_present( self, logged_in_page ):
         """
@@ -168,14 +178,27 @@ class TestQAInputInteraction:
 
         Ensures:
             - Mode selector value changes after selection
+
+        The two `if` wrappers this replaces (`if mode_select.is_visible()` and
+        `if options.count() >= 2`) turned "the select did not render" into a SKIP
+        that reported green — strictly worse than the bare count, because phase 3
+        makes an unrendered select the likely failure. A precondition is asserted
+        now, never used as a guard.
         """
         logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )
-        if mode_select.is_visible():
-            options = mode_select.locator( "option" )
-            if options.count() >= 2:
-                # Select the second option
-                mode_select.select_option( index=1 )
-                logged_in_page.wait_for_timeout( 300 )
+        assert mode_select.is_visible(), "#agent-mode is not visible — cannot be skipped past"
+
+        options  = mode_select.locator( "option" )
+        rendered = [ options.nth( i ).get_attribute( "value" ) for i in range( options.count() ) ]
+        problems = option_value_drift( rendered, expected=checked_in_option_values() )
+        assert problems == [], "#agent-mode option drift:\n  " + "\n  ".join( problems )
+
+        before = mode_select.input_value()
+        mode_select.select_option( index=1 )
+        logged_in_page.wait_for_timeout( 300 )
+        after = mode_select.input_value()
+        assert after == rendered[ 1 ], f"selecting index 1 should yield {rendered[ 1 ]!r}, got {after!r}"
+        assert after != before, f"the selector did not change: still {after!r}"

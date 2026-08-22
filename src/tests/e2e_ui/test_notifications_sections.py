@@ -11,6 +11,7 @@ Requires:
 
 import pytest
 
+from .agent_select_contract import checked_in_option_values, option_value_drift
 from .conftest import BASE_URL
 
 
@@ -115,9 +116,20 @@ class TestNotificationsSectionVisibility:
         logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
-        assert logged_in_page.get_by_test_id( "notifications-qa-mode-select" ).count() > 0
         assert logged_in_page.get_by_test_id( "notifications-qa-input" ).count() > 0
         assert logged_in_page.get_by_test_id( "notifications-qa-submit-btn" ).count() > 0
+
+        # The mode select gets more than a presence count: `count() > 0` is satisfied
+        # by a select element that rendered ZERO options, which is exactly what a
+        # failed `GET /api/v2/agents` produces once phase 3 lands. Same shared
+        # predicate as the Q&A suite, so this can never drift from it.
+        mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )
+        assert mode_select.count() > 0
+
+        options  = mode_select.locator( "option" )
+        rendered = [ options.nth( i ).get_attribute( "value" ) for i in range( options.count() ) ]
+        problems = option_value_drift( rendered, expected=checked_in_option_values() )
+        assert problems == [], "#agent-mode option drift:\n  " + "\n  ".join( problems )
 
     def test_jobs_section_has_cc_card( self, logged_in_page ):
         """
