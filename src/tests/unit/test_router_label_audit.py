@@ -109,6 +109,19 @@ class TestArithmeticRule:
         assert "only +-*/" in reason
 
     @pytest.mark.parametrize( "utterance", [
+        "What's the value of x in... uh, 4x minus 7 equals 9?",
+        "If y equals, um... 3x plus 4, what's y when x is... uh, 5?",
+        "What's the solution to, uh... 5x plus 12 equals 37?",
+        "If x plus y equals, um, 15... and 2x minus y equals, uh, 7... what are x and y?",
+        "Uh, if 2x plus 4 equals, um... 3x minus 1, what's x?",
+    ] )
+    def test_spoken_variant_algebra_stays_math( self, utterance ):
+        # These carry no caret, no "squared" and no "equation" -- only the spoken markers.
+        assert rla.classify_bucket( utterance ) == "2-symbolic"
+        label, _reason = rla.destination_arithmetic( utterance )
+        assert label == rla.MATH_LABEL
+
+    @pytest.mark.parametrize( "utterance", [
         "If a car travels at a speed of 60 miles per hour for 2.5 hours, how far does it travel?",
         "A tank can be filled by a pipe in 5 hours, but it can be emptied by another pipe in 7 hours. If both pipes are opened, how long will it take to fill the tank?",
         "If a train travels at 80 km/h and covers 320 km, how long did the journey take?",

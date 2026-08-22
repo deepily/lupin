@@ -77,6 +77,10 @@ _SYMBOLIC_RE   = re.compile(
     r"\bregression\b|\bprime\b|\bdivisor\b|\bmodul\w*|\bgcd\b|\blcm\b|\birrational\b|\bset theory\b|"
     r"\bsyllogism\b|\bmatrix\b|\bvector\b|\bfraction\b|\bpercent\w*|\bratio\b|\bmean value theorem\b|"
     r"\bodds\b|\bexpected value\b|\bdivisib\w*|\blottery\b|"
+    # Spoken-variant algebra: "what's the value of x in 4x minus 7 equals 9?" carries no
+    # "equation", no caret and no "squared", so the markers above all miss it.
+    r"\b\d+\s*[xy]\b|\bvalue of [a-z]\b|\bsolution to\b|\bwhen [xy] (is|=|equals)\b|"
+    r"\b[xy] (plus|minus|times|equals)\b|\bwhat (is|'s|’s|are) [xy]\b|"
     r"\bvariable\b|\bfunction\b|\bformula\b|\bproof\b|\bprove\b|\btheorem\b|\bsequence\b|\bseries\b)", re.I )
 
 # Bucket 1 markers: the four operations stated over bare numerals, no scenario.
