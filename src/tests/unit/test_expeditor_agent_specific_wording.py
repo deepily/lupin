@@ -138,9 +138,6 @@ class TestExpediteForwardsAgentIdentity( unittest.TestCase ):
         o.confirmation_prompt_path  = "/src/conf/prompts/runtime-argument-confirmation.txt"
         o.prompt_template_path      = "/src/conf/prompts/test.txt"
         o.llm_spec_key              = "test_key"
-        o._job_id                   = None
-        o._bearer_token             = None
-        o._last_notification_status = None
         o.config_mgr                = MagicMock()
         o.config_mgr.get            = MagicMock( return_value=None )
 
