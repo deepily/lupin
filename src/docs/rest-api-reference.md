@@ -39,14 +39,20 @@ themselves dead by the end of 2026.**
 | `POST /api/deep-research-to-podcast/submit` | `/api/v2/submit` |
 | `POST /api/deep-research-to-presentation/submit` | `/api/v2/submit` |
 | `POST /api/presentation-generator/submit` | `/api/v2/submit` |
+| `POST /api/podcast-generator/submit` | `/api/v2/ask` |
 
 The two question-shaped doors went first, when `/api/v2/ask` was the only live
 replacement. The submit-shaped ones could not follow until `/api/v2/submit` both existed
 and could build an agentic job — a 410 naming a route that answers "I do not understand"
 teaches a caller less than the error it replaced.
 
+`/api/podcast-generator/submit` is the one job-queueing door that retires into `ask`
+rather than `submit`: its description flow asked the user which document they meant and
+what languages and audience they wanted, and could answer "cancelled" — a conversation,
+which is what `ask` does and what `submit` refuses to do by design.
+
 **Still live, retiring next**: `/api/push-agentic`, `/api/swe-team/submit`,
-`/api/podcast-generator/submit`, `/api/mock-job/submit`, `/api/test-suite/submit`,
+`/api/mock-job/submit`, `/api/test-suite/submit`,
 `/api/jobs/{id_hash}/resume-from-checkpoint`, `/api/test-fix-expediter/resume-from`. The
 last three are held for stated reasons rather than left over: `/api/test-suite/submit` is
 how the gate rig schedules a :8000 run, so it lands only once that gate is green; the two

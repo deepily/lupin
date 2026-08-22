@@ -2023,13 +2023,6 @@ class NotificationsUI {
             });
         }
 
-        // Podcast submit button
-        const submitPodcastBtn = document.getElementById( 'submit-podcast-job' );
-        if ( submitPodcastBtn ) {
-            submitPodcastBtn.addEventListener( 'click', () => {
-                this.submitPodcastJob();
-            });
-        }
 
         // Research STT button (voice input)
         const researchSttBtn = document.getElementById( 'research-stt-button' );
@@ -2039,13 +2032,6 @@ class NotificationsUI {
             });
         }
 
-        // Podcast STT button (voice input)
-        const podcastSttBtn = document.getElementById( 'podcast-stt-button' );
-        if ( podcastSttBtn ) {
-            podcastSttBtn.addEventListener( 'click', () => {
-                this.handleSTTButtonClick( 'podcast-source', podcastSttBtn );
-            });
-        }
 
         // Enter key in research topic input
         const researchInput = document.getElementById( 'research-topic' );
@@ -2058,16 +2044,6 @@ class NotificationsUI {
             });
         }
 
-        // Enter key in podcast source input
-        const podcastInput = document.getElementById( 'podcast-source' );
-        if ( podcastInput ) {
-            podcastInput.addEventListener( 'keydown', ( e ) => {
-                if ( e.key === 'Enter' ) {
-                    e.preventDefault();
-                    this.submitPodcastJob();
-                }
-            });
-        }
 
         // SWE Team submit button
         const submitSweBtn = document.getElementById( 'submit-swe-job' );
@@ -3150,90 +3126,6 @@ class NotificationsUI {
 
         } catch ( error ) {
             this.error( "Research job submission failed:", error );
-            statusDiv.textContent = `✗ Error: ${error.message}`;
-            statusDiv.style.color = '#dc3545';
-        } finally {
-            submitButton.disabled = false;
-            loadingSpinner.style.display = 'none';
-        }
-    }
-
-    /**
-     * Submit a Podcast generation job.
-     *
-     * Uses smart input detection:
-     * - If input looks like a file path → direct job creation
-     * - If input looks like a description → fuzzy match + notification for confirmation
-     */
-    async submitPodcastJob() {
-        const sourceInput = document.getElementById( 'podcast-source' );
-        const dryRunCheckbox = document.getElementById( 'podcast-dry-run' );
-        const submitButton = document.getElementById( 'submit-podcast-job' );
-        const loadingSpinner = document.getElementById( 'podcast-loading' );
-        const statusDiv = document.getElementById( 'podcast-submit-status' );
-
-        const source = sourceInput.value.trim();
-        const dryRun = dryRunCheckbox.checked;
-
-        if ( !source ) {
-            statusDiv.textContent = '⚠️ Please enter a research source (path or description).';
-            statusDiv.style.color = '#dc3545';
-            return;
-        }
-
-        try {
-            // Update UI
-            submitButton.disabled = true;
-            loadingSpinner.style.display = 'inline-block';
-            statusDiv.textContent = 'Processing...';
-            statusDiv.style.color = '#666';
-
-            // Ensure token is valid before API call
-            await this.ensureValidToken();
-
-            this.log( `Submitting podcast job: ${source.substring( 0, 50 )}...` );
-
-            const response = await fetch( '/api/podcast-generator/submit', {
-                method: 'POST',
-                headers: {
-                    'Authorization': this.getAuthHeader(),
-                    'X-Session-ID': this.queueSessionId,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    research_source: source,
-                    target_languages: [ 'en', 'es-MX' ],
-                    dry_run: dryRun,
-                    ...this._getSchedulingParams( 'podcast' )
-                })
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
-                throw new Error( errorData.detail || `HTTP ${response.status}` );
-            }
-
-            const result = await response.json();
-            this.log( "Podcast job response:", result );
-
-            // Handle different response types
-            if ( result.status === 'queued' ) {
-                // Direct path mode - job created immediately
-                statusDiv.textContent = `✓ Podcast job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
-                statusDiv.style.color = '#28a745';
-                sourceInput.value = '';
-            } else if ( result.status === 'matching' ) {
-                // Description mode - fuzzy matching triggered
-                statusDiv.textContent = `🔍 ${result.message}`;
-                statusDiv.style.color = '#6f42c1';
-                // Don't clear input - user may want to modify and retry
-            } else if ( result.status === 'no_matches' ) {
-                statusDiv.textContent = `⚠️ ${result.message}`;
-                statusDiv.style.color = '#ffc107';
-            }
-
-        } catch ( error ) {
-            this.error( "Podcast job submission failed:", error );
             statusDiv.textContent = `✗ Error: ${error.message}`;
             statusDiv.style.color = '#dc3545';
         } finally {

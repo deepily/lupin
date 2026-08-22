@@ -117,6 +117,14 @@ RETIRED_DOORS = {
     # would have left a window with no check at all, so the guard moved onto the job
     # (presentation_generator/job.py) in its own earlier commit and this row waited for it.
     "/api/presentation-generator/submit"          : V2_SUBMIT,
+    # ── the podcast door, and it points at ASK, not SUBMIT ──
+    # It was counted among the plain submit-shaped doors for most of a day and it was not
+    # one. Its description path held a CONVERSATION: fuzzy-match the user's research
+    # documents, ask which one they meant, ask for languages and audience, and possibly
+    # come back "cancelled" because they declined. That is what `ask` does and exactly what
+    # `submit` refuses to do by design. Rick ruled it directly (2026-08-21): the accordion
+    # is being retired and Q&A is the entrance, so asking for a podcast is asking a question.
+    "/api/podcast-generator/submit"               : V2_ASK,
 }
 
 

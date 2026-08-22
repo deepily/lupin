@@ -277,53 +277,6 @@
                     </div>
                 </div>
 
-                <!-- Podcast Submission Card -->
-                <div class="job-submit-card" id="podcast-submit-card">
-                    <div class="job-submit-card-header" onclick="toggleSection('podcast-submit-section')">
-                        <h4>🎙️ Generate Podcast from Research</h4>
-                        <button class="toggle-button" id="podcast-submit-toggle">▶</button>
-                    </div>
-                    <div class="section-content collapsed" id="podcast-submit-section">
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label for="podcast-source" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Research Source:</label>
-                            <div style="display: flex; gap: 8px; align-items: center;">
-                                <button type="button" id="podcast-stt-button" data-testid="notifications-podcast-stt-btn" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
-                                <input type="text" id="podcast-source" data-testid="notifications-podcast-source-input" placeholder="Describe your research or paste file path..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
-                            </div>
-                            <div style="margin-top: 6px; font-size: 11px; color: #888;">
-                                💡 <strong>Smart input:</strong> Describe research → confirm selection | Paste path → generates immediately
-                            </div>
-                        </div>
-                        <div style="margin-bottom: 12px;">
-                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                                <input type="checkbox" id="podcast-dry-run" data-testid="notifications-podcast-dry-run-checkbox" />
-                                <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
-                            </label>
-                        </div>
-                        <!-- Scheduling Options -->
-                        <div class="schedule-section" data-testid="notifications-podcast-schedule-section">
-                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
-                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                                    <input type="checkbox" id="podcast-schedule" data-testid="notifications-podcast-schedule-checkbox" onchange="document.getElementById('podcast-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
-                                    <span style="font-size: 13px;">📅 Schedule for later</span>
-                                </label>
-                                <input type="datetime-local" id="podcast-scheduled-time" data-testid="notifications-podcast-scheduled-time" style="display: none;" />
-                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
-                                    <input type="checkbox" id="podcast-monopolize" data-testid="notifications-podcast-monopolize-checkbox" />
-                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
-                                </label>
-                            </div>
-                        </div>
-                        <button id="submit-podcast-job" data-testid="notifications-podcast-submit-btn" type="button" style="padding: 10px 20px; background: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
-                            🎙️ Generate Podcast
-                            <span id="podcast-loading" class="loading" style="display: none;">
-                                <span class="spinner"></span>
-                            </span>
-                        </button>
-                        <div id="podcast-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
-                    </div>
-                </div>
-
                 <!-- SWE Team Submission Card -->
                 <div class="job-submit-card" id="swe-team-submit-card">
                     <div class="job-submit-card-header" onclick="toggleSection('swe-submit-section')">
