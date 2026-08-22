@@ -53,17 +53,53 @@ MATH_LABEL = "agent router go to math"
 CALC_LABEL = "agent router go to calculator"
 
 # Unit vocabulary taken from the agent's OWN conversion tables -- not invented here.
-_KNOWN_UNITS = set( ALIASES.keys() )
-for table, _name in ALL_CATEGORIES: _KNOWN_UNITS |= set( table.keys() )
+# ── ONE unit vocabulary, ONE tokenizer ────────────────────────────────────────
+#
+# There used to be two of these -- one for the routing rules, one for the corpus
+# guard -- and they drifted apart: a fix to the guard's left the rules' behind, and
+# swapping them changed 16 verdicts. One tokenizer now serves both.
 
-# Aliases that are also ordinary English words -- matching them as units manufactures
-# conversions that are not there ("in the form a x squared" is not inches).
+_UNIT_CANONICAL = dict( ALIASES )
+_UNIT_CATEGORY  = {}
+for _table, _cat in ALL_CATEGORIES:
+    for _u in _table:
+        _UNIT_CANONICAL[ _u ] = _u
+        _UNIT_CATEGORY[ _u ]  = _cat
+
+# Aliases that are also ordinary English words. Matching them as units manufactures
+# conversions that are not there ("in the form a x squared plus b x plus c" is not
+# inches and celsius).
 _AMBIGUOUS_ALIASES = { "in", "c", "f", "m", "t", "s", "mi" }
-_KNOWN_UNITS -= _AMBIGUOUS_ALIASES
 
-_MORTGAGE_RE   = re.compile( r"\b(mortgage|refinanc\w*|down payment|amortiz\w*|apy|apr|compound interest|auto loan|car loan|personal loan|monthly payment|principal)\b", re.I )
-_PRICE_RE      = re.compile( r"\b(cheaper|better deal|best deal|price per|unit price|per ounce|per pound|which costs|compare (the )?price)", re.I )
-_CONVERT_RE    = re.compile( r"\b(convert|how many|what'?s|what is)\b", re.I )
+# Unit names the agent spells with more than one word. A single-token scan cannot see
+# these: "fluid ounces" splits into "fluid" and "ounces", and "ounces" resolves to the
+# MASS unit, so a VOLUME conversion reads as a cross-category one and is dismissed.
+# Only phrases that actually resolve to a categorized unit belong here -- "metric ton"
+# does not resolve, and listing it merely hid the plain "ton" underneath it.
+_MULTI_WORD_UNITS = [ "fluid ounces", "fluid ounce", "fl oz" ]
+
+
+# ── ONE set of phrase markers, shared by the rules and the guard ──────────────
+#
+# These used to be duplicated too, in narrower form, which is why the rule and the
+# guard disagreed on 57 calculator-corpus lines even after the tokenizer was shared.
+_MORTGAGE_RE = re.compile(
+    r"\b(mortgage|refinanc\w*|down payment|amortiz\w*|apy|apr|compound interest|"
+    r"(auto|car|personal|home|student) loan|\bloan\b|monthly payment|what'?s the monthly|"
+    r"per month|principal|interest|invest\w*|savings account|future value|"
+    r"payment (on|be)|calculate (the )?payment)\b", re.I )
+_PRICE_RE = re.compile(
+    r"\b(cheaper|better deal|best deal|better buy|better value|smarter buy|more economical|"
+    r"price per|unit price|per ounce|per pound|which costs|compare (these|the )?(two )?price|"
+    r"compare price|worth (buying|it|paying)|bang for your buck|stretches my dollar|"
+    r"which (size|option|product|should i|one is|is the)|compare these)", re.I )
+_ROUTING_RE = re.compile(
+    r"\b(calculator|unit converter|conversion mode|price comparison tool|"
+    r"handle this as a conversion|just do the conversion|simple conversion|"
+    r"convert this for me|route this to)\b", re.I )
+_CONVERT_VERB_RE = re.compile( r"\b(convert|how many|how much|how far|how heavy|what'?s|what is|in)\b", re.I )
+
+# Math-shaped: positive markers for symbolic work the calculator cannot do at all.
 
 # Bucket 2 markers: symbolic algebra, geometry, calculus, and the named branches
 # of mathematics the math file carries its own headers for.
@@ -119,36 +155,52 @@ def _norm( line ):
     return s
 
 
-def _units_in( text ):
+def unit_tokens( text ):
     """
-    Return the set of calculator-known unit tokens appearing in text.
+    Canonical unit tokens the calculator's own tables recognize in this text.
+
+    The single tokenizer for the whole module -- the routing rules and the corpus
+    guard both call it, so a fix here cannot leave one of them behind.
 
     Requires:
         - text is a string
 
     Ensures:
-        - returns a set of tokens drawn from the calculator's own unit tables
+        - returns a set of canonical unit names, singular/plural folded, multi-word
+          names resolved before the single-token scan, and tokens that are also
+          ordinary English words excluded
     """
-    words = set( re.findall( r"[a-z_]+", text.lower() ) )
-    return words & _KNOWN_UNITS
+    lowered = text.lower()
+    found   = set()
+
+    # Multi-word names first, blanked out so their parts are not re-read as
+    # single-token units of a different category.
+    for phrase in _MULTI_WORD_UNITS:
+        if phrase in lowered:
+            canonical = resolve_alias( phrase )
+            if find_category( canonical )[ 0 ] is not None: found.add( canonical )
+            lowered = lowered.replace( phrase, " " )
+
+    for word in re.findall( r"[a-z_]+", lowered ):
+        if word in _AMBIGUOUS_ALIASES: continue
+        for candidate in ( word, word.rstrip( "s" ), word + "s" ):
+            if candidate in _UNIT_CANONICAL:
+                found.add( _UNIT_CANONICAL[ candidate ] )
+                break
+    return found
 
 
-def _categories_of( units ):
+def unit_categories( units ):
     """
-    Map unit tokens to the calculator's conversion categories.
+    The calculator conversion categories a set of unit tokens belongs to.
 
     Requires:
-        - units is an iterable of unit token strings
+        - units is an iterable of canonical unit tokens
 
     Ensures:
         - returns the set of category names those tokens resolve to
     """
-    cats = set()
-    for u in units:
-        canonical = ALIASES.get( u, u )
-        for table, name in ALL_CATEGORIES:
-            if canonical in table: cats.add( name )
-    return cats
+    return { _UNIT_CATEGORY[ u ] for u in units if u in _UNIT_CATEGORY }
 
 
 def classify_bucket( line ):
@@ -194,12 +246,13 @@ def destination_capability( line ):
 
     if _MORTGAGE_RE.search( text ): return CALC_LABEL, "maps to calc op: mortgage"
     if _PRICE_RE.search( text ):    return CALC_LABEL, "maps to calc op: compare_prices"
+    if _ROUTING_RE.search( text ):  return CALC_LABEL, "explicit calculator routing phrase"
 
-    units = _units_in( text )
-    cats  = _categories_of( units )
+    units = unit_tokens( text )
+    cats  = unit_categories( units )
     # convert() only works within one category -- km-to-liters is not a conversion,
     # it is a rate problem, and belongs to the math agent.
-    if len( units ) >= 2 and len( cats ) == 1 and _CONVERT_RE.search( text ):
+    if len( units ) >= 2 and len( cats ) == 1 and _CONVERT_VERB_RE.search( text ):
         return CALC_LABEL, f"maps to calc op: convert ({sorted( units )})"
 
     return MATH_LABEL, "no CalcIntent operation covers it"
@@ -234,75 +287,12 @@ def destination_arithmetic( line ):
 # positive markers only -- it never falls through to a default -- so a line it
 # cannot recognize is reported as unrecognized rather than silently blamed.
 
-_GUARD_AMBIGUOUS = { "in", "c", "f", "m", "t", "s" }
-
-# Unit names the agent spells with more than one word. A single-token scan cannot see
-# these: "fluid ounces" splits into "fluid" and "ounces", and "ounces" resolves to the
-# MASS unit, so a volume conversion reads as a cross-category one and is dismissed.
-_MULTI_WORD_UNITS = [ "fluid ounces", "fluid ounce", "fl oz", "metric ton", "metric tons" ]
-
-_UNIT_CANONICAL = dict( ALIASES )
-_UNIT_CATEGORY  = {}
-for _table, _cat in ALL_CATEGORIES:
-    for _u in _table:
-        _UNIT_CANONICAL[ _u ] = _u
-        _UNIT_CATEGORY[ _u ]  = _cat
-
-# Calculator-shaped: the utterance asks for one of the three operations the agent has.
-_GUARD_MORTGAGE = re.compile(
-    r"\b(mortgage|refinanc\w*|down payment|amortiz\w*|apy|apr|compound interest|"
-    r"(auto|car|personal|home|student) loan|\bloan\b|monthly payment|what'?s the monthly|"
-    r"per month|principal|interest|invest\w*|savings account|future value|"
-    r"payment (on|be)|calculate (the )?payment)\b", re.I )
-_GUARD_PRICE = re.compile(
-    r"\b(cheaper|better deal|best deal|better buy|better value|smarter buy|more economical|"
-    r"price per|unit price|per ounce|per pound|which costs|compare (these|the )?(two )?price|"
-    r"compare price|worth (buying|it|paying)|bang for your buck|stretches my dollar|"
-    r"which (size|option|product|should i|one is|is the)|compare these)", re.I )
-_GUARD_ROUTING = re.compile(
-    r"\b(calculator|unit converter|conversion mode|price comparison tool|"
-    r"handle this as a conversion|just do the conversion|simple conversion|"
-    r"convert this for me|route this to)\b", re.I )
-_GUARD_CONVERT_VERB = re.compile( r"\b(convert|how many|how much|how far|how heavy|what'?s|what is|in)\b", re.I )
-
-# Math-shaped: positive markers for symbolic work the calculator cannot do at all.
-_GUARD_MATH = re.compile(
+_MATH_SHAPE_RE = re.compile(
     r"(\bx\s*\^|\b[a-z]\s*\^\s*\d|\bx squared\b|\bsolve for\b|\bthe equation\b|\binequalit\w*|"
     r"\bfactor\b|\bsimplify\b|\bderivative\b|\bintegral\b|\bcalculus\b|\bquadratic\b|"
     r"\bpythagorean\b|\bhypotenuse\b|\bsine\b|\bcosine\b|\btangent\b|\btheorem\b|"
     r"\bprobabilit\w*|\bstandard deviation\b|\bpermutation\b|\bprime number\b|"
     r"\b\d+\s*[xy]\b|\bvalue of [xy]\b|\barea of a\b|\bperimeter of\b|\bcircumference\b)", re.I )
-
-
-def guard_unit_tokens( text ):
-    """
-    Canonical unit tokens the calculator's own tables recognize in this text.
-
-    Requires:
-        - text is a string
-
-    Ensures:
-        - returns a set of canonical unit names, singular/plural folded,
-          with tokens that are also ordinary English words excluded
-    """
-    lowered = text.lower()
-    found   = set()
-
-    # Multi-word names first, and blank them out so their parts are not re-read as
-    # single-token units of a different category.
-    for phrase in _MULTI_WORD_UNITS:
-        if phrase in lowered:
-            canonical = resolve_alias( phrase )
-            if find_category( canonical )[ 0 ] is not None: found.add( canonical )
-            lowered = lowered.replace( phrase, " " )
-
-    for word in re.findall( r"[a-z_]+", lowered ):
-        if word in _GUARD_AMBIGUOUS: continue
-        for candidate in ( word, word.rstrip( "s" ), word + "s" ):
-            if candidate in _UNIT_CANONICAL:
-                found.add( _UNIT_CANONICAL[ candidate ] )
-                break
-    return found
 
 
 def is_calculator_shaped( line ):
@@ -315,13 +305,13 @@ def is_calculator_shaped( line ):
     Ensures:
         - returns True only on a positive match; never falls through to a default
     """
-    if _GUARD_MORTGAGE.search( line ): return True
-    if _GUARD_PRICE.search( line ):    return True
-    if _GUARD_ROUTING.search( line ):  return True
+    if _MORTGAGE_RE.search( line ): return True
+    if _PRICE_RE.search( line ):    return True
+    if _ROUTING_RE.search( line ):  return True
 
-    units = guard_unit_tokens( line )
-    cats  = { _UNIT_CATEGORY[ u ] for u in units if u in _UNIT_CATEGORY }
-    return len( units ) >= 2 and len( cats ) == 1 and bool( _GUARD_CONVERT_VERB.search( line ) )
+    units = unit_tokens( line )
+    cats  = unit_categories( units )
+    return len( units ) >= 2 and len( cats ) == 1 and bool( _CONVERT_VERB_RE.search( line ) )
 
 
 def is_math_shaped( line ):
@@ -334,7 +324,7 @@ def is_math_shaped( line ):
     Ensures:
         - returns True only on a positive symbolic marker
     """
-    return bool( _GUARD_MATH.search( line ) )
+    return bool( _MATH_SHAPE_RE.search( line ) )
 
 
 RULES = { "capability": destination_capability, "arithmetic": destination_arithmetic }

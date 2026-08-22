@@ -73,6 +73,24 @@ DUP_GROUP_BASELINE = {
 }
 
 
+def check_tree_matches( root, tree ):
+    """
+    Assert a configured root names the same checkout as the test tree.
+
+    Requires:
+        - root and tree are filesystem paths
+
+    Ensures:
+        - returns None when they resolve to the same directory
+
+    Raises:
+        - AssertionError naming both paths when they do not
+    """
+    assert os.path.realpath( root ) == os.path.realpath( tree ), (
+        f"LUPIN_ROOT is {os.path.realpath( root )} but this test file lives in "
+        f"{os.path.realpath( tree )}; the gate would guard the wrong checkout's corpus" )
+
+
 def _dup_groups( path ):
     """
     Count duplicate GROUPS in a corpus file.
@@ -98,9 +116,18 @@ class TestTheGateGuardsItsOwnCheckout:
     def test_lupin_root_points_at_the_tree_this_test_lives_in( self ):
         # A mismatch means the run is configured to guard a different checkout's corpus.
         # Fail loudly rather than report green about a file nobody edited.
-        assert os.path.realpath( _ROOT ) == _TEST_TREE, (
-            f"LUPIN_ROOT is {os.path.realpath( _ROOT )} but this test file lives in {_TEST_TREE}; "
-            f"the gate would guard the wrong checkout's corpus" )
+        check_tree_matches( _ROOT, _TEST_TREE )
+
+    def test_the_mismatch_check_is_observably_red( self, tmp_path ):
+        # The repo's own collection guard (row a9f87d29) refuses to collect when
+        # LUPIN_ROOT names another tree, so the assertion above can never be SEEN
+        # to fail through an env var. Exercise it directly instead -- an unobservable
+        # guard is a claim, not a check.
+        with pytest.raises( AssertionError, match="the gate would guard the wrong checkout" ):
+            check_tree_matches( str( tmp_path ), _TEST_TREE )
+
+    def test_the_mismatch_check_passes_on_a_matching_pair( self ):
+        check_tree_matches( _TEST_TREE, _TEST_TREE )
 
     def test_the_gate_reads_the_bytes_on_disk_not_a_cached_copy( self, tmp_path ):
         # Edit-then-read round trip on a real file, proving read_utterances() is not
@@ -250,7 +277,7 @@ class TestGuardPrimitives:
 
     def test_ambiguous_word_alone_is_not_a_unit( self ):
         # "in" is a preposition and "c" a coefficient; neither makes this a conversion.
-        assert rla.guard_unit_tokens( "solving in the form a x squared plus b x plus c" ) == set()
+        assert rla.unit_tokens( "solving in the form a x squared plus b x plus c" ) == set()
 
     @pytest.mark.parametrize( "utterance,expected", [
         ( "Convert 2 liters to fluid ounces",  { "liter", "fl_oz" } ),
@@ -260,14 +287,49 @@ class TestGuardPrimitives:
     def test_multi_word_unit_names_resolve_to_the_right_category( self, utterance, expected ):
         # "fluid ounces" is fl_oz, a VOLUME unit. A single-token scan reads "ounces"
         # as the MASS unit and the conversion looks cross-category, which it is not.
-        assert rla.guard_unit_tokens( utterance ) == expected
+        assert rla.unit_tokens( utterance ) == expected
 
     def test_a_multi_word_name_with_no_category_is_not_counted( self ):
         # "fl oz" resolves; a phrase that resolves to nothing in the tables must not.
-        assert "tablespoon" not in rla.guard_unit_tokens( "How many tablespoons in a cup?" )
+        assert "tablespoon" not in rla.unit_tokens( "How many tablespoons in a cup?" )
 
     def test_singular_and_plural_unit_names_both_resolve( self ):
-        assert rla.guard_unit_tokens( "How many meters are in a kilometer?" ) == { "meter", "km" }
+        assert rla.unit_tokens( "How many meters are in a kilometer?" ) == { "meter", "km" }
+
+
+class TestThereIsOnlyOneTokenizer:
+    """
+    The module used to carry two unit tokenizers -- one for the routing rules, one
+    for the corpus guard. A fix to the guard's left the rules' behind and 16
+    calculator-corpus verdicts changed depending on which one you asked. These pin
+    the single tokenizer to both callers.
+    """
+
+    def test_maria_case_one_metric_ton_in_pounds( self ):
+        # The named regression: "metric ton" does not resolve in the alias table, so
+        # listing it as a multi-word unit hid the plain "ton" underneath and the line
+        # lost its mass reading. Both units must be seen, in one category.
+        utterance = "What's 1 metric ton in pounds?"
+        assert rla.unit_tokens( utterance )                            == { "ton", "pound" }
+        assert rla.unit_categories( rla.unit_tokens( utterance ) )     == { "mass" }
+        assert rla.destination_capability( utterance )[ 0 ]            == rla.CALC_LABEL
+        assert rla.is_calculator_shaped( utterance )                   is True
+
+    def test_the_rule_and_the_guard_agree_on_every_calculator_corpus_line( self ):
+        # If a second tokenizer ever reappears, these two diverge and this goes red.
+        disagreements = [
+            ( n, raw.strip() ) for n, raw in rla.read_utterances( CALC_CORPUS )
+            if ( rla.destination_capability( raw )[ 0 ] == rla.CALC_LABEL )
+               != rla.is_calculator_shaped( raw ) ]
+        assert disagreements == [], (
+            f"{len( disagreements )} line(s) get different verdicts from the rule and the "
+            f"guard, which means the tokenizers have drifted apart again: {disagreements[ :5 ]}" )
+
+    def test_the_capability_rule_still_moves_nothing_out_of_the_math_corpus( self ):
+        # The headline result of the ruling. A tokenizer change must not disturb it.
+        movers = [ ( n, raw.strip() ) for n, raw in rla.read_utterances( MATH_CORPUS )
+                   if rla.destination_capability( raw )[ 0 ] != rla.MATH_LABEL ]
+        assert movers == [], f"capability rule moved {len( movers )} math-corpus line(s): {movers[ :5 ]}"
 
 
 class TestDuplicateGroupsDoNotGrow:
