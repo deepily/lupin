@@ -20,8 +20,8 @@ class TestQueueFilteringSmoke:
 
     @pytest.fixture
     def base_url(self):
-        """Base URL for FastAPI server (assumes running on port 7999)."""
-        return "http://localhost:7999"
+        """Base URL for FastAPI server (defaults to the dev server on port 7999)."""
+        return os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:7999" )
 
     @pytest.fixture
     def create_user(self, base_url):
@@ -29,7 +29,7 @@ class TestQueueFilteringSmoke:
         def _create_user(email: str, password: str = "test123") -> Dict[str, str]:
             # Register user
             response = requests.post(
-                f"{base_url}/api/auth/register",
+                f"{base_url}/auth/register",
                 json={
                     "email": email,
                     "password": password,
@@ -42,7 +42,7 @@ class TestQueueFilteringSmoke:
             elif response.status_code == 400 and "already exists" in response.json().get("detail", ""):
                 # User exists, login instead
                 login_response = requests.post(
-                    f"{base_url}/api/auth/login",
+                    f"{base_url}/auth/login",
                     json={"email": email, "password": password}
                 )
                 return login_response.json()
@@ -56,7 +56,7 @@ class TestQueueFilteringSmoke:
         """Helper fixture to push jobs to queue."""
         def _push_job(token: str, question: str) -> Dict:
             response = requests.post(
-                f"{base_url}/api/push",
+                f"{base_url}/api/v2/ask",
                 json={
                     "question": question,
                     "websocket_id": f"smoke_test_session_{token[:10]}"
@@ -107,14 +107,14 @@ class TestQueueFilteringSmoke:
         assert data_a["filtered_by"] == user_a["uid"]
         assert data_a["is_admin_view"] is False
         # Verify at least user A's job is present
-        assert any("2+2" in job for job in data_a["todo_jobs"])
+        assert any("2+2" in ( job["question_text"] or "" ) for job in data_a["todo_jobs_metadata"])
 
         # Test 2: User B sees only their job
         response_b = get_queue(user_b["access_token"], "todo")
         assert response_b.status_code == 200
         data_b = response_b.json()
         assert data_b["filtered_by"] == user_b["uid"]
-        assert any("3+3" in job for job in data_b["todo_jobs"])
+        assert any("3+3" in ( job["question_text"] or "" ) for job in data_b["todo_jobs_metadata"])
 
         # Test 3: Admin with wildcard sees both
         response_admin = get_queue(admin_user["access_token"], "todo", user_filter="*")
@@ -122,10 +122,10 @@ class TestQueueFilteringSmoke:
         data_admin = response_admin.json()
         assert data_admin["filtered_by"] == "*"
         assert data_admin["is_admin_view"] is True
-        # Admin should see both jobs (or more if queue has other jobs)
-        all_jobs_html = " ".join(data_admin["todo_jobs"])
-        # Note: Depending on queue state, these jobs might be in run/done queues
-        # So we just verify admin can use wildcard successfully
+        # Admin should see both jobs (or more if queue has other jobs).
+        # Note: Depending on queue state, these jobs might be in run/done queues,
+        # so we only verify admin can use wildcard and gets the structured list.
+        assert isinstance(data_admin["todo_jobs_metadata"], list)
 
     def test_regular_user_wildcard_blocked(self, create_user, get_queue):
         """Regular user attempting wildcard filter receives 403 Forbidden."""
@@ -217,7 +217,7 @@ class TestQueueFilteringSmoke:
             assert response.status_code == 200
             data = response.json()
             assert data["filtered_by"] == user["uid"]
-            assert f"{queue_name}_jobs" in data
+            assert f"{queue_name}_jobs_metadata" in data
             assert "total_jobs" in data
 
     def test_done_queue_special_format(self, create_user, get_queue):
@@ -232,7 +232,6 @@ class TestQueueFilteringSmoke:
         # Assert: Contains expected fields
         assert response.status_code == 200
         data = response.json()
-        assert "done_jobs" in data
         assert "done_jobs_metadata" in data
         assert "filtered_by" in data
         assert data["filtered_by"] == user["uid"]
@@ -245,16 +244,16 @@ class TestQueueFilteringSmoke:
         # Create user
         user = create_user("smoke_compat@test.com")
 
-        # Test: Query queue (old clients expect {queue_name}_jobs field)
+        # Test: Query queue (clients read the {queue_name}_jobs_metadata field)
         response = get_queue(user["access_token"], "todo")
 
         # Assert: Required fields present
         assert response.status_code == 200
         data = response.json()
 
-        # Core field for backward compatibility
-        assert "todo_jobs" in data
-        assert isinstance(data["todo_jobs"], list)
+        # Core field of the current contract
+        assert "todo_jobs_metadata" in data
+        assert isinstance(data["todo_jobs_metadata"], list)
 
         # New metadata fields (additive)
         assert "filtered_by" in data
