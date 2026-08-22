@@ -216,7 +216,16 @@ def test_runner_recycles_until_stop():
         n[ "c" ] += 1
         if n[ "c" ] >= 2: runner._stop.set()       # stop AT the 2nd job (after its do_all)
         return FakeJob( result="hard-cap" )
-    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=_noop_report )
+    # SWEEP SEAMS STUBBED (row ece4d86a). Unstubbed, `hold_roots_fn` and
+    # `live_session_ids_fn` default to the REAL ones, and all three sweeps at the top
+    # of run() call them BEFORE the first job is built: a project-root resolve that
+    # builds a live ConfigurationManager and scans the sibling tree for repo roots,
+    # plus a PID-checked scan of the operator's real session bridges. Both read state
+    # that peer SESSIONS write concurrently, which is what made this test pass alone
+    # and fail in a full run. Empty roots ⇒ every sweep reaches nothing. Same reason
+    # test_runner_start_stop_thread below already does this.
+    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=_noop_report,
+                               hold_roots_fn=lambda: [ ], live_session_ids_fn=lambda: set() )
     runner.run()
     assert runner.cycles == 2
     assert len( [ e for e, _ in rec.logs if e == "fleet_arbiter_recycle" ] ) == 1     # one relaunch
@@ -229,7 +238,16 @@ def test_runner_swallows_job_error():
     def factory():
         runner._stop.set()                          # stop after this one job
         return FakeJob( raises=True )
-    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=_noop_report )
+    # SWEEP SEAMS STUBBED (row ece4d86a). Unstubbed, `hold_roots_fn` and
+    # `live_session_ids_fn` default to the REAL ones, and all three sweeps at the top
+    # of run() call them BEFORE the first job is built: a project-root resolve that
+    # builds a live ConfigurationManager and scans the sibling tree for repo roots,
+    # plus a PID-checked scan of the operator's real session bridges. Both read state
+    # that peer SESSIONS write concurrently, which is what made this test pass alone
+    # and fail in a full run. Empty roots ⇒ every sweep reaches nothing. Same reason
+    # test_runner_start_stop_thread below already does this.
+    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=_noop_report,
+                               hold_roots_fn=lambda: [ ], live_session_ids_fn=lambda: set() )
     runner.run()
     assert runner.cycles == 1
     assert any( e == "fleet_arbiter_job_error" for e, _ in rec.logs )
@@ -254,7 +272,16 @@ def test_runner_start_stop_thread():
 
 
 def _one_cycle( rec, **loop_kwargs ):
-    """Run the supervisor for exactly one cycle and return it."""
+    """Run the supervisor for exactly one cycle and return it.
+
+    The two sweep seams DEFAULT TO STUBS here (row ece4d86a) for the same reason as
+    the runner tests above: unstubbed they resolve the real project root and scan the
+    operator's real session bridges on every cycle, which peer sessions write
+    concurrently. `setdefault`, not a hard-wire — the callers that are ABOUT those
+    seams (roots_fn returning None, roots_fn raising, the roots+live-set spy) still
+    pass their own and win."""
+    loop_kwargs.setdefault( "hold_roots_fn",       lambda: [ ] )
+    loop_kwargs.setdefault( "live_session_ids_fn", lambda: set() )
     runner = None
     def factory():
         runner._stop.set()
@@ -1362,6 +1389,7 @@ def test_run_survives_a_job_CONSTRUCTION_blowup_and_retries():
         if event == "fleet_arbiter_recycle": holder[ "loop" ]._stop.set()
     loop = FleetArbiterLoop( _factory, log_fn=_log,
                              hold_janitor_fn=lambda **k: [ ], hwm_janitor_fn=lambda **k: [ ],
+                             hold_roots_fn=lambda: [ ], live_session_ids_fn=lambda: set(),
                              construct_retry_seconds=0.0 )
     holder[ "loop" ] = loop
     loop.run()                                                   # must return, not raise
@@ -1386,6 +1414,7 @@ def test_run_exits_promptly_if_stopped_DURING_the_construct_backoff():
         raise ModuleNotFoundError( "No module named 'sqlalchemy'", name="sqlalchemy" )
     loop = FleetArbiterLoop( _factory, log_fn=lambda e, **f: logs.append( ( e, f ) ),
                              hold_janitor_fn=lambda **k: [ ], hwm_janitor_fn=lambda **k: [ ],
+                             hold_roots_fn=lambda: [ ], live_session_ids_fn=lambda: set(),
                              construct_retry_seconds=30.0 )   # long — a real sleep would hang the test
     holder[ "loop" ] = loop
     loop.run()                                       # returns at once via the wait() True branch
