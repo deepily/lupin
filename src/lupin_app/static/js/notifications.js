@@ -10408,29 +10408,6 @@ class NotificationsUI {
         }
     }
     
-    parseJobMetadataFromHtml( jobHtml, index ) {
-        /**
-         * Parse job metadata from HTML for backward compatibility.
-         * Fallback when structured metadata not available from API.
-         */
-        const jobIdMatch = jobHtml.match( /id=['"]([^'"]+)['"]/ );
-        const jobId = jobIdMatch ? jobIdMatch[1] : `done-job-${index}`;
-        
-        // Extract text content (basic parsing)
-        const textMatch = jobHtml.match( />([^<]+)</);
-        const text = textMatch ? textMatch[1].trim() : "Job completed";
-        
-        return {
-            job_id: jobId,
-            html: jobHtml,
-            question_text: "Q&A submission",
-            response_text: text,
-            timestamp: new Date().toISOString(),
-            user_id: this.currentUserEmail,
-            has_audio_cache: false
-        };
-    }
-    
     async checkJobAudioCacheAvailability( jobMetadata ) {
         /**
          * Check if audio is available in TTS cache for this job.
