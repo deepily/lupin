@@ -118,6 +118,23 @@ POLL_TIMEOUT_S   = 180  # 3 min — trivial CC job should finish in <30s typical
 # Helpers
 # ────────────────────────────────────────────────────────────────────────
 
+def _with_lineage( body: dict ) -> dict:
+    """
+    Stamp the monopolize lineage tag onto a submit body when the runner exported one.
+
+    Requires:
+        - body is a /api/v2/submit request body
+
+    Ensures:
+        - returns the same dict, carrying parent_id_hash when
+          LUPIN_TEST_MONOPOLIZE_PARENT_ID is set, and untouched when it is not
+    """
+    parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+    if parent_id:
+        body[ "parent_id_hash" ] = parent_id
+    return body
+
+
 def _http_post_json( url: str, body: dict, headers: dict, timeout: int = 15 ) -> dict:
     """POST JSON; return parsed JSON response. Raises urllib HTTPError on non-2xx."""
     req = urllib.request.Request(
@@ -285,8 +302,12 @@ def test_claude_code_bounded_job_uses_max_subscription( auth_headers ):
         submit_resp = _http_post_json(
             SUBMIT_ENDPOINT,
             # ONE DOOR NOW: the command names the work and `args` carries the job's own
-            # arguments. Nothing here is a queue directive, so nothing stays top-level.
-            body = {
+            # arguments. The lineage tag is the one top-level field — it is a queue
+            # directive (bug 5ed4f187): when this smoke runs as a child pytest inside a
+            # monopolizing test-suite job, the runner exports
+            # LUPIN_TEST_MONOPOLIZE_PARENT_ID, and threading it lets the consumer's Gate B
+            # admit this child through the monopoly hold instead of starving it 900s.
+            body = _with_lineage( {
                 "command"  : ROUTING_COMMAND,
                 "args"     : {
                     "prompt"    : prompt,
@@ -296,7 +317,7 @@ def test_claude_code_bounded_job_uses_max_subscription( auth_headers ):
                     "dry_run"   : False,
                 },
                 "question" : "claude code max-subscription billing probe",
-            },
+            } ),
             headers = auth_headers,
             timeout = 15,
         )

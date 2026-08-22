@@ -146,7 +146,7 @@ class ClaudeCodeDryRunSmokeTest( LivePipelineTestBase ):
         # job's own arguments in `args`. `websocket_id` stays TOP-LEVEL because it is a
         # queue/routing directive rather than an argument to the agent, and `args` is
         # checked against the command's own argument contract.
-        return {
+        body = {
             "command"      : self.ROUTING_COMMAND,
             "args"         : {
                 "prompt"    : scenario[ "prompt" ],
@@ -156,6 +156,15 @@ class ClaudeCodeDryRunSmokeTest( LivePipelineTestBase ):
             "question"     : scenario[ "prompt" ],
             "websocket_id" : ws_id,
         }
+        # Lineage tag (bug 5ed4f187): when this smoke runs as a child pytest inside a
+        # monopolizing test-suite job, the runner exports LUPIN_TEST_MONOPOLIZE_PARENT_ID
+        # (test_suite/job.py). Threading it as parent_id_hash lets the consumer's Gate B
+        # admit this child through the monopoly hold instead of starving it 900s. It is a
+        # queue directive, so it stays top-level rather than going inside `args`.
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+        if parent_id:
+            body[ "parent_id_hash" ] = parent_id
+        return body
 
     # ═══════════════════════════════════════════════════════════════════════
     # Mode Management
