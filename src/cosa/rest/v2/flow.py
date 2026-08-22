@@ -221,7 +221,14 @@ class AskFlow:
         else:
             lookup = self.cache.lookup( question )
             self._record_lookup( trace, lookup )
-            if lookup.is_replay_hit:
+            # STEP 9b, AT THE REPLAY DECISION — deliberately here and not inside the
+            # lookup. A guard in the shared search helper would also filter
+            # /api/admin/snapshots/search, blinding the one person whose job is to
+            # inspect the cache, and doing it silently. The question this asks is "may
+            # this row be SERVED as an answer", and only the replay path asks it.
+            # Refusing here falls through to routing, so the agent re-runs — which is
+            # the whole observable behaviour, not a detail of it.
+            if lookup.is_replay_hit and self._may_serve( trace, lookup.snapshot, "exact_hit" ):
                 work    = Work( "replay", lookup.snapshot, user_id, user_email, session_id, snapshotable=False )
                 outcome = self.executor.submit( work, trace )
                 # GATE 1 of 2. "waiting" means the queued executor handed the replay off —
@@ -882,6 +889,15 @@ class AskFlow:
         if score < self.confirmation_threshold:
             return ( None, None )
 
+        # STEP 9b, ON THIS PATH TOO, AND BEFORE THE ASK. An unconfirmed row is not served
+        # even if the user says yes — so asking about one would put a question to somebody
+        # whose answer cannot change the outcome. Checking first also keeps the two replay
+        # paths honest with each other: "never served, not even once" would be false if a
+        # near match could carry a row past the guard the exact path applies.
+        if not self._may_serve( trace, candidate, "near_match" ):
+            if self.debug: print( f"[v2] near match at {score:.1f}% is unconfirmed — not asking, routing" )
+            return ( None, None )
+
         if not self.confirmation_enabled:
             trace.set( "near_match_auto_accepted", score )
             return ( candidate, "near_match_auto_accepted" )
@@ -1050,6 +1066,44 @@ class AskFlow:
                              command=command, snapshotable=may_cache,
                              agent_class_name=spec.factory.__name__, agent_label=spec.label )
 
+    @classmethod
+    def _may_serve( cls, trace: StageTrace, snapshot: Any, why: str ) -> bool:
+        """Step 9b — the READ guard. A row is served only if its answer was CONFIRMED correct.
+
+        Rick: *"we want to keep unconfirmed answers from replaying until they are
+        confirmed."* Two readings were put to him and his sentence forbids the softer one:
+        an unconfirmed row is never served, NOT "its first replay still happens and a later
+        one is stopped". So this refuses every hit, every time, until the row is confirmed.
+
+        WHERE THE VERDICT COMES FROM, AND WHY NOTHING NEW IS ASKED. The only question ever
+        put to the user is the existing end-of-execution "was this answer correct?", fired
+        after the agent runs. It lands on a daemon thread and does not block, so on a
+        timeout it leaves `answer_is_correct` as None — and the row was already written
+        before the user answered. This guard only CONSUMES what that tail recorded; it adds
+        no prompt of its own.
+
+        THREE STATES, STARTING AT UNKNOWN, SO IT FAILS CLOSED. None (never answered), False
+        (the user said no) and True are all possible, and only True serves. `is True`, not
+        truthiness: a nullable column that arrives as the string "true", or as 1, or as
+        anything else a future writer invents, must not be read as consent.
+
+        READ THE HYDRATED OBJECT, NEVER THE RAW COLUMN. Both writers serialize through the
+        same record builder, so `snapshot.answer_is_correct` is uniform where the column is
+        not. Typing the column would be hardening against a future writer that skips that
+        builder — worth doing, not a prerequisite. This is the second time a guard in this
+        area has been hung on a loosely-typed nullable column; the first was
+        `routing_command`, and it failed OPEN.
+
+        A refused row is marked in the trace: the user sees the cache appear to stop
+        working, and the only way to tell "guard refused it" from "cache is broken" is to
+        have written down which happened.
+        """
+        verdict = getattr( snapshot, "answer_is_correct", None )
+        if verdict is True:
+            return True
+        trace.set( "replay_refused_unconfirmed", f"{why}:{verdict!r}" )
+        return False
+
     # THE COMMANDS THE ROUTER ITSELF CHOSE. Everything else reached `_run_agent` because
     # a CALLER named the command, and a caller's choice is not evidence about the
     # question. "resumed" belongs here: the router picked that command on the original
@@ -1093,7 +1147,14 @@ class AskFlow:
         if route_reason not in cls._ROUTER_CHOSE:
             trace.set( "writeback_refused_caller_chose_the_agent", route_reason )
             return False
-        if getattr( spec, "crud_factory", None ) is not None:
+        # PLAIN ATTRIBUTE ACCESS, NOT A DEFAULTED READ (Pocholo, on 92ed2565). Every spec
+        # the registry can return carries `crud_factory` under both flag states — measured,
+        # not assumed — so a fallback would be unreachable today AND would fail in the one
+        # direction this check must never fail: a future spec type without the attribute
+        # would be silently treated as non-CRUD and the guard would fail OPEN. Reading it
+        # plainly fails loud instead. (The READ guard's `answer_is_correct` is the opposite
+        # case — absent there means REFUSE, so a defaulted read is correct there.)
+        if spec.crud_factory is not None:
             trace.set( "writeback_refused_crud_command", spec.factory.__name__ )
             return False
         return True
