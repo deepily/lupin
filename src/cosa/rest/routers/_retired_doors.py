@@ -125,6 +125,12 @@ RETIRED_DOORS = {
     # `submit` refuses to do by design. Rick ruled it directly (2026-08-21): the accordion
     # is being retired and Q&A is the entrance, so asking for a podcast is asking a question.
     "/api/podcast-generator/submit"               : V2_ASK,
+    # ── the SWE team door ──
+    # The last lineage-aware v1 door. A monopolizing sweep's child pytest submits a
+    # swe-team dry-run and echoes the sweep's id_hash back as `parent_id_hash` so Gate B
+    # admits it through the monopoly hold; `/api/v2/submit` carries that field top-level
+    # and stamps it in the factory, so the sweep keeps working after this row lands.
+    "/api/swe-team/submit"                        : V2_SUBMIT,
 }
 
 

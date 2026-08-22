@@ -471,13 +471,16 @@ def test_the_v2_submit_door_is_lineage_aware_and_its_siblings_are_not():
     # its examples; they retired, their models went with their handlers, and they left the
     # set — correctly, since a tombstone reads no body and there is nowhere for the field
     # to hide in it. A retired door leaving here is the system working, not a gap.
-    assert endpoints.get( "/api/swe-team/submit" ) == "swe_team.py"
+    # NOTHING LIVE IS LEFT TO NAME HERE. swe-team was the last lineage-aware v1 door, and
+    # its retirement leaves /api/v2/submit as the only one — which is the point of the
+    # cutover rather than a gap in this check. The assertion above already pins it.
     for retired in ( "/api/deep-research/submit",
                      "/api/deep-research-to-podcast/submit",
                      "/api/deep-research-to-presentation/submit",
                      "/api/bug-fix-expediter/submit",
                      "/api/presentation-generator/submit",
-                     "/api/podcast-generator/submit" ):
+                     "/api/podcast-generator/submit",
+                     "/api/swe-team/submit" ):
         assert retired not in endpoints, f"{retired} is a tombstone and reads no body"
 
 
@@ -541,7 +544,7 @@ def test_the_derivation_finds_the_lineage_aware_routers():
     """
     endpoints, _unmatched = lineage_aware_endpoints( ROUTER_DIR )
     assert endpoints, "derived ZERO lineage-aware endpoints — the router parse has rotted"
-    assert "/api/swe-team/submit" in endpoints
+    assert "/api/v2/submit" in endpoints
 
 
 def test_every_lineage_aware_caller_threads_the_parent_id():

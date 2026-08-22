@@ -2045,32 +2045,6 @@ class NotificationsUI {
         }
 
 
-        // SWE Team submit button
-        const submitSweBtn = document.getElementById( 'submit-swe-job' );
-        if ( submitSweBtn ) {
-            submitSweBtn.addEventListener( 'click', () => {
-                this.submitSweTeamJob();
-            });
-        }
-
-        // SWE Team STT button (voice input)
-        const sweSttBtn = document.getElementById( 'swe-stt-button' );
-        if ( sweSttBtn ) {
-            sweSttBtn.addEventListener( 'click', () => {
-                this.handleSTTButtonClick( 'swe-task', sweSttBtn );
-            });
-        }
-
-        // Ctrl+Enter in SWE Team textarea (Enter alone inserts newline)
-        const sweTaskInput = document.getElementById( 'swe-task' );
-        if ( sweTaskInput ) {
-            sweTaskInput.addEventListener( 'keydown', ( e ) => {
-                if ( e.key === 'Enter' && e.ctrlKey ) {
-                    e.preventDefault();
-                    this.submitSweTeamJob();
-                }
-            });
-        }
 
 
         // Commons Broadcast STT button (voice input) — Phase 2 + Phase 3 voice-first.
@@ -3126,100 +3100,6 @@ class NotificationsUI {
 
         } catch ( error ) {
             this.error( "Research job submission failed:", error );
-            statusDiv.textContent = `✗ Error: ${error.message}`;
-            statusDiv.style.color = '#dc3545';
-        } finally {
-            submitButton.disabled = false;
-            loadingSpinner.style.display = 'none';
-        }
-    }
-
-    /**
-     * Submit a SWE Team engineering task.
-     *
-     * Sends task to /api/swe-team/submit for asynchronous execution.
-     * Budget and timeout are optional — only included if user sets them.
-     */
-    async submitSweTeamJob() {
-        const taskInput      = document.getElementById( 'swe-task' );
-        const budgetInput    = document.getElementById( 'swe-budget' );
-        const timeoutInput   = document.getElementById( 'swe-timeout' );
-        const dryRunCheckbox = document.getElementById( 'swe-dry-run' );
-        const submitButton   = document.getElementById( 'submit-swe-job' );
-        const loadingSpinner = document.getElementById( 'swe-loading' );
-        const statusDiv      = document.getElementById( 'swe-submit-status' );
-
-        const task   = taskInput.value.trim();
-        const dryRun = dryRunCheckbox.checked;
-
-        if ( !task ) {
-            statusDiv.textContent = '⚠️ Please describe the engineering task.';
-            statusDiv.style.color = '#dc3545';
-            return;
-        }
-
-        try {
-            // Update UI
-            submitButton.disabled = true;
-            loadingSpinner.style.display = 'inline-block';
-            statusDiv.textContent = 'Submitting SWE Team task...';
-            statusDiv.style.color = '#666';
-
-            // Ensure token is valid before API call
-            await this.ensureValidToken();
-
-            this.log( `Submitting SWE Team job: ${task.substring( 0, 50 )}...` );
-
-            // Build request body — budget and timeout are nullable
-            const body = {
-                task         : task,
-                dry_run      : dryRun,
-                websocket_id : this.queueSessionId
-            };
-
-            const budgetVal = parseFloat( budgetInput.value );
-            if ( !isNaN( budgetVal ) && budgetVal > 0 ) {
-                body.budget = budgetVal;
-            }
-
-            const timeoutVal = parseInt( timeoutInput.value );
-            if ( !isNaN( timeoutVal ) && timeoutVal > 0 ) {
-                body.timeout = timeoutVal;
-            }
-
-            const trustModeSelect = document.getElementById( 'swe-trust-mode' );
-            const trustMode = trustModeSelect ? trustModeSelect.value : '';
-            if ( trustMode ) {
-                body.trust_mode = trustMode;
-            }
-
-            Object.assign( body, this._getSchedulingParams( 'swe' ) );
-
-            const response = await fetch( '/api/swe-team/submit', {
-                method  : 'POST',
-                headers : {
-                    'Authorization' : this.getAuthHeader(),
-                    'X-Session-ID'  : this.queueSessionId,
-                    'Content-Type'  : 'application/json'
-                },
-                body: JSON.stringify( body )
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
-                throw new Error( errorData.detail || `HTTP ${response.status}` );
-            }
-
-            const result = await response.json();
-            this.log( "SWE Team job response:", result );
-
-            // Success feedback
-            statusDiv.textContent = `✓ SWE Team job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
-            statusDiv.style.color = '#28a745';
-            taskInput.value = '';
-
-        } catch ( error ) {
-            this.error( "SWE Team job submission failed:", error );
             statusDiv.textContent = `✗ Error: ${error.message}`;
             statusDiv.style.color = '#dc3545';
         } finally {

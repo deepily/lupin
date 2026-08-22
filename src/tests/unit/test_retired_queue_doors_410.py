@@ -34,12 +34,12 @@ from cosa.rest.routers._retired_doors import REMOVE_BY, RETIRED_DOORS, V2_ASK, V
 from cosa.rest.routers import (
     bug_fix_expediter, deep_research, deep_research_to_podcast,
     deep_research_to_presentation, podcast_generator, presentation_generator, queues,
-    v2_ask,
+    swe_team, v2_ask,
 )
 
 _ROUTER_MODULES = ( bug_fix_expediter, deep_research, deep_research_to_podcast,
                     deep_research_to_presentation, podcast_generator,
-                    presentation_generator, queues, v2_ask )
+                    presentation_generator, queues, swe_team, v2_ask )
 
 
 def _app():
@@ -68,7 +68,7 @@ def _concrete( path ):
 
 # ── the count, stated once so a growing table cannot pass quietly ────────────
 
-def test_exactly_eight_doors_are_retired_at_this_commit():
+def test_exactly_nine_doors_are_retired_at_this_commit():
     """
     THE COUNT IS RESTATED BY HAND ON PURPOSE, and it is the third of the three edits
     every new door costs (table row, this set, this name). A loop that silently covered
@@ -97,6 +97,11 @@ def test_exactly_eight_doors_are_retired_at_this_commit():
     `ask` does and what `submit` refuses to do by design. Rick ruled it directly: the
     accordion is retiring and Q&A is the entrance.
 
+    `/api/swe-team/submit` came ninth and was the last lineage-aware v1 door. A monopolizing
+    sweep's child pytest submits a swe-team dry-run and echoes the sweep's id_hash back as
+    `parent_id_hash` so Gate B admits it through the monopoly hold; `/api/v2/submit` carries
+    that field top-level and stamps it in the factory, so the sweep keeps working.
+
     STILL OUT, each for its own reason, because a door absent from this set should never
     read as one nobody got to:
       · `/api/upload-and-transcribe-mp3` — a speech-to-text endpoint that queues only on
@@ -118,6 +123,7 @@ def test_exactly_eight_doors_are_retired_at_this_commit():
         "/api/deep-research-to-presentation/submit",
         "/api/presentation-generator/submit",
         "/api/podcast-generator/submit",
+        "/api/swe-team/submit",
     }, sorted( RETIRED_DOORS )
 
 

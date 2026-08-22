@@ -121,7 +121,9 @@ class AgenticJobBase( ABC ):
         # consumer's Gate B admits this child THROUGH the intake hold instead of
         # deferring it as a foreign writer — the sweep's own children are part of
         # its exclusive window, not contaminants. Set post-construction by the
-        # child-spawn seam (e.g. routers/swe_team.py from parent_id_hash).
+        # child-spawn seam — agentic_job_factory, from /api/v2/submit's parent_id_hash.
+        # (This used to name routers/swe_team.py, the last v1 door that stamped it; that
+        # door is a tombstone now and the stamp moved into the factory.)
         self.spawned_by_id_hash    = spawned_by_id_hash
 
         # CJ Flow persistence fields — populated by agentic_job_factory.create_agentic_job()
