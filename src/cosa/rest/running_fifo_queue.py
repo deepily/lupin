@@ -1760,7 +1760,7 @@ class RunningFifoQueue( FifoQueue ):
 
         Ensures:
             - Does NOT block the pipeline
-            - Thread-safe via SolutionSnapshotManager._save_lock
+            - Thread-safe via the snapshot manager's own save lock
             - Updates the stored snapshot on yes/no response
         """
         def _ask_and_update():

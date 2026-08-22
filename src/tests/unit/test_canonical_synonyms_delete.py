@@ -18,14 +18,19 @@ from unittest.mock import MagicMock
 
 
 class TestDeleteSnapshotSynonymCleanup:
-    """Tests that delete_snapshot() in SolutionSnapshotManager cleans up synonyms."""
+    """Tests that delete_snapshot() on the snapshot manager cleans up synonyms.
+
+    The manager is a MagicMock, so this covers the delete/cleanup contract rather than any
+    one implementation — which is why it survived the 2026-08-21 deletion of the file-based
+    backend (ruling 6791ce47) unchanged apart from this wording.
+    """
 
     def test_synonym_cleanup_called_on_delete( self ):
         """delete_snapshot() calls delete_by_snapshot_id() when synonyms table is initialized."""
         mock_synonyms = MagicMock()
         mock_synonyms.delete_by_snapshot_id.return_value = 3
 
-        # Build a minimal mock of SolutionSnapshotManager
+        # Build a minimal mock of the snapshot manager
         mgr = MagicMock()
         mgr._canonical_synonyms = mock_synonyms
         mgr._question_lookup    = { "What is 4+4?" : "hash_abc" }
