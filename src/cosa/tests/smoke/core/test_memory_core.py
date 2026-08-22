@@ -42,7 +42,6 @@ def test_memory_modules():
     """
     memory_modules = [
         ("solution_snapshot", "cosa.memory.solution_snapshot"),
-        ("solution_snapshot_mgr", "cosa.memory.solution_snapshot_mgr"),
         ("normalizer", "cosa.memory.normalizer"),
         ("gist_normalizer", "cosa.memory.gist_normalizer"),
         ("embedding_manager", "cosa.memory.embedding_manager"),
@@ -195,7 +194,6 @@ def scan_v000_dependencies_in_memory():
     # All modules we want to scan
     all_modules = [
         "cosa.memory.solution_snapshot",
-        "cosa.memory.solution_snapshot_mgr", 
         "cosa.memory.normalizer",
         "cosa.memory.gist_normalizer",
         "cosa.memory.embedding_manager",

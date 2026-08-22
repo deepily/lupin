@@ -159,7 +159,6 @@ class CoSASmokeTestRunner:
                 "memory.input_and_output_table",
                 "memory.normalizer",
                 "memory.solution_snapshot",
-                "memory.solution_snapshot_mgr"
             ],
             "training": [
                 "training.hf_downloader",

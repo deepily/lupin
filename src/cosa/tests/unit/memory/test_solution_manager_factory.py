@@ -3,20 +3,23 @@ Unit tests for cosa.memory.solution_manager_factory.
 
 Covers the ManagerType enum and the SolutionSnapshotManagerFactory:
 
-- ManagerType.from_string (exact / case-insensitive / unknown→ValueError)
-- create_manager: str→enum coercion, debug/verbose logging, file_based / postgres
-  dispatch, and the defensive unsupported-type ValueError
-- _create_file_based_manager / _create_postgres_manager: lazy-import success,
-  ImportError-wrap, and missing-config-key KeyError arms
+- ManagerType.from_string (exact / case-insensitive / unknown→ValueError), and that
+  the two RETIRED backends — `lancedb` and, since 2026-08-21, `file_based` — are
+  refused by name rather than merely absent
+- create_manager: str→enum coercion and the defensive unsupported-type ValueError
+- _create_postgres_manager: lazy-import success and the ImportError wrap
 - get_available_types
-- create_from_config_manager: missing-type ValueError, file_based (success +
-  missing-path KeyError), postgres (explicit table, defaulted table, no storage
-  keys read), debug/verbose logging
+- create_from_config_manager: missing-type ValueError, postgres (explicit table,
+  defaulted table, no storage keys read), debug/verbose logging
 
-The heavy concrete managers (FileBasedSolutionManager / PostgresSolutionManager)
-are NEVER imported for real — their modules are injected into sys.modules as
-lightweight fakes (or set to None to force ImportError). No filesystem, DB, or
-GPU dependency.
+⚰️ The file_based cases were deleted on 2026-08-21 with the backend itself (Rick's
+ruling 6791ce47, "delete after v2 lands"). There is one backend now, so there is no
+dispatch branch left to cover — a test that kept exercising a removed arm would be
+covering a fake module and nothing else.
+
+The heavy concrete manager (PostgresSolutionManager) is NEVER imported for real — its
+module is injected into sys.modules as a lightweight fake (or set to None to force
+ImportError). No filesystem, DB, or GPU dependency.
 
 quick_smoke_test() is excluded from coverage via pyproject exclude_also.
 
@@ -45,7 +48,6 @@ def _fake_module( name, attr_name ):
     return mod, cls, created
 
 
-_FILE_MOD  = "cosa.memory.file_based_solution_manager"
 _PG_MOD    = "cosa.memory.postgres_solution_manager"
 
 
@@ -53,12 +55,10 @@ class TestManagerType( unittest.TestCase ):
     """ManagerType.from_string + enum values."""
 
     def test_from_string_exact( self ):
-        self.assertEqual( ManagerType.from_string( "file_based" ), ManagerType.FILE_BASED )
         self.assertEqual( ManagerType.from_string( "postgres" ), ManagerType.POSTGRES )
 
     def test_from_string_case_insensitive_and_trimmed( self ):
         self.assertEqual( ManagerType.from_string( "  POSTGRES  " ), ManagerType.POSTGRES )
-        self.assertEqual( ManagerType.from_string( "File_Based" ), ManagerType.FILE_BASED )
 
     def test_from_string_unknown_raises( self ):
         with self.assertRaises( ValueError ):
@@ -69,19 +69,19 @@ class TestManagerType( unittest.TestCase ):
         with self.assertRaises( ValueError ):
             ManagerType.from_string( "lancedb" )
 
+    def test_file_based_is_no_longer_a_manager_type( self ):
+        """Same contract, for the backend deleted on 2026-08-21 (ruling 6791ce47).
+
+        `file_based` is still the DEFAULT `main.py` reads when the key is unset, so a box
+        with no configured backend reaches this and is refused rather than quietly building
+        a manager whose class no longer exists.
+        """
+        with self.assertRaises( ValueError ):
+            ManagerType.from_string( "file_based" )
+
 
 class TestCreateManager( unittest.TestCase ):
     """create_manager dispatch + logging + defensive arm."""
-
-    def test_file_based_dispatch_with_logging( self ):
-        """String coercion + debug/verbose logging + file_based dispatch."""
-        mod, cls, created = _fake_module( _FILE_MOD, "FileBasedSolutionManager" )
-        with patch.dict( sys.modules, { _FILE_MOD: mod } ), patch( "builtins.print" ):
-            result = SolutionSnapshotManagerFactory.create_manager(
-                "file_based", { "path": "/x" }, debug=True, verbose=True
-            )
-        self.assertIs( result, created )
-        cls.assert_called_once_with( { "path": "/x" }, True, True )
 
     def test_postgres_dispatch( self ):
         """postgres dispatch via enum input."""
@@ -98,48 +98,18 @@ class TestCreateManager( unittest.TestCase ):
         with self.assertRaises( ValueError ):
             SolutionSnapshotManagerFactory.create_manager( bogus, {} )
 
-    def test_debug_without_verbose_skips_config_log( self ):
-        """debug=True, verbose=False → logs the header line but NOT the config dump."""
-        mod, cls, created = _fake_module( _FILE_MOD, "FileBasedSolutionManager" )
-        with patch.dict( sys.modules, { _FILE_MOD: mod } ), patch( "builtins.print" ):
-            result = SolutionSnapshotManagerFactory.create_manager(
-                "file_based", { "path": "/x" }, debug=True, verbose=False
-            )
-        self.assertIs( result, created )
-
-
-class TestCreateFileBasedManager( unittest.TestCase ):
-    """_create_file_based_manager import + validation arms."""
-
-    def test_success( self ):
-        mod, cls, created = _fake_module( _FILE_MOD, "FileBasedSolutionManager" )
-        with patch.dict( sys.modules, { _FILE_MOD: mod } ):
-            result = SolutionSnapshotManagerFactory._create_file_based_manager(
-                { "path": "/x" }, False, False
-            )
-        self.assertIs( result, created )
-
-    def test_import_error_wrapped( self ):
-        """A missing FileBasedSolutionManager module → wrapped ImportError."""
-        with patch.dict( sys.modules, { _FILE_MOD: None } ):
-            with self.assertRaises( ImportError ):
-                SolutionSnapshotManagerFactory._create_file_based_manager( { "path": "/x" }, False, False )
-
-    def test_missing_path_key_raises( self ):
-        mod, cls, created = _fake_module( _FILE_MOD, "FileBasedSolutionManager" )
-        with patch.dict( sys.modules, { _FILE_MOD: mod } ):
-            with self.assertRaises( KeyError ):
-                SolutionSnapshotManagerFactory._create_file_based_manager( {}, False, False )
-
-
 class TestGetAvailableTypes( unittest.TestCase ):
     def test_returns_all_values( self ):
         self.assertEqual( set( SolutionSnapshotManagerFactory.get_available_types() ),
-                          { "file_based", "postgres" } )
+                          { "postgres" } )
 
 
 class TestCreateFromConfigManager( unittest.TestCase ):
-    """create_from_config_manager — the file_based branch + every validation/log arm."""
+    """create_from_config_manager — every validation and logging arm.
+
+    The file_based cases went with the backend on 2026-08-21 (ruling 6791ce47): there is
+    one backend now, so there is no branch to cover.
+    """
 
     def _cfg( self, mapping ):
         cfg = Mock()
@@ -156,39 +126,6 @@ class TestCreateFromConfigManager( unittest.TestCase ):
         cfg = self._cfg( { "solution snapshots manager type": "lancedb" } )
         with self.assertRaises( ValueError ):
             SolutionSnapshotManagerFactory.create_from_config_manager( cfg )
-
-    def test_file_based_success_with_logging( self ):
-        cfg = self._cfg( {
-            "solution snapshots manager type"     : "file_based",
-            "solution snapshots file based path"  : "/solutions/",
-            "solution snapshots enable performance monitoring" : True,
-        } )
-        mod, cls, created = _fake_module( _FILE_MOD, "FileBasedSolutionManager" )
-        with patch.dict( sys.modules, { _FILE_MOD: mod } ), patch( "builtins.print" ):
-            result = SolutionSnapshotManagerFactory.create_from_config_manager( cfg, debug=True, verbose=True )
-        self.assertIs( result, created )
-        passed_config = cls.call_args[ 0 ][ 0 ]
-        self.assertEqual( passed_config[ "path" ], "/solutions/" )
-
-    def test_file_based_debug_without_verbose( self ):
-        """create_from_config_manager debug=True, verbose=False → header log, no detail log."""
-        cfg = self._cfg( {
-            "solution snapshots manager type"     : "file_based",
-            "solution snapshots file based path"  : "/solutions/",
-        } )
-        mod, cls, created = _fake_module( _FILE_MOD, "FileBasedSolutionManager" )
-        with patch.dict( sys.modules, { _FILE_MOD: mod } ), patch( "builtins.print" ):
-            result = SolutionSnapshotManagerFactory.create_from_config_manager( cfg, debug=True, verbose=False )
-        self.assertIs( result, created )
-
-    def test_file_based_missing_path_raises( self ):
-        cfg = self._cfg( {
-            "solution snapshots manager type"    : "file_based",
-            "solution snapshots file based path" : "",
-        } )
-        with self.assertRaises( KeyError ):
-            SolutionSnapshotManagerFactory.create_from_config_manager( cfg )
-
 
 class TestCreatePostgresManager( unittest.TestCase ):
     """_create_postgres_manager — dispatch, lazy import, and the no-validation contract.
