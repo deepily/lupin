@@ -44,7 +44,7 @@ if lupin_root is None:
 src_path = os.path.join( lupin_root, "src" )
 if src_path not in sys.path: sys.path.insert( 0, src_path )
 
-from cosa.agents.calculator.conversion_tables import ALIASES, ALL_CATEGORIES
+from cosa.agents.calculator.conversion_tables import ALIASES, ALL_CATEGORIES, resolve_alias, find_category
 
 MATH_FILE = "src/ephemera/prompts/data/synthetic-data-agent-routing-math.txt"
 CALC_FILE = "src/ephemera/prompts/data/synthetic-data-agent-routing-calculator.txt"
@@ -58,7 +58,7 @@ for table, _name in ALL_CATEGORIES: _KNOWN_UNITS |= set( table.keys() )
 
 # Aliases that are also ordinary English words -- matching them as units manufactures
 # conversions that are not there ("in the form a x squared" is not inches).
-_AMBIGUOUS_ALIASES = { "in", "c", "f", "m", "t", "s", "cup", "cups", "ton", "tons", "mi" }
+_AMBIGUOUS_ALIASES = { "in", "c", "f", "m", "t", "s", "mi" }
 _KNOWN_UNITS -= _AMBIGUOUS_ALIASES
 
 _MORTGAGE_RE   = re.compile( r"\b(mortgage|refinanc\w*|down payment|amortiz\w*|apy|apr|compound interest|auto loan|car loan|personal loan|monthly payment|principal)\b", re.I )
@@ -236,6 +236,11 @@ def destination_arithmetic( line ):
 
 _GUARD_AMBIGUOUS = { "in", "c", "f", "m", "t", "s" }
 
+# Unit names the agent spells with more than one word. A single-token scan cannot see
+# these: "fluid ounces" splits into "fluid" and "ounces", and "ounces" resolves to the
+# MASS unit, so a volume conversion reads as a cross-category one and is dismissed.
+_MULTI_WORD_UNITS = [ "fluid ounces", "fluid ounce", "fl oz", "metric ton", "metric tons" ]
+
 _UNIT_CANONICAL = dict( ALIASES )
 _UNIT_CATEGORY  = {}
 for _table, _cat in ALL_CATEGORIES:
@@ -280,8 +285,18 @@ def guard_unit_tokens( text ):
         - returns a set of canonical unit names, singular/plural folded,
           with tokens that are also ordinary English words excluded
     """
-    found = set()
-    for word in re.findall( r"[a-z_]+", text.lower() ):
+    lowered = text.lower()
+    found   = set()
+
+    # Multi-word names first, and blank them out so their parts are not re-read as
+    # single-token units of a different category.
+    for phrase in _MULTI_WORD_UNITS:
+        if phrase in lowered:
+            canonical = resolve_alias( phrase )
+            if find_category( canonical )[ 0 ] is not None: found.add( canonical )
+            lowered = lowered.replace( phrase, " " )
+
+    for word in re.findall( r"[a-z_]+", lowered ):
         if word in _GUARD_AMBIGUOUS: continue
         for candidate in ( word, word.rstrip( "s" ), word + "s" ):
             if candidate in _UNIT_CANONICAL:

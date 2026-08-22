@@ -27,14 +27,25 @@ import pytest
 _ROOT = os.environ.get( "LUPIN_ROOT" )
 if _ROOT is None: raise RuntimeError( "LUPIN_ROOT not set" )
 
-_SCRIPT = os.path.join( _ROOT, "src", "scripts", "router_label_audit.py" )
+# Resolved from this file's own location for the same reason the corpus paths below
+# are: the gate must exercise THIS checkout's tool against THIS checkout's corpus.
+_TEST_TREE = os.path.realpath( os.path.join( os.path.dirname( os.path.abspath( __file__ ) ), "..", "..", ".." ) )
+
+_SCRIPT = os.path.join( _TEST_TREE, "src", "scripts", "router_label_audit.py" )
 _spec   = importlib.util.spec_from_file_location( "router_label_audit_guard", _SCRIPT )
 rla     = importlib.util.module_from_spec( _spec )
 sys.modules[ "router_label_audit_guard" ] = rla
 _spec.loader.exec_module( rla )
 
-MATH_CORPUS = os.path.join( _ROOT, rla.MATH_FILE )
-CALC_CORPUS = os.path.join( _ROOT, rla.CALC_FILE )
+# The corpus this gate guards is the one in the checkout the TEST FILE lives in --
+# not whatever LUPIN_ROOT happens to point at. Resolving it from the environment
+# lets a run in worktree A silently guard worktree B's corpus: you edit one file,
+# the gate reads another, and it reports green about a file you never touched.
+# This is the one place `__file__` is the right authority rather than the banned
+# path-fishing pattern, because "which tree does this test belong to" is exactly
+# the question being asked. LUPIN_ROOT is still checked -- against this, loudly.
+MATH_CORPUS = os.path.join( _TEST_TREE, rla.MATH_FILE )
+CALC_CORPUS = os.path.join( _TEST_TREE, rla.CALC_FILE )
 
 # Measured 2026-08-21 on wt-router-label-fix. A file may appear here with a count;
 # it may never appear with a HIGHER count.
@@ -76,6 +87,29 @@ def _dup_groups( path ):
     lines  = [ raw for _n, raw in rla.read_utterances( path ) ]
     counts = collections.Counter( rla._norm( raw ) for raw in lines )
     return sum( 1 for _key, count in counts.items() if count > 1 )
+
+
+class TestTheGateGuardsItsOwnCheckout:
+
+    def test_the_corpus_files_the_gate_reads_exist_in_this_tree( self ):
+        assert os.path.isfile( MATH_CORPUS ), MATH_CORPUS
+        assert os.path.isfile( CALC_CORPUS ), CALC_CORPUS
+
+    def test_lupin_root_points_at_the_tree_this_test_lives_in( self ):
+        # A mismatch means the run is configured to guard a different checkout's corpus.
+        # Fail loudly rather than report green about a file nobody edited.
+        assert os.path.realpath( _ROOT ) == _TEST_TREE, (
+            f"LUPIN_ROOT is {os.path.realpath( _ROOT )} but this test file lives in {_TEST_TREE}; "
+            f"the gate would guard the wrong checkout's corpus" )
+
+    def test_the_gate_reads_the_bytes_on_disk_not_a_cached_copy( self, tmp_path ):
+        # Edit-then-read round trip on a real file, proving read_utterances() is not
+        # holding a snapshot from import time.
+        probe = tmp_path / "probe.txt"
+        probe.write_text( "How do you solve the equation 3x + 7 = 22?\n", encoding="utf-8" )
+        assert len( rla.read_utterances( str( probe ) ) ) == 1
+        probe.write_text( "How do you solve the equation 3x + 7 = 22?\nWhat is 2 plus 2?\n", encoding="utf-8" )
+        assert len( rla.read_utterances( str( probe ) ) ) == 2
 
 
 class TestMathCorpusHoldsNoCalculatorWork:
@@ -159,6 +193,20 @@ class TestGuardPrimitives:
     def test_ambiguous_word_alone_is_not_a_unit( self ):
         # "in" is a preposition and "c" a coefficient; neither makes this a conversion.
         assert rla.guard_unit_tokens( "solving in the form a x squared plus b x plus c" ) == set()
+
+    @pytest.mark.parametrize( "utterance,expected", [
+        ( "Convert 2 liters to fluid ounces",  { "liter", "fl_oz" } ),
+        ( "How many fluid ounces in a cup?",   { "fl_oz", "cup" } ),
+        ( "What's 100 ml in fluid ounces?",    { "ml", "fl_oz" } ),
+    ] )
+    def test_multi_word_unit_names_resolve_to_the_right_category( self, utterance, expected ):
+        # "fluid ounces" is fl_oz, a VOLUME unit. A single-token scan reads "ounces"
+        # as the MASS unit and the conversion looks cross-category, which it is not.
+        assert rla.guard_unit_tokens( utterance ) == expected
+
+    def test_a_multi_word_name_with_no_category_is_not_counted( self ):
+        # "fl oz" resolves; a phrase that resolves to nothing in the tables must not.
+        assert "tablespoon" not in rla.guard_unit_tokens( "How many tablespoons in a cup?" )
 
     def test_singular_and_plural_unit_names_both_resolve( self ):
         assert rla.guard_unit_tokens( "How many meters are in a kilometer?" ) == { "meter", "km" }
