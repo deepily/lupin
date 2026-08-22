@@ -11,15 +11,23 @@ What must not silently break:
   · BACKUP precedes DELETE, and a failing pg_dump stops the run before any DELETE;
   · the two verification halves: --verify-empty flags any non-zero count; learn-back flags
     every 9a/9b failure shape (blank user_id, no routed command, confirmed row, replay on
-    the second ask) and passes the clean shape.
-Every subprocess and HTTP call is stubbed; the tests are deterministic and red-capable
-(each guard has its inverse control).
+    the second ask) and passes the clean shape;
+  · learn-back WAITS (row 004c94ec). The old suite stubbed /api/v2/ask with a synchronous
+    body on every single arm, so 41 tests at 100% never once fed the check the `status:
+    "waiting"` body a working agent path actually returns — and the check called that
+    working system broken three ways. TestQueuedFirstAsk is the arm that was missing: a
+    waiting ask that finishes is a PASS, and each way it can genuinely fail (timed out,
+    died, no answer, no row written, an unattributable row) is reported AS ITSELF, with
+    a timeout never dressed up as a broken system.
+Every subprocess and HTTP call is stubbed and the clock is fake, so nothing sleeps; the
+tests are deterministic and red-capable (each guard has its inverse control).
 """
 import datetime
 import io
 import json
 import os
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import MagicMock
@@ -35,8 +43,13 @@ import dump_solution_cache as dsc
 class FakeRunner:
     """Routes argv to canned stdout and records every argv it saw."""
 
-    def __init__( self, counts=( 3, 3 ), after=( 0, 0 ), row="abc|u-1|agent router go to todo|", pg_dump_rc=0, psql_rc=0, committed=None ):
+    def __init__( self, counts=( 3, 3 ), after=( 0, 0 ), row="abc|u-1|agent router go to todo|", pg_dump_rc=0, psql_rc=0, committed=None, ids=None ):
         self.calls      = [ ]
+        # Successive answers to "SELECT id_hash FROM solution_snapshots" — one entry per
+        # call, the last repeating. This is how a test models a row APPEARING partway
+        # through the wait (ids=[ [], [], [ "new-1" ] ]).
+        self.ids        = [ list( batch ) for batch in ids ] if ids is not None else [ ]
+        self._ids_call  = 0
         self.counts     = counts
         self.after      = after
         self.row        = row
@@ -66,6 +79,10 @@ class FakeRunner:
         if sql.startswith( "BEGIN;" ):
             self.deleted = True
             proc.stdout = "before|" + "|".join( str( c ) for c in self.counts ) + "\n" + "after|" + "|".join( str( c ) for c in self.after ) + "\n"
+        elif sql.startswith( "SELECT id_hash FROM" ):
+            batch = self.ids[ self._ids_call ] if self._ids_call < len( self.ids ) else ( self.ids[ -1 ] if self.ids else [ ] )
+            self._ids_call += 1
+            proc.stdout = "".join( i + "\n" for i in batch )
         elif sql.startswith( "SELECT id_hash" ):
             proc.stdout = ( self.row + "\n" ) if self.row is not None else ""
         else:
@@ -88,12 +105,25 @@ class FakeResp:
 
 
 class FakeHttp:
-    """Answers /auth/login then /api/v2/ask in sequence from a queue of AskResponse dicts."""
+    """Answers /auth/login then /api/v2/ask in sequence, and the done/dead queue GETs.
 
-    def __init__( self, asks, login_status=200 ):
-        self.asks         = list( asks )
-        self.login_status = login_status
-        self.posts        = [ ]
+    `appear_after` is how many polling ROUNDS pass before the jobs become visible — a
+    round is one done-then-dead sweep — so a test can model work that is still in flight
+    without any real waiting.
+    """
+
+    def __init__( self, asks, login_status=200, done_jobs=(), dead_jobs=(), appear_after=0,
+                  queue_status=200, omit_metadata=False ):
+        self.asks          = list( asks )
+        self.login_status  = login_status
+        self.done_jobs     = list( done_jobs )
+        self.dead_jobs     = list( dead_jobs )
+        self.appear_after  = appear_after
+        self.queue_status  = queue_status
+        self.omit_metadata = omit_metadata
+        self.posts         = [ ]
+        self.gets          = [ ]
+        self.rounds        = 0
 
     def post( self, url, json=None, headers=None, timeout=None ):
         self.posts.append( ( url, json, headers ) )
@@ -101,12 +131,56 @@ class FakeHttp:
             return FakeResp( self.login_status, { "tokens": { "access_token": "tok" } } )
         return FakeResp( 200, self.asks.pop( 0 ) )
 
+    def get( self, url, headers=None, timeout=None ):
+        self.gets.append( ( url, headers ) )
+        name = url.rsplit( "/", 1 )[ -1 ]
+        if name == "done": self.rounds += 1
+        if self.queue_status != 200:
+            return FakeResp( self.queue_status, { "detail": "no" } )
+        if self.omit_metadata:
+            return FakeResp( 200, { } )
+        jobs = ( self.done_jobs if name == "done" else self.dead_jobs ) if self.rounds > self.appear_after else [ ]
+        return FakeResp( 200, { f"{name}_jobs_metadata": list( jobs ) } )
+
+
+class FakeClock:
+    """A clock that only moves when something sleeps — no test ever waits."""
+
+    def __init__( self ): self.t = 0.0
+
+    def __call__( self ): return self.t
+
+    def sleep( self, seconds ): self.t += seconds
+
 
 def _ask( **over ):
     base = { "path": "agent", "status": "done", "answer": "It is noon.", "wrote_snapshot": True,
              "snapshot_id": "abc", "cache_hit": False, "trace_id": "t1" }
     base.update( over )
     return base
+
+
+def _queued( **over ):
+    """What /api/v2/ask ACTUALLY returns on the agent path: the work was handed to the
+    queue, so there is no answer, no snapshot_id and wrote_snapshot is False — by design."""
+    base = { "path": "agent", "status": "waiting", "answer": None, "answer_raw": None,
+             "wrote_snapshot": False, "snapshot_id": None, "job_id": "job-1",
+             "cache_hit": False, "route_reason": "args_none", "trace_id": "t1" }
+    base.update( over )
+    return base
+
+
+def _job( **over ):
+    base = { "job_id": "job-1", "response_text": "It is noon.", "error": None }
+    base.update( over )
+    return base
+
+
+def _learn_back( http, runner=None, timeout_s=10, interval_s=2, db="db" ):
+    clock = FakeClock()
+    return dsc.verify_learn_back( db, "http://s", "e", "p", "q", http, runner=runner or FakeRunner(),
+                                  timeout_s=timeout_s, interval_s=interval_s,
+                                  sleep=clock.sleep, clock=clock )
 
 
 def _run_main( argv, runner=None, http=None, env=None ):
@@ -332,10 +406,10 @@ class TestLearnBack( unittest.TestCase ):
 
     def test_each_first_ask_failure_is_named( self ):
         cases = {
-            "first ask did not write a snapshot"         : _ask( wrote_snapshot=False ),
-            "first ask returned no answer"                : _ask( answer=None ),
-            "first ask replayed — cache was not empty"   : _ask( path="replay" ),
-            "first ask returned no snapshot_id"           : _ask( snapshot_id=None ),
+            "first ask finished inline without writing a snapshot" : _ask( wrote_snapshot=False ),
+            "first ask finished inline with no answer"             : _ask( answer=None ),
+            "first ask replayed — cache was not empty"             : _ask( path="replay" ),
+            "first ask finished inline with no snapshot_id"        : _ask( snapshot_id=None ),
         }
         for expected, first in cases.items():
             lb = dsc.verify_learn_back( "db", "http://s", "e", "p", "q", FakeHttp( [ first, _ask() ] ), runner=FakeRunner() )
@@ -355,6 +429,164 @@ class TestLearnBack( unittest.TestCase ):
         for second in ( _ask( cache_hit=True ), _ask( path="replay" ) ):
             lb = dsc.verify_learn_back( "db", "http://s", "e", "p", "q", FakeHttp( [ _ask(), second ] ), runner=FakeRunner() )
             self.assertIn( "second ask replayed an unconfirmed row (fails 9b)", lb[ "failures" ] )
+
+
+# ── the wait: what the 41-test suite mocked away ─────────────────────────────────
+
+class TestPollUntil( unittest.TestCase ):
+    """poll_until is the seam that separates 'not arrived yet' from 'broken'."""
+
+    def test_probes_once_even_with_no_budget( self ):
+        clock, seen = FakeClock(), [ ]
+        got = dsc.poll_until( lambda: seen.append( 1 ) or "x", 0, 2, sleep=clock.sleep, clock=clock )
+        self.assertEqual( ( got, len( seen ), clock.t ), ( "x", 1, 0.0 ) )
+
+    def test_keeps_looking_until_the_answer_arrives( self ):
+        clock, seen = FakeClock(), [ ]
+        def probe():
+            seen.append( 1 )
+            return "here" if len( seen ) == 3 else None
+        got = dsc.poll_until( probe, 10, 2, sleep=clock.sleep, clock=clock )
+        self.assertEqual( ( got, len( seen ), clock.t ), ( "here", 3, 4.0 ) )   # slept twice, not after the hit
+
+    def test_returns_none_when_the_budget_runs_out( self ):
+        clock = FakeClock()
+        self.assertIsNone( dsc.poll_until( lambda: None, 4, 2, sleep=clock.sleep, clock=clock ) )
+
+
+class TestQueueReads( unittest.TestCase ):
+
+    def test_queue_jobs_reads_the_named_metadata_list( self ):
+        h = FakeHttp( [ ], done_jobs=[ _job() ] )
+        self.assertEqual( dsc.queue_jobs( "http://s", "tok", "done", h ), [ _job() ] )
+        self.assertEqual( h.gets[ 0 ][ 1 ], { "Authorization": "Bearer tok" } )
+
+    def test_queue_jobs_missing_metadata_key_is_empty_not_a_crash( self ):
+        self.assertEqual( dsc.queue_jobs( "http://s", "tok", "done", FakeHttp( [ ], omit_metadata=True ) ), [ ] )
+
+    def test_queue_jobs_raises_on_non_200( self ):
+        with self.assertRaises( RuntimeError ):
+            dsc.queue_jobs( "http://s", "tok", "done", FakeHttp( [ ], queue_status=500 ) )
+
+    def test_probe_finds_done_then_dead_and_none_while_in_flight( self ):
+        self.assertEqual( dsc.probe_job_terminal( "http://s", "tok", "job-1", FakeHttp( [ ], done_jobs=[ _job() ] ) ),
+                          ( "done", _job() ) )
+        self.assertEqual( dsc.probe_job_terminal( "http://s", "tok", "job-1", FakeHttp( [ ], dead_jobs=[ _job( error="boom" ) ] ) ),
+                          ( "dead", _job( error="boom" ) ) )
+        self.assertIsNone( dsc.probe_job_terminal( "http://s", "tok", "job-1", FakeHttp( [ ], done_jobs=[ _job( job_id="other" ) ] ) ) )
+
+    def test_snapshot_ids_reads_the_id_set( self ):
+        self.assertEqual( dsc.snapshot_ids( "db", runner=FakeRunner( ids=[ [ "a", "b" ] ] ) ), { "a", "b" } )
+        self.assertEqual( dsc.snapshot_ids( "db", runner=FakeRunner( ids=[ [ ] ] ) ), set() )
+
+
+class TestQueuedFirstAsk( unittest.TestCase ):
+    """THE REGRESSION ARM (row 004c94ec). Every one of these feeds the check the body a
+    WORKING system actually returns — status 'waiting' — which the old check read as
+    three failures. The inverse controls below prove it still reports a broken one."""
+
+    def test_a_waiting_ask_that_finishes_is_a_PASS_not_three_failures( self ):
+        h  = FakeHttp( [ _queued(), _ask( wrote_snapshot=False, snapshot_id=None ) ], done_jobs=[ _job() ] )
+        lb = _learn_back( h, runner=FakeRunner( ids=[ [ ], [ "new-1" ] ] ) )
+        self.assertEqual( lb[ "failures" ], [ ] )
+        self.assertEqual( lb[ "settled" ][ "mode" ], "queued" )
+        self.assertEqual( lb[ "settled" ][ "terminal" ], "done" )
+        self.assertEqual( lb[ "settled" ][ "fresh_ids" ], [ "new-1" ] )
+        self.assertEqual( lb[ "fresh_row" ][ "user_id" ], "u-1" )
+
+    def test_it_waits_for_a_job_that_is_still_in_flight( self ):
+        h  = FakeHttp( [ _queued(), _ask() ], done_jobs=[ _job() ], appear_after=2 )
+        lb = _learn_back( h, runner=FakeRunner( ids=[ [ ], [ "new-1" ] ] ) )
+        self.assertEqual( lb[ "failures" ], [ ] )
+        self.assertGreater( h.rounds, 2 )
+
+    def test_it_waits_for_a_row_that_lands_after_the_job_does( self ):
+        h  = FakeHttp( [ _queued(), _ask() ], done_jobs=[ _job() ] )
+        lb = _learn_back( h, runner=FakeRunner( ids=[ [ ], [ ], [ ], [ "new-1" ] ] ) )
+        self.assertEqual( lb[ "failures" ], [ ] )
+
+    def test_the_second_ask_fires_only_after_the_row_is_read_back( self ):
+        """Ordering IS the check: a second ask sent while the first is still queued
+        cannot replay, so a pass would prove nothing."""
+        h  = FakeHttp( [ _queued(), _ask() ], done_jobs=[ _job() ] )
+        lb = _learn_back( h, runner=FakeRunner( ids=[ [ ], [ "new-1" ] ] ) )
+        asks = [ i for i, ( url, _, _ ) in enumerate( h.posts ) if url.endswith( "/api/v2/ask" ) ]
+        self.assertEqual( len( asks ), 2 )
+        self.assertTrue( h.gets, "the queues were never polled before the second ask" )
+        self.assertEqual( lb[ "second_ask" ][ "cache_hit" ], False )
+
+    # ── the inverse controls: a genuinely broken system IS reported ──────────────
+
+    def test_timeout_is_reported_as_a_timeout_not_as_a_broken_system( self ):
+        h  = FakeHttp( [ _queued() ], done_jobs=[ _job() ], appear_after=99 )
+        lb = _learn_back( h, runner=FakeRunner( ids=[ [ ] ] ), timeout_s=4 )
+        self.assertEqual( lb[ "settled" ][ "terminal" ], "timeout" )
+        joined = "; ".join( lb[ "failures" ] )
+        self.assertIn( "TIMED OUT", joined )
+        self.assertIn( "NOT evidence the system is broken", joined )
+        self.assertIn( "9b NOT TESTED", joined )
+        self.assertEqual( len( h.posts ), 2, "a second ask was sent after an unsettled first" )
+
+    def test_a_dead_job_is_reported_with_its_own_error( self ):
+        h  = FakeHttp( [ _queued() ], dead_jobs=[ _job( error="agent exploded" ) ] )
+        lb = _learn_back( h, runner=FakeRunner( ids=[ [ ] ] ) )
+        self.assertIn( "queued job job-1 died before answering: agent exploded", lb[ "failures" ] )
+        self.assertIsNone( lb[ "second_ask" ] )
+
+    def test_a_finished_job_with_no_answer_is_reported( self ):
+        h  = FakeHttp( [ _queued(), _ask() ], done_jobs=[ _job( response_text="" ) ] )
+        lb = _learn_back( h, runner=FakeRunner( ids=[ [ ], [ "new-1" ] ] ) )
+        self.assertIn( "queued job job-1 finished with no answer", lb[ "failures" ] )
+
+    def test_a_finished_job_that_wrote_nothing_is_reported_as_did_not_learn( self ):
+        h  = FakeHttp( [ _queued() ], done_jobs=[ _job() ] )
+        lb = _learn_back( h, runner=FakeRunner( ids=[ [ ] ] ), timeout_s=4 )
+        self.assertIn( "the job finished but no new snapshot row appeared — the cache did not learn", lb[ "failures" ] )
+
+    def test_more_than_one_new_row_is_refused_rather_than_guessed( self ):
+        h  = FakeHttp( [ _queued() ], done_jobs=[ _job() ] )
+        lb = _learn_back( h, runner=FakeRunner( ids=[ [ ], [ "new-1", "new-2" ] ] ) )
+        self.assertIn( "cannot attribute a snapshot row to this ask — 2 new rows appeared", "; ".join( lb[ "failures" ] ) )
+
+    def test_a_queued_ask_with_no_job_id_has_nothing_to_wait_for( self ):
+        h  = FakeHttp( [ _queued( job_id=None ) ] )
+        lb = _learn_back( h, runner=FakeRunner( ids=[ [ ] ] ) )
+        self.assertIn( "first ask was queued but returned no job_id — the check has nothing to wait for", lb[ "failures" ] )
+        self.assertEqual( h.gets, [ ] )
+
+    def test_a_status_that_is_neither_inline_nor_queued_is_named( self ):
+        for status in ( "needs_input", "parked", "failed" ):
+            lb = _learn_back( FakeHttp( [ _queued( status=status ) ] ), runner=FakeRunner( ids=[ [ ] ] ) )
+            self.assertIn( f"first ask returned status {status!r} — neither an inline answer nor a queued job",
+                           lb[ "failures" ] )
+            self.assertEqual( lb[ "settled" ][ "mode" ], "unusable" )
+
+
+class TestLearnBackTimeoutFlags( unittest.TestCase ):
+
+    def test_the_wait_budget_is_a_flag_and_reaches_the_check( self ):
+        args = dsc.build_parser().parse_args( [ "--db", "dev", "--learn-back-timeout", "7", "--learn-back-poll", "1" ] )
+        self.assertEqual( ( args.learn_back_timeout, args.learn_back_poll ), ( 7, 1 ) )
+        defaults = dsc.build_parser().parse_args( [ "--db", "dev" ] )
+        self.assertEqual( ( defaults.learn_back_timeout, defaults.learn_back_poll ),
+                          ( dsc.DEFAULT_LEARN_BACK_TIMEOUT_S, dsc.DEFAULT_LEARN_BACK_POLL_S ) )
+
+    def test_main_hands_the_budget_to_the_check( self ):
+        seen = { }
+        real = dsc.verify_learn_back
+        def spy( *a, **kw ):
+            seen.update( kw )
+            return { "failures": [ ] }
+        dsc.verify_learn_back = spy
+        try:
+            env = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "p" }
+            with tempfile.TemporaryDirectory() as d:
+                rc, _, _ = _run_main( [ "--db", "dev", "--apply", "--backup-dir", d, "--verify-learn-back",
+                                        "--learn-back-timeout", "9", "--learn-back-poll", "3" ],
+                                      http=FakeHttp( [ ] ), env=env )
+        finally:
+            dsc.verify_learn_back = real
+        self.assertEqual( ( rc, seen[ "timeout_s" ], seen[ "interval_s" ] ), ( 0, 9, 3 ) )
 
 
 # ── main ─────────────────────────────────────────────────────────────────────────

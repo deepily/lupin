@@ -23,6 +23,15 @@ through /api/v2/ask and proves the cache still LEARNS — a snapshot row appeare
 it passes 9a (non-blank user_id, a routed command), and a second ask RE-RUNS
 rather than replays (9b's guard holds on the fresh, unconfirmed row).
 
+The learn-back check WAITS for that first ask to actually finish. On the agent path
+/api/v2/ask answers `status: "waiting"` with a job_id and the snapshot is written when
+the queued job completes, so reading the answer off the immediate HTTP body reports
+failures against a working system (row 004c94ec). It polls the done/dead queues for the
+job, bounded by --learn-back-timeout, and fails LOUD and BY NAME on a timeout — "the
+answer never arrived" is reported as a timeout, never as "the system is broken". Only
+once the fresh row is read back does it fire the second ask; with no row established, 9b
+is reported UNTESTED rather than passed.
+
 DRY-RUN IS THE DEFAULT AND TOUCHES NOTHING LIVE: counts only — no pg_dump, no
 DELETE, and no HTTP (the learn-back logs in and asks a question that WRITES a
 snapshot, so it runs only under --apply; without --apply it is described, not
@@ -41,6 +50,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 lupin_root = os.environ.get( "LUPIN_ROOT" )
 if lupin_root is None:  # pragma: no cover — bootstrap guard; the in-process test needs LUPIN_ROOT to import cosa at all, so it is proven by a subprocess test (test_bootstrap_guard_fires_without_lupin_root) instead
@@ -58,6 +68,12 @@ DB_BY_TARGET     = {
 SNAPSHOT_TABLE   = "solution_snapshots"
 SYNONYM_TABLE    = "canonical_synonyms"
 ADJACENT_TABLES  = [ "gist_cache", "question_embeddings", "embedding_cache", "query_log", "input_and_output" ]
+
+# How long the learn-back check waits for a QUEUED first ask to finish, and how often it
+# looks. The agent path answers "waiting" and finishes behind the CJ Flow queue, so a
+# check that does not wait can only ever pass on a path that answers inline (row 004c94ec).
+DEFAULT_LEARN_BACK_TIMEOUT_S = 120
+DEFAULT_LEARN_BACK_POLL_S    = 2
 
 
 def databases_for( target ):
@@ -313,6 +329,76 @@ def latest_snapshot_row( db, id_hash, runner=subprocess.run ):
     return { "id_hash": f[ 0 ], "user_id": f[ 1 ], "routing_command": f[ 2 ], "answer_is_correct": f[ 3 ] }
 
 
+def queue_jobs( base_url, token, queue_name, http ):
+    """
+    Read one named queue's job metadata list.
+
+    Requires:
+        - queue_name is one of the queues /api/get-queue serves ("done", "dead", ...)
+        - http has requests' get(url, headers=, timeout=) signature
+
+    Ensures:
+        - returns the "<queue_name>_jobs_metadata" list (empty list when absent)
+        - raises RuntimeError on a non-200
+    """
+    resp = http.get( f"{base_url}/api/get-queue/{queue_name}",
+                     headers={ "Authorization": f"Bearer {token}" }, timeout=30 )
+    if resp.status_code != 200:
+        raise RuntimeError( f"/api/get-queue/{queue_name} failed: {resp.status_code} {resp.text}" )
+    return resp.json().get( f"{queue_name}_jobs_metadata", [ ] )
+
+
+def probe_job_terminal( base_url, token, job_id, http ):
+    """
+    One look for a queued job in a TERMINAL queue.
+
+    Requires:
+        - job_id is the id the ask returned for the queued work
+
+    Ensures:
+        - returns ( "done", job ) or ( "dead", job ) the first time the job appears
+          in either terminal queue, done checked first
+        - returns None while it is still in flight — that is "not arrived yet", NOT
+          a verdict about the system
+    """
+    for queue_name in ( "done", "dead" ):
+        for job in queue_jobs( base_url, token, queue_name, http ):
+            if job.get( "job_id" ) == job_id: return ( queue_name, job )
+    return None
+
+
+def snapshot_ids( db, runner=subprocess.run ):
+    """
+    Every id_hash currently in the snapshot table.
+
+    Ensures:
+        - returns a set of id_hash strings (empty set on an empty table)
+    """
+    out = run_argv( psql_argv( db, f"SELECT id_hash FROM {SNAPSHOT_TABLE};" ), runner=runner )
+    return { l.strip() for l in out.splitlines() if l.strip() }
+
+
+def poll_until( probe, timeout_s, interval_s, sleep=time.sleep, clock=time.monotonic ):
+    """
+    Call probe() until it answers truthy or the budget runs out.
+
+    Requires:
+        - probe is a zero-argument callable; timeout_s / interval_s are seconds
+        - sleep / clock are injection seams (tests pass a fake clock; nothing sleeps)
+
+    Ensures:
+        - probe() is called at least once, even with timeout_s == 0
+        - returns the first truthy result, or None when the budget expired
+        - never sleeps after the last attempt
+    """
+    deadline = clock() + timeout_s
+    while True:
+        result = probe()
+        if result: return result
+        if clock() >= deadline: return None
+        sleep( interval_s )
+
+
 def login( base_url, email, password, http ):
     """
     Log in and return the bearer token.
@@ -345,43 +431,141 @@ def ask_v2( base_url, token, question, http ):
     return resp.json()
 
 
-def verify_learn_back( db, base_url, email, password, question, http, runner=subprocess.run ):
+def settle_first_ask( first, db, base_url, token, before_ids, http, runner=subprocess.run,
+                      timeout_s=DEFAULT_LEARN_BACK_TIMEOUT_S, interval_s=DEFAULT_LEARN_BACK_POLL_S,
+                      sleep=time.sleep, clock=time.monotonic ):
+    """
+    Wait for the first ask to actually FINISH, then name the snapshot row it wrote.
+
+    THE DEFECT THIS EXISTS TO KILL (row 004c94ec): /api/v2/ask answers INLINE only on
+    the paths that run the work on the request thread. On the agent path — the common
+    one — it answers `status: "waiting"` with a job_id, the work goes to the CJ Flow
+    queue, and the snapshot is written when the job finishes. Reading wrote_snapshot /
+    answer / snapshot_id off that immediate body reports three failures against a
+    system that is working correctly. So this waits, bounded, and keeps "the answer
+    has not arrived yet" separate from "the system is broken":
+      · still in flight        → keep polling (no verdict)
+      · budget expired         → a failure that SAYS it timed out, not that it broke
+      · landed in the dead queue → a failure that names the job's own error
+      · finished with no fresh row → the cache genuinely did not learn
+
+    Requires:
+        - first is the AskResponse body; before_ids is snapshot_ids(db) taken BEFORE
+          the ask, so a row can be proven FRESH rather than merely present
+        - sleep / clock are injection seams
+
+    Ensures:
+        - returns ( snapshot_id_or_None, failures, receipt )
+        - snapshot_id is None whenever the ask could not be settled — the caller must
+          then treat 9b as untested rather than as passed
+        - never raises for a failed criterion; raises only on transport/psql errors
+    """
+    status   = first.get( "status" )
+    failures = [ ]
+    receipt  = { "status": status, "mode": None, "job_id": first.get( "job_id" ), "terminal": None, "fresh_ids": [ ] }
+
+    if status == "done":
+        receipt[ "mode" ] = "inline"
+        if not first.get( "wrote_snapshot" ): failures.append( "first ask finished inline without writing a snapshot" )
+        if not first.get( "answer" ):         failures.append( "first ask finished inline with no answer" )
+        snapshot_id = first.get( "snapshot_id" )
+        if not snapshot_id:                   failures.append( "first ask finished inline with no snapshot_id" )
+        return snapshot_id, failures, receipt
+
+    if status != "waiting":
+        receipt[ "mode" ] = "unusable"
+        failures.append( f"first ask returned status {status!r} — neither an inline answer nor a queued job" )
+        return None, failures, receipt
+
+    receipt[ "mode" ] = "queued"
+    job_id = first.get( "job_id" )
+    if not job_id:
+        failures.append( "first ask was queued but returned no job_id — the check has nothing to wait for" )
+        return None, failures, receipt
+
+    terminal = poll_until( lambda: probe_job_terminal( base_url, token, job_id, http ),
+                           timeout_s, interval_s, sleep=sleep, clock=clock )
+    if terminal is None:
+        receipt[ "terminal" ] = "timeout"
+        failures.append( f"TIMED OUT after {timeout_s}s waiting for queued job {job_id} to reach done or dead — "
+                         "the answer never arrived; this is NOT evidence the system is broken" )
+        return None, failures, receipt
+
+    queue_name, job = terminal
+    receipt[ "terminal" ] = queue_name
+    if queue_name == "dead":
+        failures.append( f"queued job {job_id} died before answering: {job.get( 'error' )}" )
+        return None, failures, receipt
+    if not job.get( "response_text" ):
+        failures.append( f"queued job {job_id} finished with no answer" )
+
+    fresh = poll_until( lambda: sorted( snapshot_ids( db, runner=runner ) - before_ids ),
+                        timeout_s, interval_s, sleep=sleep, clock=clock )
+    if not fresh:
+        failures.append( "the job finished but no new snapshot row appeared — the cache did not learn" )
+        return None, failures, receipt
+
+    receipt[ "fresh_ids" ] = fresh
+    if len( fresh ) != 1:
+        failures.append( f"cannot attribute a snapshot row to this ask — {len( fresh )} new rows appeared ({fresh}); "
+                         "the check will not guess which one it wrote" )
+        return None, failures, receipt
+    return fresh[ 0 ], failures, receipt
+
+
+def verify_learn_back( db, base_url, email, password, question, http, runner=subprocess.run,
+                       timeout_s=DEFAULT_LEARN_BACK_TIMEOUT_S, interval_s=DEFAULT_LEARN_BACK_POLL_S,
+                       sleep=time.sleep, clock=time.monotonic ):
     """
     The plan's second verification half: the emptied cache still LEARNS, and 9b holds.
 
+    ORDER IS PART OF THE CHECK, not an implementation detail. The second ask fires only
+    AFTER the first ask's row has been proven to exist and read back — a second ask sent
+    while the first one is still queued cannot fail to "not replay", so a pass would
+    prove nothing (row 004c94ec). No row established ⇒ 9b is reported UNTESTED, never
+    passed.
+
     Requires:
         - the dump has already run against db; base_url serves that db
-        - http is the requests module (or a stand-in)
+        - http is the requests module (or a stand-in) with post() AND get()
 
     Ensures:
-        - returns a receipts dict: first ask's snapshot_id/path/wrote_snapshot, the
-          row's user_id/routing_command/answer_is_correct, the second ask's
-          path/cache_hit, and a list of `failures` (empty == pass)
+        - returns a receipts dict: the first ask's own fields, how it settled, the fresh
+          row's user_id/routing_command/answer_is_correct, the second ask's path/cache_hit
+          (or None when 9b was not testable), and a list of `failures` (empty == pass)
         - never raises on a failed CRITERION — failures are listed; raises only on
           transport/auth errors (RuntimeError) or a missing row (ValueError)
     """
-    token    = login( base_url, email, password, http )
-    first    = ask_v2( base_url, token, question, http )
-    failures = [ ]
-    if not first.get( "wrote_snapshot" ): failures.append( "first ask did not write a snapshot" )
-    if not first.get( "answer" ):         failures.append( "first ask returned no answer" )
-    if first.get( "path" ) == "replay":   failures.append( "first ask replayed — cache was not empty" )
-    row = { }
-    if first.get( "snapshot_id" ):
-        row = latest_snapshot_row( db, first[ "snapshot_id" ], runner=runner )
+    token      = login( base_url, email, password, http )
+    before_ids = snapshot_ids( db, runner=runner )
+    first      = ask_v2( base_url, token, question, http )
+    failures   = [ ]
+    if first.get( "path" ) == "replay": failures.append( "first ask replayed — cache was not empty" )
+
+    snapshot_id, settle_failures, settle = settle_first_ask(
+        first, db, base_url, token, before_ids, http, runner=runner,
+        timeout_s=timeout_s, interval_s=interval_s, sleep=sleep, clock=clock )
+    failures.extend( settle_failures )
+
+    row    = { }
+    second = { }
+    if snapshot_id:
+        row = latest_snapshot_row( db, snapshot_id, runner=runner )     # the row EXISTS — proven before 9b is tested
         if not row[ "user_id" ]:                              failures.append( "fresh row has blank user_id (fails 9a)" )
         if not row[ "routing_command" ]:                      failures.append( "fresh row has no routing_command (fails 9a)" )
         if row[ "answer_is_correct" ].lower() == "true":      failures.append( "fresh row already confirmed True — guard would serve it" )
+        second = ask_v2( base_url, token, question, http )
+        if second.get( "cache_hit" ) or second.get( "path" ) == "replay":
+            failures.append( "second ask replayed an unconfirmed row (fails 9b)" )
     else:
-        failures.append( "first ask returned no snapshot_id" )
-    second = ask_v2( base_url, token, question, http )
-    if second.get( "cache_hit" ) or second.get( "path" ) == "replay":
-        failures.append( "second ask replayed an unconfirmed row (fails 9b)" )
+        failures.append( "9b NOT TESTED — no fresh row was established, so a second ask would prove nothing" )
+
     return {
         "question"       : question,
-        "first_ask"      : { k: first.get( k ) for k in ( "path", "status", "wrote_snapshot", "snapshot_id", "trace_id" ) },
+        "first_ask"      : { k: first.get( k ) for k in ( "path", "status", "wrote_snapshot", "snapshot_id", "job_id", "trace_id" ) },
+        "settled"        : settle,
         "fresh_row"      : row,
-        "second_ask"     : { k: second.get( k ) for k in ( "path", "status", "cache_hit", "trace_id" ) },
+        "second_ask"     : { k: second.get( k ) for k in ( "path", "status", "cache_hit", "trace_id" ) } if second else None,
         "failures"       : failures,
     }
 
@@ -403,9 +587,13 @@ def build_parser():
     p.add_argument( "--apply", action="store_true", help="actually back up + delete (default: dry-run, counts only)" )
     p.add_argument( "--backup-dir", default=os.path.join( cu.get_project_root(), "io", "cache-dump-backups" ) )
     p.add_argument( "--verify-empty", action="store_true", help="after --apply, re-count with a fresh psql call and fail if any in-scope count is not 0" )
-    p.add_argument( "--verify-learn-back", action="store_true", help="with --apply: ask one question through /api/v2/ask and prove the cache still learns + 9b holds (single --db only; writes a snapshot, so it never runs in dry-run)" )
+    p.add_argument( "--verify-learn-back", action="store_true", help="with --apply: ask one question through /api/v2/ask, WAIT for it to finish (the agent path answers 'waiting' and completes behind the queue), and prove the cache still learns + 9b holds (single --db only; writes a snapshot, so it never runs in dry-run)" )
     p.add_argument( "--base-url", default="http://localhost:7999" )
     p.add_argument( "--question", default="What time is it right now?" )
+    p.add_argument( "--learn-back-timeout", type=int, default=DEFAULT_LEARN_BACK_TIMEOUT_S,
+                    help=f"seconds to wait for a QUEUED first ask to reach done/dead before failing as a timeout (default {DEFAULT_LEARN_BACK_TIMEOUT_S})" )
+    p.add_argument( "--learn-back-poll", type=int, default=DEFAULT_LEARN_BACK_POLL_S,
+                    help=f"seconds between polls while waiting (default {DEFAULT_LEARN_BACK_POLL_S})" )
     return p
 
 
@@ -467,7 +655,8 @@ def main( argv=None, runner=subprocess.run, http=None, now=None, out=print ):
             password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
             if not email or not password:
                 raise SystemExit( "set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD for --verify-learn-back" )
-            lb = verify_learn_back( db, args.base_url, email, password, args.question, http, runner=runner )
+            lb = verify_learn_back( db, args.base_url, email, password, args.question, http, runner=runner,
+                                    timeout_s=args.learn_back_timeout, interval_s=args.learn_back_poll )
             entry[ "learn_back" ] = lb
             if lb[ "failures" ]: rc = 2
             out( f"  {db}: learn-back {'pass' if not lb[ 'failures' ] else 'FAIL: ' + '; '.join( lb[ 'failures' ] )}" )
