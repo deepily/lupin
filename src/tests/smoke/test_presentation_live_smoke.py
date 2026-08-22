@@ -199,7 +199,9 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
     """
 
     TEST_NAME       = "Presentation Generator Live E2E"
-    SUBMIT_ENDPOINT = "/api/presentation-generator/submit"
+    # The dedicated door /api/presentation-generator/submit is retired (410); one front door now.
+    SUBMIT_ENDPOINT = "/api/v2/submit"
+    ROUTING_COMMAND = "agent router go to presentation generator"
     # 900s equalled the real ~15-min build time with ZERO margin, so a normal build
     # crossed the boundary and reported a false FAIL (bug e5473a72). Raised to 1800s
     # (2x margin). This number is a FLOOR, not an estimate: only ONE real completed
@@ -250,14 +252,26 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
         Ensures:
             - Returns payload with dry_run=False and scenario's audience/duration
         """
-        payload = {
-            "source_path"             : scenario[ "source_path" ],
+        args = {
+            "source"                  : scenario[ "source_path" ],
             "target_duration_minutes" : scenario.get( "target_duration_minutes", 15 ),
             "audience"                : scenario.get( "audience", "general" ),
             "dry_run"                 : False,
         }
         if self._content_model:
-            payload[ "content_model" ] = self._content_model
+            args[ "content_model" ] = self._content_model
+
+        # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and
+        # answers 410 naming /api/v2/submit, which takes the routing command as a string
+        # and the agent's own arguments in `args`. The path arrives as `source` — the name
+        # the job factory already reads — and `parent_id_hash` stays TOP-LEVEL because it
+        # is a queue directive (Gate B lineage), not an argument to the agent, and `args`
+        # is checked against the command's own argument contract.
+        payload = {
+            "command"  : self.ROUTING_COMMAND,
+            "args"     : args,
+            "question" : scenario[ "source_path" ],
+        }
         # Lineage tag (bug 5ed4f187): when this smoke runs as a child pytest inside a
         # monopolizing test-suite job, the runner exports LUPIN_TEST_MONOPOLIZE_PARENT_ID
         # (test_suite/job.py). Threading it as parent_id_hash lets the consumer's Gate B
@@ -278,7 +292,7 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
 
     def get_mode_for_scenario( self, scenario ):
         """
-        Presentation Generator uses its own endpoint — no mode switching.
+        Presentation Generator enters through /api/v2/submit — no mode switching.
 
         Ensures:
             - Always returns None

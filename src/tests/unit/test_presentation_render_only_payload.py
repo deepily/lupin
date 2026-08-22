@@ -2,11 +2,16 @@
 Unit test for `PresentationRenderOnlySmokeTest.get_submit_payload`.
 
 Guards the render-only submit-path regression (row 89bfcc8f): the smoke test
-resolves an ABSOLUTE fixture path ({LUPIN_ROOT}/src/tests/fixtures/...), but the
-`/api/presentation-generator/submit` handler treats a leading-"/" source_path as
-REPO-RELATIVE and prepends project_root — so an absolute path double-roots
-({root}{root}/src/...) → 404 "Source file not found". `get_submit_payload` must
-send a REPO-RELATIVE path (project-root prefix stripped, leading "/" kept).
+resolves an ABSOLUTE fixture path ({LUPIN_ROOT}/src/tests/fixtures/...), while the
+receiving side treats a leading-"/" path as REPO-RELATIVE — so an absolute path used
+to double-root ({root}{root}/src/...) → "Source file not found". `get_submit_payload`
+must send a REPO-RELATIVE path (project-root prefix stripped, leading "/" kept).
+
+The dedicated door this used to post to is retired; the payload is now a command plus
+`args` for `/api/v2/submit`, and the path travels as `args["source"]`. The stripping is
+kept rather than dropped: the job's `resolve_source_path` would now accept either
+spelling, but a test that stops asserting the shape a caller sends stops guarding the
+regression it was written for.
 
 Zero external dependencies — the object is built via __new__ to skip the heavy
 base __init__ (login/config); only `_yaml_path` + os.environ drive the payload.
@@ -30,9 +35,9 @@ def _obj( yaml_path ):
 class TestRenderOnlyPayload( unittest.TestCase ):
     """
     Ensures:
-        - an absolute fixture path under LUPIN_ROOT → repo-relative source_path
+        - an absolute fixture path under LUPIN_ROOT → repo-relative args["source"]
         - a path NOT under LUPIN_ROOT is passed through unchanged
-        - render_only=True and dry_run=False are always set
+        - render_only=True and dry_run=False are always set inside args
     """
 
     def test_absolute_fixture_path_becomes_repo_relative( self ):
@@ -40,22 +45,26 @@ class TestRenderOnlyPayload( unittest.TestCase ):
         with patch.dict( os.environ, { "LUPIN_ROOT": "/var/lupin" } ):
             payload = _obj( "/var/lupin/src/tests/fixtures/presentations/render-only-example.yaml" ) \
                           .get_submit_payload( {}, "ws" )
+        self.assertEqual( payload[ "command" ], "agent router go to presentation generator" )
         self.assertEqual(
-            payload[ "source_path" ],
+            payload[ "args" ][ "source" ],
             "/src/tests/fixtures/presentations/render-only-example.yaml"
         )
-        self.assertTrue( payload[ "render_only" ] )
-        self.assertFalse( payload[ "dry_run" ] )
+        self.assertTrue( payload[ "args" ][ "render_only" ] )
+        self.assertFalse( payload[ "args" ][ "dry_run" ] )
 
     def test_path_not_under_root_passed_through( self ):
         """Ensures: a path outside LUPIN_ROOT is left as-is (no accidental mangling)."""
         with patch.dict( os.environ, { "LUPIN_ROOT": "/var/lupin" } ):
             payload = _obj( "/io/presentations/user/deck.yaml" ).get_submit_payload( {}, "ws" )
-        self.assertEqual( payload[ "source_path" ], "/io/presentations/user/deck.yaml" )
+        self.assertEqual( payload[ "args" ][ "source" ], "/io/presentations/user/deck.yaml" )
 
     def test_monopolize_parent_id_stamped_when_set( self ):
         """Ensures: under a monopolize sweep, parent_id_hash is stamped from
-        LUPIN_TEST_MONOPOLIZE_PARENT_ID so Gate B admits the child (bug 5ed4f187)."""
+        LUPIN_TEST_MONOPOLIZE_PARENT_ID so Gate B admits the child (bug 5ed4f187).
+
+        It stays TOP-LEVEL, outside `args`: it is a queue directive, and `args` is checked
+        against the command's own argument contract, which it is not in."""
         with patch.dict( os.environ, { "LUPIN_ROOT": "/var/lupin",
                                         "LUPIN_TEST_MONOPOLIZE_PARENT_ID": "ts-abc123" } ):
             payload = _obj( "/var/lupin/src/tests/fixtures/presentations/render-only-example.yaml" ) \

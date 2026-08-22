@@ -2096,21 +2096,6 @@ class NotificationsUI {
             });
         }
 
-        // Presentation Generator submit button
-        const submitPresentationBtn = document.getElementById( 'submit-presentation-job' );
-        if ( submitPresentationBtn ) {
-            submitPresentationBtn.addEventListener( 'click', () => {
-                this.submitPresentationJob();
-            });
-        }
-
-        // Presentation Generator STT button (voice input)
-        const presentationSttBtn = document.getElementById( 'presentation-stt-button' );
-        if ( presentationSttBtn ) {
-            presentationSttBtn.addEventListener( 'click', () => {
-                this.handleSTTButtonClick( 'presentation-source', presentationSttBtn );
-            });
-        }
 
         // Commons Broadcast STT button (voice input) — Phase 2 + Phase 3 voice-first.
         // Transcription targets the multi-line #broadcast-textarea; the broadcast-panel.js
@@ -2124,16 +2109,6 @@ class NotificationsUI {
             });
         }
 
-        // Enter key in Presentation source input
-        const presentationSourceInput = document.getElementById( 'presentation-source' );
-        if ( presentationSourceInput ) {
-            presentationSourceInput.addEventListener( 'keydown', ( e ) => {
-                if ( e.key === 'Enter' ) {
-                    e.preventDefault();
-                    this.submitPresentationJob();
-                }
-            });
-        }
 
         // Test Suite submit button
         const submitTestSuiteBtn = document.getElementById( 'submit-test-suite-job' );
@@ -3362,87 +3337,10 @@ class NotificationsUI {
     }
 
     /**
-     * Submit a Presentation Generator job.
-     *
-     * Sends source document to /api/presentation-generator/submit for
-     * asynchronous slide generation via the CJ Flow queue.
-     */
-    async submitPresentationJob() {
-        const sourceInput      = document.getElementById( 'presentation-source' );
-        const audienceSelect   = document.getElementById( 'presentation-audience' );
-        const durationInput    = document.getElementById( 'presentation-duration' );
-        const dryRunCheckbox   = document.getElementById( 'presentation-dry-run' );
-        const submitButton     = document.getElementById( 'submit-presentation-job' );
-        const loadingSpinner   = document.getElementById( 'presentation-loading' );
-        const statusDiv        = document.getElementById( 'presentation-submit-status' );
-
-        const source   = sourceInput.value.trim();
-        const audience = audienceSelect.value;
-        const duration = parseInt( durationInput.value ) || 15;
-        const dryRun   = dryRunCheckbox.checked;
-
-        if ( !source ) {
-            statusDiv.textContent = '⚠️ Please enter a source document path.';
-            statusDiv.style.color = '#dc3545';
-            return;
-        }
-
-        try {
-            // Update UI
-            submitButton.disabled = true;
-            loadingSpinner.style.display = 'inline-block';
-            statusDiv.textContent = 'Submitting presentation job...';
-            statusDiv.style.color = '#666';
-
-            // Ensure token is valid before API call
-            await this.ensureValidToken();
-
-            this.log( `Submitting presentation job: ${source.substring( 0, 50 )}...` );
-
-            const response = await fetch( '/api/presentation-generator/submit', {
-                method  : 'POST',
-                headers : {
-                    'Authorization' : this.getAuthHeader(),
-                    'X-Session-ID'  : this.queueSessionId,
-                    'Content-Type'  : 'application/json'
-                },
-                body: JSON.stringify({
-                    source_path              : source,
-                    audience                 : audience,
-                    target_duration_minutes  : duration,
-                    dry_run                  : dryRun,
-                    ...this._getSchedulingParams( 'presentation' )
-                })
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
-                throw new Error( errorData.detail || `HTTP ${response.status}` );
-            }
-
-            const result = await response.json();
-            this.log( "Presentation job response:", result );
-
-            // Success feedback
-            statusDiv.textContent = `✓ Presentation job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
-            statusDiv.style.color = '#28a745';
-            sourceInput.value = '';
-
-        } catch ( error ) {
-            this.error( "Presentation job submission failed:", error );
-            statusDiv.textContent = `✗ Error: ${error.message}`;
-            statusDiv.style.color = '#dc3545';
-        } finally {
-            submitButton.disabled = false;
-            loadingSpinner.style.display = 'none';
-        }
-    }
-
-    /**
      * Submit a render-only presentation job from an existing YAML.
      *
      * Called from the "Re-render" button on completed presentation job cards.
-     * Submits to the same endpoint with render_only=true, skipping Phases 1-5.
+     * Submits the same command with render_only=true, skipping Phases 1-5.
      *
      * @param {string} yamlPath - Relative path to the YAML intermediate file
      */
@@ -3456,7 +3354,19 @@ class NotificationsUI {
             await this.ensureValidToken();
             this.log( `Submitting render-only job for: ${yamlPath}` );
 
-            const response = await fetch( '/api/presentation-generator/submit', {
+            // ONE DOOR NOW. /api/presentation-generator/submit is retired and answers 410
+            // naming /api/v2/submit, which takes the routing command as a string and the
+            // agent's own arguments in `args`. The path arrives as `source` — the name the
+            // job factory already reads — and stays repo-relative exactly as before; the job
+            // resolves it against the project root, which a browser cannot do for itself.
+            //
+            // THIS BUTTON SURVIVES WHILE THE ACCORDION CARD DID NOT, and the line between
+            // them is worth stating: the accordion is an ENTRANCE, and Rick retired the
+            // entrances so that questions arrive through Q&A. Re-render is an action ON A
+            // RESULT — it re-renders a deck that already exists, from a job card, and there
+            // is no other way to ask for that. Deleting it would remove a capability rather
+            // than a duplicate door (Cheech, ruled 2026-08-21).
+            const response = await fetch( '/api/v2/submit', {
                 method  : 'POST',
                 headers : {
                     'Authorization' : this.getAuthHeader(),
@@ -3464,8 +3374,12 @@ class NotificationsUI {
                     'Content-Type'  : 'application/json'
                 },
                 body: JSON.stringify({
-                    source_path : yamlPath.startsWith( 'io/' ) || yamlPath.startsWith( '/io/' ) ? yamlPath : 'io/' + yamlPath,
-                    render_only : true
+                    command  : 'agent router go to presentation generator',
+                    args     : {
+                        source      : yamlPath.startsWith( 'io/' ) || yamlPath.startsWith( '/io/' ) ? yamlPath : 'io/' + yamlPath,
+                        render_only : true
+                    },
+                    question : yamlPath
                 })
             });
 

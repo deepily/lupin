@@ -386,66 +386,6 @@
                     </div>
                 </div>
 
-                <!-- Presentation Generator Submission Card -->
-                <div class="job-submit-card" id="presentation-submit-card" data-testid="notifications-presentation-card">
-                    <div class="job-submit-card-header" onclick="toggleSection('presentation-submit-section')">
-                        <h4>📊 Generate Presentation from Document</h4>
-                        <button class="toggle-button" id="presentation-submit-toggle">▶</button>
-                    </div>
-                    <div class="section-content collapsed" id="presentation-submit-section">
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label for="presentation-source" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Source Document:</label>
-                            <div style="display: flex; gap: 8px; align-items: center;">
-                                <button type="button" id="presentation-stt-button" data-testid="notifications-presentation-stt-btn" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
-                                <input type="text" id="presentation-source" data-testid="notifications-presentation-source-input" placeholder="Path to markdown or text document..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
-                            </div>
-                            <div style="margin-top: 6px; font-size: 11px; color: #888;">
-                                💡 <strong>Smart input:</strong> Paste file path to a markdown, text, or research document
-                            </div>
-                        </div>
-                        <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
-                            <div>
-                                <label for="presentation-audience" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Audience:</label>
-                                <select id="presentation-audience" data-testid="notifications-presentation-audience-select" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
-                                    <option value="general" selected>General</option>
-                                    <option value="beginner">Beginner</option>
-                                    <option value="expert">Expert</option>
-                                    <option value="academic">Academic</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label for="presentation-duration" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Duration (minutes):</label>
-                                <input type="number" id="presentation-duration" data-testid="notifications-presentation-duration-input" value="15" min="5" max="60" step="5" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
-                            </div>
-                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
-                                <input type="checkbox" id="presentation-dry-run" data-testid="notifications-presentation-dry-run-checkbox" checked />
-                                <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
-                            </label>
-                        </div>
-                        <!-- Scheduling Options -->
-                        <div class="schedule-section" data-testid="notifications-presentation-schedule-section">
-                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
-                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                                    <input type="checkbox" id="presentation-schedule" data-testid="notifications-presentation-schedule-checkbox" onchange="document.getElementById('presentation-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
-                                    <span style="font-size: 13px;">📅 Schedule for later</span>
-                                </label>
-                                <input type="datetime-local" id="presentation-scheduled-time" data-testid="notifications-presentation-scheduled-time" style="display: none;" />
-                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
-                                    <input type="checkbox" id="presentation-monopolize" data-testid="notifications-presentation-monopolize-checkbox" />
-                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
-                                </label>
-                            </div>
-                        </div>
-                        <button id="submit-presentation-job" data-testid="notifications-presentation-submit-btn" type="button" style="padding: 10px 20px; background: #20c997; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
-                            📊 Generate Presentation
-                            <span id="presentation-loading" class="loading" style="display: none;">
-                                <span class="spinner"></span>
-                            </span>
-                        </button>
-                        <div id="presentation-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
-                    </div>
-                </div>
-
                 <!-- Test Suite Submit Card -->
                 <div class="job-submit-card" id="test-suite-submit-card" data-testid="notifications-test-suite-card">
                     <div class="job-submit-card-header" onclick="toggleSection('test-suite-submit-section')">

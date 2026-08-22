@@ -14,9 +14,12 @@ Tests cover:
 import os
 import pytest
 
+import cosa.utils.util as cu
+
 from cosa.rest.job_state import JobState
 from cosa.agents.presentation_generator.job import PresentationGeneratorJob
 from cosa.agents.presentation_generator.job import source_path_is_inside_the_project
+from cosa.agents.presentation_generator.job import resolve_source_path
 from cosa.agents.presentation_generator.config import PresentationConfig
 from cosa.agents.presentation_generator.orchestrator import PresentationOrchestratorAgent
 from cosa.agents.presentation_generator.state import (
@@ -140,6 +143,54 @@ class TestTheSourcePathGuardSurvivesTheDoor:
         assert source_path_is_inside_the_project( "/etc/passwd" ) is True
         assert source_path_is_inside_the_project( "/io/deck.md" ) is True
         assert source_path_is_inside_the_project( "../outside.md" ) is False
+
+
+class TestOneResolutionRuleForTheSourcePath:
+    """
+    THE DEFECT THIS CLOSES, found while retiring the door rather than by reading it.
+    Two places resolved a source path by two DIFFERENT rules: the guard treated a leading
+    slash as PROJECT-relative, and the job's own existence check treated the same leading
+    slash as FILESYSTEM-absolute. Nothing noticed, because the retiring door always handed
+    the job an already-absolute path — the job's rule never ran on a project-relative one.
+
+    The browser cannot know the project root, so it sends `/io/deck.md`. Retire the door
+    without settling this and the Re-render button starts reporting "Source document not
+    found" for a file that is sitting right there. One rule now, read by both.
+    """
+
+    def test_a_project_relative_path_with_a_leading_slash_resolves_under_the_root( self ):
+        """RED ON REVERT: put back `full_path = self.source_path` for a leading slash and
+        `/io/deck.md` resolves to the filesystem root instead of the project."""
+        root = cu.get_project_root()
+        assert resolve_source_path( "/io/deck.md" ) == root + "/io/deck.md"
+
+    def test_a_bare_relative_path_resolves_under_the_root_too( self ):
+        root = cu.get_project_root()
+        assert resolve_source_path( "io/deck.md" ) == root + "/io/deck.md"
+
+    def test_a_path_already_under_the_root_is_left_alone( self ):
+        """The negative control, and the one the naive rule got wrong: prepending the root
+        to a path that already carries it double-roots into a misleading not-found. The
+        retiring door refused this spelling with a 400 for exactly that reason; there is
+        nothing left to refuse."""
+        root = cu.get_project_root()
+        assert resolve_source_path( root + "/io/deck.md" ) == root + "/io/deck.md"
+
+    def test_the_root_itself_is_left_alone( self ):
+        root = cu.get_project_root()
+        assert resolve_source_path( root ) == root
+
+    def test_resolving_twice_changes_nothing( self ):
+        """Idempotence is the property that lets a caller resolve early without fear —
+        without it, every layer that helpfully normalises would push the path deeper."""
+        once = resolve_source_path( "/io/deck.md" )
+        assert resolve_source_path( once ) == once
+
+    def test_the_guard_reads_the_same_rule( self ):
+        """The two must not drift apart again: whatever the resolver returns is what the
+        guard judges."""
+        assert source_path_is_inside_the_project( resolve_source_path( "/io/deck.md" ) ) is True
+        assert source_path_is_inside_the_project( "../../etc/passwd" ) is False
 
 
 class TestPresentationGeneratorJob:

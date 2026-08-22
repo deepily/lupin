@@ -111,6 +111,12 @@ RETIRED_DOORS = {
     "/api/deep-research/submit"                  : V2_SUBMIT,
     "/api/deep-research-to-podcast/submit"       : V2_SUBMIT,
     "/api/deep-research-to-presentation/submit"  : V2_SUBMIT,
+    # ── the direct presentation door ──
+    # It carried something no other door carried: a path-escape check, and nothing
+    # downstream repeated it. Retiring the door first and moving the guard afterwards
+    # would have left a window with no check at all, so the guard moved onto the job
+    # (presentation_generator/job.py) in its own earlier commit and this row waited for it.
+    "/api/presentation-generator/submit"          : V2_SUBMIT,
 }
 
 
