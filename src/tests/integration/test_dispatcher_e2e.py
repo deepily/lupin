@@ -598,25 +598,96 @@ class TestDispatcherInteractive:
 # Mock Tests (Test command construction without Claude)
 # ============================================================================
 
-@pytest.mark.skip(
-    reason="Mock patching path mismatch — subprocess.run mock not matching actual call site. "
-           "Converted from xfail to skip: the xfail report formatter hits a pytest+CPython internal "
-           "bug (SystemError: AST constructor recursion depth mismatch) that aborts the whole suite "
-           "at this test. Skipping preserves the collected tests as known-broken without crashing pytest."
-)
+class _FakeStdout:
+    """
+    Async-iterable stand-in for asyncio.subprocess.Process.stdout.
+
+    Yields pre-canned byte lines, then stops — matching how the dispatcher
+    consumes the real stream (`async for line in process.stdout`).
+    """
+
+    def __init__( self, lines ):
+        self._lines = list( lines )
+
+    def __aiter__( self ):
+        return self
+
+    async def __anext__( self ):
+        if not self._lines: raise StopAsyncIteration
+        return self._lines.pop( 0 )
+
+
+class _FakeStderr:
+    """
+    Stand-in for asyncio.subprocess.Process.stderr.
+
+    Mirrors real StreamReader semantics that the dispatcher depends on: the
+    first read() drains the buffer, every read() after it returns b"" at EOF.
+    A test double that re-served the payload on each call would hide the
+    double-read bug this class exists to make visible.
+    """
+
+    def __init__( self, data=b"" ):
+        self._data = data
+
+    async def read( self, n=-1 ):
+        data       = self._data
+        self._data = b""
+        return data
+
+
+class _FakeProcess:
+    """Stand-in for the Process returned by asyncio.create_subprocess_exec."""
+
+    def __init__( self, returncode=0, stdout_lines=(), stderr=b"" ):
+        self.returncode = returncode
+        self.pid        = 4242
+        self.stdout     = _FakeStdout( stdout_lines )
+        self.stderr     = _FakeStderr( stderr )
+        self.killed     = False
+
+    async def wait( self ):
+        return self.returncode
+
+    def kill( self ):
+        self.killed = True
+
+
+def _patch_spawn( process ):
+    """
+    Patch the dispatcher's ACTUAL spawn call site.
+
+    The dispatcher runs bounded tasks through asyncio.create_subprocess_exec,
+    not subprocess.run. These tests previously mocked subprocess.run — a call
+    site the dispatcher does not use — so `mock.called` was always False and
+    the class was blanket-skipped rather than fixed.
+
+    Returns:
+        mock.patch context manager whose AsyncMock records the spawn call.
+    """
+    return mock.patch(
+        "cosa.orchestration.claude_code.dispatcher.asyncio.create_subprocess_exec",
+        new_callable=mock.AsyncMock,
+        return_value=process
+    )
+
+
 class TestDispatcherMocked:
-    """Tests using mocked subprocess to verify command construction."""
+    """
+    Tests using a mocked subprocess to verify bounded-task dispatch.
+
+    Every test here asserts observable dispatcher behaviour — the argv it
+    builds, the environment it exports, and the TaskResult it returns — so
+    each one fails if that behaviour changes, not merely if a string is
+    reworded.
+    """
 
     @pytest.mark.asyncio
     async def test_command_construction( self, dispatcher ):
-        """Test that the command is constructed correctly."""
-        with mock.patch( 'subprocess.run' ) as mock_run:
-            mock_run.return_value = mock.Mock(
-                returncode=0,
-                stdout='{"session_id": "mock-session", "result": "mocked"}',
-                stderr=""
-            )
+        """The bounded argv names the CLI, the prompt, and the streaming contract."""
+        result_line = b'{"type":"result","session_id":"mock-session","result":"mocked","cost_usd":0.01}\n'
 
+        with _patch_spawn( _FakeProcess( returncode=0, stdout_lines=[result_line] ) ) as mock_spawn:
             task = Task(
                 id="mock-001",
                 project="lupin",
@@ -625,95 +696,105 @@ class TestDispatcherMocked:
                 max_turns=10
             )
 
-            result = await dispatcher.dispatch( task )
+            await dispatcher.dispatch( task )
 
-            assert mock_run.called
-            cmd = mock_run.call_args[0][0]
+            assert mock_spawn.called, "dispatch() never spawned a subprocess"
+            cmd = list( mock_spawn.call_args[0] )
 
             assert cmd[0] == "claude"
             assert cmd[1] == "-p"
             assert cmd[2] == "Test prompt"
-            assert "--mcp-config" in cmd
-            assert "--allowedTools" in cmd
-            assert "--output-format" in cmd
-            assert "json" in cmd
-            assert "--max-turns" in cmd
-            assert "10" in cmd
 
-            allowed_idx = cmd.index( "--allowedTools" ) + 1
-            allowed = cmd[allowed_idx]
-            assert "mcp__cosa-voice__converse" in allowed
-            assert "mcp__cosa-voice__notify" in allowed
-            assert "mcp__cosa-voice__ask_yes_no" in allowed
+            # Streaming contract: the dispatcher parses stdout line-by-line, so
+            # stream-json (not plain json) is load-bearing, and --verbose is
+            # required by the CLI whenever stream-json rides with -p.
+            assert cmd[ cmd.index( "--output-format" ) + 1 ] == "stream-json"
+            assert "--verbose" in cmd
+            assert cmd[ cmd.index( "--max-turns" ) + 1 ] == "10"
+            assert cmd[ cmd.index( "--mcp-config" ) + 1 ] == dispatcher.mcp_config_path
+            assert cmd[ cmd.index( "--permission-mode" ) + 1 ] == "acceptEdits"
+
+            # The voice tools are what make a bounded task able to reach the user.
+            allowed = cmd[ cmd.index( "--allowedTools" ) + 1 ].split( "," )
+            assert "mcp__cosa-voice__converse"    in allowed
+            assert "mcp__cosa-voice__notify"      in allowed
+            assert "mcp__cosa-voice__ask_yes_no"  in allowed
 
     @pytest.mark.asyncio
     async def test_environment_variables( self, dispatcher ):
-        """Test that environment variables are set correctly."""
-        with mock.patch( 'subprocess.run' ) as mock_run:
-            mock_run.return_value = mock.Mock(
-                returncode=0,
-                stdout='{"session_id": "mock-session", "result": "mocked"}',
-                stderr=""
-            )
-
+        """MCP_PROJECT is exported lower-cased so the MCP server resolves the project."""
+        with _patch_spawn( _FakeProcess( returncode=0 ) ) as mock_spawn:
             task = Task(
                 id="mock-002",
-                project="testproject",
+                project="TestProject",
                 prompt="Test",
                 type=TaskType.BOUNDED
             )
 
             await dispatcher.dispatch( task )
 
-            call_kwargs = mock_run.call_args[1]
-            env = call_kwargs.get( 'env', {} )
-            assert env.get( 'MCP_PROJECT' ) == "testproject"
+            env = mock_spawn.call_args[1]["env"]
+            assert env["MCP_PROJECT"] == "testproject"
+            # Inherited, not replaced — the CLI needs the ambient environment.
+            assert "PATH" in env
+
+    @pytest.mark.asyncio
+    async def test_streamed_result_populates_task_result( self, dispatcher ):
+        """A result message on stdout is surfaced on the returned TaskResult."""
+        result_line = b'{"type":"result","session_id":"sess-9","result":"all done","total_cost_usd":0.25}\n'
+
+        with _patch_spawn( _FakeProcess( returncode=0, stdout_lines=[result_line] ) ):
+            seen = []
+            dispatcher.on_message = lambda task_id, data: seen.append( ( task_id, data ) )
+
+            task = Task( id="mock-005", project="lupin", prompt="Test", type=TaskType.BOUNDED )
+            result = await dispatcher.dispatch( task )
+
+            assert result.success    is True
+            assert result.session_id == "sess-9"
+            assert result.result     == "all done"
+            assert result.cost_usd   == 0.25
+            assert result.exit_code  == 0
+            # Every parsed line is forwarded to the callback that feeds the WebSocket.
+            assert seen == [ ( "mock-005", {
+                "type"           : "result",
+                "session_id"     : "sess-9",
+                "result"         : "all done",
+                "total_cost_usd" : 0.25
+            } ) ]
 
     @pytest.mark.asyncio
     async def test_error_handling( self, dispatcher ):
-        """Test error handling when subprocess fails."""
-        with mock.patch( 'subprocess.run' ) as mock_run:
-            mock_run.return_value = mock.Mock(
-                returncode=1,
-                stdout="",
-                stderr="Error: Something went wrong"
-            )
-
-            task = Task(
-                id="mock-003",
-                project="lupin",
-                prompt="Test",
-                type=TaskType.BOUNDED
-            )
+        """A non-zero exit fails the task and surfaces the subprocess's stderr."""
+        with _patch_spawn( _FakeProcess( returncode=1, stderr=b"Error: Something went wrong" ) ):
+            task = Task( id="mock-003", project="lupin", prompt="Test", type=TaskType.BOUNDED )
 
             result = await dispatcher.dispatch( task )
 
-            assert result.success is False
-            assert result.error == "Error: Something went wrong"
+            assert result.success   is False
             assert result.exit_code == 1
+            assert result.error     == "Error: Something went wrong"
 
     @pytest.mark.asyncio
-    async def test_json_parse_error( self, dispatcher ):
-        """Test handling of invalid JSON output."""
-        with mock.patch( 'subprocess.run' ) as mock_run:
-            mock_run.return_value = mock.Mock(
-                returncode=0,
-                stdout="not valid json",
-                stderr=""
-            )
+    async def test_non_json_output_is_forwarded_as_text( self, dispatcher ):
+        """
+        Plain-text stdout is tolerated, not fatal.
 
-            task = Task(
-                id="mock-004",
-                project="lupin",
-                prompt="Test",
-                type=TaskType.BOUNDED
-            )
+        The dispatcher wraps an unparseable line as a text message and keeps
+        going; a clean exit still succeeds. This test fails if someone makes
+        the stream parser strict — which would drop the CLI's non-JSON chatter
+        on the floor and dead-letter otherwise-healthy tasks.
+        """
+        with _patch_spawn( _FakeProcess( returncode=0, stdout_lines=[b"not valid json\n"] ) ):
+            seen = []
+            dispatcher.on_message = lambda task_id, data: seen.append( data )
 
+            task = Task( id="mock-004", project="lupin", prompt="Test", type=TaskType.BOUNDED )
             result = await dispatcher.dispatch( task )
 
-            assert result.success is False
-            assert "parse" in result.error.lower() or "json" in result.error.lower()
-
+            assert seen == [ { "type": "text", "content": "not valid json" } ]
+            assert result.success   is True
+            assert result.exit_code == 0
 
 # ============================================================================
 # Run directly
