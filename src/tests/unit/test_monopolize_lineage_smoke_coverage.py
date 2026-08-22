@@ -150,6 +150,90 @@ def _callee_name( call ):
     return None
 
 
+# Routes that are NOT DOORS, and never will be — Cheech's ruling, 2026-08-21.
+#
+# ONLY A PUSHER IS A DOOR. This checker exists to catch an endpoint that PUTS WORK ON THE
+# QUEUE while quietly accepting the lineage field, because such an endpoint can be
+# submitted to untagged and starve a monopolize sweep's own children. The three routes
+# below do not put work on the queue: two are job CONTROL (message a running job, cancel
+# one) and the third rebuilds a job from server-side state, which is why it is one of the
+# HELD v1 doors rather than a retired one — an HTTP SubmitRequest can say command and args
+# but never "resume job X".
+#
+# They stay v1 and they are not being made doors tonight. Listing them here says that in
+# one place instead of leaving it to a heuristic that would have to guess.
+#
+# ⚠️ ON THE FACTS, none of the three names the lineage field at all today; the only mention
+# in queues.py was a tombstone COMMENT. So this list is not describing routes that carry
+# the field — it is recording which routes are outside this checker's remit, whatever
+# their signature.
+#
+# ⚠️ WHY THIS IS BELT AND SUSPENDERS RATHER THAN THE FIX. The red that produced this list
+# came from ARMING (a comment armed queues.py — see `_mentions_the_field_in_code`), and
+# with that fixed these three are unreachable anyway. But the day somebody legitimately
+# adds the lineage field to a model in that file, the arming fix stops helping and this
+# list is what keeps the accusation from coming back. Both are worth having: one guard
+# against prose, one against the heuristic that reads a plain path parameter like
+# `job_id: str` as a body it cannot parse.
+NOT_A_DOOR = {
+    "/api/jobs/{job_id}/message",                   # job control — messages a RUNNING job
+    "/api/jobs/{job_id}/cancel",                    # job control — cancels a RUNNING job
+    "/api/jobs/{id_hash}/resume-from-checkpoint",   # held v1 door; rebuilds from server state
+}
+
+
+def _mentions_the_field_in_code( tree ):
+    """
+    Whether a router module names the lineage field in CODE, as opposed to in prose.
+
+    THE DEFECT THIS CLOSES, and it is worth being blunt about: the docstring below has
+    always promised that "a file that merely mentions the field in prose" stays silent,
+    and the code did not do that. The outer filter was `if LINEAGE_FIELD not in text`, a
+    raw substring test over the whole file — comments and docstrings included. Nothing
+    caught it because until tonight no router had ever said `parent_id_hash` in prose.
+
+    Then a tombstone comment did. Retiring `/api/push-agentic` left a comment in
+    `queues.py` explaining that `parent_id_hash` is available on the new door — one line of
+    documentation, no behaviour — and it armed the whole file. The three unrelated POST
+    routes that live there (`/api/jobs/{job_id}/message`, `/cancel`,
+    `/resume-from-checkpoint`) take bodies this checker cannot read, so all three were
+    reported as endpoints that had "silently stopped being watched". None of them had
+    moved, been renamed, or lost anything. The accusation came from a sentence.
+
+    WHY THE FIX GOES HERE AND NOT IN THE COMMENT. Rewording the comment would have turned
+    the run green in one edit, and left a checker that punishes anyone who documents this
+    field near a router. A guard that makes accurate prose dangerous will be satisfied by
+    deleting the prose, and the next person pays the same tax without knowing why. The
+    checker's own docstring already said what it should do; this makes it true.
+
+    Requires:
+        - tree is a parsed module
+
+    Ensures:
+        - True when the field appears as an identifier (a model field, an attribute
+          access, a parameter) or as a string literal used in an expression, e.g.
+          `body.get( "parent_id_hash" )` — the hand-rolled read this checker exists for
+        - False when every occurrence is a comment (invisible to ast) or a docstring
+    """
+    docstrings = set()
+    for node in ast.walk( tree ):
+        if isinstance( node, ( ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef ) ):
+            body = getattr( node, "body", [ ] )
+            if body and isinstance( body[ 0 ], ast.Expr ) and isinstance( body[ 0 ].value, ast.Constant ) \
+               and isinstance( body[ 0 ].value.value, str ):
+                docstrings.add( id( body[ 0 ].value ) )
+
+    for node in ast.walk( tree ):
+        if isinstance( node, ast.Name )      and node.id   == LINEAGE_FIELD: return True
+        if isinstance( node, ast.Attribute ) and node.attr == LINEAGE_FIELD: return True
+        if isinstance( node, ast.arg )       and node.arg  == LINEAGE_FIELD: return True
+        if isinstance( node, ast.keyword )   and node.arg  == LINEAGE_FIELD: return True
+        if isinstance( node, ast.Constant ) and isinstance( node.value, str ) \
+           and node.value == LINEAGE_FIELD and id( node ) not in docstrings:
+            return True
+    return False
+
+
 def lineage_aware_endpoints( router_dir ):
     """
     Every POST path whose own handler takes a request model declaring the lineage field.
@@ -187,6 +271,8 @@ def lineage_aware_endpoints( router_dir ):
           checker cannot read — never per file, never gated on the file's models
         - a handler taking no body at all (a tombstone) is silent, and so is a file that
           merely mentions the field in prose
+        - a path listed in NOT_A_DOOR is silent whatever its signature — it does not push
+          work onto the queue, so it is not a door this checker is about
     """
     endpoints = {}
     unmatched = [ ]
@@ -195,11 +281,17 @@ def lineage_aware_endpoints( router_dir ):
         with open( os.path.join( router_dir, name ), "r", errors="ignore" ) as f: text = f.read()
         # The outer filter: a file that never mentions the field owns no lineage-aware
         # door and cannot hide one, so the per-door scan below stays narrow.
-        if LINEAGE_FIELD not in text: continue
+        #
+        # ⚠️ THIS READS CODE, NOT RAW TEXT, and the difference is a real defect this test
+        # once had. `LINEAGE_FIELD not in text` armed a file on a COMMENT, and one line of
+        # tombstone documentation in `queues.py` made this checker accuse three untouched
+        # routes of leaving the watched set. See `_mentions_the_field_in_code`.
+        if LINEAGE_FIELD not in text: continue               # cheap pre-filter; the real test is below
         try:
             tree = ast.parse( text )
         except SyntaxError:                                  # pragma: no cover - no router in the tree fails to parse
             continue
+        if not _mentions_the_field_in_code( tree ): continue
         models, classes = _lineage_models( tree )
         prefix = PREFIX_RE.search( text )
         prefix = prefix.group( 1 ) if prefix else ""
@@ -216,6 +308,8 @@ def lineage_aware_endpoints( router_dir ):
                           if isinstance( arg.annotation, ast.Name ) }
             if annotated & models:
                 for path in paths: endpoints[ path ] = name
+            elif paths[ 0 ] in NOT_A_DOOR:
+                continue                                 # ruled not a door — see NOT_A_DOOR
             elif _takes_an_unreadable_body( node, classes ):
                 unmatched.append( ( f"{name}::{paths[ 0 ]}",
                                     "POST handler takes a body this checker cannot read" ) )
@@ -323,6 +417,121 @@ def test_a_router_that_only_talks_about_the_field_contributes_nothing( tmp_path 
         "a file that only TALKS about the field owns no lineage-aware door — reporting it "
         "is the false accusation this checker exists to avoid, and a tombstone comment "
         "naming the field is enough to trigger it" )
+
+
+def test_a_comment_naming_the_field_does_not_arm_a_router( tmp_path ):
+    """
+    THE EXACT REGRESSION, and the test above did not catch it because its door was
+    READABLE. Reproduce the real shape: a router whose only mention of the field is a
+    COMMENT, sitting beside a door whose body this checker cannot read.
+
+    That is `queues.py` after `/api/push-agentic` retired. One line of tombstone
+    documentation — "`parent_id_hash` is available now where it was not before" — armed
+    the file, and three untouched routes (`/api/jobs/{job_id}/message`, `/cancel`,
+    `/resume-from-checkpoint`) were reported as endpoints that had silently stopped being
+    watched. Nothing had moved or been renamed. The accusation came from a sentence.
+
+    RED ON REVERT: put the raw `LINEAGE_FIELD not in text` filter back and this fails,
+    naming the door it falsely accused.
+    """
+    ( tmp_path / "commented.py" ).write_text(
+        "router = APIRouter( prefix=\"/api\" )\n"
+        f"# The new door carries {LINEAGE_FIELD} as a top-level field.\n"
+        '@router.post( "/jobs/{job_id}/message" )\n'
+        "async def send_message( job_id: str, request: Request ):\n"
+        "    pass\n"
+    )
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+    assert endpoints == {}
+    assert unmatched == [], (
+        "a COMMENT armed the file and the checker accused an untouched route of leaving "
+        "the watched set — documentation must be safe to write next to a router" )
+
+
+def test_a_docstring_naming_the_field_does_not_arm_a_router_either( tmp_path ):
+    """The same rule one syntax over: prose is prose whether it is `#` or triple-quoted,
+    and a module docstring explaining the field is as innocent as a comment."""
+    ( tmp_path / "documented.py" ).write_text(
+        f'"""This router used to hand {LINEAGE_FIELD} to the queue by hand."""\n'
+        "router = APIRouter( prefix=\"/api\" )\n"
+        '@router.post( "/jobs/{job_id}/cancel" )\n'
+        "async def cancel( job_id: str, request: Request ):\n"
+        "    pass\n"
+    )
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+    assert endpoints == {}
+    assert unmatched == []
+
+
+def test_a_ruled_not_a_door_route_stays_silent_even_in_an_armed_file( tmp_path ):
+    """
+    CHEECH'S RULING, PINNED — and pinned against the case where it actually matters.
+
+    /api/jobs/{job_id}/message, /cancel and /resume-from-checkpoint stay v1 and are NOT
+    doors: only an endpoint that PUTS WORK ON THE QUEUE is a door this checker is about.
+    Two of them are job control and the third rebuilds a job from server-side state.
+
+    The arming fix alone would make them silent today, because nothing in queues.py names
+    the field in code any more. That is not the same as honouring the ruling: the day
+    someone legitimately adds the lineage field to a model in that file, arming is correct
+    and these three would be accused again. So this test builds an ARMED file — a real
+    model declaring the field, a real door beside them — and asserts they stay silent
+    anyway. RED ON REVERT: drop the NOT_A_DOOR arm and all three come back.
+    """
+    ( tmp_path / "queuesish.py" ).write_text(
+        "from pydantic import BaseModel\n"
+        "router = APIRouter( prefix=\"/api\" )\n"
+        "class SubmitRequest( BaseModel ):\n"
+        f"    {LINEAGE_FIELD} : Optional[ str ] = Field( None )\n"
+        '@router.post( "/v2/submit" )\n'
+        "async def submit( request: SubmitRequest ):\n"
+        "    pass\n"
+        '@router.post( "/jobs/{job_id}/message" )\n'
+        "async def message( job_id: str, request: Request ):\n"
+        "    pass\n"
+        '@router.post( "/jobs/{job_id}/cancel" )\n'
+        "async def cancel( job_id: str, request: Request ):\n"
+        "    pass\n"
+        '@router.post( "/jobs/{id_hash}/resume-from-checkpoint" )\n'
+        "async def resume( id_hash: str, request: Request ):\n"
+        "    pass\n"
+    )
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+    assert endpoints == { "/api/v2/submit": "queuesish.py" }, (
+        "the real door beside them must still be watched — a ruling that silenced the "
+        "whole file would be an exemption, not a classification" )
+    assert unmatched == [], (
+        "a route ruled NOT a door must stay silent even when its file is legitimately "
+        "armed; only an endpoint that pushes work onto the queue is a door" )
+
+
+def test_a_hand_rolled_read_still_arms_the_router( tmp_path ):
+    """
+    THE CONTROL THAT KEEPS THE FIX HONEST, and without it the change above would be
+    indistinguishable from switching the checker off. The hole this whole file exists for
+    is a door that digs the field out of a raw body by hand: it ACCEPTS the field, the
+    checker cannot see the model, and the door leaves the watched set in silence.
+
+    That read is `body.get( "parent_id_hash" )` — a string literal in an expression, not a
+    docstring — so it still arms the file and the unreadable door is still reported.
+    Blinding the checker to comments must not blind it to code.
+
+    The door here takes `body: dict = Body( ... )` on purpose. A handler annotated
+    `request: Request` is FRAMEWORK-EXEMPT and is never reported however it reads the body,
+    so writing this control that way would have made it pass for the wrong reason — it
+    would have proved the exemption, not the arming.
+    """
+    ( tmp_path / "handrolled.py" ).write_text(
+        "router = APIRouter( prefix=\"/api\" )\n"
+        '@router.post( "/jobs/raw" )\n'
+        "async def raw( body: dict = Body( ... ) ):\n"
+        f'    lineage = body.get( "{LINEAGE_FIELD}" )\n'
+        "    return lineage\n"
+    )
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+    assert endpoints == {}
+    assert unmatched == [ ( "handrolled.py::/api/jobs/raw",
+                            "POST handler takes a body this checker cannot read" ) ]
 
 
 def test_the_checker_reports_a_door_it_could_not_read( tmp_path ):
