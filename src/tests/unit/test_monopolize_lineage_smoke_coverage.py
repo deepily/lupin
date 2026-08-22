@@ -466,9 +466,19 @@ def test_the_v2_submit_door_is_lineage_aware_and_its_siblings_are_not():
     assert endpoints.get( "/api/v2/submit" ) == "v2_ask.py"
     assert "/api/v2/ask"    not in endpoints
     assert "/api/v2/resume" not in endpoints
-    # and the six v1 doors this file was written for are still watched
-    assert endpoints.get( "/api/deep-research/submit" ) == "deep_research.py"
-    assert endpoints.get( "/api/swe-team/submit" )      == "swe_team.py"
+
+    # The v1 doors still LIVE are still watched. This used to name the research doors as
+    # its examples; they retired, their models went with their handlers, and they left the
+    # set — correctly, since a tombstone reads no body and there is nowhere for the field
+    # to hide in it. A retired door leaving here is the system working, not a gap.
+    assert endpoints.get( "/api/swe-team/submit" )              == "swe_team.py"
+    assert endpoints.get( "/api/podcast-generator/submit" )     == "podcast_generator.py"
+    assert endpoints.get( "/api/presentation-generator/submit" ) == "presentation_generator.py"
+    for retired in ( "/api/deep-research/submit",
+                     "/api/deep-research-to-podcast/submit",
+                     "/api/deep-research-to-presentation/submit",
+                     "/api/bug-fix-expediter/submit" ):
+        assert retired not in endpoints, f"{retired} is a tombstone and reads no body"
 
 
 def test_the_checker_flags_a_smoke_that_skips_the_tag( tmp_path ):
@@ -523,11 +533,15 @@ def test_the_derivation_finds_the_lineage_aware_routers():
     Non-vacuity guard: if the regexes rot, every assertion below passes over an empty set.
 
     Ensures:
-        - the derived set is non-empty and contains the two endpoints row 7451bebe named
+        - the derived set is non-empty and contains doors that are still LIVE
+
+    The named examples are live doors on purpose. Naming a retired one would make this
+    guard fail the day that door was tombstoned — which is a real event correctly handled,
+    not a rotted parse, and the two are worth telling apart.
     """
     endpoints, _unmatched = lineage_aware_endpoints( ROUTER_DIR )
     assert endpoints, "derived ZERO lineage-aware endpoints — the router parse has rotted"
-    assert "/api/deep-research/submit" in endpoints
+    assert "/api/swe-team/submit" in endpoints
     assert "/api/podcast-generator/submit" in endpoints
 
 

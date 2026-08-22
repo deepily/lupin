@@ -120,29 +120,42 @@ def _read_auto_fix_enabled():
         return None
 
 
-def _submit_dry_run_job( headers, endpoint, payload, label ):
+def _submit_dry_run_job( headers, command, payload, label ):
     """
-    Submit a dry-run job with force_failure_mode to a native REST endpoint.
+    Submit a dry-run job with force_failure_mode through the one front door.
+
+    ONE DOOR NOW, AND THE SECOND ARGUMENT IS A COMMAND RATHER THAN A URL. The dedicated
+    REST endpoints this used to take a path for are retired and answer 410 naming
+    /api/v2/submit, which takes the routing command as a string and the agent's own
+    arguments in `args`.
 
     Args:
         headers: Auth headers dict
-        endpoint: REST endpoint path (e.g. "/api/deep-research/submit")
-        payload: Full JSON body dict (must include dry_run=True and force_failure_mode)
+        command: Routing command (e.g. "agent router go to deep research")
+        payload: The agent's arguments (must include dry_run=True and force_failure_mode)
         label: Human-readable label for logging
 
     Returns:
         str or None: job_id on success, None on failure
     """
     print( f"\n>>> Submitting {label}..." )
-    print( f"    Endpoint: {endpoint}" )
+    print( f"    Command: {command}" )
     print( f"    force_failure_mode: {payload.get( 'force_failure_mode' )}" )
     # Lineage tag (row 7451bebe / bug 5ed4f187): a child pytest inside a monopolizing
     # test-suite job must thread LUPIN_TEST_MONOPOLIZE_PARENT_ID or the consumer's Gate B
-    # defers it as a foreign writer and it starves 900s.
+    # defers it as a foreign writer and it starves 900s. It stays TOP-LEVEL because it is
+    # a queue directive, not an argument to the agent — `args` is checked against the
+    # command's own argument contract and this is in no command's contract.
     parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
-    if parent_id:
-        payload[ "parent_id_hash" ] = parent_id
-    resp = requests.post( f"{BASE_URL}{endpoint}", json=payload, headers=headers, timeout=30 )
+    ws_id     = payload.pop( "websocket_id", None )
+    body      = {
+        "command"  : command,
+        "args"     : payload,
+        "question" : payload.get( "query", "" ),
+    }
+    if ws_id:     body[ "websocket_id" ]   = ws_id
+    if parent_id: body[ "parent_id_hash" ] = parent_id
+    resp = requests.post( f"{BASE_URL}/api/v2/submit", json=body, headers=headers, timeout=30 )
     if resp.status_code != 200:
         print( f"✗ Submit failed: {resp.status_code} {resp.text[ :300 ]}" )
         return None
@@ -229,7 +242,7 @@ def run_dr_loop_happy_scenario( headers, user_email ):
     }
     original_job_id = _submit_dry_run_job(
         headers,
-        "/api/deep-research/submit",
+        "agent router go to deep research",
         submit_payload,
         "original DR (force_failure_mode=code_bug, audience=expert)"
     )
@@ -398,7 +411,7 @@ def run_watchdog_disabled_scenario( headers ):
 
     original_job_id = _submit_dry_run_job(
         headers,
-        "/api/deep-research/submit",
+        "agent router go to deep research",
         {
             "query"              : "phase6 smoke test — watchdog disabled",
             "budget"             : 0.01,

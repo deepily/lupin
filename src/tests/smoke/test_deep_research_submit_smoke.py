@@ -1,6 +1,7 @@
 """
 Smoke test for Deep Research background job submission.
-Tests POST /api/deep-research/submit endpoint.
+Tests deep research submission through POST /api/v2/submit.
+(The old /api/deep-research/submit door is retired and answers 410.)
 
 NON-DESTRUCTIVE: Uses existing user from development database.
 Run with: python -m tests.smoke.test_deep_research_submit_smoke
@@ -35,7 +36,7 @@ def quick_smoke_test():
 
     Ensures:
         - Endpoint accepts authenticated POST requests
-        - Returns expected response structure (status, job_id, queue_position, message)
+        - Returns the v2 AskResponse structure (status, job_id, path, route_reason, trace_id)
         - Job appears in queue system
     """
     cu.print_banner( "Deep Research Submit Smoke Test", prepend_nl=True )
@@ -69,10 +70,18 @@ def quick_smoke_test():
         # Test 2: Submit Deep Research job
         print( "\nTest 2: Submitting Deep Research job..." )
         headers = { "Authorization": f"Bearer {token}" }
+        # ONE DOOR NOW. /api/deep-research/submit is retired and answers 410 naming
+        # /api/v2/submit, which takes the routing command as a string and the agent's own
+        # arguments in `args`. What used to be a flat body is a command plus its args;
+        # `websocket_id` and the lineage tag stay top-level, because they are instructions
+        # about the request and the queue rather than arguments to the agent.
         payload = {
-            "query"        : "smoke test topic - safe to ignore",
-            "user_email"   : email,
-            "budget"       : 0.01,
+            "command"      : "agent router go to deep research",
+            "args"         : {
+                "query"  : "smoke test topic - safe to ignore",
+                "budget" : 0.01,
+            },
+            "question"     : "smoke test topic - safe to ignore",
             "websocket_id" : "smoke-test-session"
         }
         # Lineage tag (bug 5ed4f187): when this smoke runs as a child pytest inside a
@@ -83,7 +92,7 @@ def quick_smoke_test():
         if parent_id:
             payload[ "parent_id_hash" ] = parent_id
         submit_resp = requests.post(
-            f"{BASE_URL}/api/deep-research/submit",
+            f"{BASE_URL}/api/v2/submit",
             json=payload,
             headers=headers
         )
@@ -96,13 +105,20 @@ def quick_smoke_test():
         data = submit_resp.json()
         print( f"✓ Job submitted successfully" )
         print( f"  Status: {data.get( 'status', 'unknown' )}" )
+        print( f"  Path: {data.get( 'path', 'unknown' )}" )
+        print( f"  Route reason: {data.get( 'route_reason', 'unknown' )}" )
         print( f"  Job ID: {data.get( 'job_id', 'unknown' )}" )
-        print( f"  Queue position: {data.get( 'queue_position', 'unknown' )}" )
-        print( f"  Message: {data.get( 'message', 'unknown' )}" )
 
         # Test 3: Verify response structure
+        #
+        # The v2 response is AskResponse, not the old door's four-field body.
+        # `queue_position` and `message` are gone and are NOT being missed: a place in the
+        # queue changes as the queue moves, so a number frozen at submission was stale the
+        # moment it was printed, and the job card learns its real place from the queue
+        # websocket events. `route_reason` is the field worth reading instead — it says
+        # WHY this request took the branch it did.
         print( "\nTest 3: Verifying response structure..." )
-        required_keys = [ "status", "job_id", "queue_position", "message" ]
+        required_keys = [ "status", "job_id", "path", "route_reason", "trace_id" ]
         for key in required_keys:
             if key not in data:
                 print( f"✗ Missing required key: {key}" )
@@ -111,15 +127,19 @@ def quick_smoke_test():
 
         # Test 4: Verify expected values
         print( "\nTest 4: Verifying expected values..." )
-        assert data[ "status" ] == "queued", f"Expected status 'queued', got '{data[ 'status' ]}'"
-        print( "✓ Status is 'queued'" )
+        # "waiting", not "queued". The old door invented its own word for accepted-and-
+        # running; the flow reports the executor's own status, and a queued executor
+        # returning "waiting" with a job_id means the work was ACCEPTED and is running
+        # behind the response — a success, not a degrade.
+        assert data[ "status" ] == "waiting", f"Expected status 'waiting', got '{data[ 'status' ]}'"
+        print( "✓ Status is 'waiting' — accepted and running behind the response" )
+
+        assert data[ "path" ] != "receptionist", (
+            f"the flow did not understand the command: {data.get( 'route_reason' )!r}" )
+        print( f"✓ Dispatched, not refused: path={data[ 'path' ]}, reason={data[ 'route_reason' ]}" )
 
         assert data[ "job_id" ].startswith( "dr-" ), f"Expected job_id to start with 'dr-', got '{data[ 'job_id' ]}'"
         print( f"✓ Job ID format correct: {data[ 'job_id' ]}" )
-
-        assert isinstance( data[ "queue_position" ], int ), "Expected queue_position to be int"
-        assert data[ "queue_position" ] >= 0, "Expected queue_position >= 0"
-        print( f"✓ Queue position is valid: {data[ 'queue_position' ]}" )
 
         # Test 5: Check queue is accessible
         print( "\nTest 5: Checking queue status..." )

@@ -31,9 +31,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from cosa.rest.routers._retired_doors import REMOVE_BY, RETIRED_DOORS, V2_ASK, V2_SUBMIT
-from cosa.rest.routers import bug_fix_expediter, queues, v2_ask
+from cosa.rest.routers import (
+    bug_fix_expediter, deep_research, deep_research_to_podcast,
+    deep_research_to_presentation, queues, v2_ask,
+)
 
-_ROUTER_MODULES = ( bug_fix_expediter, queues, v2_ask )
+_ROUTER_MODULES = ( bug_fix_expediter, deep_research, deep_research_to_podcast,
+                    deep_research_to_presentation, queues, v2_ask )
 
 
 def _app():
@@ -62,7 +66,7 @@ def _concrete( path ):
 
 # ── the count, stated once so a growing table cannot pass quietly ────────────
 
-def test_exactly_three_doors_are_retired_at_this_commit():
+def test_exactly_six_doors_are_retired_at_this_commit():
     """
     THE COUNT IS RESTATED BY HAND ON PURPOSE, and it is the third of the three edits
     every new door costs (table row, this set, this name). A loop that silently covered
@@ -71,8 +75,11 @@ def test_exactly_three_doors_are_retired_at_this_commit():
     than satisfying it.
 
     Two question-shaped doors retired first, when `ask` was the only live replacement.
-    `/api/bug-fix-expediter/submit` is the first submit-shaped one, now that
-    `/api/v2/submit` both exists AND can build an agentic job — it could not until the
+    `/api/bug-fix-expediter/submit` was the first submit-shaped one, and the three research
+    doors followed together because ONE UI function submits to all three — retiring them
+    one at a time would have meant editing that function three times, each edit leaving it
+    half cut over. They could retire at all only once `/api/v2/submit` both existed AND
+    could build an agentic job — it could not until the
     agentic reader was wired into the flow, and a refusal naming a door that answers "I
     do not understand" is a refusal pointing at nothing.
 
@@ -92,6 +99,9 @@ def test_exactly_three_doors_are_retired_at_this_commit():
         "/api/push",
         "/api/job-history/{job_id}/retry",
         "/api/bug-fix-expediter/submit",
+        "/api/deep-research/submit",
+        "/api/deep-research-to-podcast/submit",
+        "/api/deep-research-to-presentation/submit",
     }, sorted( RETIRED_DOORS )
 
 
@@ -172,6 +182,33 @@ def test_every_refusal_names_the_door_that_replaces_it( path, client ):
     # test rather than by saying what it meant.
     assert RETIRED_DOORS[ path ] in ( V2_ASK, V2_SUBMIT ), (
         f"{path} retires into {RETIRED_DOORS[ path ]!r}, which is neither v2 door"
+    )
+
+
+@pytest.mark.parametrize( "path", sorted( RETIRED_DOORS ), ids=sorted( RETIRED_DOORS ) )
+def test_every_refusal_describes_the_door_it_names( path, client ):
+    """
+    The sentence has to match the door it sends people to, per row.
+
+    WHY THIS IS NOT PEDANTRY. There are TWO live doors now, and they are not
+    interchangeable: `ask` takes a bare question and works out what it means, `submit`
+    takes work whose command the caller already chose. The refusal body read "Every
+    question now enters through …" for every row — true while `ask` was the only
+    replacement, and a coin flip the moment a submit-shaped door retired. A caller who
+    reads "send your question to /api/v2/submit" has been taught the wrong one of two
+    doors that both exist and both answer, which is worse than being told nothing.
+
+    RED ON REVERT: collapse refusal_detail back to one sentence for both replacements and
+    every submit-shaped row fails here by name (Pocholo, who asked for it per row rather
+    than per fix).
+    """
+    detail   = client.post( _concrete( path ), json={} ).json()[ "detail" ]
+    expected = { V2_ASK    : "Every question now enters through",
+                 V2_SUBMIT : "Work whose command is already decided now enters through",
+               }[ RETIRED_DOORS[ path ] ]
+    assert expected in detail, (
+        f"{path} retires into {RETIRED_DOORS[ path ]} but its refusal does not describe that "
+        f"door: {detail!r}"
     )
 
 

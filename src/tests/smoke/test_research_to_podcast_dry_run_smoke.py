@@ -95,11 +95,24 @@ def quick_smoke_test():
         # test-suite job must thread LUPIN_TEST_MONOPOLIZE_PARENT_ID or the consumer's Gate B
         # defers it as a foreign writer and it starves 900s.
         parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
-        if parent_id:
-            payload[ "parent_id_hash" ] = parent_id
+
+        # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and
+        # answers 410 naming /api/v2/submit, which takes the routing command as a string
+        # and the agent's own arguments in `args`. `websocket_id` and `parent_id_hash` stay
+        # TOP-LEVEL: they are instructions about the request and the queue, not arguments
+        # to the agent, and `args` is checked against the command's own argument contract.
+        ws_id = payload.pop( "websocket_id", None )
+        body  = {
+            "command"  : "agent router go to research to podcast",
+            "args"     : payload,
+            "question" : payload.get( "query", "" ),
+        }
+        if ws_id:     body[ "websocket_id" ]   = ws_id
+        if parent_id: body[ "parent_id_hash" ] = parent_id
+
         submit_resp = requests.post(
-            f"{BASE_URL}/api/deep-research-to-podcast/submit",
-            json=payload,
+            f"{BASE_URL}/api/v2/submit",
+            json=body,
             headers=headers
         )
 

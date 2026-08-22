@@ -1,19 +1,20 @@
 """
-Deep Research to Podcast API router for CJ Flow queue-based chained workflows.
+The retired Deep Research to Podcast submission door.
 
-Submits research queries that automatically generate a podcast after
-research completion. Combines Deep Research → Podcast Generation pipeline.
+This module used to submit chained research→podcast jobs to the CJ Flow queue. It now
+holds a single tombstone: the route stays registered and answers 410 Gone naming
+`/api/v2/submit`, which is where that work enters now.
 
-Endpoints:
-    POST /api/deep-research-to-podcast/submit - Submit chained research→podcast job
+The request and response models went with the handler, and so did the todo-queue
+dependency. A Pydantic model no route reads is a shape a caller can still find and
+reasonably believe in.
 
-Example:
-    POST /api/deep-research-to-podcast/submit
+What a caller sends instead:
+
+    POST /api/v2/submit
     {
-        "query": "State of AI safety in 2026",
-        "budget": 3.00,
-        "target_languages": ["en"],
-        "max_segments": null
+        "command": "agent router go to research to podcast",
+        "args": { "query": "State of AI safety in 2026", "budget": 3.00, "target_languages": [ "en" ] }
     }
 """
 
@@ -22,10 +23,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from cosa.rest.auth import get_current_user
-from cosa.rest.queue_extensions import user_job_tracker
-from cosa.rest.agentic_job_factory import create_agentic_job
-from cosa.agents.deep_research_to_podcast.job import DeepResearchToPodcastJob
+from cosa.rest.routers._retired_doors import RETIRED_DOORS, gone, refusal_detail, tombstone_description
 import cosa.utils.util as cu
 
 
@@ -36,148 +34,62 @@ router = APIRouter(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Request/Response Models
+# Job Submission Endpoint — retired
+#
+# The request and response models went with the handler, and so did the todo-queue
+# dependency. A Pydantic model no route reads is a shape a caller can still find and
+# reasonably believe in, and a queue handle in a module whose only POST is a tombstone
+# reads as a door that was disabled rather than retired.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class ResearchToPodcastSubmitRequest( BaseModel ):
-    """
-    Request body for research→podcast submission.
-
-    Mirrors DeepResearchSubmitRequest with additional podcast parameters.
-    """
-    query            : str = Field( ..., description="Research topic/question to investigate" )
-    budget           : Optional[ float ]       = Field( None, description="Maximum budget in USD for Deep Research" )
-    target_languages : Optional[ List[ str ] ] = Field( None, description="ISO language codes for audio generation" )
-    max_segments     : Optional[ int ]         = Field( None, description="Limit TTS to first N segments" )
-    dry_run          : bool                    = Field( False, description="Simulate execution without API calls" )
-    parent_id_hash   : Optional[ str ]         = Field( None, description="Lineage token (bug 5ed4f187, mirrors 3a14292b): id_hash of a monopolize job that SPAWNED this child. When it matches the pool's active monopolizer, the consumer's Gate B (queue_consumer.py) uses this lineage to admit the child through the intake hold rather than defer it as a foreign writer. That admit-through behaviour is exercised by the swe_team monopolize sweep, NOT by this router's unit test — the unit test asserts only that the stamp lands on the job. Set from LUPIN_TEST_MONOPOLIZE_PARENT_ID." )
-
-
-class ResearchToPodcastSubmitResponse( BaseModel ):
-    """Response for successful job submission."""
-    job_id         : str = Field( ..., description="Unique job identifier (rp-xxxxx format)" )
-    queue_position : int = Field( ..., description="Position in the todo queue" )
-    message        : str = Field( ..., description="Human-readable confirmation message" )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Dependencies
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def get_todo_queue():
-    """
-    Dependency to get todo queue from main module.
-
-    Returns:
-        RunningFifoQueue: The todo queue instance
-    """
-    import lupin_app.main as main_module
-    return main_module.jobs_todo_queue
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Job Submission Endpoint
-# ═══════════════════════════════════════════════════════════════════════════════
-
+# ── TOMBSTONE — /api/deep-research-to-podcast/submit ──
+#
+#
+# WHAT THE CALLER DOES INSTEAD. This door named its own command and put the caller's
+# scheduling and lineage fields on the job by hand. `/api/v2/submit` takes the command as
+# a string and the same arguments as `args`, and carries `scheduled_at`, `monopolize` and
+# `parent_id_hash` as its own top-level fields:
+#
+#     POST /api/v2/submit
+#     { "command": "agent router go to research to podcast",
+#       "args"   : { "query": "...", "budget": 3.0, "target_languages": [ "en", "es-MX" ] },
+#       "scheduled_at": "...", "monopolize": false, "parent_id_hash": null }
+#
+# NOTHING THIS DOOR DID IS LOST, and each piece is worth naming because "the new door does
+# it too" is the claim a tombstone rests on: the job is built by the same
+# `create_agentic_job` this handler called; the id is scoped through the same
+# `user_job_tracker.register_scoped_job`, in the queued executor (executor.py:197) rather
+# than here; the scheduling fields and the lineage stamp land on the job in the factory;
+# and the 400s for a token with no uid or email are the 401s `submit` already raises.
+#
+# The one thing that genuinely does not come back is `queue_position`. `AskResponse` has no
+# such field and is not being widened for it — a job card learns its place from the queue
+# websocket events, which is where a position that changes as the queue moves belongs
+# anyway, rather than from a number frozen at the instant of submission.
+#
+# The body is DELETED rather than left unreachable under a raise: unreachable code is code
+# nobody can test and everybody must still read. Recover it from git if any of its handling
+# turns out to be worth carrying into the flow.
 @router.post(
+    # The router carries a prefix, so the decorator takes the tail while the two
+    # tombstone helpers take the full path the table is keyed on — a decorator given
+    # the full path here would mount it TWICE-prefixed and the door would answer 404,
+    # which is the one thing a tombstone must never do.
     "/submit",
-    response_model=ResearchToPodcastSubmitResponse,
-    summary="Submit research→podcast chained job",
-    description="Submit a deep research job that automatically generates a podcast upon completion."
+    deprecated  = True,
+    status_code = 410,
+    summary     = "GONE — use /api/v2/submit",
+    description = tombstone_description( "/api/deep-research-to-podcast/submit" )
 )
-async def submit_research_to_podcast(
-    request: ResearchToPodcastSubmitRequest,
-    current_user: dict = Depends( get_current_user ),
-    todo_queue = Depends( get_todo_queue )
-):
+async def submit_research_to_podcast():
     """
-    Submit a deep research→podcast chained job.
-
-    Creates a DeepResearchToPodcastJob and pushes it to the todo queue.
-    The job runs the full pipeline:
-    1. Deep Research: Web search, synthesis, report generation
-    2. Podcast Generation: Script creation, TTS, audio stitching
-
-    Requires:
-        - Authenticated user (current_user from token)
-        - Valid research query (non-empty)
-        - Valid user email for artifact storage
+    Refuse this retired door with 410 Gone.
 
     Ensures:
-        - Job created with rp- prefix
-        - Job added to queue with user/session context
-        - Returns job_id and queue_position
-
-    Args:
-        request: ResearchToPodcastSubmitRequest with query and options
-        current_user: Authenticated user from JWT token
-        todo_queue: Todo queue instance for job submission
-
-    Returns:
-        ResearchToPodcastSubmitResponse with job_id and queue_position
-
-    Raises:
-        HTTPException 400: If query is empty
-        HTTPException 401: If not authenticated
+        - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
+          REMOVE BY 2026-12-31 date
     """
-    user_email = current_user.get( "email" )
-    user_id    = current_user.get( "uid", user_email )
-    session_id = current_user.get( "session_id", "unknown" )
-    debug      = current_user.get( "debug", False )
-
-    # Validate query
-    query = request.query.strip()
-    if not query:
-        raise HTTPException( status_code=400, detail="Query cannot be empty" )
-
-    if debug:
-        print( f"[submit_research_to_podcast] Query: {query[ :60 ]}..." )
-        print( f"[submit_research_to_podcast] Budget: ${request.budget}" if request.budget else "[submit_research_to_podcast] Budget: unlimited" )
-        print( f"[submit_research_to_podcast] Target languages: {request.target_languages}" )
-
-    # Create the chained job using shared factory
-    args_dict = { "query": query }
-    if request.budget is not None:
-        args_dict[ "budget" ] = str( request.budget )
-    if request.target_languages:
-        args_dict[ "languages" ] = ",".join( request.target_languages )
-    if request.dry_run:
-        args_dict[ "dry_run" ] = True
-
-    job = create_agentic_job(
-        command    = "agent router go to research to podcast",
-        args_dict  = args_dict,
-        user_id    = user_id,
-        user_email = user_email,
-        session_id = session_id,
-        debug      = debug
-    )
-
-    if job is None:
-        raise HTTPException( status_code=500, detail="Failed to create research-to-podcast job" )
-
-    # Apply max_segments if specified (factory doesn't handle this)
-    if request.max_segments:
-        job.max_segments = request.max_segments
-
-    # Lineage pass-through (bug 5ed4f187, mirrors swe_team 3a14292b): stamp the
-    # spawning monopolizer's id so Gate B admits this child through the monopoly hold.
-    if request.parent_id_hash: job.spawned_by_id_hash = request.parent_id_hash
-
-    # Atomic: scope ID + index for user filtering BEFORE push (race condition prevention)
-    job.id_hash = user_job_tracker.register_scoped_job( job.id_hash, user_id, session_id )
-
-    # Push to todo queue
-    todo_queue.push( job )
-
-    # Get queue position (approximate - queue length after push)
-    queue_position = todo_queue.size()
-
-    return ResearchToPodcastSubmitResponse(
-        job_id         = job.id_hash,
-        queue_position = queue_position,
-        message        = f"Research→Podcast job '{query[ :40 ]}...' added to queue at position {queue_position}"
-    )
+    gone( "/api/deep-research-to-podcast/submit" )
 
 
 def quick_smoke_test():
@@ -198,36 +110,26 @@ def quick_smoke_test():
         assert "deep-research-to-podcast" in router.tags
         print( f"✓ Router prefix: {router.prefix}" )
 
-        # Test 3: Request model
-        print( "Testing request model..." )
-        req = ResearchToPodcastSubmitRequest(
-            query            = "test research topic",
-            budget           = 3.00,
-            target_languages = [ "en" ],
-            max_segments     = 5
-        )
-        assert req.query == "test research topic"
-        assert req.budget == 3.00
-        assert req.target_languages == [ "en" ]
-        assert req.max_segments == 5
-        print( "✓ Request model works correctly" )
+        # Test 3: the door is a tombstone, mounted at the path the table names
+        #
+        # The model tests that used to sit here went with the models. What matters now is
+        # that the route resolves to exactly the path RETIRED_DOORS is keyed on: the
+        # router carries a prefix, so a decorator handed the full path would mount it
+        # twice-prefixed and the door would answer 404 — the one answer a tombstone must
+        # never give.
+        print( "Testing the retired route..." )
+        paths = [ r.path for r in router.routes ]
+        assert paths == [ "/api/deep-research-to-podcast/submit" ], paths
+        assert "/api/deep-research-to-podcast/submit" in RETIRED_DOORS
+        assert RETIRED_DOORS[ "/api/deep-research-to-podcast/submit" ] == "/api/v2/submit"
+        print( f"✓ Routes: {paths} -> {RETIRED_DOORS[ '/api/deep-research-to-podcast/submit' ]}" )
 
-        # Test 4: Response model
-        print( "Testing response model..." )
-        resp = ResearchToPodcastSubmitResponse(
-            job_id         = "rp-abc123",
-            queue_position = 1,
-            message        = "Job added to queue"
-        )
-        assert resp.job_id == "rp-abc123"
-        assert resp.queue_position == 1
-        print( "✓ Response model works correctly" )
-
-        # Test 5: Route exists
-        print( "Testing route registration..." )
-        routes = [ r.path for r in router.routes ]
-        assert any( "/submit" in route for route in routes )
-        print( f"✓ Routes: {routes}" )
+        # Test 4: the refusal names its replacement and its removal date
+        print( "Testing the refusal..." )
+        detail = refusal_detail( "/api/deep-research-to-podcast/submit" )
+        assert "/api/v2/submit" in detail
+        assert "REMOVE BY" in detail
+        print( f"✓ {detail}" )
 
         print( "\n✓ Smoke test completed successfully" )
 
