@@ -559,3 +559,52 @@ This is for the calculator, not a math equation
 Route this to the unit converter, not the math solver
 I want a price comparison, don't give me a math lesson
 Handle this conversion with the calculator agent
+
+# ── MOVED FROM MATH (2026-08-21 router-label fix) ──
+
+What is the sum of 57 and 89?
+How do you divide 345 by 15?
+If I buy 3 apples at $1.20 each and 2 bananas at $0.75 each, how much will the total cost be?
+What is 253 plus 147?
+How do you subtract 89 from 123?
+If you multiply 56 by 8, what do you get?
+What is 45 divided by 9?
+How do you calculate the total of 34, 67, and 129?
+What’s the result of 25 times 16?
+If you add 327 and 548, what’s the sum?
+How do you subtract 492 from 980?
+What is the product of 64 and 23?
+How many times does 12 go into 144?
+What’s the remainder when you divide 345 by 23?
+How much is 789 minus 456?
+If you have 300 and divide it by 25, what’s the quotient?
+How do you calculate the difference between 560 and 345?
+What is the sum of 98, 134, and 201?
+How much is 234 plus 167?
+If you subtract 299 from 450, what’s left?
+How do you multiply 15 by 35?
+Tom has $400. He wants to buy a video game console for $350 and a game for $60. Does he have enough money?
+If 4 bags of flour cost $32, how much does 1 bag of flour cost?
+Uh... what’s 253 plus, uh, 147?
+How do you... subtract 89... from 123?
+If you multiply, um, 56 by 8, what do you get?
+What’s... what’s 45 divided by, uh, 9?
+Uh... can you calculate the total of 34, 67, and... um, 129?
+What’s the result of... uh, 25 times 16?
+If you add, uh, 327... and 548, what’s the sum?
+How do you... subtract 492 from... um, 980?
+What’s the product of, uh, 64 and... 23?
+How many times does 12 go into, um... 144?
+What’s the remainder when you divide, um, 345 by 23?
+How much is... uh, 789 minus 456?
+If you have 300... and divide it by, uh... 25, what’s the quotient?
+How do you calculate the difference between, uh... 560 and 345?
+What’s the sum of... uh, 98, 134, and... um, 201?
+How much is... um, 234 plus 167?
+If you subtract 299 from... um, 450, what’s left?
+Uh... how do you multiply 15 by... uh, 35?
+Tom has $400. He wants to buy a, um... video game console for $350 and a game for, uh... $60. Does he have enough, um, money?
+If 4 bags of flour cost, um... $32, how much does, uh... one bag of flour, uh, cost?
+Calculate the total cost if I buy 15 items at $3.99 each
+I need you to solve this arithmetic problem: 847 divided by 23
+Solve this arithmetic: 3,456 times 789
