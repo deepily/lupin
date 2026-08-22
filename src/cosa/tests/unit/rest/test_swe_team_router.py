@@ -1,197 +1,102 @@
 """
-Unit tests for the SWE Team router (`cosa.rest.routers.swe_team`).
+Unit tests for the retired SWE Team router (`cosa.rest.routers.swe_team`).
 
-Covers:
-- `get_todo_queue` — pulls jobs_todo_queue off `lupin_app.main` (dual-key patched).
-- `submit_swe_team_task` — missing-uid 400, missing-email 400, session-id fallback,
-  success (minimal + every optional arm: dry_run / lead_model / worker_model /
-  budget / timeout / trust_mode / scheduled_at / monopolize / provided websocket_id),
-  factory-None 500 (re-raised through `except HTTPException`), and push-failure 500.
+WHAT USED TO BE HERE. `TestGetTodoQueue` and `TestSubmitSweTeamTask` — the dual-key
+`lupin_app.main` read, the identity 400s, every optional-field arm (lead/worker model,
+budget, timeout, trust mode), the scheduling and lineage stamps, and the factory-None and
+push-failure 500s.
 
-Zero external dependencies — create_agentic_job, user_job_tracker, and the todo
-queue are all boundary-mocked. No real jobs, no LLM, no queue, no network. Auth is
-bypassed by passing current_user explicitly.
+That handler is gone: `/api/swe-team/submit` is a tombstone naming `/api/v2/submit`. There
+is nothing to rewrite those tests INTO — the behaviour did not move within this module, it
+moved to a door with its own suite.
+
+Zero external dependencies — the tombstone reads no body, touches no queue and builds no
+job, so there is nothing left to mock.
 """
 
 import unittest
-from unittest.mock import Mock, MagicMock, patch
 import asyncio
-import sys
 import time
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
-from cosa.rest.routers.swe_team import (
-    get_todo_queue,
-    submit_swe_team_task,
-    SweTeamSubmitRequest,
-    SweTeamSubmitResponse,
-)
+import cosa.rest.routers.swe_team as mod
+from cosa.rest.routers.swe_team import submit_swe_team_task
+from cosa.rest.routers._retired_doors import RETIRED_DOORS, V2_SUBMIT
 
-
-def _patch_fastapi_main( mock_main ):
-    """Dual-key patch for `lupin_app.main` (Gotcha 1)."""
-    pkg = Mock()
-    pkg.main = mock_main
-    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
+PATH = "/api/swe-team/submit"
 
 
-def _job( id_hash="init_hash", last_q="ship the feature" ):
-    """A SweTeamJob stand-in with the attributes the endpoint reads."""
-    job = MagicMock()
-    job.id_hash             = id_hash
-    job.last_question_asked = last_q
-    return job
+class TestTheSubmitDoorIsRetired( unittest.TestCase ):
+    """The door answers 410, at the right path, naming the right replacement."""
 
+    def _client( self ):
+        app = FastAPI()
+        app.include_router( mod.router )
+        return TestClient( app, raise_server_exceptions=False )
 
-class TestGetTodoQueue( unittest.TestCase ):
-    """
-    Ensures:
-        - get_todo_queue returns main_module.jobs_todo_queue
-    """
+    def test_it_answers_410_and_names_the_submit_door( self ):
+        response = self._client().post( PATH, json={ "task": "add retries" } )
+        self.assertEqual( response.status_code, 410 )
+        self.assertIn( V2_SUBMIT, response.json()[ "detail" ] )
 
-    def test_returns_main_module_todo_queue( self ):
-        """Ensures: dependency reads jobs_todo_queue off lupin_app.main."""
-        mock_main = MagicMock()
-        mock_main.jobs_todo_queue = "Q"
-        with _patch_fastapi_main( mock_main ):
-            self.assertEqual( get_todo_queue(), "Q" )
+    def test_it_refuses_an_unauthenticated_caller_the_same_way( self ):
+        """No auth on a tombstone: a 401 reads like a credentials problem, not a retired door."""
+        self.assertEqual( self._client().post( PATH, json={ } ).status_code, 410 )
 
+    def test_it_is_mounted_once_at_the_path_the_table_names( self ):
+        """
+        RED ON REVERT, and the trap here is the MIRROR of the one the prefixed routers hit.
+        This router carries NO prefix, so the decorator must take the FULL path. Copy the
+        tail form its prefixed neighbours use and the door mounts at `/submit` while the
+        real path answers 404 — the one answer a tombstone must never give, since 404 is
+        exactly what "this route was deleted" looks like. Every handler-level test still
+        passes when that happens; only a mounted-path check catches it.
+        """
+        paths = { route.path for route in mod.router.routes }
+        self.assertEqual( paths, { PATH }, f"mounted at {paths}" )
 
-class TestSubmitSweTeamTask( unittest.TestCase ):
-    """
-    Unit tests for `submit_swe_team_task`.
+    def test_the_router_still_carries_no_prefix( self ):
+        """The premise the assertion above rests on, stated rather than assumed. If someone
+        adds a prefix here, the full path in the decorator becomes the twice-mounted bug."""
+        self.assertEqual( mod.router.prefix, "" )
 
-    Requires:
-        - create_agentic_job + user_job_tracker boundary-mocked
+    def test_the_table_says_this_door_retires_into_submit_not_ask( self ):
+        self.assertEqual( RETIRED_DOORS[ PATH ], V2_SUBMIT )
 
-    Ensures:
-        - validations (400s), session fallback, success arms, factory-None 500,
-          push-failure 500
-    """
+    def test_the_refusal_sentence_matches_the_door_it_names( self ):
+        detail = self._client().post( PATH, json={ } ).json()[ "detail" ]
+        self.assertIn( "Work whose command is already decided", detail )
+        self.assertNotIn( "Every question now enters through", detail )
 
-    def setUp( self ):
-        """Ensures: a default authenticated user + mocked queue per test."""
-        self.user  = { "uid": "user_1234567890", "email": "u@test.com" }
-        self.queue = MagicMock()
+    def test_the_handler_only_refuses( self ):
+        """RED ON REVERT: give the handler a body again and it stops raising."""
+        with self.assertRaises( HTTPException ) as caught:
+            asyncio.run( submit_swe_team_task() )
+        self.assertEqual( caught.exception.status_code, 410 )
 
-    def _call( self, body ):
-        return asyncio.run( submit_swe_team_task(
-            request_body = body,
-            current_user = self.user,
-            todo_queue   = self.queue,
-        ) )
+    def test_the_job_building_machinery_is_gone_from_this_module( self ):
+        for name in ( "create_agentic_job", "user_job_tracker", "get_todo_queue",
+                      "SweTeamSubmitRequest", "SweTeamSubmitResponse" ):
+            self.assertFalse( hasattr( mod, name ),
+                              f"{name} survives in a module whose only POST is a tombstone" )
 
-    def test_missing_uid_400( self ):
-        """Ensures: a token without uid raises 400."""
-        self.user = { "email": "u@test.com" }
-        with self.assertRaises( HTTPException ) as ctx:
-            self._call( SweTeamSubmitRequest( task="do the thing" ) )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "User ID not found", ctx.exception.detail )
-
-    def test_missing_email_400( self ):
-        """Ensures: a token without email raises 400."""
-        self.user = { "uid": "user_1234567890" }
-        with self.assertRaises( HTTPException ) as ctx:
-            self._call( SweTeamSubmitRequest( task="do the thing" ) )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "User email not found", ctx.exception.detail )
-
-    def test_success_minimal_session_fallback( self ):
-        """Ensures: minimal body queues a job; websocket_id None → api-<uid8> session fallback."""
-        self.queue.size.return_value = 4
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "swe-scoped"
-        with patch( "cosa.rest.routers.swe_team.create_agentic_job",
-                    return_value=_job() ) as m_create, \
-             patch( "cosa.rest.routers.swe_team.user_job_tracker", tracker ):
-            result = self._call( SweTeamSubmitRequest( task="build a parser" ) )
-
-        self.assertIsInstance( result, SweTeamSubmitResponse )
-        self.assertEqual( result.status, "queued" )
-        self.assertEqual( result.job_id, "swe-scoped" )
-        self.assertEqual( result.queue_position, 4 )
-        self.assertIn( "SWE Team job queued", result.message )
-        _, kwargs = m_create.call_args
-        self.assertEqual( kwargs[ "session_id" ], "api-user_123" )
-        self.assertEqual( kwargs[ "args_dict" ], { "task": "build a parser" } )
-        self.queue.push.assert_called_once()
-
-    def test_success_all_optional_arms( self ):
-        """Ensures: dry_run + lead/worker model + budget + timeout + trust_mode + websocket_id + scheduling thread through."""
-        self.queue.size.return_value = 8
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "swe-2"
-        job = _job()
-        body = SweTeamSubmitRequest(
-            task         = "refactor module",
-            dry_run      = True,
-            websocket_id = "ws-abc",
-            lead_model   = "claude-opus-4-8",
-            worker_model = "claude-sonnet-4-6",
-            budget       = 5.0,
-            timeout      = 30,
-            trust_mode   = "active",
-            scheduled_at = "2026-01-01T00:00:00",
-            monopolize   = True,
-        )
-        with patch( "cosa.rest.routers.swe_team.create_agentic_job",
-                    return_value=job ) as m_create, \
-             patch( "cosa.rest.routers.swe_team.user_job_tracker", tracker ):
-            result = self._call( body )
-
-        self.assertEqual( result.status, "queued" )
-        self.assertEqual( result.job_id, "swe-2" )
-        _, kwargs = m_create.call_args
-        ad = kwargs[ "args_dict" ]
-        self.assertEqual( kwargs[ "session_id" ], "ws-abc" )              # provided websocket_id used
-        self.assertTrue( ad[ "dry_run" ] )
-        self.assertEqual( ad[ "lead_model" ], "claude-opus-4-8" )
-        self.assertEqual( ad[ "worker_model" ], "claude-sonnet-4-6" )
-        self.assertEqual( ad[ "budget" ], "5.0" )
-        self.assertEqual( ad[ "timeout" ], "30" )
-        self.assertEqual( ad[ "trust_mode" ], "active" )
-        self.assertEqual( job.scheduled_at, "2026-01-01T00:00:00" )
-        self.assertTrue( job.monopolize )
-
-    def test_parent_id_hash_stamps_lineage( self ):
-        """bug 3a14292b: parent_id_hash threads onto job.spawned_by_id_hash so the
-        consumer's Gate B admits this child through the monopoly intake hold."""
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "swe-lin"
-        job = _job()
-        with patch( "cosa.rest.routers.swe_team.create_agentic_job", return_value=job ), \
-             patch( "cosa.rest.routers.swe_team.user_job_tracker", tracker ):
-            self._call( SweTeamSubmitRequest( task="child task", parent_id_hash="ts-parent" ) )
-        self.assertEqual( job.spawned_by_id_hash, "ts-parent" )
-
-    def test_factory_none_500( self ):
-        """Ensures: create_agentic_job None → 500 (re-raised cleanly through except HTTPException)."""
-        with patch( "cosa.rest.routers.swe_team.create_agentic_job", return_value=None ), \
-             patch( "cosa.rest.routers.swe_team.user_job_tracker", MagicMock() ):
-            with self.assertRaises( HTTPException ) as ctx:
-                self._call( SweTeamSubmitRequest( task="t" ) )
-        self.assertEqual( ctx.exception.status_code, 500 )
-        self.assertIn( "Failed to create SWE Team job", ctx.exception.detail )
-        self.queue.push.assert_not_called()
-
-    def test_push_failure_500( self ):
-        """Ensures: an exception during job push maps to 500 via the generic except."""
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "h"
-        self.queue.push.side_effect = RuntimeError( "queue down" )
-        with patch( "cosa.rest.routers.swe_team.create_agentic_job", return_value=_job() ), \
-             patch( "cosa.rest.routers.swe_team.user_job_tracker", tracker ):
-            with self.assertRaises( HTTPException ) as ctx:
-                self._call( SweTeamSubmitRequest( task="t" ) )
-        self.assertEqual( ctx.exception.status_code, 500 )
-        self.assertIn( "Failed to submit SWE Team job", ctx.exception.detail )
+    def test_the_lineage_field_still_has_a_door_that_accepts_it( self ):
+        """
+        The one thing worth checking OUTSIDE this module, because this door's retirement is
+        the one that could break a live rig. A monopolizing sweep's child pytest echoes the
+        sweep's id_hash back as `parent_id_hash` so Gate B admits it through the monopoly
+        hold; this was the last v1 door that accepted that field. If /api/v2/submit did not,
+        the sweep would starve its own children for 900s and nothing here would say so.
+        """
+        from cosa.rest.routers.v2_ask import SubmitRequest
+        self.assertIn( "parent_id_hash", SubmitRequest.model_fields )
 
 
 def isolated_unit_test():
     """
-    Run the SWE Team router unit tests in isolation.
+    Run the swe-team router unit tests in isolation.
 
     Ensures:
         - Executes all TestCases and reports (success, duration, message)
@@ -202,7 +107,7 @@ def isolated_unit_test():
     try:
         loader = unittest.TestLoader()
         suite  = unittest.TestSuite()
-        for tc in ( TestGetTodoQueue, TestSubmitSweTeamTask ):
+        for tc in ( TestTheSubmitDoorIsRetired, ):
             suite.addTests( loader.loadTestsFromTestCase( tc ) )
         result = unittest.TextTestRunner( verbosity=2 ).run( suite )
 
@@ -231,5 +136,5 @@ def isolated_unit_test():
 if __name__ == "__main__":
     success, duration, message = isolated_unit_test()
     status = "✅ PASS" if success else "❌ FAIL"
-    print( f"\n{status} SWE-Team router unit tests completed in {duration:.3f}s" )
+    print( f"\n{status} SWE-team router unit tests completed in {duration:.3f}s" )
     print( f"Result: {message}" )

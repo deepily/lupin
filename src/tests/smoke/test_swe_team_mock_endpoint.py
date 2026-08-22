@@ -101,7 +101,9 @@ class SweTeamEndpointSmokeTest( LivePipelineTestBase ):
     """
 
     TEST_NAME       = "SWE Team Endpoint"
-    SUBMIT_ENDPOINT = "/api/swe-team/submit"
+    # The dedicated door /api/swe-team/submit is retired (410); one front door now.
+    SUBMIT_ENDPOINT = "/api/v2/submit"
+    ROUTING_COMMAND = "agent router go to swe team"
     DEFAULT_TIMEOUT = 120
     POLL_INTERVAL   = 2
     SCENARIOS       = SWE_TEAM_SCENARIOS
@@ -126,15 +128,25 @@ class SweTeamEndpointSmokeTest( LivePipelineTestBase ):
         if "payload" in scenario:
             return scenario[ "payload" ]
 
-        payload = {
-            "task"         : scenario[ "task" ],
-            "dry_run"      : scenario.get( "dry_run", True ),
-            "websocket_id" : ws_id,
-        }
         # Lineage tag (row 7451bebe / bug 5ed4f187): a child pytest inside a monopolizing
         # test-suite job must thread LUPIN_TEST_MONOPOLIZE_PARENT_ID or the consumer's Gate B
         # defers it as a foreign writer and it starves 900s.
         parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+
+        # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and
+        # answers 410 naming /api/v2/submit, which takes the routing command as a string
+        # and the agent's own arguments in `args`. `websocket_id` and `parent_id_hash` stay
+        # TOP-LEVEL: they are instructions about the request and the queue, not arguments to
+        # the agent, and `args` is checked against the command's own argument contract.
+        payload = {
+            "command"      : self.ROUTING_COMMAND,
+            "args"         : {
+                "task"    : scenario[ "task" ],
+                "dry_run" : scenario.get( "dry_run", True ),
+            },
+            "question"     : scenario[ "task" ],
+            "websocket_id" : ws_id,
+        }
         if parent_id:
             payload[ "parent_id_hash" ] = parent_id
         return payload
