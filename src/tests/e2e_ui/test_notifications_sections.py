@@ -11,7 +11,7 @@ Requires:
 
 import pytest
 
-from .agent_select_contract import checked_in_option_values, option_value_drift
+from .agent_select_contract import expected_option_values, option_value_drift
 from .conftest import BASE_URL
 
 
@@ -126,9 +126,15 @@ class TestNotificationsSectionVisibility:
         mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )
         assert mode_select.count() > 0
 
+        # Phase 3 populates these from GET /api/v2/agents after auth, so wait for the
+        # render before reading the DOM — `networkidle` can land first.
+        logged_in_page.locator(
+            "#agent-mode option[value='agent router go to math']"
+        ).wait_for( state="attached", timeout=10_000 )
+
         options  = mode_select.locator( "option" )
         rendered = [ options.nth( i ).get_attribute( "value" ) for i in range( options.count() ) ]
-        problems = option_value_drift( rendered, expected=checked_in_option_values() )
+        problems = option_value_drift( rendered, expected=expected_option_values() )
         assert problems == [], "#agent-mode option drift:\n  " + "\n  ".join( problems )
 
     def test_jobs_section_has_cc_card( self, logged_in_page ):

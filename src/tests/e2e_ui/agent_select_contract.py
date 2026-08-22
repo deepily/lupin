@@ -74,6 +74,29 @@ def checked_in_option_values():
     return set( re.findall( r'<option\s+value="([^"]*)"', text[ start:end ] ) )
 
 
+def expected_option_values():
+    """
+    THE ORACLE, AFTER PHASE 3: the registry's user-initiable set plus the Auto-Route
+    sentinel — exactly what `#agent-mode` must render.
+
+    This replaced `checked_in_option_values()` on 2026-08-22, and the handover was
+    FORCED rather than remembered: phase 3 emptied the hardcoded options out of
+    notifications.html, `checked_in_option_values()` started returning an empty set,
+    and `option_value_drift`'s ORACLE EMPTY arm refused to compare. The guards went
+    red until this function existed. That was the design.
+
+    Auto-Route is included as a SENTINEL rather than exempted (Clayton, 2026-08-22):
+    a waiver that can never go stale, sitting in a table whose credibility rests on
+    waivers expiring, is a widening vector. A sentinel leaves nothing to exempt.
+
+    Ensures:
+        - returns USER_INITIABLE_COMMANDS | { AUTO_ROUTE_VALUE }
+        - reads the registry, so it crosses a real boundary against a rendered DOM
+    """
+    from cosa.rest.v2.registry import AUTO_ROUTE_VALUE, USER_INITIABLE_COMMANDS
+    return set( USER_INITIABLE_COMMANDS ) | { AUTO_ROUTE_VALUE }
+
+
 def option_value_drift( rendered, expected ):
     """
     Problems with the option values a page actually rendered. Empty list ⇒ clean.

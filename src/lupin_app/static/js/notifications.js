@@ -690,7 +690,13 @@ class NotificationsUI {
 
         this.log( `✓ Authentication setup complete for user: ${this.currentUserEmail} (admin: ${this.isAdmin}, config fetched, monitors started)` );
 
-        // Load user's current agent mode from server
+        // Fill the Q&A card's agent dropdown from the registry. BEFORE loadCurrentMode,
+        // which reads the server-side sticky VOICE mode for the badge — that call used
+        // to drive the select's value too, and cannot any more: the values are routing
+        // commands now, not the short mode keys the mode API speaks.
+        await this.loadAgentSelect();
+
+        // Load user's current agent mode from server (the badge only — see above)
         await this.loadCurrentMode();
     }
 
@@ -1816,19 +1822,22 @@ class NotificationsUI {
         const modeStatus = document.getElementById( 'mode-status' );
 
         if ( agentModeSelect ) {
-            agentModeSelect.addEventListener( 'change', async ( e ) => {
-                const mode = e.target.value === 'system' ? null : e.target.value;
-                await this.setAgentMode( mode );
+            // ONE-SHOT, NOT STICKY — Rick's ruling 2, 2026-08-22. Picking an agent
+            // routes THAT submission and nothing else; the select does not write a
+            // server-side mode any more. A submit card was always a one-shot ("run this
+            // one job"), and making its replacement sticky would change the behaviour
+            // people are used to. Sticky VOICE mode is untouched and still lives on the
+            // mode API — a different surface answering a different question.
+            agentModeSelect.addEventListener( 'change', () => {
+                this.updateOneShotRouteStatus();
             });
         }
 
         if ( modeBadge ) {
             modeBadge.addEventListener( 'click', async () => {
-                // Click badge to return to system mode
+                // The badge still reflects the sticky VOICE mode, so clicking it still
+                // clears that mode. It does NOT touch the select, which is per-request.
                 await this.setAgentMode( null );
-                if ( agentModeSelect ) {
-                    agentModeSelect.value = 'system';
-                }
             });
         }
 
@@ -2890,16 +2899,42 @@ class NotificationsUI {
             // Ensure token is valid before API call (auto-refresh if expired)
             await this.ensureValidToken();
 
-            // Submit to /api/v2/ask (POST request with JSON body).
-            // /api/push was retired 2026-08-21 and answers 410 naming this door. The
-            // body is the same shape — question + websocket_id — but the RESULT is not:
-            // /api/push queued the job and returned {status: "queued", job_id, ...} for
-            // the WebSocket to follow up on, while /api/v2/ask answers the question
-            // synchronously and returns the answer itself. Nothing below depends on the
-            // queued shape (the response is stringified into the response pane as-is),
-            // which is why this cutover is a one-line change here and would not be
-            // everywhere.
-            const url = `/api/v2/ask`;
+            // TWO DOORS, PICKED BY THE DROPDOWN (2026.08.22 plan §5.2).
+            //
+            // Auto-Route → /api/v2/ask, which is handed prose and works out what it
+            // means. A named agent → /api/v2/submit, which is handed the answer to that
+            // question up front and skips routing entirely. That IS the "dial in a
+            // specific direct route to a specific agent" Rick asked for, and it is
+            // per-request: nothing is persisted, the next question auto-routes again
+            // unless the user picks again (ruling 2).
+            //
+            // /api/push was retired 2026-08-21 and answers 410 naming the ask door. The
+            // response shape is the same on both doors here — the §8 AskResponse — and
+            // is stringified into the response pane as-is. Phase 4 replaces that dump
+            // with an inline answer box that can carry the needs_input interview.
+            const agentSelect = window.LUPIN_AGENT_SELECT;
+            const selectEl    = document.getElementById( 'agent-mode' );
+            const chosen      = selectEl ? selectEl.value : null;
+            // No module or no select ⇒ auto-route. Posting an unrecognised value to
+            // /api/v2/submit as though it were a command is worse than routing normally.
+            const autoRoute   = !agentSelect || !selectEl
+                                || agentSelect.isAutoRoute( chosen, this._agentsPayload );
+
+            const url  = autoRoute ? `/api/v2/ask` : `/api/v2/submit`;
+            const body = autoRoute
+                ? { question: text, websocket_id: this.queueSessionId }
+                : {
+                    command      : chosen,
+                    // One text box feeds the command's one required argument — exactly
+                    // what every submit card being retired already does. A command
+                    // needing none, or needing two, gets {} and comes back needs_input;
+                    // phase 4 turns that into an inline question instead of a JSON dump.
+                    args         : agentSelect.argsForCommand( chosen, text, this._agentsPayload ),
+                    question     : text,
+                    websocket_id : this.queueSessionId
+                };
+
+            this.log( `Q&A door: ${url}${autoRoute ? '' : ` (${chosen})`}` );
             const response = await fetch( url, {
                 method: 'POST',
                 headers: {
@@ -2907,10 +2942,7 @@ class NotificationsUI {
                     'X-Session-ID': this.queueSessionId,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    question: text,
-                    websocket_id: this.queueSessionId
-                })
+                body: JSON.stringify( body )
             });
             
             if ( !response.ok ) {
@@ -20697,6 +20729,94 @@ class NotificationsUI {
      * Returns:
      *     Boolean indicating success
      */
+    /**
+     * Fill the Q&A card's agent dropdown from GET /api/v2/agents.
+     *
+     * Requires:
+     *     - the user is authenticated (an access token is available)
+     *     - shared/agent-select.js has loaded and published window.LUPIN_AGENT_SELECT
+     *
+     * Ensures:
+     *     - Caches the payload on this._agentsPayload, which submitQA reads to decide
+     *       which door a submission goes through and what args ride with it
+     *     - Renders the select from that payload, Auto-Route selected
+     *     - On ANY failure leaves the select EMPTY and says so in the status line.
+     *       A shortened list looks exactly like a working one, and the failure that
+     *       matters here is a MISSING agent — so this fails visibly rather than
+     *       falling back to a hardcoded list, which is the duplication being removed
+     */
+    async loadAgentSelect() {
+        const select = document.getElementById( 'agent-mode' );
+        if ( !select ) return;
+
+        // Read at CALL time, never at load time, so module execution order cannot
+        // matter — the same contract shared/task-list-query.js uses.
+        const agentSelect = window.LUPIN_AGENT_SELECT;
+        if ( !agentSelect ) {
+            this.log( "Agent select module missing — /static/js/shared/agent-select.js did not load" );
+            this.setModeStatus( "Agent list unavailable — agent-select.js did not load", "#dc3545" );
+            return;
+        }
+
+        try {
+            await this.ensureValidToken();
+            const response = await fetch( agentSelect.AGENTS_ENDPOINT, {
+                method  : 'GET',
+                headers : { 'Authorization': this.getAuthHeader() }
+            } );
+            if ( !response.ok ) {
+                // 503 is the v2 feature gate, and it is coherent: with `v2 flow
+                // enabled` off, /api/v2/submit is off too and a dropdown driving it
+                // has nothing to drive. Named separately because the remedy differs.
+                const why = response.status === 503
+                    ? "CJ Flow v2 is disabled"
+                    : `HTTP ${response.status}`;
+                this.error( `Failed to load agent list: ${why}` );
+                this.setModeStatus( `Agent list unavailable — ${why}`, "#dc3545" );
+                return;
+            }
+            this._agentsPayload = await response.json();
+            agentSelect.renderAgentSelect( select, this._agentsPayload );
+            this.updateOneShotRouteStatus();
+            this.log( `Agent select rendered: ${this._agentsPayload.agents.length} commands, ` +
+                      `${this._agentsPayload.agents.filter( ( a ) => a.user_initiable ).length} offered` );
+        } catch ( e ) {
+            this.error( `Error loading agent list: ${e.message}` );
+            this.setModeStatus( "Agent list unavailable — see console", "#dc3545" );
+        }
+    }
+
+    /**
+     * Write the mode-status line for the CURRENT one-shot selection.
+     *
+     * Ensures:
+     *     - Says "Auto-routing enabled" for the sentinel
+     *     - Otherwise names where the NEXT question goes, in one-shot language, so the
+     *       line does not read as a mode that will persist
+     */
+    updateOneShotRouteStatus() {
+        const select      = document.getElementById( 'agent-mode' );
+        const agentSelect = window.LUPIN_AGENT_SELECT;
+        if ( !select || !agentSelect ) return;
+
+        if ( agentSelect.isAutoRoute( select.value, this._agentsPayload ) ) {
+            this.setModeStatus( "Auto-routing enabled", "#6c757d" );
+            return;
+        }
+        const chosen = select.options[ select.selectedIndex ];
+        this.setModeStatus( `Next question goes to ${chosen ? chosen.textContent : select.value}`, "#0d6efd" );
+    }
+
+    /**
+     * Set the mode-status line's text and colour, or do nothing if it is absent.
+     */
+    setModeStatus( text, color ) {
+        const modeStatus = document.getElementById( 'mode-status' );
+        if ( !modeStatus ) return;
+        modeStatus.textContent = text;
+        modeStatus.style.color = color;
+    }
+
     async setAgentMode( mode ) {
         if ( !this.currentUserEmail ) {
             this.error( "Cannot set mode: No user logged in" );
@@ -20781,14 +20901,14 @@ class NotificationsUI {
      *     displayName: Human-readable mode name
      */
     updateModeUI( mode, displayName ) {
-        const agentModeSelect = document.getElementById( 'agent-mode' );
         const modeBadge = document.getElementById( 'mode-badge' );
-        const modeStatus = document.getElementById( 'mode-status' );
 
-        // Update dropdown selection
-        if ( agentModeSelect ) {
-            agentModeSelect.value = mode || 'system';
-        }
+        // THE SELECT IS NO LONGER DRIVEN FROM HERE. It used to be set to the server's
+        // sticky mode on every load, which worked while its values were short mode
+        // keys ("math"). They are full routing commands now, so a mode key would match
+        // no option and silently blank the dropdown — and per ruling 2 the select is a
+        // ONE-SHOT per-request route anyway, not a view of a persisted mode. The badge
+        // below still shows the sticky VOICE mode, which is a different thing.
 
         // Update badge visibility and content
         if ( modeBadge ) {
@@ -20800,16 +20920,10 @@ class NotificationsUI {
             }
         }
 
-        // Update status text
-        if ( modeStatus ) {
-            if ( mode && mode !== 'system' ) {
-                modeStatus.textContent = `Direct routing to ${displayName}`;
-                modeStatus.style.color = '#0d6efd';
-            } else {
-                modeStatus.textContent = 'Auto-routing enabled';
-                modeStatus.style.color = '#6c757d';
-            }
-        }
+        // The status line belongs to the ONE-SHOT selection now, not to the sticky
+        // voice mode — two writers on one element would race, and the select's own
+        // change handler is the one a user is looking at when they read it.
+        this.updateOneShotRouteStatus();
     }
 
     /**

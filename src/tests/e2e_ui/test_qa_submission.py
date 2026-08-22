@@ -9,7 +9,8 @@ Requires:
     - Clean test database (via logged_in_page fixture)
 """
 
-from .agent_select_contract import checked_in_option_values, option_value_drift
+from cosa.rest.v2.registry import AUTO_ROUTE_VALUE
+from .agent_select_contract import expected_option_values, option_value_drift
 from .conftest import BASE_URL
 
 
@@ -41,10 +42,16 @@ class TestQAInterfaceLayout:
         The agent mode dropdown renders exactly the option values it is supposed to.
 
         Was `assert options.count() >= 2` — a count, which the retirement plan's §6
-        disqualifies, and which passes on an EMPTY select once phase 3 makes this
-        list JS-populated from `GET /api/v2/agents`. Now a set-equality against the
-        checked-in options, via the shared `option_value_drift` predicate whose
-        must-fail control is test_agent_select_contract_control.py.
+        disqualifies, and which survives a PARTIAL render (Auto-Route plus one agent
+        satisfies `>= 2` while 15 agents are missing). Now a set-equality against the
+        registry, via the shared `option_value_drift` predicate whose must-fail
+        control is test_agent_select_contract_control.py.
+
+        The oracle MOVED here on 2026-08-22 and was not moved by hand: phase 3 emptied
+        the hardcoded options out of notifications.html, so `checked_in_option_values()`
+        returned an empty set, and the predicate's ORACLE EMPTY arm refused to compare
+        rather than passing an empty-vs-empty equality. The guard stayed red until the
+        oracle was repointed at the registry. That was the design.
 
         Requires:
             - Authenticated session
@@ -57,10 +64,18 @@ class TestQAInterfaceLayout:
         logged_in_page.wait_for_load_state( "networkidle" )
 
         mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )
+
+        # The options arrive from GET /api/v2/agents AFTER auth, so `networkidle` can
+        # land before the render — a DOM read taken there sees an empty select and this
+        # guard would red on a working page. Wait for the render, then measure.
+        logged_in_page.locator(
+            "#agent-mode option[value='agent router go to math']"
+        ).wait_for( state="attached", timeout=10_000 )
+
         options     = mode_select.locator( "option" )
         rendered    = [ options.nth( i ).get_attribute( "value" ) for i in range( options.count() ) ]
 
-        problems = option_value_drift( rendered, expected=checked_in_option_values() )
+        problems = option_value_drift( rendered, expected=expected_option_values() )
         assert problems == [], "#agent-mode option drift:\n  " + "\n  ".join( problems )
 
     def test_question_input_present( self, logged_in_page ):
@@ -171,34 +186,56 @@ class TestQAInputInteraction:
 
     def test_can_change_agent_mode( self, logged_in_page ):
         """
-        User can change the agent mode selector.
+        User can change the agent selector, and the change sticks for that request.
+
+        ⚠️ REWRITTEN 2026-08-22 (Q&A card phase 3), for two reasons.
+
+        (1) The options are now fetched from GET /api/v2/agents after auth rather than
+        shipped in the HTML, so `networkidle` can land before the render. The wait is
+        now on a specific option being attached.
+
+        (2) The old body was `if visible: if count >= 2: select_option(index=1)` with
+        NO assertion after it. An empty select made both guards false and the test
+        passed having checked nothing — which is precisely the failure the async render
+        would have produced, reported green. It now asserts the resulting value.
 
         Requires:
             - Authenticated session
 
         Ensures:
-            - Mode selector value changes after selection
+            - the select renders EXACTLY the user-initiable set plus the sentinel
+            - the default is the Auto-Route sentinel, so a plain question auto-routes
+            - selecting a real agent changes the value
 
-        The two `if` wrappers this replaces (`if mode_select.is_visible()` and
-        `if options.count() >= 2`) turned "the select did not render" into a SKIP
-        that reported green — strictly worse than the bare count, because phase 3
-        makes an unrendered select the likely failure. A precondition is asserted
-        now, never used as a guard.
+        MERGE NOTE (2026-08-22): Sam and I rewrote this test independently, having both
+        found the same vacuity. Both halves are kept because each catches what the
+        other misses. His async wait is load-bearing — phase 3 fetches the options
+        after auth, so `networkidle` can land BEFORE the render and a DOM read taken
+        there sees an empty select. My set-equality is load-bearing too — waiting on
+        one option proves only that ONE option arrived, so a partial render carrying
+        Auto-Route plus `math` would satisfy it while 15 agents were missing.
         """
         logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )
-        assert mode_select.is_visible(), "#agent-mode is not visible — cannot be skipped past"
 
+        # Sam's wait: the options arrive from GET /api/v2/agents after auth, so read
+        # the DOM only once at least one of them is attached.
+        logged_in_page.locator(
+            "#agent-mode option[value='agent router go to math']"
+        ).wait_for( state="attached", timeout=10_000 )
+
+        assert mode_select.is_visible(), "#agent-mode is not visible — cannot be skipped past"
+        assert mode_select.input_value() == AUTO_ROUTE_VALUE, (
+            "the card did not come up auto-routing — a question would submit as a job"
+        )
+
+        # ...and then the WHOLE set, not just the one option we waited on.
         options  = mode_select.locator( "option" )
         rendered = [ options.nth( i ).get_attribute( "value" ) for i in range( options.count() ) ]
-        problems = option_value_drift( rendered, expected=checked_in_option_values() )
+        problems = option_value_drift( rendered, expected=expected_option_values() )
         assert problems == [], "#agent-mode option drift:\n  " + "\n  ".join( problems )
 
-        before = mode_select.input_value()
-        mode_select.select_option( index=1 )
-        logged_in_page.wait_for_timeout( 300 )
-        after = mode_select.input_value()
-        assert after == rendered[ 1 ], f"selecting index 1 should yield {rendered[ 1 ]!r}, got {after!r}"
-        assert after != before, f"the selector did not change: still {after!r}"
+        mode_select.select_option( "agent router go to math" )
+        assert mode_select.input_value() == "agent router go to math"

@@ -21,6 +21,7 @@ Run: PYTHONPATH=src .venv/bin/pytest src/tests/unit/test_v2_agents_endpoint.py -
 """
 
 import types
+from unittest import mock
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -143,6 +144,41 @@ class TestGate3UserInitiableIsTheGoverningField:
             f"served-but-not-initiable: {served - set( USER_INITIABLE_COMMANDS )}; "
             f"initiable-but-not-served: {set( USER_INITIABLE_COMMANDS ) - served}"
         )
+
+    def test_a_typeable_but_not_sayable_command_is_served_as_user_initiable( self ):
+        """THE MANUFACTURED DISCRIMINATOR — Clayton's correction to the review,
+        2026-08-22, and the reason this test exists rather than a comment.
+
+        He measured what I had not: `user_initiable − speakable` is EMPTY today. The
+        two commands separating the sets (`automatic`, `none`) are both held out of
+        the dropdown, so a gate written on `user_initiable` and one written on
+        `speakable` are green on exactly the same inputs. The defect the field was
+        invented for is LATENT, not live.
+
+        A gate whose discriminator is absent from the data asserts nothing about the
+        thing it is named after, so the case has to be MANUFACTURED: a synthetic spec
+        that is typeable and not sayable, pushed through the real projection. Without
+        this, the whole `user_initiable` rewrite could be reverted to `speakable` and
+        the suite would notice only by accident — through `automatic` and `none`
+        going the other way, which is a different fact."""
+        from cosa.rest.v2.registry import AgentSpec, CommandClass, REGISTRY
+
+        typed_only = AgentSpec(
+            "agent router go to typed only", cls=CommandClass.AGENTIC,
+            display_name="Typed Only", description="Typeable, not sayable",
+            speakable=False, user_initiable=True,
+        )
+        widened = dict( REGISTRY )
+        widened[ typed_only.command ] = typed_only
+        with mock.patch.dict( "cosa.rest.v2.registry.REGISTRY", widened, clear=True ):
+            served = _by_command( _agents() )
+
+        assert typed_only.command in served, (
+            "a user_initiable, non-speakable command did not reach the dropdown — "
+            "which is exactly the hole the field was ratified to close"
+        )
+        assert served[ typed_only.command ][ "user_initiable" ] is True
+        assert served[ typed_only.command ][ "speakable" ]      is False
 
     def test_the_two_fields_are_not_the_same_set( self ):
         # The whole reason `user_initiable` was ratified as its own field. If these

@@ -163,19 +163,35 @@ class TestTheDiscriminatorIsManufactured( unittest.TestCase ):
 class TestCheckedInOracle( unittest.TestCase ):
     """The oracle reader itself, against the real tree."""
 
-    def test_the_checked_in_oracle_is_currently_non_empty( self ):
-        # Asserts the PRECONDITION of the live guards rather than assuming it: while
-        # notifications.html still carries hardcoded options, the oracle is real. When
-        # phase 3 empties the file this test goes RED — which is the signal to repoint
-        # `expected` at USER_INITIABLE_COMMANDS, not a regression. Stated here so the
-        # next reader is not left guessing why it went red.
-        values = checked_in_option_values()
-        self.assertNotEqual(
-            values, set(),
-            "the checked-in #agent-mode options are gone — if phase 3 landed, repoint "
-            "the live guards' `expected` at the registry's USER_INITIABLE_COMMANDS "
-            "and update this test to assert the new source instead."
+    def test_GATE_2_no_hand_written_agent_list_survives_in_the_html( self ):
+        # This test used to assert the OPPOSITE — that the checked-in options were
+        # non-empty — as the precondition of the live guards while the HTML was still
+        # the oracle. Its failure message said: "if phase 3 landed, repoint `expected`
+        # at USER_INITIABLE_COMMANDS and update this test to assert the new source."
+        #
+        # Phase 3 landed (Sam, dd72936d) and it went red exactly as written. This is
+        # what it became: the plan's GATE 2 — "no hand-written agent list survives in
+        # the front end" — which is now a real claim rather than a grep that matched
+        # nothing. Reversing it was the instruction, not a workaround.
+        #
+        # It fires if anyone pastes an <option> back into #agent-mode, which is the
+        # drift the whole exercise exists to prevent.
+        leftovers = checked_in_option_values()
+        self.assertEqual(
+            leftovers, set(),
+            f"hand-written <option> values are back in #agent-mode: {sorted( leftovers )}. "
+            "The dropdown is rendered from GET /api/v2/agents; anything hardcoded here "
+            "is a fifth list to keep in sync and will drift from the registry."
         )
+
+    def test_the_registry_oracle_is_non_empty( self ):
+        # The replacement precondition. The live guards now compare against
+        # expected_option_values(); if THAT ever returned an empty set, every guard
+        # would hit ORACLE EMPTY instead of silently passing — but this says so
+        # directly rather than relying on the downstream arm to report it.
+        from tests.e2e_ui.agent_select_contract import expected_option_values
+        self.assertNotEqual( expected_option_values(), set() )
+        self.assertIn( AUTO_ROUTE_SENTINEL, expected_option_values() )
 
     def _read_as( self, html ):
         """Drive the oracle over synthetic page text, so both of its give-up arms are

@@ -285,20 +285,63 @@ class TestResearchCard:
 
     def test_mode_selector_has_research_to_presentation( self, logged_in_page ):
         """
-        Mode selector dropdown includes research_to_presentation option.
+        Agent selector includes the research-to-presentation command.
+
+        ⚠️ VALUE CHANGED 2026-08-22 (Q&A card phase 3). The option values used to be
+        short mode keys — this test looked for `value='research_to_presentation'` —
+        and are now full routing commands rendered from GET /api/v2/agents, so it
+        looks for `agent router go to research to presentation`. The dropdown is no
+        longer hand-written in notifications.html at all; see
+        src/rnd/v0.2.0/2026.08.22-qa-card-registry-driven-submit-panel-retirement.md.
+
+        The wait matters: options arrive from a fetch after auth, so a bare
+        networkidle can land before the render. Locating the option itself with a
+        timeout is the wait — a count() on an unrendered select returns 0 happily.
 
         Requires:
             - Authenticated session
 
         Ensures:
-            - research_to_presentation option exists in mode dropdown
+            - the research-to-presentation command is offered, under its command value
         """
         logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
-        mode_select = logged_in_page.locator( "#agent-mode" )
-        options = mode_select.locator( "option[value='research_to_presentation']" )
-        assert options.count() > 0
+        option = logged_in_page.locator(
+            "#agent-mode option[value='agent router go to research to presentation']"
+        )
+        option.wait_for( state="attached", timeout=10_000 )
+        assert option.count() > 0
+
+    def test_mode_selector_is_rendered_from_the_registry( self, logged_in_page ):
+        """
+        The live dropdown carries routing commands, not the retired short mode keys.
+
+        The end-to-end confirmation of gate 3. The two unit halves already prove
+        registry→endpoint and endpoint→DOM; this one proves the real page, served by
+        the real server, ends up with the same values — which no unit test can see.
+
+        Requires:
+            - Authenticated session
+
+        Ensures:
+            - every option value except the Auto-Route sentinel is a routing command
+            - a short mode key ('math') appears nowhere, so the hand-written list is
+              genuinely gone rather than rendered alongside
+        """
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        logged_in_page.locator(
+            "#agent-mode option[value='agent router go to math']"
+        ).wait_for( state="attached", timeout=10_000 )
+
+        values = logged_in_page.locator( "#agent-mode option" ).evaluate_all(
+            "options => options.map( o => o.value )"
+        )
+        assert "math" not in values, f"a short mode key survives in the dropdown: {values}"
+        for value in values:
+            assert value == "__auto_route__" or value.startswith( "agent router go to " ), value
 
 
 # ---------------------------------------------------------------------------

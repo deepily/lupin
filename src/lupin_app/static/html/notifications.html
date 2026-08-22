@@ -95,28 +95,17 @@
                 <!-- Agent Mode Selector -->
                 <div class="mode-selector-container" style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 8px 12px; background: #f8f9fa; border-radius: 4px;">
                     <label for="agent-mode" style="font-size: 13px; font-weight: 500; color: #495057;">Agent Mode:</label>
-                    <select id="agent-mode" data-testid="notifications-qa-mode-select" class="agent-mode-select" style="padding: 6px 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px; min-width: 150px;">
-                        <option value="system" selected>System (Auto-Route)</option>
-                        <optgroup label="Quick Agents">
-                            <option value="math">Math Agent</option>
-                            <option value="calendar">Calendar</option>
-                            <option value="weather">Weather</option>
-                            <option value="receptionist">Receptionist</option>
-                            <option value="todo">Todo List</option>
-                            <option value="datetime">Date & Time</option>
-                            <option value="calculator">Calculator</option>
-                        </optgroup>
-                        <optgroup label="Agentic Processes">
-                            <option value="deep_research">Deep Research</option>
-                            <option value="podcast">Podcast Generator</option>
-                            <option value="research_to_podcast">Research to Podcast</option>
-                            <option value="claude_code">Claude Code</option>
-                            <option value="swe_team">SWE Team</option>
-                            <option value="presentation">Presentation Generator</option>
-                            <option value="research_to_presentation">Research to Presentation</option>
-                            <option value="test_suite">Test Suite</option>
-                        </optgroup>
-                    </select>
+                    <!-- DELIBERATELY EMPTY. Every option here is rendered at runtime from
+                         GET /api/v2/agents by shared/agent-select.js — including the Auto-Route
+                         entry, which ships as a sentinel in that response rather than being
+                         hand-written here. Sixteen <option> tags used to live in this element:
+                         one of five hand-maintained lists describing the same set of agents, and
+                         the only one a user could see. See src/rnd/v0.2.0/2026.08.22-qa-card-
+                         registry-driven-submit-panel-retirement.md §5.2.
+                         DO NOT put an <option> back. test_qa_agent_select_is_not_hand_written.py
+                         will go red, and the value would be a short mode key that
+                         /api/v2/submit cannot route. -->
+                    <select id="agent-mode" data-testid="notifications-qa-mode-select" class="agent-mode-select" style="padding: 6px 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px; min-width: 150px;"></select>
                     <span id="mode-badge" class="mode-badge" style="display: none; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; text-transform: uppercase; background: #0d6efd; color: white; cursor: pointer;" title="Click to return to System mode">
                         <!-- Mode name will be inserted here -->
                     </span>
@@ -1057,6 +1046,7 @@
          window.LUPIN_TASK_LIST_QUERY for the classic script below, which reads
          it at call time (the poll starts well after module execution). -->
     <script type="module" src="/static/js/shared/task-list-query.js?v=20260803c"></script>
+    <script type="module" src="/static/js/shared/agent-select.js?v=20260822a"></script>
     <script src="/static/js/notifications.js?v=20260821a"></script>
     <script src="/static/js/broadcast-panel.js?v=20260619a"></script>
     <script>
