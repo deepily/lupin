@@ -20,9 +20,25 @@ than as a timeout after the full wait — and every failure names the job id AND
 the job actually was.
 
 ORDERING THIS RELIES ON, stated because a round-trip test depends on it:
-`running_fifo_queue` saves the snapshot BEFORE it pushes the job onto the done queue.
-So a job visible in the done queue has already had its write-back land, and a second
-identical ask can be expected to replay.
+`running_fifo_queue._handle_base_agent` saves the snapshot BEFORE it pushes the job onto
+the done queue. So a job visible in the done queue has already had its write-back land,
+and a second identical ask can be expected to replay. That ordering used to be read off
+the source and believed; it is now driven and pinned by
+`src/tests/unit/test_write_back_lands_before_the_job_is_done.py`.
+
+🔴 AND THE DONE QUEUE CANNOT BE WATCHED FROM INSIDE A :8000 SUITE RUN — row `ce29cd20`.
+The test-suite job is itself the queue's monopolizer, so while a suite is running the
+consumer is busy with it and anything the suite submits sits in `todo` until the suite
+ends. `wait_for_done` therefore waits on a queue that cannot advance until its own
+watcher stops, and reports "still in the todo queue after N s" every time — which is what
+it did at both gates, aea44d11 and 888754f1. Confirmed on the live box by maya against
+pool-status, not inferred.
+
+⇒ On :8000, assert the HAND-OFF and the job's presence in `todo` under the id the API
+returned (`assert_handed_off`, `assert_queued_in_todo`). `wait_for_done` is kept for a box
+whose consumer is free — a :7999 probe, or a future second server — and calling it from
+inside a suite run is a test that cannot pass. The drain half is pinned at unit tier
+instead; the file named above says which claim moved and why.
 """
 
 import time
@@ -62,6 +78,50 @@ def assert_handed_off( response_body, expect_cache_hit=None, expect_path=None ):
             f"expected path={expect_path!r}, got {response_body[ 'path' ]!r}: {response_body}"
         )
     return job_id
+
+
+DRAIN_UNOBSERVABLE = (
+    "row ce29cd20 — unobservable under monopolize: the test-suite job holds the queue "
+    "consumer for the whole run, so a job submitted from inside the suite stays in todo "
+    "and can never be seen draining. Pinned instead by "
+    "src/tests/unit/test_write_back_lands_before_the_job_is_done.py"
+)
+
+
+def assert_queued_in_todo( base_url, job_id, headers, timeout=30 ):
+    """Assert `job_id` is visible in the TODO queue, and return its metadata.
+
+    THE HALF OF THE QUEUED CONTRACT A :8000 SUITE CAN ACTUALLY SHOW. The hand-off says the
+    API accepted the work; this says the QUEUE did — the job exists, under the exact id the
+    caller was given, on the server's own board. What it deliberately does not claim is
+    that the job ever runs: under monopolize it will not, until the suite that is asking
+    finishes.
+
+    It polls rather than reading once, because "accepted" and "enqueued" are not the same
+    instant, and a single read that lands between them would fail for a reason that has
+    nothing to do with the contract.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        todo = _find_in_queue( base_url, job_id, "todo", headers )
+        if todo is not None:
+            return todo
+        for queue_name in ( "run", "done", "dead" ):
+            found = _find_in_queue( base_url, job_id, queue_name, headers )
+            if found is not None:
+                # A free consumer picked it up already — the contract is satisfied MORE
+                # strongly than asked, so this is a pass, not a surprise. Reported so a
+                # reader of the log can tell which box they were on.
+                print( f"[v2_queued] job {job_id} was already in the '{queue_name}' queue — "
+                       f"this consumer is not monopolized" )
+                return found
+        time.sleep( POLL_INTERVAL )
+
+    raise AssertionError(
+        f"job {job_id} never appeared in ANY queue within {timeout}s. The ask returned a "
+        f"job_id, so the flow believes it handed the work off — a queue that never shows it "
+        f"means the hand-off did not reach the board"
+    )
 
 
 def wait_for_done( base_url, job_id, headers, timeout=DEFAULT_TIMEOUT ):

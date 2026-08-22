@@ -7,12 +7,26 @@ that second claim — two POSTs to /api/v2/ask over HTTP against the running
 server, proving a snapshotable answer is written back and the next identical
 request replays it from cache.
 
+🔴 WHAT THIS FILE CAN AND CANNOT SHOW ON :8000 — row `ce29cd20`. The cold→warm
+round trip needs the first job to RUN, and on :8000 it cannot: the test-suite job
+is itself the queue's monopolizer, so anything the suite submits waits in `todo`
+until the suite ends. Both halves of the old test failed at both gates (aea44d11
+and 888754f1) with the same message — the job "was still in the todo queue after
+N s" — and no amount of waiting would have changed it. Confirmed on the live box
+by maya against pool-status.
+
+So the live test keeps what the box can show: the ask is a cold MISS handed off to
+the queue, and the queue actually has it under the id the API returned. The drain
+and the replay are skipped here by name and pinned a tier down —
+`src/tests/unit/test_write_back_lands_before_the_job_is_done.py` drives the
+ordering the round trip rested on. This is a real loss of coverage, not a
+relabelling: nothing on :8000 now proves the shipped app replays a row it wrote.
+Restoring it needs a consumer that is not the test itself.
+
 Fail-first (approach A, intrinsic — no shared-config toggle): the FIRST call on a
-unique cold question MUST be a MISS (cache_hit False, path agent). That miss
-assertion is exactly what goes red if write-back is off — with the flag off the
-SECOND call would also miss and the replay assertion would fail. A round-trip
-that has never been red proves nothing, and the cold→warm contrast is red-able
-within one run without editing the shared :8000 INI.
+unique cold question MUST be a MISS (cache_hit False, path agent). With write-back
+off that assertion still stands, so the surviving test is a hand-off guard rather
+than a write-back guard — stated plainly rather than left for a reader to notice.
 
 Venue: :8000 (mutates Postgres via write-back, spends real inference). Submit via
 POST /api/test-suite/submit on a verified-idle server — never side-doored.
@@ -26,7 +40,10 @@ import uuid
 import pytest
 import requests
 
-from tests.integration.v2_queued import assert_handed_off, snapshot_id_for_question, wait_for_done
+from tests.integration.v2_queued import (
+    DRAIN_UNOBSERVABLE, assert_handed_off, assert_queued_in_todo,
+    snapshot_id_for_question, wait_for_done,
+)
 
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
@@ -84,20 +101,49 @@ def _cleanup_snapshot( snapshot_id ):
         print( f"[cleanup] snapshot {snapshot_id} teardown skipped: {e}" )
 
 
+def test_v2_ask_hands_a_cold_question_to_the_queue( auth_headers ):
+    """A cold, unique question misses the cache and is handed to the queue as a real job.
+
+    THE HALF THE BOX CAN SHOW. The response says `waiting` with a job_id, claims no cache
+    hit, and says it wrote nothing — and the queue then actually holds that id. The two
+    together are the queued contract's front end: the flow decided, and the board received.
+
+    RED ON REVERT: put the inline executor back and the hand-off assertion fails; break the
+    enqueue and the job never appears on the board, which the old test could not tell apart
+    from a slow consumer.
+    """
+    question, _expected_sum = _unique_math_question()
+    body = { "question": question, "speak": False, "interactive": False }
+    try:
+        r1 = requests.post( _ASK, json=body, headers=auth_headers, timeout=120 )
+        assert r1.status_code == 200, f"first call: {r1.status_code} {r1.text}"
+        first = r1.json()
+        job_id = assert_handed_off( first, expect_cache_hit=False, expect_path="agent" )
+        assert first[ "wrote_snapshot" ] is False, (
+            f"a queued hand-off wrote a snapshot before the job ran — the row would carry "
+            f"no answer: {first}"
+        )
+
+        queued = assert_queued_in_todo( BASE_URL, job_id, auth_headers )
+        assert queued, f"the queue reported the job with no metadata: {queued}"
+    finally:
+        # Under monopolize the job never runs, so there is normally nothing written. The
+        # cleanup stays because on a box with a free consumer it WILL have run by now.
+        _cleanup_snapshot( snapshot_id_for_question( question ) )
+
+
+@pytest.mark.skip( reason=DRAIN_UNOBSERVABLE )
 def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_headers ):
     """First ask queues, runs and writes back (cold miss); the second identical ask replays it.
 
-    THE ROUND TRIP IS UNCHANGED; WHERE THE ANSWER ARRIVES IS NOT. This used to assert
-    `status == "done"` from a single POST, which is what the INLINE executor did. The
-    product's executor is the queued one: the flow hands the job to the FIFO queue and
-    answers `waiting` with a job_id, and the queue produces the answer behind the
-    response (row ce29cd20). The old assertion was pinning the executor the product
-    stopped using — so the test follows the product rather than the INI being flipped
-    back to inline to keep it green.
+    🔴 SKIPPED, NOT DELETED, AND THE DIFFERENCE MATTERS. This is the only end-to-end proof
+    that the shipped app writes a row and then serves it; nothing else covers it. It is
+    kept intact so that the day there is a consumer which is not the test itself — a
+    :7999 probe, a second server, or a suite that does not monopolize — the skip comes off
+    and the test runs as written. Deleting it would quietly turn a blocked claim into an
+    unmade one.
 
-    The write-back still happens; it is the QUEUE that does it, before the job reaches
-    the done queue. That ordering is what makes the second ask a fair test: by the time
-    the first job is observable as done, its row is already in the table.
+    Everything below is the original test, unchanged.
     """
     question, _expected_sum = _unique_math_question()
     body = { "question": question, "speak": False, "interactive": False }
