@@ -55,6 +55,21 @@ EXPECTED_SUCCESSORS = {
     "/api/swe-team/submit"                      : V2_SUBMIT,
     # Already took the command as a parameter — the new door's shape under an old name.
     "/api/push-agentic"                         : V2_SUBMIT,
+
+    # The Claude Code pair — the canonical door and its alias, one handler's worth of
+    # behaviour behind two paths. Submit-shaped on their own evidence, not by inheritance
+    # from the row above: the command was already decided (`agent router go to claude
+    # code`) and the caller supplied explicit args — prompt, project, task_type, max_turns,
+    # dry_run. Nothing about either door asked the user anything.
+    #
+    # ⚠️ THIS PAIR USED TO BE LISTED AS "AN UPGRADE, NOT A TOMBSTONE (Rick)", and that is
+    # worth recording rather than quietly overwriting. The ruling was read as an either/or
+    # when it was written, before the upgrade existed. Rick refused the JOB dying on the
+    # vine, not the door retiring — and the surest way a stale caller reaches the working
+    # door is for the old one to name it. Both halves shipped: /api/v2/submit builds the
+    # job, and the doors that used to build it point at it.
+    "/api/claude-code/submit"                   : V2_SUBMIT,
+    "/api/claude-code/queue/submit"             : V2_SUBMIT,
 }
 
 
@@ -108,7 +123,7 @@ class TestEveryRetiredDoorNamesTheRightSuccessor( unittest.TestCase ):
 
     def test_the_guard_is_not_vacuous( self ):
         """Without this, a day when both dicts empty out would pass every check above."""
-        self.assertGreaterEqual( len( EXPECTED_SUCCESSORS ), 10 )
+        self.assertGreaterEqual( len( EXPECTED_SUCCESSORS ), 12 )
         self.assertIn( V2_ASK,    EXPECTED_SUCCESSORS.values() )
         self.assertIn( V2_SUBMIT, EXPECTED_SUCCESSORS.values() )
 
