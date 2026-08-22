@@ -37,10 +37,10 @@ class NotificationsUI {
         // WebSocket connections
         this.queueChannel = null;
         this.audioChannel = null;
-        // Claude Code submissions route through /api/claude-code/submit (canonical) and
-        // surface in the CJ Flow accordion via agent-agnostic job_state_transition events.
-        // The /api/claude-code/queue/submit alias is preserved for one release cycle per
-        // src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md Q1.
+        // Claude Code submissions route through /api/v2/submit, naming the command
+        // 'agent router go to claude code', and surface in the CJ Flow accordion via
+        // agent-agnostic job_state_transition events. The two /api/claude-code/* doors are
+        // retired (410) per Rick's ruling 2026-08-21.
 
         // Session management
         this.queueSessionId = null;
@@ -3799,19 +3799,33 @@ class NotificationsUI {
 
             this.log( `Claude Code queue submit: project=${project}, type=${taskType}, dry_run=${dryRun}` );
 
-            const response = await fetch( '/api/claude-code/submit', {
+            // ONE DOOR, AND THE COMMAND IS NAMED IN THE BODY. /api/claude-code/submit and its
+            // /queue/submit alias are retired: both answer 410 naming /api/v2/submit, which
+            // takes the routing command as a string and the job's own arguments in `args`.
+            //
+            // WHAT MOVED WHERE. prompt / project / task_type / max_turns / dry_run are
+            // arguments to the Claude Code job, so they go in `args`. websocket_id,
+            // scheduled_at and monopolize are directives to the QUEUE — when to run it,
+            // whether it runs alone, where to speak — so they stay top-level. `args` is
+            // checked against the command's own argument contract, and no contract names a
+            // scheduling instruction.
+            const response = await fetch( '/api/v2/submit', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     ...this.getAuthHeaders()
                 },
                 body: JSON.stringify( {
-                    prompt: prompt,
-                    project: project,
-                    task_type: taskType,
-                    max_turns: taskType === 'INTERACTIVE' ? 200 : 50,
+                    command: 'agent router go to claude code',
+                    args: {
+                        prompt: prompt,
+                        project: project,
+                        task_type: taskType,
+                        max_turns: taskType === 'INTERACTIVE' ? 200 : 50,
+                        dry_run: dryRun
+                    },
+                    question: prompt,
                     websocket_id: this.sessionId,
-                    dry_run: dryRun,
                     ...this._getSchedulingParams( 'cc' )
                 } )
             } );
@@ -3822,10 +3836,15 @@ class NotificationsUI {
             }
 
             const data = await response.json();
-            this.log( `Claude Code job queued: ${data.job_id} at position ${data.queue_position}` );
+            this.log( `Claude Code job queued: ${data.job_id}` );
 
             // Success feedback
-            statusDiv.textContent = `✓ Claude Code job submitted! Job ID: ${data.job_id}, Position: ${data.queue_position}`;
+            // NO POSITION ANY MORE — the same call the research card made when it cut over.
+            // The v2 response carries no queue_position and is not being widened for one: a
+            // place in the queue changes as the queue moves, so a number frozen at the
+            // instant of submission was stale the moment it was printed. The job card learns
+            // its real place from the queue websocket events.
+            statusDiv.textContent = `✓ Claude Code job submitted! Job ID: ${data.job_id}`;
             statusDiv.style.color = '#28a745';
 
             // Refresh queues to show new job in the CJ Flow accordion
@@ -3844,10 +3863,11 @@ class NotificationsUI {
     // submitClaudeCode / submitClaudeCodeToQueue normalized 2026-05-11 to mirror the
     // sibling research-handler pattern (statusDiv + spinner + button disable; no
     // response panel; submitted jobs surface in the multiplexer Jobs pane via
-    // agent-agnostic job_state_transition events). URL switched to the canonical
-    // /api/claude-code/submit; the /api/claude-code/queue/submit alias is preserved
-    // server-side for one release cycle. See:
-    //   src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md
+    // agent-agnostic job_state_transition events). The URL moved again on 2026-08-21:
+    // both /api/claude-code/* doors are tombstones answering 410, and the card posts to
+    // /api/v2/submit naming its command. See:
+    //   src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md (the card pattern)
+    //   src/rnd/v0.2.0/2026.08.20-brain-integration-cascade-review-plan.md (the cutover)
     // Inject / interrupt / end-session controls remain retired (since 2026-05-05)
     // and will return when ClaudeCodeJob gains bidirectional control on cj-flow.
 

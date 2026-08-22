@@ -11,7 +11,8 @@ writing any TFE-to-CC orchestrator code.
 
 What it does:
   1. Authenticate against :8000 (test server).
-  2. POST /api/claude-code/queue/submit with a trivial BOUNDED prompt
+  2. POST /api/v2/submit (command "agent router go to claude code") with a
+     trivial BOUNDED prompt
      ("write 'hello-from-smoke' to /tmp/cc-smoke-<pid>.txt inside the
      container").
   3. Poll GET /api/job-history/<cc-job-id> until terminal (done/dead)
@@ -101,7 +102,10 @@ pytestmark = pytest.mark.skip(
 
 
 TEST_SERVER_BASE = os.environ.get( "LUPIN_API_URL", "http://localhost:8000" )
-SUBMIT_ENDPOINT  = f"{TEST_SERVER_BASE}/api/claude-code/submit"
+# The two dedicated doors (/api/claude-code/submit and its /queue/submit alias) are
+# retired (410) per Rick's 2026-08-21 ruling; one front door now.
+SUBMIT_ENDPOINT  = f"{TEST_SERVER_BASE}/api/v2/submit"
+ROUTING_COMMAND  = "agent router go to claude code"
 AUTH_ENDPOINT    = f"{TEST_SERVER_BASE}/auth/login"
 JOB_ENDPOINT     = f"{TEST_SERVER_BASE}/api/job-history"
 TEST_CONTAINER   = "lupin-rest-test"
@@ -280,12 +284,18 @@ def test_claude_code_bounded_job_uses_max_subscription( auth_headers ):
         # 1. Submit
         submit_resp = _http_post_json(
             SUBMIT_ENDPOINT,
+            # ONE DOOR NOW: the command names the work and `args` carries the job's own
+            # arguments. Nothing here is a queue directive, so nothing stays top-level.
             body = {
-                "prompt"      : prompt,
-                "project"     : "lupin",
-                "task_type"   : "BOUNDED",
-                "max_turns"   : 5,
-                "dry_run"     : False,
+                "command"  : ROUTING_COMMAND,
+                "args"     : {
+                    "prompt"    : prompt,
+                    "project"   : "lupin",
+                    "task_type" : "BOUNDED",
+                    "max_turns" : 5,
+                    "dry_run"   : False,
+                },
+                "question" : "claude code max-subscription billing probe",
             },
             headers = auth_headers,
             timeout = 15,

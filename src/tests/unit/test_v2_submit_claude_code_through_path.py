@@ -48,7 +48,9 @@ class _Tracker:
     """The id-scoping tracker the queued executor calls before the push."""
 
     def register_scoped_job( self, base_hash, user_id, session_id ):
-        return f"{base_hash}-{user_id}-{session_id}"
+        # The real tracker's format (queue_extensions.register_scoped_job): base::user.
+        # Spelled the same way here so an assertion about the id means what it means live.
+        return f"{base_hash}::{user_id}"
 
 
 class _Queue:
@@ -201,7 +203,7 @@ def test_the_queued_id_is_the_scoped_one_and_it_is_what_the_caller_is_told( clie
     """
     body = _submit( client ).json()
     job  = queue.pushed[ 0 ]
-    assert job.id_hash.endswith( "-u1234567890-api-u1234567" ), job.id_hash
+    assert job.id_hash.startswith( "cc-" ) and job.id_hash.endswith( "::u1234567890" ), job.id_hash
     assert body[ "job_id" ] == job.id_hash
 
 

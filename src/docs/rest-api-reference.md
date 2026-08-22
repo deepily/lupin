@@ -60,10 +60,14 @@ how the gate rig schedules a :8000 run, so it lands only once that gate is green
 resume-from doors rebuild a job from server-side state, and a `SubmitRequest` can say
 command and args but never "resume job X".
 
-**Two more are held for their own reasons.** The Claude Code pair
-(`/api/claude-code/submit` and its alias `/api/claude-code/queue/submit`, one handler) is
-being *upgraded* to the v2 front door rather than retired. And
-`/api/upload-and-transcribe-mp3` is not a queue door at all — it transcribes audio and
+**The Claude Code pair retired on 2026-08-21, and the upgrade is what made it possible.**
+`/api/claude-code/submit` and its alias `/api/claude-code/queue/submit` (one handler) both
+answer 410 naming `/api/v2/submit`. Rick's ruling was that the Claude Code job be *upgraded*
+to the front door rather than left to die on the vine — the tombstone is the second half of
+that, not a contradiction of it: the work still runs, through
+`{"command": "agent router go to claude code", "args": {…}}`.
+
+**One more is held for its own reason.** `/api/upload-and-transcribe-mp3` is not a queue door at all — it transcribes audio and
 enqueues only on the `munger.is_agent()` branch, so it keeps serving dictation, the admin
 snapshot search and the multiplexer's insert-at-cursor; only its enqueue branch moves to
 the ask flow.
@@ -231,22 +235,42 @@ result, not only where it posts.
 
 ## 14. Claude Code (`/api/claude-code/*`) — RETIRED 2026-05-05
 
-> **Retired endpoints.** The legacy direct-dispatch + interactive-control cluster was eliminated on 2026-05-05 due to four catalogued structural defects (URL contract mismatch, no auth, module-level state, parallel pre-cj-flow path). Use **Section 15 (`/api/claude-code/queue/submit`)** instead — it is JWT-authenticated and rides the standard CJ Flow + WebSocketManager dispatch plane. See `src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md`.
+> **Retired endpoints.** The legacy direct-dispatch + interactive-control cluster was eliminated on 2026-05-05 due to four catalogued structural defects (URL contract mismatch, no auth, module-level state, parallel pre-cj-flow path). Use **`/api/v2/submit`** instead (Section 15 records the two `/api/claude-code/*` tombstones that replaced it and were themselves retired on 2026-08-21) — it is JWT-authenticated and rides the standard CJ Flow + WebSocketManager dispatch plane. See `src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md`.
 
 | Method | Path | Status |
 |--------|------|--------|
-| POST | `/api/claude-code/dispatch` | ❌ Retired 2026-05-05 → use `/api/claude-code/queue/submit` |
+| POST | `/api/claude-code/dispatch` | ❌ Retired 2026-05-05 → use `/api/v2/submit` (the `/api/claude-code/queue/submit` it originally named is itself 410 as of 2026-08-21) |
 | POST | `/api/claude-code/{task_id}/inject` | ❌ Retired 2026-05-05 → INTERACTIVE control parity pending on cj-flow path |
 | POST | `/api/claude-code/{task_id}/interrupt` | ❌ Retired 2026-05-05 → INTERACTIVE control parity pending on cj-flow path |
 | POST | `/api/claude-code/{task_id}/end` | ❌ Retired 2026-05-05 → INTERACTIVE control parity pending on cj-flow path |
 | GET | `/api/claude-code/{task_id}/status` | ❌ Retired 2026-05-05 → use job-card status via CJ Flow accordion |
 | WebSocket | `/api/claude-code/ws/{task_id}` | ❌ Retired 2026-05-05 → progress now arrives via `/ws/queue/{session_id}` notifications keyed by `cc-*` job_id |
 
-## 15. Claude Code Queue (active path)
+## 15. Claude Code Queue (retired — use `/api/v2/submit`)
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| POST | `/api/claude-code/queue/submit` | JWT | Queue Claude Code job via CJ Flow |
+| POST | `/api/claude-code/submit` | none | ❌ Retired 2026-08-21 → 410 Gone, use `/api/v2/submit` (REMOVE BY 2026-12-31) |
+| POST | `/api/claude-code/queue/submit` | none | ❌ Retired 2026-08-21 → 410 Gone, use `/api/v2/submit` (REMOVE BY 2026-12-31) |
+
+A tombstone carries no auth dependency on purpose: an unauthenticated caller must learn the
+same thing an authenticated one does, and a 401 teaches nobody anything.
+
+```json
+POST /api/v2/submit
+{
+  "command"      : "agent router go to claude code",
+  "args"         : { "prompt": "…", "project": "lupin", "task_type": "BOUNDED",
+                     "max_turns": 50, "dry_run": false },
+  "websocket_id" : "<session id>",
+  "scheduled_at" : "2026-08-22T11:00:00-04:00"
+}
+```
+
+`prompt` / `project` / `task_type` / `max_turns` / `dry_run` are arguments to the job, so
+they go in `args`. `websocket_id` / `scheduled_at` / `monopolize` are directives to the
+queue and stay top-level. `task_type` must be `BOUNDED` or `INTERACTIVE` — anything else is
+refused when the job is built.
 
 ## 16. SWE Team (`/api/swe-team/*`)
 
@@ -441,7 +465,7 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 | `dr-` | Deep Research | `/api/deep-research/submit` |
 | `pg-` | Podcast Generator | `/api/podcast-generator/submit` |
 | `rp-` | Research-to-Podcast | `/api/deep-research-to-podcast/submit` |
-| `cc-` | Claude Code | `/api/claude-code/queue/submit` |
+| `cc-` | Claude Code | `/api/v2/submit` with `"agent router go to claude code"` (both `/api/claude-code/*` doors are now 410) |
 | `swe-` | SWE Team | `/api/swe-team/submit` |
 | `ts-` | Test Suite | `/api/test-suite/submit` |
 | `bfe-` | Bug Fix Expediter | `/api/v2/ask` with `"agent router go to bug fix expediter"` (`/api/push` is now 410) |
