@@ -1843,12 +1843,23 @@ def test_submit_with_both_command_and_job_raises( tmp_path, notifier ):
         f.submit( command="agent router go to weather", job=FakeAgent(), **_CTX )
 
 
-def test_submit_writes_back_a_snapshotable_result( tmp_path, notifier, monkeypatch ):
-    """The spine `ask` shares: a snapshotable, completed result goes through the same
-    guarded write-back, so a submitted answer is replayable later.
+def test_submit_never_writes_back_because_the_caller_chose_the_agent( tmp_path, notifier, monkeypatch ):
+    """Step 9a: a submitted result is not cached, even with a question and a snapshotable
+    command — the two conditions that used to be sufficient.
 
-    The question is REQUIRED for the write — see the test below. This one used to
-    omit it and still assert a write, which is the defect that test now pins."""
+    THIS TEST USED TO ASSERT THE OPPOSITE, and the change is the point of 9a rather than a
+    relaxation to make something pass. A `submit` caller names its own command; the router
+    never chose it. A cache row written from that says "this agent answers that question"
+    on the caller's authority alone, and `ask` would then serve it to somebody else. It is
+    the v2 shape of the mode-forced answer Rick ruled out.
+
+    ⚠️ THE ABSENCE IS THE ASSERTION, AT TWO DEPTHS. `wrote_snapshot is False` alone would
+    also pass with write-back merely disabled, so the cache is asserted untouched — and
+    `snapshot_calls` as well as `write_back_calls`, so this stays red if the guard ever
+    slides down to `write_back` and a snapshot object is built and then thrown away.
+
+    RED ON REVERT: put "submitted" into _ROUTER_CHOSE and all three assertions fail.
+    """
     monkeypatch.setattr( flow_mod, "resolve",
                          lambda c, crud_enabled: FakeSpec( required_args=(), snapshotable=True ) )
     cache = FakeCache()
@@ -1856,8 +1867,9 @@ def test_submit_writes_back_a_snapshotable_result( tmp_path, notifier, monkeypat
     r = f.submit( command="agent router go to date and time", args={},
                   question="what time is it", **_CTX )
 
-    assert len( cache.write_back_calls ) == 1
-    assert r[ "wrote_snapshot" ] is True
+    assert cache.write_back_calls == [], "a submitted answer was cached — the caller chose the agent"
+    assert cache.snapshot_calls   == [], "a snapshot was built for a submit and then discarded"
+    assert r[ "wrote_snapshot" ] is False
 
 
 def test_submit_without_a_question_writes_no_snapshot( tmp_path, notifier, monkeypatch ):
@@ -1867,8 +1879,17 @@ def test_submit_without_a_question_writes_no_snapshot( tmp_path, notifier, monke
     under the command string — "agent router go to math" — which no user will ever say,
     so the row can never be matched and only costs a read on every lookup.
 
-    RED ON REVERT: drop the `and question is not None` in `submit`'s _run_agent call and
-    the write happens, failing both assertions here.
+    ⚠️ THIS TEST IS NOW COVERED TWICE, AND SAYING SO IS THE HONEST THING. The narrowing it
+    was written for — `snapshotable=spec.snapshotable and has_question` in `submit` — was
+    REMOVED by step 9a, which refuses the write for every submit and is now the single
+    authority. So the row's absence here is 9a's doing, not the question gate's, and this
+    test can no longer go red for the reason its name gives. It is kept because the claim
+    is still one somebody should be able to look up, and because if `submit` ever regains
+    write-back for a narrower case, the no-question narrowing has to come back with it —
+    at which point this test is the one that says what "with it" means.
+
+    RED ON REVERT: put "submitted" into `AskFlow._ROUTER_CHOSE` and the write happens.
+    That is 9a's falsifier, not this test's own, which is exactly the point above.
 
     ⚠️ The absence is the assertion, at TWO depths. `wrote_snapshot is False` alone would
     pass with write-back merely disabled, so the cache is asserted untouched — and
@@ -2754,9 +2775,12 @@ class TestAnEmptyQuestionIsNoQuestion:
 
     def test_a_real_question_submit_still_writes_and_still_types_api( self, tmp_path, notifier, monkeypatch ):
         """
-        NEGATIVE CONTROL on both lines at once: widen either guard past "no question"
-        — to `not question.strip()`, say, or to the entry point — and a genuine
-        submitted question stops being cached and starts being marked.
+        NEGATIVE CONTROL on the LOGGING half. It used to cover the caching half too —
+        "a genuine submitted question is still cached" — and step 9a made that false on
+        purpose: no submit is cached now, whatever question it carries. What survives here
+        is the half `has_question` still governs, and it is the half that can still drift:
+        widen the question test past "no question" — to `not question.strip()`, say — and
+        a real submitted question starts being typed as a routing command in the query log.
         """
         monkeypatch.setattr( flow_mod, "resolve",
                              lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=True ) )
@@ -2768,8 +2792,13 @@ class TestAnEmptyQuestionIsNoQuestion:
 
         f.submit( command="agent router go to math", args={}, question="what is 2+2", **_CTX )
 
-        assert cache.write_back_calls, "a genuine submitted question was not cached"
-        assert log.rows[ -1 ][ "input_type" ] == "api"
+        assert log.rows[ -1 ][ "input_type" ] == "api", (
+            "a genuine submitted question was typed as something other than a person's words"
+        )
+        assert cache.write_back_calls == [], (
+            "step 9a: no submit is cached, however genuine its question — the caller chose "
+            "the agent, so the answer is not evidence about the question"
+        )
 
     def test_a_whitespace_only_question_is_no_question_either( self, tmp_path, notifier, monkeypatch ):
         """
