@@ -183,6 +183,9 @@ class AgentBase( RunnableCode, abc.ABC ):
         self.scheduled_at = None
         self.monopolize   = False
 
+        # Runtime brake marker (QueueableJob protocol) — written by RunningFifoQueue, never here
+        self.brake_terminal_claimed = False
+
         self.execution_state = AgentBase.STATE_WAITING_TO_RUN
     
     @abc.abstractmethod

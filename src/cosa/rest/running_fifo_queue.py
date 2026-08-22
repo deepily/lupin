@@ -768,10 +768,11 @@ class RunningFifoQueue( FifoQueue ):
 
         Returns True exactly once per job OBJECT (first caller wins) and False on
         every subsequent call, so a terminal primitive can no-op a
-        double-transition. The marker lives on the job object (getattr default
-        False — heterogeneous job types may lack it until first claim; the
-        acceptable external-object case, mirroring the getattr at ~line 736), so a
-        resubmitted repair-chain job (a NEW object) is never falsely blocked.
+        double-transition. The marker is `job.brake_terminal_claimed`, a
+        QueueableJob protocol member every job class carries from construction
+        (default False) and the push gate enforces — read directly, no getattr
+        fallback (row cdfedc41). It lives on the job OBJECT, so a resubmitted
+        repair-chain job (a NEW object) is never falsely blocked.
         Checked+set under _agentic_futures_lock (an RLock, already re-entrant for
         the callback-on-same-thread case) so the read and the write are atomic
         against a racing ghost-sweep / completion callback.
@@ -784,9 +785,9 @@ class RunningFifoQueue( FifoQueue ):
             - Every later call for the same object returns False
         """
         with self._agentic_futures_lock:
-            if getattr( job, "_brake_terminal_claimed", False ):
+            if job.brake_terminal_claimed:
                 return False
-            job._brake_terminal_claimed = True
+            job.brake_terminal_claimed = True
             return True
 
     def _release_terminal_reclaim( self, job: Any ) -> None:
@@ -809,7 +810,7 @@ class RunningFifoQueue( FifoQueue ):
             - job's terminal claim is cleared (a subsequent claim can succeed)
         """
         with self._agentic_futures_lock:
-            job._brake_terminal_claimed = False
+            job.brake_terminal_claimed = False
 
     def _transition_to_dead( self, job: Any, cause: Any ) -> None:
         """

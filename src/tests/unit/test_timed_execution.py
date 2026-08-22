@@ -43,6 +43,7 @@ class MockSchedulableJob:
         # Scheduling (CJ Flow)
         self.scheduled_at          = scheduled_at
         self.monopolize            = monopolize
+        self.brake_terminal_claimed = False
 
     def do_all( self ):
         return "done"
