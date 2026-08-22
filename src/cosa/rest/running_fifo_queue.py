@@ -13,6 +13,7 @@ from cosa.memory.solution_snapshot import SolutionSnapshot
 from cosa.memory.gist_normalizer import GistNormalizer
 
 import cosa.utils.util as du
+import cosa.rest._unreachability_probe as _probe  # ⚠️ TEMPORARY — step B0(iii), DO NOT COMMIT
 import cosa.utils.util_stopwatch as sw
 import time
 
@@ -930,7 +931,15 @@ class RunningFifoQueue( FifoQueue ):
         the pool: while agentic jobs execute concurrently in pool workers, the
         consumer thread continues popping todo queue and running fast-lane jobs
         synchronously.
+
+        ⚠️⚠️ TEMPORARY PROBE — UNCOMMITTED, step B0(iii), armed 2026-08-21 by Rachel.
+        DO NOT COMMIT. DO NOT STAGE. Reverted when the live window closes.
+        Step 7a deletes this method on a STATIC finding: grep says it has no production
+        caller. A grep cannot see a caller assembled at runtime, so this records one if
+        it exists. Inert by construction — it appends to a file and returns, never raises.
         """
+        _probe.trip( _probe.FAST_LANE, f"job={type( job ).__name__}" )
+
         truncated_question = du.truncate_string( job.last_question_asked, max_len=64 )
         run_timer          = sw.Stopwatch( "Starting job run timer..." )
 
