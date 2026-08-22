@@ -25,6 +25,21 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 from typing import Dict, Any, Optional
 
+# ⚠️ THIS WHOLE MODULE HAS NEVER RUN — 7 tests, reported as "skipped", which reads
+# as deliberate. It is not: both `pytest.skip( ..., allow_module_level=True )` calls
+# below fire on an ImportError, so the file self-skips at collection and its 7 test
+# functions have never been executed or verified even once.
+#
+# Recorded here, in the file itself, on Rick's ruling of 2026-08-22 (sprint close) —
+# deliberately NOT tracked as a row, because a note nobody can miss beats a row
+# nobody opens. Whoever harvests the "de-poison batch" this reason names: the
+# question to answer is not "why does the import fail" but "would these 7 pass at
+# all if it did not". Neither has ever been checked.
+#
+# A module-level skip is the quietest way a test file can stop existing: the count
+# says skipped, the suite stays green, and nothing distinguishes 7 tests deliberately
+# held back from 7 tests nobody has ever run.
+
 # Import test infrastructure
 try:
     from cosa.tests.unit.infrastructure.mock_manager import MockManager
