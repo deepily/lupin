@@ -122,13 +122,22 @@ class TestMathCorpusHoldsNoCalculatorWork:
             f"move them to the calculator corpus: {offenders[ :5 ]}" )
 
     def test_the_gate_goes_red_when_a_calculator_line_is_planted( self, tmp_path ):
-        planted = tmp_path / "math_with_a_bad_line.txt"
+        # Asserted as a DELTA, not an absolute count. An absolute "== 1" fails for the
+        # wrong reason on a corpus that already holds an offender -- which is exactly
+        # the state a reviewer creates while poisoning the corpus to check the gate.
+        # A prove-red test must test the GATE, never re-test the corpus.
         original = open( MATH_CORPUS, encoding="utf-8" ).read()
+        before   = { n for n, raw in rla.read_utterances( MATH_CORPUS )
+                     if rla.is_calculator_shaped( raw ) }
+
+        planted = tmp_path / "math_with_a_bad_line.txt"
         planted.write_text( original + "How many miles is 10 kilometers?\n", encoding="utf-8" )
 
-        offenders = [ n for n, raw in rla.read_utterances( str( planted ) )
-                      if rla.is_calculator_shaped( raw ) ]
-        assert len( offenders ) == 1
+        new_offenders = [ raw.strip() for n, raw in rla.read_utterances( str( planted ) )
+                          if rla.is_calculator_shaped( raw ) and n not in before ]
+
+        assert new_offenders == [ "How many miles is 10 kilometers?" ], (
+            f"gate should catch the plant and nothing else; caught {new_offenders}" )
 
         # And the real corpus is untouched by the plant.
         assert open( MATH_CORPUS, encoding="utf-8" ).read() == original
@@ -144,14 +153,63 @@ class TestCalculatorCorpusHoldsNoSymbolicWork:
             f"has no operation for; move them to the math corpus: {offenders[ :5 ]}" )
 
     def test_the_gate_goes_red_when_a_math_line_is_planted( self, tmp_path ):
-        planted = tmp_path / "calc_with_a_bad_line.txt"
+        # Delta, not absolute count -- same reason as the mirror test above.
         original = open( CALC_CORPUS, encoding="utf-8" ).read()
+        before   = { n for n, raw in rla.read_utterances( CALC_CORPUS )
+                     if rla.is_math_shaped( raw ) }
+
+        planted = tmp_path / "calc_with_a_bad_line.txt"
         planted.write_text( original + "How do you solve the equation 3x + 7 = 22?\n", encoding="utf-8" )
 
-        offenders = [ n for n, raw in rla.read_utterances( str( planted ) )
-                      if rla.is_math_shaped( raw ) ]
-        assert len( offenders ) == 1
+        new_offenders = [ raw.strip() for n, raw in rla.read_utterances( str( planted ) )
+                          if rla.is_math_shaped( raw ) and n not in before ]
+
+        assert new_offenders == [ "How do you solve the equation 3x + 7 = 22?" ], (
+            f"gate should catch the plant and nothing else; caught {new_offenders}" )
         assert open( CALC_CORPUS, encoding="utf-8" ).read() == original
+
+
+class TestTheProveRedTestsSurviveAPoisonedCorpus:
+    """
+    The prove-red tests must exercise the GATE, not the corpus. When the corpus
+    already holds offenders -- the state a reviewer creates while poisoning it to
+    check the gate -- the plant must still register as the one NEW offender. These
+    build an already-poisoned corpus, then plant on top of it.
+    """
+
+    def test_a_plant_on_an_already_poisoned_math_corpus_is_still_the_only_new_offender( self, tmp_path ):
+        poisoned = tmp_path / "already_poisoned_math.txt"
+        poisoned.write_text( "How do you solve the equation 3x + 7 = 22?\n"
+                             "Convert 180 centimeters to feet\n",          # pre-existing offender
+                             encoding="utf-8" )
+        before = { n for n, raw in rla.read_utterances( str( poisoned ) )
+                   if rla.is_calculator_shaped( raw ) }
+        assert len( before ) == 1
+
+        planted = tmp_path / "planted_math.txt"
+        planted.write_text( poisoned.read_text( encoding="utf-8" ) +
+                            "How many miles is 10 kilometers?\n", encoding="utf-8" )
+        new_offenders = [ raw.strip() for n, raw in rla.read_utterances( str( planted ) )
+                          if rla.is_calculator_shaped( raw ) and n not in before ]
+
+        assert new_offenders == [ "How many miles is 10 kilometers?" ]
+
+    def test_a_plant_on_an_already_poisoned_calculator_corpus_is_still_the_only_new_offender( self, tmp_path ):
+        poisoned = tmp_path / "already_poisoned_calc.txt"
+        poisoned.write_text( "Convert 180 centimeters to feet\n"
+                             "What's the derivative of f(x) = 3x squared + 4x?\n",   # pre-existing offender
+                             encoding="utf-8" )
+        before = { n for n, raw in rla.read_utterances( str( poisoned ) )
+                   if rla.is_math_shaped( raw ) }
+        assert len( before ) == 1
+
+        planted = tmp_path / "planted_calc.txt"
+        planted.write_text( poisoned.read_text( encoding="utf-8" ) +
+                            "How do you solve the equation 3x + 7 = 22?\n", encoding="utf-8" )
+        new_offenders = [ raw.strip() for n, raw in rla.read_utterances( str( planted ) )
+                          if rla.is_math_shaped( raw ) and n not in before ]
+
+        assert new_offenders == [ "How do you solve the equation 3x + 7 = 22?" ]
 
 
 class TestGuardPrimitives:
