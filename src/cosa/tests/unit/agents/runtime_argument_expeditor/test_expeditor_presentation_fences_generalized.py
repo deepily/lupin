@@ -58,7 +58,7 @@ class TestPresentationGetsTheGeneralisedBehaviour( unittest.TestCase ):
         with _FlowFixture( o, user_visible=[ "source" ], parsed=_expeditor_resp() ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/deck.md" ) as fuzzy, \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             o.expedite( PR, "", "u@x", "s", "uid", "make a deck about KISS" )
         self.assertEqual( fuzzy.call_args.kwargs[ "original_question" ], "make a deck about KISS" )
 
@@ -70,7 +70,7 @@ class TestPresentationGetsTheGeneralisedBehaviour( unittest.TestCase ):
         with _FlowFixture( o, user_visible=[ "source" ], parsed=_expeditor_resp() ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/deck.md" ) as fuzzy, \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             o.expedite( PR, "", "u@x", "s", "uid", "make a deck about KISS" )
         self.assertTrue( fuzzy.call_args.kwargs[ "use_choice_card" ] )
 
@@ -84,7 +84,7 @@ class TestPresentationGetsTheGeneralisedBehaviour( unittest.TestCase ):
                            parsed=_expeditor_resp( present="source=KISS" ) ), \
              patch.object( ex_mod.os.path, "exists", return_value=False ), \
              patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/kiss-deck.md" ) as fuzzy, \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( PR, "", "u@x", "s", "uid", "make a deck on KISS" )
         self.assertEqual( out[ "source" ], "/io/x/kiss-deck.md" )
         self.assertEqual( fuzzy.call_args.kwargs[ "original_question" ], "make a deck on KISS" )
@@ -106,7 +106,7 @@ class TestPresentationGetsTheGeneralisedBehaviour( unittest.TestCase ):
                            parsed=_expeditor_resp( present="source=KISS" ) ), \
              patch.object( ex_mod.os.path, "exists", return_value=False ), \
              patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/kiss-deck.md" ) as fuzzy, \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             o.expedite( PR, "", "u@x", "s", "uid", "make a deck on KISS" )
         self.assertEqual( fuzzy.call_args.kwargs[ "arg_name" ], "source" )
         self.assertEqual( fuzzy.call_args.kwargs[ "ask_question" ], PRESENTATION_QUESTION )
@@ -124,7 +124,7 @@ class TestTheRescueStillBehavesOnThePresentationPath( unittest.TestCase ):
                            parsed=_expeditor_resp( present="source=io/deep-research/u/report.md" ) ), \
              patch.object( ex_mod.os.path, "exists", return_value=True ), \
              patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/other.md" ) as fuzzy, \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( PR, "", "u@x", "s", "uid", "make a deck from io/deep-research/u/report.md" )
         self.assertEqual( out[ "source" ], "io/deep-research/u/report.md" )
         fuzzy.assert_not_called()
@@ -138,7 +138,7 @@ class TestTheRescueStillBehavesOnThePresentationPath( unittest.TestCase ):
              patch.object( ex_mod.os.path, "exists", return_value=False ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/resolved.md" ) as fuzzy, \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( PR, "", "u@x", "s", "uid", "make a deck on KISS" )
         fuzzy.assert_called_once()
         self.assertEqual( out[ "source" ], "/io/x/resolved.md" )
@@ -151,7 +151,7 @@ class TestTheRescueStillBehavesOnThePresentationPath( unittest.TestCase ):
                            parsed=_expeditor_resp( present="source=KISS" ) ), \
              patch.object( ex_mod.os.path, "exists", return_value=False ), \
              patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/deck.yaml" ), \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( PR, "", "u@x", "s", "uid", "make a deck on KISS" )
         self.assertEqual( out[ "source" ], "/io/x/deck.yaml" )
         self.assertEqual( out[ "render_only" ], "true" )
@@ -182,7 +182,7 @@ class TestNothingElseMoved( unittest.TestCase ):
         with _FlowFixture( o, user_visible=[ "research" ], parsed=_expeditor_resp() ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/report.md" ) as fuzzy, \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             o.expedite( PG, "", "u@x", "s", "uid", "make a podcast about KISS" )
         self.assertEqual( fuzzy.call_args.kwargs[ "original_question" ], "make a podcast about KISS" )
         self.assertTrue( fuzzy.call_args.kwargs[ "use_choice_card" ] )
@@ -193,7 +193,7 @@ class TestNothingElseMoved( unittest.TestCase ):
                            parsed=_expeditor_resp( present="research=KISS" ) ), \
              patch.object( ex_mod.os.path, "exists", return_value=False ), \
              patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/kiss-protocol.md" ) as fuzzy, \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( PG, "", "u@x", "s", "uid", "make me a podcast on KISS" )
         self.assertEqual( out[ "research" ], "/io/x/kiss-protocol.md" )
         # EFFECTIVE wording, not the mechanism. Before the fix the rescue passed
@@ -214,7 +214,7 @@ class TestNothingElseMoved( unittest.TestCase ):
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_handle_tfe_checkpoint_match", return_value="tfe-abcd1234" ) as tfe, \
              patch.object( o, "_handle_fuzzy_file_match" ) as fuzzy, \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( TFE, "", "u@x", "s", "uid", "resume the auth job" )
         self.assertEqual( out[ "resume_from" ], "tfe-abcd1234" )
         fuzzy.assert_not_called()
@@ -229,7 +229,7 @@ class TestNothingElseMoved( unittest.TestCase ):
                            parsed=_expeditor_resp( present="resume_from=the auth job" ) ), \
              patch.object( ex_mod.os.path, "exists", return_value=False ), \
              patch.object( o, "_handle_fuzzy_file_match" ) as fuzzy, \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( TFE, "", "u@x", "s", "uid", "resume the auth job" )
         self.assertEqual( out[ "resume_from" ], "the auth job" )
         fuzzy.assert_not_called()

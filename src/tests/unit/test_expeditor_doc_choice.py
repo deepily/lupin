@@ -68,14 +68,15 @@ class TestAskChoiceForArg( unittest.TestCase ):
     ]
 
     def _ask( self, resp ):
-        o = _mk_expeditor()
+        o   = _mk_expeditor()
+        ctx = ex_mod.ExpediteContext()
         captured = {}
         def _fake_notify( request=None, debug=False, bearer_token=None ):
             captured[ "request" ] = request
             return resp
         with patch.object( ex_mod, "notify_user_sync", side_effect=_fake_notify ):
-            out = o._ask_choice_for_arg( "research", "Which document?", self.OPTIONS, "u@e.com" )
-        return out, captured.get( "request" ), o
+            out = o._ask_choice_for_arg( "research", "Which document?", self.OPTIONS, "u@e.com", context=ctx )
+        return out, captured.get( "request" ), ctx
 
     def _ask_with_card_id( self, card_id ):
         o = _mk_expeditor()
@@ -141,7 +142,7 @@ class TestAskChoiceForArg( unittest.TestCase ):
     def test_cancel_returns_none_and_declined( self ):
         out, _r, o = self._ask( _Resp( response_value=DOC_CHOICE_CANCEL_LABEL ) )
         self.assertIsNone( out )
-        self.assertEqual( o._last_expedite_reason, BATCH_DECLINED )
+        self.assertEqual( o.reason, BATCH_DECLINED )
 
     def test_describe_returns_sentinel( self ):
         out, _r, _o = self._ask( _Resp( response_value=DOC_CHOICE_DESCRIBE_LABEL ) )
@@ -150,7 +151,7 @@ class TestAskChoiceForArg( unittest.TestCase ):
     def test_failure_returns_none_not_declined( self ):
         out, _r, o = self._ask( _Resp( success=False, response_value=None, status="error", is_error=True ) )
         self.assertIsNone( out )
-        self.assertNotEqual( o._last_expedite_reason, BATCH_DECLINED )
+        self.assertNotEqual( o.reason, BATCH_DECLINED )
 
 
 # ── 2. _describe_candidate ──────────────────────────────────────────────────
@@ -181,15 +182,19 @@ class TestChooseDocumentFromMatches( unittest.TestCase ):
     }
 
     def _choose( self, choice_return ):
-        o = _mk_expeditor()
+        o   = _mk_expeditor()
+        ctx = ex_mod.ExpediteContext()
         captured = {}
-        def _fake_choice( arg_name, question, options, user_email, abstract=None, card_id=None ):
+        def _fake_choice( arg_name, question, options, user_email, abstract=None, card_id=None, context=None ):
             captured[ "options" ] = options
             captured[ "card_id" ] = card_id
+            captured[ "context" ] = context
             return choice_return
         o._ask_choice_for_arg = _fake_choice
-        out = o._choose_document_from_matches( list( self.DOCS.keys() ), self.DOCS, "u@e.com" )
-        return out, captured.get( "options" ), o, captured.get( "card_id" )
+        out = o._choose_document_from_matches( list( self.DOCS.keys() ), self.DOCS, "u@e.com", context=ctx )
+        # the caller's context is what the ask receives — not a fresh one
+        assert captured[ "context" ] is ctx
+        return out, captured.get( "options" ), ctx, captured.get( "card_id" )
 
     def test_the_caller_names_the_card_it_is_showing( self ):
         # Row a1420538. The stub's signature broke when card_id was added; widening it
@@ -223,7 +228,7 @@ class TestChooseDocumentFromMatches( unittest.TestCase ):
     def test_label_outside_option_set_never_guesses( self ):
         out, _opts, o, _card_id = self._choose( "not-a-candidate.md" )
         self.assertIsNone( out )
-        self.assertEqual( o._last_expedite_reason, BATCH_MALFORMED )
+        self.assertEqual( o.reason, BATCH_MALFORMED )
 
     def test_basename_collision_falls_back_to_rel_label( self ):
         o = _mk_expeditor()
@@ -232,7 +237,7 @@ class TestChooseDocumentFromMatches( unittest.TestCase ):
             "io/deep-research/u/b/report.md" : "/abs/b/report.md",
         }
         captured = {}
-        def _fake_choice( arg_name, question, options, user_email, abstract=None, card_id=None ):
+        def _fake_choice( arg_name, question, options, user_email, abstract=None, card_id=None, context=None ):
             captured[ "options" ] = options
             return "io/deep-research/u/b/report.md"
         o._ask_choice_for_arg = _fake_choice

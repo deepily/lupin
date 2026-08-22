@@ -209,7 +209,12 @@ class TestHandleExpeditorTest( unittest.TestCase ):
     def _run( self, voice_command, agents, to_thread_return, job=None, force_failure_mode=None ):
         """Run _handle_expeditor_test with a controlled environment, return response."""
         expeditor = MagicMock()
-        expeditor._last_notification_status = "no_response"
+
+        async def _to_thread( _fn, **kwargs ):
+            # The endpoint hands its own ExpediteContext down; the notification status
+            # comes back on it, not off the shared expeditor (row 10c60712).
+            kwargs[ "context" ].notification_status = "no_response"
+            return to_thread_return
         tracker = MagicMock()
         tracker.register_scoped_job.side_effect = lambda h, u, s: f"scoped-{h}"
         self.queue.size.return_value = 4
@@ -220,8 +225,7 @@ class TestHandleExpeditorTest( unittest.TestCase ):
              patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=MagicMock() ), \
              patch( "cosa.rest.agentic_job_factory.create_agentic_job", return_value=job ), \
              patch( "cosa.rest.routers.mock_job.user_job_tracker", tracker ), \
-             patch( "cosa.rest.routers.mock_job.asyncio.to_thread",
-                    new=AsyncMock( return_value=to_thread_return ) ), \
+             patch( "cosa.rest.routers.mock_job.asyncio.to_thread", new=_to_thread ), \
              patch( "cosa.rest.routers.mock_job.uuid.uuid4",
                     return_value=MagicMock( hex="abcd1234ef99" ) ):
             return asyncio.run( _handle_expeditor_test(

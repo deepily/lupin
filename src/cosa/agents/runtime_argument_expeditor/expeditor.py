@@ -86,6 +86,41 @@ class ExtractionResult:
 
 
 @dataclass
+class ExpediteContext:
+    """
+    Everything that belongs to ONE expedite() call, carried as an argument.
+
+    The expeditor is shared — v2 keeps a single instance on app.state — so a
+    caller's job id, bearer token and failure reason must never live on the
+    instance. They used to (`self._job_id` / `self._bearer_token` /
+    `self._last_expedite_reason` / `self._last_notification_status`), which
+    worked only because v1 built a fresh expeditor per request. Two requests in
+    flight at once shared those four slots, and the second caller's bearer token
+    was the one the first caller's notification went out with (row 10c60712).
+
+    Requires:
+        - job_id / bearer_token are the CALLER's own, or None
+        - one instance per expedite() call, never reused across calls
+
+    Ensures:
+        - Carries values IN (job_id, bearer_token) and results OUT (reason,
+          notification_status) for exactly one call
+        - Two concurrent calls share nothing
+
+    Note on the helpers' `context=None` default: a helper called without one
+    builds a throwaway, so it sends no token and drops the reason. That is a
+    DEGRADED call, never a crossover — the failure mode of forgetting to pass
+    the context is an unauthenticated notification, not another user's
+    credential. The default exists for direct unit-level calls; every path from
+    expedite()/collect() passes the caller's own.
+    """
+    job_id              : str = None
+    bearer_token        : str = None
+    reason              : str = None    # one of the BATCH_* constants, or None on success
+    notification_status : str = None    # the last notification response's status
+
+
+@dataclass
 class ArgSpec:
     """
     An JOB_ARG_CONTRACTS entry, typed — every field the expeditor's extract() /
@@ -274,12 +309,11 @@ class RuntimeArgumentExpeditor:
         self.prompt_template_path      = config_mgr.get( "prompt template for runtime argument expeditor" )
         self.confirmation_prompt_path  = config_mgr.get( "prompt template for argument confirmation" )
         self.llm_factory               = LlmClientFactory( debug=debug, verbose=verbose )
-        self._last_notification_status = None
-        # Why the last expedite() ended without a complete args dict — one of the
-        # BATCH_* constants, or None on success. Readable by the caller so an
-        # UNREACHABLE / TIMEOUT job is never recorded as a user cancellation
-        # (bugs 2aaab1bf, 68198c9f). Set on EVERY failure path, not just the batch.
-        self._last_expedite_reason     = None
+        # NOTHING per-call lives here. Why a call ended without a complete args
+        # dict — one of the BATCH_* constants — rides on the caller's own
+        # ExpediteContext, so an UNREACHABLE / TIMEOUT job is never recorded as a
+        # user cancellation (bugs 2aaab1bf, 68198c9f) AND one caller's reason is
+        # never readable by another (row 10c60712).
 
     @staticmethod
     def _classify_ask_failure( response ):
@@ -302,7 +336,7 @@ class RuntimeArgumentExpeditor:
             return BATCH_MALFORMED
         return BATCH_UNREACHABLE
 
-    def expedite( self, command, raw_args, user_email, session_id, user_id, original_question, job_id=None, bearer_token=None ):
+    def expedite( self, command, raw_args, user_email, session_id, user_id, original_question, job_id=None, bearer_token=None, context=None ):
         """
         Run argument gap analysis and collect missing arguments from user.
 
@@ -326,25 +360,31 @@ class RuntimeArgumentExpeditor:
             original_question: Full voice command transcription
             job_id: Optional agentic job ID for routing notifications to job cards
             bearer_token: Optional JWT for authenticating notification requests
+            context: Optional ExpediteContext the caller owns. Pass one to read
+                back WHY the call failed (`context.reason`) and the last
+                notification status; omit it and that outcome is discarded. It
+                is the caller's object, not the expeditor's — two concurrent
+                calls each read their own.
 
         Returns:
             dict or None: Complete argument dictionary or None on cancel
         """
-        self._job_id               = job_id
-        self._bearer_token         = bearer_token
-        self._last_expedite_reason = None
+        context              = context if context is not None else ExpediteContext()
+        context.job_id       = job_id
+        context.bearer_token = bearer_token
+        context.reason       = None
 
         agent_entry = JOB_ARG_CONTRACTS.get( command )
         if not agent_entry:
             print( f"[Expeditor] Unknown command: {command}" )
-            self._last_expedite_reason = BATCH_INTERNAL
+            context.reason = BATCH_INTERNAL
             return None
 
         spec       = ArgSpec.from_entry( agent_entry )
         extraction = self.extract( command, raw_args, original_question, spec )
         return self.collect(
             extraction, command, original_question, spec,
-            user_email, session_id, user_id
+            user_email, session_id, user_id, context=context
         )
 
     def extract( self, command, raw_args, original_question, spec ):
@@ -481,7 +521,7 @@ class RuntimeArgumentExpeditor:
             special_handlers   = special_handlers,
         )
 
-    def collect( self, extraction, command, original_question, spec, user_email, session_id, user_id ):
+    def collect( self, extraction, command, original_question, spec, user_email, session_id, user_id, *, context ):
         """
         Interactive half of expedite(): prompt the user for the args extract()
         found missing, run any special handlers, confirm, and inject system args.
@@ -495,7 +535,7 @@ class RuntimeArgumentExpeditor:
         Ensures:
             - Returns the complete injected argument dict on success
             - Returns None on user cancel / decline / timeout / transport failure
-            - On a non-user-decision failure, sets self._last_expedite_reason
+            - On a non-user-decision failure, records the cause on context.reason
               and does not report it as a cancellation (bug 2aaab1bf)
 
         Args:
@@ -506,6 +546,8 @@ class RuntimeArgumentExpeditor:
             user_email: Authenticated user's email
             session_id: WebSocket session ID
             user_id: System user ID
+            context: THIS call's ExpediteContext (required — it carries the
+                caller's bearer token down and the failure reason back up)
 
         Returns:
             dict or None: Complete argument dictionary or None on cancel
@@ -534,9 +576,9 @@ class RuntimeArgumentExpeditor:
             # Batch-collect batchable args if more than one
             if len( batchable ) > 1:
                 if self.debug: print( f"[Expeditor] Batch-collecting {len( batchable )} args: {batchable}" )
-                batch_answers, batch_reason = self._batch_collect_args( batchable, fallback_questions, user_email, fallback_defaults, command, abstract=request_abstract )
+                batch_answers, batch_reason = self._batch_collect_args( batchable, fallback_questions, user_email, fallback_defaults, command, abstract=request_abstract, context=context )
                 if batch_answers is None:
-                    self._last_expedite_reason = batch_reason
+                    context.reason = batch_reason
                     if batch_reason == BATCH_DECLINED:
                         print( "[Expeditor] User declined batch collection" )
                     else:
@@ -544,7 +586,7 @@ class RuntimeArgumentExpeditor:
                         # reporting a transport failure as a cancellation is the defect
                         # this branch exists to prevent (bug 2aaab1bf).
                         print( f"[Expeditor] Batch collection did NOT reach a user decision: {batch_reason} "
-                               f"(notification status: {self._last_notification_status}). "
+                               f"(notification status: {context.notification_status}). "
                                f"The user did not cancel — the prompt never got a usable answer." )
                     return None
                 for arg_name, value in batch_answers.items():
@@ -557,9 +599,9 @@ class RuntimeArgumentExpeditor:
                 arg_name = batchable[ 0 ]
                 resolved_default = self._resolve_default( command, arg_name, fallback_defaults.get( arg_name ) )
                 if arg_name in fallback_questions:
-                    value = self._ask_for_arg( arg_name, fallback_questions[ arg_name ], user_email, response_default=resolved_default, abstract=request_abstract )
+                    value = self._ask_for_arg( arg_name, fallback_questions[ arg_name ], user_email, response_default=resolved_default, abstract=request_abstract, context=context )
                 else:
-                    value = self._ask_for_arg( arg_name, f"Please provide the '{arg_name}' argument.", user_email, response_default=resolved_default, abstract=request_abstract )
+                    value = self._ask_for_arg( arg_name, f"Please provide the '{arg_name}' argument.", user_email, response_default=resolved_default, abstract=request_abstract, context=context )
                 if value is None:
                     print( f"[Expeditor] User cancelled at arg '{arg_name}'" )
                     return None
@@ -592,7 +634,7 @@ class RuntimeArgumentExpeditor:
                         user_email, spec.display_name,
                         original_question=original_question, use_choice_card=True,
                         arg_name=arg_name, ask_question=fuzzy_question,
-                        file_arg=spec.file_args.get( arg_name )
+                        file_arg=spec.file_args.get( arg_name ), context=context
                     )
                     # Auto-detect YAML → set render_only flag
                     if value and value.lower().endswith( ( ".yaml", ".yml" ) ):
@@ -601,9 +643,9 @@ class RuntimeArgumentExpeditor:
                 elif handler == "tfe_checkpoint_match":
                     # Session 9056c113 doc 16 Phase 2 — voice-driven TFE resume.
                     # Fuzzy-match user description against stalled/recent TFE jobs.
-                    value = self._handle_tfe_checkpoint_match( user_email )
+                    value = self._handle_tfe_checkpoint_match( user_email, context=context )
                 else:
-                    value = self._ask_for_arg( arg_name, f"Please provide the '{arg_name}' argument.", user_email, abstract=request_abstract )
+                    value = self._ask_for_arg( arg_name, f"Please provide the '{arg_name}' argument.", user_email, abstract=request_abstract, context=context )
                 if value is None:
                     print( f"[Expeditor] User cancelled at arg '{arg_name}'" )
                     return None
@@ -642,7 +684,7 @@ class RuntimeArgumentExpeditor:
                 user_email, spec.display_name,
                 original_question=original_question, use_choice_card=True,
                 arg_name=arg_name, ask_question=spec.fallback_questions.get( arg_name ),
-                file_arg=spec.file_args.get( arg_name )
+                file_arg=spec.file_args.get( arg_name ), context=context
             )
             if value is None:
                 print( f"[Expeditor] User cancelled resolving present-but-unresolvable arg '{arg_name}'" )
@@ -655,7 +697,7 @@ class RuntimeArgumentExpeditor:
         if self.debug: print( f"[Expeditor] Final args: {final_args}" )
 
         # Step 8: Confirmation loop — user reviews args before submission
-        confirmed_args = self._confirm_and_iterate( final_args, spec, command, user_email )
+        confirmed_args = self._confirm_and_iterate( final_args, spec, command, user_email, context=context )
         if confirmed_args is None:
             print( "[Expeditor] User cancelled during confirmation" )
             return None
@@ -712,7 +754,7 @@ class RuntimeArgumentExpeditor:
             return spec.cli_module.split( "." )[ -1 ].replace( "_", " " )
         return "agent"
 
-    def _confirm_and_iterate( self, args_dict, spec, command_key, user_email ):
+    def _confirm_and_iterate( self, args_dict, spec, command_key, user_email, *, context=None ):
         """
         Present argument summary and iterate until user approves, modifies, or cancels.
 
@@ -738,10 +780,12 @@ class RuntimeArgumentExpeditor:
             spec: ArgSpec for the target agent
             command_key: Key in JOB_ARG_CONTRACTS for user-visible-args lookup
             user_email: Target user for voice prompts
+            context: THIS call's ExpediteContext (see ExpediteContext)
 
         Returns:
             dict or None: Approved args_dict or None on cancel
         """
+        context = context if context is not None else ExpediteContext()
         max_iterations = 5
 
         # Whitelist: only show user-visible args in confirmation summary
@@ -769,7 +813,7 @@ class RuntimeArgumentExpeditor:
             abstract = f"**{agent_name} Job Summary**\n\n" + "\n".join( summary_lines )
             message  = f"Here's what I have for your {agent_name} job. Does this look right?"
 
-            response = self._ask_for_confirmation( message, user_email, abstract=abstract )
+            response = self._ask_for_confirmation( message, user_email, abstract=abstract, context=context )
 
             if response is None:
                 return None
@@ -781,7 +825,7 @@ class RuntimeArgumentExpeditor:
                 return args_dict
 
             if lower == "no":
-                self._last_expedite_reason = BATCH_DECLINED
+                context.reason = BATCH_DECLINED
                 return None
 
             # "yes [comment: ...]" or "no [comment: ...]"
@@ -805,7 +849,7 @@ class RuntimeArgumentExpeditor:
                         # Loop continues — re-present updated summary
                         continue
                 # No comment or parse failed — respect the "no"
-                self._last_expedite_reason = BATCH_DECLINED
+                context.reason = BATCH_DECLINED
                 return None
 
         # Safety valve: too many iterations
@@ -1057,7 +1101,7 @@ class RuntimeArgumentExpeditor:
         return "\n".join( lines )
 
     def _ask_for_arg( self, arg_name, question, user_email, response_default=None, abstract=None,
-                      card_id=None ):
+                      card_id=None, *, context=None ):
         """
         Ask the user for a missing argument via synchronous notification.
 
@@ -1076,10 +1120,13 @@ class RuntimeArgumentExpeditor:
             user_email: Target user for notification
             response_default: Optional pre-filled default value for the input
             abstract: Optional markdown context shown in UI but not spoken
+            context: THIS call's ExpediteContext (see ExpediteContext)
 
         Returns:
             str or None: User's response or None
         """
+        context = context if context is not None else ExpediteContext()
+
         # An OPEN_ENDED ask carries no options, so response_options exists here ONLY to
         # name the ask — and it is omitted entirely when there is nothing to name, so
         # every other caller of this method sends exactly the envelope it always sent.
@@ -1100,12 +1147,12 @@ class RuntimeArgumentExpeditor:
             suppress_ding    = False,
             response_default = response_default,
             abstract         = abstract,
-            job_id           = self._job_id,
+            job_id           = context.job_id,
             response_options = response_options
         )
 
-        response = notify_user_sync( request=request, debug=self.debug, bearer_token=self._bearer_token )
-        self._last_notification_status = response.status
+        response = notify_user_sync( request=request, debug=self.debug, bearer_token=context.bearer_token )
+        context.notification_status = response.status
 
         if self.debug:
             print( f"[Expeditor] _ask_for_arg response: success={response.success}, status={response.status}, "
@@ -1116,16 +1163,16 @@ class RuntimeArgumentExpeditor:
             value = response.response_value.strip()
             # Check for cancellation keywords — the ONE outcome that is a user decision
             if value.lower() in ( "cancel", "nevermind", "never mind", "stop", "quit" ):
-                self._last_expedite_reason = BATCH_DECLINED
+                context.reason = BATCH_DECLINED
                 return None
             return value
 
         # No usable answer — a machine failure, never a user cancellation (bug 68198c9f)
-        self._last_expedite_reason = self._classify_ask_failure( response )
+        context.reason = self._classify_ask_failure( response )
         return None
 
     def _ask_choice_for_arg( self, arg_name, question, options, user_email, abstract=None,
-                             card_id=None ):
+                             card_id=None, *, context=None ):
         """
         Ask the user to pick a value for a missing arg from a fixed list, using the
         SAME multiple-choice card the routing confirm uses — no new card, renderer,
@@ -1145,7 +1192,7 @@ class RuntimeArgumentExpeditor:
         Ensures:
             - Returns the chosen option's label on a pick
             - Returns None on Cancel, timeout, or delivery/parse failure (the
-              failure reason is recorded on self._last_expedite_reason)
+              failure reason is recorded on context.reason)
             - Returns DOC_CHOICE_DESCRIBE_SENTINEL when the user picks the
               "Let me describe it instead" escape
             - Never returns a value the caller did not put in `options`
@@ -1161,6 +1208,7 @@ class RuntimeArgumentExpeditor:
         Returns:
             str or None: chosen label, DOC_CHOICE_DESCRIBE_SENTINEL, or None
         """
+        context = context if context is not None else ExpediteContext()
         response_options = {
             "questions": [ {
                 "question"     : question,
@@ -1192,16 +1240,16 @@ class RuntimeArgumentExpeditor:
             title            = f"Missing: {arg_name}",
             suppress_ding    = False,
             abstract         = abstract,
-            job_id           = self._job_id,
+            job_id           = context.job_id,
             response_options = response_options
         )
 
-        response = notify_user_sync( request=request, debug=self.debug, bearer_token=self._bearer_token )
-        self._last_notification_status = response.status
+        response = notify_user_sync( request=request, debug=self.debug, bearer_token=context.bearer_token )
+        context.notification_status = response.status
 
         if not ( response.success and response.response_value ):
             # Delivery/timeout/parse failure — a machine failure, never a user choice.
-            self._last_expedite_reason = self._classify_ask_failure( response )
+            context.reason = self._classify_ask_failure( response )
             return None
 
         # MULTIPLE_CHOICE returns the raw label OR JSON { "answers": { <header>: label } }.
@@ -1215,7 +1263,7 @@ class RuntimeArgumentExpeditor:
                 pass  # fall through with the raw value
 
         if selected is None or selected == DOC_CHOICE_CANCEL_LABEL:
-            self._last_expedite_reason = BATCH_DECLINED
+            context.reason = BATCH_DECLINED
             return None
         if selected == DOC_CHOICE_DESCRIBE_LABEL:
             return DOC_CHOICE_DESCRIBE_SENTINEL
@@ -1273,7 +1321,7 @@ class RuntimeArgumentExpeditor:
 
 
     def _choose_document_from_matches( self, matches, docs_map, user_email,
-                                       arg_name="research", agent_display_name=None ):
+                                       arg_name="research", agent_display_name=None, *, context=None ):
         """
         Present 2..MAX_CHOICE_OPTIONS candidate documents as the standard choice
         card and map the pick back to an absolute path. The doc-choice surface every
@@ -1311,6 +1359,7 @@ class RuntimeArgumentExpeditor:
         Returns:
             str or None: absolute path, DOC_CHOICE_DESCRIBE_SENTINEL, or None
         """
+        context = context if context is not None else ExpediteContext()
         options      = []
         label_to_rel = {}
         for rel in matches:
@@ -1326,7 +1375,8 @@ class RuntimeArgumentExpeditor:
             self._document_choice_question( agent_display_name ),
             options,
             user_email,
-            card_id=DOCUMENT_CHOICE_CARD_ID
+            card_id=DOCUMENT_CHOICE_CARD_ID,
+            context=context
         )
         if chosen is None or chosen == DOC_CHOICE_DESCRIBE_SENTINEL:
             return chosen
@@ -1336,10 +1386,10 @@ class RuntimeArgumentExpeditor:
             return docs_map[ rel ]
         # A label outside the fixed option set — the card cannot produce this, so
         # treat it as a non-answer rather than guessing (kills the old first-match).
-        self._last_expedite_reason = BATCH_MALFORMED
+        context.reason = BATCH_MALFORMED
         return None
 
-    def _ask_for_confirmation( self, message, user_email, abstract=None ):
+    def _ask_for_confirmation( self, message, user_email, abstract=None, *, context=None ):
         """
         Ask the user a YES_NO confirmation question via synchronous notification.
 
@@ -1359,6 +1409,7 @@ class RuntimeArgumentExpeditor:
         Returns:
             str or None: Raw response string or None
         """
+        context = context if context is not None else ExpediteContext()
         request = NotificationRequest(
             message          = message,
             response_type    = ResponseType.YES_NO,
@@ -1370,11 +1421,11 @@ class RuntimeArgumentExpeditor:
             suppress_ding    = False,
             response_default = "no",
             abstract         = abstract,
-            job_id           = self._job_id
+            job_id           = context.job_id
         )
 
-        response = notify_user_sync( request=request, debug=self.debug, bearer_token=self._bearer_token )
-        self._last_notification_status = response.status
+        response = notify_user_sync( request=request, debug=self.debug, bearer_token=context.bearer_token )
+        context.notification_status = response.status
 
         if self.debug:
             print( f"[Expeditor] _ask_for_confirmation response: success={response.success}, status={response.status}, "
@@ -1386,7 +1437,7 @@ class RuntimeArgumentExpeditor:
 
         # Confirmation never got a usable answer — a machine failure, not a decline
         # (bug 68198c9f). The measured stage-killer: an undeliverable confirm.
-        self._last_expedite_reason = self._classify_ask_failure( response )
+        context.reason = self._classify_ask_failure( response )
         return None
 
     @staticmethod
@@ -1410,7 +1461,7 @@ class RuntimeArgumentExpeditor:
         match = re.search( r'\[comment:\s*(.+?)\]', response_text )
         return match.group( 1 ).strip() if match else None
 
-    def _batch_collect_args( self, batchable_args, fallback_questions, user_email, fallback_defaults=None, command_key=None, abstract=None ):
+    def _batch_collect_args( self, batchable_args, fallback_questions, user_email, fallback_defaults=None, command_key=None, abstract=None, *, context=None ):
         """
         Collect multiple missing arguments in a single batch notification.
 
@@ -1452,6 +1503,7 @@ class RuntimeArgumentExpeditor:
             ( dict, str ) | ( None, str ): the collected answers with
             BATCH_ANSWERED, or None with the BATCH_* reason it failed.
         """
+        context = context if context is not None else ExpediteContext()
         if fallback_defaults is None:
             fallback_defaults = {}
 
@@ -1486,11 +1538,11 @@ class RuntimeArgumentExpeditor:
             response_options = response_options,
             suppress_ding    = False,
             abstract         = abstract,
-            job_id           = self._job_id
+            job_id           = context.job_id
         )
 
-        response = notify_user_sync( request=request, debug=self.debug, bearer_token=self._bearer_token )
-        self._last_notification_status = response.status
+        response = notify_user_sync( request=request, debug=self.debug, bearer_token=context.bearer_token )
+        context.notification_status = response.status
 
         if self.debug:
             print( f"[Expeditor] _batch_collect_args response: success={response.success}, status={response.status}, "
@@ -1534,7 +1586,7 @@ class RuntimeArgumentExpeditor:
 
         return answers, BATCH_ANSWERED
 
-    def _handle_fuzzy_file_match( self, user_email, agent_display_name=None, original_question=None, use_choice_card=False, arg_name="research", ask_question=None, file_arg=None ):
+    def _handle_fuzzy_file_match( self, user_email, agent_display_name=None, original_question=None, use_choice_card=False, arg_name="research", ask_question=None, file_arg=None, *, context=None ):
         """
         Use fuzzy file matching to find a document by user description.
 
@@ -1578,6 +1630,7 @@ class RuntimeArgumentExpeditor:
         Returns:
             str or None: Full path to selected document
         """
+        context = context if context is not None else ExpediteContext()
         from cosa.agents.io_models.xml_models import FuzzyFileMatchResponse
         from cosa.config.configuration_manager import ConfigurationManager
 
@@ -1633,7 +1686,8 @@ class RuntimeArgumentExpeditor:
             return self._ask_for_arg(
                 arg_name,
                 "No documents found. Please provide the path to a document.",
-                user_email
+                user_email,
+                context=context
             )
 
         # ── Auto-resolve (row bd0ce120) ──────────────────────────────────────
@@ -1664,7 +1718,8 @@ class RuntimeArgumentExpeditor:
                 if self.debug: print( f"[Expeditor] {len( auto_matches )} first-turn matches — showing choice card" )
                 chosen     = self._choose_document_from_matches(
                     auto_matches, docs_map, user_email,
-                    arg_name=arg_name, agent_display_name=agent_display_name
+                    arg_name=arg_name, agent_display_name=agent_display_name,
+                    context=context
                 )
                 card_shown = True
                 if chosen != DOC_CHOICE_DESCRIBE_SENTINEL:
@@ -1678,7 +1733,8 @@ class RuntimeArgumentExpeditor:
             arg_name,
             ask_question or "Which document should I use for the podcast? Describe it or say the filename.",
             user_email,
-            card_id=DOCUMENT_DESCRIBE_ASK_ID
+            card_id=DOCUMENT_DESCRIBE_ASK_ID,
+            context=context
         )
         if not description:
             return None
@@ -1691,13 +1747,15 @@ class RuntimeArgumentExpeditor:
             return self._ask_for_arg(
                 arg_name,
                 "I couldn't match that to a document. Please say the exact filename or path.",
-                user_email
+                user_email,
+                context=context
             )
         if status == "error":
             return self._ask_for_arg(
                 arg_name,
                 "Matching failed. Please provide the exact filename or path.",
-                user_email
+                user_email,
+                context=context
             )
 
         if not matches:
@@ -1705,7 +1763,8 @@ class RuntimeArgumentExpeditor:
             return self._ask_for_arg(
                 arg_name,
                 "I couldn't find a matching document. Please say the exact filename or path.",
-                user_email
+                user_email,
+                context=context
             )
 
         if len( matches ) == 1:
@@ -1721,14 +1780,16 @@ class RuntimeArgumentExpeditor:
             if not card_shown and len( matches ) <= MAX_CHOICE_OPTIONS:
                 chosen = self._choose_document_from_matches(
                     matches, docs_map, user_email,
-                    arg_name=arg_name, agent_display_name=agent_display_name
+                    arg_name=arg_name, agent_display_name=agent_display_name,
+                    context=context
                 )
                 if chosen != DOC_CHOICE_DESCRIBE_SENTINEL:
                     return chosen   # abs path, or None on Cancel/failure
             return self._ask_for_arg(
                 arg_name,
                 "Please say the exact filename or path of the document you want.",
-                user_email
+                user_email,
+                context=context
             )
 
         # Non-podcast consumers (e.g. presentation `source`) — same numbered prompt,
@@ -1737,7 +1798,8 @@ class RuntimeArgumentExpeditor:
         pick = self._ask_for_arg(
             arg_name,
             f"I found multiple matches: {options_str}. Say the number or name of the one you want.",
-            user_email
+            user_email,
+            context=context
         )
         if not pick:
             return None
@@ -1855,7 +1917,7 @@ class RuntimeArgumentExpeditor:
             print( f"[Expeditor] Fuzzy match error: {e}" )
             return ( "error", [] )
 
-    def _handle_tfe_checkpoint_match( self, user_email, user_description=None ):
+    def _handle_tfe_checkpoint_match( self, user_email, user_description=None, *, context=None ):
         """
         Fuzzy-match a user's natural-language description of a stalled TFE job
         to a resume target (job ID or plan doc path).
@@ -1878,6 +1940,7 @@ class RuntimeArgumentExpeditor:
         Returns:
             str or None: Resolved identifier for resume-from dispatch
         """
+        context = context if context is not None else ExpediteContext()
         try:
             from cosa.agents.test_fix_expediter.resume_resolver import (
                 list_resume_candidates, fuzzy_match_candidates,
@@ -1889,14 +1952,16 @@ class RuntimeArgumentExpeditor:
                 return self._ask_for_arg(
                     "resume_from",
                     "No stalled TFE jobs or recent plans found. Please provide a job ID (tfe-*) or paste a plan doc path.",
-                    user_email
+                    user_email,
+                    context=context
                 )
 
             if not user_description:
                 user_description = self._ask_for_arg(
                     "resume_from",
                     f"Which TFE job would you like to resume? I found {len( candidates )} candidate(s). Describe the one you want.",
-                    user_email
+                    user_email,
+                    context=context
                 )
                 if not user_description:
                     return None
@@ -1921,7 +1986,8 @@ class RuntimeArgumentExpeditor:
                 return self._ask_for_arg(
                     "resume_from",
                     "Couldn't match your description to any stalled TFE job. Please provide a job ID or paste a plan path.",
-                    user_email
+                    user_email,
+                    context=context
                 )
 
             # Multiple or low-confidence matches — ask user to disambiguate
@@ -1933,7 +1999,8 @@ class RuntimeArgumentExpeditor:
             pick = self._ask_for_arg(
                 "resume_from",
                 f"Found {len( matches )} possible match(es). Say the number or the job ID: {options_str}",
-                user_email
+                user_email,
+                context=context
             )
             if not pick:
                 return None
@@ -1960,7 +2027,8 @@ class RuntimeArgumentExpeditor:
             return self._ask_for_arg(
                 "resume_from",
                 "TFE resume matching failed. Please provide an exact job ID or plan path.",
-                user_email
+                user_email,
+                context=context
             )
 
 

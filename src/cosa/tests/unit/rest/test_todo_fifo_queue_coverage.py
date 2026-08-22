@@ -637,7 +637,13 @@ class TestHandleAgenticCommand( _TFQBase ):
         self.assertIn( "disabled", msg.lower() )
 
     def _run_expeditor_failure( self, reason ):
-        exp = Mock(); exp.expedite.return_value = None; exp._last_expedite_reason = reason
+        # The failure reason now travels back on the context the QUEUE created and
+        # handed in (row 10c60712) — the stub writes where the real expeditor writes.
+        exp = Mock()
+        def _expedite( **kwargs ):
+            kwargs[ "context" ].reason = reason
+            return None
+        exp.expedite.side_effect = _expedite
         with patch.object( tfq, "RuntimeArgumentExpeditor", return_value=exp ), \
              patch.object( tfq, "emit_job_state_transition" ), \
              patch.object( self.queue, "_notify" ), patch( "builtins.print" ):

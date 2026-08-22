@@ -52,6 +52,7 @@ from lupin_cli.notifications.notification_models import (
 from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor import (
     RuntimeArgumentExpeditor,
+    ExpediteContext,
     user_message_for_expedite_reason,
 )
 
@@ -1184,6 +1185,10 @@ class TodoFifoQueue( FifoQueue ):
             verbose    = self.verbose
         )
 
+        # The reason this call fails comes back on OUR context, not on the shared
+        # expeditor (row 10c60712) — two callers in flight at once each read their
+        # own.
+        expedite_context = ExpediteContext()
         args_dict = expeditor.expedite(
             command           = command,
             raw_args          = raw_args,
@@ -1191,15 +1196,16 @@ class TodoFifoQueue( FifoQueue ):
             session_id        = session_id,
             user_id           = user_id,
             original_question = original_question,
-            job_id            = spec_id
+            job_id            = spec_id,
+            context           = expedite_context
         )
 
         # ── Step 4: Handle failure — say WHY, and only blame the user for a real "no" ──
-        # expedite() records the cause on _last_expedite_reason (bug 68198c9f). A
+        # expedite() records the cause on the caller's context (bug 68198c9f). A
         # prompt that could not be delivered, or timed out, is a machine failure — it
         # must never be reported as the user cancelling a job they never saw.
         if args_dict is None:
-            spoken, log_line = user_message_for_expedite_reason( expeditor._last_expedite_reason )
+            spoken, log_line = user_message_for_expedite_reason( expedite_context.reason )
             emit_job_state_transition( self.websocket_mgr, spec_id, JobState.QUEUED, JobState.CANCELLED, user_id )
             self.user_job_tracker.remove_job( spec_id )
             self._notify( spoken, target_user=user_email )

@@ -792,12 +792,14 @@ def test_the_flow_never_routes_through_the_expeditors_stateful_half( tmp_path, n
     """
     TRIPWIRE: the shared expeditor must stay stateless across a v2 request.
 
-    `RuntimeArgumentExpeditor` keeps per-call state on the instance —
-    `_job_id`, `_bearer_token`, `_last_expedite_reason` (expeditor.py:309-311) —
-    and the flow holds ONE expeditor. Those writes live in `expedite()` and
-    `collect()`; `extract()`, which is all the flow calls (flow.py:121), writes
-    none of them. Verified by walking the call graph, not by grep: `extract()`
-    touches none of the three even transitively.
+    `RuntimeArgumentExpeditor` USED TO keep per-call state on the instance —
+    `_job_id`, `_bearer_token`, `_last_expedite_reason`, `_last_notification_status`
+    — and the flow holds ONE expeditor. Row 10c60712 moved all four onto a
+    per-call `ExpediteContext` the CALLER owns, so the crossover this test was
+    written to guard against can no longer happen through `expedite()` either.
+    What survives here is the boundary itself: the flow calls `extract()`
+    (flow.py), and the shared instance must come back unchanged whatever the flow
+    routes through.
 
     So there is no bearer-token crossover on the v2 path today. But the handlers
     now run OFF the event loop, so two v2 requests can be in the flow at once —
@@ -813,12 +815,15 @@ def test_the_flow_never_routes_through_the_expeditors_stateful_half( tmp_path, n
     list of the attribute names known today. A hand-list would pass the day
     someone adds a fifth per-call attribute — exactly the change worth catching.
 
-    RED ON REVERT — the exact mutation, which was run: in `flow.py`, replace
-    `self.expeditor.extract( command, raw_args, question, arg_spec )` with
-    `self.expeditor.expedite( command, raw_args, ctx[ 1 ], ctx[ 2 ], ctx[ 0 ], question,
-    job_id="job-1", bearer_token="tok-1" )`. `expedite` stamps `_job_id`,
-    `_bearer_token` and `_last_expedite_reason` on the instance before it does
-    anything else (`expeditor.py:309-311`), so the sentinels come back changed.
+    RED ON REVERT — the mutation that still bites, and which was run: put ANY
+    per-call write back on the instance, e.g. re-add `self._job_id = job_id` at
+    the top of `expedite()` and route the flow through `expedite()`. The
+    `__dict__` comparison below then comes back changed. (The mutation this
+    docstring used to name — routing the flow through `expedite()` alone — no
+    longer turns it red, and that is the fix working: `expedite()` writes the job
+    id and token onto the caller's context, never onto the shared instance. The
+    crossover itself is pinned by src/tests/unit/test_expeditor_concurrent_calls.py,
+    which runs two overlapping callers with two different tokens.)
 
     ⚠️ TWO THINGS MAKE THAT MUTATION ACTUALLY BITE, and without either one this
     test passes under its own named revert:
@@ -834,7 +839,7 @@ def test_the_flow_never_routes_through_the_expeditors_stateful_half( tmp_path, n
          still the real code path.
     """
     import cosa.agents.runtime_argument_expeditor.expeditor as expeditor_mod
-    from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
+    from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor, ExpediteContext
 
     monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: FakeSpec( required_args=( "location", ), snapshotable=False ) )
 
@@ -865,6 +870,9 @@ def test_the_flow_never_routes_through_the_expeditors_stateful_half( tmp_path, n
     # Sentinel the WHOLE instance state, not a hand-list of the names I happen to
     # know about. A list of four would pass the day someone adds a fifth per-call
     # attribute — which is precisely the change this tripwire needs to catch.
+    # The four names below no longer exist on a real expeditor (row 10c60712);
+    # setting them here keeps the before/after comparison honest about anything
+    # that puts them back.
     for name in ( "_job_id", "_bearer_token", "_last_expedite_reason",
                   "_last_notification_status" ):
         setattr( real, name, f"SENTINEL-{name}" )
@@ -893,17 +901,19 @@ def test_the_flow_never_routes_through_the_expeditors_stateful_half( tmp_path, n
             return _extraction( final_args={ "location": "Boston" }, missing=[] )
 
         def expedite( self, command, raw_args, user_email, session_id, user_id, original_question,
-                      job_id=None, bearer_token=None ):
+                      job_id=None, bearer_token=None, context=None ):
             RuntimeArgumentExpeditor.expedite( real, command, raw_args, user_email, session_id,
                                                user_id, original_question,
-                                               job_id=job_id, bearer_token=bearer_token )
+                                               job_id=job_id, bearer_token=bearer_token,
+                                               context=context )
             self.delegated.append( "expedite" )
             return _extraction( final_args={ "location": "Boston" }, missing=[] )
 
         def collect( self, extraction, command, original_question, spec,
-                     user_email, session_id, user_id ):
+                     user_email, session_id, user_id, context=None ):
             RuntimeArgumentExpeditor.collect( real, extraction, command, original_question, spec,
-                                              user_email, session_id, user_id )
+                                              user_email, session_id, user_id,
+                                              context=context or ExpediteContext() )
             self.delegated.append( "collect" )
             return _extraction( final_args={ "location": "Boston" }, missing=[] )
 

@@ -13,9 +13,10 @@ the user they had cancelled it. They never saw the prompt. Only a real "no" is a
 user decision.
 
 WHAT THIS FILE PINS, at two seams:
-  1. The expeditor RECORDS why it failed on `self._last_expedite_reason` for the
+  1. The expeditor RECORDS why it failed on the CALLER'S OWN context for the
      ask paths too, not just the batch path — declined / unreachable / timed-out
-     are kept apart.
+     are kept apart. (Row 10c60712 moved that off the shared instance: what each
+     test asserts is the context it passed in.)
   2. A pure mapping turns that reason into the (spoken, log) strings, and ONLY a
      genuine decline may tell the user they cancelled. Undeliverable, timed-out,
      malformed and incomplete are machine failures and must say so.
@@ -35,6 +36,7 @@ from cosa.agents.runtime_argument_expeditor.expeditor import (
     BATCH_MALFORMED,
     BATCH_INCOMPLETE,
     BATCH_INTERNAL,
+    ExpediteContext,
     user_message_for_expedite_reason,
 )
 
@@ -47,10 +49,7 @@ def _expeditor():
     config = MagicMock()
     config.get.return_value = "unused/for/this/test"
     with patch( "cosa.agents.runtime_argument_expeditor.expeditor.LlmClientFactory" ):
-        exp = RuntimeArgumentExpeditor( config, debug=False, verbose=False )
-    exp._job_id       = None
-    exp._bearer_token = None
-    return exp
+        return RuntimeArgumentExpeditor( config, debug=False, verbose=False )
 
 
 def _response( success, value, status="ok", is_timeout=False ):
@@ -65,16 +64,18 @@ def _response( success, value, status="ok", is_timeout=False ):
 
 def _ask_arg( response ):
     exp = _expeditor()
+    ctx = ExpediteContext()
     with patch( "cosa.agents.runtime_argument_expeditor.expeditor.notify_user_sync", return_value=response ):
-        value = exp._ask_for_arg( "query", "What topic?", "someone@example.com" )
-    return value, exp
+        value = exp._ask_for_arg( "query", "What topic?", "someone@example.com", context=ctx )
+    return value, ctx
 
 
 def _ask_confirm( response ):
     exp = _expeditor()
+    ctx = ExpediteContext()
     with patch( "cosa.agents.runtime_argument_expeditor.expeditor.notify_user_sync", return_value=response ):
-        value = exp._ask_for_confirmation( "Does this look right?", "someone@example.com" )
-    return value, exp
+        value = exp._ask_for_confirmation( "Does this look right?", "someone@example.com", context=ctx )
+    return value, ctx
 
 
 # --------------------------------------------------------------------------- #
@@ -83,48 +84,48 @@ def _ask_confirm( response ):
 
 def test_ask_for_arg_delivery_failure_is_unreachable():
     """A 503 means the user was never asked — not a decision they made."""
-    value, exp = _ask_arg( _response( False, None, status="http_error_503", is_timeout=False ) )
+    value, ctx = _ask_arg( _response( False, None, status="http_error_503", is_timeout=False ) )
     assert value is None
-    assert exp._last_expedite_reason == BATCH_UNREACHABLE
+    assert ctx.reason == BATCH_UNREACHABLE
 
 
 def test_ask_for_arg_timeout_is_timeout():
-    value, exp = _ask_arg( _response( False, None, status="timeout", is_timeout=True ) )
+    value, ctx = _ask_arg( _response( False, None, status="timeout", is_timeout=True ) )
     assert value is None
-    assert exp._last_expedite_reason == BATCH_TIMEOUT
+    assert ctx.reason == BATCH_TIMEOUT
 
 
 def test_ask_for_arg_empty_success_is_malformed():
     """Delivered (exit 0) but no usable value — a garbled answer, not a cancel."""
-    value, exp = _ask_arg( _response( True, None ) )
+    value, ctx = _ask_arg( _response( True, None ) )
     assert value is None
-    assert exp._last_expedite_reason == BATCH_MALFORMED
+    assert ctx.reason == BATCH_MALFORMED
 
 
 @pytest.mark.parametrize( "word", [ "cancel", "nevermind", "never mind", "stop", "quit", "  CANCEL  " ] )
 def test_ask_for_arg_cancel_keyword_is_declined( word ):
-    value, exp = _ask_arg( _response( True, word ) )
+    value, ctx = _ask_arg( _response( True, word ) )
     assert value is None
-    assert exp._last_expedite_reason == BATCH_DECLINED
+    assert ctx.reason == BATCH_DECLINED
 
 
 def test_ask_for_arg_success_sets_no_failure_reason():
     """A real answer leaves the failure reason untouched (None)."""
-    value, exp = _ask_arg( _response( True, "brevity" ) )
+    value, ctx = _ask_arg( _response( True, "brevity" ) )
     assert value == "brevity"
-    assert exp._last_expedite_reason is None
+    assert ctx.reason is None
 
 
 def test_ask_for_confirmation_delivery_failure_is_unreachable():
-    value, exp = _ask_confirm( _response( False, None, status="http_error_503" ) )
+    value, ctx = _ask_confirm( _response( False, None, status="http_error_503" ) )
     assert value is None
-    assert exp._last_expedite_reason == BATCH_UNREACHABLE
+    assert ctx.reason == BATCH_UNREACHABLE
 
 
 def test_ask_for_confirmation_timeout_is_timeout():
-    value, exp = _ask_confirm( _response( False, None, is_timeout=True ) )
+    value, ctx = _ask_confirm( _response( False, None, is_timeout=True ) )
     assert value is None
-    assert exp._last_expedite_reason == BATCH_TIMEOUT
+    assert ctx.reason == BATCH_TIMEOUT
 
 
 def test_confirm_and_iterate_plain_no_is_declined():
@@ -135,10 +136,11 @@ def test_confirm_and_iterate_plain_no_is_declined():
         fallback_defaults={}, special_handlers={}, display_name=None, cli_module=None,
         file_args={},
     )
+    ctx = ExpediteContext()
     with patch.object( exp, "_ask_for_confirmation", return_value="no" ):
-        result = exp._confirm_and_iterate( { "query": "brevity" }, agent_entry, "cmd", "someone@example.com" )
+        result = exp._confirm_and_iterate( { "query": "brevity" }, agent_entry, "cmd", "someone@example.com", context=ctx )
     assert result is None
-    assert exp._last_expedite_reason == BATCH_DECLINED
+    assert ctx.reason == BATCH_DECLINED
 
 
 def test_confirm_and_iterate_undelivered_keeps_machine_reason():
@@ -149,14 +151,16 @@ def test_confirm_and_iterate_undelivered_keeps_machine_reason():
         fallback_defaults={}, special_handlers={}, display_name=None, cli_module=None,
         file_args={},
     )
-    # _ask_for_confirmation returns None AND records unreachable (as it would live).
+    # _ask_for_confirmation returns None AND records unreachable (as it would
+    # live) — on the context it was handed, which is the caller's.
+    ctx = ExpediteContext()
     def _fake_confirm( *a, **k ):
-        exp._last_expedite_reason = BATCH_UNREACHABLE
+        k[ "context" ].reason = BATCH_UNREACHABLE
         return None
     with patch.object( exp, "_ask_for_confirmation", side_effect=_fake_confirm ):
-        result = exp._confirm_and_iterate( { "query": "brevity" }, agent_entry, "cmd", "someone@example.com" )
+        result = exp._confirm_and_iterate( { "query": "brevity" }, agent_entry, "cmd", "someone@example.com", context=ctx )
     assert result is None
-    assert exp._last_expedite_reason == BATCH_UNREACHABLE
+    assert ctx.reason == BATCH_UNREACHABLE
 
 
 # --------------------------------------------------------------------------- #

@@ -36,9 +36,11 @@ from unittest.mock import MagicMock, patch
 import cosa.agents.runtime_argument_expeditor.expeditor as ex_mod
 from cosa.agents.runtime_argument_expeditor.expeditor import (
     RuntimeArgumentExpeditor,
+    ExpediteContext,
     ExtractionResult,
-    ArgSpec,
     BATCH_DECLINED,
+    BATCH_UNREACHABLE,
+    user_message_for_expedite_reason,
 )
 from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
@@ -80,9 +82,11 @@ def _run_two_overlapping_calls( answer_for ):
 
     Ensures:
         - Both calls are inside expedite() at the same time (barrier in extract)
-        - Returns ( expeditor, sent, outcomes ) where `sent` is the list of
-          ( bearer_token, job_id ) pairs every notification was raised with and
-          `outcomes` maps bearer token -> ( returned args_dict, context )
+        - Returns ( expeditor, sent, outcomes, before ) where `sent` is the list
+          of ( bearer_token, job_id ) pairs every notification was raised with,
+          `outcomes` maps bearer token -> ( returned args_dict, that caller's own
+          context ), and `before` is the shared instance's __dict__ as it stood
+          before either call ran
     """
     exp     = _expeditor()
     barrier = threading.Barrier( 2, timeout=15 )
@@ -111,8 +115,11 @@ def _run_two_overlapping_calls( answer_for ):
     exp.extract = fake_extract
 
     outcomes = {}
+    before   = dict( exp.__dict__ )
 
     def one_call( token ):
+        # Each caller owns its context — that is the whole point of the fix.
+        context = ExpediteContext()
         args = exp.expedite(
             command           = COMMAND,
             raw_args          = "",
@@ -122,8 +129,9 @@ def _run_two_overlapping_calls( answer_for ):
             original_question = "research something",
             job_id            = JOB_ID_FOR[ token ],
             bearer_token      = TOKEN_FOR[ token ],
+            context           = context,
         )
-        outcomes[ token ] = args
+        outcomes[ token ] = ( args, context )
 
     with patch( "cosa.agents.runtime_argument_expeditor.expeditor.notify_user_sync", side_effect=fake_notify ):
         threads = [ threading.Thread( target=one_call, args=( t, ), name=t ) for t in ( "tok-A", "tok-B" ) ]
@@ -131,12 +139,12 @@ def _run_two_overlapping_calls( answer_for ):
         for t in threads: t.join( timeout=30 )
         for t in threads: assert not t.is_alive(), f"thread {t.name} never finished"
 
-    return exp, sent, outcomes
+    return exp, sent, outcomes, before
 
 
 def test_overlapping_expedites_each_notify_with_their_own_token_and_job_id():
     """Every notification a call raises carries THAT call's token and job id."""
-    _exp, sent, _outcomes = _run_two_overlapping_calls( { "tok-A" : "yes", "tok-B" : "yes" } )
+    _exp, sent, _outcomes, _before = _run_two_overlapping_calls( { "tok-A" : "yes", "tok-B" : "yes" } )
 
     assert len( sent ) >= 4, f"expected both calls to ask + confirm, got {sent}"
     crossed = [ pair for pair in sent if pair[ 1 ] != JOB_ID_FOR[ pair[ 0 ] ] ]
@@ -151,18 +159,78 @@ def test_overlapping_expedites_each_notify_with_their_own_token_and_job_id():
 
 def test_overlapping_expedites_each_read_back_their_own_failure_reason():
     """A caller that declined reads DECLINED; the caller that completed reads None."""
-    _exp, _sent, outcomes = _run_two_overlapping_calls( { "tok-A" : "yes", "tok-B" : "no" } )
+    _exp, _sent, outcomes, _before = _run_two_overlapping_calls( { "tok-A" : "yes", "tok-B" : "no" } )
 
-    assert outcomes[ "tok-A" ] is not None, "the completing call lost its args"
-    assert outcomes[ "tok-B" ] is None,     "the declining call returned args"
+    args_a, ctx_a = outcomes[ "tok-A" ]
+    args_b, ctx_b = outcomes[ "tok-B" ]
+
+    assert args_a is not None, "the completing call lost its args"
+    assert args_b is None,     "the declining call returned args"
+    # The reason itself, not just the shape of the return: the caller who was told
+    # "no" is the ONLY one who may read a decline.
+    assert ctx_b.reason == BATCH_DECLINED, f"the declining call read {ctx_b.reason!r}"
+    assert ctx_a.reason is None,           f"the completing call read the other caller's {ctx_a.reason!r}"
 
 
 def test_completed_expedite_leaves_no_per_call_state_on_the_shared_instance():
-    """The shared expeditor carries no caller's job id / token / reason afterwards."""
-    exp, _sent, _outcomes = _run_two_overlapping_calls( { "tok-A" : "yes", "tok-B" : "no" } )
+    """Two calls leave the shared instance byte-for-byte as they found it.
 
-    leaked = { k : v for k, v in exp.__dict__.items()
-               if isinstance( v, str ) and ( v.startswith( "tok-" ) or v.startswith( "exp-" ) ) }
-    assert leaked == {}, f"per-call state left on the shared instance: {leaked}"
-    for name in ( "_job_id", "_bearer_token", "_last_expedite_reason", "_last_notification_status" ):
-        assert name not in exp.__dict__, f"{name} is still per-call state on the shared instance"
+    The comparison is the WHOLE __dict__ before vs after, not a scan for values
+    that look like this test's fake token — a value-shaped scan passes the day
+    the stored value changes shape, which is the change worth catching.
+    """
+    exp, _sent, _outcomes, before = _run_two_overlapping_calls( { "tok-A" : "yes", "tok-B" : "no" } )
+
+    after = dict( exp.__dict__ )
+    after.pop( "extract", None )      # the test itself replaced extract()
+    before.pop( "extract", None )
+    assert after == before, (
+        f"the shared instance changed across two calls — added/changed: "
+        f"{ { k : v for k, v in after.items() if before.get( k ) != v } }"
+    )
+
+
+def test_a_real_undeliverable_expedite_reaches_the_caller_as_a_machine_failure():
+    """
+    END-TO-END on the production shape: nothing inside the expeditor is stubbed.
+
+    Only the network call is patched, with a response that says the prompt never
+    reached the user. The reason travels expedite -> collect -> _ask_for_arg and
+    comes back on the CALLER's context, and the wording the caller then speaks is
+    the machine-failure one. This is what the two live readers do
+    (todo_fifo_queue.py and routers/podcast_generator.py); the barrier tests above
+    build a harness, this one does not.
+    """
+    exp = _expeditor()
+    ctx = ExpediteContext()
+
+    undeliverable = _response( False, None, status="http_error_503", is_timeout=False )
+
+    def fake_extract( command, raw_args, original_question, spec ):
+        return ExtractionResult(
+            final_args         = {},
+            missing            = [ "query" ],
+            fallback_questions = { "query" : "What should I research?" },
+            fallback_defaults  = {},
+            special_handlers   = {},
+        )
+
+    exp.extract = fake_extract   # the LLM half only — collect() and the ask are REAL
+
+    with patch( "cosa.agents.runtime_argument_expeditor.expeditor.notify_user_sync", return_value=undeliverable ):
+        args = exp.expedite(
+            command           = COMMAND,
+            raw_args          = "",
+            user_email        = "someone@example.com",
+            session_id        = "session-1",
+            user_id           = "user-1",
+            original_question = "research something",
+            job_id            = JOB_ID_FOR[ "tok-A" ],
+            bearer_token      = TOKEN_FOR[ "tok-A" ],
+            context           = ctx,
+        )
+
+    assert args is None
+    assert ctx.reason == BATCH_UNREACHABLE, f"caller read {ctx.reason!r}"
+    spoken, _log = user_message_for_expedite_reason( ctx.reason )
+    assert "cancel" not in spoken.lower(), f"a user who was never asked was told they cancelled: {spoken!r}"

@@ -103,17 +103,16 @@ class TestClassifyAskFailure( unittest.TestCase ):
 class TestAskChoiceForArg( unittest.TestCase ):
 
     def _ask( self, response ):
-        o = _mk_expeditor()
-        o._job_id       = None
-        o._bearer_token = None
+        o    = _mk_expeditor()
+        ctx  = ex_mod.ExpediteContext()
         opts = [ { "label": "Alpha", "description": "a" }, { "label": "Beta", "description": "b" } ]
         with patch.object( ex_mod, "notify_user_sync", return_value=response ):
-            return o, o._ask_choice_for_arg( "research", "Which?", opts, "u@x" )
+            return ctx, o._ask_choice_for_arg( "research", "Which?", opts, "u@x", context=ctx )
 
     def test_delivery_failure_returns_none_and_classifies( self ):
-        o, out = self._ask( _resp( success=False, is_timeout=True ) )
+        ctx, out = self._ask( _resp( success=False, is_timeout=True ) )
         self.assertIsNone( out )
-        self.assertEqual( o._last_expedite_reason, BATCH_TIMEOUT )
+        self.assertEqual( ctx.reason, BATCH_TIMEOUT )
 
     def test_plain_label_returned( self ):
         _o, out = self._ask( _resp( response_value="Alpha" ) )
@@ -128,9 +127,9 @@ class TestAskChoiceForArg( unittest.TestCase ):
         self.assertEqual( out, "{not valid json" )
 
     def test_cancel_label_declined( self ):
-        o, out = self._ask( _resp( response_value=DOC_CHOICE_CANCEL_LABEL ) )
+        ctx, out = self._ask( _resp( response_value=DOC_CHOICE_CANCEL_LABEL ) )
         self.assertIsNone( out )
-        self.assertEqual( o._last_expedite_reason, BATCH_DECLINED )
+        self.assertEqual( ctx.reason, BATCH_DECLINED )
 
     def test_describe_label_returns_sentinel( self ):
         _o, out = self._ask( _resp( response_value=DOC_CHOICE_DESCRIBE_LABEL ) )
@@ -180,11 +179,12 @@ class TestChooseDocumentFromMatches( unittest.TestCase ):
         self.assertEqual( out, DOC_CHOICE_DESCRIBE_SENTINEL )
 
     def test_label_outside_option_set_is_malformed_none( self ):
-        o = _mk_expeditor()
+        o   = _mk_expeditor()
+        ctx = ex_mod.ExpediteContext()
         with patch.object( o, "_ask_choice_for_arg", return_value="not-an-option" ):
-            out = o._choose_document_from_matches( list( self.DMAP.keys() ), self.DMAP, "u@x" )
+            out = o._choose_document_from_matches( list( self.DMAP.keys() ), self.DMAP, "u@x", context=ctx )
         self.assertIsNone( out )
-        self.assertEqual( o._last_expedite_reason, BATCH_MALFORMED )
+        self.assertEqual( ctx.reason, BATCH_MALFORMED )
 
     def test_basename_collision_uses_full_rel_path_label( self ):
         o = _mk_expeditor()
@@ -214,7 +214,7 @@ class TestCollectPodcastSpecialHandlerSkips( unittest.TestCase ):
         with patch.object( o, "_handle_fuzzy_file_match" ) as fuzzy, \
              patch.object( o, "_confirm_and_iterate", return_value={ "query": "AI" } ), \
              patch.object( o, "_inject_system_args", return_value={ "query": "AI", "user_email": "u@x" } ):
-            out = o.collect( extraction, PG, "make a podcast", ArgSpec.from_entry( entry ), "u@x", "s", "uid" )
+            out = o.collect( extraction, PG, "make a podcast", ArgSpec.from_entry( entry ), "u@x", "s", "uid", context=ex_mod.ExpediteContext() )
         self.assertEqual( out[ "query" ], "AI" )
         fuzzy.assert_not_called()   # both branches were skips, no resolve fired
 
