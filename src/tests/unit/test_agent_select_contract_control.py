@@ -94,9 +94,13 @@ class TestTheDiscriminatorIsManufactured( unittest.TestCase ):
     `speakable` -> `user_initiable` rewrite mean something before the first
     typeable-but-not-sayable command is ever added."""
 
-    # A command a person may TYPE but must not be offered by VOICE. Synthetic on
-    # purpose: the real registry has no such command yet, which is the entire point.
-    TYPEABLE_NOT_SAYABLE = "agent router go to test fix expediter resume"
+    # A command a person may TYPE but must not be offered by VOICE. DELIBERATELY NOT
+    # a real command (Clayton, 2026-08-22): this was first bound to
+    # "agent router go to test fix expediter resume", which is live and speakable=True
+    # — so the constant's NAME said typeable-not-sayable while the registry said the
+    # opposite, and it read as documentation that was false. The real registry has no
+    # such command yet; that absence is the whole reason this case is manufactured.
+    TYPEABLE_NOT_SAYABLE = "agent router go to a synthetic typeable not sayable command"
 
     def _dropdown_from( self, specs, field ):
         """Build the option-value set a dropdown filtered on `field` would render."""
@@ -121,19 +125,38 @@ class TestTheDiscriminatorIsManufactured( unittest.TestCase ):
             f"a speakable-filtered dropdown must go RED against a user_initiable oracle: {problems}"
         )
 
-    def test_the_two_filters_are_indistinguishable_without_the_manufactured_case( self ):
-        # The negative control, and the reason the case above must be synthetic: when
-        # no command is typeable-but-not-sayable, both filters produce the SAME set and
-        # the gate cannot tell a correct implementation from a reverted one. If this
-        # ever fails, the real registry has grown the discriminating command and the
-        # synthetic case above can be retired in favour of it.
-        specs = [
-            { "command": "agent router go to math",    "speakable": True, "user_initiable": True },
-            { "command": "agent router go to weather", "speakable": True, "user_initiable": True },
-        ]
+    def test_the_LIVE_registry_still_lacks_a_typeable_not_sayable_command( self ):
+        # 🔴 CORRECTED by Clayton, 2026-08-22. This first compared two HAND-WRITTEN
+        # dicts that both carried speakable=True and user_initiable=True, and never
+        # imported REGISTRY at all — so it asserted a property of my own literals and
+        # could not fail for any reason. That is precisely the defect this file exists
+        # to catch, occurring in the file itself.
+        #
+        # It now reads the LIVE registry and asserts the ONE-SIDED difference, which is
+        # the claim that actually justifies the synthetic case above: nothing is
+        # user_initiable without also being speakable, so a dropdown built on either
+        # field renders the same set and the two implementations are indistinguishable
+        # on real data.
+        #
+        # NOT a two-sided equality: `speakable - user_initiable` is deliberately
+        # NON-empty (`agent router go to automatic`, a CONTROL command, and `none`, the
+        # internal no-command outcome). Asserting set equality would red on those and
+        # say nothing about the direction that matters.
+        #
+        # WHEN THIS FAILS, IT IS GOOD NEWS: the registry has grown a real
+        # typeable-but-not-sayable command. Retire the synthetic case above in favour
+        # of the real one — do not "fix" this by widening it.
+        from cosa.rest.v2.registry import REGISTRY
+
+        speakable = { c for c, s in REGISTRY.items() if s.speakable }
+        initiable = { c for c, s in REGISTRY.items() if s.user_initiable }
+
+        self.assertNotEqual( initiable, set(), "the registry served no user_initiable commands at all" )
         self.assertEqual(
-            self._dropdown_from( specs, "speakable" ),
-            self._dropdown_from( specs, "user_initiable" )
+            initiable - speakable, set(),
+            "the registry now has a typeable-but-not-sayable command: "
+            f"{sorted( initiable - speakable )}. Retire the synthetic case in "
+            "TYPEABLE_NOT_SAYABLE and drive the control with this real command instead."
         )
 
 
