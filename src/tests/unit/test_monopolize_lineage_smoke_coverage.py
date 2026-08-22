@@ -432,13 +432,22 @@ def test_a_comment_naming_the_field_does_not_arm_a_router( tmp_path ):
     watched. Nothing had moved or been renamed. The accusation came from a sentence.
 
     RED ON REVERT: put the raw `LINEAGE_FIELD not in text` filter back and this fails,
-    naming the door it falsely accused.
+    naming the door it falsely accused. TWO tests fail on that revert — this one and the
+    docstring one below. NOT the real-tree check: NOT_A_DOOR silences all three queues.py
+    routes now, so the tree stays green whether arming is fixed or not. That is the belt
+    doing its job and it is exactly why these two synthetics have to carry the proof.
     """
+    # ⚠️ THE PATH IS DELIBERATELY NOT ONE OF THE REAL ROUTES, and getting that wrong is
+    # how this test first shipped unable to fail. Written against
+    # `/api/jobs/{job_id}/message` it was silenced by NOT_A_DOOR — added in the SAME commit
+    # — so reverting the arming fix left it green and the red-on-revert claim was false
+    # (Pocholo). A synthetic must exercise ONE guard at a time; `/jobs/{job_id}/frobnicate`
+    # is body-shaped to this checker and on nobody's exemption list.
     ( tmp_path / "commented.py" ).write_text(
         "router = APIRouter( prefix=\"/api\" )\n"
         f"# The new door carries {LINEAGE_FIELD} as a top-level field.\n"
-        '@router.post( "/jobs/{job_id}/message" )\n'
-        "async def send_message( job_id: str, request: Request ):\n"
+        '@router.post( "/jobs/{job_id}/frobnicate" )\n'
+        "async def frobnicate( job_id: str, request: Request ):\n"
         "    pass\n"
     )
     endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
@@ -451,11 +460,13 @@ def test_a_comment_naming_the_field_does_not_arm_a_router( tmp_path ):
 def test_a_docstring_naming_the_field_does_not_arm_a_router_either( tmp_path ):
     """The same rule one syntax over: prose is prose whether it is `#` or triple-quoted,
     and a module docstring explaining the field is as innocent as a comment."""
+    # Same reason as the test above: a path outside NOT_A_DOOR, so this measures arming
+    # and nothing else.
     ( tmp_path / "documented.py" ).write_text(
         f'"""This router used to hand {LINEAGE_FIELD} to the queue by hand."""\n'
         "router = APIRouter( prefix=\"/api\" )\n"
-        '@router.post( "/jobs/{job_id}/cancel" )\n'
-        "async def cancel( job_id: str, request: Request ):\n"
+        '@router.post( "/jobs/{job_id}/frobnicate" )\n'
+        "async def frobnicate( job_id: str, request: Request ):\n"
         "    pass\n"
     )
     endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
