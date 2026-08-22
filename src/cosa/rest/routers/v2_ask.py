@@ -110,7 +110,8 @@ class AskResponse( BaseModel ):
 class AgentOption( BaseModel ):
     """One registry command, projected for a client that has to render it."""
     command        : str             = Field( ..., description="The full routing string — the value a client sends back as `command` on /api/v2/submit" )
-    label          : str             = Field( ..., description="What to show the user. CRUD-forked when the fork is on, so it names the agent that will actually run" )
+    display_name   : str             = Field( ..., description="What to SHOW the user — the dropdown's option text, a proper name ('Date & Time'). CRUD-forked, so it names the agent that will actually run" )
+    label          : str             = Field( ..., description="What the user HEARS — lowercase prose for spoken text ('date and time'). A different register from display_name, not a duplicate of it; CRUD-forked too" )
     cls            : str             = Field( ..., description="conversational | agentic | control | none" )
     description    : Optional[ str ] = Field( None, description="One-line help text; None for commands nobody picks by hand" )
     speakable      : bool            = Field( ..., description="Belongs in the voice router prompt" )
@@ -330,12 +331,13 @@ async def v2_agents(
         entry     = JOB_ARG_CONTRACTS.get( command, {} )
         agents.append( AgentOption(
             command        = command,
-            # The agentic set carries its display name in its contract; the
-            # conversational set and the receptionist carry a `label`. A command with
-            # neither (`agent router go to automatic`, `none`) falls back to its own
-            # command string — nobody renders those, and an invented label would be
-            # the one string in this response that came from nowhere.
-            label          = effective.label or entry.get( "display_name" ) or command,
+            # BOTH user-facing strings, because they are different registers: one is
+            # read in a dropdown, one is spoken. A command with neither
+            # (`agent router go to automatic`, `none`) falls back to its own command
+            # string — nobody renders those, and an invented name would be the one
+            # string in this response that came from nowhere.
+            display_name   = effective.display_name or command,
+            label          = effective.label or effective.display_name or command,
             cls            = effective.cls.value,
             description    = effective.description,
             speakable      = effective.speakable,

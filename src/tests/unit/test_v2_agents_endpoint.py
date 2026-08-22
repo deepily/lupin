@@ -63,6 +63,33 @@ def _by_command( payload ):
     return { a[ "command" ]: a for a in payload[ "agents" ] }
 
 
+def _mode_to_command():
+    """The mode-key → routing-command map, for the two MODE_METADATA boundary tests.
+
+    Built from AGENTIC_MODE_MAP (which already IS this map for the agentic half) plus
+    the seven conversational keys, which have no such map because their command is
+    just "agent router go to {key}" — except `datetime`, whose key matches, and
+    `receptionist`, which is classed NONE. Written out rather than synthesised from
+    an f-string so a renamed command has to be edited here, visibly, instead of
+    silently resolving to a key that no longer exists.
+    """
+    from cosa.rest.todo_fifo_queue import AGENTIC_MODE_MAP
+    mapping = dict( AGENTIC_MODE_MAP )
+    mapping.update( {
+        "math"        : "agent router go to math",
+        "calendar"    : "agent router go to calendar",
+        "weather"     : "agent router go to weather",
+        "receptionist": "agent router go to receptionist",
+        "todo"        : "agent router go to todo",
+        "datetime"    : "agent router go to datetime",
+        "calculator"  : "agent router go to calculator",
+    } )
+    return mapping
+
+
+_MODE_TO_COMMAND = _mode_to_command()
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # GATE 1 — the endpoint equals the registry
 # ══════════════════════════════════════════════════════════════════════════════
@@ -163,6 +190,70 @@ class TestGate3UserInitiableIsTheGoverningField:
 
 class TestProjectedFields:
 
+    def test_every_user_initiable_command_carries_a_display_name( self ):
+        # The option text. A dropdown entry falling back to its raw command string
+        # would render "agent router go to swe team" where "SWE Team" belongs.
+        missing = [ a[ "command" ] for a in _agents()[ "agents" ]
+                    if a[ "user_initiable" ] and a[ "display_name" ] == a[ "command" ] ]
+        assert missing == []
+
+    def test_display_names_are_the_mode_metadata_strings( self ):
+        """The other half of the 16 MODE_METADATA entries. Same boundary crossing as
+        the descriptions below, and the same reason: the strings served must be the
+        ones that were MOVED, not new ones written to make a test pass. Retire this
+        with its sibling when phase 7 deletes MODE_METADATA.
+
+        ONE NAMED EXCEPTION, and it is a drift this gate FOUND rather than one it
+        excuses. MODE_METADATA calls `presentation` "Presentation"; JOB_ARG_CONTRACTS
+        calls the same command "Presentation Generator". Two hand-maintained lists
+        that had already disagreed — which is the whole reason this plan exists.
+
+        The contract wins, for a reason and not by convenience: the argument
+        expeditor already speaks the contract's name during the interview, so a user
+        who picks it hears "Presentation Generator" today. The dropdown was the
+        outlier, and MODE_METADATA is the list being retired. Effect: that option's
+        text changes from "Presentation" to "Presentation Generator", which is an
+        E2E-visible change and is deliberate.
+
+        The exception is a single named command, not a predicate. A second entry
+        appearing here means a NEW drift, and it should go red."""
+        from cosa.rest.todo_fifo_queue import MODE_METADATA
+        drifted_before_this_plan = { "presentation": "Presentation Generator" }
+        served = _by_command( _agents() )
+        for mode, meta in MODE_METADATA.items():
+            if mode == "system":
+                continue                                   # the Auto-Route sentinel, not a command
+            command  = _MODE_TO_COMMAND[ mode ]
+            expected = drifted_before_this_plan.get( mode, meta[ "display_name" ] )
+            assert served[ command ][ "display_name" ] == expected, (
+                f"{command}: display_name drifted from MODE_METADATA[{mode!r}]"
+            )
+
+    def test_the_recorded_presentation_drift_is_still_the_only_one( self ):
+        # Pins the exemption above so it cannot quietly widen. If MODE_METADATA is
+        # corrected to "Presentation Generator", this goes red and the exemption
+        # should be DELETED, not kept as a no-op that would then hide the next drift.
+        from cosa.rest.todo_fifo_queue import MODE_METADATA
+        served  = _by_command( _agents() )
+        drifted = { mode for mode, meta in MODE_METADATA.items()
+                    if mode != "system"
+                    and served[ _MODE_TO_COMMAND[ mode ] ][ "display_name" ] != meta[ "display_name" ] }
+        assert drifted == { "presentation" }, (
+            f"the set of MODE_METADATA display-name drifts changed: {drifted}"
+        )
+
+    def test_display_name_and_label_are_different_registers( self ):
+        # Ruled 2026-08-22: one string is READ in a dropdown, one is HEARD in spoken
+        # text. If they were interchangeable the second field would be dead weight and
+        # a later edit would rightly collapse them — which is what turned "Math Agent"
+        # into "math" in the first cut. Pin that they have already diverged.
+        served = _by_command( _agents() )
+        assert served[ "agent router go to datetime" ][ "display_name" ] == "Date & Time"
+        assert served[ "agent router go to datetime" ][ "label" ]        == "date and time"
+        differing = [ a[ "command" ] for a in _agents()[ "agents" ]
+                      if a[ "display_name" ] != a[ "label" ] ]
+        assert differing, "display_name and label are identical everywhere — one of them is dead weight"
+
     def test_every_user_initiable_command_carries_a_description( self ):
         # The 16 MODE_METADATA strings moved in for exactly this: they are the only
         # user-facing help text on the whole surface, and a dropdown entry with no
@@ -175,30 +266,32 @@ class TestProjectedFields:
         # Crosses a real boundary while MODE_METADATA still exists: the strings the
         # endpoint serves must be the ones that were moved, not new ones written to
         # make a test pass. Retire this when phase 7 deletes MODE_METADATA.
-        from cosa.rest.todo_fifo_queue import MODE_METADATA, AGENTIC_MODE_MAP
-        served       = _by_command( _agents() )
-        mode_to_cmd  = dict( AGENTIC_MODE_MAP )
-        mode_to_cmd.update( {
-            "math": "agent router go to math", "calendar": "agent router go to calendar",
-            "weather": "agent router go to weather", "receptionist": "agent router go to receptionist",
-            "todo": "agent router go to todo", "datetime": "agent router go to datetime",
-            "calculator": "agent router go to calculator",
-        } )
+        from cosa.rest.todo_fifo_queue import MODE_METADATA
+        served = _by_command( _agents() )
         for mode, meta in MODE_METADATA.items():
             if mode == "system":
                 continue                                   # the Auto-Route sentinel, not a command
-            command = mode_to_cmd[ mode ]
+            command = _MODE_TO_COMMAND[ mode ]
             assert served[ command ][ "description" ] == meta[ "description" ], (
                 f"{command}: description drifted from MODE_METADATA[{mode!r}]"
             )
 
     def test_agentic_commands_carry_their_contract_fields( self ):
+        served   = _by_command( _agents() )
+        entry    = served[ "agent router go to deep research" ]
+        contract = JOB_ARG_CONTRACTS[ "agent router go to deep research" ]
+        assert entry[ "job_prefix" ]    == contract[ "job_prefix" ]
+        assert entry[ "required_args" ] == list( contract[ "required_user_args" ] )
+        assert entry[ "arg_questions" ] == dict( contract[ "fallback_questions" ] )
+        assert entry[ "display_name" ]  == contract[ "display_name" ]
+
+    def test_every_agentic_display_name_comes_from_its_contract( self ):
+        # Not one spot-check: the agentic display names are pulled from the contract
+        # at construction precisely so there is no second hand-written list to drift.
+        # This is what would go red if somebody typed one in by hand.
         served = _by_command( _agents() )
-        entry  = served[ "agent router go to deep research" ]
-        assert entry[ "job_prefix" ]    == JOB_ARG_CONTRACTS[ "agent router go to deep research" ][ "job_prefix" ]
-        assert entry[ "required_args" ] == list( JOB_ARG_CONTRACTS[ "agent router go to deep research" ][ "required_user_args" ] )
-        assert entry[ "arg_questions" ] == dict( JOB_ARG_CONTRACTS[ "agent router go to deep research" ][ "fallback_questions" ] )
-        assert entry[ "label" ]         == JOB_ARG_CONTRACTS[ "agent router go to deep research" ][ "display_name" ]
+        for command, contract in JOB_ARG_CONTRACTS.items():
+            assert served[ command ][ "display_name" ] == contract[ "display_name" ], command
 
     def test_conversational_commands_carry_aliases_and_literal_required_args( self ):
         served = _by_command( _agents() )
@@ -216,8 +309,10 @@ class TestProjectedFields:
         # nobody renders it, and an invented label would be the one string in this
         # response that came from nowhere.
         served = _by_command( _agents() )
-        assert served[ "agent router go to automatic" ][ "label" ] == "agent router go to automatic"
-        assert served[ "none" ][ "label" ] == "none"
+        assert served[ "agent router go to automatic" ][ "display_name" ] == "agent router go to automatic"
+        assert served[ "agent router go to automatic" ][ "label" ]        == "agent router go to automatic"
+        assert served[ "none" ][ "display_name" ] == "none"
+        assert served[ "none" ][ "label" ]        == "none"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -231,13 +326,23 @@ class TestCrudFork:
 
     def test_fork_off_serves_the_base_labels( self ):
         served = _by_command( _agents( crud_enabled=False ) )
-        assert served[ "agent router go to todo" ][ "label" ]     == "todo list"
-        assert served[ "agent router go to calendar" ][ "label" ] == "calendaring"
+        assert served[ "agent router go to todo" ][ "label" ]            == "todo list"
+        assert served[ "agent router go to todo" ][ "display_name" ]     == "Todo List"
+        assert served[ "agent router go to calendar" ][ "label" ]        == "calendaring"
+        assert served[ "agent router go to calendar" ][ "display_name" ] == "Calendar"
 
     def test_fork_on_serves_the_forked_labels( self ):
         served = _by_command( _agents( crud_enabled=True ) )
-        assert served[ "agent router go to todo" ][ "label" ]     == "todo (CRUD)"
-        assert served[ "agent router go to calendar" ][ "label" ] == "calendar (CRUD)"
+        assert served[ "agent router go to todo" ][ "label" ]            == "todo (CRUD)"
+        assert served[ "agent router go to calendar" ][ "label" ]        == "calendar (CRUD)"
+
+    def test_fork_on_forks_the_read_label_too( self ):
+        # BOTH strings move together or a user reads "Todo List" while hearing
+        # "todo (CRUD)" about the same request. Forking `label` alone was the easy
+        # miss here, because `label` is the one resolve() already handled.
+        served = _by_command( _agents( crud_enabled=True ) )
+        assert served[ "agent router go to todo" ][ "display_name" ]     == "Todo List (CRUD)"
+        assert served[ "agent router go to calendar" ][ "display_name" ] == "Calendar (CRUD)"
 
     def test_the_flag_changes_those_two_and_nothing_else( self ):
         off = _by_command( _agents( crud_enabled=False ) )

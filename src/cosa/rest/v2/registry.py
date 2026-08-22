@@ -109,6 +109,17 @@ class AgentSpec:
     # is typeable but not sayable.
     description   : Optional[ str ]      = None
     user_initiable: bool                 = False
+    # `label` vs `display_name` — one string a user HEARS, one a user READS, and they
+    # are genuinely different registers. `label` goes into spoken text ("new todo list
+    # job..."), so it is lowercase prose. `display_name` is the dropdown's option text,
+    # so it is a proper name: "Todo List", "Date & Time". Ruled by Mr Radio 2026-08-22
+    # after the first cut rendered `label` in the dropdown and turned "Math Agent" into
+    # "math". Deriving one from the other loses either the capitals or the prose.
+    # `crud_display_name` is the fork's read-label, applied by resolve() beside
+    # crud_label — without it a forked agent would keep announcing itself as the
+    # unforked one, which is the exact disagreement honouring the fork is meant to end.
+    display_name     : Optional[ str ] = None
+    crud_display_name: Optional[ str ] = None
 
     @property
     def required_args( self ) -> tuple[ str, ... ]:
@@ -150,22 +161,24 @@ class AgentSpec:
 # all six are in the dropdown today.
 _CONVERSATIONAL = (
     AgentSpec( "agent router go to math",       MathAgent,        aliases=( "math", ),             speakable=True,
-               label="math",         description="Direct math calculations", user_initiable=True ),
+               label="math",         display_name="Math Agent", description="Direct math calculations", user_initiable=True ),
     AgentSpec( "agent router go to calculator", CalculatorAgent,  aliases=( "calculator", ),       speakable=True,
-               label="calculator",   description="Unit conversions, price comparison, mortgage", user_initiable=True ),
+               label="calculator",   display_name="Calculator", description="Unit conversions, price comparison, mortgage", user_initiable=True ),
     AgentSpec( "agent router go to datetime",   DateAndTimeAgent,
                aliases=( "datetime", "agent router go to date and time" ), speakable=True,
-               label="date and time", description="Date/time queries", user_initiable=True ),
+               label="date and time", display_name="Date & Time", description="Date/time queries", user_initiable=True ),
     AgentSpec( "agent router go to todo",       TodoListAgent,
                aliases=( "todo", "todo list", "agent router go to todo list" ), speakable=True,
                label="todo list", crud_factory=TodoCrudAgent,     crud_label="todo (CRUD)",
+               display_name="Todo List", crud_display_name="Todo List (CRUD)",
                description="Task management", user_initiable=True ),
     AgentSpec( "agent router go to calendar",   CalendaringAgent, aliases=( "calendar", ),         speakable=True,
                label="calendaring", crud_factory=CalendarCrudAgent, crud_label="calendar (CRUD)",
+               display_name="Calendar", crud_display_name="Calendar (CRUD)",
                description="Calendar management", user_initiable=True ),
     AgentSpec( "agent router go to weather",    WeatherAgent,
                aliases=( "weather", ), snapshotable=False, _required_args=( "location", ), speakable=True,
-               label="weather", dings=False, description="Weather queries", user_initiable=True ),
+               label="weather", dings=False, display_name="Weather", description="Weather queries", user_initiable=True ),
 )
 
 
@@ -196,6 +209,10 @@ def _agentic_spec( command, entry ):
         cli_style      = cli_style,
         arg_spec       = ArgSpec.from_entry( entry ),
         speakable      = command in _SPEAKABLE_AGENTIC,
+        # From the contract itself, so there is no second hand-written list of display
+        # names to drift from JOB_ARG_CONTRACTS — the same construction argument the
+        # _AGENTIC comprehension above makes about the command set.
+        display_name   = entry.get( "display_name" ),
         description    = _AGENTIC_DESCRIPTIONS.get( command ),
         user_initiable = command in _USER_INITIABLE_AGENTIC,
     )
@@ -304,7 +321,7 @@ _CONTROL = (
 # the dropdown been driven off `cls`, this case would have had nowhere to live.
 _NONE = (
     AgentSpec( "agent router go to receptionist", cls=CommandClass.NONE, speakable=True,
-               label="receptionist", description="General assistance", user_initiable=True ),
+               label="receptionist", display_name="Receptionist", description="General assistance", user_initiable=True ),
     AgentSpec( "none",                            cls=CommandClass.NONE, speakable=True ),
 )
 
@@ -432,6 +449,9 @@ def resolve( command, crud_enabled ):
         - Returns the AgentSpec for a conversational command or one of its aliases
         - Applies the CRUD fork ONLY when crud_enabled is True AND the spec declares
           a crud_factory — so a flag flip changes calendar and todo and nothing else
+        - Forks BOTH user-facing strings together: `label` (heard) and `display_name`
+          (read). Forking one and not the other would leave a user reading "Todo List"
+          while hearing "todo (CRUD)" about the same request
         - A forked spec carries snapshotable=False, because the writer refuses to
           serialize CRUD agents (running_fifo_queue:1563). The table used to say
           "cache this" about a class the writer would not cache — two sources of
@@ -457,7 +477,8 @@ def resolve( command, crud_enabled ):
     if spec is None:
         return None
     if crud_enabled and spec.crud_factory is not None:
-        return replace( spec, factory=spec.crud_factory, label=spec.crud_label, snapshotable=False )
+        return replace( spec, factory=spec.crud_factory, label=spec.crud_label,
+                        display_name=spec.crud_display_name, snapshotable=False )
     return spec
 
 
