@@ -7,7 +7,6 @@ import requests
 
 from cosa.agents.confirmation_dialog import ConfirmationDialogue
 from cosa.rest.fifo_queue import FifoQueue  # CJ Flow ingress queue — receives all incoming jobs
-import cosa.rest._unreachability_probe as _probe  # ⚠️ TEMPORARY — step B0(iii), DO NOT COMMIT
 
 from cosa.agents.date_and_time_agent import DateAndTimeAgent
 from cosa.agents.receptionist_agent import ReceptionistAgent
@@ -498,19 +497,14 @@ class TodoFifoQueue( FifoQueue ):
 
         # check to see if the queue isn't accepting jobs (because it's waiting for response to a previous request)
         if not self.is_accepting_jobs():
-            # ⚠️⚠️ TEMPORARY PROBE — UNCOMMITTED, step B0(iii). DO NOT COMMIT.
-            _probe.trip( _probe.BLOCKING_GATE, f"question={question[ :40 ]!r}" )
-
+            
             msg = f"The human responded '{question}'"
             du.print_banner( msg )
             confirmation_llm_spec      = self.config_mgr.get( "llm spec key for confirmation dialog" )
             run_previous_best_snapshot = ConfirmationDialogue( confirmation_llm_spec, debug=self.debug, verbose=self.verbose ).confirmed( question )
             
         if run_previous_best_snapshot:
-
-            # ⚠️⚠️ TEMPORARY PROBE — UNCOMMITTED, step B0(iii). DO NOT COMMIT.
-            _probe.trip( _probe.BLOCKING_BRANCH, f"question={question[ :40 ]!r}" )
-
+                
             blocking_object = self.pop_blocking_object()
             
             # unpack the blocking object, setting best score to 100 because the user has confirmed that it is an exact semantic match
