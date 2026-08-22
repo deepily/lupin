@@ -1,290 +1,106 @@
 """
-Unit tests for the Presentation Generator router (`cosa.rest.routers.presentation_generator`).
+Unit tests for the retired Presentation Generator router
+(`cosa.rest.routers.presentation_generator`).
 
-Covers:
-- `get_todo_queue` / `get_websocket_mgr` — dual-key `lupin_app.main` reads.
-- `validate_source_path` — within-root (absolute + relative), escape, and the
-  exact-project-root edge.
-- `submit_presentation_job` — empty-source 400, path-escape 403, file-not-found 404,
-  render_only-requested-on-non-YAML 400, YAML auto-detect render_only success
-  (absolute path arm), full non-render success (relative path arm + every args arm:
-  target_duration_minutes / dry_run / force_failure_mode / audience / theme /
-  content_model + scheduled_at + monopolize), and factory-None 500.
+WHAT USED TO BE HERE. `TestDependencies`, `TestValidateSourcePath` and
+`TestSubmitPresentationJob` — the queue and websocket dual-key reads, the path guard's
+within-root / escape / exact-root arms, and the handler's empty-source 400, escape 403,
+not-found 404, render-only-on-non-YAML 400, both success arms and the factory-None 500.
 
-Zero external dependencies — create_agentic_job, user_job_tracker, the queue, and
-filesystem probes (validate_source_path / os.path.exists / cu.get_project_root) are
-all boundary-mocked. No real jobs, no LLM, no queue, no network. Auth bypassed by
-passing current_user explicitly.
+That handler is gone: `/api/presentation-generator/submit` is a tombstone naming
+`/api/v2/submit`. Most of those tests have nothing to be rewritten INTO — the behaviour
+did not move within this module, it moved to a door with its own suite.
+
+THE ONE EXCEPTION IS THE PATH GUARD, and it is worth being precise about where its
+coverage went rather than letting it look dropped. `validate_source_path` moved onto the
+job as `presentation_generator/job.py::source_path_is_inside_the_project`, one commit
+ahead of this one, and its tests moved with it to
+`src/tests/unit/test_presentation_generator_job.py`. It is the only thing this door did
+that nothing downstream repeated, which is why it travelled first and the tombstone waited.
+
+Zero external dependencies — the tombstone reads no body, touches no queue and builds no
+job, so there is nothing left to mock.
 """
 
 import unittest
-from unittest.mock import Mock, MagicMock, patch
 import asyncio
-import sys
 import time
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
-from cosa.rest.routers.presentation_generator import (
-    get_todo_queue,
-    get_websocket_mgr,
-    validate_source_path,
-    submit_presentation_job,
-    PresentationSubmitRequest,
-    PresentationSubmitResponse,
-)
+import cosa.rest.routers.presentation_generator as mod
+from cosa.rest.routers.presentation_generator import submit_presentation_job
+from cosa.rest.routers._retired_doors import RETIRED_DOORS, V2_SUBMIT
+
+PATH = "/api/presentation-generator/submit"
 
 
-def _patch_fastapi_main( mock_main ):
-    """Dual-key patch for `lupin_app.main` (Gotcha 1)."""
-    pkg = Mock()
-    pkg.main = mock_main
-    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
+class TestTheSubmitDoorIsRetired( unittest.TestCase ):
+    """The door answers 410, at the right path, naming the right replacement."""
 
+    def _client( self ):
+        app = FastAPI()
+        app.include_router( mod.router )
+        return TestClient( app, raise_server_exceptions=False )
 
-def _job( id_hash="init_hash" ):
-    """A PresentationGeneratorJob stand-in."""
-    job = MagicMock()
-    job.id_hash = id_hash
-    return job
+    def test_it_answers_410_and_names_the_submit_door( self ):
+        response = self._client().post( PATH, json={ "source_path": "/io/deck.md" } )
+        self.assertEqual( response.status_code, 410 )
+        self.assertIn( V2_SUBMIT, response.json()[ "detail" ] )
 
+    def test_it_refuses_an_unauthenticated_caller_the_same_way( self ):
+        """No auth on a tombstone: a 401 reads like a credentials problem, not a retired door."""
+        self.assertEqual( self._client().post( PATH, json={ } ).status_code, 410 )
 
-class TestDependencies( unittest.TestCase ):
-    """
-    Ensures:
-        - get_todo_queue / get_websocket_mgr read the right attrs off lupin_app.main
-    """
+    def test_it_is_mounted_once_at_the_path_the_table_names( self ):
+        """
+        RED ON REVERT, and this is the assertion that earns its keep. The router carries a
+        prefix, so a decorator handed the FULL path would mount the door at
+        /api/presentation-generator/api/presentation-generator/submit and the real path
+        would answer 404 — the one answer a tombstone must never give, since 404 is exactly
+        what "this route was deleted" looks like. Every handler-level test still passes when
+        that happens; only a mounted-path check catches it.
+        """
+        paths = { route.path for route in mod.router.routes }
+        self.assertEqual( paths, { PATH }, f"mounted at {paths}" )
 
-    def test_get_todo_queue( self ):
-        """Ensures: get_todo_queue returns main_module.jobs_todo_queue."""
-        mock_main = MagicMock()
-        mock_main.jobs_todo_queue = "Q"
-        with _patch_fastapi_main( mock_main ):
-            self.assertEqual( get_todo_queue(), "Q" )
+    def test_the_table_says_this_door_retires_into_submit_not_ask( self ):
+        """A presentation is work whose command is already decided, not a question."""
+        self.assertEqual( RETIRED_DOORS[ PATH ], V2_SUBMIT )
 
-    def test_get_websocket_mgr( self ):
-        """Ensures: get_websocket_mgr returns main_module.websocket_manager."""
-        mock_main = MagicMock()
-        mock_main.websocket_manager = "WS"
-        with _patch_fastapi_main( mock_main ):
-            self.assertEqual( get_websocket_mgr(), "WS" )
+    def test_the_refusal_sentence_matches_the_door_it_names( self ):
+        detail = self._client().post( PATH, json={ } ).json()[ "detail" ]
+        self.assertIn( "Work whose command is already decided", detail )
+        self.assertNotIn( "Every question now enters through", detail )
 
+    def test_the_handler_only_refuses( self ):
+        """RED ON REVERT: give the handler a body again and it stops raising."""
+        with self.assertRaises( HTTPException ) as caught:
+            asyncio.run( submit_presentation_job() )
+        self.assertEqual( caught.exception.status_code, 410 )
 
-class TestValidateSourcePath( unittest.TestCase ):
-    """
-    Unit tests for `validate_source_path`.
+    def test_the_job_building_machinery_is_gone_from_this_module( self ):
+        """
+        A queue handle or a request model left behind in a module whose only POST is a
+        tombstone reads as a door that was disabled rather than retired — and a Pydantic
+        model no route reads is a shape a caller can still find and reasonably believe in.
+        """
+        for name in ( "create_agentic_job", "user_job_tracker", "get_todo_queue",
+                      "get_websocket_mgr", "validate_source_path",
+                      "PresentationSubmitRequest", "PresentationSubmitResponse" ):
+            self.assertFalse( hasattr( mod, name ),
+                              f"{name} survives in a module whose only POST is a tombstone" )
 
-    Ensures:
-        - within-root absolute + relative → True; escape → False; ==root → True
-    """
-
-    def setUp( self ):
-        """Ensures: project root is a fixed sentinel for deterministic realpath math."""
-        self.p = patch( "cosa.rest.routers.presentation_generator.cu.get_project_root",
-                        return_value="/proj" )
-        self.p.start()
-        self.addCleanup( self.p.stop )
-
-    def test_absolute_within_root_true( self ):
-        """Ensures: an absolute project-relative path inside root resolves True."""
-        self.assertTrue( validate_source_path( "/src/rnd/report.md" ) )
-
-    def test_relative_within_root_true( self ):
-        """Ensures: a relative path inside root resolves True."""
-        self.assertTrue( validate_source_path( "src/rnd/report.md" ) )
-
-    def test_escape_false( self ):
-        """Ensures: a traversal path that escapes root resolves False."""
-        self.assertFalse( validate_source_path( "../../etc/passwd" ) )
-
-    def test_equals_root_true( self ):
-        """Ensures: a path resolving exactly to project root resolves True (== arm)."""
-        self.assertTrue( validate_source_path( "/" ) )
-
-
-class TestSubmitPresentationJob( unittest.TestCase ):
-    """
-    Unit tests for `submit_presentation_job`.
-
-    Requires:
-        - create_agentic_job + user_job_tracker + filesystem probes boundary-mocked
-
-    Ensures:
-        - 400/403/404 validations, YAML auto-detect, full success, factory-None 500
-    """
-
-    def setUp( self ):
-        """Ensures: a default authenticated user + mocked queue + fixed project root."""
-        self.user  = { "uid": "u1", "email": "u@test.com", "session_id": "sess-1" }
-        self.queue = MagicMock()
-        self.ws    = MagicMock()
-        self.p_root = patch( "cosa.rest.routers.presentation_generator.cu.get_project_root",
-                             return_value="/proj" )
-        self.p_root.start()
-        self.addCleanup( self.p_root.stop )
-
-    def _call( self, body ):
-        return asyncio.run( submit_presentation_job(
-            request       = body,
-            current_user  = self.user,
-            todo_queue    = self.queue,
-            websocket_mgr = self.ws,
-        ) )
-
-    def test_empty_source_400( self ):
-        """Ensures: a whitespace-only source_path raises 400 after strip."""
-        with self.assertRaises( HTTPException ) as ctx:
-            self._call( PresentationSubmitRequest( source_path="   " ) )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "source_path cannot be empty", ctx.exception.detail )
-
-    def test_path_escape_403( self ):
-        """Ensures: a path that escapes project root raises 403."""
-        with patch( "cosa.rest.routers.presentation_generator.validate_source_path",
-                    return_value=False ):
-            with self.assertRaises( HTTPException ) as ctx:
-                self._call( PresentationSubmitRequest( source_path="../../etc/passwd" ) )
-        self.assertEqual( ctx.exception.status_code, 403 )
-        self.assertIn( "escapes project root", ctx.exception.detail )
-
-    def test_file_not_found_404( self ):
-        """Ensures: a valid-but-missing source raises 404."""
-        with patch( "cosa.rest.routers.presentation_generator.validate_source_path",
-                    return_value=True ), \
-             patch( "cosa.rest.routers.presentation_generator.os.path.exists",
-                    return_value=False ):
-            with self.assertRaises( HTTPException ) as ctx:
-                self._call( PresentationSubmitRequest( source_path="io/missing.md" ) )
-        self.assertEqual( ctx.exception.status_code, 404 )
-        self.assertIn( "Source file not found", ctx.exception.detail )
-
-    def test_absolute_path_under_root_400( self ):
-        """Ensures: an absolute source_path under the project root is rejected
-        LOUDLY with 400 (not silently double-rooted into a misleading 404)."""
-        with self.assertRaises( HTTPException ) as ctx:
-            # cu.get_project_root() is mocked to "/proj" in setUp; a caller sending
-            # "/proj/src/..." (an absolute FS path, not a repo-relative "/src/...")
-            # would otherwise double-root to "/proj/proj/src/..." → bogus 404.
-            self._call( PresentationSubmitRequest( source_path="/proj/src/tests/fixtures/x.yaml" ) )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "must be repo-relative", ctx.exception.detail )
-
-    def test_source_path_equals_root_400( self ):
-        """Ensures: source_path exactly equal to the project root is rejected 400."""
-        with self.assertRaises( HTTPException ) as ctx:
-            self._call( PresentationSubmitRequest( source_path="/proj" ) )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "must be repo-relative", ctx.exception.detail )
-
-    def test_render_only_requested_non_yaml_400( self ):
-        """Ensures: render_only=True on a non-YAML source raises 400."""
-        with patch( "cosa.rest.routers.presentation_generator.validate_source_path",
-                    return_value=True ), \
-             patch( "cosa.rest.routers.presentation_generator.os.path.exists",
-                    return_value=True ):
-            with self.assertRaises( HTTPException ) as ctx:
-                self._call( PresentationSubmitRequest( source_path="io/x.md", render_only=True ) )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "render_only mode requires", ctx.exception.detail )
-
-    def test_success_yaml_render_only_absolute( self ):
-        """Ensures: a .yaml source auto-enables render_only; absolute-path normalize arm."""
-        self.queue.size.return_value = 3
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "pr-yaml"
-        job = _job()
-        with patch( "cosa.rest.routers.presentation_generator.validate_source_path",
-                    return_value=True ), \
-             patch( "cosa.rest.routers.presentation_generator.os.path.exists",
-                    return_value=True ), \
-             patch( "cosa.rest.routers.presentation_generator.create_agentic_job",
-                    return_value=job ) as m_create, \
-             patch( "cosa.rest.routers.presentation_generator.user_job_tracker", tracker ):
-            result = self._call( PresentationSubmitRequest( source_path="/io/deck.yaml" ) )
-
-        self.assertIsInstance( result, PresentationSubmitResponse )
-        self.assertEqual( result.job_id, "pr-yaml" )
-        self.assertEqual( result.queue_position, 3 )
-        self.assertEqual( result.status, "queued" )
-        _, kwargs = m_create.call_args
-        self.assertTrue( kwargs[ "args_dict" ][ "render_only" ] )         # auto-detected from .yaml
-        self.assertEqual( kwargs[ "args_dict" ][ "source" ], "/proj/io/deck.yaml" )  # absolute arm
-        self.queue.push.assert_called_once()
-
-    def test_success_full_non_render_relative( self ):
-        """Ensures: relative-path arm + every optional args arm + scheduling thread through."""
-        self.queue.size.return_value = 6
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "pr-full"
-        job = _job()
-        body = PresentationSubmitRequest(
-            source_path             = "io/source.md",
-            target_duration_minutes = 15,
-            target_slide_count      = 40,
-            audience                = "general",
-            theme                   = "default",
-            content_model           = "claude-sonnet-4-6",
-            dry_run                 = True,
-            force_failure_mode      = "code_bug",
-            scheduled_at            = "2026-01-01T00:00:00",
-            monopolize              = True,
-        )
-        with patch( "cosa.rest.routers.presentation_generator.validate_source_path",
-                    return_value=True ), \
-             patch( "cosa.rest.routers.presentation_generator.os.path.exists",
-                    return_value=True ), \
-             patch( "cosa.rest.routers.presentation_generator.create_agentic_job",
-                    return_value=job ) as m_create, \
-             patch( "cosa.rest.routers.presentation_generator.user_job_tracker", tracker ):
-            result = self._call( body )
-
-        self.assertEqual( result.job_id, "pr-full" )
-        _, kwargs = m_create.call_args
-        ad = kwargs[ "args_dict" ]
-        self.assertEqual( ad[ "source" ], "/proj/io/source.md" )          # relative arm
-        self.assertNotIn( "render_only", ad )                             # non-yaml, not requested
-        self.assertEqual( ad[ "target_duration_minutes" ], "15" )
-        self.assertEqual( ad[ "target_slide_count" ], "40" )
-        self.assertTrue( ad[ "dry_run" ] )
-        self.assertEqual( ad[ "force_failure_mode" ], "code_bug" )
-        self.assertEqual( ad[ "audience" ], "general" )
-        self.assertEqual( ad[ "theme" ], "default" )
-        self.assertEqual( ad[ "content_model" ], "claude-sonnet-4-6" )
-        self.assertEqual( job.scheduled_at, "2026-01-01T00:00:00" )
-        self.assertTrue( job.monopolize )
-
-    def test_parent_id_hash_stamps_lineage( self ):
-        """5ed4f187 (mirrors 3a14292b): parent_id_hash threads onto job.spawned_by_id_hash
-        so the consumer's Gate B admits this child through a monopolizing test-suite's intake
-        hold instead of starving it 900s as a foreign writer. CONTROL: without the endpoint's
-        stamp line this assertion fails (job.spawned_by_id_hash never set to the parent)."""
-        self.queue.size.return_value = 1
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "pr-child"
-        job = _job()
-        with patch( "cosa.rest.routers.presentation_generator.validate_source_path",
-                    return_value=True ), \
-             patch( "cosa.rest.routers.presentation_generator.os.path.exists",
-                    return_value=True ), \
-             patch( "cosa.rest.routers.presentation_generator.create_agentic_job",
-                    return_value=job ), \
-             patch( "cosa.rest.routers.presentation_generator.user_job_tracker", tracker ):
-            self._call( PresentationSubmitRequest( source_path="io/deck.md", parent_id_hash="ts-parent" ) )
-        self.assertEqual( job.spawned_by_id_hash, "ts-parent" )
-
-    def test_factory_none_500( self ):
-        """Ensures: create_agentic_job None → 500."""
-        with patch( "cosa.rest.routers.presentation_generator.validate_source_path",
-                    return_value=True ), \
-             patch( "cosa.rest.routers.presentation_generator.os.path.exists",
-                    return_value=True ), \
-             patch( "cosa.rest.routers.presentation_generator.create_agentic_job",
-                    return_value=None ), \
-             patch( "cosa.rest.routers.presentation_generator.user_job_tracker", MagicMock() ):
-            with self.assertRaises( HTTPException ) as ctx:
-                self._call( PresentationSubmitRequest( source_path="io/x.md" ) )
-        self.assertEqual( ctx.exception.status_code, 500 )
-        self.assertIn( "Failed to create presentation job", ctx.exception.detail )
+    def test_the_path_guard_still_exists_where_it_moved_to( self ):
+        """
+        The guard was the one thing this door did that nothing downstream repeated, so
+        "it is gone from the router" must not be the whole story. It is on the job now,
+        and this asserts that rather than trusting the comment above.
+        """
+        from cosa.agents.presentation_generator.job import source_path_is_inside_the_project
+        self.assertFalse( source_path_is_inside_the_project( "../../etc/passwd" ) )
+        self.assertTrue( source_path_is_inside_the_project( "/io/deck.md" ) )
 
 
 def isolated_unit_test():
@@ -300,7 +116,7 @@ def isolated_unit_test():
     try:
         loader = unittest.TestLoader()
         suite  = unittest.TestSuite()
-        for tc in ( TestDependencies, TestValidateSourcePath, TestSubmitPresentationJob ):
+        for tc in ( TestTheSubmitDoorIsRetired, ):
             suite.addTests( loader.loadTestsFromTestCase( tc ) )
         result = unittest.TextTestRunner( verbosity=2 ).run( suite )
 
@@ -311,10 +127,10 @@ def isolated_unit_test():
 
         success = failures == 0 and errors == 0
         if success:
-            du.print_banner( "✅ ALL PRESENTATION-GENERATOR ROUTER TESTS PASSED", prepend_nl=True )
+            du.print_banner( "✅ ALL PRESENTATION ROUTER TESTS PASSED", prepend_nl=True )
             message = f"All {tests_run} tests passed successfully in {duration:.3f}s"
         else:
-            du.print_banner( "❌ SOME PRESENTATION-GENERATOR ROUTER TESTS FAILED", prepend_nl=True )
+            du.print_banner( "❌ SOME PRESENTATION ROUTER TESTS FAILED", prepend_nl=True )
             message = f"{failures} failures, {errors} errors out of {tests_run} tests"
 
         return success, duration, message
@@ -322,12 +138,12 @@ def isolated_unit_test():
     except Exception as e:
         duration  = time.time() - start_time
         error_msg = f"Unit test execution failed: {str( e )}"
-        du.print_banner( f"💥 PRESENTATION-GENERATOR ROUTER TEST ERROR: {error_msg}", prepend_nl=True )
+        du.print_banner( f"💥 PRESENTATION ROUTER TEST ERROR: {error_msg}", prepend_nl=True )
         return False, duration, error_msg
 
 
 if __name__ == "__main__":
     success, duration, message = isolated_unit_test()
     status = "✅ PASS" if success else "❌ FAIL"
-    print( f"\n{status} Presentation-generator router unit tests completed in {duration:.3f}s" )
+    print( f"\n{status} Presentation router unit tests completed in {duration:.3f}s" )
     print( f"Result: {message}" )

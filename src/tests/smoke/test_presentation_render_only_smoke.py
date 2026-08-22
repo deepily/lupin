@@ -196,7 +196,9 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
     """
 
     TEST_NAME       = "Presentation Generator Render Only"
-    SUBMIT_ENDPOINT = "/api/presentation-generator/submit"
+    # The dedicated door /api/presentation-generator/submit is retired (410); one front door now.
+    SUBMIT_ENDPOINT = "/api/v2/submit"
+    ROUTING_COMMAND = "agent router go to presentation generator"
     DEFAULT_TIMEOUT = 120  # 2 min — render is fast
     POLL_INTERVAL   = 2
     REQUEST_TIMEOUT = 120
@@ -240,10 +242,20 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
         source_path  = self._yaml_path
         if source_path.startswith( project_root ):
             source_path = source_path[ len( project_root ): ]
+        # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and
+        # answers 410 naming /api/v2/submit, which takes the routing command as a string
+        # and the agent's own arguments in `args`. The path arrives as `source` — the name
+        # the job factory already reads — and `parent_id_hash` stays TOP-LEVEL because it
+        # is a queue directive (Gate B lineage), not an argument to the agent, and `args`
+        # is checked against the command's own argument contract.
         payload = {
-            "source_path" : source_path,
-            "render_only" : True,
-            "dry_run"     : False,
+            "command"  : self.ROUTING_COMMAND,
+            "args"     : {
+                "source"      : source_path,
+                "render_only" : True,
+                "dry_run"     : False,
+            },
+            "question" : source_path,
         }
         # Lineage tag (bug 5ed4f187 / 0c4e8cfa): when this smoke runs as a child
         # pytest inside a monopolizing test-suite job, the runner exports

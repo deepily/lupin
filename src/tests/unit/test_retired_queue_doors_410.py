@@ -33,11 +33,13 @@ from fastapi.testclient import TestClient
 from cosa.rest.routers._retired_doors import REMOVE_BY, RETIRED_DOORS, V2_ASK, V2_SUBMIT
 from cosa.rest.routers import (
     bug_fix_expediter, deep_research, deep_research_to_podcast,
-    deep_research_to_presentation, queues, v2_ask,
+    deep_research_to_presentation, podcast_generator, presentation_generator, queues,
+    v2_ask,
 )
 
 _ROUTER_MODULES = ( bug_fix_expediter, deep_research, deep_research_to_podcast,
-                    deep_research_to_presentation, queues, v2_ask )
+                    deep_research_to_presentation, podcast_generator,
+                    presentation_generator, queues, v2_ask )
 
 
 def _app():
@@ -66,7 +68,7 @@ def _concrete( path ):
 
 # ── the count, stated once so a growing table cannot pass quietly ────────────
 
-def test_exactly_six_doors_are_retired_at_this_commit():
+def test_exactly_eight_doors_are_retired_at_this_commit():
     """
     THE COUNT IS RESTATED BY HAND ON PURPOSE, and it is the third of the three edits
     every new door costs (table row, this set, this name). A loop that silently covered
@@ -82,6 +84,18 @@ def test_exactly_six_doors_are_retired_at_this_commit():
     could build an agentic job — it could not until the
     agentic reader was wired into the flow, and a refusal naming a door that answers "I
     do not understand" is a refusal pointing at nothing.
+
+    `/api/presentation-generator/submit` came seventh and one commit behind its own
+    groundwork. It was the only door carrying a path-escape check that nothing downstream
+    repeated, so the guard moved onto the job first and the tombstone followed — retiring
+    the door in the same breath would have left a window with no check at all.
+
+    `/api/podcast-generator/submit` came eighth and is the ONLY submit-shaped-looking door
+    that retires into `ask` rather than `submit`. It was never really submit-shaped: its
+    description path held a conversation — fuzzy-match the user's documents, ask which one
+    they meant, ask for languages and audience, possibly answer "cancelled" — which is what
+    `ask` does and what `submit` refuses to do by design. Rick ruled it directly: the
+    accordion is retiring and Q&A is the entrance.
 
     STILL OUT, each for its own reason, because a door absent from this set should never
     read as one nobody got to:
@@ -102,6 +116,8 @@ def test_exactly_six_doors_are_retired_at_this_commit():
         "/api/deep-research/submit",
         "/api/deep-research-to-podcast/submit",
         "/api/deep-research-to-presentation/submit",
+        "/api/presentation-generator/submit",
+        "/api/podcast-generator/submit",
     }, sorted( RETIRED_DOORS )
 
 

@@ -28,22 +28,36 @@ themselves dead by the end of 2026.**
 **The survivors**: `POST /api/v2/ask` (a bare question — route it), `POST /api/v2/submit`
 (work whose command is already decided), `POST /api/v2/resume` (resume a parked question).
 
-**Retired so far — the question-shaped doors, whose replacement is live today:**
+**Retired so far:**
 
 | Retired door | Use instead |
 |---|---|
 | `POST /api/push` | `/api/v2/ask` |
 | `POST /api/job-history/{job_id}/retry` | `/api/v2/ask` |
+| `POST /api/bug-fix-expediter/submit` | `/api/v2/submit` |
+| `POST /api/deep-research/submit` | `/api/v2/submit` |
+| `POST /api/deep-research-to-podcast/submit` | `/api/v2/submit` |
+| `POST /api/deep-research-to-presentation/submit` | `/api/v2/submit` |
+| `POST /api/presentation-generator/submit` | `/api/v2/submit` |
+| `POST /api/podcast-generator/submit` | `/api/v2/ask` |
 
-**Still live, retiring next**: the twelve submit-shaped doors —
-`/api/push-agentic`, `/api/jobs/{id_hash}/resume-from-checkpoint`,
-`/api/test-fix-expediter/resume-from`, `/api/bug-fix-expediter/submit`,
-`/api/deep-research/submit`, `/api/deep-research-to-podcast/submit`,
-`/api/deep-research-to-presentation/submit`, `/api/mock-job/submit`,
-`/api/podcast-generator/submit`, `/api/presentation-generator/submit`,
-`/api/swe-team/submit`, `/api/test-suite/submit`. They wait because **`/api/v2/submit`
-does not exist yet**, and a 410 naming a route that answers 404 teaches a caller less than
-the error it replaced. They retire in the commit that builds it.
+The two question-shaped doors went first, when `/api/v2/ask` was the only live
+replacement. The submit-shaped ones could not follow until `/api/v2/submit` both existed
+and could build an agentic job — a 410 naming a route that answers "I do not understand"
+teaches a caller less than the error it replaced.
+
+`/api/podcast-generator/submit` is the one job-queueing door that retires into `ask`
+rather than `submit`: its description flow asked the user which document they meant and
+what languages and audience they wanted, and could answer "cancelled" — a conversation,
+which is what `ask` does and what `submit` refuses to do by design.
+
+**Still live, retiring next**: `/api/push-agentic`, `/api/swe-team/submit`,
+`/api/mock-job/submit`, `/api/test-suite/submit`,
+`/api/jobs/{id_hash}/resume-from-checkpoint`, `/api/test-fix-expediter/resume-from`. The
+last three are held for stated reasons rather than left over: `/api/test-suite/submit` is
+how the gate rig schedules a :8000 run, so it lands only once that gate is green; the two
+resume-from doors rebuild a job from server-side state, and a `SubmitRequest` can say
+command and args but never "resume job X".
 
 **Two more are held for their own reasons.** The Claude Code pair
 (`/api/claude-code/submit` and its alias `/api/claude-code/queue/submit`, one handler) is

@@ -312,14 +312,22 @@ class SilentConnectedUser:
 
 # ── the build ─────────────────────────────────────────────────────────────────
 def submit_build( base, jwt, source_path, duration=15, audience="general" ):
+    # ONE DOOR NOW. /api/presentation-generator/submit is retired and answers 410 naming
+    # /api/v2/submit, which takes the routing command as a string and the agent's own
+    # arguments in `args`. The path arrives as `source` — the name the job factory already
+    # reads — and stays repo-relative exactly as before.
     r = requests.post(
-        f"{base}/api/presentation-generator/submit",
+        f"{base}/api/v2/submit",
         headers = { "Authorization": f"Bearer {jwt}" },
         json    = {
-            "source_path"             : source_path,
-            "target_duration_minutes" : duration,
-            "audience"                : audience,
-            "dry_run"                 : False,
+            "command"  : "agent router go to presentation generator",
+            "args"     : {
+                "source"                  : source_path,
+                "target_duration_minutes" : duration,
+                "audience"                : audience,
+                "dry_run"                 : False,
+            },
+            "question" : source_path,
         },
         timeout = 30,
     )
