@@ -66,6 +66,21 @@ class FakeSpec:
         self.crud_factory  = crud_factory
 
 
+def _snapshot( **fields ):
+    """A stand-in SolutionSnapshot — a row the cache could serve.
+
+    `answer_is_correct` defaults to True, i.e. a CONFIRMED row, because step 9b refuses to
+    serve anything else and every test in this file that plants a row is about what happens
+    when a row IS served. A fake that omitted the field would quietly send all of them down
+    the refusal path instead of the one they are named for — the same failure shape as a
+    fake missing `crud_factory`, which broke a dozen tests on paths production handles fine.
+
+    Tests that WANT an unconfirmed row pass answer_is_correct=None or False explicitly.
+    """
+    fields.setdefault( "answer_is_correct", True )
+    return types.SimpleNamespace( **fields )
+
+
 def _lookup( is_replay_hit=False, snapshot=None, tier=1, similarity=0.0, best_score=0.0,
              best_candidate=None, embed_cached=False, question_normalized="q",
              t_exact_ms=0.1, t_embed_ms=0.2, t_ann_ms=0.3 ):
@@ -253,7 +268,7 @@ def test_construction_ok_when_writeback_off_even_without_methods( tmp_path, noti
 # ────────────────────────────────────────────────────────────── branch 1 — replay
 
 def test_replay_hit_done_returns_replay_result( tmp_path, notifier ):
-    snap  = types.SimpleNamespace( routing_command="agent router go to math" )
+    snap  = _snapshot( routing_command="agent router go to math" )
     cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
     exe   = FakeExecutor( _outcome( status="done", answer="4", answer_raw="4" ) )
     f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), exe, FakePending(), notifier )
@@ -267,7 +282,7 @@ def test_replay_hit_done_returns_replay_result( tmp_path, notifier ):
 
 
 def test_replay_hit_failed_degrades_to_receptionist( tmp_path, notifier ):
-    snap  = types.SimpleNamespace( routing_command="agent router go to math" )
+    snap  = _snapshot( routing_command="agent router go to math" )
     cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
     # first submit (replay) fails; the receptionist submit then succeeds.
     outcomes = [ _outcome( status="failed", answer=None, error="boom" ), _outcome( status="done" ) ]
@@ -994,7 +1009,7 @@ def test_agent_path_stamps_t_complete_after_first_useful( tmp_path, notifier, mo
 
 
 def test_replay_path_stamps_t_complete( tmp_path, notifier ):
-    snap  = types.SimpleNamespace( routing_command="agent router go to math" )
+    snap  = _snapshot( routing_command="agent router go to math" )
     cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
     exe   = FakeExecutor( _outcome( status="done", answer="4", answer_raw="4" ) )
     f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), exe, FakePending(), notifier )
@@ -1112,7 +1127,7 @@ class TestWaitingIsSuccessInFlight:
         this returns the receptionist with route_reason "replay_error" — a cache
         hit apologising for a question the cache could already answer.
         """
-        snap  = types.SimpleNamespace( routing_command="agent router go to math" )
+        snap  = _snapshot( routing_command="agent router go to math" )
         cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
         exe   = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
                                         job_id=_SCOPED_JOB_ID ) )
@@ -1999,7 +2014,7 @@ class TestTheFlowAcksAQueuedJob:
         monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled:
                              FakeSpec( label="calendaring" ) if command == "agent router go to calendar"
                              else FakeSpec( label="todo list" ) )
-        snap  = types.SimpleNamespace( routing_command="agent router go to todo" )
+        snap  = _snapshot( routing_command="agent router go to todo" )
         cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
         exe   = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
                                         job_id=_SCOPED_JOB_ID ) )
@@ -2355,7 +2370,7 @@ class TestTheFlowWritesTheQueryLog:
         """The match_result v1 wrote on its replay path, carried over."""
         monkeypatch.setattr( flow_mod, "resolve",
                              lambda command, crud_enabled: FakeSpec( label="math" ) )
-        snap  = types.SimpleNamespace( routing_command="agent router go to math" )
+        snap  = _snapshot( routing_command="agent router go to math" )
         cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap, similarity=100.0 ) )
         log   = FakeQueryLog()
         f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
@@ -2526,7 +2541,7 @@ def test_a_crud_command_never_reads_the_cache( tmp_path, notifier, monkeypatch )
     cache, hits the planted replay row, and comes back path="replay".
     """
     _registry_with_fake_agent_class( monkeypatch )
-    planted = types.SimpleNamespace( routing_command="agent router go to todo" )
+    planted = _snapshot( routing_command="agent router go to todo" )
     cache   = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=planted ) )
     f       = _make_flow( tmp_path, cache, FakeRouter( "agent router go to todo" ), FakeExpeditor(),
                           FakeExecutor(), FakePending(), notifier, crud_enabled=True )
@@ -2545,7 +2560,7 @@ def test_a_non_crud_command_still_reads_the_cache_with_the_flag_on( tmp_path, no
     Same flow, same live flag, one different routed command — math has no
     crud_factory, so it reads and replays as before.
     """
-    planted = types.SimpleNamespace( routing_command="agent router go to math" )
+    planted = _snapshot( routing_command="agent router go to math" )
     cache   = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=planted ) )
     f       = _make_flow( tmp_path, cache, FakeRouter( "agent router go to math" ), FakeExpeditor(),
                           FakeExecutor(), FakePending(), notifier, crud_enabled=True )
@@ -2565,7 +2580,7 @@ def test_the_todo_command_reads_the_cache_when_the_crud_flag_is_off( tmp_path, n
     Together with the test above, the pair fails if either half of the condition is
     dropped — a skip on the flag alone, or a skip on the command alone.
     """
-    planted = types.SimpleNamespace( routing_command="agent router go to todo" )
+    planted = _snapshot( routing_command="agent router go to todo" )
     cache   = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=planted ) )
     f       = _make_flow( tmp_path, cache, FakeRouter( "agent router go to todo" ), FakeExpeditor(),
                           FakeExecutor(), FakePending(), notifier, crud_enabled=False )
@@ -2585,7 +2600,7 @@ def test_a_router_error_precedes_any_cache_hit( tmp_path, notifier ):
     RED ON REVERT: put the lookup back above the router and the planted replay row
     is served, path="replay", before the router ever says "unknown".
     """
-    planted = types.SimpleNamespace( routing_command="agent router go to math" )
+    planted = _snapshot( routing_command="agent router go to math" )
     cache   = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=planted ) )
     f       = _make_flow( tmp_path, cache, FakeRouter( "unknown" ), FakeExpeditor(),
                           FakeExecutor(), FakePending(), notifier )
@@ -2608,7 +2623,7 @@ def test_replay_reports_the_routed_command_not_the_snapshots_blank_column( tmp_p
     RED ON REVERT: read `lookup.snapshot.routing_command` again and this row, whose
     column is blank, reports command="" and no label.
     """
-    blank = types.SimpleNamespace( routing_command="" )
+    blank = _snapshot( routing_command="" )
     cache = SpyCache( lookup_result=_lookup( is_replay_hit=True, snapshot=blank ) )
     f     = _make_flow( tmp_path, cache, FakeRouter( "agent router go to math" ), FakeExpeditor(),
                         FakeExecutor( _outcome( status="waiting", answer=None, job_id=_SCOPED_JOB_ID ) ),
@@ -3001,7 +3016,7 @@ class TestAWrittenRowCanActuallyBeReplayed:
         """
         monkeypatch.setattr( flow_mod, "resolve",
                              lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
-        snap     = types.SimpleNamespace( routing_command="agent router go to math" )
+        snap     = _snapshot( routing_command="agent router go to math" )
         cache    = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
         outcomes = [ _outcome( status="failed", answer=None,
                                error="Cannot execute empty code list — snapshot has no executable code" ),
@@ -3058,7 +3073,7 @@ class TestTheFlowAsksAboutANearMatch:
                threshold=90.0, enabled=True, candidate_question="what is on my todo list" ):
         monkeypatch.setattr( flow_mod, "resolve",
                              lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
-        candidate = types.SimpleNamespace( question=candidate_question, id_hash="near-1" )
+        candidate = _snapshot( question=candidate_question, id_hash="near-1" )
         cache     = FakeCache( lookup_result=_lookup( is_replay_hit=False, best_candidate=candidate,
                                                       best_score=score, similarity=score, tier="ann" ) )
         return AskFlow(
@@ -3233,7 +3248,7 @@ class TestTheFlowAsksAboutANearMatch:
         monkeypatch.setattr( flow_mod, "resolve",
                              lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
         confirmer = _FakeConfirmer()
-        candidate = types.SimpleNamespace( question="what is on my todo list", id_hash="near-1" )
+        candidate = _snapshot( question="what is on my todo list", id_hash="near-1" )
         cache     = FakeCache( lookup_result=_lookup( is_replay_hit=False, best_candidate=candidate,
                                                       best_score=95.0, similarity=95.0, tier="ann" ) )
         f = AskFlow( cache, FakeRouter(), FakeExpeditor(), FakeExecutor( _outcome() ), FakePending(),
@@ -3255,7 +3270,7 @@ class TestTheFlowAsksAboutANearMatch:
         monkeypatch.setattr( flow_mod, "resolve",
                              lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
         confirmer = _FakeConfirmer()
-        snap      = types.SimpleNamespace( routing_command="agent router go to math", question="what is 2+2" )
+        snap      = _snapshot( routing_command="agent router go to math", question="what is 2+2" )
         cache     = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap,
                                                       best_candidate=snap, best_score=100.0 ) )
         f = AskFlow( cache, FakeRouter(), FakeExpeditor(), FakeExecutor( _outcome() ), FakePending(),
@@ -3309,7 +3324,7 @@ class TestTheFlowAsksAboutANearMatch:
         make it any less stale.
         """
         confirmer = _FakeConfirmer()
-        candidate = types.SimpleNamespace( question="what is on my todo list", id_hash="near-1" )
+        candidate = _snapshot( question="what is on my todo list", id_hash="near-1" )
         cache     = SpyCache( lookup_result=_lookup( is_replay_hit=False, best_candidate=candidate,
                                                      best_score=95.0, tier="ann" ) )
         _registry_with_fake_agent_class( monkeypatch )
