@@ -414,15 +414,21 @@ class AskFlow:
         if missing:
             return self._submit_needs_input( trace, command, missing, sorted( final_args ), ctx )
 
-        # NO QUESTION ⇒ NOT CACHEABLE, whatever the registry says about the command.
-        # `question or command` below files the row under the command string, so a
-        # question-less submit would write a cache row nothing can ever match: `ask`
-        # looks rows up by the user's words, and no user says "agent router go to math".
-        # A row that can never be hit is not a cache entry, it is landfill — and it
-        # still costs a read on every lookup. (Pocholo, reviewing step 10.)
+        # THE CACHE NARROWING THAT USED TO LIVE HERE IS NOW STEP 9a's, AND ONLY 9a's.
+        # It read `snapshotable=spec.snapshotable and has_question`, because a
+        # question-less submit would file a row under the command string — "agent router
+        # go to math" — which no user will ever say, so the row could never be hit and
+        # only cost a read on every lookup (Pocholo, reviewing step 10). 9a refuses the
+        # write for EVERY submit, question or not: the caller named the command, so the
+        # row would assert on nobody's authority but theirs. Keeping both would leave two
+        # places deciding one thing, which is the shape this plan has already been bitten
+        # by. `has_question` still governs what gets LOGGED and how the row is typed,
+        # above — that half is live and separately pinned.
+        #
+        # ⚠️ If `submit` ever regains write-back for some narrower case, the no-question
+        # narrowing has to come back WITH it. It is not obsolete; it is subsumed.
         return self._run_agent( trace, spec, command, question if has_question else command,
-                                final_args, ctx, "submitted",
-                                snapshotable=spec.snapshotable and has_question )
+                                final_args, ctx, "submitted" )
 
     # ------------------------------------------------------- the agentic arm of ask
     @staticmethod
@@ -1030,6 +1036,7 @@ class AskFlow:
         does that when it has no question to file the row under.
         """
         may_cache      = spec.snapshotable if snapshotable is None else snapshotable
+        may_cache      = self._write_guard( trace, spec, route_reason, may_cache )
         agent_question = self._compose_question( question, final_args )
         work           = Work( "agent", self._build_agent( spec.factory, agent_question, ctx, question ),
                                ctx[ 0 ], ctx[ 1 ], ctx[ 2 ], snapshotable=may_cache )
@@ -1042,6 +1049,54 @@ class AskFlow:
         return self._finish( trace, "agent", route_reason, outcome, question, ctx,
                              command=command, snapshotable=may_cache,
                              agent_class_name=spec.factory.__name__, agent_label=spec.label )
+
+    # THE COMMANDS THE ROUTER ITSELF CHOSE. Everything else reached `_run_agent` because
+    # a CALLER named the command, and a caller's choice is not evidence about the
+    # question. "resumed" belongs here: the router picked that command on the original
+    # ask, and resume only folds in the answer to the argument it was missing.
+    _ROUTER_CHOSE = frozenset( { "args_none", "args_complete", "resumed" } )
+
+    @classmethod
+    def _write_guard( cls, trace: StageTrace, spec: Any, route_reason: str, may_cache: bool ) -> bool:
+        """Step 9a — the WRITE guard. Two refusals, both narrowing `may_cache`, never widening it.
+
+        1. THE ROUTER MUST HAVE CHOSEN THE AGENT. A `submit` caller hands over a command
+           it decided on — the HTTP door names one, an in-process caller builds a job —
+           so the row it would write says "this agent answers that question" on nobody's
+           authority but the caller's. That is the v2 shape of the mode-forced answer
+           Rick ruled out: the user overrode the router, so the result is not evidence
+           about the question and is not cached. (Mode itself no longer exists on this
+           path — `user_mode` lives only in `todo_fifo_queue.push_job`, which step 6c
+           pinned as dead. `submit` is where the same shape survived.)
+
+        2. A CRUD-CAPABLE COMMAND IS NEVER CACHED, WHATEVER THE FLAG SAYS. `resolve()`
+           already returns `snapshotable=False` for a command it forks to a CRUD agent —
+           but ONLY when `crud for dataframes agents enabled` is on. With the flag off
+           the fork never applies, the plain spec keeps `snapshotable=True`, and
+           `spec.factory` is `TodoListAgent` or `CalendaringAgent`. That is not a
+           hypothetical: it is what wrote the 28 rows found in the store, 27 carrying
+           `TodoListAgent` and one `CalendaringAgent`, during the eval runs.
+
+           v1 is protected here by ROUTING rather than by its own class check — under the
+           fork a todo question builds a CRUD subclass in the first place, so a
+           `TodoListAgent` never reaches the `isinstance` test at
+           `running_fifo_queue.py:1563` to be caught by it. Keying on `crud_factory`
+           instead of on the class asks the durable question — is this command ABOUT
+           mutable user data — and it gives the same answer whichever way the flag is set.
+
+        Both refusals are recorded in the trace, because a row that is not written leaves
+        nothing behind to explain itself. A silent refusal and a broken write-back look
+        identical from the outside, which is how you spend an afternoon on the wrong one.
+        """
+        if not may_cache:
+            return False
+        if route_reason not in cls._ROUTER_CHOSE:
+            trace.set( "writeback_refused_caller_chose_the_agent", route_reason )
+            return False
+        if getattr( spec, "crud_factory", None ) is not None:
+            trace.set( "writeback_refused_crud_command", spec.factory.__name__ )
+            return False
+        return True
 
     def _receptionist( self, trace: StageTrace, question: str, ctx: tuple, route_reason: str,
                        primary_error: Optional[ str ]=None ) -> dict:
