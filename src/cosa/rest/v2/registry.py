@@ -96,6 +96,19 @@ class AgentSpec:
     crud_factory  : Optional[ Callable[ ..., Any ] ] = None   # the fork's class when `crud for dataframes agents enabled`
     crud_label    : Optional[ str ]      = None               # the fork's spoken label
     dings         : bool                 = True               # v1 rang the new-job gong for every conversational agent EXCEPT weather
+    # ── added by the Q&A-card / submit-panel retirement (2026.08.22 plan §5.1) ──
+    # `description` is the one user-facing help string the registry did not carry;
+    # the 16 lines lived in MODE_METADATA (todo_fifo_queue.py) and moved here so the
+    # dropdown, /api/mode/available and the router all read one table.
+    #
+    # `user_initiable` means "a person may start this by typing into the Q&A card"
+    # — RATIFIED data (Rick, 2026-08-22 ruling 1), deliberately NOT derived from
+    # `speakable`. The two answer different questions: `speakable` is "belongs in the
+    # voice router prompt", this is "belongs in a mouse-driven dropdown". Deriving one
+    # from the other works today by coincidence and breaks on the first command that
+    # is typeable but not sayable.
+    description   : Optional[ str ]      = None
+    user_initiable: bool                 = False
 
     @property
     def required_args( self ) -> tuple[ str, ... ]:
@@ -132,22 +145,27 @@ class AgentSpec:
 # them would have sent two working commands to the loud-fail branch and told the
 # user "I don't know how to run that". Pinned by
 # test_registry_voice_binding.py::test_every_v1_ladder_command_resolves.
+# `description` on each spec is the string that used to live in MODE_METADATA under
+# the matching mode key; all six conversational agents are `user_initiable` because
+# all six are in the dropdown today.
 _CONVERSATIONAL = (
     AgentSpec( "agent router go to math",       MathAgent,        aliases=( "math", ),             speakable=True,
-               label="math" ),
+               label="math",         description="Direct math calculations", user_initiable=True ),
     AgentSpec( "agent router go to calculator", CalculatorAgent,  aliases=( "calculator", ),       speakable=True,
-               label="calculator" ),
+               label="calculator",   description="Unit conversions, price comparison, mortgage", user_initiable=True ),
     AgentSpec( "agent router go to datetime",   DateAndTimeAgent,
                aliases=( "datetime", "agent router go to date and time" ), speakable=True,
-               label="date and time" ),
+               label="date and time", description="Date/time queries", user_initiable=True ),
     AgentSpec( "agent router go to todo",       TodoListAgent,
                aliases=( "todo", "todo list", "agent router go to todo list" ), speakable=True,
-               label="todo list", crud_factory=TodoCrudAgent,     crud_label="todo (CRUD)" ),
+               label="todo list", crud_factory=TodoCrudAgent,     crud_label="todo (CRUD)",
+               description="Task management", user_initiable=True ),
     AgentSpec( "agent router go to calendar",   CalendaringAgent, aliases=( "calendar", ),         speakable=True,
-               label="calendaring", crud_factory=CalendarCrudAgent, crud_label="calendar (CRUD)" ),
+               label="calendaring", crud_factory=CalendarCrudAgent, crud_label="calendar (CRUD)",
+               description="Calendar management", user_initiable=True ),
     AgentSpec( "agent router go to weather",    WeatherAgent,
                aliases=( "weather", ), snapshotable=False, _required_args=( "location", ), speakable=True,
-               label="weather", dings=False ),
+               label="weather", dings=False, description="Weather queries", user_initiable=True ),
 )
 
 
@@ -172,13 +190,59 @@ def _agentic_spec( command, entry ):
     else:
         cli_style = "package"
     return AgentSpec(
-        command    = command,
-        cls        = CommandClass.AGENTIC,
-        cli_module = cli_module,
-        cli_style  = cli_style,
-        arg_spec   = ArgSpec.from_entry( entry ),
-        speakable  = command in _SPEAKABLE_AGENTIC,
+        command        = command,
+        cls            = CommandClass.AGENTIC,
+        cli_module     = cli_module,
+        cli_style      = cli_style,
+        arg_spec       = ArgSpec.from_entry( entry ),
+        speakable      = command in _SPEAKABLE_AGENTIC,
+        description    = _AGENTIC_DESCRIPTIONS.get( command ),
+        user_initiable = command in _USER_INITIABLE_AGENTIC,
     )
+
+
+# ── The agentic descriptions, moved out of MODE_METADATA (2026.08.22 plan §5.1) ──
+# One line per agentic command, keyed on the command rather than on a mode key, so
+# there is nothing left to keep in sync with AGENTIC_MODE_MAP. Eight of these are the
+# MODE_METADATA strings verbatim; the three expediter lines are new because those
+# commands never had a mode key — they were reached from a card, not a dropdown.
+_AGENTIC_DESCRIPTIONS = {
+    "agent router go to deep research"            : "Investigate a topic in depth",
+    "agent router go to podcast generator"        : "Create a podcast from an existing document",
+    "agent router go to research to podcast"      : "Research a topic and create a podcast",
+    "agent router go to claude code"              : "Run a coding task",
+    "agent router go to presentation generator"   : "Generate slides from a document",
+    "agent router go to research to presentation" : "Research a topic and create slides",
+    "agent router go to swe team"                 : "Multi-agent engineering team",
+    "agent router go to test suite"               : "Run integration and E2E tests",
+    "agent router go to bug fix expediter"        : "Fix a job that died",
+    "agent router go to test fix expediter"       : "Fix a failing test suite run",
+    "agent router go to test fix expediter resume": "Resume a stalled test-fix job",
+}
+
+
+# ── The RATIFIED user-initiable agentic set — Rick's ruling 1, 2026-08-22 ─────
+# "A person may start this by typing into the Q&A card." Like `speakable`, this is
+# ratified rather than derived: no oracle proves which commands a person should be
+# able to start by hand. The TWO held OUT are held out for a stated REASON, not by
+# omission — both take a job id produced by a job that already ran and failed, and
+# nobody types one of those. You press a button on the failed job's card:
+#   • "agent router go to bug fix expediter"  — its only argument is `dead_job_id`
+#   • "agent router go to test fix expediter" — its only argument is `source_test_suite_job_id`
+# `test fix expediter resume` IS in the set: its `resume_from` is a plan path or a
+# description a person genuinely types, which is why it has a submit card today —
+# and why that card has no job left once the dropdown can express the command.
+_USER_INITIABLE_AGENTIC = frozenset( {
+    "agent router go to deep research",
+    "agent router go to podcast generator",
+    "agent router go to research to podcast",
+    "agent router go to presentation generator",
+    "agent router go to research to presentation",
+    "agent router go to claude code",
+    "agent router go to swe team",
+    "agent router go to test suite",
+    "agent router go to test fix expediter resume",
+} )
 
 
 # ── The RATIFIED speakable-agentic set (§2.1a) ────────────────────────────────
@@ -223,13 +287,42 @@ _AGENTIC = tuple( _agentic_spec( command, entry ) for command, entry in JOB_ARG_
 # an agent. `receptionist` is a router template command; `none` is the internal
 # no-command outcome. None of the three is an agent, so factory stays None and
 # resolve() returns None for all of them (unchanged, §4).
+#
+# `agent router go to automatic` is NOT user_initiable, and the distinction matters:
+# the dropdown's Auto-Route entry is the SENTINEL below, not this command. Auto-Route
+# means "do not name a command, let the router decide" — there is nothing to submit.
+# This command is the VOICE way to clear a sticky mode, which is a different act.
+# `none` is the internal no-command outcome and is not pickable by anybody.
 _CONTROL = (
-    AgentSpec( "agent router go to automatic", cls=CommandClass.CONTROL, speakable=True ),
+    AgentSpec( "agent router go to automatic", cls=CommandClass.CONTROL, speakable=True,
+               description="Normal LLM-based routing" ),
 )
+# The receptionist is the ONE stated exception (Rick's ruling 3, 2026-08-22): it is
+# genuinely both an agent a person picks on purpose AND the else-branch you land on
+# when routing fails. `cls=NONE` describes how the ROUTER reaches it and stays;
+# `user_initiable=True` says a person may pick it. Two questions, two fields — had
+# the dropdown been driven off `cls`, this case would have had nowhere to live.
 _NONE = (
-    AgentSpec( "agent router go to receptionist", cls=CommandClass.NONE, speakable=True ),
+    AgentSpec( "agent router go to receptionist", cls=CommandClass.NONE, speakable=True,
+               label="receptionist", description="General assistance", user_initiable=True ),
     AgentSpec( "none",                            cls=CommandClass.NONE, speakable=True ),
 )
+
+
+# ── The Auto-Route sentinel (2026.08.22 plan §5.2) ────────────────────────────
+# Auto-Route is the dropdown's "no command named — let the router decide" entry. It
+# is NOT a registry command and must never collide with one, so it is declared here,
+# ONCE, and rendered from this constant rather than hand-written into the HTML.
+#
+# WHY A NAMED CONSTANT AND NOT A HAND-WRITTEN <option>: the guard that keeps agent
+# lists out of the front end greps for `<option value=` inside #agent-mode. A
+# hand-written Auto-Route option would make that guard fire on legitimate scaffolding,
+# and the fix would be an exemption — which is how a guard gets quietly widened later.
+# With the sentinel rendered like every other option there is nothing to exempt.
+# Its label and description are the "system" row of the retired MODE_METADATA.
+AUTO_ROUTE_VALUE       = "__auto_route__"
+AUTO_ROUTE_LABEL       = "System (Auto-Route)"
+AUTO_ROUTE_DESCRIPTION = "Normal LLM-based routing"
 
 
 # ── The one table (§5.1) ──────────────────────────────────────────────────────
@@ -294,6 +387,15 @@ NO_MATCH = frozenset( c for c, s in REGISTRY.items() if s.cls is CommandClass.NO
 # Phase 2 retires the NAME when that guard is rewritten class-aware; there is no
 # longer a second definition to drift from the owned set.
 SPEAKABLE_JOBS = frozenset( c for c, s in JOB_COMMANDS.items() if s.speakable )
+
+# ── USER_INITIABLE_COMMANDS — the set the Q&A dropdown must render, exactly ────
+# A projection of the ratified `user_initiable` field across EVERY class, which is
+# why it is not scoped to one bucket: it spans the six conversational agents, nine of
+# the eleven agentic commands, and the receptionist (cls=NONE, ruling 3). The
+# dropdown's option values must set-EQUAL this — see the §6 gate 3 rewrite. It is
+# deliberately NOT `SPEAKABLE_JOBS` and not derived from `speakable`: a command that
+# is user_initiable but not speakable belongs in the dropdown and in no voice prompt.
+USER_INITIABLE_COMMANDS = frozenset( c for c, s in REGISTRY.items() if s.user_initiable )
 
 
 def resolve( command, crud_enabled ):
