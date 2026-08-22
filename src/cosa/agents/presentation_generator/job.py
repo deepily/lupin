@@ -17,12 +17,50 @@ Example:
 """
 
 import asyncio
+import os
 from datetime import datetime
 from typing import Optional
 
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
+
+
+def source_path_is_inside_the_project( path: str ) -> bool:
+    """
+    Whether a source path resolves to somewhere inside the project root.
+
+    WHY THIS LIVES ON THE JOB AND NOT ON A ROUTE. It used to be
+    `routers/presentation_generator.py::validate_source_path`, checked by the one door
+    that built this job. That door is retired: presentation work now enters through
+    `/api/v2/submit`, which takes a command and an args dict and — correctly — knows
+    nothing about which of an agent's arguments happen to be file paths. A guard that
+    lives on ONE entry point protects that entry point; a guard that lives on the thing
+    which opens the file protects every caller, including the voice path and any door
+    added later.
+
+    Requires:
+        - path is a non-empty string, absolute or project-relative
+
+    ⚠️ A LEADING SLASH MEANS PROJECT-RELATIVE HERE, NOT FILESYSTEM-ABSOLUTE. `/etc/passwd`
+    resolves to `<project>/etc/passwd` and comes back True — which looks alarming and is
+    not a hole: that file does not exist, and the job's own existence check refuses it a
+    moment later. This is the retiring door's convention kept verbatim (`/io/deck.md` is
+    how every caller writes a project path), and changing it here would silently break
+    every existing caller while looking like a security improvement.
+
+    Ensures:
+        - returns True when the resolved path is the project root or inside it
+        - returns False when it escapes, including via `..` segments and symlinks
+          (os.path.realpath resolves both before the comparison)
+    """
+    project_root = os.path.realpath( cu.get_project_root() )
+    if path.startswith( "/" ):
+        full_path = cu.get_project_root() + path
+    else:
+        full_path = cu.get_project_root() + "/" + path
+    resolved = os.path.realpath( full_path )
+    return resolved.startswith( project_root + "/" ) or resolved == project_root
 
 
 class PresentationGeneratorJob( AgenticJobBase ):
@@ -102,6 +140,16 @@ class PresentationGeneratorJob( AgenticJobBase ):
             debug      = debug,
             verbose    = verbose
         )
+
+        # THE PATH GUARD, ENFORCED WHERE THE FILE IS ACTUALLY OPENED. The retiring door
+        # checked this and refused with a 403; nothing downstream re-checked, so moving
+        # the guard here is what keeps a retirement from quietly becoming a path-traversal
+        # hole. Raising rather than returning False: a job that cannot be built safely
+        # must not be built at all, and the factory's caller degrades on the exception.
+        if not source_path_is_inside_the_project( source_path ):
+            raise ValueError(
+                f"Source path escapes the project root, refusing to build the job: {source_path!r}"
+            )
 
         # Presentation parameters
         self.source_path             = source_path
