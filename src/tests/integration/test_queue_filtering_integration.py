@@ -7,7 +7,6 @@ Validates full authentication and authorization workflow.
 
 import os
 
-import pytest
 import requests
 
 
@@ -15,7 +14,6 @@ import requests
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
-@pytest.mark.xfail( reason="API response format changed: 'todo_jobs' → 'todo_jobs_metadata' — tests need update" )
 class TestQueueFilteringIntegration:
     """Integration tests for queue filtering endpoints with authentication."""
 
@@ -34,8 +32,11 @@ class TestQueueFilteringIntegration:
         )
         user_token = login_response.json()["tokens"]["access_token"]
 
-        # Push a job as this user
-        push_response = requests.post( f"{BASE_URL}/api/push",
+        # Ask a question as this user. /api/push was retired 2026-08-21 (410, names this
+        # door). The swap is safe here because this test never depended on the job
+        # LANDING in the queue — it asserts total_jobs >= 0 and validates the filtering
+        # response shape, as its own comment below says.
+        push_response = requests.post( f"{BASE_URL}/api/v2/ask",
             json={
                 "question": "What is 2+2?",
                 "websocket_id": "test_session_1"
@@ -53,7 +54,7 @@ class TestQueueFilteringIntegration:
         assert queue_response.status_code == 200
         data = queue_response.json()
         print( f"Queue response: {data}" )
-        assert "todo_jobs" in data
+        assert "todo_jobs_metadata" in data
         assert "filtered_by" in data
         assert "is_admin_view" in data
         assert data["is_admin_view"] is False
@@ -142,8 +143,8 @@ class TestQueueFilteringIntegration:
         user_token = login_response.json()["tokens"]["access_token"]
         target_user_id = login_response.json()["user"]["id"]
 
-        # Push job as target user
-        requests.post( f"{BASE_URL}/api/push",
+        # Ask as the target user (/api/push retired 2026-08-21).
+        requests.post( f"{BASE_URL}/api/v2/ask",
             json={
                 "question": "Target user question",
                 "websocket_id": "target_session"
@@ -222,10 +223,10 @@ class TestQueueFilteringIntegration:
             assert response.status_code == 200
             data = response.json()
             assert data["filtered_by"] == user_id
-            assert f"{queue_name}_jobs" in data
+            assert f"{queue_name}_jobs_metadata" in data
 
     def test_done_queue_metadata_filtered_correctly( self, clean_test_db ):
-        """Done queue returns filtered metadata alongside HTML jobs."""
+        """Done queue returns filtered structured metadata."""
         # Setup: Get user token
         register_response = requests.post( f"{BASE_URL}/auth/register",
             json={"email": "donequeue@test.com", "password": "TestPassword123!"}
@@ -241,18 +242,16 @@ class TestQueueFilteringIntegration:
             headers={"Authorization": f"Bearer {user_token}"}
         )
 
-        # Assert: Contains both jobs and metadata
+        # Assert: Contains structured metadata
         assert response.status_code == 200
         data = response.json()
-        assert "done_jobs" in data
         assert "done_jobs_metadata" in data
         assert "filtered_by" in data
         assert "total_jobs" in data
 
         # If there are jobs, validate metadata structure
-        if len(data["done_jobs"]) > 0:
+        if len(data["done_jobs_metadata"]) > 0:
             metadata = data["done_jobs_metadata"][0]
-            assert "html" in metadata
             assert "job_id" in metadata
             assert "question_text" in metadata
             assert "response_text" in metadata
@@ -314,9 +313,9 @@ class TestQueueFilteringIntegration:
         assert response.status_code == 200
         data = response.json()
 
-        # Required fields for backward compatibility
-        assert "todo_jobs" in data
-        assert isinstance(data["todo_jobs"], list)
+        # Required fields of the current contract
+        assert "todo_jobs_metadata" in data
+        assert isinstance(data["todo_jobs_metadata"], list)
 
         # New metadata fields (additive, not breaking)
         assert "filtered_by" in data
@@ -342,7 +341,7 @@ class TestQueueFilteringIntegration:
         data1 = response1.json()
         assert data1["filtered_by"] == "*"
         assert data1["is_admin_view"] is True
-        assert data1["total_jobs"] == len(data1["todo_jobs"])
+        assert data1["total_jobs"] == len(data1["todo_jobs_metadata"])
 
         # Test 2: Admin without filter
         response2 = requests.get( f"{BASE_URL}/api/get-queue/todo",
@@ -351,4 +350,4 @@ class TestQueueFilteringIntegration:
         data2 = response2.json()
         assert data2["filtered_by"] == admin_uid
         assert data2["is_admin_view"] is False
-        assert data2["total_jobs"] == len(data2["todo_jobs"])
+        assert data2["total_jobs"] == len(data2["todo_jobs_metadata"])

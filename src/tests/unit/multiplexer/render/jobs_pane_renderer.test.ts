@@ -1631,23 +1631,26 @@ test("Test 43: retry ↻ renders on dead + history cards, NOT on live todo/runni
   renderer.unmount(); jobs.disposeForTesting();
 });
 
-test("Test 44: retry click confirm → POST /api/job-history/{id}/retry with the wired websocket_id (W5)", async () => {
+test("Test 44: retry click confirm → POST /api/v2/ask re-asking the stored question with the wired websocket_id (W5)", async () => {
   const bus  = createEventBusForTesting();
   const api  = makeStubApi();
   const jobs = createJobStore({ bus });
   const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api, websocketId: "wise-penguin" });
   const root = makeRoot();
   renderer.mount(root);
-  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead" }));
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead", meta: { question_text: "what is 2 + 2?" } }));
 
   const restore = stubConfirm(true);
   (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
   await flushMicrotasks();
   restore();
 
+  // The door moved AND the body changed shape: the retired /api/job-history/{id}/retry
+  // sent only a websocket_id because the SERVER held the question. /api/v2/ask is a
+  // question door, so the client now sends the question it holds.
   assert.ok(
-    api.calls.some(c => c === 'POST /api/job-history/dead-1/retry {"websocket_id":"wise-penguin"}'),
-    "retry POST carries the wired websocket_id",
+    api.calls.some(c => c === 'POST /api/v2/ask {"question":"what is 2 + 2?","websocket_id":"wise-penguin"}'),
+    "retry re-asks the stored question and carries the wired websocket_id",
   );
   renderer.unmount(); jobs.disposeForTesting();
 });
@@ -1659,7 +1662,7 @@ test("Test 45: retry without a wired websocketId sends websocket_id:'' (W5 fallb
   const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });   // no websocketId
   const root = makeRoot();
   renderer.mount(root);
-  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead" }));
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead", meta: { question_text: "what is 2 + 2?" } }));
 
   const restore = stubConfirm(true);
   (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
@@ -1667,9 +1670,37 @@ test("Test 45: retry without a wired websocketId sends websocket_id:'' (W5 fallb
   restore();
 
   assert.ok(
-    api.calls.some(c => c === 'POST /api/job-history/dead-1/retry {"websocket_id":""}'),
-    "retry POST falls back to an empty websocket_id",
+    api.calls.some(c => c === 'POST /api/v2/ask {"question":"what is 2 + 2?","websocket_id":""}'),
+    "retry falls back to an empty websocket_id",
   );
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 45b: a card with no stored question does not POST and does not prompt (2026-08-21 cutover)", async () => {
+  // The retry door used to work from the id alone — the server looked the question up.
+  // Now the client re-asks, so a card whose row carries no question text has nothing to
+  // send. Posting an empty question would be rejected at the door with nothing useful to
+  // show; warn and stop instead. Reachable for a card built from a WebSocket event rather
+  // than a hydrated history row.
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api, websocketId: "wise-penguin" });
+  const root = makeRoot();
+  renderer.mount(root);
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead", meta: {} }));
+
+  let prompted = false;
+  const restore = stubConfirm(true);
+  const realConfirm = globalThis.confirm;
+  globalThis.confirm = ((msg?: string) => { prompted = true; return realConfirm(msg as string); }) as typeof globalThis.confirm;
+  (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
+  await flushMicrotasks();
+  globalThis.confirm = realConfirm;
+  restore();
+
+  assert.deepEqual(api.calls.filter(c => c.startsWith("POST ")), [], "no POST without a question");
+  assert.equal(prompted, false, "no confirm dialog either — there is nothing to confirm");
   renderer.unmount(); jobs.disposeForTesting();
 });
 
@@ -1680,7 +1711,7 @@ test("Test 46: retry confirm-CANCEL aborts with no POST (W5)", async () => {
   const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api, websocketId: "wise-penguin" });
   const root = makeRoot();
   renderer.mount(root);
-  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead" }));
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead", meta: { question_text: "what is 2 + 2?" } }));
 
   const restore = stubConfirm(false);
   (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
@@ -1698,7 +1729,12 @@ test("Test 47: retry POST failure logs + changes nothing (W5)", async () => {
   const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api, websocketId: "wise-penguin" });
   const root = makeRoot();
   renderer.mount(root);
-  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead" }));
+  // The question is REQUIRED for this test to test what it says. After the 2026-08-21
+  // cutover the click returns early — warning, and changing nothing — when the row has
+  // no question text, which would satisfy both assertions below without a POST ever
+  // being attempted. Caught by running it: the test stayed green while covering the
+  // wrong branch.
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead", meta: { question_text: "what is 2 + 2?" } }));
 
   const origWarn = console.warn; let warned = false; console.warn = () => { warned = true; };
   const restore = stubConfirm(true);
@@ -1706,6 +1742,11 @@ test("Test 47: retry POST failure logs + changes nothing (W5)", async () => {
   await flushMicrotasks();
   restore(); console.warn = origWarn;
 
+  // makeControllableApi records the bare path (makeStubApi records "POST <path> <body>").
+  assert.ok(
+    api.calls.includes("/api/v2/ask"),
+    "the retry must actually have been attempted — otherwise this test passes on the no-question early return",
+  );
   assert.equal(warned, true, "retry failure logged");
   assert.equal(jobs.bucket("dead").length, 1, "dead card still present after a failed retry");
   renderer.unmount(); jobs.disposeForTesting();

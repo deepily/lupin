@@ -1,8 +1,13 @@
 """
 E2E UI tests for agentic job dispatch cards on the notifications page.
 
-Phase 6: Notifications & Q&A Tests — validates Claude Code, Research,
-Podcast, and SWE Team submission card elements and interactions.
+Phase 6: Notifications & Q&A Tests — validates Claude Code, Research and
+Test Suite submission card elements and interactions.
+
+The Podcast and SWE Team card classes were DELETED, not disabled, when their doors
+retired: Rick ruled 2026-08-21 that the Submit Agentic Jobs accordion is going away and
+Q&A is the entrance, so each door commit deletes its own card, and a UI test for a card
+that no longer exists is not a gap in coverage — it is coverage of nothing.
 
 Requires:
     - Dev server running on port 7999 with Testing config
@@ -294,145 +299,6 @@ class TestResearchCard:
         mode_select = logged_in_page.locator( "#agent-mode" )
         options = mode_select.locator( "option[value='research_to_presentation']" )
         assert options.count() > 0
-
-
-# ---------------------------------------------------------------------------
-# Podcast Card
-# ---------------------------------------------------------------------------
-
-class TestPodcastCard:
-    """Tests for Podcast Generator job dispatch card."""
-
-    def test_podcast_card_has_source_input( self, logged_in_page ):
-        """
-        Podcast card has source input field.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - Source input element exists
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-podcast-source-input" ).count() > 0
-
-    def test_podcast_card_has_dry_run_and_submit( self, logged_in_page ):
-        """
-        Podcast card has dry-run checkbox and submit button.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - Dry-run checkbox and submit button exist
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-podcast-dry-run-checkbox" ).count() > 0
-        assert logged_in_page.get_by_test_id( "notifications-podcast-submit-btn" ).count() > 0
-
-    def test_podcast_card_has_stt_button( self, logged_in_page ):
-        """
-        Podcast card has speech-to-text button.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - STT button element exists
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-podcast-stt-btn" ).count() > 0
-
-
-# ---------------------------------------------------------------------------
-# SWE Team Card
-# ---------------------------------------------------------------------------
-
-class TestSWETeamCard:
-    """Tests for SWE Team job dispatch card."""
-
-    def test_swe_card_has_task_textarea( self, logged_in_page ):
-        """
-        SWE Team card has task description textarea.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - Task textarea element exists
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-swe-task-textarea" ).count() > 0
-
-    def test_swe_card_has_budget_and_timeout( self, logged_in_page ):
-        """
-        SWE Team card has budget and timeout inputs.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - Budget and timeout input elements exist
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-swe-budget-input" ).count() > 0
-        assert logged_in_page.get_by_test_id( "notifications-swe-timeout-input" ).count() > 0
-
-    def test_swe_card_has_trust_mode_select( self, logged_in_page ):
-        """
-        SWE Team card has trust mode selector.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - Trust mode select element exists
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-swe-trust-mode-select" ).count() > 0
-
-    def test_swe_card_has_dry_run_and_submit( self, logged_in_page ):
-        """
-        SWE Team card has dry-run checkbox and submit button.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - Dry-run checkbox and submit button exist
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-swe-dry-run-checkbox" ).count() > 0
-        assert logged_in_page.get_by_test_id( "notifications-swe-submit-btn" ).count() > 0
-
-    def test_swe_card_has_stt_button( self, logged_in_page ):
-        """
-        SWE Team card has speech-to-text button.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - STT button element exists
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-swe-stt-btn" ).count() > 0
 
 
 # ---------------------------------------------------------------------------

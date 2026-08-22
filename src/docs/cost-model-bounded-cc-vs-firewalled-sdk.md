@@ -17,7 +17,7 @@ Lupin runs LLM-driven work on one of two paths. The choice is a design-time deci
 |---|---|
 | Code | `src/cosa/agents/claude_code/job.py` (`AgenticJobBase` subclass) |
 | Routing | CJ Flow `RunningFifoQueue._process_job` → `_submit_agentic_job` → agentic pool |
-| Submission endpoint | `POST /api/claude-code/submit` with `task_type=BOUNDED` |
+| Submission endpoint | `POST /api/v2/submit`, command `agent router go to claude code`, `args.task_type=BOUNDED` |
 | Underlying invocation | Claude Code CLI / Claude Agent SDK subprocess |
 | Auth | OAuth token tied to the Max 200 subscription |
 | **Billing** | **Covered by Max plan — zero per-token cost** |
@@ -48,7 +48,7 @@ Per the load-bearing docstring at `src/cosa/agents/deep_research/__init__.py:27`
 
 ## How we know — the empirical confirmation
 
-On 2026-05-12, a throwaway 10-job probe (5 in-repo prompts + 5 web-search prompts) was submitted via `/api/claude-code/submit` with `task_type=BOUNDED`. The probe ran sequentially with 60s spacing so the Anthropic console UI had time to settle between each.
+On 2026-05-12, a throwaway 10-job probe (5 in-repo prompts + 5 web-search prompts) was submitted via `/api/claude-code/submit` with `task_type=BOUNDED` (that door was retired on 2026-08-21; the same probe now posts to `/api/v2/submit`). The probe ran sequentially with 60s spacing so the Anthropic console UI had time to settle between each.
 
 **Result**:
 
@@ -141,16 +141,21 @@ Even though Path A is "free" in marginal-cost terms, the Max plan is NOT infinit
 
 ### Rule
 
-For any bounded CC job that does NOT need to complete synchronously (batch generation, scheduled regression sweeps, podcast/presentation/deep-research work), **set `scheduled_at` inside a window the box is awake for — prefer 7:30–10 AM EDT** — via the existing field on `ClaudeCodeQueueRequest` (`src/cosa/rest/routers/claude_code_queue.py:49`).
+For any bounded CC job that does NOT need to complete synchronously (batch generation, scheduled regression sweeps, podcast/presentation/deep-research work), **set `scheduled_at` inside a window the box is awake for — prefer 10 AM – 1 PM EDT** — via the `scheduled_at` field on `SubmitRequest` (`src/cosa/rest/routers/v2_ask.py`).
+
+`scheduled_at` stays TOP-LEVEL rather than going inside `args`: it tells the queue *when* to run the work, and `args` is checked against the command's own argument contract, which no scheduling instruction is in.
 
 ```json
-POST /api/claude-code/submit
+POST /api/v2/submit
 {
-  "prompt"       : "…",
-  "project"      : "lupin",
-  "task_type"    : "BOUNDED",
-  "scheduled_at" : "2026-05-13T08:00:00-04:00",
-  "max_turns"    : 15
+  "command"      : "agent router go to claude code",
+  "args"         : {
+    "prompt"    : "…",
+    "project"   : "lupin",
+    "task_type" : "BOUNDED",
+    "max_turns" : 15
+  },
+  "scheduled_at" : "2026-08-22T11:00:00-04:00"
 }
 ```
 
@@ -224,4 +229,5 @@ No. Walk the Q1–Q5 framework, document the answers, get the migration plan rev
 - `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` — full experiment record.
 - `src/cosa/agents/bug_fix_expediter/` + `src/cosa/agents/test_fix_expediter/` — already-migrated reference implementations.
 - `src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md` — how to package a bounded job (CJ Flow integration).
-- `src/cosa/rest/routers/claude_code_queue.py` — `/api/claude-code/submit` route definition (including `scheduled_at` field).
+- `src/cosa/rest/routers/v2_ask.py` — `/api/v2/submit` route definition (including the `scheduled_at` field).
+- `src/cosa/rest/routers/claude_code_queue.py` — the two retired `/api/claude-code/*` tombstones.

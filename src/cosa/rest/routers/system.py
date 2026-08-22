@@ -19,9 +19,8 @@ from typing import Dict, Any, Optional
 
 # Import dependencies
 from ..auth import get_current_user, get_current_user_id
-from ..dependencies.config import get_config_manager, get_snapshot_manager, get_id_generator
+from ..dependencies.config import get_config_manager, get_id_generator
 from cosa.config.configuration_manager import ConfigurationManager
-from cosa.memory.solution_snapshot_mgr import SolutionSnapshotManager
 from cosa.agents.two_word_id_generator import TwoWordIdGenerator
 from cosa.rest.code_identity import get_code_identity
 import cosa.utils.util as du

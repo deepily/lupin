@@ -125,30 +125,30 @@ class TestAgenticSetOwnership( unittest.TestCase ):
 class TestResolve( unittest.TestCase ):
 
     def test_full_command_resolves_to_spec( self ):
-        spec = resolve( "agent router go to weather" )
+        spec = resolve( "agent router go to weather", crud_enabled=False )
         self.assertIsInstance( spec, AgentSpec )
         self.assertEqual( spec.command, "agent router go to weather" )
 
     def test_short_form_alias_resolves_to_spec( self ):
-        self.assertEqual( resolve( "weather" ).command, "agent router go to weather" )
-        self.assertEqual( resolve( "todo list" ).command, "agent router go to todo" )
+        self.assertEqual( resolve( "weather", crud_enabled=False ).command, "agent router go to weather" )
+        self.assertEqual( resolve( "todo list", crud_enabled=False ).command, "agent router go to todo" )
 
     def test_deferred_command_resolves_to_none( self ):
-        self.assertIsNone( resolve( "agent router go to deep research" ) )
+        self.assertIsNone( resolve( "agent router go to deep research", crud_enabled=False ) )
 
     def test_control_command_resolves_to_none( self ):
-        self.assertIsNone( resolve( "agent router go to automatic" ) )
+        self.assertIsNone( resolve( "agent router go to automatic", crud_enabled=False ) )
 
     def test_receptionist_resolves_to_none( self ):
-        self.assertIsNone( resolve( "agent router go to receptionist" ) )
+        self.assertIsNone( resolve( "agent router go to receptionist", crud_enabled=False ) )
 
     def test_unknown_command_resolves_to_none( self ):
-        self.assertIsNone( resolve( "agent router go to nowhere" ) )
+        self.assertIsNone( resolve( "agent router go to nowhere", crud_enabled=False ) )
 
     def test_agentic_command_resolves_to_none_in_resolve( self ):
         # §5.1.3: resolve() stays scoped to CONVERSATIONAL — an owned agentic
         # command must still return None here, unchanged from before phase 1.
-        self.assertIsNone( resolve( "agent router go to deep research" ) )
+        self.assertIsNone( resolve( "agent router go to deep research", crud_enabled=False ) )
 
     def test_resolve_agentic_returns_spec( self ):
         spec = resolve_agentic( "agent router go to deep research" )
@@ -167,11 +167,11 @@ class TestRequiredArgsResolutionOrder( unittest.TestCase ):
 
     def test_literal_tuple_arm( self ):
         # weather has no declared_args and is not in JOB_ARG_CONTRACTS → literal tuple.
-        self.assertEqual( resolve( "agent router go to weather" ).required_args, ( "location", ) )
+        self.assertEqual( resolve( "agent router go to weather", crud_enabled=False ).required_args, ( "location", ) )
 
     def test_empty_when_no_source( self ):
         # math: no declared_args, not in JOB_ARG_CONTRACTS, no literal → ().
-        self.assertEqual( resolve( "agent router go to math" ).required_args, () )
+        self.assertEqual( resolve( "agent router go to math", crud_enabled=False ).required_args, () )
 
     def test_agentic_agents_table_arm( self ):
         # A spec whose command IS in JOB_ARG_CONTRACTS reads its required_user_args.

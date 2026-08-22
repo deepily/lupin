@@ -5,7 +5,6 @@ from typing import Any, Optional, Dict, Type, List
 
 import requests
 
-from cosa.agents.confirmation_dialog import ConfirmationDialogue
 from cosa.rest.fifo_queue import FifoQueue  # CJ Flow ingress queue — receives all incoming jobs
 
 from cosa.agents.date_and_time_agent import DateAndTimeAgent
@@ -17,6 +16,8 @@ from cosa.agents.math_agent import MathAgent
 from cosa.crud_for_dataframes.todo_crud_agent import TodoCrudAgent
 from cosa.crud_for_dataframes.calendar_crud_agent import CalendarCrudAgent
 from cosa.agents.calculator.agent import CalculatorAgent
+from cosa.rest.salutations import SALUTATIONS, parse_salutations
+from cosa.rest.v2.registry import resolve   # the command->agent table (row 10ef4b64)
 from cosa.agents.llm_client_factory import LlmClientFactory
 from cosa.rest.agentic_job_factory import create_agentic_job
 from cosa.memory.gister import Gister
@@ -51,6 +52,7 @@ from lupin_cli.notifications.notification_models import (
 from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor import (
     RuntimeArgumentExpeditor,
+    ExpediteContext,
     user_message_for_expedite_reason,
 )
 
@@ -206,12 +208,10 @@ class TodoFifoQueue( FifoQueue ):
 
         if self.debug: print( "TodoFifoQueue: Text processors and three-level architecture components initialized" )
         
-        # Salutations to be stripped by a brute force method until the router parses them off for us
-        self.salutations = [ "computer", "little", "buddy", "pal", "ai", "jarvis", "alexa", "siri", "hal", "einstein",
-            "jeeves", "alfred", "watson", "samwise", "sam", "hawkeye", "oye", "hey", "there", "you", "yo",
-            "hi", "hello", "hola", "good", "morning", "afternoon", "evening", "night", "buenas", "buenos", "buen", "tardes",
-            "noches", "dias", "día", "tarde", "greetings", "my", "dear", "dearest", "esteemed", "assistant", "receptionist", "friend"
-        ]
+        # Salutations to be stripped by a brute force method until the router parses
+        # them off for us. The list moved to cosa.rest.salutations so the v2 flow reads
+        # the SAME one — two copies is how two surfaces disagree about what a greeting is.
+        self.salutations = SALUTATIONS
         self.hemming_and_hawing = [
             "", "", "", "umm...", "hmm...", "hmm...", "well...", "ahem..."
         ]
@@ -244,24 +244,9 @@ class TodoFifoQueue( FifoQueue ):
         Raises:
             - None
         """
-        # Normalize the transcription by removing extra spaces after punctuation
-        # From: https://chat.openai.com/share/5783e1d5-c9ce-4503-9338-270a4c9095b2
-        words = transcription.split()
-        prefix_holder = [ ]
-        
-        # Find the index where salutations stop
-        index = 0
-        for word in words:
-            if word.strip( ',.:;!?' ).lower() in self.salutations:
-                prefix_holder.append( word )
-                index += 1
-            else:
-                break
-        
-        # Get the remaining string after salutations
-        remaining_string = ' '.join( words[ index: ] )
-
-        return ' '.join( prefix_holder ), remaining_string
+        # The implementation moved to cosa.rest.salutations; this stays as the queue's
+        # door onto it, and honours self.salutations so a test can still swap the list.
+        return parse_salutations( transcription, self.salutations )
 
     # ========================================================================
     # User Mode Management Methods
@@ -423,6 +408,29 @@ class TodoFifoQueue( FifoQueue ):
         """
         Push a new job onto the queue based on the question.
 
+        🔴 DEAD AS OF STEP 6c (2026-08-21) — NOTHING IN PRODUCTION CALLS THIS.
+
+        This was the live voice path: a question came in, and everything below decided
+        what to do with it — fitness, cache, confirmation, routing, agent construction,
+        the queue push. All of that now lives in `AskFlow` (`cosa/rest/v2/flow.py`), and
+        the switch happened by CUTOVER rather than by this method delegating to it:
+
+            · 11a / 11b retired the router doors that called it; they answer 410.
+            · step 12 moved the seven internal callers to flow.submit() / flow.ask().
+            · door 8 — /api/upload-and-transcribe-mp3, the SPOKEN way in — hands the
+              transcription to the flow in-process (routers/speech.py).
+
+        The body survives only because steps 7b and 7c delete its internals next, and
+        the queue's own coverage suite still drives it. Do not add a caller: a sweep
+        (`src/tests/unit/test_6c_push_job_has_no_production_caller.py`) fails if any
+        production module calls `push_job(` again.
+
+        THE REASON THIS PARAGRAPH EXISTS rather than the deadness just being true: the
+        plan's step 0 closed a trap where `grep "def save_snapshot"` returned the
+        DEPRECATED manager first, and a reader followed it into code nobody runs. A
+        440-line `push_job` that still reads as the live voice path is that same trap,
+        set for the next person who greps for how a spoken question is handled.
+
         Requires:
             - question is a non-empty string
             - websocket_id is a non-empty string
@@ -443,7 +451,6 @@ class TodoFifoQueue( FifoQueue ):
         Raises:
             - None (exceptions handled internally)
         """
-        run_previous_best_snapshot = False
         similar_snapshots = [ ]
         
         # NEW: Pre-processing and validation
@@ -495,69 +502,53 @@ class TodoFifoQueue( FifoQueue ):
             print( f"  Gist:       '{query_gist}'" )
             print( f"Embeddings generated - V:{len( embedding_verbatim )} N:{len( embedding_normalized )}" )
 
-        # check to see if the queue isn't accepting jobs (because it's waiting for response to a previous request)
-        if not self.is_accepting_jobs():
-            
-            msg = f"The human responded '{question}'"
-            du.print_banner( msg )
-            confirmation_llm_spec      = self.config_mgr.get( "llm spec key for confirmation dialog" )
-            run_previous_best_snapshot = ConfirmationDialogue( confirmation_llm_spec, debug=self.debug, verbose=self.verbose ).confirmed( question )
-            
-        if run_previous_best_snapshot:
-                
-            blocking_object = self.pop_blocking_object()
-            
-            # unpack the blocking object, setting best score to 100 because the user has confirmed that it is an exact semantic match
-            best_score          = 100.0
-            best_snapshot       = blocking_object[ "best_snapshot" ]
-            last_question_asked = blocking_object[ "question" ]
-            
-            # update last question asked before we throw it on the queue
-            best_snapshot.last_question_asked = last_question_asked
+        # ⚰️ REMOVED — step 7c, 2026-08-21: the two-turn confirmation dialogue.
+        #
+        # WHAT WAS HERE: an `is_accepting_jobs()` gate, and behind it a `ConfirmationDialogue`
+        # LLM call that read the user's NEXT spoken question as a yes/no answer about the
+        # PREVIOUS one, then replayed a stashed "blocking object" snapshot at a hard-coded
+        # score of 100.0. It depended on `FifoQueue.push_blocking_object()` setting
+        # `_accepting_jobs = False`, which is why that method, `pop_blocking_object()` and
+        # `is_accepting_jobs()` were deleted with it.
+        #
+        # WHY IT WAS BAD: nothing in the running system ever armed a blocking object, so the
+        # gate never went false and the branch never ran — but everyone who touched push_job
+        # still had to read it and reason about it. And on the paths where it WOULD have run
+        # it was wrong twice over: it treated a fresh question as an answer to an older one,
+        # and it recorded a guessed match as a perfect 100.0.
+        #
+        # WHAT CARRIES CONFIRMATION NOW: AskFlow's near-match ask (step 6b) — a targeted
+        # yes/no about one named snapshot, where both "no" and a timeout fall through to
+        # ordinary routing.
+        #
+        # PROVED UNREACHABLE BEFORE DELETING, not just argued: a probe recorded every trip of
+        # the gate and the branch over 2026-08-21 16:30Z–23:07Z — six boots, 65
+        # /api/upload-and-transcribe-mp3 + 2 /api/v2/ask + 1 /api/push — and logged nothing,
+        # with a positive control proving the probe could fire. Caveat the window does not
+        # cover: both probes sat inside `push_job`, which step 6c pinned as having zero
+        # production callers, so the silence re-proves the cutover at least as much as the
+        # branch. The probe module retired with this block.
 
-            # Log query with match results (confirmed snapshot)
-            match_result = {
-                'snapshot_id': best_snapshot.id_hash,
-                'type': 'confirmed_match',
-                'confidence': 100.0
-            }
-            embeddings = {
-                'verbatim'   : embedding_verbatim,
-                'normalized' : embedding_normalized
-            }
-            self._log_query_with_results(
-                query_verbatim, query_normalized, query_gist,
-                user_id, websocket_id, embeddings, cache_hits, match_result
-            )
+        # DEMO KLUDGE: if the question doesn't start with "refactor", then we're going to search for similar snapshots
+        if not question.lower().strip().startswith( "refactor " ):
 
-            self._dump_code( best_snapshot )
-            return self._queue_best_snapshot( best_snapshot, best_score, user_id, user_email )
+            # salutations, question = self.parse_salutations( question )
+            # question_gist = self.get_gist( question )
 
-        # if we're not running the previous best snapshot, then we need to find a similar one before queuing the job
+            du.print_banner( f"push_job( '{( salutations + ' ' + question ).strip()}' )", prepend_nl=True )
+            # Top-1 + confirm strategy: no threshold filtering — all results returned by manager
+            # threshold_question = self.config_mgr.get( "similarity_threshold_question",      default=98.0, return_type="float" )  # OBSOLETE
+            # threshold_gist     = self.config_mgr.get( "similarity_threshold_question_gist", default=95.0, return_type="float" )  # OBSOLETE
+            threshold_confirmation = self.config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float" )
+            print( f"push_job(): Top-1 + confirm strategy (ask floor: {threshold_confirmation}%)" )
+
+            # We're searching for similar snapshots without any salutations prepended to the question.
+            # The snapshot manager internally handles hierarchical search (exact matches first, then similarity)
+            similar_snapshots = self.snapshot_mgr.get_snapshots_by_question( parsed_question, question_gist=question_gist )
+            print()
         else:
-
-            # make sure to remove a possible blocking object
-            self.pop_blocking_object()
-            # DEMO KLUDGE: if the question doesn't start with "refactor", then we're going to search for similar snapshots
-            if not question.lower().strip().startswith( "refactor " ):
-
-                # salutations, question = self.parse_salutations( question )
-                # question_gist = self.get_gist( question )
-
-                du.print_banner( f"push_job( '{( salutations + ' ' + question ).strip()}' )", prepend_nl=True )
-                # Top-1 + confirm strategy: no threshold filtering — all results returned by manager
-                # threshold_question = self.config_mgr.get( "similarity_threshold_question",      default=98.0, return_type="float" )  # OBSOLETE
-                # threshold_gist     = self.config_mgr.get( "similarity_threshold_question_gist", default=95.0, return_type="float" )  # OBSOLETE
-                threshold_confirmation = self.config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float" )
-                print( f"push_job(): Top-1 + confirm strategy (ask floor: {threshold_confirmation}%)" )
-
-                # We're searching for similar snapshots without any salutations prepended to the question.
-                # The snapshot manager internally handles hierarchical search (exact matches first, then similarity)
-                similar_snapshots = self.snapshot_mgr.get_snapshots_by_question( parsed_question, question_gist=question_gist )
-                print()
-            else:
-                print( "push_job(): Skipping snapshot search..." )
-                similar_snapshots = [ ]
+            print( "push_job(): Skipping snapshot search..." )
+            similar_snapshots = [ ]
         
         # Flag to track if we need LLM routing (set when no cache match or user declines confirmation)
         needs_llm_routing = False
@@ -752,38 +743,31 @@ class TodoFifoQueue( FifoQueue ):
                 self._notify( f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} I'm gonna ask our research librarian about that", target_user=user_email )
                 msg = self._search_and_summarize_safely( question_gist )
             
-            elif command == "agent router go to calendar":
-                if self._crud_agents_enabled():
-                    agent = CalendarCrudAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                    msg = starting_a_new_job.format( agent_type="calendar (CRUD)" )
-                else:
-                    agent = CalendaringAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                    msg = starting_a_new_job.format( agent_type="calendaring" )
-                ding_for_new_job = True
-            elif command == "agent router go to calculator":
-                agent = CalculatorAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                msg = starting_a_new_job.format( agent_type="calculator" )
-                ding_for_new_job = True
-            elif command == "agent router go to math":
-                agent = MathAgent( question=salutation_plus_question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                msg = starting_a_new_job.format( agent_type="math" )
-                ding_for_new_job = True
-            elif command in ( "agent router go to todo", "agent router go to todo list" ):
-                if self._crud_agents_enabled():
-                    agent = TodoCrudAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                    msg = starting_a_new_job.format( agent_type="todo (CRUD)" )
-                else:
-                    agent = TodoListAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                    msg = starting_a_new_job.format( agent_type="todo list" )
-                ding_for_new_job = True
-            elif command in [ "agent router go to date and time", "agent router go to datetime" ]:
-                agent = DateAndTimeAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                msg = starting_a_new_job.format( agent_type="date and time" )
-                ding_for_new_job = True
-            elif command == "agent router go to weather":
-                agent = WeatherAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                msg = starting_a_new_job.format( agent_type="weather" )
-                # ding_for_new_job = False
+            elif resolve( command, self._crud_agents_enabled() ) is not None:
+                # ─── ONE TABLE LOOKUP, replacing six hand-written elif branches (row 10ef4b64) ───
+                # Rick, 2026-08-20: "those agents could be instantiated using a string key
+                # referencing a dictionary of prototypical Agent Objects... that doesn't take
+                # 10 elif branches." The dictionary already existed — cosa/rest/v2/registry.py —
+                # and only the HTTP route was asking it. ADDING A SEVENTH CONVERSATIONAL COMMAND
+                # NOW REQUIRES NO EDIT HERE; it is one AgentSpec row.
+                #
+                # ONE resolver, and it applies the CRUD fork itself (2b). The flag is read
+                # HERE rather than at the top of the chain so a non-conversational command
+                # still costs no config lookup, exactly as before.
+                voice_spec = resolve( command, self._crud_agents_enabled() )
+                factory, agent_label, ding_for_new_job = voice_spec.factory, voice_spec.label, voice_spec.dings
+                agent = factory(
+                    question=question, question_gist=question_gist, last_question_asked=salutation_plus_question,
+                    push_counter=self.push_counter, user_id=user_id, user_email=user_email,
+                    session_id=websocket_id, debug=True, verbose=False,
+                    auto_debug=self.auto_debug, inject_bugs=self.inject_bugs
+                )
+                msg = starting_a_new_job.format( agent_type=agent_label )
+                # ⚠️ MathAgent used to receive `salutation_plus_question` as its `question` while
+                # every other agent received the bare `question`. Rick ruled 2026-08-20 to DROP the
+                # quirk (it matches the registry's own risk-10 ruling), so math now gets the bare
+                # question like everything else. This IS a behaviour change and is deliberate — if a
+                # math regression ever appears, look here first.
             elif command in ( "agent router go to automatic", "agent router go to automatic routing mode" ):
                 previous_mode = self.clear_user_mode( user_id )
                 if previous_mode:
@@ -1201,6 +1185,10 @@ class TodoFifoQueue( FifoQueue ):
             verbose    = self.verbose
         )
 
+        # The reason this call fails comes back on OUR context, not on the shared
+        # expeditor (row 10c60712) — two callers in flight at once each read their
+        # own.
+        expedite_context = ExpediteContext()
         args_dict = expeditor.expedite(
             command           = command,
             raw_args          = raw_args,
@@ -1208,15 +1196,16 @@ class TodoFifoQueue( FifoQueue ):
             session_id        = session_id,
             user_id           = user_id,
             original_question = original_question,
-            job_id            = spec_id
+            job_id            = spec_id,
+            context           = expedite_context
         )
 
         # ── Step 4: Handle failure — say WHY, and only blame the user for a real "no" ──
-        # expedite() records the cause on _last_expedite_reason (bug 68198c9f). A
+        # expedite() records the cause on the caller's context (bug 68198c9f). A
         # prompt that could not be delivered, or timed out, is a machine failure — it
         # must never be reported as the user cancelling a job they never saw.
         if args_dict is None:
-            spoken, log_line = user_message_for_expedite_reason( expeditor._last_expedite_reason )
+            spoken, log_line = user_message_for_expedite_reason( expedite_context.reason )
             emit_job_state_transition( self.websocket_mgr, spec_id, JobState.QUEUED, JobState.CANCELLED, user_id )
             self.user_job_tracker.remove_job( spec_id )
             self._notify( spoken, target_user=user_email )

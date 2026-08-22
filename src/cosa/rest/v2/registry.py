@@ -26,7 +26,7 @@ bookkeeping change does not silently widen what the router-facing resolver retur
 No behaviour change: `resolve()` returns exactly what it did before.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Callable, Optional
 
@@ -36,6 +36,8 @@ from cosa.agents.date_and_time_agent import DateAndTimeAgent
 from cosa.agents.todo_list_agent     import TodoListAgent
 from cosa.agents.calendaring_agent   import CalendaringAgent
 from cosa.agents.weather_agent       import WeatherAgent
+from cosa.crud_for_dataframes.todo_crud_agent     import TodoCrudAgent
+from cosa.crud_for_dataframes.calendar_crud_agent import CalendarCrudAgent
 from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor      import ArgSpec
 
@@ -86,6 +88,14 @@ class AgentSpec:
     cli_style     : Optional[ str ]   = None                  # "package" | "module" — documentation only (§6)
     arg_spec      : Optional[ ArgSpec ] = None                # the expeditor's carrier, §5.1.1
     speakable     : bool              = False                 # belongs in the router prompt — RATIFIED (§2.1a), NOT derived from the template (trap 3)
+    # ── added by brain integration (row 10ef4b64, 2026-08-20) ──
+    # The CRUD fork, declared here and APPLIED BY resolve() for every caller. These
+    # three are the table's statement of what the fork changes; nothing else reads
+    # them, and no caller reaches a factory by picking one of these itself.
+    label         : Optional[ str ]      = None               # what the user HEARS ("new {label} job..."); None ⇒ derive
+    crud_factory  : Optional[ Callable[ ..., Any ] ] = None   # the fork's class when `crud for dataframes agents enabled`
+    crud_label    : Optional[ str ]      = None               # the fork's spoken label
+    dings         : bool                 = True               # v1 rang the new-job gong for every conversational agent EXCEPT weather
 
     @property
     def required_args( self ) -> tuple[ str, ... ]:
@@ -110,20 +120,34 @@ class AgentSpec:
 
 
 # ── The six conversational (phase-1) agents ──────────────────────────────────
-# Keyed on the FULL routing string (R-A1); short forms are aliases. NON-CRUD
-# classes are pinned (R-A3): v1 forks calendar/todo to CRUD agents when the
-# `crud for dataframes agents enabled` flag is set, and CRUD agents are never
-# snapshotted — inheriting that fork would report 0% cache-hit forever and read as
-# a v2 bug. The executor calls spec.factory with the shared 11-kwarg signature and
+# Keyed on the FULL routing string (R-A1); short forms are aliases. The CRUD fork
+# is applied by resolve() itself, for every caller — see its docstring for why the
+# old R-A3 pin is gone. The executor calls spec.factory with the shared 11-kwarg
+# signature and
 # the BARE question for every agent (v2 drops MathAgent's salutation quirk, risk 10).
+# ⚠️ THE FULL-FORM ALIASES ARE LOAD-BEARING, not tidiness. The v1 voice ladder
+# accepted "agent router go to date and time" and "agent router go to todo list"
+# as FULL routing strings; before row 10ef4b64 neither resolved here (measured:
+# resolve() returned None for both), so routing voice through this table without
+# them would have sent two working commands to the loud-fail branch and told the
+# user "I don't know how to run that". Pinned by
+# test_registry_voice_binding.py::test_every_v1_ladder_command_resolves.
 _CONVERSATIONAL = (
-    AgentSpec( "agent router go to math",       MathAgent,        aliases=( "math", ),             speakable=True ),
-    AgentSpec( "agent router go to calculator", CalculatorAgent,  aliases=( "calculator", ),       speakable=True ),
-    AgentSpec( "agent router go to datetime",   DateAndTimeAgent, aliases=( "datetime", ),         speakable=True ),
-    AgentSpec( "agent router go to todo",       TodoListAgent,    aliases=( "todo", "todo list" ), speakable=True ),
-    AgentSpec( "agent router go to calendar",   CalendaringAgent, aliases=( "calendar", ),         speakable=True ),
+    AgentSpec( "agent router go to math",       MathAgent,        aliases=( "math", ),             speakable=True,
+               label="math" ),
+    AgentSpec( "agent router go to calculator", CalculatorAgent,  aliases=( "calculator", ),       speakable=True,
+               label="calculator" ),
+    AgentSpec( "agent router go to datetime",   DateAndTimeAgent,
+               aliases=( "datetime", "agent router go to date and time" ), speakable=True,
+               label="date and time" ),
+    AgentSpec( "agent router go to todo",       TodoListAgent,
+               aliases=( "todo", "todo list", "agent router go to todo list" ), speakable=True,
+               label="todo list", crud_factory=TodoCrudAgent,     crud_label="todo (CRUD)" ),
+    AgentSpec( "agent router go to calendar",   CalendaringAgent, aliases=( "calendar", ),         speakable=True,
+               label="calendaring", crud_factory=CalendarCrudAgent, crud_label="calendar (CRUD)" ),
     AgentSpec( "agent router go to weather",    WeatherAgent,
-               aliases=( "weather", ), snapshotable=False, _required_args=( "location", ), speakable=True ),
+               aliases=( "weather", ), snapshotable=False, _required_args=( "location", ), speakable=True,
+               label="weather", dings=False ),
 )
 
 
@@ -272,9 +296,25 @@ NO_MATCH = frozenset( c for c, s in REGISTRY.items() if s.cls is CommandClass.NO
 SPEAKABLE_JOBS = frozenset( c for c, s in JOB_COMMANDS.items() if s.speakable )
 
 
-def resolve( command ):
+def resolve( command, crud_enabled ):
     """
-    Resolve a routing command to its CONVERSATIONAL AgentSpec, or None.
+    Resolve a routing command to its CONVERSATIONAL AgentSpec, or None, WITH the
+    CRUD fork already applied.
+
+    ONE resolver, and it is the only thing that applies the fork. There used to be
+    two — this one pinned to the non-CRUD class, and resolve_voice() which forked —
+    and the pin existed to protect ONE thing: cache-hit REPORTING. CRUD agents are
+    never snapshotted, so a v2 report that counted forked calendar and todo traffic
+    read 0% cache-hit and looked like a v2 bug. Rick ruled on 2026-08-21 that a
+    reporting constraint does not get to shape the table every request routes
+    through: the exclusion moved to whatever READS cache-hit counts, and the fork
+    moved here, where a caller cannot reach the wrong class by forgetting which
+    resolver to call.
+
+    `crud_enabled` is REQUIRED, not defaulted, for the same reason. A default would
+    restore the old failure by another name — a caller that forgets the argument
+    would silently get the un-forked class, which is exactly the bug the fold
+    removes.
 
     Scoped to CONVERSATIONAL on purpose (§5.1.3): registering the agentic set must
     not silently change what this router-facing function returns. Agentic commands
@@ -284,27 +324,39 @@ def resolve( command ):
     Requires:
         - command is a routing string: a full form ("agent router go to weather")
           or a registered short-form alias ("weather")
+        - crud_enabled is the live value of `crud for dataframes agents enabled`
 
     Ensures:
         - Returns the AgentSpec for a conversational command or one of its aliases
+        - Applies the CRUD fork ONLY when crud_enabled is True AND the spec declares
+          a crud_factory — so a flag flip changes calendar and todo and nothing else
+        - A forked spec carries snapshotable=False, because the writer refuses to
+          serialize CRUD agents (running_fifo_queue:1563). The table used to say
+          "cache this" about a class the writer would not cache — two sources of
+          truth that disagreed by construction.
         - Returns None for every non-conversational command — agentic, deferred,
           control, receptionist, none, or unknown — which the flow routes to the
           receptionist (§4, route_reason="unknown_command")
         - Never raises on an unknown command
 
     Args:
-        command: The routing command string from the router.
+        command      : The routing command string from the router.
+        crud_enabled : Whether the CRUD-for-dataframes agents are enabled.
 
     Returns:
         AgentSpec or None
     """
     spec = ANSWER_COMMANDS.get( command )
-    if spec is not None:
-        return spec
-    for candidate in ANSWER_COMMANDS.values():
-        if command in candidate.aliases:
-            return candidate
-    return None
+    if spec is None:
+        for candidate in ANSWER_COMMANDS.values():
+            if command in candidate.aliases:
+                spec = candidate
+                break
+    if spec is None:
+        return None
+    if crud_enabled and spec.crud_factory is not None:
+        return replace( spec, factory=spec.crud_factory, label=spec.crud_label, snapshotable=False )
+    return spec
 
 
 def resolve_agentic( command ):

@@ -31,6 +31,24 @@
 
 **Mine, still open in the store**: 1e597a65 (step-13 dump, Cheech's GO after 9a/9b) · cdfedc41 (brake-flag protocol member, 1447261b, Cheech's 10:00 EDT window, María PASS). Memento: `src/rnd/v0.2.0/2026.08.21-mr-radio-cascade-resume-memento.md`.
 
+## ⚖️ RULED 2026-08-21 morning (Rick, to María 🌸 `e5933e98`) — brain integration: three questions closed, one scope added
+
+Plan `src/rnd/v0.2.0/2026.08.20-brain-integration-cascade-review-plan.md`, folded at `16c6dc2b`. **Nothing built.**
+
+1. **User mode STAYS; the queue resolves it first.** *"Per your recommendation we're going to keep it because the queue resolves mode first."* `push_job` keeps `get_user_mode` and both maps and hands `AskFlow` a resolved command — **the flow never learns about modes.** Ruled after two facts read from source: the mode state is a per-user dict keyed on `current_user["uid"]` at **both** ends (`todo_fifo_queue.py:230`, `queues.py:241`/`:1606`), so it is **not** a global flag; and every one of the 15 mode targets is already `speakable`, so mode adds **stickiness, not reach**.
+2. **Guard BOTH cache ends** — *"the read at the head end of the process, and the write after the agent executes."* ⚠️ The correctness prompt he named (`running_fifo_queue.py:1751`) is **asynchronous and times out to unverified**, so the row is written before the answer arrives: `answer_is_correct` is the **read** guard's field (fails CLOSED); the **write** guard keys on whether the **router chose** the agent.
+3. **The whole snapshot cache is DUMPED after the refactor** — *"we don't need to deal with any old bullshit that we have to try to figure out why."* ⇒ the 28-row question **dissolves**, and the measurements owed against it are **no longer owed**. The guards are **not** optional because of it — a fresh cache re-poisons itself without them, and refills ownerless unless the `user_id` fix is scheduled.
+4. **NEW SCOPE — one canonical entry point, the v2 one.** *"I don't want a Q&A entry point along with an ask entry point along with a specific kind of task queuing mechanism."* **Seven HTTP doors exist today across three mechanisms**; **two bypass `push_job` entirely** (`queues.py:1829`, `:1932`), so the read guard ruled above **does not reach them**. No step written yet.
+
+**Corrected in my own text, twice**: the 27 bad rows were **not** written by mode — they came from v2's `_maybe_write_back` (`flow.py:291`), which has **no CRUD exclusion**.
+
+**And my correction itself needed correcting** (Krishna, reconciled): `TodoCrudAgent`/`CalendarCrudAgent` **are** subclasses, so `isinstance` catches *them* — but the 28 rows carry **`TodoListAgent` (27) and `CalendaringAgent` (1)**, which are **siblings** and sail straight through that check. ⇒ **v1 is protected by ROUTING, not by the class test**: the CRUD fork means a todo question builds a CRUD subclass in the first place. Both statements were true about different classes, and only the reconciled one is useful.
+
+**Still unruled**: does dead `_process_fast_lane` go with its seven tests · what becomes of the other six doors.
+
+**Own rows, found while checking and not folded into this plan**: `dead_queue_watchdog.py:396` re-pushes with `getattr( failed_job, "user_id", "" )` — an empty-key fallback shared by every job that lost its user · `speech.py:338` calls `push_job` with **one of four required arguments**, so that path is dead or raises every time; undetermined which.
+
+---
 ## 🕳️ PATTERN 2026-08-20 (Tiberius 👑, recorded by Mr. Radio 🦉 `f60b686e`) — AN INSTRUMENT THAT ERASES ITS OWN WITNESS: three sightings in one night, so design against it rather than fix it three times
 
 **The general form**: *a measurement whose population excludes failures cannot report failure.* Each sighting below looked healthy — that is the whole problem. None of the three announced anything; a person noticed the number was wrong.

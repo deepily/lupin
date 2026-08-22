@@ -48,7 +48,10 @@ WAIT_BETWEEN_JOBS_S   = 60      # 1 minute between every job submission
 POLL_INTERVAL_S       = 5
 POLL_TIMEOUT_S        = 240     # 4 min cap per job
 
-SUBMIT_ENDPOINT = f"{BASE_URL}/api/claude-code/submit"
+# Both /api/claude-code/* doors are retired (410) per Rick's 2026-08-21 ruling; the work
+# enters through the one v2 front door now, naming its command.
+SUBMIT_ENDPOINT = f"{BASE_URL}/api/v2/submit"
+ROUTING_COMMAND = "agent router go to claude code"
 JOB_ENDPOINT    = f"{BASE_URL}/api/job-history"
 
 PROBE_RUN_ID = f"probe-{int( time.time() )}"
@@ -244,11 +247,15 @@ def _run_one( headers: dict, item: dict ) -> dict:
         SUBMIT_ENDPOINT,
         headers = headers,
         json    = {
-            "prompt"    : prompt,
-            "project"   : "lupin",
-            "task_type" : "BOUNDED",
-            "max_turns" : max_turn,
-            "dry_run"   : False,
+            "command"  : ROUTING_COMMAND,
+            "args"     : {
+                "prompt"    : prompt,
+                "project"   : "lupin",
+                "task_type" : "BOUNDED",
+                "max_turns" : max_turn,
+                "dry_run"   : False,
+            },
+            "question" : label,
         },
         timeout = 15,
     )

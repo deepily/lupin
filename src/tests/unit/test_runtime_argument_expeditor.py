@@ -33,7 +33,7 @@ from unittest.mock import patch, MagicMock
 import subprocess
 
 from cosa.agents.runtime_argument_expeditor.xml_models import ExpeditorResponse, ArgConfirmationResponse
-from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor, ArgSpec
+from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor, ArgSpec, ExpediteContext
 from cosa.agents.runtime_argument_expeditor.agent_registry import (
     JOB_ARG_CONTRACTS,
     get_cli_help,
@@ -1106,9 +1106,6 @@ class TestBatchCollectArgs:
         self.expeditor.confirmation_prompt_path = "/src/conf/prompts/runtime-argument-confirmation.txt"
         self.expeditor.llm_spec_key             = "test_key"
         self.expeditor.llm_factory              = MagicMock()
-        self.expeditor._job_id                  = None
-        self.expeditor._bearer_token            = None
-        self.expeditor._last_notification_status = None
 
         # Mock config_mgr for _resolve_default()
         mock_config_mgr           = MagicMock()
@@ -1462,7 +1459,6 @@ class TestBatchAbstractPassthrough:
         self.expeditor.llm_factory              = MagicMock()
         self.expeditor._job_id                  = None
         self.expeditor._bearer_token            = None
-        self.expeditor._last_notification_status = None
 
         # Mock config_mgr for _resolve_default()
         mock_config_mgr           = MagicMock()
@@ -1585,7 +1581,6 @@ class TestBatchDefaultValues:
         self.expeditor.llm_factory              = MagicMock()
         self.expeditor._job_id                  = None
         self.expeditor._bearer_token            = None
-        self.expeditor._last_notification_status = None
 
         # Mock config_mgr — default: return None (no config override)
         self.mock_config_mgr           = MagicMock()
@@ -1757,7 +1752,6 @@ class TestJobIdThreading:
         self.expeditor.llm_factory              = MagicMock()
         self.expeditor._job_id                  = None
         self.expeditor._bearer_token            = None
-        self.expeditor._last_notification_status = None
 
         # Mock config_mgr for _resolve_default()
         mock_config_mgr           = MagicMock()
@@ -1766,11 +1760,11 @@ class TestJobIdThreading:
 
     @patch( "cosa.agents.runtime_argument_expeditor.expeditor.notify_user_sync" )
     def test_job_id_threaded_to_confirmation( self, mock_sync ):
-        """When _job_id is set, _ask_for_confirmation includes it in NotificationRequest."""
-        self.expeditor._job_id = "exp-12345678"
+        """The job id on the CALLER's context reaches _ask_for_confirmation's request."""
         mock_sync.return_value = MagicMock( success=True, response_value="yes" )
 
-        self.expeditor._ask_for_confirmation( "Does this look right?", "test@test.com", abstract="test" )
+        self.expeditor._ask_for_confirmation( "Does this look right?", "test@test.com", abstract="test",
+                                              context=ExpediteContext( job_id="exp-12345678" ) )
 
         call_kwargs = mock_sync.call_args[ 1 ]
         request = call_kwargs[ "request" ]
@@ -1778,11 +1772,11 @@ class TestJobIdThreading:
 
     @patch( "cosa.agents.runtime_argument_expeditor.expeditor.notify_user_sync" )
     def test_job_id_threaded_to_ask_for_arg( self, mock_sync ):
-        """When _job_id is set, _ask_for_arg includes it in NotificationRequest."""
-        self.expeditor._job_id = "exp-abcdef01"
+        """The job id on the CALLER's context reaches _ask_for_arg's request."""
         mock_sync.return_value = MagicMock( success=True, response_value="quantum computing" )
 
-        self.expeditor._ask_for_arg( "query", "What topic?", "test@test.com" )
+        self.expeditor._ask_for_arg( "query", "What topic?", "test@test.com",
+                                     context=ExpediteContext( job_id="exp-abcdef01" ) )
 
         call_kwargs = mock_sync.call_args[ 1 ]
         request = call_kwargs[ "request" ]
@@ -1831,7 +1825,6 @@ class TestOptionalArgPrompting:
         self.expeditor.llm_factory              = MagicMock()
         self.expeditor._job_id                  = None
         self.expeditor._bearer_token            = None
-        self.expeditor._last_notification_status = None
 
         # Mock config_mgr for _resolve_default()
         mock_config_mgr           = MagicMock()

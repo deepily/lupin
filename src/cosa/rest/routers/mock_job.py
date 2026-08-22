@@ -248,7 +248,7 @@ async def _handle_expeditor_test( voice_command, current_user, todo_queue, beare
         MockJobSubmitResponse with expeditor results
     """
     from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
-    from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
+    from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor, ExpediteContext
     from cosa.rest.agentic_job_factory import create_agentic_job
     from cosa.config.configuration_manager import ConfigurationManager
 
@@ -298,6 +298,9 @@ async def _handle_expeditor_test( voice_command, current_user, todo_queue, beare
     # Pre-generate job_id so expeditor notifications route to a dedicated job card
     expeditor_job_id = f"exp-{uuid.uuid4().hex[ :8 ]}"
 
+    # Per-call state travels on this context, never on the expeditor (row 10c60712).
+    expedite_context = ExpediteContext()
+
     args_dict = await asyncio.to_thread(
         expeditor.expedite,
         command           = matched_command,
@@ -307,7 +310,8 @@ async def _handle_expeditor_test( voice_command, current_user, todo_queue, beare
         user_id           = user_id or "test-user",
         original_question = voice_command,
         job_id            = expeditor_job_id,
-        bearer_token      = bearer_token
+        bearer_token      = bearer_token,
+        context           = expedite_context
     )
 
     if args_dict is None:
@@ -320,7 +324,7 @@ async def _handle_expeditor_test( voice_command, current_user, todo_queue, beare
                 "voice_command"        : voice_command,
                 "result"               : "cancelled_or_timeout",
                 "args_found"           : None,
-                "notification_status"  : expeditor._last_notification_status
+                "notification_status"  : expedite_context.notification_status
             },
             message        = "Expeditor test: user cancelled or timed out"
         )

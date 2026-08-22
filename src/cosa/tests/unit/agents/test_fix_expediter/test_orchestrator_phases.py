@@ -868,34 +868,44 @@ class TestPhase6:
         with patch( "cosa.rest.agentic_job_factory.create_agentic_job", return_value=None ):
             assert run( o.run_phase6_validation() ) is None
 
-    def test_success_queues_job_with_pytest_args( self ):
+    def test_success_submits_job_with_pytest_args( self ):
+        """Step 12: Phase 6 submits through lupin_app.main.ask_flow, not jobs_todo_queue.
+
+        The validation job is PREBUILT — the factory above named the command — so it
+        takes `submit`, and the queue on the app module must stay untouched.
+        """
         o = _orch( ctx=_ctx( original_pytest_args=[ "-k", "auth" ] ) )
         self._setup( o )
         vjob = SimpleNamespace( id_hash="ts-rerun", metadata=None )   # metadata None -> guard inits it
+        flow = MagicMock()
         todo = MagicMock()
-        main_mod = SimpleNamespace( jobs_todo_queue=todo )
+        main_mod = SimpleNamespace( ask_flow=flow, jobs_todo_queue=todo )
         with patch( "cosa.rest.agentic_job_factory.create_agentic_job", return_value=vjob ), \
              patch.dict( sys.modules, { "lupin_app.main": main_mod } ):
             out = run( o.run_phase6_validation() )
         assert out == "ts-rerun"
         assert vjob.metadata[ "triggered_by_tfe" ] == "tfe-test1"
-        todo.push.assert_called_once_with( vjob )
+        flow.submit.assert_called_once()
+        assert flow.submit.call_args.kwargs[ "job" ] is vjob
+        todo.push.assert_not_called()
 
-    def test_queue_none_raises_caught( self ):
+    def test_flow_none_raises_caught( self ):
         o = _orch()
         self._setup( o )
         vjob = SimpleNamespace( id_hash="ts-rerun", metadata={} )
-        main_mod = SimpleNamespace( jobs_todo_queue=None )   # None -> RuntimeError -> caught
+        todo = MagicMock()
+        main_mod = SimpleNamespace( ask_flow=None, jobs_todo_queue=todo )   # None -> RuntimeError -> caught
         with patch( "cosa.rest.agentic_job_factory.create_agentic_job", return_value=vjob ), \
              patch.dict( sys.modules, { "lupin_app.main": main_mod } ):
             assert run( o.run_phase6_validation() ) is None
+        todo.push.assert_not_called()   # no fallback route onto the queue
 
-    def test_queue_push_raises_caught( self ):
+    def test_flow_submit_raises_caught( self ):
         o = _orch()
         self._setup( o )
         vjob = SimpleNamespace( id_hash="ts-rerun", metadata={} )
-        todo = MagicMock(); todo.push.side_effect = RuntimeError( "queue full" )
-        main_mod = SimpleNamespace( jobs_todo_queue=todo )
+        flow = MagicMock(); flow.submit.side_effect = RuntimeError( "flow broken" )
+        main_mod = SimpleNamespace( ask_flow=flow, jobs_todo_queue=MagicMock() )
         with patch( "cosa.rest.agentic_job_factory.create_agentic_job", return_value=vjob ), \
              patch.dict( sys.modules, { "lupin_app.main": main_mod } ):
             assert run( o.run_phase6_validation() ) is None

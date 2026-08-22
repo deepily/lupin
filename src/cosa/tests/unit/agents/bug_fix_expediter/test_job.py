@@ -420,54 +420,59 @@ class TestResubmit( unittest.TestCase ):
         out = _run( self.job._resubmit_original_job( self.vio ) )
         self.assertIsNone( out )
 
-    def _patch_factory_and_queue( self, *, new_job, todo_queue ):
+    def _patch_factory_and_flow( self, *, new_job, ask_flow ):
+        """Step 12: the resubmit reads `lupin_app.main.ask_flow`, not jobs_todo_queue.
+
+        The scoping the tracker used to do here moved into the flow's queued executor,
+        so `user_job_tracker` is no longer part of this path — it is left out of the
+        fake rather than left in and unused.
+        """
         factory_mod = types.ModuleType( "cosa.rest.agentic_job_factory" )
         factory_mod.create_agentic_job = MagicMock( return_value=new_job )
-        qext_mod = types.ModuleType( "cosa.rest.queue_extensions" )
-        tracker = MagicMock()
-        tracker.register_scoped_job = MagicMock( side_effect=lambda idh, uid, sid: idh )
-        qext_mod.user_job_tracker = tracker
         main_mod = types.ModuleType( "lupin_app.main" )
-        main_mod.jobs_todo_queue = todo_queue
+        main_mod.ask_flow        = ask_flow
+        main_mod.jobs_todo_queue = MagicMock()   # still there; nothing here may touch it
         self.es.enter_context( patch.dict( sys.modules, {
             "cosa.rest.agentic_job_factory": factory_mod,
-            "cosa.rest.queue_extensions"   : qext_mod,
             "lupin_app.main"             : main_mod,
         } ) )
-        return factory_mod, tracker, main_mod
+        return factory_mod, main_mod
 
     def test_factory_returns_none( self ):
         self.job.dead_job_context = self._ctx( metadata_json={} )   # no original_args → reconstruct
         self._patch_cfg( auto_enabled=True )
-        self._patch_factory_and_queue( new_job=None, todo_queue=MagicMock() )
+        self._patch_factory_and_flow( new_job=None, ask_flow=MagicMock() )
         out = _run( self.job._resubmit_original_job( self.vio ) )
         self.assertIsNone( out )
 
-    def test_todo_queue_unavailable( self ):
+    def test_ask_flow_unavailable( self ):
         self.job.dead_job_context = self._ctx()
         self._patch_cfg( auto_enabled=True )
         new_job = MagicMock(); new_job.id_hash = "bfe-new::u1"
-        self._patch_factory_and_queue( new_job=new_job, todo_queue=None )
+        _factory, main_mod = self._patch_factory_and_flow( new_job=new_job, ask_flow=None )
         out = _run( self.job._resubmit_original_job( self.vio ) )
         self.assertIsNone( out )
+        # No fallback: a missing flow must not send the job round the back to the queue.
+        main_mod.jobs_todo_queue.push.assert_not_called()
 
-    def test_success_pushes_and_returns_id( self ):
+    def test_success_submits_and_returns_id( self ):
         self.job.dead_job_context = self._ctx()
         self._patch_cfg( auto_enabled=True )
         new_job = MagicMock(); new_job.id_hash = "bfe-new::u1"
-        todo_queue = MagicMock()
-        self._patch_factory_and_queue( new_job=new_job, todo_queue=todo_queue )
+        flow = MagicMock()
+        _factory, main_mod = self._patch_factory_and_flow( new_job=new_job, ask_flow=flow )
         out = _run( self.job._resubmit_original_job( self.vio ) )
         self.assertEqual( out, "bfe-new::u1" )
-        todo_queue.push.assert_called_once_with( new_job )
+        flow.submit.assert_called_once()
+        self.assertIs( flow.submit.call_args.kwargs[ "job" ], new_job )
+        main_mod.jobs_todo_queue.push.assert_not_called()
 
     def test_success_debug_off_skips_final_print( self ):
         self.job.debug = False                       # exercises the debug-off arc on success
         self.job.dead_job_context = self._ctx()
         self._patch_cfg( auto_enabled=True )
         new_job = MagicMock(); new_job.id_hash = "bfe-new::u1"
-        todo_queue = MagicMock()
-        self._patch_factory_and_queue( new_job=new_job, todo_queue=todo_queue )
+        self._patch_factory_and_flow( new_job=new_job, ask_flow=MagicMock() )
         out = _run( self.job._resubmit_original_job( self.vio ) )
         self.assertEqual( out, "bfe-new::u1" )
 

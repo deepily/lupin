@@ -710,5 +710,34 @@ def test_a_result_carrying_payload_that_also_errors_is_a_push_failure():
     assert r.ok is False and r.failure == "push_failed"
 
 
+# ─────────────────────────── the v1 arm refuses a v2 target (2026-08-21) ───────
+
+def test_a_410_from_the_target_stops_the_run():
+    """
+    `/api/push` was retired repo-wide on 2026-08-21 and this arm is the ONE exempt
+    caller — it measures the pinned v1 baseline server, which serves that door forever.
+    Pointed at a current server by mistake, every utterance would come back 410 and the
+    push seam would record `{"error": ...}` for each one: a run that reads as a hundred
+    individual failures rather than one wrong `--base-url`, with numbers written and
+    meaningless. Refuse the whole run instead.
+    """
+    with pytest.raises( RuntimeError ) as exc:
+        v1.refuse_if_door_retired( 410, "http://localhost:7999" )
+    message = str( exc.value )
+    assert "410" in message
+    assert "http://localhost:7999" in message
+    assert v1.PINNED_V1_BASELINE_SHA in message, "the message must name the server to point at"
+
+
+def test_any_other_status_is_left_alone():
+    """
+    The complement, and it is not a formality: a guard that raised on everything would
+    also satisfy the test above while making the arm unrunnable. 500s and timeouts are
+    ordinary per-utterance failures and stay that way.
+    """
+    for status in ( 200, 400, 401, 404, 409, 500, 503 ):
+        assert v1.refuse_if_door_retired( status, "http://localhost:7999" ) is None
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

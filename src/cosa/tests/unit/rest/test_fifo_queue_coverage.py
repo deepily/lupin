@@ -287,13 +287,10 @@ class TestHasChangedAndClear( unittest.TestCase ):
     def test_clear_resets_all( self ):
         q = FifoQueue()
         q.push( _job( "a" ) )
-        q.push_blocking_object( "blk" )
         q.clear()
         self.assertEqual( q.size(), 0 )
         self.assertEqual( len( q.queue_dict ), 0 )
         self.assertEqual( q.push_counter, 0 )
-        self.assertIsNone( q._blocking_object )
-        self.assertTrue( q._accepting_jobs )
 
 
 class TestUserJobAccessors( unittest.TestCase ):

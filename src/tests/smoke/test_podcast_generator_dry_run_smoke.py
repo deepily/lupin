@@ -47,7 +47,7 @@ def quick_smoke_test():
 
     Ensures:
         - Endpoint accepts authenticated POST requests with dry_run=true
-        - Returns expected response structure (status, job_id, queue_position)
+        - Returns expected response structure (status, job_id)
         - Job completes in done queue with mock results ($0.00 cost)
     """
     cu.print_banner( "Podcast Generator Dry-Run Smoke Test", prepend_nl=True )
@@ -109,9 +109,9 @@ def quick_smoke_test():
         # ═══════════════════════════════════════════════════════════════════════
         print( "\nTest 3: Submitting Podcast Generator job with dry_run=true..." )
         headers = { "Authorization": f"Bearer {token}" }
-        payload = {
-            "research_source"  : research_path,
-            "target_languages" : [ "en" ],
+        args = {
+            "research"         : research_path,
+            "languages"        : [ "en" ],
             "dry_run"          : True
         }
         # Lineage tag (bug 5ed4f187): when this smoke runs as a child pytest inside a
@@ -119,10 +119,25 @@ def quick_smoke_test():
         # (test_suite/job.py). Threading it as parent_id_hash lets the consumer's Gate B
         # admit this child through the monopoly hold instead of starving it 900s.
         parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+
+        # ONE DOOR NOW, AND THIS HARNESS PICKS THE OTHER ONE ON PURPOSE. The retired door
+        # answers 410 naming /api/v2/ask, because a human asking for a podcast is asking a
+        # question and the flow's expeditor resolves the document and the missing arguments
+        # by conversation. A test does not want that: it already knows the command and the
+        # arguments, and routing a fixed research path through a fuzzy matcher would make
+        # this smoke depend on the resolver rather than on the podcast pipeline it exists to
+        # exercise. So the harness posts to /api/v2/submit (Cheech, ruled 2026-08-21).
+        # `parent_id_hash` stays TOP-LEVEL: it is a queue directive, and `args` is checked
+        # against the command's own argument contract, which it is not in.
+        payload = {
+            "command"  : "agent router go to podcast generator",
+            "args"     : args,
+            "question" : research_path,
+        }
         if parent_id:
             payload[ "parent_id_hash" ] = parent_id
         submit_resp = requests.post(
-            f"{BASE_URL}/api/podcast-generator/submit",
+            f"{BASE_URL}/api/v2/submit",
             json=payload,
             headers=headers
         )
@@ -136,7 +151,6 @@ def quick_smoke_test():
         print( f"✓ Job submitted successfully" )
         print( f"  Status: {data.get( 'status', 'unknown' )}" )
         print( f"  Job ID: {data.get( 'job_id', 'unknown' )}" )
-        print( f"  Queue position: {data.get( 'queue_position', 'unknown' )}" )
 
         job_id = data.get( "job_id" )
 
@@ -144,7 +158,11 @@ def quick_smoke_test():
         # Test 4: Verify response structure
         # ═══════════════════════════════════════════════════════════════════════
         print( "\nTest 4: Verifying response structure..." )
-        required_keys = [ "status", "job_id", "queue_position" ]
+        # NO queue_position. The v2 response carries none and is not being widened for one:
+        # a place in the queue changes as the queue moves, so a number frozen at the instant
+        # of submission was stale the moment it was printed. A job card learns its real place
+        # from the queue websocket events.
+        required_keys = [ "status", "job_id" ]
         for key in required_keys:
             if key not in data:
                 print( f"✗ Missing required key: {key}" )
@@ -158,9 +176,6 @@ def quick_smoke_test():
         assert data[ "job_id" ].startswith( "pg-" ), f"Expected job_id to start with 'pg-', got '{data[ 'job_id' ]}'"
         print( f"✓ Job ID format correct: {data[ 'job_id' ]}" )
 
-        assert isinstance( data[ "queue_position" ], int ), "Expected queue_position to be int"
-        assert data[ "queue_position" ] >= 0, "Expected queue_position >= 0"
-        print( f"✓ Queue position is valid: {data[ 'queue_position' ]}" )
 
         # ═══════════════════════════════════════════════════════════════════════
         # Test 5: Poll done queue for completion

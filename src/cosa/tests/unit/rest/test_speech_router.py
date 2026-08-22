@@ -6,9 +6,9 @@ Covers the full module surface:
   `save_upload_to_temp`.
 - DI accessors: `get_whisper_pipeline`, `get_speech_provider`,
   `get_websocket_manager`, `get_config_manager`, `get_active_tasks`,
-  `get_todo_queue` (dual-key `lupin_app.main` patch).
+  `get_ask_flow` (dual-key `lupin_app.main` patch).
 - Async route handlers: `upload_and_transcribe_mp3_file` (agent / non-agent /
-  OOM-503 / generic-500), `get_tts_audio` (all validation branches + success +
+  no-user-401 / no-flow / OOM-503 / generic-500), `get_tts_audio` (all validation branches + success +
   500), `get_tts_audio_elevenlabs` (validation incl. numeric ranges + success),
   `upload_and_transcribe_wav_file` (success + OOM + generic, temp-cleanup arcs).
 - Async streamers: `stream_tts_hybrid` (no-ws / success / mid-stream drop /
@@ -47,7 +47,7 @@ from cosa.rest.routers.speech import (
     get_websocket_manager,
     get_config_manager,
     get_active_tasks,
-    get_todo_queue,
+    get_ask_flow,
     upload_and_transcribe_mp3_file,
     get_tts_audio,
     get_tts_audio_elevenlabs,
@@ -58,6 +58,8 @@ from cosa.rest.routers.speech import (
 )
 
 from fastapi import HTTPException
+
+_SENTINEL = object()
 
 P = "cosa.rest.routers.speech"
 
@@ -218,10 +220,15 @@ class TestDependencyAccessors( unittest.TestCase ):
         with _patch_fastapi_main( m ):
             self.assertEqual( get_active_tasks(), { "a": 1 } )
 
-    def test_get_todo_queue( self ):
-        m = MagicMock(); m.jobs_todo_queue = "TODO"
+    def test_get_ask_flow( self ):
+        """Door 8: the router reads the FLOW off lupin_app.main, not the queue.
+
+        `get_todo_queue` used to live here and went with door 8 — this module had
+        exactly one queue caller and it hands its transcription to the flow now.
+        """
+        m = MagicMock(); m.ask_flow = "FLOW"
         with _patch_fastapi_main( m ):
-            self.assertEqual( get_todo_queue(), "TODO" )
+            self.assertEqual( get_ask_flow(), "FLOW" )
 
 
 # ── upload_and_transcribe_mp3_file ──────────────────────────────────────────────
@@ -240,12 +247,16 @@ class TestUploadAndTranscribeMp3( unittest.IsolatedAsyncioTestCase ):
         m = MagicMock(); m.app_debug = debug; m.app_verbose = verbose
         return m
 
-    async def _call( self, *, munger, todo_queue=None, provider=None, main=None ):
+    _USER = { "uid": "u1234567890", "email": "t@t.com" }
+
+    async def _call( self, *, munger, ask_flow=_SENTINEL, provider=None, main=None,
+                     current_user=_SENTINEL, websocket_id=None ):
         provider    = provider or MagicMock()
         provider.transcribe.return_value = MagicMock( strip=MagicMock( return_value="transcribed" ) )
         config_mgr  = MagicMock()
         config_mgr.get.return_value = "/audio.wav"
-        todo_queue  = todo_queue or MagicMock()
+        ask_flow    = MagicMock() if ask_flow is _SENTINEL else ask_flow
+        user        = dict( self._USER ) if current_user is _SENTINEL else current_user
         main        = main or self._main( debug=True )
         with _patch_fastapi_main( main ), \
              patch( "builtins.open", mock_open() ), \
@@ -256,30 +267,110 @@ class TestUploadAndTranscribeMp3( unittest.IsolatedAsyncioTestCase ):
             self._iot = Iot
             return await upload_and_transcribe_mp3_file(
                 request=self._request(), prefix="pfx", prompt_key="generic",
-                prompt_verbose="verbose",
+                prompt_verbose="verbose", websocket_id=websocket_id,
                 whisper_pipeline=MagicMock(), provider=provider,
-                config_mgr=config_mgr, todo_queue=todo_queue,
+                config_mgr=config_mgr, ask_flow=ask_flow, current_user=user,
             )
 
-    async def test_agent_path( self ):
+    def _agent_munger( self ):
         munger = MagicMock()
         munger.is_agent.return_value = True
         munger.transcription = "do a thing"
         munger.get_jsons.return_value = '{"ok": true}'
-        tq = MagicMock(); tq.push_job.return_value = "JOBRESULT"
-        resp = await self._call( munger=munger, todo_queue=tq )
-        tq.push_job.assert_called_once_with( "do a thing" )
+        return munger
+
+    async def test_agent_path_asks_the_flow( self ):
+        """Door 8: the spoken agent request goes to `ask`, and its result is the
+        munger's result.
+
+        A BARE QUESTION, so `ask` and not `submit`: nothing about a transcription has
+        been decided, and submit would skip the routing it needs.
+        """
+        munger = self._agent_munger()
+        flow   = MagicMock(); flow.ask.return_value = { "status": "waiting", "job_id": "j1" }
+        resp   = await self._call( munger=munger, ask_flow=flow )
+        flow.ask.assert_called_once()
+        flow.submit.assert_not_called()
+        kw = flow.ask.call_args.kwargs
+        self.assertEqual( kw[ "question" ],   "do a thing" )
+        self.assertEqual( kw[ "user_id" ],    "u1234567890" )
+        self.assertEqual( kw[ "user_email" ], "t@t.com" )
+        self.assertEqual( munger.results, { "status": "waiting", "job_id": "j1" } )
         self.assertEqual( resp.status_code, 200 )
+
+    async def test_agent_path_derives_a_session_when_the_caller_sends_none( self ):
+        """Neither browser caller sends a websocket id yet, so the session is derived
+        from the user id — the same shape /api/v2/ask uses."""
+        flow = MagicMock()
+        await self._call( munger=self._agent_munger(), ask_flow=flow )
+        kw = flow.ask.call_args.kwargs
+        self.assertEqual( kw[ "session_id" ],   "mp3-u1234567" )
+        self.assertEqual( kw[ "websocket_id" ], "mp3-u1234567" )
+
+    async def test_agent_path_uses_the_session_the_caller_names( self ):
+        """The query parameter is not decoration: a caller that names its session must
+        get the answer's events on that channel, not on the derived one."""
+        flow = MagicMock()
+        await self._call( munger=self._agent_munger(), ask_flow=flow, websocket_id="ws-abc" )
+        kw = flow.ask.call_args.kwargs
+        self.assertEqual( kw[ "session_id" ],   "ws-abc" )
+        self.assertEqual( kw[ "websocket_id" ], "ws-abc" )
+
+    async def test_agent_path_without_a_user_is_401_and_never_asks( self ):
+        """An ASK creates work, and work has an owner. Refuse by name.
+
+        The assertion that matters is `flow.ask.assert_not_called()`: a 401 that still
+        ran the request would have minted an ownerless row before answering.
+        """
+        flow = MagicMock()
+        with self.assertRaises( HTTPException ) as ctx:
+            await self._call( munger=self._agent_munger(), ask_flow=flow, current_user=None )
+        self.assertEqual( ctx.exception.status_code, 401 )
+        flow.ask.assert_not_called()
+
+    async def test_agent_path_with_a_token_carrying_no_identity_is_401( self ):
+        flow = MagicMock()
+        with self.assertRaises( HTTPException ) as ctx:
+            await self._call( munger=self._agent_munger(), ask_flow=flow,
+                              current_user={ "uid": "", "email": "" } )
+        self.assertEqual( ctx.exception.status_code, 401 )
+        flow.ask.assert_not_called()
+
+    async def test_the_401_is_not_swallowed_into_a_500( self ):
+        """HTTPException is an Exception, and this handler has a catch-all that turns
+        anything into a 500 saying post-processing failed. Without the re-raise, a
+        caller that simply needs to send its token would be told the server broke."""
+        with self.assertRaises( HTTPException ) as ctx:
+            await self._call( munger=self._agent_munger(), current_user=None )
+        self.assertEqual( ctx.exception.status_code, 401 )
+        self.assertIn( "signed-in user", ctx.exception.detail )
+
+    async def test_agent_path_without_a_flow_is_a_500_naming_the_stage( self ):
+        """No flow is a wiring gap at boot, not a caller error — and there is no
+        fallback to a direct queue push, which is the whole point of door 8."""
+        with self.assertRaises( HTTPException ) as ctx:
+            await self._call( munger=self._agent_munger(), ask_flow=None )
+        self.assertEqual( ctx.exception.status_code, 500 )
+        self.assertIn( "agent request", ctx.exception.detail )
 
     async def test_agent_path_debug_off( self ):
         # Agent path with app_debug False → covers the False arc of `if app_debug:`.
-        munger = MagicMock()
-        munger.is_agent.return_value = True
-        munger.transcription = "do a thing"
-        munger.get_jsons.return_value = '{"ok": true}'
-        tq = MagicMock(); tq.push_job.return_value = "JOBRESULT"
-        resp = await self._call( munger=munger, todo_queue=tq, main=self._main( debug=False ) )
+        resp = await self._call( munger=self._agent_munger(), main=self._main( debug=False ) )
         self.assertEqual( resp.status_code, 200 )
+
+    async def test_non_agent_path_needs_no_user_at_all( self ):
+        """Dictation, snapshot search and insert-at-cursor stay tokenless. This is the
+        test that fails if someone "tidies" the 401 up to the route level."""
+        munger = MagicMock()
+        munger.is_agent.return_value = False
+        munger.transcription = "plain text"
+        munger.results = None
+        munger.get_jsons.return_value = '{"ok": 3}'
+        flow = MagicMock()
+        resp = await self._call( munger=munger, ask_flow=flow, current_user=None )
+        self.assertEqual( resp.status_code, 200 )
+        flow.ask.assert_not_called()
+        self._iot.return_value.insert_io_row.assert_called_once()
 
     async def test_non_agent_with_results( self ):
         munger = MagicMock()

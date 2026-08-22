@@ -192,7 +192,7 @@ def read_running_server_sha( base_url: str ) -> str:   # pragma: no cover - live
     latter a non-empty sentinel STRING, "unavailable", not "") — fails the run loud.
     (Live boundary; the pure, tested assertion is assert_measured_sha.)
     """
-    import json, urllib.request
+    import json, urllib.error, urllib.request
     req  = urllib.request.Request( base_url + "/api/code-identity" )   # NOT /health — see docstring
     data = json.loads( urllib.request.urlopen( req, timeout=10 ).read().decode() )
     return data.get( "git_sha", "" )   # missing -> "" -> assert_measured_sha RAISES (fail-loud, not hidden)
@@ -918,10 +918,52 @@ def truncate_snapshots( connection: Any ) -> str:
 
 # ────────────────────────────────────────── live IO seams (injected away)
 
+# The pinned server this arm is allowed to measure, named once so the refusal below and
+# any future caller say the same thing.
+PINNED_V1_BASELINE_SHA = "b0735467"
+
+
+def refuse_if_door_retired( status_code: int, base_url: str ) -> None:
+    """
+    Stop the run when the target's /api/push answers 410 — it is the wrong server.
+
+    WHY THIS ARM IS EXEMPT FROM THE CUTOVER. `/api/push` was retired repo-wide on
+    2026-08-21 and every other caller moved to /api/v2/ask. This one did not, and must
+    not: it exists to measure the PINNED v1 baseline server (sha b0735467, its own
+    standalone process), which serves /api/push and always will. Measuring v1 through the
+    v2 door would not be a v1 measurement.
+
+    WHY A REFUSAL AND NOT A RETRY OR A FALLBACK. If this script is pointed at a current
+    server by mistake, every utterance comes back 410 and the surrounding `except` turns
+    each one into `{"error": ...}` — a run that looks like a hundred individual failures
+    instead of one wrong `--base-url`. The numbers would still be written, and they would
+    be meaningless. Fail the whole run, once, naming the cause.
+
+    Requires:
+        - status_code is the HTTP status the target answered
+        - base_url is the target that was called, so the message can name it
+
+    Ensures:
+        - returns None for any status other than 410
+
+    Raises:
+        - RuntimeError naming the target, the pinned baseline sha, and the reason,
+          when the target answers 410
+    """
+    if status_code != 410: return
+    raise RuntimeError(
+        f"{base_url}/api/push answered 410 Gone — that door was retired on 2026-08-21 and "
+        f"this is NOT the pinned v1 baseline server. The v1 arm measures the standalone "
+        f"baseline at sha {PINNED_V1_BASELINE_SHA}, which still serves /api/push; it is "
+        f"exempt from the v2 cutover on purpose. Point --base-url at the pinned baseline, "
+        f"or do not run the v1 arm."
+    )
+
+
 def _default_push_fn( base_url: str, websocket_id: str,
                       token: str ) -> Callable[[str], Dict[str, Any]]:   # pragma: no cover - live HTTP boundary
     """Build a push_fn that POSTs one utterance to /api/push on the v1 server."""
-    import json, urllib.request
+    import json, urllib.error, urllib.request
     def _push( utterance: str ) -> Dict[str, Any]:
         body = json.dumps( { "question": utterance, "websocket_id": websocket_id } ).encode()
         req  = urllib.request.Request(
@@ -929,6 +971,11 @@ def _default_push_fn( base_url: str, websocket_id: str,
             headers={ "Authorization": f"Bearer {token}", "Content-Type": "application/json" }, method="POST" )
         try:
             return json.loads( urllib.request.urlopen( req, timeout=30 ).read().decode() )
+        except urllib.error.HTTPError as e:
+            # A 410 is not a per-utterance failure, it is the wrong target. Raise out of
+            # the run rather than recording an error row per utterance.
+            refuse_if_door_retired( e.code, base_url )
+            return { "error": str( e ) }
         except Exception as e:
             return { "error": str( e ) }
     return _push

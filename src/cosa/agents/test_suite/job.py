@@ -1283,7 +1283,7 @@ class TestSuiteJob( AgenticJobBase ):
                     "LUPIN_TEST_BASE_URL" : os.environ.get( "LUPIN_TEST_BASE_URL", f"http://localhost:{os.environ.get( 'PORT', '7999' )}" ),
                     # Lineage token (bug 3a14292b): this sweep's own id_hash, exposed to
                     # the pytest subprocess so any child job it spawns (e.g. a swe_team
-                    # dry-run via POST /api/swe-team/submit) can echo it back as
+                    # dry-run via POST /api/v2/submit) can echo it back as
                     # parent_id_hash. The consumer's Gate B then admits those children
                     # THROUGH the monopoly intake hold instead of starving them. Always
                     # injected — harmless when this sweep is not monopolize (Gate B never

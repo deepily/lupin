@@ -451,9 +451,16 @@ class ApproachDUserMessageSmokeTest( LivePipelineTestBase ):
         # -----------------------------------------------------------------
         print( "\n  Submitting SWE dry-run job..." )
 
+        # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and answers
+        # 410 naming /api/v2/submit, which takes the routing command as a string and the
+        # agent's own arguments in `args`. `websocket_id` and `parent_id_hash` stay
+        # TOP-LEVEL: they are instructions about the request and the queue, not arguments
+        # to the agent, and `args` is checked against the command's own argument contract.
+        task = "Smoke test: Approach D user message injection"
         payload = {
-            "task"         : "Smoke test: Approach D user message injection",
-            "dry_run"      : True,
+            "command"      : "agent router go to swe team",
+            "args"         : { "task": task, "dry_run": True },
+            "question"     : task,
             "websocket_id" : ws_id,
         }
         # Lineage tag (row 7451bebe / bug 5ed4f187): a child pytest inside a monopolizing
@@ -467,7 +474,7 @@ class ApproachDUserMessageSmokeTest( LivePipelineTestBase ):
 
         try:
             resp = requests.post(
-                f"{self.BASE_URL}/api/swe-team/submit",
+                f"{self.BASE_URL}/api/v2/submit",
                 json=submit_payload,
                 headers=req_headers,
                 timeout=self.REQUEST_TIMEOUT

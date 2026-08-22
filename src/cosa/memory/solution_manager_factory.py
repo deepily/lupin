@@ -14,8 +14,20 @@ from cosa.memory.snapshot_manager_interface import SolutionSnapshotManagerInterf
 
 
 class ManagerType( Enum ):
-    """Enumeration of available solution snapshot manager implementations."""
-    FILE_BASED = "file_based"
+    """The solution snapshot backends this app can build.
+
+    ⚰️ FILE_BASED was REMOVED on 2026-08-21 (Rick's ruling 6791ce47, "delete after v2 lands"),
+    together with `FileBasedSolutionManager` and the deprecated `SolutionSnapshotManager`.
+    It had been unreachable in production for some time — `main.py` refuses to start on any
+    value but "postgres" — but unreachable is not the reason it went. It was a TRAP: a grep
+    for `def save_snapshot` found the deprecated file-based class FIRST, in the most
+    obviously-named file, with a docstring saying it saved to files. A reviewer read that,
+    believed it, and raised a false alarm that the queue was writing to files while the
+    brain read Postgres. Two of the three classes carrying that method could not be built at
+    all; only one could, and it was the third one found.
+
+    One backend, so one answer to "where does a snapshot go".
+    """
     POSTGRES = "postgres"
 
     @classmethod
@@ -68,16 +80,12 @@ class SolutionSnapshotManagerFactory:
             - Identical interface regardless of backend type
 
         Args:
-            manager_type: Type of manager to create ("file_based" or "postgres")
+            manager_type: Type of manager to create — "postgres" is the only one left
             config: Configuration dictionary with manager-specific settings
             debug: Enable debug output
             verbose: Enable verbose output
 
         Examples:
-            # File-based manager
-            config = {"path": "/src/conf/long-term-memory/solutions/"}
-            manager = SolutionSnapshotManagerFactory.create_manager("file_based", config)
-
             # Postgres manager (no storage location — the ORM model fixes the table)
             config = {"table_name": "solution_snapshots"}
             manager = SolutionSnapshotManagerFactory.create_manager("postgres", config)
@@ -97,41 +105,10 @@ class SolutionSnapshotManagerFactory:
                 print( f"Configuration: {config}" )
 
         # Create appropriate manager implementation
-        if manager_type == ManagerType.FILE_BASED:
-            return SolutionSnapshotManagerFactory._create_file_based_manager( config, debug, verbose )
-        elif manager_type == ManagerType.POSTGRES:
+        if manager_type == ManagerType.POSTGRES:
             return SolutionSnapshotManagerFactory._create_postgres_manager( config, debug, verbose )
         else:
             raise ValueError( f"Unsupported manager type: {manager_type}" )
-
-    @staticmethod
-    def _create_file_based_manager( config: Dict[str, Any], debug: bool, verbose: bool ) -> SolutionSnapshotManagerInterface:
-        """
-        Create file-based solution snapshot manager.
-
-        Requires:
-            - config["path"] contains valid directory path
-
-        Ensures:
-            - Returns FileBasedSolutionManager instance
-            - Manager configured with provided path
-
-        Raises:
-            - ImportError if FileBasedSolutionManager not available
-            - KeyError if required config keys missing
-        """
-        try:
-            from cosa.memory.file_based_solution_manager import FileBasedSolutionManager
-        except ImportError as e:
-            raise ImportError( f"FileBasedSolutionManager not available: {e}" )
-
-        # Validate required configuration
-        required_keys = ["path"]
-        missing_keys = [key for key in required_keys if key not in config]
-        if missing_keys:
-            raise KeyError( f"Missing required config keys for file_based manager: {missing_keys}" )
-
-        return FileBasedSolutionManager( config, debug, verbose )
 
     @staticmethod
     def _create_postgres_manager( config: Dict[str, Any], debug: bool, verbose: bool ) -> SolutionSnapshotManagerInterface:
@@ -190,7 +167,7 @@ class SolutionSnapshotManagerFactory:
         Ensures:
             - Returns configured manager based on config settings
             - Uses standard Lupin configuration key names
-            - Handles both file_based and postgres configurations
+            - Builds the Postgres configuration, the only backend left
 
         Args:
             config_mgr: ConfigurationManager instance
@@ -198,9 +175,8 @@ class SolutionSnapshotManagerFactory:
             verbose: Enable verbose output
 
         Expected Config Keys:
-            - "solution snapshots manager type": "file_based" or "postgres"
-            - "solution snapshots postgres table": Reporting-only table name (postgres only)
-            - "solution snapshots file based path": Path for file-based storage (file_based only)
+            - "solution snapshots manager type": "postgres" — the only accepted value
+            - "solution snapshots postgres table": Reporting-only table name
 
         Raises:
             - ValueError if manager type not configured or invalid
@@ -213,29 +189,16 @@ class SolutionSnapshotManagerFactory:
 
         manager_type = ManagerType.from_string( manager_type_str )
 
-        # Build configuration based on manager type
-        if manager_type == ManagerType.FILE_BASED:
-            config = {
-                "path": config_mgr.get( "solution snapshots file based path" ),
-                "enable_performance_monitoring": config_mgr.get(
-                    "solution snapshots enable performance monitoring", default=True, return_type="boolean"
-                )
-            }
-
-            if not config["path"]:
-                raise KeyError( "Configuration key 'solution snapshots file based path' not found" )
-
-        else:
-            # ManagerType.POSTGRES — from_string admits no third value, so this is
-            # the only member left. No storage location to read: the table is fixed
-            # by the ORM model and the connection comes from the DB layer, so the
-            # only knobs here are reporting-only.
-            config = {
-                "table_name": config_mgr.get( "solution snapshots postgres table", default="solution_snapshots" ),
-                "enable_performance_monitoring": config_mgr.get(
-                    "solution snapshots enable performance monitoring", default=True, return_type="boolean"
-                )
-            }
+        # ManagerType.POSTGRES is the only member, and `from_string` refuses anything
+        # else, so there is nothing left to branch on. No storage location to read
+        # either: the table is fixed by the ORM model and the connection comes from
+        # the DB layer, so the only knobs here are reporting-only.
+        config = {
+            "table_name" : config_mgr.get( "solution snapshots postgres table", default="solution_snapshots" ),
+            "enable_performance_monitoring" : config_mgr.get(
+                "solution snapshots enable performance monitoring", default=True, return_type="boolean"
+            )
+        }
 
         if debug:
             print( f"Creating {manager_type.value} manager from ConfigurationManager" )
@@ -254,13 +217,20 @@ def quick_smoke_test():
     try:
         # Test enum conversion
         print( "Testing ManagerType enum..." )
-        file_type = ManagerType.from_string( "file_based" )
-        pg_type   = ManagerType.from_string( "POSTGRES" )  # Test case insensitive
+        pg_type = ManagerType.from_string( "POSTGRES" )  # Test case insensitive
 
-        if file_type == ManagerType.FILE_BASED and pg_type == ManagerType.POSTGRES:
+        if pg_type == ManagerType.POSTGRES:
             print( "✓ ManagerType enum conversion working correctly" )
         else:
             print( "✗ ManagerType enum conversion failed" )
+
+        # The retired backend is refused by name, not merely absent from the enum.
+        print( "\nTesting that the retired file_based backend is refused..." )
+        try:
+            ManagerType.from_string( "file_based" )
+            print( "✗ file_based was accepted — the deleted backend is still selectable" )
+        except ValueError:
+            print( "✓ file_based properly rejected (removed 2026-08-21, ruling 6791ce47)" )
 
         # Test invalid type handling
         print( "\nTesting invalid manager type handling..." )
@@ -273,7 +243,7 @@ def quick_smoke_test():
         # Test available types
         print( "\nTesting available types retrieval..." )
         available = SolutionSnapshotManagerFactory.get_available_types()
-        expected_types = {"file_based", "postgres"}
+        expected_types = {"postgres"}
 
         if set( available ) == expected_types:
             print( f"✓ Available types correct: {available}" )
@@ -283,18 +253,12 @@ def quick_smoke_test():
         # Test factory creation (will fail since implementations don't exist yet, but should test validation)
         print( "\nTesting factory validation..." )
 
-        # Test file-based config validation
+        # Test that the retired backend cannot be built at all
         try:
-            SolutionSnapshotManagerFactory.create_manager(
-                "file_based",
-                {},  # Missing path
-                debug=False
-            )
-            print( "✗ File-based manager accepted invalid config" )
-        except KeyError:
-            print( "✓ File-based manager properly validates config" )
-        except ImportError:
-            print( "✓ File-based manager config validation working (implementation not available)" )
+            SolutionSnapshotManagerFactory.create_manager( "file_based", {}, debug=False )
+            print( "✗ the deleted file-based manager was BUILT" )
+        except ValueError:
+            print( "✓ the deleted file-based manager cannot be built" )
 
         # Test postgres config validation — an EMPTY config is valid here, because
         # this backend has no storage location to demand.

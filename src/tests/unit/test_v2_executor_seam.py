@@ -20,6 +20,7 @@ import json
 
 import pytest
 
+import cosa.rest.v2.executor as executor_module
 from cosa.rest.v2.executor import (
     Executor,
     InlineExecutor,
@@ -85,7 +86,9 @@ class BrokenReplaySnapshot( FakeSnapshot ):
 class FakeAgent:
     """Duck-typed AgentBase: do_all() sets answer_conversational and returns it."""
 
-    def __init__( self, answer: str="agent-raw", conversational: str="agent-pretty", boom: bool=False ) -> None:
+    def __init__( self, answer: str="agent-raw", conversational: str="agent-pretty", boom: bool=False,
+                  id_hash: str="job-1" ) -> None:
+        self.id_hash               = id_hash
         self.answer                = answer
         self.answer_conversational = None
         self._conversational       = conversational
@@ -96,6 +99,32 @@ class FakeAgent:
             raise RuntimeError( "agent boom" )
         self.answer_conversational = self._conversational
         return self._conversational
+
+
+class FakeTodoQueue:
+    """Duck-typed TodoFifoQueue: a user_job_tracker that scopes, and push().
+
+    It records the job's id_hash AS SEEN AT PUSH TIME, which is the only way to
+    tell scoping-before-push from scoping-after-push — both leave the same final
+    state on the job.
+    """
+
+    def __init__( self, boom: bool=False ) -> None:
+        self.scoped        = []                 # (base_hash, user_id, session_id)
+        self.pushed        = []                 # the job objects
+        self.id_hash_at_push = []               # what the id looked like when pushed
+        self._boom         = boom
+        self.user_job_tracker = self
+
+    def register_scoped_job( self, base_hash: str, user_id: str, session_id: str=None ) -> str:
+        self.scoped.append( ( base_hash, user_id, session_id ) )
+        return f"{base_hash}::{user_id}"
+
+    def push( self, job: object ) -> None:
+        if self._boom:
+            raise RuntimeError( "queue refused the push" )
+        self.id_hash_at_push.append( job.id_hash )
+        self.pushed.append( job )
 
 
 def _work( kind: str, job: object, snapshotable: bool=True ) -> Work:
@@ -224,7 +253,7 @@ class TestWorkAndOutcome:
 
     def test_executors_satisfy_protocol( self ) -> None:
         assert isinstance( InlineExecutor(), Executor )
-        assert isinstance( QueuedExecutor(), Executor )
+        assert isinstance( QueuedExecutor( FakeTodoQueue() ), Executor )
 
 
 # --------------------------------------------------------------------------- #
@@ -294,17 +323,87 @@ class TestInlineExecutor:
 # --------------------------------------------------------------------------- #
 class TestQueuedAndFactory:
 
-    def test_queued_stub_raises( self ) -> None:
+    def test_submit_scopes_pushes_and_answers_waiting( self ) -> None:
+        """
+        The whole step-2 contract in one run: the job is scoped for user
+        filtering, pushed onto the todo queue, and the answer is "waiting"
+        carrying the SCOPED id — never an answer, because nothing ran.
+
+        RED ON REVERT: return Outcome( status="done" ) and the status assertion
+        fails; drop the push and `pushed` is empty.
+        """
+        queue = FakeTodoQueue()
         trace = StageTrace( trace_dir="/tmp/unused" )
-        with pytest.raises( NotImplementedError, match="phase-2 stub" ):
-            QueuedExecutor().submit( _work( "agent", FakeAgent() ), trace )
+        agent = FakeAgent( id_hash="base-9" )
+
+        out = QueuedExecutor( queue ).submit( _work( "agent", agent ), trace )
+
+        assert out.status  == "waiting"
+        assert out.job_id  == "base-9::u-1"
+        assert out.answer  is None,     "a queued job has not run, so it has no answer to carry"
+        assert out.error   is None
+        assert queue.scoped == [ ( "base-9", "u-1", "s-1" ) ]
+        assert queue.pushed == [ agent ]
+
+    def test_the_job_is_scoped_before_it_is_pushed( self ) -> None:
+        """
+        v1's order, kept (`todo_fifo_queue.py:857-859`): scope, THEN push. A job
+        pushed first is visible to a user-filtering read for the window before
+        its id is scoped, and that read cannot tell whose job it is.
+
+        RED ON REVERT: swap the two lines in QueuedExecutor.submit — the final
+        state of the job is identical either way, so only this assertion, taken
+        at push time, can tell the two orders apart.
+        """
+        queue = FakeTodoQueue()
+        trace = StageTrace( trace_dir="/tmp/unused" )
+
+        QueuedExecutor( queue ).submit( _work( "agent", FakeAgent( id_hash="base-9" ) ), trace )
+
+        assert queue.id_hash_at_push == [ "base-9::u-1" ], (
+            "the job reached the queue carrying an UNSCOPED id — it was pushed before it was scoped"
+        )
+
+    def test_push_failure_is_captured_not_raised( self ) -> None:
+        """A queue that refuses is a failed outcome, same contract as InlineExecutor."""
+        trace = StageTrace( trace_dir="/tmp/unused" )
+        out   = QueuedExecutor( FakeTodoQueue( boom=True ) ).submit( _work( "agent", FakeAgent() ), trace )
+        assert out.status == "failed"
+        assert "queue refused the push" in out.error
+
+    @pytest.mark.parametrize( "kind", [ "agent", "replay", "receptionist" ] )
+    def test_every_kind_is_queued( self, kind: str ) -> None:
+        """No per-kind policy lives here: what the flow hands over gets queued.
+
+        InlineExecutor dispatches by kind because replay and agents run
+        differently. Queueing does not — the consumer already dispatches by
+        type, so a kind fork here would be a second place to disagree with it.
+        """
+        queue = FakeTodoQueue()
+        trace = StageTrace( trace_dir="/tmp/unused" )
+        out   = QueuedExecutor( queue ).submit( _work( kind, FakeAgent() ), trace )
+        assert out.status == "waiting"
+        assert len( queue.pushed ) == 1
 
     def test_make_executor_inline( self ) -> None:
         assert isinstance( make_executor( "inline" ), InlineExecutor )
         assert isinstance( make_executor(), InlineExecutor )        # default
 
     def test_make_executor_queued( self ) -> None:
-        assert isinstance( make_executor( "queued" ), QueuedExecutor )
+        queue    = FakeTodoQueue()
+        executor = make_executor( "queued", todo_queue=queue )
+        assert isinstance( executor, QueuedExecutor )
+        assert executor.todo_queue is queue
+
+    def test_make_executor_queued_without_a_queue_raises( self ) -> None:
+        """
+        Fail at construction, not on the live path. Today `get_ask_flow` calls
+        make_executor with the INI name alone, so flipping `v2 executor` to
+        "queued" before step 12 wires the queue in lifespan raises HERE, naming
+        the fix — rather than building an executor that dies on a user's question.
+        """
+        with pytest.raises( ValueError, match="needs the todo queue" ):
+            make_executor( "queued" )
 
     def test_make_executor_unknown_raises( self ) -> None:
         with pytest.raises( ValueError, match="Unknown v2 executor" ):
@@ -394,3 +493,245 @@ class TestPendingRequests:
         assert entry.status == "pending"
         assert entry.answer is None
         assert entry.error is None
+
+
+class TestClaimIsAtomic:
+    """
+    `claim()` is the guard that makes threading the resume handler safe.
+
+    The race it closes: `flow.resume` reads the entry (flow.py:153) and writes it
+    later (:181/:184/:187), each call taking the RLock on its own with the agent
+    run in between. A lock around a dictionary keeps the dictionary sound; it does
+    not make a read-modify-write pair atomic. Two resumes could both pass the
+    liveness check and both run the agent on one conversation.
+
+    It is unreachable while the handler sits on the event loop, because one loop
+    cannot interleave two resumes. Moving the handler to a worker thread is what
+    makes it reachable, so these tests ship in the same commit as that move.
+    """
+
+    def _parked( self ):
+        pend = PendingRequests()
+        pid  = pend.put( extraction=None, user_email="u@x", session_id="s", user_id="u" )
+        return pend, pid
+
+    def test_first_claim_wins_and_marks_answering( self ) -> None:
+        """The claim marks the turn "answering", not "running" — the agent has not
+        started yet, and the interview-continue path hands the turn back without one
+        ever running."""
+        pend, pid = self._parked()
+        entry = pend.claim( pid )
+        assert entry is not None
+        assert entry.status == "answering"
+
+    def test_release_turn_makes_it_answerable_again( self ) -> None:
+        """A multi-turn interview claims each turn and releases it; without this the
+        second turn of every disambiguation would be refused as already_resumed."""
+        pend, pid = self._parked()
+        assert pend.claim( pid ) is not None
+        assert pend.claim( pid ) is None              # held
+        assert pend.release_turn( pid ) is True
+        assert pend.claim( pid ) is not None          # answerable again
+
+    def test_release_turn_refuses_to_revive_a_terminal_entry( self ) -> None:
+        """release_turn only un-claims a turn it owns. A done conversation must not
+        be dragged back into an answerable state by a stray release."""
+        pend, pid = self._parked()
+        pend.claim( pid )
+        pend.set_status( pid, "done", answer="sunny" )
+        assert pend.release_turn( pid ) is False
+        assert pend.get( pid ).status == "done"
+
+    def test_second_claim_returns_none( self ) -> None:
+        """
+        RED ON REVERT: make claim() a plain get() — or restore
+        get-then-set_status — and the second caller gets an entry too.
+        """
+        pend, pid = self._parked()
+        assert pend.claim( pid ) is not None
+        assert pend.claim( pid ) is None
+
+    def test_missing_and_expired_also_return_none( self ) -> None:
+        """
+        All three losing cases are indistinguishable ON PURPOSE: missing, expired
+        and already-claimed all mean "this resume does not own the conversation",
+        and a caller that treats them differently is inventing a distinction the
+        guard does not make.
+        """
+        pend, _ = self._parked()
+        assert pend.claim( "no-such-id" ) is None
+
+        clock   = FakeClock()
+        expiring = PendingRequests( ttl_seconds=1.0, clock=clock )
+        pid      = expiring.put( extraction=None, user_email="u@x", session_id="s", user_id="u" )
+        clock.advance( 2_000_000_000 )
+        assert expiring.claim( pid ) is None
+
+    def test_only_one_of_many_concurrent_claims_wins( self ) -> None:
+        """
+        The property under real threads, not simulated turn-taking.
+
+        Twelve threads race for one pending_id behind a barrier so they arrive
+        together. Exactly one must come away with the entry. A sequential test
+        cannot show this: the guard could be broken and still look correct when
+        the calls never overlap, which is precisely the state of the code before
+        the handler moves off the event loop.
+        """
+        import threading
+
+        pend, pid = self._parked()
+        winners   = []
+        lock      = threading.Lock()
+        barrier   = threading.Barrier( 12 )
+
+        def racer():
+            barrier.wait()
+            got = pend.claim( pid )
+            if got is not None:
+                with lock: winners.append( got )
+
+        threads = [ threading.Thread( target=racer ) for _ in range( 12 ) ]
+        for t in threads: t.start()
+        for t in threads: t.join()
+
+        assert len( winners ) == 1, f"{len( winners )} callers claimed one pending_id — the guard is not atomic"
+
+
+class TestTraceFileUnderConcurrency:
+    """
+    Corruption B: the trace FILE, which is the only part of tracing two callers share.
+
+    The audit changed what this test is worth. `StageTrace` is per-request — the
+    flow builds a fresh one at flow.py:88 and :149 — so two callers cannot corrupt
+    each other's marks or fields. What they share is the day's file, appended to by
+    `write()` (trace.py:163-165).
+
+    So this is EXPECTED TO PASS, and it is written down as expected rather than
+    discovered afterwards. It is kept because "expected to pass" is a prediction,
+    and an unrun prediction is an opinion. If it ever goes red, interleaved appends
+    are corrupting records and the flow needs a lock it does not have today.
+    """
+
+    def test_concurrent_writes_produce_intact_records( self, tmp_path ) -> None:
+        import json as _json
+        import threading
+
+        writers = 16
+        barrier = threading.Barrier( writers )
+
+        def write_one( n ):
+            trace = StageTrace( trace_dir=str( tmp_path ) )
+            trace.mark( "t_recv" )
+            trace.set( "who", f"caller-{n}" )
+            barrier.wait()
+            trace.write()
+
+        threads = [ threading.Thread( target=write_one, args=( n, ) ) for n in range( writers ) ]
+        for t in threads: t.start()
+        for t in threads: t.join()
+
+        files = list( tmp_path.glob( "trace-*.jsonl" ) )
+        assert len( files ) == 1, f"expected one day-file, got {[ f.name for f in files ]}"
+        lines = [ l for l in files[ 0 ].read_text().splitlines() if l.strip() ]
+
+        assert len( lines ) == writers, f"{len( lines )} records for {writers} concurrent writers — appends were lost or split"
+        whos = set()
+        for line in lines:
+            record = _json.loads( line )      # a torn line raises here, which is the point
+            whos.add( record[ "who" ] )
+        assert whos == { f"caller-{n}" for n in range( writers ) }, "records were interleaved or overwritten"
+
+
+class TestOutcomeStatusVocabulary:
+    """
+    Step 1 of the brain-integration plan: `Outcome.status` says "waiting", not
+    "parked", for a queued hand-off.
+
+    Rick's ruling: a queued job is waiting its turn, not paused. "parked" stays
+    for the flow's needs-input path, which is a genuine suspension — a request
+    held pending an answer from the user. The two situations were reading as one
+    word, and the word described only one of them.
+
+    Nothing emits the queued value yet (`QueuedExecutor.submit` still raises;
+    the executor is built in step 2), so the field's declared vocabulary is the
+    only surface a test can hold. That is enough: the rename exists to stop the
+    wrong word entering the type in the first place.
+    """
+
+    def _status_options( self ):
+        """The declared member set of Outcome.status, read off the dataclass."""
+        import typing
+        hints = typing.get_type_hints( Outcome )
+        return set( typing.get_args( hints[ "status" ] ) )
+
+    def test_waiting_is_a_member( self ) -> None:
+        """
+        RED ON REVERT: put "parked" back in the Literal in place of "waiting"
+        and this fails.
+        """
+        assert "waiting" in self._status_options()
+
+    def test_parked_is_not_a_member( self ) -> None:
+        """
+        The other half of the rename. Without this, a Literal listing BOTH words
+        passes the test above while leaving the ambiguity exactly where it was.
+        """
+        assert "parked" not in self._status_options()
+
+    def test_the_rest_of_the_vocabulary_is_unchanged( self ) -> None:
+        """
+        Ensures the rename touched one member and not the others — this fails if
+        someone rewrites the whole Literal while renaming.
+        """
+        assert self._status_options() == { "done", "waiting", "failed" }
+
+    def test_no_outcome_is_built_with_a_status_outside_the_literal( self ) -> None:
+        """
+        The reviewer's falsifier, made executable.
+
+        Pocholo's step-1 finding was that narrowing this Literal would make the
+        type lie, because the flow emits "parked". It does not: the flow passes
+        "parked" as a plain string to `_emit( status: str )`, and no Outcome is
+        ever constructed with it. But "no Outcome is built with a value outside
+        the Literal" is the right thing to hold, and holding it by hand means
+        re-deriving it every time someone adds a branch.
+
+        So this reads every `Outcome( status="..." )` in the v2 package and
+        checks each against the Literal ITSELF, not a copy of it. If someone adds
+        an executor that returns "parked" — the thing that would genuinely make
+        the narrow Literal a lie — this fails and names the value.
+
+        RED ON REVERT: add `Outcome( status="parked" )` anywhere under
+        cosa/rest/v2 and this fails.
+        """
+        import pathlib
+        import re
+
+        allowed = self._status_options()
+        v2_dir  = pathlib.Path( executor_module.__file__ ).parent
+        built   = []
+        for path in sorted( v2_dir.glob( "*.py" ) ):
+            for found in re.findall( r'Outcome\(\s*status\s*=\s*"([^"]+)"', path.read_text() ):
+                built.append( ( path.name, found ) )
+
+        assert built, "found no Outcome constructions at all — this test has gone vacuous"
+        offenders = [ ( name, value ) for name, value in built if value not in allowed ]
+        assert not offenders, (
+            f"Outcome built with a status outside the Literal {sorted( allowed )}: {offenders}. "
+            f"Either the executor is wrong or the Literal needs widening — but they must agree."
+        )
+
+    def test_the_needs_input_path_still_says_parked( self ) -> None:
+        """
+        The rename must NOT reach the flow. `flow.py` uses "parked" as the
+        RESPONSE status when a request is suspended awaiting the user, which is
+        the one place the word is accurate.
+
+        RED ON REVERT: rename those too, and this fails — which is the point,
+        because a blanket search-and-replace is the likely way to get step 1
+        wrong.
+        """
+        import inspect
+        from cosa.rest.v2 import flow as flow_module
+        source = inspect.getsource( flow_module )
+        assert 'status="parked"' in source

@@ -1,183 +1,119 @@
 """
-SWE Team job submission endpoint for CJ Flow queue integration.
+The retired SWE Team submission door.
 
-Provides endpoint for submitting SWE Team engineering tasks to the
-queue system for asynchronous execution.
+This module used to build and queue SWE Team engineering jobs. It now holds a single
+tombstone: the route stays registered and answers 410 Gone naming `/api/v2/submit`, which
+is where that work enters now.
 
-Generated on: 2026-02-16
+The request and response models went with the handler, and so did the todo-queue
+dependency. A Pydantic model no route reads is a shape a caller can still find and
+reasonably believe in.
+
+⚠️ THIS ROUTER CARRIES NO PREFIX, which is why the decorator below takes the FULL path
+while the prefixed routers in this directory take only the tail. Copying the tail form
+here would mount the door at `/submit` and the real path would answer 404 — the one answer
+a tombstone must never give.
+
+What a caller sends instead:
+
+    POST /api/v2/submit
+    {
+        "command": "agent router go to swe team",
+        "args": { "task": "add retries to the upload path", "dry_run": true, "budget": 5.0 }
+    }
 """
 
-from typing import Optional
+from fastapi import APIRouter
 
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
-
-from cosa.rest.auth import get_current_user
-from cosa.rest.queue_extensions import user_job_tracker
-from cosa.rest.agentic_job_factory import create_agentic_job
+from cosa.rest.routers._retired_doors import gone, tombstone_description
+import cosa.utils.util as cu
 
 router = APIRouter( tags=[ "swe-team" ] )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Pydantic Models
+# Job Submission Endpoint — retired
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class SweTeamSubmitRequest( BaseModel ):
-    """Request body for submitting a SWE Team job."""
-    task          : str            = Field( ..., min_length=1, description="The engineering task to accomplish" )
-    dry_run       : bool           = Field( False, description="Simulate execution without API calls" )
-    websocket_id  : Optional[ str ] = Field( None, description="WebSocket session ID for notifications" )
-    lead_model    : Optional[ str ] = Field( None, description="Model for lead agent (None = use default)" )
-    worker_model  : Optional[ str ] = Field( None, description="Model for worker agents (None = use default)" )
-    budget        : Optional[ float ] = Field( None, ge=0, description="Maximum budget in USD (None = use default)" )
-    timeout       : Optional[ int ]   = Field( None, gt=0, description="Wall-clock timeout in seconds (None = use default)" )
-    trust_mode    : Optional[ str ] = Field( None, description="Trust mode: disabled, shadow, suggest, active (None = use server default)" )
-    scheduled_at  : Optional[ str ] = Field( None, description="ISO datetime for deferred execution (None = immediate)" )
-    monopolize    : bool            = Field( False, description="Run exclusively, block all other jobs until complete" )
-    parent_id_hash: Optional[ str ] = Field( None, description="Lineage token (bug 3a14292b): id_hash of a monopolize job that SPAWNED this child. When it matches the pool's active monopolizer, the consumer's Gate B admits this child THROUGH the intake hold instead of deferring it as a foreign writer. Set by a monopolize sweep's pytest from LUPIN_TEST_MONOPOLIZE_PARENT_ID." )
-
-
-class SweTeamSubmitResponse( BaseModel ):
-    """Response body for SWE Team job submission."""
-    status         : str = Field( ..., description="Job status (queued)" )
-    job_id         : str = Field( ..., description="Unique job identifier (swe-{uuid8})" )
-    queue_position : int = Field( ..., description="Position in the todo queue" )
-    message        : str = Field( ..., description="Human-readable confirmation message" )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Dependencies
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def get_todo_queue():
-    """
-    Dependency to get todo queue from main module.
-
-    Returns:
-        TodoFifoQueue: The todo queue instance
-    """
-    import lupin_app.main as main_module
-    return main_module.jobs_todo_queue
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Job Submission Endpoint
-# ═══════════════════════════════════════════════════════════════════════════════
-
+# ── TOMBSTONE — /api/swe-team/submit ──
+#
+# WHAT THE CALLER DOES INSTEAD. This door named its own command and put the caller's
+# scheduling and lineage fields on the job by hand. `/api/v2/submit` takes the command as a
+# string and the same arguments as `args`, and carries `scheduled_at`, `monopolize` and
+# `parent_id_hash` as its own top-level fields:
+#
+#     POST /api/v2/submit
+#     { "command": "agent router go to swe team",
+#       "args"   : { "task": "...", "dry_run": true, "budget": 5.0, "timeout": 3600 },
+#       "scheduled_at": null, "monopolize": false, "parent_id_hash": null }
+#
+# THE LINEAGE FIELD MATTERS MORE HERE THAN ANYWHERE ELSE, so it is worth being explicit
+# that it survives. A monopolizing test-suite sweep exports its own id_hash to its child
+# pytests as LUPIN_TEST_MONOPOLIZE_PARENT_ID (test_suite/job.py), and a swe-team dry-run
+# spawned by one of those pytests echoes it back so the consumer's Gate B admits the child
+# THROUGH the monopoly intake hold instead of starving it 900s (bugs 3a14292b / 5ed4f187).
+# `/api/v2/submit` carries `parent_id_hash` as a top-level field and stamps it in the
+# factory, so the sweep keeps working — and it is now the only lineage-aware door left.
+#
+# NOTHING ELSE THIS DOOR DID IS LOST EITHER: the job is built by the same
+# `create_agentic_job` this handler called; the id is scoped through the same
+# `user_job_tracker.register_scoped_job`, in the queued executor rather than here; and the
+# 400s for a token with no uid or email are the 401s `submit` already raises.
+#
+# The one thing that genuinely does not come back is `queue_position`. `AskResponse` has no
+# such field and is not being widened for it — a job card learns its place from the queue
+# websocket events, which is where a position that changes as the queue moves belongs
+# anyway, rather than from a number frozen at the instant of submission.
+#
+# The body is DELETED rather than left unreachable under a raise: unreachable code is code
+# nobody can test and everybody must still read. Recover it from git if any of its handling
+# turns out to be worth carrying into the flow.
 @router.post(
+    # FULL path, because this router has no prefix — see the module docstring.
     "/api/swe-team/submit",
-    response_model = SweTeamSubmitResponse,
-    summary        = "Submit SWE team task",
-    description    = "Submit an engineering task to the SWE Team for async execution via CJ Flow."
+    deprecated  = True,
+    status_code = 410,
+    summary     = "GONE — use /api/v2/submit",
+    description = tombstone_description( "/api/swe-team/submit" )
 )
-async def submit_swe_team_task(
-    request_body: SweTeamSubmitRequest,
-    current_user: dict = Depends( get_current_user ),
-    todo_queue = Depends( get_todo_queue )
-):
+async def submit_swe_team_task():
     """
-    Submit a SWE Team engineering task to run in the background.
-
-    Creates a SweTeamJob and pushes it to the todo queue for
-    asynchronous execution. The job will run through the queue system
-    and send progress notifications via WebSocket.
-
-    Requires:
-        - Authenticated user (current_user from token)
-        - Valid task description
+    Refuse this retired door with 410 Gone.
 
     Ensures:
-        - SweTeamJob created with unique ID
-        - Job pushed to todo queue
-        - Returns job_id for tracking
-
-    Args:
-        request_body: SWE Team job parameters
-        current_user: Authenticated user from token
-        todo_queue: Todo queue instance
-
-    Returns:
-        SweTeamSubmitResponse: Job submission confirmation
-
-    Raises:
-        HTTPException 400: Invalid request parameters
-        HTTPException 500: Queue push failed
+        - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
+          REMOVE BY 2026-12-31 date
     """
-    # Get user ID and email from token (canonical source - don't trust client)
-    user_id    = current_user.get( "uid" )
-    user_email = current_user.get( "email" )
+    gone( "/api/swe-team/submit" )
 
-    if not user_id:
-        raise HTTPException(
-            status_code=400,
-            detail="User ID not found in authentication token"
-        )
 
-    if not user_email:
-        raise HTTPException(
-            status_code=400,
-            detail="User email not found in authentication token"
-        )
-
-    # Use provided websocket_id or fall back to a default
-    session_id = request_body.websocket_id or f"api-{user_id[ :8 ]}"
+def quick_smoke_test():
+    """Quick smoke test for swe_team router."""
+    cu.print_banner( "SWE Team Router Smoke Test", prepend_nl=True )
 
     try:
-        # Build args_dict from request body
-        args_dict = { "task": request_body.task }
-        if request_body.dry_run:
-            args_dict[ "dry_run" ] = True
-        if request_body.lead_model:
-            args_dict[ "lead_model" ] = request_body.lead_model
-        if request_body.worker_model:
-            args_dict[ "worker_model" ] = request_body.worker_model
-        if request_body.budget is not None:
-            args_dict[ "budget" ] = str( request_body.budget )
-        if request_body.timeout is not None:
-            args_dict[ "timeout" ] = str( request_body.timeout )
-        if request_body.trust_mode:
-            args_dict[ "trust_mode" ] = request_body.trust_mode
+        print( "Testing module import..." )
+        from cosa.rest.routers.swe_team import router
+        print( "  PASS" )
 
-        job = create_agentic_job(
-            command    = "agent router go to swe team",
-            args_dict  = args_dict,
-            user_id    = user_id,
-            user_email = user_email,
-            session_id = session_id
-        )
+        # The door is a tombstone, mounted ONCE at the path the table is keyed on. This
+        # router has NO prefix, so the decorator carries the full path; the tail form used
+        # by its prefixed neighbours would mount it at /submit and the real path would
+        # answer 404 — the one answer a tombstone must never give.
+        print( "Testing the retired route..." )
+        from cosa.rest.routers._retired_doors import RETIRED_DOORS, V2_SUBMIT
+        paths = { route.path for route in router.routes }
+        assert paths == { "/api/swe-team/submit" }, f"mounted at {paths}"
+        assert RETIRED_DOORS[ "/api/swe-team/submit" ] == V2_SUBMIT
+        print( "  PASS" )
 
-        if job is None:
-            raise HTTPException( status_code=500, detail="Failed to create SWE Team job" )
-
-        # Scheduling attributes pass-through (CJ Flow timed execution + monopolize)
-        if request_body.scheduled_at: job.scheduled_at = request_body.scheduled_at
-        if request_body.monopolize:   job.monopolize   = request_body.monopolize
-        # Lineage pass-through (bug 3a14292b): stamp the spawning monopolizer's id so
-        # Gate B admits this child through the monopoly intake hold.
-        if request_body.parent_id_hash: job.spawned_by_id_hash = request_body.parent_id_hash
-
-        # Atomic: scope ID + index for user filtering BEFORE push (race condition prevention)
-        job.id_hash = user_job_tracker.register_scoped_job( job.id_hash, user_id, session_id )
-
-        # Push to todo queue
-        todo_queue.push( job )
-
-        # Get queue position (approximate - queue length after push)
-        queue_position = todo_queue.size()
-
-        return SweTeamSubmitResponse(
-            status         = "queued",
-            job_id         = job.id_hash,
-            queue_position = queue_position,
-            message        = f"SWE Team job queued: {job.last_question_asked}"
-        )
-
-    except HTTPException:
-        raise
+        print( "\nAll SWE Team Router smoke tests passed" )
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to submit SWE Team job: {str( e )}"
-        )
+        print( f"\nSmoke test failed: {e}" )
+        import traceback
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    quick_smoke_test()

@@ -100,7 +100,44 @@ def _parse_optional_float( value, default=None ):
         return default
 
 
-def create_agentic_job( command, args_dict, user_id, user_email, session_id, debug=False, verbose=False ):
+def _stamp_queue_directives( job, scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Put the caller's queue directives on a freshly-built job.
+
+    Only a value the caller actually SET is written, which is what every v1 door did
+    (`if request_body.scheduled_at: job.scheduled_at = ...`). The difference matters:
+    the job's constructor already chose defaults, and writing an unset None or False
+    over them would let a submission that said nothing about scheduling overwrite a
+    job class that had an opinion.
+
+    A NONE JOB IS A REAL CASE ON ONE OF THE TWO CALL PATHS, and it is why this starts
+    with a guard rather than trusting its caller. `resume_job` returns None when the
+    checkpoint read finds no row, or a row with no routing command — so a caller asking
+    to resume a job that is not there gets None back, and stamping a schedule onto None
+    raises AttributeError out of the door instead of the "no such job" the caller can
+    act on. The factory's own contract is that an unknown command returns None; this
+    keeps that answer intact rather than converting it into a crash (Pocholo, reviewing
+    the commit that added the stamping).
+
+    Requires:
+        - job is a constructed AgenticJobBase subclass instance, or None
+
+    Ensures:
+        - returns None unchanged when handed None — the caller's "no such job" answer
+        - sets job.scheduled_at only when scheduled_at is truthy
+        - sets job.monopolize only when monopolize is truthy
+        - sets job.spawned_by_id_hash only when spawned_by_id_hash is truthy
+        - returns the same job object it was handed
+    """
+    if job is None:        return None
+    if scheduled_at:       job.scheduled_at       = scheduled_at
+    if monopolize:         job.monopolize         = monopolize
+    if spawned_by_id_hash: job.spawned_by_id_hash = spawned_by_id_hash
+    return job
+
+
+def create_agentic_job( command, args_dict, user_id, user_email, session_id, debug=False, verbose=False,
+                        scheduled_at=None, monopolize=False, spawned_by_id_hash=None ):
     """
     Factory function to create the correct agentic job based on command.
 
@@ -121,9 +158,22 @@ def create_agentic_job( command, args_dict, user_id, user_email, session_id, deb
         session_id: WebSocket session ID
         debug: Enable debug output
         verbose: Enable verbose output
+        scheduled_at: ISO datetime string to defer execution to, or None to run as soon
+            as the queue reaches it
+        monopolize: run exclusively, holding every other job until this one finishes
+        spawned_by_id_hash: id_hash of the monopolize job that SPAWNED this one, or None
 
     Returns:
         AgenticJobBase subclass instance, or None
+
+    WHY THE LAST THREE ARE PARAMETERS AND NOT ARGS_DICT KEYS. They are not arguments to
+    the agent — they are instructions to the QUEUE about when and how to run it, and
+    `args_dict` is validated against JOB_ARG_CONTRACTS, so smuggling them through it
+    would mean faking them into an agent's argument contract to survive the trip. Every
+    v1 door set them on the job by hand after this factory returned (deep_research.py:172,
+    podcast_generator.py:530, swe_team.py:154, mock_job.py:185, and the rest); as those
+    doors retire into /api/v2/submit there is no handler left to do that, so the stamping
+    moves in here where the job is built.
     """
     from cosa.agents.bug_fix_expediter.job              import BugFixExpediterJob
     from cosa.agents.claude_code.job                     import ClaudeCodeJob
@@ -367,7 +417,13 @@ def create_agentic_job( command, args_dict, user_id, user_email, session_id, deb
         # resume_job() returns a fully-formed job carrying its ORIGINAL routing_command
         # and args from job_history; return it directly rather than falling through to
         # the common tail, which would overwrite those with the resume args.
-        return resume_job( target.job_id, args_overrides=overrides or None )
+        # The resume path skips the common tail below, so it stamps here — a caller
+        # who says "resume this one at ten in the morning" means it just as much as a
+        # caller starting fresh work.
+        return _stamp_queue_directives(
+            resume_job( target.job_id, args_overrides=overrides or None ),
+            scheduled_at, monopolize, spawned_by_id_hash
+        )
 
     else:
         print( f"[agentic_job_factory] Unknown command: {command}" )
@@ -378,7 +434,7 @@ def create_agentic_job( command, args_dict, user_id, user_email, session_id, deb
     # BFE's resubmit path reads these to reconstruct the original job faithfully.
     job.routing_command = command
     job.original_args   = dict( args_dict )
-    return job
+    return _stamp_queue_directives( job, scheduled_at, monopolize, spawned_by_id_hash )
 
 
 def resume_job( job_id_hash, config_mgr=None, args_overrides=None ):

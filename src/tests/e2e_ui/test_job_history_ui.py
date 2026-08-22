@@ -692,22 +692,26 @@ class TestJobHistoryDeleteFlows:
 class TestJobHistoryRetryFlows:
     """Retry button flows: happy path, cancel, interrupted job retry."""
 
-    def test_retry_happy_path_creates_todo_job( self, seeded_history_page ):
+    def test_retry_happy_path_re_asks_the_question( self, seeded_history_page ):
         """
-        Retry on failed job sends correct POST, UI handles success, original stays in history.
+        Retry on a failed job RE-ASKS its stored question at /api/v2/ask.
 
-        Note: The backend push_job routes through the LLM pipeline which is unavailable
-        in the test environment. We mock the retry API response to test the frontend flow.
-        Backend retry logic is covered by integration tests.
+        `/api/job-history/{id}/retry` was retired 2026-08-21 and answers 410. It was a
+        queue door wearing a job-history URL: the server read `question_text` off the
+        stored row and re-asked it for you. The client holds that text already — it is
+        the same string the confirm dialog shows — so the client re-asks, and the
+        assertion that matters is that the QUESTION went out, not that a job id came back.
+
+        The response is mocked because a real ask runs the routing LoRA and the agent;
+        this test is about the request the page makes.
 
         Requires:
             - Standard seed set with failed job (std-003)
 
         Ensures:
-            - Confirm dialog shown with question text
-            - POST /retry sent with correct URL and method
-            - On 200 response: original failed card remains in history
-            - Badge count unchanged at 5
+            - the POST goes to /api/v2/ask, NOT to the retired retry door
+            - its body carries the stored question text, not a bare websocket_id
+            - the original failed card remains in history and the badge stays at 5
         """
         page, records = seeded_history_page
         expand_history_section( page )
@@ -721,32 +725,40 @@ class TestJobHistoryRetryFlows:
 
         assert retry_btn.count() > 0, "Retry button not found on failed job"
 
-        # Mock the retry API response (push_job requires LLM routing, unavailable in test env)
-        import json
-        mock_response = json.dumps( {
-            "status"          : "retried",
-            "original_job_id" : failed_id,
-            "result"          : { "id_hash": "mock-retried-job-001", "status": "todo" }
-        } )
+        # The retired door must never be reached again — record any hit on it so the
+        # test can say so by name rather than merely timing out on the ask.
+        retired_hits = []
         page.route(
             "**/api/job-history/*/retry",
-            lambda route: route.fulfill(
+            lambda route: ( retired_hits.append( route.request.url ), route.fulfill(
+                status=410, content_type="application/json", body='{"detail":"GONE"}' ) )[ 1 ]
+        )
+
+        asked = []
+        mock_response = json.dumps( {
+            "path": "agent", "status": "done", "route_reason": "mocked",
+            "answer": "mocked answer", "trace_id": "e2e-retry-001"
+        } )
+        page.route(
+            "**/api/v2/ask",
+            lambda route: ( asked.append( route.request.post_data ), route.fulfill(
                 status       = 200,
                 content_type = "application/json",
                 body         = mock_response
-            ) if route.request.method == "POST" else route.continue_()
+            ) )[ 1 ] if route.request.method == "POST" else route.continue_()
         )
 
-        # Click retry and wait for the mocked response
-        with page.expect_response( lambda r: "/retry" in r.url ) as response_info:
+        with page.expect_response( lambda r: "/api/v2/ask" in r.url ) as response_info:
             retry_btn.click()
 
-        retry_response = response_info.value
-        assert retry_response.ok, f"Retry POST failed with status {retry_response.status}"
+        ask_response = response_info.value
+        assert ask_response.ok, f"Re-ask POST failed with status {ask_response.status}"
+        assert retired_hits == [], f"The retired retry door was called: {retired_hits}"
 
-        retry_data = retry_response.json()
-        assert retry_data[ "status" ] == "retried"
-        assert retry_data[ "original_job_id" ] == failed_id
+        assert len( asked ) == 1, f"Expected exactly one re-ask, got {len( asked )}"
+        sent = json.loads( asked[ 0 ] )
+        assert sent[ "question" ] == failed_rec[ "question_text" ], \
+            f"Re-asked the wrong text: {sent.get( 'question' )!r}"
 
         page.wait_for_timeout( 500 )
 
@@ -794,18 +806,20 @@ class TestJobHistoryRetryFlows:
         assert cards.count() == 5, f"Expected 5 cards after cancel, got {cards.count()}"
         assert badge.text_content() == "5", f"Badge changed after cancel: '{badge.text_content()}'"
 
-    def test_retry_interrupted_job_creates_todo_job( self, seeded_history_page ):
+    def test_retry_interrupted_job_re_asks_the_question( self, seeded_history_page ):
         """
-        Retry on interrupted job sends correct POST, UI handles success.
+        Retry on an interrupted job RE-ASKS its stored question at /api/v2/ask.
 
-        Note: Backend push_job mocked (requires LLM routing, unavailable in test env).
+        Same contract as the failed-job case above, on the other status the retry
+        button appears for. The retired `/api/job-history/{id}/retry` door is not
+        involved any more; the response is mocked because a real ask runs the agent.
 
         Requires:
             - Standard seed set with interrupted job (std-004)
 
         Ensures:
-            - POST /retry sent for interrupted job
-            - On 200 response: original interrupted card remains in history
+            - the POST goes to /api/v2/ask carrying the stored question text
+            - the original interrupted card remains in history
         """
         page, records = seeded_history_page
         expand_history_section( page )
@@ -819,31 +833,30 @@ class TestJobHistoryRetryFlows:
 
         assert retry_btn.count() > 0, "Retry button not found on interrupted job"
 
-        # Mock the retry API response
-        import json
+        asked = []
         mock_response = json.dumps( {
-            "status"          : "retried",
-            "original_job_id" : interrupted_id,
-            "result"          : { "id_hash": "mock-retried-job-002", "status": "todo" }
+            "path": "agent", "status": "done", "route_reason": "mocked",
+            "answer": "mocked answer", "trace_id": "e2e-retry-002"
         } )
         page.route(
-            "**/api/job-history/*/retry",
-            lambda route: route.fulfill(
+            "**/api/v2/ask",
+            lambda route: ( asked.append( route.request.post_data ), route.fulfill(
                 status       = 200,
                 content_type = "application/json",
                 body         = mock_response
-            ) if route.request.method == "POST" else route.continue_()
+            ) )[ 1 ] if route.request.method == "POST" else route.continue_()
         )
 
-        with page.expect_response( lambda r: "/retry" in r.url ) as response_info:
+        with page.expect_response( lambda r: "/api/v2/ask" in r.url ) as response_info:
             retry_btn.click()
 
-        retry_response = response_info.value
-        assert retry_response.ok, f"Retry POST failed with status {retry_response.status}"
+        ask_response = response_info.value
+        assert ask_response.ok, f"Re-ask POST failed with status {ask_response.status}"
 
-        retry_data = retry_response.json()
-        assert retry_data[ "status" ] == "retried"
-        assert retry_data[ "original_job_id" ] == interrupted_id
+        assert len( asked ) == 1, f"Expected exactly one re-ask, got {len( asked )}"
+        sent = json.loads( asked[ 0 ] )
+        assert sent[ "question" ] == interrupted_rec[ "question_text" ], \
+            f"Re-asked the wrong text: {sent.get( 'question' )!r}"
 
         page.wait_for_timeout( 500 )
 
@@ -896,7 +909,14 @@ class TestJobHistoryEdgeCases:
 
     def test_admin_can_manage_other_users_jobs( self, admin_page ):
         """
-        Admin can see, delete, and retry jobs belonging to other users.
+        Admin sees and deletes another user's jobs; the retired retry door refuses even them.
+
+        Retry-on-behalf-of is GONE, and it dissolved rather than moved: retrying used to
+        be a server-side re-ask of a stored row, so it had an owner and needed an
+        authorization boundary. Now the client re-asks its own question at /api/v2/ask,
+        so you ask as yourself and there is no other-user retry to authorize. What is
+        left to check here is that the tombstone is UNCONDITIONAL — an admin gets the
+        same 410 everyone else gets.
 
         Requires:
             - Admin user authenticated
@@ -905,7 +925,8 @@ class TestJobHistoryEdgeCases:
         Ensures:
             - Admin sees other user's jobs in history
             - Admin can delete other user's completed job
-            - Admin can retry other user's failed job
+            - The retired retry door answers 410 to an admin, naming /api/v2/ask
+            - The failed card is untouched by the refusal
         """
         from tests.helpers.job_history_seed import seed_job_history_records
 
@@ -965,15 +986,9 @@ class TestJobHistoryEdgeCases:
         retry_btn = failed_card.locator( ".retry-btn" )
         assert retry_btn.count() > 0, "Failed job should have retry button"
 
-        # Call the retry endpoint directly via Playwright's request context (uses
-        # the browser's auth session). The UI click path goes through retryHistoryJob
-        # → authedFetch → server push_job, which runs the full LLM routing pipeline
-        # (local LoRA model call + snapshot search + embedding generation). In test
-        # env the routing LoRA cold-start + inference can take 60-150s; the click path
-        # also interacts with ambient TTS-focus-mode notifications that interfere with
-        # event delivery. Since what this test validates is the admin-authorization
-        # boundary (admin can retry another user's failed job vs. 403 for non-admin),
-        # hitting the endpoint directly with a 180s budget is a cleaner assertion.
+        # Hit the retired door directly with the admin's own session. It used to run the
+        # whole routing pipeline on the server, which is why this call carried a 180s
+        # budget; it now refuses immediately, so the budget goes with the behaviour.
         token = admin_page.evaluate( 'localStorage.getItem( "lupin_access_token" )' )
         ws_id = admin_page.evaluate( 'window.notificationsUI && window.notificationsUI.queueSessionId' ) or "e2e-admin-retry"
         retry_resp = admin_page.request.post(
@@ -983,12 +998,16 @@ class TestJobHistoryEdgeCases:
                 "Content-Type" : "application/json",
             },
             data = json.dumps( { "websocket_id": ws_id } ),
-            timeout = 180_000,
+            timeout = 30_000,
         )
-        assert retry_resp.ok, f"/retry returned {retry_resp.status}: {retry_resp.text()[:500]}"
+        assert retry_resp.status == 410, \
+            f"Retired retry door answered {retry_resp.status} to an admin: {retry_resp.text()[:500]}"
+        detail = retry_resp.json()[ "detail" ]
+        assert "/api/v2/ask" in detail, f"Refusal does not name the replacement: {detail}"
+        assert "2026-12-31" in detail, f"Refusal does not carry the removal date: {detail}"
 
-        # Failed card still in history after retry
-        assert failed_card.count() == 1, "Original failed card should remain after admin retry"
+        # The refusal changed nothing — the failed card is still there.
+        assert failed_card.count() == 1, "Original failed card should remain after the refusal"
 
 
 # ===========================================================================

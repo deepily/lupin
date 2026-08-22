@@ -407,8 +407,6 @@ class TestCrudQueueCompletion:
         queue.queue_dict      = OrderedDict()
         queue.push_counter    = 0
         queue.last_queue_size = 0
-        queue._blocking_object = None
-        queue._accepting_jobs  = True
         queue._agentic_futures      = { }
         queue._agentic_futures_lock = threading.RLock()
 

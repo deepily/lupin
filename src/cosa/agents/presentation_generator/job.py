@@ -17,12 +17,94 @@ Example:
 """
 
 import asyncio
+import os
 from datetime import datetime
 from typing import Optional
 
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
+
+
+def resolve_source_path( path: str ) -> str:
+    """
+    Turn whatever a caller wrote into the one absolute path this job will open.
+
+    WHY THIS EXISTS AT ALL. The retiring door did this and the job did it again, by two
+    DIFFERENT rules: the door treated a leading slash as PROJECT-relative and built the
+    absolute path itself, while the job's own existence check treated a leading slash as
+    FILESYSTEM-absolute and used it verbatim. Nothing noticed, because the door always
+    handed the job a path that was already absolute, so the job's rule never ran on a
+    project-relative path. Retire the door without settling this and the browser — which
+    sends `/io/deck.md` and cannot know the project root — would start failing with
+    "Source document not found" for a file that is there.
+
+    One rule now, and both the guard and the existence check read it:
+
+        - a path already at or under the project root is returned unchanged
+        - anything else is project-relative, leading slash or not
+
+    So `/io/deck.md`, `io/deck.md` and `<root>/io/deck.md` all name the same file, which
+    is what every caller already believed.
+
+    ⚠️ THE CONSEQUENCE, STATED RATHER THAN BURIED. A caller who genuinely means the
+    filesystem-absolute `/etc/passwd` gets `<root>/etc/passwd` instead — silently
+    reinterpreted, not refused. That is the retiring door's contract kept verbatim
+    (Pocholo, 2026-08-21), and it is why the guard below can be honest about `/etc/passwd`
+    coming back True: the path it checked is not the path that name suggests.
+
+    Requires:
+        - path is a string
+
+    Ensures:
+        - returns an absolute path string
+        - is idempotent: resolve( resolve( p ) ) == resolve( p )
+    """
+    project_root = cu.get_project_root()
+    if path == project_root or path.startswith( project_root + "/" ):
+        return path
+    if path.startswith( "/" ):
+        return project_root + path
+    return project_root + "/" + path
+
+
+def source_path_is_inside_the_project( path: str ) -> bool:
+    """
+    Whether a source path resolves to somewhere inside the project root.
+
+    WHY THIS LIVES ON THE JOB AND NOT ON A ROUTE. It used to be
+    `routers/presentation_generator.py::validate_source_path`, checked by the one door
+    that built this job. That door is retired: presentation work now enters through
+    `/api/v2/submit`, which takes a command and an args dict and — correctly — knows
+    nothing about which of an agent's arguments happen to be file paths. A guard that
+    lives on ONE entry point protects that entry point; a guard that lives on the thing
+    which opens the file protects every caller, including the voice path and any door
+    added later.
+
+    Requires:
+        - path is a non-empty string, absolute or project-relative
+
+    ⚠️ A LEADING SLASH MEANS PROJECT-RELATIVE HERE, NOT FILESYSTEM-ABSOLUTE — see
+    `resolve_source_path`, which both this guard and the job's existence check now read.
+    `/etc/passwd` resolves to `<project>/etc/passwd` and comes back True, which looks
+    alarming and is not a hole: that file does not exist, and the existence check refuses
+    it a moment later.
+
+    ⚠️ THIS CHECKS A PATH, NOT AN OPEN FILE, so it promises less than it looks like it
+    promises (Pocholo, 2026-08-21). The check runs when the job is built and the file is
+    opened phases later; a symlink swapped into the path between those two moments still
+    wins. That gap is inherent to checking a name rather than a handle, it is no worse
+    than the door this replaced, and it is written down here so the next reader does not
+    assume more.
+
+    Ensures:
+        - returns True when the resolved path is the project root or inside it
+        - returns False when it escapes, including via `..` segments and symlinks
+          (os.path.realpath resolves both before the comparison)
+    """
+    project_root = os.path.realpath( cu.get_project_root() )
+    resolved     = os.path.realpath( resolve_source_path( path ) )
+    return resolved.startswith( project_root + "/" ) or resolved == project_root
 
 
 class PresentationGeneratorJob( AgenticJobBase ):
@@ -102,6 +184,16 @@ class PresentationGeneratorJob( AgenticJobBase ):
             debug      = debug,
             verbose    = verbose
         )
+
+        # THE PATH GUARD, ENFORCED WHERE THE FILE IS ACTUALLY OPENED. The retiring door
+        # checked this and refused with a 403; nothing downstream re-checked, so moving
+        # the guard here is what keeps a retirement from quietly becoming a path-traversal
+        # hole. Raising rather than returning False: a job that cannot be built safely
+        # must not be built at all, and the factory's caller degrades on the exception.
+        if not source_path_is_inside_the_project( source_path ):
+            raise ValueError(
+                f"Source path escapes the project root, refusing to build the job: {source_path!r}"
+            )
 
         # Presentation parameters
         self.source_path             = source_path
@@ -250,11 +342,11 @@ class PresentationGeneratorJob( AgenticJobBase ):
 
         try:
             # Validate source document exists
-            import cosa.utils.util as cu
-            if not self.source_path.startswith( "/" ):
-                full_path = cu.get_project_root() + "/" + self.source_path
-            else:
-                full_path = self.source_path
+            # ONE RESOLUTION RULE, shared with the guard above. This used to read a
+            # leading slash as filesystem-absolute while the guard read it as
+            # project-relative — harmless only for as long as the door handed this job an
+            # already-absolute path. It no longer does.
+            full_path = resolve_source_path( self.source_path )
 
             if not os.path.exists( full_path ):
                 raise FileNotFoundError( f"Source document not found: {self.source_path}" )

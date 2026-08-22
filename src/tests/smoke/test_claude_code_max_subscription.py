@@ -11,7 +11,8 @@ writing any TFE-to-CC orchestrator code.
 
 What it does:
   1. Authenticate against :8000 (test server).
-  2. POST /api/claude-code/queue/submit with a trivial BOUNDED prompt
+  2. POST /api/v2/submit (command "agent router go to claude code") with a
+     trivial BOUNDED prompt
      ("write 'hello-from-smoke' to /tmp/cc-smoke-<pid>.txt inside the
      container").
   3. Poll GET /api/job-history/<cc-job-id> until terminal (done/dead)
@@ -101,7 +102,10 @@ pytestmark = pytest.mark.skip(
 
 
 TEST_SERVER_BASE = os.environ.get( "LUPIN_API_URL", "http://localhost:8000" )
-SUBMIT_ENDPOINT  = f"{TEST_SERVER_BASE}/api/claude-code/submit"
+# The two dedicated doors (/api/claude-code/submit and its /queue/submit alias) are
+# retired (410) per Rick's 2026-08-21 ruling; one front door now.
+SUBMIT_ENDPOINT  = f"{TEST_SERVER_BASE}/api/v2/submit"
+ROUTING_COMMAND  = "agent router go to claude code"
 AUTH_ENDPOINT    = f"{TEST_SERVER_BASE}/auth/login"
 JOB_ENDPOINT     = f"{TEST_SERVER_BASE}/api/job-history"
 TEST_CONTAINER   = "lupin-rest-test"
@@ -113,6 +117,23 @@ POLL_TIMEOUT_S   = 180  # 3 min — trivial CC job should finish in <30s typical
 # ────────────────────────────────────────────────────────────────────────
 # Helpers
 # ────────────────────────────────────────────────────────────────────────
+
+def _with_lineage( body: dict ) -> dict:
+    """
+    Stamp the monopolize lineage tag onto a submit body when the runner exported one.
+
+    Requires:
+        - body is a /api/v2/submit request body
+
+    Ensures:
+        - returns the same dict, carrying parent_id_hash when
+          LUPIN_TEST_MONOPOLIZE_PARENT_ID is set, and untouched when it is not
+    """
+    parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+    if parent_id:
+        body[ "parent_id_hash" ] = parent_id
+    return body
+
 
 def _http_post_json( url: str, body: dict, headers: dict, timeout: int = 15 ) -> dict:
     """POST JSON; return parsed JSON response. Raises urllib HTTPError on non-2xx."""
@@ -280,13 +301,23 @@ def test_claude_code_bounded_job_uses_max_subscription( auth_headers ):
         # 1. Submit
         submit_resp = _http_post_json(
             SUBMIT_ENDPOINT,
-            body = {
-                "prompt"      : prompt,
-                "project"     : "lupin",
-                "task_type"   : "BOUNDED",
-                "max_turns"   : 5,
-                "dry_run"     : False,
-            },
+            # ONE DOOR NOW: the command names the work and `args` carries the job's own
+            # arguments. The lineage tag is the one top-level field — it is a queue
+            # directive (bug 5ed4f187): when this smoke runs as a child pytest inside a
+            # monopolizing test-suite job, the runner exports
+            # LUPIN_TEST_MONOPOLIZE_PARENT_ID, and threading it lets the consumer's Gate B
+            # admit this child through the monopoly hold instead of starving it 900s.
+            body = _with_lineage( {
+                "command"  : ROUTING_COMMAND,
+                "args"     : {
+                    "prompt"    : prompt,
+                    "project"   : "lupin",
+                    "task_type" : "BOUNDED",
+                    "max_turns" : 5,
+                    "dry_run"   : False,
+                },
+                "question" : "claude code max-subscription billing probe",
+            } ),
             headers = auth_headers,
             timeout = 15,
         )

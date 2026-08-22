@@ -54,8 +54,6 @@ def _mk_expeditor( debug=False ):
     cfg.get.side_effect = lambda key, default=None, **kw: default
     with patch.object( ex_mod, "LlmClientFactory", MagicMock() ):
         o = RuntimeArgumentExpeditor( cfg, debug=debug )
-    o._job_id       = None   # NotificationRequest.job_id is Optional + pattern-validated
-    o._bearer_token = None
     # config_mgr.get returns None for these keys by default; set valid path strings so
     # the `get_project_root() + path` concatenations don't TypeError.
     o.prompt_template_path     = "/templates/rae.txt"
@@ -83,7 +81,10 @@ class TestInitAndPureHelpers( unittest.TestCase ):
     def test_init_reads_config_keys( self ):
         o = _mk_expeditor()
         self.assertEqual( o.SENDER_ID, "arg.expeditor@lupin.deepily.ai" )
-        self.assertIsNone( o._last_notification_status )
+        # A fresh expeditor holds NO per-call state at all (row 10c60712) — those
+        # four names moved onto the caller's ExpediteContext.
+        for name in ( "_job_id", "_bearer_token", "_last_expedite_reason", "_last_notification_status" ):
+            self.assertNotIn( name, o.__dict__ )
 
     def test_resolve_display_name_explicit( self ):
         self.assertEqual( RuntimeArgumentExpeditor._resolve_display_name( _spec( display_name="Deep Research" ) ),

@@ -356,7 +356,8 @@ organized around five feature pillars plus a broad hardening pass.
 
 ### Tooling & Hardening
 - **Bounded-CC billing** — `ClaudeCodeJob` BOUNDED path surfaces `cost_summary`; CC card
-  normalization Phase 4 (canonical `/api/claude-code/submit`).
+  normalization Phase 4; submission moved to `/api/v2/submit` on 2026-08-21 and both
+  `/api/claude-code/*` doors are tombstones.
 - **Daily LoC Delta tool** — `git_loc_delta` package + CLI, per-branch `--plot`, cross-repo aggregator.
 - **Model-server carve-out** — `SpeechToTextProvider` + `EmbeddingProvider` URL resolver, process-aware routing.
 - **Multiplexer** — `/app/multiplexer` page route + `GET /api/multiplexer/config`.

@@ -257,11 +257,15 @@ class TestCooldownElapsed( unittest.TestCase ):
 
 class TestDirectRetry( unittest.TestCase ):
     def _wd( self ):
-        return DeadQueueWatchdog( _cfg(), Mock(), debug=False )
+        # Step 12: the queue is still held (the gates read it) but neither submit path
+        # touches it — both go through the ask flow.
+        return DeadQueueWatchdog( _cfg(), Mock(), debug=False, ask_flow=Mock() )
 
     def test_success( self ):
         wd = self._wd()
-        wd.todo_queue.push_job.return_value = { "job_id": "new-1" }
+        # A BARE QUESTION takes `ask`: nothing about this retry has been decided, so it
+        # still needs routing. `submit` would skip that and is silently wrong.
+        wd.ask_flow.ask.return_value = { "job_id": "new-1" }
         with patch( "cosa.rest.job_persistence.get_job_by_id_hash",
                     return_value={ "question_text": "q?" } ), \
              patch( "builtins.print" ):
@@ -275,7 +279,7 @@ class TestDirectRetry( unittest.TestCase ):
 
     def test_non_dict_result_yields_none_job_id( self ):
         wd = self._wd()
-        wd.todo_queue.push_job.return_value = "not-a-dict"
+        wd.ask_flow.ask.return_value = "not-a-dict"
         with patch( "cosa.rest.job_persistence.get_job_by_id_hash",
                     return_value={ "question_text": "q?" } ), \
              patch( "builtins.print" ):
@@ -291,28 +295,30 @@ class TestDirectRetry( unittest.TestCase ):
 
 class TestSubmitBfe( unittest.TestCase ):
     def _wd( self, debug=False ):
-        return DeadQueueWatchdog( _cfg(), Mock(), debug=debug )
+        # Step 12: the BFE job is SUBMITTED through the flow, and the scoped id comes
+        # back in the flow's answer. It used to be minted here by user_job_tracker;
+        # that scoping moved into the flow's queued executor, one owner instead of two.
+        wd = DeadQueueWatchdog( _cfg(), Mock(), debug=debug, ask_flow=Mock() )
+        wd.ask_flow.submit.return_value = { "status": "waiting", "job_id": "bfe-scoped" }
+        return wd
 
     def test_success_no_overrides_no_tracker( self ):
         wd = self._wd()
         bfe = SimpleNamespace( id_hash="bfe-raw" )
-        ujt = Mock(); ujt.register_scoped_job.return_value = "bfe-scoped"
         with patch( "cosa.rest.agentic_job_factory.create_agentic_job", return_value=bfe ), \
-             patch( "cosa.rest.queue_extensions.user_job_tracker", ujt ), \
              patch( "cosa.rest.repair_attempt_tracker.get_tracker", return_value=None ), \
              patch( "builtins.print" ):
             self.assertEqual( wd._submit_bfe( _job(), 0 ), "bfe-scoped" )
-        wd.todo_queue.push.assert_called_once()
+        wd.ask_flow.submit.assert_called_once()
+        wd.todo_queue.push.assert_not_called()
 
     def test_success_dry_run_overrides_and_tracker( self ):
         wd = self._wd( debug=True )
         bfe = SimpleNamespace( id_hash="bfe-raw" )
-        ujt = Mock(); ujt.register_scoped_job.return_value = "bfe-scoped"
         tracker = Mock()
         job = _job( dry_run=True, original_args={
             "bfe_lead_model_override": "sonnet", "bfe_worker_model_override": "haiku" } )
         with patch( "cosa.rest.agentic_job_factory.create_agentic_job", return_value=bfe ) as mk, \
-             patch( "cosa.rest.queue_extensions.user_job_tracker", ujt ), \
              patch( "cosa.rest.repair_attempt_tracker.get_tracker", return_value=tracker ), \
              patch( "builtins.print" ):
             self.assertEqual( wd._submit_bfe( job, 1 ), "bfe-scoped" )
@@ -325,7 +331,6 @@ class TestSubmitBfe( unittest.TestCase ):
     def test_factory_returns_none( self ):
         wd = self._wd()
         with patch( "cosa.rest.agentic_job_factory.create_agentic_job", return_value=None ), \
-             patch( "cosa.rest.queue_extensions.user_job_tracker", Mock() ), \
              patch( "builtins.print" ):
             self.assertIsNone( wd._submit_bfe( _job(), 0 ) )
 
@@ -333,9 +338,17 @@ class TestSubmitBfe( unittest.TestCase ):
         wd = self._wd()
         with patch( "cosa.rest.agentic_job_factory.create_agentic_job",
                     side_effect=RuntimeError( "factory boom" ) ), \
-             patch( "cosa.rest.queue_extensions.user_job_tracker", Mock() ), \
              patch( "builtins.print" ):
             self.assertIsNone( wd._submit_bfe( _job(), 0 ) )
+
+    def test_no_flow_returns_none_and_never_pushes( self ):
+        """A wiring gap must not become a private door back onto the queue."""
+        wd = DeadQueueWatchdog( _cfg(), Mock(), ask_flow=None )
+        bfe = SimpleNamespace( id_hash="bfe-raw" )
+        with patch( "cosa.rest.agentic_job_factory.create_agentic_job", return_value=bfe ), \
+             patch( "builtins.print" ):
+            self.assertIsNone( wd._submit_bfe( _job(), 0 ) )
+        wd.todo_queue.push.assert_not_called()
 
 
 class TestNotifyIneligible( unittest.TestCase ):

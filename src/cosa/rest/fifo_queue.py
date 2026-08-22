@@ -36,9 +36,7 @@ class FifoQueue:
         Ensures:
             - Creates empty queue_list and queue_dict
             - Initializes push_counter to 0
-            - Sets accepting_jobs to True
             - Sets focus_mode to True
-            - Sets blocking_object to None
             - Configures auto-emission if websocket_mgr and queue_name provided
             
         Raises:
@@ -49,12 +47,16 @@ class FifoQueue:
         self.queue_dict      = OrderedDict()
         self.push_counter    = 0
         self.last_queue_size = 0
-        # used to track if the queue is accepting jobs or not, especially important when we're running in focus versus multi tasking mode
-        self._accepting_jobs  = True
         # used to track if the queue is in focus mode or not, in the future. We're going to have to tackle multitasking mode.
         self._focus_mode      = True
-        # used to track if this queue contains a blocking object
-        self._blocking_object = None
+        # ⚰️ REMOVED — step 7c, 2026-08-21: `_accepting_jobs` / `_blocking_object`, and with
+        # them `push_blocking_object()`, `pop_blocking_object()` and `is_accepting_jobs()`.
+        # They existed for one caller: the two-turn confirmation dialogue in
+        # `TodoFifoQueue.push_job`, which stashed a snapshot here and refused new work until
+        # the user's next utterance was read as a yes/no about it. Nothing ever armed one in
+        # the running system, so the queue never actually stopped accepting jobs — see the
+        # tombstone in `todo_fifo_queue.py` for the runtime proof. Confirmation now lives in
+        # AskFlow's near-match ask, which holds no state on the queue at all.
         
         # Auto-emission configuration for client-server state synchronization
         self.websocket_mgr   = websocket_mgr
@@ -70,43 +72,6 @@ class FifoQueue:
         # delete_by_id_hash → size). A plain Lock would deadlock on these.
         self._lock           = threading.RLock()
 
-    def pop_blocking_object( self ) -> Optional[Any]:
-        """
-        Remove and return the blocking object.
-        
-        Requires:
-            - None
-            
-        Ensures:
-            - Returns the blocking object (may be None)
-            - Sets _blocking_object to None
-            - Sets _accepting_jobs to True
-            
-        Raises:
-            - None
-        """
-        blocking_object = self._blocking_object
-        self._blocking_object = None
-        self._accepting_jobs = True
-        return blocking_object
-    
-    def push_blocking_object( self, blocking_object: Any ) -> None:
-        """
-        Set a blocking object and stop accepting new jobs.
-        
-        Requires:
-            - blocking_object can be any object
-            
-        Ensures:
-            - Sets _blocking_object to the provided object
-            - Sets _accepting_jobs to False
-            
-        Raises:
-            - None
-        """
-        self._blocking_object = blocking_object
-        self._accepting_jobs = False
-        
     def is_in_focus_mode( self ) -> bool:
         """
         Check if the queue is in focus mode.
@@ -121,24 +86,6 @@ class FifoQueue:
             - None
         """
         return self._focus_mode
-    
-    def is_accepting_jobs( self ) -> bool:
-        """
-        Check if the queue is accepting new jobs.
-        
-        Requires:
-            - None
-            
-        Ensures:
-            - Returns current job acceptance state
-            
-        Raises:
-            - None
-        """
-        return self._accepting_jobs
-    
-    # def set_accepting_jobs( self, accepting_jobs ):
-    #     self.accepting_jobs = accepting_jobs
     
     def push( self, item: Any ) -> None:
         """
@@ -446,8 +393,6 @@ class FifoQueue:
         Ensures:
             - Empties both queue_list and queue_dict
             - Resets push_counter to 0
-            - Clears blocking_object to None
-            - Resets accepting_jobs to True
 
         Raises:
             - None
@@ -456,8 +401,6 @@ class FifoQueue:
             self.queue_list.clear()
             self.queue_dict.clear()
             self.push_counter = 0
-            self._blocking_object = None
-            self._accepting_jobs = True
     
     def get_jobs_for_user( self, user_id: str ) -> list[Any]:
         """
@@ -696,8 +639,7 @@ def quick_smoke_test():
         print( "Testing core FIFO queue components..." )
         expected_methods = [
             "push", "pop", "head", "get_by_id_hash", "delete_by_id_hash",
-            "is_empty", "size", "has_changed", "clear",
-            "pop_blocking_object", "push_blocking_object", "is_in_focus_mode", "is_accepting_jobs"
+            "is_empty", "size", "has_changed", "clear", "is_in_focus_mode"
         ]
         
         methods_found = 0
@@ -740,7 +682,7 @@ def quick_smoke_test():
                 print( "✗ Queue initialization failed" )
             
             # Test state properties
-            if queue.is_accepting_jobs() and queue.is_in_focus_mode():
+            if queue.is_in_focus_mode():
                 print( "✓ Initial state properties correct" )
             else:
                 print( "⚠ Initial state properties may have issues" )
@@ -827,31 +769,6 @@ def quick_smoke_test():
 
         except Exception as e:
             print( f"⚠ Queue operations testing issues: {e}" )
-        
-        # Test 5: Blocking object functionality
-        print( "Testing blocking object functionality..." )
-        try:
-            queue = FifoQueue()
-            test_blocking_obj = "blocking_test"
-            
-            # Test push blocking object
-            queue.push_blocking_object( test_blocking_obj )
-            
-            if not queue.is_accepting_jobs():
-                print( "✓ Push blocking object working" )
-            else:
-                print( "✗ Push blocking object failed" )
-            
-            # Test pop blocking object
-            popped_blocking = queue.pop_blocking_object()
-            
-            if popped_blocking == test_blocking_obj and queue.is_accepting_jobs():
-                print( "✓ Pop blocking object working" )
-            else:
-                print( "✗ Pop blocking object failed" )
-            
-        except Exception as e:
-            print( f"⚠ Blocking object functionality issues: {e}" )
         
         # Test 6: WebSocket integration structure
         print( "Testing WebSocket integration structure..." )

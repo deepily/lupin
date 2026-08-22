@@ -97,6 +97,12 @@ jobs_done_queue = None
 jobs_dead_queue = None
 jobs_run_queue = None
 jobs_notification_queue = None
+# The v2 AskFlow, built in lifespan (step 12). In-process callers read it here the
+# same way they already read jobs_todo_queue — a watchdog, an expediter or the
+# boot-time restore that wants to put work on the queue goes through this flow now,
+# so the guarded write-back applies to their work too. None means the app has not
+# finished booting; every reader raises rather than falling back to a direct push.
+ask_flow = None
 snapshot_mgr = None
 io_tbl = None
 id_generator = None
@@ -587,7 +593,7 @@ async def lifespan( app: FastAPI ):
         None - Control returns to FastAPI after initialization
     """
     # Startup
-    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task, fcm_wake_service
+    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, ask_flow, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task, fcm_wake_service
     
     # Monotonic mark for the managed-bounce all-clear uptime stamp (R5).
     _startup_monotonic = time.monotonic()
@@ -671,7 +677,7 @@ async def lifespan( app: FastAPI ):
     id_generator = TwoWordIdGenerator()
 
     # Initialize solution snapshot manager using factory pattern
-    manager_type = config_mgr.get( "solution snapshots manager type", default="file_based" )
+    manager_type = config_mgr.get( "solution snapshots manager type", default="postgres" )
     
     if manager_type.lower() == "postgres":
         # The Postgres-native manager (row 5ff7b8f5, 2026-08-17). No storage location
@@ -732,6 +738,32 @@ async def lifespan( app: FastAPI ):
     jobs_done_queue = FifoQueue( websocket_mgr=websocket_manager, queue_name="done", emit_enabled=True )
     jobs_dead_queue = FifoQueue( websocket_mgr=websocket_manager, queue_name="dead", emit_enabled=True )
     jobs_run_queue = RunningFifoQueue( app, websocket_manager, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, config_mgr=config_mgr, emit_speech_callback=None )
+
+    # ── The v2 AskFlow, built HERE and nowhere else (step 12) ──────────────────
+    # It used to be built by the request-time FastAPI dependency, which meant it did
+    # not exist until the first HTTP request. Three things that run at boot need it
+    # before then — the catch-up restore, the standing arbiter submit, and both queue
+    # watchdogs — so construction moves into lifespan, immediately after the queues it
+    # depends on and before anything that uses it.
+    #
+    # ONE object, three names, each with a different reader, all set on the lines
+    # below so nobody has to hunt for the others:
+    #   ask_flow                     — the module global, read by the in-process callers
+    #                                  that already read jobs_todo_queue this way (BFE
+    #                                  Phase 6 resubmit, TFE Phase 6 validation).
+    #   app.state.ask_flow           — where an app-scoped reader would look for it.
+    #   v2_ask.install_ask_flow(...) — hands it to the /api/v2/ask|submit dependency, so
+    #                                  the HTTP door runs the same flow, not a second one.
+    #
+    # `v2 executor = queued` makes that flow hand work to jobs_todo_queue instead of
+    # running it on the caller's thread — which is what keeps the six prebuilt-job
+    # callers behaving as they did when they pushed directly.
+    from cosa.rest.routers.v2_ask import build_ask_flow, install_ask_flow
+    ask_flow, ask_flow_enabled = build_ask_flow( config_mgr, todo_queue=jobs_todo_queue )
+    app.state.ask_flow         = ask_flow
+    install_ask_flow( ask_flow, ask_flow_enabled )
+    print( f"[V2] AskFlow built in lifespan (enabled={ask_flow_enabled}, executor={type( ask_flow.executor ).__name__})" )
+
     
     # Initialize the FCM silent-relay wake sender (S6). Boots DISABLED with one
     # clear log line until Firebase credentials are provisioned (OSQ-7) — never
@@ -1019,7 +1051,7 @@ async def lifespan( app: FastAPI ):
     from cosa.rest.watchdogs import init_watchdogs
     from cosa.rest.repair_attempt_tracker import init_tracker
     init_tracker( config_mgr, debug=app_debug )
-    init_watchdogs( config_mgr, jobs_todo_queue, debug=app_debug )
+    init_watchdogs( config_mgr, jobs_todo_queue, debug=app_debug, ask_flow=ask_flow )
 
     # Initialize API Resource Manager singleton (Phase 1 CJ Flow async multi-lane).
     # No agents call it yet — wiring ensures the infrastructure is alive from boot
@@ -1035,8 +1067,12 @@ async def lifespan( app: FastAPI ):
         from cosa.rest.agentic_job_factory import create_agentic_job
         from cosa.rest.queue_extensions import user_job_tracker
 
+        # Third argument is the ASK FLOW now, not the queue (step 12) — the restore
+        # submits through the flow like every other caller. It still registers the
+        # scoped id itself: the user-job tracker is not rebuilt at boot, and without
+        # that registration a restored job runs but is invisible to /api/get-queue.
         restore_pending_jobs(
-            get_restorable_jobs(), create_agentic_job, jobs_todo_queue,
+            get_restorable_jobs(), create_agentic_job, ask_flow,
             register_scoped_job=user_job_tracker.register_scoped_job, debug=app_debug
         )
     except Exception as e:
@@ -1051,7 +1087,7 @@ async def lifespan( app: FastAPI ):
     # When the standalone :8001 lupin-arbiter-app service owns Loop B, flip the flag
     # False so the in-process arbiter does NOT submit — never two arbiters actuating.
     from cosa.rest.arbiter_bootstrap import submit_arbiter_if_enabled
-    submit_arbiter_if_enabled( jobs_todo_queue, jobs_run_queue, config_mgr )
+    submit_arbiter_if_enabled( jobs_todo_queue, jobs_run_queue, config_mgr, ask_flow=ask_flow )
 
     # Schema-drift SECOND channel. Scheduled here — not at detection time —
     # because the notification queue does not exist yet when the check runs, and

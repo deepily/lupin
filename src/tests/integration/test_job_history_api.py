@@ -153,15 +153,37 @@ class TestJobHistoryDeleteApi:
 
 
 class TestJobHistoryRetryApi:
-    """Integration tests for POST /api/job-history/{job_id}/retry endpoint (Phase 6)."""
+    """POST /api/job-history/{job_id}/retry is a TOMBSTONE — 410 Gone, to everybody.
 
-    def test_retry_unauthenticated_returns_401( self ):
-        """POST retry without auth token returns 401."""
+    Retired 2026-08-21 (bd842858) under Rick's one-entry-point ruling. It was a queue
+    door wearing a job-history URL: the server read `question_text` off the stored row
+    and called push_job with it. The client holds that text already, so the client
+    re-asks at /api/v2/ask and this route answers 410 naming that door.
+
+    THE CONTRACT CHANGED SHAPE, NOT JUST STATUS. The refusal takes no auth dependency
+    and reads no row, so the four answers this class used to distinguish — 401 for no
+    token, 404 for an unknown id, 403 for someone else's job, 400 for a job in the
+    wrong status — are all 410 now. That is deliberate: a stale client must learn the
+    same thing whether or not it holds a token, and a 401 teaches nobody anything.
+    Each case is kept as its own test rather than collapsed into one, so a stub that
+    quietly regains an auth or ownership check fails HERE, by name.
+    """
+
+    def _assert_tombstone( self, response ):
+        """Every refusal from this door: 410, names /api/v2/ask, carries the date."""
+        assert response.status_code == 410, \
+            f"Expected 410 Gone, got {response.status_code}: {response.text[ :300 ]}"
+        detail = response.json()[ "detail" ]
+        assert "/api/v2/ask" in detail, f"Refusal does not name the replacement: {detail}"
+        assert "2026-12-31" in detail, f"Refusal does not carry the removal date: {detail}"
+
+    def test_retry_unauthenticated_returns_410( self ):
+        """No token is not a credentials problem here — the door is gone for everyone."""
         response = requests.post( f"{BASE_URL}/api/job-history/some-job-id/retry" )
-        assert response.status_code == 401
+        self._assert_tombstone( response )
 
-    def test_retry_nonexistent_returns_404( self, create_test_user ):
-        """POST retry with nonexistent job ID returns 404."""
+    def test_retry_nonexistent_returns_410( self, create_test_user ):
+        """The tombstone never reads a row, so an unknown id is 410, not 404."""
         headers = get_auth_header( create_test_user[ "access_token" ] )
 
         response = requests.post(
@@ -170,7 +192,7 @@ class TestJobHistoryRetryApi:
             json={ "websocket_id": "test-ws-id" }
         )
 
-        assert response.status_code == 404
+        self._assert_tombstone( response )
 
 
 class TestJobHistoryFiltersApi:
@@ -431,15 +453,30 @@ class TestJobHistoryDeleteWithData:
 
 
 class TestJobHistoryRetryWithData:
-    """Integration tests for POST /api/job-history/{job_id}/retry with seeded data."""
+    """The tombstone answers 410 for a REAL row too, whatever its status or owner.
 
-    def test_retry_failed_job( self, seeded_job_history ):
-        """Retrying a failed job passes validation (auth + status check).
+    The class above proves the door refuses when there is nothing to find. This one
+    proves it refuses when there IS — a failed row the caller owns, an interrupted
+    one, a completed one, and one belonging to somebody else. All four used to give
+    four different answers; a row-reading handler restored behind this route would
+    show up here as one of those answers coming back.
 
-        Note: The actual push_job() call may return 500 in test environments
-        where the full agent pipeline isn't running. We verify the request
-        passes auth and status validation (not 401/403/400/404).
-        """
+    What was lost rather than moved, said plainly so nobody hunts for it: the
+    wrong-status 400 check (nothing performs it now — the client re-asks whatever it
+    wants) and the other-user 403, which dissolves rather than moves. You ask as
+    yourself at /api/v2/ask, so there is no other-user retry left to authorize.
+    """
+
+    def _assert_tombstone( self, response ):
+        """Every refusal from this door: 410, names /api/v2/ask, carries the date."""
+        assert response.status_code == 410, \
+            f"Expected 410 Gone, got {response.status_code}: {response.text[ :300 ]}"
+        detail = response.json()[ "detail" ]
+        assert "/api/v2/ask" in detail, f"Refusal does not name the replacement: {detail}"
+        assert "2026-12-31" in detail, f"Refusal does not carry the removal date: {detail}"
+
+    def test_retry_failed_job_returns_410( self, seeded_job_history ):
+        """A failed row the caller owns — the case retry existed for — is 410."""
         user    = seeded_job_history[ "user" ]
         records = seeded_job_history[ "records" ]
         headers = get_auth_header( user[ "access_token" ] )
@@ -452,19 +489,10 @@ class TestJobHistoryRetryWithData:
             headers=headers,
             json={ "websocket_id": "test-ws-retry-001" }
         )
-        # Accept 200 (pipeline available) or 500 (pipeline not running in test env)
-        assert response.status_code in ( 200, 500 ), \
-            f"Expected 200 or 500, got {response.status_code}: {response.text}"
-        if response.status_code == 200:
-            data = response.json()
-            assert data[ "status" ] == "retried"
-            assert data[ "original_job_id" ] == failed[ "id_hash" ]
+        self._assert_tombstone( response )
 
-    def test_retry_interrupted_job( self, seeded_job_history ):
-        """Retrying an interrupted job passes validation (auth + status check).
-
-        Note: Same as test_retry_failed_job — actual push may 500 in test env.
-        """
+    def test_retry_interrupted_job_returns_410( self, seeded_job_history ):
+        """The other status the retry button used to appear for is 410 as well."""
         user    = seeded_job_history[ "user" ]
         records = seeded_job_history[ "records" ]
         headers = get_auth_header( user[ "access_token" ] )
@@ -476,12 +504,10 @@ class TestJobHistoryRetryWithData:
             headers=headers,
             json={ "websocket_id": "test-ws-retry-002" }
         )
-        # Accept 200 (pipeline available) or 500 (pipeline not running in test env)
-        assert response.status_code in ( 200, 500 ), \
-            f"Expected 200 or 500, got {response.status_code}: {response.text}"
+        self._assert_tombstone( response )
 
-    def test_retry_completed_job_400( self, seeded_job_history ):
-        """Retrying a completed job returns 400 (only failed/interrupted allowed)."""
+    def test_retry_completed_job_returns_410_not_400( self, seeded_job_history ):
+        """The wrong-status 400 is GONE — no handler reads the row to object."""
         user    = seeded_job_history[ "user" ]
         records = seeded_job_history[ "records" ]
         headers = get_auth_header( user[ "access_token" ] )
@@ -493,10 +519,10 @@ class TestJobHistoryRetryWithData:
             headers=headers,
             json={ "websocket_id": "test-ws-retry-003" }
         )
-        assert response.status_code == 400
+        self._assert_tombstone( response )
 
-    def test_retry_other_users_job_403( self, create_test_user, create_test_admin ):
-        """Regular user cannot retry another user's job (403)."""
+    def test_retry_other_users_job_returns_410_not_403( self, create_test_user, create_test_admin ):
+        """The ownership 403 dissolved with the feature — you ask as yourself now."""
         from tests.helpers.job_history_seed import seed_job_history_records
 
         # Seed a failed job owned by admin
@@ -513,7 +539,7 @@ class TestJobHistoryRetryWithData:
             headers=headers,
             json={ "websocket_id": "test-ws-retry-004" }
         )
-        assert response.status_code == 403
+        self._assert_tombstone( response )
 
 
 class TestJobHistoryUserIsolation:

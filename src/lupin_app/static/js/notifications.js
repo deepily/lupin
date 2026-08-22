@@ -37,10 +37,10 @@ class NotificationsUI {
         // WebSocket connections
         this.queueChannel = null;
         this.audioChannel = null;
-        // Claude Code submissions route through /api/claude-code/submit (canonical) and
-        // surface in the CJ Flow accordion via agent-agnostic job_state_transition events.
-        // The /api/claude-code/queue/submit alias is preserved for one release cycle per
-        // src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md Q1.
+        // Claude Code submissions route through /api/v2/submit, naming the command
+        // 'agent router go to claude code', and surface in the CJ Flow accordion via
+        // agent-agnostic job_state_transition events. The two /api/claude-code/* doors are
+        // retired (410) per Rick's ruling 2026-08-21.
 
         // Session management
         this.queueSessionId = null;
@@ -2023,13 +2023,6 @@ class NotificationsUI {
             });
         }
 
-        // Podcast submit button
-        const submitPodcastBtn = document.getElementById( 'submit-podcast-job' );
-        if ( submitPodcastBtn ) {
-            submitPodcastBtn.addEventListener( 'click', () => {
-                this.submitPodcastJob();
-            });
-        }
 
         // Research STT button (voice input)
         const researchSttBtn = document.getElementById( 'research-stt-button' );
@@ -2039,13 +2032,6 @@ class NotificationsUI {
             });
         }
 
-        // Podcast STT button (voice input)
-        const podcastSttBtn = document.getElementById( 'podcast-stt-button' );
-        if ( podcastSttBtn ) {
-            podcastSttBtn.addEventListener( 'click', () => {
-                this.handleSTTButtonClick( 'podcast-source', podcastSttBtn );
-            });
-        }
 
         // Enter key in research topic input
         const researchInput = document.getElementById( 'research-topic' );
@@ -2058,59 +2044,8 @@ class NotificationsUI {
             });
         }
 
-        // Enter key in podcast source input
-        const podcastInput = document.getElementById( 'podcast-source' );
-        if ( podcastInput ) {
-            podcastInput.addEventListener( 'keydown', ( e ) => {
-                if ( e.key === 'Enter' ) {
-                    e.preventDefault();
-                    this.submitPodcastJob();
-                }
-            });
-        }
 
-        // SWE Team submit button
-        const submitSweBtn = document.getElementById( 'submit-swe-job' );
-        if ( submitSweBtn ) {
-            submitSweBtn.addEventListener( 'click', () => {
-                this.submitSweTeamJob();
-            });
-        }
 
-        // SWE Team STT button (voice input)
-        const sweSttBtn = document.getElementById( 'swe-stt-button' );
-        if ( sweSttBtn ) {
-            sweSttBtn.addEventListener( 'click', () => {
-                this.handleSTTButtonClick( 'swe-task', sweSttBtn );
-            });
-        }
-
-        // Ctrl+Enter in SWE Team textarea (Enter alone inserts newline)
-        const sweTaskInput = document.getElementById( 'swe-task' );
-        if ( sweTaskInput ) {
-            sweTaskInput.addEventListener( 'keydown', ( e ) => {
-                if ( e.key === 'Enter' && e.ctrlKey ) {
-                    e.preventDefault();
-                    this.submitSweTeamJob();
-                }
-            });
-        }
-
-        // Presentation Generator submit button
-        const submitPresentationBtn = document.getElementById( 'submit-presentation-job' );
-        if ( submitPresentationBtn ) {
-            submitPresentationBtn.addEventListener( 'click', () => {
-                this.submitPresentationJob();
-            });
-        }
-
-        // Presentation Generator STT button (voice input)
-        const presentationSttBtn = document.getElementById( 'presentation-stt-button' );
-        if ( presentationSttBtn ) {
-            presentationSttBtn.addEventListener( 'click', () => {
-                this.handleSTTButtonClick( 'presentation-source', presentationSttBtn );
-            });
-        }
 
         // Commons Broadcast STT button (voice input) — Phase 2 + Phase 3 voice-first.
         // Transcription targets the multi-line #broadcast-textarea; the broadcast-panel.js
@@ -2124,16 +2059,6 @@ class NotificationsUI {
             });
         }
 
-        // Enter key in Presentation source input
-        const presentationSourceInput = document.getElementById( 'presentation-source' );
-        if ( presentationSourceInput ) {
-            presentationSourceInput.addEventListener( 'keydown', ( e ) => {
-                if ( e.key === 'Enter' ) {
-                    e.preventDefault();
-                    this.submitPresentationJob();
-                }
-            });
-        }
 
         // Test Suite submit button
         const submitTestSuiteBtn = document.getElementById( 'submit-test-suite-job' );
@@ -2965,8 +2890,16 @@ class NotificationsUI {
             // Ensure token is valid before API call (auto-refresh if expired)
             await this.ensureValidToken();
 
-            // Submit to /api/push endpoint (POST request with JSON body)
-            const url = `/api/push`;
+            // Submit to /api/v2/ask (POST request with JSON body).
+            // /api/push was retired 2026-08-21 and answers 410 naming this door. The
+            // body is the same shape — question + websocket_id — but the RESULT is not:
+            // /api/push queued the job and returned {status: "queued", job_id, ...} for
+            // the WebSocket to follow up on, while /api/v2/ask answers the question
+            // synchronously and returns the answer itself. Nothing below depends on the
+            // queued shape (the response is stringified into the response pane as-is),
+            // which is why this cutover is a one-line change here and would not be
+            // everywhere.
+            const url = `/api/v2/ask`;
             const response = await fetch( url, {
                 method: 'POST',
                 headers: {
@@ -3070,11 +3003,11 @@ class NotificationsUI {
     // ========================================
 
     /**
-     * Submit a Deep Research job (with optional podcast generation).
+     * Submit a Deep Research job (optionally chained to a podcast or a presentation).
      *
-     * If "Also generate podcast" checkbox is checked, submits to
-     * /api/deep-research-to-podcast/submit endpoint.
-     * Otherwise, submits to /api/deep-research/submit endpoint.
+     * Always posts to /api/v2/submit. The two checkboxes pick which routing command goes
+     * in the body — plain research, research→podcast, or research→presentation. The three
+     * endpoints this used to choose between are retired and answer 410.
      */
     async submitResearchJob() {
         const topicInput = document.getElementById( 'research-topic' );
@@ -3108,25 +3041,33 @@ class NotificationsUI {
             // Ensure token is valid before API call
             await this.ensureValidToken();
 
-            // Choose endpoint based on checkboxes (mutually exclusive)
-            let endpoint = '/api/deep-research/submit';
+            // ONE DOOR NOW, AND THE CHECKBOXES CHOOSE A COMMAND RATHER THAN A URL.
+            // The three research endpoints this used to pick between are retired: they
+            // answer 410 naming /api/v2/submit, which takes the command as a string and
+            // the agent's own arguments in `args`. What used to be three routes is one
+            // route and three command strings.
+            let command = 'agent router go to deep research';
             if ( withPresentation ) {
-                endpoint = '/api/deep-research-to-presentation/submit';
+                command = 'agent router go to research to presentation';
             } else if ( withPodcast ) {
-                endpoint = '/api/deep-research-to-podcast/submit';
+                command = 'agent router go to research to podcast';
             }
 
+            // scheduled_at and monopolize stay OUTSIDE args on purpose: they tell the
+            // queue when and how to run the work, and `args` is checked against the
+            // command's own argument contract, which neither of them is in.
             const schedulingParams = this._getSchedulingParams( 'research' );
-            let body = { query: topic, budget: budget, dry_run: dryRun, ...schedulingParams };
+            let args = { query: topic, budget: budget, dry_run: dryRun };
             if ( withPodcast ) {
-                body.target_languages = [ 'en', 'es-MX' ];
+                args.target_languages = [ 'en', 'es-MX' ];
             } else if ( withPresentation ) {
-                body.target_duration_minutes = 15;
+                args.target_duration_minutes = 15;
             }
+            const body = { command: command, args: args, question: topic, ...schedulingParams };
 
-            this.log( `Submitting research job to ${endpoint}: ${topic.substring( 0, 50 )}...` );
+            this.log( `Submitting research job as ${command}: ${topic.substring( 0, 50 )}...` );
 
-            const response = await fetch( endpoint, {
+            const response = await fetch( '/api/v2/submit', {
                 method: 'POST',
                 headers: {
                     'Authorization': this.getAuthHeader(),
@@ -3145,8 +3086,13 @@ class NotificationsUI {
             this.log( "Research job submitted:", result );
 
             // Success feedback
-            const jobType = withPodcast ? 'Research→Podcast' : 'Research';
-            statusDiv.textContent = `✓ ${jobType} job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
+            // NO POSITION ANY MORE, and that is deliberate rather than an omission. The v2
+            // response carries no queue_position and is not being widened for one: a place
+            // in the queue changes as the queue moves, so a number frozen at the instant of
+            // submission was stale the moment it was printed. The job card learns its real
+            // place from the queue websocket events.
+            const jobType = withPresentation ? 'Research→Presentation' : ( withPodcast ? 'Research→Podcast' : 'Research' );
+            statusDiv.textContent = `✓ ${jobType} job submitted! Job ID: ${result.job_id}`;
             statusDiv.style.color = '#28a745';
 
             // Clear input
@@ -3163,265 +3109,10 @@ class NotificationsUI {
     }
 
     /**
-     * Submit a Podcast generation job.
-     *
-     * Uses smart input detection:
-     * - If input looks like a file path → direct job creation
-     * - If input looks like a description → fuzzy match + notification for confirmation
-     */
-    async submitPodcastJob() {
-        const sourceInput = document.getElementById( 'podcast-source' );
-        const dryRunCheckbox = document.getElementById( 'podcast-dry-run' );
-        const submitButton = document.getElementById( 'submit-podcast-job' );
-        const loadingSpinner = document.getElementById( 'podcast-loading' );
-        const statusDiv = document.getElementById( 'podcast-submit-status' );
-
-        const source = sourceInput.value.trim();
-        const dryRun = dryRunCheckbox.checked;
-
-        if ( !source ) {
-            statusDiv.textContent = '⚠️ Please enter a research source (path or description).';
-            statusDiv.style.color = '#dc3545';
-            return;
-        }
-
-        try {
-            // Update UI
-            submitButton.disabled = true;
-            loadingSpinner.style.display = 'inline-block';
-            statusDiv.textContent = 'Processing...';
-            statusDiv.style.color = '#666';
-
-            // Ensure token is valid before API call
-            await this.ensureValidToken();
-
-            this.log( `Submitting podcast job: ${source.substring( 0, 50 )}...` );
-
-            const response = await fetch( '/api/podcast-generator/submit', {
-                method: 'POST',
-                headers: {
-                    'Authorization': this.getAuthHeader(),
-                    'X-Session-ID': this.queueSessionId,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    research_source: source,
-                    target_languages: [ 'en', 'es-MX' ],
-                    dry_run: dryRun,
-                    ...this._getSchedulingParams( 'podcast' )
-                })
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
-                throw new Error( errorData.detail || `HTTP ${response.status}` );
-            }
-
-            const result = await response.json();
-            this.log( "Podcast job response:", result );
-
-            // Handle different response types
-            if ( result.status === 'queued' ) {
-                // Direct path mode - job created immediately
-                statusDiv.textContent = `✓ Podcast job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
-                statusDiv.style.color = '#28a745';
-                sourceInput.value = '';
-            } else if ( result.status === 'matching' ) {
-                // Description mode - fuzzy matching triggered
-                statusDiv.textContent = `🔍 ${result.message}`;
-                statusDiv.style.color = '#6f42c1';
-                // Don't clear input - user may want to modify and retry
-            } else if ( result.status === 'no_matches' ) {
-                statusDiv.textContent = `⚠️ ${result.message}`;
-                statusDiv.style.color = '#ffc107';
-            }
-
-        } catch ( error ) {
-            this.error( "Podcast job submission failed:", error );
-            statusDiv.textContent = `✗ Error: ${error.message}`;
-            statusDiv.style.color = '#dc3545';
-        } finally {
-            submitButton.disabled = false;
-            loadingSpinner.style.display = 'none';
-        }
-    }
-
-    /**
-     * Submit a SWE Team engineering task.
-     *
-     * Sends task to /api/swe-team/submit for asynchronous execution.
-     * Budget and timeout are optional — only included if user sets them.
-     */
-    async submitSweTeamJob() {
-        const taskInput      = document.getElementById( 'swe-task' );
-        const budgetInput    = document.getElementById( 'swe-budget' );
-        const timeoutInput   = document.getElementById( 'swe-timeout' );
-        const dryRunCheckbox = document.getElementById( 'swe-dry-run' );
-        const submitButton   = document.getElementById( 'submit-swe-job' );
-        const loadingSpinner = document.getElementById( 'swe-loading' );
-        const statusDiv      = document.getElementById( 'swe-submit-status' );
-
-        const task   = taskInput.value.trim();
-        const dryRun = dryRunCheckbox.checked;
-
-        if ( !task ) {
-            statusDiv.textContent = '⚠️ Please describe the engineering task.';
-            statusDiv.style.color = '#dc3545';
-            return;
-        }
-
-        try {
-            // Update UI
-            submitButton.disabled = true;
-            loadingSpinner.style.display = 'inline-block';
-            statusDiv.textContent = 'Submitting SWE Team task...';
-            statusDiv.style.color = '#666';
-
-            // Ensure token is valid before API call
-            await this.ensureValidToken();
-
-            this.log( `Submitting SWE Team job: ${task.substring( 0, 50 )}...` );
-
-            // Build request body — budget and timeout are nullable
-            const body = {
-                task         : task,
-                dry_run      : dryRun,
-                websocket_id : this.queueSessionId
-            };
-
-            const budgetVal = parseFloat( budgetInput.value );
-            if ( !isNaN( budgetVal ) && budgetVal > 0 ) {
-                body.budget = budgetVal;
-            }
-
-            const timeoutVal = parseInt( timeoutInput.value );
-            if ( !isNaN( timeoutVal ) && timeoutVal > 0 ) {
-                body.timeout = timeoutVal;
-            }
-
-            const trustModeSelect = document.getElementById( 'swe-trust-mode' );
-            const trustMode = trustModeSelect ? trustModeSelect.value : '';
-            if ( trustMode ) {
-                body.trust_mode = trustMode;
-            }
-
-            Object.assign( body, this._getSchedulingParams( 'swe' ) );
-
-            const response = await fetch( '/api/swe-team/submit', {
-                method  : 'POST',
-                headers : {
-                    'Authorization' : this.getAuthHeader(),
-                    'X-Session-ID'  : this.queueSessionId,
-                    'Content-Type'  : 'application/json'
-                },
-                body: JSON.stringify( body )
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
-                throw new Error( errorData.detail || `HTTP ${response.status}` );
-            }
-
-            const result = await response.json();
-            this.log( "SWE Team job response:", result );
-
-            // Success feedback
-            statusDiv.textContent = `✓ SWE Team job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
-            statusDiv.style.color = '#28a745';
-            taskInput.value = '';
-
-        } catch ( error ) {
-            this.error( "SWE Team job submission failed:", error );
-            statusDiv.textContent = `✗ Error: ${error.message}`;
-            statusDiv.style.color = '#dc3545';
-        } finally {
-            submitButton.disabled = false;
-            loadingSpinner.style.display = 'none';
-        }
-    }
-
-    /**
-     * Submit a Presentation Generator job.
-     *
-     * Sends source document to /api/presentation-generator/submit for
-     * asynchronous slide generation via the CJ Flow queue.
-     */
-    async submitPresentationJob() {
-        const sourceInput      = document.getElementById( 'presentation-source' );
-        const audienceSelect   = document.getElementById( 'presentation-audience' );
-        const durationInput    = document.getElementById( 'presentation-duration' );
-        const dryRunCheckbox   = document.getElementById( 'presentation-dry-run' );
-        const submitButton     = document.getElementById( 'submit-presentation-job' );
-        const loadingSpinner   = document.getElementById( 'presentation-loading' );
-        const statusDiv        = document.getElementById( 'presentation-submit-status' );
-
-        const source   = sourceInput.value.trim();
-        const audience = audienceSelect.value;
-        const duration = parseInt( durationInput.value ) || 15;
-        const dryRun   = dryRunCheckbox.checked;
-
-        if ( !source ) {
-            statusDiv.textContent = '⚠️ Please enter a source document path.';
-            statusDiv.style.color = '#dc3545';
-            return;
-        }
-
-        try {
-            // Update UI
-            submitButton.disabled = true;
-            loadingSpinner.style.display = 'inline-block';
-            statusDiv.textContent = 'Submitting presentation job...';
-            statusDiv.style.color = '#666';
-
-            // Ensure token is valid before API call
-            await this.ensureValidToken();
-
-            this.log( `Submitting presentation job: ${source.substring( 0, 50 )}...` );
-
-            const response = await fetch( '/api/presentation-generator/submit', {
-                method  : 'POST',
-                headers : {
-                    'Authorization' : this.getAuthHeader(),
-                    'X-Session-ID'  : this.queueSessionId,
-                    'Content-Type'  : 'application/json'
-                },
-                body: JSON.stringify({
-                    source_path              : source,
-                    audience                 : audience,
-                    target_duration_minutes  : duration,
-                    dry_run                  : dryRun,
-                    ...this._getSchedulingParams( 'presentation' )
-                })
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
-                throw new Error( errorData.detail || `HTTP ${response.status}` );
-            }
-
-            const result = await response.json();
-            this.log( "Presentation job response:", result );
-
-            // Success feedback
-            statusDiv.textContent = `✓ Presentation job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
-            statusDiv.style.color = '#28a745';
-            sourceInput.value = '';
-
-        } catch ( error ) {
-            this.error( "Presentation job submission failed:", error );
-            statusDiv.textContent = `✗ Error: ${error.message}`;
-            statusDiv.style.color = '#dc3545';
-        } finally {
-            submitButton.disabled = false;
-            loadingSpinner.style.display = 'none';
-        }
-    }
-
-    /**
      * Submit a render-only presentation job from an existing YAML.
      *
      * Called from the "Re-render" button on completed presentation job cards.
-     * Submits to the same endpoint with render_only=true, skipping Phases 1-5.
+     * Submits the same command with render_only=true, skipping Phases 1-5.
      *
      * @param {string} yamlPath - Relative path to the YAML intermediate file
      */
@@ -3435,7 +3126,19 @@ class NotificationsUI {
             await this.ensureValidToken();
             this.log( `Submitting render-only job for: ${yamlPath}` );
 
-            const response = await fetch( '/api/presentation-generator/submit', {
+            // ONE DOOR NOW. /api/presentation-generator/submit is retired and answers 410
+            // naming /api/v2/submit, which takes the routing command as a string and the
+            // agent's own arguments in `args`. The path arrives as `source` — the name the
+            // job factory already reads — and stays repo-relative exactly as before; the job
+            // resolves it against the project root, which a browser cannot do for itself.
+            //
+            // THIS BUTTON SURVIVES WHILE THE ACCORDION CARD DID NOT, and the line between
+            // them is worth stating: the accordion is an ENTRANCE, and Rick retired the
+            // entrances so that questions arrive through Q&A. Re-render is an action ON A
+            // RESULT — it re-renders a deck that already exists, from a job card, and there
+            // is no other way to ask for that. Deleting it would remove a capability rather
+            // than a duplicate door (Cheech, ruled 2026-08-21).
+            const response = await fetch( '/api/v2/submit', {
                 method  : 'POST',
                 headers : {
                     'Authorization' : this.getAuthHeader(),
@@ -3443,8 +3146,12 @@ class NotificationsUI {
                     'Content-Type'  : 'application/json'
                 },
                 body: JSON.stringify({
-                    source_path : yamlPath.startsWith( 'io/' ) || yamlPath.startsWith( '/io/' ) ? yamlPath : 'io/' + yamlPath,
-                    render_only : true
+                    command  : 'agent router go to presentation generator',
+                    args     : {
+                        source      : yamlPath.startsWith( 'io/' ) || yamlPath.startsWith( '/io/' ) ? yamlPath : 'io/' + yamlPath,
+                        render_only : true
+                    },
+                    question : yamlPath
                 })
             });
 
@@ -4092,19 +3799,33 @@ class NotificationsUI {
 
             this.log( `Claude Code queue submit: project=${project}, type=${taskType}, dry_run=${dryRun}` );
 
-            const response = await fetch( '/api/claude-code/submit', {
+            // ONE DOOR, AND THE COMMAND IS NAMED IN THE BODY. /api/claude-code/submit and its
+            // /queue/submit alias are retired: both answer 410 naming /api/v2/submit, which
+            // takes the routing command as a string and the job's own arguments in `args`.
+            //
+            // WHAT MOVED WHERE. prompt / project / task_type / max_turns / dry_run are
+            // arguments to the Claude Code job, so they go in `args`. websocket_id,
+            // scheduled_at and monopolize are directives to the QUEUE — when to run it,
+            // whether it runs alone, where to speak — so they stay top-level. `args` is
+            // checked against the command's own argument contract, and no contract names a
+            // scheduling instruction.
+            const response = await fetch( '/api/v2/submit', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     ...this.getAuthHeaders()
                 },
                 body: JSON.stringify( {
-                    prompt: prompt,
-                    project: project,
-                    task_type: taskType,
-                    max_turns: taskType === 'INTERACTIVE' ? 200 : 50,
+                    command: 'agent router go to claude code',
+                    args: {
+                        prompt: prompt,
+                        project: project,
+                        task_type: taskType,
+                        max_turns: taskType === 'INTERACTIVE' ? 200 : 50,
+                        dry_run: dryRun
+                    },
+                    question: prompt,
                     websocket_id: this.sessionId,
-                    dry_run: dryRun,
                     ...this._getSchedulingParams( 'cc' )
                 } )
             } );
@@ -4115,10 +3836,15 @@ class NotificationsUI {
             }
 
             const data = await response.json();
-            this.log( `Claude Code job queued: ${data.job_id} at position ${data.queue_position}` );
+            this.log( `Claude Code job queued: ${data.job_id}` );
 
             // Success feedback
-            statusDiv.textContent = `✓ Claude Code job submitted! Job ID: ${data.job_id}, Position: ${data.queue_position}`;
+            // NO POSITION ANY MORE — the same call the research card made when it cut over.
+            // The v2 response carries no queue_position and is not being widened for one: a
+            // place in the queue changes as the queue moves, so a number frozen at the
+            // instant of submission was stale the moment it was printed. The job card learns
+            // its real place from the queue websocket events.
+            statusDiv.textContent = `✓ Claude Code job submitted! Job ID: ${data.job_id}`;
             statusDiv.style.color = '#28a745';
 
             // Refresh queues to show new job in the CJ Flow accordion
@@ -4137,10 +3863,11 @@ class NotificationsUI {
     // submitClaudeCode / submitClaudeCodeToQueue normalized 2026-05-11 to mirror the
     // sibling research-handler pattern (statusDiv + spinner + button disable; no
     // response panel; submitted jobs surface in the multiplexer Jobs pane via
-    // agent-agnostic job_state_transition events). URL switched to the canonical
-    // /api/claude-code/submit; the /api/claude-code/queue/submit alias is preserved
-    // server-side for one release cycle. See:
-    //   src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md
+    // agent-agnostic job_state_transition events). The URL moved again on 2026-08-21:
+    // both /api/claude-code/* doors are tombstones answering 410, and the card posts to
+    // /api/v2/submit naming its command. See:
+    //   src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md (the card pattern)
+    //   src/rnd/v0.2.0/2026.08.20-brain-integration-cascade-review-plan.md (the cutover)
     // Inject / interrupt / end-session controls remain retired (since 2026-05-05)
     // and will return when ClaudeCodeJob gains bidirectional control on cj-flow.
 
@@ -6836,16 +6563,22 @@ class NotificationsUI {
          *
          * Ensures:
          *     - Prompts user for confirmation before retrying
-         *     - Sends POST /api/job-history/{jobId}/retry with websocket_id
+         *     - Re-asks the stored question via POST /api/v2/ask with websocket_id
+         *       (the /api/job-history/{jobId}/retry door was retired 2026-08-21)
          *     - Refreshes history and live queues on success
          */
         if ( !confirm( `Retry this job?\n\n"${questionText}"` ) ) return;
 
         try {
-            const response = await this.authedFetch( `/api/job-history/${jobId}/retry`, {
+            // /api/job-history/{id}/retry was retired 2026-08-21 (410, names this door).
+            // It was a queue door wearing a job-history URL: the server read the stored
+            // question off the row and re-asked it. Now the CLIENT re-asks, which it can
+            // do because it already has the text — `questionText` is the same value shown
+            // in the confirm dialog above.
+            const response = await this.authedFetch( `/api/v2/ask`, {
                 method  : 'POST',
                 headers : { 'Content-Type': 'application/json' },
-                body    : JSON.stringify( { websocket_id: this.queueSessionId } )
+                body    : JSON.stringify( { question: questionText, websocket_id: this.queueSessionId } )
             } );
 
             if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
@@ -10639,21 +10372,22 @@ class NotificationsUI {
          * Handle done queue update with enhanced structured job metadata.
          * 
          * Requires:
-         *     - data contains done_jobs (HTML list) and done_jobs_metadata (structured data)
+         *     - data contains done_jobs_metadata (the structured rows the API serves)
          *     - JobCompletionCache and audio cache are initialized
          *     
          * Ensures:
          *     - Job metadata stored for replay functionality
          *     - Audio cache availability checked and indicated
-         *     - Enhanced HTML generated with proper replay button states
-         *     - Backward compatibility maintained with original HTML format
+         *     - Enhanced HTML generated for any row that still carries an html field
          */
         try {
-            this.log( `Processing ${data.done_jobs?.length || 0} done jobs with metadata enhancement` );
-            
-            // Use structured metadata if available, fallback to HTML parsing
+            // GET /api/get-queue/done serves ONLY done_jobs_metadata (queues.py:480).
+            // This loop used to be driven by data.done_jobs, an HTML list the API no
+            // longer returns — so it never ran, doneJobsMetadata stayed empty, and
+            // replayJobAudio could not find any job to replay.
             const jobsMetadata = data.done_jobs_metadata || [];
-            const jobsHtml = data.done_jobs || [];
+            
+            this.log( `Processing ${jobsMetadata.length} done jobs with metadata enhancement` );
             
             // Store job metadata for replay functionality
             this.doneJobsMetadata = new Map();
@@ -10661,9 +10395,8 @@ class NotificationsUI {
             // Process each job and check audio cache availability
             const enhancedJobs = [];
             
-            for ( let i = 0; i < jobsHtml.length; i++ ) {
-                const jobHtml = jobsHtml[i];
-                const jobMetadata = jobsMetadata[i] || this.parseJobMetadataFromHtml( jobHtml, i );
+            for ( let i = 0; i < jobsMetadata.length; i++ ) {
+                const jobMetadata = jobsMetadata[i];
                 
                 // Check if audio is available in cache
                 jobMetadata.has_audio_cache = await this.checkJobAudioCacheAvailability( jobMetadata );
@@ -10671,9 +10404,13 @@ class NotificationsUI {
                 // Store metadata for replay access
                 this.doneJobsMetadata.set( jobMetadata.job_id, jobMetadata );
                 
-                // Generate enhanced HTML with proper replay button state
-                const enhancedJobHtml = this.generateEnhancedJobHtml( jobMetadata );
-                enhancedJobs.push( enhancedJobHtml );
+                // Generate enhanced HTML with proper replay button state. The metadata
+                // rows carry no html field today, so this is skipped and the cards are
+                // rendered from queueCategoryState.done.jobs instead; it stays here so
+                // the enhancement survives if the field ever comes back.
+                if ( jobMetadata.html ) {
+                    enhancedJobs.push( this.generateEnhancedJobHtml( jobMetadata ) );
+                }
                 
                 this.log( `Job ${jobMetadata.job_id}: cache=${jobMetadata.has_audio_cache ? '✓' : '✗'}` );
             }
@@ -10681,38 +10418,14 @@ class NotificationsUI {
             // Store enhanced HTML for rendering
             this.enhancedDoneListHtml = enhancedJobs.join( "" );
             
-            this.log( `✅ Processed ${enhancedJobs.length} done jobs with replay metadata` );
+            this.log( `✅ Processed ${jobsMetadata.length} done jobs with replay metadata` );
             
         } catch ( error ) {
             this.error( "Error processing done queue metadata:", error );
             
-            // Fallback to basic HTML rendering
-            this.enhancedDoneListHtml = data.done_jobs?.join( "" ) || "";
+            this.enhancedDoneListHtml = "";
             this.doneJobsMetadata = new Map();
         }
-    }
-    
-    parseJobMetadataFromHtml( jobHtml, index ) {
-        /**
-         * Parse job metadata from HTML for backward compatibility.
-         * Fallback when structured metadata not available from API.
-         */
-        const jobIdMatch = jobHtml.match( /id=['"]([^'"]+)['"]/ );
-        const jobId = jobIdMatch ? jobIdMatch[1] : `done-job-${index}`;
-        
-        // Extract text content (basic parsing)
-        const textMatch = jobHtml.match( />([^<]+)</);
-        const text = textMatch ? textMatch[1].trim() : "Job completed";
-        
-        return {
-            job_id: jobId,
-            html: jobHtml,
-            question_text: "Q&A submission",
-            response_text: text,
-            timestamp: new Date().toISOString(),
-            user_id: this.currentUserEmail,
-            has_audio_cache: false
-        };
     }
     
     async checkJobAudioCacheAvailability( jobMetadata ) {

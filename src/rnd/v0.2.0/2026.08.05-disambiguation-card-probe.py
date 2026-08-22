@@ -545,6 +545,14 @@ def main( argv ):
                            json={ "question": question, "websocket_id": session_id },
                            headers=headers, timeout=180 )
         log( f"push: {r.status_code} job_id={r.json().get('job_id')}" )
+        if r.status_code == 410:
+            # The v2 cutover retired /api/push (410 → /api/v2/ask). This probe measures the
+            # v1 interactive expeditor's asks over the websocket, which the v2 door does not
+            # emit — so there is nothing to capture here; port it before reuse. Ending now
+            # rather than waiting out timeout_s on asks that will never arrive (row c84e9313).
+            log( "push: /api/push is RETIRED on this server (410 → /api/v2/ask); this probe measures "
+                 "v1 expeditor asks over the WS and must be ported to the v2 door before reuse — ending." )
+            raise SystemExit( 2 )
 
         elapsed = 0
         settle  = 0

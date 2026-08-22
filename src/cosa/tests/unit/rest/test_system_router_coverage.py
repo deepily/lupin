@@ -15,7 +15,8 @@ auth-test / websocket-sessions). This file closes the remaining gap:
     - `cleanup_stale_sessions`,
     - `get_websocket_state` (incl. orphaned-user + unmapped-session diagnostics),
     - `get_client_config` (TEST + DEVELOPMENT env labels),
-    - `get_similarity_confirmation` / `set_similarity_confirmation`.
+    - `get_similarity_confirmation` / `set_similarity_confirmation`,
+    - `code_identity` (the last uncovered line in the module).
 
 Boundary-mock discipline: `lupin_app.main` is patched DUAL-KEY (G1);
 ConfigurationManager / PredictionEngine / lancedb / db engine / get_config_manager
@@ -43,6 +44,7 @@ from cosa.rest.routers.system import (
     get_client_config,
     get_similarity_confirmation,
     set_similarity_confirmation,
+    code_identity,
     SimilarityConfirmationRequest,
 )
 
@@ -367,6 +369,47 @@ class TestSimilarityConfirmation( unittest.IsolatedAsyncioTestCase ):
         result = await set_similarity_confirmation( body=body, current_user={ "u": 1 }, todo_queue=tq )
         tq.config_mgr.set_config.assert_called_once_with( "similarity confirmation enabled", "true" )
         self.assertEqual( result, { "enabled": True, "previous": False } )
+
+
+class TestCodeIdentity( unittest.IsolatedAsyncioTestCase ):
+    """
+    Ensures:
+        - `code_identity` hands back the record captured at MODULE IMPORT and does
+          not re-read the repository per request.
+
+    This was the module's last uncovered line. It is worth a real test rather than
+    a pragma: the endpoint exists to answer "which code is this process running?",
+    and a per-request re-read would reproduce exactly the lie it was built to
+    remove. A test that only checked the response shape would pass either way, so
+    this one pins the delegation instead.
+    """
+
+    async def test_it_returns_the_captured_record( self ):
+        """
+        Ensures:
+            - the endpoint returns get_code_identity()'s value unchanged.
+
+        RED ON REVERT: have the endpoint build its own dict, or re-read git, and
+        the returned object stops being the one the module captured.
+        """
+        record = { "git_sha": "deadbeef", "git_branch": "wt-brain-lane-a",
+                   "git_sha_source": "test", "imported_at": _TS, "pid": 1234 }
+        with patch( "cosa.rest.routers.system.get_code_identity", return_value=record ) as spy:
+            result = await code_identity()
+        spy.assert_called_once_with()
+        self.assertIs( result, record )
+
+    async def test_it_does_not_re_read_per_request( self ):
+        """
+        Ensures:
+            - two calls return the SAME object, so the endpoint cannot be quietly
+              turned into a per-request repository read without this failing.
+        """
+        record = { "git_sha": "deadbeef", "imported_at": _TS, "pid": 1234 }
+        with patch( "cosa.rest.routers.system.get_code_identity", return_value=record ):
+            first  = await code_identity()
+            second = await code_identity()
+        self.assertIs( first, second )
 
 
 def isolated_unit_test():

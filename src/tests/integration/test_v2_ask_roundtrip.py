@@ -7,12 +7,26 @@ that second claim — two POSTs to /api/v2/ask over HTTP against the running
 server, proving a snapshotable answer is written back and the next identical
 request replays it from cache.
 
+🔴 WHAT THIS FILE CAN AND CANNOT SHOW ON :8000 — row `ce29cd20`. The cold→warm
+round trip needs the first job to RUN, and on :8000 it cannot: the test-suite job
+is itself the queue's monopolizer, so anything the suite submits waits in `todo`
+until the suite ends. Both halves of the old test failed at both gates (aea44d11
+and 888754f1) with the same message — the job "was still in the todo queue after
+N s" — and no amount of waiting would have changed it. Confirmed on the live box
+by maya against pool-status.
+
+So the live test keeps what the box can show: the ask is a cold MISS handed off to
+the queue, and the queue actually has it under the id the API returned. The drain
+and the replay are marked xfail(strict=True) here by name and pinned a tier down —
+`src/tests/unit/test_write_back_lands_before_the_job_is_done.py` drives the
+ordering the round trip rested on. This is a real loss of coverage, not a
+relabelling: nothing on :8000 now proves the shipped app replays a row it wrote.
+Restoring it needs a consumer that is not the test itself.
+
 Fail-first (approach A, intrinsic — no shared-config toggle): the FIRST call on a
-unique cold question MUST be a MISS (cache_hit False, path agent). That miss
-assertion is exactly what goes red if write-back is off — with the flag off the
-SECOND call would also miss and the replay assertion would fail. A round-trip
-that has never been red proves nothing, and the cold→warm contrast is red-able
-within one run without editing the shared :8000 INI.
+unique cold question MUST be a MISS (cache_hit False, path agent). With write-back
+off that assertion still stands, so the surviving test is a hand-off guard rather
+than a write-back guard — stated plainly rather than left for a reader to notice.
 
 Venue: :8000 (mutates Postgres via write-back, spends real inference). Submit via
 POST /api/test-suite/submit on a verified-idle server — never side-doored.
@@ -25,6 +39,11 @@ import uuid
 
 import pytest
 import requests
+
+from tests.integration.v2_queued import (
+    DRAIN_UNOBSERVABLE, DRAIN_XFAIL_TIMEOUT, assert_handed_off, assert_queued_in_todo,
+    drop_from_todo, snapshot_id_for_question, wait_for_done,
+)
 
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
@@ -82,29 +101,93 @@ def _cleanup_snapshot( snapshot_id ):
         print( f"[cleanup] snapshot {snapshot_id} teardown skipped: {e}" )
 
 
-def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_headers ):
-    """First call routes + writes back (cold miss); second identical call replays it."""
+def test_v2_ask_hands_a_cold_question_to_the_queue( auth_headers ):
+    """A cold, unique question misses the cache and is handed to the queue as a real job.
+
+    THE HALF THE BOX CAN SHOW. The response says `waiting` with a job_id, claims no cache
+    hit, and says it wrote nothing — and the queue then actually holds that id. The two
+    together are the queued contract's front end: the flow decided, and the board received.
+
+    RED ON REVERT: put the inline executor back and the hand-off assertion fails; break the
+    enqueue and the job never appears on the board, which the old test could not tell apart
+    from a slow consumer.
+    """
     question, _expected_sum = _unique_math_question()
-    body = { "question": question, "speak": False, "interactive": False }
-    snapshot_id = None
+    body   = { "question": question, "speak": False, "interactive": False }
+    job_id = None
     try:
-        # ── first call: cold. Routes to an agent, runs, writes back. NOT a cache hit.
         r1 = requests.post( _ASK, json=body, headers=auth_headers, timeout=120 )
         assert r1.status_code == 200, f"first call: {r1.status_code} {r1.text}"
         first = r1.json()
-        assert first[ "cache_hit" ] is False, f"cold question replayed on first call: {first}"
-        assert first[ "path" ] == "agent", f"expected agent route on first call, got {first[ 'path' ]}: {first}"
-        assert first[ "status" ] == "done", f"first call did not complete: {first}"
-        snapshot_id = first[ "snapshot_id" ]
-        assert snapshot_id, f"snapshotable+done but nothing written back — write-back is off: {first}"
-        assert first[ "wrote_snapshot" ] is True, f"wrote_snapshot False despite a snapshot id: {first}"
+        job_id = assert_handed_off( first, expect_cache_hit=False, expect_path="agent" )
+        assert first[ "wrote_snapshot" ] is False, (
+            f"a queued hand-off wrote a snapshot before the job ran — the row would carry "
+            f"no answer: {first}"
+        )
 
-        # ── second call: identical. MUST be a tier-1 exact replay from the write-back.
+        queued = assert_queued_in_todo( BASE_URL, job_id, auth_headers )
+        assert queued, f"the queue reported the job with no metadata: {queued}"
+    finally:
+        # Row ff4166d9: the job this test queued will NOT drain while the suite holds the
+        # consumer, so leaving it behind means it runs hours later and pads the board for
+        # everyone after. Take it back out.
+        drop_from_todo( BASE_URL, job_id, auth_headers )
+        # Under monopolize the job never ran, so there is normally nothing written. The
+        # cleanup stays because on a box with a free consumer it WILL have run by now.
+        _cleanup_snapshot( snapshot_id_for_question( question ) )
+
+
+@pytest.mark.xfail( reason=DRAIN_UNOBSERVABLE, strict=True )
+def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_headers ):
+    """First ask queues, runs and writes back (cold miss); the second identical ask replays it.
+
+    🔴 STRICT XFAIL, NOT SKIP, AND NOT DELETED. This is the only end-to-end proof that the
+    shipped app writes a row and then serves it; nothing else covers it. Strict xfail keeps
+    it RUNNING: the day the box gains a consumer which is not the test itself — a :7999
+    probe, a second server, a suite that does not monopolize — it XPASSes and the gate goes
+    RED, and somebody comes and takes the mark off. A skip would sit quiet forever, which is
+    how a blocked claim turns into an unmade one without anybody deciding to drop it.
+
+    Its waits are bounded well under the usual ladder (DRAIN_XFAIL_TIMEOUT) — a body that
+    runs every gate costs every gate. Everything else below is the original test, unchanged.
+    """
+    question, _expected_sum = _unique_math_question()
+    body       = { "question": question, "speak": False, "interactive": False }
+    queued_ids = [ ]
+    try:
+        # ── first ask: cold. Routed, then HANDED OFF — not run on this thread.
+        r1 = requests.post( _ASK, json=body, headers=auth_headers, timeout=120 )
+        assert r1.status_code == 200, f"first call: {r1.status_code} {r1.text}"
+        first = r1.json()
+        queued_ids.append( assert_handed_off( first, expect_cache_hit=False, expect_path="agent" ) )
+        assert first[ "wrote_snapshot" ] is False, (
+            f"a queued hand-off wrote a snapshot before the job ran — the row would carry "
+            f"no answer: {first}"
+        )
+
+        # ── the queue runs it. Landing in the done queue means the write-back has landed.
+        done = wait_for_done( BASE_URL, first[ "job_id" ], auth_headers, timeout=DRAIN_XFAIL_TIMEOUT )
+        assert done, f"first job completed with no metadata: {done}"
+
+        snapshot_id = snapshot_id_for_question( question )
+        assert snapshot_id, (
+            f"the job finished but nothing was filed under {question!r} — write-back is off, "
+            f"or the row was written under a key `ask` cannot look up"
+        )
+
+        # ── second ask: identical. MUST be a tier-1 exact replay of that row.
         r2 = requests.post( _ASK, json=body, headers=auth_headers, timeout=120 )
         assert r2.status_code == 200, f"second call: {r2.status_code} {r2.text}"
         second = r2.json()
-        assert second[ "cache_hit" ] is True, f"second identical request did NOT replay — round-trip broken: {second}"
-        assert second[ "path" ] == "replay", f"expected replay path on second call, got {second[ 'path' ]}: {second}"
-        assert second[ "status" ] == "done", f"replay did not complete: {second}"
+        queued_ids.append( assert_handed_off( second, expect_cache_hit=True, expect_path="replay" ) )
+
+        # ── and the replay itself reaches a terminal answer, which is the point of a cache.
+        replayed = wait_for_done( BASE_URL, second[ "job_id" ], auth_headers, timeout=DRAIN_XFAIL_TIMEOUT )
+        assert replayed.get( "response_text" ) or replayed.get( "answer" ), (
+            f"the replay completed with no answer — a cache hit that serves nothing is a "
+            f"miss with extra steps: {replayed}"
+        )
     finally:
-        _cleanup_snapshot( snapshot_id )
+        for queued_id in queued_ids:
+            drop_from_todo( BASE_URL, queued_id, auth_headers )
+        _cleanup_snapshot( snapshot_id_for_question( question ) )

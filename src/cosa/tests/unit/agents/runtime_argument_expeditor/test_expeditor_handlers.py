@@ -63,8 +63,6 @@ def _mk_expeditor( debug=False ):
     cfg.get.side_effect = lambda key, default=None, **kw: default
     with patch.object( ex_mod, "LlmClientFactory", MagicMock() ):
         o = RuntimeArgumentExpeditor( cfg, debug=debug )
-    o._job_id       = None
-    o._bearer_token = None
     o.llm_spec_key  = "rae-llm-spec"
     return o
 

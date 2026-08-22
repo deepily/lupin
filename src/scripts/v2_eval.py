@@ -57,6 +57,7 @@ if _SRC_PATH not in sys.path:              # pragma: no cover - bootstrap: src-p
     sys.path.insert( 0, _SRC_PATH )
 
 import cosa.utils.util as du   # noqa: E402
+from cosa.rest.v2.registry import resolve   # noqa: E402  — the table the CRUD exclusion reads
 
 # The provenance-stamp contract lives in paired_eval (the paired orchestrator, which imports
 # neither arm, so there is no cycle). v2's main stamps make_provenance over the sample it
@@ -383,6 +384,58 @@ def response_similarity( record: Dict[ str, Any ] ) -> Optional[ float ]:
     return None if value is None else float( value )
 
 
+def _crud_agents_enabled() -> bool:
+    """
+    The live value of `crud for dataframes agents enabled` (lupin-app.ini:1915).
+
+    Read, not asserted. The reader used to pass crud_enabled=True into resolve(),
+    which is the CONFIGURED value today and not the same statement — with the flag
+    off, calendar and todo do not fork, they ARE snapshotable, and excluding them
+    would drop real cache misses out of the denominator and report a rate that
+    flatters the cache.
+
+    Same key and same missing-means-enabled default the v1 queue uses
+    (todo_fifo_queue._crud_agents_enabled) and the flow's construction site reads,
+    so all three surfaces cannot disagree about which agents ran.
+
+    A missing or unreadable config answers True, matching that default rather than
+    inventing a quieter one.
+    """
+    try:
+        from cosa.config.configuration_manager import ConfigurationManager
+        value = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get(
+            "crud for dataframes agents enabled", default="true"
+        )
+    except Exception:
+        return True
+    return str( value ).strip().lower() == "true"
+
+
+def _is_cacheable_command( command: Optional[ str ], crud_enabled: Optional[ bool ]=None ) -> bool:
+    """
+    Could a request that routed to `command` ever have been a cache hit?
+
+    Asks the registry, not a hand-list: a command whose spec says snapshotable=False
+    is never written back, so it can never replay. With the CRUD flag ON that is the
+    forked calendar and todo pair plus weather; with it OFF it is weather alone.
+
+    An unknown or non-conversational command answers True — it is not excluded by
+    THIS rule, and silently dropping it here would hide it from the denominator for
+    a reason that has nothing to do with caching.
+
+    crud_enabled is read from config when not supplied; the parameter exists so a
+    test can state the flag instead of depending on the machine's INI.
+    """
+    if command is None:
+        return True
+    if crud_enabled is None:
+        crud_enabled = _crud_agents_enabled()
+    spec = resolve( command, crud_enabled=crud_enabled )
+    if spec is None:
+        return True
+    return spec.snapshotable
+
+
 def matched_command( record: Dict[ str, Any ] ) -> Optional[ str ]:
     """
     The command attributed to a replayed snapshot (the §8 `command` on a replay).
@@ -498,6 +551,32 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
     cache_hits      = [ r for r in ok if response_path( r ) == PATH_REPLAY ]
     cache_candidates = [ r for r in ok if response_similarity( r ) is not None ]
 
+    # THE CRUD EXCLUSION LIVES HERE NOW, not in the routing table (step 2b, Rick
+    # 2026-08-21). It used to be enforced by pinning resolve() to the non-CRUD class
+    # so forked calendar and todo traffic never reached a CRUD agent — a REPORTING
+    # constraint shaping what every request routed through. The fork moved into
+    # resolve(); this is the reader that has to know about it.
+    #
+    # The rule is the honest one: the denominator is requests that COULD have been a
+    # cache hit. A command the writer refuses to serialize can never replay, so
+    # counting it as a miss reports a cache failure that did not happen. That covers
+    # CRUD-forked calendar and todo AND weather, which was never snapshotable either
+    # — same reason, stated once.
+    # ⚠️ A RECORD THAT ACTUALLY REPLAYED IS CACHEABLE BY DEMONSTRATION, whatever the
+    # table says. Excluding on the table alone dropped weather replays out of the
+    # DENOMINATOR while they stayed in the numerator, so cache_hit_rate went None on a
+    # weather-only run — and guard_cold_start, which raises when a "cold" pass reports
+    # any replay at all, stopped seeing a pre-warmed store. Caught by
+    # test_main_cold_guard_raises_on_warm_cold, not by reasoning about the rule.
+    #
+    # `snapshotable` says what the WRITER will write from here on. It cannot say what
+    # the store already holds.
+    crud_enabled = _crud_agents_enabled()     # read ONCE per run, not once per record
+    cacheable = [
+        r for r in ok
+        if response_path( r ) == PATH_REPLAY or _is_cacheable_command( matched_command( r ), crud_enabled )
+    ]
+
     # ERROR RATES ARE COUNTED OVER EVERY ANSWERED REQUEST, NOT OVER `ok` (row d8d019f6,
     # 2026-08-20). They used to read `ok`, which was harmless while `ok` meant "the server
     # answered" - an errored 200 was still in that set, so it could still be counted. The
@@ -565,10 +644,14 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
     return {
         "n"                   : n,
         "n_ok"                : n_ok,
+        # Merge of wip e9fdddfd (María: HTTP errors split from incomplete) with the branch's
+        # cacheable-denominator change (Krishna 2b/2c) — BOTH kept (row 4d88e790, Cheech's ruling).
         "n_http_error"        : n_http_error,   # status_code != 200 — transport, not completion
         "n_incomplete"        : n_incomplete,   # n - n_ok — work did not finish (HTTP errors included)
         "n_answered"          : n_answered,     # the four error rates are over THIS, not n_ok
-        "cache_hit_rate"      : _rate( len( cache_hits ),       n_ok ),
+        "cache_hit_rate"      : _rate( len( cache_hits ),       len( cacheable ) ),
+        "cache_hit_denominator": len( cacheable ),   # NOT n_ok — see _is_cacheable_command
+        "cache_excluded_n"    : n_ok - len( cacheable ),
         "cache_candidate_rate": _rate( len( cache_candidates ), n_ok ),
         "replay_failure_rate" : _rate( len( replay_failures ),  n_answered ),
         "router_error_rate"   : _rate( len( router_errors ),    n_answered ),

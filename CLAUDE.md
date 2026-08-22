@@ -119,7 +119,9 @@ last -x reboot | head -20      # read the morning boot times yourself
 | **10 AM – 1 PM** | ✅ **OPTIMAL — schedule batch work here** | Comfortably after the 09:24 median boot, and Rick is barely on. The only window that is reliably both up and quiet. |
 | 1 PM – 9 PM | 🟡 Acceptable | Box up, some interactive use, well below peak. |
 
-**Rule**: any non-interactive bounded job (batch generation, scheduled regression sweeps, podcast/presentation/research) MUST set `scheduled_at` inside a window the box is UP for — **prefer 10 AM – 1 PM EDT** — via `/api/claude-code/submit` (field defined at `src/cosa/rest/routers/claude_code_queue.py:49`). User-clicked synchronous bounded jobs are exempt.
+**Rule**: any non-interactive bounded job (batch generation, scheduled regression sweeps, podcast/presentation/research) MUST set `scheduled_at` inside a window the box is UP for — **prefer 10 AM – 1 PM EDT** — via `/api/v2/submit` (field defined on `SubmitRequest` at `src/cosa/rest/routers/v2_ask.py`). User-clicked synchronous bounded jobs are exempt.
+
+⚠️ **CHANGED 2026-08-21.** This line used to name `/api/claude-code/submit`. That door and its `/api/claude-code/queue/submit` alias are now tombstones answering **410 Gone** (Rick's ruling: the Claude Code job is *upgraded* to the v2 front door, not left to die on the vine). The work enters through `/api/v2/submit` naming the command `agent router go to claude code`; `scheduled_at` stays TOP-LEVEL because it tells the queue *when* to run, and `args` is checked against the command's own argument contract, which no scheduling instruction is in.
 
 ⚠️ **And the box goes down mid-day too.** On 2026-08-20 it was down **14:34–18:07**. "Optimal" means *most likely up*, never *guaranteed up* — a long job should still tolerate a restart.
 
@@ -127,10 +129,11 @@ last -x reboot | head -20      # read the morning boot times yourself
 
 Example:
 ```json
+POST /api/v2/submit
 {
-  "prompt"       : "…",
-  "task_type"    : "BOUNDED",
-  "scheduled_at" : "2026-05-13T08:00:00-04:00"
+  "command"      : "agent router go to claude code",
+  "args"         : { "prompt": "…", "task_type": "BOUNDED" },
+  "scheduled_at" : "2026-08-22T11:00:00-04:00"
 }
 ```
 

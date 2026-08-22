@@ -153,7 +153,9 @@ class ResearchToPresentationLiveSmokeTest( InteractiveSmokeTest ):
     """
 
     TEST_NAME       = "Research to Presentation Live Chain"
-    SUBMIT_ENDPOINT = "/api/deep-research-to-presentation/submit"
+    # The dedicated door /api/deep-research-to-presentation/submit is retired (410); one front door now.
+    SUBMIT_ENDPOINT = "/api/v2/submit"
+    ROUTING_COMMAND = "agent router go to research to presentation"
     DEFAULT_TIMEOUT = 2400  # 40 min (DR ~15min + PR ~8min + overhead)
     POLL_INTERVAL   = 5
     REQUEST_TIMEOUT = 2400
@@ -193,9 +195,21 @@ class ResearchToPresentationLiveSmokeTest( InteractiveSmokeTest ):
         # (test_suite/job.py). Threading it as parent_id_hash lets the consumer's Gate B
         # admit this child through the monopoly hold instead of starving it 900s.
         parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+
+        # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and
+        # answers 410 naming /api/v2/submit, which takes the routing command as a string
+        # and the agent's own arguments in `args`. What used to be a flat body is a command
+        # plus its args; `parent_id_hash` stays TOP-LEVEL because it is a queue directive
+        # (Gate B lineage), not an argument to the agent, and `args` is checked against the
+        # command's own argument contract.
+        body = {
+            "command"  : self.ROUTING_COMMAND,
+            "args"     : payload,
+            "question" : payload.get( "query", "" ),
+        }
         if parent_id:
-            payload[ "parent_id_hash" ] = parent_id
-        return payload
+            body[ "parent_id_hash" ] = parent_id
+        return body
 
     def get_mode_for_scenario( self, scenario ):
         return None

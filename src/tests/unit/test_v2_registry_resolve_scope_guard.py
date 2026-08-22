@@ -48,7 +48,7 @@ class TestResolveStaysScopedToConversational( unittest.TestCase ):
         # Whole-set guard, not a single example. Fails loudly the moment any
         # agentic command becomes resolvable through resolve() — the exact
         # regression §5.1.3 warns a naive REGISTRY.get() would introduce.
-        leaks = sorted( c for c in _AGENTIC_BUCKET if resolve( c ) is not None )
+        leaks = sorted( c for c in _AGENTIC_BUCKET if resolve( c, crud_enabled=False ) is not None )
         self.assertEqual(
             leaks, [],
             f"resolve() leaked specs for agentic commands (must return None): {leaks}"
@@ -63,7 +63,7 @@ class TestResolveStaysScopedToConversational( unittest.TestCase ):
         # behaviour change" (§5.1.3) verifiable rather than asserted.
         for command in sorted( _AGENTIC_BUCKET ):
             self.assertIsNone(
-                resolve( command ),
+                resolve( command, crud_enabled=False ),
                 f"resolve() must not serve agentic command {command!r}"
             )
             self.assertIsNotNone(

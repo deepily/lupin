@@ -1363,6 +1363,135 @@ def test_reported_route_reason_is_none_for_a_transport_failure():
 
 
 # ---------------------------------------------------------------------------
+# step 2b — the CRUD exclusion lives in THIS reader now
+# ---------------------------------------------------------------------------
+def test_uncacheable_commands_leave_the_cache_hit_denominator():
+    """
+    Rick's ruling, 2026-08-21: the routing table stops carrying a reporting
+    constraint and the reader takes it. A command the writer refuses to serialize
+    can never replay, so counting it as a cache MISS reports a failure that did not
+    happen.
+
+    RED ON REVERT: put n_ok back as the denominator and the rate becomes 1/3.
+    """
+    records = [
+        _rec( path="replay", similarity=100.0, command="agent router go to math" ),
+        _rec( path="agent",  command="agent router go to todo" ),      # CRUD fork: never cached
+        _rec( path="agent",  command="agent router go to weather" ),   # never snapshotable either
+    ]
+    m = ve.compute_metrics( records )
+    assert m[ "cache_hit_denominator" ] == 1
+    assert m[ "cache_excluded_n" ]      == 2
+    assert m[ "cache_hit_rate" ]        == 1.0
+
+
+def test_a_record_that_replayed_is_never_excluded():
+    """
+    The correction that mattered, and a test found it rather than reasoning did.
+    `snapshotable` says what the WRITER will write from here on; it cannot say what
+    the store already HOLDS. Excluding on the table alone dropped weather replays
+    from the denominator while they stayed in the numerator, so a weather-only run
+    reported cache_hit_rate None — and guard_cold_start, which raises when a cold
+    pass reports any replay at all, went blind to a pre-warmed store.
+
+    RED ON REVERT: drop the `response_path( r ) == PATH_REPLAY or` clause from the
+    cacheable filter and the rate here goes None.
+    """
+    records = [ _rec( path="replay", similarity=100.0, command="agent router go to weather" ) ]
+    m = ve.compute_metrics( records )
+    assert m[ "cache_hit_denominator" ] == 1
+    assert m[ "cache_hit_rate" ]        == 1.0
+
+    # The guard is the reason this matters, so assert the guard, not just the rate:
+    # it must still RAISE on a "cold" pass that replayed. With the exclusion broadened
+    # wrongly, the rate was None here and the guard returned quietly.
+    with pytest.raises( ve.EvalIntegrityError, match="cold-start integrity failed" ):
+        ve.guard_cold_start( m )
+
+
+def test_unknown_commands_stay_in_the_denominator():
+    """
+    An unknown or non-conversational command is not excluded by THIS rule. Dropping
+    it here would hide it from the denominator for a reason that has nothing to do
+    with caching.
+    """
+    assert ve._is_cacheable_command( "agent router go to nowhere at all" ) is True
+    assert ve._is_cacheable_command( None ) is True
+
+
+def test_the_exclusion_follows_the_crud_flag_instead_of_asserting_it():
+    """
+    Pocholo on 8f826c5a: the reader hardcoded crud_enabled=True, which is the
+    CONFIGURED value today and not the same statement.
+
+    It matters in one direction. With the flag OFF, calendar and todo do NOT fork,
+    they ARE snapshotable, and excluding them would drop real cache misses out of
+    the denominator — a rate that flatters the cache for a reason unrelated to the
+    cache.
+
+    RED ON REVERT: put crud_enabled=True back in place of the config read and the
+    flag-off half fails.
+    """
+    assert ve._is_cacheable_command( "agent router go to todo", crud_enabled=True )  is False
+    assert ve._is_cacheable_command( "agent router go to todo", crud_enabled=False ) is True
+
+    # weather is not the fork's doing — it is excluded either way
+    assert ve._is_cacheable_command( "agent router go to weather", crud_enabled=True )  is False
+    assert ve._is_cacheable_command( "agent router go to weather", crud_enabled=False ) is False
+
+
+def test_an_unreadable_config_answers_the_ini_default( monkeypatch ):
+    """
+    The key's default is missing-means-ENABLED (lupin-app.ini:1915), and the v1
+    queue and the flow's construction site both read it that way. An eval run on a
+    box with no readable config must not quietly pick the other answer.
+
+    RED ON REVERT: return False from the except branch and this fails.
+    """
+    import builtins
+    real_import = builtins.__import__
+
+    def _boom( name, *a, **kw ):
+        if name == "cosa.config.configuration_manager":
+            raise RuntimeError( "no config on this box" )
+        return real_import( name, *a, **kw )
+
+    monkeypatch.setattr( builtins, "__import__", _boom )
+    assert ve._crud_agents_enabled() is True
+
+
+def test_the_summary_itself_follows_the_flag( monkeypatch ):
+    """
+    THROUGH the reader, which is the gap Pocholo found in my first pair of tests:
+    one passed crud_enabled= explicitly and the other called _crud_agents_enabled()
+    alone, so hardcoding crud_enabled=True back inside compute_metrics left all of
+    them green. Neither ran the path that reads the flag.
+
+    With the flag OFF, todo does not fork, it IS snapshotable, and a todo request
+    that did not replay is a REAL cache miss — it must stay in the denominator.
+    Dropping it would report a rate that flatters the cache.
+
+    RED ON REVERT: hardcode crud_enabled=True at the compute_metrics call site and
+    the denominator falls to 1.
+    """
+    monkeypatch.setattr( ve, "_crud_agents_enabled", lambda: False )
+    records = [
+        _rec( path="replay", similarity=100.0, command="agent router go to math" ),
+        _rec( path="agent",  command="agent router go to todo" ),   # a real miss when the flag is OFF
+    ]
+    m = ve.compute_metrics( records )
+    assert m[ "cache_hit_denominator" ] == 2, "a cacheable miss was excluded — the reader ignored the flag"
+    assert m[ "cache_excluded_n" ]      == 0
+    assert m[ "cache_hit_rate" ]        == 0.5
+
+    # The other side of the same call, so the assertion above cannot pass by the
+    # reader ignoring the flag in BOTH directions.
+    monkeypatch.setattr( ve, "_crud_agents_enabled", lambda: True )
+    m_on = ve.compute_metrics( records )
+    assert m_on[ "cache_hit_denominator" ] == 1
+    assert m_on[ "cache_excluded_n" ]      == 1
+
+
 # Cold-store fail-fast (row a77a7906)
 #
 # guard_cold_start already REFUSES a contaminated baseline, but only after the

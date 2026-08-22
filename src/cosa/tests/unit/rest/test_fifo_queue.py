@@ -133,9 +133,7 @@ class TestFifoQueue( unittest.TestCase ):
         self.assertEqual( queue.last_queue_size, 0 )
         
         # Verify default state
-        self.assertTrue( queue._accepting_jobs )
         self.assertTrue( queue._focus_mode )
-        self.assertIsNone( queue._blocking_object )
         
         # Verify auto-emission disabled
         self.assertIsNone( queue.websocket_mgr )
@@ -166,9 +164,7 @@ class TestFifoQueue( unittest.TestCase ):
         self.assertFalse( queue.emit_enabled )
         
         # Verify other defaults unchanged
-        self.assertTrue( queue._accepting_jobs )
         self.assertTrue( queue._focus_mode )
-        self.assertIsNone( queue._blocking_object )
     
     def test_push_single_item( self ):
         """
@@ -380,30 +376,17 @@ class TestFifoQueue( unittest.TestCase ):
     def test_queue_state_management( self ):
         """
         Test queue state management properties.
-        
+
         Ensures:
-            - accepting_jobs getter/setter work correctly
-            - focus_mode getter/setter work correctly  
-            - blocking_object getter/setter work correctly
-            - State changes preserved
+            - focus_mode reads correctly
+
+        Step 7c deleted the blocking-object half of this test with the API it exercised:
+        push_blocking_object / pop_blocking_object / is_accepting_jobs are gone, so their
+        assertions went too. focus_mode is untouched and still covered.
         """
         queue, mocks = self._create_mocked_fifo_queue()
-        
-        # Test accepting_jobs (using methods from implementation)
-        self.assertTrue( queue.is_accepting_jobs() )
-        
-        # Test focus_mode  
+
         self.assertTrue( queue.is_in_focus_mode() )
-        
-        # Test blocking_object methods
-        test_object = {"type": "blocking", "reason": "test"}
-        queue.push_blocking_object( test_object )
-        self.assertFalse( queue.is_accepting_jobs() )  # Should be False after pushing blocking object
-        
-        # Test popping blocking object
-        returned_object = queue.pop_blocking_object()
-        self.assertEqual( returned_object, test_object )
-        self.assertTrue( queue.is_accepting_jobs() )  # Should be True after popping blocking object
     
     def test_size_and_empty_status( self ):
         """
