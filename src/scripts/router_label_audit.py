@@ -226,6 +226,102 @@ def destination_arithmetic( line ):
     return MATH_LABEL, f"bucket {bucket}"
 
 
+# ── Corpus consistency guard ──────────────────────────────────────────────────
+#
+# Separate from the routing classifier above, and deliberately so. The classifier
+# answers "where should this line be labelled"; the guard answers the narrower
+# question "does this line belong in the file it is sitting in". The guard uses
+# positive markers only -- it never falls through to a default -- so a line it
+# cannot recognize is reported as unrecognized rather than silently blamed.
+
+_GUARD_AMBIGUOUS = { "in", "c", "f", "m", "t", "s" }
+
+_UNIT_CANONICAL = dict( ALIASES )
+_UNIT_CATEGORY  = {}
+for _table, _cat in ALL_CATEGORIES:
+    for _u in _table:
+        _UNIT_CANONICAL[ _u ] = _u
+        _UNIT_CATEGORY[ _u ]  = _cat
+
+# Calculator-shaped: the utterance asks for one of the three operations the agent has.
+_GUARD_MORTGAGE = re.compile(
+    r"\b(mortgage|refinanc\w*|down payment|amortiz\w*|apy|apr|compound interest|"
+    r"(auto|car|personal|home|student) loan|\bloan\b|monthly payment|what'?s the monthly|"
+    r"per month|principal|interest|invest\w*|savings account|future value|"
+    r"payment (on|be)|calculate (the )?payment)\b", re.I )
+_GUARD_PRICE = re.compile(
+    r"\b(cheaper|better deal|best deal|better buy|better value|smarter buy|more economical|"
+    r"price per|unit price|per ounce|per pound|which costs|compare (these|the )?(two )?price|"
+    r"compare price|worth (buying|it|paying)|bang for your buck|stretches my dollar|"
+    r"which (size|option|product|should i|one is|is the)|compare these)", re.I )
+_GUARD_ROUTING = re.compile(
+    r"\b(calculator|unit converter|conversion mode|price comparison tool|"
+    r"handle this as a conversion|just do the conversion|simple conversion|"
+    r"convert this for me|route this to)\b", re.I )
+_GUARD_CONVERT_VERB = re.compile( r"\b(convert|how many|how much|how far|how heavy|what'?s|what is|in)\b", re.I )
+
+# Math-shaped: positive markers for symbolic work the calculator cannot do at all.
+_GUARD_MATH = re.compile(
+    r"(\bx\s*\^|\b[a-z]\s*\^\s*\d|\bx squared\b|\bsolve for\b|\bthe equation\b|\binequalit\w*|"
+    r"\bfactor\b|\bsimplify\b|\bderivative\b|\bintegral\b|\bcalculus\b|\bquadratic\b|"
+    r"\bpythagorean\b|\bhypotenuse\b|\bsine\b|\bcosine\b|\btangent\b|\btheorem\b|"
+    r"\bprobabilit\w*|\bstandard deviation\b|\bpermutation\b|\bprime number\b|"
+    r"\b\d+\s*[xy]\b|\bvalue of [xy]\b|\barea of a\b|\bperimeter of\b|\bcircumference\b)", re.I )
+
+
+def guard_unit_tokens( text ):
+    """
+    Canonical unit tokens the calculator's own tables recognize in this text.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns a set of canonical unit names, singular/plural folded,
+          with tokens that are also ordinary English words excluded
+    """
+    found = set()
+    for word in re.findall( r"[a-z_]+", text.lower() ):
+        if word in _GUARD_AMBIGUOUS: continue
+        for candidate in ( word, word.rstrip( "s" ), word + "s" ):
+            if candidate in _UNIT_CANONICAL:
+                found.add( _UNIT_CANONICAL[ candidate ] )
+                break
+    return found
+
+
+def is_calculator_shaped( line ):
+    """
+    True when the utterance asks for convert, compare_prices, or mortgage.
+
+    Requires:
+        - line is a string
+
+    Ensures:
+        - returns True only on a positive match; never falls through to a default
+    """
+    if _GUARD_MORTGAGE.search( line ): return True
+    if _GUARD_PRICE.search( line ):    return True
+    if _GUARD_ROUTING.search( line ):  return True
+
+    units = guard_unit_tokens( line )
+    cats  = { _UNIT_CATEGORY[ u ] for u in units if u in _UNIT_CATEGORY }
+    return len( units ) >= 2 and len( cats ) == 1 and bool( _GUARD_CONVERT_VERB.search( line ) )
+
+
+def is_math_shaped( line ):
+    """
+    True when the utterance is symbolic work the calculator has no operation for.
+
+    Requires:
+        - line is a string
+
+    Ensures:
+        - returns True only on a positive symbolic marker
+    """
+    return bool( _GUARD_MATH.search( line ) )
+
+
 RULES = { "capability": destination_capability, "arithmetic": destination_arithmetic }
 
 

@@ -1,3 +1,6 @@
+What is the sum of 57 and 89?
+How do you divide 345 by 15?
+If I buy 3 apples at $1.20 each and 2 bananas at $0.75 each, how much will the total cost be?
 How do you solve the equation 3x + 7 = 22?
 What’s the value of x in the quadratic equation x^2 + 5x - 6 = 0?
 If I know the area of a rectangle is 48 and the length is 12, how do I find the width?
@@ -11,8 +14,26 @@ What’s the derivative of f(x) = 3x squared + 4x?
 How do you find the integral of sin of x?
 If a car travels at a speed of 60 miles per hour for 2.5 hours, how far does it travel?
 A tank can be filled by a pipe in 5 hours, but it can be emptied by another pipe in 7 hours. If both pipes are opened, how long will it take to fill the tank?
+What is 253 plus 147?
+How do you subtract 89 from 123?
+If you multiply 56 by 8, what do you get?
+What is 45 divided by 9?
+How do you calculate the total of 34, 67, and 129?
+What’s the result of 25 times 16?
+If you add 327 and 548, what’s the sum?
+How do you subtract 492 from 980?
+What is the product of 64 and 23?
+How many times does 12 go into 144?
+What’s the remainder when you divide 345 by 23?
+How much is 789 minus 456?
 What’s the result of multiplying 78 by 56?
+If you have 300 and divide it by 25, what’s the quotient?
+How do you calculate the difference between 560 and 345?
+What is the sum of 98, 134, and 201?
+How much is 234 plus 167?
 What’s the result of dividing 1,000 by 40?
+If you subtract 299 from 450, what’s left?
+How do you multiply 15 by 35?
 How do you solve the equation 2x + 5 = 17?
 What’s the value of x in 4x - 7 = 9?
 If y = 3x + 4, what is y when x = 5?
@@ -133,8 +154,10 @@ A swimming pool can be filled by a pipe in 4 hours, but drained by another pipe 
 If a car uses 8 liters of fuel to travel 100 km, how many liters are needed to travel 250 km?
 A baker makes 120 cupcakes in 3 hours. How many cupcakes can the baker make in 8 hours?
 If the price of a jacket is $120 and there’s a 15% discount, what is the discounted price?
+Tom has $400. He wants to buy a video game console for $350 and a game for $60. Does he have enough money?
 A tree grows 15 inches per year. How tall will the tree be after 7 years if it’s currently 4 feet tall?
 A cyclist travels 45 miles in 3 hours. What is the cyclist's average speed?
+If 4 bags of flour cost $32, how much does 1 bag of flour cost?
 A plane flies 600 miles in 2 hours. At this rate, how far will it fly in 5 hours?
 A store sells shirts for $20 each. If a customer buys 5 shirts, how much will the customer pay after a 10% discount?
 There are 30 students in a class. If 12 of them are boys, what percentage of the class are girls?
@@ -142,8 +165,26 @@ A box contains 12 chocolates. If you eat 3 chocolates every day, how many days w
 A car travels 360 km using 24 liters of gasoline. How many kilometers can it travel with 60 liters of gasoline?
 A rectangular garden has a length of 8 meters and a width of 6 meters. How much fencing is needed to go around the garden?
 If the temperature drops 2 degrees every hour, how much will it drop in 7 hours?
+Uh... what’s 253 plus, uh, 147?
+How do you... subtract 89... from 123?
+If you multiply, um, 56 by 8, what do you get?
+What’s... what’s 45 divided by, uh, 9?
+Uh... can you calculate the total of 34, 67, and... um, 129?
+What’s the result of... uh, 25 times 16?
+If you add, uh, 327... and 548, what’s the sum?
+How do you... subtract 492 from... um, 980?
+What’s the product of, uh, 64 and... 23?
+How many times does 12 go into, um... 144?
+What’s the remainder when you divide, um, 345 by 23?
+How much is... uh, 789 minus 456?
 What’s the result of multiplying... uh, 78 by 56?
+If you have 300... and divide it by, uh... 25, what’s the quotient?
+How do you calculate the difference between, uh... 560 and 345?
+What’s the sum of... uh, 98, 134, and... um, 201?
+How much is... um, 234 plus 167?
 What’s the result of dividing... uh, 1,000 by 40?
+If you subtract 299 from... um, 450, what’s left?
+Uh... how do you multiply 15 by... uh, 35?
 Um, how do you... solve the equation 2x plus 5 equals 17?
 What’s the value of x in... uh, 4x minus 7 equals 9?
 If y equals, um... 3x plus 4, what’s y when x is... uh, 5?
@@ -233,8 +274,10 @@ A swimming pool can be, um... filled by a pipe in 4 hours but, uh... drained by 
 Uh, if a car uses 8 liters of fuel to, um... travel 100 kilometers, how many liters are needed to, uh... travel 250 kilometers?
 A baker makes 120 cupcakes in, um... 3 hours. How many cupcakes can the baker, uh... make in 8 hours?
 If the price of a jacket is, um... $120 and there’s a 15% discount, uh... what’s the discounted price?
+Tom has $400. He wants to buy a, um... video game console for $350 and a game for, uh... $60. Does he have enough, um, money?
 Uh... a tree grows 15 inches per year. How tall will the tree, uh... be after 7 years if it’s, um... currently 4 feet tall?
 A cyclist travels, uh... 45 miles in 3 hours. What’s the cyclist’s, uh, average speed?
+If 4 bags of flour cost, um... $32, how much does, uh... one bag of flour, uh, cost?
 Uh... a plane flies 600 miles in, um... 2 hours. At this rate, how far will it, uh... fly in 5 hours?
 Uh... a store sells shirts for $20 each. If a customer buys, um, 5 shirts... how much will the customer, um... pay after a 10% discount?
 Uh... there are 30 students in a class. If 12 of them are, uh... boys, what percentage of the class are, um... girls?
@@ -365,9 +408,11 @@ Let me use the math specialist please
 Open up the math agent for me
 
 # Quantization-resilient supplements — strong math anchors
+Calculate the total cost if I buy 15 items at $3.99 each
 Solve this equation for me: 2x + 5 = 17
 Do the math on how much I'll save with a 25% discount on $450
 Compute the area of a circle with radius 8
+I need you to solve this arithmetic problem: 847 divided by 23
 Work out this math problem: what's 15% of 680
 Solve for x: 3x squared minus 12 equals zero
 Calculate the tip on a $87.50 dinner bill at 20%
@@ -377,6 +422,7 @@ I need math help: what's the hypotenuse if the sides are 5 and 12
 Solve this formula: distance equals rate times time, rate is 55 and time is 3.5
 Calculate how many tiles I need for a 12 by 15 foot room using 1 foot tiles
 Math question: what's 7 factorial
+Solve this arithmetic: 3,456 times 789
 Can you do the math on splitting a $234 bill four ways with 18% tip
 
 # Statistics — data analysis, distributions, inference
