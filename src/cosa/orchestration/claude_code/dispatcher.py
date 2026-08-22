@@ -374,11 +374,14 @@ class ClaudeCodeDispatcher:
                     exit_code=0
                 )
             else:
-                stderr = await process.stderr.read()
+                # Reuse the payload read above — do NOT read stderr a second
+                # time. The debug read at the top of this block already drained
+                # the stream, so a re-read returns b"" at EOF and every failed
+                # task reported "Unknown error" with the real message dropped.
                 return TaskResult(
                     task_id=task.id,
                     success=False,
-                    error=stderr.decode() if stderr else "Unknown error",
+                    error=stderr_data.decode() if stderr_data else "Unknown error",
                     exit_code=process.returncode
                 )
 
