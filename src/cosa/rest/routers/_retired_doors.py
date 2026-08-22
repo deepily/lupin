@@ -94,12 +94,38 @@ V2_SUBMIT = "/api/v2/submit"
 # test-harness door with test-only callers does not justify teaching the registry a
 # mock-job command tonight).
 #
+# ── THE CLAUDE CODE PAIR: THE UPGRADE HAPPENED, AND THE TOMBSTONE IS ITS SECOND HALF ──
+#
+# This block used to end with "and the Claude Code pair is an UPGRADE to the v2 door, not a
+# tombstone (Rick)". That sentence was written before the upgrade existed, and it read the
+# ruling as an either/or. Rick's words, 2026-08-21: *"A Claude code job should absolutely be
+# upgraded and updated to use the front door submit under V2. Under no circumstances should
+# we allow it to die on the vine."* What he refused was the job dying, not the door being
+# retired — and the way to guarantee a caller ends up at the working door is to make the old
+# one say so out loud.
+#
+# So both halves landed together: `/api/v2/submit` builds the job (proved through the real
+# factory and a real ClaudeCodeJob), and the two doors that used to build it now answer 410
+# naming it. Nothing that ran before stops running; it enters through
+# `{"command": "agent router go to claude code", "args": {…}}`.
+#
+# WHY BOTH PATHS AND NOT JUST THE ALIAS. The repo-wide inventory listed only
+# `/api/claude-code/queue/submit` (door 10). The CANONICAL path is
+# `/api/claude-code/submit` — it is the one CLAUDE.md told the fleet to use, the one the UI
+# posted to, and the one every smoke test and the billing probe named. Retiring the alias
+# alone would have left the door everyone actually uses wide open (Rachel's find).
+#
+# ONE THING THE OLD HANDLER DID THAT `submit` DOES NOT: it validated `task_type` and
+# answered 400 for anything but BOUNDED/INTERACTIVE. `/api/v2/submit` is generic — it checks
+# that a command's required ARGUMENTS are present, not which values they may take. That
+# guard moved into ClaudeCodeJob's constructor in the same change, where it also covers the
+# voice path and the in-process callers.
+#
 # Also still out, each for its own stated reason: the two resume-from doors
 # (`/api/jobs/{id_hash}/resume-from-checkpoint`, `/api/test-fix-expediter/resume-from`)
 # rebuild a job from server-side state, and an HTTP `SubmitRequest` can say command and
-# args but never "resume job X"; `/api/test-suite/submit` is how the gate rig schedules a
-# :8000 run, so it lands last, after that gate is green; and the Claude Code pair is an
-# UPGRADE to the v2 door, not a tombstone (Rick).
+# args but never "resume job X"; and `/api/test-suite/submit` is how the gate rig schedules
+# a :8000 run, so it lands last, after that gate is green.
 RETIRED_DOORS = {
     "/api/push"                       : V2_ASK,
     "/api/job-history/{job_id}/retry" : V2_ASK,
@@ -137,6 +163,12 @@ RETIRED_DOORS = {
     # directives beside them. It was not a door that needed converting; it was the new
     # door with a different name and a worse contract.
     "/api/push-agentic"                           : V2_SUBMIT,
+    # ── the Claude Code pair, retired together because they are ONE handler ──
+    # Two routes, one function (claude_code_queue.py). Retiring the alias without the
+    # canonical path would leave the door CLAUDE.md, the UI, both smoke tests and the
+    # billing probe all named — which is the door that matters.
+    "/api/claude-code/submit"                    : V2_SUBMIT,
+    "/api/claude-code/queue/submit"              : V2_SUBMIT,
 }
 
 

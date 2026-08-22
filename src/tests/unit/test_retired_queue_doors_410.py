@@ -32,14 +32,14 @@ from fastapi.testclient import TestClient
 
 from cosa.rest.routers._retired_doors import REMOVE_BY, RETIRED_DOORS, V2_ASK, V2_SUBMIT
 from cosa.rest.routers import (
-    bug_fix_expediter, deep_research, deep_research_to_podcast,
+    bug_fix_expediter, claude_code_queue, deep_research, deep_research_to_podcast,
     deep_research_to_presentation, podcast_generator, presentation_generator, queues,
     swe_team, v2_ask,
 )
 
-_ROUTER_MODULES = ( bug_fix_expediter, deep_research, deep_research_to_podcast,
-                    deep_research_to_presentation, podcast_generator,
-                    presentation_generator, queues, swe_team, v2_ask )
+_ROUTER_MODULES = ( bug_fix_expediter, claude_code_queue, deep_research,
+                    deep_research_to_podcast, deep_research_to_presentation,
+                    podcast_generator, presentation_generator, queues, swe_team, v2_ask )
 
 
 def _app():
@@ -68,13 +68,22 @@ def _concrete( path ):
 
 # ── the count, stated once so a growing table cannot pass quietly ────────────
 
-def test_exactly_ten_doors_are_retired_at_this_commit():
+def test_exactly_twelve_doors_are_retired_at_this_commit():
     """
     THE COUNT IS RESTATED BY HAND ON PURPOSE, and it is the third of the three edits
     every new door costs (table row, this set, this name). A loop that silently covered
     whatever the table happened to hold is how door 8 stayed invisible for a day —
     clearing a red here by widening this into something derived removes the guard rather
     than satisfying it.
+
+    THE CLAUDE CODE PAIR JOINED ON 2026-08-21, AND ITS OWN ENTRY BELOW USED TO SAY IT NEVER
+    WOULD. That entry read "Rick ruled it an UPGRADE to the v2 door, not a tombstone",
+    which read the ruling as an either/or. Rick refused the JOB dying on the vine, not the
+    door retiring — and the surest way a stale caller reaches the working door is for the
+    old one to name it. Both halves landed together: `/api/v2/submit` builds the job, and
+    both `/api/claude-code/*` paths refuse and point at it. Two paths, because the
+    inventory listed only the alias while the canonical path is the one CLAUDE.md, the UI,
+    both smoke tests and the billing probe all used.
 
     Two question-shaped doors retired first, when `ask` was the only live replacement.
     `/api/bug-fix-expediter/submit` was the first submit-shaped one, and the three research
@@ -116,7 +125,6 @@ def test_exactly_ten_doors_are_retired_at_this_commit():
         SubmitRequest can say command and args but never "resume job X".
       · `/api/test-suite/submit` — how the gate rig schedules a :8000 run, so retiring it
         early would take away the ability to gate. It lands last.
-      · the Claude Code pair — Rick ruled it an UPGRADE to the v2 door, not a tombstone.
     """
     assert set( RETIRED_DOORS ) == {
         "/api/push",
@@ -129,6 +137,8 @@ def test_exactly_ten_doors_are_retired_at_this_commit():
         "/api/podcast-generator/submit",
         "/api/swe-team/submit",
         "/api/push-agentic",
+        "/api/claude-code/submit",
+        "/api/claude-code/queue/submit",
     }, sorted( RETIRED_DOORS )
 
 
