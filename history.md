@@ -8,6 +8,17 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.08.21 - Session e9a672a2 (Mr. Radio 🦉, six re-spins; crew Clayton 😎 · Rio ⚡ · Tiberius 👑 · John 🏄🏽 · Sam 🎙️ · Chloé 🗼) | Rick's ☕ — four branches landed, board to zero, receipts not claims
+
+1. **A router-label-fix** merged no-ff into wip `decae6c7` (+doc count fix `c6609829`): ruled **0 corpus lines move** — arithmetic already delegates to MathAgent (`agent.py:175-178`); deliverable is the rule doc + `router_label_audit.py` + red-on-plant lint test, corpus byte-identical. Sam PASS ×2, María verified, Chloé 16,460/0 + 8,801/0.
+2. **B claude-code v2 submit** (`14172091`) landed in integration at `1c319db0`, rebased twice as Cheech's head moved; **C expeditor per-call state** (`10c60712`) at `24c3b3ba`; **D xfail-blanket strip** (`82fb9fcb`) at `af9f557d`. Each: Sam PASS re-derived on the rebased base, Chloé tiers green, Cheech fast-forwarded on my relay of word + sha.
+3. **D found a live UI defect**: `handleDoneQueueUpdate` read `data.done_jobs`, which the API stopped sending — Replay on every finished job was dead ("Job metadata not found"); fixed red→green (JS 315/315). Sam's correction stands on the row: five of the twelve xfail'd tests were failing-rendered-as-skipped, not "twelve silently xpassing."
+4. **Two of my own defects, corrected on the record**: `git merge-tree --write-tree` does not exist in this git — my "both conflict" ruling was the command failing (B merged clean); and I tore down Rio's worktree mid-tier, making his log unreadable (Cheech: maya's full unit at `1c319db0` is the count of record).
+5. **Seat deaths**: Chloé's first seat died ~21:22 (replacement inherited her worktrees); I self-re-spun at 52% (#5) and again (#6) via the wake-proof path. All six seats reaped with mementos (`io/mementos/`), all crew worktrees/branches removed.
+
+**Checkpoint**: rows closed 0795b5d8 · 14172091 · 10c60712 · 82fb9fcb · 25ff8360; my own 1e597a65 (Cheech's GO) and cdfedc41 (Cheech 10:00 EDT, María PASS on 1447261b) blocked with chases; Rick's what-next ask timed out → hold until morning; NOT pushed (María/Cheech own tonight's push). Follow-ups, no rows per Rick's ban: FastAPI docs regen after bounce · lupin-mobile submit → 410 · `NotificationsHeaderRenderer.ts` TS coverage gap (pre-existing, Chloé's c8 baseline) · Rachel's monopolize-lineage red + two podcast dry-run reds at the head.
+**Files**: `src/rnd/v0.2.0/2026.08.21-mr-radio-cascade-resume-memento.md` · `src/rnd/v0.2.0/2026.08.21-router-label-fix.md` · `src/scripts/router_label_audit.py` · `src/tests/unit/test_router_label_audit.py` · `src/tests/unit/test_router_corpus_consistency.py` · `io/mementos/{john,clayton,rio,sam,chloe-3f3ad005,tiberius}.md`
+
 ### 2026.08.20 - Session f14d7ec6 (Krishna 🦚, for Cheech 🌿) | A red that only appeared under a relative PYTHONPATH, and a flag the poke told you to use
 
 **Row `19a417fa` — the unit tier swept end to end under a correct environment: 16,006 passed / 0 failed, cosa 8,750 / 0.** Tiberius's earlier full run used a relative `PYTHONPATH=src` and stopped at `-x`, so his 10,408/1 was superseded rather than wrong. All six "pre-existing" failures are green — five compose/env-contract arms caught up, and the sixth passes now that `b00b4d7a`'s `_subprocess_env()` stops it depending on how its caller was invoked. Zero failures meant no clean-HEAD comparison was needed.

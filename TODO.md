@@ -1,5 +1,20 @@
 # TODO
 
+## ☕ TONIGHT 2026-08-21 (Mr. Radio 🦉 `e9a672a2`, crew of six) — four branches landed, board to zero; follow-ups kept OUT of the store per Rick's no-new-BUG-rows order
+
+**Landed**: A router-label-fix → wip `decae6c7` (0 corpus lines move; rule doc + `router_label_audit.py` + lint test) · B claude-code v2 submit → integration `1c319db0` · C expeditor per-call state → `24c3b3ba` · D xfail-blanket strip → `af9f557d` (and fixed dead Replay on done jobs). Rows 0795b5d8 · 14172091 · 10c60712 · 82fb9fcb · 25ff8360 closed with receipts.
+
+**Follow-ups (backlog, not rows — promote when Rick lifts the ban)**:
+- [ ] Regenerate FastAPI docs (`generate-api-docs.sh` → `api.json`/`api.md`) after the next `:7999` bounce picks up B's 410 doors — needs a live server (Rio's doc `src/rnd/v0.2.0/2026.08.21-claude-code-doors-external-callers.md`).
+- [ ] lupin-mobile's one claude-code submit call site now answers 410 — owed in the mobile repo (same doc).
+- [ ] `NotificationsHeaderRenderer.ts` TS coverage 99.31 stmts / 92.94 branch (lines 394, 424-425) fails the enforced 100% gate; pre-existing, proven by Chloé's c8 baseline at f4a8bee4 — owner of the renderer.
+- [ ] Pre-existing reds at the integration head: `test_no_router_in_the_tree_is_unmatched` (Rachel, door 10) + two podcast dry-run tests; maya's full unit at `1c319db0` is the count of record (Cheech).
+- [ ] `notifications.js:6187-6193` inert bare `${queueName}_jobs` fallback — two-line deletion for whoever is next in that region (Sam).
+- [ ] Two order-effect reds in whole-run unit tiers (presentation dry-run banner, v2 cache lancedb closure) pass alone — worth a fixture look (Tiberius).
+- [ ] Tooling: `git merge-tree --write-tree` is NOT in this git — use `git merge-tree $(git merge-base A B) A B | grep -c '^<<<<<<<'` for conflict checks (cost one false "both conflict" ruling tonight).
+
+**Mine, still open in the store**: 1e597a65 (step-13 dump, Cheech's GO after 9a/9b) · cdfedc41 (brake-flag protocol member, 1447261b, Cheech's 10:00 EDT window, María PASS). Memento: `src/rnd/v0.2.0/2026.08.21-mr-radio-cascade-resume-memento.md`.
+
 ## 🕳️ PATTERN 2026-08-20 (Tiberius 👑, recorded by Mr. Radio 🦉 `f60b686e`) — AN INSTRUMENT THAT ERASES ITS OWN WITNESS: three sightings in one night, so design against it rather than fix it three times
 
 **The general form**: *a measurement whose population excludes failures cannot report failure.* Each sighting below looked healthy — that is the whole problem. None of the three announced anything; a person noticed the number was wrong.
