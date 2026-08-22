@@ -101,6 +101,22 @@ class TestConstruction( unittest.TestCase ):
         self.assertEqual( job.timeout_seconds, 3600 )
         self.assertEqual( job.state, JobState.PENDING )
 
+    def test_an_unknown_task_type_is_refused_at_construction( self ):
+        """
+        The Requires has always said BOUNDED or INTERACTIVE; nothing enforced it. An
+        unknown value was stored and then tested with `== "BOUNDED"` at every branch, so
+        a typo ran the task INTERACTIVE instead of failing — a fire-and-forget batch job
+        silently becoming one that waits for a human.
+
+        The check lives here rather than at a door because `/api/claude-code/submit` held
+        it as a 400 and is now a tombstone; `/api/v2/submit` validates that the required
+        ARGUMENTS are present, not which values they may take.
+        """
+        with self.assertRaises( ValueError ) as caught:
+            make_job( task_type="BOUNDEDD" )
+        self.assertIn( "BOUNDEDD", str( caught.exception ) )
+        self.assertIn( "BOUNDED or INTERACTIVE", str( caught.exception ) )
+
     def test_explicit_overrides( self ):
         job = make_job( task_type="INTERACTIVE", max_turns=200, timeout_seconds=120 )
         self.assertEqual( job.max_turns, 200 )

@@ -97,6 +97,17 @@ class _Pending:
     def set_status( self, *a, **kw ): return None                  # pragma: no cover - never resumed
 
 
+class _Receptionist:
+    """Stands in for the receptionist, so a degrade is observable without its stack."""
+
+    def __init__( self, **kwargs ):
+        self.kwargs          = kwargs
+        self.routing_command = "agent router go to receptionist"
+
+    def run_prompt( self, **kwargs ):                              # pragma: no cover - executor is real, job never runs
+        return "I do not understand"
+
+
 @pytest.fixture
 def queue():
     return _Queue()
@@ -108,6 +119,7 @@ def client( queue, tmp_path ):
         _Cache(), _Router(), _Expeditor(), QueuedExecutor( queue ), _Pending(),
         crud_enabled=False, similarity_floor=100.0, writeback_enabled=False,
         notifier=lambda request: None, agentic_factory=create_agentic_job,
+        receptionist_factory=_Receptionist,
         trace_dir=str( tmp_path ),
     )
     app = FastAPI()
@@ -204,3 +216,52 @@ def test_a_submit_with_no_prompt_is_refused_and_queues_nothing( client, queue ):
     assert body[ "args_missing" ] == [ "prompt" ],  body
     assert body[ "pending_id"   ] is None,          body
     assert queue.pushed == [ ]
+
+
+# ─────────────────────────────────────── the guard the retiring door held, and this one must
+
+def test_an_unknown_task_type_is_refused_and_queues_nothing( client, queue ):
+    """
+    THE ONE THING THE OLD DOOR DID THAT THE SHAPE ALONE DOES NOT CARRY.
+    `/api/claude-code/submit` upper-cased `task_type` and answered 400 for anything that
+    was not BOUNDED or INTERACTIVE. `/api/v2/submit` is generic — it validates `args`
+    against the command's argument contract, and that contract says nothing about which
+    VALUES `task_type` may take.
+
+    Left unguarded, "BOUNDEDD" reaches ClaudeCodeJob, which stores it and then tests it
+    with `== "BOUNDED"` at every branch (job.py:264, :354) — so a typo does not fail, it
+    silently runs an INTERACTIVE task that waits for a human who is not there. A
+    fire-and-forget batch job becoming an interactive one is not a smaller version of the
+    job the caller asked for.
+
+    The guard belongs to the JOB, not to the door: the job's own docstring already
+    promises `task_type is "BOUNDED" or "INTERACTIVE"`, and putting it there covers the
+    voice path and the in-process callers too, not just this one endpoint.
+
+    RED BEFORE THE FIX: this failed with the job queued and `task_type == "BOUNDEDD"`.
+    """
+    args = { "prompt": "Run the unit suite", "project": "lupin", "task_type": "BOUNDEDD" }
+    body = _submit( client, args=args ).json()
+    assert queue.pushed == [ ], (
+        f"a job with task_type=BOUNDEDD was queued: {getattr( queue.pushed[ 0 ], 'task_type', None )!r}"
+    )
+    assert body[ "path" ] == "receptionist", body
+    assert "BOUNDEDD" in ( body[ "error" ] or "" ), body[ "error" ]
+
+
+def test_task_type_is_still_case_insensitive( client, queue ):
+    """
+    The old door upper-cased before validating, so "bounded" was always legal. The guard
+    must not turn a case difference into a refusal — that would break a caller the
+    retiring door served.
+    """
+    args = { "prompt": "Run the unit suite", "project": "lupin", "task_type": "bounded" }
+    _submit( client, args=args )
+    assert queue.pushed[ 0 ].task_type == "BOUNDED"
+
+
+def test_an_interactive_claude_code_submit_still_works( client, queue ):
+    """The other legal value — the guard must admit both, not just the default."""
+    args = { "prompt": "Pair with me on the parser", "project": "lupin", "task_type": "INTERACTIVE" }
+    _submit( client, args=args )
+    assert queue.pushed[ 0 ].task_type == "INTERACTIVE"
