@@ -79,6 +79,64 @@ class TestOptionValueDriftControl( unittest.TestCase ):
         self.assertEqual( problems, [], f"a matching set must be clean: {problems}" )
 
 
+class TestTheDiscriminatorIsManufactured( unittest.TestCase ):
+    """Gate 3's discriminator does not exist in today's data, so the control has to
+    MANUFACTURE it (Clayton 😎 / Mr Radio, 2026-08-22, recorded in the plan review §1).
+
+    Measured on the live registry: `user_initiable - speakable` is EMPTY. The only two
+    commands separating the sets are `agent router go to automatic` (CONTROL) and
+    `none` (the internal no-command outcome) — neither is an agent, and no dropdown
+    filter would carry either. So a gate written on `user_initiable` and one written
+    on `speakable` are green on exactly the same inputs today: revert the fix and
+    nothing reds. A gate whose discriminator is absent from the data asserts nothing.
+
+    These tests supply the missing case synthetically. They are what makes the
+    `speakable` -> `user_initiable` rewrite mean something before the first
+    typeable-but-not-sayable command is ever added."""
+
+    # A command a person may TYPE but must not be offered by VOICE. Synthetic on
+    # purpose: the real registry has no such command yet, which is the entire point.
+    TYPEABLE_NOT_SAYABLE = "agent router go to test fix expediter resume"
+
+    def _dropdown_from( self, specs, field ):
+        """Build the option-value set a dropdown filtered on `field` would render."""
+        return { s[ "command" ] for s in specs if s[ field ] }
+
+    def test_a_speakable_filter_SILENTLY_DROPS_a_typeable_not_sayable_command( self ):
+        specs = [
+            { "command": "agent router go to math",   "speakable": True,  "user_initiable": True },
+            { "command": self.TYPEABLE_NOT_SAYABLE,   "speakable": False, "user_initiable": True },
+        ]
+        expected = self._dropdown_from( specs, "user_initiable" )
+
+        # The CORRECT filter carries it...
+        self.assertEqual( option_value_drift( sorted( expected ), expected ), [] )
+
+        # ...and the WRONG one (the pre-fix gate) drops it with no complaint of its
+        # own — the predicate is what turns that silence into a red.
+        wrong    = self._dropdown_from( specs, "speakable" )
+        problems = option_value_drift( sorted( wrong ), expected )
+        self.assertTrue(
+            any( p.startswith( "MISSING" ) and self.TYPEABLE_NOT_SAYABLE in p for p in problems ),
+            f"a speakable-filtered dropdown must go RED against a user_initiable oracle: {problems}"
+        )
+
+    def test_the_two_filters_are_indistinguishable_without_the_manufactured_case( self ):
+        # The negative control, and the reason the case above must be synthetic: when
+        # no command is typeable-but-not-sayable, both filters produce the SAME set and
+        # the gate cannot tell a correct implementation from a reverted one. If this
+        # ever fails, the real registry has grown the discriminating command and the
+        # synthetic case above can be retired in favour of it.
+        specs = [
+            { "command": "agent router go to math",    "speakable": True, "user_initiable": True },
+            { "command": "agent router go to weather", "speakable": True, "user_initiable": True },
+        ]
+        self.assertEqual(
+            self._dropdown_from( specs, "speakable" ),
+            self._dropdown_from( specs, "user_initiable" )
+        )
+
+
 class TestCheckedInOracle( unittest.TestCase ):
     """The oracle reader itself, against the real tree."""
 
