@@ -41,6 +41,7 @@ class MockJob:
         self.error                = None
         self.scheduled_at         = None
         self.monopolize           = False
+        self.brake_terminal_claimed = False
 
     def do_all( self ):
         return "done"

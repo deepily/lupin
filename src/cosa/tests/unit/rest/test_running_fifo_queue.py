@@ -44,6 +44,7 @@ class _Job:
             state=None, error=None, artifacts={}, solution_summary_gist="gist",
             solution_summary="summary", thoughts="thoughts", runtime_stats={},
             answer_is_correct=None, question="what time is it?",
+            brake_terminal_claimed=False,   # protocol member (row cdfedc41) — read directly by the brake
             _do_all_return="output", _do_all_exc=None, _code_ok=True, _fmt_ok=True,
             _code_response={ "return_code": 0, "output": "ok" }, _formatted="fmt",
         )
@@ -513,7 +514,7 @@ class TestRuntimeBrakeLegBC( _RFQBase ):
             with self.assertRaises( RuntimeError ):
                 rq._transition_to_dead( job, "cause" )
             # Claim rolled back → a retry is permitted (not wedged).
-            self.assertFalse( getattr( job, "_brake_terminal_claimed", False ) )
+            self.assertFalse( job.brake_terminal_claimed )
             self.assertEqual( rq.jobs_dead_queue.push.call_count, 0 )   # nothing pushed on the failed attempt
             # Retry: emit now succeeds → transition completes.
             self.emit.side_effect = None
@@ -533,7 +534,7 @@ class TestRuntimeBrakeLegBC( _RFQBase ):
         with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
             with self.assertRaises( RuntimeError ):
                 rq._transition_to_dead( job, "cause" )
-        self.assertFalse( getattr( job, "_brake_terminal_claimed", False ) )   # claim rolled back
+        self.assertFalse( job.brake_terminal_claimed )   # claim rolled back
         ev.assert_not_called()                                                # auto-fix never reached
 
     # ---- Leg (c) P3: _transition_to_done claims the marker → closes done->dead race ----
@@ -558,7 +559,7 @@ class TestRuntimeBrakeLegBC( _RFQBase ):
         self.emit.side_effect = RuntimeError( "emit boom" )
         with self.assertRaises( RuntimeError ):
             rq._transition_to_done( job, "out" )
-        self.assertFalse( getattr( job, "_brake_terminal_claimed", False ) )   # rolled back
+        self.assertFalse( job.brake_terminal_claimed )   # rolled back
         # follow-on dead-letter now succeeds (not wedged)
         self.emit.side_effect = None
         with patch.object( rq, "_evaluate_for_auto_fix" ):
@@ -581,11 +582,56 @@ class TestRuntimeBrakeLegBC( _RFQBase ):
         self.emit.side_effect = RuntimeError( "emit boom" )
         with self.assertRaises( RuntimeError ):
             rq._transition_to_stalled( job, "out" )
-        self.assertFalse( getattr( job, "_brake_terminal_claimed", False ) )   # rolled back
+        self.assertFalse( job.brake_terminal_claimed )   # rolled back
         self.emit.side_effect = None
         with patch.object( rq, "_evaluate_for_auto_fix" ):
             rq._transition_to_dead( job, "cause" )
         rq.jobs_dead_queue.push.assert_called_once_with( job )
+
+
+# ── The brake flag is part of the contract, not a private write ──────────────
+class TestBrakeFlagIsDeclaredOnTheProtocol( unittest.TestCase ):
+    """
+    The runtime brake marks a job terminal by writing `brake_terminal_claimed`
+    on the job object from OUTSIDE its class. For that to be a contract rather
+    than a private write, QueueableJob must DECLARE the attribute, and the
+    protocol gate (is_queueable_job) must REFUSE a job that lacks it — so a new
+    job class cannot enter the queue without carrying the flag the brake depends
+    on. Delete the declaration and BOTH tests go red: the first because the name
+    is gone from the protocol, the second because the gate then admits a job
+    that does not carry the flag.
+    """
+
+    def test_protocol_declares_the_flag_the_brake_writes( self ):
+        from cosa.rest.queue_protocol import QueueableJob
+        self.assertIn( "brake_terminal_claimed", QueueableJob.__annotations__ )
+        self.assertIs( QueueableJob.__annotations__[ "brake_terminal_claimed" ], bool )
+
+    def test_push_gate_refuses_a_job_without_the_flag_and_admits_one_with_it( self ):
+        # Arm 2 of the proof (row cdfedc41): not "the test notices the declaration" but
+        # "the GATE notices a non-conforming job" — driven through the real FifoQueue.push(),
+        # the one door every job passes on its way into a queue (fifo_queue.py).
+        from cosa.rest.fifo_queue import FifoQueue
+        from cosa.rest.queue_protocol import QueueableJob
+        # Every OTHER declared member is taken from the protocol itself, so this test
+        # does not hard-code the member list and rot when the protocol grows.
+        others = [ m for m in QueueableJob.__annotations__ if m != "brake_terminal_claimed" ]
+
+        class _AlmostAJob:
+            def do_all( self ): return ""
+            def code_ran_to_completion( self ): return True
+            def formatter_ran_to_completion( self ): return True
+
+        almost = _AlmostAJob()
+        for m in others: setattr( almost, m, None )
+        almost.id_hash = "almost-1"
+        q = FifoQueue( websocket_mgr=None, queue_name="probe", emit_enabled=False )
+        with self.assertRaises( TypeError ):          # lacks the flag → refused at push
+            q.push( almost )
+        self.assertEqual( q.size(), 0 )
+        almost.brake_terminal_claimed = False
+        q.push( almost )                              # carries it → admitted
+        self.assertEqual( q.size(), 1 )
 
 
 # ── get_pool_status ─────────────────────────────────────────────────────────

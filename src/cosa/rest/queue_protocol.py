@@ -137,6 +137,21 @@ class QueueableJob( Protocol ):
     monopolize: bool
     """If True, this job runs exclusively — no other jobs process until it completes."""
 
+    # =========================================================================
+    # Runtime Brake (leg c — terminal-transition idempotency)
+    # =========================================================================
+
+    brake_terminal_claimed: bool
+    """
+    Set True by RunningFifoQueue._claim_terminal_reclaim the first time a
+    terminal transition (done / stalled / dead) claims this job OBJECT, so a
+    racing second transition no-ops; released back to False if the guarded
+    transition raised mid-flight. Written by the QUEUE, not the job — declared
+    here so every job class carries it from construction (default False) and
+    the protocol gate refuses one that does not, instead of the queue writing a
+    private attribute no interface names.
+    """
+
     # NOTE: paused boolean removed — absorbed into JobState.PAUSED
     # Check job.state == JobState.PAUSED instead of job.paused
 
@@ -231,6 +246,7 @@ def quick_smoke_test():
             error                 = None
             scheduled_at          = None
             monopolize            = False
+            brake_terminal_claimed = False
 
             def do_all( self ):
                 return "done"

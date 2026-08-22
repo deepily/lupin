@@ -280,6 +280,9 @@ class SolutionSnapshot( RunnableCode ):
         self.scheduled_at          = None
         self.monopolize            = False
 
+        # Runtime brake marker (QueueableJob protocol) — written by RunningFifoQueue, never here
+        self.brake_terminal_claimed = False
+
         # Is there is no synonymous questions to be found then just recycle the current question
         # Handle corrupted data: ensure synonymous_questions is a valid dict/OrderedDict
         if not isinstance( synonymous_questions, dict ):

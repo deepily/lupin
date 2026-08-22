@@ -116,6 +116,9 @@ class AgenticJobBase( ABC ):
         self.scheduled_at          = scheduled_at   # ISO datetime string or None (immediate)
         self.monopolize            = monopolize      # Exclusive execution flag
 
+        # Runtime brake marker (QueueableJob protocol) — written by RunningFifoQueue, never here
+        self.brake_terminal_claimed = False
+
         # Lineage (bug 3a14292b): id_hash of the monopolize job that SPAWNED this
         # job, or None. When set AND equal to the pool's active monopolizer, the
         # consumer's Gate B admits this child THROUGH the intake hold instead of
