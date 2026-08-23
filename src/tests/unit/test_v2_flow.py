@@ -3347,3 +3347,133 @@ class TestTheFlowAsksAboutANearMatch:
 
         assert cache.lookup_calls == []
         assert confirmer.requests == []
+
+
+# ── the receptionist as a DESTINATION, not only a fallback (bug 1568269d) ─────
+#
+# "agent router go to receptionist" is a selectable command with its own training
+# utterances, but its spec is cls=NONE / factory=None, so neither reader resolves it
+# and the flow reached the receptionist through the DEGRADE door answering
+# route_reason="unknown_command". A user who ASKED FOR the receptionist was therefore
+# answered as though routing had FAILED, and a deliberate pick, a garbage command and
+# an unroutable question were identical on path, route_reason AND command.
+#
+# The fix is a LABEL: same path, same receptionist, a route_reason naming the door.
+
+RECEPTIONIST = "agent router go to receptionist"
+
+
+def test_asking_for_the_receptionist_is_not_reported_as_a_routing_failure( tmp_path, notifier, monkeypatch ):
+    """THE BUG. The router picks the receptionist on purpose; the answer must say so."""
+    monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter( command=RECEPTIONIST ), FakeExpeditor(),
+                    FakeExecutor(), FakePending(), notifier )
+    r = f.ask( "receptionist, please", **_CTX )
+    assert r[ "path" ]         == "receptionist"
+    assert r[ "route_reason" ] == "user_picked_receptionist"
+
+
+def test_submitting_the_receptionist_by_name_is_not_reported_as_a_routing_failure( tmp_path, notifier, monkeypatch ):
+    """The dropdown arm — a caller naming the command directly, same defect."""
+    monkeypatch.setattr( flow_mod, "resolve", lambda c, crud_enabled: None )
+    f = _submit_flow( tmp_path, notifier )
+    r = f.submit( command=RECEPTIONIST, args={}, **_CTX )
+    assert r[ "path" ]         == "receptionist"
+    assert r[ "route_reason" ] == "user_picked_receptionist"
+
+
+def test_the_path_is_unchanged_so_nothing_downstream_has_to_learn_a_new_value( tmp_path, notifier, monkeypatch ):
+    """A label change, not a contract change: `path` stays the value cards render on."""
+    monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter( command=RECEPTIONIST ), FakeExpeditor(),
+                    FakeExecutor(), FakePending(), notifier )
+    picked   = f.ask( "receptionist, please", **_CTX )
+    degraded = _make_flow( tmp_path, FakeCache(), FakeRouter( command="agent router go to nowhere" ),
+                           FakeExpeditor(), FakeExecutor(), FakePending(), notifier ).ask( "?", **_CTX )
+    assert picked[ "path" ] == degraded[ "path" ] == "receptionist"
+
+
+# ── THE PROOF OBLIGATION: the marker must not be fakeable ─────────────────────
+
+@pytest.mark.parametrize( "router_command,expected_reason", [
+    ( "unknown",                          "router_error" ),      # the router itself gave up
+    ( "agent router go to nowhere at all", "unknown_command" ),  # neither reader knows it
+] )
+def test_a_degraded_receptionist_never_carries_the_deliberate_pick_marker(
+    tmp_path, notifier, monkeypatch, router_command, expected_reason
+):
+    """
+    A DEGRADED receptionist must never come back saying the user asked for it.
+
+    This is the assertion that made the fix worth keeping. `_receptionist` overwrites
+    the caller's command with its own on the way out, so EVERY degrade emits
+    command="agent router go to receptionist" — meaning a marker derived from the
+    EMITTED command would be set on all of these, and would look like a distinction
+    while making none. The helper reads the INCOMING command instead.
+    """
+    monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
+    f = _make_flow( tmp_path, FakeCache(), FakeRouter( command=router_command ), FakeExpeditor(),
+                    FakeExecutor(), FakePending(), notifier )
+    r = f.ask( "what is the weather", **_CTX )
+
+    assert r[ "command" ]      == RECEPTIONIST, "precondition: the degrade emits the receptionist command"
+    assert r[ "route_reason" ] == expected_reason
+    assert r[ "route_reason" ] != "user_picked_receptionist"
+
+
+def test_the_two_doors_are_distinguishable_on_route_reason_alone( tmp_path, notifier, monkeypatch ):
+    """
+    The conflation, stated as a test: path and command are IDENTICAL on both doors, so
+    route_reason is the only field that separates them. If this ever passes because the
+    paths or commands differ, the fix has drifted into a contract change.
+    """
+    monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
+
+    def _ask( command ):
+        return _make_flow( tmp_path, FakeCache(), FakeRouter( command=command ), FakeExpeditor(),
+                           FakeExecutor(), FakePending(), notifier ).ask( "q", **_CTX )
+
+    picked   = _ask( RECEPTIONIST )
+    degraded = _ask( "agent router go to nowhere at all" )
+
+    assert picked[ "path" ]    == degraded[ "path" ]
+    assert picked[ "command" ] == degraded[ "command" ]
+    assert picked[ "route_reason" ] != degraded[ "route_reason" ]
+
+
+def test_a_deliberate_pick_is_not_filed_in_the_trace_as_an_unknown_command( tmp_path, notifier, monkeypatch ):
+    """
+    The submit arm's `unknown_command` trace key is a FAULT RECORD. A deliberate pick is
+    not a fault, so filing one would put a clean request into whatever counts faults.
+    Spies on StageTrace.set rather than reading the response, because the key never
+    reaches the response — which is exactly why it could rot unnoticed.
+    """
+    monkeypatch.setattr( flow_mod, "resolve", lambda c, crud_enabled: None )
+
+    # Capture the UNPATCHED method ONCE. Re-reading it inside the helper would wrap the
+    # PREVIOUS run's spy, so the second call would also append to the first run's list —
+    # and the test would report the degrade's fault key against the deliberate pick.
+    real_set = flow_mod.StageTrace.set
+
+    def _keys_set_during( command ):
+        seen = []
+        monkeypatch.setattr( flow_mod.StageTrace, "set",
+                             lambda self, key, value: ( seen.append( key ), real_set( self, key, value ) )[ 1 ] )
+        result = _submit_flow( tmp_path, notifier ).submit( command=command, args={}, **_CTX )
+        return ( seen, result )
+
+    picked_keys,   picked   = _keys_set_during( RECEPTIONIST )
+    degraded_keys, degraded = _keys_set_during( "agent router go to nowhere" )
+
+    assert "unknown_command" not in picked_keys, "a deliberate pick was filed as a fault"
+    assert "unknown_command" in degraded_keys,   "precondition: a real unknown command IS filed"
+    assert picked[ "route_reason" ]   == "user_picked_receptionist"
+    assert degraded[ "route_reason" ] == "unknown_command"
+
+
+def test_the_helper_reads_the_incoming_command_not_the_emitted_one():
+    """Unit-level guard on the seam itself, independent of the flow's plumbing."""
+    assert AskFlow._unresolved_route_reason( RECEPTIONIST )                == "user_picked_receptionist"
+    assert AskFlow._unresolved_route_reason( "agent router go to math" )   == "unknown_command"
+    assert AskFlow._unresolved_route_reason( "unknown" )                   == "unknown_command"
+    assert AskFlow._unresolved_route_reason( "" )                          == "unknown_command"
