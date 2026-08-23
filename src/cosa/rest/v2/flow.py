@@ -1152,6 +1152,24 @@ class AskFlow:
         a marker both doors can set is worse than no marker, because it looks like a
         distinction. The degrade callers pass their own literal reason and never reach
         this helper at all, which is what makes the marker unfakeable by construction.
+
+        ⚠️ THE TWO DOORS DO NOT MEAN QUITE THE SAME THING BY "PICKED" (Clayton, via
+        Cheech, 2026-08-23). On `submit` the caller hands us the command, so a deliberate
+        pick is literal. On `ask` the command is the ROUTER's output — so the marker means
+        "the router classified this utterance as asking for the receptionist", which is a
+        model prediction, not a click.
+
+        That is still the right label, and here is the measurement that says so: the
+        router's own command list carries an explicit `none` for "I cannot place this"
+        (src/conf/prompts/agent-router-template-completion.txt), and `none` resolves here
+        to "unknown_command". So the receptionist is a POSITIVE choice in that list —
+        alongside datetime, weather and calendar, with 174 training utterances of its own
+        — and never the else-branch. A low-confidence router does not land here; it lands
+        on `none`.
+
+        What remains is ordinary router error: a MISclassification will carry this marker.
+        That is a wrong routing decision, not a wrong label for the decision that was made,
+        and it is not something this helper can or should second-guess.
         """
 
         return "user_picked_receptionist" if command == cls.RECEPTIONIST_COMMAND else "unknown_command"
