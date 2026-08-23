@@ -107,6 +107,40 @@ class AskResponse( BaseModel ):
     error          : Optional[ str ]     = Field( None, description="Degradation error string, when a stage failed" )
 
 
+class AgentOption( BaseModel ):
+    """One registry command, projected for a client that has to render it."""
+    command        : str             = Field( ..., description="The full routing string — the value a client sends back as `command` on /api/v2/submit" )
+    display_name   : str             = Field( ..., description="What to SHOW the user — the dropdown's option text, a proper name ('Date & Time'). CRUD-forked, so it names the agent that will actually run" )
+    label          : str             = Field( ..., description="What the user HEARS — lowercase prose for spoken text ('date and time'). A different register from display_name, not a duplicate of it; CRUD-forked too" )
+    cls            : str             = Field( ..., description="conversational | agentic | control | none" )
+    description    : Optional[ str ] = Field( None, description="One-line help text; None for commands nobody picks by hand" )
+    speakable      : bool            = Field( ..., description="Belongs in the voice router prompt" )
+    user_initiable : bool            = Field( ..., description="A person may start this by typing into the Q&A card. NOT derived from `speakable` — see registry.AgentSpec" )
+    aliases        : list            = Field( default_factory=list, description="Registered short forms" )
+    required_args  : list            = Field( default_factory=list, description="Argument names this command needs before it can run" )
+    arg_questions  : dict            = Field( default_factory=dict, description="Per-argument question text, for an inline argument interview" )
+    job_prefix     : Optional[ str ] = Field( None, description="Agentic job-id prefix (dr, pg, cc, swe, …); None for non-agentic" )
+
+
+class AutoRouteOption( BaseModel ):
+    """The dropdown's 'no command named — let the router decide' entry.
+
+    Carried in the RESPONSE rather than hand-written into the page, so the front end
+    holds no agent list of its own at all — not even the one legitimate option. See
+    registry.AUTO_ROUTE_VALUE for why that is a named sentinel and not an exemption
+    written into a guard.
+    """
+    value       : str = Field( ..., description="Sentinel option value; never a registry command" )
+    label       : str = Field( ..., description="What to show the user" )
+    description : str = Field( ..., description="One-line help text" )
+
+
+class AgentsResponse( BaseModel ):
+    """Response for GET /api/v2/agents."""
+    auto_route : AutoRouteOption
+    agents     : list[ AgentOption ]
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Factory + dependency seam
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -239,6 +273,90 @@ def get_ask_flow() -> Any:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Endpoint
 # ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get( "/api/v2/agents", response_model=AgentsResponse )
+async def v2_agents(
+    current_user : dict = Depends( get_current_user ),
+    flow         : Any  = Depends( get_ask_flow ),
+) -> AgentsResponse:
+    """List every command the registry knows — a PURE PROJECTION of REGISTRY.
+
+    The read endpoint the front end was missing (2026.08.22 plan §5.1). The Q&A
+    card's agent list used to be sixteen hand-typed `<option>` tags in
+    notifications.html, one of five hand-maintained lists describing the same set;
+    this door is how that list stops being written by hand.
+
+    PURE PROJECTION means: every registry command appears, exactly once, carrying
+    its own fields. Nothing is filtered here — not the two expediters, not the
+    control command, not `none`. A client renders what it should render by reading
+    `user_initiable` (the Q&A dropdown) or `speakable` (a voice surface); the door
+    does not decide that for them, because the moment it filters, the set-equality
+    that proves the door matches the table stops being checkable.
+
+    WHY IT DEPENDS ON THE FLOW. It needs `crud_enabled` — the labels must name the
+    agent that will ACTUALLY run, so `todo` reads "todo (CRUD)" when the fork is on.
+    Reading the INI key here would be a FOURTH read of `crud for dataframes agents
+    enabled`, and a fourth read is a fourth thing to drift. The flow already holds
+    the value it will itself route with, so the label a user picks and the agent
+    they get cannot disagree. The 503 that comes with the dependency is coherent:
+    when `v2 flow enabled` is off, /api/v2/submit is off too, and a dropdown that
+    drives it has nothing to drive.
+
+    Requires:
+        - an authenticated user (get_current_user).
+
+    Ensures:
+        - `agents` carries one entry per REGISTRY command — set-equal to REGISTRY,
+          which is the §6 gate 1 assertion.
+        - the CRUD fork is applied exactly as resolve() applies it, by calling
+          resolve() itself rather than reimplementing the fork.
+        - `auto_route` carries the sentinel option, so the page hand-writes no
+          option at all.
+        - never 500s for an unknown-shaped spec: every field read is declared on
+          AgentSpec or on the command's JOB_ARG_CONTRACTS entry.
+    """
+    from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
+    from cosa.rest.v2.registry import (
+        AUTO_ROUTE_DESCRIPTION, AUTO_ROUTE_LABEL, AUTO_ROUTE_VALUE, REGISTRY, resolve,
+    )
+
+    agents = []
+    for command, spec in REGISTRY.items():
+        # resolve() returns the CRUD-forked spec for a conversational command and
+        # None for every other class — so `or spec` is the fork for the six that
+        # have one and identity for the rest. Calling resolve() instead of copying
+        # its `if crud_enabled and spec.crud_factory` test is the whole point: one
+        # implementation of the fork, not two that can disagree.
+        effective = resolve( command, flow.crud_enabled ) or spec
+        entry     = JOB_ARG_CONTRACTS.get( command, {} )
+        agents.append( AgentOption(
+            command        = command,
+            # BOTH user-facing strings, because they are different registers: one is
+            # read in a dropdown, one is spoken. A command with neither
+            # (`agent router go to automatic`, `none`) falls back to its own command
+            # string — nobody renders those, and an invented name would be the one
+            # string in this response that came from nowhere.
+            display_name   = effective.display_name or command,
+            label          = effective.label or effective.display_name or command,
+            cls            = effective.cls.value,
+            description    = effective.description,
+            speakable      = effective.speakable,
+            user_initiable = effective.user_initiable,
+            aliases        = list( effective.aliases ),
+            required_args  = list( effective.required_args ),
+            arg_questions  = dict( entry.get( "fallback_questions", {} ) ),
+            job_prefix     = entry.get( "job_prefix" ),
+        ) )
+
+    return AgentsResponse(
+        auto_route = AutoRouteOption(
+            value       = AUTO_ROUTE_VALUE,
+            label       = AUTO_ROUTE_LABEL,
+            description = AUTO_ROUTE_DESCRIPTION,
+        ),
+        agents = agents,
+    )
+
 
 @router.post( "/api/v2/ask", response_model=AskResponse )
 async def v2_ask(
