@@ -156,13 +156,28 @@ export function renderAgentSelect( selectEl, payload ) {
  *
  * Ensures:
  *     - Returns true for the sentinel, false for any command
- *     - Returns true when the payload is missing, so a page whose fetch failed
- *       falls back to auto-routing (/api/v2/ask) instead of posting a bare sentinel
- *       to /api/v2/submit as though it were a command
+ *     - Returns true when NO sentinel was named at all — a missing payload, a body
+ *       with no auto_route, or an auto_route carrying no `value` string. A page whose
+ *       fetch failed falls back to auto-routing (/api/v2/ask) rather than posting a
+ *       bare sentinel to /api/v2/submit as though it were a command
+ *     - A sentinel that WAS named but is the empty string is compared, not waved
+ *       through: "" is a legitimate option value (it is the conventional HTML
+ *       no-selection value), and the equality already answers it correctly — "" is
+ *       the sentinel, anything else is a command
+ *
+ * WHY THE TEST IS `typeof … !== "string"` AND NOT `!autoRoute.value`. The falsy check
+ * collapsed two different situations: "there is no sentinel to compare against"
+ * (an absent measurement — fail open) and "the sentinel is empty" (a present value —
+ * comparable). Under the falsy check a blank sentinel made this return true for
+ * EVERY pick, so the command the user chose was silently discarded and everything
+ * auto-routed. Nothing errored and nothing looked wrong. The unit guard could not see
+ * it either: `assert auto["value"] == AUTO_ROUTE_VALUE` reads the same constant on
+ * both sides, so it stayed green with the sentinel blanked (measured 2026-08-23; a
+ * truthiness assert now sits beside it in test_v2_agents_endpoint.py).
  */
 export function isAutoRoute( value, payload ) {
     const autoRoute = payload && payload.auto_route;
-    if ( !autoRoute || !autoRoute.value ) return true;
+    if ( !autoRoute || typeof autoRoute.value !== "string" ) return true;
     return value === autoRoute.value;
 }
 

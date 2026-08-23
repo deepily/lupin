@@ -398,6 +398,13 @@ class TestAutoRouteSentinel:
 
     def test_auto_route_is_served( self ):
         auto = _agents()[ "auto_route" ]
+        # The equality alone is a TAUTOLOGY: both sides read the same constant, so it
+        # stays green even if the sentinel is blanked to "". The tell was already in
+        # this block — `label` and `description` are checked for truthiness and
+        # `value` was not. A blank sentinel makes isAutoRoute() return true for EVERY
+        # pick (agent-select.js), so the user's chosen command is silently discarded
+        # and everything auto-routes. Silent and total is the expensive kind.
+        assert auto[ "value" ]
         assert auto[ "value" ] == AUTO_ROUTE_VALUE
         assert auto[ "label" ]
         assert auto[ "description" ]
