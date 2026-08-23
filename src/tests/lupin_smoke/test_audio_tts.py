@@ -222,11 +222,14 @@ class AudioTTSSmokeTests:
             
             self.validator.assert_websocket_event(ping_event, "sys_ping")
             
-        except Exception as e:
-            # Audio WebSocket might have different behavior
+        except TimeoutError as e:
+            # No ping arrived inside the window — the one outcome worth tolerating
+            # here, since ping cadence is timing-dependent. This used to be a bare
+            # `except Exception`, which also swallowed the assert_websocket_event
+            # below it (that helper raises AssertionError), so a malformed ping
+            # event could not fail the test.
             if self.debug:
-                print(f"[DEBUG] Audio WebSocket test: {e}")
-            pass
+                print(f"[DEBUG] Audio WebSocket ping not seen within timeout: {e}")
             
         finally:
             await self.client.close_websocket(websocket)
@@ -253,6 +256,19 @@ class AudioTTSSmokeTests:
             while time.time() - timeout_start < 10.0:  # 10 second timeout
                 try:
                     event = await asyncio.wait_for(websocket.recv(), timeout=2.0)
+                    
+                    # Audio chunks arrive as BINARY frames — recv() hands back
+                    # bytes, and json.loads chokes on the first one ("'utf-8'
+                    # codec can't decode byte 0xff in position 0", 0xff being an
+                    # MP3 frame header). That is the streaming path working, not
+                    # failing, so the frame is counted and skipped rather than
+                    # parsed. The old `except Exception: pass` around this whole
+                    # block hid the decode error entirely, which is why a test
+                    # that cannot read the stream it subscribes to still passed.
+                    if isinstance(event, (bytes, bytearray)):
+                        events_received.append("audio_streaming_chunk")
+                        continue
+                    
                     event_data = json.loads(event)
                     event_type = event_data.get("type")
                     
@@ -275,16 +291,15 @@ class AudioTTSSmokeTests:
                 except asyncio.TimeoutError:
                     break
             
-            # We might not receive events in test environment, which is OK
+            # We might not receive events in test environment, which is OK —
+            # the inner `except asyncio.TimeoutError: break` above already covers
+            # that. There used to be an outer `except Exception: pass` here as
+            # well, which additionally swallowed the assert_response_ok on the TTS
+            # request and both assert_json_contains calls on the event payloads,
+            # so a failed TTS request or a malformed event could not fail the test.
             if self.debug:
                 print(f"[DEBUG] Audio events received: {events_received}")
                 
-        except Exception as e:
-            if self.debug:
-                print(f"[DEBUG] Audio streaming test: {e}")
-            # This test might not work in all environments
-            pass
-            
         finally:
             await self.client.close_websocket(websocket)
     
@@ -317,15 +332,14 @@ class AudioTTSSmokeTests:
             assert first_data["status"] in ["success", "processing"]
             assert second_data["status"] in ["success", "processing"]
             
-            # Try cached speech endpoint if available
-            try:
-                cached_response = await self.audio_helper.get_cached_speech(test_text)
-                # This endpoint might not exist or might return 404 if not cached
-                assert cached_response.status_code in [200, 404, 501], \
-                    "Cached speech endpoint should handle requests gracefully"
-            except Exception:
-                # Cached endpoint might not be implemented
-                pass
+            # Try cached speech endpoint if available.
+            # The "cached endpoint might not be implemented" case is already
+            # covered by the status codes accepted below — an unrouted path
+            # answers 404, it does not raise — so the `except Exception: pass`
+            # that used to wrap this only ever caught the assertion itself.
+            cached_response = await self.audio_helper.get_cached_speech(test_text)
+            assert cached_response.status_code in [200, 404, 501], \
+                f"Cached speech endpoint should handle requests gracefully, got {cached_response.status_code}"
                 
         finally:
             await self.client.close_websocket(audio_ws)
@@ -372,23 +386,27 @@ class AudioTTSSmokeTests:
     
     async def test_audio_authentication(self):
         """Test audio endpoint authentication requirements."""
-        # Test without authentication
-        try:
-            headers = {}  # No auth header
-            response = await self.client.http_request(
-                "POST", 
-                "/api/get-speech", 
-                json={
-                    "session_id": self.client.session_id,
-                    "text": "Test message"
-                },
-                headers=headers
-            )
-            # Should either require auth or allow without auth
-            assert response.status_code in [200, 401], \
-                "Audio endpoint should handle auth consistently"
-        except Exception:
-            pass
+        # Test without authentication.
+        #
+        # Two things used to be wrong here at once. The `except Exception: pass`
+        # swallowed the assertion, and `headers = {}` never produced an
+        # unauthenticated request — LupinTestClient.http_request re-attaches the
+        # bearer token whenever the caller supplies no Authorization key, and an
+        # empty dict has none. So this sent a fully authenticated request, got
+        # 200, and passed on the wrong branch of an assertion that accepted both.
+        #
+        # Now it genuinely sends no token, and requires the refusal.
+        response = await self.client.http_request(
+            "POST",
+            "/api/get-speech",
+            json={
+                "session_id": self.client.session_id,
+                "text": "Test message"
+            },
+            authenticate=False
+        )
+        assert response.status_code == 401, \
+            f"Unauthenticated /api/get-speech should be rejected with 401, got {response.status_code}"
         
         # Test with authentication (normal case) - establish WebSocket first
         audio_ws = await self.client.websocket_connect(

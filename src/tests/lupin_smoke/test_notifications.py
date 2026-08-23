@@ -110,19 +110,34 @@ class NotificationSmokeTests:
     
     async def test_notify_endpoint_validation(self):
         """Test /api/notify endpoint input validation."""
-        # Test missing API key
-        try:
-            params = {
-                "message"     : "Test message",
-                "type"        : "custom",
-                "priority"    : "medium",
-                "target_user" : self.test_email
-                # Missing api_key
-            }
-            response = await self.client.http_request("POST", "/api/notify", params=params)
-            assert response.status_code == 422, "Should require api_key parameter"
-        except Exception:
-            pass  # Expected to fail
+        # Test that the endpoint refuses an unauthenticated caller.
+        #
+        # This check used to sit inside a try whose `except Exception: pass` was
+        # justified as "Expected to fail". Nothing here ever raised — a rejected
+        # request comes back as an ordinary response — so the handler only ever
+        # caught the assertion itself, and the check could not fail.
+        #
+        # Un-swallowing it exposed a second, older problem: it asserted 422 for a
+        # missing `api_key` QUERY parameter, and /api/notify has not worked that
+        # way for some time. Auth is now a dependency (require_api_key_or_jwt) that
+        # takes an X-API-Key header or a Bearer JWT, so a logged-in client passing
+        # no api_key is answered 200, correctly. The assertion had been wrong since
+        # auth moved into the middleware, and the swallow is why nobody found out.
+        #
+        # The intent worth keeping is "an unauthenticated caller is refused", so
+        # that is what is checked, with authenticate=False to actually send no
+        # token — `headers={}` does not, see LupinTestClient.http_request.
+        params = {
+            "message"     : "Test message",
+            "type"        : "custom",
+            "priority"    : "medium",
+            "target_user" : self.test_email
+        }
+        response = await self.client.http_request(
+            "POST", "/api/notify", params=params, authenticate=False
+        )
+        assert response.status_code == 401, \
+            f"Unauthenticated /api/notify should be rejected with 401, got {response.status_code}"
         
         # Test invalid priority
         response = await self.notification_helper.send_notification(

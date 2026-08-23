@@ -153,24 +153,22 @@ class QueueWorkflowSmokeTests:
     
     async def test_job_submission_validation(self):
         """Test job submission input validation."""
+        # Both checks below used to sit in a try whose `except Exception: pass`
+        # caught the assertion itself, so neither could fail. A push that raised,
+        # or answered 500, read as a pass.
+        
         # Test empty job
-        try:
-            response = await self.queue_helper.push_job("")
-            # Should either reject or handle gracefully
-            assert response.status_code in [200, 400], \
-                "Should handle empty job gracefully"
-        except Exception:
-            pass
+        response = await self.queue_helper.push_job("")
+        # Should either reject or handle gracefully
+        assert response.status_code in [200, 400], \
+            f"Should handle empty job gracefully, got {response.status_code}"
         
         # Test very long job
         long_message = "x" * 1000
-        try:
-            response = await self.queue_helper.push_job(long_message)
-            # Should either accept or reject gracefully
-            assert response.status_code in [200, 400], \
-                "Should handle long job gracefully"
-        except Exception:
-            pass
+        response = await self.queue_helper.push_job(long_message)
+        # Should either accept or reject gracefully
+        assert response.status_code in [200, 400], \
+            f"Should handle long job gracefully, got {response.status_code}"
         
         # Test job with special characters
         # TODO: Re-enable when Kagi API is stable — submits to live queue which routes to Kagi FastGPT
@@ -229,14 +227,14 @@ class QueueWorkflowSmokeTests:
             if self.debug:
                 print(f"[DEBUG] Queue events received: {events_received}")
             
-            # We might not receive events immediately in test environment
-            # That's OK - the important thing is the WebSocket connection works
-            
-        except Exception as e:
-            if self.debug:
-                print(f"[DEBUG] Queue WebSocket test: {e}")
-            # WebSocket events might not work in all test environments
-            pass
+            # We might not receive events immediately in test environment.
+            # That's OK — the important thing is the WebSocket connection works,
+            # and the inner `except asyncio.TimeoutError: continue` above already
+            # covers a quiet socket. There used to be an outer `except Exception:
+            # pass` here too, which additionally swallowed the assert_response_ok
+            # on the job push, the assert_json_contains on each event, and the
+            # integer-value assertion — so a rejected push or a malformed queue
+            # event could not fail this test.
             
         finally:
             await self.client.close_websocket(websocket)
@@ -295,39 +293,37 @@ class QueueWorkflowSmokeTests:
         """Test accessing queue contents if available."""
         queue_types = ["todo", "run", "done", "dead"]
         
+        # The "queue contents might not be accessible" case this loop used to
+        # tolerate with `except Exception: pass` is already handled explicitly by
+        # the 404 branch below. The handler only added blindness: it swallowed the
+        # assert_response_ok and both structural assertions, so a 500 response or a
+        # malformed queue item could not fail this test.
         for queue_type in queue_types:
-            try:
-                response = await self.queue_helper.get_queue_contents(queue_type)
-                
-                # Queue contents endpoint might not exist
-                if response.status_code == 404:
-                    if self.debug:
-                        print(f"[DEBUG] Queue contents endpoint not found for {queue_type}")
-                    continue
-                
-                self.validator.assert_response_ok(response, 200)
-                
-                data = response.json()
-                
-                # Should return list or dict with queue items
-                if isinstance(data, list):
-                    # List of queue items
-                    for item in data:
-                        if isinstance(item, dict):
-                            # Each item should have some basic structure
-                            assert "id" in item or "message" in item or "text" in item, \
-                                f"Queue item should have basic fields: {item}"
-                elif isinstance(data, dict):
-                    # Dict with queue info
-                    if "items" in data:
-                        assert isinstance(data["items"], list), \
-                            "Queue items should be a list"
-                
-            except Exception as e:
+            response = await self.queue_helper.get_queue_contents(queue_type)
+            
+            # Queue contents endpoint might not exist
+            if response.status_code == 404:
                 if self.debug:
-                    print(f"[DEBUG] Queue contents test for {queue_type}: {e}")
-                # Queue contents might not be accessible in all configurations
-                pass
+                    print(f"[DEBUG] Queue contents endpoint not found for {queue_type}")
+                continue
+            
+            self.validator.assert_response_ok(response, 200)
+            
+            data = response.json()
+            
+            # Should return list or dict with queue items
+            if isinstance(data, list):
+                # List of queue items
+                for item in data:
+                    if isinstance(item, dict):
+                        # Each item should have some basic structure
+                        assert "id" in item or "message" in item or "text" in item, \
+                            f"Queue item should have basic fields: {item}"
+            elif isinstance(data, dict):
+                # Dict with queue info
+                if "items" in data:
+                    assert isinstance(data["items"], list), \
+                        "Queue items should be a list"
     
     async def test_job_completion_flow(self):
         """Test complete job lifecycle if possible."""
@@ -370,34 +366,33 @@ class QueueWorkflowSmokeTests:
     
     async def test_queue_authentication(self):
         """Test queue endpoint authentication requirements."""
+        # Both blocks below had two faults at once. The `except Exception: pass`
+        # swallowed the assertion, and `headers = {}` never produced an
+        # unauthenticated request — LupinTestClient.http_request re-attaches the
+        # bearer token whenever the caller supplies no Authorization key, and an
+        # empty dict has none. So these sent fully authenticated requests, got
+        # 200, and passed on the wrong branch of an assertion that accepted both
+        # answers to the question it claimed to ask. They now genuinely send no
+        # token and require the refusal.
+        
         # Test without authentication
-        try:
-            headers = {}  # No auth header
-            response = await self.client.http_request(
-                "GET", 
-                "/api/get-queue/todo",
-                headers=headers
-            )
-            # Should either require auth or allow without auth
-            assert response.status_code in [200, 401], \
-                "Queue endpoint should handle auth consistently"
-        except Exception:
-            pass
+        response = await self.client.http_request(
+            "GET",
+            "/api/get-queue/todo",
+            authenticate=False
+        )
+        assert response.status_code == 401, \
+            f"Unauthenticated /api/get-queue/todo should be rejected with 401, got {response.status_code}"
         
         # Test job submission without auth
-        try:
-            headers = {}  # No auth header
-            response = await self.client.http_request(
-                "POST",
-                "/api/push",
-                json={"question": "Test message", "websocket_id": self.client.session_id},
-                headers=headers
-            )
-            # Should either require auth or allow without auth
-            assert response.status_code in [200, 401], \
-                "Job submission should handle auth consistently"
-        except Exception:
-            pass
+        response = await self.client.http_request(
+            "POST",
+            "/api/push",
+            json={"question": "Test message", "websocket_id": self.client.session_id},
+            authenticate=False
+        )
+        assert response.status_code == 401, \
+            f"Unauthenticated /api/push should be rejected with 401, got {response.status_code}"
         
         # Test with authentication (normal case)
         response = await self.queue_helper.get_queue_status("todo")
