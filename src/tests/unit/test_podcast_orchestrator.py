@@ -25,6 +25,7 @@ import asyncio
 import builtins
 from unittest.mock import MagicMock, AsyncMock, patch
 
+import re
 import pytest
 
 from cosa.agents.podcast_generator import orchestrator as orch_mod
@@ -1628,6 +1629,162 @@ class TestPresentScriptReviewPriority:
             f"the script-review gate must alert at high so the TTS reaches a "
             f"remote user; got {kwargs.get( 'priority' )!r}"
         )
+
+
+
+# ===========================================================================
+# Audio progress group tags (row 122f07a1)
+# ===========================================================================
+#
+# MOVED HERE FROM src/tests/unit/test_progress_group_passthrough.py, where these
+# were six `assert "<literal>" in inspect.getsource( ... )` checks. They live next
+# to _wire_pipeline / _wire_audio_only because that is the harness that can drive
+# the orchestrator; the passthrough file could only read the source text.
+#
+# TWO DIFFERENT FAILURES, NOT ONE. Both tag generators sit INSIDE the per-language
+# loop (orchestrator.py:706 and :709), so every language opens its own pair of UI
+# lines — hoist either above the loop and the source text is byte-identical while
+# Spanish silently overwrites English. That is a line in the wrong place. The
+# callback rule is a different animal: `_audio_progress_callback` reports under
+# whatever tag is on `self`, so a run that fails to open a fresh one silently
+# reports its percentages onto the PREVIOUS run's line. That is state leaking
+# across runs, and no loop-boundary mutation exercises it.
+
+_PG_RE = re.compile( r"^pg-[a-f0-9]{8}$" )
+
+# The per-language audio status notices, by message shape.
+_AUDIO_START  = r".+ audio generation \("
+_LANG_STATUS  = r"(.+ audio generation \(|Stitching .+ audio segments|.+ podcast complete!)"
+
+
+def _tags_for( notify_mock, pattern ):
+    """
+    Tags on notifications whose message matches `pattern`, in call order.
+
+    Matching a REGEX rather than a bare prefix on purpose: "Starting podcast
+    generation..." (orchestrator.py:408) is an untagged notice that a loose
+    "Starting " prefix sweeps in, putting a None in the result and making the
+    test fail for a reason that has nothing to do with the rule under test.
+    """
+    rx  = re.compile( pattern )
+    out = []
+    for c in notify_mock.await_args_list:
+        message = c.args[ 0 ] if c.args else ""
+        if not rx.match( message ): continue
+        out.append( c.kwargs.get( "progress_group_id" ) )
+    return out
+
+
+class TestAudioProgressGroupTags:
+
+    def _run_two_languages( self, notify ):
+        agent = _agent( target_languages=[ "en", "es-MX" ], research_doc_path="/proj/io/dr/report.md" )
+        async def save( s, is_revision=False, language="en" ):
+            return f"/proj/io/script-{language}.md"
+        async def stitch( tts, scr, language="en" ):
+            return f"/proj/io/audio-{language}.mp3"
+        _wire_pipeline( agent, save_path=save, audio_path=stitch )
+        notify[ "choices" ].side_effect = [
+            { "answers": { "Script Review": "Approve script" } },
+            { "answers": { "Mexican Spanish Review": "Approve script" } },
+        ]
+        with patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
+             patch( "os.path.exists", return_value=True ), \
+             patch( "pydub.AudioSegment.from_mp3", return_value=_FakeAudio( 60000 ) ):
+            _run( agent.do_all_async() )
+        return agent
+
+    def test_each_language_opens_its_own_audio_line( self, _silence_voice_io ):
+        """Two languages, two distinct tags on the "Starting ... audio" notices.
+
+        RED ON REVERT: hoist lang_audio_group_id above the language loop and
+        Spanish's status overwrites English's in the same UI slot.
+        """
+        self._run_two_languages( _silence_voice_io )
+        starts = _tags_for( _silence_voice_io[ "notify" ], _AUDIO_START )
+
+        assert len( starts ) == 2, f"expected one start notice per language, got {starts}"
+        assert len( set( starts ) ) == 2, (
+            f"each language must open its own audio line; both used {starts[ 0 ]}"
+        )
+        for tag in starts: assert _PG_RE.match( tag ), f"bad tag format: {tag!r}"
+
+    def test_one_language_s_start_stitch_and_complete_share_a_tag( self, _silence_voice_io ):
+        """A language's status notices update ONE line, not three.
+
+        RED ON REVERT: give the stitch or complete notify its own fresh tag and
+        the language's progress stops updating in place.
+        """
+        self._run_two_languages( _silence_voice_io )
+        trio = _tags_for( _silence_voice_io[ "notify" ], _LANG_STATUS )
+
+        assert len( trio ) >= 4, f"expected start+stitch+complete per language, got {trio}"
+        assert len( set( trio ) ) == 2, (
+            f"each language's status notices must share one tag, one tag per language; "
+            f"got {set( trio )}"
+        )
+
+    def test_the_milestone_tag_is_not_the_status_tag( self, _silence_voice_io ):
+        """Percentage milestones report on a different line from the status notices.
+
+        RED ON REVERT: set _audio_progress_group_id = lang_audio_group_id and the
+        percentage updates erase the "Stitching..." line, and vice versa.
+        """
+        agent  = self._run_two_languages( _silence_voice_io )
+        starts = set( _tags_for( _silence_voice_io[ "notify" ], _AUDIO_START ) )
+
+        assert _PG_RE.match( agent._audio_progress_group_id or "" ), \
+            f"no milestone tag was opened: {agent._audio_progress_group_id!r}"
+        assert agent._audio_progress_group_id not in starts, (
+            f"the milestone line and the status line must be different UI slots; "
+            f"both were {agent._audio_progress_group_id}"
+        )
+
+    def test_progress_callback_reports_under_the_tag_on_self( self, _silence_voice_io ):
+        """_audio_progress_callback tags its percentage notice with the live run's tag.
+
+        RED ON REVERT: pass a fresh tag (or None) at orchestrator.py:2077 and the
+        percentage updates detach from the run that produced them.
+        """
+        agent = _agent()
+        agent._reported_milestones     = set()
+        agent._audio_progress_group_id = "pg-deadbeef"
+
+        _run( agent._audio_progress_callback( current=5, total=10, speaker="Nora", eta_seconds=42.0 ) )
+
+        tags = _tags_for( _silence_voice_io[ "notify" ], r"Audio progress:" )
+        assert tags == [ "pg-deadbeef" ], f"expected the live run's tag, got {tags}"
+
+    def test_a_second_run_s_percentages_do_not_land_on_the_first_run_s_line( self, _silence_voice_io ):
+        """The stale-tag failure: back-to-back runs must not share a milestone line.
+
+        This is state leaking across runs, not a line in the wrong place — a run
+        that fails to open a fresh tag reports its percentages onto the previous
+        run's UI slot. RED ON REVERT: make do_audio_only_async keep whatever tag
+        is already on self instead of opening a new one.
+        """
+        # ONE agent, run twice — which is what a leak needs. Building a fresh
+        # agent per run hides the bug: `self._audio_progress_group_id` starts as
+        # None, so even a "keep the existing tag" implementation opens a new one
+        # and the test passes on a broken build. Caught by mutation, not review.
+        agent = _audio_agent()
+        _wire_audio_only( agent )
+        seen  = []
+        for _ in range( 2 ):
+            with patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
+                 patch( "os.path.exists", return_value=True ), \
+                 patch( "pydub.AudioSegment.from_mp3", return_value=_FakeAudio( 120000 ) ):
+                _run( agent.do_audio_only_async() )
+
+            agent._reported_milestones = set()
+            _run( agent._audio_progress_callback( current=5, total=10, speaker="Nora" ) )
+            seen.append( _tags_for( _silence_voice_io[ "notify" ], r"Audio progress:" )[ -1 ] )
+
+        for tag in seen: assert _PG_RE.match( tag or "" ), f"bad tag format: {tag!r}"
+        assert seen[ 0 ] != seen[ 1 ], (
+            f"the second run's percentages landed on the first run's line; both were {seen[ 0 ]}"
+        )
+
 
 
 if __name__ == "__main__":

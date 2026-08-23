@@ -243,12 +243,26 @@ class TestSweTeamHooksPassthrough:
 class TestPodcastGeneratorGroupIdGeneration:
     """Verify Podcast Generator generates valid progress group IDs."""
 
-    def test_audio_progress_group_id_attribute_exists( self ):
-        """PodcastOrchestratorAgent defines _audio_progress_group_id attribute."""
-        import inspect
+    def test_a_fresh_agent_has_no_audio_tag_yet( self ):
+        """A tag belongs to a RUN, not to the object — a new agent holds none.
+
+        Replaces a grep for the attribute name in __init__ (row 122f07a1). That
+        check passed on any build that merely mentioned the word; this one fails
+        if a stale tag is ever baked in at construction, which is what would make
+        two runs share a UI line.
+        """
         from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
-        source = inspect.getsource( PodcastOrchestratorAgent.__init__ )
-        assert "_audio_progress_group_id" in source, "Missing _audio_progress_group_id in __init__"
+        from cosa.agents.podcast_generator.config import PodcastConfig
+
+        agent = PodcastOrchestratorAgent(
+            research_doc_path = "/io/dr/report.md",
+            user_id           = "u@test.com",
+            config            = PodcastConfig(),
+        )
+        assert agent._audio_progress_group_id is None, (
+            f"a freshly built agent must not carry an audio tag; got "
+            f"{agent._audio_progress_group_id!r}"
+        )
 
     def test_pg_id_format_inline_generation( self ):
         """Inline f"pg-{uuid.uuid4().hex[:8]}" generates valid format."""
@@ -511,57 +525,24 @@ class TestSweTeamRedelegateGroupId:
         )
 
 
-class TestDeepResearchGroupId:
-    """Verify Deep Research cli.py generates research_group_id."""
-
-    def test_run_research_generates_group_id( self ):
-        """run_research() generates a research_group_id."""
-        import inspect
-        from cosa.agents.deep_research.cli import run_research
-        source = inspect.getsource( run_research )
-        assert "research_group_id" in source
-        assert 'research_group_id = f"pg-{uuid.uuid4().hex[ :8 ]}"' in source
-
-    def test_run_research_passes_group_id_to_notify( self ):
-        """voice_io.notify() calls in run_research() receive research_group_id."""
-        import inspect
-        from cosa.agents.deep_research.cli import run_research
-        source = inspect.getsource( run_research )
-        assert "progress_group_id=research_group_id" in source
-
-
-class TestPodcastGeneratorOrchestratorGroupIds:
-    """Verify Podcast Generator orchestrator generates per-language and audio group IDs."""
-
-    def test_do_all_async_generates_audio_group_id( self ):
-        """do_all_async() generates _audio_progress_group_id per language."""
-        import inspect
-        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
-        source = inspect.getsource( PodcastOrchestratorAgent.do_all_async )
-        assert '_audio_progress_group_id' in source
-        assert 'self._audio_progress_group_id     = f"pg-{uuid.uuid4().hex[ :8 ]}"' in source
-
-    def test_do_all_async_generates_lang_group_id( self ):
-        """do_all_async() generates a separate lang_audio_group_id per language."""
-        import inspect
-        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
-        source = inspect.getsource( PodcastOrchestratorAgent.do_all_async )
-        assert "lang_audio_group_id" in source
-        assert 'progress_group_id = lang_audio_group_id' in source
-
-    def test_audio_progress_callback_uses_group_id( self ):
-        """_audio_progress_callback() passes self._audio_progress_group_id to notify."""
-        import inspect
-        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
-        source = inspect.getsource( PodcastOrchestratorAgent._audio_progress_callback )
-        assert "progress_group_id = self._audio_progress_group_id" in source
-
-    def test_do_audio_only_async_generates_group_id( self ):
-        """do_audio_only_async() also generates its own _audio_progress_group_id."""
-        import inspect
-        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
-        source = inspect.getsource( PodcastOrchestratorAgent.do_audio_only_async )
-        assert '_audio_progress_group_id' in source
+# =============================================================================
+# Deep Research and Podcast tags — MOVED OUT (row 122f07a1)
+# =============================================================================
+#
+# The twelve source-text assertions that lived here (TestDeepResearchGroupId and
+# TestPodcastGeneratorOrchestratorGroupIds) are gone, replaced by tests that DRIVE
+# those pipelines and read the tags that actually reach the notification seam.
+# They now live beside the harnesses that can run them, because this file has no
+# way to reach either pipeline:
+#
+#   Deep Research  -> src/cosa/tests/unit/agents/deep_research/test_cli.py
+#                     ::TestSubqueryLoopProgressGroup   (rr_env is the harness)
+#   Podcast        -> src/tests/unit/test_podcast_orchestrator.py
+#                     ::TestAudioProgressGroupTags      (_wire_pipeline is the harness)
+#
+# The podcast set also covers the `_audio_progress_group_id` attribute that a grep
+# here used to look for in __init__: a run that never opens a tag now fails by
+# name rather than by the word being absent from a constructor.
 
 
 # =============================================================================

@@ -26,6 +26,7 @@ import argparse
 import json
 import sys
 import tempfile
+import re
 import unittest
 from contextlib import contextmanager, ExitStack
 from pathlib import Path
@@ -723,6 +724,92 @@ class TestMain( unittest.TestCase ):
         # file_path not under <root>/io/deep-research → 1176-1177 fallback relative_path.
         with main_env( main_args(), save_path="/elsewhere/report.md" ):
             cli.main()
+
+
+
+# ===========================================================================
+# The subquery loop's progress group tag (row 122f07a1)
+# ===========================================================================
+#
+# MOVED HERE FROM src/tests/unit/test_progress_group_passthrough.py, where this
+# was two `assert "<literal>" in inspect.getsource( run_research )` checks. Those
+# could not see the rule that matters: cli.py creates the tag ABOVE the subquery
+# loop, so ONE tag covers every topic and the UI updates one line in place. Move
+# that line inside the loop and the source text is byte-identical while every
+# topic starts its own line. It lives next to rr_env because that is the harness
+# that can actually drive it — the passthrough file has no way to reach here.
+
+
+class TestSubqueryLoopProgressGroup( unittest.IsolatedAsyncioTestCase ):
+
+    _PG = re.compile( r"^pg-[a-f0-9]{8}$" )
+
+    def _topic_tags( self, notify_mock ):
+        """Tags on the per-topic notifications, in call order."""
+        out = []
+        for c in notify_mock.await_args_list:
+            message = c.args[ 0 ] if c.args else ""
+            if not message.startswith( "Researching topic " ): continue
+            out.append( c.kwargs.get( "progress_group_id" ) )
+        return out
+
+    async def test_one_tag_covers_every_topic_in_the_loop( self ):
+        """Three topics, one tag — so the three status lines collapse into one.
+
+        RED ON REVERT: move `research_group_id = ...` inside the subquery loop
+        and each topic reports under its own tag.
+        """
+        with rr_env( [ clar(), plan( 3 ) ] ):
+            await cli.run_research( query="q", config=make_config(),
+                                    cost_tracker=MagicMock(), no_confirm=True )
+            tags = self._topic_tags( cli.voice_io.notify )
+
+        self.assertEqual( len( tags ), 3, f"expected one notification per topic, got {tags}" )
+        self.assertEqual( len( set( tags ) ), 1,
+                          f"the subquery loop must reuse ONE tag so the topics update one "
+                          f"line in place; got {tags}" )
+        self.assertRegex( tags[ 0 ], self._PG )
+
+    async def test_a_second_run_does_not_reuse_the_first_run_s_tag( self ):
+        """Two separate researches never share a tag.
+
+        RED ON REVERT: hoist the tag to a module constant — the second run's
+        progress would then overwrite the first's in the same UI slot.
+        """
+        with rr_env( [ clar(), plan( 1 ) ] ):
+            await cli.run_research( query="q1", config=make_config(),
+                                    cost_tracker=MagicMock(), no_confirm=True )
+            first = self._topic_tags( cli.voice_io.notify )
+
+        with rr_env( [ clar(), plan( 1 ) ] ):
+            await cli.run_research( query="q2", config=make_config(),
+                                    cost_tracker=MagicMock(), no_confirm=True )
+            second = self._topic_tags( cli.voice_io.notify )
+
+        self.assertNotEqual( first[ 0 ], second[ 0 ],
+                             f"two runs sharing a tag would overwrite each other; "
+                             f"both were {first[ 0 ]}" )
+
+    async def test_a_cache_hit_reports_under_the_same_tag_as_its_topic( self ):
+        """The cache-hit notice joins the topic's line rather than opening a new one.
+
+        RED ON REVERT: pass a fresh tag (or none) on the cached-result notify at
+        cli.py:578 and the cache notice detaches from the topic it belongs to.
+        """
+        cached = { "results": { "content": '{"findings": "f"}', "tokens": 10 } }
+        with rr_env( [ clar(), plan( 2 ) ], cached=cached ):
+            await cli.run_research( query="q", config=make_config(),
+                                    cost_tracker=MagicMock(), no_confirm=True )
+            topic_tags = self._topic_tags( cli.voice_io.notify )
+            cache_tags = [ c.kwargs.get( "progress_group_id" )
+                           for c in cli.voice_io.notify.await_args_list
+                           if ( c.args[ 0 ] if c.args else "" ).startswith( "Using cached result" ) ]
+
+        self.assertTrue( cache_tags, "no cache-hit notification fired — test has gone vacuous" )
+        self.assertEqual( set( cache_tags ), set( topic_tags ),
+                          f"cache notices must share the topics' tag; "
+                          f"topics={set( topic_tags )} cache={set( cache_tags )}" )
+
 
 
 import cosa.agents.deep_research.api_client as cli_api
