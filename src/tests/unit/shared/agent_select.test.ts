@@ -318,6 +318,25 @@ test("a missing payload falls back to auto-routing", () => {
   assert.equal(isAutoRoute("anything", { agents: [] } as never), true);
 });
 
+test("an auto_route carrying no value string still falls back to auto-routing", () => {
+  // The OTHER half of the fail-open arm, pinned separately because the fix below
+  // narrowed the condition and this is the part that must not move. auto_route is
+  // present but names no sentinel, so there is still nothing to compare against.
+  assert.equal(isAutoRoute("anything", { auto_route: {} } as never), true);
+  assert.equal(isAutoRoute("anything", { auto_route: { value: null } } as never), true);
+});
+
+test("a BLANK sentinel is compared, not waved through", () => {
+  // The bug this pins: with `!autoRoute.value` the empty-string sentinel took the
+  // fail-open branch, so EVERY pick returned true and the command the user chose was
+  // silently discarded — everything auto-routed, nothing errored, nothing looked
+  // wrong. "" is a legitimate option value (the conventional HTML no-selection
+  // value), and the plain equality answers it correctly in both directions.
+  const blank = { auto_route: { value: "" } } as never;
+  assert.equal(isAutoRoute("agent router go to math", blank), false);
+  assert.equal(isAutoRoute("", blank), true);
+});
+
 // ===========================================================================
 // argsForCommand — the typed text becomes the command's one argument
 // ===========================================================================
