@@ -155,23 +155,39 @@ class LupinTestClient:
         except Exception:
             pass  # Endpoint may not exist on older server versions
 
-    async def http_request(self, method: str, endpoint: str, **kwargs) -> httpx.Response:
+    async def http_request(self, method: str, endpoint: str, authenticate: bool = True, **kwargs) -> httpx.Response:
         """
-        Make HTTP request with automatic authentication.
-        
+        Make HTTP request, authenticated by default.
+
+        Requires:
+            - endpoint is a path beginning with "/"
+            - when authenticate is True, self.auth_token has been established
+
+        Ensures:
+            - when authenticate is True and the caller supplied no Authorization
+              header, the client's bearer token is attached
+            - when authenticate is False, NO Authorization header is sent, even
+              though the client holds a token
+
+        Note on `authenticate=False`: passing `headers={}` does NOT produce an
+        unauthenticated request. An empty dict contains no Authorization key, so
+        the auto-attach branch below fires and puts the token back. Three tests
+        that meant to probe unauthenticated access were doing exactly that and
+        had never once reached the server without a token. Ask for it explicitly.
+
         Args:
             method: HTTP method (GET, POST, etc.)
             endpoint: API endpoint path
+            authenticate: attach the bearer token (default True); False sends none
             **kwargs: Additional arguments for httpx
-            
+
         Returns:
             httpx.Response object
         """
         url = f"{self.base_url}{endpoint}"
         
-        # Add authentication header if not provided
         headers = kwargs.get('headers', {})
-        if 'Authorization' not in headers:
+        if authenticate and 'Authorization' not in headers:
             headers['Authorization'] = self.auth_token
         kwargs['headers'] = headers
         
