@@ -429,17 +429,32 @@ class TestTestSuiteCard:
 
     def test_mode_selector_has_test_suite( self, logged_in_page ):
         """
-        Mode selector dropdown includes test_suite option.
+        Agent selector includes the test-suite command.
+
+        ⚠️ VALUE CHANGED 2026-08-22 (Q&A card phase 3), rebaselined 2026-08-23. The
+        option values used to be short mode keys — this test looked for
+        `value='test_suite'` — and are now full routing commands rendered from
+        GET /api/v2/agents, so it looks for `agent router go to test suite`. Its
+        sibling `test_mode_selector_has_research_to_presentation` was rebaselined
+        with phase 3; this one was missed and would have gone red on the next
+        :8000 run. Same change, same reason.
+
+        The wait matters: options arrive from a fetch after auth, so a bare
+        networkidle can land before the render. Locating the option itself with a
+        timeout is the wait — a count() on an unrendered select returns 0 happily,
+        which is why the bare count() this replaced was not enough on its own.
 
         Requires:
             - Authenticated session
 
         Ensures:
-            - test_suite option exists in mode dropdown
+            - the test-suite command is offered, under its command value
         """
         logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
-        mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )
-        options     = mode_select.locator( "option[value='test_suite']" )
-        assert options.count() > 0
+        option = logged_in_page.locator(
+            "#agent-mode option[value='agent router go to test suite']"
+        )
+        option.wait_for( state="attached", timeout=10_000 )
+        assert option.count() > 0
