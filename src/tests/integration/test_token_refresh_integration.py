@@ -47,37 +47,47 @@ def authenticated_user( clean_test_db ):
     return user_id, email, token
 
 
-# ---------------------------------------------------------------------------
-# Venue gate for the classes below.
-#
-# These three classes each carried @pytest.mark.xfail (NON-strict) reading
-# "TestClient(app) + create_user triggers bcrypt 72-byte error". That reason is
-# false on both halves, measured 2026-08-22:
-#
-#   · bcrypt does not break create_user. passlib 1.7.4 logs "(trapped) error
-#     reading bcrypt version" against bcrypt 4.3.0 and carries on;
-#     hash_password() returns a valid 60-char hash and verify_password()
-#     round-trips it.
-#   · The actual failure is at SETUP, not in any test body, and it is a venue
-#     error: clean_test_db asserts the engine points at lupin_db_test, and off
-#     :8000 it points at lupin_db_dev. The fixture is refusing to wipe the dev
-#     database — working exactly as designed.
-#
-# So the tests were never broken; they were being marked as broken for running
-# in the wrong place. Non-strict meant that once they were run in the RIGHT
-# place they would xpass silently and nobody would learn the mark could come
-# off. Strict, with a reason true today, makes the next :8000 gate run report
-# whichever answer is real.
-# ---------------------------------------------------------------------------
-_NEEDS_TEST_DB = pytest.mark.xfail(
-    strict = True,
-    reason = "requires the :8000 hot-swapped lupin_db_test; clean_test_db refuses "
-             "to run against lupin_db_dev. Remove this mark once a :8000 gate run "
-             "shows it passing (it will go red here the moment it does)."
-)
+@pytest.fixture( autouse=True )
+def _require_test_db():
+    """
+    Skip when this module is not pointed at the :8000 hot-swapped test database.
+
+    These three classes each used to carry a NON-strict class-level xfail reading
+    "TestClient(app) + create_user triggers bcrypt 72-byte error". That reason is
+    false on both halves, measured 2026-08-22:
+
+      · bcrypt does not break create_user. passlib 1.7.4 logs "(trapped) error
+        reading bcrypt version" against bcrypt 4.3.0 and carries on;
+        hash_password() returns a valid 60-char hash and verify_password()
+        round-trips it.
+      · The real failure was at SETUP, not in any test body, and it was a venue
+        error: clean_test_db asserts the engine points at lupin_db_test, and off
+        :8000 it points at lupin_db_dev. The fixture was refusing to wipe the dev
+        database — working exactly as designed.
+
+    So these tests were never broken; they were marked broken for being run in
+    the wrong place. An xfail is the wrong instrument for that either way: it
+    says "expected to fail", when the truth is "cannot run here". Non-strict, it
+    would have xpassed silently on :8000 and nobody would learn the mark could
+    come off; strict, it would go red on :8000 for passing, which is a false
+    alarm about a test that is simply working.
+
+    A runtime condition says the true thing and expires by itself. The engine is
+    read at call time, not import time, because the hot-swap to lupin_db_test
+    happens after collection — a module-level check would wrongly skip on :8000
+    too. Where the test DB is live these run and can genuinely fail; anywhere
+    else they skip with a reason naming what is missing.
+    """
+    from cosa.rest.db import database as db_module
+
+    db_url = str( db_module.engine.url )
+    if "lupin_db_test" not in db_url:
+        pytest.skip(
+            f"requires the :8000 hot-swapped lupin_db_test (engine is on {db_url.rsplit( '/', 1 )[ -1 ]}); "
+            f"clean_test_db refuses to run against the dev database"
+        )
 
 
-@_NEEDS_TEST_DB
 class TestConfigFetchIntegration:
     """Test integration of config fetch with authentication."""
 
@@ -122,7 +132,6 @@ class TestConfigFetchIntegration:
         assert payload_after["sub"] == user_id
 
 
-@_NEEDS_TEST_DB
 class TestTokenExpiryThreshold:
     """Test token expiry threshold logic."""
 
@@ -170,7 +179,6 @@ class TestTokenExpiryThreshold:
             f"Expected 5-minute threshold (300s), got {threshold_secs}s"
 
 
-@_NEEDS_TEST_DB
 class TestDeduplicationLogic:
     """Test deduplication prevents rapid-fire refreshes."""
 
