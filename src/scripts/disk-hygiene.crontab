@@ -1,0 +1,5 @@
+# [PLAN] Disk hygiene — Plan 3 Phase 1 (María, 2026-08-23)
+# Install:  crontab -l > /tmp/c; cat src/scripts/disk-hygiene.crontab >> /tmp/c; crontab /tmp/c
+# Weekly report Sundays 03:00; weekly sweep Sundays 03:30 (14-day retention).
+0 3 * * 0 LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/disk-hygiene-report.sh >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/disk-hygiene-report.log 2>&1
+30 3 * * 0 LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/sweep-hook-logs.sh --apply >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/disk-hygiene-sweep.log 2>&1
