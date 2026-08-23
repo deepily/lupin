@@ -221,59 +221,128 @@ class TestRawOutputFormatterMigration:
     """Test suite for RawOutputFormatter integration with factory parsing."""
     
     def test_formatter_factory_integration( self ):
-        """Test RawOutputFormatter creates and uses XML parser factory."""
-        
-        # Note: This test validates the integration without requiring LLM calls
-        
-        # The formatter should be created with factory integration
-        # We can test this by checking that the factory import and initialization work
-        from cosa.agents.raw_output_formatter import RawOutputFormatter
-        
-        # Verify the import and class structure
-        assert hasattr( RawOutputFormatter, '__init__' )
-        
-        # The actual formatter creation may fail due to LLM configuration issues,
-        # but the important thing is that the factory integration code is present
-        try:
-            # Check if the factory integration is in the source code
-            import inspect
-            source = inspect.getsource( RawOutputFormatter.__init__ )
-            assert "XmlParserFactory" in source
-            assert "xml_parser_factory" in source
-            
-            source_run = inspect.getsource( RawOutputFormatter.run_formatter )
-            assert "parse_agent_response" in source_run
-            assert "rephrased_answer" in source_run  # Pydantic field name
-            
-        except Exception as e:
-            # If we can't inspect the source, at least verify the imports work
-            from cosa.agents.io_models.utils.xml_parser_factory import XmlParserFactory
-            assert XmlParserFactory is not None
-    
-    def test_formatter_xml_parsing_logic( self ):
-        """Test the XML parsing logic in RawOutputFormatter."""
-        
-        # Test the parsing logic directly without LLM calls
-        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        factory = XmlParserFactory( config_mgr )
-        
-        # Simulate the parsing that happens in run_formatter
-        mock_response = '''<response>
-            <rephrased-answer>It's 65 degrees and partly cloudy in Seattle.</rephrased-answer>
-        </response>'''
-        
-        try:
-            parsed_response = factory.parse_agent_response(
-                mock_response,
-                "agent router go to weather",
-                [ "rephrased-answer" ]
+        """
+        The formatter parses its LLM's answer through the XML parser FACTORY and
+        returns what the factory extracted.
+
+        HOW THIS IS CHECKED, AND WHY IT CHANGED (row 122f07a1). This test used to
+        read RawOutputFormatter's source and assert four words appeared in it
+        ("XmlParserFactory", "xml_parser_factory", "parse_agent_response",
+        "rephrased_answer") — and it did so INSIDE a `try` whose `except Exception`
+        swallowed the result. AssertionError is an Exception, so all four could
+        fail and the test still passed: it could not go red for any reason at all.
+        Both defects are gone. This builds the formatter with its config, template,
+        and LLM stubbed, runs it, and reads what comes back.
+        """
+        from unittest.mock import MagicMock, patch
+        import cosa.agents.raw_output_formatter as rof_mod
+
+        # The one thing under test: the factory's extracted value must be the
+        # value the formatter returns.
+        parser = MagicMock()
+        parser.parse_agent_response.return_value = {
+            "rephrased_answer": "It's 65 degrees and partly cloudy in Seattle."
+        }
+
+        llm = MagicMock()
+        llm.run.return_value = "<response><rephrased-answer>ignored</rephrased-answer></response>"
+
+        config = MagicMock()
+        config.get.side_effect = lambda key, *a, **kw: (
+            "/src/conf/prompts/formatter.txt" if key.startswith( "formatter template" ) else "spec-formatter"
+        )
+
+        with patch.object( rof_mod, "ConfigurationManager", return_value=config ), \
+             patch.object( rof_mod, "XmlParserFactory", return_value=parser ) as factory_cls, \
+             patch.object( rof_mod, "LlmClientFactory" ) as llm_factory, \
+             patch.object( rof_mod.du, "get_file_as_string", return_value="TEMPLATE {question}" ), \
+             patch.object( rof_mod.du, "get_project_root", return_value="/proj" ):
+            llm_factory.return_value.get_client.return_value = llm
+
+            formatter = rof_mod.RawOutputFormatter(
+                question        = "what's the weather in Seattle",
+                raw_output      = "<weather>65F partly cloudy</weather>",
+                routing_command = "agent router go to weather",
             )
-            output = parsed_response.get( "rephrased_answer", "" )
-            
-            assert output == "It's 65 degrees and partly cloudy in Seattle."
-            
-        except Exception as e:
-            assert False, f"Formatter parsing logic failed: {e}"
+            output = formatter.run_formatter()
+
+        # 1. The factory is the parser it built — not a hand-rolled one.
+        factory_cls.assert_called_once_with( config )
+        assert formatter.xml_parser_factory is parser
+
+        # 2. It asked the factory to parse the LLM's answer, under the FORMATTER
+        #    routing command, for the rephrased-answer tag.
+        parser.parse_agent_response.assert_called_once()
+        call = parser.parse_agent_response.call_args
+        assert call.args[ 0 ] == llm.run.return_value, "the formatter parsed something other than its LLM's answer"
+        assert call.args[ 1 ] == "formatter for agent router go to weather", (
+            f"the formatter must parse under its OWN routing command, not the agent's; "
+            f"got {call.args[ 1 ]!r}"
+        )
+        assert call.args[ 2 ] == [ "rephrased-answer" ]
+
+        # 3. What the factory extracted is what the caller gets.
+        assert output == "It's 65 degrees and partly cloudy in Seattle."
+
+    def test_a_missing_rephrased_answer_yields_empty_not_a_crash( self ):
+        """The formatter's documented fallback when the tag is absent.
+
+        RED ON REVERT: drop the default from the `.get( "rephrased_answer", "" )`
+        and this raises KeyError instead of returning "".
+        """
+        from unittest.mock import MagicMock, patch
+        import cosa.agents.raw_output_formatter as rof_mod
+
+        parser = MagicMock()
+        parser.parse_agent_response.return_value = { }      # the tag never arrived
+
+        config = MagicMock()
+        config.get.side_effect = lambda key, *a, **kw: (
+            "/src/conf/prompts/formatter.txt" if key.startswith( "formatter template" ) else "spec-formatter"
+        )
+
+        with patch.object( rof_mod, "ConfigurationManager", return_value=config ), \
+             patch.object( rof_mod, "XmlParserFactory", return_value=parser ), \
+             patch.object( rof_mod, "LlmClientFactory" ), \
+             patch.object( rof_mod.du, "get_file_as_string", return_value="TEMPLATE" ), \
+             patch.object( rof_mod.du, "get_project_root", return_value="/proj" ):
+            formatter = rof_mod.RawOutputFormatter(
+                question        = "q",
+                raw_output      = "r",
+                routing_command = "agent router go to weather",
+            )
+            assert formatter.run_formatter() == ""
+
+    def test_formatter_xml_parsing_logic( self ):
+        """The factory extracts the rephrased answer from a real formatter response.
+
+        HOW THIS CHANGED (row 122f07a1): the assertion used to sit inside a `try`
+        with `except Exception: assert False, ...` underneath. The inner assert
+        raised AssertionError, the handler caught it, and the `assert False` raised
+        a SECOND AssertionError that nothing caught — so the test could fail, but
+        only ever with "Formatter parsing logic failed", never naming what the
+        parser actually returned. The try is gone; a wrong value now reports itself.
+        """
+        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        factory    = XmlParserFactory( config_mgr )
+
+        mock_response = (
+            "<response>"
+            "<rephrased-answer>It's 65 degrees and partly cloudy in Seattle.</rephrased-answer>"
+            "</response>"
+        )
+
+        parsed_response = factory.parse_agent_response(
+            mock_response,
+            "agent router go to weather",
+            [ "rephrased-answer" ]
+        )
+
+        assert parsed_response.get( "rephrased_answer", "" ) == \
+            "It's 65 degrees and partly cloudy in Seattle.", (
+                f"the factory did not extract the rephrased answer; it returned "
+                f"{parsed_response!r}"
+            )
 
 
 def run_weather_migration_tests():

@@ -725,13 +725,49 @@ class TestOutcomeStatusVocabulary:
         """
         The rename must NOT reach the flow. `flow.py` uses "parked" as the
         RESPONSE status when a request is suspended awaiting the user, which is
-        the one place the word is accurate.
+        the one place the word is accurate — and the executor must never produce
+        it, which is what makes the narrow Literal true.
 
-        RED ON REVERT: rename those too, and this fails — which is the point,
-        because a blanket search-and-replace is the likely way to get step 1
-        wrong.
+        HOW THIS IS CHECKED, AND WHY IT CHANGED (row 122f07a1). This used to grep
+        flow.py's source for the literal `status="parked"`. That passed on a build
+        where the string sat in a comment or a dead branch, and would have died on
+        a reformat that split the keyword across lines. It also only ever proved
+        the word was PRESENT — never that the suspended-awaiting-user path is the
+        one that emits it. This walks the flow's own AST to find where the word is
+        actually handed to `_emit`, and pairs it with the executor's Literal.
+
+        RED ON REVERT: a blanket search-and-replace across v2 renames the flow's
+        emit too, and the parked call disappears from the needs_input path.
         """
+        import ast
         import inspect
         from cosa.rest.v2 import flow as flow_module
-        source = inspect.getsource( flow_module )
-        assert 'status="parked"' in source
+
+        tree = ast.parse( inspect.getsource( flow_module ) )
+
+        # Every _emit call that hands out status="parked", with the path it names.
+        parked_paths = set()
+        for node in ast.walk( tree ):
+            if not isinstance( node, ast.Call ): continue
+            if not ast.unparse( node.func ).endswith( "_emit" ): continue
+            kw = { k.arg: k.value for k in node.keywords if k.arg }
+            status = kw.get( "status" )
+            if not ( isinstance( status, ast.Constant ) and status.value == "parked" ): continue
+            path = kw.get( "path" )
+            parked_paths.add( path.value if isinstance( path, ast.Constant ) else ast.unparse( path ) )
+
+        assert parked_paths, (
+            "no _emit call in flow.py hands out status=\"parked\" — the rename reached "
+            "the flow, and a suspended request now reports something else to the caller"
+        )
+        assert "needs_input" in parked_paths, (
+            f"\"parked\" is emitted, but not on the needs_input path — it is the "
+            f"awaiting-the-user response and nothing else; found on {sorted( parked_paths )}"
+        )
+
+        # The other half of the same invariant: the executor must NOT be able to
+        # produce it, or the narrow Literal would be a lie.
+        assert "parked" not in self._status_options(), (
+            "the executor's Outcome Literal now admits \"parked\" — the flow's response "
+            "vocabulary and the executor's have collided"
+        )

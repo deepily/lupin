@@ -74,6 +74,57 @@ _V1_LADDER_COMMANDS = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Boundary-mocked queue — same discipline as
+# src/cosa/tests/unit/rest/test_push_job_entry_coverage.py, which is where this
+# pattern comes from. ZERO real LLM / embedding / DB / network / agent execution.
+# ---------------------------------------------------------------------------
+
+_QUEUE_CONFIG = {
+    "debug auto"                           : False,
+    "debug inject bugs"                    : False,
+    "fifo todo queue enable input gisting" : True,
+    "llm spec key for confirmation dialog" : "spec-confirm",
+    "similarity threshold confirmation"    : 90.0,
+    "similarity confirmation enabled"      : True,
+    "crud for dataframes agents enabled"   : "false",
+    "prompt template for agent router"     : "/src/conf/prompts/router.txt",
+    "llm spec key for agent router"        : "spec-router",
+    "runtime argument expeditor enabled"   : True,
+}
+
+
+def _boundary_mocked_queue():
+    """A TodoFifoQueue whose heavy constructor dependencies are all stubbed."""
+    from unittest.mock import Mock, patch
+    import cosa.rest.todo_fifo_queue as tfq
+    from cosa.rest.todo_fifo_queue import TodoFifoQueue
+
+    config = Mock()
+    config.get.side_effect = lambda key, default=None, return_type=None: _QUEUE_CONFIG.get( key, default )
+
+    heavy = [ patch.object( tfq, name ) for name in (
+        "LlmClientFactory", "Gister", "GistNormalizer", "Normalizer",
+        "QueryLogTable", "EmbeddingManager", "get_embedding_provider" ) ]
+    for h in heavy: h.start()
+    try:
+        snap_mgr = Mock()
+        queue = TodoFifoQueue( websocket_mgr=Mock(), snapshot_mgr=snap_mgr, app=Mock(),
+                               config_mgr=config, debug=False, verbose=False )
+    finally:
+        for h in reversed( heavy ): h.stop()
+
+    queue.gist_normalizer.get_normalized_gist    = Mock( return_value="gist" )
+    queue.normalizer.normalize                   = Mock( return_value="normalized" )
+    queue._embedding_provider.generate_embedding = Mock( return_value=[ 0.1, 0.2 ] )
+    queue.query_log.log_query                    = Mock()
+    queue.user_job_tracker                       = Mock()
+    queue.user_job_tracker.register_scoped_job   = Mock( side_effect=lambda idh, *a, **k: idh )
+    # No cache candidate — every case here must reach the routing block.
+    snap_mgr.get_snapshots_by_question.return_value = [ ]
+    return queue
+
+
 class TestEveryV1CommandStillResolves:
     """The migration must not silently drop a routing string that worked."""
 
@@ -218,16 +269,44 @@ class TestTheLadderIsGoneAndStaysGone:
                 f"back. Add an AgentSpec row instead."
             )
 
-    def test_push_job_asks_the_registry( self ):
-        """RED ON REVERT: delete the resolve() call and this fails.
+    def test_push_job_builds_the_agent_the_registry_hands_it( self ):
+        """push_job routes a conversational command by ASKING the resolver, and
+        builds whatever the resolver hands back.
 
-        The pin follows the fold: there is one resolver now, so the name to look
-        for changed. Step 6c invalidates this again when push_job stops resolving
-        at all.
+        HOW THIS IS CHECKED, AND WHY IT CHANGED (row 122f07a1). This used to assert
+        the literal "resolve(" appeared in push_job's source. That passed on any
+        build containing those six characters — including one that calls the
+        resolver and throws the answer away — and would have died on a rename that
+        broke nothing. This drives push_job with a registry entry swapped for a
+        sentinel and requires the sentinel to come out, which is only true if the
+        table lookup is what decided the route.
+
+        RED ON REVERT: rebuild the if/elif ladder so push_job constructs MathAgent
+        by name and the sentinel never appears.
         """
-        from cosa.rest.todo_fifo_queue import TodoFifoQueue
-        source = inspect.getsource( TodoFifoQueue.push_job )
-        assert "resolve(" in source
+        from unittest.mock import Mock, patch
+        from dataclasses import replace
+        import cosa.rest.todo_fifo_queue as tfq
+        import cosa.rest.v2.registry as reg
+
+        sentinel = Mock(); sentinel.id_hash = "from-the-table"
+
+        spec = resolve( "agent router go to math", crud_enabled=False )
+        assert spec is not None, "premise broken: the math command no longer resolves"
+        stub = replace( spec, factory=lambda **kw: sentinel, crud_factory=lambda **kw: sentinel )
+
+        queue = _boundary_mocked_queue()
+        with patch.dict( reg.ANSWER_COMMANDS, { spec.command: stub } ), \
+             patch.object( queue, "_get_routing_command",
+                           return_value=( "agent router go to math", "" ) ), \
+             patch.object( queue, "push" ), patch.object( queue, "_notify" ), \
+             patch( "builtins.print" ):
+            result = queue.push_job( "what is two plus two", "ws1", "u1", "u@x.com" )
+
+        assert result[ "job_id" ] == "from-the-table", (
+            "push_job did not build the agent the registry handed it — it is deciding "
+            f"the route itself; got {result}"
+        )
 
     def test_a_new_command_needs_no_queue_edit( self ):
         """

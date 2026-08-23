@@ -189,22 +189,64 @@ def quick_smoke_test():
         # ═══════════════════════════════════════════════════════════════════
         print( "\nPart 4: Dead-queue API serializer check..." )
 
-        # Source-level verification of Fix 8b — the dead-queue branch exists
-        # and reads job.artifacts for plan_path, remediation_snapshot_path,
-        # report_path, yaml_path, cost_summary. Done via inspection rather
-        # than a full live push/poll because in-memory dead queue state is
-        # wiped on every uvicorn reload (a known instability).
-        import inspect as _inspect
+        # Fix 8b, checked by DRIVING the serializer (row 122f07a1). This block used
+        # to read queues.py's source and look for the literal dead-queue branch plus
+        # the five field names, justified as "inspection rather than a full live
+        # push/poll because in-memory dead queue state is wiped on every uvicorn
+        # reload". That reason does not survive checking: get_queue takes its four
+        # queues as ordinary arguments, so there is no live queue state to depend on.
+        # The source check went green on any build that kept the branch and the words
+        # while returning None for every field — which is what the user would see.
+        import asyncio as _asyncio
+        from unittest.mock import MagicMock as _Mock, patch as _patch
         import cosa.rest.routers.queues as queues_mod
-        queues_src = _inspect.getsource( queues_mod )
-        assert 'if queue_name == "dead":' in queues_src, \
-            "Fix 8b regression: dead-queue branch missing from queues.py"
-        for field in ( "plan_path", "remediation_snapshot_path", "report_path", "yaml_path", "cost_summary" ):
-            assert f'"{field}"' in queues_src, \
-                f"Fix 8b regression: dead-queue branch missing '{field}' field"
-        assert "artifacts.get" in queues_src, \
-            "Fix 8b regression: dead-queue branch doesn't read from job.artifacts"
-        print( "  ✓ Fix 8b live: queues.py has dead-queue branch with all 5 artifact fields" )
+        from cosa.agents.agentic_job_base import AgenticJobBase as _AgenticJobBase
+        from cosa.rest.queue_protocol import JobState as _JobState
+
+        _dead_job = _Mock( spec=_AgenticJobBase )
+        _dead_job.id_hash             = "smoke_tfe_dead"
+        _dead_job.last_question_asked = "fix the failing tests"
+        _dead_job.run_date            = "2026-04-11T10:00:00"
+        _dead_job.created_date        = "2026-04-11T09:00:00"
+        _dead_job.user_email          = "smoke@test.com"
+        _dead_job.session_id          = "smoke-test-session"
+        _dead_job.job_type            = "test_fix_expediter"
+        _dead_job.state               = _JobState.FAILED
+        _dead_job.error               = "boom"
+        _dead_job.started_at          = "2026-04-11T10:00:00"
+        _dead_job.completed_at        = "2026-04-11T10:05:00"
+        _dead_job.scheduled_at        = None
+        _dead_job.monopolize          = False
+        _dead_job.cost_summary        = { "usd": 1.25 }
+        _dead_job.artifacts           = {
+            "plan_path"                : "/io/plans/tfe-plan.md",
+            "remediation_snapshot_path": "/io/snapshots/tfe-remediation.json",
+            "report_path"              : "/io/reports/tfe-report.md",
+            "yaml_path"                : "/io/tfe.yaml",
+        }
+        _dead_queue = _Mock()
+        _dead_queue.get_jobs_for_user.return_value = [ _dead_job ]
+
+        with _patch.object( queues_mod, "_count_interactions_for_jobs", return_value={} ):
+            _out = _asyncio.run( queues_mod.get_queue(
+                queue_name    = "dead",
+                current_user  = { "uid": "admin1", "email": "a@x.com", "roles": [ "admin" ] },
+                user_filter   = "admin1",
+                todo_queue    = _Mock(), running_queue = _Mock(),
+                done_queue    = _Mock(), dead_queue    = _dead_queue,
+            ) )
+        _card = _out[ "dead_jobs_metadata" ][ 0 ]
+        assert _card[ "plan_path" ]                 == "/io/plans/tfe-plan.md", \
+            f"Fix 8b regression: dead card lost plan_path — got {_card.get( 'plan_path' )!r}"
+        assert _card[ "remediation_snapshot_path" ] == "/io/snapshots/tfe-remediation.json", \
+            f"Fix 8b regression: dead card lost remediation_snapshot_path"
+        assert _card[ "report_path" ]               == "/io/reports/tfe-report.md", \
+            "Fix 8b regression: dead card lost report_path"
+        assert _card[ "yaml_path" ]                 == "/io/tfe.yaml", \
+            "Fix 8b regression: dead card lost yaml_path"
+        assert _card[ "cost_summary" ]              == { "usd": 1.25 }, \
+            "Fix 8b regression: dead card lost cost_summary"
+        print( "  ✓ Fix 8b live: a dead agentic card carries all 5 partial artifacts" )
 
         # Frontend sanity check (Fix 8c) — make sure notifications.js has the
         # partial-artifacts section for dead cards
@@ -228,10 +270,27 @@ def quick_smoke_test():
         # Part 5: orchestrator notify_progress kwarg sanity (Fix 6)
         # ═══════════════════════════════════════════════════════════════════
         print( "\nPart 5: Fix 6 — orchestrator notify_progress has no notification_type kwarg..." )
+        # Fix 6, checked on the CALLS rather than the file's text (row 122f07a1).
+        # The old assertion read `"notification_type=" not in src or "# Fix 6" in src`
+        # — and "# Fix 6" is a comment sitting in that very file, so the right-hand
+        # side was always true and the whole check was always green. It could not
+        # have failed. This walks the module's AST and looks at every notify_progress
+        # call, so a real regression is named with its line number.
+        import ast as _ast
+        import inspect as _inspect
         import cosa.agents.test_fix_expediter.orchestrator as orch_mod
-        orch_src = _inspect.getsource( orch_mod )
-        assert "notification_type=" not in orch_src or "# Fix 6" in orch_src, \
-            "Fix 6 regression: notification_type= kwarg found in orchestrator.py"
+
+        _tree = _ast.parse( _inspect.getsource( orch_mod ) )
+        _offenders = [
+            f"line {n.lineno}" for n in _ast.walk( _tree )
+            if isinstance( n, _ast.Call )
+            and _ast.unparse( n.func ).split( "." )[ -1 ] == "notify_progress"
+            and any( k.arg == "notification_type" for k in n.keywords )
+        ]
+        assert not _offenders, (
+            f"Fix 6 regression: notify_progress called with notification_type= at "
+            f"{', '.join( _offenders )} in orchestrator.py"
+        )
         print( "  ✓ Orchestrator notify_progress calls are clean of the notification_type kwarg" )
 
         # ═══════════════════════════════════════════════════════════════════

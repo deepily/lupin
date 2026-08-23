@@ -188,15 +188,44 @@ def test_there_is_no_sleep_constant_anywhere_in_the_oracle():
     wrong reason, with nobody notified. The observed "~3 minutes" is TELEMETRY from a single
     observation. It must never enter the test.
 
-    This asserts the module never imports `time` or calls `sleep` — the bound is a caller
-    deadline and the clock is injected.
+    HOW THIS IS CHECKED, AND WHY IT CHANGED (row 122f07a1). This used to read the
+    module's source text and assert that "time.sleep" and "import time" were absent.
+    Two spellings walked straight past it — `from time import sleep` then a bare
+    `sleep( 3 )`, and `import time as t` then `t.sleep( 3 )`. Neither contains
+    either literal. The check below reads what the module ACTUALLY imported and
+    what it ACTUALLY calls, so every spelling is covered and a rename of the
+    surrounding code cannot false-alarm it.
     """
+    import ast
     import inspect
     import cosa.utils.vertex_monitoring_oracle as mod
 
-    source = inspect.getsource( mod )
-    assert "time.sleep" not in source, "a sleep crept into the oracle — spec a canary, not a clock"
-    assert "import time" not in source, "the oracle must not own a clock; the caller injects one"
+    # 1. Nothing named `time` or `sleep` is bound in the module namespace, however
+    #    it was spelled on the import line.
+    for name in ( "time", "sleep", "monotonic", "perf_counter" ):
+        assert name not in vars( mod ), (
+            f"the oracle bound `{name}` — it must not own a clock; the caller injects one"
+        )
+
+    # 2. No call anywhere in the module ends in .sleep() or is a bare sleep().
+    tree  = ast.parse( inspect.getsource( mod ) )
+    slept = [
+        ast.unparse( n.func ) for n in ast.walk( tree )
+        if isinstance( n, ast.Call ) and ast.unparse( n.func ).split( "." )[ -1 ] == "sleep"
+    ]
+    assert not slept, f"a sleep crept into the oracle — spec a canary, not a clock: {slept}"
+
+    # 3. The import statements themselves name no clock module, under any alias.
+    imported = set()
+    for n in ast.walk( tree ):
+        if isinstance( n, ast.Import ):
+            for a in n.names: imported.add( a.name.split( "." )[ 0 ] )
+        elif isinstance( n, ast.ImportFrom ) and n.module:
+            imported.add( n.module.split( "." )[ 0 ] )
+    assert "time" not in imported, (
+        f"the oracle imports `time` — the bound is a caller deadline, not a constant; "
+        f"imports were {sorted( imported )}"
+    )
 
 
 # The receipt await_canary() hands back: proof the oracle was AWAKE in this window.
