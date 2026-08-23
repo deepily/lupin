@@ -310,6 +310,21 @@ test("the sentinel routes to ask; a command does not", () => {
   assert.equal(isAutoRoute("agent router go to math", body), false);
 });
 
+test("a BLANK sentinel does not silently auto-route every chosen agent", () => {
+  // Clayton's catch, 2026-08-22. isAutoRoute treats a falsy sentinel as "nothing to
+  // compare against" and answers true, so a blank value would send every named agent
+  // to /api/v2/ask as though nobody had picked one. The render already refuses to
+  // build options from a blank sentinel, so the system fails CLOSED (an empty
+  // dropdown, visible) rather than open — this pins that pairing so a later change to
+  // either half cannot quietly open it.
+  const body = payload();
+  body.auto_route.value = "";
+  assert.deepEqual(buildAgentSelectOptions(body), [], "a blank sentinel must render nothing");
+  const select = freshSelect();
+  assert.deepEqual(renderAgentSelect(select, body), []);
+  assert.equal(select.children.length, 0);
+});
+
 test("a missing payload falls back to auto-routing", () => {
   // If the fetch failed there is no sentinel to compare against, and posting an
   // unrecognised value to /api/v2/submit as though it were a command is worse than

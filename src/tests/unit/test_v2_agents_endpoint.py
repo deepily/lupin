@@ -406,6 +406,13 @@ class TestAutoRouteSentinel:
         # and everything auto-routes. Silent and total is the expensive kind.
         assert auto[ "value" ]
         assert auto[ "value" ] == AUTO_ROUTE_VALUE
+        # Clayton's catch, 2026-08-22: the equality alone would be satisfied by a
+        # BLANK sentinel, and a blank one is not inert. The client's isAutoRoute()
+        # treats a falsy sentinel as "no sentinel to compare against" and returns
+        # true for EVERY value, so every named agent would silently route to
+        # /api/v2/ask as though nobody had chosen one. Latent today — the constant is
+        # non-empty — which is exactly when it is cheap to pin.
+        assert auto[ "value" ], "the Auto-Route sentinel is blank"
         assert auto[ "label" ]
         assert auto[ "description" ]
 
