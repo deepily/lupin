@@ -14,8 +14,10 @@ Tests cover:
 """
 
 from typing import Dict, Any
+import pytest
 
 from cosa.agents.io_models.xml_models import BugInjectionResponse
+from cosa.agents.io_models.utils.util_xml_pydantic import XMLParsingError
 from cosa.agents.io_models.utils.xml_parser_factory import XmlParserFactory
 from cosa.agents.bug_injector import BugInjector
 from cosa.config.configuration_manager import ConfigurationManager
@@ -176,15 +178,26 @@ class TestBugInjectorFactoryIntegration:
         </response>'''
         
         # Should raise validation error for invalid line number
-        try:
+        # ROW beffcddd — this used to read:
+        #     try:
+        #         self.factory.parse_agent_response( ... )
+        #         assert False, "Should have raised validation error for invalid line number"
+        #     except Exception:
+        #         pass  # Expected validation error
+        # AssertionError IS an Exception, so when the parser did NOT raise, the
+        # `assert False` was caught by the very handler below it and the test went
+        # green. It could not fail for the reason it names. pytest.raises does what
+        # the old shape was trying to say, and fails loudly when nothing is raised.
+        #
+        # NARROWED to XMLParsingError deliberately: `pytest.raises( Exception )` would
+        # pass on a TypeError from a bad call signature or an ImportError from a moved
+        # module — i.e. it would go green while proving the parser was never reached.
+        with pytest.raises( XMLParsingError ):
             self.factory.parse_agent_response(
                 xml_invalid,
                 "agent router go to bug injector",
                 [ "line-number", "bug" ]
             )
-            assert False, "Should have raised validation error for invalid line number"
-        except Exception:
-            pass  # Expected validation error
     
     def test_factory_missing_required_fields( self ):
         """Test factory handling of missing required fields."""
@@ -194,15 +207,22 @@ class TestBugInjectorFactoryIntegration:
         </response>'''
         
         # Should raise validation error for missing required field
-        try:
+        # ROW beffcddd — this used to read:
+        #     try:
+        #         self.factory.parse_agent_response( ... )
+        #         assert False, "Should have raised validation error for missing line-number"
+        #     except Exception:
+        #         pass  # Expected validation error
+        # AssertionError IS an Exception, so when the parser did NOT raise, the
+        # `assert False` was caught by the very handler below it and the test went
+        # green. It could not fail for the reason it names. pytest.raises does what
+        # the old shape was trying to say, and fails loudly when nothing is raised.
+        with pytest.raises( XMLParsingError ):
             self.factory.parse_agent_response(
                 xml_missing_line,
                 "agent router go to bug injector",
                 [ "line-number", "bug" ]
             )
-            assert False, "Should have raised validation error for missing line-number"
-        except Exception:
-            pass  # Expected validation error
     
     def test_factory_empty_bug_handling( self ):
         """
@@ -216,15 +236,22 @@ class TestBugInjectorFactoryIntegration:
             <bug></bug>
         </response>'''
 
-        try:
+        # ROW beffcddd — this used to read:
+        #     try:
+        #         self.factory.parse_agent_response( ... )
+        #         assert False, "Should have raised a validation error for empty bug"
+        #     except Exception:
+        #         pass  # Expected validation error
+        # AssertionError IS an Exception, so when the parser did NOT raise, the
+        # `assert False` was caught by the very handler below it and the test went
+        # green. It could not fail for the reason it names. pytest.raises does what
+        # the old shape was trying to say, and fails loudly when nothing is raised.
+        with pytest.raises( XMLParsingError ):
             self.factory.parse_agent_response(
                 xml_empty_bug,
                 "agent router go to bug injector",
                 [ "line-number", "bug" ]
             )
-            assert False, "Should have raised a validation error for empty bug"
-        except Exception:
-            pass  # Expected: empty bug code is invalid
 
 
 class TestBugInjectorMigrationIntegration:
