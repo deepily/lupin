@@ -72,11 +72,32 @@ def _require_test_db():
     come off; strict, it would go red on :8000 for passing, which is a false
     alarm about a test that is simply working.
 
-    A runtime condition says the true thing and expires by itself. The engine is
-    read at call time, not import time, because the hot-swap to lupin_db_test
-    happens after collection — a module-level check would wrongly skip on :8000
-    too. Where the test DB is live these run and can genuinely fail; anywhere
-    else they skip with a reason naming what is missing.
+    A runtime condition says the true thing and expires by itself. Where the test
+    DB is live these run and can genuinely fail; anywhere else they skip with a
+    reason naming what is missing.
+
+    WHY THE ENGINE IS READ AT CALL TIME. Not because of a post-collection
+    hot-swap — there is none in this process, and an earlier version of this
+    docstring said there was. `swap_database` (cosa/rest/db/database.py:187) runs
+    in the SERVER process behind /api/init; pytest's own engine is a module-level
+    singleton built at import from LUPIN_ENV, and this module imports
+    lupin_app.main at line 12, so the engine already holds its final value during
+    collection. A module-level check would have read the same value and would NOT
+    have wrongly skipped on :8000.
+
+    The real reason is a sibling in this same directory:
+    test_answers_owed_authlane_dv1.py:113 rebinds `db_module.engine` to a
+    throwaway database partway through the run and restores it after its yield,
+    without a try/finally. Anything holding a value captured at import time would
+    be reading a stale engine; a call-time read follows the rebind. Measured
+    2026-08-23 on this host: LUPIN_ENV unset -> engine on lupin_db_dev, these
+    skip; LUPIN_ENV=testing (what run-integration-tests.sh:202 exports) -> engine
+    on lupin_db_test, these run.
+
+    THE COST OF THIS CHANGE, stated out loud. A strict xfail went RED the day the
+    tests started passing, which is a loud self-expiry. A skip expires quietly: a
+    bare `pytest src/tests/integration/` without LUPIN_ENV skips all four and the
+    run still reads green. That trade is deliberate, not free.
     """
     from cosa.rest.db import database as db_module
 
