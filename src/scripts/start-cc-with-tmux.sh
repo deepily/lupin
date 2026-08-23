@@ -297,6 +297,51 @@ fi
 # `claude` does not run there (F-A10).
 if [[ "$VERTEX" == "1" ]]; then PANE_GUARD_ARG="True"; else PANE_GUARD_ARG="False"; fi
 INNER+="python3 -c 'from cosa.utils.vertex_env import pane_guard; pane_guard( vertex_path=$PANE_GUARD_ARG )' || exit 1; "
+# ── Per-session memory ceiling — OOM incident 2026-08-22 (P0) ─────────────────
+# A single `node` reached ~229 GB RSS and the kernel OOM-killed it under
+# CONSTRAINT_NONE/global_oom. Because ~2 dozen sessions share ONE
+# tmux-server.service slice, one runaway is a whole-host event — and the kernel
+# picks by oom_score, so an INNOCENT session can be the victim. A transient
+# scope in its OWN slice makes the kill single-session.
+#
+# WHY A CGROUP AND NOT A NODE FLAG. There is no Node flag that bounds external
+# memory. --max-old-space-size bounds only V8 generations (default 4G on a
+# >=16G host) and blowing THAT aborts gracefully with "JavaScript heap out of
+# memory" — not a 229 GB SIGKILL. The blowup lives in Buffer/ArrayBuffer, which
+# nodejs/node#24225 has wanted a bound for since 2018 and still has none.
+# An OS/cgroup ceiling is the only thing that actually works.
+#
+# WHY --scope AND NOT --unit. `systemd-run --scope` EXECs the command, so the
+# pane's process is still `claude` itself: TTY untouched, and anything that
+# resolves a session by pane pid (listener status, context-pressure) is
+# unaffected. Verified here: pane_pid WAS the target process, no extra layer.
+#
+# MemorySwapMax=0 is what makes the cap REAL — MemoryMax alone lets the cgroup
+# swap past it. MemoryHigh throttles+reclaims first, so a slow climber shows as
+# slow and trips the 16G watcher before the hard kill.
+#
+# Design: src/rnd/v0.2.0/2026.08.22-oom-incident-what-we-know-response.md
+CC_MEM_LIMIT="${CC_MEM_LIMIT:-24G}"
+CC_MEM_HIGH="${CC_MEM_HIGH:-18G}"
+if [[ "$CC_MEM_LIMIT" != "off" ]] \
+   && command -v systemd-run >/dev/null 2>&1 \
+   && [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
+    # '-' is systemd's slice-HIERARCHY separator, so the leaf is sanitized to
+    # [A-Za-z0-9_] and every worker hangs off one implicit ccworker.slice
+    # parent — which a single drop-in can later cap fleet-wide.
+    _cc_slice="ccworker-$( printf '%s' "$SESSION_NAME" | tr -c 'a-zA-Z0-9' '_' ).slice"
+    # Prefer a worker over tmux-server/orchestrator when the kernel must choose.
+    # oom_score_adj is inherited across both execs below. Raising is
+    # unprivileged; lowering is not. Scopes take no OOMScoreAdjust= property
+    # (systemd execs nothing for a scope), so this is set in the pane shell.
+    INNER+="echo 500 > /proc/self/oom_score_adj 2>/dev/null; "
+    INNER+="systemd-run --user --scope --quiet --collect"
+    INNER+=" -p MemoryAccounting=yes"
+    INNER+=" -p MemoryHigh=$(printf '%q' "$CC_MEM_HIGH")"
+    INNER+=" -p MemoryMax=$(printf '%q' "$CC_MEM_LIMIT")"
+    INNER+=" -p MemorySwapMax=0"
+    INNER+=" --slice=$(printf '%q' "$_cc_slice") -- "
+fi
 INNER+="$CLAUDE_CMD"
 
 # Per-project persona CHAINS — DERIVED from the fleet roster, never typed twice
