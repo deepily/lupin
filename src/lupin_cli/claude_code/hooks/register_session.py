@@ -1450,12 +1450,23 @@ def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
 
     Ensures:
         - writes the receipt best-effort; returns the path written, or None
+        - places it under THIS repo_root's fleet data root, never the ambient one
         - NEVER raises and never blocks the boot — a diagnostic that can break a
           SessionStart is worse than the failure it reports. An unimportable
           module (a partially-installed tree) is swallowed the same way.
+
+    THE DIRECTORY IS PASSED, NOT RESOLVED DOWNSTREAM. `write_boot_receipt` falls
+    back to `fleet_data_root()` with no argument, which reads the AMBIENT project
+    root rather than the repo it was handed — so a caller working in a temp tree
+    still writes into the live fleet directory. Measured 2026-08-23: a green run
+    of the register_session memento-block unit suite planted 4 real receipts in
+    projects-data/lupin, one carrying a real persona, a live memento_slot and a
+    booted_at of that second. A healthy-looking receipt in the directory the wake
+    check reads, written by the test suite, is a false green waiting to happen.
     """
     try:
         from cosa.agents.heartbeat_arbiter.respin_wake_check import write_boot_receipt
+        from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
         return write_boot_receipt(
             session_id         = stable_session_id,
             persona            = persona_name,
@@ -1463,6 +1474,7 @@ def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
             memento_path       = memento_path,
             memento_written_at = memento_written_at,
             repo_root          = repo_root,
+            base_dir           = str( fleet_data_root( repo_root ) ),
         )
     except Exception:
         return None

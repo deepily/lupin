@@ -2717,6 +2717,15 @@ def spawn_sessions(
     # the cost goal is met entirely by the worker-side flag.
     spawn_models   = cfg[ "spawn_models" ]
     resolved_model = model or spawn_models.get( role ) or spawn_models.get( "default" )
+    # Stamp the re-spin's fire time BEFORE the launch, not after it. The wake
+    # check ignores any receipt older than `fired_at` — that guard is what stops
+    # a self_respin's own pre-clear receipt from greening its successor. Taken
+    # after the launch, it also swallows a HEALTHY successor: a seat that reaches
+    # its SessionStart while later seats are still being launched leaves a receipt
+    # the check then reads as too old, and the manager gets a false "it never
+    # woke". Earlier is always safe; later is not.
+    import datetime as _dt
+    respin_fired_at = _dt.datetime.now().astimezone()
     try:
         result = session_spawner.spawn_sessions(
             count, task_prompt, sid,
@@ -2740,19 +2749,22 @@ def spawn_sessions(
     # is left alone. Best-effort: the watch is a diagnostic and must never turn
     # a successful spawn into a failed call.
     if seed_memento and not dry_run:
-        _arm_respin_wake_watch( result, persona )
+        _arm_respin_wake_watch( result, persona, respin_fired_at )
     return result
 
 
-def _arm_respin_wake_watch( spawn_result, manager_persona ):   # pragma: no cover - thin live-boundary glue; arm_watches_for_spawn is covered directly
-    """Start the post-re-spin wake watches, shouting at the firing manager by DM."""
-    import datetime as _dt
+def _arm_respin_wake_watch( spawn_result, manager_persona, fired_at ):   # pragma: no cover - thin live-boundary glue; arm_watches_for_spawn is covered directly
+    """Start the post-re-spin wake watches, shouting at the firing manager by DM.
+
+    `fired_at` is passed in rather than read here: it must be stamped BEFORE the
+    launch, or a successor that boots quickly leaves a receipt the check dismisses
+    as predating the re-spin."""
     try:
         from cosa.agents.heartbeat_arbiter.respin_wake_check import arm_watches_for_spawn
         arm_watches_for_spawn(
             spawn_result,
             alert_fn  = lambda message: _dm_send_fn( recipient=manager_persona, body=message ),
-            fired_at  = _dt.datetime.now().astimezone(),
+            fired_at  = fired_at,
         )
     except Exception as e:
         logger.warning( f"[spawn] re-spin wake watch not armed: {e}" )

@@ -131,3 +131,40 @@ def test_the_stamp_helper_returns_the_path_it_wrote( receipts ):
                                           "2026-08-21T21:00:00+00:00", "/repo" )
     assert path == str( receipts / f"{rwc.RECEIPT_PREFIX}s1.json" )
     assert os.path.exists( path )
+
+
+def test_a_unit_run_never_writes_into_the_live_fleet_data_root( tmp_path ):
+    """
+    The stamp must place its receipt under the repo_root it was HANDED, never
+    under whatever the ambient environment resolves to.
+
+    Without the repo_root, `_resolve_base_dir( None )` falls through to
+    `fleet_data_root()` with no argument, which reads `cu.get_project_root()` —
+    the LIVE fleet directory, whatever the caller set up. Measured 2026-08-23:
+    a green run of `test_register_session_memento_block.py` (64 passed) planted
+    4 real receipts in projects-data/lupin, one of them carrying a real persona,
+    a live memento_slot and a booted_at of that second. That is a healthy-looking
+    receipt sitting in the directory the wake check reads, written by the test
+    suite itself.
+
+    This test deliberately does NOT use the `receipts` fixture: that fixture
+    replaces `_resolve_base_dir`, which is the exact seam under test here.
+    """
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
+
+    live = str( fleet_data_root() )
+    repo = tmp_path / "projects" / "myrepo"
+    repo.mkdir( parents=True )
+    expected = str( fleet_data_root( str( repo ) ) )
+    assert expected != live, "the temp repo must not resolve to the live fleet root"
+
+    stray = rwc.receipt_path( live, "guard-sid" )
+    try:
+        path = rs._stamp_respin_boot_receipt( "guard-sid", "maya", "cc-maya-1",
+                                              None, None, str( repo ) )
+        assert not os.path.exists( stray ), \
+            f"the stamp wrote a receipt into the LIVE fleet root: {stray}"
+        assert path == rwc.receipt_path( expected, "guard-sid" )
+        assert os.path.exists( path )
+    finally:
+        if os.path.exists( stray ): os.remove( stray )
