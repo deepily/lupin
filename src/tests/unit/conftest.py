@@ -65,6 +65,35 @@ def _isolate_hook_log_dir( tmp_path, monkeypatch ):
     monkeypatch.setenv( "LUPIN_HOOK_LOG_DIR", str( tmp_path / "hook-logs" ) )
 
 
+@pytest.fixture( autouse=True )
+def _isolate_fleet_data_root( tmp_path, monkeypatch ):
+    """
+    Redirect the FLEET DATA ROOT to a per-test tmp dir via DEEPILY_DATA_DIR, so
+    no unit test writes into the real projects-data/<repo>/ directory.
+
+    Why (the third sibling of the two isolations above): SessionStart now stamps
+    a re-spin boot receipt on EVERY boot, and `_build_memento_block` is driven
+    directly by several register_session unit suites. A test that passes no
+    repo_root gets the AMBIENT one — the real repo — and its receipt lands in the
+    real fleet dir, which is the directory the wake check reads. Measured
+    2026-08-23: four register_session suites planted 9 receipts there between
+    them, one carrying a real persona, a live memento_slot and a booted_at of
+    that second. A healthy-looking receipt in the live directory, written by the
+    test suite, is a false green waiting for a same-id re-spin.
+
+    Rick's ruling on decision 2b20a6d6 (2026-07-27) is the standing rule: no test
+    touches a live data store; if it is not isolated it gets fixed. This is the
+    one place that cannot be forgotten by the next suite to arrive — passing the
+    directory correctly at each call site (which the stamp now also does) fixes
+    the callers that supply a repo_root, and this fixes the ones that do not.
+
+    `fleet_data_root()` reads DEEPILY_DATA_DIR at CALL time, so the redirect holds
+    regardless of import order. A test that needs the real root monkeypatches it
+    away locally.
+    """
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "fleet-data" ) )
+
+
 # ---------------------------------------------------------------------------
 # RETIRED 2026-07-27 — the `_PG_ISOLATION_MODULES` allowlist and its
 # `_isolate_pg_vector_store` per-test-schema fixture (bug cfcbb703 Family B).

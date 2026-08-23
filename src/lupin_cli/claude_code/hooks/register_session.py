@@ -1432,7 +1432,56 @@ def _resolve_repo_root( cwd=None ):
     return os.environ.get( "LUPIN_ROOT", os.getcwd() )
 
 
-def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=None ):
+def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
+                                memento_path, memento_written_at, repo_root ):
+    """
+    Leave the boot receipt a re-spin's wake check reads (row b0570b67).
+
+    THE ONE THING TO GET RIGHT: this fires on EVERY boot, including the boot
+    where no memento resolved. "It woke but consumed nothing" and "it never woke
+    at all" are different failures with different fixes, and skipping the write
+    on the empty path would collapse them into the same silence — which is the
+    bug this receipt exists to end. `memento_path=None` is a finding, not a
+    reason to stay quiet.
+
+    Requires:
+        - stable_session_id is this seat's session id, or None
+        - memento_path is the file the boot path actually opened, or None
+
+    Ensures:
+        - writes the receipt best-effort; returns the path written, or None
+        - places it under THIS repo_root's fleet data root, never the ambient one
+        - NEVER raises and never blocks the boot — a diagnostic that can break a
+          SessionStart is worse than the failure it reports. An unimportable
+          module (a partially-installed tree) is swallowed the same way.
+
+    THE DIRECTORY IS PASSED, NOT RESOLVED DOWNSTREAM. `write_boot_receipt` falls
+    back to `fleet_data_root()` with no argument, which reads the AMBIENT project
+    root rather than the repo it was handed — so a caller working in a temp tree
+    still writes into the live fleet directory. Measured 2026-08-23: a green run
+    of the register_session memento-block unit suite planted 4 real receipts in
+    projects-data/lupin, one carrying a real persona, a live memento_slot and a
+    booted_at of that second. A healthy-looking receipt in the directory the wake
+    check reads, written by the test suite, is a false green waiting to happen.
+    """
+    try:
+        from cosa.agents.heartbeat_arbiter.respin_wake_check import write_boot_receipt
+        from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
+        return write_boot_receipt(
+            session_id         = stable_session_id,
+            persona            = persona_name,
+            tmux_session       = tmux_session,
+            memento_path       = memento_path,
+            memento_written_at = memento_written_at,
+            repo_root          = repo_root,
+            base_dir           = str( fleet_data_root( repo_root ) ),
+        )
+    except Exception:
+        return None
+
+
+def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=None,
+                          tmux_session=None ):
     """
     Render this seat's memento pointer + newest amendment as a block for the
     SessionStart hook's `additionalContext` — the channel the SESSION ITSELF
@@ -1473,6 +1522,16 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
     repo_root = repo_root if repo_root is not None else _resolve_repo_root( cwd )
 
     path = _resolve_memento_path( stable_session_id, persona_name, repo_root )
+
+    # The wake check's witness (row b0570b67). Stamped HERE because this is the
+    # one place that knows WHICH file the boot path actually opened — the fact
+    # that answers "did it wake?" and "did it read the right memento?" at once.
+    # Written before the early return so a blank rehydrate is recorded too.
+    _stamp_respin_boot_receipt(
+        stable_session_id, persona_name, tmux_session,
+        path, _written_at_of( _header_of( path ) ) if path else None, repo_root,
+    )
+
     if not path: return ""
 
     try:
@@ -2103,7 +2162,8 @@ def main():
         alarm_block = _build_persona_failure_block( voice_persona_failure, stable_session_id )
         try:
             allocated_persona = ( session_data.get( "voice_persona" ) or {} ).get( "name" )
-            memento_block     = _build_memento_block( stable_session_id, allocated_persona, cwd=cwd )
+            memento_block     = _build_memento_block( stable_session_id, allocated_persona, cwd=cwd,
+                                                      tmux_session=session_data.get( "tmux_session" ) )
         except Exception as e:
             print( f"[register_session] WARNING: memento block failed ({type( e ).__name__}: {e})",
                    file=sys.stderr )
