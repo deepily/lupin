@@ -2951,10 +2951,13 @@ class NotificationsUI {
             
             const responseData = await response.json();
             this.log( "Q&A submitted successfully:", responseData );
-            
-            // Update response area
-            this.updateElement( "response-text", JSON.stringify( responseData, null, 2 ) );
-            
+
+            // PHASE 4: a response that asks for a missing argument becomes an inline
+            // question instead of a JSON dump. handleQAResult owns both outcomes, and
+            // the resume turn re-enters it, so a two-argument interview loops without
+            // any extra machinery here.
+            this.handleQAResult( responseData );
+
             // Clear input
             inputElement.value = '';
             
@@ -2972,6 +2975,89 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Render one v2 response: an inline question when the flow needs an argument,
+     * the result otherwise.
+     *
+     * Requires:
+     *     - result is an /api/v2/ask, /api/v2/submit or /api/v2/resume response body
+     *
+     * Ensures:
+     *     - an ANSWERABLE needs_input (one carrying a pending_id) renders the inline
+     *       box and wires Enter + the button to submitArgAnswer
+     *     - every other outcome clears any outstanding box first, so a completed
+     *       interview does not leave its last question sitting under the answer
+     *     - a needs_input WITHOUT a pending_id — the submit door's non-parking
+     *       refusal, and an expired park — renders as a result, never as a box whose
+     *       submit cannot succeed
+     *     - falls back to the raw dump when the module did not load, so a missing
+     *       static asset degrades to the old behaviour rather than a blank card
+     */
+    handleQAResult( result ) {
+        const container = document.getElementById( 'qa-arg-interview' );
+        // Read at CALL time, never at load time, so module execution order cannot matter.
+        const interview = window.LUPIN_ARG_INTERVIEW;
+        if ( !interview || !container ) {
+            this.log( "Arg-interview module missing — falling back to the raw response dump" );
+            this.updateElement( "response-text", JSON.stringify( result, null, 2 ) );
+            return;
+        }
+
+        if ( !interview.isAnswerable( result ) ) {
+            interview.clearArgQuestion( container );
+            this.updateElement( "response-text", JSON.stringify( result, null, 2 ) );
+            return;
+        }
+
+        const wired = interview.renderArgQuestion( container, result );
+        this.updateElement( "response-text", result.answer );
+        wired.button.addEventListener( 'click', () => this.submitArgAnswer( result, wired.input.value ) );
+        wired.input.addEventListener( 'keydown', ( e ) => {
+            if ( e.key === 'Enter' ) {
+                e.preventDefault();
+                this.submitArgAnswer( result, wired.input.value );
+            }
+        } );
+        wired.input.focus();
+    }
+
+    /**
+     * Answer one interview question — POST /api/v2/resume — and render what comes back.
+     *
+     * Ensures:
+     *     - a blank answer is ignored rather than posted; resume rejects an empty
+     *       answer with a 422 and the user would see a validation dump instead of the
+     *       question they still have to answer
+     *     - the result re-enters handleQAResult, so a second missing argument renders
+     *       as the next question and the loop closes when the flow terminates
+     *     - a transport failure leaves the box UP with the error beside it: the
+     *       pending entry is still parked server-side, so the answer is still wanted
+     */
+    async submitArgAnswer( result, answer ) {
+        const interview = window.LUPIN_ARG_INTERVIEW;
+        const text      = ( answer || '' ).trim();
+        if ( !text ) return;
+
+        try {
+            await this.ensureValidToken();
+            const response = await fetch( '/api/v2/resume', {
+                method: 'POST',
+                headers: {
+                    'Authorization': this.getAuthHeader(),
+                    'X-Session-ID': this.queueSessionId,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify( interview.resumeBody( result, text, this.queueSessionId ) )
+            } );
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}: ${response.statusText}` );
+            this.handleQAResult( await response.json() );
+        } catch ( error ) {
+            this.error( "Answer submission failed:", error );
+            this.updateElement( "response-text", `Error: ${error.message}` );
+            this.handleServerError( error );
+        }
+    }
+
     handleServerError( error ) {
         /**
          * Detect server errors (500, 503, etc.) and create spoken notifications

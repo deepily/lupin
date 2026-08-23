@@ -133,6 +133,13 @@
                     <span class="metric"><span class="metric-label">TTFA:</span> <span id="metric-ttfa">--</span></span>
                     <span class="metric"><span class="metric-label">RTT:</span> <span id="metric-rtt">--</span></span>
                 </div>
+                <!-- The inline argument interview (phase 4). Filled at runtime by
+                     shared/arg-interview.js when a v2 response comes back needs_input
+                     with a pending_id; hidden whenever no question is outstanding.
+                     This is what replaces the submit cards' up-front forms: the flow
+                     already asks for query/prompt/source one at a time from the same
+                     contract, so the card inherits every agent's interview at once. -->
+                <div id="qa-arg-interview" data-testid="notifications-qa-arg-interview" class="qa-arg-interview" hidden></div>
                 <div id="response-text">No response yet...</div>
             </div>
         </div>
@@ -1047,6 +1054,7 @@
          it at call time (the poll starts well after module execution). -->
     <script type="module" src="/static/js/shared/task-list-query.js?v=20260803c"></script>
     <script type="module" src="/static/js/shared/agent-select.js?v=20260822a"></script>
+    <script type="module" src="/static/js/shared/arg-interview.js?v=20260822a"></script>
     <script src="/static/js/notifications.js?v=20260821a"></script>
     <script src="/static/js/broadcast-panel.js?v=20260619a"></script>
     <script>
