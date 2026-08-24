@@ -303,7 +303,7 @@ run_queue_tests() {
 Placeholder for Job Queue Workflow Smoke Tests
 
 This file will contain tests for:
-- Job submission via /api/push
+- Job submission via /api/v2/ask
 - Queue state transitions (TODO → RUNNING → DONE)
 - Job completion notifications
 - Queue count updates via WebSocket
@@ -316,7 +316,7 @@ import sys
 async def main():
     print("🚧 Job queue workflow tests not yet implemented")
     print("📋 Planned test coverage:")
-    print("   • Job submission via /api/push")
+    print("   • Job submission via /api/v2/ask")
     print("   • Queue state transitions (TODO → RUNNING → DONE)")
     print("   • Job completion notifications")
     print("   • Queue count updates via WebSocket")
