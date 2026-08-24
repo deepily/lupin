@@ -52,6 +52,7 @@ from cosa.rest.db import database as db_module
 from cosa.rest.db.auto_migrate import build_alembic_config
 from cosa.rest.postgres_models import User, Notification
 from cosa.rest.db.repositories.notification_repository import NotificationRepository
+from cosa.rest.db.repositories.user_repository import UserRepository
 
 
 _THROWAWAY_DB = f"answers_owed_repo_{os.getpid()}"
@@ -243,3 +244,124 @@ def test_mark_answer_delivered_stores_correct_instant_under_nonutc_session( owed
         f"stored instant is off by {drift:.0f}s under a non-UTC session — naive utcnow() "
         f"was interpreted in the session timezone. Use datetime.now( timezone.utc )."
     )
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Row 3b4002fe — the SIBLINGS of the guarded line.
+#
+# The guard above proves ONE line (notification_repository.py:468, the aware
+# mark_answer_delivered). Its own comment names `responded_at` as the thing to
+# stay consistent WITH — and responded_at was still naive, in two places, with
+# no guard at all. delivered_at and last_login_at were naive too. A green guard
+# covering one line while three siblings carry the identical defect reads as
+# coverage it does not have.
+#
+# Each guard below is the same shape as María's: write under a non-UTC session,
+# read the stored ABSOLUTE instant with EXTRACT( EPOCH ... ) — which is
+# timezone-independent — and require it to match real wall-clock now. A UTC-only
+# assertion cannot falsify the bug: TIMESTAMPTZ reads back aware either way, and
+# under UTC there is no offset to expose.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_NON_UTC_ZONE = "America/New_York"
+
+
+def _stored_epoch( session, table, column, row_id ):
+    """Read one timestamp column back as a timezone-independent epoch."""
+    return session.execute(
+        text( f"SELECT EXTRACT( EPOCH FROM {column} ) FROM {table} WHERE id = :rid" ),
+        { "rid": str( row_id ) },
+    ).scalar()
+
+
+def _assert_instant_is_right( epoch_stored, t0, column ):
+    assert epoch_stored is not None, f"{column} must be set"
+    drift = abs( float( epoch_stored ) - t0 )
+    assert drift < 120, (
+        f"{column} is off by {drift:.0f}s under a {_NON_UTC_ZONE} session — a naive "
+        f"utcnow() was interpreted in the session timezone. Use datetime.now( timezone.utc )."
+    )
+
+
+def test_update_state_delivered_stores_correct_instant_under_nonutc_session( owed_session ):
+    """GUARD: NotificationRepository.update_state writes delivered_at (naive utcnow, :401)."""
+    session = owed_session
+    repo    = NotificationRepository( session )
+    rid     = _make_user( session )
+    nid     = _add_notif( session, rid, message="tz guard delivered_at" )
+    session.commit()
+
+    session.execute( text( f"SET TIME ZONE '{_NON_UTC_ZONE}'" ) )
+    try:
+        t0 = time.time()
+        repo.update_state( nid, "delivered" )
+        session.commit()
+        epoch_stored = _stored_epoch( session, "notifications", "delivered_at", nid )
+    finally:
+        session.execute( text( "SET TIME ZONE 'UTC'" ) )
+        session.commit()
+
+    _assert_instant_is_right( epoch_stored, t0, "delivered_at" )
+
+
+def test_update_state_responded_stores_correct_instant_under_nonutc_session( owed_session ):
+    """GUARD: NotificationRepository.update_state writes responded_at (naive utcnow, :401)."""
+    session = owed_session
+    repo    = NotificationRepository( session )
+    rid     = _make_user( session )
+    nid     = _add_notif( session, rid, message="tz guard responded_at via update_state" )
+    session.commit()
+
+    session.execute( text( f"SET TIME ZONE '{_NON_UTC_ZONE}'" ) )
+    try:
+        t0 = time.time()
+        repo.update_state( nid, "responded" )
+        session.commit()
+        epoch_stored = _stored_epoch( session, "notifications", "responded_at", nid )
+    finally:
+        session.execute( text( "SET TIME ZONE 'UTC'" ) )
+        session.commit()
+
+    _assert_instant_is_right( epoch_stored, t0, "responded_at" )
+
+
+def test_update_response_stores_correct_instant_under_nonutc_session( owed_session ):
+    """GUARD: NotificationRepository.update_response writes responded_at (naive utcnow, :437)."""
+    session = owed_session
+    repo    = NotificationRepository( session )
+    rid     = _make_user( session )
+    nid     = _add_notif( session, rid, message="tz guard responded_at via update_response" )
+    session.commit()
+
+    session.execute( text( f"SET TIME ZONE '{_NON_UTC_ZONE}'" ) )
+    try:
+        t0 = time.time()
+        repo.update_response( nid, { "answer": "yes" } )
+        session.commit()
+        epoch_stored = _stored_epoch( session, "notifications", "responded_at", nid )
+    finally:
+        session.execute( text( "SET TIME ZONE 'UTC'" ) )
+        session.commit()
+
+    _assert_instant_is_right( epoch_stored, t0, "responded_at" )
+
+
+def test_update_last_login_stores_correct_instant_under_nonutc_session( owed_session ):
+    """GUARD: UserRepository.update_last_login writes last_login_at (naive utcnow, :134)."""
+    session   = owed_session
+    user_repo = UserRepository( session )
+    rid       = _make_user( session )
+    session.commit()
+
+    session.execute( text( f"SET TIME ZONE '{_NON_UTC_ZONE}'" ) )
+    try:
+        t0 = time.time()
+        user_repo.update_last_login( rid )
+        session.commit()
+        epoch_stored = _stored_epoch( session, "users", "last_login_at", rid )
+    finally:
+        session.execute( text( "SET TIME ZONE 'UTC'" ) )
+        session.commit()
+
+    _assert_instant_is_right( epoch_stored, t0, "last_login_at" )
