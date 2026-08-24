@@ -180,46 +180,8 @@ run_notification_tests() {
     log_category "Running Notification System Tests"
     
     if [ ! -f "$NOTIFICATIONS_TESTS" ]; then
-        log_warning "Notification tests not yet implemented: $NOTIFICATIONS_TESTS"
-        log_info "Creating placeholder for notification tests..."
-        
-        # Create directory if it doesn't exist
-        mkdir -p "$LUPIN_SMOKE_DIR"
-        
-        # Create placeholder test file
-        cat > "$NOTIFICATIONS_TESTS" << 'EOF'
-#!/usr/bin/env python3
-"""
-Placeholder for Notification System Smoke Tests
-
-This file will contain tests for:
-- /api/notify endpoint validation
-- Notification queue operations
-- WebSocket notification delivery
-- User-specific notification routing
-- Priority handling validation
-"""
-
-import asyncio
-import sys
-
-async def main():
-    print("🚧 Notification tests not yet implemented")
-    print("📋 Planned test coverage:")
-    print("   • /api/notify endpoint validation")
-    print("   • Notification queue operations") 
-    print("   • WebSocket notification delivery")
-    print("   • User-specific notification routing")
-    print("   • Priority handling validation")
-    print("")
-    print("✅ Placeholder test completed")
-    return True
-
-if __name__ == "__main__":
-    result = asyncio.run(main())
-    sys.exit(0 if result else 1)
-EOF
-        chmod +x "$NOTIFICATIONS_TESTS"
+        log_error "Notification tests missing: $NOTIFICATIONS_TESTS"
+        return 1
     fi
     
     # Run the test
@@ -237,46 +199,8 @@ run_audio_tests() {
     log_category "Running Audio/TTS System Tests"
     
     if [ ! -f "$AUDIO_TESTS" ]; then
-        log_warning "Audio tests not yet implemented: $AUDIO_TESTS"
-        log_info "Creating placeholder for audio tests..."
-        
-        # Create directory if it doesn't exist
-        mkdir -p "$LUPIN_SMOKE_DIR"
-        
-        # Create placeholder test file
-        cat > "$AUDIO_TESTS" << 'EOF'
-#!/usr/bin/env python3
-"""
-Placeholder for Audio/TTS System Smoke Tests
-
-This file will contain tests for:
-- /api/get-speech TTS endpoint validation
-- Audio WebSocket streaming events
-- Instant vs reliable playback modes
-- TTS caching mechanism validation
-- Binary audio chunk handling
-"""
-
-import asyncio
-import sys
-
-async def main():
-    print("🚧 Audio/TTS tests not yet implemented")
-    print("📋 Planned test coverage:")
-    print("   • /api/get-speech TTS endpoint validation")
-    print("   • Audio WebSocket streaming events")
-    print("   • Instant vs reliable playback modes")
-    print("   • TTS caching mechanism validation")
-    print("   • Binary audio chunk handling")
-    print("")
-    print("✅ Placeholder test completed")
-    return True
-
-if __name__ == "__main__":
-    result = asyncio.run(main())
-    sys.exit(0 if result else 1)
-EOF
-        chmod +x "$AUDIO_TESTS"
+        log_error "Audio tests missing: $AUDIO_TESTS"
+        return 1
     fi
     
     # Run the test
@@ -294,46 +218,8 @@ run_queue_tests() {
     log_category "Running Job Queue Workflow Tests"
     
     if [ ! -f "$QUEUE_TESTS" ]; then
-        log_warning "Queue tests not yet implemented: $QUEUE_TESTS"
-        log_info "Creating placeholder for queue tests..."
-        
-        # Create directory if it doesn't exist
-        mkdir -p "$LUPIN_SMOKE_DIR"
-        
-        # Create placeholder test file
-        cat > "$QUEUE_TESTS" << 'EOF'
-#!/usr/bin/env python3
-"""
-Placeholder for Job Queue Workflow Smoke Tests
-
-This file will contain tests for:
-- Job submission via /api/v2/ask
-- Queue state transitions (TODO → RUNNING → DONE)
-- Job completion notifications
-- Queue count updates via WebSocket
-- Job lifecycle validation
-"""
-
-import asyncio
-import sys
-
-async def main():
-    print("🚧 Job queue workflow tests not yet implemented")
-    print("📋 Planned test coverage:")
-    print("   • Job submission via /api/v2/ask")
-    print("   • Queue state transitions (TODO → RUNNING → DONE)")
-    print("   • Job completion notifications")
-    print("   • Queue count updates via WebSocket")
-    print("   • Job lifecycle validation")
-    print("")
-    print("✅ Placeholder test completed")
-    return True
-
-if __name__ == "__main__":
-    result = asyncio.run(main())
-    sys.exit(0 if result else 1)
-EOF
-        chmod +x "$QUEUE_TESTS"
+        log_error "Queue tests missing: $QUEUE_TESTS"
+        return 1
     fi
     
     # Run the test
