@@ -8,7 +8,7 @@ update-password / deactivate / mark-verified / reset-password ).
 """
 
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 
 from sqlalchemy.exc import IntegrityError
@@ -221,6 +221,37 @@ class TestAuthenticateUser( unittest.TestCase ):
             self.assertEqual( data[ "roles" ], [ "admin" ] )
             self.assertEqual( data[ "created_at" ], "2025-09-29T12:00:00" )
             mock_repo_cls.return_value.update_last_login.assert_called_once()
+
+    def test_last_login_at_carries_a_utc_offset( self ):
+        """
+        Ensures:
+            - last_login_at parses as a TIMEZONE-AWARE instant (row 3b4002fe)
+
+        This asserts the string carries an OFFSET, not that it equals a literal.
+        Pinning the literal would only re-freeze whichever spelling happens to be
+        current, and would pass just as happily on the naive one.
+
+        Why it matters: created_at on the line above comes off a TIMESTAMPTZ column
+        and serialises with +00:00, while last_login_at used to be a naive
+        utcnow().isoformat() carrying no offset at all. Both land in this one dict,
+        and admin-users.js renders both through new Date( ... ) - which reads a
+        zone-less string as LOCAL time. So the admin users table showed created_at
+        correctly and last_login_at shifted by the operator's UTC offset, on the
+        same row, with nothing in the code to say why.
+        """
+        with patch( f"{MODULE}.get_db" ), patch( f"{MODULE}.UserRepository" ) as mock_repo_cls, \
+             patch( f"{MODULE}.verify_password", return_value=True ):
+            mock_repo_cls.return_value.get_by_email.return_value = _user()
+            ok, msg, data = authenticate_user( "a@b.com", "pw" )
+
+        self.assertTrue( ok )
+        parsed = datetime.fromisoformat( data[ "last_login_at" ] )
+        self.assertIsNotNone(
+            parsed.tzinfo,
+            "last_login_at was serialised without a UTC offset - a browser parsing it "
+            "with new Date( ... ) reads it as LOCAL time and displays it shifted"
+        )
+        self.assertEqual( parsed.utcoffset(), timedelta( 0 ) )
 
     def test_success_bare_row( self ):
         """
