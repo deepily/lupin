@@ -141,9 +141,21 @@ services:
 
   # Lupin REST API — Development (port 7999)
   # Always runs [Lupin: Development] config with lupin_db_dev.
-  # uvicorn --reload enabled for live code changes during development.
+  # uvicorn --reload is OFF by default since 2026-08-01 (opt-in via LUPIN_RELOAD, gated by
+  # reload_enabled() in bootstrap_helpers.py) — watching the tree took the server down for the
+  # whole fleet whenever anyone touched a watched file. A saved .py is NOT a served .py: it
+  # needs a bounce (src/scripts/bounce-dev-server.sh).
   lupin-rest-dev:
-    image: lupin:1.1.2-agy-candidate    # 2026-07-11: agy (Antigravity CLI) baked in (Rio, Rick user_direct). Rollback: lupin:1.1.1-pgvector-candidate. Prior: 1.1.1-pgvector-candidate (v0.2.0 pgvector swap, gate d93a1edb).
+    # 2026-08-23 (Mr. Radio, Rick user_direct): dev STANDARDIZED onto the same image as
+    # test. The 07-27 split was never a design decision — 1.1.3's own comment below says
+    # "the image is correct for dev too", and dev stayed behind ONLY because recreating
+    # this container bounces Rick's live :7999. That objection expired 2026-08-01 when the
+    # policy became "anybody may bounce :7999 within reason". Delta over 1.1.2 is three
+    # binaries (tmux, node v22.15.0, terraform v1.12.2); dpkg 523 -> 527, ZERO removed,
+    # ZERO version changes, chromium/pip-freeze/bundled-CC byte-identical.
+    # Rollback: lupin:1.1.2-agy-candidate (2026-07-11, agy baked in — Rio, Rick user_direct).
+    # Prior to that: 1.1.1-pgvector-candidate (v0.2.0 pgvector swap, gate d93a1edb).
+    image: lupin:1.1.3-testtoolchain-candidate
     container_name: lupin-rest-dev
     restart: unless-stopped
     user: "1001:1001"

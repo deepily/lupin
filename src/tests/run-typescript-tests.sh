@@ -128,7 +128,30 @@ done
 # NOTE for src/cosa/repo/gate_reachability.py: the `src/tests/**` glob below is
 # a GLOB ROOT, not a suite target. That detector's path-token regex rejects it
 # on purpose; see the comment on _PATH_TOKEN_RE.
-exec npx c8 \
+# ── THE RUNNER IS CAPPED, AND THE CAP IS NOT WHY IT IS SAFE ──────────────────
+# 2026-08-23 (Clayton found it, Maria verified, Mr. Radio landed it). This line
+# used to end in a bare `npx tsx --test "src/tests/**/*.test.ts"` — no timeout, no
+# concurrency cap. That is the EXACT command shape that got a session killed by
+# systemd-oomd at 13:02:50 that day: node's test runner fans out one worker per
+# core (32 here), each tsx worker carrying an esbuild service — 52 processes.
+#
+# package.json's `test` script was capped the same day; this script is the OTHER
+# door into the same 119 files and it was missed. TestSuiteJob wraps its own
+# 1500s timeout around this script (SUITE_TIMEOUTS_SECONDS["typescript"]), but a
+# HAND-RUN had nothing, and nothing anywhere capped fan-out.
+#
+# 🔴 Read this before trusting the cap: a second seat died at 16:06:34 the same
+# day running ONE file at --test-concurrency=1 under `timeout 300`. Caps and
+# timeouts did NOT save it. The allocator is still unidentified (row d84839ae),
+# and 77 of the 119 *.test.ts files load a DOM via @happy-dom/global-registrator.
+# So this cap bounds the blast radius; it does not make the suite safe. Treat any
+# run of this script as a blast-radius action: announce first, one at a time
+# across the whole fleet. Full survey:
+#   src/rnd/v0.2.0/2026.08.23-typescript-test-runner-oom-hazard.md
+TS_TIMEOUT_SECS="${TS_TIMEOUT_SECS:-1400}"      # under TestSuiteJob's own 1500s
+TS_CONCURRENCY="${TS_CONCURRENCY:-4}"           # matches package.json's cap
+
+exec timeout "$TS_TIMEOUT_SECS" npx c8 \
     --all \
     $CHECK_COVERAGE \
     --lines      "$THRESHOLD_LINES" \
@@ -144,4 +167,5 @@ exec npx c8 \
     --exclude='**/index.ts' \
     --reporter=text-summary \
     --reporter=text \
-    npx tsx --test "src/tests/**/*.test.ts" "${PASSTHROUGH_ARGS[@]}"
+    node --test-concurrency="$TS_CONCURRENCY" --import tsx \
+         --test "src/tests/**/*.test.ts" "${PASSTHROUGH_ARGS[@]}"
