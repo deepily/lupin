@@ -196,51 +196,88 @@ class NotificationSmokeTests:
             raise
     
     async def test_notification_queue_operations( self ):
-        """Test notification queue CRUD operations."""
-        test_email = self.test_email
+        """Test notification queue CRUD operations.
 
-        # Send a notification first — capture the UUID from response
-        send_response = await self.notification_helper.send_notification(
-            message="Queue operation test notification",
-            target_user=test_email,
-            priority="high"
+        ⚠️ THE WEBSOCKET CONNECTION BELOW IS LOAD-BEARING, NOT SETUP NOISE.
+        GET /api/notifications/{user_id} reads the IN-MEMORY FIFO queue, and
+        /api/notify only pushes to that queue when the target user is connected —
+        an offline target returns "user_not_available" one line before the push
+        (see the fire-and-forget branch of routers/notifications.py). Without a
+        live connection the notification is durably recorded in the database and
+        never appears in the queue this test reads, so the test asks for something
+        the send cannot deliver. Measured both ways against the dev server:
+
+            ws connected = False → status "user_not_available", queue 23, not found
+            ws connected = True  → status "queued",             queue 24, found
+
+        This test was a standing red for exactly that reason (row 0dbc1e91).
+        """
+        test_email   = self.test_email
+        test_message = "Queue operation test notification"
+
+        # Connect first so the target user is genuinely online for the send.
+        websocket = await self.client.websocket_connect(
+            "/ws/queue/{session_id}",
+            subscribed_events=[ "notification_queue_update", "auth_success", "sys_ping" ]
         )
 
-        self.validator.assert_response_ok( send_response, 200 )
+        try:
+            # Send a notification — capture the UUID from response
+            send_response = await self.notification_helper.send_notification(
+                message=test_message,
+                target_user=test_email,
+                priority="high"
+            )
 
-        send_data = send_response.json()
-        # Use the server-returned UUID as user_id for queue lookup
-        user_id = send_data.get( "target_system_id", email_to_system_id( test_email ) )
+            self.validator.assert_response_ok( send_response, 200 )
 
-        if self.debug:
-            print( f"[DEBUG] Sent notification, user_id for lookup: {user_id}" )
+            send_data = send_response.json()
 
-        # Wait a moment for notification to be processed
-        await asyncio.sleep( 0.5 )
+            # ⚠️ A 200 IS NOT A DELIVERY. The server answers 200 whether it queued
+            # the notification or refused it as undeliverable, and says which in its
+            # status field. Checking only the envelope is how this test read a
+            # refusal as a successful send for as long as it has been failing.
+            assert send_data[ "status" ] == "queued", (
+                f"Send was accepted with HTTP 200 but not queued: status="
+                f"{send_data.get( 'status' )!r}. A 200 carrying 'user_not_available' "
+                f"means the target was offline and nothing entered the queue."
+            )
 
-        # Get user notifications
-        get_response = await self.notification_helper.get_user_notifications( user_id )
-        self.validator.assert_response_ok( get_response, 200 )
+            # Use the server-returned UUID as user_id for queue lookup
+            user_id = send_data.get( "target_system_id", email_to_system_id( test_email ) )
 
-        get_data = get_response.json()
-        self.validator.assert_json_contains( get_data, [ "status", "notifications", "notification_count" ] )
+            if self.debug:
+                print( f"[DEBUG] Sent notification, user_id for lookup: {user_id}" )
 
-        # Should have at least our test notification
-        notifications = get_data[ "notifications" ]
-        if self.debug:
-            print( f"[DEBUG] Found {len( notifications )} notifications for user {user_id}" )
-            print( f"[DEBUG] Notification response: {get_data}" )
-        assert len( notifications ) > 0, f"Should have notifications in queue for user {user_id}. Found: {len( notifications )}"
+            # Wait a moment for notification to be processed
+            await asyncio.sleep( 0.5 )
 
-        # Find our test notification
-        test_notification = None
-        for notification in notifications:
-            if notification[ "message" ] == "Queue operation test notification":
-                test_notification = notification
-                break
+            # Get user notifications
+            get_response = await self.notification_helper.get_user_notifications( user_id )
+            self.validator.assert_response_ok( get_response, 200 )
 
-        assert test_notification is not None, "Test notification not found in queue"
-        assert test_notification[ "priority" ] == "high"
+            get_data = get_response.json()
+            self.validator.assert_json_contains( get_data, [ "status", "notifications", "notification_count" ] )
+
+            # Should have at least our test notification
+            notifications = get_data[ "notifications" ]
+            if self.debug:
+                print( f"[DEBUG] Found {len( notifications )} notifications for user {user_id}" )
+                print( f"[DEBUG] Notification response: {get_data}" )
+            assert len( notifications ) > 0, f"Should have notifications in queue for user {user_id}. Found: {len( notifications )}"
+
+            # Find our test notification
+            test_notification = None
+            for notification in notifications:
+                if notification[ "message" ] == test_message:
+                    test_notification = notification
+                    break
+
+            assert test_notification is not None, "Test notification not found in queue"
+            assert test_notification[ "priority" ] == "high"
+
+        finally:
+            await self.client.close_websocket( websocket )
 
         # Test marking as played (if notification has ID)
         # Server bug: NotificationFifoQueue._emit_queue_update missing — causes hang/500
@@ -328,43 +365,49 @@ class NotificationSmokeTests:
                 message=test_message,
                 priority="urgent"
             )
-            
+
             self.validator.assert_response_ok(send_response, 200)
-            
-            # Wait for WebSocket notification event
-            try:
-                notification_event = await self.client.wait_for_websocket_event(
-                    websocket, "notification_queue_update", timeout=10.0
-                )
 
-                # Validate event structure — server sends notification at top level
-                self.validator.assert_websocket_event(
-                    notification_event,
-                    "notification_queue_update"
-                )
+            # A 200 is not a delivery — the server answers 200 whether it queued the
+            # notification or refused it as undeliverable, and names which in `status`.
+            send_data = send_response.json()
+            assert send_data[ "status" ] == "queued", (
+                f"Send was accepted with HTTP 200 but not queued: status="
+                f"{send_data.get( 'status' )!r}. Nothing will arrive over the socket."
+            )
 
-                # Notification may be under "data" or "notification" key
-                if "data" in notification_event:
-                    notification = notification_event[ "data" ].get( "notification", notification_event[ "data" ] )
-                elif "notification" in notification_event:
-                    notification = notification_event[ "notification" ]
-                else:
-                    raise AssertionError( f"No notification data in event: {notification_event}" )
+            # ⚠️ THE TIMEOUT IS NOT TOLERATED. This block used to end in
+            # `except TimeoutError: pass`, excused as "may be expected in test
+            # environment" — which made the test report green whether the event
+            # arrived or not, i.e. green precisely when the delivery it exists to
+            # prove had failed. The send above is now asserted to have been queued,
+            # so a socket that stays silent is a real failure and must say so.
+            notification_event = await self.client.wait_for_websocket_event(
+                websocket, "notification_queue_update", timeout=10.0
+            )
 
-                self.validator.assert_json_contains(
-                    notification,
-                    [ "message", "type", "priority", "timestamp" ]
-                )
+            # Validate event structure — server sends notification at top level
+            self.validator.assert_websocket_event(
+                notification_event,
+                "notification_queue_update"
+            )
 
-                assert notification[ "message" ] == test_message
-                assert notification[ "priority" ] == "urgent"
-                
-            except TimeoutError:
-                # This might be expected if user isn't connected to the specific session
-                if self.debug:
-                    print("[DEBUG] WebSocket notification timeout - may be expected in test environment")
-                pass
-                
+            # Notification may be under "data" or "notification" key
+            if "data" in notification_event:
+                notification = notification_event[ "data" ].get( "notification", notification_event[ "data" ] )
+            elif "notification" in notification_event:
+                notification = notification_event[ "notification" ]
+            else:
+                raise AssertionError( f"No notification data in event: {notification_event}" )
+
+            self.validator.assert_json_contains(
+                notification,
+                [ "message", "type", "priority", "timestamp" ]
+            )
+
+            assert notification[ "message" ] == test_message
+            assert notification[ "priority" ] == "urgent"
+
         finally:
             await self.client.close_websocket(websocket)
     
