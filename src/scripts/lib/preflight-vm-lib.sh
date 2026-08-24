@@ -908,3 +908,103 @@ pfv_deployed_ref_status() {
     [ "$stamped" = "$head_sha" ] && { echo "MATCH"; return 0; }
     echo "STALE"; return 1
 }
+
+# ── pfv_environ_lookup ───────────────────────────────────────────────────────
+# Read ONE variable out of a container's real process environment.
+#
+# WHY THIS EXISTS RATHER THAN `docker exec printenv`. env-contract.tsv's own
+# JWT_SECRET_KEY row states the rule: "read /proc/1/environ, not `docker exec
+# printenv` — printenv derives a fresh environment from container config and
+# misses an entrypoint that sources an env file over the top." A value that IS
+# in the running process then reads as UNSET, and C6 blocks a deploy over a
+# variable that is actually present. C6 was using the very call the contract it
+# reads warns against.
+#
+# INPUT IS NEWLINE-SEPARATED, NOT NUL-SEPARATED, ON PURPOSE. /proc/1/environ is
+# NUL-separated, but bash command substitution SILENTLY DROPS NUL bytes — the
+# whole environ would arrive as one run-together line with no separators and
+# nothing would ever match. The caller converts inside the container
+# (`sh -c "tr '\0' '\n' < /proc/1/environ"`) so this function receives lines.
+#
+# Requires:
+#   - $1 = variable name; stdin = newline-separated NAME=value entries
+# Ensures:
+#   - prints the value and returns 0 when the name is present, EVEN IF the value
+#     is empty — set-but-empty and unset are different failures with different
+#     remedies, and collapsing them is what `sh -c 'printf %s "$VAR"'` does wrong
+#   - returns 1, printing nothing, when the name is absent
+#   - FIRST match wins, which is what getenv() in the container would return
+#   - never prints the value of anything it was not asked for: a preflight is run
+#     when someone is confused, i.e. when they are most likely to paste its output
+#   - CAVEAT: a value containing a literal newline splits across lines here and its
+#     tail is lost. printenv had the same shape of limitation; no Lupin contract var
+#     is multi-line.
+pfv_environ_lookup() {
+    local name="$1" line
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            "$name="*) printf '%s' "${line#*=}"; return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# ── pfv_env_file_supplies ────────────────────────────────────────────────────
+# Does the HOST env file supply a usable value for this variable?
+#
+# WHY (row e7048496 — the unpassable bootstrap trap). An environment variable can
+# only enter a container at CREATE. So on a VM whose container predates a newly-
+# REQUIRED var, C6's PRE arm blocks because the running container lacks it, and the
+# only thing that can put it there is the `up -d --force-recreate` that PRE just
+# blocked. Measured live 2026-08-24 on lupin-host-test: appending JWT_SECRET_KEY to
+# cloud-gpu.env did NOT clear it — the running container still predated the value —
+# and only LUPIN_SKIP_PREFLIGHT=1 got through, disabling all 50 other assertions to
+# clear one false blocker. A gate that must always be skipped is not a gate.
+#
+# The distinction that fixes it is already knowable at the point of the check: is
+# the value sitting in the env file the imminent recreate will read? This answers
+# exactly that and nothing more. It does NOT decide the tier — preflight-vm.sh does,
+# because the same answer means different things in PRE and POST.
+#
+# Requires:
+#   - $1 = path to the env file compose is invoked with, $2 = variable name
+# Ensures:
+#   - returns 0 when the file assigns the name a NON-EMPTY value
+#   - returns 1 when it assigns it an EMPTY value. Not a pass: `${VAR:?}` aborts on
+#     empty exactly as it does on unset, so an empty entry will NOT satisfy the
+#     recreate and must not read as one
+#   - returns 2 when the file does not assign it at all
+#   - returns 3 when the file is missing or unreadable — cannot tell, never a pass
+#   - a COMMENTED-OUT assignment does not count. cloud-gpu.env:31 carries exactly
+#     that shape for CLAUDE_CODE_OAUTH_TOKEN, so treating `#NAME=...` as supply
+#     would manufacture a false exemption on a real file in this repo
+#   - LAST assignment wins, which is how both compose's env-file reader and a shell
+#     resolve a repeated name
+#   - accepts an optional `export ` prefix so a shell-style host env file parses too
+#   - strips ONE layer of matching quotes around the value
+#   - NEVER prints the value — several of these rows are SECRET-shaped. The return
+#     code carries the whole answer
+pfv_env_file_supplies() {
+    local file="$1" name="$2" line value="" found=false
+    [ -n "$file" ] && [ -r "$file" ] || return 3
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line#"${line%%[![:space:]]*}"}"          # strip leading whitespace
+        case "$line" in ""|\#*) continue ;; esac
+        line="${line#export }"
+        line="${line#"${line%%[![:space:]]*}"}"
+        case "$line" in "$name="*) ;; *) continue ;; esac
+        value="${line#*=}"
+        found=true
+    done < "$file"
+    [ "$found" = true ] || return 2
+    # `?*` here would require a character BETWEEN the quotes and let `KEY=""` through
+    # as a two-character non-empty value — a quoted-empty entry reading as supply, which
+    # is precisely the false exemption this function exists to prevent. `*` matches the
+    # empty middle; a lone unbalanced quote still cannot match (it has no closing half).
+    case "$value" in
+        \"*\") value="${value#\"}"; value="${value%\"}" ;;
+        \'*\') value="${value#\'}"; value="${value%\'}" ;;
+    esac
+    [ -n "$value" ] || return 1
+    return 0
+}

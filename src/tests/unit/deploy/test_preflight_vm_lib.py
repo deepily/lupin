@@ -686,3 +686,141 @@ def test_scan_orphan_pyc_runs_against_the_real_repo_tree():
         cls, _, path = line.partition( "\t" )
         assert cls in ( "DEAD", "SOURCELESS" )
         assert path.endswith( ".pyc" )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# pfv_environ_lookup  (row e7048496 — the /proc/1/environ witness)
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_environ_lookup_finds_a_set_variable():
+    r = _run( "printf 'A=1\\nJWT_SECRET_KEY=deadbeef\\nB=2\\n' | pfv_environ_lookup JWT_SECRET_KEY" )
+    assert r.returncode == 0
+    assert r.stdout == "deadbeef"
+
+
+def test_environ_lookup_returns_nonzero_for_an_absent_variable():
+    """The failing arm. Without it the function could `return 0` always and every
+    caller would read UNSET as SET."""
+    r = _run( "printf 'A=1\\nB=2\\n' | pfv_environ_lookup JWT_SECRET_KEY" )
+    assert r.returncode == 1
+    assert r.stdout == ""
+
+
+def test_environ_lookup_reports_set_but_EMPTY_as_set():
+    """Set-but-empty and unset are DIFFERENT failures with different remedies; C6
+    reports them differently, so the witness must not collapse them."""
+    r = _run( "printf 'JWT_SECRET_KEY=\\nB=2\\n' | pfv_environ_lookup JWT_SECRET_KEY" )
+    assert r.returncode == 0
+    assert r.stdout == ""
+
+
+def test_environ_lookup_keeps_equals_signs_inside_the_value():
+    r = _run( "printf 'DSN=host=db;port=5432\\n' | pfv_environ_lookup DSN" )
+    assert r.returncode == 0
+    assert r.stdout == "host=db;port=5432"
+
+
+def test_environ_lookup_does_not_match_a_name_that_is_merely_a_suffix():
+    """`GH_TOKEN` must not be answered by a line for `MY_GH_TOKEN` — a sloppy match
+    would pass a deploy on the strength of the wrong variable."""
+    r = _run( "printf 'MY_GH_TOKEN=x\\n' | pfv_environ_lookup GH_TOKEN" )
+    assert r.returncode == 1
+
+
+def test_environ_lookup_takes_the_FIRST_match():
+    """getenv() in the container returns the first entry; the witness must agree with
+    what the process itself would see."""
+    r = _run( "printf 'X=first\\nX=second\\n' | pfv_environ_lookup X" )
+    assert r.returncode == 0
+    assert r.stdout == "first"
+
+
+def test_environ_lookup_reads_a_final_line_with_no_trailing_newline():
+    r = _run( "printf 'A=1\\nX=last' | pfv_environ_lookup X" )
+    assert r.returncode == 0
+    assert r.stdout == "last"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# pfv_env_file_supplies  (row e7048496 — the bootstrap exemption's evidence)
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_env_file_supplies_returns_0_for_a_nonempty_value( tmp_path ):
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "OTHER=1\nJWT_SECRET_KEY=0123456789abcdef\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 0
+
+
+def test_env_file_supplies_returns_1_for_an_EMPTY_value( tmp_path ):
+    """An empty entry must NOT read as supply: `${VAR:?}` aborts on empty exactly as
+    it aborts on unset, so the recreate would fail and the exemption would have been
+    a false promise."""
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "JWT_SECRET_KEY=\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 1
+
+
+def test_env_file_supplies_returns_2_when_the_name_is_absent( tmp_path ):
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "OTHER=1\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 2
+
+
+def test_env_file_supplies_returns_3_when_the_file_is_unreadable( tmp_path ):
+    """Cannot-tell is its own answer and is never a pass — the rule pfv_classify_probe
+    exists to enforce."""
+    missing = tmp_path / "nope.env"
+    assert _run( f"pfv_env_file_supplies '{missing}' JWT_SECRET_KEY" ).returncode == 3
+    assert _run( "pfv_env_file_supplies '' JWT_SECRET_KEY" ).returncode == 3
+
+
+def test_env_file_supplies_ignores_a_COMMENTED_OUT_assignment( tmp_path ):
+    """cloud-gpu.env:31 carries exactly this shape for CLAUDE_CODE_OAUTH_TOKEN, so a
+    scanner counting `#NAME=...` as supply would manufacture a false exemption on a
+    real file in this repo."""
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "# CLAUDE_CODE_OAUTH_TOKEN=sk-live-xxxx\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' CLAUDE_CODE_OAUTH_TOKEN" ).returncode == 2
+    f.write_text( "   #CLAUDE_CODE_OAUTH_TOKEN=sk-live-xxxx\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' CLAUDE_CODE_OAUTH_TOKEN" ).returncode == 2
+
+
+def test_env_file_supplies_lets_the_LAST_assignment_win( tmp_path ):
+    """Both compose's env-file reader and a shell resolve a repeated name to the last
+    one, so a later blank-out must be seen as the blank-out it is."""
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "JWT_SECRET_KEY=good\nJWT_SECRET_KEY=\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 1
+    f.write_text( "JWT_SECRET_KEY=\nJWT_SECRET_KEY=good\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 0
+
+
+def test_env_file_supplies_accepts_an_export_prefixed_shell_style_file( tmp_path ):
+    f = tmp_path / "host.env"
+    f.write_text( "  export JWT_SECRET_KEY=abc\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 0
+
+
+def test_env_file_supplies_strips_one_layer_of_matching_quotes( tmp_path ):
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( 'JWT_SECRET_KEY=""\n' )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 1, \
+        "a quoted-empty value is still empty"
+    f.write_text( "JWT_SECRET_KEY='abc'\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 0
+
+
+def test_env_file_supplies_does_not_match_a_name_that_is_merely_a_suffix( tmp_path ):
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "MY_GH_TOKEN=x\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' GH_TOKEN" ).returncode == 2
+
+
+def test_env_file_supplies_never_prints_the_secret( tmp_path ):
+    """These rows are SECRET-shaped and a preflight is run precisely when someone is
+    confused — i.e. when they are most likely to paste its output somewhere."""
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "JWT_SECRET_KEY=super-secret-value\n" )
+    r = _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" )
+    assert "super-secret-value" not in r.stdout
+    assert "super-secret-value" not in r.stderr

@@ -58,6 +58,10 @@ PHASE="full"
 VERBOSE=false
 CONTAINER="${PREFLIGHT_VM_CONTAINER:-lupin-rest-cloud-gpu}"
 COMPOSE_FILE="${PREFLIGHT_VM_COMPOSE:-$REPO_ROOT/docker-compose.cloud-gpu.yml}"
+# The env file compose is invoked with. C6's bootstrap exemption (row e7048496) asks
+# this file whether a var missing from the RUNNING container will be supplied by the
+# imminent recreate, so it needs the real path, not just a basename for a remedy line.
+ENV_FILE="${PREFLIGHT_VM_ENVFILE:-$REPO_ROOT/cloud-gpu.env}"
 VM_PREFIX="${PREFLIGHT_VM_PREFIX:-/mnt/lupin-data}"
 APP_URL="${PREFLIGHT_VM_APP_URL:-http://localhost:7999}"
 ARBITER_URL="${PREFLIGHT_VM_ARBITER_URL:-http://localhost:8001}"
@@ -632,7 +636,7 @@ PY
                             report pass BLOCK "$cname supplied at container CREATE — $( basename "$COMPOSE_FILE" ) interpolates it \${VAR:?}, which aborts \`up\` when unset, and $CONTAINER is running   [surface: COMPOSE]"
                         else
                             report unknown BLOCK "$cname: cannot witness a COMPOSE-surface var while $CONTAINER is not running" \
-                                          "start the stack, then re-run: docker compose -f $( basename "$COMPOSE_FILE" ) --env-file $( basename "${PREFLIGHT_VM_ENVFILE:-cloud-gpu.env}" ) up -d"
+                                          "start the stack, then re-run: docker compose -f $( basename "$COMPOSE_FILE" ) --env-file $( basename "$ENV_FILE" ) up -d"
                         fi ;;
                     ABSENT)
                         report fail WARN "$cname declared surface=COMPOSE but $( basename "$COMPOSE_FILE" ) never references it" \
@@ -667,18 +671,68 @@ PY
             ctier="BLOCK"
             [ "$derived" = "OPTIONAL" ] && ctier="WARN"
 
-            # `printenv` distinguishes UNSET (non-zero) from set-but-empty (zero,
-            # empty stdout). `sh -c 'printf %s "$VAR"'` collapses the two, and they
-            # have different remedies.
-            if cvalue="$( docker exec "$CONTAINER" printenv "$cname" 2>/dev/null )"; then
-                cset=true
+            # THE WITNESS IS /proc/1/environ, NOT `docker exec printenv` — which is the
+            # rule env-contract.tsv's own JWT_SECRET_KEY row states, and which this check
+            # was breaking while reading that very file. printenv derives a fresh
+            # environment from the container's CONFIG, so it cannot see an entrypoint that
+            # sources an env file over the top: a value that IS in the running process
+            # reads as UNSET and C6 blocks a deploy over it.
+            #
+            # The NUL→newline conversion runs INSIDE the container because bash command
+            # substitution silently DROPS NUL bytes — read raw, the whole environ arrives
+            # as one run-together line and nothing ever matches.
+            #
+            # printenv survives as a FALLBACK for a container with no shell or no readable
+            # /proc/1 (a distroless image, an app that is not PID 1). It is named in the
+            # output when it is used, because a weaker witness must not pass as the strong
+            # one. Both distinguish UNSET (non-zero) from set-but-empty (zero, empty
+            # stdout); `sh -c 'printf %s "$VAR"'` collapses the two and they have different
+            # remedies.
+            cset=false; cvalue=""; cwitness="/proc/1/environ"
+            if cenviron="$( docker exec "$CONTAINER" sh -c "tr '\\0' '\\n' < /proc/1/environ" 2>/dev/null )" \
+               && [ -n "$cenviron" ]; then
+                if cvalue="$( pfv_environ_lookup "$cname" <<< "$cenviron" )"; then cset=true; fi
             else
-                cset=false; cvalue=""
+                cwitness="docker exec printenv (WEAKER — cannot see an entrypoint-sourced env file)"
+                if cvalue="$( docker exec "$CONTAINER" printenv "$cname" 2>/dev/null )"; then
+                    cset=true
+                else
+                    cvalue=""
+                fi
             fi
 
             if [ "$cset" != true ]; then
-                report unknown "$ctier" "$cname is UNSET in the container (compose regime: $regime)" \
-                              "set $cname for this venue — $( basename "$COMPOSE_FILE" ) declares it $regime"
+                # ── BOOTSTRAP EXEMPTION (row e7048496) ───────────────────────────
+                # An environment variable can only enter a container at CREATE. Blocking
+                # PRE because the RUNNING container lacks a newly-REQUIRED var makes the
+                # deploy unpassable: the only thing that can supply it is the
+                # `up -d --force-recreate` that PRE just blocked. Measured live on
+                # lupin-host-test 2026-08-24 — the operator's only way out was
+                # LUPIN_SKIP_PREFLIGHT=1, which disables all 50 other assertions to clear
+                # one false blocker.
+                #
+                # So look at the env file the imminent recreate will read. Present there
+                # with a non-empty value => the property will be true a minute from now;
+                # that is a WARN naming what is about to satisfy it, not a block.
+                #
+                # ⚠️ SCOPED TO PHASE PRE, DELIBERATELY. In POST the recreate has ALREADY
+                # happened, so "will be satisfied by the imminent recreate" is false — and
+                # a var present in the env file yet absent from a just-created container is
+                # a WORSE finding than a plain miss, not a lesser one. POST keeps blocking.
+                pfv_env_file_supplies "$ENV_FILE" "$cname"; efrc=$?
+                if [ "$PHASE" = "pre" ] && [ "$efrc" -eq 0 ]; then
+                    report fail WARN "$cname is UNSET in the running container but IS supplied by $( basename "$ENV_FILE" ) — a var can only enter a container at CREATE, so the imminent recreate will satisfy it   [witness: $cwitness]" \
+                                  "no action needed before deploying; re-assert it after with: src/scripts/preflight-vm.sh --phase post"
+                else
+                    case $efrc in
+                        0) efnote="it IS in $( basename "$ENV_FILE" ), so a recreate should have injected it — that it did not is the finding" ;;
+                        1) efnote="$( basename "$ENV_FILE" ) declares it EMPTY, which \${VAR:?} rejects exactly as it rejects unset" ;;
+                        2) efnote="and it is absent from $( basename "$ENV_FILE" ) too" ;;
+                        *) efnote="and $( basename "$ENV_FILE" ) could not be read, so nothing here can say whether a recreate would supply it" ;;
+                    esac
+                    report unknown "$ctier" "$cname is UNSET in the container (compose regime: $regime) — $efnote   [witness: $cwitness]" \
+                                  "set $cname in $( basename "$ENV_FILE" ) for this venue, then: docker compose -f $( basename "$COMPOSE_FILE" ) --env-file $( basename "$ENV_FILE" ) up -d --no-deps --force-recreate $CONTAINER   # a RESTART will NOT re-read the environment"
+                fi
             else
                 pfv_shape_matches "$cvalue" "$cshape" "$VM_PREFIX"; crc=$?
                 case $crc in
