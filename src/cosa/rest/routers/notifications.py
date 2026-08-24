@@ -1048,7 +1048,7 @@ async def notify_user(
                             "sender_id"         : resolved_sender_id,
                             "title"             : title,
                             "abstract"          : abstract,
-                            "timestamp"         : datetime.utcnow().isoformat(),
+                            "timestamp"         : datetime.now( timezone.utc ).isoformat(),
                             "voice_persona"     : listener_voice_persona,
                             "direction"         : direction,
                         },
@@ -1426,7 +1426,7 @@ async def notify_user(
                             "notification_id"  : notification_id,
                             "default_used"     : response_default,
                             "timeout"          : True,
-                            "timestamp"        : datetime.utcnow().isoformat()
+                            "timestamp"        : datetime.now( timezone.utc ).isoformat()
                         }
                     )
                     print(f"[NOTIFY] ✓ Broadcast notification_expired event for {notification_id}")
@@ -1619,7 +1619,7 @@ async def submit_notification_response(
                 data    = {
                     "notification_id"  : notification_id,
                     "response_value"   : response_value,
-                    "timestamp"        : datetime.utcnow().isoformat(),
+                    "timestamp"        : datetime.now( timezone.utc ).isoformat(),
                     "time_display"     : get_formatted_time_display(),
                     "date_display"     : get_formatted_date_display()
                 }
@@ -1633,7 +1633,7 @@ async def submit_notification_response(
             "message"          : f"Response recorded for notification {notification_id}",
             "notification_id"  : notification_id,
             "response_value"   : response_value,
-            "timestamp"        : datetime.utcnow().isoformat(),
+            "timestamp"        : datetime.now( timezone.utc ).isoformat(),
             "time_display"     : get_formatted_time_display(),
             "date_display"     : get_formatted_date_display()
         }
