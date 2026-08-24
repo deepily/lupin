@@ -10,8 +10,10 @@ import asyncio
 import importlib
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
+from types  import SimpleNamespace
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -38,11 +40,13 @@ from lupin_mcp.session_spawner import (
     _write_manifest,
     _capture_reap_identity,
     _resolve_project_root,
+    _main_checkout_of,
     _recover_tmux_session,
     _scan_persona_by_tmux_session,
     _build_identity_warning,
     _slug,
     DEFAULT_SPAWN_CAP,
+    DEFAULT_SPAWN_PROJECT,
     PERSONA_STATE_ALLOCATED,
     PERSONA_STATE_NONE,
     PERSONA_STATE_UNKNOWN,
@@ -1765,3 +1769,157 @@ class TestResolveProjectRoot:
         expected = str( tmp_path / "planning-is-prompting" )
         assert _resolve_project_root( "plan" )                  == expected
         assert _resolve_project_root( "planning-is-prompting" ) == expected
+
+
+class TestResolveProjectRootFromAWorktree:
+    """
+    Row 1cf6c918 — a worktree is not a sibling of its peers.
+
+    The resolver derived the projects directory as `parent( LUPIN_ROOT )`, which holds
+    only while LUPIN_ROOT is a top-level checkout. In a git worktree that parent is the
+    worktree's container (`.../.claude/worktrees`), which holds no project, so EVERY name
+    resolved to None — and since `project` defaults to "lupin", a manager working in a
+    worktree could not spawn at all.
+
+    These build REAL git repositories and REAL worktrees rather than faking a path shape,
+    because the whole defect was a path shape that looked plausible and was wrong.
+    """
+
+    @staticmethod
+    def _git( *args, cwd ):
+        subprocess.run( [ "git", *args ], cwd=str( cwd ), check=True,
+                        capture_output=True, text=True )
+
+    @classmethod
+    def _make_repo( cls, path ):
+        """A real git repo with one commit — a worktree cannot be added to an empty one."""
+        path.mkdir( parents=True, exist_ok=True )
+        cls._git( "init", "-q", cwd=path )
+        cls._git( "config", "user.email", "t@example.com", cwd=path )
+        cls._git( "config", "user.name",  "t",             cwd=path )
+        ( path / "seed" ).write_text( "seed\n" )
+        cls._git( "add", "seed", cwd=path )
+        cls._git( "commit", "-qm", "seed", cwd=path )
+        return path
+
+    def test_own_project_from_a_worktree_resolves_to_the_WORKTREE( self, tmp_path, monkeypatch ):
+        """
+        Isolation is the reason a manager is in a worktree; answering with the main
+        checkout would quietly undo it and put the worker back on the shared tree.
+        """
+        repo = self._make_repo( tmp_path / "lupin" )
+        wt   = repo / ".claude" / "worktrees" / "crew"
+        self._git( "worktree", "add", "--detach", "-q", str( wt ), "HEAD", cwd=repo )
+
+        monkeypatch.setenv( "LUPIN_ROOT", str( wt ) )
+        assert _resolve_project_root( "lupin" ) == str( wt.resolve() )
+
+    def test_sibling_project_resolves_from_a_worktree( self, tmp_path, monkeypatch ):
+        """
+        The failing arm before the fix: from a worktree this returned None, because the
+        sibling search ran inside `.claude/worktrees` instead of the projects directory.
+        """
+        repo  = self._make_repo( tmp_path / "lupin" )
+        other = self._make_repo( tmp_path / "other" )
+        wt    = repo / ".claude" / "worktrees" / "crew"
+        self._git( "worktree", "add", "--detach", "-q", str( wt ), "HEAD", cwd=repo )
+
+        monkeypatch.setenv( "LUPIN_ROOT", str( wt ) )
+        assert _resolve_project_root( "other" ) == str( other )
+
+    def test_an_absent_project_STILL_refuses_from_a_worktree( self, tmp_path, monkeypatch ):
+        """
+        The half that must survive the fix. A resolver that answered every name would be
+        a worse defect than the one being closed — the caller refuses precisely so a
+        spawn cannot silently land in the caller's own cwd wearing another repo's name.
+        """
+        repo = self._make_repo( tmp_path / "lupin" )
+        wt   = repo / ".claude" / "worktrees" / "crew"
+        self._git( "worktree", "add", "--detach", "-q", str( wt ), "HEAD", cwd=repo )
+
+        monkeypatch.setenv( "LUPIN_ROOT", str( wt ) )
+        assert _resolve_project_root( "no-such-project" ) is None
+
+    def test_spawn_sessions_is_reachable_from_a_worktree_with_the_DEFAULT_project(
+        self, tmp_path, monkeypatch
+    ):
+        """
+        The capability, asserted end to end. `project` defaults to "lupin", so before the
+        fix this raised and a worktree manager could not spawn a worker at all — which is
+        the difference between 27 red tests and a lost capability.
+        """
+        repo = self._make_repo( tmp_path / "lupin" )
+        wt   = repo / ".claude" / "worktrees" / "crew"
+        self._git( "worktree", "add", "--detach", "-q", str( wt ), "HEAD", cwd=repo )
+
+        monkeypatch.setenv( "LUPIN_ROOT", str( wt ) )
+        result = spawn_sessions(
+            count=1, task_prompt="probe", manager_session_id="mgr",
+            script_path="x", dry_run=True,
+            runner=lambda *a, **k: SimpleNamespace( returncode=0, stdout="", stderr="" ),
+            session_dir=tmp_path / "sessions",
+        )
+        assert result[ "requested" ] == 1
+
+
+class TestMainCheckoutOf:
+    """`_main_checkout_of` — the primitive that replaced the path guess (row 1cf6c918)."""
+
+    def test_a_plain_checkout_is_its_own_main_checkout( self, tmp_path ):
+        repo = TestResolveProjectRootFromAWorktree._make_repo( tmp_path / "repo" )
+        assert _main_checkout_of( repo ) == repo.resolve()
+
+    def test_a_worktree_reports_the_main_checkout( self, tmp_path ):
+        repo = TestResolveProjectRootFromAWorktree._make_repo( tmp_path / "repo" )
+        wt   = tmp_path / "wt"
+        TestResolveProjectRootFromAWorktree._git(
+            "worktree", "add", "--detach", "-q", str( wt ), "HEAD", cwd=repo )
+        assert _main_checkout_of( wt ) == repo.resolve()
+
+    def test_a_non_repo_degrades_to_the_path_it_was_given( self, tmp_path ):
+        """
+        The fallback arm, and it must be exercised: when git cannot answer, the resolver
+        has to behave exactly as it did before the fix rather than raise out of a
+        resolver. A git failure costs the worktree fix and nothing else.
+        """
+        plain = tmp_path / "not-a-repo"
+        plain.mkdir()
+        assert _main_checkout_of( plain ) == plain
+
+    def test_a_missing_git_binary_degrades_instead_of_raising( self, tmp_path ):
+        """OSError from subprocess is the no-git-installed shape."""
+        repo = TestResolveProjectRootFromAWorktree._make_repo( tmp_path / "repo" )
+        with patch( "lupin_mcp.session_spawner.subprocess.run", side_effect=OSError( "no git" ) ):
+            assert _main_checkout_of( repo ) == repo
+
+
+class TestUnresolvableProjectMessageNamesARealEscape:
+    """
+    Row 1cf6c918, third defect. The refusal used to advise "omit `project` to inherit the
+    caller's own repo" — but `project` DEFAULTS to "lupin", so omitting it re-supplies the
+    value that just failed and the reader loops. Only an explicit project=None reaches the
+    inherit path.
+    """
+
+    def test_the_message_does_not_advise_omitting_the_argument( self, tmp_path, monkeypatch ):
+        monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path / "lupin" ) )
+        ( tmp_path / "lupin" ).mkdir()
+        with pytest.raises( ValueError ) as exc:
+            spawn_sessions( count=1, task_prompt="p", manager_session_id="m",
+                            script_path="x", project="no-such-project", dry_run=True )
+        msg = str( exc.value )
+        assert "project=None" in msg, "the message must name the escape that actually works"
+        assert "OMITTING" in msg, "it must say that omitting the argument is NOT that escape"
+        assert DEFAULT_SPAWN_PROJECT in msg, "and it must name the default it would apply"
+
+    def test_project_None_really_is_an_escape( self, tmp_path, monkeypatch ):
+        """The advice has to be true, not merely different from the old advice."""
+        monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path / "lupin" ) )
+        ( tmp_path / "lupin" ).mkdir()
+        result = spawn_sessions(
+            count=1, task_prompt="p", manager_session_id="m", script_path="x",
+            project=None, dry_run=True,
+            runner=lambda *a, **k: SimpleNamespace( returncode=0, stdout="", stderr="" ),
+            session_dir=tmp_path / "sessions",
+        )
+        assert result[ "requested" ] == 1

@@ -39,6 +39,13 @@ from cosa.agents.utils.sender_id import detect_project
 # at the call site by the INI key `cc session spawn max reviewers`.
 DEFAULT_SPAWN_CAP = 8
 
+# The default `project`. Named rather than repeated as a literal so the refusal
+# message in spawn_sessions cannot drift from the value it describes — a message
+# telling a caller what omitting the argument actually does has to read the same
+# constant the signature does, or it goes wrong the day someone changes one of
+# them (row 1cf6c918).
+DEFAULT_SPAWN_PROJECT = "lupin"
+
 # Directory holding session bridge + manifest files (mirrors session_bridge.py).
 # Row 8ccc20ab — derived from the one seam (see
 # lupin_cli/claude_code/hooks/lib/sessions_dir.py).
@@ -325,17 +332,43 @@ def _resolve_project_root( project ):
     Requires:
         - project is a project name, or None
 
+    ⚠️ A WORKTREE IS NOT A SIBLING OF ITS PEERS (row 1cf6c918). This used to derive
+    the projects directory as `parent( LUPIN_ROOT )`, which holds only while
+    LUPIN_ROOT is a top-level checkout. In a git worktree LUPIN_ROOT is something
+    like `<repo>/.claude/worktrees/<name>`, so that parent is `.../worktrees` — a
+    directory with no project in it — and EVERY name resolved to None. Since
+    `project` defaults to "lupin", that refused every spawn a worktree manager
+    could make. Measured 2026-08-24 through the live entry point in a real
+    worktree, not inferred from the failing tests: `project` omitted raised, and
+    only an explicit `project=None` got through.
+
+    So ask git where the main checkout is instead of guessing from a path shape.
+    `--git-common-dir` points at the ONE `.git` all worktrees share; its parent is
+    the main checkout and that checkout's parent is the projects directory. The
+    path guess stays as a fallback for when git cannot answer (not a repo, no git
+    binary), so nothing gets worse anywhere this already worked.
+
+    Requires:
+        - project is a project name, or None
+
     Ensures:
         - returns None for a falsy project (caller inherits its own cwd, the
           prior behaviour)
         - resolves the alias map first, so both "plan" and "planning-is-prompting"
           reach the same root
-        - returns the absolute path of a SIBLING directory of LUPIN_ROOT whose
-          name matches and which contains a `.git` entry
+        - the CALLER'S OWN project name resolves to the CALLER'S OWN root — the
+          worktree itself when it is in one. Isolation is the reason a manager is
+          working in a worktree; sending its workers to the main checkout would
+          quietly undo it. In a top-level checkout this returns the same path the
+          sibling search already did, so it changes nothing there
+        - any OTHER project resolves to a sibling of the MAIN CHECKOUT whose name
+          matches and which contains a `.git` entry (a file in a worktree, a
+          directory in a checkout — both count)
         - returns None when nothing matches — the caller REFUSES rather than
           falling back to its own cwd, because a silent fallback is the original
           defect wearing a new hat
-        - never raises
+        - never raises: a git failure degrades to the old path guess, never an
+          exception out of a resolver
 
     Returns:
         str | None: absolute repo root, or None
@@ -349,13 +382,56 @@ def _resolve_project_root( project ):
 
     lupin_root = os.environ.get( "LUPIN_ROOT" )
     if not lupin_root: return None
-    projects_dir = Path( lupin_root ).resolve().parent
+    lupin_root = Path( lupin_root ).resolve()
+
+    main_checkout = _main_checkout_of( lupin_root )
+    projects_dir  = main_checkout.parent
+
+    # The caller's own project, named. Answer with where the caller actually IS,
+    # which is the worktree when it is in one — not with the main checkout that
+    # happens to share its name.
+    if main_checkout.name in candidates:
+        return str( lupin_root )
 
     for name in candidates:
         candidate = projects_dir / name
         if ( candidate / ".git" ).exists():
             return str( candidate )
     return None
+
+
+def _main_checkout_of( start ):
+    """
+    The MAIN checkout of the repository `start` belongs to (row 1cf6c918).
+
+    Every worktree of a repo shares one `.git` directory, and `--git-common-dir`
+    is the only thing that names it without knowing the tree's layout. Its parent
+    is the main checkout; from a plain checkout it simply returns that checkout,
+    which is why the caller needs no branch for the two cases.
+
+    Requires:
+        - start is an absolute Path that exists
+
+    Ensures:
+        - returns the main checkout's Path when git can answer
+        - returns `start` unchanged when git cannot — not a repo, no git binary, a
+          timeout. That is exactly the old behaviour, so a git failure costs the
+          worktree fix and nothing else
+        - never raises
+
+    Returns:
+        Path
+    """
+    try:
+        out = subprocess.run(
+            [ "git", "-C", str( start ), "rev-parse", "--path-format=absolute", "--git-common-dir" ],
+            capture_output=True, text=True, timeout=10
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return Path( out.stdout.strip() ).resolve().parent
+    except ( OSError, subprocess.SubprocessError ):
+        pass
+    return start
 
 
 def spawn_sessions(
@@ -366,7 +442,7 @@ def spawn_sessions(
     script_path        : str,
     manager_persona    : Optional[ str ] = None,
     role               : str = "reviewer",
-    project            : str = "lupin",
+    project            : str = DEFAULT_SPAWN_PROJECT,
     persona_preference : Optional[ Any ] = None,
     seed_memento       : Optional[ str ] = None,
     tokens             : Optional[ Dict[ str, Any ] ] = None,
@@ -427,14 +503,16 @@ def spawn_sessions(
         manager_session_id: the spawning manager's session id (lineage key)
         script_path: spawn script path
         role: requested role label (templated into the prompt)
-        project: LABEL recorded on the spawn record. It does NOT set the
-            child's working directory and does NOT choose which CLAUDE.md the
-            child loads — the child inherits the CALLER's cwd, because
-            `tmux new-session` (start-cc-with-tmux.sh:543) is invoked without
-            `-c` and that script has no working-directory handling at all.
-            Passing a project other than the caller's own repo is REFUSED (row
-            697a85fe); see the rejection below for why cwd is not simply
-            retrofitted here.
+        project: the child's WORKING DIRECTORY — hence its CLAUDE.md and git
+            identity (row 697a85fe, Rick's ruling 2026-08-19). ⚠️ This text used
+            to say the OPPOSITE ("a LABEL... does NOT set the child's working
+            directory"). That was true before the ruling and has been contradicted
+            by the code twenty lines below ever since; it is corrected here rather
+            than left to mislead the next reader of the very argument being changed.
+            Defaults to DEFAULT_SPAWN_PROJECT. An unresolvable project is REFUSED,
+            never silently swapped for the caller's cwd. To genuinely inherit the
+            caller's cwd, pass project=None EXPLICITLY — omitting the argument
+            applies the default instead.
         persona_preference: str | list — ordered persona chain transported to
             the children via COSA_VOICE_PERSONA_CHAIN (see
             src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md)
@@ -483,10 +561,18 @@ def spawn_sessions(
     # caller's cwd, which is the original defect wearing a new hat.
     work_dir = _resolve_project_root( project )
     if project and work_dir is None:
+        # ⚠️ THE ADVICE MUST NAME AN ESCAPE THAT EXISTS (row 1cf6c918). This used to
+        # say "omit `project` to inherit the caller's own repo" — but `project`
+        # DEFAULTS to "lupin", so omitting it hands back the very value that just
+        # failed, and a reader following the sentence verbatim loops. Only an
+        # EXPLICIT project=None reaches the inherit-the-caller's-cwd path, and that
+        # is what this now says.
         raise ValueError(
             f"cannot spawn into project {project!r}: no repository root resolves for it. "
-            f"Pass a project whose root exists on this host, or omit `project` to inherit "
-            f"the caller's own repo ({detect_project()!r})."
+            f"Pass a project whose root exists on this host, or pass project=None "
+            f"EXPLICITLY to inherit the caller's own cwd — note that OMITTING the "
+            f"argument does not do that, it applies the default {DEFAULT_SPAWN_PROJECT!r}. "
+            f"The caller's own repo here is {detect_project()!r}."
         )
 
     # The DM/collection topic and the tmux SESSION name BOTH key on the manager
