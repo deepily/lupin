@@ -222,6 +222,10 @@ remote_compose() {
 #                    overwriting colliding untracked files. Does NOT `git clean`, so untracked
 #                    non-colliding files (data store, cloud-gpu.env, keys) are PRESERVED. This is
 #                    the deploy semantic — a deploy target must mirror the branch. (deploy)
+#
+# BOTH MOVING MODES STAMP `$VM_ROOT/.deployed-ref` (row c41ec7e6) with the VM's post-move HEAD,
+# a UTC timestamp, and `push-bundle-<mode>`. Fetch-only does NOT stamp — no code moved, so there
+# is nothing new to record and a fresh timestamp would falsely imply there was.
 do_push_bundle() {
     local branch="$1" mode="$2"
     require_project
@@ -234,8 +238,8 @@ do_push_bundle() {
     log "bundling branch '$branch' from $repo_root"
     local move_desc=""
     case "$mode" in
-        checkout) move_desc="; sudo git checkout -B $branch FETCH_HEAD; purge __pycache__ + *.pyc; chown 1001 tree" ;;
-        reset)    move_desc="; sudo git reset --hard FETCH_HEAD; sudo git checkout -B $branch FETCH_HEAD; purge __pycache__ + *.pyc; chown 1001 tree" ;;
+        checkout) move_desc="; sudo git checkout -B $branch FETCH_HEAD; purge __pycache__ + *.pyc; chown 1001 tree; stamp $VM_ROOT/.deployed-ref = '<vm HEAD sha> <utc ts> push-bundle-checkout'" ;;
+        reset)    move_desc="; sudo git reset --hard FETCH_HEAD; sudo git checkout -B $branch FETCH_HEAD; purge __pycache__ + *.pyc; chown 1001 tree; stamp $VM_ROOT/.deployed-ref = '<vm HEAD sha> <utc ts> push-bundle-reset'" ;;
     esac
     if [ "$DRY_RUN" -eq 1 ]; then
         log "(dry-run) git bundle create <tmp> $branch; scp -> VM:/tmp; cp -> $vm_bundle; sudo git fetch origin $branch; chown 1001 .git$move_desc"
@@ -262,16 +266,37 @@ do_push_bundle() {
     # how "lupin-vm.sh deploy runs up -d WITHOUT --no-deps" sat in a runbook for a day
     # and then took :7999 down.
     local purge_pyc="sudo find $VM_ROOT/src -name '__pycache__' -type d -prune -exec rm -rf {} + && sudo find $VM_ROOT/src -name '*.pyc' -delete && echo PYCACHE_PURGED"
+    # STAMP THE PROVENANCE REF whenever the working tree MOVES (row c41ec7e6, 2026-08-24).
+    # `.deployed-ref` is the file the code-sync design (src/rnd/2026.06.23-gcp-code-sync-to-runtime-design.md
+    # §3) promised so that "what is running on the VM?" is one `cat`, not a code-grep. Only
+    # deploy-cloud-test.sh ever wrote it, and that is not the script this VM is deployed with —
+    # so on 2026-08-24 the stamp read df611aa7 / 2026-07-13 while the VM's tree was at 24f8d88f /
+    # 2026-08-17. A stamp that is five weeks behind is worse than no stamp at all: an absent file
+    # sends the reader to measure, a stale one sends them to a wrong answer they have no reason
+    # to doubt.
+    #
+    # DERIVED FROM THE VM, NOT FROM INTENT: the SHA is `git rev-parse HEAD` read on the VM AFTER
+    # the tree has moved, not the SHA we meant to ship. If any step of the &&-chain above failed,
+    # this never runs and the old stamp stays — a stamp is only ever written by a move that
+    # actually completed.
+    #
+    # AXIS FIELD says `push-bundle-<mode>`, deliberately NOT `code`/`deps`. deploy-cloud-test.sh's
+    # third field records which axis its detector ROUTED to; push-bundle runs no such detector —
+    # it moves source and never touches deps or the image. Writing `code` here would claim a
+    # routing decision that was never made, which is exactly the kind of confident-but-unearned
+    # answer this row exists to remove. Readers that want the SHA are unaffected: every one of
+    # them takes field 1 (dctl_sanitize_sha, the e2e helper, preflight check B6).
+    local stamp_ref="echo \$( git $safe rev-parse HEAD ) \$( date -u +%FT%TZ ) push-bundle-$mode | sudo tee $VM_ROOT/.deployed-ref >/dev/null && sudo chown 1001:1001 $VM_ROOT/.deployed-ref && echo REF_STAMPED && cat $VM_ROOT/.deployed-ref"
     local rcmd="cp /tmp/lupin-wip.bundle $vm_bundle && rm -f /tmp/lupin-wip.bundle && cd $VM_ROOT && sudo git $safe fetch origin $branch && sudo chown -R 1001:1001 .git && echo FETCHED && git $safe log --oneline -1 FETCH_HEAD"
     case "$mode" in
         checkout)
-            rcmd="$rcmd && sudo git $safe checkout -B $branch FETCH_HEAD && $purge_pyc && sudo chown -R 1001:1001 . && echo CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
+            rcmd="$rcmd && sudo git $safe checkout -B $branch FETCH_HEAD && $purge_pyc && sudo chown -R 1001:1001 . && $stamp_ref && echo CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
         reset)
             # DRIFT-PROOF: reset --hard forces the tracked tree to FETCH_HEAD (discards local
             # tracked edits, overwrites colliding untracked), then checkout -B relabels HEAD onto
             # the branch (now clean, so it can't abort). No `git clean` — untracked non-colliding
             # files (data/env/keys) survive.
-            rcmd="$rcmd && sudo git $safe reset --hard FETCH_HEAD && sudo git $safe checkout -B $branch FETCH_HEAD && $purge_pyc && sudo chown -R 1001:1001 . && echo RESET_CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
+            rcmd="$rcmd && sudo git $safe reset --hard FETCH_HEAD && sudo git $safe checkout -B $branch FETCH_HEAD && $purge_pyc && sudo chown -R 1001:1001 . && $stamp_ref && echo RESET_CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
     esac
     log "refreshing bundle + fetch on VM$( [ -n "$mode" ] && echo " (+$mode)" )"
     gcloud compute ssh "$VM_NAME" \

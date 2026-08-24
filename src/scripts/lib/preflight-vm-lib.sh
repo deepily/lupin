@@ -871,3 +871,40 @@ pfv_scan_orphan_pyc() {
     [ "$found" -eq 0 ] || return 1
     return 0
 }
+
+# ── pfv_deployed_ref_status ──────────────────────────────────────────────────
+# Classify the VM's `.deployed-ref` provenance stamp against the tree's real HEAD.
+#
+# Requires:
+#   - $1 = the stamp file's first line, verbatim ("" when the file is absent or empty).
+#          Its shape is "<40-hex sha> <utc ts> <axis>" — written by lupin-vm.sh
+#          do_push_bundle and by deploy-cloud-test.sh.
+#   - $2 = the full 40-hex sha the working tree is actually at (git rev-parse HEAD).
+# Ensures:
+#   - echoes exactly one of: ABSENT · MALFORMED · STALE · MATCH, and returns
+#     0 for MATCH, 1 for STALE, 2 for ABSENT, 3 for MALFORMED
+#   - reads FIELD 1 ONLY, the way every other consumer does (dctl_sanitize_sha, the
+#     e2e helper). The timestamp and axis fields are narration; the sha is the claim.
+#   - MALFORMED is split out from STALE deliberately. "the file says something that
+#     is not a sha" and "the file says a DIFFERENT sha" are different failures with
+#     different causes — a truncated write versus a move that never re-stamped — and
+#     collapsing them sends the reader to the wrong one.
+#   - comparison is full-length exact, never a prefix. A prefix compare would call a
+#     stamp correct on the strength of 7 shared characters.
+#   - pure: no git, no filesystem, no network. Both facts are passed IN so the
+#     classification can be unit-tested without a VM.
+pfv_deployed_ref_status() {
+    local line="$1" head_sha="$2"
+    local stamped
+    stamped="$( printf '%s' "$line" | awk '{print $1}' )"
+    [ -n "$stamped" ] || { echo "ABSENT"; return 2; }
+    # 40 lowercase hex and nothing else. `git rev-parse HEAD` never returns anything
+    # shorter, so a short sha here means the file was written by something other than
+    # the deploy path and its claim cannot be checked.
+    case "$stamped" in
+        *[!0-9a-f]* )                      echo "MALFORMED"; return 3 ;;
+    esac
+    [ "${#stamped}" -eq 40 ] || { echo "MALFORMED"; return 3; }
+    [ "$stamped" = "$head_sha" ] && { echo "MATCH"; return 0; }
+    echo "STALE"; return 1
+}

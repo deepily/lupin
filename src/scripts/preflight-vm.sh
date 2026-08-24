@@ -418,6 +418,54 @@ for pair in "$REPO_ROOT" "${PLANNING_IS_PROMPTING_ROOT:-}"; do
     fi
 done
 
+# B6 — the `.deployed-ref` provenance stamp agrees with the tree it claims to describe
+# (row c41ec7e6, 2026-08-24).
+#
+# WHAT IT IS FOR: the code-sync design promised that "what is running on the VM?" is one
+# `cat .deployed-ref`, not a code-grep. B1 above already proves the tree is clean at some
+# sha; this proves the FILE THAT ANSWERS THE QUESTION names that same sha.
+#
+# WHY IT WAS NEEDED: measured on this VM 2026-08-24, the stamp said df611aa7 / 2026-07-13
+# while the tree was at 24f8d88f / 2026-08-17 — five weeks apart. `lupin-vm.sh push-bundle`
+# moved the tree and never wrote the stamp; only deploy-cloud-test.sh wrote it, and that is
+# not the script this VM deploys with. push-bundle now stamps, and this is the assertion
+# that keeps the two from drifting apart again quietly.
+#
+# WARN, NOT BLOCK: a wrong stamp does not make the VM unfit to deploy onto — the deploy
+# reads git, not this file. What it does is give every later reader a confident wrong
+# answer, and make deploy-cloud-test.sh's axis detector diff from a bogus baseline, since
+# it takes its "previous" sha from here. That second effect is measured, not supposed —
+# with the live VM's stale stamp on 2026-08-24:
+#
+#     dctl_detect_axis 1959ed18 dc4b655d  ->  code   (true baseline: no dep file moved)
+#     dctl_detect_axis df611aa7 dc4b655d  ->  deps   (stale stamp: 1257 commits of drift)
+#
+# so a pure code change is routed to a full image rebuild. A wasted rebuild and a misled
+# operator, not an unsafe deploy — hence WARN. POST-phase with B1/B2 for the same reason
+# they are: in PRE the ref is about to move, so the assertion would be noise.
+DEPLOYED_REF_FILE="$REPO_ROOT/.deployed-ref"
+ref_head="$( sudo -n git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf '' )"
+ref_line="$( head -n1 "$DEPLOYED_REF_FILE" 2>/dev/null || printf '' )"
+if [ -z "$ref_head" ]; then
+    report unknown WARN "cannot read HEAD of $REPO_ROOT — .deployed-ref cannot be checked" \
+                  "sudo git -C $REPO_ROOT rev-parse HEAD"
+else
+    ref_status="$( pfv_deployed_ref_status "$ref_line" "$ref_head" )"
+    case "$ref_status" in
+        MATCH)
+            report pass WARN ".deployed-ref agrees with HEAD (${ref_head:0:8})" ;;
+        ABSENT)
+            report fail WARN "no .deployed-ref at $DEPLOYED_REF_FILE — 'what is running here?' has no one-cat answer" \
+                          "lupin-vm.sh push-bundle <branch> --checkout   # stamps it" ;;
+        MALFORMED)
+            report fail WARN ".deployed-ref field 1 is not a 40-hex sha: '$( printf '%s' "$ref_line" | awk '{print $1}' )'" \
+                          "lupin-vm.sh push-bundle <branch> --checkout   # rewrites the stamp" ;;
+        STALE)
+            report fail WARN ".deployed-ref says $( printf '%s' "$ref_line" | awk '{print substr($1,1,8)}' ) but the tree is at ${ref_head:0:8} — the stamp is being trusted and is wrong" \
+                          "lupin-vm.sh push-bundle <branch> --checkout   # re-stamps from the VM's own HEAD" ;;
+    esac
+fi
+
 # B4 — a committed .mcp.json with absolute dev paths pollutes every checkout.
 if sudo -n git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" ls-files --error-unmatch .mcp.json >/dev/null 2>&1; then
     report fail WARN ".mcp.json is TRACKED — it must not be (cosa-voice is a per-machine USER-scope MCP)" \
