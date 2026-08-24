@@ -73,3 +73,26 @@ regex==2026.4.4
 # reads/writes YAML. Added 2026-07-22 after a live ModuleNotFoundError('yaml') on
 # lupin-host-test — the import graph grew this dep after the 2026-06-10 freeze.
 pyyaml==6.0.3
+
+# --- fleet_arbiter_loop import graph (added 2026-08-24) -------------------
+# The arbiter's :8001 service crash-looped on lupin-host-test immediately after
+# the v0.2.0 parity deploy: ModuleNotFoundError('requests'), raised at import of
+# cosa/agents/utils/proxy_agents/base_listener.py, reached transitively from
+# lupin_arbiter_app.fleet_arbiter_loop -> heartbeat_arbiter.arbiter_job ->
+# fleet_render -> manager_resolver -> lupin_mcp.session_spawner ->
+# cosa.agents.utils (package __init__ imports proxy_agents eagerly).
+#
+# Five packages, found by walking check-arbiter-venv.py to zero failures (each
+# round exposes the next layer). Versions pinned to what the app container
+# actually runs, so the arbiter and the app cannot drift apart.
+requests==2.33.1
+websockets==16.0
+
+# follow_through_escalation_watcher pulls the DB stack in whenever
+# `follow through escalation enabled = true` (it IS true on the VM), so these are
+# required, not optional. If that flag is ever turned off, read it BEFORE the
+# import rather than dropping these — a disabled feature must not impose its
+# dependencies, and that inversion is what took the fleet loop down on 2026-08-08.
+sqlalchemy==2.0.40
+psycopg2-binary==2.9.11
+pgvector==0.4.2
