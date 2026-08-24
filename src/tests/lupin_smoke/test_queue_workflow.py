@@ -44,6 +44,23 @@ class QueueWorkflowHelper:
     def __init__(self, client: LupinTestClient):
         self.client = client
     
+    def _routable_session_id(self) -> str:
+        """
+        The session id events will actually be ROUTED to.
+
+        The client holds two. `session_id` is a synthetic local string
+        ("test_session_1787531636"); `last_generated_session_id` is the
+        server-issued id ("beautiful elephant") that `websocket_connect`
+        substituted into the URL and which the live socket is bound to.
+
+        Submitting under the synthetic one addresses a session nobody is
+        listening on, so every queue event for that job goes to a channel with
+        no subscriber. The audio helper already resolves this the same way (see
+        AudioTTSHelper.get_speech); the queue helper never did, which is why no
+        queue-event test here has ever had a chance of seeing one.
+        """
+        return getattr( self.client, "last_generated_session_id", self.client.session_id )
+    
     async def push_job(self, message: str, job_type: str = "test") -> dict:
         """
         Submit a bare question through the v2 front door.
@@ -72,7 +89,7 @@ class QueueWorkflowHelper:
         """
         data = {
             "question"     : message,
-            "websocket_id" : self.client.session_id,
+            "websocket_id" : self._routable_session_id(),
             "speak"        : False,
             "interactive"  : False,
         }
@@ -107,7 +124,7 @@ class QueueWorkflowHelper:
         data = {
             "command"      : command,
             "args"         : args or {},
-            "websocket_id" : self.client.session_id,
+            "websocket_id" : self._routable_session_id(),
             "speak"        : False,
         }
         
@@ -334,14 +351,34 @@ class QueueWorkflowSmokeTests:
             if self.debug:
                 print(f"[DEBUG] Queue events received: {events_received}")
             
-            # We might not receive events immediately in test environment.
-            # That's OK — the important thing is the WebSocket connection works,
-            # and the inner `except asyncio.TimeoutError: continue` above already
-            # covers a quiet socket. There used to be an outer `except Exception:
-            # pass` here too, which additionally swallowed the assert_response_ok
-            # on the job push, the assert_json_contains on each event, and the
-            # integer-value assertion — so a rejected push or a malformed queue
-            # event could not fail this test.
+            # 🔴 THIS ASSERTION IS EXPECTED TO FAIL TODAY. It is deliberate, it is
+            # not flaky, and it must not be relaxed to make the suite green — see
+            # the row referenced below.
+            #
+            # This test is NAMED for observing queue transitions, and until now it
+            # could not fail if it observed none: it collected events into a list
+            # and then asserted nothing about it. Proven rather than argued —
+            # unsubscribing EVERY queue event from the socket left the test green.
+            #
+            # The old comment here read "We might not receive events immediately in
+            # test environment. That's OK." That was checked and it is not an
+            # environment quirk. Measured on :7999 with the session-id routing bug
+            # above already fixed, so the events were addressed to the socket that
+            # was actually listening: a submit returning path='agent'
+            # status='waiting' — a genuinely queued job — produced `connect` and
+            # `sys_ping` and NOTHING ELSE across 25 seconds. Zero
+            # queue_todo_update, zero queue_running_update, zero queue_done_update,
+            # zero tts_job_request. The channel was alive the whole time.
+            #
+            # So the tolerance was hiding a real defect rather than absorbing test
+            # flakiness, which is why it is gone. A red that names a missing event
+            # is worth more than a green that hides one.
+            assert events_received, (
+                "No queue transition events arrived for a job that really was queued "
+                "(submit returned path='agent', status='waiting'). Expected at least one "
+                "of queue_todo_update / queue_running_update / queue_done_update / "
+                "tts_job_request on the subscribed socket."
+            )
             
         finally:
             await self.client.close_websocket(websocket)
