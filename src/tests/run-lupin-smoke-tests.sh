@@ -8,7 +8,7 @@
 #   ./run-lupin-smoke-tests.sh [options]
 #
 # Options:
-#   --category CATEGORY  Run only specific category (websockets, basic, notifications, audio, queues, all)
+#   --category CATEGORY  Run only specific category (websockets, basic, notifications, audio, queues, filtering, all)
 #   --quick              Run quick subset of critical tests (under 2 minutes)
 #   --pre-polish         Run as pre-polish baseline test
 #   --post-polish        Run as post-polish validation test
@@ -30,6 +30,10 @@ LUPIN_SMOKE_DIR="$TESTS_DIR/lupin_smoke"
 NOTIFICATIONS_TESTS="$LUPIN_SMOKE_DIR/test_notifications.py"
 AUDIO_TESTS="$LUPIN_SMOKE_DIR/test_audio_tts.py"
 QUEUE_TESTS="$LUPIN_SMOKE_DIR/test_queue_workflow.py"
+# The one pytest-SHAPED file in this directory. It is driven by pytest rather
+# than as a script, and until row e5e964f4 this runner named the other three
+# and never touched it — so its tests ran nowhere routinely.
+FILTERING_TESTS="$LUPIN_SMOKE_DIR/test_queue_filtering_smoke.py"
 
 # Color codes for output
 RED='\033[0;31m'
@@ -342,6 +346,27 @@ EOF
     fi
 }
 
+# Function to run queue-filtering tests (pytest-shaped, not a script)
+run_filtering_tests() {
+    log_category "Running Queue Filtering Tests"
+
+    if [ ! -f "$FILTERING_TESTS" ]; then
+        log_error "Queue filtering tests missing: $FILTERING_TESTS"
+        return 1
+    fi
+
+    # This file declares ordinary pytest functions, so it is RUN BY PYTEST —
+    # invoking it as a script would execute nothing and exit 0, which is the
+    # same silent-pass shape row e5e964f4 exists to close.
+    if python3 -m pytest "$FILTERING_TESTS" -q --no-header; then
+        log_success "Queue filtering tests completed successfully"
+        return 0
+    else
+        log_error "Queue filtering tests failed"
+        return 1
+    fi
+}
+
 # Function to run all test categories
 run_all_tests() {
     local failed_categories=()
@@ -352,7 +377,7 @@ run_all_tests() {
     echo ""
     
     # Run each category and track results
-    categories=("websockets" "basic" "notifications" "audio" "queues")
+    categories=("websockets" "basic" "notifications" "audio" "queues" "filtering")
     
     for category in "${categories[@]}"; do
         total_categories=$((total_categories + 1))
@@ -392,6 +417,13 @@ run_all_tests() {
                     passed_categories=$((passed_categories + 1))
                 else
                     failed_categories+=("queues")
+                fi
+                ;;
+            "filtering")
+                if run_filtering_tests "$@"; then
+                    passed_categories=$((passed_categories + 1))
+                else
+                    failed_categories+=("filtering")
                 fi
                 ;;
         esac
@@ -583,6 +615,11 @@ main() {
                     success=true
                 fi
                 ;;
+            "filtering")
+                if run_filtering_tests "${additional_args[@]}"; then
+                    success=true
+                fi
+                ;;
             "all")
                 if run_all_tests "${additional_args[@]}"; then
                     success=true
@@ -590,7 +627,7 @@ main() {
                 ;;
             *)
                 log_error "Unknown category: $category"
-                log_info "Valid categories: websockets, basic, notifications, audio, queues, all"
+                log_info "Valid categories: websockets, basic, notifications, audio, queues, filtering, all"
                 exit 1
                 ;;
         esac

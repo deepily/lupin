@@ -11,6 +11,7 @@ Comprehensive smoke tests for the Lupin audio and text-to-speech system includin
 """
 
 import sys
+import pytest
 import os
 
 # Bootstrap using LUPIN_ROOT for standalone script execution
@@ -548,6 +549,52 @@ class AudioTTSSmokeTests:
         print(f"{'='*60}")
         
         return passed == total
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# pytest collection bridge (row e5e964f4)
+#
+# WHY THIS EXISTS. The methods above hang off a plain class that takes an
+# __init__, and pytest refuses to collect a test class with a constructor. So
+# `pytest src/tests/lupin_smoke/` used to collect ZERO tests from this file,
+# report success, and EXIT 0 — with nothing in its output saying the file had
+# been skipped. Three of the directory's four files behaved that way, which is
+# how a deliberately-red test here stayed invisible to anyone verifying with
+# pytest instead of the shell runner.
+#
+# This bridge does not replace `run-lupin-smoke-tests.sh`, which still invokes
+# this module as a script. It makes the same methods reachable from pytest as
+# well, so both runners see the same result instead of disagreeing silently.
+#
+# The suite instance is module-scoped ON PURPOSE: the shell runner builds ONE
+# instance and walks every method on it, and each construction performs a real
+# login. A fresh instance per test would log in 10 times per file and diverge
+# from the behaviour the runner exercises.
+
+_SMOKE_METHODS = [
+    "test_get_speech_endpoint_basic",
+    "test_get_speech_playback_modes",
+    "test_get_speech_validation",
+    "test_session_id_validation",
+    "test_audio_websocket_connection",
+    "test_audio_streaming_events",
+    "test_tts_caching_mechanism",
+    "test_concurrent_tts_requests",
+    "test_audio_authentication",
+    "test_tts_auth_header_format_regression",
+]
+
+
+@pytest.fixture( scope="module" )
+def smoke_suite():
+    """One suite instance per module, matching how the shell runner drives it."""
+    return AudioTTSSmokeTests( debug=False )
+
+
+@pytest.mark.parametrize( "method_name", _SMOKE_METHODS )
+def test_lupin_smoke( smoke_suite, method_name ):
+    """Run one smoke method under pytest. Named per method so a failure points at it."""
+    asyncio.run( getattr( smoke_suite, method_name )() )
 
 
 async def main():
