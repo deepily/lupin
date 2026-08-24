@@ -67,11 +67,19 @@ VERSIONED_ASSET_RE = re.compile( r'(?:href|src)="(/static/[^"?]+)\?v=(\d{8})([a-
 # parametrized freshness test would collect zero cases and pass VACUOUSLY; this set
 # makes that impossible by asserting discovery found exactly these. Update it
 # deliberately when the page's versioned-asset set genuinely changes.
+#
+# 2026-08-24 (row aa6afbd8): grew six -> eight. agent-select.js and arg-interview.js
+# had been linked on the page with ?v= tokens but were never added here, so this
+# anchor was red — and that is the anchor working as designed: a new versioned
+# asset joining the page must also join the freshness guard, or it rots unwatched.
+# Bumping the stale tokens alone would NOT have cleared it.
 EXPECTED_VERSIONED_ASSETS = frozenset( {
     "/static/css/notifications.css",
     "/static/css/broadcast-panel.css",
     "/static/css/task-list.css",
     "/static/js/shared/task-list-query.js",
+    "/static/js/shared/agent-select.js",
+    "/static/js/shared/arg-interview.js",
     "/static/js/notifications.js",
     "/static/js/broadcast-panel.js",
 } )
