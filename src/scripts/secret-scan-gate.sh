@@ -25,8 +25,14 @@ if ! command -v gitleaks > /dev/null 2>&1; then
     exit 1
 fi
 
-echo "🔍 secret-scan gate: scanning '$SCAN_PATH' with gitleaks..."
-if gitleaks detect --source "$SCAN_PATH" --no-banner --redact; then
+# --no-git is LOAD-BEARING, not a speed knob (fixed 2026-08-24, row a3c23605).
+# `gitleaks detect` without it scans GIT HISTORY — on 2026-08-24 that meant 3529
+# commits and 9 findings, none of which could ever reach an image: history is not
+# the build context. What ships is the WORKING TREE minus .dockerignore, and that
+# is what this gate exists to guard, per the header above. Scanning history instead
+# made the gate fail every build while never once looking at what Docker copies.
+echo "🔍 secret-scan gate: scanning build context '$SCAN_PATH' with gitleaks (--no-git)..."
+if gitleaks detect --source "$SCAN_PATH" --no-git --no-banner --redact; then
     echo "✓ secret-scan gate passed"
 else
     echo "❌ SECRET-SCAN GATE FAILED — secrets detected; build aborted"
