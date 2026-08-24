@@ -518,8 +518,14 @@ def _persist_response_required_sync(
     """
     with get_db() as session:
         repo = NotificationRepository( session )
-        # Calculate expiration time
-        expires_at = datetime.utcnow() + timedelta( seconds=timeout_seconds )
+        # Calculate expiration time.
+        # AWARE — this value goes straight into create_notification and lands in
+        # the TIMESTAMPTZ expires_at column (postgres_models.py:618). Naive here
+        # and naive in the sweep used to cancel when both ran under the same
+        # session; across sessions an expired row was never swept at all. Fixed
+        # together with notification_repository.get_expired_notifications
+        # (row 3b4002fe).
+        expires_at = datetime.now( timezone.utc ) + timedelta( seconds=timeout_seconds )
         db_notification = repo.create_notification(
             sender_id          = resolved_sender_id,
             recipient_id       = uuid.UUID( target_system_id ),

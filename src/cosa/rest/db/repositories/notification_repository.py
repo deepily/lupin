@@ -397,8 +397,13 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         notification.state = new_state
 
-        # Update appropriate timestamp based on state
-        now = datetime.utcnow()
+        # Update appropriate timestamp based on state.
+        # AWARE, not utcnow(): delivered_at / responded_at are TIMESTAMPTZ
+        # (postgres_models.py:600/604), and Postgres reads a NAIVE value in the
+        # session's TimeZone GUC — so under a non-UTC session the stored instant
+        # is shifted by the offset. Measured at exactly 14400s under
+        # America/New_York before this changed (row 3b4002fe).
+        now = datetime.now( timezone.utc )
         if new_state == "delivered":
             notification.delivered_at = now
         elif new_state == "responded":
@@ -434,7 +439,8 @@ class NotificationRepository( BaseRepository[Notification] ):
             return None
 
         notification.response_value = response_value
-        notification.responded_at = datetime.utcnow()
+        # AWARE — same TIMESTAMPTZ reason as update_state above (row 3b4002fe).
+        notification.responded_at = datetime.now( timezone.utc )
         notification.state = "responded"
 
         self.session.flush()
@@ -676,7 +682,12 @@ class NotificationRepository( BaseRepository[Notification] ):
         Returns:
             List of expired Notification instances
         """
-        now = datetime.utcnow()
+        # AWARE — this `now` is compared against the TIMESTAMPTZ expires_at
+        # column. Naive on BOTH sides used to cancel out when the write and the
+        # sweep shared a session; it did not when they differed, and a row that
+        # had expired was simply never swept. Fixed together with the writer at
+        # routers/notifications.py (row 3b4002fe).
+        now = datetime.now( timezone.utc )
         return self.session.query( Notification ).filter(
             Notification.state == 'delivered',
             Notification.expires_at.isnot( None ),

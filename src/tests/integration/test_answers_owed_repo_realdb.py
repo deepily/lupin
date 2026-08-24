@@ -407,42 +407,101 @@ def _sweep_ids( repo ):
     return { n.id for n in repo.get_expired_notifications() }
 
 
-def test_expiry_sweep_same_session_timezone( owed_session ):
-    """The cancelling case: write AND sweep under the same non-UTC session.
+def test_expiry_sweep_does_not_sweep_an_unexpired_row_under_nonutc_session( owed_session ):
+    """The SWEEP half: a row that has NOT expired must survive a non-UTC sweep.
 
-    An expires_at 60s in the PAST must be swept. Today this passes — but it
-    passes because the write shift and the sweep shift are equal and opposite,
-    not because either is right. If this ever goes red after only ONE half of
-    the pair is fixed, that is the cancellation breaking, not a new defect.
+    get_expired_notifications compared a NAIVE now against the TIMESTAMPTZ
+    expires_at column. Postgres read that naive parameter in the session's
+    timezone, which under America/New_York puts `now` four hours in the FUTURE —
+    so the sweep expired rows that still had up to four hours left on them.
+
+    Written AWARE, the way routers/notifications.py now writes it, so this test
+    isolates the sweep and does not also depend on the writer.
     """
     session = owed_session
     repo    = NotificationRepository( session )
     rid     = _make_user( session )
 
+    not_yet_due = datetime.now( timezone.utc ) + timedelta( seconds=60 )
+    nid = _add_expiring_notif( session, rid, not_yet_due, message="expiry not yet due" )
+    session.commit()
+
     session.execute( text( f"SET TIME ZONE '{_NON_UTC_ZONE}'" ) )
     try:
-        # written exactly the way routers/notifications.py:522 writes it
-        naive_past = datetime.utcnow() - timedelta( seconds=60 )
-        nid = _add_expiring_notif( session, rid, naive_past, message="expiry same-session" )
-        session.commit()
         swept = _sweep_ids( repo )
     finally:
         session.execute( text( "SET TIME ZONE 'UTC'" ) )
         session.commit()
 
-    assert nid in swept, (
-        "a notification that expired 60s ago was NOT swept under a same-timezone "
-        "session — the write/sweep shifts no longer cancel"
+    assert nid not in swept, (
+        f"a notification with 60s still to run was swept under a {_NON_UTC_ZONE} "
+        f"session — the sweep's naive `now` was read in the session timezone and "
+        f"landed hours in the future, expiring rows early"
+    )
+
+
+def test_response_required_writer_computes_an_aware_expires_at():
+    """The WRITER half, pinned at its own line.
+
+    ⚠️ THIS IS THE GUARD THAT ACTUALLY COVERS routers/notifications.py:522. The
+    cross-session sweep test below does NOT: it writes expires_at itself, so it
+    exercises the sweep and never touches the writer. Saying so matters — a guard
+    whose scope reads wider than it is, is the exact defect this row is about.
+
+    _persist_response_required_sync computed expires_at with a naive utcnow() and
+    handed it straight to create_notification, whose expires_at column is
+    TIMESTAMPTZ. Under a non-UTC session Postgres stored that instant hours in the
+    future and the row never expired. Here the DB is stubbed out entirely so the
+    assertion is about the VALUE the writer produces, not about storage.
+    """
+    from cosa.rest.routers import notifications as notif_module
+
+    captured = {}
+
+    class _FakeRepo:
+        def __init__( self, session ): pass
+        def create_notification( self, **kwargs ):
+            captured.update( kwargs )
+            class _Row: id = uuid.uuid4()
+            return _Row()
+        def update_state( self, *a, **kw ): pass
+
+    class _FakeSession:
+        def __enter__( self ): return self
+        def __exit__( self, *a ): return False
+
+    real_get_db, real_repo = notif_module.get_db, notif_module.NotificationRepository
+    notif_module.get_db                  = lambda: _FakeSession()
+    notif_module.NotificationRepository  = _FakeRepo
+    try:
+        notif_module._persist_response_required_sync(
+            "claude.code@lupin.deepily.ai#probe", str( uuid.uuid4() ), "tz writer guard",
+            "task", "high", None, None, "yes_no", None, None, 300, None, None, "delivered",
+        )
+    finally:
+        notif_module.get_db                 = real_get_db
+        notif_module.NotificationRepository = real_repo
+
+    expires_at = captured.get( "expires_at" )
+    assert expires_at is not None, "the writer must pass expires_at to create_notification"
+    assert expires_at.tzinfo is not None, (
+        "the writer handed a NAIVE expires_at to a TIMESTAMPTZ column — Postgres will "
+        "read it in the session timezone and store the wrong instant. Use "
+        "datetime.now( timezone.utc )."
     )
 
 
 def test_expiry_sweep_across_session_timezones( owed_session ):
-    """The real case: write under one session timezone, sweep under another.
+    """The WRITER half: an expired row must be swept even when the sweep runs
+    under a different session timezone than the write.
 
-    Nothing cancels here. An expires_at 60s in the past is stored 4h in the
-    FUTURE by the non-UTC write, so the UTC sweep does not see it as expired and
-    the notification never times out. RED against the current naive pair; GREEN
-    once BOTH halves are aware.
+    routers/notifications.py:522 wrote expires_at as a naive utcnow(), which a
+    non-UTC session stored four hours in the FUTURE — so a UTC sweep never saw it
+    as expired and the notification did not time out for another four hours.
+    Naive on both sides cancelled only while write and sweep shared a session;
+    across sessions nothing cancelled and the row simply never expired.
+
+    Written AWARE here, as the fixed writer now does.
     """
     session = owed_session
     repo    = NotificationRepository( session )
@@ -450,8 +509,8 @@ def test_expiry_sweep_across_session_timezones( owed_session ):
 
     session.execute( text( f"SET TIME ZONE '{_NON_UTC_ZONE}'" ) )
     try:
-        naive_past = datetime.utcnow() - timedelta( seconds=60 )
-        nid = _add_expiring_notif( session, rid, naive_past, message="expiry cross-session" )
+        overdue = datetime.now( timezone.utc ) - timedelta( seconds=60 )
+        nid = _add_expiring_notif( session, rid, overdue, message="expiry cross-session" )
         session.commit()
     finally:
         session.execute( text( "SET TIME ZONE 'UTC'" ) )
@@ -463,6 +522,5 @@ def test_expiry_sweep_across_session_timezones( owed_session ):
 
     assert nid in swept, (
         "a notification that expired 60s ago was NOT swept when the sweep ran under "
-        "a different session timezone than the write — the naive write stored the "
-        "instant 4h in the future, so it will not time out for another 4h"
+        "a different session timezone than the write"
     )
