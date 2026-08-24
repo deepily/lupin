@@ -73,19 +73,5 @@
   "src/tests/ws_channel_browser/test_ws_circuit_banner.py": "UNGATED 2026-07-21 (d97b024e): browser-driven WebSocket channel suite with no runner script.",
   "src/tests/ws_channel_browser/test_ws_close_codes.py": "UNGATED 2026-07-21 (d97b024e): browser-driven WebSocket channel suite with no runner script.",
   "src/tests/ws_channel_browser/test_ws_lifecycle.py": "UNGATED 2026-07-21 (d97b024e): browser-driven WebSocket channel suite with no runner script.",
-  "src/tests/ws_channel_unit/test_ws_channel_unit.py": "UNGATED 2026-07-21 (d97b024e): WebSocket channel unit suite sitting outside src/tests/unit/, so the `unit` gate cannot reach it.",
-  "src/tmp/test_browser_enhanced.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git.",
-  "src/tmp/test_browser_tts.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git.",
-  "src/tmp/test_fastapi_integration.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git.",
-  "src/tmp/test_final_validation.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git.",
-  "src/tmp/test_integration.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git.",
-  "src/tmp/test_math_agent_context.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git.",
-  "src/tmp/test_producer_consumer.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git.",
-  "src/tmp/test_queue_authenticated.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git.",
-  "src/tmp/test_queue_push_debug.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git.",
-  "src/tmp/test_queue_types.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git.",
-  "src/tmp/test_queue_workflow.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git.",
-  "src/tmp/test_running_queue.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git.",
-  "src/tmp/test_simple_integration.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git.",
-  "src/tmp/test_websocket_tts.py": "UNGATED 2026-07-21 (d97b024e): untracked scratch tree, not part of the repository. Collects only because pytest reads DISK, not git."
+  "src/tests/ws_channel_unit/test_ws_channel_unit.py": "UNGATED 2026-07-21 (d97b024e): WebSocket channel unit suite sitting outside src/tests/unit/, so the `unit` gate cannot reach it."
 }

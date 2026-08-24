@@ -50,6 +50,15 @@ EXCLUDED_PATH_PARTS = (
     "__pycache__",
     "lupin-mobile",
     "lupin-plugin-firefox",
+    # `tmp` added 2026-08-23 (row c4dd7768). `src/tmp/` is a self-declared scratch
+    # directory — its own README says "This directory is excluded from git tracking"
+    # — and `.gitignore:5` ignores every `tmp` component, so git has never tracked a
+    # byte of it. Its 14 `test_*.py` files existed on ONE developer's disk and in no
+    # clone, worktree or CI checkout, yet the census scans DISK: they entered the
+    # population here and nowhere else, and their 14 allowlist entries read as valid
+    # here and as stale everywhere else. A census answer must not depend on which
+    # checkout you ask from (the same shape as bug 5e6e0680).
+    "tmp",
 )
 
 # The file whose SUITE_SCRIPTS map defines every gate-invocable runner.
