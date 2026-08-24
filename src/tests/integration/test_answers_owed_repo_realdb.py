@@ -365,3 +365,104 @@ def test_update_last_login_stores_correct_instant_under_nonutc_session( owed_ses
         session.commit()
 
     _assert_instant_is_right( epoch_stored, t0, "last_login_at" )
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE EXPIRY PAIR — two wrongs that may be cancelling (Cheech, row 3b4002fe).
+#
+# routers/notifications.py:522 WRITES expires_at as a naive utcnow() + timeout,
+# and notification_repository.py:679 SWEEPS by comparing a naive now against that
+# same TIMESTAMPTZ column. Both sides are interpreted in the session's TimeZone
+# GUC, so when write and sweep happen under the SAME session the two shifts
+# cancel and the sweep looks correct.
+#
+# ⇒ FIXING EITHER SIDE ALONE TURNS A CANCELLING PAIR INTO A LIVE ONE-SIDED BUG.
+#   The pair below pins both halves of that: same-session behaviour (which is
+#   green today, and green for the wrong reason) and cross-session behaviour
+#   (which is broken today and is what a real deployment eventually looks like).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _add_expiring_notif( session, recipient_id, expires_at, *, message ):
+    """One delivered notification whose expires_at is written as the caller supplies it."""
+    nid = uuid.uuid4()
+    session.add( Notification(
+        id                 = nid,
+        sender_id          = f"claude.code@lupin.deepily.ai#{_PERSONA}sess",
+        recipient_id       = recipient_id,
+        message            = message,
+        type               = "task",
+        priority           = "high",
+        created_at         = datetime.now( timezone.utc ) - timedelta( hours=1 ),
+        sender_persona     = _PERSONA,
+        response_requested = True,
+        state              = "delivered",
+        expires_at         = expires_at,
+    ) )
+    session.flush()
+    return nid
+
+
+def _sweep_ids( repo ):
+    return { n.id for n in repo.get_expired_notifications() }
+
+
+def test_expiry_sweep_same_session_timezone( owed_session ):
+    """The cancelling case: write AND sweep under the same non-UTC session.
+
+    An expires_at 60s in the PAST must be swept. Today this passes — but it
+    passes because the write shift and the sweep shift are equal and opposite,
+    not because either is right. If this ever goes red after only ONE half of
+    the pair is fixed, that is the cancellation breaking, not a new defect.
+    """
+    session = owed_session
+    repo    = NotificationRepository( session )
+    rid     = _make_user( session )
+
+    session.execute( text( f"SET TIME ZONE '{_NON_UTC_ZONE}'" ) )
+    try:
+        # written exactly the way routers/notifications.py:522 writes it
+        naive_past = datetime.utcnow() - timedelta( seconds=60 )
+        nid = _add_expiring_notif( session, rid, naive_past, message="expiry same-session" )
+        session.commit()
+        swept = _sweep_ids( repo )
+    finally:
+        session.execute( text( "SET TIME ZONE 'UTC'" ) )
+        session.commit()
+
+    assert nid in swept, (
+        "a notification that expired 60s ago was NOT swept under a same-timezone "
+        "session — the write/sweep shifts no longer cancel"
+    )
+
+
+def test_expiry_sweep_across_session_timezones( owed_session ):
+    """The real case: write under one session timezone, sweep under another.
+
+    Nothing cancels here. An expires_at 60s in the past is stored 4h in the
+    FUTURE by the non-UTC write, so the UTC sweep does not see it as expired and
+    the notification never times out. RED against the current naive pair; GREEN
+    once BOTH halves are aware.
+    """
+    session = owed_session
+    repo    = NotificationRepository( session )
+    rid     = _make_user( session )
+
+    session.execute( text( f"SET TIME ZONE '{_NON_UTC_ZONE}'" ) )
+    try:
+        naive_past = datetime.utcnow() - timedelta( seconds=60 )
+        nid = _add_expiring_notif( session, rid, naive_past, message="expiry cross-session" )
+        session.commit()
+    finally:
+        session.execute( text( "SET TIME ZONE 'UTC'" ) )
+        session.commit()
+
+    # …and sweep from a UTC session, as a different worker or a restarted
+    # process would.
+    swept = _sweep_ids( repo )
+
+    assert nid in swept, (
+        "a notification that expired 60s ago was NOT swept when the sweep ran under "
+        "a different session timezone than the write — the naive write stored the "
+        "instant 4h in the future, so it will not time out for another 4h"
+    )
