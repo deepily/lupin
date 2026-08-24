@@ -365,43 +365,49 @@ class NotificationSmokeTests:
                 message=test_message,
                 priority="urgent"
             )
-            
+
             self.validator.assert_response_ok(send_response, 200)
-            
-            # Wait for WebSocket notification event
-            try:
-                notification_event = await self.client.wait_for_websocket_event(
-                    websocket, "notification_queue_update", timeout=10.0
-                )
 
-                # Validate event structure — server sends notification at top level
-                self.validator.assert_websocket_event(
-                    notification_event,
-                    "notification_queue_update"
-                )
+            # A 200 is not a delivery — the server answers 200 whether it queued the
+            # notification or refused it as undeliverable, and names which in `status`.
+            send_data = send_response.json()
+            assert send_data[ "status" ] == "queued", (
+                f"Send was accepted with HTTP 200 but not queued: status="
+                f"{send_data.get( 'status' )!r}. Nothing will arrive over the socket."
+            )
 
-                # Notification may be under "data" or "notification" key
-                if "data" in notification_event:
-                    notification = notification_event[ "data" ].get( "notification", notification_event[ "data" ] )
-                elif "notification" in notification_event:
-                    notification = notification_event[ "notification" ]
-                else:
-                    raise AssertionError( f"No notification data in event: {notification_event}" )
+            # ⚠️ THE TIMEOUT IS NOT TOLERATED. This block used to end in
+            # `except TimeoutError: pass`, excused as "may be expected in test
+            # environment" — which made the test report green whether the event
+            # arrived or not, i.e. green precisely when the delivery it exists to
+            # prove had failed. The send above is now asserted to have been queued,
+            # so a socket that stays silent is a real failure and must say so.
+            notification_event = await self.client.wait_for_websocket_event(
+                websocket, "notification_queue_update", timeout=10.0
+            )
 
-                self.validator.assert_json_contains(
-                    notification,
-                    [ "message", "type", "priority", "timestamp" ]
-                )
+            # Validate event structure — server sends notification at top level
+            self.validator.assert_websocket_event(
+                notification_event,
+                "notification_queue_update"
+            )
 
-                assert notification[ "message" ] == test_message
-                assert notification[ "priority" ] == "urgent"
-                
-            except TimeoutError:
-                # This might be expected if user isn't connected to the specific session
-                if self.debug:
-                    print("[DEBUG] WebSocket notification timeout - may be expected in test environment")
-                pass
-                
+            # Notification may be under "data" or "notification" key
+            if "data" in notification_event:
+                notification = notification_event[ "data" ].get( "notification", notification_event[ "data" ] )
+            elif "notification" in notification_event:
+                notification = notification_event[ "notification" ]
+            else:
+                raise AssertionError( f"No notification data in event: {notification_event}" )
+
+            self.validator.assert_json_contains(
+                notification,
+                [ "message", "type", "priority", "timestamp" ]
+            )
+
+            assert notification[ "message" ] == test_message
+            assert notification[ "priority" ] == "urgent"
+
         finally:
             await self.client.close_websocket(websocket)
     
