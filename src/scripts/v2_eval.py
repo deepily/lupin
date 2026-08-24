@@ -80,13 +80,40 @@ from eval_isolation_guard import (   # noqa: E402
 # ---------------------------------------------------------------------------
 PATH_REPLAY       = "replay"
 PATH_AGENT        = "agent"
-PATH_RECEPTIONIST = "receptionist"
 PATH_NEEDS_INPUT  = "needs_input"
+
+# 🔴 PATH_RECEPTIONIST DOES NOT MEAN "SOMETHING WENT WRONG" — READ route_reason TOO.
+# Row c242166d. Two different things arrive here with the same `path`:
+#
+#     a user (or the router) ASKED FOR the receptionist   -> route_reason "user_picked_receptionist"
+#     nothing could serve the request, so it degraded     -> route_reason "unknown_command"
+#
+# `path` staying "receptionist" for both is CORRECT, not a compromise: the receptionist
+# genuinely served the request either way. What differs is WHY it was reached, and
+# route_reason is the field whose whole job is naming which rule fired (flow.py:783).
+# Row 1568269d landed that marker at ced053a1; the flow can tell them apart. This harness
+# is one of the two readers that still could not.
+#
+# The trap was latent rather than live: this constant was DECLARED AND NEVER USED, which is
+# exactly what Clayton warned about when he recommended the marker — "the next person to
+# use it inherits the conflation." Anyone reaching for it to count receptionist outcomes as
+# routing failures would have scored every deliberate pick as a failure. Bug 38815328 is
+# the precedent from the other side: a warm pass where 117 of 300 requests came back as the
+# receptionist and 115 could not say why.
+#
+# So use is_receptionist_degrade() below. A bare `response_path( r ) == PATH_RECEPTIONIST`
+# failure test is the defect, and src/tests/unit/test_v2_eval_receptionist_reader.py fails
+# the build if one appears in this file.
+PATH_RECEPTIONIST = "receptionist"
 
 ROUTE_AGENT_ERROR   = "agent_error"
 ROUTE_ROUTER_ERROR  = "router_error"
 ROUTE_EXTRACT_ERROR = "extract_error"
 ROUTE_REPLAY_ERROR  = "replay_error"
+
+# The two doors to the receptionist, as the flow labels them (flow.py:1175).
+ROUTE_USER_PICKED_RECEPTIONIST = "user_picked_receptionist"
+ROUTE_UNKNOWN_COMMAND          = "unknown_command"
 
 # The four route reasons that mean the work did NOT complete. A 200 carrying one of these
 # is a REPORTED FAILURE, not a success — see is_completed_ok below.
@@ -349,6 +376,48 @@ def response_route_reason( record: Dict[ str, Any ] ) -> Optional[ str ]:
     if not record[ "ok" ]:
         return None
     return record[ "payload" ].get( "route_reason" )
+
+
+def is_receptionist_degrade( record: Dict[ str, Any ] ) -> bool:
+    """
+    Did this request reach the receptionist BECAUSE NOTHING COULD SERVE IT?
+
+    Row c242166d. The distinction a report has to make before it counts a receptionist
+    outcome against anything: a deliberate pick is the system working, and a degrade is the
+    system failing to route. Both carry path="receptionist", so `path` alone cannot answer
+    it and any metric keyed on `path` alone scores the first as the second.
+
+    ⚠️ WHAT "PICKED" MEANS DIFFERS BY DOOR, and the harness inherits that as-is. On
+    /submit the caller names the command, so a pick is literal. On /ask the command is the
+    ROUTER's output, so the marker means "the router classified this utterance as asking
+    for the receptionist" — a model prediction, not a click. That is still a positive
+    choice rather than an else-branch: the router's command list carries an explicit `none`
+    for "I cannot place this" and `none` resolves to unknown_command, so a low-confidence
+    router lands there instead. A MISclassification will therefore carry the pick marker.
+    That is a wrong routing decision, not a wrong label for the decision that was made, and
+    this predicate does not try to second-guess it.
+
+    ⚠️ NOT MEASURED, and stated rather than left implied: how often the router actually
+    emits the receptionist in real traffic is unknown. Trained-for is not observed-in-
+    traffic. It does not change this predicate — a positive detection reported as a failure
+    is wrong at any frequency — but nobody should read this function's existence as
+    evidence the case is common.
+
+    Requires:
+        - record is a harness record with "ok" and "payload"
+
+    Ensures:
+        - False for any record that did not complete OK (there is no reported path to read)
+        - False for any path other than the receptionist
+        - False when the receptionist was ASKED FOR (route_reason "user_picked_receptionist")
+        - True when the receptionist was reached any other way, INCLUDING a body carrying no
+          route_reason at all: before the ced053a1 marker existed every degrade looked like
+          that, so treating a missing marker as a pick would silently un-count the very
+          failures this predicate is for
+    """
+    if response_path( record ) != PATH_RECEPTIONIST:
+        return False
+    return response_route_reason( record ) != ROUTE_USER_PICKED_RECEPTIONIST
 
 
 def reported_route_reason( record: Dict[ str, Any ] ) -> Optional[ str ]:
