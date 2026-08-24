@@ -60,8 +60,8 @@ class TestPytestDirectScript:
         assert mode & stat.S_IXGRP, "Script is not group-executable"
 
     def test_script_delegates_to_pytest( self, script_path ):
-        """The script must invoke `python3 -m pytest`, not `python3` directly
-        (otherwise fixtures / markers / parametrize won't work).
+        """The script must run the caller's arguments THROUGH PYTEST, not through a plain
+        `python3 file.py` (which silently skips fixtures, markers and parametrize).
 
         ⚠️ THIS TEST USED TO ASSERT ON `exec` ITSELF, and that made it a test of the
         delivery mechanism rather than of the delegation. Row 73c6819d had to DROP the
@@ -69,6 +69,16 @@ class TestPytestDirectScript:
         and on a conftest collection error that code is the only signal there is. The
         proposition worth keeping is "pytest gets the caller's arguments", so that is what
         is asserted now; the copy-paste guard against a bare `python3 file.py` stays.
+
+        ⚠️ AND IT USED TO ASSERT THE SPELLING `-m pytest` SPECIFICALLY, which made it fail
+        for the wrong reason on 2026-08-24 (row fc74c1d4). That row stopped this script
+        running pytest through a bare `python3` — a bare python3 is whatever is on PATH, and
+        an under-provisioned one under-collects while the reduced count gets reported as the
+        whole suite (row c98bce3f). The script now calls `"$PYTEST"`, resolved by
+        src/scripts/lib/resolve-venv-pytest.sh to a real .venv/bin/pytest binary, so fixtures,
+        markers and parametrize all work exactly as before — the property this test cares
+        about is intact and only the spelling changed. So both forms are accepted: an
+        `-m pytest` module invocation, or a resolved pytest binary.
         """
         with open( script_path, "r" ) as f:
             content = f.read()
@@ -76,8 +86,9 @@ class TestPytestDirectScript:
                         if "pytest" in l and "$@" in l and not l.strip().startswith( "#" ) ]
 
         assert invocations, f"No line passing \"$@\" to pytest found in {script_path}"
-        assert any( "-m pytest" in l for l in invocations ), (
-            f"{script_path} must delegate to `python3 -m pytest`, not run a file with plain "
-            f"python3 the way run-smoke-direct.sh does — fixtures, markers and parametrize "
-            f"do not work that way. Lines seen: {invocations}"
+        assert any( ( "-m pytest" in l ) or ( "$PYTEST" in l ) for l in invocations ), (
+            f"{script_path} must run the caller's arguments through pytest — either as "
+            f"`<python> -m pytest` or as a resolved `\"$PYTEST\"` binary — and not as a plain "
+            f"`python3 file.py` the way run-smoke-direct.sh does; fixtures, markers and "
+            f"parametrize do not work that way. Lines seen: {invocations}"
         )

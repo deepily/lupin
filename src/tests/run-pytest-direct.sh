@@ -44,6 +44,15 @@ fi
 # A collection error is the suite NEVER RUNNING, and its conftest shape fires no pytest
 # hook at all — so the exit code, read out here, is the only thing that can report it
 # (row 73c6819d). The wrapper re-raises pytest's status verbatim.
+# Same explicit-venv requirement as every other sanctioned runner (rows c98bce3f,
+# fc74c1d4). This script did not merely FALL BACK to a bare python3 — it used one
+# unconditionally, never trying a venv at all. The header line above ("delegates to
+# `python3 -m pytest` instead of `python3` directly") is about module-vs-file invocation,
+# not a deliberate choice of interpreter, and TestSuiteJob invokes this as the
+# "pytest_direct" test type, so it carries the same false-green risk as the rest.
+source "$PROJECT_ROOT/src/scripts/lib/resolve-venv-pytest.sh"
+resolve_venv_pytest || exit $?
+
 source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
-run_pytest_with_diagnosis python3 -m pytest "$@"
+run_pytest_with_diagnosis "$PYTEST" "$@"
 exit $?

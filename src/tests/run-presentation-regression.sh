@@ -40,8 +40,12 @@ INCLUDE_R2P=false
 LOG_FILE="/tmp/presentation-regression-latest.log"
 VENV_ACTIVATE=".venv/bin/activate"
 # Use venv python on host, fall back to system python in Docker container
-VENV_PYTHON="$PROJECT_ROOT/.venv/bin/python3"
-if ! "$VENV_PYTHON" --version > /dev/null 2>&1; then VENV_PYTHON="python3"; fi
+# Require an EXPLICIT venv python — never silently degrade to a bare `python3`. The old
+# second line here did exactly that, which is the row c98bce3f false-green shape in a
+# different spelling: an under-provisioned interpreter under-collects and the reduced
+# count gets reported as the whole suite. Shared so it cannot drift again (row fc74c1d4).
+source "$PROJECT_ROOT/src/scripts/lib/resolve-venv-pytest.sh"
+resolve_venv_python || exit $?
 # PYTEST_CMD is a test seam: a control-proof harness overrides it with a stub
 # that returns a chosen exit code, to exercise run_tier's 3-way classification
 # without spending on real LLM tiers. Defaults to the real pytest invocation.

@@ -30,8 +30,13 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="$PROJECT_ROOT/src:${PYTHONPATH}"
 export LUPIN_ROOT="$PROJECT_ROOT"
 
-VENV_PYTEST="$PROJECT_ROOT/.venv/bin/pytest"
-if [ -x "$VENV_PYTEST" ] && "$VENV_PYTEST" --version > /dev/null 2>&1; then PYTEST="$VENV_PYTEST"; else PYTEST="python3 -m pytest"; fi
+# Require an EXPLICIT venv pytest — never silently fall back to a bare `python3 -m pytest`.
+# A bare python3 resolves to whatever is on PATH; an under-provisioned interpreter aborts
+# collection of part of the suite and the runner reports the REDUCED count as the whole
+# suite — a false green on a merge gate (row c98bce3f). The resolution is shared rather
+# than inline BECAUSE it was inline once and never reached this script (row fc74c1d4).
+source "$PROJECT_ROOT/src/scripts/lib/resolve-venv-pytest.sh"
+resolve_venv_pytest || exit $?
 
 # `-m serial_bridge_guard` OVERRIDES the addopts `-m` expression, selecting exactly
 # the deselected-by-default guard tests. Every file listed below carries one.

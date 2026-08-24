@@ -19,6 +19,10 @@ set -e  # Exit on any error
 # Script configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Shared venv-pytest resolution — never a bare `python3 -m pytest` (rows c98bce3f,
+# fc74c1d4). Sourced here so run_filtering_tests can call resolve_venv_pytest.
+source "$PROJECT_ROOT/src/scripts/lib/resolve-venv-pytest.sh"
 TESTS_DIR="$SCRIPT_DIR"
 
 # Existing test script paths
@@ -244,7 +248,14 @@ run_filtering_tests() {
     # This file declares ordinary pytest functions, so it is RUN BY PYTEST —
     # invoking it as a script would execute nothing and exit 0, which is the
     # same silent-pass shape row e5e964f4 exists to close.
-    if python3 -m pytest "$FILTERING_TESTS" -q --no-header; then
+    #
+    # And it must be the VENV pytest, not a bare python3: an under-provisioned
+    # interpreter under-collects and the reduced count gets reported as the whole
+    # suite (rows c98bce3f, fc74c1d4). This script was the sixth runner carrying the
+    # fallback and was found by the property test, not by grep — see
+    # src/tests/unit/test_runner_venv_pytest_guard.py.
+    resolve_venv_pytest || return $?
+    if "$PYTEST" "$FILTERING_TESTS" -q --no-header; then
         log_success "Queue filtering tests completed successfully"
         return 0
     else

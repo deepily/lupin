@@ -40,8 +40,12 @@ PORT="${LUPIN_TEST_PORT:-8000}"
 BASE_URL="${LUPIN_TEST_BASE_URL:-http://localhost:$PORT}"
 PROJECT_ROOT="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/lupin}"
 # Use venv python on host, fall back to system python in Docker container
-VENV_PYTHON="$PROJECT_ROOT/.venv/bin/python3"
-if ! "$VENV_PYTHON" --version > /dev/null 2>&1; then VENV_PYTHON="python3"; fi
+# Require an EXPLICIT venv python — never silently degrade to a bare `python3`. The old
+# second line here did exactly that, which is the row c98bce3f false-green shape in a
+# different spelling: an under-provisioned interpreter under-collects and the reduced
+# count gets reported as the whole suite. Shared so it cannot drift again (row fc74c1d4).
+source "$PROJECT_ROOT/src/scripts/lib/resolve-venv-pytest.sh"
+resolve_venv_python || exit $?
 
 # --- Background execution support ---
 LOG_DIR="/tmp"
@@ -263,7 +267,7 @@ cd "$PROJECT_ROOT"
 # status is re-raised verbatim, so the reporting below is unchanged. Row 73c6819d.
 source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
 set +e  # Don't exit on pytest failure
-run_pytest_with_diagnosis $VENV_PYTHON -m pytest src/tests/e2e_ui/ --browser chromium "${REMAINING_ARGS[@]}"
+run_pytest_with_diagnosis "$VENV_PYTHON" -m pytest src/tests/e2e_ui/ --browser chromium "${REMAINING_ARGS[@]}"
 PYTEST_EXIT_CODE=$?
 set -e
 
