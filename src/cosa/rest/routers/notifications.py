@@ -218,7 +218,7 @@ async def _ask_reattach_generator( notification_id, timeout_seconds ):
         - budget exhausted with neither yields an `expired` frame with no default
     """
     yield f"data: {json.dumps({'status': 'ack', 'notification_id': notification_id})}\n\n"
-    deadline      = datetime.utcnow() + timedelta( seconds=timeout_seconds )
+    deadline      = datetime.now( timezone.utc ) + timedelta( seconds=timeout_seconds )
     poll_interval = 2.0
     while True:
         row = await asyncio.to_thread( _read_notification_state_sync, notification_id )
@@ -231,10 +231,10 @@ async def _ask_reattach_generator( notification_id, timeout_seconds ):
                 val = _extract_response_value( row[ "response_value" ] )
                 yield f"data: {json.dumps({'status': 'expired', 'response': val, 'default_used': True, 'timeout': True})}\n\n"
                 return
-        if datetime.utcnow() >= deadline:
+        if datetime.now( timezone.utc ) >= deadline:
             yield f"data: {json.dumps({'status': 'expired', 'response': None, 'default_used': False, 'timeout': True})}\n\n"
             return
-        await asyncio.sleep( min( poll_interval, max( 0.0, ( deadline - datetime.utcnow() ).total_seconds() ) ) )
+        await asyncio.sleep( min( poll_interval, max( 0.0, ( deadline - datetime.now( timezone.utc ) ).total_seconds() ) ) )
 
 
 def _sse_headers():
