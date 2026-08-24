@@ -49,6 +49,93 @@ _diagnosis_python() {
     echo "python3"
 }
 
+# ── Coverage-blindness detector (row f8e5215b) ──────────────────────────────
+#
+# THE SHAPE: pytest-cov's --no-cov-on-fail suppresses the ENTIRE coverage report when any
+# test in the run fails. Pair that with a tier carrying tolerated red — a worktree tier
+# always does (row 1cf6c918) — and the instrument goes blind exactly when the number is
+# wanted. The failure is SILENT: no warning, no "coverage suppressed" line, just an absent
+# table. Nothing distinguishes "coverage was not measured" from "I forgot to pass --cov",
+# so a ten-minute tier can be run specifically to get a number the flag then deletes
+# (measured 2026-08-22 gating a0322a77; reproduced 2026-08-24 on this branch).
+#
+# WHAT THE FLAG ACTUALLY BUYS, measured 2026-08-24 rather than assumed. Coverage TRACING is
+# paid whenever --cov is passed at all; the flag skips only the report RENDER at the end.
+# Same two-file red run, three configs:
+#     --no-cov                                 0.61s
+#     --cov=cosa --no-cov-on-fail              0.83s   <- tracing paid, NO table produced
+#     --cov=cosa                              10.19s   <- tracing paid, table produced
+# So the flag saves ~9.4s of rendering at cosa scope (49,542 statements, branch mode) and
+# ~6.3s at the full repo scope (61,370 statements, line mode) — a fixed end-of-run cost that
+# does not scale with test count. Against the unit tier's measured 698s that is ~1.3%. The
+# number is worth the second and a bit; that is why this warns instead of staying quiet.
+#
+# WHY A DETECTOR RATHER THAN A BAN ON THE FLAG. --no-cov-on-fail is only one way to end a
+# run with no number. A --cov scoped to a module the run never imports reports "No data to
+# report" and prints no table (reproduced while measuring the above). A --cov-report routed
+# only to a file, or a pytest-cov missing from the interpreter, look identical to the
+# reader. So this asserts the PROPERTY worth having — a number reached you — instead of the
+# absence of one flag, and names the flag as the cause only when it was actually passed.
+#
+# It never changes the exit status. It reports beside the result, like the diagnosis above.
+
+# True when the command asks for coverage at all.
+_cov_requested() {
+    local a
+    for a in "$@"; do
+        case "$a" in --cov|--cov=*|--cov-report|--cov-report=*|--cov-config=*) return 0 ;; esac
+    done
+    return 1
+}
+
+# True when --no-cov-on-fail is in the command — the one cause that can be named exactly.
+_cov_suppressed_on_fail() {
+    local a
+    for a in "$@"; do [ "$a" = "--no-cov-on-fail" ] && return 0; done
+    return 1
+}
+
+# True when the captured output actually contains a coverage report. pytest-cov's terminal
+# report opens with a `coverage: platform ...` separator and ends in a TOTAL row; either one
+# present means a number reached the reader.
+_cov_table_present() {
+    grep -qE 'coverage: platform|^TOTAL[[:space:]]' "$1" 2>/dev/null
+}
+
+_warn_if_coverage_went_blind() {
+    local capture="$1" status="$2"; shift 2
+    _cov_requested "$@"           || return 0
+    [ "$status" -eq 0 ]           && return 0   # a green run reports; nothing to warn about
+    _cov_table_present "$capture" && return 0
+
+    {
+        echo ""
+        echo "================================================================================"
+        echo "NO COVERAGE NUMBER WAS PRODUCED BY THIS RUN  (row f8e5215b)"
+        echo "--------------------------------------------------------------------------------"
+        echo "Coverage was requested, the run exited $status, and no coverage table appeared in"
+        echo "the output. This run measured nothing you can cite. An absent table looks exactly"
+        echo "like never having asked for coverage, which is why this says so out loud."
+        if _cov_suppressed_on_fail "$@"; then
+            echo ""
+            echo "  Cause: --no-cov-on-fail was passed. pytest-cov drops the whole report when"
+            echo "         any test fails, so a tier with tolerated red never reports a number."
+            echo "  Fix:   re-run the same command WITHOUT --no-cov-on-fail. Measured cost of"
+            echo "         the report on this repo: ~6-10s, fixed, whatever the test count."
+        else
+            echo ""
+            echo "  --no-cov-on-fail was NOT passed, so the cause is something else: a --cov"
+            echo "  scoped to code this run never imported (pytest-cov then warns \"No data to"
+            echo "  report\" and prints no table), a --cov-report routed only to a file, or"
+            echo "  pytest-cov missing from this interpreter."
+        fi
+        echo ""
+        echo "Do not report coverage as verified from this run."
+        echo "================================================================================"
+        echo ""
+    } >&2
+}
+
 run_pytest_with_diagnosis() {
     local capture status python_bin module_path
     capture="$( mktemp -t pytest-collection-XXXXXX.log 2>/dev/null )"
@@ -56,6 +143,11 @@ run_pytest_with_diagnosis() {
     # No temp file available: run pytest plainly rather than not at all. A diagnostic that
     # can block a test run is worse than the silence it removes.
     if [ -z "$capture" ]; then
+        # No capture file: neither the collection diagnosis nor the coverage-blindness check
+        # (row f8e5215b) can read this run's output. Name the guarantees that are off rather
+        # than running degraded in silence — that silence is the defect both checks are about.
+        echo "pytest-with-diagnosis: no temp file available — collection diagnosis and the" >&2
+        echo "  coverage-blindness check are DISABLED for this run." >&2
         "$@"
         return $?
     fi
@@ -87,6 +179,8 @@ run_pytest_with_diagnosis() {
                 --project-root "$LUPIN_ROOT" || true
         fi
     fi
+
+    _warn_if_coverage_went_blind "$capture" "$status" "$@"
 
     rm -f "$capture"
     return $status
