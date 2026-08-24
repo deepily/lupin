@@ -9,12 +9,23 @@
 #
 # TWO AXES (auto-detected):
 #   AXIS A (code): only src/ changed -> bind-mount sync + docker restart.
-#                  ⚠️ REQUIRES the target container to bind /var/lupin/src. It does
-#                  NOT today (the ./src mount was removed 2026-07-07 so it cannot
-#                  shadow the baked image), so this axis ABORTS with a named error
-#                  rather than silently deploying nothing — bug be706f10. Asserted
-#                  against the LIVE container via docker inspect, not this repo's
-#                  compose file, which is not what the VM runs.
+#                  ⚠️ REQUIRES the target container to bind /var/lupin/src. The
+#                  cloud-TEST container does NOT (the ./src mount was removed
+#                  2026-07-07 so it cannot shadow the baked image), so this axis
+#                  ABORTS with a named error rather than silently deploying
+#                  nothing — bug be706f10. Asserted against the LIVE container via
+#                  docker inspect, not this repo's compose file, which is not what
+#                  the VM runs.
+#                  ⚠️ THAT SENTENCE IS ABOUT CLOUD-TEST AND ONLY CLOUD-TEST (row
+#                  5f1532d1). It used to read "It does NOT today", which invited
+#                  the reader to carry it across venues. Measured on lupin-host-test
+#                  2026-08-24, the cloud-GPU container DOES bind it:
+#                      /mnt/lupin-data/lupin/src -> /var/lupin/src
+#                  so on that VM the fast code path is exactly what works, and this
+#                  abort would refuse it. That is not a contradiction to fix by
+#                  loosening the abort — it is why the venue guard below stops this
+#                  script before it ever reaches an assertion written for somewhere
+#                  else. On cloud-GPU, use `lupin-vm.sh deploy`.
 #   AXIS B (deps): pyproject.toml / uv.lock changed -> image rebuild path
 #                  (build->push->pull->force-recreate). NEVER a silent restart.
 #
@@ -73,6 +84,66 @@ if [ "$ALLOW_DIRTY" -eq 0 ]; then
         die "working tree differs from $SHORT under src/ or deps — commit first (or --allow-dirty)."
     fi
 fi
+
+# ---- VENUE GUARD: is the venue this script is hardcoded to even HERE? ----
+#
+# ROW 5f1532d1. Every config value at the top of this file names the cloud-TEST
+# venue: lupin-rest-cloud-test / docker-compose.cloud-test.yml / cloud-test.env.
+# The one and only VM runs the cloud-GPU venue. Measured on lupin-host-test
+# 2026-08-24: `lupin-rest-cloud-test` does not exist in ANY state, not even
+# stopped, so every `docker restart` and `docker inspect` below addresses nothing.
+#
+# NOBODY IS BROKEN TODAY — the working path is `lupin-vm.sh deploy`, which targets
+# cloud-gpu correctly and carries the --no-deps fix (bug 70794d58). The hazard this
+# guard removes is a READER: this file is named deploy-cloud-test.sh but reads like
+# THE deploy script, and without the guard its failures teach the wrong lesson —
+# "the container is missing" or "code deploys are impossible on this VM" — when the
+# truth is only that this script is pointed at a venue that is not here.
+#
+# BOTH compose files and BOTH env files ARE present on the VM, so their presence
+# proves nothing about which venue is live. The container is the fact that decides
+# it, which is why this asks docker and not the filesystem.
+#
+# RUNS BEFORE EVERYTHING, --dry-run INCLUDED. A dry-run that prints a confident
+# plan for a container that does not exist is precisely the misleading output this
+# guard exists to prevent, and a dry-run already reads the VM over ssh two lines
+# below, so this adds no class of access it did not already have.
+assert_target_venue_exists() {
+    log "venue guard: is $REST_CONTAINER present on $VM_NAME?"
+    local names
+    names="$( "${SSH[@]}" "sudo docker ps -a --format '{{.Names}}'" 2>/dev/null || true )"
+    dctl_venue_present "$REST_CONTAINER" "$names"
+    case $? in
+        0) log "venue OK — $REST_CONTAINER is present" ;;
+        2) die "cannot list containers on $VM_NAME — the venue guard could not ask its question.
+     This is NOT a verdict that the container is absent; the probe itself failed.
+     Check: gcloud auth, the VM is running, and that sudo docker works over ssh." ;;
+        *) local running
+           running="$( "${SSH[@]}" "sudo docker ps --format '{{.Names}}'" 2>/dev/null | tr '\n' ' ' || true )"
+           die "WRONG VENUE — this script is not the deploy path for $VM_NAME.
+
+  This script is hardcoded to the cloud-TEST venue:
+      container $REST_CONTAINER   compose $COMPOSE_FILE   env $ENV_FILE
+  and $REST_CONTAINER does not exist on $VM_NAME in any state, not even stopped.
+  What is actually running there: ${running:-<nothing>}
+
+  Nothing is broken and nothing is missing. This VM runs the cloud-GPU venue, and
+  its deploy path is:
+
+      src/scripts/lupin-vm.sh deploy
+
+  which targets docker-compose.cloud-gpu.yml / cloud-gpu.env and carries the
+  --no-deps fix (bug 70794d58) that this script's venue also needs.
+
+  Do NOT 'fix' this by repointing the config at the top of this file at cloud-gpu.
+  The two venues differ in more than names — see the AXIS-A note in the header,
+  whose premise is true of cloud-test and false of cloud-gpu. Repointing would
+  carry cloud-test's assumptions onto a venue they do not describe, which is the
+  same class of error as the one this guard just caught."
+           ;;
+    esac
+}
+assert_target_venue_exists
 
 # ---- read the VM's currently-deployed ref --------------------------------
 PREV_SHA="$( "${SSH[@]}" "cat $DEPLOYED_REF_FILE 2>/dev/null | awk '{print \$1}'" 2>/dev/null || true )"

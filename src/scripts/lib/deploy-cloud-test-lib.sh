@@ -99,3 +99,37 @@ dctl_compute_stamp() {
     local sha="$1" short="${1:0:8}"
     echo "$( git show -s --format=%cI "$sha" | tr -d ':+' )-$short"
 }
+
+# dctl_venue_present <container> <ps_names>
+#   Is <container> among the names in <ps_names> (one per line, as
+#   `docker ps -a --format '{{.Names}}'` emits them)?
+#
+#   WHY (row 5f1532d1). This script is hardcoded to the cloud-TEST venue —
+#   lupin-rest-cloud-test / docker-compose.cloud-test.yml / cloud-test.env. The
+#   one and only VM runs the cloud-GPU venue. Measured on lupin-host-test
+#   2026-08-24, `lupin-rest-cloud-test` does not exist in ANY state, not even
+#   stopped, so every `docker restart|inspect` here addresses nothing. Nobody is
+#   broken today because the working path is `lupin-vm.sh deploy`; the hazard is
+#   a reader picking this script by its name — it reads like THE deploy script —
+#   and concluding the container is missing or that code deploys are impossible.
+#
+#   Requires: $1 = the container name to look for; $2 = newline-separated names.
+#   Ensures:
+#     - returns 0 when present, 1 when absent, 2 when the name list is EMPTY.
+#     - the empty case is SEPARATE on purpose. "docker reported no containers"
+#       and "docker reported containers, none of them mine" are different facts:
+#       the first usually means the probe itself failed (ssh died, docker down,
+#       no sudo) and answering "absent" to a question that was never successfully
+#       asked is how a broken probe becomes a confident wrong verdict.
+#     - the match is WHOLE-LINE exact, never a substring: `lupin-rest` is a prefix
+#       of `lupin-rest-cloud-gpu`, and a substring test would report a cloud-test
+#       container present on a VM that runs only cloud-gpu — the precise
+#       false-green this guard exists to stop.
+#     - PURE: takes the ps output as an argument rather than shelling out, so the
+#       decision is testable without a VM, a network, or docker.
+dctl_venue_present() {
+    local want="$1" names="$2"
+    [ -n "$( printf '%s' "$names" | tr -d '[:space:]' )" ] || return 2
+    printf '%s\n' "$names" | grep -Fxq "$want" && return 0
+    return 1
+}
