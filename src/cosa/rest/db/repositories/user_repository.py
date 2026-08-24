@@ -5,7 +5,7 @@ Provides user-specific methods beyond base repository functionality.
 """
 
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 from sqlalchemy.orm import Session
@@ -131,7 +131,10 @@ class UserRepository(BaseRepository[User]):
         Returns:
             Updated User instance or None if not found
         """
-        return self.update( user_id, last_login_at = datetime.utcnow() )
+        # AWARE — last_login_at is TIMESTAMPTZ (postgres_models.py:104); a naive
+        # value is read in the session timezone and stores the wrong instant
+        # (row 3b4002fe).
+        return self.update( user_id, last_login_at = datetime.now( timezone.utc ) )
 
     def update_roles( self, user_id: uuid.UUID, roles: List[str] ) -> Optional[User]:
         """

@@ -14,7 +14,7 @@ Responsibilities:
 
 import jwt
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, List
 from cosa.config.configuration_manager import ConfigurationManager
 
@@ -72,7 +72,7 @@ def create_access_token( user_id: str, email: str, roles: List[str] ) -> str:
         raise ValueError( "user_id and email are required" )
 
     # Calculate expiration
-    expire = datetime.utcnow() + timedelta( minutes=ACCESS_TOKEN_EXPIRE_MINUTES )
+    expire = datetime.now( timezone.utc ) + timedelta( minutes=ACCESS_TOKEN_EXPIRE_MINUTES )
 
     # Build payload
     payload = {
@@ -80,7 +80,7 @@ def create_access_token( user_id: str, email: str, roles: List[str] ) -> str:
         "email" : email,
         "roles" : roles if roles else ["user"],
         "exp"   : expire,
-        "iat"   : datetime.utcnow(),
+        "iat"   : datetime.now( timezone.utc ),
         "jti"   : _generate_jti()  # Unique token ID
     }
 
@@ -116,14 +116,14 @@ def create_refresh_token( user_id: str, email: str ) -> str:
         raise ValueError( "user_id and email are required" )
 
     # Calculate expiration
-    expire = datetime.utcnow() + timedelta( days=REFRESH_TOKEN_EXPIRE_DAYS )
+    expire = datetime.now( timezone.utc ) + timedelta( days=REFRESH_TOKEN_EXPIRE_DAYS )
 
     # Build payload
     payload = {
         "sub"        : user_id,
         "email"      : email,
         "exp"        : expire,
-        "iat"        : datetime.utcnow(),
+        "iat"        : datetime.now( timezone.utc ),
         "jti"        : _generate_jti(),
         "token_type" : "refresh"  # Distinguish from access tokens
     }
@@ -275,12 +275,12 @@ def quick_smoke_test():
         # Test 6: Expired token detection
         print( "Testing expired token detection..." )
         # Create token that expired in the past
-        past_expire = datetime.utcnow() - timedelta( minutes=1 )
+        past_expire = datetime.now( timezone.utc ) - timedelta( minutes=1 )
         expired_payload = {
             "sub"   : "test_user",
             "email" : "test@example.com",
             "exp"   : past_expire,
-            "iat"   : datetime.utcnow() - timedelta( minutes=2 )
+            "iat"   : datetime.now( timezone.utc ) - timedelta( minutes=2 )
         }
         expired_token = jwt.encode( expired_payload, SECRET_KEY, algorithm=ALGORITHM )
 

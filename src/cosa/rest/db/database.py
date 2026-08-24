@@ -239,7 +239,7 @@ def get_db() -> Generator[Session, None, None]:
         with get_db() as session:
             user = session.query( User ).filter( User.email == email ).first()
             if user:
-                user.last_login = datetime.utcnow()
+                user.last_login = datetime.now( timezone.utc )
             # Commits automatically if no exception
 
     Raises:
