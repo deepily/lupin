@@ -54,7 +54,117 @@ JSTEST_RUNTIME_MAX="${JSTEST_RUNTIME_MAX:-1500}"
 # fallback would be a run that LOOKS lane-protected and is not, which is the
 # false-green shape this lane exists to prevent. Set JSTEST_ALLOW_UNCAPPED=1 to
 # opt out deliberately; it prints what it is giving up.
+# INSIDE A CONTAINER THERE IS NO systemd-run, AND THERE CANNOT BE A SUB-SCOPE.
+# Measured on lupin-rest-test 2026-08-24: `command -v systemd-run` is ABSENT, the
+# container runs as 1001:1001, and /sys/fs/cgroup/memory.max is root-owned 0644 —
+# so the process can READ its ceiling and cannot create or write one. The lever
+# therefore lives in docker-compose.yml (deploy.resources.limits.memory), not here.
+#
+# ⇒ In a container the lane DEFERS to that ceiling when one exists, and REFUSES
+# when it does not. Refusing is the whole point: `memory.max` reading `max` means
+# UNCAPPED, and a door that runs the suite uncapped while reporting itself as the
+# capped lane is worse than a door that will not open. This is what makes the
+# compose limit load-bearing rather than decorative.
+_jstest_in_container() { [ -f /.dockerenv ]; }
+
+_jstest_container_ceiling() {
+    # Echoes the byte ceiling, or "max"/"" when there is none to find.
+    cat /sys/fs/cgroup/memory.max 2>/dev/null || echo ""
+}
+
+
+# ── THE PER-PROCESS WATCHDOG ─────────────────────────────────────────────────
+# 🔴 WHY NOT NODE_OPTIONS --max-old-space-size, which is the obvious answer and
+# is WRONG here. This allocator is OFF-HEAP, so the V8 heap ceiling is not in its
+# path. Measured twice: the original kill ran with --max-old-space-size=2048 and
+# reached 6 GB with no "JavaScript heap out of memory" abort and no heapsnapshot
+# despite --heapsnapshot-near-heap-limit=1; re-run at 512 it still reached the
+# 4 GB cgroup limit and was SIGKILLed in 3.4 seconds. A heap cap cannot bound
+# memory that is not on the heap.
+#
+# So the ceiling has to be enforced from OUTSIDE the process, and the enforcer
+# must work where systemd-run does not exist and the process cannot write its
+# own cgroup — i.e. inside the container. Polling RSS and sending SIGKILL needs
+# no privileges at all and works identically in both places.
+#
+# ⇒ IT KILLS THE NODE PROCESS, NOT THE CONTAINER. That is the whole design goal:
+# a runaway takes the tier red and leaves uvicorn serving. A container-wide
+# mem_limit would have taken :8000 down with it, which is worse than the failure
+# being fixed.
+#
+# THE CEILING, and its provenance — do not quote the number without this.
+#   · a PASSING single-file run peaks at 199 MB RSS (measured 2026-08-24)
+#   · the runaway climbs ~640 MB per 250 ms, about 2.5 GB/s (measured)
+#   · overshoot = growth-rate x poll-interval, so a 100 ms poll costs ~250 MB
+# 2 GB is ~10x the measured working set, which is generous for the 119-file
+# suite at concurrency 4. ⚠️ It is ONE FILE'S peak, not the suite's — nobody has
+# measured the full suite because the tier is banned. Re-derive when it runs.
+JSTEST_RSS_MAX_MB="${JSTEST_RSS_MAX_MB:-2048}"
+JSTEST_POLL_SECS="${JSTEST_POLL_SECS:-0.1}"
+
+# Total RSS in MB of a pid and its children. node --test spawns a worker per
+# file, so watching only the parent would watch the wrong process.
+_jstest_tree_rss_mb() {
+    local root="$1"
+    ps -o rss= -p "$root" --ppid "$root" 2>/dev/null | awk '{ s += $1 } END { print int( s / 1024 ) }'
+}
+
+jstest_watchdog_exec() {
+    "$@" &
+    local target=$!
+    local peak=0 rss=0
+
+    while kill -0 "$target" 2>/dev/null; do
+        rss="$( _jstest_tree_rss_mb "$target" )"
+        [ -z "$rss" ] && rss=0
+        [ "$rss" -gt "$peak" ] && peak="$rss"
+        if [ "$rss" -gt "$JSTEST_RSS_MAX_MB" ]; then
+            echo "🔴 [jstest-lane] RSS ${rss}MB exceeded the ${JSTEST_RSS_MAX_MB}MB ceiling — killing node." >&2
+            echo "    The tier goes RED and the server keeps serving; that is the intended outcome." >&2
+            echo "    Most likely a FAILING assertion holding a DOM node (rows f5768ee4 / 32c58572)." >&2
+            kill -9 "$target" 2>/dev/null
+            pkill -9 -P "$target" 2>/dev/null
+            wait "$target" 2>/dev/null
+            return 137
+        fi
+        sleep "$JSTEST_POLL_SECS"
+    done
+
+    wait "$target"
+    local rc=$?
+    # A process that finishes inside one poll interval is never sampled. Reporting
+    # "peak 0MB" there would be a fabricated measurement, and a number printed by a
+    # tool is a number someone will later quote — so say there was no sample.
+    if [ "$peak" -eq 0 ]; then
+        echo "[jstest-lane] finished within one poll (${JSTEST_POLL_SECS}s) — no RSS sample taken" >&2
+    else
+        echo "[jstest-lane] peak RSS ${peak}MB of ${JSTEST_RSS_MAX_MB}MB ceiling" >&2
+    fi
+    return $rc
+}
+
 jstest_slice_exec() {
+    if _jstest_in_container; then
+        local ceiling
+        ceiling="$( _jstest_container_ceiling )"
+        if [ -z "$ceiling" ] || [ "$ceiling" = "max" ]; then
+            if [ "${JSTEST_ALLOW_UNCAPPED:-}" = "1" ]; then
+                echo "⚠️  [jstest-lane] container has NO memory ceiling and JSTEST_ALLOW_UNCAPPED=1 — running UNCAPPED." >&2
+                exec "$@"
+            fi
+            echo "🔴 [jstest-lane] IN A CONTAINER WITH NO MEMORY CEILING — refusing." >&2
+            echo "    /sys/fs/cgroup/memory.max reads '${ceiling:-<unreadable>}', which means UNCAPPED." >&2
+            echo "    systemd-run does not exist in a container and this process cannot write its own" >&2
+            echo "    cgroup, so the ceiling must come from docker-compose.yml:" >&2
+            echo "        deploy: { resources: { limits: { memory: 12G } } }   on this service" >&2
+            echo "    Add it and recreate the container (a plain restart does NOT apply it)." >&2
+            return 70
+        fi
+        echo "[jstest-lane] in-container; container ceiling memory.max=$ceiling bytes" >&2
+        jstest_watchdog_exec "$@"
+        return $?
+    fi
+
     if ! command -v systemd-run >/dev/null 2>&1; then
         if [ "${JSTEST_ALLOW_UNCAPPED:-}" = "1" ]; then
             echo "⚠️  [jstest-lane] systemd-run NOT FOUND and JSTEST_ALLOW_UNCAPPED=1 — running UNCAPPED." >&2
@@ -68,7 +178,7 @@ jstest_slice_exec() {
         return 70
     fi
 
-    echo "[jstest-lane] slice=$JSTEST_SLICE MemoryMax=$JSTEST_MEM_MAX MemorySwapMax=0 RuntimeMaxSec=$JSTEST_RUNTIME_MAX" >&2
+    echo "[jstest-lane] slice=$JSTEST_SLICE MemoryMax=$JSTEST_MEM_MAX MemorySwapMax=0 RuntimeMaxSec=$JSTEST_RUNTIME_MAX rss_ceiling=${JSTEST_RSS_MAX_MB}MB" >&2
     exec systemd-run --user --scope --quiet \
         --slice="$JSTEST_SLICE" \
         -p MemoryMax="$JSTEST_MEM_MAX" \

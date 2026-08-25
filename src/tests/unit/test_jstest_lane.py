@@ -266,6 +266,184 @@ class TestItActuallyContainsARunaway:
 # 5. This file's own tests are actually collected
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 6. The container path — where systemd-run does not exist
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestTheContainerPath:
+    """
+    Measured on lupin-rest-test, 2026-08-24: `command -v systemd-run` is ABSENT,
+    the container runs as 1001:1001, and /sys/fs/cgroup/memory.max is root-owned
+    0644 — the process can READ its ceiling and cannot create or write one.
+
+    So door 4 cannot cap itself. The ceiling must come from docker-compose.yml,
+    and the lane's job in a container is to CHECK that it arrived. Refusing when
+    it did not is what makes the compose limit load-bearing instead of
+    decorative: without these tests, a container with no limit would run the
+    suite uncapped while reporting itself as the capped lane.
+    """
+
+    def _fake_container( self, tmp_path, ceiling ):
+        """A tiny shim tree: a /.dockerenv marker and a memory.max to read."""
+        cg = tmp_path / "cgroup"
+        cg.mkdir()
+        ( cg / "memory.max" ).write_text( ceiling, encoding="utf-8" )
+        return cg
+
+    def _run_as_container( self, tmp_path, ceiling, extra_env=None ):
+        # Override the two probes rather than pretending to be in Docker: the
+        # shell functions are the seam, and overriding them keeps the test
+        # honest about WHICH branch it is exercising.
+        cg = self._fake_container( tmp_path, ceiling )
+        body = (
+            '_jstest_in_container() { return 0; }\n'
+            '_jstest_container_ceiling() { cat "%s/memory.max"; }\n'
+            'jstest_slice_exec true\n'
+        ) % cg
+        return _run_snippet( body, env=extra_env )
+
+    def test_a_container_WITHOUT_a_ceiling_is_REFUSED( self, tmp_path ):
+        r = self._run_as_container( tmp_path, "max" )
+        assert r.returncode == 70, ( r.returncode, r.stdout, r.stderr )
+        assert "NO MEMORY CEILING" in r.stderr
+
+    def test_the_refusal_names_the_COMPOSE_KEY_that_fixes_it( self, tmp_path ):
+        # A refusal that does not say where the ceiling comes from sends the
+        # reader to systemd-run, which does not exist in a container.
+        r = self._run_as_container( tmp_path, "max" )
+        assert "deploy:" in r.stderr and "limits:" in r.stderr and "memory:" in r.stderr
+
+    def test_the_refusal_warns_that_a_RESTART_does_not_apply_it( self, tmp_path ):
+        # Mount and resource specs resolve at container CREATE. A plain restart
+        # reuses the old values and the change silently does not land.
+        r = self._run_as_container( tmp_path, "max" )
+        assert "recreate" in r.stderr.lower()
+
+    def test_a_container_WITH_a_ceiling_RUNS_and_names_the_number( self, tmp_path ):
+        r = self._run_as_container( tmp_path, "12884901888" )
+        assert r.returncode == 0, ( r.returncode, r.stderr )
+        assert "12884901888" in r.stderr, "the lane must state the ceiling it is trusting"
+
+    def test_an_unreadable_ceiling_is_treated_as_ABSENT_not_as_permission( self, tmp_path ):
+        # Fail closed: if the ceiling cannot be read, we do not know there is one.
+        cg = tmp_path / "cgroup"; cg.mkdir()
+        body = (
+            '_jstest_in_container() { return 0; }\n'
+            '_jstest_container_ceiling() { echo ""; }\n'
+            'jstest_slice_exec true\n'
+        )
+        r = _run_snippet( body )
+        assert r.returncode == 70, ( r.returncode, r.stderr )
+
+    def test_the_container_escape_hatch_still_exists_and_announces_itself( self, tmp_path ):
+        r = self._run_as_container( tmp_path, "max", extra_env={ "JSTEST_ALLOW_UNCAPPED": "1" } )
+        assert r.returncode == 0, ( r.returncode, r.stderr )
+        assert "UNCAPPED" in r.stderr
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 7. The per-process watchdog — bound NODE, not the container
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestTheWatchdog:
+    """
+    🔴 WHY NOT `--max-old-space-size`, which is the obvious answer and is wrong.
+    This allocator is OFF-HEAP, so the V8 heap ceiling is not in its path.
+    Measured twice: the original kill ran at 2048 MB and reached 6 GB with no
+    heap abort and no heapsnapshot despite asking for one; re-run at 512 MB it
+    still reached the 4 GB cgroup limit and was SIGKILLed in 3.4 seconds.
+
+    The ceiling therefore has to be enforced from OUTSIDE the process, by
+    something that works where systemd-run does not exist and the process cannot
+    write its own cgroup — which is the container. Polling RSS needs no
+    privileges and behaves identically in both venues.
+    """
+
+    HOG = ( "import sys\n"
+            "c = []\n"
+            "while True:\n"
+            "    c.append( bytearray( 8 * 1024 * 1024 ) )\n"
+            "    if len( c ) > 256: sys.exit( 99 )\n" )
+
+    def _watch( self, tmp_path, script_src, ceiling_mb, poll="0.05" ):
+        f = tmp_path / "subject.py"
+        f.write_text( script_src, encoding="utf-8" )
+        return _run_snippet(
+            'jstest_watchdog_exec %s %s' % ( sys.executable, f ),
+            env={ "JSTEST_RSS_MAX_MB": str( ceiling_mb ), "JSTEST_POLL_SECS": poll },
+        )
+
+    def test_a_runaway_is_KILLED_at_the_ceiling( self, tmp_path ):
+        r = self._watch( tmp_path, self.HOG, ceiling_mb=300 )
+        assert r.returncode == 137, ( r.returncode, r.stderr )
+        assert r.returncode != 99, "the hog reached its own exit — the ceiling did not hold"
+
+    def test_the_CALLER_SURVIVES_the_kill( self, tmp_path ):
+        # The entire design goal: kill node, leave the server serving. If the
+        # watchdog took its own shell down this would print nothing.
+        f = tmp_path / "subject.py"
+        f.write_text( self.HOG, encoding="utf-8" )
+        r = _run_snippet(
+            'jstest_watchdog_exec %s %s\necho "CALLER_ALIVE rc=$?"' % ( sys.executable, f ),
+            env={ "JSTEST_RSS_MAX_MB": "300", "JSTEST_POLL_SECS": "0.05" },
+        )
+        assert "CALLER_ALIVE rc=137" in r.stdout, ( r.stdout, r.stderr )
+
+    def test_it_watches_the_whole_PROCESS_TREE_not_just_the_parent( self, tmp_path ):
+        """
+        🔴 THE PRODUCTION SHAPE, and the one a single-process hog cannot test.
+        `node --test` spawns a WORKER PER FILE, so the memory lives in a CHILD
+        while the parent stays small. A watchdog reading only the parent's RSS
+        sees ~10 MB forever and never fires.
+
+        This test exists because a mutation proved the gap: changing
+        `ps -o rss= -p "$root" --ppid "$root"` to drop `--ppid` left every other
+        watchdog test green. The suite could not tell parent-only from tree.
+        """
+        child = tmp_path / "child.py"
+        child.write_text( self.HOG, encoding="utf-8" )
+        parent = tmp_path / "parent.py"
+        parent.write_text(
+            "import subprocess, sys\n"
+            "# The parent stays tiny and just waits — all the memory is the child's.\n"
+            "p = subprocess.Popen( [ sys.executable, %r ] )\n"
+            "p.wait()\n" % str( child ),
+            encoding="utf-8",
+        )
+        r = _run_snippet(
+            'jstest_watchdog_exec %s %s' % ( sys.executable, parent ),
+            env={ "JSTEST_RSS_MAX_MB": "300", "JSTEST_POLL_SECS": "0.05" },
+        )
+        assert r.returncode == 137, (
+            "The watchdog did not fire on memory held by a CHILD process. That is the "
+            "shape node --test actually produces.\nrc=%r\nstderr=%s" % ( r.returncode, r.stderr )
+        )
+
+    def test_the_kill_message_names_the_LIKELY_CAUSE_not_just_the_number( self, tmp_path ):
+        # An operator reading "RSS exceeded" learns nothing actionable. The
+        # cause is a failing assertion holding a DOM node, every time so far.
+        r = self._watch( tmp_path, self.HOG, ceiling_mb=300 )
+        assert "DOM node" in r.stderr
+
+    def test_a_well_behaved_process_runs_to_completion( self, tmp_path ):
+        r = self._watch( tmp_path, "print( 'work done' )\n", ceiling_mb=2048 )
+        assert r.returncode == 0, ( r.returncode, r.stderr )
+        assert "work done" in r.stdout
+
+    def test_a_FAILING_process_keeps_its_own_exit_code( self, tmp_path ):
+        # A watchdog that swallowed the exit code would turn every red tier green.
+        r = self._watch( tmp_path, "import sys; sys.exit( 3 )\n", ceiling_mb=2048 )
+        assert r.returncode == 3, ( r.returncode, r.stderr )
+
+    def test_it_does_NOT_report_a_fabricated_zero_peak( self, tmp_path ):
+        # A process finishing inside one poll is never sampled. Printing
+        # "peak 0MB" would be a measurement nobody took, and a number a tool
+        # prints is a number someone later quotes.
+        r = self._watch( tmp_path, "print( 'fast' )\n", ceiling_mb=2048, poll="5" )
+        assert "peak RSS 0MB" not in r.stderr
+        assert "no RSS sample" in r.stderr
+
+
 def test_every_test_this_file_declares_is_actually_collected( request ):
     """
     The guard that would have caught this file's own defect (row 282d4c19).
