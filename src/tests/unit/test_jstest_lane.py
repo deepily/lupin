@@ -419,6 +419,40 @@ class TestTheWatchdog:
             "shape node --test actually produces.\nrc=%r\nstderr=%s" % ( r.returncode, r.stderr )
         )
 
+    def test_it_sees_a_GRANDCHILD_not_just_a_direct_child( self, tmp_path ):
+        """
+        🔴 THE SECOND LEVEL OF THE SAME BLINDNESS, found by Cheech asking whether
+        the 199 MB baseline had been measured on the parent or the tree.
+
+        The first fix replaced parent-only with `ps --ppid`, which is parent plus
+        DIRECT children — still one level. Measured with parent → child → hog,
+        that version reported a 28 MB peak while the grandchild allocated past
+        2 GB, and never fired. `node --import tsx --test` is exactly this shape
+        whenever a loader or shell sits between the runner and the worker.
+
+        Both failure modes are SILENT: the watchdog reports a comfortable peak
+        and the runaway proceeds.
+        """
+        hog = tmp_path / "hog.py";    hog.write_text( self.HOG, encoding="utf-8" )
+        mid = tmp_path / "child.py"
+        mid.write_text(
+            "import subprocess, sys\n"
+            "subprocess.Popen( [ sys.executable, %r ] ).wait()\n" % str( hog ),
+            encoding="utf-8" )
+        top = tmp_path / "parent.py"
+        top.write_text(
+            "import subprocess, sys\n"
+            "subprocess.Popen( [ sys.executable, %r ] ).wait()\n" % str( mid ),
+            encoding="utf-8" )
+        r = _run_snippet(
+            'jstest_watchdog_exec %s %s' % ( sys.executable, top ),
+            env={ "JSTEST_RSS_MAX_MB": "300", "JSTEST_POLL_SECS": "0.05" },
+        )
+        assert r.returncode == 137, (
+            "The watchdog did not fire on memory held TWO levels down.\nrc=%r\nstderr=%s"
+            % ( r.returncode, r.stderr )
+        )
+
     def test_the_kill_message_names_the_LIKELY_CAUSE_not_just_the_number( self, tmp_path ):
         # An operator reading "RSS exceeded" learns nothing actionable. The
         # cause is a failing assertion holding a DOM node, every time so far.

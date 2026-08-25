@@ -102,11 +102,36 @@ _jstest_container_ceiling() {
 JSTEST_RSS_MAX_MB="${JSTEST_RSS_MAX_MB:-2048}"
 JSTEST_POLL_SECS="${JSTEST_POLL_SECS:-0.1}"
 
-# Total RSS in MB of a pid and its children. node --test spawns a worker per
-# file, so watching only the parent would watch the wrong process.
+# Total RSS in MB of a pid and EVERY DESCENDANT, at any depth.
+#
+# 🔴 TWO LEVELS OF THIS WERE WRONG IN A ROW, so the comment records both.
+#   1. Reading only the PARENT: node --test spawns a worker per file, so the
+#      memory is the worker's while the parent sits near 10 MB. A parent-only
+#      watchdog polls ~10 MB forever and never fires.
+#   2. Reading parent + DIRECT children (`ps --ppid`): still one level. Measured
+#      2026-08-24 with a parent → child → hog tree, the watchdog reported a
+#      28 MB peak while the grandchild allocated past 2 GB, and never fired.
+#      `node --import tsx --test` is exactly this shape when a loader or shell
+#      sits between the runner and the worker.
+# ⇒ Walk the whole descendant set. Both failure modes are SILENT — the watchdog
+#   reports a comfortable peak and the runaway proceeds — which is why each was
+#   found by a mutation and a probe rather than by anything going red.
+_jstest_descendants() {
+    local root="$1" frontier="$1" next=""
+    echo "$root"
+    while [ -n "$frontier" ]; do
+        next="$( pgrep -P "$( echo $frontier | tr ' ' ',' )" 2>/dev/null | tr '\n' ' ' )"
+        [ -z "$next" ] && break
+        echo "$next" | tr ' ' '\n' | grep -v '^$'
+        frontier="$next"
+    done
+}
+
 _jstest_tree_rss_mb() {
-    local root="$1"
-    ps -o rss= -p "$root" --ppid "$root" 2>/dev/null | awk '{ s += $1 } END { print int( s / 1024 ) }'
+    local root="$1" pids
+    pids="$( _jstest_descendants "$root" | tr '\n' ',' | sed 's/,$//' )"
+    [ -z "$pids" ] && { echo 0; return; }
+    ps -o rss= -p "$pids" 2>/dev/null | awk '{ s += $1 } END { print int( s / 1024 ) }'
 }
 
 jstest_watchdog_exec() {
