@@ -85,9 +85,23 @@ def test_handle_event_routes_notification_queue_update():
 
 
 def test_handle_event_job_state_transition_verbose_prints( capsys ):
+    # The payload below is the one emit_job_state_transition() really sends.
+    # This test used to feed from_queue/to_queue — keys the event has NEVER
+    # carried — so it asserted the handler could read a payload that does not
+    # exist, and the real one printed "? -> ?" for a year. Row e3417974.
+    r = _responder( verbose=True )
+    _run( r.handle_event( "job_state_transition",
+                          { "job_id": "j1", "from_state": "queued", "to_state": "running" } ) )
+    assert "Job state: j1 queued -> running" in capsys.readouterr().out
+
+
+def test_handle_event_job_state_transition_does_not_read_retired_keys( capsys ):
+    """A payload carrying ONLY the retired keys must not render as if it worked."""
     r = _responder( verbose=True )
     _run( r.handle_event( "job_state_transition", { "job_id": "j1", "from_queue": "a", "to_queue": "b" } ) )
-    assert "Job state: j1 a -> b" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "a -> b" not in out
+    assert "Job state: j1 ? -> ?" in out
 
 
 def test_handle_event_job_state_transition_quiet( capsys ):

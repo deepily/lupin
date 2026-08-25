@@ -137,10 +137,14 @@ class DecisionResponder( BaseResponder ):
 
         elif event_type == "job_state_transition":
             if self.verbose:
+                # from_state / to_state are the keys emit_job_state_transition()
+                # actually sends (queue_util.py:65-71). This read from_queue /
+                # to_queue, which the event has never carried, so the "?" defaults
+                # meant this line printed "? -> ?" on every transition. Row e3417974.
                 job_id     = event_data.get( "job_id", "?" )
-                from_queue = event_data.get( "from_queue", "?" )
-                to_queue   = event_data.get( "to_queue", "?" )
-                print( f"{self.LOG_PREFIX} Job state: {job_id} {from_queue} -> {to_queue}" )
+                from_state = event_data.get( "from_state", "?" )
+                to_state   = event_data.get( "to_state", "?" )
+                print( f"{self.LOG_PREFIX} Job state: {job_id} {from_state} -> {to_state}" )
 
         elif self.verbose:
             print( f"{self.LOG_PREFIX} Event: {event_type}" )

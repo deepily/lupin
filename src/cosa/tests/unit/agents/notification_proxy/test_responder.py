@@ -110,10 +110,24 @@ class TestHandleEvent:
         asyncio.run( r.handle_event( "notification_queue_update", _notif() ) )
         assert r.stats[ "notifications_received" ] == 1
 
-    def test_job_state_transition_verbose( self ):
+    def test_job_state_transition_verbose( self, capsys ):
+        # Two defects in the four lines this replaces. It asserted NOTHING — it
+        # called the handler and stopped, so it could not fail. And it fed
+        # from_queue/to_queue, keys emit_job_state_transition() has never sent,
+        # so it described a payload that does not exist. Row e3417974.
+        r, _, _, _ = _make_responder( verbose=True )
+        asyncio.run( r.handle_event( "job_state_transition",
+                                     { "job_id": "j", "from_state": "queued", "to_state": "running" } ) )
+        assert "Job state: j queued → running" in capsys.readouterr().out
+
+    def test_job_state_transition_does_not_read_retired_keys( self, capsys ):
+        """A payload carrying ONLY the retired keys must not render as if it worked."""
         r, _, _, _ = _make_responder( verbose=True )
         asyncio.run( r.handle_event( "job_state_transition",
                                      { "job_id": "j", "from_queue": "todo", "to_queue": "run" } ) )
+        out = capsys.readouterr().out
+        assert "todo → run" not in out
+        assert "Job state: j ? → ?" in out
 
     def test_other_event_verbose( self ):
         r, _, _, _ = _make_responder( verbose=True )
@@ -314,6 +328,23 @@ class TestHumanOnlyExemption:
             self._run( r, _notif( response_type="yes_no", human_only=True ) )
         assert posted[ "called" ] is False, "proxy answered a human_only ask in dry_run — it must not"
         assert r.stats[ "skipped" ] == 1
+
+    def test_human_only_skipped_silently_when_not_verbose( self, capsys ):
+        """
+        The skip must hold with verbose off — the guard is the behaviour, the
+        log line is not. Every human_only test above ran verbose=True, so the
+        quiet arm of that `if self.verbose` was never taken (coverage 296->298).
+        """
+        r, _, _, _ = _make_responder( dry_run=True, verbose=False )
+        posted = { "called": False }
+        def fake_post( url, **kw ):
+            posted[ "called" ] = True
+            return MagicMock( status_code=200, json=lambda: {} )
+        with patch.object( rr.requests, "post", side_effect=fake_post ):
+            self._run( r, _notif( response_type="yes_no", human_only=True ) )
+        assert posted[ "called" ] is False, "proxy answered a human_only ask — it must not"
+        assert r.stats[ "skipped" ] == 1
+        assert "Skipped (human_only" not in capsys.readouterr().out
 
     def test_human_only_not_answered_by_strategy( self ):
         r, rule, script, llm = _make_responder( verbose=True )

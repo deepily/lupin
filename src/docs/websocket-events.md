@@ -461,10 +461,18 @@ The following events were removed in July 2025 and replaced by `job_state_transi
 
 | Deprecated Event | Replacement |
 |-----------------|-------------|
-| `queue_todo_update` | `job_state_transition` (with `to_queue: "todo"`) |
-| `queue_running_update` | `job_state_transition` (with `to_queue: "run"`) |
-| `queue_done_update` | `job_state_transition` (with `to_queue: "done"`) |
-| `queue_dead_update` | `job_state_transition` (with `to_queue: "dead"`) |
+| `queue_todo_update` | `job_state_transition` (with `to_state: "queued"`) |
+| `queue_running_update` | `job_state_transition` (with `to_state: "running"`) |
+| `queue_done_update` | `job_state_transition` (with `to_state: "completed"`) |
+| `queue_dead_update` | `job_state_transition` (with `to_state: "failed"`) |
+
+> ⚠️ **This table used to say `to_queue: "todo"` / `"run"` / `"done"` / `"dead"`, and that
+> field does not exist.** `emit_job_state_transition()` (`src/cosa/rest/queue_util.py:65-71`)
+> emits exactly `job_id`, `from_state`, `to_state`, `timestamp`, and an optional `metadata` —
+> never `to_queue`. Measured live on :7999: a submitted job produces `pending`->`queued`,
+> `queued`->`running`, `running`->`completed`. Two consumers had been reading the phantom
+> field with a `.get( "to_queue", "?" )` default and printing `? -> ?` on every transition
+> since the rename; corrected 2026-08-24 (row e3417974).
 
 The following event was renamed during the 2026-05-13 Speakerphone solo/chorus refactor (Phase 3 of `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`):
 
