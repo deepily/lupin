@@ -4,19 +4,34 @@
 # WHY THIS SCRIPT EXISTS
 # The tests marked `serial_bridge_guard` fingerprint the operator's REAL bridge
 # directory (~/.claude/sessions) before and after driving register_session.main().
-# That check is only VALID on a QUIESCENT box: on a busy fleet box a peer session
-# writes its own bridge mid-run and the guard would blame the test (the exact false
-# accusation row e2ae4102 was filed for). So these tests are DESELECTED from every
-# default run by pytest.ini's `-m "not serial_bridge_guard"`, and run ONLY here.
+# A peer session can write its own bridge mid-run, and the guard would then blame the
+# test (the exact false accusation row e2ae4102 was filed for). So these tests are
+# DESELECTED from every default run by pytest.ini's `-m "not serial_bridge_guard"`,
+# and run ONLY here.
 #
 # ⚠️ NOTHING ELSE INVOKES THIS. It is wired into the human merge checklist —
 # CLAUDE.md § PR MERGE REQUIREMENTS. If that line is dropped, the whole-directory
 # hazard guard is silently gone; the concurrent scoped canary does not see a merge
 # into a live seat.
 #
-# WHEN TO RUN: at merge time, on a quiescent box (you are the only session writing
-# bridges — no other CC session mid-write). If it reports contact, a hook is
-# resolving its directory from a hardcoded real path instead of the seam.
+# WHEN TO RUN: at merge time. 🔴 THIS HEADER USED TO SAY "on a quiescent box (you are
+# the only session writing bridges)". THAT STATE NEVER ARRIVES — measured 2026-08-24
+# with no suite running anywhere, 13 entries under ~/.claude/sessions changed in 60
+# seconds, and the seat RUNNING the guard writes its own bridge while the guard
+# executes. It cannot be arranged by asking peers to hold still. Superseded by
+# CLAUDE.md § PR MERGE REQUIREMENTS (row 5a68c92c); analysis in
+# src/rnd/v0.2.0/2026.08.24-serial-bridge-guard-unsatisfiable-precondition.md.
+#
+# HOW TO READ THE RESULT — real contact is DETERMINISTIC, peer noise is not:
+#   1. Re-run and compare the NAMED file. Same filename every run = contact.
+#      A different file each run, or none = peer noise.
+#   2. Identify the writer: read the named file's session_id / cc_pid, then
+#      `ls /proc/<cc_pid>`. A live seat that is not the test is noise.
+#   3. 🔴 IT CUTS BOTH WAYS — ONE GREEN IS ALSO ONE SAMPLE. On a check whose failure
+#      mode is nondeterministic, a single pass is exactly as weak as a single fail.
+#      Run it more than once before reporting EITHER colour.
+# Real contact means a hook is resolving its directory from a hardcoded real path
+# instead of the seam.
 #
 # Usage:
 #   run-serial-bridge-guard.sh [extra pytest flags...]
