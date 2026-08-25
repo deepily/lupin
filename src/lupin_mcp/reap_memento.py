@@ -446,6 +446,95 @@ def memento_alarm( outcomes ):
              + ". See memento_outcomes for each seat's reason before re-spinning." )
 
 
+# ── The post-kill re-check (row f94ab580) ─────────────────────────────────────
+# Statuses that name a DERIVABLE SLOT and so can be re-asked of the disk. The two
+# `skipped*` verdicts are deliberately absent: they mean the slot could not be
+# derived at all (no persona/session, or no cwd), so there is no file to re-read
+# and nothing a second look could prove. They stay loud, untouched.
+RECHECKABLE = ( "timeout_no_memento", "prior_holder_present", "unparseable_present" )
+
+
+def recheck_losing_seats(
+    outcomes,
+    identities,
+    *,
+    now_fn         = None,
+    read_text_fn   = None,
+    window_seconds = DEFAULT_WINDOW_SECONDS,
+    min_bytes      = DEFAULT_MIN_BYTES,
+    merge_claim_fn = None
+):
+    """
+    Re-ask the disk ONCE, after the kill, before the alarm is composed.
+
+    THE DEFECT THIS CLOSES (row f94ab580, measured 2026-08-25 on a four-seat reap).
+    `coordinate_mementos` computes its verdict at ASK TIME. A seat still mid-write
+    when the ask window expires is reported as having failed to write a memento —
+    and while it writes, the slot legitimately holds the PRIOR holder's file, which
+    is exactly what `prior_holder_present` / `unparseable_present` describe. The
+    classifier reads a TRUE fact about the WRONG MOMENT. Two of four seats were
+    misreported that way; one DM'd "ready for re-spin — memento on disk, 48 lines,
+    verified" AFTER it had been killed and logged as unproven.
+
+    WHAT THIS IS NOT. It does not soften, delay, or forgive the alarm — row 0a36d83d
+    exists because the alarm used to be a silent no-op, and row 3b0c5f90 exists
+    because a race and a genuine loss used to return the same answer. An outcome is
+    upgraded ONLY when `verify_seat_memento` — the SAME predicate the reap used,
+    which proves the header's session_id is THIS seat's — passes on a second read.
+    Existence at the slot is never enough: that is precisely what produced the
+    wrong-but-plausible verdict for the seat whose slot held a prior holder's file.
+    Nothing here can quiet an absent memento or another session's file.
+
+    Requires:
+        - outcomes maps seat name -> a `coordinate_mementos` outcome dict (the
+          reserved `_error` key is tolerated and passed through untouched)
+        - identities maps the SAME seat names -> `_capture_reap_identity` dicts —
+          the same source pass 1 used, so the re-check reads the same seat's repo
+        - read_text_fn( path ) -> text or None; now_fn() -> an AWARE datetime
+
+    Ensures:
+        - returns a NEW dict; the input is never mutated
+        - a seat whose own memento is provably at the slot on the second read is
+          upgraded to "written" — it WAS asked, and its file appeared after the ask,
+          just after the poll deadline rather than before it. NOT "verified", which
+          means no DM was sent and would be false here
+        - every other seat keeps its verdict and its reason VERBATIM, including the
+          two `skipped*` verdicts, which name no slot and are not re-read
+        - a seat whose repo root cannot be resolved is NOT upgraded — an unresolvable
+          root would silently skip the merge-claim gate, and a quieter alarm bought
+          by a weaker check is the failure mode this row forbids
+        - one clock read for the whole pass, so two seats cannot be judged fresh
+          against different "now"s
+        - never raises
+    """
+    now_fn       = now_fn       if now_fn       is not None else _default_now
+    read_text_fn = read_text_fn if read_text_fn is not None else _default_read_text
+
+    rechecked = dict( outcomes )
+    now       = now_fn()
+    for name, outcome in outcomes.items():
+        if not isinstance( outcome, dict ):
+            continue
+        if outcome.get( "status" ) not in RECHECKABLE:
+            continue
+        repo_root = seat_repo_root( identities.get( name ) )
+        if repo_root is None:
+            continue
+        slot           = seat_memento_slot( repo_root, outcome.get( "persona" ) )
+        usable, reason = verify_seat_memento( slot, ( outcome.get( "session_id" ) or "" )[ :8 ], now,
+                                              read_text_fn=read_text_fn,
+                                              window_seconds=window_seconds, min_bytes=min_bytes,
+                                              repo_root=repo_root, merge_claim_fn=merge_claim_fn )
+        if not usable:
+            continue
+        rechecked[ name ] = dict( outcome )
+        rechecked[ name ][ "status" ] = "written"
+        rechecked[ name ][ "reason" ] = ( f"appeared after ask, during teardown: {reason}. "
+                                          f"At ask time this seat read as {outcome.get( 'status' )} "
+                                          f"— it was mid-write, not failing" )
+    return rechecked
+
+
 # ── Identity helpers ──────────────────────────────────────────────────────────
 def _identity_bits( ident ):
     """

@@ -2865,6 +2865,17 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
         min_bytes         = cfg[ "reap_memento_min_bytes" ],
         ask_timeout_sec   = cfg[ "reap_memento_ask_timeout_sec" ],
         poll_interval_sec = cfg[ "reap_memento_poll_interval_sec" ] )
+    # POST-KILL RE-CHECK (row f94ab580) → the coordinator above judges at ASK TIME,
+    # and the kill is what ends a seat's chance to write. A seat still mid-write when
+    # the ask window expired was GUARANTEED to be reported as having failed to write
+    # one — measured on a four-seat reap, two of four alarms were that race. Same
+    # verify predicate, same INI window/floor, so this look and the first can never
+    # disagree about what counts as proven; it can only upgrade a seat that re-proves
+    # itself, never quiet an absent memento or another session's file.
+    memento_recheck = functools.partial(
+        reap_memento.recheck_losing_seats,
+        window_seconds    = cfg[ "reap_memento_window_seconds" ],
+        min_bytes         = cfg[ "reap_memento_min_bytes" ] )
     # LIVE reap path → wire the real reap-RECONCILE producer (d647b531) so a reaped
     # worker's non-terminal store items are auto-reconciled (close-if-receipt /
     # reassign-to-live-manager / surface) instead of orphaning. session_spawner
@@ -2873,7 +2884,8 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     return session_spawner.dismiss_sessions(
         sid, session_names=session_names, reason=reason, write_memento=wm,
         reconcile_items_fn=session_spawner._default_reconcile_store_items,
-        respin_personas=respin_personas, memento_coord_fn=memento_coord )
+        respin_personas=respin_personas, memento_coord_fn=memento_coord,
+        memento_recheck_fn=memento_recheck )
 
 
 @mcp.tool

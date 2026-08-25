@@ -1030,7 +1030,8 @@ def dismiss_sessions(
     clear_hold_fn      : Optional[ Callable ] = None,
     reconcile_items_fn : Optional[ Callable ] = None,
     respin_personas    : Optional[ List[ str ] ] = None,
-    memento_coord_fn   : Optional[ Callable ] = None
+    memento_coord_fn   : Optional[ Callable ] = None,
+    memento_recheck_fn : Optional[ Callable ] = None
 ) -> Dict[ str, Any ]:
     """
     Reap reviewer sessions this manager spawned: kill their tmux sessions and
@@ -1056,6 +1057,16 @@ def dismiss_sessions(
           `memento_outcomes["_error"]` — never a silent success (that WAS the bug).
           DEFAULT is None (skip) so unit reaps + the write_memento=False idle-TTL
           path stay hermetic; the real coordinator is wired by the MCP wrapper.
+        - POST-KILL RE-CHECK (row f94ab580): when `memento_recheck_fn` is provided, it
+          runs ONCE AFTER the kill loop and BEFORE `memento_alarm` is composed, so a
+          seat that lands its memento during teardown is no longer guaranteed to be
+          misreported. Measured 2026-08-25: two of four alarmed seats had a complete,
+          self-named memento on disk 30s later — the coordinator's verdict is a
+          snapshot at ASK TIME, and the kill is what ends the seat's chance to write.
+          It can only UPGRADE a seat that re-proves itself on the same predicate; an
+          absent memento and another session's file stay loud. FAIL-SAFE and SURFACED
+          the same way as the coordinator: a raising re-check leaves every honest
+          verdict standing and records itself in `memento_outcomes["_recheck_error"]`.
         - `reason` and `write_memento` are echoed in the result; `write_memento`
           coordination is NO LONGER a no-op — see MEMENTO COORDINATION above
         - `memento_alarm` (row 3b0c5f90) is a single TOP-LEVEL line naming every seat
@@ -1101,6 +1112,9 @@ def dismiss_sessions(
         memento_coord_fn: pre-kill memento coordinator (identities) -> per-seat
             outcome map; None = skip (hermetic default). The MCP wrapper wires the
             live `reap_memento.coordinate_mementos`. See MEMENTO COORDINATION above.
+        memento_recheck_fn: post-kill re-check (outcomes, identities) -> a revised
+            outcome map; None = skip (hermetic default). The MCP wrapper wires the
+            live `reap_memento.recheck_losing_seats`. See POST-KILL RE-CHECK above.
 
     Returns:
         dict: dismissal result
@@ -1139,6 +1153,26 @@ def dismiss_sessions(
             "session_name" : name,
             "status"       : "killed" if ok else "already_gone"
         } )
+
+    # POST-KILL RE-CHECK (row f94ab580) — the ONE second look, before the alarm is
+    # composed. The coordinator above judged at ASK TIME; the kill is the moment a
+    # seat's chance to write ends, so a seat mid-write when the ask window expired
+    # was GUARANTEED to be reported as having failed. Measured on a four-seat reap:
+    # two of the four alarmed seats had a complete, self-named memento on disk
+    # seconds later, and one of them DM'd "ready for re-spin" after it was already
+    # killed and logged unproven. This can only UPGRADE a seat that re-proves itself
+    # on the same identity-checking predicate — an absent memento stays absent and a
+    # prior holder's file stays a prior holder's file. FAIL-SAFE: a raising re-check
+    # NEVER breaks the reap and NEVER discards the honest verdicts it was given.
+    if memento_recheck_fn is not None:
+        try:
+            memento_outcomes = memento_recheck_fn( memento_outcomes, identities )
+        except Exception as error:
+            memento_outcomes = dict( memento_outcomes )
+            memento_outcomes[ "_recheck_error" ] = ( f"post-kill memento re-check raised "
+                                                     f"({error.__class__.__name__}: {error}) — the "
+                                                     f"verdicts below are as of ASK TIME and a seat "
+                                                     f"that wrote during teardown may be misreported" )
 
     reaped_names = { d[ "session_name" ] for d in dismissed }
     remaining    = [ r for r in records if r[ "session_name" ] not in reaped_names ]
