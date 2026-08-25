@@ -396,16 +396,17 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 **All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **cosa (:7999 — in-tree `src/cosa/tests/**`, `src/tests/run-cosa-tests.sh`; joined the pyramid 2026-08-13, row d83d025b)** → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh` — read the note below before reading its verdict)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
 
-The **cosa tier's count was being asserted without ever being run.** Now measured **twice, on two different trees**:
+The **cosa tier's count was being asserted without ever being run.** Now measured **three times across two different trees**:
 
 ```
-@3a8ce109  8668 passed, 26 skipped, 101 warnings in 280.72s      EXIT=0   (Tiberius, 2026-08-24 21:16)
-@17e78c98  8668 passed, 26 skipped                               EXIT=0   (Rio, independent re-run)
+@3a8ce109  8668 passed, 26 skipped, 101 warnings in 280.72s   EXIT=0   (Tiberius, 2026-08-24 21:16)
+@17e78c98  8668 passed, 26 skipped               in 274.45s   EXIT=0   (Rio, independent)
+@17e78c98  8668 passed, 26 skipped               in 274.53s   EXIT=0   (Rio, independent)
 ```
 
 The figure in circulation was **8,622/0**, which is simply the count as of **08-22**. Nothing regressed — **zero failures** in both runs — and 7 commits touched `src/cosa/tests` in between, adding a net **+44** `def test_` (`402e528c` `f2be1f6d` `8cb320bb` `0dd919d2` `927076a4` `566cb971` `e38abe43`) against a measured +46; the remainder is parametrization. **Stale expectation, not regression**, proven both ways rather than inferred from the unit tier's similar drift.
 
-**Two independent samples at two different shas**, so 8,668 is not a one-tree artifact. Still re-derive rather than quote on sight — that habit is what let `8,622` stand since 08-22 — but the number itself now rests on more than one run.
+**Three samples across two different shas, by two seats**, so 8,668 is neither a one-tree artifact nor a one-runner one. Wall time is tight too — 274.45 / 274.53 / 280.72s. Still re-derive rather than quote on sight — that habit is what let `8,622` stand since 08-22 — but the number itself now rests on more than one run.
 
 **The stdout-watcher hazard does not reach this tier, and that is measured rather than merely unobserved**: across `src/cosa/tests`, **379 stdout-capturing test functions in 89 files, of which ZERO parse the capture as JSON** (Rio). The hazard breaks a `json.loads()` on polluted stdout, so with no JSON parsers the exposure here is **zero**, not "0 lines seen in one run." The unit tier is the exposed one — 15 files parse stdout as JSON there; see `src/rnd/v0.2.0/2026.08.24-import-time-watcher-thread-poisons-stdout-tests.md`.
 
