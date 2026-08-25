@@ -76,7 +76,16 @@ SUITES_SUPPORTING_JUNIT_XML = frozenset( {
 # Per-suite max execution timeout (seconds). Process is killed if exceeded.
 # Values based on observed worst-case runtimes + 2x buffer. Tunable.
 SUITE_TIMEOUTS_SECONDS = {
-    "typescript"   : 1500,   # 25 min (observed 8m19s for 2,245 tests on 2026-07-21 WITHOUT c8; c8 instrumentation adds overhead, so ~2.5x margin over the uninstrumented run)
+    "typescript"   : 1500,   # 25 min. ⚠️ CORRECTED 2026-08-24: this used to read "8m19s ... WITHOUT c8;
+                             # c8 adds overhead, so ~2.5x margin over the uninstrumented run". That run WAS under
+                             # c8 — run-typescript-tests.sh:62 reports its coverage percentages, which only a c8
+                             # run produces. The two files described the same 07-21 run in contradictory terms and
+                             # the margin arithmetic here rested on the wrong half.
+                             # MEASURED 2026-08-24 (row 92e94cb7): c8 costs ~60% wall clock — 117 files ran 18s
+                             # bare vs 29s under c8. The budget still holds comfortably, but note WHY it is not
+                             # 29s for the suite: ONE file, audio_transport.test.ts, PASSES in 452s and owns
+                             # essentially the entire wall clock. Fix that file and this budget could drop by an
+                             # order of magnitude. Provenance: src/rnd/v0.2.0/2026.08.24-typescript-suite-memory-measured.md
     "unit"         : 300,    #  5 min (bumped from 180s on 2026-06-12: observed ~185s on ts-b51e63c9 — suite grew to ~6745 tests and the 180s budget killed it mid-run; ~1.6x margin over observed)
     "smoke"        : 3600,   # 60 min (bumped from 1800s on 2026-04-21: observed 2456s on ts-f55d172d — 160 tests + container_preflight adds overhead; ~1.46x margin over observed)
     "smoke_direct" : 1200,   # 20 min (longest: Phase D live ~10 min)
