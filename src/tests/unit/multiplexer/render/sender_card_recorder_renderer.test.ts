@@ -470,7 +470,7 @@ test("send success POSTs /api/notify with the legacy query shape + Bearer header
   assert.equal(captured!.init?.method, "POST");
   assert.equal((captured!.init?.headers as Record<string, string>)["Authorization"], "Bearer tok123");
   assert.equal(input(vi).value, "");
-  assert.equal(vi.querySelector(".cc-voice-input-error"), null);
+  assert.ok( vi.querySelector(".cc-voice-input-error") === null );
 });
 
 test("send failure (!resp.ok) with a body surfaces the server error; no Bearer header when token absent; input retained", async () => {
@@ -544,7 +544,7 @@ test("send with an empty data-session-hash early-returns (no POST, no error)", a
   const restore = stubFetch( async () => { called = true; return fakeResp({ ok: true }); } );
   try { send(vi).click(); await flush(); } finally { restore(); }
   assert.equal(called, false);
-  assert.equal(vi.querySelector(".cc-voice-input-error"), null);
+  assert.ok( vi.querySelector(".cc-voice-input-error") === null );
 });
 
 test("send with an empty data-sender-id early-returns (no POST, no error)", async () => {
@@ -554,7 +554,7 @@ test("send with an empty data-sender-id early-returns (no POST, no error)", asyn
   const restore = stubFetch( async () => { called = true; return fakeResp({ ok: true }); } );
   try { send(vi).click(); await flush(); } finally { restore(); }
   assert.equal(called, false);
-  assert.equal(vi.querySelector(".cc-voice-input-error"), null);
+  assert.ok( vi.querySelector(".cc-voice-input-error") === null );
 });
 
 test("renderError keeps a single error element per row (replaces a prior one)", async () => {
@@ -622,7 +622,7 @@ test("conv-mode (inactive) POSTs {on:true} to the legacy speakerphone endpoint w
   assert.equal(captured!.init?.method, "POST");
   assert.equal(JSON.parse(captured!.init?.body as string).on, true);
   assert.equal((captured!.init?.headers as Record<string, string>)["Authorization"], "Bearer tokC");
-  assert.equal(vi.querySelector(".cc-voice-input-error"), null);
+  assert.ok( vi.querySelector(".cc-voice-input-error") === null );
 });
 
 test("conv-mode (active) POSTs {on:false}; no Bearer header when token absent", async () => {

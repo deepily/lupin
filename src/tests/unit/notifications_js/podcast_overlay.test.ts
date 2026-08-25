@@ -163,14 +163,14 @@ test( "dismiss button click removes the overlay (stops playback by removing the 
   ui._showPodcastOverlay( "/app/audio?path=a.mp3&embed=1", "X" );
   const btn = document.querySelector( "button.podcast-overlay-dismiss" ) as HTMLButtonElement;
   btn.click();
-  assert.equal( document.getElementById( "podcast-overlay" ), null, "overlay removed on dismiss" );
+  assert.ok( document.getElementById( "podcast-overlay" ) === null, "overlay removed on dismiss" );
 } );
 
 // ── _dismissPodcastOverlay ────────────────────────────────────────────────────
 test( "_dismissPodcastOverlay is a no-op when no overlay is open", () => {
   const ui = newUI();
   assert.doesNotThrow( () => ui._dismissPodcastOverlay() );
-  assert.equal( document.getElementById( "podcast-overlay" ), null );
+  assert.ok( document.getElementById( "podcast-overlay" ) === null );
 } );
 
 // ── _handleEmbeddedAudioClick (routing branches) ──────────────────────────────
@@ -191,7 +191,7 @@ test( "click on a PLAIN audio link is left alone — no overlay, no preventDefau
   const ev = clickEvent( a );
   ui._handleEmbeddedAudioClick( ev );
   assert.equal( ev.prevented, false, "plain link NOT intercepted" );
-  assert.equal( document.getElementById( "podcast-overlay" ), null, "no overlay for the plain link" );
+  assert.ok( document.getElementById( "podcast-overlay" ) === null, "no overlay for the plain link" );
 } );
 
 test( "click with no anchor in the ancestry is ignored", () => {
@@ -201,7 +201,7 @@ test( "click with no anchor in the ancestry is ignored", () => {
   const ev = clickEvent( div );
   ui._handleEmbeddedAudioClick( ev );
   assert.equal( ev.prevented, false );
-  assert.equal( document.getElementById( "podcast-overlay" ), null );
+  assert.ok( document.getElementById( "podcast-overlay" ) === null );
 } );
 
 test( "click that originates inside the reading-pane iframe is ignored", () => {
@@ -217,7 +217,7 @@ test( "click that originates inside the reading-pane iframe is ignored", () => {
   const ev = clickEvent( a );
   ui._handleEmbeddedAudioClick( ev );
   assert.equal( ev.prevented, false, "iframe-internal click bailed" );
-  assert.equal( document.getElementById( "podcast-overlay" ), null );
+  assert.ok( document.getElementById( "podcast-overlay" ) === null );
 } );
 
 test( "click on a non-audio link is ignored", () => {
@@ -226,7 +226,7 @@ test( "click on a non-audio link is ignored", () => {
   const ev = clickEvent( a );
   ui._handleEmbeddedAudioClick( ev );
   assert.equal( ev.prevented, false );
-  assert.equal( document.getElementById( "podcast-overlay" ), null );
+  assert.ok( document.getElementById( "podcast-overlay" ) === null );
 } );
 
 test( "embed link routing survives an absolute loopback-host prefix (normalized first)", () => {

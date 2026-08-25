@@ -223,7 +223,7 @@ test( "wireEvents: anonymous nav has no logout button (no-op branch)", () => {
     const nav = buildNavElement( document, state( { authenticated: false, admin: false, email: null, pathname: "/app" } ) );
     // No logout button exists → the logoutBtn branch is skipped; must not throw.
     assert.doesNotThrow( () => wireEvents( nav, makeStorage(), () => {} ) );
-    assert.equal( nav.querySelector( ".lupin-nav-logout" ), null );
+    assert.ok( nav.querySelector( ".lupin-nav-logout" ) === null );
 } );
 
 test( "wireEvents: missing toggle/links short-circuits the hamburger wiring", () => {

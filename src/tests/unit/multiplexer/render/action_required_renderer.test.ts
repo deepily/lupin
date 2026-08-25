@@ -208,8 +208,8 @@ test("yes_no error-rollback: rejection + 'failed' event → widget rebuilt with 
   state.items.set("ar1", { ...item, state: "failed" });
   emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: "yes" });
   // Widget rebuilt: still interactive (Yes/No buttons present) + error stripe rendered.
-  assert.notEqual(root.querySelector(".action-required-btn-yes"), null, "Yes button still present");
-  assert.notEqual(root.querySelector(".action-required-error-stripe"), null, "error stripe rendered");
+  assert.ok( root.querySelector(".action-required-btn-yes") !== null, "Yes button still present" );
+  assert.ok( root.querySelector(".action-required-error-stripe") !== null, "error stripe rendered" );
   renderer.unmount();
 });
 
@@ -224,8 +224,8 @@ test("radio error-rollback: failed event leaves widget interactive + retry path"
   await flush();
   state.items.set("ar1", { ...item, state: "failed" });
   emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: "a" });
-  assert.notEqual(root.querySelector('input[type="radio"]'), null);
-  assert.notEqual(root.querySelector(".action-required-error-stripe"), null);
+  assert.ok( root.querySelector('input[type="radio"]') !== null );
+  assert.ok( root.querySelector(".action-required-error-stripe") !== null );
   renderer.unmount();
 });
 
@@ -239,8 +239,8 @@ test("checkbox error-rollback: failed event preserves checkbox controls", async 
   await flush();
   state.items.set("ar1", { ...item, state: "failed" });
   emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: [] });
-  assert.notEqual(root.querySelector('input[type="checkbox"]'), null);
-  assert.notEqual(root.querySelector(".action-required-error-stripe"), null);
+  assert.ok( root.querySelector('input[type="checkbox"]') !== null );
+  assert.ok( root.querySelector(".action-required-error-stripe") !== null );
   renderer.unmount();
 });
 
@@ -255,8 +255,8 @@ test("open_ended error-rollback: failed event preserves text input", async () =>
   await flush();
   state.items.set("ar1", { ...item, state: "failed" });
   emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: "x" });
-  assert.notEqual(root.querySelector(".action-required-input"), null);
-  assert.notEqual(root.querySelector(".action-required-error-stripe"), null);
+  assert.ok( root.querySelector(".action-required-input") !== null );
+  assert.ok( root.querySelector(".action-required-error-stripe") !== null );
   renderer.unmount();
 });
 
@@ -271,7 +271,7 @@ test("open_ended_batch error-rollback: failed event preserves batch inputs", asy
   state.items.set("ar1", { ...item, state: "failed" });
   emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: {} });
   assert.equal(root.querySelectorAll(".action-required-batch-input").length, 2);
-  assert.notEqual(root.querySelector(".action-required-error-stripe"), null);
+  assert.ok( root.querySelector(".action-required-error-stripe") !== null );
   renderer.unmount();
 });
 
@@ -289,7 +289,7 @@ test("transition: pending → submitting (responded-pending event renders submit
   emitChange(bus, { changeKind: "responded-pending", id_hash: "ar1", response: "yes" });
   const widget = root.querySelector<HTMLElement>('[data-id-hash="ar1"]');
   assert.equal(widget!.dataset.state, "submitting");
-  assert.notEqual(widget!.querySelector(".action-required-submitting-msg"), null);
+  assert.ok( widget!.querySelector(".action-required-submitting-msg") !== null );
   renderer.unmount();
 });
 
@@ -312,8 +312,8 @@ test("transition: submitting → failed (failed event renders interactive widget
   state.items.set("ar1", makeItem({ state: "failed" }));
   emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: "yes" });
   // failed state renders the interactive widget (re-enabled) + error stripe.
-  assert.notEqual(root.querySelector(".action-required-btn-yes"), null);
-  assert.notEqual(root.querySelector(".action-required-error-stripe"), null);
+  assert.ok( root.querySelector(".action-required-btn-yes") !== null );
+  assert.ok( root.querySelector(".action-required-error-stripe") !== null );
   renderer.unmount();
 });
 
@@ -322,13 +322,13 @@ test("transition: failed → submitting retry (responded-pending after failed re
   state.items.set("ar1", makeItem({ state: "failed" }));
   renderer.mount(root);
   // Verify failed state has error stripe.
-  assert.notEqual(root.querySelector(".action-required-error-stripe"), null);
+  assert.ok( root.querySelector(".action-required-error-stripe") !== null );
   // Retry: store transitions back to submitting.
   state.items.set("ar1", makeItem({ state: "submitting" }));
   emitChange(bus, { changeKind: "responded-pending", id_hash: "ar1", response: "yes" });
   assert.equal(root.querySelector<HTMLElement>('[data-id-hash="ar1"]')!.dataset.state, "submitting");
   // Error stripe should be gone after retry transition.
-  assert.equal(root.querySelector(".action-required-error-stripe"), null);
+  assert.ok( root.querySelector(".action-required-error-stripe") === null );
   renderer.unmount();
 });
 
@@ -351,7 +351,7 @@ test("transition: cancelled (store-side cancel) → widget removed when item als
   // Store evicts item entirely + fires cancelled event.
   state.items.delete("ar1");
   emitChange(bus, { changeKind: "cancelled", id_hash: "ar1" });
-  assert.equal(root.querySelector('[data-id-hash="ar1"]'), null);
+  assert.ok( root.querySelector('[data-id-hash="ar1"]') === null );
   renderer.unmount();
 });
 
@@ -444,7 +444,7 @@ test("inertness-lift: read-only → interactive is atomic + all 4 markers gone (
   // Lane 0a: widgets live inside the `.section-content` wrapper, under the header.
   const contentWrap = root.querySelector(".section-content");
   assert.notEqual(contentWrap, null, "Lane 0a section-content wrapper present");
-  assert.notEqual(root.querySelector(".section-header"), null, "Lane 0a section-header bar present");
+  assert.ok( root.querySelector(".section-header") !== null, "Lane 0a section-header bar present" );
 
   // The swap MUST result in exactly one widget for ar1 in the final DOM (not 0, not 2),
   // and it must live inside the content wrapper (not orphaned at the root).
@@ -456,7 +456,7 @@ test("inertness-lift: read-only → interactive is atomic + all 4 markers gone (
   assert.equal(newWidget!.getAttribute("data-phase6-pending"), null, "marker 1 gone: data-phase6-pending");
   assert.equal(newWidget!.getAttribute("aria-disabled"),       null, "marker 2 gone: aria-disabled");
   assert.equal(newWidget!.style.cursor,                          "", "marker 3 gone: cursor:not-allowed");
-  assert.equal(newWidget!.querySelector(".action-required-pending-notice"), null, "marker 4 gone: pending-notice microcopy");
+  assert.ok( newWidget!.querySelector(".action-required-pending-notice") === null, "marker 4 gone: pending-notice microcopy" );
 
   renderer.unmount();
 });
@@ -481,8 +481,8 @@ test("multi-item render: each item gets its own widget + correct data-id-hash", 
   state.items.set("ar1", makeItem({ id_hash: "ar1", prompt: "First?" }));
   state.items.set("ar2", makeItem({ id_hash: "ar2", prompt: "Second?" }));
   renderer.mount(root);
-  assert.notEqual(root.querySelector('[data-id-hash="ar1"]'), null);
-  assert.notEqual(root.querySelector('[data-id-hash="ar2"]'), null);
+  assert.ok( root.querySelector('[data-id-hash="ar1"]') !== null );
+  assert.ok( root.querySelector('[data-id-hash="ar2"]') !== null );
   assert.equal(root.querySelectorAll(".action-required-widget").length, 2);
   renderer.unmount();
 });
@@ -492,9 +492,9 @@ test("forceRenderForTesting: re-renders all items synchronously after mutation",
   renderer.mount(root);
   // Add an item AFTER mount without firing a store event.
   state.items.set("ar1", makeItem());
-  assert.equal(root.querySelector('[data-id-hash="ar1"]'), null, "no widget yet (no event)");
+  assert.ok( root.querySelector('[data-id-hash="ar1"]') === null, "no widget yet (no event)" );
   renderer.forceRenderForTesting();
-  assert.notEqual(root.querySelector('[data-id-hash="ar1"]'), null, "widget appears after force render");
+  assert.ok( root.querySelector('[data-id-hash="ar1"]') !== null, "widget appears after force render" );
   renderer.unmount();
 });
 
@@ -514,9 +514,9 @@ test("offline-frozen / offline-resumed events trigger widget rebuild (no special
   renderer.mount(root);
   emitChange(bus, { changeKind: "offline-frozen", id_hash: "ar1", countdownMs: 25_000 });
   // Widget still present, no exception.
-  assert.notEqual(root.querySelector('[data-id-hash="ar1"]'), null);
+  assert.ok( root.querySelector('[data-id-hash="ar1"]') !== null );
   emitChange(bus, { changeKind: "offline-resumed", id_hash: "ar1", countdownMs: 25_000 });
-  assert.notEqual(root.querySelector('[data-id-hash="ar1"]'), null);
+  assert.ok( root.querySelector('[data-id-hash="ar1"]') !== null );
   renderer.unmount();
 });
 
@@ -594,18 +594,18 @@ test("empty: mount with zero items paints #action-required-empty (renderAll coun
   assert.notEqual(empty, null, "empty panel painted on mount-at-0");
   assert.ok(empty!.classList.contains("action-required-empty-state"));
   assert.match(empty!.textContent ?? "", /No pending actions/);
-  assert.equal(root.querySelector(".action-required-widget"), null, "no widgets when empty");
+  assert.ok( root.querySelector(".action-required-widget") === null, "no widgets when empty" );
   renderer.unmount();
 });
 
 test("empty: first widget added clears the empty panel (clearEmpty removes it)", () => {
   const { renderer, root, bus, state } = setupRenderer();
   renderer.mount(root);
-  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty present before first item");
+  assert.ok( root.querySelector("#action-required-empty") !== null, "empty present before first item" );
   // A new AR item arrives.
   state.items.set("ar1", makeItem({ id_hash: "ar1" }));
   emitChange(bus, { changeKind: "added", id_hash: "ar1" });
-  assert.equal(root.querySelector("#action-required-empty"), null, "empty removed once a widget paints");
+  assert.ok( root.querySelector("#action-required-empty") === null, "empty removed once a widget paints" );
   assert.notEqual(root.querySelector<HTMLElement>('[data-id-hash="ar1"]'), null, "widget painted");
   renderer.unmount();
 });
@@ -615,12 +615,12 @@ test("empty: removing the last widget repaints the empty panel (onChange list→
   state.items.set("ar1", makeItem({ id_hash: "ar1" }));
   renderer.mount(root);
   assert.notEqual(root.querySelector<HTMLElement>('[data-id-hash="ar1"]'), null, "widget present");
-  assert.equal(root.querySelector("#action-required-empty"), null, "no empty while a widget exists");
+  assert.ok( root.querySelector("#action-required-empty") === null, "no empty while a widget exists" );
   // Item evicted from the store → onChange sees getById undefined.
   state.items.delete("ar1");
   emitChange(bus, { changeKind: "cancelled", id_hash: "ar1" });
   assert.equal(root.querySelector<HTMLElement>('[data-id-hash="ar1"]'), null, "widget removed");
-  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty repainted after last removal");
+  assert.ok( root.querySelector("#action-required-empty") !== null, "empty repainted after last removal" );
   renderer.unmount();
 });
 
@@ -631,7 +631,7 @@ test("empty: removing one of two widgets does NOT paint empty (list still non-em
   renderer.mount(root);
   state.items.delete("ar1");
   emitChange(bus, { changeKind: "cancelled", id_hash: "ar1" });
-  assert.equal(root.querySelector("#action-required-empty"), null, "no empty while ar2 remains");
+  assert.ok( root.querySelector("#action-required-empty") === null, "no empty while ar2 remains" );
   assert.notEqual(root.querySelector<HTMLElement>('[data-id-hash="ar2"]'), null, "ar2 still present");
   renderer.unmount();
 });
@@ -642,7 +642,7 @@ test("empty: unmount-at-0 paints #action-required-empty (boundary owner edge)", 
   renderer.unmount();
   // Phase-6b owns painting the empty-state on teardown so the panel is not blank
   // until the next AR event reaches Phase-5.
-  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty painted on unmount-at-0");
+  assert.ok( root.querySelector("#action-required-empty") !== null, "empty painted on unmount-at-0" );
   assert.equal(root.dataset.phase6bOwner, undefined, "ownership released");
 });
 
@@ -651,19 +651,19 @@ test("empty: unmount WITH items leaves a blank panel, not the empty-state (unmou
   state.items.set("ar1", makeItem({ id_hash: "ar1" }));
   renderer.mount(root);
   renderer.unmount();
-  assert.equal(root.querySelector("#action-required-empty"), null, "no empty-state when items remained");
-  assert.equal(root.querySelector(".action-required-widget"), null, "children cleared on unmount");
+  assert.ok( root.querySelector("#action-required-empty") === null, "no empty-state when items remained" );
+  assert.ok( root.querySelector(".action-required-widget") === null, "children cleared on unmount" );
 });
 
 test("empty: forceRenderForTesting with zero items paints the empty panel", () => {
   const { renderer, root, state } = setupRenderer();
   state.items.set("ar1", makeItem({ id_hash: "ar1" }));
   renderer.mount(root);
-  assert.equal(root.querySelector("#action-required-empty"), null, "widget present after mount");
+  assert.ok( root.querySelector("#action-required-empty") === null, "widget present after mount" );
   // Store drained, then a full re-render is forced.
   state.items.clear();
   renderer.forceRenderForTesting();
-  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty painted on force-render at 0");
+  assert.ok( root.querySelector("#action-required-empty") !== null, "empty painted on force-render at 0" );
   renderer.unmount();
 });
 

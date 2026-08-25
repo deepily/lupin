@@ -300,7 +300,7 @@ test("populateJobMetaIfNeeded: card without <pre.job-meta-json> child is no-op (
   // No <pre> inside.
   // Should not throw.
   populateJobMetaIfNeeded(card, { foo: "bar" });
-  assert.equal(card.querySelector(".job-meta-json"), null);
+  assert.ok( card.querySelector(".job-meta-json") === null );
 });
 
 // ---------------------------------------------------------------------------
@@ -320,7 +320,7 @@ test("renderJobCard: renders the retry ↻ button when opts.retryable, before th
 
 test("renderJobCard: NO retry button when retryable is absent or false (live cards) (W5)", () => {
   const noOpt = renderJobCard(makeJob({ status: "running" }));
-  assert.equal(noOpt.querySelector(".job-retry-button"), null, "no retry when opts omitted");
+  assert.ok( noOpt.querySelector(".job-retry-button") === null, "no retry when opts omitted" );
   const falseOpt = renderJobCard(makeJob({ status: "done" }), { retryable: false });
-  assert.equal(falseOpt.querySelector(".job-retry-button"), null, "no retry when retryable=false");
+  assert.ok( falseOpt.querySelector(".job-retry-button") === null, "no retry when retryable=false" );
 });

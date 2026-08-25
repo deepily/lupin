@@ -94,7 +94,7 @@ test("open_ended_batch renders one input per option (treated as headers)", () =>
   assert.equal(inputs[0]!.dataset.batchHeader, "Topic");
   assert.equal(inputs[1]!.dataset.batchHeader, "Budget");
   assert.equal(inputs[2]!.dataset.batchHeader, "Audience");
-  assert.notEqual(el.querySelector(".action-required-btn-submit-all"), null);
+  assert.ok( el.querySelector(".action-required-btn-submit-all") !== null );
 });
 
 // ---------------------------------------------------------------------------
@@ -188,8 +188,8 @@ test("multiple_choice with multiSelect undefined defaults to radio (single-selec
   const item = makeItem({ response_type: "multiple_choice", options: ["red", "blue"] });
   // multiSelect omitted → undefined → falls to radio path.
   const el = renderActionRequiredInteractive(item, handlers);
-  assert.notEqual(el.querySelector(".action-required-options-radio"), null);
-  assert.equal(el.querySelector(".action-required-options-checkbox"), null);
+  assert.ok( el.querySelector(".action-required-options-radio") !== null );
+  assert.ok( el.querySelector(".action-required-options-checkbox") === null );
   el.querySelector<HTMLInputElement>('input[type="radio"]')!.checked = true;
   el.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
   assert.deepEqual(calls, ["red"]);

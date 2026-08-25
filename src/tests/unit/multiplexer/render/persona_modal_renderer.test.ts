@@ -120,9 +120,9 @@ test("mount creates a popover in the portal for every sender already carrying a 
   const r = createPersonaModalRenderer({ eventBus: bus, stores: { senders: store } });
   r.mount(root);
   assert.equal(portal.children.length, 2);
-  assert.notEqual(portal.querySelector("#persona-popover-a"), null);
-  assert.notEqual(portal.querySelector("#persona-popover-b"), null);
-  assert.equal(portal.querySelector("#persona-popover-c"), null);
+  assert.ok( portal.querySelector("#persona-popover-a") !== null );
+  assert.ok( portal.querySelector("#persona-popover-b") !== null );
+  assert.ok( portal.querySelector("#persona-popover-c") === null );
 });
 
 // ===========================================================================
@@ -140,7 +140,7 @@ test("store_senders_changed('added') with persona creates a new popover", () => 
   store.setList([ makeSender({ sender_id: "a", voice_persona: makePersona() }) ]);
   emit(bus, "a", "added");
   assert.equal(portal.children.length, 1);
-  assert.notEqual(portal.querySelector("#persona-popover-a"), null);
+  assert.ok( portal.querySelector("#persona-popover-a") !== null );
 });
 
 test("store_senders_changed('updated') with persona change re-renders in place (preserves popover element identity)", () => {
@@ -309,9 +309,9 @@ test("forceRenderForTesting() reconciles to current store state (adds + removes)
   ]);
   r.forceRenderForTesting();
   assert.equal(portal.children.length, 2);
-  assert.notEqual(portal.querySelector("#persona-popover-b"), null);
-  assert.notEqual(portal.querySelector("#persona-popover-c"), null);
-  assert.equal(portal.querySelector("#persona-popover-a"), null, "stale popover removed");
+  assert.ok( portal.querySelector("#persona-popover-b") !== null );
+  assert.ok( portal.querySelector("#persona-popover-c") !== null );
+  assert.ok( portal.querySelector("#persona-popover-a") === null, "stale popover removed" );
 });
 
 // ===========================================================================
@@ -352,8 +352,8 @@ test("hydrated change (no sender_id) reconciles ALL popovers from store.list()",
     ts      : 0,
   });
   assert.equal(portal.children.length, 2);
-  assert.notEqual(portal.querySelector("#persona-popover-a"), null);
-  assert.notEqual(portal.querySelector("#persona-popover-b"), null);
-  assert.equal(portal.querySelector("#persona-popover-stale"), null, "stale popover removed");
-  assert.equal(portal.querySelector("#persona-popover-personaless"), null, "persona-less sender gets no popover");
+  assert.ok( portal.querySelector("#persona-popover-a") !== null );
+  assert.ok( portal.querySelector("#persona-popover-b") !== null );
+  assert.ok( portal.querySelector("#persona-popover-stale") === null, "stale popover removed" );
+  assert.ok( portal.querySelector("#persona-popover-personaless") === null, "persona-less sender gets no popover" );
 });

@@ -9,40 +9,18 @@
 # number below it and reports a flood of new violations that are not new. A count is
 # stable under ordinary editing and still catches a genuinely added assertion.
 #
-# Baselined 2026-08-24 by Pocholo (7991a2cd). Total: 276 across 35 files.
 
-src/tests/unit/multiplexer/boot_order_mount_integrity.test.ts                            2
-src/tests/unit/multiplexer/render/action_required_renderer.test.ts                       35
-src/tests/unit/multiplexer/render/broadcast_card_renderer.test.ts                        16
+
+# Baselined 2026-08-24 by Pocholo (7991a2cd). RATCHETED DOWN from 276/35 to 16/8
+# after a truth-preserving rewrite of the two mechanical shapes. What remains is
+# the judgement class: assertions comparing one DOM node to ANOTHER, where the
+# repair is a primitive projection that distinguishes them and is a design choice.
+
+src/tests/unit/multiplexer/render/action_required_renderer.test.ts                       1
 src/tests/unit/multiplexer/render/dom.test.ts                                            3
-src/tests/unit/multiplexer/render/fleet_status_renderer.test.ts                          3
-src/tests/unit/multiplexer/render/jobs_pane_renderer.test.ts                             14
-src/tests/unit/multiplexer/render/missed_badge_renderer.test.ts                          5
-src/tests/unit/multiplexer/render/nav_bar_renderer.test.ts                               9
-src/tests/unit/multiplexer/render/notifications_header_renderer.test.ts                  8
-src/tests/unit/multiplexer/render/notifications_list_renderer.test.ts                    16
-src/tests/unit/multiplexer/render/notifications_list_tts_controls.test.ts                1
-src/tests/unit/multiplexer/render/persona_modal_renderer.test.ts                         11
-src/tests/unit/multiplexer/render/section_toolbar_renderer.test.ts                       5
-src/tests/unit/multiplexer/render/sender_card_recorder_renderer.test.ts                  4
-src/tests/unit/multiplexer/render/session_strip_renderer.test.ts                         3
-src/tests/unit/multiplexer/render/task_list_renderer.test.ts                             7
-src/tests/unit/multiplexer/render/templates_action_required_interactive.test.ts          3
-src/tests/unit/multiplexer/render/templates_broadcast_card.test.ts                       21
-src/tests/unit/multiplexer/render/templates_job_bucket.test.ts                           8
-src/tests/unit/multiplexer/render/templates_job_card.test.ts                             4
-src/tests/unit/multiplexer/render/templates_notification_item.test.ts                    12
-src/tests/unit/multiplexer/render/templates_notification_item_tts_controls.test.ts       7
-src/tests/unit/multiplexer/render/templates_persona_modal.test.ts                        3
+src/tests/unit/multiplexer/render/templates_job_bucket.test.ts                           1
+src/tests/unit/multiplexer/render/templates_job_card.test.ts                             1
 src/tests/unit/multiplexer/render/templates_section_header.test.ts                       4
-src/tests/unit/multiplexer/render/templates_sender_card.test.ts                          25
-src/tests/unit/multiplexer/render/templates_session_strip_icon.test.ts                   2
-src/tests/unit/multiplexer/render/templates_tts_chrome.test.ts                           9
-src/tests/unit/multiplexer/render/tts_chrome_renderer.test.ts                            8
-src/tests/unit/multiplexer/render/tts_preview_slider_renderer.test.ts                    1
-src/tests/unit/nav/lupin_nav_port.test.ts                                                2
+src/tests/unit/multiplexer/render/tts_chrome_renderer.test.ts                            1
+src/tests/unit/nav/lupin_nav_port.test.ts                                                1
 src/tests/unit/notifications_js/action_required_pane.test.ts                             4
-src/tests/unit/notifications_js/manager_badge_live_update.test.ts                        3
-src/tests/unit/notifications_js/manager_badge_strip.test.ts                              4
-src/tests/unit/notifications_js/podcast_overlay.test.ts                                  6
-src/tests/unit/notifications_js/task_list_panel.test.ts                                  8

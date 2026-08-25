@@ -67,13 +67,13 @@ test("voice_id row always renders with 'Voice:' prefix", () => {
 // AC-A3 #5
 test("display_name row OMITTED when display_name absent", () => {
   const root = renderPersonaPopover(makeInput());
-  assert.equal(root.querySelector(".persona-popover-display-name"), null);
+  assert.ok( root.querySelector(".persona-popover-display-name") === null );
 });
 
 // AC-A3 #6
 test("display_name row OMITTED when display_name === name (avoid redundant rendering)", () => {
   const root = renderPersonaPopover(makeInput({ name: "Tiberius", display_name: "Tiberius" }));
-  assert.equal(root.querySelector(".persona-popover-display-name"), null);
+  assert.ok( root.querySelector(".persona-popover-display-name") === null );
 });
 
 // AC-A3 #7
@@ -117,5 +117,5 @@ test("empty-string icon: name row renders just the name (no leading space)", () 
 // AC-A3 #12 — display_name empty string is treated as absent
 test("display_name === '' (empty string) does NOT render the display-name row", () => {
   const root = renderPersonaPopover(makeInput({ name: "Tiberius", display_name: "" }));
-  assert.equal(root.querySelector(".persona-popover-display-name"), null);
+  assert.ok( root.querySelector(".persona-popover-display-name") === null );
 });

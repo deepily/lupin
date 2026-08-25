@@ -58,7 +58,7 @@ test("mount with zero count paints an empty root (hidden)", () => {
   const r = createMissedBadgeRenderer({ eventBus: bus, stores: { missed: store } });
   const root = document.createElement("div");
   r.mount(root);
-  assert.equal(root.querySelector(".missed-badge"), null);
+  assert.ok( root.querySelector(".missed-badge") === null );
 });
 
 test("mount with non-zero count paints the badge + Reset button", () => {
@@ -78,7 +78,7 @@ test("store_missed_changed repaints: 0 → N shows badge, N → 0 hides it", () 
   const r = createMissedBadgeRenderer({ eventBus: bus, stores: { missed: store } });
   const root = document.createElement("div");
   r.mount(root);
-  assert.equal(root.querySelector(".missed-badge"), null);
+  assert.ok( root.querySelector(".missed-badge") === null );
 
   store.setCount(3);
   emitChanged(bus, 3);
@@ -86,7 +86,7 @@ test("store_missed_changed repaints: 0 → N shows badge, N → 0 hides it", () 
 
   store.setCount(0);
   emitChanged(bus, 0);
-  assert.equal(root.querySelector(".missed-badge"), null);
+  assert.ok( root.querySelector(".missed-badge") === null );
 });
 
 // ---------------------------------------------------------------------------
@@ -143,12 +143,12 @@ test("unmount unsubscribes (no repaint after) and clears the root; re-mount OK",
   assert.ok(root.querySelector(".missed-badge"));
 
   r.unmount();
-  assert.equal(root.querySelector(".missed-badge"), null);
+  assert.ok( root.querySelector(".missed-badge") === null );
 
   // After unmount, a changed event must NOT repaint into the old root.
   store.setCount(9);
   emitChanged(bus, 9);
-  assert.equal(root.querySelector(".missed-badge"), null);
+  assert.ok( root.querySelector(".missed-badge") === null );
 
   assert.doesNotThrow(() => r.mount(root));
   assert.ok(root.querySelector(".missed-badge"));

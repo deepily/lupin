@@ -156,7 +156,7 @@ test("unmount: detaches listeners, clears icons + card focus, resets", () => {
   assert.equal(document.querySelector('.sender-card[data-sender-id="s2"]')!.getAttribute("data-focus-hidden"), "true");
   r.unmount();
   assert.equal(iconsEl.querySelectorAll(".cc-strip-icon").length, 0);
-  assert.equal(document.querySelector('.sender-card[data-focus-hidden="true"]'), null);
+  assert.ok( document.querySelector('.sender-card[data-focus-hidden="true"]') === null );
   // listener detached: a store event after unmount does not repaint
   store.setList([session()]);
   emit(bus, { changeKind: "added", sender_id: "s1" });
@@ -249,7 +249,7 @@ test("WP7: reaping a non-focused session drops its icon from the strip", () => {
   assert.equal(iconsEl.querySelectorAll(".cc-strip-icon").length, 2);
   store.setList([session({ sender_id: "keep" })]);
   emit(bus, { changeKind: "removed", sender_id: "reap" });
-  assert.equal(iconsEl.querySelector('[data-sender-id="reap"]'), null);
+  assert.ok( iconsEl.querySelector('[data-sender-id="reap"]') === null );
   assert.equal(iconsEl.querySelectorAll(".cc-strip-icon").length, 1);
 });
 
@@ -281,7 +281,7 @@ test("WP9: re-assign dropping the manager clears the lineage badge in place", ()
   assert.ok(iconsEl.querySelector(".cc-strip-manager-badge"));
   store.setList([session({ sender_id: "s1" })]);   // manager dropped
   emit(bus, { changeKind: "updated", sender_id: "s1" });
-  assert.equal(iconsEl.querySelector(".cc-strip-manager-badge"), null);
+  assert.ok( iconsEl.querySelector(".cc-strip-manager-badge") === null );
   assert.equal(iconsEl.querySelector('[data-sender-id="s1"]')!.getAttribute("data-has-manager"), null);
 });
 

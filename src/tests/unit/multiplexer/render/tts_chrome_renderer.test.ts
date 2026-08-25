@@ -187,7 +187,7 @@ function emitChunk(bus: ReturnType<typeof createEventBusForTesting>, payload: St
 test("mount: renders chrome on initial paint; root contains .tts-chrome", () => {
   const { renderer, root } = setupRenderer("idle");
   renderer.mount(root);
-  assert.notEqual(root.querySelector(".tts-chrome"), null);
+  assert.ok( root.querySelector(".tts-chrome") !== null );
   renderer.unmount();
 });
 
@@ -348,7 +348,7 @@ test("stop semantics: clicking Stop clears queue to 0 + transitions state to idl
   // asserted the empty panel because the empty-state was audio-idle-driven.)
   assert.equal(root.querySelector<HTMLElement>(".tts-chrome")!.dataset.state, "idle");
   assert.match(root.querySelector(".tts-queue-length")!.textContent ?? "", /Queued: 5/, "pending retained after stop");
-  assert.equal(root.querySelector(".tts-queue-empty-state"), null, "pending retained → not the empty panel");
+  assert.ok( root.querySelector(".tts-queue-empty-state") === null, "pending retained → not the empty panel" );
   renderer.unmount();
 });
 
@@ -411,7 +411,7 @@ test("Lane 0a: TTS pane renders the .section-header bar (🔊 Playing), count = 
   assert.equal(count.textContent, "3", "header count = initial queue length");
 
   // Transport chrome lives in the content wrapper below the header.
-  assert.notEqual(root.querySelector(".section-content .tts-queue-length"), null, "chrome nested in section-content");
+  assert.ok( root.querySelector(".section-content .tts-queue-length") !== null, "chrome nested in section-content" );
 
   // Count tracks the queue length on re-render.
   ttsQueue.setPending(pendingItems(5));
@@ -464,8 +464,8 @@ test("WP4: pending minimized cards render in 1-indexed queue order", () => {
 test("WP4: empty queue (no active, no pending) → no cards; idle chrome shows empty panel; count 0", () => {
   const { renderer, root } = setupRenderer("idle", 0);
   renderer.mount(root);
-  assert.equal(root.querySelector(".tts-active-card"), null);
-  assert.equal(root.querySelector(".tts-minimized"), null);
+  assert.ok( root.querySelector(".tts-active-card") === null );
+  assert.ok( root.querySelector(".tts-minimized") === null );
   assert.match(root.querySelector(".tts-queue-empty-state")!.textContent ?? "", /Nothing in the queue/);
   assert.equal(root.querySelector(".section-header-count")!.textContent, "0");
   renderer.unmount();
@@ -550,7 +550,7 @@ test("70cbff3e (T13): focus mode renders 'Paused: N waiting' header + Resume but
   const header = root.querySelector(".tts-playing-header")!;
   assert.match(header.textContent ?? "", /Paused: 2 waiting/);
   assert.equal(header.className, "tts-playing-header focus-mode");
-  assert.notEqual(root.querySelector(".tts-btn-resume"), null, "Resume present in focus mode");
+  assert.ok( root.querySelector(".tts-btn-resume") !== null, "Resume present in focus mode" );
   renderer.unmount();
 });
 
@@ -560,7 +560,7 @@ test("70cbff3e (T13b): focus with ZERO pending still renders the chrome (focus-a
   ttsQueue.setPending([]);
   ttsQueue.setFocus(true);
   renderer.mount(root);
-  assert.equal(root.querySelector(".tts-queue-empty-state"), null, "focused ⟹ not the empty panel");
+  assert.ok( root.querySelector(".tts-queue-empty-state") === null, "focused ⟹ not the empty panel" );
   assert.match((root.querySelector(".tts-playing-header")!).textContent ?? "", /Paused: 0 waiting/);
   renderer.unmount();
 });

@@ -171,14 +171,14 @@ test("constructor throws without a store", () => {
 
 test("mount builds the card; a 2nd mount throws", async () => {
   const { renderer, root } = await setup();
-  assert.notEqual(root.querySelector("#broadcast-submit-card"), null);
+  assert.ok( root.querySelector("#broadcast-submit-card") !== null );
   assert.throws(() => renderer.mount(root), /already mounted/);
 });
 
 test("unmount clears the root + is idempotent", async () => {
   const { renderer, root } = await setup();
   renderer.unmount();
-  assert.equal(root.querySelector("#broadcast-submit-card"), null);
+  assert.ok( root.querySelector("#broadcast-submit-card") === null );
   renderer.unmount();   // 2nd call is a no-op
 });
 
@@ -195,8 +195,8 @@ test("forceRenderForTesting re-renders chips + send state", async () => {
 test("B1: nested commons chrome survives a recipient-row refresh (F-Sam-BA1)", async () => {
   const { root } = await setup();
   // Present after the initial mount + first performRefresh().
-  assert.notEqual(root.querySelector("#commons-activity-pane"), null);
-  assert.notEqual(root.querySelector("#commons-activity-entries"), null);
+  assert.ok( root.querySelector("#commons-activity-pane") !== null );
+  assert.ok( root.querySelector("#commons-activity-entries") !== null );
 
   // Trigger an explicit recipient refresh → renderChips → recipientsRow.replaceChildren().
   $(root, "#broadcast-recipients-refresh").click();
@@ -205,7 +205,7 @@ test("B1: nested commons chrome survives a recipient-row refresh (F-Sam-BA1)", a
   // The recipients row was wiped + rebuilt, but the commons subtree is untouched.
   const commons = root.querySelector("#commons-activity-pane");
   assert.notEqual(commons, null);
-  assert.notEqual(root.querySelector("#commons-activity-entries"), null);
+  assert.ok( root.querySelector("#commons-activity-entries") !== null );
   // And it genuinely lives OUTSIDE the recipients row.
   assert.equal($(root, "#broadcast-recipients-row").contains(commons), false);
 });
@@ -245,7 +245,7 @@ test("↻ refresh re-fetches the recipient list", async () => {
 
 test("store_session_strip_changed triggers a (debounced) recipient refresh", async () => {
   const { root, bus, getCalls } = await setup({ sessions: [] });   // debounceMs 0 → fires within flush()
-  assert.notEqual(root.querySelector(".broadcast-chip.no-recipients"), null);
+  assert.ok( root.querySelector(".broadcast-chip.no-recipients") !== null );
   const before = getCalls();   // 1 from the initial mount hydrate
   // A peer appears; the burst-path scheduleRefresh runs its trailing fetch.
   bus.emit({ type: "store_session_strip_changed", payload: { changeKind: "added" }, source: "test", ts: 0 });
@@ -255,7 +255,7 @@ test("store_session_strip_changed triggers a (debounced) recipient refresh", asy
   await flush();
   await flush();
   assert.equal(getCalls(), before + 1);
-  assert.notEqual(root.querySelector(".broadcast-chip.no-recipients"), null);
+  assert.ok( root.querySelector(".broadcast-chip.no-recipients") !== null );
 });
 
 test("a burst of store_session_strip_changed events coalesces into ONE refresh", async () => {
@@ -372,7 +372,7 @@ test("a stale (out-of-order) hydrate REJECTION does NOT paint an error over the 
   assert.equal(chips(root).length, 3);
   gets[0].reject(new Error("late failure"));   // older rejects AFTER → must be guarded
   await flush();
-  assert.equal(root.querySelector(".broadcast-chip.no-recipients"), null);   // no error pill
+  assert.ok( root.querySelector(".broadcast-chip.no-recipients") === null );   // no error pill
   assert.equal(chips(root).length, 3);
 });
 
@@ -524,7 +524,7 @@ test("onCancel (ESC) resets the stuck mic state, leaving the textarea untouched"
 test("clicking a disabled send button does NOT open the modal", async () => {
   const { root } = await setup({ sessions: RECIPIENTS });
   sendBtn(root).click();   // disabled (empty body)
-  assert.equal(document.getElementById("broadcast-confirm-modal-overlay"), null);
+  assert.ok( document.getElementById("broadcast-confirm-modal-overlay") === null );
 });
 
 test("send → confirm modal opens, Cancel removes it", async () => {
@@ -535,7 +535,7 @@ test("send → confirm modal opens, Cancel removes it", async () => {
   assert.notEqual(overlay, null);
   assert.ok(overlay?.querySelector(".modal-preview")?.textContent?.includes("hello world"));
   (overlay?.querySelector(".btn-cancel") as HTMLButtonElement).click();
-  assert.equal(document.getElementById("broadcast-confirm-modal-overlay"), null);
+  assert.ok( document.getElementById("broadcast-confirm-modal-overlay") === null );
 });
 
 test("opening the confirm modal twice leaves only one overlay (no leak)", async () => {
@@ -553,10 +553,10 @@ test("modal backdrop click closes it; inner click does not", async () => {
   const overlay = document.getElementById("broadcast-confirm-modal-overlay") as HTMLElement;
   // Click on the inner modal (target !== overlay) — stays open.
   (overlay.querySelector("#broadcast-confirm-modal") as HTMLElement).click();
-  assert.notEqual(document.getElementById("broadcast-confirm-modal-overlay"), null);
+  assert.ok( document.getElementById("broadcast-confirm-modal-overlay") !== null );
   // Click on the overlay backdrop itself — closes.
   overlay.click();
-  assert.equal(document.getElementById("broadcast-confirm-modal-overlay"), null);
+  assert.ok( document.getElementById("broadcast-confirm-modal-overlay") === null );
 });
 
 test("confirm modal: single field-less recipient → '1 session' heading + session_id chip", async () => {
@@ -589,7 +589,7 @@ test("Confirm + Send posts the broadcast, clears the textarea, reflects recipien
   assert.equal(sent.length, 1);
   assert.deepEqual(sent[0], { message: "ship it", require_ack: true, include_originator: true });
   assert.equal(ta(root).value, "");
-  assert.equal(document.getElementById("broadcast-confirm-modal-overlay"), null);
+  assert.ok( document.getElementById("broadcast-confirm-modal-overlay") === null );
   assert.ok($(root, "#broadcast-submit-status").textContent?.includes("sent to 2 sessions"));
 });
 
@@ -621,7 +621,7 @@ test("send failure re-enables Confirm + shows the error status (Error)", async (
   await flush();
   assert.equal(confirm.disabled, false);
   assert.equal(confirm.textContent, "Confirm + Send");
-  assert.notEqual(document.getElementById("broadcast-confirm-modal-overlay"), null);   // modal stays for retry
+  assert.ok( document.getElementById("broadcast-confirm-modal-overlay") !== null );   // modal stays for retry
   assert.ok($(root, "#broadcast-submit-status").textContent?.includes("send failed: 429 rate limited"));
 });
 
@@ -638,7 +638,7 @@ test("unmount removes an open modal", async () => {
   const { renderer, root } = await setup({ sessions: RECIPIENTS });
   typeMessage(root, "hi");
   sendBtn(root).click();
-  assert.notEqual(document.getElementById("broadcast-confirm-modal-overlay"), null);
+  assert.ok( document.getElementById("broadcast-confirm-modal-overlay") !== null );
   renderer.unmount();
-  assert.equal(document.getElementById("broadcast-confirm-modal-overlay"), null);
+  assert.ok( document.getElementById("broadcast-confirm-modal-overlay") === null );
 });

@@ -95,7 +95,7 @@ test("renderSessionStripIcon: with manager → lineage badge present", () => {
 
 test("renderSessionStripIcon: without manager → no lineage badge", () => {
   const el = renderSessionStripIcon(session());
-  assert.equal(el.querySelector(".cc-strip-manager-badge"), null);
+  assert.ok( el.querySelector(".cc-strip-manager-badge") === null );
   assert.equal(el.getAttribute("data-has-manager"), null);
 });
 
@@ -117,7 +117,7 @@ test("applyManagerBadge: applies badge with color, title, derived initial", () =
 test("applyManagerBadge: null clears badge + data-has-manager", () => {
   const btn = renderSessionStripIcon(session({ manager_persona: MANAGER }));
   applyManagerBadge(btn, null);
-  assert.equal(btn.querySelector(".cc-strip-manager-badge"), null);
+  assert.ok( btn.querySelector(".cc-strip-manager-badge") === null );
   assert.equal(btn.getAttribute("data-has-manager"), null);
 });
 

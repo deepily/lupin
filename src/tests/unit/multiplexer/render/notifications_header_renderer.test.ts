@@ -94,9 +94,9 @@ test("mount builds the chrome; a 2nd mount throws", () => {
   const { store } = makeStore({ active: [note("a")] });
   const { api } = makeApi();
   const { renderer, root } = mountInto({ store, api });
-  assert.notEqual(root.querySelector("#notifications-count"), null);
-  assert.notEqual(root.querySelector("#clear-all-notifications"), null);
-  assert.notEqual(root.querySelector("#history-dropdown-toggle"), null);
+  assert.ok( root.querySelector("#notifications-count") !== null );
+  assert.ok( root.querySelector("#clear-all-notifications") !== null );
+  assert.ok( root.querySelector("#history-dropdown-toggle") !== null );
   assert.equal(($(root, "#history-dropdown-container") as HTMLElement).hidden, true);
   assert.throws(() => renderer.mount(root), /already mounted/);
 });
@@ -106,7 +106,7 @@ test("unmount clears the root + is idempotent", () => {
   const { api } = makeApi();
   const { renderer, root } = mountInto({ store, api });
   renderer.unmount();
-  assert.equal(root.querySelector("#notifications-count"), null);
+  assert.ok( root.querySelector("#notifications-count") === null );
   renderer.unmount();   // no-op
 });
 
@@ -146,8 +146,8 @@ test("mount builds empty env-label + clock spans", () => {
   const { store } = makeStore();
   const { api } = makeApi();
   const { root } = mountInto({ store, api });
-  assert.notEqual(root.querySelector("#env-label"), null);
-  assert.notEqual(root.querySelector("#clock"), null);
+  assert.ok( root.querySelector("#env-label") !== null );
+  assert.ok( root.querySelector("#clock") !== null );
   assert.equal($(root, "#env-label").textContent, "");
   assert.equal($(root, "#clock").textContent, "");
 });
@@ -289,8 +289,8 @@ test("Lane 0a: 🔔 section-header bar with env-label/clock in the h3; chevron c
   assert.ok(header, "section-header bar present");
   const h3 = header.querySelector("h3") as HTMLElement;
   assert.ok(h3.textContent!.includes("🔔 Notifications"), "🔔 Notifications title");
-  assert.notEqual(h3.querySelector("#env-label"), null, "env-label injected into h3");
-  assert.notEqual(h3.querySelector("#clock"), null, "clock injected into h3");
+  assert.ok( h3.querySelector("#env-label") !== null, "env-label injected into h3" );
+  assert.ok( h3.querySelector("#clock") !== null, "clock injected into h3" );
   assert.equal($(root, "#notifications-count").textContent, "1", "total count in header");
 
   const chevron = header.querySelector(".toggle-button") as HTMLElement;

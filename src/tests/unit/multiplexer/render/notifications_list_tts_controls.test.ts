@@ -262,7 +262,7 @@ test("driver: active bubble is OUTGOING (no pause btn) → setPauseGlyph null-gu
   s.bus.emit({ type: "store_audio_state_change", payload: { state: "paused", prev: "playing" } });
   const b = bubble(s, "n1")!;
   assert.ok(b.classList.contains("tts-playing"));
-  assert.equal(b.querySelector(".notification-corner-pause-btn"), null);   // outgoing has no pause btn
+  assert.ok( b.querySelector(".notification-corner-pause-btn") === null );   // outgoing has no pause btn
   s.renderer.unmount();
 });
 

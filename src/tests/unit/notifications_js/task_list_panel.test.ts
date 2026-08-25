@@ -502,7 +502,7 @@ test( "_handleTaskListClick: a target lacking .closest is safely ignored (defens
   const ui = newUI();
   buildPanelDOM();
   ui._handleTaskListClick( {} );            // no .closest → emoji null → accordion toggle no-ops
-  assert.equal( document.getElementById( "task-body-overlay" ), null );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null );
 } );
 
 test( "_handleTaskListClick: a LIVE 📄 with NO dataset opens overlay with empty body/id (|| '' fallback)", () => {
@@ -543,7 +543,7 @@ test( "_handleTaskListClick: a DIMMED 📄 is inert — no overlay, no accordion
   container.appendChild( dimmed );
   const before = container.innerHTML;
   ui._handleTaskListClick( dimmed );
-  assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay for dimmed emoji" );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null, "no overlay for dimmed emoji" );
   assert.equal( container.innerHTML, before, "no accordion toggle for dimmed emoji" );
 } );
 
@@ -566,7 +566,7 @@ test( "openTaskBodyOverlay: backdrop click dismisses; inner panel click does NOT
   panel.dispatchEvent( new Event( "click", { bubbles: true } ) );   // inner click bubbles to overlay but is stopped
   assert.ok( document.getElementById( "task-body-overlay" ), "inner-panel click keeps overlay open" );
   overlay.dispatchEvent( new Event( "click", { bubbles: true } ) ); // backdrop click
-  assert.equal( document.getElementById( "task-body-overlay" ), null, "backdrop click dismissed" );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null, "backdrop click dismissed" );
 } );
 
 test( "openTaskBodyOverlay: Escape dismisses + detaches its keydown listener", () => {
@@ -575,7 +575,7 @@ test( "openTaskBodyOverlay: Escape dismisses + detaches its keydown listener", (
   ui.openTaskBodyOverlay( "body", "id8" );
   assert.ok( ui._taskBodyOverlayKeyListener, "Esc listener stored while open" );
   document.dispatchEvent( new KeyboardEvent( "keydown", { key: "Escape" } ) );
-  assert.equal( document.getElementById( "task-body-overlay" ), null, "Esc dismissed" );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null, "Esc dismissed" );
   assert.equal( ui._taskBodyOverlayKeyListener, null, "Esc listener detached on dismiss" );
 } );
 
@@ -611,17 +611,17 @@ test( "openTaskBodyOverlay: no document.body → no-op (degrade-safe, no throw)"
   buildPanelDOM();
   const body = document.body;
   body.remove();                                        // document.body becomes null
-  assert.equal( document.body, null );
+  assert.ok( document.body === null );
   ui.openTaskBodyOverlay( "body", "id" );               // must not throw, must not create
   document.documentElement.appendChild( body );         // restore for subsequent tests
-  assert.equal( document.getElementById( "task-body-overlay" ), null );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null );
 } );
 
 test( "_dismissTaskBodyOverlay: idempotent when no overlay is open (no throw)", () => {
   const ui = newUI();
   buildPanelDOM();
   ui._dismissTaskBodyOverlay();                         // nothing open
-  assert.equal( document.getElementById( "task-body-overlay" ), null );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null );
 } );
 
 test( "_wireTaskListAccordion: a delegated 📄 click through the wired listener opens the overlay", () => {
@@ -655,7 +655,7 @@ test( "_wireTaskListAccordion: a keydown that is neither emoji nor header is ign
   const container = document.getElementById( "task-list-container" )!;
   // Enter on the container itself (not on an emoji or header) → early return, no overlay/toggle.
   container.dispatchEvent( new KeyboardEvent( "keydown", { key: "Enter", bubbles: true } ) );
-  assert.equal( document.getElementById( "task-body-overlay" ), null );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null );
 } );
 
 // ─────────────────────────── renderTaskList (DOM dispatch) ───────────────────────────

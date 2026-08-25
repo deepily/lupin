@@ -99,7 +99,7 @@ test("boot-order: mounting NotificationsListRenderer into #notifications-pane le
     // is precisely what boot.ts's later getElementById calls (e.g. :400 for the
     // recorder mount) rely on.
     for (const id of CRITICAL_STATIC_IDS) {
-      assert.notEqual(document.getElementById(id), null, `#${id} must survive the list-renderer mount`);
+      assert.ok( document.getElementById(id) !== null, `#${id} must survive the list-renderer mount` );
     }
 
     // The AR sibling section is untouched (still empty, still a sibling of the
@@ -110,11 +110,8 @@ test("boot-order: mounting NotificationsListRenderer into #notifications-pane le
 
     // The renderer DID populate its OWN pane content (the empty-state marker), so
     // #sender-cards-container is the live mount, not a bystander.
-    assert.notEqual(
-      document.querySelector("#sender-cards-container [data-testid='multiplexer-empty-state']"),
-      null,
-      "renderer populated the surviving #sender-cards-container",
-    );
+    assert.ok( document.querySelector("#sender-cards-container [data-testid='multiplexer-empty-state']") !== null,
+      "renderer populated the surviving #sender-cards-container", );
 
     renderer.unmount();
   } finally {

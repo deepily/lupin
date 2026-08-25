@@ -89,7 +89,7 @@ test("template: authenticated + email renders 3 items, the email, and the Logout
   assert.equal(nav.querySelectorAll(".lupin-nav-link").length, 3);
   assert.equal(nav.querySelector('[data-testid="nav-user-email"]')?.textContent, "a@b.com");
   assert.ok(nav.querySelector(".lupin-nav-logout"));
-  assert.equal(nav.querySelector(".lupin-nav-login"), null);
+  assert.ok( nav.querySelector(".lupin-nav-login") === null );
   // activePath "/app" → Home active (first === operand); the others inactive.
   assert.ok(nav.querySelector('[data-testid="nav-home-link"]')?.classList.contains("lupin-nav-active"));
   assert.equal(nav.querySelector('[data-testid="nav-notifications-link"]')?.classList.contains("lupin-nav-active"), false);
@@ -103,10 +103,10 @@ test("template: unauthenticated hides the auth-gated items and shows the Login l
   // Only Home (auth:false) survives the filter.
   assert.equal(nav.querySelectorAll(".lupin-nav-link").length, 1);
   assert.ok(nav.querySelector('[data-testid="nav-home-link"]'));
-  assert.equal(nav.querySelector('[data-testid="nav-notifications-link"]'), null);
+  assert.ok( nav.querySelector('[data-testid="nav-notifications-link"]') === null );
   assert.ok(nav.querySelector(".lupin-nav-login"));
-  assert.equal(nav.querySelector(".lupin-nav-logout"), null);
-  assert.equal(nav.querySelector('[data-testid="nav-user-email"]'), null);
+  assert.ok( nav.querySelector(".lupin-nav-logout") === null );
+  assert.ok( nav.querySelector('[data-testid="nav-user-email"]') === null );
 });
 
 test("template: authenticated but email===null renders the Login link, no throw (D2 email-null arm)", () => {
@@ -116,7 +116,7 @@ test("template: authenticated but email===null renders the Login link, no throw 
   );
   // authenticated && email!==null → false via the email arm → login side.
   assert.ok(nav.querySelector(".lupin-nav-login"));
-  assert.equal(nav.querySelector(".lupin-nav-logout"), null);
+  assert.ok( nav.querySelector(".lupin-nav-logout") === null );
   // Auth-gated items still show (authenticated === true).
   assert.equal(nav.querySelectorAll(".lupin-nav-link").length, 3);
 });
@@ -248,7 +248,7 @@ test("D3 TRANSITION: auth_state_change re-renders logged-in → logged-out (Logo
   port.setEmail(null);
   emitAuthChange(bus, "expired");
 
-  assert.equal(root.querySelector(".lupin-nav-logout"), null, "Logout gone after logout transition");
+  assert.ok( root.querySelector(".lupin-nav-logout") === null, "Logout gone after logout transition" );
   assert.ok(root.querySelector(".lupin-nav-login"), "Login link appears after logout transition");
 });
 
@@ -268,12 +268,12 @@ test("unmount unsubscribes (no repaint) + clears the root; re-mount OK", () => {
   assert.ok(root.querySelector(".lupin-nav"));
 
   r.unmount();
-  assert.equal(root.querySelector(".lupin-nav"), null);
+  assert.ok( root.querySelector(".lupin-nav") === null );
 
   // After unmount, an auth_state_change must NOT repaint into the old root.
   port.setAuthenticated(false);
   emitAuthChange(bus, "expired");
-  assert.equal(root.querySelector(".lupin-nav"), null);
+  assert.ok( root.querySelector(".lupin-nav") === null );
 
   assert.doesNotThrow(() => r.mount(root));
   assert.ok(root.querySelector(".lupin-nav"));
@@ -303,6 +303,6 @@ test("forceRenderForTesting after mount repaints from current port state", () =>
   port.setAuthenticated(false);
   port.setEmail(null);
   r.forceRenderForTesting();
-  assert.equal(root.querySelector(".lupin-nav-logout"), null);
+  assert.ok( root.querySelector(".lupin-nav-logout") === null );
   assert.ok(root.querySelector(".lupin-nav-login"));
 });

@@ -107,7 +107,7 @@ test("senderCard: unread_count > 0 renders .sender-new-count badge with the numb
 
 test("senderCard: unread_count === 0 renders no .sender-new-count badge", () => {
   const card = renderSenderCard(makeSender({ unread_count: 0 }), [], { appTimezone: "UTC" });
-  assert.equal(card.querySelector(".sender-new-count"), null);
+  assert.ok( card.querySelector(".sender-new-count") === null );
 });
 
 // ---------------------------------------------------------------------------
@@ -120,9 +120,9 @@ test("senderCard: unread_count === 0 renders no .sender-new-count badge", () => 
 test("senderCard: WORKER (is_worker) sets data-worker on the card AND suppresses .sender-new-count", () => {
   const card = renderSenderCard(makeSender({ unread_count: 7, is_worker: true }), [], { appTimezone: "UTC" });
   assert.equal(card.getAttribute("data-worker"), "true", "card flagged worker for the shared pulse rule");
-  assert.equal(card.querySelector(".sender-new-count"), null, "numeric count suppressed for worker");
+  assert.ok( card.querySelector(".sender-new-count") === null, "numeric count suppressed for worker" );
   // Number-only suppression — the stats container (pulse anchor) still renders.
-  assert.notEqual(card.querySelector(".sender-stats-group"), null);
+  assert.ok( card.querySelector(".sender-stats-group") !== null );
 });
 
 test("senderCard: ROOT (is_worker false) keeps the count and carries NO data-worker", () => {
@@ -142,7 +142,7 @@ test("senderCard: is_worker undefined (no lineage signal) behaves like a non-wor
 test("senderCard: WORKER with zero unread still flags data-worker (pulse needs it) and shows no count", () => {
   const card = renderSenderCard(makeSender({ unread_count: 0, is_worker: true }), [], { appTimezone: "UTC" });
   assert.equal(card.getAttribute("data-worker"), "true");
-  assert.equal(card.querySelector(".sender-new-count"), null);
+  assert.ok( card.querySelector(".sender-new-count") === null );
 });
 
 test("senderCard: borrowed persona gets the 'borrowed' class on .sender-persona-badge", () => {
@@ -186,7 +186,7 @@ test("senderCard: empty display_name falls back to sender_id in header (.sender-
   assert.notEqual(nameEl, null);
   assert.equal(nameEl!.textContent, "sess_99");
   // The old mux-only class must be gone (rename, not add-alongside).
-  assert.equal(card.querySelector(".sender-display-name"), null);
+  assert.ok( card.querySelector(".sender-display-name") === null );
 });
 
 // ---------------------------------------------------------------------------
@@ -202,12 +202,12 @@ test("senderCard: header emits the always-present chrome (status / project-name 
   const card = renderSenderCard(makeSender(), [], { appTimezone: "UTC" });
   const header = card.querySelector(".sender-card-header");
   assert.notEqual(header, null);
-  assert.notEqual(header!.querySelector(".sender-status"), null, ".sender-status present");
-  assert.notEqual(header!.querySelector(".sender-project-name"), null, ".sender-project-name present");
-  assert.notEqual(header!.querySelector(".sender-delete-btn"), null, ".sender-delete-btn present");
-  assert.notEqual(header!.querySelector(".sender-toggle"), null, ".sender-toggle present");
+  assert.ok( header!.querySelector(".sender-status") !== null, ".sender-status present" );
+  assert.ok( header!.querySelector(".sender-project-name") !== null, ".sender-project-name present" );
+  assert.ok( header!.querySelector(".sender-delete-btn") !== null, ".sender-delete-btn present" );
+  assert.ok( header!.querySelector(".sender-toggle") !== null, ".sender-toggle present" );
   // Mux idiom: NO inline onclick anywhere in the emitted chrome.
-  assert.equal(card.querySelector("[onclick]"), null, "no inline onclick (mux idiom)");
+  assert.ok( card.querySelector("[onclick]") === null, "no inline onclick (mux idiom)" );
 });
 
 test("senderCard: CC session (sender_id with '#') emits the session block", () => {
@@ -218,10 +218,10 @@ test("senderCard: CC session (sender_id with '#') emits the session block", () =
   );
   // V10a: the redundant `#<sessionHash>` span (.sender-session-id) was dropped —
   // the copy button still exposes the session id; the visible duplicate is gone.
-  assert.equal(card.querySelector(".sender-session-id"), null, ".sender-session-id dropped (V10a redundant #id)");
-  assert.notEqual(card.querySelector(".sender-session-copy"), null, ".sender-session-copy present");
-  assert.notEqual(card.querySelector(".sender-gist-btn"), null, ".sender-gist-btn present");
-  assert.notEqual(card.querySelector(".sender-session-name"), null, ".sender-session-name present (empty until rename lands)");
+  assert.ok( card.querySelector(".sender-session-id") === null, ".sender-session-id dropped (V10a redundant #id)" );
+  assert.ok( card.querySelector(".sender-session-copy") !== null, ".sender-session-copy present" );
+  assert.ok( card.querySelector(".sender-gist-btn") !== null, ".sender-gist-btn present" );
+  assert.ok( card.querySelector(".sender-session-name") !== null, ".sender-session-name present (empty until rename lands)" );
 });
 
 test("senderCard: non-CC sender (no '#') omits the session block (legacy parity)", () => {
@@ -230,9 +230,9 @@ test("senderCard: non-CC sender (no '#') omits the session block (legacy parity)
     [],
     { appTimezone: "UTC" },
   );
-  assert.equal(card.querySelector(".sender-session-copy"), null);
-  assert.equal(card.querySelector(".sender-gist-btn"), null);
-  assert.equal(card.querySelector(".sender-session-name"), null);
+  assert.ok( card.querySelector(".sender-session-copy") === null );
+  assert.ok( card.querySelector(".sender-gist-btn") === null );
+  assert.ok( card.querySelector(".sender-session-name") === null );
 });
 
 // ---------------------------------------------------------------------------
@@ -257,15 +257,15 @@ test("senderCard: CC session emits the inline voice-input row with all four lega
   const row = vi!.querySelector(".cc-voice-input-row");
   assert.notEqual(row, null, ".cc-voice-input-row present");
   // The four legacy-verbatim controls.
-  assert.notEqual(row!.querySelector(".sender-conversation-mode-btn"), null, "conv-mode toggle present");
-  assert.notEqual(row!.querySelector(".stt-button.cc-session-stt"), null, "mic present");
+  assert.ok( row!.querySelector(".sender-conversation-mode-btn") !== null, "conv-mode toggle present" );
+  assert.ok( row!.querySelector(".stt-button.cc-session-stt") !== null, "mic present" );
   const msgInput = row!.querySelector("input.cc-session-msg-input") as HTMLInputElement | null;
   assert.notEqual(msgInput, null, "text input present");
   assert.equal(msgInput!.getAttribute("id"), "cc-session-input-parity01", "input id composed with the session hash");
   assert.equal(msgInput!.getAttribute("placeholder"), "Send voice/text to CC session...");
-  assert.notEqual(row!.querySelector(".response-submit-button.cc-session-send"), null, "send present");
+  assert.ok( row!.querySelector(".response-submit-button.cc-session-send") !== null, "send present" );
   // Mux idiom: NO inline onclick anywhere in the row.
-  assert.equal(vi!.querySelector("[onclick]"), null, "no inline onclick (mux idiom)");
+  assert.ok( vi!.querySelector("[onclick]") === null, "no inline onclick (mux idiom)" );
 });
 
 test("senderCard: voice-input row sits BETWEEN the header and the dates region (legacy position)", () => {
@@ -312,8 +312,8 @@ test("senderCard: non-CC sender (no '#') omits the voice-input row entirely (leg
     [],
     { appTimezone: "UTC" },
   );
-  assert.equal(card.querySelector(".cc-voice-input"), null, "no voice row for a non-CC sender");
-  assert.equal(card.querySelector(".cc-voice-input-row"), null);
+  assert.ok( card.querySelector(".cc-voice-input") === null, "no voice row for a non-CC sender" );
+  assert.ok( card.querySelector(".cc-voice-input-row") === null );
 });
 
 test("senderCard: injected opts.now drives the status glyph deterministically", () => {
@@ -431,12 +431,12 @@ describe("Bug#1 — progress-group head election (176× → 1×)", () => {
     assert.equal(headMsg?.getAttribute("data-id-hash"), "q");
     // Non-head group members are pre-filtered → NOT rendered as flat rows.
     for (const gone of ["m", "a", "z", "b"]) {
-      assert.equal(card.querySelector(`.sender-message[data-id-hash="${gone}"]`), null);
+      assert.ok( card.querySelector(`.sender-message[data-id-hash="${gone}"]`) === null );
     }
     // The non-progress row survives and renders flat (no head wrapper).
     const np = card.querySelector('.sender-message[data-id-hash="np"]');
     assert.ok(np, "non-progress row should render");
-    assert.equal(np!.querySelector(".progress-group-head"), null);
+    assert.ok( np!.querySelector(".progress-group-head") === null );
   });
 
   test("cross-date-span group elects exactly ONE head (not one-per-date)", () => {
