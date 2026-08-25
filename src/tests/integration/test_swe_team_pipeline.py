@@ -24,6 +24,8 @@ import time
 import pytest
 import requests
 
+from tests.integration.v2_queued import assert_handed_off
+
 # Server configuration
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
@@ -332,11 +334,12 @@ class TestSweTeamDryRunPipeline:
         )
         assert resp.status_code == 200
 
-        data = resp.json()
-        assert data[ "status" ] == "queued"
-        assert data[ "queue_position" ] >= 0
-
-        job_id = data[ "job_id" ]
+        # The v2 hand-off status is "waiting", not "queued" — AskResponse.status is
+        # done | waiting | parked | needs_input | expired | failed (v2_ask.py:91), and
+        # AskResponse carries no queue_position at all. Both assertions predate the
+        # move of this door to v2 in 4f1501a2. assert_handed_off() is the shared check
+        # every other v2 caller uses, and it explains itself on failure.
+        job_id = assert_handed_off( resp.json() )
         assert job_id.startswith( "swe-" )
 
         # Poll until complete (shared-pool-aware budget — bug 67473d91)
