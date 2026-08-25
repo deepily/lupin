@@ -213,5 +213,46 @@ class TestTheRuleIsWhereTheAuthorWillSeeIt:
         assert "Never pass a DOM node as the ACTUAL value" not in mutated
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 4. The judgement class the burn-down ended on
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestItCoversTheNodeToNodeShapes:
+    """
+    The last 16 violations were not `(<DOM>, null)` — they compared one node to
+    ANOTHER (`strictEqual( parent.children[0], refC )`, `equal( content.parentNode,
+    body )`). Those are the shapes most likely to be re-introduced, because they
+    read as ordinary identity assertions rather than as null-checks.
+
+    Pinned verbatim from the 16 that were actually in the tree, so that a future
+    narrowing of DOM_TERMINAL cannot quietly stop covering them.
+    """
+
+    @pytest.mark.parametrize( "src", [
+        'assert.strictEqual(parent.children[0], refC);',
+        'assert.equal( content.parentNode, body, "moved" );',
+        'assert.notEqual( content.parentNode, body, "not moved" );',
+        'assert.equal( root.firstElementChild, header );',
+        'assert.equal( btn.nextElementSibling, other );',
+        'assert.equal( h3.querySelector( ".c" ), handle.countEl );',
+        'assert.equal( handle.actionsEl.lastElementChild, x );',
+        'assert.equal( document.body.firstChild, port );',
+    ] )
+    def test_a_node_to_node_comparison_is_flagged( self, src ):
+        assert scan_text( src ), (
+            "A DOM node is the ACTUAL value here — a failing assertion deep-inspects it. "
+            "Not flagged: %s" % src
+        )
+
+    @pytest.mark.parametrize( "src", [
+        'assert.equal( root.firstElementChild.id, "x" );',      # primitive projection
+        'assert.equal( calls[0].body, payload );',              # a fetch record, not document.body
+    ] )
+    def test_the_controls_stay_unflagged( self, src ):
+        # Without these the parametrised test above would pass just as happily
+        # against a rule that flagged every assert in the tree.
+        assert not scan_text( src ), "false positive on: %s" % src
+
+
 def test_every_test_this_file_declares_is_actually_collected( request ):
     assert_every_declared_test_is_collected( request, __file__ )
