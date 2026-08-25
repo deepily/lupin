@@ -148,14 +148,25 @@ class QueueWorkflowHelper:
     async def get_queue_contents(self, queue_type: str) -> dict:
         """
         Get queue contents.
-        
+
+        This used to call GET /api/queue/{queue_type}. THAT URL HAS NEVER EXISTED
+        in any commit — the only route under /api/queue/ is /api/queue/pool-status.
+        So it returned 404 for all four queue types, every iteration of the caller's
+        loop took a `continue`, and not one assertion in the test body ever ran.
+
+        Queue contents are served by GET /api/get-queue/{queue_name}, whose own
+        OpenAPI summary reads "Get queue contents" (queues.py:270). That is the same
+        door `get_queue_status` uses; there is ONE endpoint, and the two helpers
+        differ only in what their callers assert about the reply — status asserts a
+        count, contents asserts the job-record shape.
+
         Args:
             queue_type: "todo", "run", "done", or "dead"
-            
+
         Returns:
             Queue contents response
         """
-        response = await self.client.http_request("GET", f"/api/queue/{queue_type}")
+        response = await self.client.http_request("GET", f"/api/get-queue/{queue_type}")
         return response
 
 
@@ -435,40 +446,87 @@ class QueueWorkflowSmokeTests:
             assert final_count >= 0, f"Queue count should not be negative for {queue_type}"
     
     async def test_queue_contents_access(self):
-        """Test accessing queue contents if available."""
-        queue_types = ["todo", "run", "done", "dead"]
-        
-        # The "queue contents might not be accessible" case this loop used to
-        # tolerate with `except Exception: pass` is already handled explicitly by
-        # the 404 branch below. The handler only added blindness: it swallowed the
-        # assert_response_ok and both structural assertions, so a 500 response or a
-        # malformed queue item could not fail this test.
+        """
+        Assert the shape of the queue-contents reply for all four queues.
+
+        WHAT THIS TEST USED TO BE. Its helper called /api/queue/{queue_type}, a URL
+        that has never existed, so every iteration hit a 404, took a `continue`, and
+        executed none of the assertions below it. It was green, collected, and proved
+        nothing — assertion-never-reached, shape 7 of
+        src/rnd/v0.2.0/2026.08.23-plausible-and-wrong-seven-vacuity-shapes.md.
+        The 404 branch is gone rather than tolerated: assert_response_ok now NAMES a
+        404 instead of stepping around it.
+
+        THE OLD STRUCTURAL CHECKS WERE ALSO WRONG, not merely unreached. They looked
+        for "id" / "message" / "text" on each item and for a top-level "items" list.
+        The endpoint returns neither. Its real reply (queues.py, all three branches)
+        is a fixed envelope:
+
+            { f"{queue_name}_jobs_metadata" : [ job, ... ],
+              "filtered_by"                 : str,
+              "is_admin_view"               : bool,
+              "total_jobs"                  : int }
+
+        Requires:
+            - the live server on :7999 is reachable and the client holds a token
+            - queue_type is one of todo / run / done / dead
+
+        Ensures:
+            - every queue answers 200; a 404 or 500 fails naming the queue
+            - the four envelope keys are present, correctly typed, and total_jobs
+              AGREES with the length of the job list it claims to count
+            - every job record carries the fields the UI reads off it
+            - when the queues happen to be empty the per-job assertions cannot run,
+              and this test SAYS SO on stdout rather than reporting a silent green
+              about job structure it never inspected
+        """
+        queue_types     = [ "todo", "run", "done", "dead" ]
+        items_inspected = 0
+
         for queue_type in queue_types:
-            response = await self.queue_helper.get_queue_contents(queue_type)
-            
-            # Queue contents endpoint might not exist
-            if response.status_code == 404:
-                if self.debug:
-                    print(f"[DEBUG] Queue contents endpoint not found for {queue_type}")
-                continue
-            
-            self.validator.assert_response_ok(response, 200)
-            
-            data = response.json()
-            
-            # Should return list or dict with queue items
-            if isinstance(data, list):
-                # List of queue items
-                for item in data:
-                    if isinstance(item, dict):
-                        # Each item should have some basic structure
-                        assert "id" in item or "message" in item or "text" in item, \
-                            f"Queue item should have basic fields: {item}"
-            elif isinstance(data, dict):
-                # Dict with queue info
-                if "items" in data:
-                    assert isinstance(data["items"], list), \
-                        "Queue items should be a list"
+            response = await self.queue_helper.get_queue_contents( queue_type )
+
+            self.validator.assert_response_ok( response, 200 )
+
+            data         = response.json()
+            metadata_key = f"{queue_type}_jobs_metadata"
+
+            for key in ( metadata_key, "filtered_by", "is_admin_view", "total_jobs" ):
+                assert key in data, \
+                    f"/api/get-queue/{queue_type} reply is missing '{key}'; got {sorted( data.keys() )}"
+
+            jobs = data[ metadata_key ]
+            assert isinstance( jobs, list ), \
+                f"{metadata_key} should be a list, got {type( jobs ).__name__}"
+            assert isinstance( data[ "total_jobs" ], int ), \
+                f"total_jobs should be an int for {queue_type}, got {type( data[ 'total_jobs' ] ).__name__}"
+            assert data[ "total_jobs" ] == len( jobs ), \
+                f"total_jobs ({data[ 'total_jobs' ]}) disagrees with len({metadata_key}) ({len( jobs )}) for {queue_type}"
+            assert isinstance( data[ "filtered_by" ], str ) and data[ "filtered_by" ], \
+                f"filtered_by should be a non-empty string for {queue_type}, got {data[ 'filtered_by' ]!r}"
+            assert isinstance( data[ "is_admin_view" ], bool ), \
+                f"is_admin_view should be a bool for {queue_type}, got {type( data[ 'is_admin_view' ] ).__name__}"
+
+            # Fields common to all three server-side branches (todo/run, done, dead).
+            # The done branch adds response_text and artifact paths; those are not
+            # asserted here because three of the four queues never carry them.
+            for job in jobs:
+                assert isinstance( job, dict ), \
+                    f"{metadata_key} entries should be dicts, got {type( job ).__name__}"
+                for field in ( "job_id", "question_text", "timestamp", "user_id", "agent_type", "status" ):
+                    assert field in job, \
+                        f"{queue_type} job record is missing '{field}'; got {sorted( job.keys() )}"
+                assert isinstance( job[ "job_id" ], str ) and job[ "job_id" ], \
+                    f"{queue_type} job_id should be a non-empty string, got {job[ 'job_id' ]!r}"
+                items_inspected += 1
+
+        # Disclosure, not decoration. The envelope assertions above ran for all four
+        # queues and can fail; the per-job ones only run when a queue holds something.
+        # Saying which half executed is the difference between this test and the one
+        # it replaces.
+        if items_inspected == 0:
+            print( "[NOTE] test_queue_contents_access: all four queues were empty, so the "
+                   "per-job field assertions did not execute. The envelope assertions did." )
     
     async def test_job_completion_flow(self):
         """Test complete job lifecycle if possible."""
