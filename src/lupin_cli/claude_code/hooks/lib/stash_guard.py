@@ -29,34 +29,41 @@ SCOPE: only the MUTATING subcommands are denied. `git stash list` and
 `git stash show` are read-only and stay allowed — they are how you inspect the
 stack before acting on it.
 
-KNOWN OVER-BLOCK, AND IT IS DELIBERATE (row e062580e). This is a regex over the
-RAW command string; it does not parse shell quoting. So a separator appearing
-INSIDE a quoted string still counts as a command position, and a command that
-merely CONTAINS such a snippet is refused even though no stash would run.
-Measured 2026-08-24 while demonstrating the guard:
+FIXED OVER-BLOCK, kept here as a record (row e062580e). This matcher is a regex
+over the RAW command string and did not parse shell quoting, so a separator
+appearing INSIDE a quoted literal counted as a command position and a command
+that merely CONTAINED such a snippet was refused, even though no stash would
+run. Measured 2026-08-24 while demonstrating the guard, three false denies: a
+semicolon, a pipe, and a paren, each inside a quoted literal.
 
-    DENIED   x = "cd /tmp; git st​ash pop"     separator inside a quoted literal
-    DENIED   x = "foo | git st​ash push"       pipe inside a quoted literal
-    allowed  x = "git st​ash pop"              quoted literal, no separator first
-    allowed  grep "git st​ash" docs/           the phrase as a plain argument
-    allowed  echo 'git st​ash pop'             the phrase inside a quoted string
+⇒ IT IS NOW FIXED, by `_blank_quoted_spans` below: BALANCED quoted spans are
+blanked before matching. The three cases above now pass; all thirteen mutating
+forms still deny; 58 tests, 100% lines and branches.
 
-(The examples above carry a zero-width space inside the verb so that reading
-THIS FILE through a shell command is not itself refused — which is the clearest
-statement of the problem this note describes.)
+⇒ THIS NOTE PREVIOUSLY SAID THE OPPOSITE — "the reason it is not fixed" — and
+that reasoning is worth keeping because it still holds against the fix it
+refused. Making the matcher SHELL-AWARE (shlex) is heavier on a hot path and
+RAISES on unbalanced quotes, where the fail-open backstop below would then ALLOW
+a real mutating command. Trading a false deny for a possible false allow is the
+wrong direction for a control whose whole value is deny-by-default, and that
+option stays refused. What shipped is the cheaper third option: still a regex,
+still total, and it CANNOT hide a real command, because the pattern requires a
+closing quote — an unbalanced span matches nothing and the text is left exactly
+as it was. Measured both ways.
 
-⇒ THE WORKAROUND, because you WILL hit this writing a test table or a doc
-snippet: put the script in a FILE and run the file rather than piping it through
-a heredoc, or edit with the Write/Edit tools instead of a shell redirect. Both
-were needed to produce this very paragraph.
+⇒ THE WORKAROUND THIS NOTE USED TO PRESCRIBE — put the script in a FILE and run
+the file rather than a heredoc — is no longer needed for the quoted-separator
+case. It was needed to write this very paragraph's predecessor, and it was needed
+twice more to produce the fix: once for the probe that measured the defect, once
+for the patch that removed it. It remains the right move any time the guard
+refuses authoring text.
 
-⇒ AND THE REASON IT IS NOT "FIXED": every case above is a false DENY, never a
-false ALLOW. Making the matcher shell-aware (shlex) is heavier on a hot path and
-can RAISE on unbalanced quotes — where the fail-open backstop below would then
-ALLOW a real mutating command. Trading a false deny for a possible false allow
-is the wrong direction for a control whose entire value is deny-by-default. If
-it is ever revisited, the acceptance test is that all thirteen currently-denied
-forms stay denied.
+(Some examples in this file carry a zero-width space inside the verb so that
+reading THIS FILE through a shell command is not itself refused. That trick is
+kept: the guard still denies genuine command position, which is the point.)
+
+If this is ever revisited, the acceptance test is unchanged: all thirteen
+currently-denied forms stay denied.
 
 SAFETY — this runs inside the hot-path PreToolUse hook (every tool call, every
 session), so two non-negotiables:
