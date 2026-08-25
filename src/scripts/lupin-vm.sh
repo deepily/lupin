@@ -537,7 +537,18 @@ case "$SUBCMD" in
             case "$a" in
                 --checkout) DO_CHECKOUT="checkout" ;;
                 --*)        die "push-bundle: unknown flag $a" ;;
-                *)          [ -z "$BRANCH" ] && BRANCH="$a" ;;
+                *)          # REFUSE a second positional rather than dropping it (2026-08-24).
+                            # The mode is a FLAG. `push-bundle <branch> checkout` used to send
+                            # `checkout` through here, find BRANCH already set, and discard it —
+                            # exit 0, tree never moved. A mistyped `--flag` died loudly one line
+                            # above while a plausible bare word ran and did nothing, and the only
+                            # tell was a missing tail on the dry-run plan, i.e. invisible on the
+                            # live run where it costs something.
+                            if [ -z "$BRANCH" ]; then
+                                BRANCH="$a"
+                            else
+                                die "push-bundle: unexpected argument '$a' — the mode is a FLAG, not a positional. Did you mean: push-bundle $BRANCH --checkout"
+                            fi ;;
             esac
         done
         do_push_bundle "$BRANCH" "$DO_CHECKOUT"
@@ -560,7 +571,21 @@ case "$SUBCMD" in
         # aborting would leave the operator with a moved tree and a non-zero exit and no
         # more information than the report already gave them. `deploy`'s PRE arm aborts
         # because nothing has been touched yet; this one reports.
-        if [ -n "$DO_CHECKOUT" ] && [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
+        if [ -n "$DO_CHECKOUT" ] && [ "$DRY_RUN" -eq 1 ]; then
+            # A DRY RUN MUST NOT CONTACT THE VM (2026-08-24). do_push_bundle honours
+            # DRY_RUN and returns before opening a connection, but this arm sits OUTSIDE
+            # it at subcommand level and was guarded only on DO_CHECKOUT — so
+            # `--dry-run … --checkout` opened an IAP tunnel and ran 59 assertions against
+            # the live VM, under a log line claiming the tree had moved when nothing had.
+            # Sibling `deploy` already guards its structurally identical remote call.
+            # Read-only, so nothing was damaged; a dry run that misstates its own contract
+            # is still worth closing, because it is what you reach for when unsure.
+            #
+            # It SAYS what it would do rather than going silent: skipping the arm without
+            # a word would leave the operator unaware the real run preflights at all,
+            # trading a dishonest dry run for an incomplete one.
+            log "(dry-run) POST-checkout preflight on VM: bash src/scripts/preflight-vm.sh --phase post"
+        elif [ -n "$DO_CHECKOUT" ] && [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
             log "POST-checkout preflight (--phase post) — the tree moved without a restart"
             gcloud compute ssh "$VM_NAME" \
                 --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
