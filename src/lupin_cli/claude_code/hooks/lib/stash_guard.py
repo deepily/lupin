@@ -38,7 +38,39 @@ semicolon, a pipe, and a paren, each inside a quoted literal.
 
 ⇒ IT IS NOW FIXED, by `_blank_quoted_spans` below: BALANCED quoted spans are
 blanked before matching. The three cases above now pass; all thirteen mutating
-forms still deny; 58 tests, 100% lines and branches.
+forms still deny.
+
+🔴 AND THAT FIX OPENED A HOLE, WHICH IS THE PART WORTH READING (row 1ebc9be3,
+reported by Rachel, measured 2026-08-24 by running the pre-fix and post-fix
+matchers on the same inputs). Blanking the quoted span ALSO blanked the payload
+of a nested interpreter, so `bash -c 'echo x; git st​ash pop'` DENIED before the
+over-block fix and was ALLOWED after it. A false deny had been traded for a
+false ALLOW — precisely the trade the row said to refuse, made while refusing it.
+It is repaired below by scanning an INTERPRETER'S payload while still blanking
+every other quoted span, so both properties hold at once.
+
+⇒ THE WIDER FINDING, and the reason this module was rewritten rather than
+patched: the matcher recognised ONE SPELLING of the program in one syntactic
+position. Measured against 22 natural forms, TWENTY-ONE walked past it — an
+absolute or relative path, a backslash escape, a quoted program name, the
+env / command / sudo / nohup / time / xargs wrappers, an env-assignment prefix,
+a brace group, `if ...; then`, a line continuation, a nested shell. Every one
+reaches the same repo-global stack.
+
+⇒ THE FIX IS NORMALISATION, NOT A LONGER DENYLIST. Each clause removes a DEGREE
+OF FREEDOM in how the program may be written rather than naming one more thing
+to refuse; adding cases to a denylist is how the original arrived here. 21 of 22
+now deny. 83 tests, 100% lines and branches.
+
+⚠️ THE ONE THAT REMAINS, named on purpose: `g=git; $g st​ash pop`. Text matching
+cannot resolve variable indirection, an eval, or a base64 payload, and no hook
+that sees only text ever will. THE THREAT MODEL IS ACCIDENT, NOT EVASION — this
+fleet has no adversary, it has habits. Nobody reaches for variable indirection
+by accident and everybody reaches for `/usr/bin/git`, so catching every natural
+spelling is the whole job. A test pins that residual as known and accepted, and
+fails if it is ever silently closed, so this paragraph cannot drift out of date.
+This guard is an accident-preventer. It is not a security boundary, and calling
+it one would be the same defect it exists to catch.
 
 ⇒ THIS NOTE PREVIOUSLY SAID THE OPPOSITE — "the reason it is not fixed" — and
 that reasoning is worth keeping because it still holds against the fix it
@@ -105,12 +137,57 @@ READONLY_SUBCOMMANDS = frozenset( { "list", "show" } )
 # out of the guard — there the word sits inside an argument, not at a command
 # slot. Between `git` and `stash` we skip pre-subcommand options (`-C <path>`,
 # `--git-dir=...`, `-c key=val`).
+# THE BYPASS CLASS, and why this pattern is shaped the way it is (row 1ebc9be3,
+# measured 2026-08-24 after Rachel reported it). The original pattern recognised
+# exactly ONE spelling of the program — the bare word `git` — in one syntactic
+# position. A command's TEXT has unbounded spellings, so 21 of 22 natural forms
+# walked straight past it while reaching the same repo-global stack: an absolute
+# or relative path, a backslash escape, a quoted program name, the env / command
+# / sudo / nohup / time / xargs wrappers, an env-assignment prefix, a brace
+# group, `if ...; then`, a line continuation, and a nested `sh -c`.
+#
+# ⇒ THE FIX IS NORMALISATION, NOT A LONGER DENYLIST. Every clause below removes
+# one DEGREE OF FREEDOM in how the program can be spelled, rather than naming one
+# more thing to refuse. Adding cases to a denylist is how the original got here.
+#
+# ⇒ WHAT IT CANNOT DO, stated plainly so the docstring's promise stays honest:
+# text matching cannot resolve `g=git; $g stash pop`, an eval, or a base64
+# payload. THE THREAT MODEL IS ACCIDENT, NOT EVASION — this fleet has no
+# adversary, it has habits. Nobody reaches for variable indirection by accident,
+# and everybody reaches for `/usr/bin/git` or `sudo`. Catching every natural
+# spelling is the whole job; claiming completeness would be the defect this
+# module exists to catch.
+
+# Command position, widened. `{` and `)` open a command slot too, and so do the
+# shell keywords, which is how `if true; then git stash pop; fi` slipped through.
+# ⚠️ THE BACKTICK IS DELIBERATELY ABSENT, and it is the one place this pattern
+# trades coverage for usability on measured evidence rather than taste. A
+# backtick opens a command substitution, so ``git st​ash pop`` really is an
+# invocation — but in THIS fleet a backtick almost always opens markdown prose,
+# and the two are byte-identical. Rachel measured the cost on 2026-08-24:
+# 22 denial events across 11 sessions in one night, nearly all of them people
+# writing documentation ABOUT the guard. Under an accident threat model that is
+# the wrong side of the trade: nobody runs a stash by backtick substitution
+# while writing a doc, and `$(...)` — the form people actually use — is still
+# caught by the open paren. Adding it back means re-measuring the friction.
+_COMMAND_POSITION = r"(?:^|[;&|(){}\n]|\bthen\b|\bdo\b|\belse\b|\belif\b)"
+
+# Things that sit between the command slot and the program while still running
+# it: environment assignments (FOO=bar) and transparent wrappers.
+_WRAPPERS = r"(?:env|command|builtin|exec|sudo|nohup|time|nice|stdbuf|xargs)"
+_PREFIXES = rf"(?P<prefix>(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*|{_WRAPPERS})\b)*)"
+
+# The program itself, allowing any leading path. The bare name is matched by the
+# empty alternative of the path group.
+_PROGRAM  = r"(?:[\w./~+-]*/)?git"
+
 _GIT_STASH_RE = re.compile(
-    r"""
-    (?:^|[;&|(]|\n)              # command position
+    rf"""
+    {_COMMAND_POSITION}
+    {_PREFIXES}
     \s*
-    git\b                        # the program
-    (?P<pre>(?:\s+(?:-[Cc]\s+[^\s;&|]+|-{1,2}[^\s;&|]+))*)   # pre-subcommand options; -C <path> / -c k=v take an argument
+    {_PROGRAM}\b                 # the program, however it is spelled
+    (?P<pre>(?:\s+(?:-[Cc]\s+[^\s;&|]+|-{{1,2}}[^\s;&|]+))*)   # pre-subcommand options; -C <path> / -c k=v take an argument
     (?P<sep>\s+)
     stash\b
     (?P<rest>[^;&|\n]*)          # the remainder of THIS command only
@@ -118,11 +195,64 @@ _GIT_STASH_RE = re.compile(
     re.VERBOSE,
 )
 
+# Nested interpreters: `sh -c '<payload>'` runs the payload as a command, so the
+# payload must be scanned as one. This is the arm that repairs the regression
+# _blank_quoted_spans introduced — blanking the quoted span hid the payload, so
+# `bash -c 'echo x; git stash pop'` DENIED before that change and was ALLOWED
+# after it. Recursing here restores the deny WITHOUT reopening the over-block,
+# because only an interpreter's payload is reached into; every other quoted span
+# is still blanked.
+_NESTED_SHELL_RE = re.compile(
+    r"""\b(?:ba|z|k|da)?sh\s+(?:-[A-Za-z]+\s+)*-c\s*(?P<q>['"])(?P<payload>.*?)(?P=q)""",
+    re.VERBOSE | re.DOTALL,
+)
+
 
 def _guard_disabled( env=None ) -> bool:
     """True iff LUPIN_ALLOW_GIT_STASH is set truthy (the escape hatch)."""
     env = env if env is not None else os.environ
     return str( env.get( _ENV_FLAG, "" ) ).strip().lower() in _TRUE_VALUES
+
+
+# The escape hatch written the way the deny message tells you to write it:
+# `LUPIN_ALLOW_GIT_STASH=1 git st​ash drop <sha>`.
+_INLINE_FLAG_RE = re.compile( rf"\b{_ENV_FLAG}=(?P<value>[^\s;&|]*)" )
+
+
+def _hatch_in_prefix( prefix ) -> bool:
+    """
+    True iff an env-assignment prefix carries the escape-hatch flag, truthy.
+
+    WHY THIS EXISTS, and it is a correction to a claim I made out loud (row
+    1ebc9be3, 2026-08-24). The deny message has always told the reader to
+    "re-run with LUPIN_ALLOW_GIT_STASH=1". I tested that inline form against the
+    live hook, saw the command go through, and reported the hatch as working.
+    IT WAS NOT WORKING. The hook is a separate process and never sees an inline
+    `VAR=1 cmd` prefix in its os.environ; what actually happened is that the
+    assignment pushed `git` out of command position, so the OLD matcher simply
+    failed to match. The hatch was indistinguishable from bypass #14, and my
+    original prediction — that the inline form could not reach the hook — had
+    been right before I talked myself out of it on bad evidence.
+
+    Closing that bypass therefore closed the documented hatch with it. This
+    reads the flag from the COMMAND instead, so the instruction in the deny
+    message is true rather than accidentally true.
+
+    Requires:
+        - prefix is the matched env-assignment / wrapper span, or None
+
+    Ensures:
+        - True only when the flag is assigned a truthy value IN THIS INVOCATION'S
+          own prefix — not somewhere else in the line, so `echo FLAG=1` before an
+          unrelated mutation cannot disable the guard for it
+        - never raises
+    """
+    if not prefix:
+        return False
+    found = _INLINE_FLAG_RE.search( prefix )
+    if not found:
+        return False
+    return found.group( "value" ).strip().strip( "'\"" ).lower() in _TRUE_VALUES
 
 
 def _first_subcommand( rest: str ) -> Optional[ str ]:
@@ -207,6 +337,66 @@ def _blank_quoted_spans( command ):
     return _QUOTED_SPAN_RE.sub( " ", command )
 
 
+# Escapes and quotes used INSIDE a program name: `\git`, `g\it`, `'git'`,
+# `"git"`. A backslash before a word character is shell noise that changes
+# nothing about which program runs, and quoting a bare word is the same word.
+_INNER_ESCAPE_RE = re.compile( r"\\(?=\w)" )
+_BARE_QUOTE_RE   = re.compile( r"""(?<![\w])(['"])(\w[\w./-]*)\1""" )
+
+# A backslash-newline is a line continuation: the shell joins the two lines into
+# ONE command, so `git \<newline> stash pop` is a single invocation.
+_LINE_CONTINUATION_RE = re.compile( r"\\\s*\n\s*" )
+
+
+def _normalise_spelling( command ):
+    """
+    Remove degrees of freedom in HOW a command is written, without changing
+    WHICH command it is.
+
+    Requires:
+        - command is a str
+
+    Ensures:
+        - line continuations are joined, so a wrapped invocation reads as one
+        - a backslash before a word character is dropped (`\\git` -> `git`)
+        - a quoted bare word is unquoted (`'git'` -> `git`)
+        - returns a string; never raises
+    """
+    command = _LINE_CONTINUATION_RE.sub( " ", command )
+    command = _BARE_QUOTE_RE.sub( r"\2", command )
+    command = _INNER_ESCAPE_RE.sub( "", command )
+    return command
+
+
+def _scannable_forms( command ):
+    """
+    Every text that must be checked for a mutating stash, given one raw command.
+
+    Requires:
+        - command is a non-empty str
+
+    Ensures:
+        - yields the command with quoted spans blanked (the outer shell's view)
+        - yields the payload of each nested `sh -c` / `bash -c` separately, so an
+          interpreter's argument is scanned as the command it will become
+        - every yielded form has had its spelling normalised
+        - never raises
+    """
+    # ORDER MATTERS, and getting it wrong is itself a bypass — I shipped it the
+    # other way round first and measured `'git' stash pop` sailing through.
+    # Normalise FIRST: a quoted BARE WORD like `'git'` is just the word, but if
+    # the spans are blanked first the program name disappears entirely.
+    # Unquoting bare words cannot reopen the over-block, because that pattern
+    # matches a single word with no spaces — `"cd /tmp; git stash pop"` is
+    # untouched by it and is still blanked below.
+    yield _blank_quoted_spans( _normalise_spelling( command ) )
+
+    for nested in _NESTED_SHELL_RE.finditer( command ):
+        payload = nested.group( "payload" )
+        if payload:
+            yield _normalise_spelling( payload )
+
+
 def stash_deny_reason(
     tool_name,
     tool_input,
@@ -241,11 +431,14 @@ def stash_deny_reason(
         command = tool_input.get( "command", "" )
         if not isinstance( command, str ) or not command:
             return None
-        for match in _GIT_STASH_RE.finditer( _blank_quoted_spans( command ) ):
-            sub = _first_subcommand( match.group( "rest" ) )
-            if sub in READONLY_SUBCOMMANDS:
-                continue
-            return _deny_reason_for( sub )
+        for form in _scannable_forms( command ):
+            for match in _GIT_STASH_RE.finditer( form ):
+                sub = _first_subcommand( match.group( "rest" ) )
+                if sub in READONLY_SUBCOMMANDS:
+                    continue
+                if _hatch_in_prefix( match.group( "prefix" ) ):
+                    continue
+                return _deny_reason_for( sub )
         return None
     except Exception:                    # pragma: no cover - fail-open backstop: every statement above is total over the validated inputs, so no input reaches it; kept because a hot-path guard must never raise
         return None

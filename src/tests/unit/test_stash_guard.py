@@ -323,3 +323,244 @@ def test_blanking_uses_a_space_so_it_cannot_manufacture_a_command_position():
 def test_unbalanced_input_is_returned_unchanged():
     raw = 'echo "still open'
     assert _blank_quoted_spans( raw ) == raw
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# THE BYPASS CLASS (row 1ebc9be3, reported by Rachel, measured 2026-08-24)
+#
+# The guard used to recognise ONE spelling of the program — the bare word `git`
+# — in one syntactic position. Measured against 22 natural forms, 21 walked
+# past it while reaching the same repo-global stack.
+#
+# These tests are the CLASS, not a list of the 21. Each names the degree of
+# freedom it removes, so a future edit that reintroduces one fails with a
+# sentence saying which.
+
+BYPASS_FORMS = [
+    # how the program is spelled
+    ( "/usr/bin/git stash pop",                "absolute path" ),
+    ( "/usr/local/bin/git stash pop",          "another absolute path" ),
+    ( "./git stash pop",                       "relative path" ),
+    ( "\\git stash pop",                       "backslash-escaped name" ),
+    ( "'git' stash pop",                       "single-quoted program name" ),
+    ( '"git" stash pop',                       "double-quoted program name" ),
+    ( "g\\it stash pop",                       "escape inside the name" ),
+    # wrappers that still run git
+    ( "env git stash pop",                     "via env" ),
+    ( "command git stash pop",                 "via the command builtin" ),
+    ( "sudo git stash pop",                    "via sudo" ),
+    ( "nohup git stash pop",                   "via nohup" ),
+    ( "time git stash pop",                    "via time" ),
+    ( "xargs git stash pop",                   "via xargs" ),
+    # environment assignment before the program
+    ( "GIT_DIR=/x/.git git stash pop",         "env assignment prefix" ),
+    # nested interpreters
+    ( "sh -c 'git stash pop'",                 "nested sh -c, single quotes" ),
+    ( 'sh -c "git stash pop"',                 "nested sh -c, double quotes" ),
+    ( "bash -c 'echo x; git stash pop'",       "nested bash -c with a separator" ),
+    # command positions the original class did not cover
+    ( "{ git stash pop; }",                    "brace group" ),
+    ( "if true; then git stash pop; fi",       "inside an if/then" ),
+    # line continuation
+    ( "git \\\n  stash pop",                   "backslash line continuation" ),
+]
+
+
+@pytest.mark.parametrize( "command,label", BYPASS_FORMS, ids=[ b[ 1 ] for b in BYPASS_FORMS ] )
+def test_bypass_forms_are_denied( command, label ):
+    """
+    Every spelling that reaches the shared stack must be refused.
+
+    Ensures:
+        - the guard denies the form, naming which degree of freedom regressed
+    """
+    assert stash_deny_reason( "Bash", { "command": command }, enabled=True ) is not None, (
+        f"BYPASS REOPENED — {label}: {command!r} reaches the same repo-global stack "
+        "and is no longer denied. The fix is normalisation (remove the degree of "
+        "freedom), never another entry in a denylist."
+    )
+
+
+def test_nested_shell_payload_is_scanned_and_the_over_block_stays_fixed():
+    """
+    The two halves of the quoting question, which pull in opposite directions.
+
+    Blanking quoted spans fixed a false deny (row e062580e) and, measured after
+    the fact, turned nested shells from DENY into ALLOW — a false deny traded
+    for a false ALLOW, the exact trade the row said to refuse. Reaching into an
+    INTERPRETER'S payload while still blanking every other quoted span is what
+    lets both hold at once.
+
+    Ensures:
+        - an interpreter payload is scanned as the command it becomes
+        - a quoted string that is merely TEXT is still not a command position
+    """
+    assert stash_deny_reason(
+        "Bash", { "command": "bash -c 'echo x; git stash pop'" }, enabled=True
+    ) is not None, "an interpreter's payload must be scanned as a command"
+
+    assert stash_deny_reason(
+        "Bash", { "command": 'x = "cd /tmp; git stash pop"' }, enabled=True
+    ) is None, "a separator inside a quoted literal is not a command position"
+
+
+def test_read_only_verbs_survive_every_spelling():
+    """
+    Normalisation must not turn the allowed verbs into denied ones.
+
+    Ensures:
+        - list/show stay allowed through a path, a wrapper and an interpreter
+    """
+    for command in (
+        "/usr/bin/git stash list",
+        "sudo git stash show",
+        "sh -c 'git stash list'",
+        "env git stash show -p",
+    ):
+        assert stash_deny_reason( "Bash", { "command": command }, enabled=True ) is None, \
+            f"read-only verb wrongly denied: {command!r}"
+
+
+def test_ordinary_commands_are_untouched():
+    """
+    The guard sits on EVERY tool call, so a false deny is expensive.
+
+    Ensures:
+        - commands that merely mention the word, or use git for anything else,
+          are allowed
+    """
+    for command in (
+        'grep "git stash" docs/',
+        "echo 'git stash pop'",
+        "git commit -m 'no git stash here'",
+        "git status",
+        "git log --oneline -5",
+        "ls /usr/bin/git",
+        "cat stash_guard.py",
+    ):
+        assert stash_deny_reason( "Bash", { "command": command }, enabled=True ) is None, \
+            f"false deny on an ordinary command: {command!r}"
+
+
+def test_an_interpreter_with_an_empty_payload_is_skipped():
+    """
+    `sh -c ''` matches the nested-interpreter pattern but carries nothing to
+    scan. The empty payload is skipped rather than fed to the matcher as an
+    empty string.
+
+    Ensures:
+        - an empty interpreter payload is allowed and does not raise
+        - a real command elsewhere in the same line is still caught, so the skip
+          cannot swallow the rest of the scan
+    """
+    assert stash_deny_reason( "Bash", { "command": "sh -c ''" }, enabled=True ) is None
+    assert stash_deny_reason(
+        "Bash", { "command": "sh -c ''; git stash pop" }, enabled=True
+    ) is not None
+
+
+def test_the_inline_escape_hatch_is_honoured():
+    """
+    THE DENY MESSAGE'S OWN INSTRUCTION MUST BE TRUE.
+
+    Every deny tells the reader to "re-run with LUPIN_ALLOW_GIT_STASH=1". This
+    test is the permanent guarantee that doing so works, because it silently did
+    NOT for most of this guard's life and nobody noticed (row 1ebc9be3).
+
+    The history is worth keeping. The hook is a separate process and never sees
+    an inline `VAR=1 cmd` prefix in its os.environ. The inline form appeared to
+    work only because the env assignment pushed `git` out of command position,
+    so the matcher failed to match — the hatch was indistinguishable from the
+    env-assignment BYPASS. Closing that bypass closed the hatch with it, which is
+    how the defect surfaced at all.
+
+    Ensures:
+        - the flag is read from the COMMAND, with the hook's own environment
+          explicitly clean, so this cannot pass for the old accidental reason
+        - a mutating verb is allowed through when the flag prefixes it
+        - the flag is NOT required to be in the hook's environment
+    """
+    clean = { }          # the flag deliberately absent from the hook's env
+
+    for command in (
+        "LUPIN_ALLOW_GIT_STASH=1 git stash drop",
+        "LUPIN_ALLOW_GIT_STASH=true git stash pop",
+        "LUPIN_ALLOW_GIT_STASH=1 /usr/bin/git stash push -- some/path",
+    ):
+        assert stash_deny_reason( "Bash", { "command": command }, env=clean ) is None, (
+            f"THE ESCAPE HATCH IS BROKEN for {command!r}. The deny message tells "
+            "every reader to re-run with this flag; if that instruction is false, "
+            "the guard is lying to the person it just blocked."
+        )
+
+
+def test_an_unrelated_env_assignment_is_still_denied():
+    """
+    The other side of the hatch, so honouring it cannot become a bypass.
+
+    Ensures:
+        - a non-flag assignment before git does NOT disable the guard
+        - a WRONG value for the flag does not disable it either
+        - the flag mentioned outside this invocation's own prefix does not
+          disable it — `echo` first, real mutation second
+    """
+    clean = { }
+
+    for command in (
+        "FOO=1 git stash pop",
+        "LUPIN_ALLOW_GIT_STASH=0 git stash pop",
+        "LUPIN_ALLOW_GIT_STASH=nope git stash pop",
+        "echo LUPIN_ALLOW_GIT_STASH=1; git stash pop",
+    ):
+        assert stash_deny_reason( "Bash", { "command": command }, env=clean ) is not None, (
+            f"the hatch leaked into {command!r} — it must apply only to the "
+            "invocation whose own prefix carries a truthy flag"
+        )
+
+
+def test_prose_in_backticks_is_not_a_command( ):
+    """
+    Writing ABOUT the guard must not be blocked by the guard.
+
+    Rachel measured the cost on 2026-08-24: 22 denial events across 11 sessions
+    in one night, nearly all of them people documenting this very module. A
+    backtick genuinely does open a command substitution, so this is a real trade
+    — but the two forms are byte-identical in text, and under an accident threat
+    model the documentation case dominates by orders of magnitude.
+
+    Ensures:
+        - markdown prose mentioning the verb is allowed
+        - the form people actually use for substitution, $(...), is still denied
+    """
+    prose = "cat > notes.md <<'EOF'\nThe guard denies `git stash pop`.\nEOF"
+    assert stash_deny_reason( "Bash", { "command": prose }, enabled=True ) is None, \
+        "writing documentation about the guard must not be refused by the guard"
+
+    assert stash_deny_reason(
+        "Bash", { "command": "x=$(git stash pop)" }, enabled=True
+    ) is not None, "$(...) substitution is a real invocation and must stay denied"
+
+
+def test_variable_indirection_is_the_named_residual():
+    """
+    THE LIMIT, ASSERTED SO IT CANNOT BE FORGOTTEN.
+
+    `g=git; $g stash pop` cannot be resolved from text, and neither can eval or
+    a base64 payload. This test PINS that as known and accepted rather than
+    letting the guard imply a completeness it does not have.
+
+    The threat model is ACCIDENT, not evasion (Cheech, 2026-08-24): this fleet
+    has no adversary, it has habits. Nobody reaches for variable indirection by
+    accident; everybody reaches for /usr/bin/git and sudo.
+
+    Ensures:
+        - the residual is allowed, and this test says why on purpose
+        - if a future change DOES catch it, this test fails and someone updates
+          the docstring's honesty rather than quietly gaining a promise
+    """
+    assert stash_deny_reason(
+        "Bash", { "command": "g=git; $g stash pop" }, enabled=True
+    ) is None, (
+        "variable indirection is now caught — good, but the module docstring "
+        "still calls it a residual. Update the docstring and this test together."
+    )
