@@ -109,11 +109,58 @@ class TestMarkInterruptedJobsLogic:
     Full DB integration tests require a live database.
     """
 
-    def test_running_always_interrupted( self ):
-        """RUNNING jobs should always be marked interrupted (no schedule check needed)."""
-        # This is tested by the SQL WHERE clause: status == 'running' → bulk UPDATE
-        # The logic is unconditional — no scheduled_at check for running jobs
-        assert True  # Structural assertion — the SQL handles this
+    @patch( "cosa.rest.job_persistence.get_last_available" )
+    @patch( "cosa.rest.job_persistence.get_db" )
+    def test_running_always_interrupted( self, mock_get_db, mock_last_available ):
+        """
+        RUNNING jobs are marked interrupted unconditionally.
+
+        This test used to be `assert True` with a comment saying "the SQL handles
+        this" (row ac37dc5a). It named the behaviour and checked none of it: it
+        could not tell an unconditional bulk UPDATE from one that had grown a
+        scheduled_at condition, which is exactly the regression the comment was
+        worried about.
+
+        Ensures:
+            - the bulk UPDATE targets rows whose status is RUNNING
+            - it sets status to INTERRUPTED and stamps completed_at
+            - its WHERE clause mentions ONLY status — no scheduled_at, no
+              metadata_json, no downtime window
+            - the count returned is the UPDATE's own rowcount
+            - none of this depends on the last-available marker: it runs the same
+              when there is no marker at all
+        """
+        session = _mock_db( mock_get_db )
+        mock_last_available.return_value = None          # no downtime marker at all
+        session.execute.return_value.rowcount = 3
+        session.execute.return_value.scalars.return_value.all.return_value = [ ]
+
+        counts = mark_interrupted_jobs()
+
+        assert counts[ "running" ] == 3, \
+            f"the running count must be the UPDATE's rowcount, got {counts[ 'running' ]}"
+
+        update_stmt = session.execute.call_args_list[ 0 ][ 0 ][ 0 ]
+
+        # The values it sets. SQLAlchemy wraps each literal in a BindParameter,
+        # so the value being set is on `.value`.
+        values = { c.name: v.value for c, v in update_stmt._values.items() }
+        assert values[ "status" ] == JobState.INTERRUPTED.value, \
+            f"RUNNING rows must become INTERRUPTED, got {values[ 'status' ]!r}"
+        assert "completed_at" in values, "an interrupted job must be stamped completed_at"
+
+        # The rows it selects. Compiled with literals so the comparison value is
+        # visible; the point is WHICH COLUMNS appear, not the SQL dialect.
+        where_sql = str( update_stmt.whereclause.compile(
+            compile_kwargs={ "literal_binds": True }
+        ) )
+        assert "status" in where_sql
+        assert JobState.RUNNING.value in where_sql, \
+            f"the UPDATE must select RUNNING rows, got {where_sql!r}"
+        assert "scheduled_at" not in where_sql, \
+            f"RUNNING is unconditional — a scheduled_at condition here is the bug: {where_sql!r}"
+        assert "metadata_json" not in where_sql, \
+            f"RUNNING is unconditional — no metadata lookup belongs here: {where_sql!r}"
 
     def test_pending_with_future_schedule_preserved( self ):
         """PENDING + future scheduled_at → _is_future_scheduled returns True → preserve."""

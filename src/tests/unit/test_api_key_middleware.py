@@ -283,13 +283,45 @@ class TestAPIKeySecurityRequirements:
         assert bcrypt.checkpw( test_password.encode( 'utf-8' ), password_hash )
 
     def test_no_plaintext_storage( self ):
-        """Document that plaintext API keys must not be stored."""
-        # Security requirement: Only bcrypt hashes are stored in database
-        # Plaintext keys are:
-        # 1. Generated once
-        # 2. Shown to user once
-        # 3. Written to key file
-        # 4. Never stored in database
+        """
+        The api_keys table has nowhere to put a plaintext key.
 
-        # This test documents the requirement (enforcement is by design)
-        assert True, "Plaintext API keys must never be stored in database"
+        This test used to be `assert True` with a comment saying enforcement was
+        "by design" (row ac37dc5a). A requirement that is documented and not
+        checked is a requirement that a future column can quietly break, and
+        this one guards credentials. It is mechanically checkable: read the
+        model's own columns.
+
+        Ensures:
+            - the only key-bearing column is key_hash
+            - no column is named for a raw secret (key, api_key, secret, token,
+              password, plaintext) — adding one is the regression
+            - key_hash is sized for a SHA-256 hex digest and no larger, so it
+              cannot hold a longer raw key
+            - the write path takes a hash, never the raw key
+        """
+        import inspect
+
+        from cosa.rest.postgres_models import ApiKey
+        from cosa.rest.db.repositories.api_key_repository import ApiKeyRepository
+
+        column_names = { c.name for c in ApiKey.__table__.columns }
+
+        assert "key_hash" in column_names, \
+            f"api_keys must store a hash column; got {sorted( column_names )}"
+
+        forbidden = { "key", "api_key", "raw_key", "secret", "token", "password", "plaintext" }
+        leaked    = column_names & forbidden
+        assert not leaked, \
+            f"api_keys has a column that could hold a raw credential: {sorted( leaked )}"
+
+        # A SHA-256 hex digest is exactly 64 characters. A wider column is the
+        # first thing that would have to change to store something raw.
+        assert ApiKey.__table__.columns[ "key_hash" ].type.length == 64, \
+            "key_hash is sized for a SHA-256 hex digest; widening it is a red flag"
+
+        # The write path names its input a hash and has no raw-key parameter.
+        create_params = set( inspect.signature( ApiKeyRepository.create_key ).parameters )
+        assert "key_hash" in create_params
+        assert not ( create_params & forbidden ), \
+            f"create_key accepts a raw credential parameter: {sorted( create_params & forbidden )}"
