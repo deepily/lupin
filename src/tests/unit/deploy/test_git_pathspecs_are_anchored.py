@@ -136,3 +136,96 @@ def test_the_tripwire_accepts_both_anchored_forms():
     anchored_process  = 'git -C "$root" diff --quiet "$a" "$b" -- pyproject.toml'
     assert not list( _offending_lines( anchored_pathspec ) ), ":/ pathspec must be accepted"
     assert not list( _offending_lines( anchored_process  ) ), "git -C must be accepted"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# The Python call sites: anchored, not coincidentally correct (row 0adf242e)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import subprocess
+
+
+def _repo( tmp_path ):
+    """A throwaway repo with a subdirectory and one file staged OUTSIDE it."""
+    def sh( *a ):
+        return subprocess.run( a, cwd=tmp_path, capture_output=True, text=True )
+
+    sh( "git", "init", "-q" )
+    sh( "git", "config", "user.email", "t@t.t" )
+    sh( "git", "config", "user.name", "t" )
+    ( tmp_path / "src" ).mkdir()
+    ( tmp_path / "src" / "keep.py" ).write_text( "x = 1\n" )
+    sh( "git", "add", "-A" ); sh( "git", "commit", "-qm", "base" )
+
+    ( tmp_path / "outside.txt" ).write_text( "PASSWORD = 'hunter2'\n" )
+    sh( "git", "add", "outside.txt" )
+    return tmp_path
+
+
+def test_diff_relative_really_can_blind_a_cached_read( tmp_path ):
+    """
+    THE ASSUMPTION, ASSERTED RATHER THAN TRUSTED. The pathspec-free `git diff --cached`
+    calls in this repo are repo-wide only because `diff.relative` is unset. That is a
+    COINCIDENCE, not an invariant — nothing stops someone setting it.
+
+    This test proves the hazard is real, so the `--no-relative` flags on those call
+    sites read as load-bearing rather than as noise a future reader might tidy away.
+    """
+    root = _repo( tmp_path )
+    bare = subprocess.run(
+        [ "git", "-c", "diff.relative=true", "diff", "--cached", "--name-only" ],
+        cwd=root / "src", capture_output=True, text=True ).stdout.split()
+    assert bare == [], (
+        "diff.relative no longer scopes a cached read to CWD — if git changed this, the "
+        "--no-relative flags are still harmless, but this test's premise needs rewriting"
+    )
+
+
+def test_no_relative_defeats_it( tmp_path ):
+    """The flag the call sites use must actually restore the repo-wide view."""
+    root = _repo( tmp_path )
+    fixed = subprocess.run(
+        [ "git", "-c", "diff.relative=true", "diff", "--cached", "--no-relative", "--name-only" ],
+        cwd=root / "src", capture_output=True, text=True ).stdout.split()
+    assert fixed == [ "outside.txt" ], f"--no-relative did not restore the repo-wide view: {fixed}"
+
+
+@pytest.mark.parametrize( "rel_path", [
+    "src/scripts/pre-commit-secret-scan.py",
+    "src/lupin_cli/claude_code/hooks/lib/commit_scope_guard.py",
+] )
+def test_cached_reads_in_guards_carry_no_relative( rel_path ):
+    """
+    Every `git diff --cached` in a GUARD must carry --no-relative.
+
+    These two decide whether a commit is allowed to proceed. Scoped silently to a
+    subdirectory, both fail in the same direction: an empty result reads as "nothing to
+    object to", so the guard passes the commit it exists to stop.
+    """
+    text = ( Path( cu.get_project_root() ) / rel_path ).read_text( encoding="utf-8" )
+    for i, line in enumerate( text.splitlines(), start=1 ):
+        if '"--cached"' in line and not line.strip().startswith( "#" ):
+            window = "\n".join( text.splitlines()[ i - 1 : i + 2 ] )
+            assert "--no-relative" in window, (
+                f"{rel_path}:{i} runs a --cached read without --no-relative; it will go "
+                f"blind to files staged outside the CWD if diff.relative is ever set."
+            )
+
+
+def test_secret_scanner_worktree_mode_is_anchored_to_the_repo_root():
+    """
+    `git ls-files` is CWD-SCOPED BY DEFAULT — no config needed, unlike the diff cases.
+
+    Measured on this repo before the fix: 4826 files from the root, 4638 from src/ — and
+    running the scanner from src/cosa found 38 findings where the root found 256. A secret
+    scanner that quietly covers a fraction of the tree and still reports its result is the
+    worst shape available, because the clean number is believed.
+    """
+    text = ( Path( cu.get_project_root() ) / "src/scripts/secret_scan.py" ).read_text( encoding="utf-8" )
+    assert '"git", "-C", root, "ls-files"' in text, (
+        "secret_scan.py worktree mode must run ls-files anchored to the repo root"
+    )
+    assert "os.path.join( root, f )" in text, (
+        "ls-files emits repo-root-relative paths — opening them from another CWD raises "
+        "OSError, which the surrounding except swallows, turning a coverage hole silent"
+    )

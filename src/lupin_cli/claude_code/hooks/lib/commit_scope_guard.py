@@ -182,13 +182,29 @@ def _staged_paths( cwd=None ) -> Optional[ list ]:
 
     Ensures:
         - returns the list of staged paths, possibly empty
+        - the list is REPO-WIDE regardless of `cwd` or of git config — enforced by
+          `--no-relative`, not assumed (row 0adf242e)
         - returns None when the read fails for ANY reason (not a repo, git
           missing, timeout), which the caller treats as allow
         - never raises
+
+    ⚠️ THE FAIL-OPEN ON THE THIRD LINE IS DELIBERATE AND DECLARED, not incidental:
+    a returncode != 0 or any exception yields None and the caller ALLOWS the commit.
+    That is the correct trade for a PreToolUse hook, which must never wedge a commit
+    because git was momentarily unreadable — but it means this guard cannot be relied
+    on as a security boundary. It catches an honest mistake, not a determined one.
+
+    🔴 `--no-relative` IS LOAD-BEARING. The first line of this docstring promises the
+    set is "unscoped", and without the flag that promise is only true because
+    `diff.relative` happens to be unset in this repo. With `-c diff.relative=true`,
+    measured: run from src/ with a file staged outside src/, this command returns an
+    EMPTY list — and an empty staged set reads to the caller as "nothing to object
+    to", so the guard would wave through exactly the cross-scope commit it exists to
+    stop. A contract that says "unscoped" must enforce it.
     """
     try:
         done = subprocess.run(
-            [ "git", "diff", "--cached", "--name-only" ],
+            [ "git", "diff", "--cached", "--no-relative", "--name-only" ],
             cwd            = cwd,
             capture_output = True,
             text           = True,

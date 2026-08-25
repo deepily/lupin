@@ -58,8 +58,17 @@ def added_lines_by_file( diff=None ):
         - a deleted or renamed-away path never appears
     """
     if diff is None:
+        # `--no-relative` is LOAD-BEARING (row 0adf242e, 2026-08-25). Without it the
+        # diff is scoped to the caller's CWD whenever `diff.relative` is set, and the
+        # scanner then sees NOTHING for files staged outside that directory while still
+        # reporting clean. Measured: with `-c diff.relative=true`, run from src/ with
+        # .gitignore staged, this command yields ZERO hunks.
+        #
+        # `diff.relative` is not set in this repo today — which is exactly why it is worth
+        # pinning here. The invariant was COINCIDENTAL, resting on a config nobody has
+        # touched, and a secret scanner must not depend on a setting staying unset.
         diff = subprocess.run( [ "git", "diff", "--cached", "--unified=0",
-                                 "--diff-filter=ACMR" ],
+                                 "--no-relative", "--diff-filter=ACMR" ],
                                capture_output=True, text=True ).stdout
     added, path, lineno = {}, None, 0
     for line in diff.splitlines():

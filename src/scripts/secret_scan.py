@@ -367,6 +367,7 @@ def scan_ref( ref, cwd=None ):
 
 
 if __name__ == "__main__":
+    import os
     import subprocess
     mode     = sys.argv[ 1 ] if len( sys.argv ) > 1 else "worktree"
     findings = []
@@ -407,13 +408,33 @@ if __name__ == "__main__":
         print( f"--- {len( wanted )} unique text blobs scanned ---", file=sys.stderr )
 
     elif mode == "worktree":
-        files = subprocess.run( [ "git", "ls-files" ], capture_output=True, text=True ).stdout.split()
+        # 🔴 ANCHOR TO THE REPO ROOT (row 0adf242e, 2026-08-25). `git ls-files` is
+        # CWD-SCOPED BY DEFAULT — no config required. Measured on this repo:
+        #     from repo root : 4826 files
+        #     from src/      : 4638 files   -> 188 files never scanned
+        # Run from anywhere but the root, this scanner silently covered less than the
+        # repository and still reported clean. A secret scanner that fails open is
+        # worse than no scanner, because the clean result is believed.
+        #
+        # `git rev-parse --show-toplevel` is the anchor, and the `open()` below must
+        # resolve against it too — ls-files emits repo-root-relative paths, so opening
+        # them from another CWD would raise OSError and get swallowed by the except.
+        # That would have turned a coverage hole into a SILENT one.
+        root = subprocess.run(
+            [ "git", "rev-parse", "--show-toplevel" ], capture_output=True, text=True
+        ).stdout.strip()
+        if not root:
+            print( "secret_scan: not inside a git repository — refusing to report clean", file=sys.stderr )
+            sys.exit( 2 )
+        files = subprocess.run(
+            [ "git", "-C", root, "ls-files" ], capture_output=True, text=True
+        ).stdout.split()
         skip  = ( ".venv/", "node_modules/", "__pycache__/", ".claude/worktrees/" )
         for f in files:
             if any( s in f for s in skip ):
                 continue
             try:
-                with open( f, "r", encoding="utf-8", errors="replace" ) as fh:
+                with open( os.path.join( root, f ), "r", encoding="utf-8", errors="replace" ) as fh:
                     findings += scan_text( fh.read(), f )
             except ( OSError, IsADirectoryError ):
                 continue
