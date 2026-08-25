@@ -130,7 +130,7 @@ def exclusive_flock( lock_path ):
             try:
                 fcntl.flock( lock_file.fileno(), fcntl.LOCK_UN )
                 lock_file.close()
-            except OSError:   # pragma: no cover - unlock/close failure is unreachable on a held lock under test
+            except OSError:   # pragma: no cover - flock(LOCK_UN) + close on a descriptor this function itself opened and holds; OSError has no reachable cause here
                 pass
 
 

@@ -1925,5 +1925,5 @@ def quick_smoke_test():
     print( "\nAll session_spawner smoke tests: ✓ passed" )
 
 
-if __name__ == "__main__":  # pragma: no cover  # CLI entry point; body exercised by the unit suite
+if __name__ == "__main__":  # pragma: no cover  # __name__ is never "__main__" under an import, so this line cannot execute in any in-process test
     quick_smoke_test()

@@ -722,7 +722,7 @@ def parse_own_pressure( section, persona ):
     return status, record.get( "consumption_pct_of_window" )
 
 
-def _live_own_pressure( persona ):   # pragma: no cover - live :8001 httpx fetch ONLY; parse covered by parse_own_pressure
+def _live_own_pressure( persona ):   # pragma: no cover - the body is a single live httpx call to :8001; there is no branch here to exercise without a real socket
     """
     Read THIS persona's own context-pressure record for the pre-clear stamp.
 

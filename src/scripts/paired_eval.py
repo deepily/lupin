@@ -65,7 +65,7 @@ _root        = os.environ.get( "LUPIN_ROOT", os.getcwd() )
 _src_path    = os.path.join( _root, "src" )
 _scripts_dir = os.path.join( _src_path, "scripts" )
 for _p in ( _src_path, _scripts_dir ):
-    if _p not in sys.path:               # pragma: no cover - bootstrap path guard (already present under test)
+    if _p not in sys.path:               # pragma: no cover - the guard is false whenever this module is imported, because importing it is what puts _p on sys.path; no test can reach the true arm from in-process
         sys.path.insert( 0, _p )
 
 import cosa.utils.util as du   # noqa: E402
@@ -710,6 +710,6 @@ def main(
     return { "verdict": verdict, "report": report, "out_path": out_path }
 
 
-if __name__ == "__main__":                    # pragma: no cover - CLI wrapper, exercised by the scheduled paired run
+if __name__ == "__main__":                    # pragma: no cover - __name__ is never "__main__" under an import, so this line cannot execute in any in-process test
     result = main()
     print( f"wrote {result[ 'out_path' ]}" )

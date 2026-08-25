@@ -1291,5 +1291,5 @@ def quick_smoke_test():
     print( "\nAll voice persona helpers smoke tests: ✓ passed" )
 
 
-if __name__ == "__main__":  # pragma: no cover  # CLI entry point; quick_smoke_test body is exercised by the unit suite
+if __name__ == "__main__":  # pragma: no cover  # __name__ is never "__main__" under an import, so this line cannot execute in any in-process test
     quick_smoke_test()

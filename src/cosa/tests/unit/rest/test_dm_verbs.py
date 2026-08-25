@@ -10,7 +10,7 @@ line + branch + function on every non-`# pragma: no cover` symbol:
     execute_dm_list (bad-since 400 / thread view / inbox view / limit clamp hi+lo / since passthrough)
 
 The async route handlers (post_dm_send, post_dm_respond, get_dm, list_dms) are
-`# pragma: no cover` thin I/O wiring — exercised by integration/smoke, not here.
+a `no cover` pragma: thin I/O wiring, checked by the integration and smoke tiers rather than here.
 
 Design: src/rnd/v0.1.8/2026.06.16-dm-api-namespace-design.md
 """

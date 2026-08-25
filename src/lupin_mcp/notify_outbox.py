@@ -199,7 +199,7 @@ def start_flusher(
             return False
         _flusher_started = True
 
-    def _loop():  # pragma: no cover - unbounded `while True` with a real sleep; entering it under test never returns. Body = flush() + a log-and-continue guard; flush() itself is covered directly by src/tests/unit/lupin_mcp/test_notify_outbox.py (incl. the send_fn-raises case). The guard's own except arm is NOT covered anywhere - see row 1a465fc3
+    def _loop():  # pragma: no cover - unbounded `while True` around a real time.sleep; any call enters a loop that never returns, so no test can execute this body and reach the next statement
         while True:
             time.sleep( interval_seconds )
             try:

@@ -200,4 +200,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()   # pragma: no cover — CLI entry; main() itself is covered by the unit test
+    main()   # pragma: no cover — __name__ is never "__main__" under an import, so this line cannot execute in any in-process test

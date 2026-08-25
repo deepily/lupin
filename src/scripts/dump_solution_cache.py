@@ -53,7 +53,7 @@ import sys
 import time
 
 lupin_root = os.environ.get( "LUPIN_ROOT" )
-if lupin_root is None:  # pragma: no cover — bootstrap guard; the in-process test needs LUPIN_ROOT to import cosa at all, so it is proven by a subprocess test (test_bootstrap_guard_fires_without_lupin_root) instead
+if lupin_root is None:  # pragma: no cover — unreachable in-process: importing this module requires LUPIN_ROOT to be set, so by the time any in-process test can call it the guard is already false
     raise RuntimeError( "LUPIN_ROOT not set — export LUPIN_ROOT=/path/to/project" )
 src_path = os.path.join( lupin_root, "src" )
 if src_path not in sys.path: sys.path.insert( 0, src_path )
