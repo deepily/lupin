@@ -79,6 +79,15 @@ src/conf/keys/**
 src/scripts/cloud-run.env
 src/scripts/cloud-run-model-server.env
 
+# VM-local compose env files. Four places in the tree already CALL these
+# git-ignored (docker-compose.cloud-gpu.yml:18, preflight-vm-lib.sh:224,
+# lupin-vm.sh:45, vm-unversioned-manifest.tsv:44) and until this line they
+# were not — `git check-ignore` returned nothing for either. They carry
+# DB_PASSWORD and JWT_SECRET_KEY per src/conf/env-contract.tsv, i.e. exactly
+# what the `.env` rule above exists to keep out of a tracked file.
+cloud-gpu.env
+cloud-test.env
+
 # Terraform — local state, provider cache, and secret-bearing tfvars.
 # (.terraform.lock.hcl IS committed — it pins provider versions.)
 src/terraform/**/.terraform/

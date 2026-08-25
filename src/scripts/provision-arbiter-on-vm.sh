@@ -27,8 +27,12 @@
 #     at it (e.g. export LUPIN_ROOT=/mnt/lupin-data/lupin).
 #   - The running user is in the `docker` group (so `docker inspect` works without
 #     sudo). Verify: `id -nG | tr ' ' '\n' | grep -qx docker`.
-#   - The cloud-test compose stack is (or will be) up; the arbiter watches the
-#     containers named in [Lupin: Testing-GCS] `arbiter health watch containers`.
+#   - The cloud-GPU compose stack is (or will be) up; the arbiter watches the
+#     containers named in [Lupin: Testing-GCS] `arbiter health watch containers`
+#     (= lupin-rest-cloud-gpu, lupin-cloudsql-proxy — lupin-app.ini:686).
+#     NOT cloud-test: lupin-host-test runs docker-compose.cloud-gpu.yml. The INI
+#     was corrected cloud-test -> cloud-gpu on 2026-07-22 (lupin-app.ini:37 note);
+#     this script's two operator-facing mentions were not, until row 0d175dac.
 #
 # Design of record:
 #   src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.06.10-m2-arbiter-ride-along-and-vm-cutover.md §2.4
@@ -169,7 +173,7 @@ HELD — operator/Rick steps (NOT run by this script; actuates the login session
 
 Bounce-survival check (the out-of-band guarantee): restarting an app container
 must NOT affect :8001 —
-  docker restart lupin-rest-cloud-test && \\
+  docker restart lupin-rest-cloud-gpu && \\
   python3 -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3).read())"
 ================================================================================
 EOF
