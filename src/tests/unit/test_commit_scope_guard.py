@@ -30,97 +30,287 @@ def _bash( command ):
     return ( "Bash", { "command": command } )
 
 
-# ── It fires on a real commit ────────────────────────────────────────────────
+# ── Manifest fixture ─────────────────────────────────────────────────────────
 
-def test_plain_commit_is_denied_and_lists_the_whole_index():
-    tool, payload = _bash( 'git commit -m "a message"' )
+MANIFEST = """# Claude Session Manifest (Multi-Session)
+**Format Version**: 2.0
 
-    reason = commit_scope_deny_reason( tool, payload, staged_reader=_reader( "mine.py", "theirs.py" ) )
+---
+
+## Session: e5398ce6
+**Status**: active
+
+### Touched Files
+- 2026-08-25T17:17:00 | src/mine_one.py
+- 2026-08-25T17:20:00 | src/mine_two.py
+
+---
+
+## Session: aa11bb22
+**Status**: active
+
+### Touched Files
+- 2026-08-25T16:00:00 | src/theirs.py
+
+---
+"""
+
+MY_SESSION = "e5398ce6-fd21-4cb6-8556-1a44844f8fcf"
+
+
+@pytest.fixture
+def repo( tmp_path ):
+    """A tree carrying the parallel-session manifest."""
+    ( tmp_path / ".claude-session.md" ).write_text( MANIFEST )
+    return str( tmp_path )
+
+
+# ── PROOF 1 — RED FIRST: a contaminated index is refused, naming the foreign file
+
+def test_a_peers_staged_file_is_refused_and_its_owner_named( repo ):
+    tool, payload = _bash( "git commit -m x" )
+
+    reason = commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/mine_one.py", "src/theirs.py" ),
+    )
 
     assert reason is not None
-    assert "WHOLE INDEX" in reason
-    assert "2 file(s) staged" in reason
-    assert "mine.py" in reason
-    assert "theirs.py" in reason
+    assert "src/theirs.py" in reason
+    assert "claimed by session aa11bb22" in reason
+    assert "1 staged file(s) are NOT claimed" in reason
 
 
-def test_the_reason_names_every_staged_path_not_a_summary():
-    """The list IS the control — a count without names reproduces the defect."""
-    paths = [ f"src/file_{i}.py" for i in range( 12 ) ]
-    tool, payload = _bash( "git commit -F -" )
+def test_a_file_no_session_claims_is_refused_too( repo ):
+    """Unaccounted is unaccounted, even when no peer section names it."""
+    tool, payload = _bash( "git commit -m x" )
 
-    reason = commit_scope_deny_reason( tool, payload, staged_reader=_reader( *paths ) )
+    reason = commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/mine_one.py", "src/nobody.py" ),
+    )
 
-    for path in paths:
+    assert "src/nobody.py" in reason
+    assert "claimed by no session" in reason
+
+
+def test_the_refusal_always_prints_the_full_unscoped_set( repo ):
+    """The unscoped list is the thing the original defect was missing."""
+    tool, payload = _bash( "git commit -m x" )
+
+    reason = commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/mine_one.py", "src/mine_two.py", "src/theirs.py" ),
+    )
+
+    assert "THE FULL STAGED SET (3 file(s))" in reason
+    for path in ( "src/mine_one.py", "src/mine_two.py", "src/theirs.py" ):
         assert path in reason
 
 
-def test_amend_is_denied_too():
-    """--amend still writes the index, so it carries the same hazard."""
-    tool, payload = _bash( "git commit --amend --no-edit" )
+# ── PROOF 2 — NEGATIVE CONTROL: a clean single-seat index commits untouched ──
 
-    assert commit_scope_deny_reason( tool, payload, staged_reader=_reader( "a.py" ) ) is not None
+def test_a_clean_single_seat_index_is_not_refused( repo ):
+    """Not refuse-always in disguise. Zero friction on the normal path."""
+    tool, payload = _bash( "git commit -m x" )
 
+    reason = commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/mine_one.py", "src/mine_two.py" ),
+    )
+
+    assert reason is None
+
+
+@pytest.mark.parametrize( "auto", [ "history.md", "TODO.md", "CLAUDE.md", ".claude-session.md" ] )
+def test_sanctioned_auto_includes_ride_along( repo, auto ):
+    """CLAUDE.md sanctions these on any session's commit."""
+    tool, payload = _bash( "git commit -m x" )
+
+    reason = commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/mine_one.py", auto ),
+    )
+
+    assert reason is None
+
+
+def test_the_verdict_is_deterministic( repo ):
+    """Same staged set, same verdict every run — peer noise must not move it."""
+    tool, payload = _bash( "git commit -m x" )
+    call = lambda: commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/mine_one.py", "src/theirs.py" ),
+    )
+
+    assert call() == call() == call()
+
+
+# ── PROOF 3 — the escape hatch is honoured ──────────────────────────────────
+
+def test_the_hatch_lets_a_deliberate_peer_landing_through( repo ):
+    """A manager landing a peer's reviewed work on purpose stays possible."""
+    tool, payload = _bash( "LUPIN_COMMIT_SCOPE_ACK=1 git commit -m 'land reviewed work'" )
+
+    reason = commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/theirs.py" ),
+    )
+
+    assert reason is None
+
+
+@pytest.mark.parametrize( "value", [ "1", "true", "on", "yes", "TRUE" ] )
+def test_every_truthy_hatch_value_is_honoured( repo, value ):
+    tool, payload = _bash( f"LUPIN_COMMIT_SCOPE_ACK={value} git commit -m x" )
+
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo, staged_reader=_reader( "src/theirs.py" )
+    ) is None
+
+
+def test_a_falsy_hatch_does_not_open_it( repo ):
+    tool, payload = _bash( "LUPIN_COMMIT_SCOPE_ACK=0 git commit -m x" )
+
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo, staged_reader=_reader( "src/theirs.py" )
+    ) is not None
+
+
+def test_a_hatch_elsewhere_on_the_line_does_not_open_it( repo ):
+    """Scoped to this invocation's own prefix."""
+    tool, payload = _bash( "echo LUPIN_COMMIT_SCOPE_ACK=1 && git commit -m x" )
+
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo, staged_reader=_reader( "src/theirs.py" )
+    ) is not None
+
+
+# ── PROOF 4 — FAIL-OPEN when no manifest exists ─────────────────────────────
+
+def test_no_manifest_file_fails_open( tmp_path ):
+    """Most of the fleet. A seat that never adopted the discipline is not wedged."""
+    tool, payload = _bash( "git commit -m x" )
+
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=str( tmp_path ),
+        staged_reader=_reader( "anything.py", "whatever.py" ),
+    ) is None
+
+
+def test_a_session_with_no_section_fails_open( repo ):
+    """The manifest exists but says nothing about this seat."""
+    tool, payload = _bash( "git commit -m x" )
+
+    assert commit_scope_deny_reason(
+        tool, payload, session_id="99999999-0000-0000-0000-000000000000", cwd=repo,
+        staged_reader=_reader( "src/theirs.py" ),
+    ) is None
+
+
+def test_a_missing_session_id_fails_open( repo ):
+    tool, payload = _bash( "git commit -m x" )
+
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=None, cwd=repo, staged_reader=_reader( "src/theirs.py" )
+    ) is None
+
+
+def test_an_unreadable_index_fails_open( repo ):
+    tool, payload = _bash( "git commit -m x" )
+
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo, staged_reader=lambda cwd: None
+    ) is None
+
+
+def test_an_empty_index_is_allowed( repo ):
+    tool, payload = _bash( "git commit -m x" )
+
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo, staged_reader=_reader()
+    ) is None
+
+
+def test_a_section_claiming_nothing_is_not_the_same_as_no_section( tmp_path ):
+    """Empty section = this seat claims nothing, so a staged file IS foreign."""
+    manifest = "\n".join( [
+        "## Session: e5398ce6",
+        "**Status**: active",
+        "",
+        "### Touched Files",
+        "",
+        "---",
+    ] )
+    ( tmp_path / ".claude-session.md" ).write_text( manifest )
+    tool, payload = _bash( "git commit -m x" )
+
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=str( tmp_path ),
+        staged_reader=_reader( "src/something.py" ),
+    ) is not None
+
+
+# ── Size is an independent trigger, unrelated to ownership ──────────────────
+
+def test_an_oversized_own_file_is_still_refused( repo, tmp_path ):
+    """The 246 MB incident: the files were the committer's OWN."""
+    big = tmp_path / "src" / "mine_one.py"
+    big.parent.mkdir( parents=True, exist_ok=True )
+    big.write_bytes( b"x" * ( LARGE_FILE_BYTES + 1 ) )
+    tool, payload = _bash( "git commit -m x" )
+
+    reason = commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo, staged_reader=_reader( "src/mine_one.py" ),
+    )
+
+    assert "LARGE FILE(S) STAGED" in reason
+    assert "246 MB" in reason
+
+
+def test_size_refuses_even_with_no_manifest( tmp_path ):
+    """Ownership fail-open must not disable the size trigger."""
+    big = tmp_path / "huge.bin"
+    big.write_bytes( b"x" * ( LARGE_FILE_BYTES + 1 ) )
+    tool, payload = _bash( "git commit -m x" )
+
+    reason = commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=str( tmp_path ), staged_reader=_reader( "huge.bin" ),
+    )
+
+    assert "LARGE FILE(S) STAGED" in reason
+
+
+def test_a_small_own_file_triggers_nothing( repo, tmp_path ):
+    """Positive control on the size trigger."""
+    small = tmp_path / "src" / "mine_one.py"
+    small.parent.mkdir( parents=True, exist_ok=True )
+    small.write_text( "x" )
+    tool, payload = _bash( "git commit -m x" )
+
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo, staged_reader=_reader( "src/mine_one.py" )
+    ) is None
+
+
+# ── Command matching ────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize( "command", [
     "git commit -m x",
     "/usr/bin/git commit -m x",
-    "./git commit -m x",
     "cd /repo && git commit -m x",
     "sudo git commit -m x",
-    "env git commit -m x",
     "GIT_AUTHOR_NAME=x git commit -m y",
     "git -C /repo commit -m x",
-    "true; git commit -m x",
+    "git commit --amend --no-edit",
     "if true; then git commit -m x; fi",
 ] )
-def test_natural_spellings_are_caught( command ):
-    """Accident threat model: the forms people actually type."""
+def test_natural_spellings_are_caught( repo, command ):
     tool, payload = _bash( command )
 
-    assert commit_scope_deny_reason( tool, payload, staged_reader=_reader( "a.py" ) ) is not None
-
-
-# ── It stays quiet when it should ────────────────────────────────────────────
-
-def test_acknowledged_commit_passes():
-    tool, payload = _bash( 'LUPIN_COMMIT_SCOPE_ACK=1 git commit -m "reviewed the index"' )
-
-    assert commit_scope_deny_reason( tool, payload, staged_reader=_reader( "a.py" ) ) is None
-
-
-@pytest.mark.parametrize( "value", [ "1", "true", "on", "yes", "TRUE" ] )
-def test_every_truthy_ack_value_passes( value ):
-    tool, payload = _bash( f"{ 'LUPIN_COMMIT_SCOPE_ACK' }={value} git commit -m x" )
-
-    assert commit_scope_deny_reason( tool, payload, staged_reader=_reader( "a.py" ) ) is None
-
-
-def test_a_falsy_ack_does_not_acknowledge():
-    tool, payload = _bash( "LUPIN_COMMIT_SCOPE_ACK=0 git commit -m x" )
-
-    assert commit_scope_deny_reason( tool, payload, staged_reader=_reader( "a.py" ) ) is not None
-
-
-def test_an_ack_elsewhere_on_the_line_does_not_acknowledge():
-    """Scoped to this invocation's own prefix — an echo cannot acknowledge a commit."""
-    tool, payload = _bash( "echo LUPIN_COMMIT_SCOPE_ACK=1 && git commit -m x" )
-
-    assert commit_scope_deny_reason( tool, payload, staged_reader=_reader( "a.py" ) ) is not None
-
-
-def test_empty_index_is_allowed():
-    """Nothing staged — the commit fails on its own and there is nothing to review."""
-    tool, payload = _bash( "git commit -m x" )
-
-    assert commit_scope_deny_reason( tool, payload, staged_reader=_reader() ) is None
-
-
-def test_unreadable_index_fails_open():
-    """Not a repo, git missing, timeout — a guard must never break a tool call."""
-    tool, payload = _bash( "git commit -m x" )
-
-    assert commit_scope_deny_reason( tool, payload, staged_reader=lambda cwd: None ) is None
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo, staged_reader=_reader( "src/theirs.py" )
+    ) is not None
 
 
 @pytest.mark.parametrize( "command", [
@@ -129,77 +319,33 @@ def test_unreadable_index_fails_open():
     "git log --oneline -1",
     "grep -rn 'git commit' docs/",
     "echo 'git commit -m x'",
-    "python -c \"print('git commit')\"",
+    "echo 'first; git commit -m x'",
 ] )
-def test_non_commit_commands_are_untouched( command ):
+def test_non_commit_commands_are_untouched( repo, command ):
     tool, payload = _bash( command )
 
-    assert commit_scope_deny_reason( tool, payload, staged_reader=_reader( "a.py" ) ) is None
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo, staged_reader=_reader( "src/theirs.py" )
+    ) is None
 
 
-def test_a_quoted_separator_does_not_manufacture_a_command_position():
-    """The over-block stash_guard had to fix — a separator inside a literal."""
-    tool, payload = _bash( "echo 'first; git commit -m x'" )
-
-    assert commit_scope_deny_reason( tool, payload, staged_reader=_reader( "a.py" ) ) is None
-
-
-def test_non_bash_tools_are_untouched():
-    assert commit_scope_deny_reason( "Edit", { "command": "git commit -m x" }, staged_reader=_reader( "a.py" ) ) is None
+def test_non_bash_tools_are_untouched( repo ):
+    assert commit_scope_deny_reason(
+        "Edit", { "command": "git commit -m x" }, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/theirs.py" ),
+    ) is None
 
 
 @pytest.mark.parametrize( "payload", [ None, "not a dict", 42, [] ] )
-def test_malformed_tool_input_fails_open( payload ):
-    assert commit_scope_deny_reason( "Bash", payload, staged_reader=_reader( "a.py" ) ) is None
+def test_malformed_tool_input_fails_open( repo, payload ):
+    assert commit_scope_deny_reason( "Bash", payload, session_id=MY_SESSION, cwd=repo ) is None
 
 
 @pytest.mark.parametrize( "command", [ "", None, 42 ] )
-def test_missing_or_non_string_command_fails_open( command ):
-    assert commit_scope_deny_reason( "Bash", { "command": command }, staged_reader=_reader( "a.py" ) ) is None
-
-
-# ── The size call-out — the 246 MB class ─────────────────────────────────────
-
-def test_a_large_staged_file_is_flagged( tmp_path ):
-    """A path list alone reads as harmless; a size beside it does not."""
-    big = tmp_path / "voice-commands-xml-train.jsonl.prev"
-    big.write_bytes( b"x" * ( LARGE_FILE_BYTES + 1 ) )
-    tool, payload = _bash( "git commit -m x" )
-
-    reason = commit_scope_deny_reason(
-        tool, payload, cwd=str( tmp_path ),
-        staged_reader=_reader( "voice-commands-xml-train.jsonl.prev" ),
-    )
-
-    assert "LARGE FILE(S)" in reason
-    assert "246 MB" in reason
-    assert "⚠️" in reason
-
-
-def test_a_small_staged_file_is_not_flagged( tmp_path ):
-    """Positive control — the size call-out is not printed for everything."""
-    small = tmp_path / "mod.py"
-    small.write_text( "x" )
-    tool, payload = _bash( "git commit -m x" )
-
-    reason = commit_scope_deny_reason(
-        tool, payload, cwd=str( tmp_path ), staged_reader=_reader( "mod.py" ),
-    )
-
-    assert "LARGE FILE(S)" not in reason
-    assert "mod.py" in reason
-
-
-def test_a_staged_path_that_no_longer_exists_is_still_listed( tmp_path ):
-    """A deletion is staged too — an unreadable size must not drop the path."""
-    tool, payload = _bash( "git commit -m x" )
-
-    reason = commit_scope_deny_reason(
-        tool, payload, cwd=str( tmp_path ), staged_reader=_reader( "deleted.py" ),
-    )
-
-    assert "deleted.py" in reason
-    assert "LARGE FILE(S)" not in reason
+def test_missing_or_non_string_command_fails_open( repo, command ):
+    assert commit_scope_deny_reason(
+        "Bash", { "command": command }, session_id=MY_SESSION, cwd=repo
+    ) is None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

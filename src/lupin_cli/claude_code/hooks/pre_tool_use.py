@@ -108,16 +108,23 @@ def main():
     # there, so on a shared tree a peer's staged work commits under your name —
     # measured that day, five files staged by name and four peer files committed.
     # The check that failed was a PATH-SCOPED `git status`, which structurally
-    # cannot show the contamination it exists to catch. This denies ONCE and puts
-    # the complete staged set in front of the committer; re-run with
-    # LUPIN_COMMIT_SCOPE_ACK=1 to proceed. It never judges whose files they are —
-    # there is no reliable ownership oracle, and a guard that cries wolf gets
-    # switched off. FAIL-OPEN by contract (the lib returns None on any error,
-    # including an unreadable index), so it cannot break a tool call.
+    # cannot show the contamination it exists to catch. Ownership comes from
+    # `.claude-session.md` — this session's own section plus the sanctioned
+    # auto-includes; anything else staged is named in the refusal along with the
+    # peer session that claims it. Re-run with LUPIN_COMMIT_SCOPE_ACK=1 for the
+    # deliberate case (a manager landing a peer's reviewed work is legitimate).
+    # A CLEAN single-seat index is never refused — the guard fires
+    # only on a staged path this session's `.claude-session.md` section does not
+    # claim, or on an oversized file. FAIL-OPEN by contract (the lib returns None
+    # on any error, on an unreadable index, and on a session with NO manifest
+    # section), so it cannot break a tool call or wedge a seat that never adopted
+    # the manifest discipline.
     from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
         commit_scope_deny_reason, build_commit_scope_deny_response,
     )
-    commit_reason = commit_scope_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
+    commit_reason = commit_scope_deny_reason(
+        payload.get( "tool_name", "" ), payload.get( "tool_input", {} ), session_id=session_id
+    )
     if commit_reason:
         emit_json( build_commit_scope_deny_response( commit_reason ) )
         sys.exit( 0 )

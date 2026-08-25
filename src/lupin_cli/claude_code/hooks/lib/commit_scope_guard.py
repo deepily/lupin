@@ -24,18 +24,35 @@ WHAT IT DOES: on a `git commit`, DENY ONCE and put the complete staged set in
 front of the committer — every path, the count, and any file large enough to
 matter. Re-run with the acknowledgement prefix to proceed.
 
-⇒ IT NEVER DECIDES WHOSE FILES THEY ARE, and that is deliberate. A hook has no
-reliable ownership oracle: `.claude-session.md` depends on a manifest discipline
-that is itself a rule people forget, so blocking on it would produce false denies
-on legitimate work — and a guard that cries wolf gets switched off, which is
-worse than no guard. This one asserts nothing about intent. It guarantees only
-that the list was SEEN, and leaves the judgement where it belongs.
+⇒ IT REFUSES ONLY A CONTAMINATED INDEX, not every commit. The ownership oracle
+is `.claude-session.md`, the parallel-session manifest: this session's own
+`### Touched Files` section is what it claims, plus the sanctioned auto-includes.
+A staged path claimed by nobody-but-a-peer is what triggers the refusal, and the
+message names the peer's session.
 
-⇒ SO THE FRICTION IS ONE EXTRA ROUND TRIP PER COMMIT, honestly stated rather
-than hidden. That is the price of the list being in front of you rather than
-available to you.
+⇒ A CLEAN SINGLE-SEAT INDEX COMMITS UNTOUCHED — zero friction, and that is a
+REQUIREMENT rather than a nicety (row 53c4900f). My first cut denied once on
+EVERY commit and asked the committer to acknowledge the list. That is
+refuse-always wearing a guard's clothes: it imposes a round trip on every commit
+in the fleet, and a control everyone pays for on every use is a control someone
+eventually switches off. The row's negative control exists precisely to reject
+that shape, and it was right to.
 
-SIZE, because the second incident was a size incident. Rotation (row 11390b57)
+⇒ FAIL-OPEN ON A MISSING MANIFEST, which is most of the fleet. No manifest file,
+no section for this session, or an unreadable one → ALLOW. A seat that never
+adopted the manifest discipline must never be wedged by it.
+
+⚠️ AND THE RESIDUAL, named rather than hidden: a STALE section produces a FALSE
+REFUSAL — the seat touched a file and did not record it, so the guard reads it as
+foreign. That is the recoverable direction (the hatch is one prefix away, and the
+remedy — update your section — is an existing mandate), where the opposite
+direction silently commits a peer's work. But it is real friction, and if it
+turns out to bite more often than contamination does, this trade should be
+re-measured rather than defended.
+
+SIZE IS AN INDEPENDENT TRIGGER, because the second incident was a size incident
+and it had nothing to do with ownership: the files were the committer's own.
+Rotation (row 11390b57)
 wrote `voice-commands-xml-train.jsonl.prev` — 196 MB — and the ignore pattern
 `**/voice-commands-xml-*.jsonl` did not match it, because it ends `.jsonl.prev`.
 246 MB across three files sat committable for about forty minutes. A path list
@@ -211,50 +228,161 @@ def _size_of( path: str, cwd=None ) -> Optional[ int ]:
         return None
 
 
-def _deny_reason_for( paths: list, cwd=None ) -> str:
+# The parallel-session manifest, and the files sanctioned to ride along with any
+# session's commit (CLAUDE.md § PARALLEL SESSION SAFETY).
+MANIFEST_FILENAME = ".claude-session.md"
+AUTO_INCLUDES     = frozenset( {
+    "history.md", "TODO.md", "CLAUDE.md", "CLAUDE.local.md", "bug-fix-queue.md",
+    MANIFEST_FILENAME,
+} )
+
+_SECTION_RE = re.compile( r"^##\s+Session:\s*(?P<sid>\S+)\s*$" )
+_TOUCHED_RE = re.compile( r"^-\s+(?P<ts>[^|]+)\|\s*(?P<path>.+?)\s*$" )
+
+
+def _parse_manifest( text: str ) -> dict:
     """
-    Compose the deny text: the whole staged set, sizes that matter, the remedy.
+    Map each session id in the manifest to the set of paths its section claims.
 
     Requires:
-        - paths is the non-empty staged set
+        - text is the manifest file's contents
 
     Ensures:
-        - names every staged path — this list IS the control
-        - flags any file at or above LARGE_FILE_BYTES on its own line
+        - returns { session_id: set(paths) }, possibly empty
+        - a section with no touched files maps to an empty set, which is NOT the
+          same as an absent section — absent means "no discipline here, fail
+          open", empty means "this seat claims nothing"
         - never raises
     """
-    lines = [
-        f"`git commit` writes the WHOLE INDEX — {len( paths )} file(s) staged right now, "
-        "not only what you added:",
-        "",
-    ]
+    claims  = {}
+    current = None
 
-    large = []
+    for line in text.splitlines():
+        section = _SECTION_RE.match( line.strip() )
+        if section:
+            current = section.group( "sid" )
+            claims.setdefault( current, set() )
+            continue
+
+        if current is None: continue
+
+        touched = _TOUCHED_RE.match( line.strip() )
+        if touched:
+            claims[ current ].add( touched.group( "path" ).strip() )
+
+    return claims
+
+
+def _claims_for_session( session_id, cwd=None ):
+    """
+    What THIS session claims, and what every other section claims.
+
+    Sections are keyed by the 8-char session prefix while the hook is handed the
+    full UUID, so the match is by prefix in either direction.
+
+    Requires:
+        - session_id is the hook payload's session id, or falsy
+
+    Ensures:
+        - returns ( mine, others ) where mine is a set of paths or None when this
+          session has NO section — None is the fail-open signal, distinct from an
+          empty set
+        - others maps path -> session id, for naming the apparent owner
+        - never raises
+    """
+    if not session_id: return None, {}
+
+    try:
+        with open( os.path.join( cwd or "", MANIFEST_FILENAME ), "r" ) as f:
+            claims = _parse_manifest( f.read() )
+    except Exception:
+        return None, {}
+
+    mine = None
+    for sid, paths in claims.items():
+        if session_id.startswith( sid ) or sid.startswith( session_id ):
+            mine = set() if mine is None else mine
+            mine |= paths
+
+    others = {}
+    for sid, paths in claims.items():
+        if session_id.startswith( sid ) or sid.startswith( session_id ): continue
+        for path in paths:
+            others.setdefault( path, sid )
+
+    return mine, others
+
+
+def _large_files( paths: list, cwd=None ) -> list:
+    """Ensures: returns [ (path, size) ] for staged files at or above the cap."""
+    found = []
     for path in sorted( paths ):
         size = _size_of( path, cwd )
         if size is not None and size >= LARGE_FILE_BYTES:
-            large.append( ( path, size ) )
-            lines.append( f"  {path}   ⚠️ {_human_size( size )}" )
-        else:
-            lines.append( f"  {path}" )
+            found.append( ( path, size ) )
 
-    lines.append( "" )
-    if large:
+    return found
+
+
+def _deny_reason_for( foreign: dict, large: list, staged: list, cwd=None ) -> str:
+    """
+    Compose the refusal: the foreign files and their apparent owner, then sizes.
+
+    Requires:
+        - foreign maps a staged path -> the session id that claims it (or None
+          when no section claims it at all)
+        - large is [ (path, size) ] for oversized staged files
+        - at least one of foreign / large is non-empty
+
+    Ensures:
+        - names every offending file, and the peer session where one is known
+        - always prints the FULL staged set, because the unscoped list is the
+          thing the original defect was missing
+        - never raises
+    """
+    lines = []
+
+    if foreign:
         lines.append(
-            f"🔴 {len( large )} LARGE FILE(S) ABOVE. On 2026-08-25 three rotated training "
-            "artifacts totalling 246 MB sat committable because an ignore pattern missed "
-            "them by one suffix. Confirm these belong in git history before proceeding."
+            f"`git commit` writes the WHOLE INDEX, and {len( foreign )} staged file(s) are "
+            "NOT claimed by this session's manifest section:"
+        )
+        lines.append( "" )
+        for path in sorted( foreign ):
+            owner = foreign[ path ]
+            lines.append( f"  {path}" + ( f"   ← claimed by session {owner}" if owner else "   ← claimed by no session" ) )
+        lines.append( "" )
+        lines.append(
+            "`git add` does not clear the index, so a peer's staged work commits under "
+            "YOUR name. That happened on 2026-08-25 (commit 7c8c4f83, four files): the "
+            "staging was correct and the CHECK was path-scoped, which structurally "
+            "cannot show you somebody else's file."
         )
         lines.append( "" )
 
+    if large:
+        lines.append( f"🔴 {len( large )} LARGE FILE(S) STAGED:" )
+        for path, size in large:
+            lines.append( f"  {path}   ⚠️ {_human_size( size )}" )
+        lines.append(
+            "On 2026-08-25 three rotated training artifacts totalling 246 MB sat "
+            "committable because an ignore pattern missed them by one suffix. Confirm "
+            "these belong in git history."
+        )
+        lines.append( "" )
+
+    lines.append( f"THE FULL STAGED SET ({len( staged )} file(s)) — this is the unscoped list:" )
+    for path in sorted( staged ):
+        lines.append( f"  {path}" )
+
     lines.extend( [
-        "READ THE LIST. Anything there that is not yours belongs to another session — "
-        "`git add` does not clear the index, so a peer's staged work commits under YOUR "
-        "name (this happened 2026-08-25).",
-        "  · not yours →  git restore --staged <path>",
-        "  · yours     →  re-run with LUPIN_COMMIT_SCOPE_ACK=1 git commit ...",
         "",
-        "This guard never judges whose files these are; it only guarantees you saw them.",
+        "  · not yours     →  git restore --staged <path>",
+        "  · yours         →  add it to your section of .claude-session.md, or",
+        "                     re-run with LUPIN_COMMIT_SCOPE_ACK=1 git commit ...",
+        "",
+        "A clean single-seat index is never refused — if you are seeing this, something "
+        "staged is unaccounted for.",
     ] )
 
     return "\n".join( lines )
@@ -264,23 +392,27 @@ def commit_scope_deny_reason(
     tool_name,
     tool_input,
     *,
-    cwd = None,
+    session_id    = None,
+    cwd           = None,
     staged_reader = None,
 ) -> Optional[ str ]:
     """
-    Return a deny-reason iff a Bash `git commit` has not acknowledged its index.
+    Return a deny-reason iff a Bash `git commit` would carry unaccounted files.
 
     Requires:
         - tool_name is the hook payload's tool_name (str)
         - tool_input is the hook payload's tool_input (dict) carrying "command"
+        - session_id is the hook payload's session id (full UUID or 8-char)
         - staged_reader is None (real git) or injected for testing
 
     Ensures:
         - None unless ALL hold: tool_name is Bash, the command invokes `git
-          commit` in command position, the ack prefix is absent, and the staged
-          set is readable and non-empty
-        - the reason names EVERY staged path
-        - FAIL-OPEN: any unexpected error → None
+          commit` in command position, the ack prefix is absent, the staged set
+          is readable and non-empty, and it contains either a path this session's
+          manifest section does not claim or an oversized file
+        - a CLEAN single-seat index returns None — the guard is not refuse-always
+        - FAIL-OPEN: any unexpected error, and any absence of a manifest section
+          for this session, → None
     """
     try:
         if tool_name not in BASH_TOOL_NAMES: return None
@@ -295,12 +427,28 @@ def commit_scope_deny_reason(
         if _ack_in_prefix( match.group( "prefix" ) ): return None
 
         reader = staged_reader or _staged_paths
-        paths  = reader( cwd )
-        # Unreadable index → allow (fail-open). Empty index → the commit will
-        # fail on its own and there is nothing to review.
-        if not paths: return None
+        staged = reader( cwd )
+        # Unreadable index → allow (fail-open). Empty index → the commit fails on
+        # its own and there is nothing to review.
+        if not staged: return None
 
-        return _deny_reason_for( paths, cwd )
+        large = _large_files( staged, cwd )
+
+        mine, others = _claims_for_session( session_id, cwd )
+        if mine is None:
+            # No manifest, or no section for this session: this seat never adopted
+            # the discipline, so it must not be wedged by it. Size alone can still
+            # refuse — that hazard has nothing to do with ownership.
+            return _deny_reason_for( {}, large, staged, cwd ) if large else None
+
+        foreign = {}
+        for path in staged:
+            if path in mine or os.path.basename( path ) in AUTO_INCLUDES: continue
+            foreign[ path ] = others.get( path )
+
+        if not foreign and not large: return None
+
+        return _deny_reason_for( foreign, large, staged, cwd )
 
     except Exception:                    # pragma: no cover - fail-open backstop: every statement above is total over the validated inputs; kept because a hot-path guard must never raise
         return None
