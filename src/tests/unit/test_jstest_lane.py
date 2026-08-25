@@ -535,11 +535,35 @@ class TestTheWatchdog:
         # a race the test kept winning, not a kill.
         chain = self._chain( tmp_path, marker, persist=True )
 
+        # 🔴 THE ECHO IS THE OTHER HALF OF THE ASSERTION, and it is here because
+        # "no survivors" is trivially satisfiable BY KILLING EVERYTHING. The
+        # obvious over-correction when survivors turn up is to widen the kill —
+        # a group kill on the ambient group, or a pattern sweep. Both make the
+        # line below pass while taking the watchdog and its caller down too.
+        #
+        # The depth-0 caller test (test_the_CALLER_SURVIVES_the_kill) cannot
+        # stand in for this: the self-kill only bites once there is a TREE to
+        # over-reach through, and that test drives a single process.
+        #
+        # ⇒ A kill is correct only when the runaway is gone AND the killer is
+        #   still standing. Asserting one without the other accepts a control
+        #   that works by destroying itself.
         r = _run_snippet(
-            'jstest_watchdog_exec %s %s 4' % ( sys.executable, chain ),
+            'jstest_watchdog_exec %s %s 4\necho "CALLER_ALIVE rc=$?"' % ( sys.executable, chain ),
             env={ "JSTEST_RSS_MAX_MB": "300", "JSTEST_POLL_SECS": "0.05" },
         )
-        assert r.returncode == 137, ( r.returncode, r.stderr )
+        assert "CALLER_ALIVE rc=137" in r.stdout, (
+            "THE WATCHDOG TOOK ITS OWN CALLER DOWN. The runaway may well be dead, but the "
+            "shell that was supposed to outlive it never reached the next line — so this is "
+            "a kill that works by destroying the killer.\nrc=%r\nstdout=%r\nstderr=%s"
+            % ( r.returncode, r.stdout, r.stderr )
+        )
+        # ⚠️ NO `r.returncode == 137` HERE, and the reason is a trap worth naming:
+        # appending the echo makes IT the snippet's last command, so the shell
+        # exits with the echo's 0 and r.returncode stops meaning the watchdog's
+        # result. The 137 is asserted INSIDE the CALLER_ALIVE string above, which
+        # is the same shape test_the_CALLER_SURVIVES_the_kill uses. Re-adding an
+        # r.returncode check here would go red against perfectly good code.
 
         # The assertion the other tests could not make: is anything left?
         import subprocess, time
