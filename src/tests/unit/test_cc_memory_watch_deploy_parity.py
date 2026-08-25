@@ -13,11 +13,12 @@ and the only reason they agreed was that a person had reconciled them by hand
 ninety minutes earlier. That is a state, not a mechanism. A grep across
 src/tests for the deployed path returned nothing.
 
-⚠️ AND THERE IS NO INSTALLER. No script under src/scripts references the
-deployed path, and the unit's own Documentation= line points at
-src/scripts/watch-cc-memory.sh, which does not exist. The copy is done by
-hand, which makes drift MORE likely, not less — so the failure message below
-carries the exact commands rather than pointing at a tool that is not there.
+THE REMEDY IS src/scripts/install-cc-memory-watch.sh. When this guard was
+first written there was no installer at all — the copy was hand-made and the
+unit's Documentation= line pointed at src/scripts/watch-cc-memory.sh, which
+does not exist. Both were fixed in the same commit that added the installer,
+so the failure message below names a tool that really is there. If that ever
+stops being true, fix the installer rather than softening this message.
 
 The consequence of drift is quiet and expensive: the watcher keeps running,
 keeps writing plausible samples, and reports a quantity the repo no longer
@@ -96,9 +97,11 @@ class TestDeployedWatcherMatchesRepo:
             f"  tracked  {TRACKED}\n"
             f"           sha256 {tracked_sha}\n"
             f"The service samples the DEPLOYED copy, so edits to the tracked file "
-            f"have not taken effect. There is no installer script; reconcile by hand:\n"
-            f"  cp {TRACKED} {deployed}\n"
-            f"  systemctl --user restart lupin-cc-memory-watch.service\n"
+            f"have not taken effect. Reconcile with the installer:\n"
+            f"  LUPIN_ROOT={cu.get_project_root()} ./src/scripts/install-cc-memory-watch.sh\n"
+            f"It re-deploys the module, re-renders the unit and restarts the service.\n"
+            f"⚠️ The restart interrupts an in-flight collection for a few seconds; no "
+            f"samples are lost (the unit appends), but finish a measurement window first.\n"
             f"Then confirm the log is emitting what you expect before trusting it."
         )
 

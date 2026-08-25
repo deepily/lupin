@@ -1,0 +1,48 @@
+# Claude Code runaway-memory watcher (store row df5c3696).
+#
+# Rick's ruling 2026-08-22: "Watcher now, cap after a day of data." This unit is
+# the WATCHER half only. It is READ-ONLY — it samples /proc and cgroup files and
+# writes lines. It never kills, throttles, or caps anything.
+#
+# 🔴 THE CAP IS NOT IN SERVICE AND MUST NOT BE STARTED FROM HERE. The per-session
+# MemoryMax work is a separate concern; this watcher exists to produce the
+# measurement that sizes it.
+#
+# WHAT THIS BUYS, AND WHAT IT DOES NOT: attribution and early warning. NOT
+# protection. A runaway tonight still takes the box down; the difference is that
+# afterwards somebody can name which session did it.
+#
+# WHY A SNAPSHOT UNDER __DEPLOY_DIR__ RATHER THAN THE REPO — one live reason, and
+# one that is now HISTORY:
+#   · LIVE: the repo is a SHARED worktree. Pointing PYTHONPATH at it would swap
+#     the sampler underneath a running collection whenever anyone switches
+#     branches — a monitoring daemon that changes mid-run is worse than one that
+#     is slightly stale. The module is pure stdlib, so a copy runs standalone.
+#   · STALE (do not act on it): earlier copies of this unit said the module
+#     "ships on an unmerged branch alongside the cap". It landed on the working
+#     branch at ab2a321c. That is no longer a reason for the copy; the branch-
+#     switch hazard above is.
+#
+# ⚠️ THIS IS A COPY, SO IT CAN DRIFT FROM THE REPO. Two things catch that now:
+# src/tests/unit/test_cc_memory_watch_deploy_parity.py fails when the deployed
+# file stops matching the tracked one, and install-cc-memory-watch.sh is the
+# supported way to reconcile it. Re-run the installer after editing the module.
+[Unit]
+Description=Claude Code runaway-memory watcher (row df5c3696) — read-only, no cap
+Documentation=file://__LUPIN_ROOT__/src/scripts/install-cc-memory-watch.sh
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=__DEPLOY_DIR__
+# --report prints every seat seen each pass; that stream IS the distribution the
+# sizing question needs, so it is captured to disk rather than left on stdout.
+ExecStart=/usr/bin/python3 -m cc_memory_watch --threshold-gb 16 --interval 15 --report --log __LOG_DIR__/cc-memory-alerts.log
+# append:, NOT truncate: — a restart (or the overnight power-down) must not start
+# the collection over. Measured 2026-08-25: this is what makes the samples survive.
+StandardOutput=append:__LOG_DIR__/cc-memory-samples.log
+StandardError=append:__LOG_DIR__/cc-memory-samples.log
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
