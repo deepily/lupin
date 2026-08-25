@@ -75,6 +75,7 @@ from pathlib import Path
 from typing  import Any, Callable, Dict, Optional, Tuple
 
 from lupin_mcp.persona_normalization import persona_slug
+from lupin_mcp.memento_merge_claim   import refuted_merge_claim
 
 
 # ── Defaults (the MCP wrapper overrides these from INI at the live call) ───────
@@ -231,7 +232,9 @@ def verify_seat_memento(
     *,
     read_text_fn,
     window_seconds = DEFAULT_WINDOW_SECONDS,
-    min_bytes      = DEFAULT_MIN_BYTES
+    min_bytes      = DEFAULT_MIN_BYTES,
+    repo_root      = None,
+    merge_claim_fn = None
 ) -> Tuple[ bool, str ]:
     """
     Prove the memento at `path` is USABLE for reaping seat `seat_sid8` — complete
@@ -251,6 +254,14 @@ def verify_seat_memento(
           such case means ASK (a self-reported header that cannot be proven fresh is
           never treated as fresh)
         - mtime is NEVER consulted — it cannot grant a skip
+        - MERGE-CLAIM GATE (row 0c80f26d): with `repo_root` given, a memento that
+          claims work is still unmerged while naming a commit ALREADY in HEAD is
+          REFUSED. That line is the one a successor acts on first, and it goes
+          stale within minutes because it describes SOMEBODY ELSE'S pending
+          action — the manager merges, and the author is no longer running to
+          notice. Only a claim the repo can PROVE false refuses; an unresolvable
+          sha or a git error is "cannot refute", which allows. `repo_root=None`
+          skips the gate entirely, so pure unit verification stays hermetic.
         - never raises
     """
     text = read_text_fn( path )
@@ -297,6 +308,18 @@ def verify_seat_memento(
         return False, "memento header written_at is future-dated — corrupt or forged stamp"
     if age > window_seconds:
         return False, f"memento is stale ({int( age )}s old > {window_seconds}s window)"
+
+    # MERGE-CLAIM GATE (row 0c80f26d). Everything above proves the file is THIS
+    # seat's, complete, and written this window — all of which can be true of a
+    # memento whose most consequential line was falsified two minutes ago by the
+    # manager doing the merge. Freshness does not imply truth about a value the
+    # author does not control.
+    if repo_root is not None:
+        checker = merge_claim_fn if merge_claim_fn is not None else refuted_merge_claim
+        refuted = checker( text, repo_root )
+        if refuted:
+            return False, refuted
+
     return True, f"verified: complete, session-matched, fresh ({int( age )}s old)"
 
 
@@ -485,6 +508,7 @@ def coordinate_mementos(
     sleep_fn           : Callable = time.sleep,
     window_seconds     : int = DEFAULT_WINDOW_SECONDS,
     min_bytes          : int = DEFAULT_MIN_BYTES,
+    merge_claim_fn     = None,
     ask_timeout_sec    : int = DEFAULT_ASK_TIMEOUT_SEC,
     poll_interval_sec  : int = DEFAULT_POLL_INTERVAL_SEC
 ) -> Dict[ str, Dict[ str, Any ] ]:
@@ -602,13 +626,14 @@ def coordinate_mementos(
         slot          = seat_memento_slot( repo_root, persona_name )
         usable, reason = verify_seat_memento( slot, session_id[ :8 ], now,
                                               read_text_fn=read_text_fn,
-                                              window_seconds=window_seconds, min_bytes=min_bytes )
+                                              window_seconds=window_seconds, min_bytes=min_bytes,
+                                              repo_root=repo_root, merge_claim_fn=merge_claim_fn )
         if usable:
             outcomes[ name ] = { "status": "verified", "reason": reason,
                                  "persona": persona_name, "session_id": session_id, "slot": str( slot ) }
         else:
             pending[ name ] = { "persona": persona_name, "session_id": session_id,
-                                "slot": slot, "pre_ask_reason": reason }
+                                "slot": slot, "pre_ask_reason": reason, "repo_root": repo_root }
 
     if not pending:
         return outcomes
@@ -633,7 +658,8 @@ def coordinate_mementos(
             info           = pending[ name ]
             usable, reason = verify_seat_memento( info[ "slot" ], info[ "session_id" ][ :8 ], now,
                                                   read_text_fn=read_text_fn,
-                                                  window_seconds=window_seconds, min_bytes=min_bytes )
+                                                  window_seconds=window_seconds, min_bytes=min_bytes,
+                                                  repo_root=info[ "repo_root" ], merge_claim_fn=merge_claim_fn )
             if usable:
                 outcomes[ name ] = { "status": "written", "reason": f"appeared after ask: {reason}",
                                      "persona": info[ "persona" ], "session_id": info[ "session_id" ],
