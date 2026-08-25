@@ -542,6 +542,23 @@ services:
         #    A plain `docker restart` reuses the old limits and this change silently does nothing.
         limits:
           memory: 12G
+    # 🔴 SWAP MUST BE ZERO, and `limits.memory` above does NOT do it (mr radio's catch,
+    # 2026-08-25). Measured after the first recreate: memory.swap.max read 12884901888 and
+    # docker's HostConfig.MemorySwap read 25769803776 — the default is 2x memory, so capping
+    # memory alone leaves swap wide open. The host carries a 4G swapfile, so this is real.
+    #
+    # WHY IT MATTERS HERE SPECIFICALLY: inside a container the lane cannot make a sub-scope,
+    # so its enforcer is the RSS WATCHDOG — and a process that swaps has its RSS go DOWN.
+    # A swapping runaway therefore gets QUIETER to the watchdog while it is doing the most
+    # damage, converting a fast local kill into the slow global stall the host-side lane
+    # avoids with MemorySwapMax=0.
+    #
+    # memswap_limit is the TOTAL of memory + swap, so setting it EQUAL to mem_limit yields
+    # zero swap (cgroup v2: memory.swap.max = MemorySwap - Memory = 0). Both legacy keys are
+    # used together because `deploy.resources.limits` has no swap sub-key at all, and
+    # memswap_limit is only honored alongside mem_limit.
+    mem_limit: 12g
+    memswap_limit: 12g
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""]
       interval: 30s
