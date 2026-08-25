@@ -72,6 +72,37 @@ def main():
         emit_json( build_subagent_deny_response( gov_reason ) )
         sys.exit( 0 )
 
+    # Stash guard (bug 1ebc9be3): `git stash` writes to a SINGLE repo-global
+    # stack shared by every worktree and every live session, so a pop can apply
+    # another session's held work into your tree and — when the changesets do
+    # not overlap — do it silently, leaving you to commit their files under your
+    # name. Read-only `git stash list` / `show` stay allowed. DEFAULT-ON with a
+    # LUPIN_ALLOW_GIT_STASH escape hatch, and FAIL-OPEN by contract (the lib
+    # returns None on any error), so it cannot break a tool call.
+    from lupin_cli.claude_code.hooks.lib.stash_guard import (
+        stash_deny_reason, build_stash_deny_response,
+    )
+    stash_reason = stash_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
+    if stash_reason:
+        emit_json( build_stash_deny_response( stash_reason ) )
+        sys.exit( 0 )
+
+    # Kill guard (row cd332d2b): a seat's argv carries its whole spawn brief, so a
+    # fleet-wide `ps`/`pgrep` sweep grepping for a test path matches LIVE SESSIONS,
+    # not just tests. On 2026-08-21 one such sweep killed three seats in 612 ms —
+    # ten seconds after the CLI's own `pkill` shim had refused the same pattern by
+    # name, which the hand-rolled `ps | grep | kill` form walks straight past.
+    # Own-children sweeps (`pkill -P $$`) and kill-free listings stay allowed.
+    # DEFAULT-ON with a LUPIN_ALLOW_UNSCOPED_KILL escape hatch, and FAIL-OPEN by
+    # contract (the lib returns None on any error), so it cannot break a tool call.
+    from lupin_cli.claude_code.hooks.lib.kill_guard import (
+        kill_deny_reason, build_kill_deny_response,
+    )
+    kill_reason = kill_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
+    if kill_reason:
+        emit_json( build_kill_deny_response( kill_reason ) )
+        sys.exit( 0 )
+
     # Drain voice buffer, acknowledge, and inject as additionalContext
     # No tool TTS — PostToolUse handles announcements
     messages  = drain_and_acknowledge( session_id )
