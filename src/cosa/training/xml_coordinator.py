@@ -1129,23 +1129,50 @@ class XmlCoordinator:
             - Sets appropriate file permissions
         """
         import os
+        from datetime import datetime, timezone
+        import cosa.training.corpus_fingerprint as cf
 
         du.print_banner( "Writing train, test, validate splits to jsonl...", prepend_nl=True )
         print( f"   train_df.shape: {train_df.shape[ 0 ]:,} x {train_df.shape[ 1 ]}" )
         print( f"    test_df.shape: {test_df.shape[ 0 ]:,} x {test_df.shape[ 1 ]}" )
         print( f"validate_df.shape: {validate_df.shape[ 0 ]:,} x {validate_df.shape[ 1 ]}" )
 
-        path = self.path_prefix + "/src/ephemera/prompts/data/voice-commands-xml-train.jsonl"
-        train_df.to_json( path, orient="records", lines=True )
-        os.chmod( path, 0o666 )
+        for df, filename in ( ( train_df, "voice-commands-xml-train.jsonl" ), ( test_df, "voice-commands-xml-test.jsonl" ), ( validate_df, "voice-commands-xml-validate.jsonl" ) ):
 
-        path = self.path_prefix + "/src/ephemera/prompts/data/voice-commands-xml-test.jsonl"
-        test_df.to_json( path, orient="records", lines=True )
-        os.chmod( path, 0o666 )
+            path = self.path_prefix + "/src/ephemera/prompts/data/" + filename
+            self._rotate_previous_artifact( path )
+            df.to_json( path, orient="records", lines=True )
+            os.chmod( path, 0o666 )
 
-        path = self.path_prefix + "/src/ephemera/prompts/data/voice-commands-xml-validate.jsonl"
-        validate_df.to_json( path, orient="records", lines=True )
-        os.chmod( path, 0o666 )
+        # Stamp the corpus this artifact was built from, so a later run can refuse
+        # rather than silently train on a dataset built from a different corpus.
+        stamp = cf.write_stamp( self.path_prefix, datetime.now( timezone.utc ).isoformat() )
+        print( f"Stamped corpus fingerprint {stamp[ 'corpus_hash' ]} over {len( stamp[ 'files' ] )} corpus files." )
+
+    def _rotate_previous_artifact( self, path: str ) -> bool:
+        """
+        Keep one previous copy of a generated artifact before it is overwritten.
+
+        Regeneration is irreversible and the outputs are git-ignored, so without
+        this the only copy of a good dataset is destroyed by the next run.
+
+        Requires:
+            - path names the artifact about to be written
+
+        Ensures:
+            - renames an existing artifact to <path>.prev, replacing any older .prev
+            - returns True when a copy was kept, False when there was nothing to keep
+            - never raises when the artifact does not yet exist
+        """
+        import os
+
+        if not os.path.exists( path ): return False
+
+        previous = path + ".prev"
+        os.replace( path, previous )
+        print( f"Kept previous copy: {previous}" )
+
+        return True
 
     def compare_validation_results( self, before_df: pd.DataFrame, after_df: pd.DataFrame, title: str="Validation Comparison" ) -> pd.DataFrame:
         """

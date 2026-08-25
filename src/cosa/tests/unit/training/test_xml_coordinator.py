@@ -491,16 +491,25 @@ class TestXmlCoordinator( unittest.TestCase ):
         followed by os.chmod( path, 0o666 ) -> 3 chmod calls. The GPT-specific
         gpt_message.to_json files were retired with the GPT-message training path.
 
+        It also rotates one previous copy of each output and stamps the corpus
+        fingerprint beside them ( row 11390b57 ), so a later training run can tell
+        whether the dataset it is about to train on was built from this corpus.
+
         Ensures:
             - Writes all three splits via to_json( orient="records", lines=True )
             - Sets file permissions on each of the 3 files
             - Does NOT write any GPT-specific files
+            - Stamps the corpus fingerprint exactly once, for this path_prefix
         """
         with patch( 'cosa.training.xml_coordinator.XmlPromptGenerator' ), \
              patch( 'cosa.training.xml_coordinator.XmlResponseValidator' ), \
              patch( 'cosa.training.xml_coordinator.du.print_banner' ), \
              patch( 'builtins.print' ), \
+             patch( 'cosa.training.corpus_fingerprint.write_stamp' ) as mock_stamp, \
+             patch( 'cosa.training.xml_coordinator.os.path.exists', return_value=False ), \
              patch( 'cosa.training.xml_coordinator.os.chmod' ) as mock_chmod:
+
+            mock_stamp.return_value = { "corpus_hash": "abc123", "files": [ ] }
 
             # Create mock DataFrames
             mock_train = Mock()
@@ -526,6 +535,10 @@ class TestXmlCoordinator( unittest.TestCase ):
 
             # Verify permissions set ( 3 plain JSONL files, no GPT files )
             self.assertEqual( mock_chmod.call_count, 3 )
+
+            # The artifact is stamped with the corpus it was built from
+            mock_stamp.assert_called_once()
+            self.assertEqual( mock_stamp.call_args[ 0 ][ 0 ], "/test" )
     
     def test_query_llm_tgi_coordination( self ):
         """
