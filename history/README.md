@@ -12,6 +12,7 @@ This directory contains archived session history from the Lupin project, organiz
 
 | Archive | Period | Sessions | Key Topics |
 |---------|--------|----------|------------|
+| [2026-08-10-to-12](2026-08-10-to-12-history.md) | Aug 10 – Aug 12, 2026 | 3 sessions | Two silent failures on the test VM (a missing key, a dead thread inside a healthy process); dm.txt promoted to a real agent with the two-variable confound named; the corpus re-cut by sentences and four experiment designs killed before shipping |
 | [2026-08-04-to-07](2026-08-04-to-07-history.md) | Aug 4 – Aug 7, 2026 | ~9 sessions | Mr Radio / Cheech crew runs: arbiter fleet-loop bring-up and silent-death fix, three-worker SWE crews, embedding + store rows, the first brain-integration groundwork |
 | [2026-08-02-to-03](2026-08-02-to-03-history.md) | Aug 2 – Aug 3, 2026 | ~3 sessions | Embedding regeneration built and a norm shown not to identify a model, three store/tooling rows gated rather than relayed, and the DM verbosity pilot proven on a live gate after a worker refused a false green |
 | [2026-07-28-to-31](2026-07-28-to-31-history.md) | Jul 28 – Jul 31, 2026 | ~2 sessions | Mistral Small 24B stood up on GPU1 with the config cutover from Phi-4, and a 38-hour outage closed on one key file with two authorities — dev was the only host where the defect was invisible |
