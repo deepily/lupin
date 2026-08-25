@@ -254,6 +254,48 @@ assertion whose intent has to survive the rewrite.
 
 ---
 
+## Red-first commits carry a banner
+
+When a fix lands as two commits — a RED that proves the defect is live, then the GREEN that
+fixes it — the RED commit is a **deliberately failing state on the main line**. Anyone who
+checks out that sha, or whose tooling does, sees failures and has no way to tell them from a
+regression. That has already produced one escalation (2026-08-24, row `9d89afe2`): a peer ran
+the file at the RED sha, reported 3 failures, and the report was accurate and the code was
+fine.
+
+**The rule**: a test file introduced by a red-first commit carries a banner at the top of its
+module docstring naming both shas and both expected outcomes.
+
+```
+╔══════════════════════════════════════════════════════════════════════════════╗
+║ RED-FIRST FILE. IF THIS IS FAILING, CHECK YOUR SHA BEFORE REPORTING IT.      ║
+║                                                                              ║
+║   expected to FAIL  at  <red sha>   — N failed, M passed                     ║
+║   expected to PASS  from <green sha> onward — K passed                       ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+```
+
+Say which failures are expected and how many, and say plainly that a red at or after the
+GREEN sha is a real regression worth reporting **with the reporter's sha**. Live example:
+`src/tests/unit/test_registry_topic_not_a_file_path.py`.
+
+⚠️ **You cannot write the RED sha into the RED commit.** The sha does not exist until the
+commit is made, so a banner naming it must be added afterwards — which means the banner
+itself lands in the GREEN commit or later, and the window it protects is exactly the window
+where it is absent. Two ways to close that, neither free:
+
+| Approach | Cost |
+|---|---|
+| Banner with the shas left as `<pending>` in the RED commit, filled in by the GREEN | Two edits; the RED sha is still unnamed while only the RED exists |
+| Name the **row id** in the RED commit and the shas in the GREEN | The row is stable and knowable in advance; the shas arrive when they exist |
+
+The second is preferred: `row 9d89afe2, red-first — this file is expected to fail until the
+fix commit` is writable at RED time and already answers the reader's question. **A banner that
+can only be written after the danger has passed is worth having anyway** — most readers arrive
+long after, not during — but do not record it as though it protects the gap. It does not.
+
+---
+
 ## Test Comparison Matrix
 
 | Test Type | Count | Files | Speed | Dependencies | Purpose |

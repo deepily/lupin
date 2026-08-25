@@ -1,6 +1,23 @@
 """
 A spoken TOPIC must never fill a FILE-PATH argument — row `9d89afe2`.
 
+╔══════════════════════════════════════════════════════════════════════════════╗
+║ RED-FIRST FILE. IF THIS IS FAILING, CHECK YOUR SHA BEFORE REPORTING IT.      ║
+║                                                                              ║
+║   expected to FAIL  at  78f6683d  — 3 failed, 2 passed                       ║
+║   expected to PASS  from 633b9c3c onward — 5 passed                          ║
+║                                                                              ║
+║ `78f6683d` lands this file while the defect is still live, ON PURPOSE, so    ║
+║ the defect is on the record as OBSERVED rather than described. `633b9c3c`    ║
+║ is the fix. Both are ancestors of main. A red at `78f6683d` is this file     ║
+║ doing its job; a red at or after `633b9c3c` is a real regression — report    ║
+║ that one, with your sha.                                                     ║
+║                                                                              ║
+║ The 2 that pass even at `78f6683d` are the negative controls: the            ║
+║ presentation generator's file-shaped aliases stay legal, and the expeditor's ║
+║ mapping loop is unchanged.                                                   ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
 THE DEFECT, end to end. Rick says "make me a podcast on KISS". The extractor is
 trained as a TOPIC agent: all 1200 `agent router go to podcast generator` rows in
 `voice-commands-xml-train.jsonl` emit `topic="<subject phrase>"`, and ZERO emit a
