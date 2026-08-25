@@ -45,6 +45,26 @@ WHAT IS PINNED HERE, and why each is here rather than trusted:
   operator override reaches the pane. A ceiling nobody can lift in an emergency
   gets removed wholesale rather than adjusted.
 
+⚠️ DO NOT SIZE THIS CEILING AGAINST `memory.current` — IT IS THE WRONG NUMBER,
+and it will talk you into raising the cap for no reason. Measured 2026-08-25:
+a live seat read `memory.current` = 15.76 GB, twenty times the 0.78 GB peak the
+8G ceiling was derived from, which looks like proof that 8G would kill real
+work. It is not. The breakdown was `file` 14.77 GB (of which `active_file`
+14.70) against `anon` 0.67 GB — almost all of it reclaimable page cache from
+reading the repo, and the anon figure agrees with the watcher's distribution to
+within a rounding error. A cgroup at its limit RECLAIMS file cache before it
+kills anything, and `MemorySwapMax=0` bounds only ANON, so page cache is still
+dropped normally. THE NUMBER THIS CEILING ACTS ON IN PRACTICE IS THE ANON
+FOOTPRINT. Compare against `memory.stat`'s `anon`, never against
+`memory.current`.
+
+⚠️ AND THIS CEILING ONLY REACHES SESSIONS LAUNCHED THROUGH THIS SCRIPT. A
+`self_respin` reuses the seat's EXISTING scope, so a re-spun session keeps
+whatever ceiling it was born with — observed the same minute this change landed.
+Live seats therefore drain to the new value as they are genuinely relaunched,
+not when the commit merges. Do not read a live 24G scope as this change having
+failed.
+
 Venue: :7999 bucket — `--dry-run` exits before any tmux call, so no session is
 created and no persistent state is touched. Under 2s.
 
