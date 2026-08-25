@@ -375,3 +375,97 @@ def _has_a_test_method( node: ast.ClassDef ) -> bool:
         isinstance( child, ( ast.FunctionDef, ast.AsyncFunctionDef ) ) and child.name.startswith( "test_" )
         for child in node.body
     )
+
+
+def _body_is_vacuous( node: ast.FunctionDef ) -> bool:
+    """
+    Whether a test function's body asserts NOTHING once its docstring is removed.
+
+    THE SHAPE (row ac37dc5a, vacuity shape 5). A test whose whole body is a
+    docstring is collected, runs, passes, and contributes a green result to the
+    number a human reads before merging. Seven of them sit in the integration tier
+    — the FINAL merge gate — each carrying a numbered description of the flow it
+    would exercise, then `pass`. A reviewer scanning names sees timeout handling,
+    duplicate-response prevention and offline defaults covered. None of it is.
+
+    ⚠️ THIS IS WORSE THAN A MISSING TEST, which is why it earns a detector rather
+    than a cleanup. A missing test leaves a gap somebody can notice; a described-
+    but-unwritten one OCCUPIES the slot where the gap would have been noticed.
+
+    Requires:
+        - node is a FunctionDef / AsyncFunctionDef
+
+    Ensures:
+        - returns True when every remaining statement is `pass`, `...`,
+          `assert True`, or `raise NotImplementedError`
+        - the leading docstring is not counted — describing a test is not testing it
+        - returns True when NOTHING remains after the docstring is dropped. A
+          function whose entire body IS its docstring is legal Python and is the
+          PUREST form of this
+          defect — a description with not even a `pass` under it. This arm read
+          `return False` when first written, on the reasoning that the grammar
+          forbids an empty body; the grammar forbids an empty SOURCE body, but the
+          list left after removing the docstring is empty all the time. The unit
+          test caught it before the detector shipped
+        - `assert True` counts as vacuous even when a comment says the real check
+          lives elsewhere (a SQL WHERE clause, a policy). It still passes
+          unconditionally and still reports green; a documented placeholder is
+          honest, not harmless
+    """
+    body = list( node.body )
+    if body and isinstance( body[ 0 ], ast.Expr ) and isinstance( body[ 0 ].value, ast.Constant ) \
+            and isinstance( body[ 0 ].value.value, str ):
+        body = body[ 1: ]                      # drop the docstring
+    if not body: return True          # docstring and nothing else — see the contract above
+
+    for stmt in body:
+        if isinstance( stmt, ast.Pass ):
+            continue
+        if isinstance( stmt, ast.Expr ) and isinstance( stmt.value, ast.Constant ) \
+                and stmt.value.value is Ellipsis:
+            continue
+        if isinstance( stmt, ast.Assert ) and isinstance( stmt.test, ast.Constant ) \
+                and stmt.test.value is True:
+            continue
+        if isinstance( stmt, ast.Raise ):
+            exc = stmt.exc
+            name = getattr( exc, "id", None ) or getattr( getattr( exc, "func", None ), "id", None )
+            if name == "NotImplementedError":
+                continue
+        return False
+    return True
+
+
+def find_stub_bodied_tests( project_root: Path ) -> List[ str ]:
+    """
+    Every GATE-REACHABLE test function whose body asserts nothing.
+
+    Scoped to gate-reachable files ON PURPOSE (row ac37dc5a amendment). The raw
+    count across the repo was 13, but three of those sit in files no runner names,
+    so they cannot colour any merge gate — reporting 13 overstates the reach. What
+    a merge actually depends on is the ten inside a gate target, and this returns
+    only those.
+
+    Requires:
+        - project_root is the repo root
+
+    Ensures:
+        - returns sorted "relative/path.py::function_name" entries
+        - only files reachable from a sanctioned runner are scanned
+        - an unparseable file is skipped rather than raising — it fails collection
+          loudly elsewhere and is not the silent class this hunts
+    """
+    targets = find_gate_targets( project_root )
+    found   = []
+    for path in sorted( project_root.glob( "src/**/test_*.py" ) ):
+        relative = path.relative_to( project_root ).as_posix()
+        if not _is_reachable( relative, targets ): continue
+        try:
+            tree = ast.parse( path.read_text( encoding="utf-8" ) )
+        except ( SyntaxError, UnicodeDecodeError ):
+            continue
+        for node in ast.walk( tree ):
+            if isinstance( node, ( ast.FunctionDef, ast.AsyncFunctionDef ) ) \
+                    and node.name.startswith( "test_" ) and _body_is_vacuous( node ):
+                found.append( f"{relative}::{node.name}" )
+    return sorted( found )
