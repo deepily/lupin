@@ -34,6 +34,7 @@ def _receipt( **overrides ):
         "booted_at"          : _at( 5 ).isoformat(),
         "memento_path"       : "/repo/.claude-memento-maya-9e0b977d.md",
         "memento_written_at" : _at( -120 ).isoformat(),
+        "memento_persona"    : "maya",
         "memento_slot"       : rwc.SLOT_ROOT,
         "repo_root"          : "/repo",
     }
@@ -620,3 +621,139 @@ def test_the_poll_stops_rather_than_spinning_if_pending_survives_the_deadline( m
                                  sleep_fn=slept.append )
     assert got.verdict is rwc.WakeVerdict.PENDING
     assert slept == []
+
+
+# ── persona_slugs — the comparison key (row c3670edc) ─────────────────────────
+
+@pytest.mark.parametrize( "value", [ None, 42, "", "   ", "🕊️", "—" ] )
+def test_persona_slugs_is_empty_for_an_unknowable_name( value ):
+    """An identity that cannot be read must never be reported as a WRONG one."""
+    assert rwc.persona_slugs( value ) == frozenset()
+
+
+def test_persona_slugs_strips_case_space_and_emoji():
+    assert rwc.persona_slugs( "  Rachel 🕊️  " ) == frozenset( { "rachel" } )
+
+
+def test_persona_slugs_yields_BOTH_spellings_of_an_accented_name():
+    """The two writers in this fleet disagree, so both forms have to be offered."""
+    assert rwc.persona_slugs( "María" ) == frozenset( { "maria", "mar-a" } )
+
+
+@pytest.mark.parametrize( "seat,record", [ ( "María", "maria" ), ( "María", "mar-a" ),
+                                           ( "Cheech 🌿", "cheech" ) ] )
+def test_persona_slugs_never_calls_one_real_seat_two_people( seat, record ):
+    """The false-alarm control: a live roster persona must never read as an impostor."""
+    assert not rwc.persona_slugs( seat ).isdisjoint( rwc.persona_slugs( record ) )
+
+
+def test_persona_slugs_does_separate_two_actually_different_people():
+    assert rwc.persona_slugs( "rachel" ).isdisjoint( rwc.persona_slugs( "clayton" ) )
+
+
+# ── WRONG_PERSONA — the question the first cut did not ask (row c3670edc) ─────
+
+def test_the_clayton_case_alarms_instead_of_greening():
+    """THE ROW'S OWN SCENARIO. A successor seeded from the repo-wide root pointer
+    reads a record that is live, in a live slot, and freshly written — and belongs
+    to somebody else. Under the first cut this walked every rung and came out
+    RETURNED."""
+    receipt = _receipt( persona="cheech", memento_persona="clayton",
+                        memento_path="/repo/.claude-memento-clayton-8002a94e.md" )
+    out = rwc.classify_wake( receipt, fired_at=FIRED, now=_at( 10 ) )
+    assert out.verdict  is rwc.WakeVerdict.WRONG_PERSONA
+    assert out.is_alarm is True
+    assert out.memento_path == "/repo/.claude-memento-clayton-8002a94e.md"
+    assert "cheech"  in out.reason
+    assert "clayton" in out.reason
+
+
+def test_inverse_a_record_that_IS_yours_stays_quiet():
+    out = rwc.classify_wake( _receipt(), fired_at=FIRED, now=_at( 10 ) )
+    assert out.verdict  is rwc.WakeVerdict.RETURNED
+    assert out.is_alarm is False
+
+
+def test_inverse_a_differently_spelled_but_same_seat_stays_quiet():
+    """María's own record, stamped by the writer that does not fold accents."""
+    out = rwc.classify_wake( _receipt( persona="María", memento_persona="mar-a" ),
+                             fired_at=FIRED, now=_at( 10 ) )
+    assert out.verdict is rwc.WakeVerdict.RETURNED
+
+
+def test_a_record_that_does_not_say_whose_it_is_cannot_alarm():
+    """Unprovable is not an alarm — the same rule the undated-record case follows."""
+    out = rwc.classify_wake( _receipt( memento_persona=None ), fired_at=FIRED, now=_at( 10 ) )
+    assert out.verdict is rwc.WakeVerdict.RETURNED
+
+
+def test_a_seat_with_no_allocated_persona_cannot_alarm():
+    out = rwc.classify_wake( _receipt( persona=None, memento_persona="clayton" ),
+                             fired_at=FIRED, now=_at( 10 ) )
+    assert out.verdict is rwc.WakeVerdict.RETURNED
+
+
+def test_an_emoji_only_persona_on_either_side_cannot_alarm():
+    """Reduces to no slug at all, so nothing can be proven about it."""
+    assert rwc.classify_wake( _receipt( persona="🕊️", memento_persona="clayton" ),
+                              fired_at=FIRED, now=_at( 10 ) ).verdict is rwc.WakeVerdict.RETURNED
+    assert rwc.classify_wake( _receipt( persona="rachel", memento_persona="🕊️" ),
+                              fired_at=FIRED, now=_at( 10 ) ).verdict is rwc.WakeVerdict.RETURNED
+
+
+def test_wrong_persona_is_asked_BEFORE_the_slot_question():
+    """A mirror copy of somebody else's record is both wrong things at once; the
+    identity finding is the one the manager needs first."""
+    out = rwc.classify_wake( _receipt( persona="cheech", memento_persona="clayton",
+                                       memento_slot=rwc.SLOT_MIRROR ),
+                             fired_at=FIRED, now=_at( 10 ) )
+    assert out.verdict is rwc.WakeVerdict.WRONG_PERSONA
+
+
+def test_wrong_persona_is_asked_BEFORE_the_age_question():
+    out = rwc.classify_wake( _receipt( persona="cheech", memento_persona="clayton",
+                                       memento_written_at=_at( -99999 ).isoformat() ),
+                             fired_at=FIRED, now=_at( 10 ) )
+    assert out.verdict is rwc.WakeVerdict.WRONG_PERSONA
+
+
+def test_seed_not_consumed_still_wins_when_there_is_no_path_at_all():
+    """No file was read, so there is no record to be somebody else's."""
+    out = rwc.classify_wake( _receipt( memento_path=None, memento_persona="clayton" ),
+                             fired_at=FIRED, now=_at( 10 ) )
+    assert out.verdict is rwc.WakeVerdict.SEED_NOT_CONSUMED
+
+
+def test_the_alarm_line_names_the_file_the_seat_actually_opened():
+    out  = rwc.classify_wake( _receipt( persona="cheech", memento_persona="clayton",
+                                        memento_path="/repo/.claude-memento-clayton-8002a94e.md" ),
+                              fired_at=FIRED, now=_at( 10 ) )
+    line = rwc.render_alert( out, fired_at=FIRED )
+    assert "WRONG_PERSONA" in line
+    assert "/repo/.claude-memento-clayton-8002a94e.md" in line
+
+
+# ── the receipt carries the record's own claim ────────────────────────────────
+
+def test_build_receipt_dict_records_the_mementos_declared_persona():
+    body = rwc.build_receipt_dict(
+        session_id="s1", persona="cheech", tmux_session="t", memento_path="/repo/m.md",
+        memento_written_at=None, repo_root="/repo", booted_at=_at( 1 ),
+        memento_persona="clayton",
+    )
+    assert body[ "persona" ]         == "cheech"
+    assert body[ "memento_persona" ] == "clayton"
+
+
+def test_build_receipt_dict_leaves_the_declared_persona_none_when_unstated():
+    body = rwc.build_receipt_dict(
+        session_id="s1", persona="cheech", tmux_session="t", memento_path=None,
+        memento_written_at=None, repo_root="/repo", booted_at=_at( 1 ),
+    )
+    assert body[ "memento_persona" ] is None
+
+
+def test_write_boot_receipt_round_trips_the_declared_persona( tmp_path ):
+    rwc.write_boot_receipt( session_id="s1", persona="cheech", memento_path="/repo/m.md",
+                            memento_persona="clayton", base_dir=str( tmp_path ) )
+    assert rwc.read_receipt( str( tmp_path ), "s1" )[ "memento_persona" ] == "clayton"

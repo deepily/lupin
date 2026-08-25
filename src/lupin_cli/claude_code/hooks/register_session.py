@@ -1433,7 +1433,8 @@ def _resolve_repo_root( cwd=None ):
 
 
 def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
-                                memento_path, memento_written_at, repo_root ):
+                                memento_path, memento_written_at, repo_root,
+                                memento_persona=None ):
     """
     Leave the boot receipt a re-spin's wake check reads (row b0570b67).
 
@@ -1473,6 +1474,7 @@ def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
             tmux_session       = tmux_session,
             memento_path       = memento_path,
             memento_written_at = memento_written_at,
+            memento_persona    = memento_persona,
             repo_root          = repo_root,
             base_dir           = str( fleet_data_root( repo_root ) ),
         )
@@ -1527,9 +1529,17 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
     # one place that knows WHICH file the boot path actually opened — the fact
     # that answers "did it wake?" and "did it read the right memento?" at once.
     # Written before the early return so a blank rehydrate is recorded too.
+    # The record's OWN declared persona rides along with its stamp. `persona_name`
+    # is who the SEAT is; this is who the FILE says it belongs to, and the wake
+    # check's WRONG_PERSONA verdict is the difference between them (row c3670edc).
+    # Read from the header the resolver already confirmed, falling back to the
+    # filename — `_persona_of` is the same two-source rule the resolver itself
+    # uses, so the receipt cannot disagree with the decision it is recording.
+    header = _header_of( path ) if path else None
     _stamp_respin_boot_receipt(
         stable_session_id, persona_name, tmux_session,
-        path, _written_at_of( _header_of( path ) ) if path else None, repo_root,
+        path, _written_at_of( header ) if path else None, repo_root,
+        memento_persona = _persona_of( path, header ) if path else None,
     )
 
     if not path: return ""

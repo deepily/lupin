@@ -168,3 +168,55 @@ def test_a_unit_run_never_writes_into_the_live_fleet_data_root( tmp_path ):
         assert os.path.exists( path )
     finally:
         if os.path.exists( stray ): os.remove( stray )
+
+
+# ── the receipt carries the record's OWN declared persona (row c3670edc) ──────
+
+def test_the_receipt_records_which_persona_the_memento_declares( tmp_path, receipts, monkeypatch ):
+    """`persona` is who the SEAT is; `memento_persona` is who the FILE says it
+    belongs to. The wake check's WRONG_PERSONA verdict is the difference between
+    them, so the receipt has to carry both or the question cannot be asked."""
+    monkeypatch.setenv( "HOME", str( tmp_path / "home" ) )
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _memento( repo )
+
+    rs._build_memento_block( "aaaaaaaa-1111-2222-3333-444444444444", "maya",
+                             repo_root=str( repo ), tmux_session="cc-maya-1" )
+
+    body = json.loads( ( receipts / f"{rwc.RECEIPT_PREFIX}aaaaaaaa-1111-2222-3333-444444444444.json" ).read_text() )
+    assert body[ "persona" ]         == "maya"
+    assert body[ "memento_persona" ] == "maya"
+
+
+def test_the_declared_persona_falls_back_to_the_filename_when_the_record_has_no_header(
+        tmp_path, receipts, monkeypatch ):
+    """Real header-less records exist (.claude-memento-maria-350ac4c2.md). The
+    filename carries the persona unambiguously, and `_persona_of` is the same
+    two-source rule the resolver itself used to pick this file — so the receipt
+    cannot disagree with the decision it is recording."""
+    monkeypatch.setenv( "HOME", str( tmp_path / "home" ) )
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    ( repo / ".claude-memento-maya-aaaaaaaa.md" ).write_text( "# a human heading, no machine header\n" )
+
+    rs._build_memento_block( "aaaaaaaa-1111-2222-3333-444444444444", "maya",
+                             repo_root=str( repo ), tmux_session="cc-maya-1" )
+
+    body = json.loads( ( receipts / f"{rwc.RECEIPT_PREFIX}aaaaaaaa-1111-2222-3333-444444444444.json" ).read_text() )
+    assert body[ "memento_persona" ]    == "maya"
+    assert body[ "memento_written_at" ] is None
+
+
+def test_a_blank_rehydrate_declares_no_persona( tmp_path, receipts, monkeypatch ):
+    """No file was opened, so there is no record to attribute to anybody."""
+    monkeypatch.setenv( "HOME", str( tmp_path / "home" ) )
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    rs._build_memento_block( "bbbbbbbb-1111-2222-3333-444444444444", "maya",
+                             repo_root=str( repo ), tmux_session="cc-maya-1" )
+
+    body = json.loads( ( receipts / f"{rwc.RECEIPT_PREFIX}bbbbbbbb-1111-2222-3333-444444444444.json" ).read_text() )
+    assert body[ "memento_path" ]    is None
+    assert body[ "memento_persona" ] is None

@@ -23,7 +23,18 @@ BOOT RECEIPT naming that file, and the check reads it:
   · RECEIPT naming a mirror-slot copy   ⇒ it woke and read the wrong file (Krishna)
   · RECEIPT naming a long-stale record  ⇒ it woke onto old state
   · RECEIPT naming nothing at all       ⇒ it woke but consumed no seed
+  · RECEIPT naming ANOTHER PERSONA's    ⇒ it woke into somebody else's world
   · RECEIPT naming a fresh root record  ⇒ RETURNED
+
+THE QUESTION THE FIRST CUT DID NOT ASK (row c3670edc, 2026-08-24). Every test
+above is about the FILE — is it live, is it current. None was about the READER.
+So a successor handed another persona's record walked the whole ladder and came
+out RETURNED: it booted, it resolved a memento, the slot was live, the record was
+fresh. The one failure mode where a seat is confidently and coherently wrong was
+the one the check certified as healthy, and a manager who reads RETURNED stops
+looking. `WRONG_PERSONA` is that missing question. The shape is borrowed from
+`reap_memento.verify_seat_memento`, which already refuses "a prior holder's
+memento in this slot" — the same check, moved to where the reader is.
 
 CONSUMER-WRITTEN, ALWAYS. The receipt is written by the REHYDRATED SEAT's own
 SessionStart, never by the thing that fired the re-spin. A receipt written by
@@ -53,8 +64,10 @@ import datetime
 import glob
 import json
 import os
+import re
 import threading
 import time
+import unicodedata
 
 from dataclasses import dataclass
 from enum        import Enum
@@ -107,6 +120,7 @@ class WakeVerdict( Enum ):
     SEED_NOT_CONSUMED = "SEED_NOT_CONSUMED"  # ALARM: woke, but resolved no memento at all
     STALE_SLOT        = "STALE_SLOT"         # ALARM: woke, read a mirror copy not the live record
     STALE_MEMENTO     = "STALE_MEMENTO"      # ALARM: woke, read a live slot but an old record
+    WRONG_PERSONA     = "WRONG_PERSONA"      # ALARM: woke, read a live+current record belonging to SOMEBODY ELSE
     MALFORMED_RECEIPT = "MALFORMED_RECEIPT"  # ALARM: a receipt exists but its stamps are unreadable
 
 
@@ -213,7 +227,8 @@ def receipt_path( base_dir, session_id ):
 
 
 def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
-                        memento_written_at, repo_root, booted_at ):
+                        memento_written_at, repo_root, booted_at,
+                        memento_persona=None ):
     """
     Build the receipt body a rehydrated seat writes at SessionStart.
 
@@ -227,9 +242,23 @@ def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
         - memento_path is the file the boot path actually opened, or None
         - booted_at is an aware datetime
 
+    TWO PERSONAS, AND THEY ARE NOT THE SAME FIELD. `persona` is who the SEAT
+    thinks it is; `memento_persona` is who the RECORD says it belongs to. Every
+    other field here describes the FILE — is it live, is it current — and a file
+    can be both while belonging to somebody else. Recording the record's own
+    claim is what lets the reader ask the one question the rest cannot.
+
+    Requires:
+        - session_id is the seat's session id
+        - memento_path is the file the boot path actually opened, or None
+        - memento_persona is the persona that file declares itself to belong to,
+          or None when the record does not say
+        - booted_at is an aware datetime
+
     Ensures:
         - returns a JSON-serializable dict carrying identity, the boot stamp, the
-          memento path, its written_at stamp, and the classified slot
+          memento path, its written_at stamp, its declared persona, and the
+          classified slot
         - memento_slot is SLOT_NONE when no memento resolved
         - never raises
     """
@@ -240,6 +269,7 @@ def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
         "booted_at"          : booted_at.isoformat(),
         "memento_path"       : memento_path,
         "memento_written_at" : memento_written_at,
+        "memento_persona"    : memento_persona,
         "memento_slot"       : classify_memento_slot( memento_path, repo_root ),
         "repo_root"          : repo_root,
     }
@@ -261,7 +291,8 @@ def _resolve_base_dir( base_dir ):
 
 def write_boot_receipt( *, session_id, persona=None, tmux_session=None,
                         memento_path=None, memento_written_at=None,
-                        repo_root=None, base_dir=None, now=None ):
+                        memento_persona=None, repo_root=None, base_dir=None,
+                        now=None ):
     """
     Write this seat's boot receipt. Best-effort — a boot must never fail on it.
 
@@ -293,6 +324,7 @@ def write_boot_receipt( *, session_id, persona=None, tmux_session=None,
             tmux_session       = tmux_session,
             memento_path       = memento_path,
             memento_written_at = memento_written_at,
+            memento_persona    = memento_persona,
             repo_root          = repo_root,
             booted_at          = stamp,
         )
@@ -327,6 +359,51 @@ def read_receipt( base_dir, session_id ):
 def _norm( value ):
     """Case-fold a persona name for comparison; a non-string stays None."""
     return value.strip().lower() if isinstance( value, str ) else None
+
+
+def persona_slugs( value ):
+    """
+    Every slug a persona name could legitimately have been written as.
+
+    A SET, not a string, and that is the whole design. The two writers in this
+    fleet disagree: `memento_io.slugify` does NOT fold accents, so "María"
+    becomes "mar-a", while `register_session._persona_slugs` folds first and
+    produces "maria". Both spellings name the same seat and both exist on disk —
+    planning-is-prompting holds 18 records under `maria` and one under `mar-a`.
+    Reducing each side to ONE canonical slug and comparing would report a live
+    roster persona as an impostor every time she re-spun, and a check that cries
+    wolf on a real seat gets switched off inside a day.
+
+    So each side yields the set of forms it could have been written as, and the
+    caller reports a mismatch only when the two sets are DISJOINT — i.e. when no
+    spelling of one is a spelling of the other.
+
+    Requires:
+        - value is a persona name string, or anything defensively
+
+    Ensures:
+        - returns a frozenset of lowercase [a-z0-9-] slugs: the accent-folded
+          form, plus the naive form when it differs ("María" -> maria, mar-a)
+        - returns an EMPTY frozenset for a non-string, an empty string, or a name
+          with no alphanumerics at all (an emoji-only persona) — an unknowable
+          identity must never be reported as a MISMATCHED one
+        - never raises
+    """
+    lowered = _norm( value )
+    if not lowered:
+        return frozenset()
+
+    # Accent-fold first: NFKD splits a letter from its accent, dropping the
+    # combining marks leaves the base letter. This is the form writers produce.
+    folded = "".join( ch for ch in unicodedata.normalize( "NFKD", lowered )
+                      if not unicodedata.combining( ch ) )
+
+    out = set()
+    for candidate in ( folded, lowered ):
+        slug = re.sub( r"[^a-z0-9]+", "-", candidate ).strip( "-" )
+        if slug:
+            out.add( slug )
+    return frozenset( out )
 
 
 def find_receipt_by_identity( base_dir, *, persona=None, tmux_session=None, since=None ):
@@ -417,6 +494,12 @@ def classify_wake( receipt, *, fired_at, now,
         - MALFORMED_RECEIPT (ALARM) when fired_at/now is missing, or a present
           receipt carries an unreadable booted_at once past the deadline
         - SEED_NOT_CONSUMED (ALARM) when it woke, expect_memento, and none resolved
+        - WRONG_PERSONA (ALARM) when the record it read declares a persona that
+          differs from the seat's own — checked BEFORE slot and age, because a
+          record can be live and current and still be somebody else's
+        - a mismatch is reported ONLY when both personas yield slugs AND no
+          spelling of one is a spelling of the other; either side unknown is
+          unprovable, and an unprovable mismatch is not an alarm
         - STALE_SLOT (ALARM) when it woke and read a slot outside the live family
         - STALE_MEMENTO (ALARM) when it woke, read a live slot, and that record's
           written_at is older than max_memento_age_seconds
@@ -477,6 +560,28 @@ def classify_wake( receipt, *, fired_at, now,
                    "that was supposed to hand it its own prior state", True )
 
     if path:
+        # IS IT YOURS? Asked BEFORE the slot and age questions, and that order is
+        # the point. Every other test here is about the FILE — is it live, is it
+        # current — and a file can be both while belonging to somebody else. That
+        # case used to walk the whole ladder and come out RETURNED, so the one
+        # failure where the successor is confidently and coherently wrong was the
+        # one failure that wore a green. A manager who reads RETURNED stops
+        # looking, which is worse than no check at all.
+        #
+        # Only a mismatch that can be PROVEN is reported: both names must reduce
+        # to a slug. A record that does not say whose it is, or a seat with no
+        # allocated persona, cannot be shown to be crossed — and inventing an
+        # alarm out of an absent measurement is how a check earns its way into
+        # being ignored (the same rule the undated-record case follows below).
+        mine   = persona_slugs( who )
+        theirs = persona_slugs( body.get( "memento_persona" ) )
+        if mine and theirs and mine.isdisjoint( theirs ):
+            return _v( WakeVerdict.WRONG_PERSONA,
+                       f"the successor booted as '{who}' and read a memento belonging to "
+                       f"'{body.get( 'memento_persona' )}' — it has rehydrated somebody else's "
+                       f"branches, rows and manager, and every other check on this record passes",
+                       True, memento_path=path )
+
         if slot not in LIVE_SLOTS:
             return _v( WakeVerdict.STALE_SLOT,
                        f"the successor read its memento from the '{slot}' slot, not the live record — "
