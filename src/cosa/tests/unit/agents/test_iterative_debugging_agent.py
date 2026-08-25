@@ -37,11 +37,16 @@ def _seed_init( self_inner, *args, **kwargs ):
     self_inner.do_not_serialize = [ "config_mgr" ]
 
     cfg = Mock()
-    cfg.get.side_effect = lambda key, default=None, return_type=None: (
+    _lookup = lambda key, default=None, return_type=None: (
         [ "llm_key_1" ]    if key == "llm model keys for debugger"
         else "/tmpl/min.txt" if key == "agent prompt for debugger minimalist"
         else { "model": key }
     )
+    cfg.get.side_effect = _lookup
+    # get_required() answers the same way here. Without this the Mock hands back
+    # a Mock and the concatenation at iterative_debugging_agent.py:114 fails —
+    # which is the very crash row 3e4a4a4a is about, just wearing a test costume.
+    cfg.get_required.side_effect = lambda key, silent=False, return_type=None: _lookup( key )
     self_inner.config_mgr = cfg
 
 

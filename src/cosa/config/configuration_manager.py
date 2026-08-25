@@ -69,6 +69,32 @@ def singleton( cls: type ) -> Callable[..., Any]:
     
     return wrapper
 
+
+class MissingConfigKeyError( Exception ):
+    """
+    Raised by ConfigurationManager.get_required() when a key a caller cannot
+    proceed without is absent from — or blank in — the resolved config block.
+
+    Carries the key, the resolved block id, and the config path so the message
+    names WHERE to fix it, not just WHAT was missing. get() is unaffected: a
+    caller that tolerates absence keeps using get() and still gets None.
+    """
+
+    def __init__( self, key: str, block_id: str, config_path: Optional[str], blank: bool=False ) -> None:
+
+        self.key         = key
+        self.block_id    = block_id
+        self.config_path = config_path
+        self.blank       = blank
+
+        problem = "resolved to an empty value" if blank else "not found"
+        super().__init__(
+            "Required configuration key [{0}] {1} in block [{2}] of [{3}]".format(
+                key, problem, block_id, config_path
+            )
+        )
+
+
 @singleton
 class ConfigurationManager():
     """
@@ -795,6 +821,54 @@ class ConfigurationManager():
                 self.splain_me( key )
     
                 return None
+
+    def get_required( self, key: str, silent: bool=False, return_type: str="string" ) -> Union[str, int, float, bool, list, dict]:
+
+        """
+        Get a configuration value the caller cannot proceed without.
+
+        Use this instead of get() wherever the result is concatenated, indexed,
+        or used in arithmetic — those callers cannot survive a None and have no
+        way to notice they got one. get()'s behaviour is deliberately unchanged:
+        a caller that genuinely tolerates absence keeps get().
+
+        Requires:
+            - key is a non-empty string
+            - return_type is one of: 'boolean', 'float', 'int', 'string', 'list-string', 'json', 'dict'
+            - self.config and self.config_block_id are initialized
+
+        Ensures:
+            - Returns the typed value when the key exists with a non-blank value
+            - Never returns None
+            - Splains the key before raising, unless silent or mute_splainer
+
+        Raises:
+            - MissingConfigKeyError if the key is absent from the resolved block,
+              naming the key, the block, and the config path
+            - MissingConfigKeyError if the key exists but its value is blank — a
+              required key set to nothing is a configuration error, not a value
+            - ValueError if return_type is invalid
+        """
+
+        if not self.exists( key ):
+
+            if not silent and not self.mute_splainer:
+                du.print_banner( "Required key [{0}] NOT found in block [{1}]".format( key, self.config_block_id ), end="\n" )
+                self.splain_me( key )
+
+            raise MissingConfigKeyError( key, self.config_block_id, self.config_path )
+
+        raw = os.path.expandvars( self.config.get( self.config_block_id, key ) )
+
+        if raw.strip() == "":
+
+            if not silent and not self.mute_splainer:
+                du.print_banner( "Required key [{0}] is BLANK in block [{1}]".format( key, self.config_block_id ), end="\n" )
+                self.splain_me( key )
+
+            raise MissingConfigKeyError( key, self.config_block_id, self.config_path, blank=True )
+
+        return self._get_typed_value( raw, return_type )
 
     def _get_typed_value( self, value: Any, return_type: str ) -> Union[str, int, float, bool, list, dict]:
         """

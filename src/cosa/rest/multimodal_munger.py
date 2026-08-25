@@ -1337,7 +1337,7 @@ class MultiModalMunger:
         # Add runtime switch or configuration to allow for TGI service to be used also.
         command_dict    = self._get_command_dict( match_type="ai_matching", confidence=-1.0 )
         
-        template_path   = du.get_project_root() + self.config_mgr.get( "vox command prompt path wo root" )
+        template_path   = du.get_project_root() + self.config_mgr.get_required( "vox command prompt path wo root" )
         prompt_template = du.get_file_as_string( template_path )
         prompt          = prompt_template.format( voice_command=transcription )
         

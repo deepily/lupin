@@ -166,7 +166,7 @@ class AgentBase( RunnableCode, abc.ABC ):
         
         if self.df_path_key is not None:
 
-            self.df = pd.read_csv( du.get_project_root() + self.config_mgr.get( self.df_path_key ) )
+            self.df = pd.read_csv( du.get_project_root() + self.config_mgr.get_required( self.df_path_key ) )
             self.df = dup.cast_to_datetime( self.df )
 
         # QueueableJob protocol compliance - status tracking attributes
