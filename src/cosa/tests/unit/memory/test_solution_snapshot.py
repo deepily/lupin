@@ -43,6 +43,28 @@ def _embed_mocked( generate_returns=None ):
         yield provider
 
 
+def _codeless_agent():
+    """
+    A stand-in for an agent whose prompt_response_dict carries NO "code" key.
+
+    CalculatorAgent's dispatch path is exactly this shape: it answers from pure
+    Python and never generates code, so `.get( "code", ... )` falls to its default.
+    """
+    agent = Mock()
+    agent.last_question_asked  = "How much is 789 minus 456?"
+    agent.question             = "How much is 789 minus 456?"
+    agent.question_gist        = "how much is 789 minus 456"
+    agent.routing_command      = "agent router go to calculator"
+    agent.answer_conversational = "789 minus 456 is 333."
+    agent.user_id              = "u1"
+    agent.user_email           = "e@example.com"
+    agent.session_id           = "s1"
+    agent.id_hash              = "abc123"
+    agent.prompt_response_dict = { "operation": "arithmetic", "confidence": "0.98" }
+    agent.code_response_dict   = { "return_code": 0, "output": 333 }
+    return agent
+
+
 class TestStaticMethods( unittest.TestCase ):
     """Pure static utilities — no construction needed."""
 
@@ -135,6 +157,94 @@ class TestInitialization( unittest.TestCase ):
         self.assertEqual( snap.runtime_stats, { "custom_stat": 42 } )
         self.assertEqual( snap.user_id, "test_user_123" )
         self.assertEqual( snap.programming_language, "JavaScript" )
+
+
+class TestEmptyCodeNeverReachesTheEmbedder( unittest.TestCase ):
+    """
+    Falsification suite for bug b35af923.
+
+    A job that has already produced and notified its answer must not then die in
+    the dead queue because the snapshot tried to embed an empty string. Two
+    independently-sufficient ends are pinned here: the PRODUCER default that
+    manufactured [ "" ], and the CONSUMER guard that tested the list's length
+    instead of the text it joins to.
+    """
+
+    # ── the CONSUMER end: a list that joins to nothing must not be embedded ──
+
+    def test_list_holding_one_empty_string_is_not_embedded( self ):
+        """[ "" ] has length 1 but joins to "" — the exact shape that 422'd."""
+        with _embed_mocked() as provider:
+            snap = SolutionSnapshot( question="q", code=[ "" ], debug=False )
+        for call in provider.generate_embedding.call_args_list:
+            self.assertNotEqual( call[ 0 ][ 0 ], "", "an empty string reached the embedder" )
+        self.assertEqual( snap.code_embedding, [] )
+
+    def test_list_of_several_empty_strings_is_not_embedded( self ):
+        """[ "", "" ] joins to " " — whitespace only, still nothing to embed."""
+        with _embed_mocked() as provider:
+            snap = SolutionSnapshot( question="q", code=[ "", "" ], debug=False )
+        for call in provider.generate_embedding.call_args_list:
+            self.assertTrue( call[ 0 ][ 0 ].strip(), "a blank string reached the embedder" )
+        self.assertEqual( snap.code_embedding, [] )
+
+    def test_whitespace_only_lines_are_not_embedded( self ):
+        """Indentation-only lines carry no code."""
+        with _embed_mocked() as provider:
+            snap = SolutionSnapshot( question="q", code=[ "   ", "\t" ], debug=False )
+        for call in provider.generate_embedding.call_args_list:
+            self.assertTrue( call[ 0 ][ 0 ].strip() )
+        self.assertEqual( snap.code_embedding, [] )
+
+    def test_empty_list_is_not_embedded( self ):
+        """The already-correct case stays correct."""
+        with _embed_mocked() as provider:
+            snap = SolutionSnapshot( question="q", code=[], debug=False )
+        self.assertEqual( snap.code_embedding, [] )
+
+    def test_real_code_is_still_embedded( self ):
+        """The guard must not become so strict that it stops embedding real code."""
+        with _embed_mocked() as provider:
+            snap = SolutionSnapshot( question="q", code=[ "x = 1", "print( x )" ], debug=False )
+        self.assertEqual( snap.code_embedding, _DUMMY_EMB )
+        embedded = [ c[ 0 ][ 0 ] for c in provider.generate_embedding.call_args_list ]
+        self.assertIn( "x = 1 print( x )", embedded )
+
+    def test_code_with_one_blank_line_among_real_lines_is_embedded( self ):
+        """A blank line inside real code is not a reason to skip the embedding."""
+        with _embed_mocked() as provider:
+            snap = SolutionSnapshot( question="q", code=[ "x = 1", "", "print( x )" ], debug=False )
+        self.assertEqual( snap.code_embedding, _DUMMY_EMB )
+
+    # ── the PRODUCER end: the default handed to the constructor ──
+
+    def test_create_defaults_missing_code_to_empty_list( self ):
+        """
+        An agent with no "code" key — CalculatorAgent's dispatch path is exactly
+        this — must yield [], matching the constructor's own default, not [ "" ].
+        """
+        agent = _codeless_agent()
+        with _embed_mocked():
+            snap = SolutionSnapshot.create( agent )
+        self.assertEqual( snap.code, [] )
+
+    def test_create_on_a_codeless_agent_embeds_no_empty_string( self ):
+        """The end-to-end shape of the bug: create() must not 422."""
+        agent = _codeless_agent()
+        with _embed_mocked() as provider:
+            snap = SolutionSnapshot.create( agent )
+        for call in provider.generate_embedding.call_args_list:
+            self.assertTrue( call[ 0 ][ 0 ].strip(), "create() sent an empty string to the embedder" )
+        self.assertEqual( snap.code_embedding, [] )
+
+    def test_create_still_carries_real_code_through( self ):
+        """A code-bearing agent is unaffected by the default change."""
+        agent = _codeless_agent()
+        agent.prompt_response_dict[ "code" ] = [ "print( 2 + 2 )" ]
+        with _embed_mocked():
+            snap = SolutionSnapshot.create( agent )
+        self.assertEqual( snap.code, [ "print( 2 + 2 )" ] )
+        self.assertEqual( snap.code_embedding, _DUMMY_EMB )
 
 
 class TestHashAndSynonyms( unittest.TestCase ):

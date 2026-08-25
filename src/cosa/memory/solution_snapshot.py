@@ -354,8 +354,15 @@ class SolutionSnapshot( RunnableCode ):
         # Gist embedding generation removed (dead code — gist text still used for L3 matching)
         self.question_gist_embedding = question_gist_embedding if question_gist_embedding else []
 
-        # If the code embedding is empty, generate it
-        if len( code ) > 0 and not code_embedding:
+        # If the code embedding is empty, generate it.
+        # Guard the JOINED TEXT, not len( code ) — bug b35af923: a list that is
+        # non-empty but holds only blank lines (["" ] is the shape the producer
+        # below used to hand us) passes a length check and joins to "", which the
+        # embeddings endpoint refuses with a 422 that kills the job AFTER it has
+        # already answered the user. Mirrors the same all-blank test used by
+        # run_code() below.
+        code_text = " ".join( code ).strip() if code else ""
+        if code_text and not code_embedding:
             self.code_embedding = self._embedding_provider.generate_embedding( " ".join( code ), content_type="code" )
             dirty = True
         else:
@@ -466,7 +473,7 @@ class SolutionSnapshot( RunnableCode ):
         synonymous_question_gists=OrderedDict( { agent.question_gist: 100.0 } ),
                             error=agent.prompt_response_dict.get( "error", "" ),
                  solution_summary=agent.prompt_response_dict.get( "explanation", "N/A" ),
-                             code=agent.prompt_response_dict.get( "code", [ "" ] ),
+                             code=agent.prompt_response_dict.get( "code", [] ),   # [] not [ "" ] — bug b35af923; matches this class's own ctor default
                      code_returns=agent.prompt_response_dict.get( "returns", "N/A" ),
                      code_example=agent.prompt_response_dict.get( "example", "N/A" ),
                          thoughts=agent.prompt_response_dict.get( "thoughts", "N/A" ),

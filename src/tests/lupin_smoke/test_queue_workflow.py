@@ -278,10 +278,17 @@ class QueueWorkflowSmokeTests:
     async def test_queue_websocket_events(self):
         """Test queue-related WebSocket events."""
         # Connect to queue WebSocket
+        # `job_state_transition` is THE queue transition event this system emits.
+        # This test used to ask for queue_todo_update / queue_running_update /
+        # queue_done_update, and row 32054938 read the resulting silence as a
+        # product defect. It is not: those three names appear ZERO times in
+        # product code — only in this file and in the websocket smoke config —
+        # and they are absent from `websocket available events` in
+        # lupin-app.ini:1507. Nothing has ever emitted them, so subscribing to
+        # them could only ever produce nothing.
         websocket = await self.client.websocket_connect(
             "/ws/queue/{session_id}",
-            subscribed_events=["queue_todo_update", "queue_running_update",
-                             "queue_done_update", "tts_job_request",
+            subscribed_events=["job_state_transition",
                              "auth_success", "sys_ping"]
         )
         
@@ -338,23 +345,21 @@ class QueueWorkflowSmokeTests:
                     event_data = json.loads(event)
                     event_type = event_data.get("type")
                     
-                    if event_type in ["queue_todo_update", "queue_running_update", 
-                                    "queue_done_update", "tts_job_request"]:
-                        events_received.append(event_type)
-                        
+                    if event_type == "job_state_transition":
+                        events_received.append(event_data)
+
                         if self.debug:
                             print(f"[QUEUE EVENT] {event_type}: {event_data}")
-                        
-                        # Validate event structure
-                        if event_type.startswith("queue_"):
-                            self.validator.assert_json_contains(event_data, ["value"])
-                            assert isinstance(event_data["value"], int), \
-                                "Queue update should have integer value"
-                        elif event_type == "tts_job_request":
-                            self.validator.assert_json_contains(event_data, ["text"])
-                        
-                        # If we get a completion event, we can stop
-                        if event_type == "tts_job_request":
+
+                        # Validate event structure — a transition that cannot say
+                        # which job moved, or where from and to, is not evidence
+                        # the queue moved.
+                        self.validator.assert_json_contains(event_data, ["job_id", "from_state", "to_state"])
+
+                        # QUEUED -> RUNNING is the transition this test exists to
+                        # witness: proof the consumer picked the job up, not just
+                        # that the submit door accepted it.
+                        if event_data.get("to_state") == "running":
                             break
                             
                 except asyncio.TimeoutError:
@@ -363,9 +368,15 @@ class QueueWorkflowSmokeTests:
             if self.debug:
                 print(f"[DEBUG] Queue events received: {events_received}")
             
-            # 🔴 THIS ASSERTION IS EXPECTED TO FAIL TODAY. It is deliberate, it is
-            # not flaky, and it must not be relaxed to make the suite green — see
-            # the row referenced below.
+            # 🔴 STILL A HARD ASSERTION — it just names the right event now.
+            # Row 32054938 left this red on the belief that a queued job emits no
+            # transition events. Measured on :7999 (boot #108) with the same
+            # submit this test makes: THREE job_state_transition events arrive on
+            # a correctly-bound socket, two immediately and one at ~5.5s. The
+            # events were always there; this test was listening for names that do
+            # not exist. Pointing it at the real name is NOT relaxing it — it
+            # still fails if no transition arrives, which the mutation below
+            # proves.
             #
             # This test is NAMED for observing queue transitions, and until now it
             # could not fail if it observed none: it collected events into a list
@@ -386,10 +397,17 @@ class QueueWorkflowSmokeTests:
             # flakiness, which is why it is gone. A red that names a missing event
             # is worth more than a green that hides one.
             assert events_received, (
-                "No queue transition events arrived for a job that really was queued "
-                "(submit returned path='agent', status='waiting'). Expected at least one "
-                "of queue_todo_update / queue_running_update / queue_done_update / "
-                "tts_job_request on the subscribed socket."
+                "No job_state_transition events arrived for a job that really was queued "
+                "(submit returned path='agent', status='waiting'). This is the event the "
+                "queue actually emits — see emit_job_state_transition() at "
+                "todo_fifo_queue.py:1176 (PENDING->QUEUED) and queue_consumer.py:198 "
+                "(QUEUED->RUNNING). Silence here means the queue stopped emitting, not "
+                "that the test is asking for the wrong name."
+            )
+            transitions = [ f"{e.get('from_state')}->{e.get('to_state')}" for e in events_received ]
+            assert any( e.get("to_state") == "queued" for e in events_received ), (
+                f"A submit that reported status='waiting' must produce a transition INTO "
+                f"the queued state. Got: {transitions}"
             )
             
         finally:
