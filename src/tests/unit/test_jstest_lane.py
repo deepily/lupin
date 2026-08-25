@@ -23,6 +23,7 @@ WHAT THIS PINS, and why each one is here rather than trusted:
 import json
 import os
 import sys
+import signal
 import subprocess
 import textwrap
 from pathlib import Path
@@ -365,6 +366,55 @@ class TestTheWatchdog:
             "    c.append( bytearray( 8 * 1024 * 1024 ) )\n"
             "    if len( c ) > 256: sys.exit( 99 )\n" )
 
+
+    # ── THE CLEANUP THAT WAS NEVER HERE (added 2026-08-24) ───────────────────
+    # 🔴 THE HAZARD IS IN THE GREEN PATH'S BLIND SPOT: these tests spawn a hog
+    # with persist=True, which by design NEVER exits on its own — that is what
+    # killed the race the docstring below describes. Nothing ever reaped it.
+    #
+    # So on a GREEN run the watchdog's kill cleans up and nothing leaks. On a
+    # RED run — the watchdog regressing, or a deliberate mutation proving this
+    # suite still bites — the survivors the test just DETECTED stay resident
+    # FOREVER, at ~2.1 GB each.
+    #
+    # MEASURED 2026-08-24: sixteen processes from three separate pytest runs
+    # (pytest-470 / -474 / -477) were alive for over an hour holding 6.3 GB —
+    # three complete chains, reparented to `systemd --user` once their pytest
+    # exited. They were NOT evidence of a broken kill: a green run leaves
+    # nothing, verified. They were the debris of red runs that had no cleanup.
+    #
+    # ⇒ A test that leaks 2 GB every time it correctly fails punishes the suite
+    #   for working. Mutation testing is the practice this fleet runs ON PURPOSE,
+    #   so the failing path is a path we deliberately visit.
+    #
+    # Reaps by EXPLICIT PID, deepest-first, matched on this pytest process's own
+    # marker — never a pattern sweep of the box. The marker embeds os.getpid(),
+    # so it cannot match a peer session's processes even by accident (row
+    # cd332d2b: a hand-rolled pattern kill took three seats on 2026-08-21).
+    @pytest.fixture( autouse=True )
+    def _reap_my_own_strays( self ):
+        yield
+        marker = "jstest_survivor_%d" % os.getpid()
+        listing = subprocess.run(
+            [ "ps", "-eo", "pid=,ppid=,args=" ], capture_output=True, text=True ).stdout
+        mine = {}
+        for line in listing.splitlines():
+            if marker not in line: continue
+            parts = line.split( None, 2 )
+            if len( parts ) < 3: continue
+            mine[ int( parts[ 0 ] ) ] = int( parts[ 1 ] )
+        if not mine: return
+        # Deepest-first: a pid whose parent is also ours is deeper. Sorting by
+        # how many of its ancestors are in the set orders the kill safely.
+        def depth( pid ):
+            d, seen = 0, set()
+            while pid in mine and pid not in seen:
+                seen.add( pid ); pid = mine[ pid ]; d += 1
+            return d
+        for pid in sorted( mine, key=depth, reverse=True ):
+            try: os.kill( pid, signal.SIGKILL )
+            except ProcessLookupError: pass
+
     def _watch( self, tmp_path, script_src, ceiling_mb, poll="0.05" ):
         f = tmp_path / "subject.py"
         f.write_text( script_src, encoding="utf-8" )
@@ -485,11 +535,35 @@ class TestTheWatchdog:
         # a race the test kept winning, not a kill.
         chain = self._chain( tmp_path, marker, persist=True )
 
+        # 🔴 THE ECHO IS THE OTHER HALF OF THE ASSERTION, and it is here because
+        # "no survivors" is trivially satisfiable BY KILLING EVERYTHING. The
+        # obvious over-correction when survivors turn up is to widen the kill —
+        # a group kill on the ambient group, or a pattern sweep. Both make the
+        # line below pass while taking the watchdog and its caller down too.
+        #
+        # The depth-0 caller test (test_the_CALLER_SURVIVES_the_kill) cannot
+        # stand in for this: the self-kill only bites once there is a TREE to
+        # over-reach through, and that test drives a single process.
+        #
+        # ⇒ A kill is correct only when the runaway is gone AND the killer is
+        #   still standing. Asserting one without the other accepts a control
+        #   that works by destroying itself.
         r = _run_snippet(
-            'jstest_watchdog_exec %s %s 4' % ( sys.executable, chain ),
+            'jstest_watchdog_exec %s %s 4\necho "CALLER_ALIVE rc=$?"' % ( sys.executable, chain ),
             env={ "JSTEST_RSS_MAX_MB": "300", "JSTEST_POLL_SECS": "0.05" },
         )
-        assert r.returncode == 137, ( r.returncode, r.stderr )
+        assert "CALLER_ALIVE rc=137" in r.stdout, (
+            "THE WATCHDOG TOOK ITS OWN CALLER DOWN. The runaway may well be dead, but the "
+            "shell that was supposed to outlive it never reached the next line — so this is "
+            "a kill that works by destroying the killer.\nrc=%r\nstdout=%r\nstderr=%s"
+            % ( r.returncode, r.stdout, r.stderr )
+        )
+        # ⚠️ NO `r.returncode == 137` HERE, and the reason is a trap worth naming:
+        # appending the echo makes IT the snippet's last command, so the shell
+        # exits with the echo's 0 and r.returncode stops meaning the watchdog's
+        # result. The 137 is asserted INSIDE the CALLER_ALIVE string above, which
+        # is the same shape test_the_CALLER_SURVIVES_the_kill uses. Re-adding an
+        # r.returncode check here would go red against perfectly good code.
 
         # The assertion the other tests could not make: is anything left?
         import subprocess, time
