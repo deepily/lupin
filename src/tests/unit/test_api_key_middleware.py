@@ -78,30 +78,24 @@ class TestValidateAPIKey:
         assert result == test_user_id
         mock_repo.get_active_keys.assert_called_once()
 
-    @pytest.mark.xfail(
-        strict = True,
-        reason = "row 23a43f57 — _validate_api_key_sync wraps the WHOLE key loop in one "
-                 "try/except, and bcrypt.checkpw RAISES on a malformed stored hash, so an "
-                 "earlier bad row aborts the sweep. STRICT on purpose: the moment the fix "
-                 "lands this test passes, and strict xfail turns THAT into a failure so "
-                 "nobody can fix the bug and leave the marker behind."
-    )
     @pytest.mark.asyncio
     async def test_one_malformed_row_does_not_block_the_keys_after_it( self ):
         """
         A valid key must still authenticate when an earlier row is malformed.
 
-        🔴 EXPECTED TO FAIL AGAINST HEAD — row 23a43f57. This is the acceptance
-        criterion for that fix, written before it, so the fix has something to
-        turn green. It is a red that names a missing behaviour, not a broken test.
+        FIXED — row 23a43f57. This test was committed FIRST, as a strict xfail,
+        so the fix would have something to turn green. It earned its keep: when
+        the per-row try/except landed, the strict marker turned the unexpected
+        pass into a failure, which is exactly how a stale marker is meant to be
+        caught. The marker is gone and this is now an ordinary regression guard.
 
-        THE MECHANISM. _validate_api_key_sync loops over EVERY active key calling
-        bcrypt.checkpw, and the whole loop sits inside ONE try/except that returns
-        None. checkpw RAISES ValueError on a stored value that is not a
-        well-formed bcrypt hash — it does not return False — so a malformed row
-        does not merely fail to match itself. The raise escapes the loop, the
-        outer handler swallows it, and every key ordered AFTER the bad row is
-        never checked. Their owners get 401 on a good credential.
+        THE MECHANISM IT GUARDS. _validate_api_key_sync loops over EVERY active
+        key calling bcrypt.checkpw. checkpw RAISES ValueError on a stored value
+        that is not a well-formed bcrypt hash — it does not return False — so
+        before the fix a malformed row did not merely fail to match itself: the
+        raise escaped the loop, the outer handler swallowed it, and every key
+        ordered AFTER the bad row was never checked. Their owners got 401 on a
+        good credential.
 
         HOW A BAD ROW GOT THERE. Until 2026-08-24 the repository's create_key
         docstring example showed hashlib.sha256(...).hexdigest() and the model
@@ -135,8 +129,8 @@ class TestValidateAPIKey:
 
         assert result == test_user_id, (
             "a malformed stored hash on an EARLIER row aborted the sweep, so a valid "
-            "key was never checked — see row 23a43f57; the fix is to move the "
-            "try/except inside the loop and skip the bad row loudly"
+            "key was never checked — row 23a43f57. The per-row try/except in "
+            "_validate_api_key_sync is what keeps this green; do not hoist it back out."
         )
 
     @pytest.mark.asyncio
