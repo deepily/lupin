@@ -159,6 +159,47 @@ def _deny_reason_for( subcommand: Optional[ str ] ) -> str:
     )
 
 
+# BALANCED quoted spans are blanked before matching (row e062580e, 2026-08-24).
+#
+# THE FALSE DENY THIS REMOVES. `_GIT_STASH_RE` looks for the phrase in "command
+# position" -- start-of-string or just after one of `; & | ( \n`. It is a regex over
+# the RAW string and knows nothing about shell quoting, so a separator INSIDE a quoted
+# literal counted as a command position. Measured before the fix, three false denies:
+# a semicolon, a pipe, and a paren, each inside a quoted literal.
+#
+# So a heredoc, a test table, or a doc snippet listing those commands was refused
+# wholesale. That is authoring friction on a guard whose entire value is that nobody
+# turns it off, and the row exists because it bit its own author within minutes of him
+# demonstrating it. It then bit the seat that fixed it TWICE -- once writing the probe
+# that measured it, once writing the patch that removed it.
+#
+# WHY THIS DOES NOT TRADE A FALSE DENY FOR A FALSE ALLOW, which is the trade the row
+# says to refuse. The pattern requires a CLOSING quote, so it matches only BALANCED
+# spans. An unbalanced quote -- where a naive strip would swallow to end-of-string and
+# hide a real command -- matches nothing, and the text is left exactly as it was.
+# Measured both ways: an unbalanced quote followed by a real mutating command still
+# DENIES, before and after this change.
+#
+# Blanking to a SPACE rather than deleting: deletion could butt two fragments together
+# and manufacture a command position nobody typed. A space can only ever separate.
+#
+# Still a regex, still total, so the fail-open backstop keeps its meaning -- this adds
+# no path that can raise. shlex was considered and refused: it RAISES on unbalanced
+# quotes, and the backstop would then ALLOW a real mutation.
+_QUOTED_SPAN_RE = re.compile( '"[^"]*"' + "|" + "'[^']*'" )
+
+
+def _blank_quoted_spans( command ):
+    """
+    Ensures:
+        - returns <command> with every BALANCED single- or double-quoted span
+          replaced by a single space
+        - returns <command> unchanged where quotes are unbalanced
+        - never raises
+    """
+    return _QUOTED_SPAN_RE.sub( " ", command )
+
+
 def stash_deny_reason(
     tool_name,
     tool_input,
@@ -193,7 +234,7 @@ def stash_deny_reason(
         command = tool_input.get( "command", "" )
         if not isinstance( command, str ) or not command:
             return None
-        for match in _GIT_STASH_RE.finditer( command ):
+        for match in _GIT_STASH_RE.finditer( _blank_quoted_spans( command ) ):
             sub = _first_subcommand( match.group( "rest" ) )
             if sub in READONLY_SUBCOMMANDS:
                 continue

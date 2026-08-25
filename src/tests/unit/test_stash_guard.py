@@ -18,6 +18,7 @@ from lupin_cli.claude_code.hooks.lib.stash_guard import (
     _guard_disabled,
     _first_subcommand,
     _deny_reason_for,
+    _blank_quoted_spans,
     READONLY_SUBCOMMANDS,
 )
 
@@ -256,3 +257,69 @@ def test_build_stash_deny_response_shape():
             "permissionDecisionReason" : "because",
         }
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Row e062580e — a separator inside a QUOTED span is not a command position
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# THE DEFECT, as John measured it: `_GIT_STASH_RE` finds the phrase in "command
+# position" — start-of-string or just after `; & | ( \n` — over the RAW string, with no
+# notion of shell quoting. So a separator inside a quoted literal counted, and a heredoc
+# or test table listing these commands was refused wholesale. Before the fix these three
+# DENIED; the probe reported MISMATCHES: 3.
+#
+# It is a false DENY, never a false ALLOW, so it was never an escape — the cost lands on
+# authoring, which is exactly how a guard gets switched off by the first person it
+# inconveniences. It bit John demonstrating it, then bit the seat that fixed it twice:
+# once writing the probe, once writing the patch.
+#
+# ⚠️ THIS BLOCK IS ITSELF THE END-TO-END PROOF. It was appended through a heredoc whose
+# text contains the phrase after a separator inside quotes. Before the fix the live
+# PreToolUse hook refused that write outright. If this test file exists, the hook let it
+# through — which no unit assertion below can demonstrate, because they all call the
+# matcher directly rather than crossing the hook.
+
+QUOTED_FALSE_DENIES = [
+    'x = "cd /tmp; git stash pop"',
+    'x = "foo | git stash push"',
+    'x = "( git stash pop )"',
+]
+
+
+@pytest.mark.parametrize( "command", QUOTED_FALSE_DENIES )
+def test_a_separator_inside_a_quoted_span_is_not_a_command_position( command ):
+    assert stash_deny_reason( "Bash", { "command": command }, enabled=True ) is None, (
+        f"denied a quoted literal: {command!r}. The separator is inside quotes, so no "
+        "command runs there — this is the row e062580e false deny."
+    )
+
+
+def test_a_real_command_after_a_quoted_one_is_still_denied():
+    """THE CONTROL THAT KEEPS THE FIX HONEST. Blanking quoted spans must not blank the
+    command that follows them — otherwise the fix has bought authoring comfort by
+    putting a hole in a deny-by-default guard."""
+    command = 'x = "a; git stash pop"; git stash pop'
+    assert stash_deny_reason( "Bash", { "command": command }, enabled=True ) is not None
+
+
+def test_an_unbalanced_quote_does_not_hide_a_real_command():
+    """THE TRADE THE ROW SAYS TO REFUSE: a false deny swapped for a false ALLOW.
+
+    A naive strip runs from the opening quote to end-of-string and swallows whatever
+    follows. This pattern requires a CLOSING quote, so an unbalanced span matches
+    nothing and the text is left exactly as it was. Measured identically before and
+    after the fix."""
+    command = 'echo "oops ; git stash pop'
+    assert stash_deny_reason( "Bash", { "command": command }, enabled=True ) is not None
+
+
+def test_blanking_uses_a_space_so_it_cannot_manufacture_a_command_position():
+    """Deletion could butt two fragments together into a separator nobody typed; a
+    space can only ever separate. `git` here is not in command position either way."""
+    assert _blank_quoted_spans( 'a="x"git stash pop' ) == 'a= git stash pop'
+
+
+def test_unbalanced_input_is_returned_unchanged():
+    raw = 'echo "still open'
+    assert _blank_quoted_spans( raw ) == raw
