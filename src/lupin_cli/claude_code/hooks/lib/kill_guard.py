@@ -1,0 +1,323 @@
+"""
+Kill guard — an unscoped process sweep can reach another seat's CLI (row cd332d2b).
+
+WHAT IT COSTS, measured: on 2026-08-21 at 15:27:03Z a worker ran
+`pkill -f "pytest src/tests/unit"`. The CLI's own shadow-`pkill` shell function
+REFUSED it, verbatim: "this pattern matches the Claude CLI process (PID
+127519)". Ten seconds later the same worker reproduced the sweep by hand as
+`ps -eo pid,args | grep "[p]ytest src/tests/unit" | ... | while read p; do kill
+$p; done` — a shape the shadow function does not see — and its own output names
+the damage: "killed 125491 killed 127519 killed 171103 ..." — eight processes,
+INCLUDING the 127519 the refusal had just named. Three worker seats stopped
+within 612 ms; the author's was one of them. A fourth seat survived only
+because its command line did not happen to match the pattern.
+
+⇒ WHY A PATTERN THAT LOOKS LIKE A TEST PATH MATCHES A SEAT: a seat is launched
+as `claude --model … <its entire spawn brief>`, so the brief is in its argv.
+Any brief that so much as mentions `src/tests/unit` makes that seat a match for
+a grep aimed at pytest. The pattern does not have to be careless to be lethal —
+it only has to be a phrase somebody wrote down.
+
+WHAT IS DENIED, and nothing wider:
+  · SHAPE A — `kill <pid>` (any signal) naming a PID that /proc says is a LIVE
+    `claude` process. Verified against /proc at hook time, so this is a fact
+    about the box rather than a guess about the string.
+  · SHAPE B — a system-wide process listing (`ps -e`/`ps aux`/`pgrep`) feeding a
+    kill downstream in the same command. This is the shape above, refused
+    BEFORE any PID is known — which is the only moment it can still be refused,
+    since the PIDs are not in the command text.
+
+Heredoc BODIES are stripped before matching — a file that DOCUMENTS a sweep\nis data, not a sweep. (This module's own test file is such a file, and the\nguard denied it on first wiring, which is how the exclusion got written.)\n\nWHAT STAYS ALLOWED: killing your OWN children — `pkill -P $$`, `pgrep -P $$ |
+xargs kill`, `ps --ppid $$`, `kill $!`, `kill %1` — and any listing with no kill
+downstream. Read-only `ps`/`pgrep` are how you find out what is running.
+
+SAFETY — this runs inside the hot-path PreToolUse hook (every tool call, every
+session), so two non-negotiables:
+  • FAIL-OPEN: ANY error → allow (return None). A guard must never break a tool
+    call.
+  • ESCAPE HATCH: LUPIN_ALLOW_UNSCOPED_KILL=1 disables the guard for a session
+    that genuinely must sweep — after it has read the PIDs and confirmed none is
+    a seat.
+
+⚠️ DEFAULT-ON, deliberately. The rule this replaces already existed as advice
+("narrow the pattern"), was delivered to the author ten seconds before the
+event, and did not survive contact with a hurry.
+"""
+import os
+import re
+from typing import Optional
+
+
+# Bash tool name as it appears in the PreToolUse hook payload.
+BASH_TOOL_NAMES = ( "Bash", )
+
+_ENV_FLAG    = "LUPIN_ALLOW_UNSCOPED_KILL"
+_TRUE_VALUES = ( "1", "true", "on", "yes" )
+
+# What /proc/<pid>/comm reads for a Claude Code CLI process.
+CLAUDE_COMM = "claude"
+
+# `kill` in COMMAND POSITION with at least one literal decimal PID. Signal flags
+# (`-9`, `-KILL`, `-s TERM`, `--signal=9`) sit between the verb and the targets,
+# so they are skipped rather than parsed. Job specs (`%1`) and expansions (`$!`,
+# `$p`) carry no literal digits and never match here — SHAPE A is only ever
+# about a PID the author typed.
+_KILL_LITERAL_RE = re.compile(
+    r"""
+    (?:^|[;&|(`]|\n)             # command position
+    \s*
+    kill\b                       # the verb (not pkill/killall — different shapes)
+    (?P<args>(?:\s+[^\s;&|)`\n]+)*)   # the remainder of THIS command only
+    """,
+    re.VERBOSE,
+)
+
+# A process listing that is NOT scoped to the caller's own children. `ps` needs
+# an all-processes selector; `pgrep` is fleet-wide unless told otherwise.
+_UNSCOPED_LISTING_RE = re.compile(
+    r"""
+    (?:^|[;&|(`]|\n)\s*
+    (?:
+        ps\b(?=(?:\s+[^\s;&|)`\n]+)*\s+-?[aAe])   # ps -e / ps -A / ps aux / ps ax
+      | pgrep\b
+    )
+    """,
+    re.VERBOSE,
+)
+
+# Scoping that makes a listing safe: it can only ever return our own children.
+_OWN_CHILDREN_RE = re.compile( r"(?:-P|--parent|--ppid)\s*=?\s*\S" )
+
+# A kill downstream of the listing. `xargs kill`, a `while read … kill` loop, a
+# bare `kill` in a later command — all reach the same PIDs.
+# `sudo` can sit before `xargs` OR between it and the kill (`xargs sudo kill`),
+# so it is optional in BOTH slots rather than only the first.
+_KILL_VERB_RE = re.compile(
+    r"(?:^|[;&|(`{]|\n|\bdo\b)\s*(?:sudo\s+)?(?:xargs\s+(?:-[^\s]+\s+)*(?:sudo\s+)?)?kill(?:all)?\b"
+)
+
+
+# A heredoc body is DATA, not commands. Writing a file that documents a sweep —
+# this module's own test file does exactly that — must not read as running one.
+# Caught by the guard denying its own test file's heredoc on first wiring.
+_HEREDOC_RE = re.compile( r"<<-?\s*(['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)\1" )
+
+
+def _strip_heredocs( command: str ) -> str:
+    """
+    Remove heredoc BODIES, keeping the lines that carry real commands.
+
+    Requires:
+        - command is the shell command string
+
+    Ensures:
+        - every line strictly between a `<<TAG` line and its terminator line is
+          dropped; the introducing line and the terminator are kept
+        - an unterminated heredoc drops the rest of the string (that text is
+          data no matter where it ends)
+        - a command with no heredoc is returned unchanged
+    """
+    match = _HEREDOC_RE.search( command )
+    if not match:
+        return command
+    lines = command.split( "\n" )
+    kept  = []
+    tag   = None
+    for line in lines:
+        if tag is None:
+            kept.append( line )
+            found = _HEREDOC_RE.search( line )
+            if found:
+                tag = found.group( "tag" )
+        elif line.strip() == tag:
+            kept.append( line )
+            tag = None
+    return "\n".join( kept )
+
+
+def _guard_disabled( env=None ) -> bool:
+    """True iff LUPIN_ALLOW_UNSCOPED_KILL is set truthy (the escape hatch)."""
+    env = env if env is not None else os.environ
+    return str( env.get( _ENV_FLAG, "" ) ).strip().lower() in _TRUE_VALUES
+
+
+def _default_comm_reader( pid: str ) -> Optional[ str ]:
+    """
+    Read /proc/<pid>/comm, or None when the PID is gone or unreadable.
+
+    Requires:
+        - pid is a decimal PID string
+
+    Ensures:
+        - returns the stripped comm value for a live process
+        - returns None on any OSError (dead PID, permission, no procfs)
+    """
+    try:
+        with open( f"/proc/{pid}/comm", "r" ) as handle:
+            return handle.read().strip()
+    except OSError:
+        return None
+
+
+def _literal_pids( args: str ) -> list:
+    """
+    The literal decimal PIDs in a `kill` argument list.
+
+    Requires:
+        - args is the text following the `kill` verb within one command
+
+    Ensures:
+        - returns every bare all-digit token, in order
+        - skips flags (`-9`, `-s`, `--signal=9`) and their values, and skips any
+          token carrying an expansion or a job spec — those name no PID here
+    """
+    pids = []
+    for token in args.split():
+        if token.startswith( "-" ):
+            continue
+        if token.isdigit():
+            pids.append( token )
+    return pids
+
+
+def _claude_pids_targeted( command: str, comm_reader ) -> list:
+    """
+    The PIDs this command kills that /proc says are live `claude` processes.
+
+    Requires:
+        - command is the shell command string
+        - comm_reader is a callable( pid ) -> comm string or None
+
+    Ensures:
+        - returns the matching PIDs in the order they appear in the command
+        - returns [] when no literal PID is targeted, or none of them is a seat
+    """
+    hits = []
+    for match in _KILL_LITERAL_RE.finditer( command ):
+        for pid in _literal_pids( match.group( "args" ) ):
+            if comm_reader( pid ) == CLAUDE_COMM:
+                hits.append( pid )
+    return hits
+
+
+def _sweeps_unscoped( command: str ) -> bool:
+    """
+    True iff the command lists processes fleet-wide and kills downstream of it.
+
+    Requires:
+        - command is the shell command string
+
+    Ensures:
+        - True only when an unscoped `ps`/`pgrep` appears AND a kill verb appears
+          LATER in the string (a kill before the listing cannot consume it)
+        - False when every listing is scoped to the caller's own children
+        - False for a listing with no kill downstream (read-only reconnaissance)
+    """
+    for listing in _UNSCOPED_LISTING_RE.finditer( command ):
+        tail = command[ listing.end(): ]
+        if _OWN_CHILDREN_RE.search( tail.split( "|" )[ 0 ] ):
+            continue
+        if _KILL_VERB_RE.search( tail ):
+            return True
+    return False
+
+
+def _deny_reason_for( claude_pids: list ) -> str:
+    """Compose the deny text, naming the seats at risk and the substitute."""
+    if claude_pids:
+        head = (
+            f"This `kill` names PID(s) {', '.join( claude_pids )}, which /proc says "
+            "are LIVE Claude Code sessions. Killing another seat destroys its "
+            "context with no memento and no tombstone."
+        )
+    else:
+        head = (
+            "This command lists processes fleet-wide (`ps -e`/`ps aux`/`pgrep`) and "
+            "kills what it finds. That sweep sees EVERY seat on the box, not just "
+            "yours."
+        )
+    return (
+        f"{head}\n"
+        "WHY THE PATTERN DOES NOT HAVE TO LOOK DANGEROUS: a seat runs as "
+        "`claude … <its whole spawn brief>`, so its argv contains the brief. A grep "
+        "for a test path matches any seat whose brief mentions that path. On "
+        "2026-08-21 exactly this took out three seats in 612 ms, including the "
+        "author's own — ten seconds after `pkill` had refused the same pattern by "
+        "name (row cd332d2b).\n"
+        "USE INSTEAD:\n"
+        "  · kill YOUR OWN children — `pkill -P $$ -f <pattern>`, or "
+        "`pgrep -P $$ -f <pattern> | xargs -r kill`;\n"
+        "  · a job you started in this shell — `kill %1`, `kill $!`;\n"
+        "  · read first, then kill by a PID you have checked: "
+        "`cat /proc/<pid>/comm` must NOT say `claude`.\n"
+        "`ps` and `pgrep` with no kill downstream stay allowed. If you have read "
+        "the PIDs and confirmed none is a seat, re-run with "
+        "LUPIN_ALLOW_UNSCOPED_KILL=1."
+    )
+
+
+def kill_deny_reason(
+    tool_name,
+    tool_input,
+    *,
+    enabled     : Optional[ bool ] = None,
+    env         = None,
+    comm_reader = None,
+) -> Optional[ str ]:
+    """
+    Return a deny-reason string iff a Bash call can signal a seat it does not own.
+
+    Requires:
+        - tool_name is the hook payload's tool_name (str)
+        - tool_input is the hook payload's tool_input (dict) whose "command"
+          key carries the shell command, when present
+        - enabled is None (resolved from env) or injected for testing
+        - comm_reader is None (real /proc) or injected for testing
+
+    Ensures:
+        - None unless the guard is enabled AND tool_name is Bash AND the command
+          matches SHAPE A (kills a PID /proc reports as `claude`) or SHAPE B (an
+          unscoped listing with a kill downstream)
+        - SHAPE A is reported in preference to SHAPE B — it can name the victims
+        - None for own-children sweeps and for listings with no kill downstream
+        - FAIL-OPEN: any unexpected error → None
+    """
+    try:
+        if enabled is None:
+            enabled = not _guard_disabled( env )
+        if not enabled:
+            return None
+        if tool_name not in BASH_TOOL_NAMES:
+            return None
+        if not isinstance( tool_input, dict ):
+            return None
+        command = tool_input.get( "command", "" )
+        if not isinstance( command, str ) or not command:
+            return None
+        command     = _strip_heredocs( command )
+        reader      = comm_reader if comm_reader is not None else _default_comm_reader
+        claude_pids = _claude_pids_targeted( command, reader )
+        if claude_pids:
+            return _deny_reason_for( claude_pids )
+        if _sweeps_unscoped( command ):
+            return _deny_reason_for( [] )
+        return None
+    except Exception:                    # pragma: no cover - fail-open backstop: every statement above is total over the validated inputs, so no input reaches it; kept because a hot-path guard must never raise
+        return None
+
+
+def build_kill_deny_response( reason: str ) -> dict:
+    """
+    Build the PreToolUse deny envelope (mirrors build_stash_deny_response).
+
+    Ensures:
+        - returns { hookSpecificOutput: { hookEventName: "PreToolUse",
+          permissionDecision: "deny", permissionDecisionReason: <reason> } }
+    """
+    return {
+        "hookSpecificOutput": {
+            "hookEventName"            : "PreToolUse",
+            "permissionDecision"       : "deny",
+            "permissionDecisionReason" : reason,
+        }
+    }
