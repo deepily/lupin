@@ -23,7 +23,12 @@ WHAT IS DENIED, and nothing wider:
     `claude` process. Verified against /proc at hook time, so this is a fact
     about the box rather than a guess about the string.
   · SHAPE B — a system-wide process listing (`ps -e`/`ps aux`/`pgrep`) feeding a
-    kill downstream in the same command. This is the shape above, refused
+    kill downstream in the same command.
+  · SHAPE C — a `pkill`/`killall` PATTERN with no own-children scoping. The
+    CLI's own shadow-`pkill` refuses only a pattern matching YOUR pid; one
+    that matches another seat and not you goes through it untouched.
+  · SHAPE D — `kill $(pgrep …)`, identical in behaviour to the piped form B
+    already denies. This is the shape above, refused
     BEFORE any PID is known — which is the only moment it can still be refused,
     since the PIDs are not in the command text.
 
@@ -45,7 +50,9 @@ event, and did not survive contact with a hurry.
 """
 import os
 import re
-from typing import Optional
+import shlex
+import subprocess
+from typing import List, Optional
 
 
 # Bash tool name as it appears in the PreToolUse hook payload.
@@ -53,6 +60,9 @@ BASH_TOOL_NAMES = ( "Bash", )
 
 _ENV_FLAG    = "LUPIN_ALLOW_UNSCOPED_KILL"
 _TRUE_VALUES = ( "1", "true", "on", "yes" )
+
+# A signal flag on a kill verb: `-9`, `-KILL`, `-SIGTERM`. Not a selector.
+_SIGNAL_FLAG_RE = re.compile( r"-\d+|-(?:SIG)?[A-Z]+" )
 
 # What /proc/<pid>/comm reads for a Claude Code CLI process.
 CLAUDE_COMM = "claude"
@@ -106,6 +116,24 @@ _FOR_SUBST_RE = re.compile( r"\bfor\s+(?P<var>\w+)\s+in\s+(?:\$\(|`)" )
 
 # A kill downstream of the listing. `xargs kill`, a `while read … kill` loop, a
 # bare `kill` in a later command — all reach the same PIDs.
+# SHAPE C — a PATTERN sweep: `pkill`/`killall` selects across the whole box by
+# name or `-f` pattern. The CLI ships a shadow-`pkill` that refuses a pattern
+# matching ITS OWN pid, and that is narrower than the hazard: a pattern matching
+# ANOTHER seat and not yours sails straight through it. Found by Krishna
+# 2026-08-24 while reviewing this guard, together with SHAPE D below.
+_PATTERN_SWEEP_RE = re.compile(
+    r"(?:^|[;&|(`{]|\n|\bdo\b)\s*(?:sudo\s+)?(?:pkill|killall)\b(?P<args>(?:\s+[^\s;&|)`\n]+)*)"
+)
+
+# SHAPE D — a substitution feeding a kill DIRECTLY: `kill $(pgrep …)` has the
+# exact semantics of `pgrep … | xargs kill`, which SHAPE B already denies.
+# Denying one and not the other draws an arbitrary line through identical
+# behaviour.
+_KILL_SUBST_RE = re.compile(
+    r"(?:^|[;&|(`{]|\n|\bdo\b)\s*(?:sudo\s+)?kill(?:all)?\b[^;&|\n]*?"
+    r"(?:\$\(|`)(?P<subst>[^)`]*)"
+)
+
 # `sudo` can sit before `xargs` OR between it and the kill (`xargs sudo kill`),
 # so it is optional in BOTH slots rather than only the first.
 _KILL_VERB_RE = re.compile(
@@ -149,6 +177,98 @@ def _strip_heredocs( command: str ) -> str:
             kept.append( line )
             tag = None
     return "\n".join( kept )
+
+
+def _sweep_selector( args: str ) -> List[ str ]:
+    """
+    The `pgrep` selector equivalent to a `pkill`/`killall` argument list.
+
+    Requires:
+        - args is the text following the pkill/killall verb
+
+    Ensures:
+        - signal flags are dropped — `-9`, `-KILL`, `-TERM`, `-s TERM`,
+          `--signal=9`, `--signal 9` — because pgrep rejects them
+        - `--signal`'s and `-s`'s separate VALUE is dropped with it
+        - every other token is kept in order, so the selector matches exactly
+          what the sweep would have matched
+        - the split is SHELL-AWARE, so a quoted pattern containing spaces stays
+          one token — `pkill -f "pytest src/tests/unit"` selects on the whole
+          phrase, exactly as the shell would have handed it to pkill
+        - unbalanced quotes fall back to a whitespace split rather than giving up
+    """
+    # shlex, NOT split() — `pkill -f "pytest src/tests/unit"` is ONE pattern with
+    # spaces in it. Splitting on whitespace hands pgrep three patterns, pgrep
+    # refuses more than one, the probe comes back empty, and the guard allows the
+    # exact command that killed three seats. Caught by replaying real traffic.
+    try:
+        tokens = shlex.split( args )
+    except ValueError:
+        tokens = args.split()   # unbalanced quotes — fall back rather than refuse to look
+    kept = []
+    skip = False
+    for token in tokens:
+        if skip:
+            skip = False
+            continue
+        if token in ( "--signal", "-s" ):
+            skip = True
+            continue
+        if token.startswith( "--signal=" ):
+            continue
+        if _SIGNAL_FLAG_RE.fullmatch( token ):
+            continue
+        kept.append( token )
+    return kept
+
+
+def _default_pgrep_probe( selector: List[ str ] ) -> List[ str ]:
+    """
+    The PIDs `pgrep <selector>` reports right now.
+
+    Requires:
+        - selector is the argument list to hand pgrep
+
+    Ensures:
+        - returns the matching PIDs as strings, or [] when pgrep matches nothing
+        - returns [] on any failure (pgrep missing, timeout, OSError) — a probe
+          that cannot answer must not manufacture a refusal
+    """
+    if not selector:
+        return []
+    try:
+        result = subprocess.run(
+            [ "pgrep", *selector ], capture_output=True, text=True, timeout=5
+        )
+        return [ line.strip() for line in result.stdout.split( "\n" ) if line.strip().isdigit() ]
+    except ( OSError, subprocess.SubprocessError ):
+        return []
+
+
+def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader ) -> List[ str ]:
+    """
+    The live `claude` PIDs a `pkill`/`killall` pattern currently matches.
+
+    Requires:
+        - args is the sweep's argument list
+        - pgrep_probe( selector ) -> list of PID strings
+        - comm_reader( pid ) -> comm string or None
+
+    Ensures:
+        - returns the matching PIDs whose /proc comm is `claude`, in pgrep order
+        - returns [] when the pattern matches no seat — which is the ordinary
+          case and must stay ALLOWED: 21 of 6,492 real fleet commands are this
+          shape, nearly all of them a seat stopping its OWN superseded test run.
+          Refusing all of them is how a guard gets routed around, and routing
+          around the refusal is exactly what killed three seats on 2026-08-21.
+        - the reading is a SNAPSHOT: a seat that starts matching between this
+          check and the command running is not covered. That race is accepted —
+          it is far narrower than the hazard, and no PreToolUse check can close it
+    """
+    selector = _sweep_selector( args )
+    if not selector:
+        return []
+    return [ pid for pid in pgrep_probe( selector ) if comm_reader( pid ) == CLAUDE_COMM ]
 
 
 def _guard_disabled( env=None ) -> bool:
@@ -290,7 +410,37 @@ def _sweeps_unscoped( command: str ) -> bool:
         variable = _loop_variable_fed_by( command, listing.end() )
         if variable and re.search( r"kill\b[^;&|\n]*\$\{?" + re.escape( variable ) + r"\b", command ):
             return True
+
+    # SHAPE D — the listing sits inside a substitution that IS the kill's argument.
+    for subst in _KILL_SUBST_RE.finditer( command ):
+        inner = subst.group( "subst" )
+        if _UNSCOPED_LISTING_RE.search( "\n" + inner ) and not _OWN_CHILDREN_RE.search( inner ):
+            return True
+
     return False
+
+
+def _sweep_seat_hits( command: str, pgrep_probe, comm_reader ) -> List[ str ]:
+    """
+    SHAPE C — the live seats a `pkill`/`killall` in this command would kill.
+
+    Requires:
+        - command is the shell command string
+        - pgrep_probe / comm_reader are the injected probes
+
+    Ensures:
+        - returns the `claude` PIDs the first seat-hitting sweep would reach
+        - returns [] for a sweep scoped to own children (`pkill -P $$`), for a
+          bare `pkill` with no selector, and for any pattern matching no seat
+    """
+    for sweep in _PATTERN_SWEEP_RE.finditer( command ):
+        args = sweep.group( "args" )
+        if not args.strip() or _OWN_CHILDREN_RE.search( args ):
+            continue
+        hits = _seats_a_sweep_would_hit( args, pgrep_probe, comm_reader )
+        if hits:
+            return hits
+    return []
 
 
 def _deny_reason_for( claude_pids: list ) -> str:
@@ -334,6 +484,7 @@ def kill_deny_reason(
     enabled     : Optional[ bool ] = None,
     env         = None,
     comm_reader = None,
+    pgrep_probe = None,
 ) -> Optional[ str ]:
     """
     Return a deny-reason string iff a Bash call can signal a seat it does not own.
@@ -370,10 +521,14 @@ def kill_deny_reason(
         claude_pids = _claude_pids_targeted( command, reader )
         if claude_pids:
             return _deny_reason_for( claude_pids )
+        prober      = pgrep_probe if pgrep_probe is not None else _default_pgrep_probe
+        sweep_hits  = _sweep_seat_hits( command, prober, reader )
+        if sweep_hits:
+            return _deny_reason_for( sweep_hits )
         if _sweeps_unscoped( command ):
             return _deny_reason_for( [] )
         return None
-    except Exception:                    # pragma: no cover - fail-open backstop: every statement above is total over the validated inputs, so no input reaches it; kept because a hot-path guard must never raise
+    except Exception:                    # pragma: no cover - fail-open backstop; NOT decorative: a missing `import subprocess` in the probe path landed here on 2026-08-24 and turned every verdict into a silent allow, which is why the guard is replayed against real traffic rather than trusted to its unit tests
         return None
 
 

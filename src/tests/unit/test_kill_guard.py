@@ -12,6 +12,8 @@ Coverage target is 100% lines AND branches on kill_guard.py (Lupin-wide gate).
 The one exclusion is the fail-open `except Exception` backstop, which carries a
 same-line pragma explaining why it is genuinely unreachable.
 """
+import uuid
+
 import pytest
 
 from lupin_cli.claude_code.hooks.lib.kill_guard import (
@@ -22,6 +24,9 @@ from lupin_cli.claude_code.hooks.lib.kill_guard import (
     _literal_pids,
     _claude_pids_targeted,
     _sweeps_unscoped,
+    _sweep_selector,
+    _seats_a_sweep_would_hit,
+    _default_pgrep_probe,
     _pipeline_window,
     _loop_variable_fed_by,
     _strip_heredocs,
@@ -456,3 +461,199 @@ def test_loop_variable_is_none_when_the_substitution_already_closed():
     command = "for p in $(echo 1); do :; done; pgrep -f x | wc -l"
     listing = command.index( "pgrep" ) + len( "pgrep" )
     assert _loop_variable_fed_by( command, listing ) is None
+
+
+# ---------------------------------------------------------------------------
+# SHAPE C — a pkill/killall PATTERN, denied only when it would hit a live seat
+# ---------------------------------------------------------------------------
+
+def _hits( pids ):
+    """pgrep stub: the pattern matches these PIDs."""
+    return lambda selector: list( pids )
+
+
+def _sweep( command, probe, comm_reader=_all_claude ):
+    return kill_deny_reason(
+        "Bash", { "command": command }, enabled=True,
+        comm_reader=comm_reader, pgrep_probe=probe,
+    )
+
+
+@pytest.mark.parametrize( "command", [
+    'pkill -f "pytest src/tests/unit"',
+    "pkill -9 -f claude",
+    "killall -9 node",
+    "killall node",
+    "sudo pkill -f tsx",
+] )
+def test_a_pattern_sweep_that_would_hit_a_seat_is_denied( command ):
+
+    reason = _sweep( command, _hits( [ "127519" ] ) )
+    assert reason is not None
+    assert "127519" in reason
+
+
+def test_the_same_sweep_is_ALLOWED_when_no_seat_matches():
+    """21 of 6,492 real fleet commands are this shape, nearly all of them safe."""
+    assert _sweep( 'pkill -f "pytest src/tests/unit"', _hits( [ "999" ] ), _no_claude ) is None
+
+
+def test_a_pattern_matching_nothing_at_all_is_allowed():
+
+    assert _sweep( 'pkill -f "no-such-thing"', _hits( [] ) ) is None
+
+
+@pytest.mark.parametrize( "command", [
+    "pkill -P $$ -f pytest",
+    "pkill --parent $$ -f pytest",
+] )
+def test_an_own_children_sweep_is_allowed_without_probing( command ):
+    """
+    The probe must never be CALLED — asserted by recording, not by raising. A
+    raising probe is swallowed by the fail-open backstop, so the test passed even
+    with the exemption deleted. Found by mutation, not by reading.
+    """
+    calls = []
+
+    def recording_probe( selector ):
+        calls.append( selector )
+        return [ "127519" ]
+
+    assert _sweep( command, recording_probe ) is None
+    assert calls == []
+
+
+def test_a_bare_pkill_with_no_selector_is_allowed():
+    """Nothing to match on, so nothing to refuse — pkill will error by itself."""
+    assert _sweep( "pkill", _hits( [ "127519" ] ) ) is None
+
+
+def test_the_second_sweep_is_caught_when_the_first_is_scoped():
+
+    command = 'pkill -P $$ -f safe; pkill -f "pytest src/tests/unit"'
+    assert _sweep( command, _hits( [ "127519" ] ) ) is not None
+
+
+def test_the_probe_defaults_to_real_pgrep():
+    """`pgrep_probe=None` resolves to pgrep — an impossible pattern matches none."""
+    impossible = "nomatch-" + uuid.uuid4().hex
+    assert kill_deny_reason(
+        "Bash", { "command": 'pkill -f "' + impossible + '"' }, enabled=True
+    ) is None
+
+
+# ---------------------------------------------------------------------------
+# _sweep_selector — the pkill argv translated into a pgrep selector
+# ---------------------------------------------------------------------------
+
+def test_a_quoted_pattern_with_spaces_stays_one_token():
+    """A whitespace split hands pgrep 3 patterns; pgrep takes 1 and returns none,
+    so the guard would have allowed the exact command that killed three seats."""
+    assert _sweep_selector( ' -f "pytest src/tests/unit"' ) == [ "-f", "pytest src/tests/unit" ]
+
+
+@pytest.mark.parametrize( "args,expected", [
+    ( " -9 -f claude",            [ "-f", "claude" ] ),
+    ( " -KILL -f claude",         [ "-f", "claude" ] ),
+    ( " -SIGTERM -f claude",      [ "-f", "claude" ] ),
+    ( " -s TERM -f claude",       [ "-f", "claude" ] ),
+    ( " --signal TERM -f claude", [ "-f", "claude" ] ),
+    ( " --signal=9 -f claude",    [ "-f", "claude" ] ),
+] )
+def test_every_signal_flag_form_is_dropped( args, expected ):
+
+    assert _sweep_selector( args ) == expected
+
+
+def test_unbalanced_quotes_fall_back_to_a_whitespace_split():
+
+    assert _sweep_selector( ' -f "unclosed' ) == [ "-f", '"unclosed' ]
+
+
+def test_an_empty_argument_list_yields_no_selector():
+
+    assert _sweep_selector( "   " ) == []
+
+
+def test_seats_a_sweep_would_hit_returns_empty_without_a_selector():
+
+    assert _seats_a_sweep_would_hit( "  ", _hits( [ "1" ] ), _all_claude ) == []
+
+
+def test_seats_a_sweep_would_hit_filters_out_non_seats():
+
+    hits = _seats_a_sweep_would_hit(
+        " -f x", _hits( [ "1", "2" ] ),
+        lambda pid: CLAUDE_COMM if pid == "2" else "pytest",
+    )
+    assert hits == [ "2" ]
+
+
+# ---------------------------------------------------------------------------
+# _default_pgrep_probe
+# ---------------------------------------------------------------------------
+
+def test_default_pgrep_probe_finds_this_very_process():
+    """A real pgrep against a real box, asserting a PID we can name."""
+    import os
+    assert str( os.getpid() ) in _default_pgrep_probe( [ "-x", "python" ] ) + \
+                                 _default_pgrep_probe( [ "-x", "python3" ] ) + \
+                                 _default_pgrep_probe( [ "-f", "pytest" ] )
+
+
+def test_default_pgrep_probe_returns_empty_for_no_selector( monkeypatch ):
+    """An empty selector must not reach pgrep at all — a bare `pgrep` is not a
+    harmless no-op question to ask. Asserted by making any shell-out fail."""
+    import subprocess
+
+    def must_not_run( *a, **kw ):
+        raise AssertionError( "an empty selector must not shell out" )
+
+    monkeypatch.setattr( subprocess, "run", must_not_run )
+    assert _default_pgrep_probe( [] ) == []
+
+
+def test_default_pgrep_probe_returns_empty_when_nothing_matches():
+    """
+    The pattern is a FRESH UUID on purpose. Any fixed spelling ends up in the argv
+    of whatever shell wrote or ran this file, and `pgrep -f` then matches that
+    shell — so the test fails for the very reason the guard exists. It did exactly
+    that, twice, before this line was written.
+    """
+    impossible = "nomatch-" + uuid.uuid4().hex
+    assert _default_pgrep_probe( [ "-f", impossible ] ) == []
+
+
+def test_default_pgrep_probe_returns_empty_when_pgrep_cannot_run( monkeypatch ):
+
+    import subprocess
+    def boom( *a, **kw ):
+        raise OSError( "no pgrep" )
+    monkeypatch.setattr( subprocess, "run", boom )
+    assert _default_pgrep_probe( [ "-f", "x" ] ) == []
+
+
+# ---------------------------------------------------------------------------
+# SHAPE D — a substitution feeding a kill directly
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "command", [
+    "kill $(pgrep -f pytest)",
+    "kill -9 $(pgrep -f 'src/tests/unit')",
+    "kill `pgrep -f pytest`",
+    "kill $(ps -eo pid,args | grep [p]ytest | awk '{print $1}')",
+    "sudo kill $(pgrep -f pytest)",
+] )
+def test_a_substitution_feeding_a_kill_is_denied( command ):
+    """Identical semantics to `pgrep … | xargs kill`, which SHAPE B denies."""
+    assert _deny( command ) is not None
+
+
+@pytest.mark.parametrize( "command", [
+    "kill $(pgrep -P $$ -f pytest)",
+    "kill $(cat run.pid)",
+    "kill $(echo 4242)",
+] )
+def test_a_substitution_that_is_not_a_fleet_listing_is_allowed( command ):
+
+    assert _deny( command ) is None
