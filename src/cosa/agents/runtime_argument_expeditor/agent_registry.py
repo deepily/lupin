@@ -73,7 +73,11 @@ JOB_ARG_CONTRACTS = {
         "arg_mapping"        : {
             "research"         : "research",
             "document_path"    : "research",
-            "topic"            : "research",
+            # NO `"topic" : "research"` — row 9d89afe2. `research` is a FILE PATH, and all
+            # 1200 trained rows for this command emit topic="<subject phrase>", so the alias
+            # delivered a spoken subject as a filename (FileNotFoundError on a file nobody
+            # named). Unmapped, `topic` keeps its own name, `research` stays MISSING, and the
+            # fuzzy_file_match handler below fires and asks which document was meant.
             "audience"         : "audience",
             "audience_context" : "audience_context",
         },
