@@ -22,6 +22,8 @@ from lupin_cli.claude_code.hooks.lib.kill_guard import (
     _literal_pids,
     _claude_pids_targeted,
     _sweeps_unscoped,
+    _pipeline_window,
+    _loop_variable_fed_by,
     _strip_heredocs,
     _deny_reason_for,
     CLAUDE_COMM,
@@ -376,3 +378,81 @@ def test_build_kill_deny_response_shape():
             "permissionDecisionReason" : "because",
         }
     }
+
+
+# ---------------------------------------------------------------------------
+# A kill must CONSUME the listing — the false-positive class, from real traffic
+# ---------------------------------------------------------------------------
+
+# Copied verbatim from a live session's transcript. `pgrep -c` returns a COUNT,
+# never a PID, and the `kill $SAMPLER` targets a background job this same shell
+# started. The guard's first cut denied it; that is the whole reason this class
+# has a name. Measured: it was the ONLY denial across 6,681 real Bash commands
+# from 83 sessions over three days.
+REAL_WORLD_MONITOR = (
+    '( for i in $(seq 1 60); do c=$(pgrep -c -f "node|esbuild" 2>/dev/null || echo 0); '
+    'echo "$c" >> /tmp/proc-samples.txt; sleep 1; done ) &\n'
+    "SAMPLER=$!\n"
+    "npm test 2>&1 | tail -12\n"
+    "kill $SAMPLER 2>/dev/null\n"
+)
+
+
+def test_a_counter_plus_a_background_job_kill_is_not_a_sweep():
+    """The real-world false positive that made the consume test necessary."""
+    assert _deny( REAL_WORLD_MONITOR ) is None
+
+
+def test_a_pipe_inside_a_quoted_argument_is_not_a_pipeline():
+    """`pgrep -f "node|esbuild"` carries a pipe in an ARGUMENT, not an operator."""
+    assert _deny( 'pgrep -f "node|esbuild"; kill $!' ) is None
+
+
+def test_a_kill_in_a_later_command_does_not_consume_an_earlier_listing():
+
+    assert _deny( "ps aux | grep pytest; kill $!" ) is None
+
+
+def test_a_double_pipe_is_control_flow_not_a_pipeline():
+
+    assert _deny( "pgrep -f pytest || kill $!" ) is None
+
+
+def test_a_loop_over_a_substitution_must_kill_THAT_variable():
+    """A `for` loop that kills something else is not fed by the listing."""
+    assert _deny( "for p in $(pgrep -f pytest); do kill $OTHER; done" ) is None
+
+
+def test_pipeline_window_stops_at_a_plain_separator():
+
+    assert _pipeline_window( " -e | wc -l; kill 5" ) == " -e | wc -l"
+
+
+def test_pipeline_window_runs_past_a_separator_inside_a_compound():
+    """`while read p; do kill $p; done` must stay inside the window."""
+    window = _pipeline_window( " -e | while read p; do kill $p; done; echo after" )
+    assert "kill $p" in window
+    assert "echo after" not in window
+
+
+def test_pipeline_window_with_an_unclosed_compound_runs_to_the_end():
+
+    window = _pipeline_window( " -e | while read p; do kill $p" )
+    assert "kill $p" in window
+
+
+def test_pipeline_window_with_no_separator_is_the_whole_tail():
+
+    assert _pipeline_window( " -e | xargs kill" ) == " -e | xargs kill"
+
+
+def test_loop_variable_is_none_without_a_for_substitution():
+
+    assert _loop_variable_fed_by( "pgrep -f x", 5 ) is None
+
+
+def test_loop_variable_is_none_when_the_substitution_already_closed():
+    """A `for` whose `$( … )` closed before this listing does not feed it."""
+    command = "for p in $(echo 1); do :; done; pgrep -f x | wc -l"
+    listing = command.index( "pgrep" ) + len( "pgrep" )
+    assert _loop_variable_fed_by( command, listing ) is None

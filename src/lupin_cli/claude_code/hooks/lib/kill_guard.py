@@ -88,6 +88,22 @@ _UNSCOPED_LISTING_RE = re.compile(
 # Scoping that makes a listing safe: it can only ever return our own children.
 _OWN_CHILDREN_RE = re.compile( r"(?:-P|--parent|--ppid)\s*=?\s*\S" )
 
+# Quoted spans, removed before any structural test. `pgrep -f "node|esbuild"`
+# carries a pipe INSIDE an argument; reading that as a pipeline is how the guard
+# first mis-flagged a real monitoring loop that killed only its own `$!`.
+_QUOTED_RE = re.compile( r'''\'[^\']*\'|"[^"]*"''' )
+
+# A single `|` — the pipeline operator. `||` is control flow and pipes nothing.
+_PIPE_RE = re.compile( r"(?<!\|)\|(?!\|)" )
+
+# A compound that carries the pipeline's last segment past a `;` — the `while
+# read p; do kill $p; done` tail of the incident command lives here.
+_COMPOUND_RE = re.compile( r"\b(?:while|for|until|do)\b|\{" )
+
+# `for <var> in $( <listing> )` — the substitution form, where the listing feeds
+# a loop variable rather than a pipe.
+_FOR_SUBST_RE = re.compile( r"\bfor\s+(?P<var>\w+)\s+in\s+(?:\$\(|`)" )
+
 # A kill downstream of the listing. `xargs kill`, a `while read … kill` loop, a
 # bare `kill` in a later command — all reach the same PIDs.
 # `sudo` can sit before `xargs` OR between it and the kill (`xargs sudo kill`),
@@ -200,24 +216,79 @@ def _claude_pids_targeted( command: str, comm_reader ) -> list:
     return hits
 
 
+def _pipeline_window( tail: str ) -> str:
+    """
+    The text a listing's output can still reach: its own pipeline, no further.
+
+    Requires:
+        - tail is the command text following an unscoped listing
+
+    Ensures:
+        - quoted spans are blanked first, so a `|` inside an argument is not read
+          as a pipeline operator
+        - the window ends at the first `;`, newline, or `)` — EXCEPT when a
+          compound keyword (`while`/`for`/`until`/`do`/`{`) opens before it, in
+          which case it runs to `done`/`}` or to the end of the string
+    """
+    blanked = _QUOTED_RE.sub( lambda m: " " * len( m.group( 0 ) ), tail )
+    stop    = re.search( r"[;\n)]", blanked )
+    if stop is None:
+        return blanked
+    head = blanked[ : stop.start() ]
+    if not _COMPOUND_RE.search( head ):
+        return head
+    closer = re.search( r"\bdone\b|\}", blanked )
+    return blanked[ : closer.end() ] if closer else blanked
+
+
+def _loop_variable_fed_by( command: str, listing_end: int ) -> Optional[ str ]:
+    """
+    The loop variable a `for X in $( <listing> )` binds this listing's output to.
+
+    Requires:
+        - command is the shell command string
+        - listing_end is the offset just past the matched listing verb
+
+    Ensures:
+        - returns the variable name when a `for … in $(`/backtick opens before
+          the listing and has not closed before it
+        - returns None when no such loop introduces this listing
+    """
+    for match in _FOR_SUBST_RE.finditer( command, 0, listing_end ):
+        between = command[ match.end() : listing_end ]
+        if ")" in between or "`" in between:
+            continue
+        return match.group( "var" )
+    return None
+
+
 def _sweeps_unscoped( command: str ) -> bool:
     """
-    True iff the command lists processes fleet-wide and kills downstream of it.
+    True iff the command lists processes fleet-wide and KILLS WHAT IT FINDS.
+
+    A kill that merely appears later is not enough — `kill $!` after a `pgrep -c`
+    counter kills a background job the shell already owns, and reading that as a
+    sweep is a false positive against real, safe code. The listing's output must
+    actually reach the kill: down a pipeline, or through a `for … in $(…)` loop.
 
     Requires:
         - command is the shell command string
 
     Ensures:
-        - True only when an unscoped `ps`/`pgrep` appears AND a kill verb appears
-          LATER in the string (a kill before the listing cannot consume it)
+        - True when an unscoped listing is piped into a kill, or bound by a
+          `for … in $( … )` loop whose variable is killed
         - False when every listing is scoped to the caller's own children
-        - False for a listing with no kill downstream (read-only reconnaissance)
+        - False for a listing whose output no kill consumes
     """
     for listing in _UNSCOPED_LISTING_RE.finditer( command ):
-        tail = command[ listing.end(): ]
-        if _OWN_CHILDREN_RE.search( tail.split( "|" )[ 0 ] ):
+        tail   = command[ listing.end(): ]
+        window = _pipeline_window( tail )
+        if _OWN_CHILDREN_RE.search( window ):
             continue
-        if _KILL_VERB_RE.search( tail ):
+        if _PIPE_RE.search( window ) and _KILL_VERB_RE.search( window ):
+            return True
+        variable = _loop_variable_fed_by( command, listing.end() )
+        if variable and re.search( r"kill\b[^;&|\n]*\$\{?" + re.escape( variable ) + r"\b", command ):
             return True
     return False
 
