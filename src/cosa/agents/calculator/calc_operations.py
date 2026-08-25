@@ -2,7 +2,8 @@
 """
 Pure Python calculation functions for the Everyday Calculator agent.
 
-Three domains, zero LLM involvement in the computation:
+Four domains, zero LLM involvement in the computation:
+    - arithmetic()     — Plain arithmetic over a list of operands
     - convert()        — Unit conversions (length, mass, volume, temperature)
     - compare_prices() — Unit price normalization + comparison
     - mortgage()       — Standard amortization formula
@@ -13,6 +14,129 @@ All functions return result dicts with "status" key for consistent handling.
 from cosa.agents.calculator.conversion_tables import (
     resolve_alias, find_category, TEMPERATURE
 )
+
+
+# Operator name → the word used when speaking the expression back to the user
+ARITHMETIC_OPERATORS = {
+    "add"      : "plus",
+    "subtract" : "minus",
+    "multiply" : "times",
+    "divide"   : "divided by",
+    "modulo"   : "modulo",
+    "power"    : "to the power of",
+}
+
+
+def arithmetic( operands, operator ):
+    """
+    Evaluate plain arithmetic over a list of operands, folding left to right.
+
+    add and multiply are naturally n-ary; subtract, divide, modulo and power
+    fold from the left, so [ 100, 20, 5 ] with "subtract" is ( 100 - 20 ) - 5.
+
+    Requires:
+        - operands is a list of at least 2 numerics
+        - operator is one of ARITHMETIC_OPERATORS
+
+    Ensures:
+        - Returns dict with status="ok", result, operands, operator, expression
+        - Returns dict with status="error" on unknown operator, too few
+          operands, non-numeric operands, division/modulo by zero, or a
+          result that is not a finite real number
+        - Integral results are returned as int so voice output says "333",
+          never "333.0"
+
+    Raises:
+        - Nothing — errors returned in result dict
+    """
+    if operator is None:
+        return { "status": "error", "message": "No arithmetic operator provided." }
+
+    op = operator.strip().lower()
+
+    if op not in ARITHMETIC_OPERATORS:
+        valid = ", ".join( sorted( ARITHMETIC_OPERATORS.keys() ) )
+        return { "status": "error", "message": f"Unknown arithmetic operator: {operator}. Valid: {valid}" }
+
+    if not operands or len( operands ) < 2:
+        return { "status": "error", "message": "Arithmetic needs at least two numbers." }
+
+    try:
+        values = [ float( operand ) for operand in operands ]
+    except ( ValueError, TypeError ):
+        return { "status": "error", "message": "All operands must be numbers." }
+
+    result = values[ 0 ]
+
+    for operand in values[ 1: ]:
+
+        if op in ( "divide", "modulo" ) and operand == 0:
+            verb = "divide by zero" if op == "divide" else "take a remainder modulo zero"
+            return { "status": "error", "message": f"Cannot {verb}." }
+
+        try:
+            result = _apply_operator( result, operand, op )
+        except ( ZeroDivisionError, OverflowError ):
+            return { "status": "error", "message": "That calculation is out of range." }
+
+    # A negative base with a fractional exponent leaves the real numbers
+    if isinstance( result, complex ):
+        return { "status": "error", "message": "That calculation has no real-number answer." }
+
+    result = round( result, 6 )
+
+    # Integral results read better in speech as ints — "333", not "333.0"
+    if result == int( result ):
+        result = int( result )
+
+    expression = f" {ARITHMETIC_OPERATORS[ op ]} ".join( _format_operand( value ) for value in values )
+
+    return {
+        "status"     : "ok",
+        "result"     : result,
+        "operands"   : values,
+        "operator"   : op,
+        "expression" : expression
+    }
+
+
+def _apply_operator( left, right, op ):
+    """
+    Apply one arithmetic operator to a running result and the next operand.
+
+    Requires:
+        - left and right are floats
+        - op is a key of ARITHMETIC_OPERATORS
+        - right is non-zero when op is "divide" or "modulo"
+
+    Ensures:
+        - Returns the folded value
+
+    Raises:
+        - ZeroDivisionError or OverflowError from the underlying operator
+    """
+    if op == "add":      return left + right
+    if op == "subtract": return left - right
+    if op == "multiply": return left * right
+    if op == "divide":   return left / right
+    if op == "modulo":   return left % right
+    return left ** right
+
+
+def _format_operand( value ):
+    """
+    Render one operand for the spoken expression string.
+
+    Requires:
+        - value is a float
+
+    Ensures:
+        - Returns a thousands-separated int-looking string for integral
+          values, else the float
+    """
+    if value == int( value ):
+        return f"{int( value ):,}"
+    return f"{value:,}"
 
 
 def convert( value, from_unit, to_unit ):
@@ -286,6 +410,21 @@ def quick_smoke_test():
     passed = True
 
     try:
+        # ── Arithmetic Tests ──
+        result = arithmetic( [ 789, 456 ], "subtract" )
+        assert result[ "status" ] == "ok"
+        assert result[ "result" ] == 333
+        print( f"  ✓ arithmetic: 789 - 456 → {result[ 'result' ]}" )
+
+        result = arithmetic( [ 34, 67, 129 ], "add" )
+        assert result[ "status" ] == "ok"
+        assert result[ "result" ] == 230
+        print( f"  ✓ arithmetic: n-ary sum → {result[ 'result' ]}" )
+
+        result = arithmetic( [ 45, 0 ], "divide" )
+        assert result[ "status" ] == "error"
+        print( f"  ✓ arithmetic: divide by zero → error" )
+
         # ── Unit Conversion Tests ──
         result = convert( 10, "kilometers", "miles" )
         assert result[ "status" ] == "ok"

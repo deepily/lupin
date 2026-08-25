@@ -63,6 +63,24 @@ from tests.smoke.utilities.live_pipeline_base import LivePipelineTestBase
 
 CALCULATOR_QUERIES = [
     {
+        "id"               : "ARITHMETIC_SUBTRACT",
+        "query"            : "How much is 789 minus 456?",
+        "expected_op"      : "arithmetic",
+        "expected_keywords" : [ "333" ],
+    },
+    {
+        "id"               : "ARITHMETIC_SUM",
+        "query"            : "What is the sum of 98, 134, and 201?",
+        "expected_op"      : "arithmetic",
+        "expected_keywords" : [ "433" ],
+    },
+    {
+        "id"               : "ARITHMETIC_PRODUCT",
+        "query"            : "What is the product of 64 and 23?",
+        "expected_op"      : "arithmetic",
+        "expected_keywords" : [ "1,472", "1472" ],
+    },
+    {
         "id"               : "CONVERT_KM",
         "query"            : "How many miles is 10 kilometers?",
         "expected_op"      : "convert",

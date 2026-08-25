@@ -9,10 +9,25 @@ audit CSV so a reviewer can refute the call line by line.
 Two rules are implemented. Neither is chosen by this script -- the caller
 names one, and the CSV records which one produced the destinations.
 
-    capability  Label CALCULATOR iff the utterance maps to one of the three
-                operations CalculatorAgent actually implements (convert /
-                compare_prices / mortgage, per CalcIntent.VALID_OPERATIONS).
-                Everything else -- bare arithmetic included -- stays MATH.
+    capability  Label CALCULATOR iff the utterance maps to convert /
+                compare_prices / mortgage. Everything else -- bare arithmetic
+                included -- stays MATH.
+
+                *** STALE AS OF 2026-08-24, AND DELIBERATELY NOT CHANGED. ***
+                This rule was written when those three WERE every operation
+                CalculatorAgent implemented, so it could say "the operations the
+                calculator actually implements, per CalcIntent.VALID_OPERATIONS"
+                and mean the same thing. Row 11af54f8 added a fourth operation,
+                `arithmetic`, so the two readings have come apart: bare arithmetic
+                is now something the calculator CAN do, and this rule still sends
+                it to MATH.
+
+                The rule is left alone on purpose. Moving corpus lines is row
+                2ebe4ccb (the labelling half); 11af54f8 was only the code half,
+                and the 2026-08-21 "0 lines move" ruling in
+                src/rnd/v0.2.0/2026.08.21-router-label-fix.md rested partly on the
+                capability gap that has now closed. Whoever re-opens that ruling
+                owns this docstring with it.
 
     arithmetic  Bucket 1 (bare arithmetic) and the +-*/-only half of bucket 3
                 (word problems needing only the four operations on the stated
@@ -298,6 +313,11 @@ _MATH_SHAPE_RE = re.compile(
 def is_calculator_shaped( line ):
     """
     True when the utterance asks for convert, compare_prices, or mortgage.
+
+    NOTE: deliberately does NOT recognize bare arithmetic, even though
+    CalculatorAgent gained an `arithmetic` operation on 2026-08-24 (row 11af54f8).
+    See the `capability` rule note in the module docstring — widening this is a
+    corpus-labelling decision (row 2ebe4ccb), not a code cleanup.
 
     Requires:
         - line is a string
