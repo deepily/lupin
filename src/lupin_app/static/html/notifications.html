@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260619a">
     <link rel="stylesheet" href="/static/css/task-list.css?v=20260803c">
+    <link rel="stylesheet" href="/static/css/epic-board.css?v=20260824a">
 </head>
 <body>
     <!-- Master-detail two-pane shell (2026-05-21 — see
@@ -46,6 +47,7 @@
         <button class="toolbar-btn active" data-section="section-notifications" data-testid="notifications-toolbar-notifs" title="Notifications">💬</button>
         <button class="toolbar-btn active" data-section="section-fleet-status" data-testid="fleet-status-toolbar-btn" title="Fleet Status">🛰️</button>
         <button class="toolbar-btn active" data-section="section-task-list" data-testid="task-list-toolbar-btn" title="Task List">🗒️</button>
+        <button class="toolbar-btn active" data-section="section-epic-board" data-testid="epic-board-toolbar-btn" title="Epic Board">🗂️</button>
         <!-- Task-list per-persona accordion controls (2026-06-17). DISTINCT class
              (task-accordion-btn, NOT toolbar-btn) + NO data-section so the
              section-visibility click dispatcher ignores them — these are actions
@@ -711,6 +713,39 @@
             </div>
         </div>
 
+        <!-- Epic Board Section — the MACRO twin of the Task List above, showing the
+             SAME rows grouped by epic (correlation_key) instead of by owner. Plan:
+             src/rnd/v0.2.0/2026.08.24-epic-accordion-mini-plan.md.
+             Shares the task list's fetch: refreshTaskList() renders both panes off
+             one composite, so there is exactly ONE poll against /api/tasks on this
+             page. The ⟳ button therefore refreshes BOTH, by design. -->
+        <div class="collapsible-section" id="section-epic-board">
+            <div class="section-header" onclick="toggleSection('epic-board-section')">
+                <h3>🗂️ Epic Board: <span id="epic-board-count">0</span>
+                    <span id="epic-board-updated" class="task-list-updated"
+                          data-testid="epic-board-updated"
+                          title="Last refreshed (HH:MM:SS, browser timezone)"></span></h3>
+                <button class="epic-accordion-btn" id="epic-board-collapse-all"
+                        data-testid="epic-board-collapse-all-btn" type="button"
+                        onclick="event.stopPropagation(); window.notificationsUI.collapseAllEpics()"
+                        title="Collapse all epics">⊟</button>
+                <button class="epic-accordion-btn" id="epic-board-expand-all"
+                        data-testid="epic-board-expand-all-btn" type="button"
+                        onclick="event.stopPropagation(); window.notificationsUI.expandAllEpics()"
+                        title="Expand all epics">⊞</button>
+                <button class="refresh-btn" id="epic-board-refresh"
+                        data-testid="epic-board-refresh-btn"
+                        onclick="event.stopPropagation(); window.notificationsUI.refreshTaskList()"
+                        title="Refresh now (refreshes the Task List too — they share one fetch)">⟳</button>
+                <button class="toggle-button" id="epic-board-toggle">▼</button>
+            </div>
+            <div class="section-content" id="epic-board-section">
+                <div id="epic-board-container" data-testid="epic-board-container">
+                    <!-- rendered epic-grouped table (read-only) -->
+                </div>
+            </div>
+        </div>
+
         <!-- Queue Filter Settings (Admin Only) -->
         <div class="collapsible-section" id="filter-settings-section" style="display: none;">
             <div class="section-header" onclick="toggleSection('filter-section')">
@@ -1055,7 +1090,7 @@
     <script type="module" src="/static/js/shared/task-list-query.js?v=20260803c"></script>
     <script type="module" src="/static/js/shared/agent-select.js?v=20260823a"></script>
     <script type="module" src="/static/js/shared/arg-interview.js?v=20260823a"></script>
-    <script src="/static/js/notifications.js?v=20260823a"></script>
+    <script src="/static/js/notifications.js?v=20260824a"></script>
     <script src="/static/js/broadcast-panel.js?v=20260619a"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.

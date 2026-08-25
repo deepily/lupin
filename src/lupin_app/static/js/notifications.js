@@ -402,6 +402,22 @@ class NotificationsUI {
         this.TASK_LIST_COLLAPSED_KEY    = 'lupin.taskList.collapsedOwners'; // localStorage key: JSON array of collapsed owner keys
         this.TASK_LIST_UNASSIGNED_KEY   = '__unassigned__';                 // sentinel owner key for the ownerless bucket
         this._taskListAccordionWired    = false;                            // event-delegation guard (wire the container listener once)
+
+        // Epic Board panel — the MACRO view of the SAME rows the task list shows,
+        // grouped on correlation_key instead of owner_persona. Plan:
+        // src/rnd/v0.2.0/2026.08.24-epic-accordion-mini-plan.md
+        // NOTE the absence of a poll handle and an in-flight guard here: this
+        // panel deliberately has NEITHER. It renders off refreshTaskList()'s
+        // composite, so there is exactly one timer against /api/tasks on this page.
+        this.EPIC_KEY_PREFIX            = 'epic:';                          // a correlation_key counts as an epic ONLY with this prefix
+        this.EPIC_UNASSIGNED_KEY        = 'epic:unassigned';                // the deliberately-epicless epic; sorts LAST among epics
+        this.EPIC_ON_RICK_KEY           = '__on_rick__';                    // sentinel group key: the waiting-on-Rick highlight
+        this.EPIC_DRIFT_KEY             = '__drift__';                      // sentinel group key: rows carrying no epic at all
+        this.EPIC_BLOCKER_OF_INTEREST   = 'rick';                           // the one human the highlight section watches for
+        this.EPIC_BOARD_STATE_KEY       = 'lupin.epicBoard.groupState';     // localStorage key: JSON map of group key -> isExpanded CHOICES
+        this._epicBoardAccordionWired   = false;                            // event-delegation guard (wire the container listener once)
+        this._epicStories               = {};                               // GET /api/epic-stories body, memoized for the page's life
+        this._epicStoriesFetched        = false;                            // one-shot guard: hand-edited file, never polled
         // Task-list row redesign (design 2026.06.29): the client title-truncation
         // backstop length — IDENTICAL to the server-side store-guard cap (60 chars,
         // handoff #5 / D4). Catches LEGACY rows written before the store guard.
@@ -9817,6 +9833,13 @@ class NotificationsUI {
         try {
             const composite = await this.fetchTaskList();
             this.renderTaskList( composite );
+            // The Epic Board renders off THIS composite — no second fetch, no
+            // second timer, so the two panes can never show different clocks.
+            // The story text is a separate, MEMOIZED one-shot against a different
+            // endpoint (hand-edited file, not live state), so this await costs a
+            // request on the first tick only and never again.
+            await this.fetchEpicStories();
+            this.renderEpicBoard( composite );
         } finally {
             this._taskListFetchInFlight = false;
         }
@@ -10134,6 +10157,668 @@ class NotificationsUI {
         this.saveCollapsedTaskOwners( new Set() );
         document.querySelectorAll( "#task-list-container tbody.task-group[data-owner]" )
             .forEach( tbody => this._applyTaskGroupCollapseState( tbody, false ) );
+    }
+
+
+    // ========================================
+    // EPIC BOARD PANEL — the MACRO view of the same rows
+    // Plan: src/rnd/v0.2.0/2026.08.24-epic-accordion-mini-plan.md
+    //
+    // The task-list card above answers "who owes what". This one answers "what
+    // are we trying to finish", off the SAME rows, grouped on `correlation_key`
+    // (which holds "epic:<slug>") instead of on `owner_persona`.
+    //
+    // ONE FETCH, ONE CLOCK — deliberately. This panel has NO poll of its own and
+    // NO fetch of its own against /api/tasks: refreshTaskList() hands its already-
+    // fetched composite to renderEpicBoard(). A second timer against the same
+    // endpoint would be waste AND would give the two panes different clocks, which
+    // reads as a bug the first time they disagree.
+    //
+    // Sections mirror the board generator (planning-is-prompting
+    // workflow/scripts/generate_epic_board.py), because those sections were
+    // designed against this data and Rick already reads them:
+    //     ⏳ Waiting on Rick — a HIGHLIGHT, not a move (rows also stay in their epic)
+    //     per-epic groups     — collapsed by default
+    //     🔴 Drift            — rows carrying no epic key, the nudge to stamp one
+    // ========================================
+
+    async fetchEpicStories() {
+        /**
+         * Fetch the hand-maintained epic story text from GET /api/epic-stories
+         * (same auth guard as /api/tasks). ONE-SHOT and cached — this is a
+         * hand-edited file, not live state, so it is NOT polled. The result is
+         * memoized on the instance and reused for the life of the page.
+         *
+         * A missing / unreachable story file is NOT an error condition: the board
+         * renders de-slugged epic names, exactly as the generator does, and the
+         * absence is the visible nudge to write one.
+         *
+         * Requires:
+         *     - this.authedFetch is available (handles JWT refresh)
+         *
+         * Ensures:
+         *     - Returns the stories map ({ "epic:<slug>": { title, story } })
+         *     - Returns {} on ANY failure (401, non-2xx, network throw, bad shape)
+         *     - Fetches at most once per page load (memoized, including the
+         *       failure case — a down endpoint must not be retried every render)
+         *     - Never throws
+         */
+        if ( this._epicStoriesFetched ) return this._epicStories;
+        this._epicStoriesFetched = true;
+        try {
+            const response = await this.authedFetch( "/api/epic-stories" );
+            if ( !response.ok ) {
+                this.log( `Epic stories unavailable (HTTP ${response.status}) — epics render de-slugged` );
+                return this._epicStories;
+            }
+            const body = await response.json();
+            if ( body && body.stories && typeof body.stories === "object" ) {
+                this._epicStories = body.stories;
+            }
+        } catch ( error ) {
+            this.log( `Epic stories fetch failed: ${error} — epics render de-slugged` );
+        }
+        return this._epicStories;
+    }
+
+    _epicKeyOf( task ) {
+        /**
+         * The epic key a row belongs to, or null when it carries none.
+         *
+         * Mirrors the generator's rule VERBATIM: a key counts only when it starts
+         * with "epic:". That catches BOTH a row minted without a correlation_key
+         * AND a row whose key was overwritten by a cc-task: respawn adoption —
+         * the second is the reason a plain truthiness check is not enough.
+         *
+         * Ensures:
+         *     - correlation_key starting "epic:" → that key; anything else → null
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        const key = ( task && task.correlation_key ) ? String( task.correlation_key ) : "";
+        return key.startsWith( this.EPIC_KEY_PREFIX ) ? key : null;
+    }
+
+    _epicTitleLabel( epicKey ) {
+        /**
+         * The human title for an epic: the hand-maintained story title when one
+         * exists, otherwise the DE-SLUGGED key ("epic:board-visibility" →
+         * "board visibility").
+         *
+         * A missing entry is a nudge, never an error — this is the one behavior
+         * the plan calls out explicitly, and it mirrors generate_epic_board.py:385.
+         *
+         * Ensures:
+         *     - a story with a non-empty title → that title
+         *     - no story / blank title → key minus the "epic:" prefix, "-" → " "
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        const story = this._epicStories[ epicKey ];
+        if ( story && story.title ) return String( story.title );
+        return String( epicKey ).replace( this.EPIC_KEY_PREFIX, "" ).replace( /-/g, " " );
+    }
+
+    _epicStoryText( epicKey ) {
+        /**
+         * The one-line story for an epic, or "" when none is written.
+         *
+         * Ensures:
+         *     - a story with a non-empty `story` → that string; else ""
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        const story = this._epicStories[ epicKey ];
+        return ( story && story.story ) ? String( story.story ) : "";
+    }
+
+    _taskWaitsOnRick( task ) {
+        /**
+         * Whether a row is blocked on Rick himself.
+         *
+         * KIND IS IGNORED ON PURPOSE, mirroring the generator's _ref_names_user:
+         * the same human appears as {kind:"user"} when a gate was raised on him and
+         * {kind:"persona"} when a row was simply assigned his name. A selector keyed
+         * to one kind silently drops half the queue — the exact shape of miss this
+         * section exists to stop.
+         *
+         * Ensures:
+         *     - true when ANY blocked_by ref has id === "rick" (case/space-insensitive)
+         *       and kind ∈ { user, persona }
+         *     - a non-array / absent blocked_by → false
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        const refs = ( task && Array.isArray( task.blocked_by ) ) ? task.blocked_by : [];
+        return refs.some( ref => {
+            if ( !ref || typeof ref !== "object" ) return false;
+            const ident = String( ref.id == null ? "" : ref.id ).trim().toLowerCase();
+            return ident === this.EPIC_BLOCKER_OF_INTEREST
+                && ( ref.kind === "user" || ref.kind === "persona" );
+        } );
+    }
+
+    groupTasksByEpic( tasks ) {
+        /**
+         * Build the epic-grouped model from a flat task array — the MACRO twin of
+         * groupTasksByOwner.
+         *
+         * Group ordering mirrors the generator's sort_key: the "epic:unassigned"
+         * bucket sinks LAST among the epics, everything else is biggest-first, ties
+         * broken by key so the order is stable across renders.
+         *
+         * Requires:
+         *     - tasks is an array of task rows (or non-array → treated as empty)
+         *
+         * Ensures:
+         *     - Returns { totalCount, onRick, groups, drift }
+         *     - totalCount counts ALL input rows
+         *     - onRick holds every row blocked on Rick, P0 first then id — a
+         *       HIGHLIGHT, not a move: those rows ALSO stay under their epic
+         *     - groups holds one entry per distinct "epic:" key, biggest first,
+         *       "epic:unassigned" last; each { epicKey, tasks: [...] }
+         *     - drift holds every row whose correlation_key is absent or does not
+         *       start with "epic:" — never silently dropped
+         *     - a row is in exactly one of groups / drift
+         *     - within a group, rows sort by status-rank then priority then title
+         *       (the same urgency order the task list uses)
+         *     - Pure + degrade-safe (falsy rows collapse to {}, never throw)
+         */
+        const rows = Array.isArray( tasks ) ? tasks : [];
+
+        const byEpic = new Map();   // "epic:<slug>" → tasks[]
+        const drift  = [];
+        const onRick = [];
+
+        rows.forEach( raw => {
+            const task    = raw || {};
+            const epicKey = this._epicKeyOf( task );
+            if ( epicKey ) {
+                if ( byEpic.has( epicKey ) ) byEpic.get( epicKey ).push( task );
+                else byEpic.set( epicKey, [ task ] );
+            } else {
+                drift.push( task );
+            }
+            if ( this._taskWaitsOnRick( task ) ) onRick.push( task );
+        } );
+
+        const byUrgency = ( a, b ) => {
+            const sr = this._taskStatusRank( a.status ) - this._taskStatusRank( b.status );
+            if ( sr !== 0 ) return sr;
+            const pr = this._taskPriorityRank( a.priority ) - this._taskPriorityRank( b.priority );
+            if ( pr !== 0 ) return pr;
+            return this._taskTitleLabel( a ).localeCompare( this._taskTitleLabel( b ) );
+        };
+
+        // Generator parity (sort_key): unassigned last, then biggest bucket first,
+        // then key — so a render never reshuffles two equal-sized epics.
+        const groups = Array.from( byEpic.keys() )
+            .sort( ( a, b ) => {
+                const au = a === this.EPIC_UNASSIGNED_KEY ? 1 : 0;
+                const bu = b === this.EPIC_UNASSIGNED_KEY ? 1 : 0;
+                if ( au !== bu ) return au - bu;
+                const size = byEpic.get( b ).length - byEpic.get( a ).length;
+                if ( size !== 0 ) return size;
+                return a.localeCompare( b );
+            } )
+            .map( epicKey => ( {
+                epicKey,
+                tasks : byEpic.get( epicKey ).slice().sort( byUrgency )
+            } ) );
+
+        onRick.sort( ( a, b ) => {
+            const pr = this._taskPriorityRank( a.priority ) - this._taskPriorityRank( b.priority );
+            if ( pr !== 0 ) return pr;
+            return String( a.id || "" ).localeCompare( String( b.id || "" ) );
+        } );
+
+        return { totalCount: rows.length, onRick, groups, drift: drift.slice().sort( byUrgency ) };
+    }
+
+    _epicGroupIdSlug( epicKey ) {
+        /**
+         * Map an epic key to a DOM-id-safe slug for the group's <tbody> id / the
+         * header's aria-controls target.
+         *
+         * Ensures:
+         *     - "epic-group-" + key with non [A-Za-z0-9_-] chars → "-"
+         *     - Pure: no DOM, no side effects
+         */
+        return "epic-group-" + String( epicKey ).replace( /[^a-zA-Z0-9_-]/g, "-" );
+    }
+
+    _epicDefaultExpanded( epicKey ) {
+        /**
+         * The FIRST-LOAD open/closed default for one group, before the viewer has
+         * expressed any preference.
+         *
+         * Plan §6: "Default state: all epics collapsed. The macro view's value is
+         * the list of epics and their counts; opening one is a deliberate act."
+         * The ⏳ Waiting-on-Rick section is the documented exception — the plan
+         * calls it a HIGHLIGHT, and a collapsed highlight highlights nothing.
+         *
+         * Ensures:
+         *     - the on-Rick sentinel → true; every other key (epics, drift) → false
+         *     - Pure: no DOM, no side effects
+         */
+        return epicKey === this.EPIC_ON_RICK_KEY;
+    }
+
+    loadEpicGroupState() {
+        /**
+         * Read the persisted per-group open/closed CHOICES from localStorage.
+         *
+         * Stores CHOICES, not state — a plain map of group key → isExpanded, holding
+         * only groups the viewer has actually toggled. A key that is ABSENT falls
+         * through to _epicDefaultExpanded, which is what makes "collapsed by
+         * default" survive an epic being minted later: a brand-new epic the viewer
+         * has never seen is absent from the map, so it takes the default rather
+         * than inheriting some stale set's membership.
+         *
+         * Ensures:
+         *     - Returns a plain object of key → boolean (empty on absent/invalid/
+         *       parse-error); non-boolean values are dropped defensively
+         *     - Never throws
+         */
+        try {
+            const raw    = localStorage.getItem( this.EPIC_BOARD_STATE_KEY );
+            const parsed = raw ? JSON.parse( raw ) : {};
+            if ( !parsed || typeof parsed !== "object" || Array.isArray( parsed ) ) return {};
+            const clean = {};
+            Object.keys( parsed ).forEach( key => {
+                if ( typeof parsed[ key ] === "boolean" ) clean[ key ] = parsed[ key ];
+            } );
+            return clean;
+        } catch ( e ) {
+            this.error( "Error loading epic group state:", e );
+            return {};
+        }
+    }
+
+    saveEpicGroupState( state ) {
+        /**
+         * Persist the per-group open/closed choice map to localStorage.
+         *
+         * Requires:
+         *     - state is a plain object of group key → boolean
+         *
+         * Ensures:
+         *     - The EPIC_BOARD_STATE_KEY entry is written; errors are swallowed
+         *       (a private-mode / quota failure must never break rendering)
+         */
+        try {
+            localStorage.setItem( this.EPIC_BOARD_STATE_KEY, JSON.stringify( state ) );
+        } catch ( e ) {
+            this.error( "Error saving epic group state:", e );
+        }
+    }
+
+    _epicGroupIsExpanded( epicKey, state ) {
+        /**
+         * Resolve one group's open/closed state: the viewer's recorded choice when
+         * there is one, the per-key default otherwise.
+         *
+         * Requires:
+         *     - state is the choice map from loadEpicGroupState (or any object)
+         *
+         * Ensures:
+         *     - a recorded boolean for epicKey → that boolean
+         *     - no record → _epicDefaultExpanded( epicKey )
+         *     - Pure: no DOM, no side effects
+         */
+        const recorded = state ? state[ epicKey ] : undefined;
+        return typeof recorded === "boolean" ? recorded : this._epicDefaultExpanded( epicKey );
+    }
+
+    toggleEpicCollapsed( epicKey ) {
+        /**
+         * Flip one group's open/closed state and persist the choice.
+         *
+         * Requires:
+         *     - epicKey is a rendered group key (an epic, the drift sentinel, or
+         *       the on-Rick sentinel)
+         *
+         * Ensures:
+         *     - the flipped choice is recorded and persisted
+         *     - returns the NEW collapsed boolean for epicKey
+         */
+        const state       = this.loadEpicGroupState();
+        const isExpanded  = !this._epicGroupIsExpanded( epicKey, state );
+        state[ epicKey ]  = isExpanded;
+        this.saveEpicGroupState( state );
+        return !isExpanded;
+    }
+
+    _renderEpicRow( task ) {
+        /**
+         * Render one epic-board row (a <tr>) with FOUR columns: ID · Priority ·
+         * Status · Title.
+         *
+         * DELIBERATELY narrower than the task-list row. Owner is omitted because
+         * that is precisely what the pane above is for — repeating it here would
+         * make the macro view a worse copy of the micro one (plan §6).
+         *
+         * EVERY store-sourced value is escapeHtml'd (this card writes via
+         * innerHTML, so it must escape explicitly).
+         *
+         * Requires:
+         *     - task is a row object (fields rendered defensively — falsy → "—")
+         *
+         * Ensures:
+         *     - the <tr> carries a `task-status-*` class; the Priority cell carries
+         *       a `task-prio-*` heat class when recognized
+         *     - Title is truncated with the FULL title on a hover-tooltip
+         *     - Pure: no DOM access, no side effects (object in → string out)
+         */
+        const statusWord  = this.escapeHtml( task.status || "unknown" );
+        const statusClass = this._taskStatusClass( task.status );
+        const prioClass   = this._taskPriorityClass( task.priority );
+        const idLabel     = this.escapeHtml( this._taskIdLabel( task ) );
+        const fullTitle   = this._taskTitleLabel( task );
+        const titleText   = this.escapeHtml( this._truncateTaskTitle( fullTitle ) );
+        const titleAttr   = this._escapeTaskAttr( fullTitle );
+        const priority    = this.escapeHtml( this._taskCellOrDash( task.priority ) );
+
+        return `
+            <tr class="epic-row ${statusClass}">
+                <td class="epic-col-id">${idLabel}</td>
+                <td class="epic-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
+                <td class="epic-col-status"><span class="task-status-dot"></span>${statusWord}</td>
+                <td class="epic-col-title" title="${titleAttr}">${titleText}</td>
+            </tr>`;
+    }
+
+    _renderEpicGroup( epicKey, headerLabel, tasks, state, extraClass, storyText ) {
+        /**
+         * Render ONE accordion group as a <tbody>: a clickable header bar (chevron
+         * + label + count) followed by that group's rows, plus the epic's one-line
+         * story when there is one.
+         *
+         * Requires:
+         *     - epicKey is the stable accordion key (data-epic + persisted choice key)
+         *     - headerLabel is the ALREADY-ESCAPED header text
+         *     - tasks is the group's row array
+         *     - state is the choice map from loadEpicGroupState
+         *     - extraClass is an extra <tbody> class or "" (drift / on-Rick accents)
+         *     - storyText is the one-line story, or "" for none
+         *
+         * Ensures:
+         *     - collapsed groups render the `collapsed` class (CSS hides the rows),
+         *       chevron ▸ and aria-expanded="false"; expanded ones ▾ / "true"
+         *     - the header carries role/tabindex/aria-controls for keyboard a11y
+         *     - Pure: no DOM access, no side effects
+         */
+        const isCollapsed = !this._epicGroupIsExpanded( epicKey, state );
+        const idSlug      = this._epicGroupIdSlug( epicKey );
+        const epicAttr    = this._escapeTaskAttr( epicKey );
+        const chevron     = `<span class="epic-group-chevron" aria-hidden="true">${isCollapsed ? "▸" : "▾"}</span>`;
+
+        const groupHeaderHtml = `
+            <tr class="epic-group-header${extraClass ? " " + extraClass + "-header" : ""}" role="button" tabindex="0" aria-expanded="${isCollapsed ? "false" : "true"}" aria-controls="${idSlug}">
+                <td colspan="4">${chevron}<span class="epic-group-label">${headerLabel}</span><span class="epic-group-count">${tasks.length}</span></td>
+            </tr>`;
+
+        // The story rides INSIDE the group, so opening an epic answers "what is
+        // this?" in the same gesture that reveals its rows.
+        const storyHtml = storyText
+            ? `<tr class="epic-story-row"><td colspan="4">${this.escapeHtml( storyText )}</td></tr>`
+            : "";
+
+        const rows = tasks.map( t => this._renderEpicRow( t ) ).join( "" );
+        return `<tbody class="epic-group${extraClass ? " " + extraClass : ""}${isCollapsed ? " collapsed" : ""}" id="${idSlug}" data-epic="${epicAttr}">${groupHeaderHtml}${storyHtml}${rows}</tbody>`;
+    }
+
+    renderEpicBoardTable( model, state ) {
+        /**
+         * Render the epic-grouped model as a read-only table.
+         *
+         * Section order mirrors the board generator: ⏳ Waiting on Rick FIRST (a
+         * highlight — those rows ALSO appear under their own epic, deliberately),
+         * then the per-epic groups, then 🔴 Drift last.
+         *
+         * The Drift group renders even when EMPTY, as a green all-clear. A section
+         * that vanishes when it is satisfied cannot be distinguished from a section
+         * that failed to render, and drift is exactly the thing a reader needs to
+         * be able to confirm is zero.
+         *
+         * Requires:
+         *     - model is the { totalCount, onRick, groups, drift } shape from
+         *       groupTasksByEpic
+         *     - state is the choice map from loadEpicGroupState (or undefined)
+         *
+         * Ensures:
+         *     - Returns an HTML string (caller assigns to innerHTML)
+         *     - Read-only: no action column, no mutating controls
+         *     - Pure: no DOM access, no side effects
+         */
+        const choices = ( state && typeof state === "object" ) ? state : {};
+
+        const headerRow = `
+            <thead>
+                <tr>
+                    <th class="epic-col-id">ID</th>
+                    <th class="epic-col-priority">P</th>
+                    <th class="epic-col-status">Status</th>
+                    <th class="epic-col-title">Title</th>
+                </tr>
+            </thead>`;
+
+        const sections = [];
+
+        if ( model.onRick.length > 0 ) {
+            sections.push( this._renderEpicGroup(
+                this.EPIC_ON_RICK_KEY,
+                "⏳ Waiting on Rick",
+                model.onRick,
+                choices,
+                "epic-group-on-rick",
+                "Highlighted, not moved — each of these also appears under its own epic below."
+            ) );
+        }
+
+        model.groups.forEach( group => {
+            sections.push( this._renderEpicGroup(
+                group.epicKey,
+                this.escapeHtml( this._epicTitleLabel( group.epicKey ) ),
+                group.tasks,
+                choices,
+                "",
+                this._epicStoryText( group.epicKey )
+            ) );
+        } );
+
+        sections.push( this._renderEpicGroup(
+            this.EPIC_DRIFT_KEY,
+            model.drift.length > 0 ? "🔴 Drift — rows carrying no epic" : "✅ No drift",
+            model.drift,
+            choices,
+            "epic-group-drift",
+            model.drift.length > 0
+                ? "Each was either minted without a correlation_key, or had its epic key overwritten. Stamp one."
+                : ""
+        ) );
+
+        return `<table class="epic-board-table">${headerRow}${sections.join( "" )}</table>`;
+    }
+
+    renderEpicBoard( composite, stampUpdated = true ) {
+        /**
+         * Dispatch the SHARED task-list composite to the epic view.
+         *
+         * Takes the composite as an ARGUMENT rather than fetching — this is the
+         * mechanism by which the two panes share one fetch and one clock. Called
+         * from refreshTaskList() immediately after renderTaskList().
+         *
+         * Mirrors the task-list card's four states so the two panes degrade
+         * identically; the truncation banner is deliberately NOT repeated here
+         * (the pane above already carries it for the same rows).
+         *
+         * Requires:
+         *     - composite is the object returned by fetchTaskList()
+         *     - #epic-board-container / #epic-board-count exist (no-op if absent)
+         *     - stampUpdated: true on a real fetch; false to skip re-stamping
+         *
+         * Ensures:
+         *     - count reflects the number of EPICS shown (the macro unit), not rows
+         *     - never throws, never renders blank
+         */
+        const container = document.getElementById( "epic-board-container" );
+        const countEl   = document.getElementById( "epic-board-count" );
+        if ( !container ) return;
+
+        this._wireEpicBoardAccordion();
+
+        if ( composite && composite.status === "auth_required" ) {
+            container.innerHTML = `<p class="task-list-message task-list-signin">🔒 Sign-in required.</p>`;
+            if ( countEl ) countEl.textContent = "0";
+            return;
+        }
+
+        if ( composite && composite.status === "query_unavailable" ) {
+            container.innerHTML =
+                `<p class="task-list-message task-list-query-unavailable">🧩 Task-list query did not load` +
+                ` — /static/js/shared/task-list-query.js is missing or failed to parse.` +
+                ` This is a deploy problem, not a store outage.</p>`;
+            if ( countEl ) countEl.textContent = "0";
+            return;
+        }
+
+        if ( !composite || composite.status === "unreachable" || !Array.isArray( composite.tasks ) ) {
+            container.innerHTML = `<p class="task-list-message task-list-unreachable">⚠️ Store unreachable — showing nothing rather than something stale.</p>`;
+            return;
+        }
+
+        // The SAME open-row filter the task list applies, so the two panes can
+        // never disagree about which rows exist.
+        const openTasks = composite.tasks.filter( t => this.isTaskOpenStatus( ( t || {} ).status ) );
+        const model     = this.groupTasksByEpic( openTasks );
+        if ( countEl ) countEl.textContent = String( model.groups.length );
+
+        container.innerHTML = this.renderEpicBoardTable( model, this.loadEpicGroupState() );
+
+        if ( stampUpdated ) this._stampEpicBoardUpdated();
+    }
+
+    _stampEpicBoardUpdated() {
+        /**
+         * Stamp the #epic-board-updated span with the current time, in the
+         * browser's own zone (DST-aware) via the shared fleet formatter.
+         *
+         * Ensures:
+         *     - Span text set to "updated HH:MM:SS TZ" on success; no-op if absent
+         */
+        const el = document.getElementById( "epic-board-updated" );
+        if ( !el ) return;
+        el.textContent = `updated ${this._formatFleetTimestamp( new Date(), undefined )}`;
+    }
+
+    _applyEpicGroupCollapseState( tbody, isCollapsed ) {
+        /**
+         * Reflect a group's collapsed state into its already-rendered DOM (class +
+         * header aria-expanded + chevron glyph) WITHOUT a full re-render.
+         *
+         * Requires:
+         *     - tbody is a <tbody.epic-group> element
+         *     - isCollapsed is the desired collapsed boolean
+         *
+         * Ensures:
+         *     - tbody.collapsed toggled; CSS hides/shows its rows
+         *     - the header's aria-expanded + chevron reflect the new state
+         */
+        tbody.classList.toggle( "collapsed", isCollapsed );
+        const header = tbody.querySelector( ".epic-group-header" );
+        if ( header ) {
+            header.setAttribute( "aria-expanded", String( !isCollapsed ) );
+            const chevron = header.querySelector( ".epic-group-chevron" );
+            if ( chevron ) chevron.textContent = isCollapsed ? "▸" : "▾";
+        }
+    }
+
+    _handleEpicAccordionToggle( target ) {
+        /**
+         * Toggle the epic group whose header was activated (click or Enter/Space).
+         *
+         * Requires:
+         *     - target is the activated DOM node (or a descendant of a header)
+         *
+         * Ensures:
+         *     - no-op if the activation was not within an .epic-group-header
+         *     - otherwise flips + persists that group's choice and updates its
+         *       group DOM in place
+         */
+        const header = target && target.closest ? target.closest( ".epic-group-header" ) : null;
+        if ( !header ) return;
+        const tbody = header.closest( "tbody.epic-group" );
+        if ( !tbody ) return;
+        const isCollapsed = this.toggleEpicCollapsed( tbody.dataset.epic );
+        this._applyEpicGroupCollapseState( tbody, isCollapsed );
+    }
+
+    _wireEpicBoardAccordion() {
+        /**
+         * Install the single delegated click+keyboard listener for the epic
+         * accordion, on the persistent #epic-board-container element (its innerHTML
+         * is replaced each render, the element itself is not).
+         *
+         * Ensures:
+         *     - listeners attached at most once (guarded by _epicBoardAccordionWired)
+         *     - no-op if the container is absent (degrade-safe)
+         */
+        if ( this._epicBoardAccordionWired ) return;
+        const container = document.getElementById( "epic-board-container" );
+        if ( !container ) return;
+
+        container.addEventListener( "click", ( e ) => this._handleEpicAccordionToggle( e.target ) );
+        container.addEventListener( "keydown", ( e ) => {
+            // " " is the modern key value; "Spacebar" the legacy spelling.
+            if ( e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar" ) return;
+            if ( !e.target.closest || !e.target.closest( ".epic-group-header" ) ) return;
+            e.preventDefault();   // Space must act, not scroll the page
+            this._handleEpicAccordionToggle( e.target );
+        } );
+
+        this._epicBoardAccordionWired = true;
+        this.log( "Epic board accordion delegation wired" );
+    }
+
+    _epicKeysInDom() {
+        /**
+         * Collect the group keys of every currently-rendered epic group.
+         *
+         * Ensures:
+         *     - Returns an array of data-epic values from the rendered <tbody>s
+         *       (empty array if the container/table is absent)
+         */
+        return Array.from(
+            document.querySelectorAll( "#epic-board-container tbody.epic-group[data-epic]" )
+        ).map( el => el.dataset.epic );
+    }
+
+    collapseAllEpics() {
+        /**
+         * Collapse every currently-rendered epic group and persist the choice.
+         *
+         * Ensures:
+         *     - every rendered key is recorded as NOT expanded (an explicit choice,
+         *       so it survives even for groups whose default is open)
+         *     - each rendered group's DOM reflects the collapsed state in place
+         */
+        const state = this.loadEpicGroupState();
+        this._epicKeysInDom().forEach( key => { state[ key ] = false; } );
+        this.saveEpicGroupState( state );
+        document.querySelectorAll( "#epic-board-container tbody.epic-group[data-epic]" )
+            .forEach( tbody => this._applyEpicGroupCollapseState( tbody, true ) );
+    }
+
+    expandAllEpics() {
+        /**
+         * Expand every currently-rendered epic group and persist the choice.
+         *
+         * Ensures:
+         *     - every rendered key is recorded as expanded
+         *     - each rendered group's DOM reflects the expanded state in place
+         */
+        const state = this.loadEpicGroupState();
+        this._epicKeysInDom().forEach( key => { state[ key ] = true; } );
+        this.saveEpicGroupState( state );
+        document.querySelectorAll( "#epic-board-container tbody.epic-group[data-epic]" )
+            .forEach( tbody => this._applyEpicGroupCollapseState( tbody, false ) );
     }
 
     // ========================================

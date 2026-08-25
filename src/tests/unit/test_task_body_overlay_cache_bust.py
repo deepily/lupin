@@ -77,6 +77,7 @@ EXPECTED_VERSIONED_ASSETS = frozenset( {
     "/static/css/notifications.css",
     "/static/css/broadcast-panel.css",
     "/static/css/task-list.css",
+    "/static/css/epic-board.css",
     "/static/js/shared/task-list-query.js",
     "/static/js/shared/agent-select.js",
     "/static/js/shared/arg-interview.js",

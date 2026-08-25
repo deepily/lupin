@@ -27,6 +27,7 @@ src/rnd/2026.06.11-unified-task-store-design.md (v0.4, Rick-ruled §3.1).
 from datetime import datetime, timezone
 from typing import Annotated, Optional
 import json
+import os
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -38,6 +39,7 @@ from cosa.rest.db.repositories.task_repository import TaskRepository
 from cosa.rest import task_store_rules as rules
 from cosa.rest.task_store_owed import blocker_is_terminal, item_blocker_ids, park_reason_is_stale
 from cosa.agents.utils.sender_id import canonicalize_project_name
+import cosa.utils.util as cu
 from lupin_mcp.persona_normalization import canonical_persona_key
 # Manager-only blocked-mint guard (Rick 2026-07-20). REUSE the ONE canonical
 # manager-figure predicate — never a second copy of the role logic (G1). In the
@@ -1692,3 +1694,75 @@ def get_task_events(
             raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
         events = [ _serialize_event( event ) for event in repo.get_events( task_id ) ]
         return { "events": events, "count": len( events ) }
+
+
+# ---------------------------------------------------------------------------
+# Epic story text — GET /api/epic-stories
+#
+# Rick's ruling 2026-08-24 (mini-plan §5): the hand-maintained epic-story file
+# MOVES into this repo and is served from the router that already serves the
+# rows. The task store is this repo's; `correlation_key` — where the epic lives
+# — is a field on this repo's rows; twelve of the fourteen epics are lupin work.
+# The file sat in planning-is-prompting because that is where the board
+# generator happened to be written, not because anything about it belonged
+# there.
+#
+# One consumer today is the notifications client's Epic Board accordion; the
+# board generator (planning-is-prompting workflow/scripts/generate_epic_board.py)
+# repoints at this endpoint separately — until it does, the JSON exists in BOTH
+# places, which is stated here rather than left for a reader to discover.
+#
+# Plan: src/rnd/v0.2.0/2026.08.24-epic-accordion-mini-plan.md §5
+# ---------------------------------------------------------------------------
+
+EPIC_STORIES_REL_PATH = "/src/conf/epic-stories.json"
+
+
+@router.get(
+    "/epic-stories",
+    summary     = "Get the hand-maintained epic story text",
+    description = "Returns src/conf/epic-stories.json as-is: a map of "
+                  "`epic:<slug>` -> { title, story }, plus a `_README` key. "
+                  "Hand-maintained — a manager minting a new epic adds its line "
+                  "in the same turn. An epic with NO entry is not an error: the "
+                  "consumer renders a de-slugged key and no story, which is the "
+                  "visible nudge to write one. Auth: X-API-Key or Bearer JWT "
+                  "(the same guard as /api/tasks)."
+)
+def get_epic_stories(
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+):
+    """
+    Serve the epic story text that annotates the epic-grouped board.
+
+    Requires:
+        - authenticated caller (X-API-Key or Bearer JWT — same guard as /api/tasks)
+
+    Ensures:
+        - returns { stories: {...}, count } where `stories` is the file verbatim
+          and `count` counts the real epic keys (the `_README` key excluded)
+        - a MISSING file returns { stories: {}, count: 0 } with 200, NEVER a 5xx:
+          a missing story file must degrade the board to de-slugged names, not
+          take the panel down. The absence is the nudge, and the nudge must not
+          be an outage
+        - an UNPARSEABLE file raises 500 — that is a real defect a human edited
+          into the file, and it must be loud rather than silently empty
+    """
+    path = cu.get_project_root() + EPIC_STORIES_REL_PATH
+    if not os.path.exists( path ):
+        return { "stories": {}, "count": 0 }
+    try:
+        with open( path, "r", encoding="utf-8" ) as handle:
+            stories = json.load( handle )
+    except json.JSONDecodeError as error:
+        raise HTTPException(
+            status_code = 500,
+            detail      = f"epic-stories.json is not valid JSON: {error}"
+        )
+    if not isinstance( stories, dict ):
+        raise HTTPException(
+            status_code = 500,
+            detail      = "epic-stories.json must contain a JSON object at its root"
+        )
+    real_keys = [ key for key in stories.keys() if not key.startswith( "_" ) ]
+    return { "stories": stories, "count": len( real_keys ) }
