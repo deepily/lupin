@@ -1,11 +1,58 @@
 # Agentic Voice Workflow: Complete Lifecycle Guide
 
-**Version**: 3.2
+**Version**: 4.0
 **Created**: 2026-01-27
-**Updated**: 2026-04-12
+**Updated**: 2026-08-25
 **Purpose**: Complete lifecycle guide — CONCEPT → BUILD → VALIDATE — for creating CJ Flow agentic background jobs with voice I/O and queue integration
 
 **Pattern Source**: Derived from `deep_research`, `podcast_generator`, and `deep_research_to_podcast` agents.
+
+---
+
+## 🔴 READ THIS FIRST — what changed on 2026-08-25 (brain integration)
+
+Registration and routing were rebuilt. **Parts of this long document still describe
+the old world**; where they disagree with the seven statements below, these win, and
+the sections that were actually wrong have been corrected in place and marked.
+
+1. **Registration is ONE contract entry** in `JOB_ARG_CONTRACTS`
+   (`src/cosa/agents/runtime_argument_expeditor/agent_registry.py`) — not four
+   hand-edited files. The v2 registry derives the agentic `AgentSpec` from that table
+   by comprehension (`src/cosa/rest/v2/registry.py`). Two ratified one-line opt-ins
+   (`_SPEAKABLE_AGENTIC`, `_USER_INITIABLE_AGENTIC`) and one description line are the
+   rest.
+2. **The retrain asymmetry.** A prompt line makes the command reachable *immediately*;
+   the retrain only makes it *dependable*. Measured on the production adapter, same
+   training set, only the prompt differing: **0/5 unlisted vs 5/5 listed**
+   (`src/rnd/v0.2.0/2026.08.15-router-emission-probe.md`).
+3. **Routing and argument resolution go through the BRAIN** — `AskFlow`
+   (`src/cosa/rest/v2/flow.py`), behind `POST /api/v2/ask` and `POST /api/v2/submit`.
+   🔴 **Do not add an `if`/`elif` for ROUTING.** That is the defect that was removed;
+   a new one recreates it. ⚠️ **But know which `elif` is which**: job *construction*
+   in `create_agentic_job()` still dispatches by branch and phase 5 (dispatch by
+   registry lookup) is not wired — verified in the tree 2026-08-25, eleven branches
+   live. You still add a construction branch today. Reading the rule as "no branches
+   anywhere" leaves a new agent unbuildable.
+4. **A command declares its arguments AND the question to ask when one is missing, in
+   the same entry** — `required_user_args` beside `fallback_questions`, so the two
+   cannot drift.
+5. **`scheduled_at` and `monopolize` are RUNTIME queue directives, not agent
+   arguments.** `AskFlow._split_queue_directives()` pops them before the job is built.
+   They arrive in the same dict as real arguments, which is why this is easy to get
+   wrong — and a left-in `scheduled_at` is dropped **in silence** while the caller
+   believes the job is scheduled.
+6. **During the migration window a new command runs in SHADOW mode before it is
+   flipped live** — `<agent> trust mode = shadow` in `lupin-app.ini`: compute and log
+   the decision, do not execute it.
+7. **The SWE-team surface is in scope too** —
+   `.claude/skills/spin-up-swe-team/SKILL.md` names this process, because that is what
+   a crew actually reads when standing up.
+
+**Ten v1 doors are now 410 tombstones** (`/api/push`, `/api/claude-code/submit` and
+eight more). `/api/v2/ask` and `/api/v2/submit` are the canonical doors.
+
+Whole picture for a reader who was in none of these sessions:
+`src/rnd/v0.2.0/2026.08.25-agentic-voice-workflow-pass-1-and-2.md`.
 
 ---
 
@@ -146,7 +193,7 @@ Users can modify these via the `[comment: ...]` pattern — e.g., *"yes, but sch
 | `scheduled_at` | `None` (immediate) | ISO datetime for delayed execution |
 | `monopolize` | `False` | When True, blocks concurrent jobs (future Hybrid Fast Lane) |
 
-**No per-agent work needed**: Runtime args are automatically included in every confirmation summary and extracted in `_handle_agentic_command()` before the factory creates the job. New agents get scheduling for free.
+**No per-agent work needed**: Runtime args are automatically included in every confirmation summary and popped by `AskFlow._split_queue_directives()` (`src/cosa/rest/v2/flow.py`) before the job is built. New agents get scheduling for free — and must NOT declare `scheduled_at`/`monopolize` in their contract, because `args` is validated against the contract and these are in no command's contract. (This line named v1's `_handle_agentic_command()` until 2026-08-25.)
 
 **UI form path**: Every job submission card also includes a "Schedule for later" checkbox + datetime picker and an "Exclusive mode" checkbox, producing the same `scheduled_at` and `monopolize` fields in the POST body.
 
@@ -1592,9 +1639,29 @@ AGENTIC_AGENTS = {
 
 **Optional field**: `special_handlers` — for advanced input resolution (e.g., `"research": "fuzzy_file_match"` in the podcast generator).
 
-### Factory Registration (agentic_job_factory.py)
+### Factory Registration — ⚠️ STILL REQUIRED, and it is the LAST hand-edited branch
 
-Add an `elif` branch to `create_agentic_job()` in `src/cosa/rest/agentic_job_factory.py`:
+**Add your construction branch to `create_agentic_job()` in
+`src/cosa/rest/agentic_job_factory.py`.** This survived the brain integration and is
+the one place a command-name `elif` is still correct. Verified in the tree 2026-08-25:
+eleven branches live.
+
+**Why it survived, and when it goes.** The v2 registry already carries a `job_factory`
+field for exactly this; it is `None` in phase 1, and phase 5 — "wires factory dispatch
+by lookup" in the registry's own docstring — has not landed. So this branch is a known
+temporary seam, not the pattern. Expect to delete it.
+
+🔴 **Do not confuse this with ROUTING.** Deciding *which* command a request is goes
+through `resolve()` / `resolve_agentic()` and nowhere else; the three v1 routing
+mechanisms are gone and `src/tests/unit/test_v2_registry_drift_guard.py` stops them
+returning. A reviewer should reject a new **routing** `if command == ...` on sight,
+and accept a **construction** branch here until phase 5 lands.
+
+Registration itself is the single `JOB_ARG_CONTRACTS` entry described in "READ THIS
+FIRST". If your command needs behaviour the *registry* cannot express, add a **field**
+to the entry — the way `crud_factory`, `label`, `dings` and `user_initiable` were each
+added — not a branch that reads the command name and decides.
+
 
 ```python
 def create_agentic_job( command, args_dict, user_id, user_email, session_id, debug=False, verbose=False ):
@@ -1629,8 +1696,8 @@ def create_agentic_job( command, args_dict, user_id, user_email, session_id, deb
         return None
 ```
 
-This factory is shared by both the voice path (Expeditor → TodoFifoQueue) and the REST path
-(dedicated router endpoints). Adding your branch here means both paths work automatically.
+This factory is shared by the voice path (Expeditor → AskFlow) and the API path, so one
+branch serves both.
 
 ### Phase 5 Smoke Test Checklist
 
@@ -1674,8 +1741,12 @@ targeted to the correct user via `user_job_tracker`. The browser receives these 
 [LUPIN] Create {agent_name}/job.py with AgenticJobBase inheritance
 [LUPIN] Implement do_all() -> _execute() bridge pattern
 [LUPIN] Add dry-run mode with breadcrumb notifications
-[LUPIN] Register agent in agent_registry.py (AGENTIC_AGENTS dict)
-[LUPIN] Add factory elif branch in agentic_job_factory.py
+[LUPIN] Add ONE entry to JOB_ARG_CONTRACTS (required_user_args + fallback_questions together)
+[LUPIN] Add the command to _SPEAKABLE_AGENTIC / _USER_INITIABLE_AGENTIC if it qualifies (ratified, not derived)
+[LUPIN] Add one line to _AGENTIC_DESCRIPTIONS
+[LUPIN] Add the job-CONSTRUCTION branch to create_agentic_job() (still required; phase 5 will retire it)
+[LUPIN] NO *routing* if/elif anywhere — routing resolves through AskFlow + the registry
+[LUPIN] Start the command at "trust mode = shadow" in lupin-app.ini before flipping it live
 [LUPIN] Add <command> line to src/conf/prompts/agent-router-template-completion.txt  <-- REQUIRED for voice reachability
 [LUPIN] Add command key to src/conf/training/agent-router-*.json (NOT vox-cmd-*)     <-- reliability after next retrain
 [LUPIN] Create dedicated FastAPI router (Phase 5b)
@@ -4239,8 +4310,14 @@ Phase 5: Queue Integration
 [ ] job.py with AgenticJobBase inheritance
 [ ] do_all() → _execute() bridge pattern
 [ ] Dry-run mode with breadcrumb notifications
-[ ] Agent registered in agent_registry.py (AGENTIC_AGENTS dict)
-[ ] Factory elif branch added in agentic_job_factory.py
+[ ] ONE entry added to JOB_ARG_CONTRACTS — required_user_args AND fallback_questions together
+[ ] Ratified opt-ins set if they apply: _SPEAKABLE_AGENTIC, _USER_INITIABLE_AGENTIC
+[ ] One line in _AGENTIC_DESCRIPTIONS
+[ ] Job-CONSTRUCTION branch added to create_agentic_job() (still required today)
+[ ] NO *routing* if/elif anywhere — routing resolves through AskFlow + the registry
+[ ] scheduled_at / monopolize NOT in the contract (queue directives, not agent args)
+[ ] Command starts at trust mode = shadow before being flipped live
+[ ] test_v2_registry_drift_guard.py green
 [ ] Dedicated FastAPI router created and registered in main.py
 
 Phase 5b: Router + Automated Testing
