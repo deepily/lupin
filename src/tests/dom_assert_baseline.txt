@@ -1,26 +1,16 @@
 # Row f5768ee4 — KNOWN violations of "never assert a DOM node as the ACTUAL value".
 #
-# A RATCHET, not an allowlist. The test fails when any file's count RISES or a new
-# file appears; counts may only fall, and lowering one requires editing this file,
-# which is the point — a fix is recorded rather than absorbed silently.
+# 🔴 EMPTY. The list is zero as of 2026-08-24 (Pocholo, 7991a2cd), down from 276
+# across 35 files. KEEP IT EMPTY — with no entries the ratchet is a plain gate:
+# any new violation anywhere goes red immediately, with nothing to hide behind.
+#
+# A RATCHET, not an allowlist. The test fails when any file's count RISES or a
+# new file appears; counts may only fall, and lowering one requires editing this
+# file, which is the point — a fix is recorded rather than absorbed silently.
 #
 # KEYED BY FILE AND COUNT, DELIBERATELY NOT BY LINE NUMBER. A path:line baseline
-# looks more precise and is worse: inserting one line above a violation shifts every
-# number below it and reports a flood of new violations that are not new. A count is
-# stable under ordinary editing and still catches a genuinely added assertion.
+# looks more precise and is worse: inserting one line above a violation shifts
+# every number below it and reports a flood of violations that are not new.
 #
-
-
-# Baselined 2026-08-24 by Pocholo (7991a2cd). RATCHETED DOWN from 276/35 to 16/8
-# after a truth-preserving rewrite of the two mechanical shapes. What remains is
-# the judgement class: assertions comparing one DOM node to ANOTHER, where the
-# repair is a primitive projection that distinguishes them and is a design choice.
-
-src/tests/unit/multiplexer/render/action_required_renderer.test.ts                       1
-src/tests/unit/multiplexer/render/dom.test.ts                                            3
-src/tests/unit/multiplexer/render/templates_job_bucket.test.ts                           1
-src/tests/unit/multiplexer/render/templates_job_card.test.ts                             1
-src/tests/unit/multiplexer/render/templates_section_header.test.ts                       4
-src/tests/unit/multiplexer/render/tts_chrome_renderer.test.ts                            1
-src/tests/unit/nav/lupin_nav_port.test.ts                                                1
-src/tests/unit/notifications_js/action_required_pane.test.ts                             4
+# If you must add an entry here, you are recording a DEFECT you chose not to fix.
+# Say why in the commit, not here.

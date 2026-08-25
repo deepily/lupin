@@ -405,7 +405,7 @@ test("Lane 0a: TTS pane renders the .section-header bar (🔊 Playing), count = 
   const header = root.querySelector(".section-header") as HTMLElement;
   assert.notEqual(header, null, "section-header bar present");
   assert.ok(header.querySelector("h3")!.textContent!.includes("🔊 Playing"), "🔊 Playing title");
-  assert.equal(root.firstElementChild, header, "header is above the body");
+  assert.ok( root.firstElementChild === header, "header is above the body" );
 
   const count = root.querySelector(".section-header-count") as HTMLElement;
   assert.equal(count.textContent, "3", "header count = initial queue length");

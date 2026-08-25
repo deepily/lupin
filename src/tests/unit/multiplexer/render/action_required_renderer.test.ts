@@ -685,7 +685,7 @@ test("Lane 0a: mount renders the .section-header bar (⚠️ Action Required) + 
   const content = root.querySelector(".section-content") as HTMLElement;
   assert.notEqual(content, null, "section-content wrapper present");
   assert.equal(content.querySelectorAll(".action-required-widget").length, 2, "both widgets nested in content");
-  assert.equal(root.firstElementChild, header, "header is the first child (above the body)");
+  assert.ok( root.firstElementChild === header, "header is the first child (above the body)" );
   renderer.unmount();
 });
 

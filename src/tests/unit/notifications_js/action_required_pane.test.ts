@@ -77,7 +77,7 @@ test( "enter: lifts content into the pane, hides home, forces 0.5, stashes prior
   ( ui._enterActionRequiredPaneMode as () => void ).call( ui );
 
   assert.equal( ui._actionRequiredInPane, true );
-  assert.equal( content.parentNode, body, "content moved into the pane body" );
+  assert.ok( content.parentNode === body, "content moved into the pane body" );
   assert.ok( content.classList.contains( "in-reading-pane" ) );
   assert.equal( section.style.display, "none", "home section hidden" );
   assert.ok( shell.classList.contains( "pane-open" ) );
@@ -92,7 +92,7 @@ test( "enter: no-op in vertical mode", () => {
   const { content, body } = buildDOM();
   ( ui._enterActionRequiredPaneMode as () => void ).call( ui );
   assert.equal( ui._actionRequiredInPane, false );
-  assert.notEqual( content.parentNode, body, "content NOT moved in vertical mode" );
+  assert.ok( content.parentNode !== body, "content NOT moved in vertical mode" );
 } );
 
 test( "enter: idempotent when already in pane mode", () => {
@@ -111,7 +111,7 @@ test( "exit (nothing stashed): content home, section shown, pane closed, ratio r
   ( ui._exitActionRequiredPaneMode as () => void ).call( ui );
 
   assert.equal( ui._actionRequiredInPane, false );
-  assert.equal( content.parentNode, section, "content moved back to its home section" );
+  assert.ok( content.parentNode === section, "content moved back to its home section" );
   assert.ok( !content.classList.contains( "in-reading-pane" ) );
   assert.equal( section.style.display, "", "home section shown again" );
   assert.equal( ui._paneSplitRatio, 0.667, "divider/ratio restored" );
@@ -128,7 +128,7 @@ test( "exit: restores the prior abstract AND the divider position", () => {
   assert.equal( ui._paneSplitRatio, 0.5, "forced to 0.5 while up" );
 
   ( ui._exitActionRequiredPaneMode as () => void ).call( ui );
-  assert.equal( content.parentNode, section, "content back home" );
+  assert.ok( content.parentNode === section, "content back home" );
   assert.deepEqual( ui._renderedEntry, { type: "abstract", payload: "**hi**", title: "Prior" }, "prior abstract re-rendered" );
   assert.equal( ui._paneSplitRatio, 0.72, "divider/ratio restored EXACTLY" );
   assert.equal( ui._closeCalled, undefined, "pane NOT closed (prior content restored instead)" );

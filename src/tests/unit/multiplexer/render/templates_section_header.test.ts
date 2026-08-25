@@ -43,14 +43,14 @@ test( "renderSectionHeader: builds the .section-header contract (icon+title+coun
   // count chip is inside the h3, empty until setCount.
   assert.equal( handle.countEl.className, "section-header-count" );
   assert.equal( handle.countEl.textContent, "" );
-  assert.equal( h3.querySelector( ".section-header-count" ), handle.countEl );
+  assert.ok( h3.querySelector( ".section-header-count" ) === handle.countEl );
 
   // actions slot holds the given control THEN the chevron (rightmost).
   assert.equal( handle.actionsEl.className, "section-header-actions" );
-  assert.equal( handle.actionsEl.querySelector( ".my-refresh" ), refresh );
+  assert.ok( handle.actionsEl.querySelector( ".my-refresh" ) === refresh );
   assert.equal( handle.toggleEl.className, "toggle-button" );
   assert.equal( handle.toggleEl.textContent, "▼" );          // expanded glyph
-  assert.equal( handle.actionsEl.lastElementChild, handle.toggleEl );
+  assert.ok( handle.actionsEl.lastElementChild === handle.toggleEl );
   assert.equal( handle.toggleEl.getAttribute( "role" ), "button" );
 } );
 
@@ -59,7 +59,7 @@ test( "renderSectionHeader: no testid + no actions → header carries no data-te
   assert.equal( handle.header.hasAttribute( "data-testid" ), false );
   // Only the chevron in the actions slot.
   assert.equal( handle.actionsEl.children.length, 1 );
-  assert.equal( handle.actionsEl.firstElementChild, handle.toggleEl );
+  assert.ok( handle.actionsEl.firstElementChild === handle.toggleEl );
 } );
 
 test( "setCount: accepts a number and a preformatted string", () => {

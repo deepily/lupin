@@ -229,7 +229,7 @@ test("renderJobBucket: every bucket header carries exactly one .queue-delete-all
     assert.equal(btn.type, "button");
     assert.equal(btn.textContent, "🗑");
     const toggle = el.querySelector(".jobs-bucket-toggle") as HTMLElement;
-    assert.equal(btn.nextElementSibling, toggle, `${bucket}: 🗑 sits immediately before the chevron`);
+    assert.ok( btn.nextElementSibling === toggle, `${bucket}: 🗑 sits immediately before the chevron` );
   }
 });
 

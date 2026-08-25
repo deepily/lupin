@@ -257,7 +257,7 @@ test( "mountNav injects the nav as body's first child, pads the body, and wires 
 
     const nav = mountNav( document, fakeWin, storage );
 
-    assert.equal( document.body.firstChild, nav );           // injected at the top
+    assert.ok( document.body.firstChild === nav );           // injected at the top
     assert.equal( nav.id, "lupin-nav" );
     assert.equal( document.body.style.paddingTop, "56px" );  // body padded
 

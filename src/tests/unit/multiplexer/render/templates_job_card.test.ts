@@ -315,7 +315,7 @@ test("renderJobCard: renders the retry ↻ button when opts.retryable, before th
   assert.equal(retry.textContent, "↻");
   assert.equal(retry.title, "Retry");
   const del = el.querySelector(".job-delete-button") as HTMLElement;
-  assert.equal(retry.nextElementSibling, del, "retry sits immediately before the delete button");
+  assert.ok( retry.nextElementSibling === del, "retry sits immediately before the delete button" );
 });
 
 test("renderJobCard: NO retry button when retryable is absent or false (live cards) (W5)", () => {
