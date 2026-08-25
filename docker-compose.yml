@@ -528,6 +528,20 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+        # 🔴 REQUIRED FOR THE TYPESCRIPT TIER — not a tuning knob (row 92e94cb7, 2026-08-25).
+        # The capped JS-test lane REFUSES to run when it cannot prove a ceiling, and inside a
+        # container it can only defer to the container's own: systemd-run does not exist there
+        # and the process cannot write its own cgroup. Without this the tier exits 70 with
+        # "IN A CONTAINER WITH NO MEMORY CEILING — refusing", and the suite then reports
+        # 0 passed / 0 failed with job status "completed" — which any gate reading the status
+        # rather than the counts sees as a pass. Measured, ts-76be90f0.
+        # Measured 2026-08-25: this container idles at ~630 MB, so 12G is ~19x headroom and
+        # well clear of the e2e tier's chromium. The lane's own RSS watchdog (2048 MB) still
+        # fires first for a runaway — this ceiling is the PRECONDITION, not the protection.
+        # ⚠️ Applies at container CREATE: `docker compose up -d --force-recreate lupin-rest-test`.
+        #    A plain `docker restart` reuses the old limits and this change silently does nothing.
+        limits:
+          memory: 12G
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""]
       interval: 30s
