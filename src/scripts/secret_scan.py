@@ -37,6 +37,26 @@ value is still live on the pushed branch — that alone hid the credential this
 scanner was built for. Use `ref origin/main` or `history`, not `worktree`, when
 the question is what a reader of the public repo can see.
 
+THIS FILE IS THE INVENTORY SWEEP. IT IS NOT THE COMMIT GATE — different entry
+point, different guarantees, and conflating them cost an hour on 2026-08-25
+(row 0adf242e). The gate is src/scripts/pre-commit-secret-scan.py, which reads
+the STAGED DIFF and is CWD-immune because git chdir's to the repo root before
+running any hook. This file walks the tree
+and, until 0adf242e, did so from wherever it was invoked:
+
+    findings from the repo root   256
+    findings from src/            255
+    findings from src/cosa         38
+
+A sweep that covers a fraction of the tree and prints its number anyway is the
+worst available shape, because the clean result is believed precisely because it
+looks like a result. `worktree` mode now anchors ls-files with `git -C <root>`
+and opens each path against that root — the second half matters as much as the
+first, since ls-files emits root-relative paths and opening them from another
+directory raises OSError straight into an `except … continue`, which would have
+turned a coverage hole into a SILENT one. It refuses (exit 2) rather than
+reporting clean when no repo root can be found.
+
 OUTPUT IS MASKED — key, length and a truncated sha256, never the value. A
 report that quotes the secret has spread it further.
 

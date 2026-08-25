@@ -26,11 +26,46 @@ belongs in the commit message where a reviewer will see it.
 
 The output is masked: key, line and a truncated sha256, never the value.
 
+🔴 THIS GATE IS CWD-IMMUNE BY VIRTUE OF GIT, NOT BY ANYTHING IN THIS FILE.
+Written down 2026-08-25 (row 0adf242e) because it is a LOAD-BEARING EXTERNAL
+GUARANTEE holding up a security control, and it was recorded nowhere.
+
+Two facts, both measured rather than taken from the docs:
+
+  1. `git` chdir's to the top level of the working tree before invoking ANY hook.
+     So this script runs from the repo root no matter which directory the human
+     typed `git commit` in. Probe hook run from a subdirectory reported the ROOT
+     as its cwd.
+  2. It reads the STAGED DIFF (`git diff --cached`), not a walk of the working
+     tree — so there is no directory-relative file enumeration to go narrow.
+
+⇒ Nobody's commits have ever received a narrower scan than a commit made at the
+root. That was checked when `secret_scan.py worktree` was found to be CWD-scoped
+(256 findings from the root, 38 from src/cosa). THE TWO ARE DIFFERENT ENTRY
+POINTS. That defect degraded the hand-run INVENTORY sweep; it never touched this
+gate.
+
+⚠️ WHY IT IS WRITTEN HERE ANYWAY. Fact 1 is not ours. If a future harness invokes
+this script directly — a CI step, a wrapper, a human debugging from src/cosa —
+git's chdir does not happen and the guarantee evaporates silently. That is the
+same shape as `diff.relative` being unset: correct today, correct for a reason
+nobody recorded, and nothing announces it when it stops being true.
+
+That is why `--no-relative` is passed below even though the hook path does not
+need it. It costs nothing and it is what makes the MANUAL path safe: run by hand
+from a subdirectory with `diff.relative=true`, this script exited 0 — silently
+clean — before that flag. Do not remove it as redundant; it is redundant only
+for the one invocation path git happens to protect.
+
+Pinned by tests in src/tests/unit/deploy/test_git_pathspecs_are_anchored.py:
+git-runs-hooks-from-the-repo-root, the end-to-end gate, and the manual case.
+
 Requires:
     - run from inside the repo, with changes staged
 Ensures:
     - exit 0 when no staged ADDED line carries a credential value
     - exit 1 with a masked report otherwise
+    - the verdict does not depend on the caller's directory
 """
 
 import os
