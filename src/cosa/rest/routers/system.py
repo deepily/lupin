@@ -132,10 +132,12 @@ async def health():
     "/api/busy",
     response_class = JSONResponse,
     summary        = "Is a job running on this server right now?",
-    description    = "Two integers for the managed-bounce guard (row 08919110): "
-                     "inflight_agentic_jobs and run_queue_size. Unauthenticated by design "
-                     "so a host shell script can read it with no credential. Leaks only how "
-                     "many jobs are running; adds nothing to /health."
+    description    = "Queue occupancy for the managed-bounce guard (row 08919110) and the "
+                     "venue-idle check (row e6b8fe56): inflight_agentic_jobs, run_queue_size, "
+                     "todo_queue_size and the monopolize slot. Unauthenticated by design so a "
+                     "host shell script can read it with no credential, and UNFILTERED — unlike "
+                     "/api/get-queue/{q}, which shows only the caller's own jobs. Adds nothing "
+                     "to /health."
 )
 async def busy():
     """
@@ -149,14 +151,20 @@ async def busy():
     small endpoint exists specifically for the guard (Rick's ruling 2026-08-02).
 
     Requires:
-        - lupin_app.main is importable and jobs_run_queue is initialized (server past
-          startup)
+        - lupin_app.main is importable and jobs_run_queue / jobs_todo_queue are
+          initialized (server past startup)
 
     Ensures:
-        - Returns {"inflight_agentic_jobs": int, "run_queue_size": int}
+        - Returns {"inflight_agentic_jobs": int, "run_queue_size": int,
+          "todo_queue_size": int, "monopolize_inflight": bool, "monopolize_id": str|None}
         - inflight_agentic_jobs = the CJ-flow shared agentic pool's in-flight count
           (running_fifo_queue.get_pool_status()); run_queue_size = the run FIFO queue
           depth. Either > 0 means a restart would destroy running work.
+        - todo_queue_size = the ingress FIFO depth: work ACCEPTED but not yet started.
+          Zero pool field moves for a queued job, which is why it is reported here.
+        - Every count is FLEET-WIDE, not per-user: these read the queue objects directly
+          rather than /api/get-queue/{q}, which filters to the caller and returns 403 to a
+          non-admin asking for user_filter="*" (measured 2026-08-25 with the gate account).
         - Adds NO field to /health — that endpoint's 2-field contract is pinned by a test.
 
     Raises:
@@ -165,11 +173,22 @@ async def busy():
           here never blocks a recovery bounce.
     """
     import lupin_app.main as main_module
-    run_queue = main_module.jobs_run_queue
-    pool      = run_queue.get_pool_status()
+    run_queue  = main_module.jobs_run_queue
+    todo_queue = main_module.jobs_todo_queue
+    pool       = run_queue.get_pool_status()
     return {
         "inflight_agentic_jobs" : int( pool[ "inflight_agentic_jobs" ] ),
-        "run_queue_size"        : int( run_queue.size() )
+        "run_queue_size"        : int( run_queue.size() ),
+        # Row e6b8fe56 — the three fields below were the blind spot. MEASURED
+        # 2026-08-25: with 2 jobs QUEUED in todo and 1 running INLINE on the
+        # consumer thread, pool-status read inflight=0 / monopolize_id=null, so
+        # every reader that derived "idle" from it called a backed-up venue free.
+        # todo_queue_size is what makes "nothing is WAITING" answerable at all;
+        # the monopolize pair is carried here so the whole verdict can be reached
+        # WITHOUT credentials (pool-status requires get_current_user).
+        "todo_queue_size"       : int( todo_queue.size() ),
+        "monopolize_inflight"   : bool( pool[ "monopolize_inflight" ] ),
+        "monopolize_id"         : pool[ "monopolize_id" ],
     }
 
 
