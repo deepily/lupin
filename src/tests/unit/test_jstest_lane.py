@@ -459,6 +459,60 @@ class TestTheWatchdog:
         r = self._watch( tmp_path, self.HOG, ceiling_mb=300 )
         assert "DOM node" in r.stderr
 
+    def test_the_kill_LEAVES_NO_SURVIVORS_anywhere_in_the_tree( self, tmp_path ):
+        """
+        🔴 THE THIRD LEVEL OF THE SAME BUG, and the worst of the three.
+
+        Detection was fixed to walk every depth while the KILL still reached only
+        the root and its direct children. Measured on a depth-4 chain: the
+        watchdog fired, ANNOUNCED the kill, returned 137 — and three processes
+        were still alive afterwards, including the one allocating.
+
+        That is worse than never firing. A watchdog that half-kills reports the
+        runaway as handled, so nobody looks again while it keeps growing.
+
+        Every other test in this class passed throughout, because they all
+        asserted on the RETURN CODE and none looked at what was still running.
+        """
+        marker = "jstest_survivor_%d" % os.getpid()
+        hog    = tmp_path / ( marker + "_hog.py" )
+        # ⚠️ THIS HOG MUST NOT EXIT ON ITS OWN. self.HOG stops at 1 GB, and with
+        # that version this very test passed against a DELIBERATELY BROKEN
+        # one-level kill — the survivors had simply finished before the check
+        # looked. "No survivors" was a race the test kept winning, not a kill.
+        # Holding forever makes a survivor detectable rather than lucky.
+        hog.write_text(
+            "import sys, time\n"
+            "c = []\n"
+            "while len( c ) <= 256:\n"
+            "    c.append( bytearray( 8 * 1024 * 1024 ) )\n"
+            "while True: time.sleep( 0.2 )\n",
+            encoding="utf-8" )
+        chain  = tmp_path / ( marker + "_chain.py" )
+        chain.write_text(
+            "import subprocess, sys, os\n"
+            "n = int( sys.argv[1] )\n"
+            "nxt = [ sys.executable, %r ] if n <= 0 else [ sys.executable, __file__, str( n - 1 ) ]\n"
+            "subprocess.Popen( nxt ).wait()\n" % str( hog ),
+            encoding="utf-8" )
+
+        r = _run_snippet(
+            'jstest_watchdog_exec %s %s 3' % ( sys.executable, chain ),
+            env={ "JSTEST_RSS_MAX_MB": "300", "JSTEST_POLL_SECS": "0.05" },
+        )
+        assert r.returncode == 137, ( r.returncode, r.stderr )
+
+        # The assertion the other tests could not make: is anything left?
+        import subprocess, time
+        time.sleep( 0.5 )
+        listing = subprocess.run( [ "ps", "-eo", "cmd" ], capture_output=True, text=True ).stdout
+        survivors = [ ln for ln in listing.splitlines() if marker in ln ]
+        assert not survivors, (
+            "The watchdog returned 137 and %d process(es) are STILL RUNNING — it reported "
+            "the runaway as handled while it kept allocating:\n  %s"
+            % ( len( survivors ), "\n  ".join( survivors[ :5 ] ) )
+        )
+
     def test_a_well_behaved_process_runs_to_completion( self, tmp_path ):
         r = self._watch( tmp_path, "print( 'work done' )\n", ceiling_mb=2048 )
         assert r.returncode == 0, ( r.returncode, r.stderr )

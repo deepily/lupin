@@ -147,8 +147,22 @@ jstest_watchdog_exec() {
             echo "🔴 [jstest-lane] RSS ${rss}MB exceeded the ${JSTEST_RSS_MAX_MB}MB ceiling — killing node." >&2
             echo "    The tier goes RED and the server keeps serving; that is the intended outcome." >&2
             echo "    Most likely a FAILING assertion holding a DOM node (rows f5768ee4 / 32c58572)." >&2
-            kill -9 "$target" 2>/dev/null
-            pkill -9 -P "$target" 2>/dev/null
+            # KILL THE WHOLE DESCENDANT SET, DEEPEST FIRST — a THIRD level of the
+            # same one-level bug. Detection was fixed to walk every depth while the
+            # KILL was still `kill $target` plus `pkill -P $target`: the root and its
+            # direct children. Measured 2026-08-24 on a depth-4 chain, the watchdog
+            # fired, ANNOUNCED the kill, and three processes were still alive
+            # afterwards — including the one actually allocating. A watchdog that
+            # detects and half-kills is worse than one that never fires, because it
+            # reports the runaway as handled.
+            #
+            # Deepest-first, so a dying parent cannot re-parent a live child away
+            # before we reach it. Explicit pids only — never a pattern match; a
+            # hand-rolled pattern kill is what took three seats on 2026-08-21
+            # (row cd332d2b).
+            local victims v
+            victims="$( _jstest_descendants "$target" | tac )"
+            for v in $victims; do kill -9 "$v" 2>/dev/null; done
             wait "$target" 2>/dev/null
             return 137
         fi
