@@ -140,6 +140,16 @@ nohup.out
 # Skip your voice come in training data, it's too big!
 # Why isn't this exclusion working?!?
 **/voice-commands-xml-*.jsonl
+# The rotated previous copy (row 11390b57). Same file, same 196 MB, one suffix later —
+# and the pattern above does NOT match it, because it ends .jsonl.prev not .jsonl.
+**/voice-commands-xml-*.jsonl.prev
+# The corpus fingerprint sidecar. DELIBERATELY NOT TRACKED: it describes the LOCAL
+# artifact, and that artifact is ignored. A tracked stamp would travel to a checkout
+# holding a DIFFERENT local artifact and certify a pairing that never existed — a false
+# PASS, which is the one failure this guard must never have. A fresh checkout has no
+# artifact at all, so it returns "no artifact yet" and generates; it never reaches the
+# stamp check. See src/cosa/training/corpus_fingerprint.py.
+**/voice-commands-xml.fingerprint.json
 #src/ephemera/prompts/data/voice-commands-xml-test.jsonl
 #src/ephemera/prompts/data/voice-commands-xml-train.jsonl
 #src/ephemera/prompts/data/voice-commands-xml-validate.jsonl

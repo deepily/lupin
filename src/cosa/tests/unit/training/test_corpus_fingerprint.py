@@ -447,3 +447,59 @@ def test_rotation_is_a_no_op_on_a_first_run( tmp_path ):
 
     assert XmlCoordinator._rotate_previous_artifact( None, path ) is False
     assert not os.path.exists( path + ".prev" )
+
+# ── The generated files must stay OUT of git ─────────────────────────────────
+
+def _gitignore_patterns():
+    """The .gitignore patterns, read from the repo root."""
+    import cosa.utils.util as du
+    with open( du.get_project_root() + "/.gitignore", "r" ) as f:
+        return [ line.strip() for line in f if line.strip() and not line.strip().startswith( "#" ) ]
+
+
+def _is_ignored( filename, patterns ):
+    """True when some pattern covers this basename the way git would match it."""
+    import fnmatch
+    for pattern in patterns:
+        bare = pattern[ 3: ] if pattern.startswith( "**/" ) else pattern
+        if fnmatch.fnmatch( filename, bare ): return True
+
+    return False
+
+
+def test_every_generated_file_is_gitignored():
+    """
+    The artifacts, their rotated copies and the stamp must all be uncommittable.
+
+    The train split alone is ~200 MB and .gitignore excludes it deliberately. Rotation
+    (row 11390b57) added a second copy of each, and the existing pattern did NOT cover
+    it — `voice-commands-xml-train.jsonl.prev` does not end in `.jsonl`. This test ties
+    the names the module actually writes to the patterns that must exclude them, so
+    renaming a constant cannot silently re-open a 200 MB commit.
+    """
+    patterns = _gitignore_patterns()
+
+    generated = list( cf.ARTIFACT_FILENAMES )
+    generated += [ name + ".prev" for name in cf.ARTIFACT_FILENAMES ]
+    generated += [ cf.FINGERPRINT_FILENAME ]
+
+    unignored = [ name for name in generated if not _is_ignored( name, patterns ) ]
+
+    assert unignored == [], f"generated files are committable: {unignored}"
+
+
+def test_the_gitignore_check_can_fail():
+    """Positive control — the matcher does not simply return True for everything."""
+    assert _is_ignored( "voice-commands-xml-train.jsonl", _gitignore_patterns() ) is True
+    assert _is_ignored( "src/cosa/training/corpus_fingerprint.py", _gitignore_patterns() ) is False
+
+
+def test_the_stamp_is_deliberately_not_tracked():
+    """
+    The sidecar describes the LOCAL artifact, and that artifact is git-ignored.
+
+    A tracked stamp would travel to a checkout holding a DIFFERENT local artifact and
+    certify a pairing that never existed — a false PASS, which is the one failure this
+    guard must never have. The refusal it produces instead is recoverable.
+    """
+    assert _is_ignored( cf.FINGERPRINT_FILENAME, _gitignore_patterns() ) is True
