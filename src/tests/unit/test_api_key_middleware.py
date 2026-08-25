@@ -271,16 +271,100 @@ class TestAPIKeySecurityRequirements:
             f"API key entropy ({actual_entropy_bits} bits) below requirement ({min_entropy_bits} bits)"
 
     def test_bcrypt_cost_factor_requirement( self ):
-        """Document bcrypt cost factor requirement."""
-        # Requirement: Cost factor >= 12 (balance security vs performance)
+        """
+        LUPIN's configured bcrypt cost is at least 12 — not the library's.
+
+        WHAT THIS TEST USED TO DO (row 323049bb). It chose a cost itself, hashed
+        a string it made up, and checked bcrypt round-tripped it:
+
+            salt          = bcrypt.gensalt( rounds=required_cost )
+            password_hash = bcrypt.hashpw( test_password.encode(), salt )
+            assert bcrypt.checkpw( test_password.encode(), password_hash )
+
+        Every value there was manufactured inside the test and no Lupin code was
+        called, so it asserted that the bcrypt library works. It would pass
+        unchanged on a machine where Lupin's cost had been dropped to 4 — which
+        is the only thing the "cost >= 12" requirement is about. Vacuity shape 2:
+        it asserts something other than the behaviour its name claims.
+
+        Ensures:
+            - password_service.hash_password produces a real bcrypt hash
+            - the cost embedded IN THAT HASH is >= 12, read back from Lupin's
+              own output rather than chosen here
+            - the hash verifies, and a wrong password does not
+        """
+        from cosa.rest.password_service import hash_password, verify_password
+
         required_cost = 12
+        produced      = hash_password( "CorrectHorseBattery1!" )
 
-        # Verify a hash created with cost=12 validates correctly
-        test_password = "test_password"
-        salt = bcrypt.gensalt( rounds=required_cost )
-        password_hash = bcrypt.hashpw( test_password.encode( 'utf-8' ), salt )
+        # A bcrypt hash is $<ident>$<cost>$<salt+digest> — the cost is field 2.
+        fields = produced.split( "$" )
+        assert fields[ 1 ].startswith( "2" ), \
+            f"expected a bcrypt hash, got identifier {fields[ 1 ]!r} in {produced!r}"
 
-        assert bcrypt.checkpw( test_password.encode( 'utf-8' ), password_hash )
+        actual_cost = int( fields[ 2 ] )
+        assert actual_cost >= required_cost, \
+            f"Lupin hashes at bcrypt cost {actual_cost}; the requirement is >= {required_cost}"
+
+        assert verify_password( "CorrectHorseBattery1!", produced )
+        assert not verify_password( "WrongPassword1!", produced )
+
+    def test_api_keys_are_validated_with_bcrypt_not_a_fast_digest( self ):
+        """
+        The API-key auth path uses bcrypt, and a SHA-256 digest cannot pass it.
+
+        This exists because the RECORDS said otherwise (row 323049bb): the ApiKey
+        model docstring said "SHA-256 hash of API key" and the repository's
+        create_key example showed hashlib.sha256(...).hexdigest(). Both were
+        wrong, and copying that example mints a credential that can never
+        authenticate — a failure that looks like a bad key, not a bad write.
+        Corrected in the same commit; this test is what keeps them corrected.
+
+        Ensures:
+            - a key hashed the way production hashes it validates
+            - the SAME key stored as a SHA-256 digest does NOT validate, so the
+              old example cannot quietly come back
+        """
+        import hashlib
+
+        raw_key = "lupin_test_key_material"
+
+        production_hash = bcrypt.hashpw(
+            raw_key.encode( "utf-8" ), bcrypt.gensalt( rounds=12 )
+        )
+        assert bcrypt.checkpw( raw_key.encode( "utf-8" ), production_hash )
+
+        # A SHA-256 digest is not merely a non-matching hash — it is not a valid
+        # bcrypt hash at all, so checkpw RAISES rather than returning False.
+        # That distinction is the point: see the note below.
+        sha_digest = hashlib.sha256( raw_key.encode( "utf-8" ) ).hexdigest()
+        with pytest.raises( ValueError ):
+            bcrypt.checkpw( raw_key.encode( "utf-8" ), sha_digest.encode( "utf-8" ) )
+
+    def test_a_malformed_stored_hash_raises_rather_than_returning_false( self ):
+        """
+        Pin the behaviour that makes one bad row dangerous to every other key.
+
+        validate_api_key_sync loops over ALL active keys calling bcrypt.checkpw,
+        inside one try/except that returns None. Because checkpw RAISES on a
+        malformed stored hash instead of returning False, a single bad row does
+        not merely fail to match — it aborts the loop, so every key ordered after
+        it is never checked. Filed separately; this test records the mechanism so
+        a fix has something to turn green.
+
+        Ensures:
+            - checkpw raises ValueError on a stored value that is not a bcrypt hash
+            - it returns False, without raising, on a well-formed non-matching one
+        """
+        raw_key = "lupin_test_key_material"
+
+        with pytest.raises( ValueError ):
+            bcrypt.checkpw( raw_key.encode( "utf-8" ), b"not-a-bcrypt-hash" )
+
+        other_hash = bcrypt.hashpw( b"a-different-key", bcrypt.gensalt( rounds=4 ) )
+        assert bcrypt.checkpw( raw_key.encode( "utf-8" ), other_hash ) is False, \
+            "a well-formed non-matching hash must return False, not raise"
 
     def test_no_plaintext_storage( self ):
         """
@@ -315,10 +399,19 @@ class TestAPIKeySecurityRequirements:
         assert not leaked, \
             f"api_keys has a column that could hold a raw credential: {sorted( leaked )}"
 
-        # A SHA-256 hex digest is exactly 64 characters. A wider column is the
-        # first thing that would have to change to store something raw.
+        # CORRECTED (row 323049bb). This line first said "a SHA-256 hex digest is
+        # exactly 64 characters", which was wrong: api_keys hold a BCRYPT hash of
+        # 60 characters ($2b$12$ + 53), written by create_service_account_postgres
+        # and verified by bcrypt.checkpw in api_key_auth. I took the SHA-256 claim
+        # from the model's own docstring and the repository's example, both of
+        # which are stale — and I wrote it hours after cataloguing exactly this
+        # defect. The column guard is still the right assertion; only its stated
+        # reason was false.
+        #
+        # 64 leaves 4 characters of headroom over a bcrypt hash and is far too
+        # narrow for a raw key, which is what makes it a useful guard.
         assert ApiKey.__table__.columns[ "key_hash" ].type.length == 64, \
-            "key_hash is sized for a SHA-256 hex digest; widening it is a red flag"
+            "key_hash is sized for a 60-character bcrypt hash; widening it is a red flag"
 
         # The write path names its input a hash and has no raw-key parameter.
         create_params = set( inspect.signature( ApiKeyRepository.create_key ).parameters )

@@ -396,6 +396,16 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 **All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **cosa (:7999 — in-tree `src/cosa/tests/**`, `src/tests/run-cosa-tests.sh`; joined the pyramid 2026-08-13, row d83d025b)** → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh` — read the note below before reading its verdict)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
 
+The **cosa tier's count was being asserted without ever being run.** Measured 2026-08-24 21:16 @`3a8ce109`, on :7999:
+
+```
+8668 passed, 26 skipped, 101 warnings in 280.72s (0:04:40)      EXIT=0
+```
+
+The figure in circulation was **8,622/0**, which is simply the count as of **08-22**. Nothing regressed — **zero failures, zero errors** — and 7 commits touched `src/cosa/tests` in between, adding a net **+44** `def test_` (`402e528c` `f2be1f6d` `8cb320bb` `0dd919d2` `927076a4` `566cb971` `e38abe43`) against a measured +46; the remainder is parametrization. **Stale expectation, not regression** — and proven both ways rather than inferred from the unit tier's similar drift.
+
+🔴 **This line is ONE RUN and is not a soundness proof.** Re-derive the count before quoting it; do not trust it the way `8,622` was trusted — that is the whole defect being recorded here. Note also that the import-time stdout-watcher hazard (`src/rnd/v0.2.0/2026.08.24-import-time-watcher-thread-poisons-stdout-tests.md`) fired **0 times in this tier against 5 per unit run** — absence in one sample, **not immunity**; nobody has counted the cosa tree's stdout-capturing tests.
+
 The **serial bridge guard** step is the tier-2 whole-directory contact check (row e2ae4102) that the concurrent unit run deselects (`-m "not serial_bridge_guard"`) because a live peer's bridge write would false-accuse it. If it reports contact, a hook may be resolving its directory from a hardcoded real path instead of the seam. Dropping this line silently removes the guard — the concurrent scoped canary does not see a merge into a live seat.
 
 > 🔴 **DO NOT WAIT FOR A "QUIESCENT BOX" — THERE IS NO SUCH STATE** (row `5a68c92c`). This line used to say "on a quiescent box", and the row-level guidance said "run it when you are the only session writing bridges." **That condition cannot be satisfied and asking peers to pause will not create it.** Measured 2026-08-24 with no suite running anywhere: **13 entries under `~/.claude/sessions` changed in 60 seconds**, and four live seats wrote bridges inside ten minutes — **including the seat running the guard**, which writes its own bridge and its own listener files while the guard executes. The precondition named a state that never exists, so a red told the reader nothing and the sanctioned response ("re-run") was indistinguishable from weakening a gate.
