@@ -317,12 +317,39 @@ INNER+="python3 -c 'from cosa.utils.vertex_env import pane_guard; pane_guard( ve
 # unaffected. Verified here: pane_pid WAS the target process, no extra layer.
 #
 # MemorySwapMax=0 is what makes the cap REAL — MemoryMax alone lets the cgroup
-# swap past it. MemoryHigh throttles+reclaims first, so a slow climber shows as
-# slow and trips the 16G watcher before the hard kill.
+# swap past it. Measured 2026-08-22: MemoryMax=64M against a 512 MB allocator
+# RAN TO COMPLETION, because with memory.swap.max unset the cgroup reclaims by
+# swapping rather than killing; adding MemorySwapMax=0 produced rc 137 and
+# oom_kill 1 in the scope's own memory.events. The swap bound is not a
+# refinement of the cap, it is the half that makes it bind.
+#
+# WHY 8G AND NOT 24G — Rick ruled it 2026-08-25, and the arithmetic is the
+# reason. A per-session ceiling bounds one SESSION at any value; it bounds the
+# MACHINE only if ceiling x concurrency stays under RAM. Against the ~24
+# sessions live on the OOM day, on a 251 GiB box:
+#     4G  x24 =  96 GB   safe, but only ~5x the observed peak
+#     8G  x24 = 192 GB   fits, ~10x observed          <- this
+#     16G x24 = 384 GB   EXCEEDS the box
+#     24G x24 = 576 GB   over twice the box
+# So 16G and 24G do not protect the box at all: they stop ONE runaway while
+# several at once still take the machine down. Measured cost of 8G: across
+# 26,797 samples over 69 sessions the worst single Claude Code process was
+# 0.78 GB and the median 0.61, so 8G is ~10x anything real — while the 229 GB
+# runaway that started this is ~29x ABOVE the ceiling, so it dies early with
+# the transcript still readable.
+#
+# 🔴 NO MemoryHigh — DELIBERATE, DO NOT ADD IT BACK. A soft limit throttles and
+# reclaims instead of killing, which manufactures exactly the sustained reclaim
+# pressure systemd-oomd's PSI criterion selects victims on. It can therefore
+# help CAUSE the kill it was meant to soften, and oomd picks by pressure rather
+# than by fault — so the session it takes need not be the one at fault. The
+# capped JS-test lane reached this conclusion independently and pins it in a
+# test (src/tests/unit/test_jstest_lane.py, "a future edit helpfully adding
+# MemoryHigh must go red"); this launcher is now consistent with it. What was
+# here before: MemoryHigh=18G under MemoryMax=24G.
 #
 # Design: src/rnd/v0.2.0/2026.08.22-oom-incident-what-we-know-response.md
-CC_MEM_LIMIT="${CC_MEM_LIMIT:-24G}"
-CC_MEM_HIGH="${CC_MEM_HIGH:-18G}"
+CC_MEM_LIMIT="${CC_MEM_LIMIT:-8G}"
 if [[ "$CC_MEM_LIMIT" != "off" ]] \
    && command -v systemd-run >/dev/null 2>&1 \
    && [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
@@ -337,7 +364,6 @@ if [[ "$CC_MEM_LIMIT" != "off" ]] \
     INNER+="echo 500 > /proc/self/oom_score_adj 2>/dev/null; "
     INNER+="systemd-run --user --scope --quiet --collect"
     INNER+=" -p MemoryAccounting=yes"
-    INNER+=" -p MemoryHigh=$(printf '%q' "$CC_MEM_HIGH")"
     INNER+=" -p MemoryMax=$(printf '%q' "$CC_MEM_LIMIT")"
     INNER+=" -p MemorySwapMax=0"
     INNER+=" --slice=$(printf '%q' "$_cc_slice") -- "
