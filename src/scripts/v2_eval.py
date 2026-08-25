@@ -121,6 +121,28 @@ ROUTE_ERROR_REASONS = frozenset( {
     ROUTE_AGENT_ERROR, ROUTE_ROUTER_ERROR, ROUTE_EXTRACT_ERROR, ROUTE_REPLAY_ERROR,
 } )
 
+# 🔴 THE ONE STATUS THAT MEANS "THE ANSWER HAS NOT LANDED YET" (row 2ec6ad9c, 2026-08-25).
+# The v2 agent path is asynchronous: /api/v2/ask ENQUEUES the job and returns, so the
+# response carries status="waiting", answer=None, wrote_snapshot=False, similarity=None,
+# cache_hit=False — every field the cache metrics read, absent because nothing had
+# finished. Those are not cache misses. The harness cannot see the cache on that path
+# at all, and it was reporting the blindness as 0.0.
+#
+# The flow's whole status vocabulary is seven values (flow.py:178/647/687/735,
+# executor.py:121/151/202): done, failed, needs_input, expired, parked, rejected — all
+# terminal FOR THIS CALL — and `waiting`, the executor's single deferred outcome. So
+# this set is one member, and a new deferred status is a one-line edit here.
+#
+# A record with NO status at all reads as OBSERVED: every pre-contract record and every
+# record from the synchronous era (the 2026-08-21 run) predates the field, and inventing
+# blindness for them would erase measurements that really happened.
+STATUS_WAITING     = "waiting"
+DEFERRED_STATUSES  = frozenset( { STATUS_WAITING } )
+
+# What an unmeasurable metric prints. NOT "0.0", NOT "n/a", NOT an empty cell — each of
+# those reads as a measurement or as a shrug. The banner beside it carries the count.
+UNMEASURABLE_CELL  = "unmeasurable"
+
 
 def is_completed_ok( status_code, payload ):
     """
@@ -445,6 +467,60 @@ def reported_route_reason( record: Dict[ str, Any ] ) -> Optional[ str ]:
     return payload.get( "route_reason" ) if isinstance( payload, dict ) else None
 
 
+def response_status( record: Dict[ str, Any ] ) -> Optional[ str ]:
+    """
+    The §8 `status` a 200 CARRIES — the field that says whether the work finished.
+
+    Peer of reported_route_reason: gated on the HTTP status rather than on `ok`, so it
+    can be read for any answered request. Returns None for a non-200 or an unparseable
+    body — in both cases nothing reported a status, and the caller must not read that
+    silence as a terminal outcome.
+    """
+    if record.get( "status_code" ) != 200:
+        return None
+    payload = record.get( "payload" )
+    return payload.get( "status" ) if isinstance( payload, dict ) else None
+
+
+def is_outcome_observed( record: Dict[ str, Any ] ) -> bool:
+    """
+    Did this response report an outcome the cache metrics can actually READ?
+
+    🔴 WHY (row 2ec6ad9c, 2026-08-25). On the async agent path the server enqueues and
+    answers status="waiting" with similarity None and wrote_snapshot False. Those fields
+    are the entire evidence base for cache_hit_rate, cache_candidate_rate and the §6a
+    table, and on a waiting response they are ABSENT rather than negative. Counting such
+    a record in a cache denominator turns a blind instrument into a confident zero: the
+    warm pass of eval-2026-08-25-16-53-36 reported cache_hit_rate 0.0 over a denominator
+    of 80, of which 79 had not answered. What separates that run from the 2026-08-21 one
+    — same corpus, same harness, cache-hit 0.4586 with replay firing 83 times — is
+    readable in the records themselves: 291 of the 08-21 responses carried status "done"
+    and 158 carried a similarity, while all 200 of the 08-25 responses carry "waiting"
+    and not one carries a similarity.
+
+    This predicate is DELIBERATELY separate from is_completed_ok. A waiting response is
+    still a completed *request* — the server answered and reported no error — so `ok`
+    must not move: routing accuracy, the four error rates and both latency instruments
+    all read denominators built from it, and flipping `waiting` to not-ok would shrink
+    every one of them silently. Only the cache family, whose evidence is genuinely
+    missing, narrows onto this predicate.
+
+    Requires:
+        - record is a harness record with "status_code" and "payload"
+
+    Ensures:
+        - False for any request that did not return 200 (nothing reported an outcome)
+        - False for an unparseable payload, for the same reason
+        - False for a status in DEFERRED_STATUSES — the answer lands later
+        - True otherwise, INCLUDING a body carrying no status field at all: absence of
+          the field is a pre-contract record, not evidence the work was left running
+    """
+    status = response_status( record )
+    if status is None:
+        return isinstance( record.get( "payload" ), dict ) and record.get( "status_code" ) == 200
+    return status not in DEFERRED_STATUSES
+
+
 def response_similarity( record: Dict[ str, Any ] ) -> Optional[ float ]:
     """The §8 `similarity` (best score) for a record, or None when absent/failed."""
     if not record[ "ok" ]:
@@ -602,6 +678,10 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
           percentiles, routing accuracy, the would-be-wrong count, and by_path counts.
         - a rate's denominator is the count of completed requests, so a failed
           call can never inflate a numerator.
+        - the CACHE family (cache_hit_rate, cache_candidate_rate) is scored over the
+          OBSERVED completed requests only, and publishes cache_measurable /
+          cache_observed_n / cache_unobserved_n so a run that could not see the cache
+          is distinguishable from one that measured a miss. No other metric moves.
         - routing_accuracy is scored over ELIGIBLE ok records only, and the exclusion
           is published as routing_eligible_n / routing_excluded_n /
           routing_excluded_share so it is auditable rather than silent.
@@ -617,8 +697,17 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
     ok       = [ r for r in records if r[ "ok" ] ]
     n_ok     = len( ok )
 
-    cache_hits      = [ r for r in ok if response_path( r ) == PATH_REPLAY ]
-    cache_candidates = [ r for r in ok if response_similarity( r ) is not None ]
+    # 🔴 THE CACHE FAMILY MEASURES OVER OBSERVED ROWS ONLY (row 2ec6ad9c, 2026-08-25).
+    # A `waiting` response has not answered, so its similarity/wrote_snapshot/cache_hit
+    # fields are absent rather than negative — see is_outcome_observed. Nothing else in
+    # this function moves onto `observed`: every other denominator stays on `ok` or
+    # `answered`, which is the whole point of keeping the predicate separate.
+    observed        = [ r for r in ok if is_outcome_observed( r ) ]
+    n_observed      = len( observed )
+    n_unobserved    = n_ok - n_observed
+
+    cache_hits      = [ r for r in observed if response_path( r ) == PATH_REPLAY ]
+    cache_candidates = [ r for r in observed if response_similarity( r ) is not None ]
 
     # THE CRUD EXCLUSION LIVES HERE NOW, not in the routing table (step 2b, Rick
     # 2026-08-21). It used to be enforced by pinning resolve() to the non-CRUD class
@@ -640,11 +729,18 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
     #
     # `snapshotable` says what the WRITER will write from here on. It cannot say what
     # the store already holds.
+    #
+    # TWO EXCLUSIONS, TWO COUNTS, KEPT APART (row 2ec6ad9c). `cache_excluded_n` answers
+    # "how many completed rows could never have replayed" — a property of the COMMAND,
+    # independent of whether the work finished, so it stays scored over `ok`.
+    # `cache_unobserved_n` answers "how many rows had not answered yet" — a property of
+    # the RUN. Folding them into one number would let a blind run read as an uncacheable
+    # corpus.
     crud_enabled = _crud_agents_enabled()     # read ONCE per run, not once per record
-    cacheable = [
-        r for r in ok
-        if response_path( r ) == PATH_REPLAY or _is_cacheable_command( matched_command( r ), crud_enabled )
-    ]
+    def _cacheable( record ):
+        return response_path( record ) == PATH_REPLAY or _is_cacheable_command( matched_command( record ), crud_enabled )
+    cacheable          = [ r for r in ok       if _cacheable( r ) ]
+    cacheable_observed = [ r for r in observed if _cacheable( r ) ]
 
     # ERROR RATES ARE COUNTED OVER EVERY ANSWERED REQUEST, NOT OVER `ok` (row d8d019f6,
     # 2026-08-20). They used to read `ok`, which was harmless while `ok` meant "the server
@@ -718,10 +814,21 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
         "n_http_error"        : n_http_error,   # status_code != 200 — transport, not completion
         "n_incomplete"        : n_incomplete,   # n - n_ok — work did not finish (HTTP errors included)
         "n_answered"          : n_answered,     # the four error rates are over THIS, not n_ok
-        "cache_hit_rate"      : _rate( len( cache_hits ),       len( cacheable ) ),
-        "cache_hit_denominator": len( cacheable ),   # NOT n_ok — see _is_cacheable_command
-        "cache_excluded_n"    : n_ok - len( cacheable ),
-        "cache_candidate_rate": _rate( len( cache_candidates ), n_ok ),
+        # A rate of None here has TWO possible causes and the report must tell them apart:
+        # `cache_measurable` False means the harness could not SEE the cache (nothing had
+        # answered); True with a None rate means it looked and there was nothing cacheable
+        # to score. The first renders "unmeasurable", the second keeps the old "n/a".
+        "cache_hit_rate"      : _rate( len( cache_hits ),       len( cacheable_observed ) ),
+        "cache_hit_denominator": len( cacheable_observed ),   # observed AND cacheable — see is_outcome_observed
+        "cache_excluded_n"    : n_ok - len( cacheable ),      # the COMMAND rule, over every completed row
+        "cache_candidate_rate": _rate( len( cache_candidates ), n_observed ),
+        "cache_measurable"    : n_observed > 0,
+        "cache_observed_n"    : n_observed,
+        "cache_unobserved_n"  : n_unobserved,
+        # How many OBSERVED rows carried a similarity at all. The §6a floor sweep has
+        # zero evidence when this is 0 — every floor then reads 0.0 by construction
+        # rather than by measurement. See threshold_table.
+        "cache_scored_n"      : len( cache_candidates ),
         "replay_failure_rate" : _rate( len( replay_failures ),  n_answered ),
         "router_error_rate"   : _rate( len( router_errors ),    n_answered ),
         "extract_error_rate"  : _rate( len( extract_errors ),   n_answered ),
@@ -757,18 +864,37 @@ def threshold_table(
         - records carry each request's best similarity (or None) via the §8 payload.
 
     Ensures:
-        - returns one row per floor: {floor, hit_rate, hits, would_be_wrong}, where
-          hit_rate is the fraction of 200-returning requests whose best similarity is
+        - returns one row per floor: {floor, hit_rate, hits, would_be_wrong, measurable},
+          where hit_rate is the fraction of OBSERVED requests whose best similarity is
           at or above the floor, and would_be_wrong counts those whose matched command
           differs from the expected command (the R-C2 lower-bound oracle).
-        - hit_rate is None only when there are zero 200-returning requests.
+        - `measurable` is False when NO request reported a terminal outcome, and ALSO
+          when the observed requests carried no similarity at all — in both cases every
+          floor reads 0.0 by construction rather than by measurement.
+        - hit_rate is None when there were no observed requests to divide by.
+
+    🔴 THIS TABLE IS THE SHARPEST FALSE-CLEAN IN THE REPORT (row 2ec6ad9c, 2026-08-25).
+    Scored over `ok` it printed 0.0 at all four floors on a pass where not one response
+    had answered — four rows that read as a decisive threshold finding and were a
+    measurement of nothing. The denominator is the OBSERVED rows for the same reason
+    compute_metrics narrows the cache family onto them.
     """
-    ok   = [ r for r in records if r[ "ok" ] ]
-    n_ok = len( ok )
+    ok         = [ r for r in records if r[ "ok" ] ]
+    observed   = [ r for r in ok if is_outcome_observed( r ) ]
+    n_observed = len( observed )
+    # ⚠️ OBSERVED IS NOT ENOUGH FOR A FLOOR SWEEP — it also needs a SCORE to sweep.
+    # Caught on the real records rather than reasoned out: eval-2026-08-25-16-53-36 has
+    # exactly ONE observed row in each pass (a needs_input, which does reach the cache —
+    # the lookup runs at flow.py:210, the args refusal at flow.py:285) and it carried no
+    # similarity. An observed-only gate therefore still printed 0.0 at all four floors
+    # off a denominator of 1. With no similarity anywhere, every floor is 0.0 BY
+    # CONSTRUCTION and the table is evidence of nothing.
+    n_scored   = sum( 1 for r in observed if response_similarity( r ) is not None )
+    measurable = n_observed > 0 and n_scored > 0
     rows : List[ Dict[ str, Any ] ] = []
     for floor in floors:
         at_floor = [
-            r for r in ok
+            r for r in observed
             if response_similarity( r ) is not None and response_similarity( r ) >= floor
         ]
         wrong = [
@@ -777,9 +903,10 @@ def threshold_table(
         ]
         rows.append( {
             "floor"          : floor,
-            "hit_rate"       : _rate( len( at_floor ), n_ok ),
+            "hit_rate"       : _rate( len( at_floor ), n_observed ),
             "hits"           : len( at_floor ),
             "would_be_wrong" : len( wrong ),
+            "measurable"     : measurable,
         } )
     return rows
 
@@ -1317,6 +1444,35 @@ def _fmt( value: Optional[ float ] ) -> str:
     return "n/a" if value is None else str( value )
 
 
+def _fmt_cache( metrics: Dict[ str, Any ], key: str ) -> str:
+    """
+    A CACHE metric cell — the one family that can be blind rather than empty.
+
+    Row 2ec6ad9c. `n/a` and `0.0` both read as statements about the cache. When nothing
+    in the pass reported a terminal outcome there is no statement to make, so the cell
+    says so in the word itself and the banner under the table carries the count.
+    """
+    if not metrics[ "cache_measurable" ]:
+        return UNMEASURABLE_CELL
+    # ⚠️ THE DENOMINATOR RIDES IN THE CELL. A pass can be measurable and still rest on a
+    # sliver: the real 08-25 run observed ONE of its 100 responses, and a bare "0.0"
+    # beside a 100-request table reads as a verdict on all 100. Printing "0.0 (n=1)"
+    # states the sample in the same glance, which is honest without inventing a
+    # minimum-sample policy nobody ruled on.
+    denominator = metrics[ "cache_hit_denominator" ] if key == "cache_hit_rate" else metrics[ "cache_observed_n" ]
+    return f"{_fmt( metrics[ key ] )} (n={denominator})"
+
+
+def _unobserved_note( metrics: Dict[ str, Any ], label: str ) -> Optional[ str ]:
+    """One '<label>: N of M responses not observed' clause, or None when all were observed."""
+    if metrics[ "cache_unobserved_n" ] == 0:
+        return None
+    return (
+        f"{label}: {metrics[ 'cache_unobserved_n' ]} of {metrics[ 'cache_unobserved_n' ] + metrics[ 'cache_observed_n' ]} "
+        f"responses not observed (status \"{STATUS_WAITING}\" — the request was enqueued and the answer lands later)"
+    )
+
+
 def render_report(
     cold_metrics  : Dict[ str, Any ],
     warm_metrics  : Dict[ str, Any ],
@@ -1354,6 +1510,7 @@ def render_report(
         ( "requests (n)",          "n" ),
         ( "HTTP errors (non-200)", "n_http_error" ),
         ( "incomplete (work did not finish)", "n_incomplete" ),
+        ( "responses not observed (still waiting)", "cache_unobserved_n" ),
         ( "cache-hit rate",        "cache_hit_rate" ),
         ( "cache-candidate rate",  "cache_candidate_rate" ),
         ( "replay-failure rate",   "replay_failure_rate" ),
@@ -1369,9 +1526,37 @@ def render_report(
         ( "p95 client-send (ms)",  "client_p95_ms" ),
         ( "would-be-wrong (count)","would_be_wrong" ),
     ]
+    _cache_rate_keys = { "cache_hit_rate", "cache_candidate_rate" }
     for label, key in rows:
-        lines.append( f"| {label} | {_fmt( cold_metrics[ key ] )} | {_fmt( warm_metrics[ key ] )} |" )
+        if key in _cache_rate_keys:
+            cold_cell, warm_cell = _fmt_cache( cold_metrics, key ), _fmt_cache( warm_metrics, key )
+        else:
+            cold_cell, warm_cell = _fmt( cold_metrics[ key ] ), _fmt( warm_metrics[ key ] )
+        lines.append( f"| {label} | {cold_cell} | {warm_cell} |" )
     lines.append( "" )
+
+    # 🔴 THE BANNER THAT MAKES THE CELL READABLE (row 2ec6ad9c, 2026-08-25). A cell
+    # reading "unmeasurable" tells the reader WHAT; this tells them WHY and HOW BIG, in
+    # the same breath. Emitted whenever ANY response went unobserved, not only when the
+    # whole pass did — a partially-blind pass still reports a real rate, and the reader
+    # is owed the size of the sample it was measured over.
+    notes = [ note for note in (
+        _unobserved_note( cold_metrics, "cold" ),
+        _unobserved_note( warm_metrics, "warm" ),
+    ) if note is not None ]
+    if notes:
+        lines.append(
+            "> 🔴 **the cache metrics above are scored over the OBSERVED responses only.** "
+            "The v2 agent path enqueues and returns, so a response can come back before the "
+            "work has run: its `similarity`, `wrote_snapshot` and `cache_hit` fields are then "
+            "ABSENT, not negative. Scoring such a row as a miss reports a cache failure that "
+            f"did not happen, so a pass with nothing observed prints `{UNMEASURABLE_CELL}` "
+            "rather than 0.0."
+        )
+        for note in notes:
+            lines.append( f">   - {note}" )
+        lines.append( "" )
+
     lines.append(
         "> **routing accuracy is scored over the ELIGIBLE rows only** — utterances whose "
         "expected command is not mappable are EXCLUDED from the denominator, not counted "
@@ -1395,12 +1580,30 @@ def render_report(
     lines.append( "" )
     lines.append( "## Cache-hit rate vs threshold (§6a, warm pass)" )
     lines.append( "" )
-    lines.append( "| floor | hit-rate | hits | would-be-wrong |" )
-    lines.append( "|---|---|---|---|" )
-    for row in warm_table:
+    # 🔴 NO TABLE AT ALL WHEN NOTHING WAS OBSERVED (row 2ec6ad9c, 2026-08-25). Four rows
+    # of 0.0 read as a decisive threshold finding — the sharpest false-clean in this
+    # report. A table whose every cell says "unmeasurable" still LOOKS like a result, so
+    # the whole table is replaced by the refusal and the reason.
+    if not ( warm_table and warm_table[ 0 ][ "measurable" ] ):
+        observed_n   = warm_metrics[ "cache_observed_n" ]
+        unobserved_n = warm_metrics[ "cache_unobserved_n" ]
+        lines.append( f"**{UNMEASURABLE_CELL.upper()} — no table is printed for this run.**" )
+        lines.append( "" )
         lines.append(
-            f"| {row[ 'floor' ]} | {_fmt( row[ 'hit_rate' ] )} | {row[ 'hits' ]} | {row[ 'would_be_wrong' ]} |"
+            f"A floor sweep needs similarity scores to sweep, and this pass produced none: "
+            f"{unobserved_n} of {observed_n + unobserved_n} warm responses never reported a terminal "
+            f"outcome (`status=\"{STATUS_WAITING}\"` — enqueued, answer still to land), and "
+            f"{warm_metrics[ 'cache_scored_n' ]} of the {observed_n} that did carried a similarity. "
+            "Every floor would therefore read 0.0 BY CONSTRUCTION — four rows that look like a "
+            "decisive threshold finding and measure nothing. There is no threshold evidence in this run."
         )
+    else:
+        lines.append( "| floor | hit-rate | hits | would-be-wrong |" )
+        lines.append( "|---|---|---|---|" )
+        for row in warm_table:
+            lines.append(
+                f"| {row[ 'floor' ]} | {_fmt( row[ 'hit_rate' ] )} | {row[ 'hits' ]} | {row[ 'would_be_wrong' ]} |"
+            )
     lines.append( "" )
     lines.append( f"> would-be-wrong caveat: {WOULD_BE_WRONG_CAVEAT}" )
     lines.append( "" )
