@@ -279,6 +279,28 @@ class TestEpicBoardMount:
         """
         A missing story entry is a NUDGE, never an error (plan §5 step 3).
 
+        READ WITH text_content(), NEVER inner_text() — two independent reasons,
+        either one alone is enough to fail a correct board:
+
+        1. CASE. `epic-board.css:116` sets `text-transform: capitalize` on
+           `.epic-group-label`. `inner_text()` returns text AS RENDERED, so the
+           hand-written title "Seal the test tier" comes back "Seal The Test
+           Tier" and a substring check fails on case alone — while the DOM holds
+           exactly the right string. `text_content()` reads the source text and
+           is blind to the transform.
+        2. VISIBILITY. Epics start COLLAPSED, and `epic-board.css:135-137`
+           hides `.epic-row` + `.epic-story-row` with `display: none`. The rows
+           stay in the DOM; `inner_text()` omits hidden text, `text_content()`
+           does not. So the story-line assertion cannot pass through
+           `inner_text()` without first expanding the group.
+
+        The failure this comment exists to stop is INDISTINGUISHABLE from a real
+        one by rendered text: de-slugging "epic:seal-the-test-tier" also renders
+        "Seal The Test Tier", so a reader who sees the diff cannot tell a CSS
+        artifact from a story map that never arrived. The discriminator is
+        `test_the_story_file_is_fetched_ONCE_not_every_tick` — it asserts the
+        stub was hit exactly once, which is what proves the data was there.
+
         Ensures:
             - the epic WITH a story renders its hand-written title + story line
             - the epic WITHOUT one renders its de-slugged key and no story row
@@ -286,10 +308,10 @@ class TestEpicBoardMount:
         _seeded_page( logged_in_page )
 
         board = logged_in_page.locator( "#epic-board-container" )
-        assert "Seal the test tier" in board.inner_text()
-        assert "A green run does not mean what it says." in board.inner_text()
+        assert "Seal the test tier" in board.text_content()
+        assert "A green run does not mean what it says." in board.text_content()
         # board-visibility has no entry → de-slugged, and still rendered.
-        assert "board visibility" in board.inner_text()
+        assert "board visibility" in board.text_content()
 
 
 class TestEpicBoardToolbarEntryPoint:
