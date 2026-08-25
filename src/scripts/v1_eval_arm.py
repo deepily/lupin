@@ -918,9 +918,14 @@ def truncate_snapshots( connection: Any ) -> str:
 
 # ────────────────────────────────────────── live IO seams (injected away)
 
-# The pinned server this arm is allowed to measure, named once so the refusal below and
-# any future caller say the same thing.
-PINNED_V1_BASELINE_SHA = "b0735467"
+# 🔴 THERE IS EXACTLY ONE PIN CONSTANT, AND IT IS V1_PIN_SHA (row 647f3733, 2026-08-25).
+# This spot used to hold a SECOND one — PINNED_V1_BASELINE_SHA = "b0735467" — introduced with
+# the comment "named once so the refusal below and any future caller say the same thing". It
+# did the opposite: b0735467 is the pre-drift sha Mr Radio's 2026-08-21 reconciliation ruling
+# REJECTED (it predates bf77852b, so it ships the 8aa89f42 cross-user leak), while V1_PIN_SHA
+# moved to 15536409. One file, two constants, two different answers to "which v1 is the
+# baseline" — and the refusal below told a mis-pointed operator to aim at the rejected one.
+# Read V1_PIN_SHA (line 117). Do not reintroduce a second name for this.
 
 
 def refuse_if_door_retired( status_code: int, base_url: str ) -> None:
@@ -929,7 +934,7 @@ def refuse_if_door_retired( status_code: int, base_url: str ) -> None:
 
     WHY THIS ARM IS EXEMPT FROM THE CUTOVER. `/api/push` was retired repo-wide on
     2026-08-21 and every other caller moved to /api/v2/ask. This one did not, and must
-    not: it exists to measure the PINNED v1 baseline server (sha b0735467, its own
+    not: it exists to measure the PINNED v1 baseline server (sha V1_PIN_SHA, its own
     standalone process), which serves /api/push and always will. Measuring v1 through the
     v2 door would not be a v1 measurement.
 
@@ -947,14 +952,14 @@ def refuse_if_door_retired( status_code: int, base_url: str ) -> None:
         - returns None for any status other than 410
 
     Raises:
-        - RuntimeError naming the target, the pinned baseline sha, and the reason,
-          when the target answers 410
+        - RuntimeError naming the target, V1_PIN_SHA (the pinned baseline sha the
+          operator must actually point at), and the reason, when the target answers 410
     """
     if status_code != 410: return
     raise RuntimeError(
         f"{base_url}/api/push answered 410 Gone — that door was retired on 2026-08-21 and "
         f"this is NOT the pinned v1 baseline server. The v1 arm measures the standalone "
-        f"baseline at sha {PINNED_V1_BASELINE_SHA}, which still serves /api/push; it is "
+        f"baseline at sha {V1_PIN_SHA}, which still serves /api/push; it is "
         f"exempt from the v2 cutover on purpose. Point --base-url at the pinned baseline, "
         f"or do not run the v1 arm."
     )

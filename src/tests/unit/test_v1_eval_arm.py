@@ -726,7 +726,37 @@ def test_a_410_from_the_target_stops_the_run():
     message = str( exc.value )
     assert "410" in message
     assert "http://localhost:7999" in message
-    assert v1.PINNED_V1_BASELINE_SHA in message, "the message must name the server to point at"
+    assert v1.V1_PIN_SHA in message, "the message must name the server to point at"
+
+
+def test_the_410_refusal_names_the_PIN_not_the_rejected_sha():
+    """
+    🔴 Row 647f3733. This file carried TWO constants naming "the pinned v1 baseline":
+    V1_PIN_SHA = 15536409 (Mr Radio's 2026-08-21 reconciliation ruling, which carries
+    bf77852b, the 8aa89f42 cross-user leak fix) and PINNED_V1_BASELINE_SHA = b0735467
+    — the pre-drift sha that ruling explicitly REJECTED because it ships the leak.
+
+    The refusal message interpolated the SECOND one, so an operator who mis-pointed
+    --base-url was told, in as many words, to aim at the sha nobody intends to measure.
+    It could not corrupt a number — assert_measured_sha checks V1_PIN_SHA and would
+    refuse a b0735467 server — so this is wrong DIRECTIONS, not a wrong measurement.
+
+    ⚠️ THE TEST ABOVE COULD NOT CATCH IT. It asserted the message contained
+    `v1.PINNED_V1_BASELINE_SHA` — the same constant the message interpolated — so it
+    passed no matter which sha that constant held. A test that reads its expectation
+    out of the code under test cannot disagree with it. This one names the sha.
+    """
+    with pytest.raises( RuntimeError ) as exc:
+        v1.refuse_if_door_retired( 410, "http://localhost:7999" )
+    message = str( exc.value )
+    assert "15536409" in message, "the refusal must send the operator to the RULED pin"
+    assert "b0735467" not in message, "the refusal must not name the rejected pre-drift sha"
+
+
+def test_only_one_constant_names_the_pinned_v1_baseline():
+    """Two constants for one concept is how the two got to disagree. There is now one."""
+    assert v1.V1_PIN_SHA == "15536409"
+    assert not hasattr( v1, "PINNED_V1_BASELINE_SHA" )
 
 
 def test_any_other_status_is_left_alone():
