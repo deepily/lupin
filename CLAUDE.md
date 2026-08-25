@@ -396,15 +396,18 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 **All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **cosa (:7999 — in-tree `src/cosa/tests/**`, `src/tests/run-cosa-tests.sh`; joined the pyramid 2026-08-13, row d83d025b)** → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh` — read the note below before reading its verdict)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
 
-The **cosa tier's count was being asserted without ever being run.** Measured 2026-08-24 21:16 @`3a8ce109`, on :7999:
+The **cosa tier's count was being asserted without ever being run.** Now measured **twice, on two different trees**:
 
 ```
-8668 passed, 26 skipped, 101 warnings in 280.72s (0:04:40)      EXIT=0
+@3a8ce109  8668 passed, 26 skipped, 101 warnings in 280.72s      EXIT=0   (Tiberius, 2026-08-24 21:16)
+@17e78c98  8668 passed, 26 skipped                               EXIT=0   (Rio, independent re-run)
 ```
 
-The figure in circulation was **8,622/0**, which is simply the count as of **08-22**. Nothing regressed — **zero failures, zero errors** — and 7 commits touched `src/cosa/tests` in between, adding a net **+44** `def test_` (`402e528c` `f2be1f6d` `8cb320bb` `0dd919d2` `927076a4` `566cb971` `e38abe43`) against a measured +46; the remainder is parametrization. **Stale expectation, not regression** — and proven both ways rather than inferred from the unit tier's similar drift.
+The figure in circulation was **8,622/0**, which is simply the count as of **08-22**. Nothing regressed — **zero failures** in both runs — and 7 commits touched `src/cosa/tests` in between, adding a net **+44** `def test_` (`402e528c` `f2be1f6d` `8cb320bb` `0dd919d2` `927076a4` `566cb971` `e38abe43`) against a measured +46; the remainder is parametrization. **Stale expectation, not regression**, proven both ways rather than inferred from the unit tier's similar drift.
 
-🔴 **This line is ONE RUN and is not a soundness proof.** Re-derive the count before quoting it; do not trust it the way `8,622` was trusted — that is the whole defect being recorded here. Note also that the import-time stdout-watcher hazard (`src/rnd/v0.2.0/2026.08.24-import-time-watcher-thread-poisons-stdout-tests.md`) fired **0 times in this tier against 5 per unit run** — absence in one sample, **not immunity**; nobody has counted the cosa tree's stdout-capturing tests.
+**Two independent samples at two different shas**, so 8,668 is not a one-tree artifact. Still re-derive rather than quote on sight — that habit is what let `8,622` stand since 08-22 — but the number itself now rests on more than one run.
+
+**The stdout-watcher hazard does not reach this tier, and that is measured rather than merely unobserved**: across `src/cosa/tests`, **379 stdout-capturing test functions in 89 files, of which ZERO parse the capture as JSON** (Rio). The hazard breaks a `json.loads()` on polluted stdout, so with no JSON parsers the exposure here is **zero**, not "0 lines seen in one run." The unit tier is the exposed one — 15 files parse stdout as JSON there; see `src/rnd/v0.2.0/2026.08.24-import-time-watcher-thread-poisons-stdout-tests.md`.
 
 The **serial bridge guard** step is the tier-2 whole-directory contact check (row e2ae4102) that the concurrent unit run deselects (`-m "not serial_bridge_guard"`) because a live peer's bridge write would false-accuse it. If it reports contact, a hook may be resolving its directory from a hardcoded real path instead of the seam. Dropping this line silently removes the guard — the concurrent scoped canary does not see a merge into a live seat.
 
