@@ -140,13 +140,29 @@ done
 # 1500s timeout around this script (SUITE_TIMEOUTS_SECONDS["typescript"]), but a
 # HAND-RUN had nothing, and nothing anywhere capped fan-out.
 #
-# 🔴 Read this before trusting the cap: a second seat died at 16:06:34 the same
-# day running ONE file at --test-concurrency=1 under `timeout 300`. Caps and
-# timeouts did NOT save it. The allocator is still unidentified (row d84839ae),
-# and 77 of the 119 *.test.ts files load a DOM via @happy-dom/global-registrator.
-# So this cap bounds the blast radius; it does not make the suite safe. Treat any
-# run of this script as a blast-radius action: announce first, one at a time
-# across the whole fleet. Full survey:
+# ✅ UPDATED 2026-08-25 (row 92e94cb7) — this comment used to say "the allocator
+# is still unidentified" and "treat any run of this script as a blast-radius
+# action: announce first, one at a time across the whole fleet." BOTH ARE NOW
+# OBSOLETE, and so is the tier ban this script used to sit under.
+#
+# The allocator IS named (row 32c58572): node:assert builds its failure diff by
+# deep-inspecting the actual value, and on a happy-dom element that walk goes
+# element -> ownerDocument -> defaultView -> the whole Window graph and never
+# terminates. It needs THREE things at once — happy-dom registered, a DOM node as
+# an assertion operand, and the assertion FAILING. Remove any one and it is
+# harmless (measured, 3 runs per cell). 77 of the 119 *.test.ts files load a DOM,
+# but a DOM alone was never the hazard; a FAILING ASSERTION HOLDING ONE is.
+#
+# Containment is measured, not assumed (2026-08-25, 3 runs of a deliberate
+# reproducer, src/tests/unit/shared/oom_containment_probe.probe.ts): killed at
+# exit 137 in 2 seconds each, 2153/2202/2123 MB peak, ZERO systemd-oomd lines,
+# the box untouched at ~218 GB free. The runaway dies against its own ceiling;
+# the tier goes RED and the server keeps serving. So this script is an ordinary
+# test run now — no announcement, no fleet-wide serialization.
+#
+# ⚠️ Still true, and unrelated to memory: a full run may HANG (row f8055be3 —
+# leaked transports loop ~440s expected). An RC=124 is that defect, not this one.
+# Full survey + the rules now in force:
 #   src/rnd/v0.2.0/2026.08.23-typescript-test-runner-oom-hazard.md
 TS_TIMEOUT_SECS="${TS_TIMEOUT_SECS:-1400}"      # under TestSuiteJob's own 1500s
 TS_CONCURRENCY="${TS_CONCURRENCY:-4}"           # matches package.json's cap
@@ -154,8 +170,14 @@ TS_CONCURRENCY="${TS_CONCURRENCY:-4}"           # matches package.json's cap
 # ── THE LANE (row 32c58572 follow-up) ────────────────────────────────────────
 # The `timeout` above is kept for its SIGTERM-on-a-cooperating-process behaviour
 # but it is NOT the cap: timeout(1) signals its direct child only, and node
-# blocked in a synchronous GC frame never services the signal — a measured run
-# under `timeout 300` burned 388 seconds. The enforcing ceiling is the cgroup.
+# blocked in a synchronous GC frame never services the signal. The enforcing
+# ceiling is the cgroup.
+#
+# 🔴 The "burned 388 seconds under a 300s cap" receipt that used to sit on this
+# line is STRUCK (Cheech, 2026-08-25): those are CPU seconds on a 32-core box
+# where V8's GC and helper threads run in parallel, so 388 CPU-seconds is
+# consistent with the cap firing AND with it never firing. CPU seconds cannot
+# bound wall seconds. The conclusion survives on the mechanism above alone.
 source "$PROJECT_ROOT/src/scripts/lib/jstest-slice.sh"
 JSTEST_RUNTIME_MAX="${JSTEST_RUNTIME_MAX:-$(( TS_TIMEOUT_SECS + 100 ))}"
 

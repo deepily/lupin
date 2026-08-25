@@ -41,10 +41,16 @@
 #
 # ⚠️ AND WHY THE SCOPE REPLACES `timeout` RATHER THAN JOINING IT. timeout(1)
 # signals its DIRECT CHILD only, never the process group, and node blocked in a
-# synchronous C++/GC frame never services SIGTERM. Receipt (row 32c58572): a run
-# under `timeout 300` burned 6m28s of CPU — 388 seconds against a 300-second
-# ceiling. The cap never fired. systemd-run caps wall time AND memory in one
-# primitive that does not depend on the target cooperating.
+# synchronous C++/GC frame never services SIGTERM. systemd-run caps wall time AND
+# memory in one primitive that does not depend on the target cooperating.
+#
+# 🔴 THE RECEIPT THAT USED TO SIT HERE IS STRUCK (Cheech, 2026-08-25). It read:
+# "a run under `timeout 300` burned 6m28s of CPU — 388 seconds against a
+# 300-second ceiling; the cap never fired." Those are CPU seconds on a 32-core
+# box where V8's GC and helper threads run in parallel, so 388 CPU-seconds is
+# consistent with the cap firing AND with it never firing. CPU seconds cannot
+# bound wall seconds. The conclusion survives on the MECHANISM above alone —
+# which is why this is a strike and not a reversal. Do not re-cite the number.
 
 # Our own path, so the in-scope re-entry can source this same file rather than
 # carrying a second copy of the watchdog that can drift.

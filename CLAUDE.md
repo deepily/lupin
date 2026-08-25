@@ -389,6 +389,7 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 | Suite | Venue | Command | Notes |
 |---|---|---|---|
 | Unit | :7999 | `pytest src/tests/unit/` | Fast isolated tests, mocked deps |
+| TypeScript | :8000 (scheduled) | `./src/tests/run-typescript-tests.sh` | 119 `*.test.ts` under c8 at 100%; ~8-25 min, no server. Runs inside the capped `jstest.slice` cgroup (RSS watchdog 2048 MB fires before the 8 G `MemoryMax`). **Tier ban LIFTED 2026-08-25** (row 92e94cb7) — all four doors are capped, so `test_types: ["all"]` is safe again. ⚠️ A full run may still HANG on leaked transports (row f8055be3) — an RC=124 is that defect, not memory |
 | Smoke (inline) | :7999 | `python -m cosa.rest.<module>` | `quick_smoke_test()` blocks; non-destructive. `src/tests/smoke/` files are heterogeneous — route each by the §TESTING VENUES rubric, not the folder |
 | WebSocket smoke | :7999 | `src/scripts/run-websocket-smoke-tests.sh` | 50 tests; connection/auth/events |
 | Integration | :8000 (scheduled) | `./src/tests/run-integration-tests.sh --bg -v` | 43 tests; **FINAL merge gate**; always `--bg` |
@@ -405,7 +406,7 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 ## PR MERGE REQUIREMENTS
 
 <!-- merge-pyramid-suites: unit cosa typescript smoke websocket e2e integration -->
-**All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **cosa (:7999 — in-tree `src/cosa/tests/**`, `src/tests/run-cosa-tests.sh`; joined the pyramid 2026-08-13, row d83d025b)** → **typescript (:7999 — `src/tests/run-typescript-tests.sh`, c8 at 100%; runs inside the capped `jstest.slice` cgroup, see §THE CAPPED JS-TEST LANE)** → smoke (:7999) → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh` — read the note below before reading its verdict)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
+**All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **cosa (:7999 — in-tree `src/cosa/tests/**`, `src/tests/run-cosa-tests.sh`; joined the pyramid 2026-08-13, row d83d025b)** → **typescript (:8000 scheduled — `src/tests/run-typescript-tests.sh`, c8 at 100%, ~8-25 min so it fails the :7999 two-minute rubric; runs inside the capped `jstest.slice` cgroup — ban lifted 2026-08-25, row 92e94cb7)** → smoke (:7999) → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh` — read the note below before reading its verdict)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
 
 The **cosa tier's count was being asserted without ever being run.** Now measured **three times across two different trees**:
 
