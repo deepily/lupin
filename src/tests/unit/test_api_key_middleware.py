@@ -78,6 +78,97 @@ class TestValidateAPIKey:
         assert result == test_user_id
         mock_repo.get_active_keys.assert_called_once()
 
+    @pytest.mark.xfail(
+        strict = True,
+        reason = "row 23a43f57 — _validate_api_key_sync wraps the WHOLE key loop in one "
+                 "try/except, and bcrypt.checkpw RAISES on a malformed stored hash, so an "
+                 "earlier bad row aborts the sweep. STRICT on purpose: the moment the fix "
+                 "lands this test passes, and strict xfail turns THAT into a failure so "
+                 "nobody can fix the bug and leave the marker behind."
+    )
+    @pytest.mark.asyncio
+    async def test_one_malformed_row_does_not_block_the_keys_after_it( self ):
+        """
+        A valid key must still authenticate when an earlier row is malformed.
+
+        🔴 EXPECTED TO FAIL AGAINST HEAD — row 23a43f57. This is the acceptance
+        criterion for that fix, written before it, so the fix has something to
+        turn green. It is a red that names a missing behaviour, not a broken test.
+
+        THE MECHANISM. _validate_api_key_sync loops over EVERY active key calling
+        bcrypt.checkpw, and the whole loop sits inside ONE try/except that returns
+        None. checkpw RAISES ValueError on a stored value that is not a
+        well-formed bcrypt hash — it does not return False — so a malformed row
+        does not merely fail to match itself. The raise escapes the loop, the
+        outer handler swallows it, and every key ordered AFTER the bad row is
+        never checked. Their owners get 401 on a good credential.
+
+        HOW A BAD ROW GOT THERE. Until 2026-08-24 the repository's create_key
+        docstring example showed hashlib.sha256(...).hexdigest() and the model
+        called key_hash "SHA-256 hash of API key". Both were wrong and both are
+        corrected, but rows already written that way are still in the table.
+
+        WHY IT WOULD BE HARD TO DIAGNOSE: get_active_keys returns rows in
+        unspecified order, so whether a given key works depends on where it sorts
+        relative to the bad one — and that can change when rows are added.
+
+        Ensures:
+            - with [malformed, valid], the valid key still resolves to its user
+        """
+        test_key     = "ck_live_" + "B" * 64
+        test_user_id = "22345678-1234-1234-1234-123456789012"
+
+        valid_hash = bcrypt.hashpw(
+            test_key.encode( "utf-8" ), bcrypt.gensalt( rounds=12 )
+        ).decode( "utf-8" )
+
+        # Exactly what the old SHA-256 example would have written.
+        import hashlib
+        malformed_hash = hashlib.sha256( test_key.encode( "utf-8" ) ).hexdigest()
+
+        malformed_row = MockApiKey( id=1, user_id="11111111-1111-1111-1111-111111111111",
+                                    key_hash=malformed_hash )
+        valid_row     = MockApiKey( id=2, user_id=test_user_id, key_hash=valid_hash )
+
+        with mock_db_session( [ malformed_row, valid_row ] ):
+            result = await validate_api_key( test_key )
+
+        assert result == test_user_id, (
+            "a malformed stored hash on an EARLIER row aborted the sweep, so a valid "
+            "key was never checked — see row 23a43f57; the fix is to move the "
+            "try/except inside the loop and skip the bad row loudly"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_malformed_row_after_the_match_is_harmless( self ):
+        """
+        The control for the test above, so its red cannot be misread.
+
+        If this one also failed, the problem would be the mock harness rather
+        than the ordering. It passes against HEAD: the loop returns on the match
+        before it ever reaches the malformed row.
+
+        Ensures:
+            - with [valid, malformed], the valid key resolves normally
+        """
+        import hashlib
+
+        test_key     = "ck_live_" + "C" * 64
+        test_user_id = "32345678-1234-1234-1234-123456789012"
+
+        valid_hash = bcrypt.hashpw(
+            test_key.encode( "utf-8" ), bcrypt.gensalt( rounds=12 )
+        ).decode( "utf-8" )
+
+        valid_row     = MockApiKey( id=1, user_id=test_user_id, key_hash=valid_hash )
+        malformed_row = MockApiKey( id=2, user_id="11111111-1111-1111-1111-111111111111",
+                                    key_hash=hashlib.sha256( b"whatever" ).hexdigest() )
+
+        with mock_db_session( [ valid_row, malformed_row ] ):
+            result = await validate_api_key( test_key )
+
+        assert result == test_user_id
+
     @pytest.mark.asyncio
     async def test_invalid_api_key_returns_none( self ):
         """Test that invalid API key returns None."""
