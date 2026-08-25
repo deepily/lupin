@@ -143,6 +143,7 @@ def test_the_tripwire_accepts_both_anchored_forms():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import subprocess
+import sys
 
 
 def _repo( tmp_path ):
@@ -229,3 +230,90 @@ def test_secret_scanner_worktree_mode_is_anchored_to_the_repo_root():
         "ls-files emits repo-root-relative paths — opening them from another CWD raises "
         "OSError, which the surrounding except swallows, turning a coverage hole silent"
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# The pre-commit gate, end to end (mr radio's question, 2026-08-25)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _repo_with_secret_outside_subdir( tmp_path ):
+    """A repo with sub/, and a credential staged at the ROOT — outside that subdir."""
+    def sh( *a ):
+        return subprocess.run( a, cwd=tmp_path, capture_output=True, text=True )
+
+    sh( "git", "init", "-q" )
+    sh( "git", "config", "user.email", "t@t.t" )
+    sh( "git", "config", "user.name", "t" )
+    ( tmp_path / "sub" ).mkdir()
+    ( tmp_path / "sub" / "keep.py" ).write_text( "x = 1\n" )
+    sh( "git", "add", "-A" ); sh( "git", "commit", "-qm", "base" )
+
+    ( tmp_path / "outside.py" ).write_text( 'api_key = "AKIAIOSFODNN7EXAMPLE12345"\n' )
+    sh( "git", "add", "outside.py" )
+    return tmp_path
+
+
+def test_git_runs_hooks_from_the_repo_root( tmp_path ):
+    """
+    The load-bearing fact behind the gate's safety, ASSERTED rather than assumed.
+
+    git invokes hooks with CWD set to the top of the working tree, whatever directory
+    the human typed `git commit` in. That is what makes the pre-commit gate immune to
+    the CWD hazard in this file — independently of any flag it passes.
+
+    Pinned because the whole severity assessment rests on it: if git ever stopped doing
+    this, a commit from a subdirectory would get a different scan from one at the root.
+    """
+    root = _repo_with_secret_outside_subdir( tmp_path )
+    hook = root / ".git" / "hooks" / "pre-commit"
+    hook.write_text( '#!/bin/sh\necho "CWD:$(pwd)" >&2\nexit 1\n' )
+    hook.chmod( 0o755 )
+
+    out = subprocess.run( [ "git", "commit", "-qm", "probe" ],
+                          cwd=root / "sub", capture_output=True, text=True ).stderr
+    reported = [ l.split( ":", 1 )[ 1 ] for l in out.splitlines() if l.startswith( "CWD:" ) ]
+    assert reported, f"hook did not run: {out!r}"
+    assert Path( reported[ 0 ] ).resolve() == root.resolve(), (
+        f"git ran the hook from {reported[0]!r}, not the repo root {str( root )!r}"
+    )
+
+
+def test_the_pre_commit_gate_catches_a_secret_staged_outside_the_cwd( tmp_path ):
+    """
+    THE END-TO-END QUESTION: does a commit made from a subdirectory get a narrower scan?
+
+    NO. Two independent reasons, and this asserts the whole chain rather than either
+    half: git runs the hook from the repo root, AND the hook reads the STAGED DIFF
+    (`git diff --cached`), not a walk of the working tree from wherever it was invoked.
+    The `git ls-files` CWD-scoping that under-reported the standing sweep 256 -> 38 is a
+    DIFFERENT entry point (`secret_scan.py worktree`) and never sat on the commit path.
+    """
+    root = _repo_with_secret_outside_subdir( tmp_path )
+    hook = root / ".git" / "hooks" / "pre-commit"
+    hook.symlink_to( Path( cu.get_project_root() ) / "src/scripts/pre-commit-secret-scan.py" )
+
+    done = subprocess.run( [ "git", "commit", "-qm", "probe" ],
+                           cwd=root / "sub", capture_output=True, text=True )
+    assert done.returncode != 0, "the gate let a staged credential through"
+    assert "outside.py" in done.stderr, f"gate fired but did not name the file: {done.stderr!r}"
+
+
+def test_manual_invocation_from_a_subdir_still_catches_it( tmp_path ):
+    """
+    The case `--no-relative` actually buys, since git already anchors the hook path.
+
+    Run the scanner BY HAND from a subdirectory with `diff.relative` set — no git to
+    reset the CWD — and it must still see a credential staged outside that directory.
+    Measured before the flag: this returned exit 0, silently clean.
+    """
+    root = _repo_with_secret_outside_subdir( tmp_path )
+    subprocess.run( [ "git", "config", "diff.relative", "true" ], cwd=root, capture_output=True )
+
+    script = Path( cu.get_project_root() ) / "src/scripts/pre-commit-secret-scan.py"
+    done   = subprocess.run( [ sys.executable, str( script ) ],
+                             cwd=root / "sub", capture_output=True, text=True )
+    assert done.returncode == 1, (
+        f"manual run from a subdirectory went blind (exit {done.returncode}); "
+        f"--no-relative is what stops this"
+    )
+    assert "outside.py" in done.stderr
