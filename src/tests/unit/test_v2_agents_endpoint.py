@@ -181,6 +181,44 @@ class TestGate1EndpointEqualsRegistry:
 # GATE 3 (server half) — the dropdown's set is governed by `user_initiable`
 # ══════════════════════════════════════════════════════════════════════════════
 
+# The user-initiable set as a SECOND, INDEPENDENT AUTHORITY (row 47d45f1f, 2026-08-24).
+#
+# WHY THIS EXISTS AND WHAT IT CATCHES THAT EXPECTED_COMMANDS DOES NOT. Gate 1's
+# checked-in list pins WHICH COMMANDS EXIST; it says nothing about the FLAG on each
+# one. Measured: flipping `math`'s `user_initiable` to False drops Math Agent out of
+# the Q&A dropdown — a user-visible regression in the surface this file protects —
+# and 1,528 tests pass, EXPECTED_COMMANDS among them, because `math` never left the
+# registry. Only its flag moved.
+#
+# The set-equality below it has the same blind spot for the same reason gate 1 did:
+# USER_INITIABLE_COMMANDS is DERIVED from REGISTRY, so clearing a spec's flag moves
+# both sides together. The named per-command assertions in this class cover
+# `receptionist`, both expediters, TFE resume, `none` and `automatic` — none of the
+# commands a person actually picks from the dropdown.
+#
+# So this is the same fix Clayton landed for gate 1 (7921496e), on the other axis:
+# HAND-MAINTAINED, so a flag cannot flip without a human writing it down. If updating
+# it feels like busywork, that IS the check running.
+EXPECTED_USER_INITIABLE = frozenset( {
+    "agent router go to calculator",
+    "agent router go to calendar",
+    "agent router go to claude code",
+    "agent router go to datetime",
+    "agent router go to deep research",
+    "agent router go to math",
+    "agent router go to podcast generator",
+    "agent router go to presentation generator",
+    "agent router go to receptionist",
+    "agent router go to research to podcast",
+    "agent router go to research to presentation",
+    "agent router go to swe team",
+    "agent router go to test fix expediter resume",
+    "agent router go to test suite",
+    "agent router go to todo",
+    "agent router go to weather",
+} )
+
+
 class TestGate3UserInitiableIsTheGoverningField:
     """The blocker fix. Gate 3 as the plan shipped it tested `speakable`; after
     ruling 1 the dropdown is governed by `user_initiable`, and the two fields
@@ -195,6 +233,51 @@ class TestGate3UserInitiableIsTheGoverningField:
     # NAMED per-command assertions below (receptionist, both expediters, TFE resume,
     # `none`, `automatic`) — those are the ones that go red on a data change, and
     # deleting one silently removes the only check on that command.
+    def test_user_initiable_set_matches_the_checked_in_expectation( self ):
+        """THE ARM WITH A SECOND SOURCE — the one the set-equality below cannot be.
+
+        Falsification, verified rather than claimed: set any spec's `user_initiable`
+        to False and this goes RED, while
+        `test_served_user_initiable_set_equals_the_registry_projection` stays green
+        under that same mutation. Keeping both is deliberate, exactly as in gate 1:
+        this arm sees a FLAG that changed behind someone's back, the derived arm sees
+        the projection losing or renaming a command across HTTP."""
+        served = { a[ "command" ] for a in _agents()[ "agents" ] if a[ "user_initiable" ] }
+        assert served == EXPECTED_USER_INITIABLE, (
+            f"served-but-unexpected: {sorted( served - EXPECTED_USER_INITIABLE )}; "
+            f"expected-but-unserved: {sorted( EXPECTED_USER_INITIABLE - served )}.\n"
+            f"A command's `user_initiable` changed, which adds or removes an option in "
+            f"the Q&A card dropdown. If that was deliberate, update "
+            f"EXPECTED_USER_INITIABLE in this file — that edit is the point of this "
+            f"gate, not an obstacle to it."
+        )
+
+    # The six conversational agents, NAMED one at a time (Mr. Radio's ruling, 21:08).
+    #
+    # The set-equality above is a single assertion whose failure message lists a diff;
+    # these are six, and a red names the agent in the test id itself. That matters
+    # because deleting one line from a checked-in set is easy to wave through in
+    # review, while deleting a test called
+    # `...[agent router go to math]` is visibly removing the only check on Math Agent.
+    # Same reason the pre-existing per-command assertions in this class exist for
+    # `receptionist`, the expediters, `none` and `automatic` — this extends that
+    # practice to the commands a person actually picks.
+    @pytest.mark.parametrize( "command", [
+        "agent router go to math",
+        "agent router go to calculator",
+        "agent router go to datetime",
+        "agent router go to todo",
+        "agent router go to calendar",
+        "agent router go to weather",
+    ] )
+    def test_a_conversational_agent_is_served_as_user_initiable( self, command ):
+        served = _by_command( _agents() )
+        assert command in served, f"{command} is not served at all"
+        assert served[ command ][ "user_initiable" ] is True, (
+            f"{command} is served with user_initiable=False, so it has silently "
+            f"disappeared from the Q&A card dropdown."
+        )
+
     def test_served_user_initiable_set_equals_the_registry_projection( self ):
         served = { a[ "command" ] for a in _agents()[ "agents" ] if a[ "user_initiable" ] }
         assert served == set( USER_INITIABLE_COMMANDS ), (
