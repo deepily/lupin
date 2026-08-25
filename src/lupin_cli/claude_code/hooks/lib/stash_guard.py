@@ -105,6 +105,27 @@ session), so two non-negotiables:
     genuinely needs the stack — an owner clearing their OWN entry after
     verifying its content is preserved elsewhere.
 
+    🔴 IT IS HONOURED BY A PREFIX CARVE-OUT (`_hatch_in_prefix`), NOT BY THE ENV
+    READ, AND THAT IS NOT A SHORTCUT — IT IS THE ONLY THING THAT CAN WORK. A
+    PreToolUse hook is a SEPARATE PROCESS reading its OWN environment, and an
+    inline `VAR=1 cmd` prefix belongs to a command that HAS NOT RUN YET. So an
+    env-var hatch can never be honoured through os.environ from a command
+    string, no matter how the read is written.
+
+    Verified independently by Rachel 🕊️ on 2026-08-24: setting the flag in the
+    hook's own process environment produced an IDENTICAL verdict to not setting
+    it, so the allow demonstrably comes from the carve-out. At the same sha a
+    GENERIC env prefix is still denied (`GIT_DIR=.git git st​ash pop` → DENY),
+    which is the split that matters — arbitrary env prefixes refused, the hatch
+    prefix let through.
+
+    ⇒ DO NOT "SIMPLIFY" THE CARVE-OUT AWAY. Deleting it does not fall back to
+    the env read; it silently removes the hatch entirely, and every deny message
+    in this module tells the reader to use it. That is how the hatch spent most
+    of this guard's life broken without anyone noticing: it appeared to work
+    only because an env assignment pushed the program out of command position,
+    making it indistinguishable from the env-assignment BYPASS.
+
 ⚠️ Unlike subagent_governance this guard is DEFAULT-ON. A control that must be
 switched on is the courtesy version of itself: the rule this replaces already
 depended on remembering, which is the reason the hazard reached production once.
