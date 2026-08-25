@@ -289,6 +289,30 @@ where it is absent. Two ways to close that, neither free:
 | Banner with the shas left as `<pending>` in the RED commit, filled in by the GREEN | Two edits; the RED sha is still unnamed while only the RED exists |
 | Name the **row id** in the RED commit and the shas in the GREEN | The row is stable and knowable in advance; the shas arrive when they exist |
 
+### How many files this rule does NOT yet describe
+
+**Measured 2026-08-24, and deliberately NOT SWEPT.** Recorded so the next reader inherits the
+number instead of rediscovering it, and so this section is not mistaken for a description of
+the tree as it stands:
+
+| | count |
+|---|---|
+| Test files self-describing as red-first | **27** |
+| …carrying a sha-naming banner | **1** (`test_registry_topic_not_a_file_path.py`) |
+| **Not yet compliant** | **26** |
+
+Method, so the count is re-derivable rather than trusted:
+
+```bash
+grep -rlie 'red-first' src/tests/unit/*.py src/cosa/tests -r | sort -u | wc -l
+# then, per file: grep -qiE 'expected to (FAIL|PASS)'
+```
+
+Red-first is an established practice here, older than this section — the section is its
+written home, not its introduction. Bannering the other 26 is real work and is not scheduled;
+it is a mechanical edit per file that still needs a human to read each one and name the right
+two shas, which is exactly the kind of change that should not be batched at speed.
+
 The second is preferred: `row 9d89afe2, red-first — this file is expected to fail until the
 fix commit` is writable at RED time and already answers the reader's question. **A banner that
 can only be written after the danger has passed is worth having anyway** — most readers arrive

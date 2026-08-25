@@ -204,6 +204,45 @@ class TestTheRuleIsWhereTheAuthorWillSeeIt:
         text = README.read_text( encoding="utf-8" )
         assert "node --test" in text and "92e94cb7" in text
 
+    def test_the_readme_documents_the_RED_FIRST_BANNER_practice( self ):
+        # Added in the commit AFTER the one that wrote that section — because it was
+        # shipped unguarded two commits after this file argued that unguarded rules
+        # drift. The argument applies to my own text or it applies to nothing.
+        text    = README.read_text( encoding="utf-8" )
+        missing = [ phrase for phrase in (
+            "Red-first commits carry a banner",              # the section exists
+            "expected to FAIL",                              # the template's two halves
+            "expected to PASS",
+            "You cannot write the RED sha into the RED commit",   # the constraint
+            "row id",                                        # the writable form
+        ) if phrase not in text ]
+        assert not missing, (
+            "The red-first section lost part of itself: %s. The constraint is the load-bearing "
+            "half — a banner shipped without it reads as closing a gap it cannot close, because "
+            "the sha does not exist until the commit is made." % missing
+        )
+
+    def test_the_readme_records_the_UNSWEPT_COUNT_rather_than_implying_compliance( self ):
+        # A standard documented without its known exceptions reads as though the tree
+        # already complies. It does not: 27 files self-describe as red-first and 1 has
+        # a banner. The number is recorded so the next reader inherits it instead of
+        # rediscovering it, and so nobody reads the section as a description of today.
+        # 🔴 THE FIRST VERSION OF THIS ASSERTION WAS BLIND, and a mutation caught it.
+        # It tested `"26" in text`, which every date in the file satisfies — `2026-08-24`,
+        # `263 tests`. Removing the actual count left it green. A bare substring is not a
+        # claim about the thing you meant; anchor on the row that carries it.
+        text    = README.read_text( encoding="utf-8" )
+        missing = [ phrase for phrase in (
+            "**Not yet compliant** | **26**",   # the count, in the row that states it
+            "NOT SWEPT",                        # said out loud, not implied
+            "grep -rlie 'red-first'",           # the method, so it is re-derivable
+        ) if phrase not in text ]
+        assert not missing, (
+            "The README no longer records how many red-first files lack a banner: %s. Without "
+            "the count the section reads as a description of the tree rather than a rule the "
+            "tree does not yet meet." % missing
+        )
+
     def test_the_guard_can_be_made_to_FIRE( self ):
         # Falsifier. A doc guard that cannot go red is a doc guard that is not running —
         # the exact defect class row f5768ee4 exists to stop.
