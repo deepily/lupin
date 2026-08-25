@@ -34,7 +34,7 @@ answer to a stale client would be 401 — which teaches nobody anything and read
 a credentials problem.
 
 Source of the door list: Chloé's repo-wide inventory,
-`src/rnd/v0.2.0/2026.08.21-cascade-resume-artifacts/2026.08.21-queue-entry-point-inventory-corrected.md`,
+`src/rnd/v0.2.0/_archive/F/2026.08.21-cascade-resume-artifacts/2026.08.21-queue-entry-point-inventory-corrected.md`,
 each path re-resolved from its `APIRouter` prefix at build time rather than copied.
 """
 

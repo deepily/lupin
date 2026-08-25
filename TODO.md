@@ -30,7 +30,7 @@
 - [ ] Two order-effect reds in whole-run unit tiers (presentation dry-run banner, v2 cache lancedb closure) pass alone — worth a fixture look (Tiberius).
 - [ ] Tooling: `git merge-tree --write-tree` is NOT in this git — use `git merge-tree $(git merge-base A B) A B | grep -c '^<<<<<<<'` for conflict checks (cost one false "both conflict" ruling tonight).
 
-**Mine, still open in the store**: 1e597a65 (step-13 dump, Cheech's GO after 9a/9b) · cdfedc41 (brake-flag protocol member, 1447261b, Cheech's 10:00 EDT window, María PASS). Memento: `src/rnd/v0.2.0/2026.08.21-mr-radio-cascade-resume-memento.md`.
+**Mine, still open in the store**: 1e597a65 (step-13 dump, Cheech's GO after 9a/9b) · cdfedc41 (brake-flag protocol member, 1447261b, Cheech's 10:00 EDT window, María PASS). Memento: `src/rnd/v0.2.0/_archive/D/2026.08.21-mr-radio-cascade-resume-memento.md`.
 
 ## ⚖️ RULED 2026-08-21 morning (Rick, to María 🌸 `e5933e98`) — brain integration: three questions closed, one scope added
 
