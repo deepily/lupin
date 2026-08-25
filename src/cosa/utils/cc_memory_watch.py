@@ -51,6 +51,23 @@ LISTENER_MODULE = "cc_notification_listener"
 
 # The scope unit the launcher's memory cap creates: lupin-cc-<session>-<pid>.scope
 _SCOPE_RE  = re.compile( r"/(lupin-cc-(?P<session>.+?)-(?P<pid>\d+))\.scope" )
+
+# The launcher that ACTUALLY went into service (a52d160c) names scopes differently from
+# the one _SCOPE_RE was written for: a per-session `ccworker-<name>.slice` holding a
+# systemd-generated `run-r<hash>.scope`, with no session id in the leaf at all. Measured
+# 2026-08-25: parse_scope_unit returned ( None, None ) for EVERY live seat, so the
+# cgroup→session resolver had been silently dead since the cap went in. Attribution
+# survived only because the listener owner-pid map (resolver 1) carries it.
+# The slice leaf holds the tmux session name with '-' sanitized to '_' by the launcher.
+_SLICE_RE  = re.compile( r"/ccworker-(?P<session>[A-Za-z0-9_]+)\.slice" )
+
+# The cgroup-v2 path a process sits in: the part after `0::`. This is what names the
+# scope directory under /sys/fs/cgroup, and therefore the only way to read the cap's
+# OWN accounting rather than a per-process approximation of it.
+_CGROUP_PATH_RE = re.compile( r"^0::(?P<path>/.*)$", re.MULTILINE )
+
+# `anon` out of a cgroup's memory.stat, in bytes.
+_ANON_RE = re.compile( r"^anon\s+(\d+)$", re.MULTILINE )
 _VMRSS_RE  = re.compile( r"^VmRSS:\s+(\d+)\s+kB", re.MULTILINE )
 _PANE_RE   = re.compile( r"^TMUX_PANE=(.+)$", re.MULTILINE )
 
@@ -58,7 +75,8 @@ _PANE_RE   = re.compile( r"^TMUX_PANE=(.+)$", re.MULTILINE )
 class Sample:
     """One observation of one Claude Code process."""
 
-    def __init__( self, pid, rss_kb, cmdline, session_id=None, scope_unit=None, tmux_session=None ):
+    def __init__( self, pid, rss_kb, cmdline, session_id=None, scope_unit=None, tmux_session=None,
+                  scope_anon_kb=None ):
 
         self.pid          = pid
         self.rss_kb       = rss_kb
@@ -66,6 +84,10 @@ class Sample:
         self.session_id   = session_id
         self.scope_unit   = scope_unit
         self.tmux_session = tmux_session
+        # The cap-relevant quantity — the whole scope's unreclaimable memory, not this
+        # process's RSS. None when the scope cannot be read (an uncapped seat, or a
+        # cgroup path we cannot resolve); None must read as "unknown", never as zero.
+        self.scope_anon_kb = scope_anon_kb
 
     @property
     def rss_gb( self ):
@@ -111,9 +133,64 @@ def parse_scope_unit( cgroup_text ):
 
     match = _SCOPE_RE.search( cgroup_text )
 
-    if not match: return ( None, None )
+    if match: return ( match.group( 1 ), match.group( "session" ) )
 
-    return ( match.group( 1 ), match.group( "session" ) )
+    # The in-service shape (a52d160c). The scope leaf is a systemd hash carrying no
+    # identity, so the SLICE is what names the seat — and the launcher sanitizes '-'
+    # to '_' building it, which is undone here so the name matches every other surface.
+    slice_match = _SLICE_RE.search( cgroup_text )
+
+    if slice_match:
+        session = slice_match.group( "session" ).replace( "_", "-" )
+        return ( slice_match.group( 0 ).lstrip( "/" ), session )
+
+    return ( None, None )
+
+
+def parse_cgroup_path( cgroup_text ):
+    """
+    Ensures:
+        - returns the cgroup-v2 path a process sits in (the part after `0::`), or None
+        - never raises
+    """
+    match = _CGROUP_PATH_RE.search( cgroup_text or "" )
+
+    return match.group( "path" ) if match else None
+
+
+def read_scope_anon_kb( cgroup_path, read_fn ):
+    """
+    The number the cap is actually enforced against, read from the cap's OWN accounting.
+
+    WHY THIS EXISTS (row 117ed1b6, measured 2026-08-25). Every other figure this module
+    produces is per-PROCESS VmRSS, and a cgroup ceiling acts on the whole process TREE.
+    On a live seat: claude alone 0.53 GiB against scope anon 2.12 GiB across 15
+    processes. Summing VmRSS does NOT recover it either — VmRSS counts shared pages
+    once per process while the cgroup counts them once, so the sum overshoots. There is
+    no arithmetic over per-process samples that yields this; it has to be read.
+
+    ⚠️ anon, NOT memory.current. memory.current includes reclaimable page cache, and one
+    seat measured 0.68 GiB anon against 15.78 GiB memory.current — 23x apart. Under a
+    ceiling the kernel drops that cache rather than killing; with MemorySwapMax=0 anon
+    is what it CANNOT reclaim, so anon is what decides a kill.
+
+    Requires:
+        - cgroup_path is a cgroup-v2 path (from parse_cgroup_path), or None
+        - read_fn( path ) returns file text, or None when unreadable
+
+    Ensures:
+        - returns the scope's anon in KB, or None when the path is absent, the
+          memory.stat is unreadable, or it carries no anon line
+        - never raises
+    """
+    if not cgroup_path: return None
+
+    text = read_fn( f"/sys/fs/cgroup{cgroup_path}/memory.stat" )
+    if text is None: return None
+
+    match = _ANON_RE.search( text )
+
+    return int( match.group( 1 ) ) // 1024 if match else None
 
 
 def parse_tmux_pane( environ_text ):
@@ -398,16 +475,18 @@ def collect_samples():
         rss_kb = parse_vm_rss_kb( status )
         if rss_kb is None: continue
 
-        scope_unit, scope_session = parse_scope_unit( _read( f"/proc/{pid}/cgroup" ) or "" )
+        cgroup_text               = _read( f"/proc/{pid}/cgroup" ) or ""
+        scope_unit, scope_session = parse_scope_unit( cgroup_text )
         pane                      = parse_tmux_pane( ( _read( f"/proc/{pid}/environ" ) or "" ).replace( "\0", "\n" ) )
 
         samples.append( Sample(
-            pid          = pid,
-            rss_kb       = rss_kb,
-            cmdline      = argv,
-            session_id   = owners.get( pid ),
-            scope_unit   = scope_unit,
-            tmux_session = resolve_tmux_session( pane ) or scope_session,
+            pid           = pid,
+            rss_kb        = rss_kb,
+            cmdline       = argv,
+            session_id    = owners.get( pid ),
+            scope_unit    = scope_unit,
+            tmux_session  = resolve_tmux_session( pane ) or scope_session,
+            scope_anon_kb = read_scope_anon_kb( parse_cgroup_path( cgroup_text ), _read ),
         ) )
 
     return samples
@@ -494,9 +573,16 @@ def main( argv=None ):
             # collected for. Lines from one pass share a stamp, so a pass groups by
             # equality and needs no separator or heuristic.
             for sample in sorted( samples, key=lambda s: -s.rss_kb ):
+                # scope_anon_gb is the CAP-RELEVANT figure and rss_gb is not; both are
+                # printed because they answer different questions and conflating them is
+                # the defect this line exists to stop. "unknown" rather than 0.00 when the
+                # scope cannot be read — a zero would read as a healthy seat.
+                anon = ( f"{sample.scope_anon_kb / KB_PER_GB:6.2f}"
+                         if sample.scope_anon_kb is not None else "unknown" )
                 print(
                     f"  ts={timestamp} "
                     f"pid={sample.pid} rss_gb={sample.rss_gb:6.2f} "
+                    f"scope_anon_gb={anon} "
                     f"session={sample.session_id or 'unresolved'} "
                     f"tmux={sample.tmux_session or 'unresolved'}",
                     flush=True,

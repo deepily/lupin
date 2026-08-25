@@ -325,6 +325,13 @@ def fake_proc( monkeypatch ):
 
     def fake_read( path ):
 
+        # The module reads TWO kinds of path now (row 117ed1b6): /proc/<pid>/… for the
+        # per-process view, and /sys/fs/cgroup/<scope>/memory.stat for the cap-relevant
+        # per-scope anon. A fixture that assumes every read is /proc crashes on the
+        # second — which is the fixture telling you the module grew a new dependency.
+        if path.startswith( "/sys/fs/cgroup" ):
+            return f"anon {int( 2 * KB_PER_GB * 1024 )}\nfile 12345\n"
+
         pid  = int( path.split( "/" )[ 2 ] )
         leaf = path.rsplit( "/", 1 )[ -1 ]
 
@@ -512,6 +519,8 @@ def two_claudes( monkeypatch ):
     monkeypatch.setattr( watch, "resolve_tmux_session", lambda pane, **kw: "cc-tmux-session-f587a06c" )
 
     def fake_read( path ):
+        if path.startswith( "/sys/fs/cgroup" ):
+            return f"anon {int( 2 * KB_PER_GB * 1024 )}\nfile 12345\n"
         pid  = int( path.split( "/" )[ 2 ] )
         leaf = path.rsplit( "/", 1 )[ -1 ]
         if leaf == "comm":    return table[ pid ][ "comm" ]
@@ -551,3 +560,95 @@ def test_one_pass_shares_a_single_stamp( two_claudes, capsys ):
     stamps = { _TS_RE.search( line ).group() for line in _report_lines( capsys ) }
 
     assert len( stamps ) == 1, f"one pass emitted {len( stamps )} distinct stamps: {stamps}"
+
+
+# ── The cap-relevant noun (row 117ed1b6, 2026-08-25) ──────────────────────────
+# WHY THESE EXIST. Everything above measures per-PROCESS VmRSS. A cgroup ceiling acts on
+# the process TREE, and the two disagree by enough to invert the ordering: measured live,
+# the seat with the SMALLEST rss_gb (0.48) had the LARGEST scope anon (2.13). A cap sized
+# off the per-process distribution is sized off the wrong quantity, and no arithmetic over
+# those samples recovers the right one — VmRSS counts shared pages once per process while
+# the cgroup counts them once, so even summing overshoots.
+
+def test_the_in_service_scope_shape_resolves_to_a_seat():
+    """
+    THE DEAD RESOLVER. _SCOPE_RE was written for `lupin-cc-<session>-<pid>.scope`, which
+    never went into service; the launcher that shipped creates a per-session
+    `ccworker-<name>.slice` holding a systemd-generated `run-r<hash>.scope` with no
+    identity in the leaf at all. Measured 2026-08-25: parse_scope_unit returned
+    ( None, None ) for EVERY live seat, so the cgroup→session resolver had been silently
+    dead since the cap went in. Attribution survived on the listener map alone.
+    """
+    live = ( "0::/user.slice/user-1001.slice/user@1001.service/ccworker.slice/"
+             "ccworker-cc_author_mr_radio_2.slice/run-r4c93752a689d46c29a96ca60dbad4049.scope\n" )
+
+    unit, session = watch.parse_scope_unit( live )
+
+    assert unit    == "ccworker-cc_author_mr_radio_2.slice"
+    # '-' is systemd's slice-hierarchy separator so the launcher sanitizes it to '_';
+    # undoing that is what makes this name match every other surface's spelling.
+    assert session == "cc-author-mr-radio-2"
+
+
+def test_the_original_scope_shape_still_resolves():
+    """The branch shape must keep working — widening a resolver must not replace it."""
+    unit, session = watch.parse_scope_unit( "0::/user.slice/lupin-cc-sam-751918.scope\n" )
+
+    assert unit    == "lupin-cc-sam-751918"
+    assert session == "sam"
+
+
+def test_a_process_in_no_recognised_scope_resolves_to_nothing():
+    assert watch.parse_scope_unit( "0::/user.slice/user-1001.slice\n" ) == ( None, None )
+
+
+def test_the_cgroup_path_is_recovered_for_reading_the_scopes_own_accounting():
+    text = "0::/user.slice/ccworker.slice/ccworker-x.slice/run-r1.scope\n"
+
+    assert watch.parse_cgroup_path( text ) == "/user.slice/ccworker.slice/ccworker-x.slice/run-r1.scope"
+    assert watch.parse_cgroup_path( "" )   is None
+
+
+def test_scope_anon_is_read_from_the_scopes_own_memory_stat():
+    """anon, in KB — the quantity MemorySwapMax=0 makes unreclaimable, hence the one
+    that decides a kill. NOT memory.current, which counts page cache the kernel drops."""
+    stat = "anon 2147483648\nfile 15854567424\ninactive_file 75497472\n"
+
+    assert watch.read_scope_anon_kb( "/s/x.scope", lambda p: stat ) == 2147483648 // 1024
+
+
+@pytest.mark.parametrize( "path,reader,why", [
+    ( None,        lambda p: "anon 1\n",       "no cgroup path — nothing to read" ),
+    ( "/s/x.scope", lambda p: None,            "memory.stat unreadable (uncapped or gone)" ),
+    ( "/s/x.scope", lambda p: "file 123\n",    "memory.stat carries no anon line" ),
+] )
+def test_an_unreadable_scope_is_unknown_and_never_zero( path, reader, why ):
+    """
+    None must never collapse to 0. A zero reads as a healthy seat, which is the opposite
+    of 'we could not tell' — the same failure the VmRSS-less status guard exists for.
+    """
+    assert watch.read_scope_anon_kb( path, reader ) is None, why
+
+
+def test_the_report_line_carries_the_cap_relevant_noun_beside_the_process_one( fake_proc, capsys ):
+    """
+    BOTH, deliberately. They answer different questions and printing only one is how a
+    reader ends up dividing a per-process figure into a per-scope ceiling.
+    """
+    main( [ "--once", "--report", "--threshold-gb", "999" ] )
+    line = [ l for l in capsys.readouterr().out.splitlines() if "pid=" in l ][ 0 ]
+
+    assert "rss_gb="        in line
+    assert "scope_anon_gb=" in line
+    assert "scope_anon_gb=  2.00" in line          # the fixture's scope holds 2 GiB anon
+
+
+def test_an_unreadable_scope_prints_unknown_not_a_number( fake_proc, capsys, monkeypatch ):
+    """A seat whose scope cannot be read must be visibly unknown in the stream."""
+    monkeypatch.setattr( watch, "read_scope_anon_kb", lambda path, read_fn: None )
+
+    main( [ "--once", "--report", "--threshold-gb", "999" ] )
+    line = [ l for l in capsys.readouterr().out.splitlines() if "pid=" in l ][ 0 ]
+
+    assert "scope_anon_gb=unknown" in line
+    assert "scope_anon_gb=  0.00" not in line
