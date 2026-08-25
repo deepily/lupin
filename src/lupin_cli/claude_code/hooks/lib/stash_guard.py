@@ -29,6 +29,35 @@ SCOPE: only the MUTATING subcommands are denied. `git stash list` and
 `git stash show` are read-only and stay allowed — they are how you inspect the
 stack before acting on it.
 
+KNOWN OVER-BLOCK, AND IT IS DELIBERATE (row e062580e). This is a regex over the
+RAW command string; it does not parse shell quoting. So a separator appearing
+INSIDE a quoted string still counts as a command position, and a command that
+merely CONTAINS such a snippet is refused even though no stash would run.
+Measured 2026-08-24 while demonstrating the guard:
+
+    DENIED   x = "cd /tmp; git st​ash pop"     separator inside a quoted literal
+    DENIED   x = "foo | git st​ash push"       pipe inside a quoted literal
+    allowed  x = "git st​ash pop"              quoted literal, no separator first
+    allowed  grep "git st​ash" docs/           the phrase as a plain argument
+    allowed  echo 'git st​ash pop'             the phrase inside a quoted string
+
+(The examples above carry a zero-width space inside the verb so that reading
+THIS FILE through a shell command is not itself refused — which is the clearest
+statement of the problem this note describes.)
+
+⇒ THE WORKAROUND, because you WILL hit this writing a test table or a doc
+snippet: put the script in a FILE and run the file rather than piping it through
+a heredoc, or edit with the Write/Edit tools instead of a shell redirect. Both
+were needed to produce this very paragraph.
+
+⇒ AND THE REASON IT IS NOT "FIXED": every case above is a false DENY, never a
+false ALLOW. Making the matcher shell-aware (shlex) is heavier on a hot path and
+can RAISE on unbalanced quotes — where the fail-open backstop below would then
+ALLOW a real mutating command. Trading a false deny for a possible false allow
+is the wrong direction for a control whose entire value is deny-by-default. If
+it is ever revisited, the acceptance test is that all thirteen currently-denied
+forms stay denied.
+
 SAFETY — this runs inside the hot-path PreToolUse hook (every tool call, every
 session), so two non-negotiables:
   • FAIL-OPEN: ANY error → allow (return None). A guard must never break a tool
