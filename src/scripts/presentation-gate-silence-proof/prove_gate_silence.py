@@ -414,6 +414,24 @@ def require_lock_clear( base, jwt ):
     return ps
 
 
+def lock_clear_banner( ps ):
+    """
+    Report the monopolize-slot check at its true width.
+
+    `require_lock_clear` reads ONE field. It answers "will Gate B defer this
+    foreign pr- job", which is an identity question about the monopolize slot --
+    not "is :8000 free". Shared-pool jobs can be inflight and more queued behind
+    them with the slot clear, and this precondition cannot see any of it. The
+    line therefore names the field it read and names the blind spot; the venue
+    question is answered by list-pending, per CLAUDE.md section TESTING VENUES.
+    """
+    return (
+        f"[proof] no monopolizer holds the :8000 slot "
+        f"(monopolize_id={ps.get( 'monopolize_id' )}) -- Gate B will not defer us. "
+        f"NOT an idle-venue check: queued/pending shared-pool work is unread here."
+    )
+
+
 def poll_until_terminal( base, jwt, job_id, overall_timeout, on_tick=None ):
     """
     Poll running/done/dead until the job lands in done or dead (or we time out).
@@ -519,7 +537,7 @@ def main():
     # window. --force only for a deliberate override.
     if not args.force:
         ps = require_lock_clear( args.base, jwt )
-        print( f"[proof] :8000 lock clear (monopolize_id={ps.get( 'monopolize_id' )}) — safe to submit" )
+        print( lock_clear_banner( ps ) )
     else:
         print( "[proof] --force: skipping lock-clear precondition" )
 
