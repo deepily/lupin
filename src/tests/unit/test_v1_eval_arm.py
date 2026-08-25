@@ -17,6 +17,24 @@ Target: 100% lines + branches + functions on the pure surface. Live IO seams
 (_default_push_fn / _default_collect_fn / load_v1_class_to_command / __main__)
 are pragma'd boundaries.
 
+⚠️ THIS FILE ALONE DOES NOT COVER v1_eval_arm.py, AND READING IT AS IF IT DID HAS NOW
+COST TWO ROWS (7c31c3b0, 2d5aa0be). Measured alone it reports 77% with 65 uncovered
+statements, ALL of them lines 1070-1186 — WsJobEventListener and its factory. Those 65
+are not a gap and they are not pragma'd: they are covered by test_v1_ws_recv_events.py
+(commit 7df2eadf), which drives the listener against a REAL in-process websockets
+server over TCP rather than a shape-mock. Together the suites reach 100% lines AND
+branches, 0 missed. A partial measurement that looks like a coverage hole is how a
+closed gap gets re-minted as an open one.
+
+THE INVOCATION, because the naive one silently reports 0% and this lineage has been
+bitten by unreproducible coverage figures repeatedly. The module is loaded BY PATH,
+not as a package, so `--cov=scripts.v1_eval_arm` matches nothing and prints "module
+was never imported". Name the bare module and pass every suite that imports it:
+
+    PYTHONPATH=src:src/scripts python3 -m pytest \
+      $( grep -rln v1_eval_arm --include='*.py' src/tests/unit/ ) \
+      --cov=v1_eval_arm --cov-branch --cov-report=term-missing
+
 Venue: :7999-eligible / local — pure + seam-injected (no IO, no server).
 """
 import os
