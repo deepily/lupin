@@ -308,6 +308,11 @@ def main():
     ap.add_argument( "--out", default="io/gate-b/latest", help="directory for samples.jsonl + verdict.json" )
     ap.add_argument( "--max-seconds", type=int, default=1800, help="how long to watch after submit" )
     ap.add_argument( "--dry-run", action="store_true", help="check preconditions only; do NOT submit" )
+    ap.add_argument( "--watch-only", metavar="JOB_ID",
+                     help="do NOT submit; resume watching an ALREADY-submitted job by id. "
+                          "Exists because the watcher can be killed (a shell timeout, a "
+                          "disconnect) while the job keeps running server-side — re-submitting "
+                          "would start a SECOND monopolizer and measure the wrong one." )
     args = ap.parse_args()
 
     print( "── preconditions ──" )
@@ -336,10 +341,20 @@ def main():
         print( "REFUSING: :8000 is not free. Queueing behind a live gate is a different experiment." )
         return 2
 
+    if args.watch_only:
+        # Resuming: the job is already in flight, so the idle check does not apply — the box
+        # being busy with MY OWN job is the state we are here to observe.
+        my_job_id = args.watch_only
+        print( f"\n── watch-only: resuming on {my_job_id}, NOT submitting ──" )
+        qualifying, n = watch( token, my_job_id, args.out, args.max_seconds )
+        return _report( args, my_job_id, qualifying, n )
+
     print( "\n── submit ──" )
     status, resp = _http( "POST", "/api/test-suite/submit", token=token, body={
-        "test_types"           : [ "smoke" ],
-        "pytest_args"          : [ TARGET_SUITE, "--auto-proxy", "-v" ],
+        # ⚠️ STRINGS, NOT LISTS. The endpoint's schema rejects arrays with a 422
+        # (string_type on both fields) — measured 2026-08-24 on the first fire.
+        "test_types"           : "smoke",
+        "pytest_args"          : f"{TARGET_SUITE} --auto-proxy",
         "auto_fix_on_failure"  : False,      # a false red must not arm the TFE treadmill (bug 67473d91)
     } )
     if status not in ( 200, 201 ):
@@ -352,6 +367,11 @@ def main():
     print( f"\n── watching pool-status every {POLL_SECONDS}s, writing every sample ──" )
     qualifying, n = watch( token, my_job_id, args.out, args.max_seconds )
 
+    return _report( args, my_job_id, qualifying, n )
+
+
+def _report( args, my_job_id, qualifying, n ):
+    """Write verdict.json and print the sample verbatim. Shared by the submit and resume paths."""
     verdict = {
         "row"                : "99b09840",
         "my_job_id"          : my_job_id,
