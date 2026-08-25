@@ -189,6 +189,61 @@ def test_run_all_tests_script_agrees_with_all_suite_components():
     assert shell_suites == ALL_SUITE_COMPONENTS
 
 
+def test_claude_md_merge_pyramid_agrees_with_all_suite_components():
+    """
+    CLAUDE.md's merge pyramid and the code's suite list must name the same suites.
+
+    THE FAILURE THIS PREVENTS, measured 2026-08-25: CLAUDE.md § PR MERGE REQUIREMENTS
+    listed six steps and omitted BOTH `typescript` and `smoke`, while
+    ALL_SUITE_COMPONENTS and run-all-tests.sh's SUITES=(...) both carried seven
+    suites. A reader following the documented pyramid merged without ever running
+    two tiers, and nothing failed — a gate absent from the doc is a gate nobody
+    runs, which is indistinguishable from a gate that passed.
+
+    Two independent lists already guard each other (shell SUITES vs Python
+    ALL_SUITE_COMPONENTS, above). The DOC was the third list nobody checked.
+
+    Requires:
+        - CLAUDE.md carries a `<!-- merge-pyramid-suites: ... -->` marker line
+        - the prose paragraph beneath it names each suite
+
+    Ensures:
+        - the marker's suite SET equals ALL_SUITE_COMPONENTS
+        - every marker name also appears in the human-readable prose
+
+    SET, not sequence, and deliberately so: the shell array runs `integration`
+    before `e2e`, while the documented pyramid runs `e2e` first and holds
+    `integration` back as the FINAL GATE. That ordering difference is a ruling,
+    not drift. Membership is what must never differ.
+    """
+    claude_md = ( Path( cu.get_project_root() ) / "CLAUDE.md" ).read_text( encoding="utf-8" )
+
+    marker = re.search( r"<!--\s*merge-pyramid-suites:([^>]*?)-->", claude_md )
+    assert marker is not None, (
+        "CLAUDE.md carries no `<!-- merge-pyramid-suites: ... -->` marker — the merge "
+        "pyramid became unparseable, so this drift check cannot run. Restore the marker "
+        "immediately above § PR MERGE REQUIREMENTS' order sentence."
+    )
+    documented = marker.group( 1 ).split()
+
+    assert sorted( documented ) == sorted( ALL_SUITE_COMPONENTS ), (
+        f"CLAUDE.md merge pyramid names {sorted( documented )} but the code runs "
+        f"{sorted( ALL_SUITE_COMPONENTS )}. Missing from the doc: "
+        f"{sorted( set( ALL_SUITE_COMPONENTS ) - set( documented ) )}; "
+        f"extra in the doc: {sorted( set( documented ) - set( ALL_SUITE_COMPONENTS ) )}."
+    )
+
+    # The marker is machine-readable and therefore invisible to a human reader.
+    # A marker that is correct while the prose beneath it omits a tier is the exact
+    # defect this test exists to catch, one level down — so check the prose too.
+    prose = claude_md[ marker.end() : ].split( "\n\n", 1 )[ 0 ].lower()
+    for suite in documented:
+        assert suite in prose, (
+            f"`{suite}` is in CLAUDE.md's merge-pyramid marker but not in the prose "
+            f"sentence a human actually reads. The marker is not the documentation."
+        )
+
+
 def test_typescript_has_an_explicit_timeout():
     """A suite falling back to the 600s default would be killed mid-run."""
     assert SUITE_TIMEOUTS_SECONDS[ "typescript" ] > 8 * 60, (
