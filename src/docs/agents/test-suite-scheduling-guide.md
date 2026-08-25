@@ -457,6 +457,38 @@ dead queue and **BFE** (not TFE) picks it up. The dead queue path is for agentic
 jobs that crashed; the done queue path is for agentic jobs that completed with
 failures. These are distinct code paths with distinct watchdogs.
 
+### The third case: a run that returned normally but executed ZERO tests
+
+⚠️ **CHANGED 2026-08-25 (row `a9d19d18`).** There is a case that is neither of the
+two above, and it used to be filed under the wrong one. If the suite subprocess
+crashes at *startup* — before any test runs — `_execute()` still returns normally,
+so `do_all` used to set `JobState.COMPLETED` and the job landed in the **done**
+queue reading `completed` while carrying `0 passed / 0 failed / 0 errors / 0 skipped`.
+
+Measured on job `ts-76be90f0`: the capped JS-test lane refused to start (`exit=70`,
+no container memory ceiling) and the run was reported as completed.
+
+**Now**: a run that executed zero tests terminates as `JobState.FAILED` and routes
+to the **dead** queue, with `job.error` naming the verdict. A run that never
+executed has not passed.
+
+**Three deliberate exclusions — do not "tidy" these into the condition:**
+
+| Case | State | Why |
+|---|---|---|
+| **Genuine red** (tests ran, some failed) | `COMPLETED` → done → **TFE** | The job did its work and is reporting a red. TFE reads the done queue and gates on `all_passed`; routing reds to dead would hide them from the thing that remediates them. |
+| **Partial run** (one tier ran, another did not) | `COMPLETED` → done | Also classifies as `NOT EXECUTED`, but its counts and `all_passed` already tell the truth. Routing partials to dead is a behaviour change outside this defect. |
+| **Dry run** (all-zero counts by construction) | `COMPLETED` → done | The dry-run path builds `suite_results` with zero counts too. `overall_status` is published by the *real* run path only, and that is what separates "a real run executed nothing" from "no real run happened". |
+
+**Consequence worth knowing**: because these now reach the dead queue, **BFE** may
+engage on a startup crash where previously nothing did. That is the intended
+direction — a suite that cannot start is a defect — but it is a new trigger.
+
+**This was NOT a live false green.** Every machine consumer reads
+`cost_summary["all_passed"]`, which was already correctly `False`
+(`test_suite_completion_watchdog.py:150`, `test_fix_expediter/snapshot_loader.py:161`);
+no caller gates on the job status. The fix closes the gap before one does.
+
 ---
 
 ## 10. Troubleshooting

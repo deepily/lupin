@@ -1301,3 +1301,134 @@ def test_a_malformed_failure_detail_does_not_break_the_card():
     """
     line = _line( failed=1, failure_details=[ "not-a-dict" ] )
     assert "1 failed" in line
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Terminal state reflects whether anything actually RAN (row a9d19d18)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _run_do_all( job, execute_return, cost_summary, suite_results, overall_status ):
+    """
+    Drive do_all() with _execute() stubbed to leave the state a real run would leave.
+
+    do_all bridges to the async _execute via asyncio.run, so the seam under test is
+    "what do_all does with what _execute left on self", not the subprocess itself.
+    """
+    async def fake_execute():
+        job.cost_summary    = cost_summary
+        job.suite_results   = suite_results
+        job.overall_status  = overall_status
+        return execute_return
+
+    with patch.object( TestSuiteJob, "_execute", side_effect=fake_execute ):
+        return job.do_all()
+
+
+def _counts( passed=0, failed=0, errors=0, skipped=0 ):
+    return {
+        "total_passed"  : passed,
+        "total_failed"  : failed,
+        "total_errors"  : errors,
+        "total_skipped" : skipped,
+        "all_passed"    : ( failed + errors ) == 0 and passed > 0,
+    }
+
+
+def test_a_suite_that_executed_nothing_is_FAILED_not_completed( job ):
+    """
+    THE DEFECT THIS ROW EXISTS FOR (row a9d19d18), measured on job ts-76be90f0.
+
+    The capped JS-test lane refused to start (exit 70, no container memory ceiling),
+    so ZERO tests ran — and the job still landed in the `done` queue reading
+    "completed". `_classify_outcome` had already called it NOT EXECUTED; do_all
+    never asked. A run that never executed has not passed.
+    """
+    _run_do_all(
+        job,
+        execute_return = "Test suite run complete. NOT EXECUTED.",
+        cost_summary   = _counts(),
+        suite_results  = { "typescript": { "passed": 0, "failed": 0, "errors": 0, "skipped": 0 } },
+        overall_status = "NOT EXECUTED",
+    )
+    assert job.state == JobState.FAILED
+    assert "ZERO tests" in job.error
+    assert "NOT EXECUTED" in job.error
+
+
+def test_a_collection_error_that_ran_nothing_is_also_FAILED( job ):
+    """A suite that could not even collect ran nothing — same verdict, different cause."""
+    _run_do_all(
+        job,
+        execute_return = "COLLECTION ERROR — THE SUITE DID NOT RUN",
+        cost_summary   = _counts(),
+        suite_results  = { "unit": { "passed": 0, "failed": 0, "errors": 0, "skipped": 0 } },
+        overall_status = "COLLECTION ERROR",
+    )
+    assert job.state == JobState.FAILED
+
+
+def test_a_green_run_is_COMPLETED( job ):
+    """The ordinary case must not regress — 2421 passed is a completed job."""
+    _run_do_all(
+        job,
+        execute_return = "Test suite run complete. ALL PASSED.",
+        cost_summary   = _counts( passed=2421 ),
+        suite_results  = { "typescript": { "passed": 2421, "failed": 0, "errors": 0, "skipped": 0 } },
+        overall_status = "PASSED",
+    )
+    assert job.state == JobState.COMPLETED
+    assert job.error is None or job.error == ""
+
+
+def test_a_genuine_RED_stays_COMPLETED_because_the_job_did_its_work( job ):
+    """
+    DELIBERATE, and the reason is load-bearing: a suite that ran and went red is a
+    job that DID its work and is reporting a red. The TestSuiteCompletionWatchdog
+    reads the DONE queue and gates on all_passed — routing reds to the dead queue
+    would hide them from the very thing that remediates them.
+    """
+    _run_do_all(
+        job,
+        execute_return = "Test suite run complete. FAILURES DETECTED.",
+        cost_summary   = _counts( passed=10, failed=3 ),
+        suite_results  = { "unit": { "passed": 10, "failed": 3, "errors": 0, "skipped": 0 } },
+        overall_status = "FAILED",
+    )
+    assert job.state == JobState.COMPLETED
+
+
+def test_a_PARTIAL_run_stays_COMPLETED( job ):
+    """
+    Scope guard. A partial run (one tier ran, another did not) ALSO classifies as
+    NOT EXECUTED, and deliberately keeps COMPLETED: its counts and all_passed already
+    tell the truth, and routing partials to the dead queue is a behaviour change well
+    outside this defect. If this test is ever changed, change it with a reason.
+    """
+    _run_do_all(
+        job,
+        execute_return = "Test suite run complete. NOT EXECUTED.",
+        cost_summary   = _counts( passed=50 ),
+        suite_results  = {
+            "unit"       : { "passed": 50, "failed": 0, "errors": 0, "skipped": 0 },
+            "typescript" : { "passed":  0, "failed": 0, "errors": 0, "skipped": 0 },
+        },
+        overall_status = "NOT EXECUTED",
+    )
+    assert job.state == JobState.COMPLETED
+
+
+def test_a_DRY_RUN_stays_COMPLETED_even_though_its_counts_are_all_zero( dry_run_job ):
+    """
+    THE TRAP THIS GUARDS, and it nearly shipped: the dry-run path builds suite_results
+    with all-zero counts too. A predicate keyed on the counts alone marks every dry run
+    FAILED. `overall_status` is published by the REAL path only, which is what tells
+    "a real run executed nothing" apart from "no real run happened".
+    """
+    _run_do_all(
+        dry_run_job,
+        execute_return = "Dry run complete.",
+        cost_summary   = { "mode": "dry_run", "suites": [ "integration" ], "suites_run": 1 },
+        suite_results  = { "integration": { "passed": 0, "failed": 0, "errors": 0, "skipped": 0 } },
+        overall_status = None,
+    )
+    assert dry_run_job.state == JobState.COMPLETED

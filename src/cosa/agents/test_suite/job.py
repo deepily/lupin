@@ -290,6 +290,11 @@ class TestSuiteJob( AgenticJobBase ):
         # Results (populated after execution)
         self.suite_results = {}
         self.cost_summary  = None  # Required by queues.py for unified job interface
+        # The 4-way verdict from _classify_outcome, published by the REAL run path only
+        # (row a9d19d18). Stays None on the dry-run path and on any early return, which
+        # is exactly what do_all uses to tell "a real run executed nothing" apart from
+        # "no real run happened" — a dry run also carries all-zero counts.
+        self.overall_status = None
 
     # Env vars exposed to the pytest subprocess are prefix-filtered so arbitrary
     # client-supplied vars can't leak into the runner. Extend the allowlist here
@@ -389,6 +394,46 @@ class TestSuiteJob( AgenticJobBase ):
                 self.answer_conversational = result or "Test suite run was cancelled by the user."
                 if self.debug: print( "[TestSuiteJob] Cancelled by user request" )
                 return self.answer_conversational
+
+            # A run that executed ZERO tests did not complete its mandate — it is
+            # FAILED, not COMPLETED (row a9d19d18). Measured on ts-76be90f0: the
+            # subprocess exited 70 at startup, nothing ran, and the job still landed
+            # in the `done` queue reading "completed". `_classify_outcome` had
+            # already called it NOT EXECUTED; the state machine simply never asked.
+            #
+            # THE PREDICATE IS DELIBERATELY THE NARROW ONE — nothing executed at all,
+            # which is exactly `_classify_outcome`'s own first branch. A PARTIAL run
+            # (some tier ran, another did not) also classifies as NOT EXECUTED, and it
+            # deliberately KEEPS JobState.COMPLETED here: its counts and `all_passed`
+            # already tell the truth, and routing partials to the dead queue would be
+            # a behaviour change well outside this defect. Widen this only with a
+            # reason, not by tidying the condition.
+            #
+            # Genuine reds (tests ran, some failed) also stay COMPLETED: the JOB did
+            # its work and is reporting a red. The TestSuiteCompletionWatchdog expects
+            # exactly that — it reads the done queue and gates on all_passed.
+            # ⚠️ `overall_status is not None` is what distinguishes a REAL run from a
+            # DRY RUN, and it is load-bearing: the dry-run path also builds
+            # suite_results with all-zero counts, so a predicate keyed on the counts
+            # alone would mark every dry run FAILED. Only the real path publishes the
+            # verdict.
+            summary  = self.cost_summary or {}
+            executed = (
+                summary[ "total_passed" ] + summary[ "total_failed" ] +
+                summary[ "total_errors" ] + summary[ "total_skipped" ]
+            ) if self.overall_status is not None else -1
+
+            if executed == 0:
+                self.state        = JobState.FAILED
+                self.completed_at = cu.get_current_datetime_iso()
+                self.result       = result
+                self.error        = (
+                    f"Suite executed ZERO tests (verdict: {self.overall_status}). "
+                    f"A run that never executed has not passed — see the report for the startup output."
+                )
+                self.answer_conversational = result
+                if self.debug: print( f"[TestSuiteJob] NOTHING RAN — state=FAILED ({self.error})" )
+                return result
 
             self.state        = JobState.COMPLETED
             self.completed_at = cu.get_current_datetime_iso()
@@ -698,6 +743,22 @@ class TestSuiteJob( AgenticJobBase ):
                 collection_error = any_collection_error and ( total_failed + total_errors ) == 0
             )
             all_passed = ( overall_status == "PASSED" )
+
+            # Hand the 4-way verdict up to do_all so the JOB STATE can reflect it
+            # (row a9d19d18). do_all used to set JobState.COMPLETED for anything that
+            # returned without raising, so a run whose subprocess crashed at startup
+            # having executed ZERO tests landed in the `done` queue reading
+            # "completed" — measured, ts-76be90f0. The correct verdict already exists
+            # right here; it simply was not carried anywhere the state machine reads.
+            #
+            # ⚠️ NOT a false green today, and the scope is deliberately narrow because
+            # of that: every machine consumer reads cost_summary["all_passed"], which
+            # is already correct (test_suite_completion_watchdog.py:150,
+            # test_fix_expediter/snapshot_loader.py:161). Grepped for a caller gating
+            # on JobState.COMPLETED / status == "completed" — every hit is queue
+            # plumbing, none is a pass/fail gate. This closes the gap before some
+            # future caller reaches for the more obvious field.
+            self.overall_status = overall_status
 
             # Store artifacts + cost_summary (required by queues.py unified interface)
             self.cost_summary = {
