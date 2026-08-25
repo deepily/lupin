@@ -198,6 +198,62 @@ pytest src/tests/smoke/test_proxy_integration.py -v
 
 ---
 
+### 7. TypeScript / DOM Tests (`src/tests/unit/**/*.test.ts`)
+
+**Purpose**: Test browser-side modules (multiplexer, notifications, nav) under `happy-dom`
+
+119 `.test.ts` files live under `src/tests/unit/`. Until this section existed they were
+absent from this document entirely, so a person writing one had nothing to read.
+
+> 🔴 **THE TIER IS UNDER A STANDING BAN.** Do not run `npm test`, `node --test`, or any
+> runner that globs `src/tests/**/*.ts`. The ban followed the 2026-08-22/23 out-of-memory
+> kills that took down roughly two dozen sessions. It has not been lifted. Containment work
+> is row `92e94cb7`; the ban holds **by filename only**, so any new runner that globs these
+> paths silently re-arms the hazard.
+
+#### 🔴 THE RULE — read this BEFORE you write the assertion
+
+**Never pass a DOM node as the ACTUAL value of an assertion.** Assert a **primitive
+projection** instead — `.textContent`, `.id`, `.tagName`, a count, a boolean.
+
+```ts
+// VIOLATION - when this FAILS, node:assert deep-inspects the node to build its diff,
+//   walking element -> ownerDocument -> defaultView -> the whole Window graph, ~2.5 GB/s,
+//   without terminating, until the kernel kills the process.
+assert.equal( root.querySelector( ".thing" ), null );
+
+// CORRECT - the assertion holds a primitive, so a failure diff is bounded.
+assert.equal( root.querySelector( ".thing" )?.textContent ?? null, null );
+assert.equal( root.querySelectorAll( ".thing" ).length, 0 );
+```
+
+The node may be produced and inspected freely. It must not be **the thing the assertion is
+holding at the moment it fails** — a passing assert never builds a diff, which is why these
+survive in review and kill in CI.
+
+**Measured** (row `32c58572`, three runs per cell):
+
+| Condition | Outcome |
+|---|---|
+| happy-dom element + **FAILING** assert | **killed 3/3** |
+| happy-dom element + PASSING assert | survives |
+| plain object + FAILING assert | survives |
+| no happy-dom | survives |
+
+**Enforcement**: `src/tests/dom_assert_lint.py`, ratcheted against
+`src/tests/dom_assert_baseline.txt` and run by `src/tests/unit/test_dom_assert_lint.py` in
+the **Python** unit tier — because an ESLint rule would be the better instrument and would
+run nowhere: no config covers `src/tests`, and the TS tier is banned. Counts may only fall.
+A file that gains a violation goes red.
+
+**Known violations**: 276 across 35 files, recorded as a ratchet, not forgiven. Burning them
+down is separate work (row `f5768ee4` item 2) and must not be done blind — each is a real
+assertion whose intent has to survive the rewrite.
+
+**Background**: [`src/docs/explainers/2026.08.24-oom-debugging-story-explainer.md`](../docs/explainers/2026.08.24-oom-debugging-story-explainer.md)
+
+---
+
 ## Test Comparison Matrix
 
 | Test Type | Count | Files | Speed | Dependencies | Purpose |

@@ -161,5 +161,57 @@ class TestTheFalsifier:
         assert scan_text( f ) == []
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 4. The rule reaches the author BEFORE the test is written — row f5768ee4 item 3
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# The lint fires AFTER a violation is written and only when the Python tier runs.
+# Item 3 asks for the rule where a person hits it while AUTHORING. That surface is
+# src/tests/README.md — which, until row f5768ee4, did not mention the TypeScript
+# tier at all: 119 *.test.ts files and no line in the testing document about them.
+#
+# A doc is not an installed control, so it is guarded here. Delete the section and
+# the Python unit tier goes red — the same ratchet logic applied to the prose.
+
+README = ROOT / "src" / "tests" / "README.md"
+
+
+class TestTheRuleIsWhereTheAuthorWillSeeIt:
+
+    def test_the_testing_readme_documents_the_typescript_tier_at_all( self ):
+        text = README.read_text( encoding="utf-8" )
+        assert "*.test.ts" in text, (
+            "src/tests/README.md does not mention the TypeScript tier. 119 .test.ts files "
+            "exist under src/tests/unit/ — a person writing one has nothing to read."
+        )
+
+    def test_the_testing_readme_states_the_rule_and_its_mechanism( self ):
+        text = README.read_text( encoding="utf-8" )
+        missing = [ phrase for phrase in (
+            "Never pass a DOM node as the ACTUAL value",   # the rule
+            "primitive",                                   # what to do instead
+            "deep-inspects",                               # WHY — the allocator
+            "dom_assert_lint.py",                          # where enforcement lives
+        ) if phrase not in text ]
+        assert not missing, (
+            "The authoring surface lost part of the rule — a reader now gets an instruction "
+            "without the mechanism, which is the shape that gets ignored: %s" % missing
+        )
+
+    def test_the_readme_warns_that_the_tier_is_banned( self ):
+        # The ban holds by FILENAME only; a new runner globbing these paths re-arms
+        # the hazard silently. An author who does not know that will write one.
+        text = README.read_text( encoding="utf-8" )
+        assert "node --test" in text and "92e94cb7" in text
+
+    def test_the_guard_can_be_made_to_FIRE( self ):
+        # Falsifier. A doc guard that cannot go red is a doc guard that is not running —
+        # the exact defect class row f5768ee4 exists to stop.
+        text = README.read_text( encoding="utf-8" )
+        mutated = text.replace( "Never pass a DOM node as the ACTUAL value", "" )
+        assert mutated != text, "mutation was a no-op — the guard is asserting nothing"
+        assert "Never pass a DOM node as the ACTUAL value" not in mutated
+
+
 def test_every_test_this_file_declares_is_actually_collected( request ):
     assert_every_declared_test_is_collected( request, __file__ )
