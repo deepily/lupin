@@ -521,6 +521,46 @@ class TestTheWatchdog:
         assert "no RSS sample" in r.stderr
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 8. The host path must ENFORCE the ceiling it ANNOUNCES
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestTheHostPathEnforcesWhatItAnnounces:
+    """
+    🔴 THE HOST PATH ANNOUNCED A CEILING IT DID NOT ENFORCE. Its log line already
+    read `rss_ceiling=2048MB` while it exec'd systemd-run directly — the watchdog
+    ran only on the container path. The scope's MemoryMax did contain a runaway,
+    so nothing escaped, but it killed the WHOLE SCOPE rather than the one process
+    that grew, and the per-process ceiling in the message was decorative.
+
+    A tool that prints a number it does not act on is worse than one that prints
+    nothing: the number gets quoted.
+    """
+
+    @pytest.mark.skipif( not os.path.exists( "/usr/bin/systemd-run" ), reason="systemd-run absent" )
+    def test_the_host_path_kills_at_the_RSS_ceiling_not_only_at_the_scope_limit( self, tmp_path ):
+        # RSS ceiling far BELOW the scope's MemoryMax, so only the watchdog can
+        # be what fires. If the scope were doing the work, this would need to
+        # reach 6G first and the message would not name the RSS number.
+        hog = tmp_path / "hog.py"
+        hog.write_text( self.HOG_PERSIST, encoding="utf-8" )
+        r = _run_snippet(
+            'jstest_slice_exec %s %s' % ( sys.executable, hog ),
+            env={ "JSTEST_RSS_MAX_MB": "300", "JSTEST_POLL_SECS": "0.05",
+                  "JSTEST_MEM_MAX": "6G", "JSTEST_RUNTIME_MAX": "60" },
+        )
+        assert "exceeded the 300MB ceiling" in r.stderr, (
+            "The host path did not enforce its own announced RSS ceiling — only the "
+            "scope limit would have fired.\nstderr=%s" % r.stderr
+        )
+
+    HOG_PERSIST = ( "import sys, time\n"
+                    "c = []\n"
+                    "while len( c ) <= 256:\n"
+                    "    c.append( bytearray( 8 * 1024 * 1024 ) )\n"
+                    "while True: time.sleep( 0.2 )\n" )
+
+
 def test_every_test_this_file_declares_is_actually_collected( request ):
     """
     The guard that would have caught this file's own defect (row 282d4c19).

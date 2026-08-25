@@ -46,6 +46,9 @@
 # ceiling. The cap never fired. systemd-run caps wall time AND memory in one
 # primitive that does not depend on the target cooperating.
 
+# Our own path, so the in-scope re-entry can source this same file rather than
+# carrying a second copy of the watchdog that can drift.
+JSTEST_LIB_PATH="${BASH_SOURCE[0]}"
 JSTEST_SLICE="${JSTEST_SLICE:-jstest.slice}"
 JSTEST_MEM_MAX="${JSTEST_MEM_MAX:-8G}"
 JSTEST_RUNTIME_MAX="${JSTEST_RUNTIME_MAX:-1500}"
@@ -218,10 +221,21 @@ jstest_slice_exec() {
     fi
 
     echo "[jstest-lane] slice=$JSTEST_SLICE MemoryMax=$JSTEST_MEM_MAX MemorySwapMax=0 RuntimeMaxSec=$JSTEST_RUNTIME_MAX rss_ceiling=${JSTEST_RSS_MAX_MB}MB" >&2
+    # 🔴 THE WATCHDOG RUNS INSIDE THE SCOPE, NOT INSTEAD OF IT — and this line
+    # used to be a lie. The host path exec'd systemd-run directly while the
+    # message above already announced `rss_ceiling=...MB`, so the host ANNOUNCED
+    # a per-process ceiling it never enforced; only the container path ran the
+    # watchdog. The scope alone kills the whole scope (every worker) on the
+    # container's terms; the watchdog kills the one process that grew and says
+    # why. Both are wanted: the watchdog is the surgical cut, the scope is the
+    # backstop if the watchdog is outrun between polls.
+    #
+    # Re-entering through `bash -c 'source "$0"; ...'` keeps ONE implementation
+    # of the watchdog rather than a second copy that can drift from the first.
     exec systemd-run --user --scope --quiet \
         --slice="$JSTEST_SLICE" \
         -p MemoryMax="$JSTEST_MEM_MAX" \
         -p MemorySwapMax=0 \
         -p RuntimeMaxSec="$JSTEST_RUNTIME_MAX" \
-        -- "$@"
+        -- bash -c 'source "$0"; jstest_watchdog_exec "$@"' "$JSTEST_LIB_PATH" "$@"
 }
