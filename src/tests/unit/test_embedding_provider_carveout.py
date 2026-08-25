@@ -114,7 +114,7 @@ def test_resolve_model_server_url_resolves_cloud_run_https_and_env_wins( monkeyp
     local `model server url` INI value — the env-switch from a local GPU
     container to the scale-to-zero Cloud Run service is this single value.
 
-    See: src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
+    See: src/rnd/v0.1.9/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
     """
     from cosa.memory.embedding_provider import EmbeddingProvider
 

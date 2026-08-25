@@ -82,7 +82,7 @@ scope. On the finalized **weekday-only + VM-suspend** profile the split is a **C
 WIN: ≈ $527/mo, ~$96/mo (~15%) cheaper than the current always-on on-demand VM
 ($623/mo)**. Itemization (Cloud Run weekday-warm $431 + e2-standard-8 running-303h
 $81 + ~100GB disk $10 + suspended RAM-state ~$2 + misc $3) + sources:
-[03-cost-reprice.md](/app/docs?path=lupin/src/rnd/2026.06.30-gpu-model-server-cloud-run-split/03-cost-reprice.md).
+[03-cost-reprice.md](/app/docs?path=lupin/src/rnd/v0.1.9/2026.06.30-gpu-model-server-cloud-run-split/03-cost-reprice.md).
 
 The earlier ~$803/mo "inversion" was an artifact of a 24×7 VM + 7-day warm Rick never
 wanted (kept in 03 as the rejected variant). With weekday-only usage + off-hours
@@ -109,7 +109,7 @@ calculator with creds at apply.**
 
 > **Terraform Set B is now parameterized to these ruled values** (was built on recommended defaults). The scheduled-warm choice (#2) means the ×2 Cloud Scheduler jobs are IN scope (not optional). The **`terraform apply` to real GCP is the real-money step — Rick's explicit go + his GCP login.**
 
-> **SCHEDULE CORRECTION (2026-07-01, Rick).** Decision #2's warm window is **weekday-only**: both services utilized **Mon–Fri 09:00–23:00 EDT** (~303 h/mo); all other hours (weeknights + all weekend) Cloud Run → min=0 scale-to-zero + the VM **PAUSED (suspended, not stopped** — preserves RAM for near-instant resume). Rick's framing: **monthly cost only — 1-yr CUD is out of scope.** On that axis the split re-prices to **≈ $527/mo, a CLEAN WIN — ~$96/mo (~15%) cheaper than the $623 on-demand always-on VM**; full itemization in [03-cost-reprice.md](/app/docs?path=lupin/src/rnd/2026.06.30-gpu-model-server-cloud-run-split/03-cost-reprice.md). Two NEW sub-tasks follow (held pending Rick's buy-in): (1) the module's `scale_up_cron`/`scale_down_cron` become weekday-only (`0 9 * * 1-5` / `0 23 * * 1-5`); (2) a **cross-repo VM suspend/resume** pair (Cloud Scheduler → Compute Engine API `instances.suspend`/`resume` — Cloud Run's min-toggle can't pause a VM), owned by `terraforming-vms` (see 02-vm-downgrade-handoff.md). Operational note: suspending the VM takes lupin-rest + CC + FIFO OFFLINE off-hours — acceptable for this cloud-TEST env.
+> **SCHEDULE CORRECTION (2026-07-01, Rick).** Decision #2's warm window is **weekday-only**: both services utilized **Mon–Fri 09:00–23:00 EDT** (~303 h/mo); all other hours (weeknights + all weekend) Cloud Run → min=0 scale-to-zero + the VM **PAUSED (suspended, not stopped** — preserves RAM for near-instant resume). Rick's framing: **monthly cost only — 1-yr CUD is out of scope.** On that axis the split re-prices to **≈ $527/mo, a CLEAN WIN — ~$96/mo (~15%) cheaper than the $623 on-demand always-on VM**; full itemization in [03-cost-reprice.md](/app/docs?path=lupin/src/rnd/v0.1.9/2026.06.30-gpu-model-server-cloud-run-split/03-cost-reprice.md). Two NEW sub-tasks follow (held pending Rick's buy-in): (1) the module's `scale_up_cron`/`scale_down_cron` become weekday-only (`0 9 * * 1-5` / `0 23 * * 1-5`); (2) a **cross-repo VM suspend/resume** pair (Cloud Scheduler → Compute Engine API `instances.suspend`/`resume` — Cloud Run's min-toggle can't pause a VM), owned by `terraforming-vms` (see 02-vm-downgrade-handoff.md). Operational note: suspending the VM takes lupin-rest + CC + FIFO OFFLINE off-hours — acceptable for this cloud-TEST env.
 
 ## Execution lanes (dry prep — no creds; built on recommended defaults + parameterized)
 

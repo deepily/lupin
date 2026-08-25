@@ -5,7 +5,7 @@ row c41ec7e6.
 
 THE DEFECT
 ----------
-The code-sync design (src/rnd/2026.06.23-gcp-code-sync-to-runtime-design.md §3)
+The code-sync design (src/rnd/v0.1.9/2026.06.23-gcp-code-sync-to-runtime-design.md §3)
 promised a provenance stamp so that "what is running on the VM?" is one `cat`,
 not a code-grep. Only `deploy-cloud-test.sh` ever wrote it — and that is not the
 script this VM is deployed with. `lupin-vm.sh push-bundle` moves the tree in both

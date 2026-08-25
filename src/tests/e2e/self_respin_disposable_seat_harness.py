@@ -8,7 +8,7 @@ context, and reports whether it came back. It NEVER fires at a working seat, and
 firing step is gated behind an explicit go: with no --go it takes the pre-snapshot
 and stops, so "when the verb is green we run rather than write."
 
-DESIGN (no firing here): src/rnd/2026.08.13-self-respin-disposable-seat-e2e-observation-plan.md
+DESIGN (no firing here): src/rnd/v0.2.0/2026.08.13-self-respin-disposable-seat-e2e-observation-plan.md
 
 Two halves:
   • OBSERVATION is REAL — it drives the shipped oracle

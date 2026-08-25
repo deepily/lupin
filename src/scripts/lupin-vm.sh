@@ -14,7 +14,7 @@
 # any other VM-side port may not — one rule PER port). See runbook §"Tunnel firewall" for the
 # one-time `gcloud compute firewall-rules create`, or run `lupin-vm.sh firewall open VM_PORT`.
 #
-# Runbook: src/rnd/2026.07.22-lupin-host-test-ssh-tunnel-automation.md
+# Runbook: src/rnd/v0.1.9/2026.07.22-lupin-host-test-ssh-tunnel-automation.md
 #
 # Usage:
 #   src/scripts/lupin-vm.sh <subcommand> [args]
@@ -40,7 +40,7 @@ VM_DEEPILY_DATA_DIR="/mnt/lupin-data/projects-data"
 # The CPU VM (post GPU→CPU downgrade) runs the cloud-GPU topology: model-server on Cloud Run,
 # NO local nvidia container. Using cloud-test.yml here recreates a local GPU model-server that
 # cannot start on the CPU VM ("could not select device driver nvidia"). Source of truth:
-# docker-compose.cloud-gpu.yml + src/rnd/2026.07.08-cpu-vm-app-restore-runbook.md §3.
+# docker-compose.cloud-gpu.yml + src/rnd/v0.1.9/2026.07.08-cpu-vm-app-restore-runbook.md §3.
 COMPOSE_FILE="docker-compose.cloud-gpu.yml"     # CPU VM: Cloud Run model-server, no nvidia
 ENV_FILE="cloud-gpu.env"                         # requires LUPIN_MODEL_SERVER_URL (on the VM, git-ignored)
 # `docker compose logs/up <name>` take the SERVICE name, NOT the container_name. The service is
@@ -267,7 +267,7 @@ do_push_bundle() {
     # and then took :7999 down.
     local purge_pyc="sudo find $VM_ROOT/src -name '__pycache__' -type d -prune -exec rm -rf {} + && sudo find $VM_ROOT/src -name '*.pyc' -delete && echo PYCACHE_PURGED"
     # STAMP THE PROVENANCE REF whenever the working tree MOVES (row c41ec7e6, 2026-08-24).
-    # `.deployed-ref` is the file the code-sync design (src/rnd/2026.06.23-gcp-code-sync-to-runtime-design.md
+    # `.deployed-ref` is the file the code-sync design (src/rnd/v0.1.9/2026.06.23-gcp-code-sync-to-runtime-design.md
     # §3) promised so that "what is running on the VM?" is one `cat`, not a code-grep. Only
     # deploy-cloud-test.sh ever wrote it, and that is not the script this VM is deployed with —
     # so on 2026-08-24 the stamp read df611aa7 / 2026-07-13 while the VM's tree was at 24f8d88f /

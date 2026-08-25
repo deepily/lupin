@@ -11,7 +11,7 @@
 # The VM-coupled orchestration (SCP, ssh, docker) stays in the
 # parent script. Source this file; do not execute it.
 #
-# Design: src/rnd/2026.06.23-gcp-code-sync-to-runtime-design.md §4
+# Design: src/rnd/v0.1.9/2026.06.23-gcp-code-sync-to-runtime-design.md §4
 #################################################################
 
 # Dependency files whose change forces the AXIS-B (image rebuild) path.

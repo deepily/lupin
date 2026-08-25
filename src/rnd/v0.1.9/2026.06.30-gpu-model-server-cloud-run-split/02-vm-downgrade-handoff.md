@@ -5,7 +5,7 @@
 | **Date** | 2026-06-30 |
 | **Author** | Sam 🎙️ (session `c8e31f76`, Lane 3) under Tiberius 👑 |
 | **Target repo** | `terraforming-vms` (separate repo/state — NOT editable from the Lupin repo) |
-| **Parent design** | [Open: 01-design.md](/app/docs?path=lupin/src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md) |
+| **Parent design** | [Open: 01-design.md](/app/docs?path=lupin/src/rnd/v0.1.9/2026.06.30-gpu-model-server-cloud-run-split/01-design.md) |
 | **Epic** | `dab6cdfa` — GPU model-server → Cloud Run (scale-to-zero) split |
 | **Status** | HANDOFF — dry prep only; no GCP creds; nothing applied. PUSH + `terraform apply` are Rick-gated. |
 

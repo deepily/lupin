@@ -1,6 +1,6 @@
 """
 Live E2E for deploy-cloud-test.sh (task d8c699aa) — §5 of the design doc
-`src/rnd/2026.06.23-gcp-code-sync-to-runtime-design.md`.
+`src/rnd/v0.1.9/2026.06.23-gcp-code-sync-to-runtime-design.md`.
 
 This is the REPRODUCIBLE form of the "axis-A + rollback" live proof. It is
 **env-gated**: it touches the real GCP cloud-test VM (`lupin-host-test`) via

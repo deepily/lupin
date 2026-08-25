@@ -55,7 +55,7 @@
 #   src/terraform/modules/cloud-run-model-server/variables.tf).
 #
 # Design of record:
-#   src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
+#   src/rnd/v0.1.9/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
 #   src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
 #
 # Examples:

@@ -5,7 +5,7 @@
 # Purpose: Repeatable, provenance-stamped code-sync of a COMMITTED
 #   git ref onto the GCP cloud-test VM (lupin-host-test), replacing
 #   the manual bundle->SCP->sudo-pull->chown->restart flow.
-#   Implements task d8c699aa (design: src/rnd/2026.06.23-gcp-code-sync-to-runtime-design.md).
+#   Implements task d8c699aa (design: src/rnd/v0.1.9/2026.06.23-gcp-code-sync-to-runtime-design.md).
 #
 # TWO AXES (auto-detected):
 #   AXIS A (code): only src/ changed -> bind-mount sync + docker restart.

@@ -211,7 +211,7 @@ I first reported that as a new finding. It wasn't: fixed in code on 2026-08-16 (
 
 **Checkpoint**: `481f6a8d` + `af406cc9`, 14 files. 121 tests green; 100% lines/branches on `app.py` and on every line of the loop diff. Gate proven both directions on a purpose-built control venv. Row `970002f1`.
 
-**Files**: `src/lupin_arbiter_app/{app,fleet_arbiter_loop}.py` · `src/scripts/{check-arbiter-venv.py,provision-arbiter-on-vm.sh,preflight-vm.sh,run-lupin-arbiter-app.sh,requirements-arbiter.txt}` · 3 test files · `src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md` · `src/rnd/2026.07.22-arbiter-bringup-on-lupin-host-test.md` §7 · `CLAUDE.md`
+**Files**: `src/lupin_arbiter_app/{app,fleet_arbiter_loop}.py` · `src/scripts/{check-arbiter-venv.py,provision-arbiter-on-vm.sh,preflight-vm.sh,run-lupin-arbiter-app.sh,requirements-arbiter.txt}` · 3 test files · `src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md` · `src/rnd/v0.1.9/2026.07.22-arbiter-bringup-on-lupin-host-test.md` §7 · `CLAUDE.md`
 
 **Not verified — the VM was powered down mid-check**: the restart onto the new light venv. Provisioning passed its own gate on that venv (12 modules, no DB closure) and the unit is enabled, so it should come up clean; **confirm before trusting it**. Still open: the arbiter's `live_notify_disabled` at every boot (no `development` env in `~/.lupin/config`), and 8 provider keys still absent from the VM.
 
