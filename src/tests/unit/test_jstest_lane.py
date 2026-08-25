@@ -29,6 +29,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.collected_count_guard import assert_every_declared_test_is_collected
+
 ROOT     = Path( os.environ[ "LUPIN_ROOT" ] )
 LIB      = ROOT / "src" / "scripts" / "lib" / "jstest-slice.sh"
 DOOR1    = ROOT / "src" / "scripts" / "run-js-tests-capped.sh"
@@ -258,3 +260,19 @@ class TestItActuallyContainsARunaway:
             "With a 4G ceiling the 1 GB hog should run to completion. It returned %r instead, so "
             "the containment test above is not measuring the cap." % r.returncode
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5. This file's own tests are actually collected
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_every_test_this_file_declares_is_actually_collected( request ):
+    """
+    The guard that would have caught this file's own defect (row 282d4c19).
+
+    A method of TestItActuallyContainsARunaway briefly landed OUTSIDE the class:
+    present, indented, syntactically valid, collected by nothing, suite green.
+    Only the collected count moving 15 -> 15 instead of 15 -> 16 revealed it, and
+    only because someone happened to be reading the number.
+    """
+    assert_every_declared_test_is_collected( request, __file__ )
