@@ -103,6 +103,25 @@ def main():
         emit_json( build_kill_deny_response( kill_reason ) )
         sys.exit( 0 )
 
+    # Commit scope guard (2026-08-25): `git commit` writes the WHOLE INDEX, not
+    # the files you staged. `git add <paths>` does not clear what is already
+    # there, so on a shared tree a peer's staged work commits under your name —
+    # measured that day, five files staged by name and four peer files committed.
+    # The check that failed was a PATH-SCOPED `git status`, which structurally
+    # cannot show the contamination it exists to catch. This denies ONCE and puts
+    # the complete staged set in front of the committer; re-run with
+    # LUPIN_COMMIT_SCOPE_ACK=1 to proceed. It never judges whose files they are —
+    # there is no reliable ownership oracle, and a guard that cries wolf gets
+    # switched off. FAIL-OPEN by contract (the lib returns None on any error,
+    # including an unreadable index), so it cannot break a tool call.
+    from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
+        commit_scope_deny_reason, build_commit_scope_deny_response,
+    )
+    commit_reason = commit_scope_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
+    if commit_reason:
+        emit_json( build_commit_scope_deny_response( commit_reason ) )
+        sys.exit( 0 )
+
     # Drain voice buffer, acknowledge, and inject as additionalContext
     # No tool TTS — PostToolUse handles announcements
     messages  = drain_and_acknowledge( session_id )
