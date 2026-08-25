@@ -95,10 +95,67 @@ _MODE_TO_COMMAND = _mode_to_command()
 # GATE 1 — the endpoint equals the registry
 # ══════════════════════════════════════════════════════════════════════════════
 
+# The command set as a SECOND, INDEPENDENT AUTHORITY (row 0d7a33db, 2026-08-24).
+#
+# WHY A CHECKED-IN LIST RATHER THAN A DERIVED ONE. The gate below used to compare the
+# endpoint against REGISTRY and its docstring said "falsify it by adding a spec to the
+# table: this goes red until the endpoint carries it." That was measured and it is
+# FALSE: the endpoint PROJECTS this table, so adding a spec served it in the same call
+# and the assertion stayed green; dropping one moved 20 served to 19 and stayed green
+# too. Both sides had one source, so they could not disagree about which commands
+# exist — a set-equality against yourself is not an equality, it is a tautology with
+# two names.
+#
+# This list is the missing second source. It is deliberately HAND-MAINTAINED: adding a
+# command to the registry must fail here until a human writes it down, which is the
+# whole point — the gate exists so a command cannot appear or vanish without somebody
+# noticing. If updating it feels like busywork, that IS the check running.
+EXPECTED_COMMANDS = frozenset( {
+    "agent router go to automatic",
+    "agent router go to bug fix expediter",
+    "agent router go to calculator",
+    "agent router go to calendar",
+    "agent router go to claude code",
+    "agent router go to datetime",
+    "agent router go to deep research",
+    "agent router go to math",
+    "agent router go to podcast generator",
+    "agent router go to presentation generator",
+    "agent router go to receptionist",
+    "agent router go to research to podcast",
+    "agent router go to research to presentation",
+    "agent router go to swe team",
+    "agent router go to test fix expediter",
+    "agent router go to test fix expediter resume",
+    "agent router go to test suite",
+    "agent router go to todo",
+    "agent router go to weather",
+    "none",
+} )
+
+
 class TestGate1EndpointEqualsRegistry:
     """A set-equality across a REAL boundary — an HTTP response body against a
-    Python table. Falsify it by adding a spec to the table: this goes red until the
-    endpoint carries it."""
+    Python table — PLUS a comparison against a hand-maintained expected set, which is
+    the half that can see a wrong table.
+
+    Falsification, verified rather than claimed (row 0d7a33db): add or remove a spec
+    in REGISTRY and `test_command_set_matches_the_checked_in_expectation` goes RED.
+    `test_command_set_equals_registry` stays green under that same mutation, and
+    keeping both is deliberate — the first proves the projection crosses HTTP intact
+    (a serialization bug, a dropped field, a filter in the router), the second proves
+    the table itself did not change behind anyone's back. Neither subsumes the other."""
+
+    def test_command_set_matches_the_checked_in_expectation( self ):
+        """THE ARM WITH A SECOND SOURCE. REGISTRY cannot be its own witness; this
+        compares the served set against a list a human wrote down."""
+        served = { a[ "command" ] for a in _agents()[ "agents" ] }
+        assert served == EXPECTED_COMMANDS, (
+            f"served-but-unexpected: {sorted( served - EXPECTED_COMMANDS )}; "
+            f"expected-but-unserved: {sorted( EXPECTED_COMMANDS - served )}.\n"
+            f"A command changed. If that was deliberate, update EXPECTED_COMMANDS in "
+            f"this file — that edit is the point of this gate, not an obstacle to it."
+        )
 
     def test_command_set_equals_registry( self ):
         served = { a[ "command" ] for a in _agents()[ "agents" ] }
