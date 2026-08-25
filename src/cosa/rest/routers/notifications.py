@@ -1073,6 +1073,7 @@ async def notify_user(
                         "target_user"        : target_user,
                         "target_system_id"   : target_system_id,
                         "connection_count"   : 1,
+                        "delivered"          : True,
                         "delivery_path"      : "cc-listener",
                         "listener_session"   : listener_sid,
                     }
@@ -1097,7 +1098,18 @@ async def notify_user(
                     "message"            : f"User {target_user} is not connected to queue UI",
                     "target_user"        : target_user,
                     "target_system_id"   : target_system_id,
-                    "connection_count"   : 0
+                    "connection_count"   : 0,
+                    # Row fcc74307, Rick's ruling 2026-08-25: "Keep the design,
+                    # make the reply honest." A 200 here means ACCEPTED, never
+                    # delivered — and the DB row written above is a FORENSIC
+                    # record, not a mailbox: GET /notifications/{user_id} reads
+                    # only the in-memory queue and nothing rehydrates it, so
+                    # this notification is durably stored and permanently
+                    # unreachable through the endpoint that serves them. That is
+                    # the documented design and it stays; the defect was that a
+                    # caller had no cheap way to tell. This field is that way.
+                    "delivered"          : False,
+                    "delivery_path"      : None,
                 }
                 # Cache for idempotency (retries will get the same response without re-persisting)
                 if idempotency_key:
@@ -1146,7 +1158,13 @@ async def notify_user(
                 "message"            : f"Notification queued for delivery to {target_user}",
                 "target_user"        : target_user,
                 "target_system_id"   : target_system_id,
-                "connection_count"   : connection_count
+                "connection_count"   : connection_count,
+                # True because the user IS connected and this reached the live
+                # delivery queue — not a claim the socket has already carried it.
+                # `delivered` answers "will this be readable", which is the
+                # question a caller actually has; the offline path returns False.
+                "delivered"          : True,
+                "delivery_path"      : "queue",
             }
             # Cache for idempotency
             if idempotency_key:
