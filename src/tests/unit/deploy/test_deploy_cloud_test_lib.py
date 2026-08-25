@@ -263,3 +263,89 @@ def test_lib_declares_all_pure_functions():
     for fn in ( "dctl_parse_args", "dctl_resolve_sha", "dctl_sanitize_sha",
                 "dctl_detect_axis", "dctl_check_clean", "dctl_compute_stamp" ):
         assert f"{fn}()" in text, f"missing function {fn}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CWD-invariance — the pathspec anchoring (row 0adf242e)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _make_repo_with_dep_change( root ):
+    """
+    Build a throwaway repo with a SUBDIRECTORY and a dep-file change between two
+    commits, so a CWD-sensitive pathspec has somewhere wrong to resolve to.
+
+    Ensures:
+        - returns ( first_sha, second_sha ); pyproject.toml differs between them
+        - root/src/ exists, so a bare `-- pyproject.toml` run from there resolves
+          to src/pyproject.toml, which does not exist
+    """
+    def sh( *args, **kw ):
+        return subprocess.run( args, cwd=root, capture_output=True, text=True, **kw )
+
+    sh( "git", "init", "-q" )
+    sh( "git", "config", "user.email", "t@t.t" )
+    sh( "git", "config", "user.name", "t" )
+    ( root / "src" ).mkdir()
+    ( root / "src" / "app.py" ).write_text( "x = 1\n" )
+    ( root / "pyproject.toml" ).write_text( "[project]\nname = 'a'\n" )
+    sh( "git", "add", "-A" )
+    sh( "git", "commit", "-qm", "one" )
+    first = sh( "git", "rev-parse", "HEAD" ).stdout.strip()
+
+    ( root / "pyproject.toml" ).write_text( "[project]\nname = 'a'\nversion = '2'\n" )
+    sh( "git", "add", "-A" )
+    sh( "git", "commit", "-qm", "two" )
+    second = sh( "git", "rev-parse", "HEAD" ).stdout.strip()
+    return first, second
+
+
+def test_detect_axis_gives_the_same_answer_from_a_subdirectory( tmp_path ):
+    """
+    THE DEFECT THIS PINS (row 0adf242e). A bare `git diff -- pyproject.toml` uses a
+    pathspec RELATIVE TO CWD. Run from src/ it means src/pyproject.toml, which does
+    not exist — so git reports no difference and the detector answers "code" for a
+    run that genuinely changed a dependency.
+
+    Measured on the real repo before the fix, same two shas:
+        from repo root -> deps (correct)
+        from src/      -> code (WRONG)
+
+    THE FAILURE DIRECTION IS THE HARMFUL ONE: a real dependency change classifies as
+    code-only, routing the deploy to the bind-mount path — shipping new code against
+    STALE DEPS. And it is silent by construction: the answer is well-formed and
+    plausible, and the callers' `2>/dev/null` makes a pathspec that matches nothing
+    look exactly like a clean diff.
+    """
+    first, second = _make_repo_with_dep_change( tmp_path )
+
+    from_root = _run_lib( tmp_path,          f"dctl_detect_axis {first} {second}" ).stdout.strip()
+    from_sub  = _run_lib( tmp_path / "src",  f"dctl_detect_axis {first} {second}" ).stdout.strip()
+
+    assert from_root == "deps", "a changed dep file must route to the deps axis"
+    assert from_sub  == "deps", (
+        f"detector is CWD-sensitive: repo root says {from_root!r}, src/ says {from_sub!r}. "
+        f"A dependency change seen from a subdirectory would deploy code against stale deps."
+    )
+
+
+def test_check_clean_still_sees_a_dirty_tree_from_a_subdirectory( tmp_path ):
+    """
+    The same hazard on the guard that stops a deploy shipping UNCOMMITTED code, and
+    here it is worse in kind. Unanchored, `-- src/` run from src/ means src/src/ and
+    the dep paths miss too, so a dirty tree reads as CLEAN and the guard waves it
+    through.
+
+    Measured on the real repo before the fix, from src/ with a demonstrably dirty
+    tree: the old pathspecs returned 0 ("clean").
+    """
+    first, second = _make_repo_with_dep_change( tmp_path )
+    ( tmp_path / "src" / "app.py" ).write_text( "x = 2  # uncommitted\n" )
+
+    from_root = _run_lib( tmp_path,         "dctl_check_clean HEAD; echo $?" ).stdout.strip()
+    from_sub  = _run_lib( tmp_path / "src", "dctl_check_clean HEAD; echo $?" ).stdout.strip()
+
+    assert from_root == "1", "a dirty tree must not read as clean from the repo root"
+    assert from_sub  == "1", (
+        f"check_clean is CWD-sensitive: repo root says {from_root!r}, src/ says {from_sub!r}. "
+        f"Reading 0 from a subdirectory means the guard would ship uncommitted code."
+    )

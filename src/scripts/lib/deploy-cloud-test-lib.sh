@@ -62,18 +62,49 @@ dctl_sanitize_sha() {
     echo "$1" | tr -dc '0-9a-f'
 }
 
+# dctl_anchor_paths <path>...
+#   Prefix each path with git's ":/" magic pathspec so it resolves from the
+#   REPOSITORY ROOT rather than the caller's current directory.
+#
+#   🔴 WHY THIS EXISTS (row 0adf242e, 2026-08-25). A bare `git diff -- pyproject.toml`
+#   uses a pathspec RELATIVE TO CWD. Run from src/ it means `src/pyproject.toml`,
+#   which does not exist — so git reports NO DIFFERENCE and the caller concludes
+#   "no dependency changed". Measured on the same two shas:
+#
+#       from repo root : dctl_detect_axis df611aa7 dc4b655d -> deps   (correct)
+#       from src/      : dctl_detect_axis df611aa7 dc4b655d -> code   (WRONG)
+#
+#   and `git diff --quiet df611aa7 dc4b655d -- pyproject.toml uv.lock` exits 0 from
+#   src/ while pyproject.toml genuinely differs between those commits.
+#
+#   THE FAILURE DIRECTION IS THE BAD ONE. A real dependency change silently
+#   classifies as code-only, which routes the deploy down the bind-mount path and
+#   ships new code against STALE DEPS. The failure is silent by construction: the
+#   answer is well-formed, plausible, and wrong, and `2>/dev/null` on the callers
+#   means a pathspec that matches nothing looks identical to a clean diff.
+#
+#   Found because test_deployed_ref_stamp.py's stale-baseline assertion went red
+#   when the unit tier was run from src/ and green from the repo root. The GUARD
+#   WAS RIGHT AND THE LIBRARY WAS WRONG — the assertion was not relaxed.
+dctl_anchor_paths() {
+    local p
+    for p in "$@"; do printf '%s\n' ":/${p}"; done
+}
+
 # dctl_detect_axis <prev_sha> <sha>
 #   Decide the delivery axis between the VM's deployed ref and the target.
 #   Requires: <sha> is a valid commit; <prev_sha> is a valid commit or "".
 #   Ensures:  echoes "deps" when <prev_sha> is empty (conservative first
 #             deploy) OR when any DCTL_DEP_PATHS file differs between the
 #             two refs; echoes "code" otherwise. Returns 0.
+#             The answer does NOT depend on the caller's current directory.
 dctl_detect_axis() {
     local prev_sha="$1" sha="$2"
     if [ -z "$prev_sha" ]; then
         echo "deps"; return 0
     fi
-    if git diff --quiet "$prev_sha" "$sha" -- "${DCTL_DEP_PATHS[@]}" 2>/dev/null; then
+    local anchored=(); mapfile -t anchored < <( dctl_anchor_paths "${DCTL_DEP_PATHS[@]}" )
+    if git diff --quiet "$prev_sha" "$sha" -- "${anchored[@]}" 2>/dev/null; then
         echo "code"
     else
         echo "deps"
@@ -85,9 +116,16 @@ dctl_detect_axis() {
 #   and the dep files? (If not, the deploy would ship un-committed code.)
 #   Requires: <sha> is a valid commit.
 #   Ensures:  returns 0 when clean, 1 when src/ or a dep file differs.
+#             The answer does NOT depend on the caller's current directory.
+#
+#   Same CWD hazard as dctl_detect_axis, and here it is worse in kind: this is the
+#   guard that stops a deploy shipping UNCOMMITTED code. Run from src/, the `src/`
+#   pathspec would mean `src/src/` and the dep paths would miss too, so a dirty
+#   tree would read as clean and the guard would wave it through.
 dctl_check_clean() {
     local sha="$1"
-    git diff --quiet "$sha" -- src/ "${DCTL_DEP_PATHS[@]}" 2>/dev/null
+    local anchored=(); mapfile -t anchored < <( dctl_anchor_paths src/ "${DCTL_DEP_PATHS[@]}" )
+    git diff --quiet "$sha" -- "${anchored[@]}" 2>/dev/null
 }
 
 # dctl_compute_stamp <sha>
