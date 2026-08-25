@@ -542,36 +542,207 @@ class TestCancelJob( unittest.IsolatedAsyncioTestCase ):
         self.user = { "uid": "u1", "email": "e", "roles": [ "user" ] }
 
     async def test_not_found_404( self ):
+        # Row 4b87fe61: a 404 now means BOTH queues were searched, not just running.
         rq = Mock(); rq.get_by_id_hash.side_effect = KeyError()
+        tq = Mock(); tq.get_by_id_hash.side_effect = KeyError()
         with patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await cancel_job( job_id="j", current_user=self.user, running_queue=rq )
+                await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
         self.assertEqual( ctx.exception.status_code, 404 )
 
     async def test_not_owner_403( self ):
         job = Mock(); job.user_id = "other"
         rq = Mock(); rq.get_by_id_hash.return_value = job
+        tq = Mock(); tq.get_by_id_hash.side_effect = KeyError()
         with patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await cancel_job( job_id="j", current_user=self.user, running_queue=rq )
+                await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
         self.assertEqual( ctx.exception.status_code, 403 )
 
     async def test_non_agentic_400( self ):
+        # Still a 400, but the message now names the lever that does work
+        # (row 4b87fe61 — an endpoint that only says what it will not do).
         job = Mock( spec=[ "user_id" ] ); job.user_id = "u1"   # plain Mock, not AgenticJobBase
         rq = Mock(); rq.get_by_id_hash.return_value = job
+        tq = Mock(); tq.get_by_id_hash.side_effect = KeyError()
         with patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await cancel_job( job_id="j", current_user=self.user, running_queue=rq )
+                await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
         self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "Only agentic jobs", ctx.exception.detail )
+        self.assertIn( "does not support graceful cancellation", ctx.exception.detail )
+        self.assertIn( "DELETE /api/queue/run/j", ctx.exception.detail )
 
     async def test_success( self ):
         job = _FakeAgenticJob(); job.user_id = "u1"; job.request_cancel = Mock()
         rq = Mock(); rq.get_by_id_hash.return_value = job
+        tq = Mock(); tq.get_by_id_hash.side_effect = KeyError()
         with patch( "builtins.print" ):
-            out = await cancel_job( job_id="j", current_user=self.user, running_queue=rq )
+            out = await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
         self.assertEqual( out[ "status" ], "cancel_requested" )
+        self.assertEqual( out[ "queue" ], "run" )
         job.request_cancel.assert_called_once()
+
+
+class TestCancelJobReachesQueuedJobs( unittest.IsolatedAsyncioTestCase ):
+    """
+    Falsification suite for row 4b87fe61: cancel must reach a job that has not
+    started yet.
+
+    Before the fix, cancel_job looked the job up in the RUNNING queue only, so a
+    queued job — the cheap, no-work-lost moment you most want to cancel at — came
+    back 404 "Job not found or not running". A caller who believed that 404 would
+    then watch the job start anyway.
+    """
+
+    def setUp( self ):
+        self.user  = { "uid": "u1", "email": "e", "roles": [ "user" ] }
+        self.admin = { "uid": "admin", "email": "a", "roles": [ "admin" ] }
+
+    def _queues( self, todo_job=None, running_job=None ):
+        """Build (running_queue, todo_queue) mocks; a None job means KeyError."""
+        rq = Mock()
+        tq = Mock()
+        if running_job is None:
+            rq.get_by_id_hash.side_effect = KeyError()
+        else:
+            rq.get_by_id_hash.return_value = running_job
+        if todo_job is None:
+            tq.get_by_id_hash.side_effect = KeyError()
+        else:
+            tq.get_by_id_hash.return_value = todo_job
+            tq.delete_by_id_hash.return_value = True
+        return rq, tq
+
+    async def test_queued_job_is_cancelled_not_404( self ):
+        """A job waiting in todo is cancelled, and the todo queue really loses it."""
+        job = _FakeAgenticJob(); job.user_id = "u1"
+        rq, tq = self._queues( todo_job=job )
+
+        mock_main = Mock(); mock_main.websocket_manager = Mock()
+        with _patch_fastapi_main( mock_main ), \
+             patch( "cosa.utils.util.get_current_datetime_iso", return_value="2025-08-05T12:00:00" ), \
+             patch( "builtins.print" ):
+            out = await cancel_job( job_id="ts-3fc47888", current_user=self.user,
+                                    running_queue=rq, todo_queue=tq )
+
+        self.assertEqual( out[ "status" ], "cancelled" )
+        self.assertEqual( out[ "queue" ], "todo" )
+        tq.delete_by_id_hash.assert_called_once_with( "ts-3fc47888" )
+
+    async def test_queued_non_agentic_job_is_also_cancelled( self ):
+        """The agentic-only restriction is a RUNNING-queue rule, not a queued-job rule."""
+        job = Mock( spec=[ "user_id" ] ); job.user_id = "u1"   # deliberately not agentic
+        rq, tq = self._queues( todo_job=job )
+
+        mock_main = Mock(); mock_main.websocket_manager = Mock()
+        with _patch_fastapi_main( mock_main ), \
+             patch( "cosa.utils.util.get_current_datetime_iso", return_value="2025-08-05T12:00:00" ), \
+             patch( "builtins.print" ):
+            out = await cancel_job( job_id="j", current_user=self.user,
+                                    running_queue=rq, todo_queue=tq )
+
+        self.assertEqual( out[ "status" ], "cancelled" )
+
+    async def test_cancelling_a_queued_job_emits_job_removed( self ):
+        """The UI must learn the card is gone, same as the delete path does."""
+        job = _FakeAgenticJob(); job.user_id = "u1"
+        rq, tq = self._queues( todo_job=job )
+
+        mock_main = Mock(); mock_main.websocket_manager = Mock()
+        with _patch_fastapi_main( mock_main ), \
+             patch( "cosa.utils.util.get_current_datetime_iso", return_value="2025-08-05T12:00:00" ), \
+             patch( "builtins.print" ):
+            await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
+
+        mock_main.websocket_manager.emit_to_user_and_admins_sync.assert_called_once()
+        args = mock_main.websocket_manager.emit_to_user_and_admins_sync.call_args[ 0 ]
+        self.assertEqual( args[ 1 ], "job_removed" )
+        self.assertEqual( args[ 2 ][ "queue" ], "todo" )
+
+    async def test_websocket_failure_does_not_fail_the_cancel( self ):
+        """A broken websocket must not turn a successful cancel into an error."""
+        job = _FakeAgenticJob(); job.user_id = "u1"
+        rq, tq = self._queues( todo_job=job )
+
+        mock_main = Mock()
+        mock_main.websocket_manager.emit_to_user_and_admins_sync.side_effect = RuntimeError( "boom" )
+        with _patch_fastapi_main( mock_main ), \
+             patch( "cosa.utils.util.get_current_datetime_iso", return_value="2025-08-05T12:00:00" ), \
+             patch( "builtins.print" ):
+            out = await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
+
+        self.assertEqual( out[ "status" ], "cancelled" )
+
+    async def test_queued_job_owned_by_someone_else_is_403( self ):
+        """Ownership is checked on the queued path too, not just the running one."""
+        job = _FakeAgenticJob(); job.user_id = "someone_else"
+        rq, tq = self._queues( todo_job=job )
+
+        with patch( "builtins.print" ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
+        self.assertEqual( ctx.exception.status_code, 403 )
+
+    async def test_admin_may_cancel_another_users_queued_job( self ):
+        """Admins keep the same override they have on every other job verb."""
+        job = _FakeAgenticJob(); job.user_id = "someone_else"
+        rq, tq = self._queues( todo_job=job )
+
+        mock_main = Mock(); mock_main.websocket_manager = Mock()
+        with _patch_fastapi_main( mock_main ), \
+             patch( "cosa.utils.util.get_current_datetime_iso", return_value="2025-08-05T12:00:00" ), \
+             patch( "builtins.print" ):
+            out = await cancel_job( job_id="j", current_user=self.admin, running_queue=rq, todo_queue=tq )
+        self.assertEqual( out[ "status" ], "cancelled" )
+
+    async def test_running_job_still_wins_over_a_stale_todo_entry( self ):
+        """If the job is running, cancel it gracefully — do not delete it from todo."""
+        running = _FakeAgenticJob(); running.user_id = "u1"; running.request_cancel = Mock()
+        todo    = _FakeAgenticJob(); todo.user_id = "u1"
+        rq, tq  = self._queues( todo_job=todo, running_job=running )
+
+        with patch( "builtins.print" ):
+            out = await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
+
+        self.assertEqual( out[ "status" ], "cancel_requested" )
+        running.request_cancel.assert_called_once()
+        tq.delete_by_id_hash.assert_not_called()
+
+    async def test_unknown_job_404_does_not_claim_it_is_merely_not_running( self ):
+        """The 404 must not imply 'exists but idle' when nothing was found at all."""
+        rq, tq = self._queues()
+
+        with patch( "builtins.print" ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await cancel_job( job_id="typo", current_user=self.user, running_queue=rq, todo_queue=tq )
+
+        self.assertEqual( ctx.exception.status_code, 404 )
+        detail = ctx.exception.detail
+        self.assertIn( "queued", detail )
+        self.assertIn( "running", detail )
+        self.assertNotEqual( detail, "Job not found or not running: typo" )
+
+    async def test_delete_failure_on_the_queued_path_is_reported( self ):
+        """A delete that reports no-op must not be dressed up as a successful cancel."""
+        job = _FakeAgenticJob(); job.user_id = "u1"
+        rq, tq = self._queues( todo_job=job )
+        tq.delete_by_id_hash.return_value = False
+
+        with patch( "builtins.print" ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
+        self.assertEqual( ctx.exception.status_code, 409 )
+
+    async def test_running_non_agentic_400_names_the_working_lever( self ):
+        """The 400 must say what to do instead, not just what it will not do."""
+        job = Mock( spec=[ "user_id" ] ); job.user_id = "u1"
+        rq, tq = self._queues( running_job=job )
+
+        with patch( "builtins.print" ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
+        self.assertEqual( ctx.exception.status_code, 400 )
+        self.assertIn( "/api/queue/run/", ctx.exception.detail )
 
 
 class TestDeleteAllQueueJobs( unittest.IsolatedAsyncioTestCase ):

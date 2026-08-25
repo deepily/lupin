@@ -921,73 +921,149 @@ async def send_job_message(
     }
 
 
+def _emit_job_removed( user_id, job_id, queue_name ):
+    """
+    Tell the owner and any watching admins that a job card is gone.
+
+    Best-effort: a websocket problem must never turn a completed queue mutation
+    into a failed request, so every failure is logged and swallowed.
+
+    Requires:
+        - user_id, job_id and queue_name are strings
+
+    Ensures:
+        - Emits a job_removed event, or logs and returns on any failure
+        - Never raises
+    """
+    try:
+        import lupin_app.main as main_module
+        ws_manager = main_module.websocket_manager
+        if ws_manager:
+            ws_manager.emit_to_user_and_admins_sync( user_id, 'job_removed', {
+                'job_id'    : job_id,
+                'queue'     : queue_name,
+                'timestamp' : cu.get_current_datetime_iso()
+            } )
+    except Exception as e:
+        print( f"[API] Warning: Failed to emit job_removed event: {e}" )
+
+
 @router.post(
     "/jobs/{job_id}/cancel",
-    summary     = "Cancel running job",
-    description = "Request graceful cancellation of a running agentic job at its next phase boundary."
+    summary     = "Cancel a queued or running job",
+    description = "Cancel a job whether it has started or not. A job still waiting in the "
+                  "todo queue is removed outright; a running agentic job is asked to stop "
+                  "gracefully at its next phase boundary."
 )
 async def cancel_job(
     job_id: str,
     current_user: dict = Depends( get_current_user ),
     running_queue = Depends( get_running_queue ),
+    todo_queue    = Depends( get_todo_queue ),
 ):
     """
-    Request graceful cancellation of a running agentic job.
+    Cancel a job in either of the two states a caller can meaningfully cancel from.
 
-    Sets the job's cancel flag so it stops at the next phase-boundary checkpoint.
-    Only agentic jobs (deep research, podcast generator) support cancellation.
+    The running queue is consulted first, so a job that has already started is
+    stopped gracefully rather than yanked out from under itself. If it has not
+    started, it is removed from the todo queue — that covers every pre-running
+    state, because a scheduled job sits in todo carrying a `scheduled_at` it is
+    simply not yet eligible against; there is no separate scheduled queue.
+
+    Row 4b87fe61: this endpoint used to look only in the running queue, so the
+    cheapest and safest moment to cancel — before any work has been done — was the
+    one moment it refused, with a 404 that read as "no such job".
 
     Requires:
-        - job_id identifies a currently running job
         - current_user is authenticated
         - Job belongs to current user OR user is admin
 
     Ensures:
-        - Job's _cancel_requested flag is set to True
-        - Orchestrator's _stop_requested flag is set (if available)
-        - Job will stop at next checkpoint (0-60 seconds latency)
-        - Returns confirmation of cancel request
+        - A queued job is removed from the todo queue and a job_removed event
+          is emitted; returns status="cancelled"
+        - A running agentic job has its cancel flag set and stops at its next
+          checkpoint; returns status="cancel_requested"
+        - A 404 says which states were searched, so it can never be mistaken for
+          "the job exists but has not started"
 
     Raises:
-        - HTTPException 404: Job not found in running queue
-        - HTTPException 403: User does not own this job
-        - HTTPException 400: Job type does not support cancellation
+        - HTTPException 404: No job with this id is queued or running
+        - HTTPException 403: User does not own this job and is not admin
+        - HTTPException 400: Running job type does not support graceful cancellation
+        - HTTPException 409: The job was found in todo but the delete did not take
 
     Args:
-        job_id: Target running job ID
+        job_id: Target job ID
         current_user: Authenticated user info
         running_queue: Running queue dependency
+        todo_queue: Todo queue dependency
 
     Returns:
-        dict: {status, job_id, message}
+        dict: {status, job_id, queue, message}
     """
     user_id = current_user[ "uid" ]
 
     print( f"[API] POST /api/jobs/{job_id}/cancel - user: {user_id}" )
 
-    # Validate job exists and is running
+    # Running first — a started job gets a graceful stop, not a yank
     try:
         job = running_queue.get_by_id_hash( job_id )
     except KeyError:
-        raise HTTPException( status_code=404, detail=f"Job not found or not running: {job_id}" )
+        job = None
 
-    # Validate ownership (user or admin)
+    if job is not None:
+
+        if job.user_id != user_id and not is_admin( current_user ):
+            raise HTTPException( status_code=403, detail="Not authorized to cancel this job" )
+
+        if not isinstance( job, AgenticJobBase ):
+            raise HTTPException(
+                status_code = 400,
+                detail      = f"Job {job_id} is already running and its type does not support graceful "
+                              f"cancellation. To stop it anyway, use DELETE /api/queue/run/{job_id} — "
+                              f"that removes it immediately and loses its work."
+            )
+
+        job.request_cancel()
+
+        print( f"[API] Cancel requested for running job {job_id} by user {user_id}" )
+
+        return {
+            "status"  : "cancel_requested",
+            "job_id"  : job_id,
+            "queue"   : "run",
+            "message" : "Cancellation requested. Job will stop at next checkpoint.",
+        }
+
+    # Not started yet — the cheap case, and the one this endpoint used to refuse
+    try:
+        job = todo_queue.get_by_id_hash( job_id )
+    except KeyError:
+        raise HTTPException(
+            status_code = 404,
+            detail      = f"No job with id {job_id} is queued or running. It may have already "
+                          f"finished, or the id may be wrong."
+        )
+
     if job.user_id != user_id and not is_admin( current_user ):
         raise HTTPException( status_code=403, detail="Not authorized to cancel this job" )
 
-    # Check if it's an agentic job (only agentic jobs support cancellation)
-    if not isinstance( job, AgenticJobBase ):
-        raise HTTPException( status_code=400, detail="Only agentic jobs support cancellation" )
+    if not todo_queue.delete_by_id_hash( job_id ):
+        raise HTTPException(
+            status_code = 409,
+            detail      = f"Job {job_id} was queued a moment ago but could not be removed — it has "
+                          f"most likely just started. Retry the cancel."
+        )
 
-    # Request graceful cancellation
-    job.request_cancel()
+    _emit_job_removed( user_id, job_id, "todo" )
 
-    print( f"[API] Cancel requested for job {job_id} by user {user_id}" )
+    print( f"[API] Queued job {job_id} cancelled before starting, by user {user_id}" )
 
     return {
-        "status"  : "cancel_requested",
+        "status"  : "cancelled",
         "job_id"  : job_id,
-        "message" : "Cancellation requested. Job will stop at next checkpoint.",
+        "queue"   : "todo",
+        "message" : "Job removed from the queue before it started. No work was lost.",
     }
 
 
@@ -1157,21 +1233,7 @@ async def delete_queue_job(
     # Emit WebSocket event for UI synchronization (canonical dual-emit:
     # owner + watching admins, deduplicated). See
     # WebSocketManager.emit_to_user_and_admins_sync for the rationale.
-    # NOTE: import path is `lupin_app.main` not `src.lupin_app.main` —
-    # PYTHONPATH already includes src/, so the `src.` prefix raises
-    # ModuleNotFoundError and silently swallowed every job_removed emit
-    # before today (Session 248e740e fix).
-    try:
-        import lupin_app.main as main_module
-        ws_manager = main_module.websocket_manager
-        if ws_manager:
-            ws_manager.emit_to_user_and_admins_sync( user_id, 'job_removed', {
-                'job_id'    : job_id,
-                'queue'     : queue_name,
-                'timestamp' : cu.get_current_datetime_iso()
-            } )
-    except Exception as e:
-        print( f"[API] Warning: Failed to emit job_removed event: {e}" )
+    _emit_job_removed( user_id, job_id, queue_name )
 
     print( f"[API] Job {job_id} removed from {queue_name} queue by user {user_id}" )
 
