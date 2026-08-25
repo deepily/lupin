@@ -14,7 +14,7 @@
     "typecheck:nav": "tsc --noEmit -p tsconfig.nav.json",
     "typecheck:diagnostic": "tsc --noEmit -p tsconfig.diagnostic.json",
     "lint": "eslint src/lupin_app/static/js/multiplexer/",
-    "test": "timeout 900 node --test-concurrency=4 --import tsx --test \"src/tests/**/*.test.ts\"",
+    "test": "bash src/scripts/run-js-tests-capped.sh",
     "test:uncapped": "echo 'REFUSED: see package.json test script — uncapped tsx --test OOM-killed a session on 2026-08-23. Use npm test.' && exit 1"
   },
   "devDependencies": {

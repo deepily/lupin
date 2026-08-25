@@ -151,7 +151,15 @@ done
 TS_TIMEOUT_SECS="${TS_TIMEOUT_SECS:-1400}"      # under TestSuiteJob's own 1500s
 TS_CONCURRENCY="${TS_CONCURRENCY:-4}"           # matches package.json's cap
 
-exec timeout "$TS_TIMEOUT_SECS" npx c8 \
+# ── THE LANE (row 32c58572 follow-up) ────────────────────────────────────────
+# The `timeout` above is kept for its SIGTERM-on-a-cooperating-process behaviour
+# but it is NOT the cap: timeout(1) signals its direct child only, and node
+# blocked in a synchronous GC frame never services the signal — a measured run
+# under `timeout 300` burned 388 seconds. The enforcing ceiling is the cgroup.
+source "$PROJECT_ROOT/src/scripts/lib/jstest-slice.sh"
+JSTEST_RUNTIME_MAX="${JSTEST_RUNTIME_MAX:-$(( TS_TIMEOUT_SECS + 100 ))}"
+
+jstest_slice_exec timeout "$TS_TIMEOUT_SECS" npx c8 \
     --all \
     $CHECK_COVERAGE \
     --lines      "$THRESHOLD_LINES" \
