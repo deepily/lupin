@@ -2,7 +2,6 @@
 
 ## COMMANDS
 - Run FastAPI server: `src/scripts/run-fastapi-lupin.sh` (Runs on port 7999)
-- Run GUI client: `src/scripts/run-lupin-gui.sh`
 - Docker build: `docker build -f docker/lupin/Dockerfile .`
 - Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
 - Install cosa-voice MCP (global): `src/scripts/install-cosa-voice.sh` (user scope, all repos)
@@ -184,7 +183,13 @@ POST /api/v2/submit
 - `/src/cosa/io/`: Input/output helpers
 - `/src/cosa/utils/`: Shared utility functions
 - `/src/cosa/docs/`, `/src/cosa/history/`, `/src/cosa/rnd/`, `/src/cosa/tests/`: documentation, history, R&D, and tests
-- `/src/lib/clients/`: Client interface implementations
+
+> **`/src/lib/` was DELETED 2026-08-26** (Rick's ruling, row `e2099400` §3b). It held the desktop
+> client — `lupin_client.py`, `lupin_client_cmd.py`, `lupin_client_gui.py`, 1,454 lines — which had
+> been unimportable since `pyaudio` left the environment, was last touched 2026-01-28, and carried
+> 524 statements at 0% inside a 100% coverage mandate. Its only live caller,
+> `src/scripts/run-lupin-gui.sh`, went with it: a Mac-only launcher invoking `python3.10` over SSHFS
+> in a 3.13 repo. **Recover either with `git checkout 71d5efaa -- src/lib src/scripts/run-lupin-gui.sh`.**
 
 ## DEBUGGING
 - Set `debug=True` and `verbose=True` parameters in class instantiations

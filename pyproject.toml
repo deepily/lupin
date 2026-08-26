@@ -203,7 +203,6 @@ source = [
     "src/lupin_mcp",
     "src/lupin_arbiter_app",
     "src/lupin_app",
-    "src/lib",
     "src/lupin_model_server",
 ]
 omit   = [
