@@ -268,6 +268,22 @@ class TestItNeverTakesTheSendPathDown( unittest.TestCase ):
         finally:
             sentences.restorable_pointers = original
 
+    def test_the_ROLLBACK_branch_also_survives_a_raising_pattern( self ):
+        """
+        The live check's fail-soft is tested above; the rollback branch needs the same
+        proof or it is an untested path that only runs on the day someone reaches for it.
+        Caught by the coverage run, not by reading — lines 1094-1095 were the only two of
+        the change's own lines left uncovered.
+        """
+        real = dm._FAB_PATH_LEGACY
+        class _Boom:
+            def findall( self, _text ): raise RuntimeError( "boom" )
+        dm._FAB_PATH_LEGACY = _Boom()
+        try:
+            self.assertEqual( [], _fabricated_paths_legacy( "a", "b" ) )
+        finally:
+            dm._FAB_PATH_LEGACY = real
+
     def test_the_path_class_still_reaches_fabricated_facts( self ):
         """The caller's contract is unchanged: paths arrive under the "path" key."""
         self.assertIn( "src/conf/x.ini",
