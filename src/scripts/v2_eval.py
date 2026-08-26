@@ -1415,6 +1415,78 @@ def load_mappable_commands() -> Optional[ List[ str ] ]:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Terminal wait - the fix for the span asymmetry (row a2e360f8)
+# ---------------------------------------------------------------------------
+
+# The queue-WS `to_state` values that end a job. Kept identical to v1_eval_arm's
+# _TERMINAL_STATES ON PURPOSE: the two arms must agree on what "finished" means, or the
+# paired gate is comparing two different events again under a new name.
+V2_TERMINAL_STATES = frozenset( { "completed", "failed", "cancelled", "interrupted" } )
+
+
+def terminal_waiting_ask( ask, ws_recv_events, clock=time.monotonic ):
+    """
+    Wrap an `ask` so its record's `client_span_ms` ends at the OBSERVED COMPLETION.
+
+    WHY THIS EXISTS (row a2e360f8, Mr Radio's v1_eval_arm.py:373 catch, 2026-08-25).
+    The two arms were not measuring the same thing:
+      - v1 (v1_eval_arm.py:373): send -> observed COMPLETION, via the queue WS terminal frame.
+      - v2 (HttpAskClient.ask):  send -> reply in hand, which under `v2 executor = queued`
+        is the ENQUEUE ACK.
+    The paired median-delta gate compared v1-at-completion against v2-at-enqueue, so every
+    millisecond of v2's deferred work landed in v1's column and none in v2's. The bias ran
+    one way, and it is the plan's PRIMARY criterion.
+
+    The v2 docstring asserting the two spans were equivalent was TRUE when written - under
+    `inline` the executor ran the work synchronously. 22c85b5b flipped the key in an INI
+    file, so nothing in this module changed and the claim was never re-read.
+
+    Requires:
+        - ask(question) returns {utterance, ok, status_code, payload, client_span_ms}.
+        - ws_recv_events(job_id) BLOCKS until that job reaches a terminal to_state and
+          returns its frames; it RAISES on timeout (v1_eval_arm.WsJobEventListener).
+        - clock() is a monotonic seconds source.
+
+    Ensures:
+        - a reply that is NOT `waiting` is returned untouched - an inline-executor run, an
+          HTTP error and a synchronous reply all keep their original span, so this wrapper
+          is a no-op on every path it was not written for.
+        - a `waiting` reply carrying a job_id BLOCKS for the terminal frame, then returns
+          the record with `client_span_ms` re-measured send->terminal, `payload.status`
+          replaced by the terminal to_state, and `terminal_waited` True.
+        - it does NOT swallow the timeout. v1 lets EvalIntegrityError propagate and kill the
+          pass rather than feed a short span into the gate; this does the same, which is why
+          there is NO third state here. A wait that times out does not become "we looked and
+          never found out" - it stops the run. That was the hazard named in this row's Q4,
+          and mirroring v1 removes it rather than managing it.
+        - a `waiting` reply with NO job_id keeps its original span and is marked
+          `terminal_waited` False, so it is visible rather than silently short.
+    """
+    def _ask( question ):
+        send_ts = clock()
+        record  = ask( question )
+        payload = record.get( "payload" ) or {}
+        if payload.get( "status" ) != STATUS_WAITING:
+            return record                       # inline reply, or an error - already terminal
+        job_id = payload.get( "job_id" )
+        if not job_id:
+            record[ "terminal_waited" ] = False
+            return record
+        events   = ws_recv_events( job_id )     # BLOCKS; RAISES on timeout, exactly like v1
+        recv_ts  = clock()
+        terminal = next( ( ev for ev in reversed( events )
+                           if ev.get( "to_state" ) in V2_TERMINAL_STATES ), None )
+        record[ "client_span_ms" ]  = ( recv_ts - send_ts ) * 1000.0
+        record[ "terminal_waited" ] = True
+        if terminal is not None:
+            payload[ "status" ]        = terminal.get( "to_state" )
+            payload[ "terminal_meta" ] = terminal.get( "metadata" )
+            record[ "payload" ]        = payload
+        return record
+    return _ask
+
+
 def run_pass(
     corpus          : List[ Tuple[ str, str ] ],
     ask             : Callable[ [ str ], Dict[ str, Any ] ],
@@ -1534,13 +1606,45 @@ def _fmt_cache( metrics: Dict[ str, Any ], key: str ) -> str:
     return f"{_fmt( metrics[ key ] )} (n={denominator})"
 
 
-def _unobserved_note( metrics: Dict[ str, Any ], label: str ) -> Optional[ str ]:
-    """One '<label>: N of M responses not observed' clause, or None when all were observed."""
-    if metrics[ "cache_unobserved_n" ] == 0:
+# The two blind-able families count over DIFFERENT BASE SETS, and the banner has to say
+# which one it is speaking about (row e7aa19bf residual, 2026-08-25).
+#   cache  — observed out of `ok`       ( r["ok"] )
+#   errors — observed out of `answered` ( r["status_code"] == 200 )
+# Those sets coincide on a run where every HTTP success is a 200 and vice versa, and they
+# are NOT the same set by construction. Publishing one family's count under a banner the
+# other family's cell also sits beneath is the same class of defect this row exists for:
+# a number that is right about one thing being read as a statement about another.
+_UNOBSERVED_FAMILIES = (
+    ( "cache",  "cache_unobserved_n",  "cache_observed_n",  "HTTP-successful responses" ),
+    ( "errors", "errors_unobserved_n", "errors_observed_n", "answered (200) responses" ),
+)
+
+
+def _unobserved_note(
+    metrics       : Dict[ str, Any ],
+    label         : str,
+    unobserved_key: str = "cache_unobserved_n",
+    observed_key  : str = "cache_observed_n",
+    base_set      : str = "HTTP-successful responses",
+) -> Optional[ str ]:
+    """
+    One '<label> <family>: N of M ... not observed' clause, or None when all were observed.
+
+    Requires:
+        - metrics carries unobserved_key and observed_key
+
+    Ensures:
+        - returns None when the unobserved count is zero
+        - otherwise names the count, the total, AND the base set the pair was
+          counted over, so a reader can tell which family the number describes
+    """
+    unobserved = metrics[ unobserved_key ]
+    if unobserved == 0:
         return None
+    total = unobserved + metrics[ observed_key ]
     return (
-        f"{label}: {metrics[ 'cache_unobserved_n' ]} of {metrics[ 'cache_unobserved_n' ] + metrics[ 'cache_observed_n' ]} "
-        f"responses not observed (status \"{STATUS_WAITING}\" — the request was enqueued and the answer lands later)"
+        f"{label}: {unobserved} of {total} {base_set} not observed "
+        f"(status \"{STATUS_WAITING}\" — the request was enqueued and the answer lands later)"
     )
 
 
@@ -1617,9 +1721,14 @@ def render_report(
     # the same breath. Emitted whenever ANY response went unobserved, not only when the
     # whole pass did — a partially-blind pass still reports a real rate, and the reader
     # is owed the size of the sample it was measured over.
+    # ONE CLAUSE PER (pass, family). Emitting the errors family separately rather than
+    # letting the cache count stand in for it is the whole of the e7aa19bf residual:
+    # errors_unobserved_n was computed and published and never rendered, so the error
+    # cells sat beneath a banner counting a different base set.
     notes = [ note for note in (
-        _unobserved_note( cold_metrics, "cold" ),
-        _unobserved_note( warm_metrics, "warm" ),
+        _unobserved_note( metrics, f"{pass_label} {family}", unobs_key, obs_key, base_set )
+        for pass_label, metrics in ( ( "cold", cold_metrics ), ( "warm", warm_metrics ) )
+        for family, unobs_key, obs_key, base_set in _UNOBSERVED_FAMILIES
     ) if note is not None ]
     if notes:
         lines.append(
