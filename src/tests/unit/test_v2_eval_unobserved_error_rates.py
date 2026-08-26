@@ -203,3 +203,69 @@ def test_routing_and_latency_denominators_were_not_touched():
     assert m[ "n" ] == 100
     assert m[ "n_ok" ] == 100, "every row here is a completed REQUEST; `ok` must not move"
     assert m[ "routing_eligible_n" ] == 100
+
+
+# ---------------------------------------------------------------------------
+# THE PARTIAL CASE — the one that discriminates.
+#
+# A fully-blind pass and a fully-observed pass are the easy ends: the first must say
+# "unmeasurable", the second must not move at all. Neither tells you the fix picked the
+# RIGHT denominator, because on those two the wrong choice is either obviously broken or
+# invisible. Only a partially-observed pass separates them — there the two candidate
+# denominators give materially different numbers, and the test can say which one is
+# published. (Mr Radio's flag, 2026-08-25.)
+# ---------------------------------------------------------------------------
+def test_partial_pass_scores_over_observed_not_over_answered():
+    """20 resolved (4 replay errors) + 80 waiting. Over observed: 0.2. Over answered: 0.04."""
+    records  = [ _resolved( f"r{i}", ve.ROUTE_REPLAY_ERROR ) for i in range( 4 ) ]
+    records += [ _resolved( f"r{i}" ) for i in range( 4, 20 ) ]
+    records += [ _waiting(  f"w{i}" ) for i in range( 80 ) ]
+    m = ve.compute_metrics( records )
+
+    assert m[ "errors_observed_n"   ] == 20
+    assert m[ "errors_unobserved_n" ] == 80
+    assert m[ "n_answered"          ] == 100, "the wider count stays published, not replaced"
+
+    assert m[ "replay_failure_rate" ] == 0.2, (
+        "4 of the 20 rows that could be looked at were replay failures. Scoring over all "
+        "100 answered gives 0.04 — a fivefold understatement produced entirely by rows "
+        "that reported nothing"
+    )
+    # State the rejected number explicitly so a future edit that reverts the denominator
+    # fails HERE, naming what it did, rather than silently reading 0.04.
+    assert m[ "replay_failure_rate" ] != round( 4 / 100, 4 )
+
+
+def test_partial_pass_cell_shows_the_sliver_it_rests_on():
+    records  = [ _resolved( f"r{i}", ve.ROUTE_REPLAY_ERROR ) for i in range( 4 ) ]
+    records += [ _resolved( f"r{i}" ) for i in range( 4, 20 ) ]
+    records += [ _waiting(  f"w{i}" ) for i in range( 80 ) ]
+    m = ve.compute_metrics( records )
+    assert ve._fmt_error_rate( m, "replay_failure_rate" ) == "0.2 (n=20)", (
+        "a reader seeing 0.2 beside a 100-request table must be told it rests on 20"
+    )
+
+
+def test_partial_pass_keeps_the_four_rates_independent():
+    """Two different error kinds in one partial pass — each over the same observed set."""
+    records  = [ _resolved( f"a{i}", ve.ROUTE_AGENT_ERROR  ) for i in range( 3 ) ]
+    records += [ _resolved( f"x{i}", ve.ROUTE_EXTRACT_ERROR ) for i in range( 1 ) ]
+    records += [ _resolved( f"r{i}" ) for i in range( 6 ) ]
+    records += [ _waiting(  f"w{i}" ) for i in range( 90 ) ]
+    m = ve.compute_metrics( records )
+    assert m[ "errors_observed_n"  ] == 10
+    assert m[ "agent_error_rate"   ] == 0.3
+    assert m[ "extract_error_rate" ] == 0.1
+    assert m[ "router_error_rate"  ] == 0.0   # looked at 10, found none — a REAL zero
+    assert m[ "replay_failure_rate" ] == 0.0
+    assert m[ "errors_measurable"  ] is True
+
+
+def test_a_single_observed_row_is_measurable_but_says_so():
+    """The boundary: one observed row is evidence, and the cell must not hide how thin."""
+    records  = [ _resolved( "r0", ve.ROUTE_AGENT_ERROR ) ]
+    records += [ _waiting( f"w{i}" ) for i in range( 99 ) ]
+    m = ve.compute_metrics( records )
+    assert m[ "errors_measurable" ] is True
+    assert m[ "agent_error_rate" ] == 1.0
+    assert ve._fmt_error_rate( m, "agent_error_rate" ) == "1.0 (n=1)"

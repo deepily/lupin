@@ -677,11 +677,28 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
         - returns a dict of counts, rates (None when the denominator is 0), latency
           percentiles, routing accuracy, the would-be-wrong count, and by_path counts.
         - a rate's denominator is the count of completed requests, so a failed
-          call can never inflate a numerator.
+          call can never inflate a numerator. TWO families narrow further, and each
+          says so below rather than leaving a reader to infer it from the call site.
         - the CACHE family (cache_hit_rate, cache_candidate_rate) is scored over the
           OBSERVED completed requests only, and publishes cache_measurable /
           cache_observed_n / cache_unobserved_n so a run that could not see the cache
-          is distinguishable from one that measured a miss. No other metric moves.
+          is distinguishable from one that measured a miss.
+        - the ERROR family (replay_failure_rate, router_error_rate, extract_error_rate,
+          agent_error_rate) is scored over the OBSERVED answered requests — NOT over
+          n_answered, which is still published beside it — and publishes
+          errors_measurable / errors_observed_n / errors_unobserved_n for the same
+          reason. The evidence these four read is the TERMINAL OUTCOME, and a row that
+          has not resolved carries none, so including it makes the numerator
+          structurally 0 and prints a confident zero from a blind instrument.
+          ⚠️ THE PARTIAL CASE IS THE ONE THAT MATTERS: on a pass with SOME rows
+          resolved, the rate is over those rows alone, so one observed replay_error
+          among 99 waiting rows is 1.0 — not 0.01. The cell carries the denominator
+          ("1.0 (n=1)") so a rate resting on a sliver cannot read as a verdict on the
+          pass. On a fully-observed pass errors_observed_n == n_answered and every
+          rate is bit-identical to the pre-2026-08-25 behaviour.
+        - NO OTHER METRIC MOVES ONTO `observed`. routing_accuracy, both latency
+          instruments, n_ok, n_incomplete and n_answered all keep their prior
+          denominators — see test_waiting_does_not_move_any_other_denominator.
         - routing_accuracy is scored over ELIGIBLE ok records only, and the exclusion
           is published as routing_eligible_n / routing_excluded_n /
           routing_excluded_share so it is auditable rather than silent.
@@ -699,8 +716,9 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
 
     # 🔴 THE CACHE FAMILY MEASURES OVER OBSERVED ROWS ONLY (row 2ec6ad9c, 2026-08-25).
     # A `waiting` response has not answered, so its similarity/wrote_snapshot/cache_hit
-    # fields are absent rather than negative — see is_outcome_observed. Nothing else in
-    # this function moves onto `observed`: every other denominator stays on `ok` or
+    # fields are absent rather than negative — see is_outcome_observed. The ERROR family
+    # joined it on 2026-08-25 for the same reason (see the returned dict); apart from
+    # those two families every other denominator stays on `ok` or
     # `answered`, which is the whole point of keeping the predicate separate.
     observed        = [ r for r in ok if is_outcome_observed( r ) ]
     n_observed      = len( observed )
