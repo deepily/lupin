@@ -24,6 +24,8 @@ import time
 
 import pytest
 
+from tests.smoke.multiplexer_auth import seed_multiplexer_auth, stub_empty_hydration
+
 BASE_URL          = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 PHASE6A_PAGE_URL  = f"{BASE_URL}/app/multiplexer"
 
@@ -128,14 +130,23 @@ def test_phase6a_functional_smoke():
         browser = p.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
+            stub_empty_hydration( context )
             page    = context.new_page()
             page.goto( PHASE6A_PAGE_URL, wait_until="networkidle", timeout=15_000 )
             _wait_for_test_hook( page )
 
-            # Jobs-pane should be visible — `hidden` lifted on mount per design.
+            # Jobs-pane stays cold-HIDDEN on mount. Refreshed 2026-08-26: the
+            # original AC8a assertion required `hidden` to be lifted here, but
+            # JobsPaneRenderer stopped stripping it on 2026-07-02 (Lane 0c) —
+            # Job Queues is hidden by default for legacy parity (Q3 RULED) and
+            # visibility is now owned by the section toolbar as a persisted user
+            # choice, not by this renderer. See JobsPaneRenderer.ts ~line 192.
+            # The renderer still populates the buckets while the section is
+            # hidden, which is what the rest of this test verifies.
             jobs_pane = page.locator( '[data-testid="multiplexer-jobs-pane"]' ).first
-            assert jobs_pane.evaluate( "el => el.hasAttribute('hidden')" ) is False, (
-                "jobs-pane still has hidden attribute after mount"
+            assert jobs_pane.evaluate( "el => el.hasAttribute('hidden')" ) is True, (
+                "jobs-pane should stay cold-hidden after mount (Lane 0c, 2026-07-02)"
             )
             assert jobs_pane.evaluate( "el => el.hasAttribute('data-phase6-pending')" ) is False, (
                 "jobs-pane still has data-phase6-pending after mount"
@@ -156,9 +167,14 @@ def test_phase6a_functional_smoke():
             page.evaluate( _INJECT_3_JOBS_JS )
 
             # Wait for the 3 cards to appear across their respective buckets.
-            page.wait_for_selector( '[data-bucket="running"] [data-id-hash="fix-run-001"]', timeout=2000 )
-            page.wait_for_selector( '[data-bucket="done"] [data-id-hash="fix-done-001"]',   timeout=2000 )
-            page.wait_for_selector( '[data-bucket="history"] [data-id-hash="fix-hist-001"]', timeout=2000 )
+            # state="attached", not the default "visible": since Lane 0c
+            # (2026-07-02) the jobs pane is cold-hidden, so its cards are in the
+            # DOM but never visible until the user shows the section. The
+            # contract this test verifies is that the renderer POPULATES the
+            # buckets regardless of whether the section is shown.
+            page.wait_for_selector( '[data-bucket="running"] [data-id-hash="fix-run-001"]', state="attached", timeout=2000 )
+            page.wait_for_selector( '[data-bucket="done"] [data-id-hash="fix-done-001"]',   state="attached", timeout=2000 )
+            page.wait_for_selector( '[data-bucket="history"] [data-id-hash="fix-hist-001"]', state="attached", timeout=2000 )
 
             # Total job-card count = 3 (one per bucket).
             card_count = page.locator( '#jobs-buckets-container .job-card' ).count()
@@ -193,6 +209,8 @@ def test_phase6a_data_phase6_pending_exact_count():
         browser = p.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
+            stub_empty_hydration( context )
             page    = context.new_page()
             page.goto( PHASE6A_PAGE_URL, wait_until="networkidle", timeout=15_000 )
             _wait_for_test_hook( page )
@@ -253,6 +271,8 @@ def test_phase6a_perf_gate():
         browser = p.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
+            stub_empty_hydration( context )
             page    = context.new_page()
             page.goto( PHASE6A_PAGE_URL, wait_until="networkidle", timeout=15_000 )
             _wait_for_test_hook( page )
@@ -296,6 +316,8 @@ def test_phase6a_boot_complete_handler_handshake():
         browser = p.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
+            stub_empty_hydration( context )
             page    = context.new_page()
             page.on( "console", lambda msg: console_messages.append( msg.text ) )
             page.goto( PHASE6A_PAGE_URL, wait_until="networkidle", timeout=15_000 )
@@ -352,6 +374,8 @@ def test_phase6a_css_canary_no_body_drift():
         browser = p.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
+            stub_empty_hydration( context )
             page    = context.new_page()
             page.goto( PHASE6A_PAGE_URL, wait_until="networkidle", timeout=15_000 )
             _wait_for_test_hook( page )

@@ -33,6 +33,8 @@ import time
 from pathlib import Path
 
 import pytest
+
+from tests.smoke.multiplexer_auth import seed_multiplexer_auth
 import requests
 
 # ---------------------------------------------------------------------------
@@ -55,12 +57,24 @@ MULTIPLEXER_DIR = PROJECT_ROOT / "src/lupin_app/static/js/multiplexer"
 # ---------------------------------------------------------------------------
 
 def test_ac1_route_returns_200_html():
-    """GET /app/multiplexer → 200 + text/html (HEAD returns 405 by FastAPI convention)."""
+    """
+    GET /app/multiplexer -> 200 + text/html (HEAD returns 405 by FastAPI convention).
+
+    Boot-tag assertion refreshed 2026-08-26: commit 53fef419 replaced the static
+    `<script src=".../boot.js">` tag with a manifest-driven inline ES module that
+    fetches manifest.json, resolves the content-hashed bundle name and imports it
+    (falling back to the stable boot.js on any manifest failure). The old literal
+    is genuinely absent from the served HTML, so the test now asserts the two
+    strings the current boot path actually emits.
+    """
     resp = requests.get( f"{BASE_URL}/app/multiplexer", timeout=10 )
     assert resp.status_code == 200, f"expected 200, got {resp.status_code}"
     assert resp.headers.get( "content-type", "" ).startswith( "text/html" )
     assert "<h1>Multiplexer</h1>" in resp.text
-    assert 'src="/static/dist/multiplexer/boot.js"' in resp.text
+    assert '<script type="module">'                          in resp.text
+    assert '"/static/dist/multiplexer/"'                      in resp.text
+    assert 'DIST_BASE + "manifest.json"'                      in resp.text
+    assert 'DIST_BASE + "boot.js"'                            in resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +148,7 @@ def test_ac4_page_load_playwright():
         browser = p.chromium.launch( headless=True )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
             page    = context.new_page()
             page.on( "console", lambda msg: console_messages.append( msg.text ) )
             page.goto( f"{BASE_URL}/app/multiplexer", wait_until="networkidle", timeout=15000 )

@@ -31,6 +31,8 @@ import time
 
 import pytest
 
+from tests.smoke.multiplexer_auth import seed_multiplexer_auth, stub_empty_hydration
+
 BASE_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 
 PHASE5_PAGE_URL = f"{BASE_URL}/app/multiplexer"
@@ -143,6 +145,8 @@ def test_phase5_functional_smoke():
         browser = p.chromium.launch( headless=True, args=["--autoplay-policy=no-user-gesture-required"] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
+            stub_empty_hydration( context )
             page    = context.new_page()
             page.goto( PHASE5_PAGE_URL, wait_until="networkidle", timeout=15_000 )
             _wait_for_test_hook( page )
@@ -276,6 +280,8 @@ def test_phase5_perf_gate():
         browser = p.chromium.launch( headless=True, args=["--autoplay-policy=no-user-gesture-required"] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
+            stub_empty_hydration( context )
             page    = context.new_page()
             page.goto( PHASE5_PAGE_URL, wait_until="networkidle", timeout=15_000 )
             _wait_for_test_hook( page )
@@ -324,6 +330,8 @@ def test_phase5_boot_complete_handler_handshake():
         browser = p.chromium.launch( headless=True, args=["--autoplay-policy=no-user-gesture-required"] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
+            stub_empty_hydration( context )
             page    = context.new_page()
             page.on( "console", lambda msg: console_messages.append( msg.text ) )
             page.goto( PHASE5_PAGE_URL, wait_until="networkidle", timeout=15_000 )

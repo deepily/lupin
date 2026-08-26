@@ -22,56 +22,15 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import os
 import time
 
 import pytest
-import requests
+
+from tests.smoke.multiplexer_auth import login_tokens, seed_multiplexer_auth
 
 
 BASE_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
-
-
-def _get_credentials() -> tuple[ str, str ]:
-    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
-    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
-    if not email or not password:
-        pytest.skip( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD env vars not set" )
-    return email, password
-
-
-def _login_and_build_storage_envelope() -> str:
-    """
-    Login via /auth/login and pack tokens into the multiplexer's expected
-    StorageService envelope shape (`StorageService.ts` schema:
-    `{schemaVersion: 1, payload: {accessToken, refreshToken, expiresAt}, ts}`).
-
-    Returns the JSON string of the envelope ready for `localStorage.setItem`.
-    """
-    email, password = _get_credentials()
-    resp = requests.post(
-        f"{BASE_URL}/auth/login",
-        json    = { "email": email, "password": password },
-        timeout = 10,
-    )
-    assert resp.status_code == 200, f"login failed: { resp.status_code } { resp.text }"
-    body = resp.json()
-    tokens = body[ "tokens" ]
-
-    # Build the multiplexer's Token shape (camelCase) from the server's
-    # snake_case payload.
-    token_payload = {
-        "accessToken"  : tokens[ "access_token" ],
-        "refreshToken" : tokens[ "refresh_token" ],
-        "expiresAt"    : int( time.time() * 1000 ) + tokens[ "expires_in" ] * 1000,
-    }
-    envelope = {
-        "schemaVersion" : 1,
-        "payload"       : token_payload,
-        "ts"            : int( time.time() * 1000 ),
-    }
-    return json.dumps( envelope )
 
 
 def test_phase3_page_load_transports_reach_auth_success():
@@ -84,7 +43,7 @@ def test_phase3_page_load_transports_reach_auth_success():
     """
     from playwright.sync_api import sync_playwright
 
-    auth_envelope = _login_and_build_storage_envelope()
+    auth_tokens = login_tokens()
 
     queue_ws_seen      : list[ object ]   = []
     audio_ws_seen      : list[ object ]   = []
@@ -101,9 +60,7 @@ def test_phase3_page_load_transports_reach_auth_success():
             # page script runs. The init script runs on every navigation;
             # because we set it before page.goto, AuthManager will hydrate
             # from this token on construction.
-            context.add_init_script(
-                f"window.localStorage.setItem('lupin:auth_token', { json.dumps( auth_envelope ) });"
-            )
+            seed_multiplexer_auth( context, auth_tokens )
 
             page = context.new_page()
 

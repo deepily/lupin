@@ -34,46 +34,11 @@ import os
 import time
 
 import pytest
-import requests
+
+from tests.smoke.multiplexer_auth import login_tokens, seed_multiplexer_auth
 
 
 BASE_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
-
-
-def _get_credentials() -> tuple[ str, str ]:
-    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
-    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
-    if not email or not password:
-        pytest.skip( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD env vars not set" )
-    return email, password
-
-
-def _login_and_build_storage_envelope() -> str:
-    """
-    Login via /auth/login and pack tokens into the multiplexer's expected
-    StorageService envelope shape (see Phase 3 smoke for shape rationale).
-    """
-    email, password = _get_credentials()
-    resp = requests.post(
-        f"{BASE_URL}/auth/login",
-        json    = { "email": email, "password": password },
-        timeout = 10,
-    )
-    assert resp.status_code == 200, f"login failed: { resp.status_code } { resp.text }"
-    body = resp.json()
-    tokens = body[ "tokens" ]
-
-    token_payload = {
-        "accessToken"  : tokens[ "access_token" ],
-        "refreshToken" : tokens[ "refresh_token" ],
-        "expiresAt"    : int( time.time() * 1000 ) + tokens[ "expires_in" ] * 1000,
-    }
-    envelope = {
-        "schemaVersion" : 1,
-        "payload"       : token_payload,
-        "ts"            : int( time.time() * 1000 ),
-    }
-    return json.dumps( envelope )
 
 
 def test_phase4_boot_complete_carries_audio_handler_name():
@@ -87,7 +52,7 @@ def test_phase4_boot_complete_carries_audio_handler_name():
     """
     from playwright.sync_api import sync_playwright
 
-    auth_envelope = _login_and_build_storage_envelope()
+    auth_tokens = login_tokens()
 
     boot_complete_log : list[ dict ] = []
     console_errors    : list[ str ]  = []
@@ -99,9 +64,7 @@ def test_phase4_boot_complete_carries_audio_handler_name():
         )
         try:
             context = browser.new_context()
-            context.add_init_script(
-                f"window.localStorage.setItem('lupin:auth_token', { json.dumps( auth_envelope ) });"
-            )
+            seed_multiplexer_auth( context, auth_tokens )
             page = context.new_page()
 
             def _on_console( msg ):
@@ -162,7 +125,7 @@ def test_phase4_audio_store_processes_pcm_chunk():
     """
     from playwright.sync_api import sync_playwright
 
-    auth_envelope = _login_and_build_storage_envelope()
+    auth_tokens = login_tokens()
     state_changes : list[ dict ] = []
     chunk_decoded : list[ dict ] = []
     console_errors: list[ str ]  = []
@@ -174,9 +137,7 @@ def test_phase4_audio_store_processes_pcm_chunk():
         )
         try:
             context = browser.new_context()
-            context.add_init_script(
-                f"window.localStorage.setItem('lupin:auth_token', { json.dumps( auth_envelope ) });"
-            )
+            seed_multiplexer_auth( context, auth_tokens )
             page = context.new_page()
 
             def _on_console( msg ):
@@ -269,7 +230,7 @@ def test_phase4_no_console_errors_on_load():
     """
     from playwright.sync_api import sync_playwright
 
-    auth_envelope = _login_and_build_storage_envelope()
+    auth_tokens = login_tokens()
     console_errors: list[ str ] = []
 
     with sync_playwright() as p:
@@ -279,9 +240,7 @@ def test_phase4_no_console_errors_on_load():
         )
         try:
             context = browser.new_context()
-            context.add_init_script(
-                f"window.localStorage.setItem('lupin:auth_token', { json.dumps( auth_envelope ) });"
-            )
+            seed_multiplexer_auth( context, auth_tokens )
             page = context.new_page()
             page.on( "console", lambda msg: (
                 console_errors.append( msg.text ) if msg.type == "error" else None

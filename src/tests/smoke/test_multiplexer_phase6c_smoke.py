@@ -35,6 +35,8 @@ import time
 
 import pytest
 
+from tests.smoke.multiplexer_auth import seed_multiplexer_auth, stub_empty_hydration
+
 BASE_URL        = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 MULTIPLEXER_URL = f"{BASE_URL}/app/multiplexer"
 
@@ -143,6 +145,8 @@ _DEACTIVATE_CONV_MODE_JS = """
 def _new_page( pw ):
     browser = pw.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
     context = browser.new_context()
+    seed_multiplexer_auth( context )
+    stub_empty_hydration( context )
     page    = context.new_page()
     page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
     _wait_for_test_hook( page )
@@ -302,15 +306,23 @@ def test_focus_flash_auto_removes_after_duration():
 
 def test_boot_handshake_emits_canonical_mounted_lines_in_order():
     """AC-D11 + AC-B11: console emits the canonical :mounted lines in order
-    BEFORE the JSON `boot_complete` line. Sequence:
-        notifications → jobs → actionRequired → ttsChrome →
-        conversationModePin (Node D) → focusTray (Node B)
-    Future Node A + C land their lines after focusTray when they ship."""
+    BEFORE the JSON `boot_complete` line.
+
+    Expected list refreshed 2026-08-26 against the mounts boot.ts actually
+    performs. Two changes since the list was written:
+      - focusTrayRenderer was RETIRED on 2026-06-10 (WP2) — the CC-session
+        strip's focus toggle supersedes it (boot.ts ~line 382), so its line is
+        gone.
+      - six renderers were added after it: sessionStrip, readingPane,
+        commonsActivity, taskList, sectionToolbar, navBar.
+    """
     from playwright.sync_api import sync_playwright
     with sync_playwright() as pw:
         browser = pw.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
+            stub_empty_hydration( context )
             page    = context.new_page()
             log_lines: list[ str ] = []
             page.on( "console", lambda msg: log_lines.append( msg.text ) )
@@ -324,14 +336,19 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 "[multiplexer] actionRequiredRenderer:mounted",
                 "[multiplexer] ttsChromeRenderer:mounted",
                 "[multiplexer] conversationModePinRenderer:mounted",
-                "[multiplexer] focusTrayRenderer:mounted",
                 "[multiplexer] personaModalRenderer:mounted",
                 "[multiplexer] senderCardRecorderRenderer:mounted",
+                "[multiplexer] sessionStripRenderer:mounted",
+                "[multiplexer] readingPaneRenderer:mounted",
+                "[multiplexer] commonsActivityRenderer:mounted",
                 # Lane E full-parity quartet (2026-06-10) — appended at the
                 # NEW-LANE MOUNT SLOT after the Phase 6c mounts, in this order.
                 "[multiplexer] ttsPreviewSliderRenderer:mounted",
                 "[multiplexer] missedBadgeRenderer:mounted",
                 "[multiplexer] fleetStatusRenderer:mounted",
+                "[multiplexer] taskListRenderer:mounted",
+                "[multiplexer] sectionToolbarRenderer:mounted",
+                "[multiplexer] navBarRenderer:mounted",
             ]
             assert mount_lines == expected, (
                 f"boot handshake mismatch:\nexpected={expected}\ngot     ={mount_lines}"
@@ -682,6 +699,7 @@ def test_ac_b15_grep_gate_d_css_has_zero_keyframes_focus_flash():
 # AC-B10 #1-#8 : Section B functional smoke (focus-mode toggle + focus-tray)
 # ===========================================================================
 
+@pytest.mark.skip( reason="#focus-mode-toggle and FocusTrayRenderer were RETIRED 2026-06-10 (WP2) — the CC-session strip's focus toggle supersedes them and SessionStripRenderer is now the sole writer of data-focus-hidden. See boot.ts ~line 382 and multiplexer.html ~line 175. These 8 cases test a control that no longer exists; they need rewriting against the strip toggle, not repairing." )
 def test_b10_toggle_exists_and_enabled_when_pin_present():
     """AC-B10 #1: #focus-mode-toggle is in the DOM + enabled when a pinned
     sender exists (the renderer lifts hidden + data-phase6-pending; the
@@ -701,6 +719,7 @@ def test_b10_toggle_exists_and_enabled_when_pin_present():
             browser.close()
 
 
+@pytest.mark.skip( reason="#focus-mode-toggle and FocusTrayRenderer were RETIRED 2026-06-10 (WP2) — the CC-session strip's focus toggle supersedes them and SessionStripRenderer is now the sole writer of data-focus-hidden. See boot.ts ~line 382 and multiplexer.html ~line 175. These 8 cases test a control that no longer exists; they need rewriting against the strip toggle, not repairing." )
 def test_b10_toggle_disabled_with_tooltip_when_no_pin():
     """AC-B10 #2: with no pinned sender, the toggle is disabled and carries
     a tooltip explaining the requirement (OSQ-B-3 ratification)."""
@@ -718,6 +737,7 @@ def test_b10_toggle_disabled_with_tooltip_when_no_pin():
             browser.close()
 
 
+@pytest.mark.skip( reason="#focus-mode-toggle and FocusTrayRenderer were RETIRED 2026-06-10 (WP2) — the CC-session strip's focus toggle supersedes them and SessionStripRenderer is now the sole writer of data-focus-hidden. See boot.ts ~line 382 and multiplexer.html ~line 175. These 8 cases test a control that no longer exists; they need rewriting against the strip toggle, not repairing." )
 def test_b10_toggle_click_flips_focus_mode_on():
     """AC-B10 #3: clicking the toggle with a pinned sender flips
     aria-pressed=true and textContent to 'Focus mode ON'."""
@@ -736,6 +756,7 @@ def test_b10_toggle_click_flips_focus_mode_on():
             browser.close()
 
 
+@pytest.mark.skip( reason="#focus-mode-toggle and FocusTrayRenderer were RETIRED 2026-06-10 (WP2) — the CC-session strip's focus toggle supersedes them and SessionStripRenderer is now the sole writer of data-focus-hidden. See boot.ts ~line 382 and multiplexer.html ~line 175. These 8 cases test a control that no longer exists; they need rewriting against the strip toggle, not repairing." )
 def test_b10_focus_mode_hides_non_pinned_cards_via_data_attribute():
     """AC-B10 #4: focus mode ON applies data-focus-hidden=true to non-pinned
     sender cards; B-CSS's `display: none` rule hides them via offsetParent."""
@@ -766,6 +787,7 @@ def test_b10_focus_mode_hides_non_pinned_cards_via_data_attribute():
             browser.close()
 
 
+@pytest.mark.skip( reason="#focus-mode-toggle and FocusTrayRenderer were RETIRED 2026-06-10 (WP2) — the CC-session strip's focus toggle supersedes them and SessionStripRenderer is now the sole writer of data-focus-hidden. See boot.ts ~line 382 and multiplexer.html ~line 175. These 8 cases test a control that no longer exists; they need rewriting against the strip toggle, not repairing." )
 def test_b10_focus_tray_populated_with_hidden_senders():
     """AC-B10 #5: focus mode ON populates #focus-tray with a button per
     hidden sender."""
@@ -783,6 +805,7 @@ def test_b10_focus_tray_populated_with_hidden_senders():
             browser.close()
 
 
+@pytest.mark.skip( reason="#focus-mode-toggle and FocusTrayRenderer were RETIRED 2026-06-10 (WP2) — the CC-session strip's focus toggle supersedes them and SessionStripRenderer is now the sole writer of data-focus-hidden. See boot.ts ~line 382 and multiplexer.html ~line 175. These 8 cases test a control that no longer exists; they need rewriting against the strip toggle, not repairing." )
 def test_b10_tray_row_click_exits_focus_mode():
     """AC-B10 #6: clicking a focus-tray row exits focus mode (OSQ-B-2)."""
     from playwright.sync_api import sync_playwright
@@ -807,6 +830,7 @@ def test_b10_tray_row_click_exits_focus_mode():
             browser.close()
 
 
+@pytest.mark.skip( reason="#focus-mode-toggle and FocusTrayRenderer were RETIRED 2026-06-10 (WP2) — the CC-session strip's focus toggle supersedes them and SessionStripRenderer is now the sole writer of data-focus-hidden. See boot.ts ~line 382 and multiplexer.html ~line 175. These 8 cases test a control that no longer exists; they need rewriting against the strip toggle, not repairing." )
 def test_b10_pin_move_while_focus_mode_on_transfers_hidden():
     """AC-B10 #7: when pin moves while focus mode is ON, data-focus-hidden
     re-applies to the new non-pinned set per F-Arnold-B-Stage2-4."""
@@ -830,6 +854,7 @@ def test_b10_pin_move_while_focus_mode_on_transfers_hidden():
             browser.close()
 
 
+@pytest.mark.skip( reason="#focus-mode-toggle and FocusTrayRenderer were RETIRED 2026-06-10 (WP2) — the CC-session strip's focus toggle supersedes them and SessionStripRenderer is now the sole writer of data-focus-hidden. See boot.ts ~line 382 and multiplexer.html ~line 175. These 8 cases test a control that no longer exists; they need rewriting against the strip toggle, not repairing." )
 def test_b10_pin_disappears_disables_toggle_holds_focus_mode():
     """AC-B10 #8: deactivating the pin while focus mode is ON disables the
     toggle (visual cue) but HOLDS focus mode state per the dual-emission
@@ -872,6 +897,8 @@ def test_css_canary_no_body_drift_from_conversation_mode_pin_css():
         browser = pw.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
+            stub_empty_hydration( context )
             page    = context.new_page()
             page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
             _wait_for_test_hook( page )
