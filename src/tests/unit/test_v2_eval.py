@@ -749,6 +749,19 @@ def test_main_stamps_provenance_and_writes_paired_artifact( tmp_path ):
 def test_main_defaults_use_injected_helpers( tmp_path, monkeypatch ):
     root = str( tmp_path )
     _seed_trace( tmp_path, _WEATHER_QUESTIONS )
+
+    # main reads the FROZEN routing denominator from the project root (row e2099400 §6.1), and
+    # a missing one is FATAL by design — it used to fall back to scoring the full corpus, which
+    # is how a v2 number could silently stop being comparable to every earlier one. This test
+    # repoints the project root at tmp_path, so the real file has to come with it. COPIED
+    # rather than hand-written, and the loader left unpatched: the point of this test is what
+    # main reaches for when nothing is injected, and a stubbed loader would answer a different
+    # question.
+    real_frozen = os.path.join( ve.du.get_project_root(), "src", "conf", "v1-eligible-routing-commands.json" )
+    conf_dir    = tmp_path / "src" / "conf"
+    conf_dir.mkdir( parents=True, exist_ok=True )
+    ( conf_dir / "v1-eligible-routing-commands.json" ).write_text( open( real_frozen ).read() )
+
     class _FixedDT:
         def strftime( self, fmt ):
             return "2026-08-14-02-30-00"

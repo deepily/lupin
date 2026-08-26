@@ -1418,26 +1418,60 @@ def read_running_server_sha( base_url: str ) -> str:   # pragma: no cover - live
     return data.get( "git_sha", "" )
 
 
-def load_mappable_commands() -> Optional[ List[ str ] ]:
+ELIGIBLE_COMMANDS_PATH = os.path.join( "src", "conf", "v1-eligible-routing-commands.json" )
+
+
+class EligibleCommandsUnavailable( RuntimeError ):
+    """The routing denominator could not be read. Raised instead of scoring a wider one."""
+
+
+def load_mappable_commands( path: Optional[ str ]=None ) -> List[ str ]:
     """
-    The routing commands both arms can score, from the live v1 registry.
+    The routing commands both arms score on, read from the FROZEN checked-in list.
+
+    ⚠️ THIS USED TO IMPORT `load_v1_class_to_command` FROM `v1_eval_arm`, AND THAT WAS A BREAK
+    WAITING FOR THE DELETION (María's review, 2026-08-26). Two things made it worse than an
+    ordinary dangling import. It ran on EVERY v2 eval, not only paired ones — so the whole v1
+    excision would have changed v2's own numbers. And its failure path returned None, which
+    makes `compute_metrics` score routing over the FULL corpus rather than the eligible-only
+    set: a different denominator, a number that still prints, and the only notice a WARNING
+    line on stdout. Every figure after the deletion would have been quietly incomparable to
+    every figure before it.
+
+    The pin is a fixed sha, so reading the registry live was never buying freshness — only a
+    dependency. The list is now a constant, stamped with the sha it came from.
+
+    Requires:
+        - the frozen list exists at src/conf/v1-eligible-routing-commands.json, relative to
+          LUPIN_ROOT (or `path`, for tests)
 
     Ensures:
-        - returns the class_to_command VALUES (the same list v1_eval_arm hands its own
-          assemble step), or None when the registry cannot be read
-        - a None return is announced on stdout, never silent: an unrestricted denominator
-          is the very asymmetry this exists to close, so a reader must see it happened
-        - never raises
+        - returns the eligible routing commands, non-empty, in the file's order
+        - NEVER returns None and never falls back to an unrestricted denominator
+
+    Raises:
+        - EligibleCommandsUnavailable when the file is missing, unreadable, malformed, or
+          carries an empty list. ⚠️ FATAL ON PURPOSE (María's fix (b) on top of (a)): scoring
+          a wider corpus and printing a percentage is the exact failure this replaces, and a
+          run that cannot name its denominator has nothing to report.
     """
+    resolved = path or os.path.join( du.get_project_root(), ELIGIBLE_COMMANDS_PATH )
     try:
-        from v1_eval_arm import load_v1_class_to_command      # lazy: v1 imports v2
-        class_to_command, _ambiguous = load_v1_class_to_command()
-        return list( class_to_command.values() )
-    except Exception as failure:                              # pragma: no cover - live-registry seam
-        print( f"[v2-eval] WARNING: could not read the v1 routing registry ({type( failure ).__name__}: "
-               f"{failure}) — routing accuracy will be scored over the FULL corpus, which is NOT "
-               f"comparable to the v1 arm's eligible-only denominator." )
-        return None
+        with open( resolved ) as handle:
+            payload = json.load( handle )
+        commands = payload[ "commands" ]
+    except Exception as failure:
+        raise EligibleCommandsUnavailable(
+            f"could not read the frozen routing denominator at {resolved} "
+            f"({type( failure ).__name__}: {failure}). Routing accuracy is NOT scored over the "
+            f"full corpus as a fallback — that number would not be comparable to any prior run. "
+            f"Restore the file (it is checked in) and re-run." ) from failure
+
+    if not isinstance( commands, list ) or not commands or not all( isinstance( c, str ) for c in commands ):
+        raise EligibleCommandsUnavailable(
+            f"the frozen routing denominator at {resolved} does not carry a non-empty list of "
+            f"command strings under 'commands' — got {commands!r}." )
+    return list( commands )
 
 
 # ---------------------------------------------------------------------------
@@ -2016,9 +2050,10 @@ def main(
     guard_run_integrity( warm_records, landed, max_router_error_rate=args.max_router_error_rate )
 
     # The routing denominator must be the SAME set of utterances the v1 arm scores on
-    # (row d8d019f6). Derived from the LIVE registry here, exactly as the v1 arm derives
-    # it, and imported lazily because v1_eval_arm imports THIS module — a module-level
-    # import would close the cycle.
+    # (row d8d019f6). Read from the FROZEN checked-in list, stamped with the pin sha it was
+    # derived from — it used to be imported live out of v1_eval_arm, which is being deleted,
+    # and whose failure path silently widened this denominator to the whole corpus.
+    # A missing list RAISES here rather than scoring something else (María's fix, 2026-08-26).
     mappable = load_mappable_commands()
     cold_metrics = compute_metrics( cold_records, mappable_commands=mappable )
     warm_metrics = compute_metrics( warm_records, mappable_commands=mappable )
