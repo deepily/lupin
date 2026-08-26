@@ -680,363 +680,45 @@ JOB_BUILDERS = {
 def create_agentic_job( command, args_dict, user_id, user_email, session_id, debug=False, verbose=False,
                         scheduled_at=None, monopolize=False, spawned_by_id_hash=None ):
     """
-    Factory function to create the correct agentic job based on command.
+    Build the agentic Job for `command`, or None if nothing owns that command.
 
-    PHASE 5 PASS A (row d2e23ecb): the eleven branch BODIES now live in one builder each
-    and this function calls them. The if/elif is still here ON PURPOSE -- step 1 changes
-    WHERE the bodies live and nothing else, so the move can be proven by comparison
-    against _legacy_create_agentic_job before dispatch itself changes. Step 2 replaces
-    this chain with a registry lookup and deletes the legacy function.
+    PHASE 5 STEP 2 (row d2e23ecb): dispatch is a REGISTRY LOOKUP. The eleven-branch
+    if/elif chain and `_legacy_create_agentic_job` are both gone; step 1 had already
+    moved the branch bodies into one builder each and proved the move by comparison,
+    so this commit changes only HOW a builder is reached.
+
+    Adding an agentic command is now: write a builder, add it to JOB_BUILDERS, list the
+    command in the registry. No branch to hand-edit, and `test_1b2` fails if you do
+    only two of the three.
+
+    THE None CONTRACT IS DELIBERATE AND LOAD-BEARING. The chain ended in an `else` that
+    printed and returned None, and callers rely on it — `todo_fifo_queue` treats None as
+    "not an agentic command" and routes on. A dict lookup that raised KeyError on a miss
+    would be a behaviour change wearing a refactor's clothes, so the miss path is spelled
+    out here rather than left to `[]`.
 
     Requires:
-        - command is a recognized agentic routing command string
-        - args_dict contains the required arguments for the target job
+        - command is a routing command string; args_dict carries that job's required args
         - user_id, user_email, session_id are non-empty strings
 
     Ensures:
-        - returns the appropriate Job instance for the command
-        - returns None if the command is unrecognized -- CONTRACT, not an accident; a
-          lookup that raised KeyError on a miss would be a behaviour change
-        - queue directives (scheduled_at / monopolize / spawned_by_id_hash) are stamped
-          by the builder, via _finish for ten of them and directly for the exempt one
+        - returns the Job the registry's job_factory builds for `command`
+        - returns None, and prints, if no registry entry owns `command` or its entry has
+          no job_factory — the same observable behaviour the if/elif chain had
+        - queue directives (scheduled_at / monopolize / spawned_by_id_hash) are stamped by
+          the builder, via _finish for ten of them and directly for the exempt one
     """
-    if command == "agent router go to deep research":
-        return _build_deep_research( command, args_dict, user_id, user_email, session_id, debug, verbose,
-                            scheduled_at, monopolize, spawned_by_id_hash )
-    elif command == "agent router go to podcast generator":
-        return _build_podcast_generator( command, args_dict, user_id, user_email, session_id, debug, verbose,
-                            scheduled_at, monopolize, spawned_by_id_hash )
-    elif command == "agent router go to research to podcast":
-        return _build_research_to_podcast( command, args_dict, user_id, user_email, session_id, debug, verbose,
-                            scheduled_at, monopolize, spawned_by_id_hash )
-    elif command == "agent router go to claude code":
-        return _build_claude_code( command, args_dict, user_id, user_email, session_id, debug, verbose,
-                            scheduled_at, monopolize, spawned_by_id_hash )
-    elif command == "agent router go to presentation generator":
-        return _build_presentation_generator( command, args_dict, user_id, user_email, session_id, debug, verbose,
-                            scheduled_at, monopolize, spawned_by_id_hash )
-    elif command == "agent router go to research to presentation":
-        return _build_research_to_presentation( command, args_dict, user_id, user_email, session_id, debug, verbose,
-                            scheduled_at, monopolize, spawned_by_id_hash )
-    elif command == "agent router go to swe team":
-        return _build_swe_team( command, args_dict, user_id, user_email, session_id, debug, verbose,
-                            scheduled_at, monopolize, spawned_by_id_hash )
-    elif command == "agent router go to test suite":
-        return _build_test_suite( command, args_dict, user_id, user_email, session_id, debug, verbose,
-                            scheduled_at, monopolize, spawned_by_id_hash )
-    elif command == "agent router go to bug fix expediter":
-        return _build_bug_fix_expediter( command, args_dict, user_id, user_email, session_id, debug, verbose,
-                            scheduled_at, monopolize, spawned_by_id_hash )
-    elif command == "agent router go to test fix expediter":
-        return _build_test_fix_expediter( command, args_dict, user_id, user_email, session_id, debug, verbose,
-                            scheduled_at, monopolize, spawned_by_id_hash )
-    elif command == "agent router go to test fix expediter resume":
-        return _build_test_fix_expediter_resume( command, args_dict, user_id, user_email, session_id, debug, verbose,
-                            scheduled_at, monopolize, spawned_by_id_hash )
-    else:
+    # Deferred: the registry imports THIS module for JOB_BUILDERS, so a module-level
+    # import here would be a cycle. Same reason as registry._agentic_spec's own import.
+    from cosa.rest.v2.registry import JOB_COMMANDS
+
+    spec = JOB_COMMANDS.get( command )
+    if spec is None or spec.job_factory is None:
         print( f"[agentic_job_factory] Unknown command: {command}" )
         return None
 
-
-def _legacy_create_agentic_job( command, args_dict, user_id, user_email, session_id, debug=False, verbose=False,
-                                scheduled_at=None, monopolize=False, spawned_by_id_hash=None ):
-    """
-    Factory function to create the correct agentic job based on command.
-
-    Requires:
-        - command is a recognized agentic routing command string
-        - args_dict contains the required arguments for the target job
-        - user_id, user_email, session_id are non-empty strings
-
-    Ensures:
-        - Returns appropriate Job instance for the command
-        - Returns None if command is unrecognized
-
-    Args:
-        command: Routing command key (e.g., "agent router go to deep research")
-        args_dict: Complete argument dictionary
-        user_id: System user ID
-        user_email: User's email address
-        session_id: WebSocket session ID
-        debug: Enable debug output
-        verbose: Enable verbose output
-        scheduled_at: ISO datetime string to defer execution to, or None to run as soon
-            as the queue reaches it
-        monopolize: run exclusively, holding every other job until this one finishes
-        spawned_by_id_hash: id_hash of the monopolize job that SPAWNED this one, or None
-
-    Returns:
-        AgenticJobBase subclass instance, or None
-
-    WHY THE LAST THREE ARE PARAMETERS AND NOT ARGS_DICT KEYS. They are not arguments to
-    the agent — they are instructions to the QUEUE about when and how to run it, and
-    `args_dict` is validated against JOB_ARG_CONTRACTS, so smuggling them through it
-    would mean faking them into an agent's argument contract to survive the trip. Every
-    v1 door set them on the job by hand after this factory returned (deep_research.py:172,
-    podcast_generator.py:530, swe_team.py:154, mock_job.py:185, and the rest); as those
-    doors retire into /api/v2/submit there is no handler left to do that, so the stamping
-    moves in here where the job is built.
-    """
-    from cosa.agents.bug_fix_expediter.job              import BugFixExpediterJob
-    from cosa.agents.claude_code.job                     import ClaudeCodeJob
-    from cosa.agents.deep_research.job                   import DeepResearchJob
-    from cosa.agents.deep_research_to_podcast.job        import DeepResearchToPodcastJob
-    from cosa.agents.deep_research_to_presentation.job   import DeepResearchToPresentationJob
-    from cosa.agents.podcast_generator.job               import PodcastGeneratorJob
-    from cosa.agents.presentation_generator.job          import PresentationGeneratorJob
-    from cosa.agents.swe_team.job                        import SweTeamJob
-    from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
-    from cosa.agents.test_suite.job                      import TestSuiteJob
-
-    if command == "agent router go to deep research":
-        job = DeepResearchJob(
-            query              = args_dict.get( "query", "" ),
-            user_id            = user_id,
-            user_email         = user_email,
-            session_id         = session_id,
-            budget             = _parse_optional_float( args_dict.get( "budget" ) ),
-            no_confirm         = True,
-            dry_run            = _parse_boolean( args_dict.get( "dry_run" ) ),
-            force_failure_mode = args_dict.get( "force_failure_mode" ),
-            audience           = args_dict.get( "audience" ),
-            audience_context   = args_dict.get( "audience_context" ),
-            debug              = debug,
-            verbose            = verbose
-        )
-
-    elif command == "agent router go to podcast generator":
-        # Parse target_languages if provided as string
-        languages = None
-        if args_dict.get( "languages" ):
-            if isinstance( args_dict[ "languages" ], list ):
-                languages = args_dict[ "languages" ]
-            else:
-                languages = [ lang.strip() for lang in args_dict[ "languages" ].split( "," ) ]
-
-        job = PodcastGeneratorJob(
-            research_path      = args_dict.get( "research", "" ),
-            user_id            = user_id,
-            user_email         = user_email,
-            session_id         = session_id,
-            target_languages   = languages,
-            dry_run            = _parse_boolean( args_dict.get( "dry_run" ) ),
-            force_failure_mode = args_dict.get( "force_failure_mode" ),
-            audience           = args_dict.get( "audience" ),
-            audience_context   = args_dict.get( "audience_context" ),
-            debug              = debug,
-            verbose            = verbose
-        )
-
-    elif command == "agent router go to research to podcast":
-        # Parse target_languages if provided as string
-        languages = None
-        if args_dict.get( "languages" ):
-            if isinstance( args_dict[ "languages" ], list ):
-                languages = args_dict[ "languages" ]
-            else:
-                languages = [ lang.strip() for lang in args_dict[ "languages" ].split( "," ) ]
-
-        job = DeepResearchToPodcastJob(
-            query            = args_dict.get( "query", "" ),
-            user_id          = user_id,
-            user_email       = user_email,
-            session_id       = session_id,
-            budget           = _parse_optional_float( args_dict.get( "budget" ) ),
-            target_languages = languages,
-            dry_run          = _parse_boolean( args_dict.get( "dry_run" ) ),
-            audience         = args_dict.get( "audience" ),
-            audience_context = args_dict.get( "audience_context" ),
-            debug            = debug,
-            verbose          = verbose
-        )
-
-    elif command == "agent router go to claude code":
-        job = ClaudeCodeJob(
-            prompt          = args_dict.get( "prompt", "" ),
-            project         = args_dict.get( "project", "lupin" ),
-            user_id         = user_id,
-            user_email      = user_email,
-            session_id      = session_id,
-            task_type       = args_dict.get( "task_type", "BOUNDED" ),
-            max_turns       = _parse_optional_int( args_dict.get( "max_turns" ) ),
-            timeout_seconds = _parse_optional_int( args_dict.get( "timeout_seconds" ) ),
-            dry_run         = _parse_boolean( args_dict.get( "dry_run" ) ),
-            debug           = debug,
-            verbose         = verbose
-        )
-
-    elif command == "agent router go to presentation generator":
-        job = PresentationGeneratorJob(
-            source_path             = args_dict.get( "source", "" ),
-            user_id                 = user_id,
-            user_email              = user_email,
-            session_id              = session_id,
-            target_duration_minutes = _parse_optional_int( args_dict.get( "target_duration_minutes" ) ),
-            target_slide_count      = _parse_optional_int( args_dict.get( "target_slide_count" ) ),
-            audience                = args_dict.get( "audience" ),
-            audience_context        = args_dict.get( "audience_context" ),
-            theme                   = args_dict.get( "theme" ),
-            content_model           = args_dict.get( "content_model" ),
-            render_only             = _parse_boolean( args_dict.get( "render_only" ) ),
-            dry_run                 = _parse_boolean( args_dict.get( "dry_run" ) ),
-            force_failure_mode      = args_dict.get( "force_failure_mode" ),
-            debug                   = debug,
-            verbose                 = verbose
-        )
-
-    elif command == "agent router go to research to presentation":
-        job = DeepResearchToPresentationJob(
-            query                   = args_dict.get( "query", "" ),
-            user_id                 = user_id,
-            user_email              = user_email,
-            session_id              = session_id,
-            budget                  = _parse_optional_float( args_dict.get( "budget" ) ),
-            target_duration_minutes = _parse_optional_int( args_dict.get( "target_duration_minutes" ) ),
-            target_slide_count      = _parse_optional_int( args_dict.get( "target_slide_count" ) ),
-            theme                   = args_dict.get( "theme" ),
-            lead_model              = args_dict.get( "lead_model" ),
-            dry_run                 = _parse_boolean( args_dict.get( "dry_run" ) ),
-            audience                = args_dict.get( "audience" ),
-            audience_context        = args_dict.get( "audience_context" ),
-            debug                   = debug,
-            verbose                 = verbose,
-        )
-
-    elif command == "agent router go to swe team":
-        job = SweTeamJob(
-            task           = args_dict.get( "task", args_dict.get( "prompt", "" ) ),
-            user_id        = user_id,
-            user_email     = user_email,
-            session_id     = session_id,
-            dry_run        = _parse_boolean( args_dict.get( "dry_run" ) ),
-            dry_run_phases = _parse_optional_int( args_dict.get( "dry_run_phases" ) ) or 10,
-            dry_run_delay  = _parse_optional_float( args_dict.get( "dry_run_delay" ) ) or 1.5,
-            lead_model     = args_dict.get( "lead_model" ),
-            worker_model   = args_dict.get( "worker_model" ),
-            budget         = _parse_optional_float( args_dict.get( "budget" ) ),
-            timeout        = _parse_optional_int( args_dict.get( "timeout" ) ),
-            trust_mode     = args_dict.get( "trust_mode" ),
-            debug          = debug,
-            verbose        = verbose
-        )
-
-    elif command == "agent router go to test suite":
-        # Parse test_types: comma-separated string → list
-        test_types_raw = args_dict.get( "test_types", "integration,e2e" )
-        if isinstance( test_types_raw, str ):
-            test_types = [ t.strip() for t in test_types_raw.split( "," ) if t.strip() ]
-        else:
-            test_types = test_types_raw
-
-        # Parse pytest_args: JSON list or quote-aware string → list.
-        # shlex.split, NOT str.split: a quoted expression like -k "a or b" must
-        # survive as ONE -k value. The naive word-split shattered it — pytest
-        # read the bare `or` as a file arg and exited 4, a silent zero-test run
-        # that LOOKED submitted (2026-06-11, found independently by two sessions).
-        pytest_args_raw = args_dict.get( "pytest_args", "" )
-        if isinstance( pytest_args_raw, list ):
-            pytest_args = pytest_args_raw
-        elif pytest_args_raw and pytest_args_raw.lower() not in _SEMANTIC_NONE:
-            try:
-                pytest_args = shlex.split( pytest_args_raw )
-            except ValueError as e:
-                # Unbalanced quotes must fail LOUD at submit time — the silent
-                # alternative is exactly the zero-test run this fix removes.
-                raise ValueError( f"Malformed pytest_args {pytest_args_raw!r}: {e}" )
-        else:
-            pytest_args = []
-
-        job = TestSuiteJob(
-            test_types          = test_types,
-            user_id             = user_id,
-            user_email          = user_email,
-            session_id          = session_id,
-            pytest_args         = pytest_args,
-            dry_run             = _parse_boolean( args_dict.get( "dry_run" ) ),
-            auto_fix_on_failure = _parse_optional_boolean( args_dict.get( "auto_fix_on_failure" ) ),
-            env_vars            = args_dict.get( "env_vars" ) or None,
-            debug               = debug,
-            verbose             = verbose
-        )
-
-    elif command == "agent router go to bug fix expediter":
-        job = BugFixExpediterJob(
-            dead_job_id           = args_dict.get( "dead_job_id", "" ),
-            user_id               = user_id,
-            user_email            = user_email,
-            session_id            = session_id,
-            extra_context         = args_dict.get( "extra_context", "" ),
-            dry_run               = _parse_boolean( args_dict.get( "dry_run" ) ),
-            lead_model_override   = args_dict.get( "lead_model_override" )   or None,
-            worker_model_override = args_dict.get( "worker_model_override" ) or None,
-            thinking_effort       = args_dict.get( "thinking_effort" )       or None,
-            debug                 = debug,
-            verbose               = verbose
-        )
-
-    elif command == "agent router go to test fix expediter":
-        # Parse optional original_test_types / original_pytest_args (comma-separated)
-        test_types_arg = args_dict.get( "original_test_types", [] )
-        if isinstance( test_types_arg, str ):
-            test_types_arg = [ s.strip() for s in test_types_arg.split( "," ) if s.strip() ]
-        pytest_args_arg = args_dict.get( "original_pytest_args", [] )
-        if isinstance( pytest_args_arg, str ):
-            pytest_args_arg = [ s.strip() for s in pytest_args_arg.split( " " ) if s.strip() ]
-
-        job = TestFixExpediterJob(
-            remediation_snapshot_path = args_dict.get( "remediation_snapshot_path", "" ),
-            source_test_suite_job_id  = args_dict.get( "source_test_suite_job_id", "" ),
-            user_id                   = user_id,
-            user_email                = user_email,
-            session_id                = session_id,
-            original_test_types       = test_types_arg,
-            original_pytest_args      = pytest_args_arg,
-            dry_run                   = _parse_boolean( args_dict.get( "dry_run" ) ),
-            lead_model_override       = args_dict.get( "lead_model_override" )   or None,
-            worker_model_override     = args_dict.get( "worker_model_override" ) or None,
-            thinking_effort           = args_dict.get( "thinking_effort" )       or None,
-            debug                     = debug,
-            verbose                   = verbose,
-        )
-
-    elif command == "agent router go to test fix expediter resume":
-        # Voice resume — mirrors POST /api/test-fix-expediter/resume-from
-        # (queues.py:1857). resume_from is already fuzzy-matched by the expeditor's
-        # tfe_checkpoint_match handler; resolve it to a single stalled job, then
-        # rebuild via resume_job(). No single match (not-found / still-ambiguous) →
-        # return None so the flow routes to the receptionist to speak the failure
-        # (the voice path has no HTTP channel for a 404/ambiguous response).
-        from cosa.agents.test_fix_expediter.resume_resolver import resolve_resume_target
-        target = resolve_resume_target( args_dict.get( "resume_from", "" ), user_email )
-        if target.job_id is None:
-            return None
-        overrides = {
-            "lead_model_override"   : args_dict.get( "lead_model_override" ),
-            "worker_model_override" : args_dict.get( "worker_model_override" ),
-            "thinking_effort"       : args_dict.get( "thinking_effort" ),
-        }
-        overrides = { k: v for k, v in overrides.items() if v is not None }
-        # resume_job() returns a fully-formed job carrying its ORIGINAL routing_command
-        # and args from job_history; return it directly rather than falling through to
-        # the common tail, which would overwrite those with the resume args.
-        # The resume path skips the common tail below, so it stamps here — a caller
-        # who says "resume this one at ten in the morning" means it just as much as a
-        # caller starting fresh work.
-        return _stamp_queue_directives(
-            resume_job( target.job_id, args_overrides=overrides or None ),
-            scheduled_at, monopolize, spawned_by_id_hash
-        )
-
-    else:
-        print( f"[agentic_job_factory] Unknown command: {command}" )
-        return None
-
-    # Populate CJ Flow persistence fields on every constructed job so job_history
-    # persists both the routing command and the exact args_dict the job was built from.
-    # BFE's resubmit path reads these to reconstruct the original job faithfully.
-    job.routing_command = command
-    job.original_args   = dict( args_dict )
-    return _stamp_queue_directives( job, scheduled_at, monopolize, spawned_by_id_hash )
+    return spec.job_factory( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                             scheduled_at, monopolize, spawned_by_id_hash )
 
 
 def resume_job( job_id_hash, config_mgr=None, args_overrides=None ):

@@ -288,6 +288,57 @@ class TestAgenticDriftGuard( unittest.TestCase ):
             f"lookup would return None for these: {unbound}"
         )
 
+    def test_1b3_no_command_equality_branch_reappears_in_the_factory( self ):
+        """Phase 5 step 2 (row d2e23ecb) — the branch chain must not grow back.
+
+        The other assertions in this file are all SET comparisons, and a re-introduced
+        `if command == "..."` branch does not break any of them: the command would still
+        be owned, still have a builder, still be in the registry. Every set would agree
+        while dispatch quietly had two paths again — the lookup for most commands and a
+        hand-written branch for the special one somebody was in a hurry about. That is
+        exactly the state step 2 removed, so it needs its own assertion.
+
+        THIS ONE COULD NOT BE WRITTEN BEFORE THE DELETION. It is false while the chain
+        exists, which is why it lands in the same commit that removes it rather than
+        earlier (Mr Radio's condition, 20:17).
+
+        Read with `ast`, not a regex: a regex over the source cannot tell an `if` test
+        from the same characters inside a string or a comment, and this file already has
+        `command ==` in prose. The AST walk also lets the failure name the function and
+        line, which a grep hit cannot.
+
+        SCOPE — deliberately the whole module, not just `create_agentic_job`. Drift does
+        not have to come back in the function it left; a new `_dispatch_special_cases`
+        helper called from the lookup is the same defect with a different name. If a
+        builder ever has an honest reason to compare `command`, this test names the site
+        and that becomes a decision somebody makes on purpose."""
+        import ast
+        source = cu.get_file_as_string( cu.get_project_root() + FACTORY_SOURCE )
+        tree   = ast.parse( source )
+
+        offenders = []
+        for node in ast.walk( tree ):
+            if not isinstance( node, ast.If ):
+                continue
+            for cmp_node in ast.walk( node.test ):
+                if not isinstance( cmp_node, ast.Compare ):
+                    continue
+                if not isinstance( cmp_node.left, ast.Name ) or cmp_node.left.id != "command":
+                    continue
+                if not all( isinstance( op, ast.Eq ) for op in cmp_node.ops ):
+                    continue
+                literals = [ c.value for c in cmp_node.comparators
+                             if isinstance( c, ast.Constant ) and isinstance( c.value, str ) ]
+                if literals:
+                    offenders.append( f"line {cmp_node.lineno}: if command == {literals!r}" )
+
+        self.assertEqual(
+            offenders, [],
+            "a `command == \"...\"` dispatch branch is back in the job factory — dispatch is a "
+            "registry lookup now (row d2e23ecb). Add the command to JOB_BUILDERS and the "
+            f"registry instead of branching on it. Sites: {offenders}"
+        )
+
     def test_1c_training_agentic_keys_equal_the_owned_agentic_set( self ):
         training = _training_agentic_keys()
         owned    = set( JOB_COMMANDS )
