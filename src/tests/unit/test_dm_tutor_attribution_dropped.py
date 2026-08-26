@@ -1,5 +1,13 @@
 """
-The DM tutor must not deliver a rewrite the reader cannot attribute.
+The DM tutor must SAY SO when a rewrite is one the reader may not be able to attribute.
+
+⚠️ IT USED TO REFUSE, AND STOPPED ON 2026-08-26 (row `20026f56`, Rick's ruling). Refusing
+sent the sender's full uncondensed original on 53-58% of every rewrite; the harm it was
+buying off was three peer reports in three weeks, each one caught by the human reading it.
+So the rewrite goes out now, the check still runs, the reason is still written to the row,
+and the recipient gets four extra words telling them to check who did what. The tests
+below were rewritten from "refuses" to "flags and delivers" in the same change — if you
+are looking for the old behaviour, it is in git, not in a config switch.
 
 Row `cf1587cd`, filed by María 🌸 on Clayton 😎's finding, 2026-08-25. Four condensed
 DMs reached her in six minutes; in two she could not tell whose measurement a claim was
@@ -11,8 +19,9 @@ from thread `b3abbb72`, lifted verbatim out of the traffic corpus — not paraph
 not invented examples. `MARIA_2156` is the one she opened the row with.
 
 REVERT AND WATCH IT GO RED (bar item 4): deleting the `_dropped_attribution` call in
-`_apply_dm_tutor` turns `test_send_path_refuses_marias_2156_message` red on that exact
-message. Recorded in
+`_apply_dm_tutor` turns `test_send_path_flags_and_delivers_marias_2156_message` red on
+that exact message — the outcome reads `rewritten` and the row carries no reason, which
+is the instrument going dark rather than a defect being fixed. Recorded in
 `src/rnd/v0.2.0/2026.08.26-dm-condenser-drops-sentence-subjects.md` §3.
 
 Sibling file: `test_dm_tutor_attribution_guard.py` covers row `897a8db1` — the tutor
@@ -237,26 +246,48 @@ def _config( **overrides ):
     return config
 
 
-def test_send_path_refuses_marias_2156_message():
+def test_send_path_flags_and_delivers_marias_2156_message():
     """
-    🔴 THE REVERT-AND-WATCH-IT-GO-RED TEST (bar item 4).
+    🔴 THE REVERT-AND-WATCH-IT-GO-RED TEST (bar item 4), and now the OPEN-GATE test too.
 
-    Delete the `_dropped_attribution` block in `_apply_dm_tutor` and this goes red on
-    the exact message María opened the row with.
+    Both halves are asserted on one message, deliberately, because the whole risk of row
+    `20026f56` is that somebody satisfies one half and quietly drops the other:
+
+      the gate is OPEN    — the condensed rewrite is what goes out, not the original
+      the sensor is LIVE  — the row still names the outcome and still says why
+
+    Delete the `_dropped_attribution` block in `_apply_dm_tutor` and the second half goes
+    red on the exact message María opened the row with.
     """
+    from cosa.rest.routers.dm import DM_TUTOR_ATTRIBUTION_NOTICE
+
     delivered, meta = _apply_dm_tutor(
         MARIA_2156_SUBMITTED,
         config=_config(),
         rewrite_fn=lambda body: MARIA_2156_DELIVERED,
     )
-    assert delivered == MARIA_2156_SUBMITTED, "the sender's own words must go out"
-    assert meta[ "tutor_outcome" ]  == "attribution_blocked"
+    # THE GATE IS OPEN.
+    assert delivered != MARIA_2156_SUBMITTED, "the rewrite must go out, not the original"
+    assert delivered.startswith( MARIA_2156_DELIVERED.split( "\n" )[ 0 ] )
+    assert delivered.endswith( DM_TUTOR_ATTRIBUTION_NOTICE )
+
+    # THE SENSOR IS LIVE.
+    assert meta[ "tutor_outcome" ]  == "attribution_flagged"
     assert meta[ "tutor_attribution" ]
     assert "dropped" in meta[ "tutor_attribution" ]
 
 
 def test_send_path_delivers_a_rewrite_that_keeps_the_people():
-    """The guard must not refuse everything — the passing case is pinned too."""
+    """
+    The clean case, and the half of Part B that is easy to lose.
+
+    🔴 THE WARNING MUST NOT BECOME WALLPAPER. Roughly half of rewrites keep everybody the
+    sender named. If "check who did what" is appended to those too, it is read past
+    everywhere and therefore read past on the ones that lost a name — which is the only
+    place it does anything. So this pins the PLAIN notice on an attributable rewrite.
+    """
+    from cosa.rest.routers.dm import DM_TUTOR_NOTICE, DM_TUTOR_ATTRIBUTION_NOTICE
+
     delivered, meta = _apply_dm_tutor(
         MARIA_2156_SUBMITTED,
         config=_config(),
@@ -265,10 +296,18 @@ def test_send_path_delivers_a_rewrite_that_keeps_the_people():
     assert meta[ "tutor_outcome" ]     == "rewritten"
     assert meta[ "tutor_attribution" ] is None
     assert delivered.startswith( MARIA_2156_DELIVERED_OK.split( "\n" )[ 0 ] )
+    assert delivered.endswith( DM_TUTOR_NOTICE )
+    assert DM_TUTOR_ATTRIBUTION_NOTICE not in delivered
 
 
 def test_send_path_honours_the_off_switch():
-    """With the guard off, the same unattributable rewrite is delivered as before."""
+    """
+    With the check off the rewrite still goes out — and now carries the PLAIN notice and
+    an empty row, because nothing measured it. That is the difference between "the check
+    said this one is fine" and "nobody looked", and the corpus has to keep them apart.
+    """
+    from cosa.rest.routers.dm import DM_TUTOR_NOTICE, DM_TUTOR_ATTRIBUTION_NOTICE
+
     delivered, meta = _apply_dm_tutor(
         MARIA_2156_SUBMITTED,
         config=_config( attribution_guard=False ),
@@ -277,6 +316,8 @@ def test_send_path_honours_the_off_switch():
     assert meta[ "tutor_outcome" ]     == "rewritten"
     assert meta[ "tutor_attribution" ] is None
     assert delivered.startswith( MARIA_2156_DELIVERED.split( "\n" )[ 0 ] )
+    assert delivered.endswith( DM_TUTOR_NOTICE )
+    assert DM_TUTOR_ATTRIBUTION_NOTICE not in delivered
 
 
 def test_send_path_honours_the_threshold():
@@ -289,7 +330,7 @@ def test_send_path_honours_the_threshold():
     _, strict  = _apply_dm_tutor( original, config=_config( attribution_min_persons=1 ),
                                   rewrite_fn=lambda body: rewritten )
     assert lenient[ "tutor_outcome" ] == "rewritten"
-    assert strict[ "tutor_outcome" ]  == "attribution_blocked"
+    assert strict[ "tutor_outcome" ]  == "attribution_flagged"
 
 
 def test_meta_carries_the_field_on_every_path():
@@ -299,7 +340,10 @@ def test_meta_carries_the_field_on_every_path():
     """
     from cosa.rest.routers.dm import DM_CORPUS_SCHEMA_VERSION
 
-    assert DM_CORPUS_SCHEMA_VERSION >= 5
+    # 6, not 5: `attribution_flagged` replaced `attribution_blocked` and old rows were
+    # deliberately NOT migrated, so the version is what tells a reader which of the two
+    # a row is allowed to carry.
+    assert DM_CORPUS_SCHEMA_VERSION >= 6
     _, off = _apply_dm_tutor( "one short line.", config=_config( enabled=False ),
                               rewrite_fn=lambda body: "x" )
     assert "tutor_attribution" in off

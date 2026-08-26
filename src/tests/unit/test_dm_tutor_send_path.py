@@ -240,7 +240,11 @@ class TestApplyDmTutor( unittest.TestCase ):
         silence: a row simply lacking a rewrite could not say whether the tutor was off,
         did not fire, fired and failed, or was gated.
 
-        SIX STATES SINCE row cf1587cd — `attribution_blocked` joined them. The
+        SIX STATES SINCE row cf1587cd, and the fifth was RENAMED by row 20026f56:
+        `attribution_blocked` (the check fired, the rewrite was refused) became
+        `attribution_flagged` (the check fired, the rewrite went out anyway). A renamed
+        value rather than a reused one, so no reader mistakes a delivered row for a
+        refused one — and old rows keep the old word, on purpose. The
         "rewritten" case moved from the placeholder `"x."` to `_FAITHFUL` for the same
         reason the fabrication guard once moved these fixtures: `"x."` drops every person
         `_VERBOSE` names, so the attribution guard refuses it, correctly. A placeholder
@@ -256,7 +260,7 @@ class TestApplyDmTutor( unittest.TestCase ):
                         rewrite_fn=lambda b: _FAITHFUL_LONG )[ 1 ][ "tutor_outcome" ],
         }
         self.assertEqual(
-            outcomes, { "disabled", "under_trigger", "rewritten", "attribution_blocked",
+            outcomes, { "disabled", "under_trigger", "rewritten", "attribution_flagged",
                         "model_failed", "gate_rejected" }
         )
 
@@ -551,9 +555,11 @@ class TestTheRecipientIsTold( unittest.TestCase ):
     """
 
     def setUp( self ):
-        from cosa.rest.routers.dm import _apply_dm_tutor, DM_TUTOR_NOTICE
-        self.apply  = _apply_dm_tutor
-        self.notice = DM_TUTOR_NOTICE
+        from cosa.rest.routers.dm import ( _apply_dm_tutor, DM_TUTOR_NOTICE,
+                                           DM_TUTOR_ATTRIBUTION_NOTICE )
+        self.apply       = _apply_dm_tutor
+        self.notice      = DM_TUTOR_NOTICE
+        self.warn_notice = DM_TUTOR_ATTRIBUTION_NOTICE
 
     def test_a_rewritten_dm_carries_the_notice( self ):
         text, meta = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: _FAITHFUL )
@@ -576,10 +582,18 @@ class TestTheRecipientIsTold( unittest.TestCase ):
         self.assertNotIn( self.notice, text )
 
     def test_the_notice_names_no_number( self ):
-        """It says THAT the message was shortened, never how long it was or what fired."""
+        """
+        It says THAT the message was shortened, never how long it was or what fired.
+
+        BOTH VARIANTS, since row `20026f56` added a second one. A second wording is a
+        second chance to leak the trigger by arithmetic, and the reason the first one
+        carries no digits does not automatically carry over to a line somebody else wrote.
+        """
         import re
-        self.assertIsNone( re.search( r"\d", self.notice ),
-                           f"the recipient notice leaks a number: {self.notice!r}" )
+        for label, notice in ( ( "plain", self.notice ), ( "attribution", self.warn_notice ) ):
+            with self.subTest( case=label ):
+                self.assertIsNone( re.search( r"\d", notice ),
+                                   f"the recipient notice leaks a number: {notice!r}" )
 
     def test_the_notice_is_STRUCTURE_not_a_claim( self ):
         """
@@ -590,6 +604,9 @@ class TestTheRecipientIsTold( unittest.TestCase ):
         """
         from cosa.agents.dm_tutor.sentences import count_sentences
         self.assertEqual( count_sentences( self.notice ), 0 )
+        self.assertEqual( count_sentences( self.warn_notice ), 0,
+                          "the four-word variant is not exempt as structure — the tutor "
+                          "will start rewriting its own footer" )
 
         text, _ = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: _FAITHFUL )
         self.assertEqual( count_sentences( text ), 3, "the notice inflated the delivered claim count" )
@@ -607,10 +624,21 @@ class TestTheRecipientIsTold( unittest.TestCase ):
         re-arming the trap with no test noticing.
         """
         from cosa.agents.dm_tutor.sentences import count_sentences
-        self.assertEqual(
-            count_sentences( self.notice ), 0,
-            "DM_TUTOR_NOTICE no longer matches the structure pattern in sentences.py — "
-            "edit both, or the tutor will start rewriting its own output"
+        for name, notice in ( ( "DM_TUTOR_NOTICE",             self.notice ),
+                              ( "DM_TUTOR_ATTRIBUTION_NOTICE", self.warn_notice ) ):
+            with self.subTest( constant=name ):
+                self.assertEqual(
+                    count_sentences( notice ), 0,
+                    f"{name} no longer matches the structure pattern in sentences.py — "
+                    "edit both, or the tutor will start rewriting its own output"
+                )
+
+        # The two must keep the SAME first sentence: sentences.py exempts them with one
+        # prefix-anchored pattern, so a reworded opener silently un-exempts whichever one
+        # moved. Pinned as a prefix rather than as a second copy of the literal.
+        self.assertTrue(
+            self.warn_notice.startswith( "This DM was condensed in transit." ),
+            "the attribution notice no longer shares the exempted opening sentence"
         )
 
 

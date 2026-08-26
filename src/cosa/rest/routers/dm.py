@@ -689,7 +689,12 @@ def get_dm_feedback_arm():
 # 5 — adds `tutor_attribution` (row cf1587cd), same reasoning one guard over: a null
 # must not mean both "the reader could attribute this one" and "this row predates the
 # attribution guard entirely".
-DM_CORPUS_SCHEMA_VERSION = 5
+# 6 — the attribution guard STOPS REFUSING (row 20026f56, Rick 2026-08-26). The outcome
+# `attribution_blocked` is retired at this version and `attribution_flagged` replaces it:
+# same predicate, same recorded reason, but the rewrite is DELIVERED. Old rows are NOT
+# migrated, so a reader counting how often the check fires must accept both values — an
+# `attribution_blocked` row is a v5 refusal and an `attribution_flagged` row is a v6 send.
+DM_CORPUS_SCHEMA_VERSION = 6
 
 # Identifies the tutor's behaviour, independent of the git sha: two processes on the
 # same commit with different config are the same code and a different treatment.
@@ -712,6 +717,25 @@ DM_TUTOR_VERSION = "dm-tutor-1"
 # start rewriting its own output forever. `sentences.py` treats this exact line as
 # structure, and a test pins the two together.
 DM_TUTOR_NOTICE = "This DM was condensed in transit. Need more detail? Ask the sender one question"
+
+# The same notice plus four words, used ONLY where the attribution check actually fired
+# (row 20026f56). Since that check stopped refusing, this is the one thing standing
+# between the reader and a condensed body that lost a name the sender wrote.
+#
+# 🔴 CONDITIONAL, NEVER BLANKET, AND THAT IS THE WHOLE POINT. Roughly half of rewrites
+# are perfectly attributable. Warning about attribution on those too makes the sentence
+# wallpaper — read past everywhere, and therefore read past in the one place it matters.
+# We already compute the predicate; using it to pick the wording costs nothing.
+#
+# "Check who did what" and not "be careful": Cheech's 2026-08-13 near-miss was precisely
+# a WHO error — he was one step from calling a scope violation on the wrong person — and
+# "be careful" does not say careful of what.
+#
+# ⚠️ SAME PREFIX AS DM_TUTOR_NOTICE, DELIBERATELY. `sentences.py` exempts this line as
+# structure with `^\s*This DM was condensed in transit\..*$` — prefix-anchored — so the
+# extra words land inside the `.*` and the tutor still will not rewrite its own footer.
+# Change the first sentence of either constant and you re-arm that trap; a test pins both.
+DM_TUTOR_ATTRIBUTION_NOTICE = "This DM was condensed in transit. Check who did what. Need more detail? Ask the sender one question"
 
 # The SEED list of product names that end in a code extension. They are not files, nobody
 # can open them, and a rewrite saying "the Node.js test" has cited nothing — so blocking
@@ -1478,20 +1502,32 @@ def _strip_invented_id_labels( original, rewritten ):
 # fifty are attribution INVERSIONS, where the rewrite names a person and names the wrong
 # one, and nothing here can see those.
 #
-# 🔴 WHY THIS REFUSES RATHER THAN RESTORES, which is the whole design decision.
-# `_restore_dropped_pointers` RESTORES because a path is self-contained: it still says
-# where to look with the sentence around it gone. A SUBJECT IS NOT. Appending "Maria" on
-# a line under three sentences does not tell a reader which sentence it belongs to - it
-# produces the bare-token line Rick banned for hashes (a0151611), one class over. The
-# three guards that CANNOT repair - invented facts, re-scoped quantities, unreachable id
-# labels - all deliver the sender's own words instead, and attribution belongs with them.
+# 🔴 IT NO LONGER REFUSES — IT ONLY MEASURES (row 20026f56, Rick 2026-08-26). It shipped
+# as a refusal, and the refusal cost the sender's full uncondensed original on 53-58% of
+# all rewrites. Against that: three peer reports in three weeks, every one caught by the
+# human reading it, and no error that reached a commit, an artifact or a decision. Paying
+# more than half of all sends to prevent friction that was already being caught is the
+# wrong trade, so the gate is open and the reader gets a pointed warning instead.
+#
+# ⚠️ THE MEASURING HALF IS UNCHANGED AND MUST STAY THAT WAY. The predicate below is the
+# only instrument watching this drift, and the day-by-day trend line reads the outcome it
+# writes. Stop recording and the rate silently reads zero, which looks exactly like a
+# fixed defect. Rick's own words: track it while leaving the gate open.
+#
+# WHY IT DOES NOT RESTORE THE NAME EITHER. `_restore_dropped_pointers` restores because a
+# path is self-contained: it still says where to look with the sentence around it gone. A
+# SUBJECT IS NOT. Appending "Maria" on a line under three sentences does not tell a reader
+# which sentence it belongs to - it produces the bare-token line Rick banned for hashes
+# (a0151611), one class over. Whether a name can be placed back in its own slot is a
+# separate feasibility question and is not answered here.
 #
 # WARNING: REGEX, NOT A PARSER, AND DELIBERATELY. The measurement instrument uses spaCy;
 # this does not, because a 50 MB model loaded at import would be a new dependency on the
 # send path for a check the other four guards make with `re`. The cost is stated rather
 # than hidden: on 75 hand-labelled pairs this predicate agrees 83% of the time at 0.71
-# precision and 0.68 recall. Every false fire costs exactly one thing - the sender's own
-# message goes out uncondensed - which is the cheap direction to be wrong in.
+# precision and 0.68 recall. A false fire now costs one sentence of extra warning on a
+# message that did not need it, which is cheaper still than the uncondensed original it
+# used to cost.
 _ATTRIB_PRONOUN = re.compile(
     r"\b(?:i|me|my|mine|myself|we|us|our|ours|you|your|yours|yourself|yourselves)\b",
     re.IGNORECASE
@@ -1514,15 +1550,15 @@ def _attribution_personas():
     """
     The fleet's persona names, read from the SAME key that allocates them.
 
-    Hardcoding the roster here would rot the moment somebody joins the pool — the guard
-    would stop recognising a real name as attribution and start refusing that person's
+    Hardcoding the roster here would rot the moment somebody joins the pool — the check
+    would stop recognising a real name as attribution and start flagging that person's
     DMs. The voice pool is the live list, so it is the one to read.
 
     Ensures:
         - returns a lowercase list of persona names from `cc session voice persona pool`
         - returns [] if the config cannot be read, which costs recall and never
           correctness: a rewrite that keeps a pronoun still passes, and one that keeps
-          only a name is refused unnecessarily — the cheap direction
+          only a name is flagged unnecessarily — the cheap direction
 
     Raises:
         - nothing
@@ -1594,9 +1630,13 @@ def _count_attributions( text, personas ):
 
 def _dropped_attribution( original, rewritten, min_persons=3 ):
     """
-    Why this rewrite may not be delivered, or "" when it may.
+    Why a reader may not be able to attribute this rewrite, or "" when they can.
 
-    Two conditions, either of which refuses:
+    ⚠️ THIS NO LONGER DECIDES DELIVERY (row 20026f56). It used to; the caller now records
+    what it says and sends the rewrite anyway, with a sharper notice attached. Read a
+    non-empty return as "flag this one", never as "refuse this one".
+
+    Two conditions, either of which fires:
 
       DROPPED   the original points at people at least `min_persons` times and the
                 rewrite points at none. The threshold exists because a message that
@@ -1614,11 +1654,11 @@ def _dropped_attribution( original, rewritten, min_persons=3 ):
         - min_persons is a positive int
 
     Ensures:
-        - returns "" when the rewrite may be delivered
+        - returns "" when the reader can attribute the rewrite
         - returns a short human-readable reason otherwise, which the caller records on
-          the corpus row — a refusal nobody can read is an unauditable one
-        - NEVER raises: on any internal failure it returns "", so a broken guard
-          delivers the rewrite rather than blocking every DM in the fleet
+          the corpus row — a finding nobody can read is an unauditable one
+        - NEVER raises: on any internal failure it returns "", so a broken check flags
+          nothing rather than mislabelling every DM in the fleet
 
     Raises:
         - nothing
@@ -1713,9 +1753,11 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
         # (refused). Recorded either way, so a corpus reader can tell a repair from a
         # clean rewrite — a silent repair is an unauditable one.
         "tutor_id_labels"      : None,
-        # Why a rewrite was refused as unattributable, when it was. Same reasoning as
-        # the two fields above: "the guard fired" is unanswerable from a log line the
-        # next reader does not have, and this guard is the widest of the four.
+        # Why a delivered rewrite may be hard to attribute, when the check fired. Same
+        # reasoning as the two fields above: "the check fired" is unanswerable from a log
+        # line the next reader does not have, and this check is the widest of the five.
+        # 🔴 THIS FIELD AND `tutor_outcome` ARE THE WHOLE SENSOR now that nothing is
+        # refused. Both are written on every fire; neither is optional.
         "tutor_attribution"    : None,
     }
 
@@ -1792,18 +1834,25 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
             print( f"[dm-tutor] REFUSED a rewrite that moved a quantity across a ledger: {rescoped}" )
             return body_text, meta
 
-        # ATTRIBUTION CHECK — refuse a rewrite the reader cannot attribute (row cf1587cd).
-        # Last of the refusers because it is the widest: it fires on ~30-43% of rewrites
-        # depending on the threshold, so running it ahead of the others would mask their
+        # ATTRIBUTION CHECK — MEASURED, AND NO LONGER A REFUSAL (row 20026f56, Rick
+        # 2026-08-26: "just because you turn the refusal guard off doesn't mean that you
+        # can't track it"). Last of the checks because it is the widest: it fires on
+        # 53-58% of rewrites, so running it ahead of the others would mask their
         # narrower, sharper findings behind this one's label in the corpus.
+        #
+        # 🔴 THE SENSOR IS THE POINT OF THIS BLOCK NOW. Refusing was costing the full
+        # original on more than half of all sends to prevent a harm that, in three weeks
+        # of reports, a human caught every time. Measuring costs nothing. So the
+        # predicate still runs, the reason is still written to the row, and the rewrite
+        # goes out with a sharper notice attached (`DM_TUTOR_ATTRIBUTION_NOTICE`).
+        # Delete the recording and the day-by-day trend line goes dark with nothing said.
+        attribution = None
         if config[ "attribution_guard" ]:
             attribution = _dropped_attribution( body_text, rewritten,
                                                 min_persons=config[ "attribution_min_persons" ] )
             if attribution:
-                meta[ "tutor_outcome" ]     = "attribution_blocked"
                 meta[ "tutor_attribution" ] = attribution
-                print( f"[dm-tutor] REFUSED a rewrite the reader cannot attribute: {attribution}" )
-                return body_text, meta
+                print( f"[dm-tutor] FLAGGED a rewrite the reader may not be able to attribute: {attribution}" )
 
         claims_out                 = _count_claims( rewritten )
         meta[ "tutor_claims_out" ] = claims_out
@@ -1817,9 +1866,16 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
             meta[ "tutor_outcome" ] = "gate_rejected"
             return body_text, meta
 
-        meta[ "tutor_outcome" ] = "rewritten"
-        # Tell the RECIPIENT the prose is not the sender's (Cheech, 2026-08-13).
-        return rewritten.rstrip() + "\n" + DM_TUTOR_NOTICE, meta
+        # `attribution_flagged` is a DELIVERED rewrite that the check fired on — the v5
+        # `attribution_blocked` value meant the opposite (refused) and is not reused, so
+        # nobody reads a delivered row as a refused one. Both are the same predicate:
+        # count how often it fires by accepting either value, not just this one.
+        meta[ "tutor_outcome" ] = "attribution_flagged" if attribution else "rewritten"
+
+        # Tell the RECIPIENT the prose is not the sender's (Cheech, 2026-08-13), and tell
+        # the ones who actually lost a name to go looking for it (row 20026f56).
+        notice = DM_TUTOR_ATTRIBUTION_NOTICE if attribution else DM_TUTOR_NOTICE
+        return rewritten.rstrip() + "\n" + notice, meta
 
     except Exception as e:
         # The send path must survive anything the tutor does. An exception here means

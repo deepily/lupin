@@ -151,6 +151,24 @@ class TestWholeLinePointerIsStructure( unittest.TestCase ):
         )
         self.assertEqual( count_sentences( body ), 1 )
 
+    def test_the_four_word_variant_of_the_notice_is_also_structure( self ):
+        """
+        Row `20026f56` added a second notice — the same opening sentence plus "Check who
+        did what." — for the messages the attribution check fires on.
+
+        The exemption is prefix-anchored (`^\\s*This DM was condensed in transit\\..*$`), so
+        the extra words land inside the `.*` and it still matches. That is a property of
+        the pattern rather than of anyone's care, and this is what proves it: re-anchor
+        the pattern to the end of the old wording and this line starts counting as a
+        claim, which is the tutor rewriting its own footer forever.
+        """
+        body = (
+            "The one real claim is here.\n"
+            "This DM was condensed in transit. Check who did what. Need more detail? "
+            "Ask the sender one question"
+        )
+        self.assertEqual( count_sentences( body ), 1 )
+
     def test_a_clean_rewrite_plus_appended_pointer_lines_stays_at_three( self ):
         """The delivered shape after a repair: three claims, then pointer-only lines."""
         delivered = ( "Krishna has the row.\n"
