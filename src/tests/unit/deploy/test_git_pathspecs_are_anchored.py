@@ -95,15 +95,17 @@ def test_shell_git_pathspecs_are_anchored_to_the_repo_root( path ):
     """
     No shell script may ask git a path question in a way that changes answer with CWD.
 
-    KNOWN AND ACCEPTED: deploy-cloud-test.sh's `git archive --format=tar "$SHA" src/` is
-    CWD-sensitive but FAILS CLOSED — measured, it exits 128 ("pathspec 'src/' did not match
-    any files") and the script runs under `set -euo pipefail`, so the deploy aborts rather
-    than shipping an empty tar. It is listed here so the exemption is a decision on the
-    record rather than a gap in the regex.
+    THE EXEMPTION MAP IS EMPTY, and that is a measured state rather than an oversight.
+    It carried one entry: deploy-cloud-test.sh's `git archive --format=tar "$SHA" src/`,
+    CWD-sensitive but FAILING CLOSED (measured: exit 128, "pathspec 'src/' did not match
+    any files", under `set -euo pipefail`, so the deploy aborted rather than shipping an
+    empty tar). That script was retired 2026-08-26 (row 0d175dac), so the exemption has no
+    subject. The map is KEPT rather than inlined away: the next accepted-but-CWD-sensitive
+    line needs somewhere to be declared, and an empty map says "nothing is exempt today"
+    where no map at all would say nothing.
     """
     accepted = {
         # file name -> set of line substrings that are known CWD-sensitive but fail closed
-        "deploy-cloud-test.sh": { 'git archive --format=tar "$SHA" src/' },
     }
     allowed = accepted.get( path.name, set() )
 

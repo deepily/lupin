@@ -5,7 +5,8 @@
 # Every function here is VM-uncoupled: no SSH, no docker, no gcloud, no network.
 # The runner (preflight-vm.sh) gathers real state and feeds it to these; that split
 # is what makes the logic unit-testable, following the precedent set by
-# src/scripts/lib/deploy-cloud-test-lib.sh (task d8c699aa).
+# src/scripts/lib/deploy-cloud-test-lib.sh (task d8c699aa; that lib was retired
+# 2026-08-26, row 0d175dac — the precedent it set is what this file still follows).
 #
 # Naming: every function is prefixed `pfv_` so a `source` into the runner cannot
 # collide with the runner's own names.
@@ -236,7 +237,8 @@ pfv_contract_remedy() {
 #   env-contract.tsv has ONE `requirement` column, and the venues disagree:
 #       docker-compose.cloud-gpu.yml:193   ${LUPIN_MODEL_SERVER_URL:?…}       required
 #       docker-compose.yml:193,299         ${LUPIN_MODEL_SERVER_URL:-http://…} defaulted
-#       docker-compose.cloud-test.yml:113  http://lupin-model-server:7998      hardcoded
+#       (a third venue, docker-compose.cloud-test.yml, hardcoded it outright; that file
+#        was retired 2026-08-26, row 0d175dac — the two above still disagree)
 #   The obvious fix is a per-venue requirement column. That would be a SECOND
 #   authority for a fact compose already states — the shape decision 2b20a6d6 found
 #   with FOUR authorities for "which store backs this data" and no comparator
@@ -878,7 +880,8 @@ pfv_scan_orphan_pyc() {
 # Requires:
 #   - $1 = the stamp file's first line, verbatim ("" when the file is absent or empty).
 #          Its shape is "<40-hex sha> <utc ts> <axis>" — written by lupin-vm.sh
-#          do_push_bundle and by deploy-cloud-test.sh.
+#          do_push_bundle. (deploy-cloud-test.sh also wrote it until it was retired
+#          2026-08-26, row 0d175dac.)
 #   - $2 = the full 40-hex sha the working tree is actually at (git rev-parse HEAD).
 # Ensures:
 #   - echoes exactly one of: ABSENT · MALFORMED · STALE · MATCH, and returns

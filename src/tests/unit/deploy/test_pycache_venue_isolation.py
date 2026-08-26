@@ -71,7 +71,6 @@ REPO_ROOT = Path( __file__ ).resolve().parents[ 4 ]
 COMPOSE_FILES = [
     "docker-compose.yml",
     "docker-compose.cloud-gpu.yml",
-    "docker-compose.cloud-test.yml",
 ]
 
 SRC_TARGET = "/var/lupin/src"

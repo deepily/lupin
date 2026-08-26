@@ -52,14 +52,12 @@ SERVICES_RUNNING_UNIT_TESTS = [ "lupin-rest-dev", "lupin-rest-test" ]
 DECLARED_REPO_ROOT_ARTIFACTS = [
     "docker-compose.yml",
     "docker-compose.cloud-gpu.yml",
-    "docker-compose.cloud-test.yml",
     "docker",                      # directory: covers docker/**/Dockerfile, claude-config, scripts
     ".dockerignore",
     ".docview.yml",
     ".gitleaks.toml",
     ".stylelintrc.json",
     "alembic.ini",
-    "cloud-test.env.example",
     "package.json",
     "package-lock.json",
     "pyproject.toml",

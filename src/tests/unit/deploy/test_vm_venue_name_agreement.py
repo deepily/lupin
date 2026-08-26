@@ -18,9 +18,14 @@ all. And the compose files are named the other way round from what they hold:
     docker-compose.cloud-test.yml  DOES carry lupin-model-server with
                                    driver: nvidia / capabilities: [gpu] (line 196+)
 
-The rename that reconciles those names touches 35 tracked code files and 209
-occurrences of seven identifiers, so it is a coordinated change with its own
-test pass and is NOT done here. What IS pinned here are the three statements
+✅ RESOLVED 2026-08-26 (row 0d175dac, Rick's Option A + Q1=R2). The collision above
+is history: docker-compose.cloud-test.yml was RETIRED rather than renamed, together
+with deploy-cloud-test.sh and its lib. Nothing was renamed — that was the ruling,
+and it is the only branch that could not trip the substring trap (cloud-gpu and
+cloud-test are substrings of every obvious replacement, so during a cutover a stale
+reference and a migrated one grep alike). One cloud compose file ships now, and
+test_exactly_one_cloud_compose_file_ships_and_it_reserves_no_gpu is what keeps it
+that way. The paragraph above is kept as the record of what was measured. What IS pinned here are the three statements
 that were false at that sha and are cheap to keep true:
 
   1. cloud-gpu.env / cloud-test.env are git-ignored. Four places in the tree
@@ -55,8 +60,19 @@ import yaml
 
 REPO_ROOT = Path( __file__ ).resolve().parents[ 4 ]
 
+# BOTH stay listed after the 2026-08-26 retirement (row 0d175dac). The cloud-test
+# VENUE is gone, but its .gitignore entry was deliberately KEPT: an ignore rule for
+# a secrets file is defence in depth, and deleting one so the tree reads tidier is
+# the wrong direction on a file carrying DB_PASSWORD and JWT_SECRET_KEY.
 VM_ENV_FILES       = [ "cloud-gpu.env", "cloud-test.env" ]
-VM_ENV_EXAMPLE     = "cloud-test.env.example"
+
+# RE-POINTED 2026-08-26 (row 0d175dac). Was cloud-test.env.example, retired with its
+# venue. src/scripts/cloud-run.env.example is the surviving pair of the same shape —
+# tracked template beside a git-ignored real file (.gitignore:79) — so the negative
+# control still has a live subject. Left pointing at the retired file it would have
+# passed vacuously: _git_ignores() is falsy for a path that does not exist, so the
+# assertion would have held for the wrong reason and guarded nothing.
+VM_ENV_EXAMPLE     = "src/scripts/cloud-run.env.example"
 PROVISION_SCRIPT   = REPO_ROOT / "src/scripts/provision-arbiter-on-vm.sh"
 LUPIN_VM_SCRIPT    = REPO_ROOT / "src/scripts/lupin-vm.sh"
 LUPIN_APP_INI      = REPO_ROOT / "src/conf/lupin-app.ini"
@@ -121,9 +137,9 @@ def test_vm_compose_env_files_are_git_ignored( env_file ):
 
 def test_the_tracked_example_stays_tracked():
     """
-    Negative control. A rule broad enough to swallow `cloud-test.env.example`
-    would silently untrack the one file a new deployer copies from, so the
-    ignore must be exact rather than a `cloud-*.env*` glob.
+    Negative control. A rule broad enough to swallow the tracked `.env.example`
+    template would silently untrack the one file a new deployer copies from, so
+    the ignore must be exact rather than a `*.env*` glob.
     """
     assert not _git_ignores( VM_ENV_EXAMPLE ), (
         f"{VM_ENV_EXAMPLE} must remain tracked — it is the copy-from template."
@@ -132,26 +148,42 @@ def test_the_tracked_example_stays_tracked():
 
 # --- 2. the provisioning script points the operator at containers that exist --
 
-def test_premise_the_two_compose_files_name_different_rest_containers():
+def test_exactly_one_cloud_compose_file_ships_and_it_reserves_no_gpu():
     """
-    Derive the container names from the compose files rather than hardcoding
-    them, so this file does not quietly outlive a rename it cannot see.
+    THE INVERSION, RESOLVED — and pinned so it cannot come back unnoticed.
 
-    Only the VENUE-SUFFIXED containers are expected to differ. The two Cloud SQL
-    sidecars (lupin-cloudsql-proxy, lupin-cloudsql-socket-init) carry the SAME
-    container_name in both files on purpose — they are the same service either
-    way. That shared prefix space is exactly why dctl_venue_present matches
-    whole-line-exact: `lupin-rest` is a prefix of `lupin-rest-cloud-gpu`, and a
-    substring test would report a cloud-test container present on a cloud-gpu VM.
+    This replaces two premise tests that both needed a SECOND cloud compose file:
+    one comparing the rest container_names across the pair, one asserting that the
+    file NOT named for a GPU was the one reserving a GPU. Both operands existed
+    only while docker-compose.cloud-test.yml did; it was retired 2026-08-26 under
+    Option A (row 0d175dac).
+
+    The second of those said in its own failure message that resolving the
+    inversion means deleting it. It resolved — by retiring the GPU-bearing file
+    rather than by moving the GPU block, which is the outcome Rick ruled. What is
+    left is ONE cloud compose file, named cloud-gpu, reserving no GPU, on a host
+    (lupin-host-test, e2-standard-8) that has none.
+
+    That is a coherent state, not the collision the row was filed about. This test
+    is what notices if a second cloud compose file appears, or if a GPU
+    reservation lands in the one we ship — either would re-open the row.
     """
-    gpu_rest  = { n for n in _container_names( "docker-compose.cloud-gpu.yml"  ) if n.startswith( "lupin-rest-" ) }
-    test_rest = { n for n in _container_names( "docker-compose.cloud-test.yml" ) if n.startswith( "lupin-rest-" ) }
+    cloud_files = sorted(
+        p.name for p in REPO_ROOT.glob( "docker-compose.cloud-*.yml" )
+    )
+    assert cloud_files == [ "docker-compose.cloud-gpu.yml" ], (
+        f"cloud compose files shipped: {cloud_files}. Expected exactly "
+        "['docker-compose.cloud-gpu.yml']. A second one re-opens row 0d175dac: two "
+        "venues means the naming axes can disagree again, and it needs its own "
+        "container_name collision check (see the retired premise test in git "
+        "history at this path)."
+    )
 
-    assert gpu_rest and test_rest, "each cloud compose file must name a lupin-rest-* container"
-    assert gpu_rest & test_rest == set(), (
-        f"the two cloud compose files now share a rest container_name "
-        f"({sorted( gpu_rest & test_rest )}); the collision this guard reasons "
-        f"about has changed shape — re-read row 0d175dac"
+    body = ( REPO_ROOT / "docker-compose.cloud-gpu.yml" ).read_text()
+    assert "driver: nvidia" not in body, (
+        "docker-compose.cloud-gpu.yml now reserves a GPU. The only VM "
+        "(lupin-host-test, e2-standard-8) has ZERO guestAccelerators, so `up` "
+        "would fail on it — see test_live_deploy_compose_file_requires_no_gpu_device."
     )
 
 
@@ -194,21 +226,10 @@ def test_live_deploy_compose_file_requires_no_gpu_device():
         )
 
 
-def test_premise_the_other_cloud_file_is_the_gpu_bearing_one():
-    """
-    The inversion this row exists to reconcile, pinned so it cannot be quietly
-    'fixed' by moving the GPU block instead of moving the names: the file NOT
-    named for a GPU is the one that reserves one.
-    """
-    test_body = ( REPO_ROOT / "docker-compose.cloud-test.yml" ).read_text()
-    gpu_body  = ( REPO_ROOT / "docker-compose.cloud-gpu.yml"  ).read_text()
-
-    assert "driver: nvidia" in test_body, (
-        "docker-compose.cloud-test.yml no longer reserves a GPU. If the GPU block "
-        "moved to the cloud-gpu file, the names finally agree — delete this test "
-        "and close row 0d175dac."
-    )
-    assert "driver: nvidia" not in gpu_body, (
-        "docker-compose.cloud-gpu.yml now reserves a GPU. Re-read "
-        "test_live_deploy_compose_file_requires_no_gpu_device — the VM has none."
-    )
+# RETIRED 2026-08-26 (row 0d175dac): test_premise_the_other_cloud_file_is_the_gpu_bearing_one.
+# It pinned the inversion — the file NOT named for a GPU was the one reserving one —
+# by reading docker-compose.cloud-test.yml. That file was retired under Option A, so
+# the inversion is gone and the assertion has no subject. Its own failure message
+# authorised exactly this ("the names finally agree — delete this test"). The
+# surviving state is pinned by
+# test_exactly_one_cloud_compose_file_ships_and_it_reserves_no_gpu above.

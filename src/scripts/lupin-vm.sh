@@ -8,7 +8,7 @@
 #   3. app service control   (svc up|down|restart|status|logs)  — docker compose on the VM
 #   4. local tunnel          (tunnel [PORT] [VM_PORT])          — bind localhost:PORT -> VM :VM_PORT
 #
-# Access is IAP-only (no public IP), identical to deploy-cloud-test.sh for SSH. NOTE: the `tunnel`
+# Access is IAP-only (no public IP). NOTE: the `tunnel`
 # subcommand forwards IAP TCP to VM_PORT (default 7999), which needs a VPC firewall rule allowing
 # the IAP range 35.235.240.0/20 -> tcp:VM_PORT (SSH works because tcp:22 already has one; 7999 and
 # any other VM-side port may not — one rule PER port). See runbook §"Tunnel firewall" for the
@@ -30,7 +30,7 @@ set -euo pipefail
 # ---- config (overridable via env) ----------------------------------------
 VM_NAME="${LUPIN_VM_NAME:-lupin-host-test}"
 VM_ZONE="${LUPIN_VM_ZONE:-us-central1-a}"
-VM_ROOT="/mnt/lupin-data/lupin"                 # UID-1001-owned on-VM checkout (deploy-cloud-test.sh:31)
+VM_ROOT="/mnt/lupin-data/lupin"                 # UID-1001-owned on-VM checkout
 VM_PIP_ROOT="/mnt/lupin-data/planning-is-prompting"  # sibling PIP checkout on the VM (push-env exports PLANNING_IS_PROMPTING_ROOT)
 VM_DEEPILY_PROJECTS_DIR="/mnt/lupin-data"       # parent of the on-VM checkouts; push-env exports DEEPILY_PROJECTS_DIR (referenced by the shipped alias library)
 # Per-machine state deliberately kept OUT of every repo (Rick 2026-08-04). On dev this is a
@@ -172,8 +172,9 @@ SUBCMD="${1:-}"
 shift || true
 
 # ---- project id (fail loud — a silent default can act on the wrong project) ----
-# Mirrors deploy-cloud-test.sh:115. VM lifecycle + IAP both take an explicit --project so nothing
-# rides on the ambient `gcloud config` project, which may point elsewhere.
+# VM lifecycle + IAP both take an explicit --project so nothing rides on the ambient
+# `gcloud config` project, which may point elsewhere. (This mirrored the same guard in
+# deploy-cloud-test.sh, retired 2026-08-26 — row 0d175dac.)
 require_project() {
     : "${LUPIN_GCP_PROJECT_ID:?Set LUPIN_GCP_PROJECT_ID (e.g. export LUPIN_GCP_PROJECT_ID=hello-world-foo-423219)}"
 }
@@ -269,8 +270,9 @@ do_push_bundle() {
     # STAMP THE PROVENANCE REF whenever the working tree MOVES (row c41ec7e6, 2026-08-24).
     # `.deployed-ref` is the file the code-sync design (src/rnd/v0.1.9/2026.06.23-gcp-code-sync-to-runtime-design.md
     # §3) promised so that "what is running on the VM?" is one `cat`, not a code-grep. Only
-    # deploy-cloud-test.sh ever wrote it, and that is not the script this VM is deployed with —
-    # so on 2026-08-24 the stamp read df611aa7 / 2026-07-13 while the VM's tree was at 24f8d88f /
+    # deploy-cloud-test.sh ever wrote it (retired 2026-08-26, row 0d175dac), and that was not
+    # the script this VM is deployed with — so on 2026-08-24 the stamp read df611aa7 /
+    # 2026-07-13 while the VM's tree was at 24f8d88f /
     # 2026-08-17. A stamp that is five weeks behind is worse than no stamp at all: an absent file
     # sends the reader to measure, a stale one sends them to a wrong answer they have no reason
     # to doubt.
@@ -281,11 +283,12 @@ do_push_bundle() {
     # actually completed.
     #
     # AXIS FIELD says `push-bundle-<mode>`, deliberately NOT `code`/`deps`. deploy-cloud-test.sh's
-    # third field records which axis its detector ROUTED to; push-bundle runs no such detector —
+    # third field recorded which axis its detector ROUTED to; that script was retired
+    # 2026-08-26 (row 0d175dac) and push-bundle runs no such detector —
     # it moves source and never touches deps or the image. Writing `code` here would claim a
     # routing decision that was never made, which is exactly the kind of confident-but-unearned
     # answer this row exists to remove. Readers that want the SHA are unaffected: every one of
-    # them takes field 1 (dctl_sanitize_sha, the e2e helper, preflight check B6).
+    # them takes field 1 — today that is preflight check B6 (pfv_deployed_ref_status).
     local stamp_ref="echo \$( git $safe rev-parse HEAD ) \$( date -u +%FT%TZ ) push-bundle-$mode | sudo tee $VM_ROOT/.deployed-ref >/dev/null && sudo chown 1001:1001 $VM_ROOT/.deployed-ref && echo REF_STAMPED && cat $VM_ROOT/.deployed-ref"
     local rcmd="cp /tmp/lupin-wip.bundle $vm_bundle && rm -f /tmp/lupin-wip.bundle && cd $VM_ROOT && sudo git $safe fetch origin $branch && sudo chown -R 1001:1001 .git && echo FETCHED && git $safe log --oneline -1 FETCH_HEAD"
     case "$mode" in

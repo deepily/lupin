@@ -46,13 +46,20 @@ WHAT THIS GUARD COVERS, AND WHAT IT DOES NOT
 COVERS: the socket-deletion path — the two Cloud SQL services whose identical
 hardcoded `container_name`s are today's accidental guard.
 
-DOES NOT COVER: the app-recreate path from ARM 1. Both files define a service
-named `lupin-rest` with DIVERGENT container_names (`lupin-rest-cloud-gpu` vs
-`lupin-rest-cloud-test`), which is the shape that destroyed `clay-probe-holder-a`.
-No hardcoded name protects that, so it is unguardable by the arm below — it is
-why a per-file `name:` is the real remedy rather than a tidier way to spell one.
-Stated here rather than left implied: this guard's scope is narrower than the
-hazard, and a green run is not a claim that the two stacks may be co-run.
+DOES NOT COVER: the app-recreate path from ARM 1. When there were two files they
+each defined a service named `lupin-rest` with DIVERGENT container_names
+(`lupin-rest-cloud-gpu` vs `lupin-rest-cloud-test`), which is the shape that
+destroyed `clay-probe-holder-a`. No hardcoded name protects that, so it is
+unguardable by the arm below — it is why a per-file `name:` is the real remedy
+rather than a tidier way to spell one. Stated here rather than left implied: this
+guard's scope is narrower than the hazard, and a green run is not a claim that two
+stacks may be co-run.
+
+STATE SINCE 2026-08-26 (row 0d175dac): docker-compose.cloud-test.yml was retired,
+so exactly ONE file declares these services and there is no live pair to compare.
+The pairwise live assertion is therefore gone; a tripwire took its place, and the
+predicate plus its controls are kept because they are what the re-arming commit
+will need. See test_exactly_one_compose_file_declares_the_cloud_sql_services.
 
 WHAT EACH TEST PINS
 -------------------
@@ -77,8 +84,11 @@ import yaml
 
 REPO_ROOT = Path( __file__ ).resolve().parents[ 4 ]
 
-CLOUD_GPU  = "docker-compose.cloud-gpu.yml"
-CLOUD_TEST = "docker-compose.cloud-test.yml"
+CLOUD_GPU = "docker-compose.cloud-gpu.yml"
+
+# Every compose file at the repo root. The tripwire below scans these to find how
+# many declare the Cloud SQL services — the dual-stack hazard needs TWO.
+ROOT_COMPOSE_GLOB = "docker-compose*.yml"
 
 # The two services whose identical hardcoded container_names are the ONLY thing
 # standing between a second stack's bring-up and the first stack's live socket.
@@ -164,8 +174,26 @@ def evaluate_dual_stack_isolation( gpu_doc, test_doc ):
 
 
 @pytest.fixture
-def live_docs():
-    return _load( CLOUD_GPU ), _load( CLOUD_TEST )
+def gpu_doc():
+    return _load( CLOUD_GPU )
+
+
+@pytest.fixture
+def synthetic_pair( gpu_doc ):
+    """
+    A SECOND stack modelled from the only live one.
+
+    Until 2026-08-26 this was a genuine pair: docker-compose.cloud-test.yml was
+    the other file declaring these services. It was retired that day (row
+    0d175dac), so there is no second live stack to compare against — the tripwire
+    above is what notices if one comes back.
+
+    The predicate's controls still need two operands, and copying the live doc is
+    a faithful model of the hazard rather than a stand-in for it: ARM 1 measured
+    exactly this shape — two files declaring the SAME services with the SAME
+    hardcoded container_names, resolving to one project name.
+    """
+    return gpu_doc, copy.deepcopy( gpu_doc )
 
 
 def _strip_container_names( doc ):
@@ -176,78 +204,82 @@ def _strip_container_names( doc ):
     return out
 
 
-def test_socket_init_rm_premise_holds( live_docs ):
+def test_socket_init_rm_premise_holds( gpu_doc ):
     """
-    PREMISE. Both files still run the socket `rm`. If they stop, this guard is
+    PREMISE. The live file still runs the socket `rm`. If it stops, this guard is
     protecting a hazard that no longer exists and should say so loudly rather
     than keep passing for a reason that has expired.
     """
-    for doc, rel in zip( live_docs, ( CLOUD_GPU, CLOUD_TEST ) ):
-        command = doc[ "services" ][ "cloudsql-socket-init" ][ "command" ]
-        joined  = " ".join( command ) if isinstance( command, list ) else str( command )
-        assert SOCKET_RM_FRAGMENT in joined, f"{rel}: cloudsql-socket-init no longer deletes the socket — re-read this guard's premise"
+    command = gpu_doc[ "services" ][ "cloudsql-socket-init" ][ "command" ]
+    joined  = " ".join( command ) if isinstance( command, list ) else str( command )
+    assert SOCKET_RM_FRAGMENT in joined, f"{CLOUD_GPU}: cloudsql-socket-init no longer deletes the socket — re-read this guard's premise"
 
 
-def test_live_compose_files_are_isolated_by_at_least_one_mechanism( live_docs ):
+def test_exactly_one_compose_file_declares_the_cloud_sql_services():
     """
-    THE LIVE ASSERTION. Goes red the moment a rename-only diff lands.
+    THE TRIPWIRE, and the reason this file is not deleted.
+
+    The dual-stack hazard needs TWO compose files declaring these services in one
+    directory. Since docker-compose.cloud-test.yml was retired (2026-08-26, row
+    0d175dac) there is exactly ONE, so the live pairwise assertion has no second
+    operand and is gone.
+
+    This is what notices if a second one comes back. It goes RED on the commit
+    that adds it — which is the commit that must also pin a distinct top-level
+    `name:` in each file, per the ruling above. Deleting this file instead would
+    have made that commit look clean.
     """
-    gpu_doc, test_doc = live_docs
-    result = evaluate_dual_stack_isolation( gpu_doc, test_doc )
-    assert result[ "safe" ], (
-        "Neither isolation mechanism holds: the two cloud compose files share a "
-        "compose project and no longer share a hardcoded container_name. Under "
-        "one project name docker RECREATES rather than conflicts, so stack 2's "
-        "socket-init deletes stack 1's live socket. Pin a distinct top-level "
-        "`name:` in each file IN THIS SAME COMMIT."
+    declaring = []
+    for path in sorted( REPO_ROOT.glob( ROOT_COMPOSE_GLOB ) ):
+        doc = yaml.safe_load( path.read_text() ) or {}
+        services = doc.get( "services" ) or {}
+        if all( s in services for s in COLLISION_GUARD_SERVICES ):
+            declaring.append( path.name )
+
+    assert declaring == [ CLOUD_GPU ], (
+        f"compose files declaring {COLLISION_GUARD_SERVICES}: {declaring}. "
+        f"Expected exactly [{CLOUD_GPU!r}]. A SECOND file re-arms the dual-stack "
+        "socket-deletion hazard this guard documents: under one compose project "
+        "name docker RECREATES rather than conflicts, so stack 2's socket-init "
+        "deletes stack 1's live socket. Pin a distinct top-level `name:` in each "
+        "file IN THIS SAME COMMIT, then re-point this assertion at the new set."
     )
 
 
-def test_todays_guard_is_the_name_collision_arm( live_docs ):
-    """
-    Pins WHICH arm is load-bearing right now, so a future reader does not assume
-    the files are project-isolated when they are only accidentally name-guarded.
-    """
-    gpu_doc, test_doc = live_docs
-    result = evaluate_dual_stack_isolation( gpu_doc, test_doc )
-    assert result[ "name_collision_guard" ] is True
-    assert result[ "project_isolated"     ] is False, "files now pin distinct project names — update this guard's narrative, the accidental arm is no longer what protects us"
-
-
-def test_rename_only_diff_is_rejected( live_docs ):
+def test_rename_only_diff_is_rejected( synthetic_pair ):
     """
     CONTROL THAT MUST FAIL. Strip the container names, pin nothing: unsafe.
     """
-    gpu_doc, test_doc = live_docs
+    gpu_doc, test_doc = synthetic_pair
     result = evaluate_dual_stack_isolation( _strip_container_names( gpu_doc ), _strip_container_names( test_doc ) )
     assert result[ "name_collision_guard" ] is False
     assert result[ "project_isolated"     ] is False
     assert result[ "safe"                 ] is False
 
 
-def test_rename_plus_distinct_project_names_is_accepted( live_docs ):
+def test_rename_plus_distinct_project_names_is_accepted( synthetic_pair ):
     """
     The correct one-commit shape is ACCEPTED — otherwise this guard would just be
     "never change these files", which blocks the ruled remedy instead of the
     dangerous half of it.
     """
-    gpu_doc, test_doc = live_docs
+    gpu_doc, test_doc = synthetic_pair
     gpu_stripped  = _strip_container_names( gpu_doc  )
     test_stripped = _strip_container_names( test_doc )
     gpu_stripped [ "name" ] = "lupin-cloud-gpu"
-    test_stripped[ "name" ] = "lupin-cloud-test"
+    test_stripped[ "name" ] = "lupin-cloud-second"
     result = evaluate_dual_stack_isolation( gpu_stripped, test_stripped )
     assert result[ "project_isolated" ] is True
     assert result[ "safe"             ] is True
 
 
-def test_identical_project_names_are_not_isolation( live_docs ):
+def test_identical_project_names_are_not_isolation( synthetic_pair ):
     """
     ARM 1 of the measurement, as a unit assertion: two files pinning the SAME
     project name are the regime where the socket was deleted and the first
     stack's app container was destroyed.
     """
-    gpu_doc, test_doc = live_docs
+    gpu_doc, test_doc = synthetic_pair
     gpu_stripped  = _strip_container_names( gpu_doc  )
     test_stripped = _strip_container_names( test_doc )
     gpu_stripped [ "name" ] = "lupin"
@@ -264,7 +296,7 @@ def test_blank_project_name_is_treated_as_unpinned():
     unguarded regime on a typo.
     """
     gpu_doc  = { "name" : "   ", "services" : {} }
-    test_doc = { "name" : "lupin-cloud-test", "services" : {} }
+    test_doc = { "name" : "lupin-cloud-second", "services" : {} }
     assert is_project_isolated( gpu_doc, test_doc ) is False
 
 

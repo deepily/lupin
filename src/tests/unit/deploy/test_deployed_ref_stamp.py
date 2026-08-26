@@ -7,9 +7,10 @@ THE DEFECT
 ----------
 The code-sync design (src/rnd/v0.1.9/2026.06.23-gcp-code-sync-to-runtime-design.md §3)
 promised a provenance stamp so that "what is running on the VM?" is one `cat`,
-not a code-grep. Only `deploy-cloud-test.sh` ever wrote it — and that is not the
-script this VM is deployed with. `lupin-vm.sh push-bundle` moves the tree in both
-its moving modes and wrote nothing.
+not a code-grep. Only `deploy-cloud-test.sh` ever wrote it — and that was not the
+script this VM is deployed with (it was retired 2026-08-26, row 0d175dac).
+`lupin-vm.sh push-bundle` moves the tree in both its moving modes and wrote
+nothing.
 
 Measured on the live VM 2026-08-24:
 
@@ -20,13 +21,19 @@ A stamp five weeks behind is worse than no stamp, because an absent file sends
 the reader to measure and a stale one sends them to a wrong answer they have no
 reason to doubt.
 
-IT IS NOT ONLY A DOCUMENTATION DEFECT
--------------------------------------
-`deploy-cloud-test.sh` takes its axis-detect BASELINE from this file. With the
-live stale value, a pure code change is routed to a full image rebuild:
+IT WAS NOT ONLY A DOCUMENTATION DEFECT
+--------------------------------------
+`deploy-cloud-test.sh` TOOK its axis-detect BASELINE from this file. With the live
+stale value, a pure code change was routed to a full image rebuild:
 
     dctl_detect_axis 1959ed18 dc4b655d  ->  code    (true baseline)
     dctl_detect_axis df611aa7 dc4b655d  ->  deps    (stale stamp)
+
+⚠️ PAST TENSE SINCE 2026-08-26 (row 0d175dac): that script and its `dctl_detect_axis`
+were retired, and nothing replaced the detector — so this second consequence no
+longer has a mechanism. It is kept as the record of why the check was built. The
+FIRST consequence is unchanged and is what B6 still guards: a stale stamp sends the
+reader to a wrong answer they have no reason to doubt.
 
 That pair is asserted below, so the claim in preflight's B6 comment is checked
 rather than merely written down.
@@ -62,7 +69,6 @@ LUPIN_ROOT = pathlib.Path( os.environ[ "LUPIN_ROOT" ] )
 SCRIPT     = LUPIN_ROOT / "src/scripts/lupin-vm.sh"
 PREFLIGHT  = LUPIN_ROOT / "src/scripts/preflight-vm.sh"
 LIB        = LUPIN_ROOT / "src/scripts/lib/preflight-vm-lib.sh"
-DCTL_LIB   = LUPIN_ROOT / "src/scripts/lib/deploy-cloud-test-lib.sh"
 
 SOURCE           = SCRIPT.read_text()
 PREFLIGHT_SOURCE = PREFLIGHT.read_text()
@@ -164,10 +170,11 @@ def test_dry_run_narration_mentions_the_stamp():
 
 def test_the_axis_field_does_not_impersonate_a_routed_axis():
     """
-    deploy-cloud-test.sh's third field records which axis its detector ROUTED to
-    (`code` / `deps`). push-bundle runs no such detector — it moves source and
-    never touches deps or the image. Writing `code` there would claim a routing
-    decision that was never made.
+    deploy-cloud-test.sh's third field recorded which axis its detector ROUTED to
+    (`code` / `deps`); that script was retired 2026-08-26 (row 0d175dac).
+    push-bundle runs no such detector — it moves source and never touches deps or
+    the image. Writing `code` there would claim a routing decision that was never
+    made, which is why this stays asserted after the other writer is gone.
     """
     definition = re.search( r"^\s*local stamp_ref=.*$", SOURCE, re.M ).group( 0 )
     assert "push-bundle-$mode" in definition
@@ -238,22 +245,27 @@ def test_the_extracted_stamp_records_the_repos_actual_head( tmp_path, mode ):
     assert fields[ 2 ] == f"push-bundle-{mode}"
 
 
-def test_the_written_stamp_survives_the_sanitizer_every_reader_uses( tmp_path ):
+def test_the_written_stamp_survives_the_reader_that_consumes_it( tmp_path ):
     """
-    THE HANDSHAKE with the existing consumers. `dctl_sanitize_sha` strips a
-    .deployed-ref line to hex so deploy-cloud-test.sh can use it as an axis
-    baseline. A stamp this script writes must come back out of that function as
-    exactly the sha it recorded — if either side's idea of the format drifts,
-    this fails.
+    THE HANDSHAKE with the consumer. A stamp this script writes must be read back
+    by the live reader as exactly the sha it recorded — if either side's idea of
+    the format drifts, this fails.
+
+    RE-POINTED 2026-08-26 (row 0d175dac). This used to call `dctl_sanitize_sha`,
+    which lived in deploy-cloud-test-lib.sh and was retired with that script. The
+    surviving consumer is preflight's `pfv_deployed_ref_status`, which does its own
+    field-1 extraction — so the handshake is still real, and is now tested against
+    the reader that actually runs rather than one that no longer exists.
     """
     root, sha = _seed_repo( tmp_path )
     cmd = _extract_stamp_command()
     _run_sh( f'VM_ROOT="{root}"; safe="-c safe.directory={root}"; mode="checkout"; '
              f'cd "{root}"; {cmd}' )
 
-    r = _run_sh( f'source "{DCTL_LIB}"; '
-                 f'dctl_sanitize_sha "$( awk \'{{print $1}}\' "{root}/.deployed-ref" )"' )
-    assert r.stdout.strip() == sha
+    line = ( root / ".deployed-ref" ).read_text().strip()
+    r = _run_sh( f'source "{LIB}"; pfv_deployed_ref_status "{line}" "{sha}"' )
+    assert r.stdout.strip() == "MATCH", r.stdout + r.stderr
+    assert r.returncode == 0
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -342,18 +354,9 @@ def test_b6_runs_in_the_post_phase_block():
     assert block_start < PREFLIGHT_SOURCE.index( "pfv_deployed_ref_status" ) < block_end
 
 
-def test_the_stale_baseline_really_does_misroute_the_axis():
-    """
-    B6's comment claims a stale stamp makes deploy-cloud-test.sh's axis detector
-    route a pure code change to a full image rebuild. That is the load-bearing
-    reason the check exists at all, so it is asserted here rather than left as
-    prose. Both shas are in this repo's history; dc4b655d moves no dep file
-    relative to the VM's true HEAD, and does relative to the stale stamp.
-    """
-    def axis( prev, target ):
-        return _run_sh( f'source "{DCTL_LIB}"; dctl_detect_axis {prev} {target}' ).stdout.strip()
-
-    assert axis( LIVE_VM_HEAD, "dc4b655d" ) == "code", \
-        "true baseline should route a code-only change to the bind-mount path"
-    assert axis( LIVE_STALE_LINE.split()[ 0 ], "dc4b655d" ) == "deps", \
-        "stale baseline should misroute the same change to a full image rebuild"
+# RETIRED 2026-08-26 (row 0d175dac): test_the_stale_baseline_really_does_misroute_the_axis.
+# It asserted that a stale stamp made deploy-cloud-test.sh's axis detector route a pure
+# code change to a full image rebuild. Both the script and its `dctl_detect_axis` were
+# retired that day and nothing replaced the detector, so the assertion had no subject.
+# B6 is unaffected: its other stated reason -- a stale stamp means the tree moved and was
+# never re-stamped -- is still checked, by the tests above.

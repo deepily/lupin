@@ -12,7 +12,8 @@ be dropped by any future edit without a single test going red.
 
 THE MECHANISM, MEASURED (docker compose v2.19.1, isolated throwaway project)
 ---------------------------------------------------------------------------
-Graph, identical in docker-compose.cloud-gpu.yml and docker-compose.cloud-test.yml:
+Graph, in docker-compose.cloud-gpu.yml (and, until it was retired on 2026-08-26,
+identically in docker-compose.cloud-test.yml):
 
     lupin-rest --depends_on(service_healthy)--> cloud-sql-proxy
     cloud-sql-proxy --depends_on(service_completed_successfully)--> cloudsql-socket-init
@@ -47,11 +48,16 @@ longer exists.
 when the fix is removed.
 
 `test_compose_verbs_reference_a_real_service` catches the container-name-for-
-service-name class (arm 4). `deploy-cloud-test.sh` AXIS-B passed
-`lupin-rest-cloud-test` (a container_name) to `compose pull`/`compose up`; under
-`set -e` it aborted on the `pull` and so had NEVER completed. That also made its
-missing `--no-deps` LATENT rather than lucky: fixing the service name alone would
-have ARMED the socket-deletion bug on the cloud-test VM.
+service-name class (arm 4). The case that produced this arm: `deploy-cloud-test.sh`
+AXIS-B passed `lupin-rest-cloud-test` (a container_name) to `compose pull`/`compose
+up`; under `set -e` it aborted on the `pull` and so had NEVER completed. That also
+made its missing `--no-deps` LATENT rather than lucky — fixing the service name
+alone would have ARMED the socket-deletion bug.
+
+That script and its compose file were RETIRED on 2026-08-26 (row 0d175dac), so the
+arm no longer has that subject. It is kept, and still runs against lupin-vm.sh: the
+mistake it catches is a shape any deploy script can make, and the reason this file
+exists at all is that the original fix was protected by nothing.
 """
 
 import re
@@ -65,11 +71,10 @@ REPO_ROOT = Path( __file__ ).resolve().parents[ 4 ]
 # The deploy scripts that drive `docker compose` against a cloud compose file.
 # Each entry: script path -> the compose file whose services it names.
 DEPLOY_SCRIPTS = {
-    "src/scripts/lupin-vm.sh"          : "docker-compose.cloud-gpu.yml",
-    "src/scripts/deploy-cloud-test.sh" : "docker-compose.cloud-test.yml",
+    "src/scripts/lupin-vm.sh" : "docker-compose.cloud-gpu.yml",
 }
 
-COMPOSE_FILES = [ "docker-compose.cloud-gpu.yml", "docker-compose.cloud-test.yml" ]
+COMPOSE_FILES = [ "docker-compose.cloud-gpu.yml" ]
 
 # `up -d` with NO service argument is a whole-graph bring-up: running socket-init
 # is CORRECT there (it is the first-boot path, and `--no-deps` is not even
@@ -244,9 +249,11 @@ def test_compose_verbs_reference_a_real_service( script_rel ):
     `docker compose pull|up` resolves SERVICE names. Handed a container_name it
     exits `no such service: <name>` (measured, compose v2.19.1, both verbs).
 
-    deploy-cloud-test.sh AXIS-B passed $REST_CONTAINER ("lupin-rest-cloud-test",
-    a container_name) to both verbs, so under `set -e` it aborted on the `pull`
-    and had never once completed a dependency-axis deploy.
+    The case that produced this arm: deploy-cloud-test.sh AXIS-B passed
+    $REST_CONTAINER ("lupin-rest-cloud-test", a container_name) to both verbs, so
+    under `set -e` it aborted on the `pull` and had never once completed a
+    dependency-axis deploy. That script was retired 2026-08-26 (row 0d175dac); the
+    arm still guards every surviving deploy script.
     """
     text        = _read( script_rel )
     variables   = _script_vars( text )

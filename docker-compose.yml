@@ -7,7 +7,7 @@ services:
   # major 16 → the existing postgresql-dev-data volume is compatible (design §11).
   # Applying this needs `docker compose up -d --force-recreate` (NOT restart) —
   # SHARED-INFRA, coordinated with the operator, not applied from a build session.
-  # Cloud-SQL supports pgvector natively → cloud-test/prod compose need no change.
+  # Cloud-SQL supports pgvector natively → the cloud/prod compose needs no change.
   postgres:
     image: pgvector/pgvector:pg16
     container_name: lupin-postgres
@@ -182,14 +182,12 @@ services:
       # rewrite the deploy config it is asserting about.
       - ./docker-compose.yml:/var/lupin/docker-compose.yml:ro
       - ./docker-compose.cloud-gpu.yml:/var/lupin/docker-compose.cloud-gpu.yml:ro
-      - ./docker-compose.cloud-test.yml:/var/lupin/docker-compose.cloud-test.yml:ro
       - ./docker:/var/lupin/docker:ro
       - ./.dockerignore:/var/lupin/.dockerignore:ro
       - ./.docview.yml:/var/lupin/.docview.yml:ro
       - ./.gitleaks.toml:/var/lupin/.gitleaks.toml:ro
       - ./.stylelintrc.json:/var/lupin/.stylelintrc.json:ro
       - ./alembic.ini:/var/lupin/alembic.ini:ro
-      - ./cloud-test.env.example:/var/lupin/cloud-test.env.example:ro
       - ./package.json:/var/lupin/package.json:ro
       - ./package-lock.json:/var/lupin/package-lock.json:ro
       - ./pyproject.toml:/var/lupin/pyproject.toml:ro
@@ -368,14 +366,12 @@ services:
       # rewrite the deploy config it is asserting about.
       - ./docker-compose.yml:/var/lupin/docker-compose.yml:ro
       - ./docker-compose.cloud-gpu.yml:/var/lupin/docker-compose.cloud-gpu.yml:ro
-      - ./docker-compose.cloud-test.yml:/var/lupin/docker-compose.cloud-test.yml:ro
       - ./docker:/var/lupin/docker:ro
       - ./.dockerignore:/var/lupin/.dockerignore:ro
       - ./.docview.yml:/var/lupin/.docview.yml:ro
       - ./.gitleaks.toml:/var/lupin/.gitleaks.toml:ro
       - ./.stylelintrc.json:/var/lupin/.stylelintrc.json:ro
       - ./alembic.ini:/var/lupin/alembic.ini:ro
-      - ./cloud-test.env.example:/var/lupin/cloud-test.env.example:ro
       - ./package.json:/var/lupin/package.json:ro
       - ./package-lock.json:/var/lupin/package-lock.json:ro
       # node_modules — the `typescript` tier's ONLY source of c8/tsx/esbuild.

@@ -4,8 +4,11 @@ Compose-service parity — R1 of the configuration-splintering analysis
 
 THE DEFECT THIS EXISTS TO CATCH
 -------------------------------
-The `lupin-rest` service shape is defined FOUR times across THREE compose files,
-each list hand-maintained, and no two agree. On 2026-05-12 two doc-viewer binds
+The `lupin-rest` service shape is defined THREE times across TWO compose files,
+each list hand-maintained, and no two agree. (It was FOUR across THREE until
+2026-08-26, when docker-compose.cloud-test.yml was retired — row 0d175dac. The
+defect below is UNCHANGED: it lives between docker-compose.yml and
+docker-compose.cloud-gpu.yml, which is the pair that actually regressed.) On 2026-05-12 two doc-viewer binds
 were added to docker-compose.yml; they were never copied into
 docker-compose.cloud-gpu.yml, and the VM's doc viewer served NOTHING for weeks.
 Root cause, in the runbook's own words: "nothing compared the two files."
@@ -15,7 +18,8 @@ This is the comparator. It is STATIC — no docker, no VM, no network.
 WHAT IT IS NOT
 --------------
 It is NOT a demand for uniformity. Several divergences are RULED DECISIONS
-(cloud-test deliberately omits ./src so the baked -r3 image is not shadowed).
+(cloud-gpu deliberately omits the dev-box-only surfaces — worktree lanes, test
+runner config, training env).
 The rule is that every divergence be DECLARED AND DATED, not that none exist.
 
 Both maps below are checked in BOTH DIRECTIONS: an entry that is no longer
@@ -37,7 +41,6 @@ PROJECT_ROOT = cu.get_project_root()
 SERVICES = {
     "dev-dev"    : ( "docker-compose.yml",            "lupin-rest-dev"  ),
     "dev-test"   : ( "docker-compose.yml",            "lupin-rest-test" ),
-    "cloud-test" : ( "docker-compose.cloud-test.yml", "lupin-rest"      ),
     "cloud-gpu"  : ( "docker-compose.cloud-gpu.yml",  "lupin-rest"      ),
 }
 
@@ -46,33 +49,16 @@ SERVICES = {
 # An absence NOT listed here fails. An entry listed here that is actually
 # PRESENT also fails (stale exemption).
 KNOWN_DIVERGENT_MOUNTS = {
-    "/var/lupin/src": {
-        "cloud-test": "2026-07-07 Mr. Radio ruling — app code rides the baked "
-                      "lupin:1.2.1-pgvector-r3 image; a live ./src bind would SHADOW "
-                      "the baked cutover code. Deliberate, documented in the file.",
-    },
     "/var/lupin/.git": {
-        "cloud-test": "2026-07-26 — worktree lanes (BFE/TFE) are a dev-box facility; "
-                      "the cloud legs do not run fix-expediters.",
         "cloud-gpu" : "2026-07-26 — same.",
     },
     "/var/lupin/.claude/worktrees": {
-        "cloud-test": "2026-07-26 — see /var/lupin/.git.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/.git.",
     },
     "/var/lupin/pytest.ini": {
-        "cloud-test": "2026-07-26 — test-runner config; the cloud legs are not test venues.",
         "cloud-gpu" : "2026-07-26 — same.",
     },
     "/var/lupin/dm-corpus": {
-        "cloud-test": "2026-08-13 Mr. Radio — the DM traffic corpus is bind-mounted from "
-                      "the DEV BOX's <projects-data>/lupin/dm-corpus, a host path that does "
-                      "not exist on a GCP VM. The writer degrades correctly without the "
-                      "mount: with LUPIN_DM_CORPUS_DIR unset it derives a path from the "
-                      "fleet data root, which is still OUTSIDE the repo (the property that "
-                      "matters) but container-local and therefore ephemeral. Accepted — the "
-                      "corpus is a dev-box research dataset, and the cloud legs send no "
-                      "fleet DM traffic to collect.",
         "cloud-gpu" : "2026-08-13 — same.",
     },
     # ── repo-root deploy artifacts the UNIT SUITE asserts about (bug b5b6d252) ──
@@ -86,54 +72,36 @@ KNOWN_DIVERGENT_MOUNTS = {
     # cloud leg ever runs the unit suite, these entries must go, and the predicate
     # says so rather than leaving it to memory.
     "/var/lupin/docker-compose.yml": {
-        "cloud-test": "2026-07-26 — read by unit tests only; the cloud legs do not run the unit suite.",
         "cloud-gpu" : "2026-07-26 — same.",
     },
     "/var/lupin/docker-compose.cloud-gpu.yml": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
-        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
-    },
-    "/var/lupin/docker-compose.cloud-test.yml": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     "/var/lupin/docker": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     "/var/lupin/.dockerignore": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     "/var/lupin/.docview.yml": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     # The remaining surfaces test_no_hardcoded_gcp_identifiers READS. It walks
     # git ls-files rather than a list, so the set is 16 files, not the 6 the
     # first pass guessed — see test_repo_root_artifact_mount_parity.py.
     "/var/lupin/.gitleaks.toml": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     "/var/lupin/.stylelintrc.json": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     "/var/lupin/alembic.ini": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
-        "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
-    },
-    "/var/lupin/cloud-test.env.example": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     "/var/lupin/package.json": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     "/var/lupin/package-lock.json": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     # ── node_modules — TEST-ONLY, and the dev absence is NOT the same reason ──
@@ -149,39 +117,27 @@ KNOWN_DIVERGENT_MOUNTS = {
                       "take. REMOVE THIS ENTRY the next time :7999 is recreated for any "
                       "other reason; the tier does not run there today, so nothing is lost "
                       "meanwhile.",
-        "cloud-test": "2026-07-27 — the cloud legs do not run the typescript tier "
-                      "(scoped to WHO RUNS THE SUITE, per the block above — not to "
-                      "'cloud legs are different').",
-        "cloud-gpu" : "2026-07-27 — see cloud-test.",
+        "cloud-gpu" : "2026-07-27 — same: the cloud legs do not run the typescript tier.",
     },
     "/var/lupin/pyproject.toml": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     "/var/lupin/tsconfig.json": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     "/var/lupin/tsconfig.diagnostic.json": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     "/var/lupin/tsconfig.nav.json": {
-        "cloud-test": "2026-07-26 — see /var/lupin/docker-compose.yml.",
         "cloud-gpu" : "2026-07-26 — see /var/lupin/docker-compose.yml.",
     },
     "/home/rruiz/.lora_env": {
-        "cloud-test": "2026-07-26 — PEFT/LoRA training env, dev-box only.",
         "cloud-gpu" : "2026-07-26 — same.",
     },
     "/home/rruiz/.lupin": {
-        "cloud-test": "2026-07-26 — the notify CLIENT config; the cloud legs are notify "
-                      "TARGETS, not senders.",
         "cloud-gpu" : "2026-07-26 — same.",
     },
     "/var/external-claude/plans": {
-        "cloud-test": "2026-07-26 — the `claude-plans` doc scope is not deployed to the VM "
-                      "(runbook §7c: its absence is the registry reporting reality).",
         "cloud-gpu" : "2026-07-26 — same.",
     },
     "/cloudsql": {
@@ -191,7 +147,7 @@ KNOWN_DIVERGENT_MOUNTS = {
     },
     "/var/lupin/src/conf/keys": {
         "dev-dev"  : "2026-07-26 — on dev the keys dir is already inside the ./src bind; "
-                     "the cloud legs bind it separately because cloud-test has no ./src.",
+                     "the cloud leg binds it separately because it has no ./src bind.",
         "dev-test" : "2026-07-26 — same.",
     },
     # 2026-08-02 — BOTH /home/rruiz/.claude entries DELETED, gap closed, not excused.
@@ -210,12 +166,6 @@ KNOWN_DIVERGENT_MOUNTS = {
     # This test is what surfaced the leftovers — it failed with "IS NOW PRESENT in
     # dev-dev / dev-test" the moment the mounts converged, which is the entire point
     # of the stale-exemption check.
-    "/home/rruiz/.claude/sessions": {
-        "cloud-test": "2026-07-26 UNCLASSIFIED — the CC session-bridge bind that fixed "
-                      "persona-404 on cloud-gpu (b7ea000f) was never added to cloud-test. "
-                      "Whether that leg allocates personas has NOT been determined. "
-                      "This entry records an open question, not a ruling.",
-    },
     # ── the doc-viewer surface: ONE fact, TWO deliberate shapes ────────────
     # NB: cloud-gpu is deliberately NOT exempted here. It satisfies this target by
     # CHILD COVERAGE (see _covered_by_children) — it binds each repo explicitly because
@@ -224,50 +174,20 @@ KNOWN_DIVERGENT_MOUNTS = {
     # lack this" would equally have masked cloud-gpu losing all four explicit binds,
     # i.e. the exact 2026-05-12 regression. An exemption must not be wider than the
     # divergence it excuses.
-    "/var/external-projects": {
-        "cloud-test": "2026-07-26 UNCLASSIFIED — see the four child entries below.",
-    },
-    "/var/external-projects/lupin": {
-        "cloud-test": "2026-07-26 UNCLASSIFIED — cloud-test carries NO doc-viewer binds at all. "
-                      "Whether that leg is meant to serve the doc viewer has NOT been "
-                      "determined; nothing in the repo answers it. Records an open question. "
-                      "If it IS meant to, this is the 2026-05-12 regression latent a second time.",
-    },
-    "/var/external-projects/planning-is-prompting": {
-        "cloud-test": "2026-07-26 UNCLASSIFIED — see /var/external-projects/lupin.",
-    },
-    "/var/external-projects/google/skills-distillation": {
-        "cloud-test": "2026-07-26 UNCLASSIFIED — see /var/external-projects/lupin.",
-    },
-    "/var/external-projects/google/parallel-search": {
-        "cloud-test": "2026-07-26 UNCLASSIFIED — see /var/external-projects/lupin.",
-    },
 }
 
 # ── KNOWN_DIVERGENT_ENV ───────────────────────────────────────────────────
 KNOWN_DIVERGENT_ENV = {
     "LUPIN_DM_CORPUS_DIR": {
-        "cloud-test": "2026-08-13 Mr. Radio — names the dev-box bind-mount that the cloud "
-                      "legs do not have (see KNOWN_DIVERGENT_MOUNTS /var/lupin/dm-corpus). "
-                      "UNSET IS A SUPPORTED STATE, not a gap: the resolver falls back to a "
-                      "fleet-data-root derivation that is still outside the repo. Setting it "
-                      "on a leg with no such mount would be worse — it would name a directory "
-                      "nobody backs up and read as deliberate.",
         "cloud-gpu" : "2026-08-13 — same.",
     },
     "LUPIN_SERVER_PORT": {
-        "cloud-test": "2026-08-13 Mr. Radio — corpus provenance only: it labels which server "
-                      "wrote a DM row so :7999 and :8000 traffic stays separable in one shared "
-                      "file. The cloud legs write no fleet DM traffic, and the row records "
-                      "'unknown' rather than guessing when it is absent.",
         "cloud-gpu" : "2026-08-13 — same.",
     },
     "CHROME_PATH": {
-        "cloud-test": "2026-07-26 — Playwright/mux E2E is a dev-box venue.",
         "cloud-gpu" : "2026-07-26 — same.",
     },
     "LUPIN_INTERACTIVE_TESTS": {
-        "cloud-test": "2026-07-26 — see CHROME_PATH.",
         "cloud-gpu" : "2026-07-26 — same.",
     },
     # LUPIN_V1_ARM_BASE_URL and LUPIN_PAIRED_N had exemptions here until 2026-08-26. Both
@@ -275,21 +195,15 @@ KNOWN_DIVERGENT_ENV = {
     # exemption for them would now be an entry excusing a variable that does not exist —
     # which is how this table rots into something nobody trusts.
     "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": {
-        "cloud-test": "2026-07-26 — test credentials, dev-box venues only.",
         "cloud-gpu" : "2026-07-26 — same.",
     },
     "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": {
-        "cloud-test": "2026-07-26 — see above.",
         "cloud-gpu" : "2026-07-26 — same.",
     },
     "GH_TOKEN": {
-        "cloud-test": "2026-07-26 — GitHub creds on the VM live in ~/.git-credentials on the "
-                      "HOST, not in the container (runbook §7b).",
         "cloud-gpu" : "2026-07-26 — same.",
     },
     "DB_HOST": {
-        "cloud-test": "2026-07-26 — cloud legs reach postgres over the Cloud SQL unix socket, "
-                      "so host/port are not addressed this way.",
         "cloud-gpu" : "2026-07-26 — same.",
     },
     "DB_NAME": {
@@ -321,7 +235,6 @@ KNOWN_DIVERGENT_ENV = {
                      "an asymmetry between two services in the SAME file. notify() reads this "
                      "for target-user resolution (401 without it). Not yet determined whether "
                      "dev-dev needs it. Records an open question, not a ruling.",
-        "cloud-test": "2026-07-26 UNCLASSIFIED — see above.",
         "cloud-gpu" : "2026-07-26 UNCLASSIFIED — see above.",
     },
     "LUPIN_MODEL_SERVER_API_KEY_FILE": {

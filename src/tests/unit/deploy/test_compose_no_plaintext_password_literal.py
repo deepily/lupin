@@ -40,7 +40,6 @@ PROJECT_ROOT = cu.get_project_root()
 COMPOSE_FILES = (
     "docker-compose.yml",
     "docker-compose.cloud-gpu.yml",
-    "docker-compose.cloud-test.yml",
 )
 
 # No \b anywhere: that boundary is exactly what hid these names for months.

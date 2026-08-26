@@ -32,7 +32,8 @@ fi
 #
 # WHY 2 EXISTS AND WHY IT COMES BEFORE 3: the arbiter's host venv used to live at
 # $LUPIN_ROOT/.venv-arbiter, INSIDE the deploy tree. Every code push runs
-# `sudo chown -R 1001:1001` over that tree (lupin-vm.sh:253, deploy-cloud-test.sh:155),
+# `sudo chown -R 1001:1001` over that tree (lupin-vm.sh; deploy-cloud-test.sh did the
+# same until it was retired 2026-08-26, row 0d175dac),
 # and uid 1001 does not exist on lupin-host-test — so the venv ended up owned by a
 # nonexistent user, unwritable by the service account that runs it. Provisioning it
 # in place failed with `PermissionError: RECORD`, and a hand-chown was silently

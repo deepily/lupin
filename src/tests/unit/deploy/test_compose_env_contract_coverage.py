@@ -57,7 +57,6 @@ PROJECT_ROOT = cu.get_project_root()
 COMPOSE_FILES = (
     "docker-compose.yml",
     "docker-compose.cloud-gpu.yml",
-    "docker-compose.cloud-test.yml",
 )
 
 CONTRACT = os.path.join( PROJECT_ROOT, "src/conf/env-contract.tsv" )

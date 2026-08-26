@@ -5,8 +5,8 @@ THE DEFECT THIS CLOSES
     Two knobs with similar names, set side by side in every compose file,
     choosing COUPLED facts:
 
-        LUPIN_ENV        chooses the DATABASE. cloud-test.yml's own comment
-                         says it is "never inferred".
+        LUPIN_ENV        chooses the DATABASE. The cloud compose file's own
+                         comment says it is "never inferred".
         config_block_id  chooses the INI BLOCK (inside LUPIN_CONFIG_MGR_CLI_ARGS).
 
     Nothing compared them. A disagreement crashes nothing — the app simply
@@ -45,7 +45,6 @@ LIB_PATH     = os.path.join( PROJECT_ROOT, "src/scripts/lib/preflight-vm-lib.sh"
 COMPOSE_FILES = [
     "docker-compose.yml",
     "docker-compose.cloud-gpu.yml",
-    "docker-compose.cloud-test.yml",
 ]
 
 # Matches `LUPIN_ENV: testing` and `config_block_id=Lupin:+Testing-GCS`.
@@ -184,7 +183,10 @@ def test_scan_finds_every_known_pair():
     parser broke, not that the config is right.
     """
     pairs = _scan_compose_pairs()
-    assert len( pairs ) >= 4, f"expected >=4 LUPIN_ENV blocks, scanned {len( pairs )}: {pairs}"
+    # 3 since 2026-08-26 (row 0d175dac): docker-compose.cloud-test.yml carried the
+    # fourth and was retired. The floor tracks the files actually shipped — it is an
+    # instrument check, so it must move when the instrument's subject does.
+    assert len( pairs ) >= 3, f"expected >=3 LUPIN_ENV blocks, scanned {len( pairs )}: {pairs}"
     files_seen = { p[ 0 ] for p in pairs }
     assert "docker-compose.cloud-gpu.yml" in files_seen
     assert "docker-compose.yml" in files_seen

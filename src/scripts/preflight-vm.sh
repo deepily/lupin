@@ -431,21 +431,26 @@ done
 #
 # WHY IT WAS NEEDED: measured on this VM 2026-08-24, the stamp said df611aa7 / 2026-07-13
 # while the tree was at 24f8d88f / 2026-08-17 — five weeks apart. `lupin-vm.sh push-bundle`
-# moved the tree and never wrote the stamp; only deploy-cloud-test.sh wrote it, and that is
-# not the script this VM deploys with. push-bundle now stamps, and this is the assertion
-# that keeps the two from drifting apart again quietly.
+# moved the tree and never wrote the stamp; only deploy-cloud-test.sh wrote it (retired
+# 2026-08-26, row 0d175dac), and that was not the script this VM deploys with.
+# push-bundle now stamps, and this is the assertion that keeps the two from drifting
+# apart again quietly.
 #
 # WARN, NOT BLOCK: a wrong stamp does not make the VM unfit to deploy onto — the deploy
 # reads git, not this file. What it does is give every later reader a confident wrong
-# answer, and make deploy-cloud-test.sh's axis detector diff from a bogus baseline, since
-# it takes its "previous" sha from here. That second effect is measured, not supposed —
-# with the live VM's stale stamp on 2026-08-24:
+# answer. It ALSO used to make deploy-cloud-test.sh's axis detector diff from a bogus
+# baseline, since that detector took its "previous" sha from here — measured, not
+# supposed, with the live VM's stale stamp on 2026-08-24:
 #
 #     dctl_detect_axis 1959ed18 dc4b655d  ->  code   (true baseline: no dep file moved)
 #     dctl_detect_axis df611aa7 dc4b655d  ->  deps   (stale stamp: 1257 commits of drift)
 #
-# so a pure code change is routed to a full image rebuild. A wasted rebuild and a misled
-# operator, not an unsafe deploy — hence WARN. POST-phase with B1/B2 for the same reason
+# i.e. a pure code change routed to a full image rebuild. ⚠️ THAT SECOND EFFECT IS GONE:
+# the script and its dctl_detect_axis were retired 2026-08-26 (row 0d175dac) and nothing
+# replaced the detector, so the block above is kept as the record of why this check was
+# built, not as a live consequence. The FIRST effect — a confident wrong answer for every
+# later reader — is unchanged and is what this check still earns its place on.
+# A misled operator, not an unsafe deploy — hence WARN. POST-phase with B1/B2 for the same reason
 # they are: in PRE the ref is about to move, so the assertion would be noise.
 DEPLOYED_REF_FILE="$REPO_ROOT/.deployed-ref"
 ref_head="$( sudo -n git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf '' )"
