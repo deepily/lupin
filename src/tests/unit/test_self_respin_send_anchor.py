@@ -34,6 +34,13 @@ import cosa.agents.heartbeat_arbiter.self_respin_observer as obs
 UTC = datetime.timezone.utc
 
 
+# A memento body over MIN_MEMENTO_SUBSTANCE_BYTES (row 4cf9f9fd). The nonce-only
+# husk a truncating stamp leaves is now REJECTED, so a stub memento in a test about
+# something else has to look like a real one.
+_REAL_BODY = ( "board state: row 4cf9f9fd, manager mr radio, venue :8000 idle, "
+               "next act is the containment probe.\n" ) * 5
+
+
 def _dt( minute, second=0 ):
     """A fixed aware datetime at 2026-08-14T02:{minute}:{second}Z."""
     return datetime.datetime( 2026, 8, 14, 2, minute, second, tzinfo=UTC )
@@ -457,7 +464,7 @@ def test_scheduling_clears_a_stale_send_stamp_from_a_prior_cycle( tmp_path ):
     memento = tmp_path / ".claude-memento.md"
     nonce   = "stale-cycle-uuid"
     memento.write_text(
-        "# memento\n" + sr.build_nonce_line( nonce, _dt( 20 ) ) + "\n"
+        "# memento\n" + _REAL_BODY + sr.build_nonce_line( nonce, _dt( 20 ) ) + "\n"
     )
 
     stale = tmp_path / ".self-respin-keys-sent-sid9.marker"

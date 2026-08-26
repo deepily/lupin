@@ -71,7 +71,13 @@ def test_gate_non_string_aborts_fail_safe():
 # ---------------------------------------------------------------------------
 # build_nonce_line + verify_memento_content — the option-(b) freshness proof
 # ---------------------------------------------------------------------------
-def _memento_with_nonce( uuid, ts, extra="board state...\n" ):
+# A body over the substance floor (row 4cf9f9fd) — these tests are about FRESHNESS,
+# so they must not trip the nonce-only gate on their way to the assertion they mean.
+_REAL_BODY = ( "board state: row 4cf9f9fd in progress, manager mr radio, "
+               "venue :8000 idle, next act is the containment probe.\n" ) * 5
+
+
+def _memento_with_nonce( uuid, ts, extra=_REAL_BODY ):
     return f"# memento\n{extra}{sr.build_nonce_line( uuid, ts )}\n"
 
 
@@ -795,3 +801,95 @@ def test_confirmation_kwargs_takes_its_wording_from_confirmation_text():
 def test_confirmation_kwargs_degrades_the_persona_like_the_text_does():
     kwargs = sr.confirmation_kwargs( "unknown" )
     assert kwargs[ "question" ].startswith( f"{sr.UNNAMED_SEAT} is at their context ceiling" )
+
+
+# ---------------------------------------------------------------------------
+# Row 4cf9f9fd — the truncating stamp, and the two halves that make it unwritable.
+# Measured 2026-08-25 on session d34333a9: a 105-line memento became 93 bytes (the
+# nonce line alone), verified clean, and the pane cleared into it.
+# ---------------------------------------------------------------------------
+def test_verify_rejects_a_nonce_only_memento_even_though_it_is_fresh():
+    """The exact failure shape: right uuid, fresh ts, and nothing to wake into."""
+    content = f"{sr.build_nonce_line( 'u1', _dt( 20 ) )}\n"
+    ok, reason = sr.verify_memento_content( content, "u1", _dt( 21 ), cycle_window_seconds=300 )
+    assert ok is False
+    assert "nonce-only" in reason
+
+
+def test_verify_rejects_a_body_under_the_substance_floor():
+    content = _memento_with_nonce( "u1", _dt( 20 ), extra="b\n" )
+    ok, reason = sr.verify_memento_content( content, "u1", _dt( 21 ) )
+    assert ok is False
+    assert str( sr.MIN_MEMENTO_SUBSTANCE_BYTES ) in reason
+
+
+def test_substance_floor_sits_under_every_real_memento():
+    """1226B was the smallest genuine memento on the box when this floor was set."""
+    assert sr.MIN_MEMENTO_SUBSTANCE_BYTES < 1226
+
+
+def test_stamp_appends_without_losing_the_body( tmp_path ):
+    memento = tmp_path / "seat.md"
+    memento.write_text( _REAL_BODY, encoding="utf-8" )
+
+    line = sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
+
+    after = memento.read_text( encoding="utf-8" )
+    assert _REAL_BODY.strip() in after                     # every byte of the body survived
+    assert after.endswith( line + "\n" )
+    assert sr.verify_memento_content( after, "u1", _dt( 21 ) )[ 0 ] is True
+
+
+def test_stamp_is_the_fix_for_the_truncating_one_liner( tmp_path ):
+    """The regression itself: the hand-rolled form empties the file, the verb does not."""
+    hand = tmp_path / "hand.md"
+    hand.write_text( _REAL_BODY, encoding="utf-8" )
+    # Clayton's line, verbatim in shape: the outer open() truncates before the read runs.
+    open( hand, "w" ).write( open( hand ).read().rstrip( "\n" ) + "\n\nSTAMP\n" )
+    assert hand.read_text( encoding="utf-8" ) == "\n\nSTAMP\n"      # the body is gone
+
+    safe = tmp_path / "safe.md"
+    safe.write_text( _REAL_BODY, encoding="utf-8" )
+    sr.stamp_nonce_into( str( safe ), "u1", _dt( 20 ) )
+    assert _REAL_BODY.strip() in safe.read_text( encoding="utf-8" )
+
+
+def test_stamp_leaves_no_temp_file_behind( tmp_path ):
+    memento = tmp_path / "seat.md"
+    memento.write_text( _REAL_BODY, encoding="utf-8" )
+    sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
+    assert [ p.name for p in tmp_path.iterdir() ] == [ "seat.md" ]
+
+
+def test_stamp_refuses_a_missing_memento( tmp_path ):
+    with pytest.raises( FileNotFoundError ):
+        sr.stamp_nonce_into( str( tmp_path / "nope.md" ), "u1", _dt( 20 ) )
+
+
+def test_stamp_refuses_a_blank_memento( tmp_path ):
+    memento = tmp_path / "blank.md"
+    memento.write_text( "   \n", encoding="utf-8" )
+    with pytest.raises( ValueError, match="blank" ):
+        sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
+
+
+def test_stamp_refuses_to_stamp_the_same_nonce_twice( tmp_path ):
+    memento = tmp_path / "seat.md"
+    memento.write_text( _REAL_BODY, encoding="utf-8" )
+    sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
+    with pytest.raises( ValueError, match="already carries" ):
+        sr.stamp_nonce_into( str( memento ), "u1", _dt( 21 ) )
+
+
+def test_stamp_removes_the_temp_file_when_the_write_fails( tmp_path, monkeypatch ):
+    memento = tmp_path / "seat.md"
+    memento.write_text( _REAL_BODY, encoding="utf-8" )
+
+    def _boom( *a, **kw ):
+        raise OSError( "disk full" )
+    monkeypatch.setattr( sr.os, "replace", _boom )
+
+    with pytest.raises( OSError ):
+        sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
+    assert [ p.name for p in tmp_path.iterdir() ] == [ "seat.md" ]      # tmp cleaned
+    assert memento.read_text( encoding="utf-8" ) == _REAL_BODY          # original untouched

@@ -12,11 +12,14 @@ The verb is IRREVERSIBLE (it zeroes the seat's context), so every guard lives at
 the chokepoint — INSIDE the verb, never a caller obligation (Krishna's ruling):
 
   (a) MEMENTO VERIFY — option (b): the caller stamps a fresh {uuid, iso_ts} nonce
-      line into the memento at write time and passes the uuid. The verb confirms
-      that exact uuid is on disk AND its stamped ts is within the cycle window —
-      proving the memento is complete (a partial write never carries the nonce)
-      AND fresh-THIS-cycle (an 8-day-stale body carries an old uuid). Existence is
-      neither. Fail ⇒ abort, never clear into nothing.
+      line into the memento at write time — via stamp_nonce_into(), which owns the
+      whole read-append-write so no caller writes the destructive half by hand —
+      and passes the uuid. The verb confirms that exact uuid is on disk, that its
+      stamped ts is within the cycle window, AND that the body still has substance
+      once the nonce line is removed: complete (a partial write never carries the
+      nonce), fresh-THIS-cycle (an 8-day-stale body carries an old uuid), and not
+      the nonce-only husk a truncating stamp leaves (row 4cf9f9fd). Existence is
+      none of the three. Fail ⇒ abort, never clear into nothing.
 
   (b) CONFIRMATION GATE — the verb itself asks (no caller "already-confirmed"
       kwarg exists). default="yes"; offline / timeout / None / 503 → PROCEED
@@ -63,6 +66,15 @@ FIRE_TOKEN_PREFIX            = ".self-respin-fire-"
 NONCE_LINE_PREFIX            = "SELF-RESPIN-NONCE:"     # caller stamps: "SELF-RESPIN-NONCE: <uuid> @ <iso_ts>"
 DEFAULT_DELAY_SECONDS        = 20
 DEFAULT_CYCLE_WINDOW_SECONDS = 300                      # memento nonce ts must be within this of now
+
+# The SUBSTANCE floor (row 4cf9f9fd). Freshness is not completeness: a file whose
+# ENTIRE content is the nonce line is fresh, carries the right uuid, and is nothing —
+# and it is exactly the shape a truncating stamp produces. Measured against every real
+# memento on this box 2026-08-25: the smallest genuine one is 1226 bytes, the smallest
+# in this repo 1433; the failure shape is 0 bytes once the nonce line is removed. 400
+# sits ~3x under the smallest real memento and far above the failure, so it rejects the
+# truncation without ever rejecting a terse-but-real seat.
+MIN_MEMENTO_SUBSTANCE_BYTES  = 400
 
 # The wake-after-clear readiness gate (row 275cb0b9, GAP 1 + John's ruling 1). The
 # rehydrated seat is proven ready by its BRIDGE FILE being rewritten (SessionStart
@@ -129,6 +141,57 @@ def build_nonce_line( nonce_uuid, ts ):
     return f"{NONCE_LINE_PREFIX} {nonce_uuid} @ {ts.isoformat()}"
 
 
+def stamp_nonce_into( path, nonce_uuid, ts ):
+    """
+    Append this cycle's nonce line to an EXISTING memento without ever putting the
+    file in a truncated state — the whole operation, so no caller has to write the
+    destructive half by hand (row 4cf9f9fd).
+
+    The defect this exists to make unwritable: `open( p, "w" ).write( open( p ).read() + line )`
+    truncates on the OUTER open, evaluated first, so the inner read returns "" and the
+    memento becomes the nonce line alone. It then verifies, and the pane clears into it.
+
+    Requires:
+        - path names an existing, non-blank memento file (utf-8)
+        - nonce_uuid is the uuid for THIS cycle; ts is an aware datetime
+
+    Ensures:
+        - the file's prior content is preserved verbatim, with the nonce line appended
+          after one blank line and a trailing newline
+        - the write lands via a temp file in the SAME directory + os.replace, so a
+          reader either sees the whole old file or the whole new one, never a partial
+        - the temp file is removed if the write fails
+        - returns the nonce line that was stamped
+
+    Raises:
+        - FileNotFoundError if path does not exist — never creates a memento from nothing
+        - ValueError if the file is blank, or already carries this nonce
+    """
+    with open( path, "r", encoding="utf-8" ) as fh:
+        existing = fh.read()
+
+    if not existing.strip():
+        raise ValueError( f"refusing to stamp a blank memento ({path}) — there is nothing to clear into" )
+
+    line = build_nonce_line( nonce_uuid, ts )
+    if f"{NONCE_LINE_PREFIX} {nonce_uuid} @ " in existing:
+        raise ValueError( f"memento already carries nonce {nonce_uuid} — stamp once per cycle" )
+
+    body = existing.rstrip( "\n" ) + "\n\n" + line + "\n"
+    tmp  = f"{path}.stamp-{os.getpid()}.tmp"
+    try:
+        with open( tmp, "w", encoding="utf-8" ) as fh:
+            fh.write( body )
+            fh.flush()
+            os.fsync( fh.fileno() )
+        os.replace( tmp, path )
+    except BaseException:
+        _best_effort_remove( tmp )
+        raise
+
+    return line
+
+
 def verify_memento_content( content, nonce_uuid, now, *, cycle_window_seconds=DEFAULT_CYCLE_WINDOW_SECONDS ):
     """
     Prove the memento on disk is COMPLETE and FRESH-THIS-CYCLE (option (b)).
@@ -139,7 +202,10 @@ def verify_memento_content( content, nonce_uuid, now, *, cycle_window_seconds=DE
         - now is an aware datetime
 
     Ensures:
-        - ( False, reason ) when: content is empty/None; nonce_uuid is blank; no
+        - ( False, reason ) when: content is empty/None; nonce_uuid is blank; the body
+          with every nonce line removed is under MIN_MEMENTO_SUBSTANCE_BYTES (the
+          nonce-only shape a truncating stamp leaves — fresh, right uuid, nothing to
+          wake into); no
           `SELF-RESPIN-NONCE: <nonce_uuid> @ <ts>` line is present (memento not
           written this cycle, or a partial write that never reached the nonce); the
           stamped ts is naive/unparseable; or the ts is outside ±cycle_window of now
@@ -152,6 +218,19 @@ def verify_memento_content( content, nonce_uuid, now, *, cycle_window_seconds=DE
         return False, "memento missing or empty — refusing to clear into nothing"
     if not nonce_uuid:
         return False, "no memento nonce supplied — cannot prove this-cycle freshness"
+
+    # SUBSTANCE, not just freshness (row 4cf9f9fd). Strip every stamp line and weigh
+    # what is left: a truncating stamp leaves the nonce and nothing else, which is
+    # fresh, correctly-uuid'd, and still nothing to wake into. Named precisely, because
+    # "nonce-only" tells the seat its stamp truncated the file — "empty" would not.
+    substance = "\n".join(
+        ln for ln in content.splitlines() if not ln.strip().startswith( NONCE_LINE_PREFIX )
+    ).strip()
+    if len( substance.encode( "utf-8" ) ) < MIN_MEMENTO_SUBSTANCE_BYTES:
+        return False, (
+            f"memento is nonce-only or near-empty ({len( substance.encode( 'utf-8' ) )}B of body, "
+            f"floor {MIN_MEMENTO_SUBSTANCE_BYTES}B) — the stamp truncated it; refusing to clear into nothing"
+        )
 
     stamped_ts = None
     needle     = f"{NONCE_LINE_PREFIX} {nonce_uuid} @ "

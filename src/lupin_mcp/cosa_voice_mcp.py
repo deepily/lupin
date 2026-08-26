@@ -2235,11 +2235,15 @@ def self_respin( memento_path: str, memento_nonce: str, delay_seconds: int = 20,
     context — for the price of one memento write instead of a whole successor's
     context. IRREVERSIBLE; every guard lives INSIDE this verb.
 
-    BEFORE CALLING: write your memento to disk THIS cycle, stamping into its body
-    the nonce line that self_respin_core.build_nonce_line( nonce_uuid, ts ) produces,
-    and pass that nonce_uuid as `memento_nonce`. The verb confirms that exact nonce
-    (and a fresh timestamp) on disk before it will schedule anything — a stale or
-    partial memento aborts the clear, so you never clear into nothing.
+    BEFORE CALLING: write your memento to disk THIS cycle, then stamp this cycle's
+    nonce into it by CALLING self_respin_core.stamp_nonce_into( path, nonce_uuid, ts ) —
+    do NOT hand-roll the read-append-write. That one call reads the file whole and
+    lands the new text through a temp file + atomic rename, so the memento is never
+    momentarily truncated; the hand-rolled version is what emptied a 105-line memento
+    down to its nonce line on 2026-08-25 (row 4cf9f9fd). Pass that same nonce_uuid as
+    `memento_nonce`. The verb confirms that exact nonce, a fresh timestamp, AND a body
+    that still has substance once the nonce line is removed — a stale, partial, or
+    nonce-only memento aborts the clear, so you never clear into nothing.
 
     The verb then: (a) verifies the memento is complete + fresh this cycle;
     (b) asks you a yes/no confirmation on the human surface, DEFAULTING TO YES so an

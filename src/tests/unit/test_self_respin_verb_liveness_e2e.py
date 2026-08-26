@@ -54,6 +54,7 @@ from cosa.agents.heartbeat_arbiter.self_respin_observer import (
     WAKE_PROOF_NONCE_LINE,
 )
 
+
 UTC     = datetime.timezone.utc
 FIRED   = datetime.datetime( 2026, 8, 15, 2, 0, 0, tzinfo=UTC )
 SESSION = "d15fa6fa"
@@ -68,6 +69,13 @@ _PAST_DUE = FIRED + datetime.timedelta( seconds=600 )   # well past the deadline
 
 
 # ── real-disk seams (the integration surface) ──────────────────────────────────
+
+# A memento body over MIN_MEMENTO_SUBSTANCE_BYTES (row 4cf9f9fd). The nonce-only
+# husk a truncating stamp leaves is now REJECTED, so a stub memento in a test about
+# something else has to look like a real one.
+_REAL_BODY = ( "board state: row 4cf9f9fd, manager mr radio, venue :8000 idle, "
+               "next act is the containment probe.\n" ) * 5
+
 
 def _real_write_json( path, data ):
     """Write JSON to disk exactly as the atomic seam would land it (real file)."""
@@ -95,7 +103,7 @@ def _seed_memento( tmp_path, nonce_uuid, stamp_ts=FIRED ):
     """Write a complete memento carrying a fresh this-cycle nonce line."""
     memento = tmp_path / "tiberius-memento.md"
     memento.write_text(
-        "# Memento\nsome durable state\n" + build_nonce_line( nonce_uuid, stamp_ts ) + "\n"
+        "# Memento\n" + _REAL_BODY + build_nonce_line( nonce_uuid, stamp_ts ) + "\n"
     )
     return str( memento )
 

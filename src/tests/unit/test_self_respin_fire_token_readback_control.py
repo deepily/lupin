@@ -28,6 +28,13 @@ if _src_path not in sys.path:
 from lupin_mcp.self_respin_core import perform_self_respin, build_nonce_line
 from cosa.agents.heartbeat_arbiter.self_respin_observer import MARKER_PREFIX
 
+
+# A memento body over MIN_MEMENTO_SUBSTANCE_BYTES (row 4cf9f9fd). The nonce-only
+# husk a truncating stamp leaves is now REJECTED, so a stub memento in a test about
+# something else has to look like a real one.
+_REAL_BODY = ( "board state: row 4cf9f9fd, manager mr radio, venue :8000 idle, "
+               "next act is the containment probe.\n" ) * 5
+
 UTC     = datetime.timezone.utc
 NOW     = datetime.datetime( 2026, 8, 14, 2, 0, 0, tzinfo=UTC )
 SESSION = "9662b5ac"
@@ -38,7 +45,9 @@ def test_fire_token_readback_failure_aborts_and_removes_marker( tmp_path ):
     """Token read-back fails → aborted, nothing scheduled, marker cleaned up."""
     base    = str( tmp_path )
     memento = tmp_path / "memento.md"
-    memento.write_text( build_nonce_line( NONCE, NOW ) + "\n" )   # verifies: nonce present + fresh
+    # A body over the substance floor (row 4cf9f9fd) — this test is about the fire-token
+    # read-back, so its memento must clear the nonce-only gate on the way there.
+    memento.write_text( _REAL_BODY + build_nonce_line( NONCE, NOW ) + "\n" )
 
     scheduled = []
 
@@ -70,6 +79,7 @@ def test_fire_token_readback_failure_aborts_and_removes_marker( tmp_path ):
         read_text_fn     = read_text_fn,
         write_json_fn    = write_json_fn,
     )
+
 
     assert result.status == "aborted"
     assert "fire token" in result.reason
