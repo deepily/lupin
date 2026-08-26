@@ -602,3 +602,49 @@ def test_the_frame_walk_is_bounded( tmp_path, monkeypatch, capsys ):
     cu.get_project_root()
 
     assert capsys.readouterr().err == ""
+
+
+# ── get_spoken_char_cap — the six statements the file was short of 100% ──────
+# Pre-existing and unrelated to the wrong-tree detector, but the gate is the FILE,
+# not the diff, so they are covered here rather than rounded up to "99%".
+
+def test_spoken_char_cap_reads_the_configured_value( monkeypatch ):
+    """The runtime-tunable path: whatever the ini says, at call time."""
+    import cosa.config.configuration_manager as cm
+
+    class _Mgr:
+        def __init__( self, **kwargs ): pass
+        def get( self, key, default=None, return_type=None ):
+            assert key == cu.SPOKEN_CHAR_CAP_INI_KEY
+            assert return_type == "int"
+            return 640
+    monkeypatch.setattr( cm, "ConfigurationManager", _Mgr )
+
+    assert cu.get_spoken_char_cap() == 640
+
+
+def test_spoken_char_cap_falls_back_when_the_key_is_absent( monkeypatch ):
+    """An absent key yields the default the caller passed in, not None."""
+    import cosa.config.configuration_manager as cm
+
+    class _Mgr:
+        def __init__( self, **kwargs ): pass
+        def get( self, key, default=None, return_type=None ): return default
+    monkeypatch.setattr( cm, "ConfigurationManager", _Mgr )
+
+    assert cu.get_spoken_char_cap() == cu.SPOKEN_CHAR_CAP_DEFAULT
+
+
+def test_spoken_char_cap_never_raises_out_of_a_config_failure( monkeypatch ):
+    """
+    This cap is read on the TTS path. A config blow-up must degrade to the default
+    rather than take the spoken channel down — the docstring promises 'never raises'
+    and nothing was holding it to that.
+    """
+    import cosa.config.configuration_manager as cm
+
+    class _Boom:
+        def __init__( self, **kwargs ): raise RuntimeError( "ini unreadable" )
+    monkeypatch.setattr( cm, "ConfigurationManager", _Boom )
+
+    assert cu.get_spoken_char_cap() == cu.SPOKEN_CHAR_CAP_DEFAULT
