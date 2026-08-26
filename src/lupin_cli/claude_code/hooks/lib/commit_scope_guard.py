@@ -213,11 +213,21 @@ def _blank_quoted_spans( command: str ) -> str:
     command position — the over-block stash_guard had to fix (row e062580e).
 
     Ensures:
-        - every balanced single- or double-quoted span becomes one space
+        - every balanced single- or double-quoted span becomes THE SAME NUMBER OF
+          SPACES, so the blanked string is character-for-character aligned with the
+          original and a match offset taken here still points at the same place there
         - text with unbalanced quotes is returned unchanged, so nothing can hide
         - never raises
+
+    🔴 LENGTH-PRESERVING IS LOAD-BEARING. It collapsed each span to ONE space until
+    2026-08-25, and then `_pathspec_of` took a match offset from the blanked string
+    and sliced the RAW command with it. Measured: `python3 - "$MSG" <<'EOF' … EOF`
+    followed by `git commit -F "$MSG" -- <paths>` put the offset 12 characters
+    early, the tail began with a newline, the bounded scan saw an EMPTY command, and
+    a pathspec commit was reviewed as though it named nothing — falling back to the
+    index, which is precisely the set a pathspec commit does not write.
     """
-    return _QUOTED_SPAN_RE.sub( " ", command )
+    return _QUOTED_SPAN_RE.sub( lambda m: " " * len( m.group( 0 ) ), command )
 
 
 def _ack_in_prefix( prefix ) -> bool:
@@ -255,6 +265,56 @@ def _mentions_git_commit( command: str ):
         - never raises
     """
     return _GIT_COMMIT_RE.search( _blank_quoted_spans( command ) )
+
+
+_HEREDOC_RE = re.compile( r"<<(?P<dash>-?)\s*(?P<q>['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)(?P=q)" )
+
+
+def _strip_heredoc_bodies( command: str ):
+    """
+    Remove every heredoc BODY, so a `git commit` quoted inside one is not mistaken
+    for the command being run (row 292dd3d8).
+
+    Measured on this guard's own commit: the message was written with
+    `cat > msg.txt <<'EOF' … EOF` and the body contained the line
+    `git commit  -> the index`. `_mentions_git_commit` searches from the left, so it
+    matched THAT occurrence — inside prose — and the real `git commit -F msg.txt --
+    <paths>` further down was never the thing examined. The guard gave up, which is
+    the safe direction, but it means the newly-mandated `-F <file>` shape goes
+    unreviewed for anyone who writes the message in the same command. It is the same
+    defect as the heredoc false-positive one commit earlier, one level up: text that
+    is DATA was read as COMMAND.
+
+    Requires:
+        - command is the raw Bash command
+
+    Ensures:
+        - returns the command with each heredoc's body and terminator line removed,
+          the redirection operator itself left in place
+        - returns None when a heredoc opens and its terminator never appears — an
+          unterminated body could hide anything, so the caller ALLOWS and says so
+        - a command with no heredoc is returned unchanged
+        - never raises
+    """
+    if "<<" not in command: return command
+
+    lines, out, i = command.splitlines(), [], 0
+    while i < len( lines ):
+        line  = lines[ i ]
+        out.append( line )
+        opener = _HEREDOC_RE.search( line )
+        i += 1
+        if opener is None: continue
+
+        tag, dash = opener.group( "tag" ), opener.group( "dash" )
+        while i < len( lines ):
+            candidate = lines[ i ].strip() if dash else lines[ i ]
+            i += 1
+            if candidate.rstrip() == tag: break
+        else:
+            return None                      # opened and never closed
+
+    return "\n".join( out )
 
 
 def _commits_the_whole_worktree( command: str, match ) -> bool:
@@ -720,6 +780,11 @@ def evaluate_commit_scope(
 
         command = tool_input.get( "command", "" )
         if not isinstance( command, str ) or not command: return allow
+
+        # A `git commit` quoted inside a heredoc is DATA, not the command being run.
+        command = _strip_heredoc_bodies( command )
+        if command is None:
+            return CommitScopeVerdict( None, _notice_for( "a heredoc opens and never closes, so what is command and what is text cannot be told apart" ) )
 
         match = _mentions_git_commit( command )
         if match is None: return allow

@@ -21,6 +21,7 @@ from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
     _mentions_git_commit,
     _modified_tracked_paths,
     _pathspec_of,
+    _strip_heredoc_bodies,
     evaluate_commit_scope,
     build_commit_scope_notice_response,
     SCOPE_INDEX,
@@ -667,7 +668,7 @@ def test_the_pathspec_refusal_warns_about_working_tree_CONTENT( repo ):
 
 
 @pytest.mark.parametrize( "command,fragment", [
-    ( "git commit -F - <<'MSG'",              "redirection"      ),
+    ( "git commit -F - <<'MSG'\nmessage body\nMSG", "redirection"  ),   # body stripped; the `<<` itself remains
     ( 'git commit -- "src/*.py"',             "magic or globs"   ),
     ( "git commit -S -m x src/a.py",          "optional argument"),
     ( "git commit --frobnicate src/a.py",     "not an option"    ),
@@ -745,3 +746,92 @@ def test_pathspec_magic_without_a_double_dash_is_also_a_give_up():
     paths, unsure = _pathspec_of( command, _mentions_git_commit( command ) )
     assert paths is None
     assert "magic or globs" in unsure
+
+
+# ── A `git commit` inside a heredoc is DATA, not the command being run ───────
+# Measured on this guard's OWN commit: the message was written with
+# `cat > msg.txt <<'EOF' … EOF`, the body contained the line `git commit -> the
+# index`, and the left-to-right search matched THAT — so the real
+# `git commit -F msg.txt -- <paths>` was never the thing examined.
+
+def test_a_git_commit_quoted_in_a_heredoc_is_not_the_command( repo ):
+    command = (
+        "MSG=/tmp/m.txt\n"
+        "cat > \"$MSG\" <<'EOF'\n"
+        "    git commit             -> the index\n"
+        "    git commit -a          -> the index plus modified\n"
+        "EOF\n"
+        "git commit -F \"$MSG\" -- src/theirs.py"
+    )
+    verdict = evaluate_commit_scope(
+        "Bash", { "command": command }, session_id=MY_SESSION, cwd=repo, staged_reader=_reader(),
+    )
+    assert verdict.notice is None                       # the prose no longer confuses it
+    assert "src/theirs.py" in verdict.deny_reason       # the REAL commit is reviewed
+    assert "THE PATHS THIS COMMIT NAMES" in verdict.deny_reason
+
+
+def test_the_same_command_naming_only_my_own_paths_passes_clean( repo ):
+    command = (
+        "cat > msg.txt <<'EOF'\n"
+        "    git commit -am x\n"
+        "EOF\n"
+        "git commit -F msg.txt -- src/mine_one.py"
+    )
+    verdict = evaluate_commit_scope(
+        "Bash", { "command": command }, session_id=MY_SESSION, cwd=repo, staged_reader=_reader(),
+    )
+    assert verdict.deny_reason is None and verdict.notice is None
+
+
+def test_an_unterminated_heredoc_is_allowed_with_a_notice( repo ):
+    """Opened and never closed — the body could hide anything, so decide nothing."""
+    command = "git commit -F - <<'EOF'\nsome message that never ends"
+    verdict = evaluate_commit_scope(
+        "Bash", { "command": command }, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/theirs.py" ),
+    )
+    assert verdict.deny_reason is None
+    assert "never closes" in verdict.notice
+
+
+@pytest.mark.parametrize( "command,expected", [
+    ( "echo hi",                              "echo hi" ),                # untouched
+    ( "cat <<EOF\nbody\nEOF\ngit commit -m x", "cat <<EOF\ngit commit -m x" ),
+    ( "cat <<-TAG\n\tbody\n\tTAG\ndone",      "cat <<-TAG\ndone" ),       # <<- strips indent
+    ( 'cat <<"Q"\nbody\nQ\nx',                'cat <<"Q"\nx' ),           # quoted tag
+] )
+def test_the_heredoc_stripper_keeps_the_command_and_drops_the_body( command, expected ):
+    assert _strip_heredoc_bodies( command ) == expected
+
+
+def test_blank_quoted_spans_preserves_length_so_offsets_stay_valid():
+    """
+    The blanked string is used to FIND the command; the raw string is used to read
+    its arguments. Collapsing a quoted span to one space desynchronises the two, and
+    every offset taken after it points at the wrong character.
+    """
+    command = 'git commit -F "a longer quoted argument" -- src/a.py'
+    assert len( _blank_quoted_spans( command ) ) == len( command )
+
+
+def test_a_quoted_argument_before_the_pathspec_does_not_shift_the_scan( repo ):
+    """
+    Measured 2026-08-25: `python3 - "$MSG" <<'EOF' … EOF` then
+    `git commit -F "$MSG" -- <paths>` put the match offset 12 characters early, the
+    bounded tail began at a newline and read as an EMPTY command, so a pathspec
+    commit was judged on the INDEX — the one set it does not write.
+    """
+    command = (
+        "MSG=/tmp/m.txt\n"
+        "python3 - \"$MSG\" <<'PYEOF'\n"
+        "write the message\n"
+        "PYEOF\n"
+        "git commit -F \"$MSG\" -- src/theirs.py"
+    )
+    verdict = evaluate_commit_scope(
+        "Bash", { "command": command }, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/mine_one.py" ),      # index says CLEAN
+    )
+    assert "THE PATHS THIS COMMIT NAMES" in verdict.deny_reason
+    assert "src/theirs.py" in verdict.deny_reason
