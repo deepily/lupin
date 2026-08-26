@@ -1,0 +1,402 @@
+[
+ {
+  "i": 0,
+  "ts": "2026-08-25T02:11:42",
+  "from": "mr radio",
+  "to": "Tiberius",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 1,
+  "ts": "2026-08-26T00:45:16",
+  "from": "Tiberius",
+  "to": "Clayton",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 2,
+  "ts": "2026-08-15T22:20:01",
+  "from": "Tiberius",
+  "to": "Rachel",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 3,
+  "ts": "2026-08-16T00:55:14",
+  "from": "Cheech",
+  "to": "maria",
+  "subject_lost": 1,
+  "why": "Cheech's own corrections and the 'you/I' frame gone; whose proposal 'inject the memento at boot' is cannot be recovered"
+ },
+ {
+  "i": 4,
+  "ts": "2026-08-19T22:43:06",
+  "from": "Tiberius",
+  "to": "Rachel",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 5,
+  "ts": "2026-08-17T00:16:04",
+  "from": "Krishna",
+  "to": "Cheech",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 6,
+  "ts": "2026-08-25T22:44:19",
+  "from": "mr radio",
+  "to": "Rio",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 7,
+  "ts": "2026-08-17T04:11:29",
+  "from": "mr radio",
+  "to": "Tiffany",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 8,
+  "ts": "2026-08-16T20:44:32",
+  "from": "mr radio",
+  "to": "arnold",
+  "subject_lost": 1,
+  "why": "'I'm requiring it pre-commit' became 'The change is required'; reader cannot tell who requires it or that John cleared the edits"
+ },
+ {
+  "i": 9,
+  "ts": "2026-08-16T19:31:53",
+  "from": "maria",
+  "to": "Rachel",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 10,
+  "ts": "2026-08-22T01:06:04",
+  "from": "sam",
+  "to": "mr radio",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 11,
+  "ts": "2026-08-16T00:03:02",
+  "from": "Tiberius",
+  "to": "Tiffany",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 12,
+  "ts": "2026-08-17T03:07:07",
+  "from": "Cheech",
+  "to": "Krishna",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 13,
+  "ts": "2026-08-16T18:16:56",
+  "from": "Rachel",
+  "to": "Tiffany",
+  "subject_lost": 1,
+  "why": "a dedup REPORT arrived as the instruction 'Work on bab95a0a, not ebcb763e'; Rachel's own retraction gone"
+ },
+ {
+  "i": 14,
+  "ts": "2026-08-15T22:16:51",
+  "from": "Tiberius",
+  "to": "Tiffany",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 15,
+  "ts": "2026-08-17T04:29:53",
+  "from": "maria",
+  "to": "Cheech",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 16,
+  "ts": "2026-08-16T19:58:33",
+  "from": "chloe",
+  "to": "Rachel",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 17,
+  "ts": "2026-08-16T16:44:32",
+  "from": "sam",
+  "to": "mr radio",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 18,
+  "ts": "2026-08-16T23:49:01",
+  "from": "Clayton",
+  "to": "maya",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 19,
+  "ts": "2026-08-14T18:01:41",
+  "from": "sam",
+  "to": "mr radio",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 20,
+  "ts": "2026-08-22T01:20:42",
+  "from": "maria",
+  "to": "Clayton",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 21,
+  "ts": "2026-08-25T02:37:51",
+  "from": "Tiberius",
+  "to": "Cheech",
+  "subject_lost": 1,
+  "why": "Tiberius's 'I was wrong' and 'your row does not survive' both gone; the resolver claims float with no owner"
+ },
+ {
+  "i": 22,
+  "ts": "2026-08-17T13:40:22",
+  "from": "Cheech",
+  "to": "Rachel",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 23,
+  "ts": "2026-08-16T20:05:15",
+  "from": "john",
+  "to": "mr radio",
+  "subject_lost": 1,
+  "why": "'YES to both, and I RAN it' became 'are proven'; no person survives, which is exactly the whose-measurement question"
+ },
+ {
+  "i": 24,
+  "ts": "2026-08-26T01:09:44",
+  "from": "mr radio",
+  "to": "Clayton",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 25,
+  "ts": "2026-08-25T01:34:04",
+  "from": "Cheech",
+  "to": "mr radio",
+  "subject_lost": 1,
+  "why": "delivered says the sender IS holding :8000; the original's headline was STOP HOLDING IT. Subject inverted"
+ },
+ {
+  "i": 26,
+  "ts": "2026-08-25T17:19:27",
+  "from": "maria",
+  "to": "mr radio",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 27,
+  "ts": "2026-08-16T20:19:39",
+  "from": "mr radio",
+  "to": "john",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 28,
+  "ts": "2026-08-17T21:03:23",
+  "from": "Krishna",
+  "to": "maria",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 29,
+  "ts": "2026-08-26T01:47:38",
+  "from": "Clayton",
+  "to": "mr radio",
+  "subject_lost": 0,
+  "why": "REVISED after re-reading: the original binds nothing to a person either, so what was lost is the commit sha and the board state - content, not subject"
+ },
+ {
+  "i": 30,
+  "ts": "2026-08-15T23:12:08",
+  "from": "maria",
+  "to": "Clayton",
+  "subject_lost": 1,
+  "why": "'Verified your inversion' gone; Clayton cannot tell the correction is about his own finding"
+ },
+ {
+  "i": 31,
+  "ts": "2026-08-17T19:16:50",
+  "from": "mr radio",
+  "to": "sam",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 32,
+  "ts": "2026-08-26T00:30:43",
+  "from": "Clayton",
+  "to": "mr radio",
+  "subject_lost": 1,
+  "why": "'You were right about test_2 and test_3, and I checked it' gone; credit and checker both unrecoverable"
+ },
+ {
+  "i": 33,
+  "ts": "2026-08-17T20:15:25",
+  "from": "Rio",
+  "to": "maria",
+  "subject_lost": 1,
+  "why": "'your frame found two wrong subjects, and the first is mine' gone; the mistake now belongs to nobody"
+ },
+ {
+  "i": 34,
+  "ts": "2026-08-16T17:44:05",
+  "from": "Cheech",
+  "to": "maya",
+  "subject_lost": 1,
+  "why": "INVERTED: maya set the standard and maya is being instructed; delivered says Cheech did both"
+ },
+ {
+  "i": 35,
+  "ts": "2026-08-26T01:40:29",
+  "from": "Krishna",
+  "to": "mr radio",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 36,
+  "ts": "2026-08-17T23:55:18",
+  "from": "Tiffany",
+  "to": "mr radio",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 37,
+  "ts": "2026-08-16T19:26:11",
+  "from": "Clayton",
+  "to": "Cheech",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 38,
+  "ts": "2026-08-26T01:27:50",
+  "from": "maria",
+  "to": "mr radio",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 39,
+  "ts": "2026-08-16T23:54:45",
+  "from": "maria",
+  "to": "mr radio",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 40,
+  "ts": "2026-08-18T00:33:23",
+  "from": "mr radio",
+  "to": "Rachel",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 41,
+  "ts": "2026-08-21T14:56:41",
+  "from": "Tiberius",
+  "to": "mr radio",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 42,
+  "ts": "2026-08-25T23:54:35",
+  "from": "mr radio",
+  "to": "Clayton",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 43,
+  "ts": "2026-08-25T03:00:38",
+  "from": "mr radio",
+  "to": "Clayton",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 44,
+  "ts": "2026-08-25T01:51:15",
+  "from": "Tiberius",
+  "to": "mr radio",
+  "subject_lost": 1,
+  "why": "'The developer' twice, and it is genuinely ambiguous whether that is Tiberius or Clayton"
+ },
+ {
+  "i": 45,
+  "ts": "2026-08-21T21:11:50",
+  "from": "Krishna",
+  "to": "Cheech",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 46,
+  "ts": "2026-08-17T03:07:05",
+  "from": "mr radio",
+  "to": "Cheech",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 47,
+  "ts": "2026-08-17T20:27:22",
+  "from": "maria",
+  "to": "chloe",
+  "subject_lost": 1,
+  "why": "chloe is not told the contradiction is in HER proposal, nor that Tiberius caught it"
+ },
+ {
+  "i": 48,
+  "ts": "2026-08-17T02:53:00",
+  "from": "Rachel",
+  "to": "mr radio",
+  "subject_lost": 0,
+  "why": ""
+ },
+ {
+  "i": 49,
+  "ts": "2026-08-24T00:08:11",
+  "from": "maria",
+  "to": "Cheech",
+  "subject_lost": 1,
+  "why": "INVERTED: Cheech caught the three issues; delivered credits Maria with catching them"
+ }
+]

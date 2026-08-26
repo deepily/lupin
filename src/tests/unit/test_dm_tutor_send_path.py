@@ -236,20 +236,28 @@ class TestApplyDmTutor( unittest.TestCase ):
 
     def test_the_outcome_vocabulary_is_disjoint( self ):
         """
-        Each of the five states must be distinguishable in the corpus. Before this field
-        they were one silence: a row simply lacking a rewrite could not say whether the
-        tutor was off, did not fire, fired and failed, or was gated.
+        Each state must be distinguishable in the corpus. Before this field they were one
+        silence: a row simply lacking a rewrite could not say whether the tutor was off,
+        did not fire, fired and failed, or was gated.
+
+        SIX STATES SINCE row cf1587cd — `attribution_blocked` joined them. The
+        "rewritten" case moved from the placeholder `"x."` to `_FAITHFUL` for the same
+        reason the fabrication guard once moved these fixtures: `"x."` drops every person
+        `_VERBOSE` names, so the attribution guard refuses it, correctly. A placeholder
+        no real rewrite resembles cannot stand in for a delivered one.
         """
         outcomes = {
             self.apply( _VERBOSE,   config=_cfg( enabled=False ), rewrite_fn=lambda b: "x." )[ 1 ][ "tutor_outcome" ],
             self.apply( _COMPLIANT, config=_cfg(),               rewrite_fn=lambda b: "x." )[ 1 ][ "tutor_outcome" ],
+            self.apply( _VERBOSE,   config=_cfg(),               rewrite_fn=lambda b: _FAITHFUL )[ 1 ][ "tutor_outcome" ],
             self.apply( _VERBOSE,   config=_cfg(),               rewrite_fn=lambda b: "x." )[ 1 ][ "tutor_outcome" ],
             self.apply( _VERBOSE,   config=_cfg(),               rewrite_fn=lambda b: None )[ 1 ][ "tutor_outcome" ],
             self.apply( _VERBOSE,   config=_cfg( gate_enabled=True, gate_max_claims=1 ),
-                        rewrite_fn=lambda b: _FAITHFUL )[ 1 ][ "tutor_outcome" ],
+                        rewrite_fn=lambda b: _FAITHFUL_LONG )[ 1 ][ "tutor_outcome" ],
         }
         self.assertEqual(
-            outcomes, { "disabled", "under_trigger", "rewritten", "model_failed", "gate_rejected" }
+            outcomes, { "disabled", "under_trigger", "rewritten", "attribution_blocked",
+                        "model_failed", "gate_rejected" }
         )
 
 
@@ -1014,12 +1022,15 @@ class TestTheCondenserMayNotInventAnIdsType( unittest.TestCase ):
                           "a repaired body must be clean by this guard's own reading" )
 
     def test_a_repaired_rewrite_is_DELIVERED_not_refused( self ):
+        # The rewrite keeps "Sam" ON PURPOSE (row cf1587cd). Without him the attribution
+        # guard refuses it first and this test stops exercising the label repair at all —
+        # a test that goes red for the guard next door proves nothing about this one.
         original  = ( "DO NOT CLOSE 0c4e8cfa — Sam has live evidence the mechanism still fires. "
                       "It contradicts the verdict I relayed this morning. "
                       "His run enqueued a child job. The submit returned 200. "
                       "Tell me if you read it differently." )
         text, meta = self.apply( original, config=_cfg(),
-                                 rewrite_fn=lambda b: "The mechanism identified by commit hash 0c4e8cfa still fires." )
+                                 rewrite_fn=lambda b: "Sam has evidence the mechanism identified by commit hash 0c4e8cfa still fires." )
         self.assertEqual( meta[ "tutor_outcome" ], "rewritten",
                           "a repairable label must not cost the sender the compression" )
         self.assertNotIn( "commit", text )

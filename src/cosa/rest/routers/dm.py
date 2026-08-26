@@ -686,7 +686,10 @@ def get_dm_feedback_arm():
 # which keys happen to be present in the rows they sampled.
 # 4 — adds `tutor_rescoped` (row c1a2e859). A reader must be able to tell "no quantity
 # moved" from "this row predates the check"; without the bump both look like a null.
-DM_CORPUS_SCHEMA_VERSION = 4
+# 5 — adds `tutor_attribution` (row cf1587cd), same reasoning one guard over: a null
+# must not mean both "the reader could attribute this one" and "this row predates the
+# attribution guard entirely".
+DM_CORPUS_SCHEMA_VERSION = 5
 
 # Identifies the tutor's behaviour, independent of the git sha: two processes on the
 # same commit with different config are the same code and a different treatment.
@@ -718,6 +721,16 @@ _DM_TUTOR_DEFAULTS = {
     # V3-strict ON by default — Rick's ruling 2026-08-18. The flag exists so the dial
     # moves without a code change; he has wanted to move it twice.
     "fab_guard_strict": True,
+    # The attribution guard (row cf1587cd). ON, because a rewrite the reader cannot
+    # attribute is the defect the row was filed for — and the failure mode of leaving it
+    # off is the tutor's own history: built 2026-08-11, shipped nothing for two days
+    # because nothing called it.
+    "attribution_guard"      : True,
+    # 3, not 1, and the number is measured rather than chosen. Across 75 hand-labelled
+    # pairs: min 1 → 0.62 precision, min 3 → 0.71, min 5 → 0.75 at half the recall. A
+    # message that mentions one person in passing can lose the mention without costing
+    # the reader anything; one built on who-did-what cannot.
+    "attribution_min_persons": 3,
 }
 
 
@@ -747,6 +760,8 @@ def get_dm_tutor_config():
             "gate_enabled"    : cm.get( "dm tutor output gate enabled",    default=False, return_type="boolean" ),
             "gate_max_claims" : cm.get( "dm tutor output gate max claims", default=4,     return_type="int" ),
             "fab_guard_strict": cm.get( "dm tutor fabrication guard strict", default=True,  return_type="boolean" ),
+            "attribution_guard"      : cm.get( "dm tutor attribution guard enabled",     default=True, return_type="boolean" ),
+            "attribution_min_persons": cm.get( "dm tutor attribution guard min persons", default=3,    return_type="int" ),
         }
     except Exception as e:
         print( f"[dm-tutor] WARNING: config read failed, tutor OFF for this send: {e}" )
@@ -1222,6 +1237,185 @@ def _strip_invented_id_labels( original, rewritten ):
         return rewritten
 
 
+# ── THE ATTRIBUTION GUARD (row cf1587cd) ─────────────────────────────────────
+#
+# THE DEFECT, filed by María 🌸 on Clayton 😎's finding, 2026-08-25: a condensed DM
+# loses the SUBJECT of its claims, so the reader cannot tell WHOSE measurement a
+# statement is about, or a report from an instruction. Four received messages in six
+# minutes; two cost a clarifying round-trip, and a third was inverted far enough that
+# Clayton apologised for an ambiguity the transport had made, not him.
+#
+# MEASURED before anything was written (src/rnd/v0.2.0/2026.08.26-dm-condenser-drops-
+# sentence-subjects.md): 75 pairs from the traffic corpus read by eye — 50 to calibrate,
+# 25 held out — give 22 losses, 29.3% (95% CI 20.2-40.4%). That is a FLOOR: two of the
+# fifty are attribution INVERSIONS, where the rewrite names a person and names the wrong
+# one, and nothing here can see those.
+#
+# 🔴 WHY THIS REFUSES RATHER THAN RESTORES, which is the whole design decision.
+# `_restore_dropped_pointers` RESTORES because a path is self-contained: it still says
+# where to look with the sentence around it gone. A SUBJECT IS NOT. Appending "Maria" on
+# a line under three sentences does not tell a reader which sentence it belongs to - it
+# produces the bare-token line Rick banned for hashes (a0151611), one class over. The
+# three guards that CANNOT repair - invented facts, re-scoped quantities, unreachable id
+# labels - all deliver the sender's own words instead, and attribution belongs with them.
+#
+# WARNING: REGEX, NOT A PARSER, AND DELIBERATELY. The measurement instrument uses spaCy;
+# this does not, because a 50 MB model loaded at import would be a new dependency on the
+# send path for a check the other four guards make with `re`. The cost is stated rather
+# than hidden: on 75 hand-labelled pairs this predicate agrees 83% of the time at 0.71
+# precision and 0.68 recall. Every false fire costs exactly one thing - the sender's own
+# message goes out uncondensed - which is the cheap direction to be wrong in.
+_ATTRIB_PRONOUN = re.compile(
+    r"\b(?:i|me|my|mine|myself|we|us|our|ours|you|your|yours|yourself|yourselves)\b",
+    re.IGNORECASE
+)
+
+# A role that names NOBODY. "the developer has completed a review" leaves a job title
+# where a name belonged. "the sender" is in here too: it usually decodes to the sender
+# and is therefore NOT counted as a loss in the measurement - but as a REFUSAL trigger it
+# earns its place, because the one inversion in Maria's own thread reads "The sender's
+# figure is not in question" where the sender meant the RECIPIENT's figure.
+_ATTRIB_ROLE = re.compile(
+    r"\bthe\s+(?:sender|author|writer|speaker|developer|engineer|reviewer|manager|"
+    r"worker|user|person|individual|team|seat|agent|assistant|maintainer|owner|"
+    r"caller|recipient)\b",
+    re.IGNORECASE
+)
+
+
+def _attribution_personas():
+    """
+    The fleet's persona names, read from the SAME key that allocates them.
+
+    Hardcoding the roster here would rot the moment somebody joins the pool — the guard
+    would stop recognising a real name as attribution and start refusing that person's
+    DMs. The voice pool is the live list, so it is the one to read.
+
+    Ensures:
+        - returns a lowercase list of persona names from `cc session voice persona pool`
+        - returns [] if the config cannot be read, which costs recall and never
+          correctness: a rewrite that keeps a pronoun still passes, and one that keeps
+          only a name is refused unnecessarily — the cheap direction
+
+    Raises:
+        - nothing
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    try:
+        cm   = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        pool = cm.get( "cc session voice persona pool", default="" )
+        return [ name.strip().lower() for name in ( pool or "" ).split( "," ) if name.strip() ]
+    except Exception:
+        return []
+
+
+def _attribution_prose( text ):
+    """
+    The claim-carrying prose, with pointer tokens blanked — what a person check may read.
+
+    ⚠️ THE POINTERS MUST GO, and this was measured rather than guessed. A restored line
+    reading `.claude-memento-cheech-80c17315.md` contains a persona name, so a rewrite
+    that had thrown every person away scored as ATTRIBUTED because of the filename under
+    it. Two of the six misses in the first calibration run were that one line.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns the tutor's own prose lines joined, with every pointer token replaced
+          by a space
+        - returns the text unchanged if the counter module cannot be imported, which
+          keeps the guard working on a degraded reading rather than not at all
+
+    Raises:
+        - nothing
+    """
+    try:
+        from cosa.agents.dm_tutor.sentences import prose_lines, pointer_tokens
+        joined = " ".join( prose_lines( text ) )
+        for token in pointer_tokens( joined ):
+            joined = joined.replace( token, " " )
+        return joined
+    except Exception:
+        return text
+
+
+def _count_attributions( text, personas ):
+    """
+    How many times a text points at a person.
+
+    Requires:
+        - text is a string
+        - personas is a list of lowercase names
+
+    Ensures:
+        - returns a non-negative int counting first/second-person pronouns plus
+          persona-name mentions
+        - returns 0 rather than raising on anything
+
+    Raises:
+        - nothing
+    """
+    try:
+        total = len( _ATTRIB_PRONOUN.findall( text ) )
+        for name in personas:
+            total += len( re.findall( r"\b" + re.escape( name ) + r"\b", text, re.IGNORECASE ) )
+        return total
+    except Exception:
+        return 0
+
+
+def _dropped_attribution( original, rewritten, min_persons=3 ):
+    """
+    Why this rewrite may not be delivered, or "" when it may.
+
+    Two conditions, either of which refuses:
+
+      DROPPED   the original points at people at least `min_persons` times and the
+                rewrite points at none. The threshold exists because a message that
+                mentions one person in passing can lose that mention without costing the
+                reader anything, while one built on who-did-what cannot. Measured across
+                the 75 labelled pairs, the threshold trades recall for precision:
+                min 1 → 0.62 precision, min 3 → 0.71, min 5 → 0.75 at half the recall.
+
+      FRAMED    the rewrite introduces a role noun that names nobody where the original
+                used no such frame — "the developer has completed a review" in place of
+                a name the sender wrote.
+
+    Requires:
+        - original and rewritten are strings
+        - min_persons is a positive int
+
+    Ensures:
+        - returns "" when the rewrite may be delivered
+        - returns a short human-readable reason otherwise, which the caller records on
+          the corpus row — a refusal nobody can read is an unauditable one
+        - NEVER raises: on any internal failure it returns "", so a broken guard
+          delivers the rewrite rather than blocking every DM in the fleet
+
+    Raises:
+        - nothing
+    """
+    try:
+        personas = _attribution_personas()
+        orig     = _attribution_prose( original or "" )
+        rewrite  = _attribution_prose( rewritten or "" )
+
+        orig_people    = _count_attributions( orig, personas )
+        rewrite_people = _count_attributions( rewrite, personas )
+
+        if orig_people >= min_persons and rewrite_people == 0:
+            return f"dropped: original points at a person {orig_people}x, rewrite 0x"
+
+        framed = _ATTRIB_ROLE.search( rewrite )
+        if framed and not _ATTRIB_ROLE.search( orig ):
+            return f"role noun names nobody: \"{framed.group( 0 )}\""
+
+        return ""
+    except Exception:
+        return ""
+
+
 def _count_claims( body_text ):
     """
     The CANONICAL sentence count — the claim counter (ruling 4, 2026-08-12).
@@ -1292,6 +1486,10 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
         # (refused). Recorded either way, so a corpus reader can tell a repair from a
         # clean rewrite — a silent repair is an unauditable one.
         "tutor_id_labels"      : None,
+        # Why a rewrite was refused as unattributable, when it was. Same reasoning as
+        # the two fields above: "the guard fired" is unanswerable from a log line the
+        # next reader does not have, and this guard is the widest of the four.
+        "tutor_attribution"    : None,
     }
 
     try:
@@ -1364,6 +1562,19 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
             meta[ "tutor_rescoped" ] = rescoped
             print( f"[dm-tutor] REFUSED a rewrite that moved a quantity across a ledger: {rescoped}" )
             return body_text, meta
+
+        # ATTRIBUTION CHECK — refuse a rewrite the reader cannot attribute (row cf1587cd).
+        # Last of the refusers because it is the widest: it fires on ~30-43% of rewrites
+        # depending on the threshold, so running it ahead of the others would mask their
+        # narrower, sharper findings behind this one's label in the corpus.
+        if config[ "attribution_guard" ]:
+            attribution = _dropped_attribution( body_text, rewritten,
+                                                min_persons=config[ "attribution_min_persons" ] )
+            if attribution:
+                meta[ "tutor_outcome" ]     = "attribution_blocked"
+                meta[ "tutor_attribution" ] = attribution
+                print( f"[dm-tutor] REFUSED a rewrite the reader cannot attribute: {attribution}" )
+                return body_text, meta
 
         claims_out                 = _count_claims( rewritten )
         meta[ "tutor_claims_out" ] = claims_out
