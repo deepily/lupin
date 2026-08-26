@@ -1432,3 +1432,533 @@ def test_a_DRY_RUN_stays_COMPLETED_even_though_its_counts_are_all_zero( dry_run_
         overall_status = None,
     )
     assert dry_run_job.state == JobState.COMPLETED
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Helpers that had NO test in either tier (row e2099400 coverage sweep).
+#
+# Measured 2026-08-25: `_parse_pytest_progress_stdout`, `_parse_node_tap_summary`,
+# `_terminate_process_group` and `_attestation_project_root` / the unpinned
+# `_artifact_dir` arm were named ZERO times in src/tests/unit/ AND in
+# src/cosa/tests/unit/agents/test_suite/. Three of them are recovery paths — the
+# code that runs only when a tier has already gone wrong — which is exactly the
+# code that must not be first exercised in production.
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestClassifyOutcomeCollectionError:
+    """
+    A collection error is not "zero tests passed" — it is "the suite never got to
+    run". The distinction is the whole point of the verdict: 0/0/0/0 with a green
+    label is the indistinguishable-zeros failure this classifier exists to end.
+    """
+
+    def test_collection_error_outranks_every_count( self ):
+        assert TestSuiteJob._classify_outcome( 0, 0, 0, 0, 0, collection_error=True ) == "COLLECTION ERROR"
+
+    def test_collection_error_wins_even_when_tests_passed( self ):
+        # A partially-collected run can report passes AND a collection error. The
+        # error must still be the verdict — some tests never got the chance to run.
+        assert TestSuiteJob._classify_outcome( 12, 0, 0, 0, 0, collection_error=True ) == "COLLECTION ERROR"
+
+    def test_without_a_collection_error_the_counts_decide( self ):
+        assert TestSuiteJob._classify_outcome( 0, 0, 0, 0, 0, collection_error=False ) == "NOT EXECUTED"
+        assert TestSuiteJob._classify_outcome( 5, 1, 0, 0, 0, collection_error=False ) == "FAILED"
+        assert TestSuiteJob._classify_outcome( 5, 0, 0, 0, 0, collection_error=False ) == "PASSED"
+
+
+class TestNodeTapSummaryParser:
+    """
+    Row 36e479ed — the typescript suite has no junit-xml, so its TAP trailer is the
+    only evidence a green run produced. Without a parse it lands as 0/0/0/0 and is
+    classified a failure.
+    """
+
+    TRAILER = "# tests 2245\n# pass 2240\n# fail 3\n# skipped 2\n"
+
+    def test_reads_the_trailer_counts( self ):
+        got = TestSuiteJob._parse_node_tap_summary( self.TRAILER )
+        assert got == { "passed": 2240, "failed": 3, "skipped": 2, "errors": 0 }
+
+    def test_absent_trailer_returns_none_not_zeros( self ):
+        # None lets the caller keep its own default; a zero dict would assert
+        # "the run produced nothing", which is a different and false claim.
+        assert TestSuiteJob._parse_node_tap_summary( "no trailer here" ) is None
+        assert TestSuiteJob._parse_node_tap_summary( "" ) is None
+
+    def test_a_pass_line_alone_is_enough_and_the_rest_default_to_zero( self ):
+        assert TestSuiteJob._parse_node_tap_summary( "# pass 7\n" ) == {
+            "passed": 7, "failed": 0, "skipped": 0, "errors": 0 }
+
+    def test_the_last_trailer_wins_so_nested_output_cannot_shadow_the_total( self ):
+        # A test whose own output contains "# pass 1" must not become the run total.
+        nested = "# pass 1\n# fail 0\nsome test output\n# pass 900\n# fail 4\n"
+        assert TestSuiteJob._parse_node_tap_summary( nested )[ "passed" ] == 900
+        assert TestSuiteJob._parse_node_tap_summary( nested )[ "failed" ] == 4
+
+    def test_an_indented_pass_line_is_not_a_trailer( self ):
+        # The trailer is anchored to line start; indented output is test content.
+        assert TestSuiteJob._parse_node_tap_summary( "    # pass 5\n" ) is None
+
+
+class TestNonPytestStdoutRoutesTypescriptToTap:
+    def test_typescript_routes_to_the_tap_parser( self ):
+        got = TestSuiteJob._parse_non_pytest_stdout( "typescript", "# pass 11\n# fail 0\n" )
+        assert got == { "passed": 11, "failed": 0, "skipped": 0, "errors": 0 }
+
+    def test_an_unknown_suite_type_is_not_parsed( self ):
+        assert TestSuiteJob._parse_non_pytest_stdout( "unit", "# pass 11\n" ) is None
+
+    def test_empty_stdout_is_not_parsed( self ):
+        assert TestSuiteJob._parse_non_pytest_stdout( "typescript", "" ) is None
+
+
+class TestPytestProgressRecovery:
+    """
+    Bug 8b93bcf5's mitigation: a KILLED tier never writes junit-xml and never
+    reaches the summary block, so the compact progress stream is the only surviving
+    evidence. Recovering it is what stops a killed run reporting 0/0/0/1 —
+    indistinguishable from a tier that never started while sitting on real results.
+
+    ⚠️ FILE-level only, by construction. Compact pytest output carries no test
+    node-id, so these tests assert counts and filenames and deliberately do NOT
+    assert per-test names — there are none to recover.
+    """
+
+    def test_counts_a_single_progress_line_and_names_the_file( self ):
+        got = TestSuiteJob._parse_pytest_progress_stdout(
+            "src/tests/smoke/test_alembic.py FFF.F                    [  1%]\n" )
+        assert ( got[ "passed" ], got[ "failed" ] ) == ( 1, 4 )
+        assert got[ "partial_files" ] == [ ( "src/tests/smoke/test_alembic.py", "FFF.F" ) ]
+
+    def test_sums_across_files_and_counts_every_progress_char( self ):
+        stdout = (
+            "src/tests/unit/test_a.py ..s.E                            [ 10%]\n"
+            "src/tests/unit/test_b.py .F..                             [ 20%]\n"
+        )
+        got = TestSuiteJob._parse_pytest_progress_stdout( stdout )
+        assert got[ "passed" ]  == 6      # 3 dots in "..s.E", 3 in ".F.."
+        assert got[ "failed" ]  == 1
+        assert got[ "errors" ]  == 1
+        assert got[ "skipped" ] == 1
+        assert len( got[ "partial_files" ] ) == 2
+
+    def test_a_wrapped_continuation_line_is_attributed_to_the_current_file( self ):
+        # pytest wraps long progress runs onto a following line with no filename.
+        stdout = (
+            "src/tests/unit/test_long.py ....................          [ 30%]\n"
+            "....                                                      [ 31%]\n"
+        )
+        got = TestSuiteJob._parse_pytest_progress_stdout( stdout )
+        assert got[ "passed" ] == 24
+        assert [ f for f, _ in got[ "partial_files" ] ] == [ "src/tests/unit/test_long.py" ] * 2
+
+    def test_a_continuation_before_any_filename_is_ignored( self ):
+        # Nothing to attribute it to — guessing a file would be worse than dropping it.
+        assert TestSuiteJob._parse_pytest_progress_stdout( "....\n" ) is None
+
+    def test_xfail_and_xpass_count_as_neither_pass_nor_failure( self ):
+        got = TestSuiteJob._parse_pytest_progress_stdout( "t.py .xX.\n" )
+        assert ( got[ "passed" ], got[ "failed" ], got[ "errors" ] ) == ( 2, 0, 0 )
+
+    def test_tracebacks_and_banners_are_skipped_rather_than_miscounted( self ):
+        # A traceback line contains dots. Counting them as passes would invent
+        # results, which is worse than recovering none.
+        stdout = (
+            "======================= FAILURES =======================\n"
+            "E   AssertionError: expected 1 got 2\n"
+            "src/tests/unit/test_a.py ..                               [  5%]\n"
+        )
+        got = TestSuiteJob._parse_pytest_progress_stdout( stdout )
+        assert got[ "passed" ] == 2
+        assert len( got[ "partial_files" ] ) == 1
+
+    def test_no_recognizable_progress_returns_none_not_a_zero_dict( self ):
+        # The load-bearing distinction: None means "could not recover", a zero dict
+        # would mean "recovered, and it was nothing".
+        assert TestSuiteJob._parse_pytest_progress_stdout( "collecting ...\nERROR\n" ) is None
+        assert TestSuiteJob._parse_pytest_progress_stdout( "" ) is None
+
+    def test_spaces_inside_a_progress_run_are_ignored( self ):
+        got = TestSuiteJob._parse_pytest_progress_stdout( "t.py .. ..                [ 9%]\n" )
+        assert got[ "passed" ] == 4
+
+
+class TestTerminateProcessGroup:
+    """
+    Bug 8b93bcf5, third defect: the runner is `bash <script>`, so terminate() hits
+    bash alone and a grandchild keeps the inherited stdout pipe alive past the kill.
+    The group signal is the fix; the fallbacks exist because this helper runs inside
+    the caller's error path and must never raise a second failure into it.
+    """
+
+    def test_signals_the_whole_group_then_reaps( self, monkeypatch ):
+        sent = []
+        monkeypatch.setattr( os, "getpgid", lambda pid: 4242 )
+        monkeypatch.setattr( os, "killpg", lambda pgid, sig: sent.append( ( pgid, sig ) ) )
+
+        proc = MagicMock()
+        proc.pid = 99
+        proc.wait.return_value = 0
+
+        TestSuiteJob._terminate_process_group( proc )
+
+        import signal as _signal
+        assert sent == [ ( 4242, _signal.SIGTERM ) ]        # reaped, so no SIGKILL
+        proc.wait.assert_called_once()
+
+    def test_escalates_to_sigkill_when_the_group_will_not_die( self, monkeypatch ):
+        import signal as _signal
+        import subprocess as _sp
+        sent = []
+        monkeypatch.setattr( os, "getpgid", lambda pid: 4242 )
+        monkeypatch.setattr( os, "killpg", lambda pgid, sig: sent.append( sig ) )
+
+        proc = MagicMock()
+        proc.pid = 99
+        proc.wait.side_effect = [ _sp.TimeoutExpired( "cmd", 10 ), 0 ]
+
+        TestSuiteJob._terminate_process_group( proc )
+        assert sent == [ _signal.SIGTERM, _signal.SIGKILL ]
+
+    def test_falls_back_to_the_direct_child_when_the_group_is_gone( self, monkeypatch ):
+        # No group left (ProcessLookupError) — the kill must still reach the child,
+        # just without its descendants.
+        def no_group( pid ):
+            raise ProcessLookupError( "gone" )
+        monkeypatch.setattr( os, "getpgid", no_group )
+
+        proc = MagicMock()
+        proc.pid = 99
+        proc.wait.return_value = 0
+
+        TestSuiteJob._terminate_process_group( proc )
+        proc.terminate.assert_called_once()                 # SIGTERM arm
+
+    def test_a_child_that_is_already_gone_does_not_raise( self, monkeypatch ):
+        """
+        Both the group AND the direct child are gone. The helper is called while the
+        caller is already handling a failure, so it must swallow this and return —
+        raising here would replace a measured timeout verdict with an exception.
+        """
+        def no_group( pid ):
+            raise ProcessLookupError( "gone" )
+        monkeypatch.setattr( os, "getpgid", no_group )
+
+        proc = MagicMock()
+        proc.pid = 99
+        proc.terminate.side_effect = ProcessLookupError( "already reaped" )
+        proc.kill.side_effect      = ProcessLookupError( "already reaped" )
+        proc.wait.return_value     = 0
+
+        TestSuiteJob._terminate_process_group( proc )       # must not raise
+
+    def test_a_platform_without_killpg_still_kills_the_child( self, monkeypatch ):
+        def no_killpg( pid ):
+            raise AttributeError( "no killpg on this platform" )
+        monkeypatch.setattr( os, "getpgid", no_killpg )
+
+        proc = MagicMock()
+        proc.pid = 99
+        proc.wait.return_value = 0
+
+        TestSuiteJob._terminate_process_group( proc )
+        proc.terminate.assert_called_once()
+
+
+class TestArtifactRootResolution:
+    """
+    `_isolate_artifact_root` pins `_ARTIFACT_DIR` for every test in this module, so
+    the UNPINNED arm — the one production actually takes — was never executed here.
+    These unpin it deliberately.
+    """
+
+    def test_unpinned_artifact_dir_resolves_through_attestation( self, tmp_path, monkeypatch ):
+        import cosa.agents.test_suite.attestation as att
+        target = tmp_path / "resolved" / "artifacts"
+        monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", None )
+        monkeypatch.setattr( att, "artifact_root", lambda: str( target ) )
+
+        got = TestSuiteJob._artifact_dir()
+
+        assert got == str( target )
+        assert target.is_dir()                             # created here, not assumed
+
+    def test_a_pinned_artifact_dir_is_created_and_returned( self, tmp_path, monkeypatch ):
+        pinned = tmp_path / "pinned" / "deep"
+        monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( pinned ) )
+        assert TestSuiteJob._artifact_dir() == str( pinned )
+        assert pinned.is_dir()
+
+    def test_attestation_project_root_is_none_in_production( self, job, monkeypatch ):
+        # None lets `attestation` resolve the real root. Any other value would send
+        # a production attestation somewhere else.
+        monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", None )
+        assert job._attestation_project_root() is None
+
+    def test_attestation_project_root_follows_a_pinned_dir( self, job, tmp_path, monkeypatch ):
+        # Fail-closed: with a pinned dir, a test's attestation must never land in
+        # the live ledger.
+        monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path ) )
+        assert job._attestation_project_root() == str( tmp_path )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The KILLED-TIER path inside _run_suite (bug 8b93bcf5).
+#
+# Everything below only executes when a tier has already gone wrong: the budget
+# blew, or the stdout reader thread died. It was the last uncovered region of the
+# file, which is the worst place to have one — the recovery code for a failure is
+# the code most likely to be first exercised in production.
+#
+# The harness fakes Popen and runs the reader thread SYNCHRONOUSLY, so the queue
+# contents are fully determined before the poll loop starts. Wall-clock is driven
+# by a fake monotonic clock rather than real sleeps, so a timeout fires on a
+# chosen iteration instead of after a real budget.
+# ═════════════════════════════════════════════════════════════════════════════
+
+import queue as _queue_mod
+import subprocess as _subprocess_mod
+
+import cosa.agents.test_suite.job as job_mod
+
+
+class _FakePipe:
+    """A stdout pipe that yields `lines` then EOF, and can die partway."""
+
+    def __init__( self, lines, raise_after=None ):
+        self._lines      = list( lines )
+        self._raise_after = raise_after
+        self._served      = 0
+
+    def readline( self ):
+        if self._raise_after is not None and self._served == self._raise_after:
+            raise OSError( "pipe went away" )
+        if not self._lines:
+            return ""                                      # EOF
+        self._served += 1
+        return self._lines.pop( 0 )
+
+
+class _SyncThread:
+    """
+    Stand-in for threading.Thread whose start() runs the target INLINE.
+
+    The real reader thread races the poll loop, so what is in the queue when the
+    timeout fires would be nondeterministic. Running it inline makes the queue a
+    known quantity and the test a statement about the drain logic rather than
+    about scheduling.
+    """
+
+    def __init__( self, target=None, args=(), daemon=None ):
+        self._target = target
+        self._args   = args
+        self.daemon  = daemon
+
+    def start( self ):
+        self._target( *self._args )
+
+    def join( self, timeout=None ):
+        pass
+
+
+class _FakeClock:
+    """
+    monotonic() returns 0.0 for the first `zero_calls` calls, then `after`.
+
+    The jump is what makes a chosen poll iteration exceed the budget; before it,
+    every elapsed check reads 0 and the loop just drains its queue.
+    """
+
+    def __init__( self, zero_calls, after=10_000.0, step=0.0 ):
+        self.zero_calls = zero_calls
+        self.after      = after
+        self.step       = step                             # per-call advance AFTER the jump
+        self.calls      = 0
+        self.post       = 0
+
+    def __call__( self ):
+        self.calls += 1
+        if self.calls <= self.zero_calls:
+            return 0.0
+        value = self.after + self.step * self.post
+        self.post += 1
+        return value
+
+
+def _install_harness( monkeypatch, tmp_path, *, lines, poll_returns=None,
+                      zero_calls=99, raise_after=None, returncode=0, clock_step=0.0 ):
+    """
+    Wire a fake `bash <script>` run. Returns ( project_root, fake_process ).
+
+    `poll_returns` is what process.poll() answers; None keeps the child 'running'
+    so the loop cannot exit normally and the timeout branch is reachable.
+    """
+    root   = tmp_path / "proj"
+    script = root / "src/tests/run-unit-tests.sh"
+    script.parent.mkdir( parents=True, exist_ok=True )
+    script.write_text( "#!/bin/bash\ntrue\n" )
+
+    proc            = MagicMock()
+    proc.pid        = 4242
+    proc.stdout     = _FakePipe( lines, raise_after=raise_after )
+    proc.poll.return_value = poll_returns
+    proc.returncode = returncode
+
+    monkeypatch.setattr( job_mod.subprocess, "Popen", lambda *a, **k: proc )
+    monkeypatch.setattr( job_mod.threading, "Thread", _SyncThread )
+    monkeypatch.setattr( job_mod.time, "monotonic", _FakeClock( zero_calls, step=clock_step ) )
+    monkeypatch.setattr( TestSuiteJob, "_terminate_process_group", staticmethod( lambda p: None ) )
+    monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path / "artifacts" ) )
+    return str( root ), proc
+
+
+class TestRunSuiteTimeoutRecovery:
+
+    def test_a_killed_tier_recovers_partial_counts_from_progress_output( self, job, tmp_path, monkeypatch ):
+        """
+        Bug 8b93bcf5's whole point: a killed tier used to report 0/0/0/1 —
+        indistinguishable from a tier that never started — while sitting on
+        results it had already produced. The progress stream is the only evidence
+        that survives a kill, so it must be mined before the verdict is written.
+        """
+        lines = [
+            "src/tests/unit/test_a.py ....F                            [ 10%]\n",
+            "src/tests/unit/test_b.py ...s                             [ 20%]\n",
+        ]
+        # 1 start_time + 2 line iterations + 1 EOF iteration = 4 zero reads, then
+        # the 5th elapsed check jumps past the budget.
+        root, _ = _install_harness( monkeypatch, tmp_path, lines=lines, zero_calls=4 )
+
+        result = job._run_suite( "unit", root )
+
+        assert result[ "exit_code" ] == -2                 # the timeout verdict
+        assert result[ "passed" ]  == 7                    # 4 + 3 recovered
+        assert result[ "failed" ]  == 1
+        assert result[ "skipped" ] == 1
+        # +1 for the timeout itself — a killed tier can never report a clean bill.
+        assert result[ "errors" ]  == 1
+        assert "PARTIAL results recovered" in result[ "error" ]
+        assert "FILE-level only" in result[ "error" ]
+
+    def test_a_killed_tier_with_no_progress_output_says_so_plainly( self, job, tmp_path, monkeypatch ):
+        # Nothing recoverable. The note must say that rather than let zero counts
+        # imply the run produced nothing.
+        lines   = [ "collecting ...\n" ]
+        root, _ = _install_harness( monkeypatch, tmp_path, lines=lines, zero_calls=3 )
+
+        result = job._run_suite( "unit", root )
+
+        assert result[ "exit_code" ] == -2
+        assert ( result[ "passed" ], result[ "failed" ], result[ "skipped" ] ) == ( 0, 0, 0 )
+        assert result[ "errors" ] == 1
+        assert "NO partial results could be recovered" in result[ "error" ]
+
+    def test_the_drain_stops_on_an_empty_queue_rather_than_waiting_out_its_budget( self, job, tmp_path, monkeypatch ):
+        """
+        The drain replaced a BLOCKING `process.stdout.read()` that waited on any
+        surviving grandchild holding the pipe — measured at 30.0s against a 1s
+        budget. With the poll loop having already consumed everything, the drain
+        must find the queue empty and return immediately, not sit on its deadline.
+        """
+        lines   = [ "src/tests/unit/test_a.py ..                       [  5%]\n" ]
+        # 1 start + 1 line + 1 EOF + 1 empty-get iteration = 4, then timeout.
+        root, _ = _install_harness( monkeypatch, tmp_path, lines=lines, zero_calls=4 )
+
+        result = job._run_suite( "unit", root )
+
+        assert result[ "exit_code" ] == -2
+        assert result[ "passed" ] == 2                     # the consumed line still counted
+
+    def test_a_reader_crash_found_during_the_drain_is_recorded_not_raised( self, job, tmp_path, monkeypatch ):
+        """
+        On the MAIN poll path a reader crash is re-raised, because silence there
+        would report a crashed tier as green. In the DRAIN it must NOT raise: this
+        path is already returning a measured timeout verdict, and converting that
+        into an exception would lose the counts it just recovered. The marker is
+        recorded in the log instead — and it is not a log line either, so a bare
+        append would put a repr into the saved stdout.
+        """
+        lines = [ "src/tests/unit/test_a.py ...                        [  5%]\n" ]
+        # readline raises after serving 1 line -> reader posts a crash marker, then
+        # its finally posts EOF. Timeout fires after the first line is consumed, so
+        # the marker is still queued when the drain runs.
+        root, _ = _install_harness( monkeypatch, tmp_path, lines=lines,
+                                    raise_after=1, zero_calls=2 )
+
+        result = job._run_suite( "unit", root )
+
+        assert result[ "exit_code" ] == -2                 # timeout verdict survives
+        assert result[ "errors" ] == 1                     # not turned into a crash
+        log_text = open( result[ "log_path" ] ).read()
+        assert "stdout reader thread died" in log_text
+        assert "OSError" in log_text
+
+
+class TestRunSuiteCollectionDiagnosis:
+    def test_a_diagnosis_that_raises_cannot_change_the_suite_outcome( self, job, tmp_path, monkeypatch ):
+        """
+        The diagnosis is a diagnostic, and a diagnostic must never be able to fail
+        a run by raising. It fails soft to None and the suite result stands.
+        """
+        import cosa.utils.pytest_collection_diagnosis as diag_mod
+        def boom( exit_code, stdout ):
+            raise RuntimeError( "diagnosis blew up" )
+        monkeypatch.setattr( diag_mod, "diagnose", boom )
+
+        lines   = [ "src/tests/unit/test_a.py ..                       [100%]\n" ]
+        # poll() returns 0 -> the child has exited, so the loop leaves normally.
+        root, _ = _install_harness( monkeypatch, tmp_path, lines=lines,
+                                    poll_returns=0, returncode=0 )
+
+        result = job._run_suite( "unit", root )
+
+        assert result[ "exit_code" ] == 0                  # outcome unchanged
+        assert result[ "collection_diagnosis" ] is None    # failed soft
+
+    def test_a_working_diagnosis_is_carried_on_the_result( self, job, tmp_path, monkeypatch ):
+        import cosa.utils.pytest_collection_diagnosis as diag_mod
+        monkeypatch.setattr( diag_mod, "diagnose", lambda exit_code, stdout: "looks fine" )
+
+        lines   = [ "src/tests/unit/test_a.py ..                       [100%]\n" ]
+        root, _ = _install_harness( monkeypatch, tmp_path, lines=lines,
+                                    poll_returns=0, returncode=0 )
+
+        assert job._run_suite( "unit", root )[ "collection_diagnosis" ] == "looks fine"
+
+
+class TestProgressParserSkipsVerboseLines:
+    def test_a_verbose_node_id_line_is_not_counted_as_progress( self ):
+        # `-v` output carries a filename-shaped token but is not a progress run.
+        # Counting its letters would invent results.
+        stdout = (
+            "src/tests/unit/test_a.py ..                               [  5%]\n"
+            "src/tests/unit/test_a.py::test_x PASSED\n"
+        )
+        got = TestSuiteJob._parse_pytest_progress_stdout( stdout )
+        assert got[ "passed" ] == 2
+        assert len( got[ "partial_files" ] ) == 1
+
+
+    def test_the_drain_gives_up_at_its_budget_instead_of_waiting_forever( self, job, tmp_path, monkeypatch ):
+        """
+        The drain is BOUNDED on purpose. A surviving grandchild can keep producing
+        output past the kill, and the old blocking read waited for it — measured at
+        30.0s against a 1s budget. Here the queue still holds lines when
+        STDOUT_DRAIN_BUDGET_SECONDS expires, and the loop must exit on its deadline
+        rather than keep draining.
+
+        The clock advances 3s per check after the timeout fires, so the 5s drain
+        budget lapses partway through a queue that still has work in it.
+        """
+        lines = [ f"src/tests/unit/test_{i}.py ..                      [ {i}%]\n"
+                  for i in range( 8 ) ]
+        # Timeout fires on the FIRST poll iteration, so nothing has been consumed
+        # and all 8 lines plus the EOF sentinel are still queued.
+        root, _ = _install_harness( monkeypatch, tmp_path, lines=lines,
+                                    zero_calls=1, clock_step=3.0 )
+
+        result = job._run_suite( "unit", root )
+
+        assert result[ "exit_code" ] == -2
+        # It drained SOME but not all — the budget cut it short, which is the point.
+        assert 0 < result[ "passed" ] < 16                  # 8 files x 2 dots = 16 if fully drained
