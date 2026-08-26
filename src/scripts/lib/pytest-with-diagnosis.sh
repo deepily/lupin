@@ -35,6 +35,21 @@
 #
 # Created: 2026-08-17 (row 73c6819d — the human-at-a-terminal half of bc83f2df)
 
+# ── Contended-coverage guard (row e2099400, decision 4) ─────────────────────
+#
+# Sourced HERE rather than by each runner on purpose. Row fc74c1d4's lesson is that a guard
+# written inline in one runner never reaches the others — four were still unguarded months
+# after the first fix. Every sanctioned runner already routes through
+# run_pytest_with_diagnosis below, so one insertion covers all of them.
+_GUARD_CONTENDED_COVERAGE_LIB="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/guard-contended-coverage.sh"
+if [ -f "$_GUARD_CONTENDED_COVERAGE_LIB" ]; then
+    # shellcheck source=guard-contended-coverage.sh
+    source "$_GUARD_CONTENDED_COVERAGE_LIB"
+else
+    echo "pytest-with-diagnosis: guard-contended-coverage.sh not found beside this file —" >&2
+    echo "  a --cov run will NOT be checked for a competing suite. Row e2099400." >&2
+fi
+
 # Resolve the interpreter used to render a diagnosis. It runs the module BY FILE PATH, so
 # no `cosa` package import is involved — which matters, because the failure being
 # diagnosed is frequently an import error in this very tree.
@@ -138,6 +153,13 @@ _warn_if_coverage_went_blind() {
 
 run_pytest_with_diagnosis() {
     local capture status python_bin module_path
+
+    # Refuse a coverage run while another suite is live (row e2099400). Returns non-zero
+    # ONLY for a refusal; a run with no --cov, or a clear box, falls straight through.
+    if declare -F guard_contended_coverage >/dev/null 2>&1; then
+        guard_contended_coverage "$@" || return $?
+    fi
+
     capture="$( mktemp -t pytest-collection-XXXXXX.log 2>/dev/null )"
 
     # No temp file available: run pytest plainly rather than not at all. A diagnostic that
