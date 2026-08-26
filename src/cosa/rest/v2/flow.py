@@ -31,7 +31,7 @@ from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRA
 from cosa.agents.runtime_argument_expeditor.expeditor import ArgSpec
 from cosa.rest.v2.executor import Work
 from cosa.rest.salutations import parse_salutations
-from cosa.rest.v2.registry import resolve, resolve_agentic
+from cosa.rest.v2.registry import resolve, resolve_agentic, canonical_command
 from cosa.rest.v2.trace import StageTrace
 
 from lupin_cli.notifications.notify_user_async import notify_user_async
@@ -1375,6 +1375,15 @@ class AskFlow:
         conservative bias (v2 reads slightly slower, never faster), the audit-safe
         direction for the paired harness.
         """
+        # ONE ROUTE MUST REACH THE OUTPUT VOCABULARY UNDER ONE NAME (row 759a895b).
+        # `math` is a registered alias of `agent router go to math`, and resolve() honours
+        # aliases -- so a router emitting the short form routed CORRECTLY and was then
+        # recorded under its own spelling. Downstream counts grouped by payload.command
+        # split silently, and an exact-match routing score marked a right route as a miss.
+        # Canonicalised HERE because _emit is the single chokepoint every terminal exit
+        # funnels through, so one line fixes every emitter. Deliberately NOT applied to
+        # _route_reason, which reads the INCOMING command on purpose (see its docstring).
+        command = canonical_command( command )
         trace.mark( "t_complete" )
         trace.update( path=path, status=status, route_reason=route_reason, cache_hit=cache_hit,
                       wrote_snapshot=snapshot_id is not None )

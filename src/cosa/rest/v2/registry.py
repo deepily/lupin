@@ -490,6 +490,47 @@ def resolve( command, crud_enabled ):
     return spec
 
 
+def canonical_command( command ):
+    """
+    Map a routing command OR one of its aliases to the registry's canonical spelling.
+
+    WHY THIS EXISTS (row 759a895b, María 🌸's finding). `math` is a registered alias of
+    `agent router go to math` (this file, the conversational table), and `resolve()`
+    honours aliases — so a router emitting the short form ROUTES CORRECTLY. What did not
+    happen is the record adopting the canonical name: `v2/flow.py:_emit` copied the raw
+    router string into `payload.command`, so one route reached the output vocabulary under
+    two spellings. Every downstream count grouped by that field then split silently, and an
+    exact-match routing score marked a CORRECT route as a miss.
+
+    Measured in `io/v2-flow/eval-2026-08-25-19-31-31/records.jsonl`: 50 records spell it
+    `agent router go to math` and 2 spell it `math`, same `route_reason`, and both bare
+    records are the same utterance in the cold and warm passes.
+
+    Scoped to the WHOLE registry, not just the conversational class, because the output
+    vocabulary is the whole registry — an agentic alias would split a count exactly the
+    same way. `resolve()` cannot serve here: it is deliberately conversational-only and
+    returns None for every agentic command.
+
+    Requires:
+        - command is a string, or None
+
+    Ensures:
+        - returns the canonical command when `command` is a registry command or an alias
+        - returns `command` UNCHANGED when it is neither, and when it is None — an unknown
+          string is not this function's business to invent a spelling for, and callers pass
+          None on paths that never had a command
+        - never raises
+    """
+    if not command:
+        return command
+    if command in REGISTRY:
+        return command
+    for canonical, spec in REGISTRY.items():
+        if command in spec.aliases:
+            return canonical
+    return command
+
+
 def resolve_agentic( command ):
     """
     Resolve a routing command to its AGENTIC AgentSpec, or None.
