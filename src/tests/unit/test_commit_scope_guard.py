@@ -20,6 +20,12 @@ from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
     _commits_the_whole_worktree,
     _mentions_git_commit,
     _modified_tracked_paths,
+    _pathspec_of,
+    evaluate_commit_scope,
+    build_commit_scope_notice_response,
+    SCOPE_INDEX,
+    SCOPE_DASH_A,
+    SCOPE_PATHSPEC,
     LARGE_FILE_BYTES,
 )
 
@@ -617,3 +623,125 @@ def test_a_heredoc_body_quoting_dash_a_does_not_make_this_a_dash_a_commit():
 def test_the_scan_stops_at_the_end_of_this_command( command ):
     """The first match's flags are this command's flags — not the whole line's."""
     assert _commits_the_whole_worktree( command, _mentions_git_commit( command ) ) is False
+
+
+# ── Row 292dd3d8, mr radio's ruling 2026-08-25 ───────────────────────────────
+# `git commit -- <paths>` is now STANDING PRACTICE, because it takes named paths
+# from the working tree and never reads the shared index — which is what makes it
+# race-free, and also what made it invisible here: an empty index read as nothing
+# to object to. Mandating the safe shape would have made every compliant commit an
+# unreviewed one. So the guard learns the pathspec, and gives up out loud.
+
+def test_a_pathspec_commit_is_reviewed_on_the_paths_it_names( repo ):
+    tool, payload = _bash( "git commit -F msg.txt -- src/mine_one.py src/theirs.py" )
+    verdict = evaluate_commit_scope(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader(),                    # index EMPTY — the whole point
+    )
+    assert "src/theirs.py" in verdict.deny_reason
+    assert "THE PATHS THIS COMMIT NAMES" in verdict.deny_reason
+
+
+def test_a_pathspec_commit_of_only_my_own_paths_passes( repo ):
+    tool, payload = _bash( "git commit -F msg.txt -- src/mine_one.py src/mine_two.py" )
+    verdict = evaluate_commit_scope(
+        tool, payload, session_id=MY_SESSION, cwd=repo, staged_reader=_reader(),
+    )
+    assert verdict.deny_reason is None
+    assert verdict.notice is None
+
+
+def test_the_pathspec_refusal_warns_about_working_tree_CONTENT( repo ):
+    """
+    mr radio's point, and the sharper hazard: a pathspec commit takes the file's
+    WORKING-TREE content, so naming a file you legitimately claim still commits
+    whatever a peer left uncommitted inside it. Nothing here can stop that — but
+    the refusal can at least tell the seat to look at the diff, not the name.
+    """
+    tool, payload = _bash( "git commit -F msg.txt -- src/theirs.py" )
+    reason = evaluate_commit_scope(
+        tool, payload, session_id=MY_SESSION, cwd=repo, staged_reader=_reader(),
+    ).deny_reason
+    assert "WORKING-TREE content" in reason
+    assert "git diff -- <path>" in reason
+
+
+@pytest.mark.parametrize( "command,fragment", [
+    ( "git commit -F - <<'MSG'",              "redirection"      ),
+    ( 'git commit -- "src/*.py"',             "magic or globs"   ),
+    ( "git commit -S -m x src/a.py",          "optional argument"),
+    ( "git commit --frobnicate src/a.py",     "not an option"    ),
+    ( 'git commit -m "unbalanced',            "quoting"          ),
+] )
+def test_an_unparseable_commit_is_ALLOWED_with_a_notice( repo, command, fragment ):
+    """Allow-on-doubt: a guard that refuses honest commits gets switched off."""
+    tool, payload = _bash( command )
+    verdict = evaluate_commit_scope(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/theirs.py" ),   # would otherwise REFUSE
+    )
+    assert verdict.deny_reason is None
+    assert "NOT REVIEWED" in verdict.notice
+    assert fragment in verdict.notice
+
+
+def test_the_notice_envelope_allows_rather_than_denies():
+    """No permissionDecision key at all — the commit runs, the seat is told."""
+    envelope = build_commit_scope_notice_response( "something" )
+    out      = envelope[ "hookSpecificOutput" ]
+    assert out[ "hookEventName" ] == "PreToolUse"
+    assert out[ "additionalContext" ] == "something"
+    assert "permissionDecision" not in out
+
+
+@pytest.mark.parametrize( "command,staged,modified,heading", [
+    ( 'git commit -m x',                      ( "src/theirs.py", ), (), "THE FULL STAGED SET" ),
+    ( 'git commit -am x',                     (),                   ( "src/theirs.py", ),
+      "THE FULL SET THIS COMMIT WOULD CARRY" ),
+    ( 'git commit -F m.txt -- src/theirs.py', (),                   (), "THE PATHS THIS COMMIT NAMES" ),
+] )
+def test_the_refusal_always_names_which_set_it_reviewed( repo, command, staged, modified, heading ):
+    """Three shapes, three sets — a refusal that does not say which is a wrong map."""
+    tool, payload = _bash( command )
+    reason = evaluate_commit_scope(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( *staged ), modified_reader=_modified( *modified ),
+    ).deny_reason
+    assert heading in reason
+
+
+@pytest.mark.parametrize( "command,expected", [
+    ( "git commit -- a.py b.py",       [ "a.py", "b.py" ] ),
+    ( 'git commit -m "fix" -- a.py',   [ "a.py" ]         ),
+    ( "git commit -m fix a.py",        [ "a.py" ]         ),   # -m eats "fix", not a.py
+    ( "git commit -am x",              []                 ),   # cluster: m eats x
+    ( "git commit --amend --no-edit",  []                 ),
+    ( "git commit --author=me a.py",   [ "a.py" ]         ),   # = carries its own arg
+    ( "git commit",                    []                 ),
+] )
+def test_the_pathspec_parser_accounts_for_every_option_argument( command, expected ):
+    paths, unsure = _pathspec_of( command, _mentions_git_commit( command ) )
+    assert unsure is None
+    assert paths == expected
+
+
+def test_the_ack_hatch_still_beats_a_pathspec_commit( repo ):
+    tool, payload = _bash( "LUPIN_COMMIT_SCOPE_ACK=1 git commit -F m.txt -- src/theirs.py" )
+    verdict = evaluate_commit_scope( tool, payload, session_id=MY_SESSION, cwd=repo, staged_reader=_reader() )
+    assert verdict.deny_reason is None and verdict.notice is None
+
+
+def test_an_optional_arg_option_buried_in_a_CLUSTER_is_still_ambiguous():
+    """`-Sm x` — the S is inside the cluster, so the bare-token check never sees it."""
+    command = "git commit -Sm x src/a.py"
+    paths, unsure = _pathspec_of( command, _mentions_git_commit( command ) )
+    assert paths is None
+    assert "optional" in unsure
+
+
+def test_pathspec_magic_without_a_double_dash_is_also_a_give_up():
+    """Magic does not need `--` in front of it to be unresolvable here."""
+    command = "git commit -m x src/*.py"
+    paths, unsure = _pathspec_of( command, _mentions_git_commit( command ) )
+    assert paths is None
+    assert "magic or globs" in unsure

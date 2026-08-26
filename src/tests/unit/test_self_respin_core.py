@@ -893,3 +893,24 @@ def test_stamp_removes_the_temp_file_when_the_write_fails( tmp_path, monkeypatch
         sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
     assert [ p.name for p in tmp_path.iterdir() ] == [ "seat.md" ]      # tmp cleaned
     assert memento.read_text( encoding="utf-8" ) == _REAL_BODY          # original untouched
+
+
+def test_only_the_BODY_moves_the_verdict_not_the_nonce_freshness():
+    """
+    Clayton's nit, and it is the right one: a test that rejects a husk proves
+    nothing unless the SAME nonce, at the SAME instant, passes once a body is
+    present. Otherwise the rejection could be staleness wearing the floor's
+    clothes and the floor would never be exercised.
+    """
+    stamped, now = _dt( 20 ), _dt( 21 )
+    line         = sr.build_nonce_line( "u1", stamped )
+
+    husk = f"{line}\n"
+    real = f"# memento\n{_REAL_BODY}{line}\n"
+
+    husk_ok, husk_why = sr.verify_memento_content( husk, "u1", now, cycle_window_seconds=300 )
+    real_ok, _        = sr.verify_memento_content( real, "u1", now, cycle_window_seconds=300 )
+
+    assert husk_ok is False and real_ok is True     # same nonce, same clock — only the body differs
+    assert "nonce-only" in husk_why
+    assert "stale" not in husk_why                  # it failed on SUBSTANCE, not freshness
