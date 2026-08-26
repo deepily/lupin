@@ -623,6 +623,108 @@ def print_banner(msg: str, expletive: bool = False, chunk: str = "¡@#!-$?%^_¿"
     print(bar_str, end=end)
 
 
+# ── The wrong-tree detector (row ef22c328) ────────────────────────────────────
+# Measured 2026-08-25: a standalone script run by hand from a WORKTREE, using the
+# documented bootstrap that joins $LUPIN_ROOT/src onto sys.path, imports its code
+# from the MAIN checkout. You edit one tree and exercise another.
+#
+# The test tier is already covered — Rio's worktree_tree_guard (rows 71249e0f /
+# a9f87d29) refuses a mismatched pytest run outright. But it arms on TEST COLLECTION,
+# so a plain `python3 script.py` never trips it, and 282 files carry the bootstrap.
+# Retrofitting all of them is not the move; one detector at the door they share is.
+#
+# WHY IT ONLY WARNS. get_project_root() is on the hot path in the container, in the
+# hooks and in every agent. A refusal here could wedge production over a condition
+# that is legitimate elsewhere (a script deliberately driving another tree). Loud and
+# once is the right volume — the same "state it, do not swallow it" shape as the rest.
+_wrong_tree_warned = set()
+
+
+def _git_tree_of( path ):
+    """
+    The git worktree a path belongs to, or None.
+
+    Ensures:
+        - walks up looking for a `.git` entry — a DIRECTORY in the main checkout, a
+          FILE in a linked worktree; both count, which is the whole point here
+        - returns the containing directory, or None when there is no git above it
+        - never raises
+    """
+    try:
+        current = os.path.abspath( path )
+        if os.path.isfile( current ): current = os.path.dirname( current )
+        while True:
+            if os.path.exists( os.path.join( current, ".git" ) ): return current
+            parent = os.path.dirname( current )
+            if parent == current: return None
+            current = parent
+    except Exception:
+        return None
+
+
+def _warn_once_if_caller_is_in_another_tree( root ):
+    """
+    Say so — once per calling file — when the caller lives in a different git tree
+    than LUPIN_ROOT points at.
+
+    Requires:
+        - root is the LUPIN_ROOT value about to be handed back
+
+    Ensures:
+        - FAST PATH FIRST: a caller inside `root` returns after one string compare,
+          which is every ordinary run, the container included
+        - warns at most once per calling file, to stderr, naming both trees
+        - never raises and never refuses — see the note above on volume
+    """
+    try:
+        # WALK OUT TO THE FIRST FRAME THAT IS NOT THIS MODULE, rather than trusting a
+        # fixed depth. Measured while building this: `sys._getframe( 2 )` was silently
+        # wrong — one caller reached it through get_project_root (depth 2) and a direct
+        # caller at module level had NO frame 2 at all, so the lookup raised and the
+        # detector failed SILENTLY. A detector that quietly fails is worse than none.
+        caller, depth = None, 1
+        while depth < 12:
+            try:
+                candidate = sys._getframe( depth ).f_code.co_filename
+            except ValueError:
+                break
+            if candidate != __file__:
+                caller = candidate
+                break
+            depth += 1
+        if caller is None: return
+
+        # 🔴 THE SEPARATOR IS LOAD-BEARING. Written first as a bare
+        # `caller.startswith( root )`, and measured silently wrong on every worktree
+        # this box has: root is `…/projects/lupin`, the worktrees are
+        # `…/projects/lupin-wt-clayton-unit`, and that string DOES start with the
+        # root — so the fast path swallowed exactly the population the detector
+        # exists to catch. A prefix test between paths must compare path COMPONENTS.
+        caller = os.path.abspath( caller )
+        root_abs = os.path.abspath( root ).rstrip( os.sep )
+        if caller == root_abs or caller.startswith( root_abs + os.sep ): return   # the ordinary case
+        if caller in _wrong_tree_warned: return
+
+        caller_tree = _git_tree_of( caller )
+        root_tree   = _git_tree_of( root )
+        if caller_tree is None or root_tree is None: return              # not a git layout; nothing to compare
+        if os.path.realpath( caller_tree ) == os.path.realpath( root_tree ): return
+
+        _wrong_tree_warned.add( caller )
+        print(
+            f"\n WRONG-TREE WARNING (row ef22c328): this file and LUPIN_ROOT are in DIFFERENT git trees,\n"
+            f"    so it will import code from the tree it is NOT sitting in.\n"
+            f"      this file  : {caller}\n"
+            f"      its tree   : {caller_tree}\n"
+            f"      LUPIN_ROOT : {root}\n"
+            f"    Your edits are probably not what runs. Set LUPIN_ROOT to the tree you are working in,\n"
+            f"    or ignore this if you meant to drive the other tree.\n",
+            file=sys.stderr,
+        )
+    except Exception:
+        return                       # a detector must never break the thing it watches
+
+
 def get_project_root() -> str:
     """
     Get the root directory path of the project.
@@ -647,7 +749,9 @@ def get_project_root() -> str:
         print(f"os.getcwd() [{os.getcwd()}]")
 
     if "LUPIN_ROOT" in os.environ:
-        return os.environ["LUPIN_ROOT"]
+        root = os.environ["LUPIN_ROOT"]
+        _warn_once_if_caller_is_in_another_tree( root )
+        return root
     else:
         path = "/var/lupin"
         print(f"WARNING: LUPIN_ROOT not found in environment variables. Returning default path '{path}'")

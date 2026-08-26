@@ -415,3 +415,114 @@ class TestSmallHelpers( unittest.TestCase ):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── The wrong-tree detector (row ef22c328) ───────────────────────────────────
+# A standalone script run by hand from a WORKTREE, using the documented bootstrap
+# that joins $LUPIN_ROOT/src onto sys.path, imports its code from the MAIN checkout.
+# Rio's worktree_tree_guard covers pytest; it arms on TEST COLLECTION, so a plain
+# `python3 script.py` never trips it.
+
+def _clear_warn_cache():
+    cu._wrong_tree_warned.clear()
+
+
+def test_a_caller_inside_the_root_is_silent( tmp_path, monkeypatch, capsys ):
+    """The ordinary case — every normal run, the container included."""
+    _clear_warn_cache()
+    monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""
+
+
+def test_a_sibling_tree_whose_NAME_starts_with_the_root_is_NOT_inside_it( tmp_path, monkeypatch, capsys ):
+    """
+    🔴 The bug this test exists for, measured while building the detector. Root is
+    `…/lupin`; the worktrees on this box are `…/lupin-wt-clayton-unit`. A bare
+    `caller.startswith( root )` is TRUE for those, so the fast path swallowed exactly
+    the population the detector was built to catch — and it failed silently, which is
+    the one failure mode a detector must not have.
+    """
+    _clear_warn_cache()
+    root    = tmp_path / "lupin"
+    sibling = tmp_path / "lupin-wt-someseat"
+    for d in ( root, sibling ):
+        ( d / ".git" ).mkdir( parents=True )
+
+    monkeypatch.setenv( "LUPIN_ROOT", str( root ) )
+    monkeypatch.setattr(
+        cu.sys, "_getframe",
+        lambda depth: _FakeFrame( str( sibling / "script.py" ) ) if depth == 1 else _FakeFrame( cu.__file__ ),
+    )
+    cu.get_project_root()
+
+    err = capsys.readouterr().err
+    assert "WRONG-TREE WARNING" in err
+    assert str( sibling ) in err
+
+
+def test_it_warns_once_per_file_not_once_per_call( tmp_path, monkeypatch, capsys ):
+    """get_project_root() is on the hot path; a per-call warning would be noise."""
+    _clear_warn_cache()
+    root    = tmp_path / "lupin"
+    sibling = tmp_path / "lupin-wt-someseat"
+    for d in ( root, sibling ):
+        ( d / ".git" ).mkdir( parents=True )
+
+    monkeypatch.setenv( "LUPIN_ROOT", str( root ) )
+    monkeypatch.setattr(
+        cu.sys, "_getframe",
+        lambda depth: _FakeFrame( str( sibling / "script.py" ) ) if depth == 1 else _FakeFrame( cu.__file__ ),
+    )
+    cu.get_project_root()
+    capsys.readouterr()                      # drain the first, legitimate warning
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""
+
+
+def test_a_non_git_layout_says_nothing( tmp_path, monkeypatch, capsys ):
+    """Nothing to compare — decide nothing rather than guess."""
+    _clear_warn_cache()
+    root    = tmp_path / "lupin"             # deliberately NO .git anywhere
+    sibling = tmp_path / "lupin-wt-someseat"
+    for d in ( root, sibling ): d.mkdir( parents=True )
+
+    monkeypatch.setenv( "LUPIN_ROOT", str( root ) )
+    monkeypatch.setattr(
+        cu.sys, "_getframe",
+        lambda depth: _FakeFrame( str( sibling / "script.py" ) ) if depth == 1 else _FakeFrame( cu.__file__ ),
+    )
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""
+
+
+def test_the_detector_never_raises( tmp_path, monkeypatch ):
+    """A detector that breaks the thing it watches is worse than no detector."""
+    _clear_warn_cache()
+    monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
+    monkeypatch.setattr( cu.sys, "_getframe", lambda depth: ( _ for _ in () ).throw( RuntimeError( "boom" ) ) )
+
+    assert cu.get_project_root() == str( tmp_path )      # returns normally despite the blow-up
+
+
+def test_git_tree_of_finds_a_worktree_dot_git_FILE( tmp_path ):
+    """A linked worktree's `.git` is a FILE, not a directory — both must count."""
+    tree = tmp_path / "wt"
+    tree.mkdir()
+    ( tree / ".git" ).write_text( "gitdir: /elsewhere/.git/worktrees/wt\n" )
+    nested = tree / "a" / "b"
+    nested.mkdir( parents=True )
+
+    assert cu._git_tree_of( str( nested ) ) == str( tree )
+
+
+def test_git_tree_of_returns_none_above_every_repo( tmp_path ):
+    assert cu._git_tree_of( str( tmp_path ) ) is None
+
+
+class _FakeFrame:
+    def __init__( self, filename ):
+        self.f_code = type( "C", (), { "co_filename": filename } )()
