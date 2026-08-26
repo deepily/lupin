@@ -200,7 +200,9 @@ importlib._bootstrap._find_and_load = _find_and_load_watching_reimports
 # coverage of 96.0% reached. Total coverage: 96.59%" — GREEN, and false. 391 files,
 # ALL under src/cosa, 34,322 statements against 62,305 in the same session's 19:04
 # run. ~28,000 statements vanished from a frame the config says holds them,
-# src/lib among them at 0.0%. THE DIRECTION IS THE HAZARD: the vanished files are
+# src/lib among them at 0.0% (that package was DELETED 2026-08-26, row e2099400
+# §3b — the example is kept because it is what was measured, not what is
+# measurable today). THE DIRECTION IS THE HAZARD: the vanished files are
 # the known-worse-than-average ones, so dropping them RAISED the mean —
 # 95.62 -> 96.59 while nothing improved. A red gate did not turn green; the report
 # stopped measuring the red part.
