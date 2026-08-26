@@ -157,10 +157,34 @@ def _task_events_columns( url ):
 
 
 def _create_all( url ):
-    """Bootstrap the FULL current ORM schema (the create_all path) on the DB."""
+    """
+    Bootstrap the FULL current ORM schema (the create_all path) on the DB.
+
+    Mirrors the production bootstrap in `cosa.rest.db.auto_migrate` — including
+    the `CREATE EXTENSION IF NOT EXISTS vector` that runs one line before
+    `create_all` there (auto_migrate.py, "Truly fresh, empty database" branch).
+
+    That extension line was added to the real bootstrap on 2026-08-03 (1fa05b16)
+    when pgvector landed, and THIS copy of the sequence was not updated with it.
+    A throwaway DB starts without the extension, so `create_all` hit a Vector
+    column and died with `(psycopg2.errors.UndefinedObject) type "vector" does
+    not exist` — all four tests in this file, on a real boot path that works
+    fine. Restored 2026-08-26.
+
+    Requires:
+        - url points at a reachable Postgres whose image bundles pgvector
+          (docker-compose uses pgvector/pgvector:pg16; Cloud SQL has it native)
+
+    Ensures:
+        - the `vector` type exists before any Vector column is built
+        - the full ORM schema is created
+    """
     from cosa.rest.postgres_models import Base
     eng = create_engine( url )
     try:
+        # Idempotent — a no-op when the extension is already present.
+        with eng.begin() as conn:
+            conn.execute( text( "CREATE EXTENSION IF NOT EXISTS vector" ) )
         Base.metadata.create_all( eng )
     finally:
         eng.dispose()

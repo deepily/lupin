@@ -10,11 +10,11 @@ Specifically asserts:
        `notification.voice_persona` populated.
     2. POST /voice-persona/{sid}/release produces a `notification_queue_update`
        envelope carrying `notification.type === "voice_persona_released"`.
-    3. POST /conversation-mode/{sid} produces a `notification_queue_update`
-       envelope carrying `notification.type === "conversation_mode_changed"` and
+    3. POST /speakerphone/{sid} produces a `notification_queue_update`
+       envelope carrying `notification.type === "speakerphone_changed"` and
        `notification.payload.active` matching the toggled state.
     4. NO top-level WS frame with `type ∈ { "voice_persona_assigned",
-       "voice_persona_released", "conversation_mode_changed" }` arrives — the
+       "voice_persona_released", "speakerphone_changed" }` arrives — the
        legacy ad-hoc channel must be silent.
 
 Venue: :7999 (AI-discretionary). Test creates a synthetic bridge file inside
@@ -41,11 +41,14 @@ BASE_URL    = os.environ.get( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
 WS_BASE     = BASE_URL.replace( "http://", "ws://" ).replace( "https://", "wss://" )
 SESSION_DIR = Path.home() / ".claude" / "sessions"
 
-# Custom notification types introduced by the 2026-04-29 migration
+# Custom notification types introduced by the 2026-04-29 migration.
+# `conversation_mode_changed` -> `speakerphone_changed` in 53fef419 (2026-06-19)
+# when the feature and its route were renamed; the old name is retained below so
+# the "legacy names must NOT arrive as top-level frames" assertion still covers it.
 MIGRATED_TYPES = {
     "voice_persona_assigned",
     "voice_persona_released",
-    "conversation_mode_changed"
+    "speakerphone_changed"
 }
 
 
@@ -144,9 +147,14 @@ async def _ws_capture(
                 "auth_success",
                 "auth_error",
                 # Legacy event names — left here so we can assert they DON'T arrive.
+                # `conversation_mode_changed` is doubly legacy: it was migrated off
+                # top-level frames in 2026-04-29, then renamed to
+                # `speakerphone_changed` in 53fef419. Both are subscribed so either
+                # arriving as a bare frame fails the guard.
                 "voice_persona_assigned",
                 "voice_persona_released",
-                "conversation_mode_changed"
+                "conversation_mode_changed",
+                "speakerphone_changed"
             ]
         } ) )
 
@@ -268,16 +276,28 @@ class TestVoicePersonaAssignedRoutedThroughNotificationSubsystem:
         assert _illegal_top_level_frames( captured ) == []
 
 
-class TestConversationModeChangedRoutedThroughNotificationSubsystem:
+class TestSpeakerphoneChangedRoutedThroughNotificationSubsystem:
+    """
+    RENAMED 2026-08-26. This class drove POST /api/cosa-voice/conversation-mode/
+    {session_id} with body {"active": ...} and expected a
+    `conversation_mode_changed` notification. All three moved in 53fef419
+    (2026-06-19): the route is now /api/cosa-voice/speakerphone/{session_id}
+    (conversation-mode is absent from the live OpenAPI), the body key is `on`
+    not `active`, and the broadcast type is `speakerphone_changed` with a
+    payload of {session_id, on} (plus {displaced, displaced_by} on a
+    displacement). The old path 404'd silently, so the tests failed on "no
+    notification captured" rather than on the rename — the endpoint is not
+    broken, the test was aimed at an address that no longer exists.
+    """
 
     @pytest.mark.asyncio
-    async def test_activate_emits_conversation_mode_changed_notification( self, auth_token, synthetic_bridge ):
-        """POST /conversation-mode active=True produces a notification with payload.active=True for OUR session.
+    async def test_activate_emits_speakerphone_changed_notification( self, auth_token, synthetic_bridge ):
+        """POST /speakerphone on=True produces a notification with payload.on=True for OUR session.
 
-        Note: activation triggers mutex-displacement of any other active conversation-mode sessions.
-        Those displace events also fire conversation_mode_changed notifications (with displaced=True,
-        active=False). We assert specifically on OUR session's activation event by filtering
-        notification.payload.session_id == our session_id.
+        Note: in solo mode activation displaces any other active speakerphone session.
+        Those displace events also fire speakerphone_changed notifications (with
+        displaced=True, on=False). We assert specifically on OUR session's activation
+        event by filtering notification.payload.session_id == our session_id.
         """
         session_id, _ = synthetic_bridge
 
@@ -285,9 +305,9 @@ class TestConversationModeChangedRoutedThroughNotificationSubsystem:
             await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: _http_post(
-                    f"/api/cosa-voice/conversation-mode/{session_id}",
+                    f"/api/cosa-voice/speakerphone/{session_id}",
                     auth_token,
-                    json_body={ "active": True }
+                    json_body={ "on": True }
                 )
             )
 
@@ -295,19 +315,19 @@ class TestConversationModeChangedRoutedThroughNotificationSubsystem:
 
         migrated = _migrated_type_envelopes( captured )
         # Filter to OUR session's notification (mutex displacement may have produced
-        # additional conversation_mode_changed notifications for other sessions)
+        # additional speakerphone_changed notifications for other sessions)
         ours = [ env for env in migrated
-                 if env[ "notification" ][ "type" ] == "conversation_mode_changed"
+                 if env[ "notification" ][ "type" ] == "speakerphone_changed"
                  and env[ "notification" ].get( "payload", {} ).get( "session_id" ) == session_id ]
         assert len( ours ) >= 1, (
-            f"Expected notification_queue_update with type=conversation_mode_changed for "
+            f"Expected notification_queue_update with type=speakerphone_changed for "
             f"session_id={session_id}; captured: "
             f"{[ ( e.get('type'), e.get('notification', {}).get('type'), e.get('notification', {}).get('payload', {}).get('session_id') ) for e in captured ]}"
         )
 
         notif = ours[ 0 ][ "notification" ]
         assert notif.get( "payload" ) is not None
-        assert notif[ "payload" ].get( "active" ) is True
+        assert notif[ "payload" ].get( "on" ) is True
         # Activation event for our session must NOT be a displacement event
         assert notif[ "payload" ].get( "displaced" ) is not True
 
@@ -315,9 +335,9 @@ class TestConversationModeChangedRoutedThroughNotificationSubsystem:
 
         # Cleanup — flip back off so we don't leave the bridge active
         _http_post(
-            f"/api/cosa-voice/conversation-mode/{session_id}",
+            f"/api/cosa-voice/speakerphone/{session_id}",
             auth_token,
-            json_body={ "active": False }
+            json_body={ "on": False }
         )
 
     @pytest.mark.asyncio
@@ -352,24 +372,24 @@ class TestConversationModeChangedRoutedThroughNotificationSubsystem:
                 assert "voice_id" in persona
 
     @pytest.mark.asyncio
-    async def test_deactivate_emits_conversation_mode_changed_with_active_false( self, auth_token, synthetic_bridge ):
-        """POST /conversation-mode active=False produces a notification with payload.active=False."""
+    async def test_deactivate_emits_speakerphone_changed_with_on_false( self, auth_token, synthetic_bridge ):
+        """POST /speakerphone on=False produces a notification with payload.on=False."""
         session_id, _ = synthetic_bridge
 
         # Pre-activate (sync)
         _http_post(
-            f"/api/cosa-voice/conversation-mode/{session_id}",
+            f"/api/cosa-voice/speakerphone/{session_id}",
             auth_token,
-            json_body={ "active": True }
+            json_body={ "on": True }
         )
 
         async def trigger():
             await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: _http_post(
-                    f"/api/cosa-voice/conversation-mode/{session_id}",
+                    f"/api/cosa-voice/speakerphone/{session_id}",
                     auth_token,
-                    json_body={ "active": False }
+                    json_body={ "on": False }
                 )
             )
 
@@ -377,10 +397,10 @@ class TestConversationModeChangedRoutedThroughNotificationSubsystem:
 
         migrated = _migrated_type_envelopes( captured )
         matching = [ env for env in migrated
-                     if env[ "notification" ][ "type" ] == "conversation_mode_changed"
-                     and env[ "notification" ].get( "payload", {} ).get( "active" ) is False ]
+                     if env[ "notification" ][ "type" ] == "speakerphone_changed"
+                     and env[ "notification" ].get( "payload", {} ).get( "on" ) is False ]
         assert len( matching ) >= 1, (
-            f"Expected conversation_mode_changed notification with payload.active=False; "
+            f"Expected speakerphone_changed notification with payload.on=False; "
             f"got: {[ ( e.get('type'), e.get('notification', {}).get('type'), e.get('notification', {}).get('payload') ) for e in captured ]}"
         )
 

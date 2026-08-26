@@ -38,7 +38,22 @@ import requests
 MODEL_SERVER_URL = os.environ.get( "LUPIN_MODEL_SERVER_URL", "http://localhost:7998" )
 COMPUTE_URL      = os.environ.get( "LUPIN_APP_SERVER_URL",   "http://localhost:7999" )
 LUPIN_ROOT       = Path( os.environ.get( "LUPIN_ROOT", os.getcwd() ) )
-KEY_FILE         = LUPIN_ROOT / "src" / "conf" / "keys" / "notification-api-claude-code-dev"
+# Which key file the model server validates against.
+#
+# Changed 2026-08-26. This was hardcoded to "notification-api-claude-code-dev",
+# which is the model server's built-in code default
+# (lupin_model_server/main.py:76) — but docker-compose OVERRIDES
+# LUPIN_MODEL_SERVER_API_KEY_NAME to "model-server-api" on all three services,
+# and both client providers (memory/embedding_provider.py:273,
+# memory/speech_to_text_provider.py:156) default to "model-server-api" for
+# exactly that reason. The two key files hold DIFFERENT keys, so this test was
+# presenting the wrong one and getting `401 Invalid X-API-Key` on all four
+# authenticated probes. Decoupling design:
+# src/rnd/v0.1.9/2026.07.28-model-server-api-key-decoupling.md
+#
+# Read the env var, same as the clients, so the three ends cannot drift again.
+API_KEY_NAME     = os.environ.get( "LUPIN_MODEL_SERVER_API_KEY_NAME", "model-server-api" )
+KEY_FILE         = LUPIN_ROOT / "src" / "conf" / "keys" / API_KEY_NAME
 WARMUP_MP3       = LUPIN_ROOT / "src" / "conf" / "warmup" / "whisper-warmup-85s.mp3"
 
 

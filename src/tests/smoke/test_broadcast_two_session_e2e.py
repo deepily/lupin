@@ -267,8 +267,26 @@ def test_step9_two_session_e2e_persona_targeted_broadcast():
 
         maria_result    = maria_done_q.get( timeout=5 )
         tiberius_result = tiberius_done_q.get( timeout=5 )
-        assert maria_result.get( "status" )    == "completed", f"maria handler: {maria_result}"
-        assert tiberius_result.get( "status" ) == "completed", f"tiberius handler: {tiberius_result}"
+        # Per-recipient status, tightened 2026-08-26. Both were asserted as plain
+        # "completed", which was the only value the handler could return when this
+        # was written. `completed-with-withheld` was added 2026-07-18 (shipped in
+        # 1fa05b16, broadcast_handler.py:512) and fires whenever a line was withheld
+        # from that persona — which is EXACTLY what this test arranges: the body
+        # carries an "@Maria:" directive, so Maria gets the whole thing and Tiberius
+        # has one line withheld. Tiberius was correctly reporting
+        # completed-with-withheld and the assertion called it a failure.
+        #
+        # Asserting the two DIFFERENT values, rather than accepting either, keeps
+        # this as evidence of the withholding: a regression that stopped withholding
+        # from Tiberius, or started withholding from Maria, still reddens.
+        assert maria_result.get( "status" )    == "completed", (
+            f"maria sees the @Maria line, so nothing is withheld from her: {maria_result}" )
+        assert tiberius_result.get( "status" ) == "completed-with-withheld", (
+            f"tiberius has the @Maria line withheld, so his ack must say so: {tiberius_result}" )
+        assert tiberius_result.get( "withheld_count" ) == 1, (
+            f"exactly one line (@Maria:) is withheld from tiberius: {tiberius_result}" )
+        assert maria_result.get( "withheld_count", 0 ) == 0, (
+            f"nothing is withheld from maria: {maria_result}" )
         assert maria_result[ "broadcast_id" ]    == broadcast_id
         assert tiberius_result[ "broadcast_id" ] == broadcast_id
 
@@ -314,9 +332,17 @@ def test_step9_two_session_e2e_persona_targeted_broadcast():
         assert maria_session_id    in ack_by_session
         assert tiberius_session_id in ack_by_session
 
+        # Same per-recipient status refresh as above (2026-08-26): the loop asserted
+        # "completed" for BOTH acks, but Tiberius's ack carries
+        # completed-with-withheld because the @Maria line was withheld from him.
+        # Correlation is checked for both; the status is checked per persona.
         for sid, ack in ack_by_session.items():
             assert ack[ "metadata" ][ "broadcast_id" ] == broadcast_id, f"{sid} ack missing broadcast_id correlation"
-            assert ack[ "metadata" ][ "status" ]       == "completed",  f"{sid} ack not completed: {ack}"
+
+        assert ack_by_session[ maria_session_id    ][ "metadata" ][ "status" ] == "completed", (
+            f"maria ack (nothing withheld): {ack_by_session[ maria_session_id ]}" )
+        assert ack_by_session[ tiberius_session_id ][ "metadata" ][ "status" ] == "completed-with-withheld", (
+            f"tiberius ack (one line withheld): {ack_by_session[ tiberius_session_id ]}" )
 
         # Body summaries differ — Maria's contains the directive, Tiberius's does not.
         maria_summary    = ack_by_session[ maria_session_id    ][ "metadata" ][ "body_summary" ]
@@ -349,9 +375,17 @@ def test_step9_two_session_e2e_persona_targeted_broadcast():
         pushed_session_ids = sorted( p[ "session_id" ] for p in pushed_payloads )
         assert pushed_session_ids == sorted( [ maria_session_id, tiberius_session_id ] )
 
+        # Third site of the same 2026-08-26 status refresh — the WS payload carries
+        # the same per-persona status the ack entry does, so Tiberius's is
+        # completed-with-withheld here too.
+        expected_status_by_session = {
+            maria_session_id    : "completed",
+            tiberius_session_id : "completed-with-withheld",
+        }
         for p in pushed_payloads:
             assert p[ "broadcast_id" ] == broadcast_id
-            assert p[ "status" ]       == "completed"
+            assert p[ "status" ] == expected_status_by_session[ p[ "session_id" ] ], (
+                f"unexpected status for {p[ 'persona_name' ]}: {p}" )
             assert p[ "persona_name" ] in ( "Maria", "Tiberius" )
             # body_summary travels through the payload so the UI can render per-session detail
             assert isinstance( p[ "body_summary" ], str )

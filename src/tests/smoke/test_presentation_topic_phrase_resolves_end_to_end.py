@@ -119,7 +119,14 @@ class TestPresentationTopicPhraseResolvesToARealFile( unittest.TestCase ):
             patch.object( ex_mod.ExpeditorResponse, "from_xml",
                           return_value=_parsed_with_topic_phrase_source() ),
             patch.object( o, "_ask_for_arg", asks ),
-            patch.object( o, "_confirm_and_iterate", side_effect=lambda args, *rest: args ),
+            # `**kw` added 2026-08-26: commit 64c8a9fd (2026-08-21) moved the
+            # expeditor's per-call state off `self` and onto a keyword-only
+            # `context=` argument, so the real `_confirm_and_iterate` is now
+            # called with a keyword this stub could not accept — all three tests
+            # died on `unexpected keyword argument 'context'`. The stub swallows
+            # whatever keywords the caller passes so a future signature change
+            # does not redden this file again for the same reason.
+            patch.object( o, "_confirm_and_iterate", side_effect=lambda args, *rest, **kw: args ),
         ] + list( extra_patches )
         for p in patches: p.start()
         ex_mod.PromptTemplateProcessor.return_value.process_template.side_effect = lambda t, n: t

@@ -34,6 +34,34 @@ BASE_URL    = os.environ.get( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
 SESSION_DIR = Path.home() / ".claude" / "sessions"
 
 
+# ── configured-pool readers (added 2026-08-26) ──────────────────────────────
+# The pool roster used to be hardcoded in three places in this file. It has
+# changed at least twice (6 names -> 14, and the overflow persona moved from
+# sam to arnold on 2026-05-19), and each change reddened these tests without
+# anything being wrong. Read the same INI keys the server reads instead.
+
+def _configured_pool_names() -> list[ str ]:
+    """
+    Ensures:
+        - returns the persona names from `cc session voice persona pool`,
+          stripped, in config order
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    raw = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( "cc session voice persona pool" )
+    return [ n.strip() for n in raw.split( "," ) if n.strip() ]
+
+
+def _configured_overflow_name() -> str:
+    """
+    Ensures:
+        - returns `cc session voice persona overflow name`, lowercased
+          (the persona reserved for pool exhaustion — never an allocatable member)
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get(
+        "cc session voice persona overflow name" ).strip().lower()
+
+
 # ── Auth fixture ─────────────────────────────────────────────────────────────
 
 @pytest.fixture( scope="module" )
@@ -110,8 +138,21 @@ def synthetic_bridge():
 
 class TestVoicePersonaPool:
 
-    def test_get_pool_returns_6_voices( self, auth_token ):
-        """GET /pool should return the 6 configured allocatable voices."""
+    def test_get_pool_returns_the_configured_pool( self, auth_token ):
+        """
+        GET /pool returns exactly the personas named by the INI pool key.
+
+        Refreshed 2026-08-26. This asserted a hardcoded 6-name pool
+        {maria, mr radio, Rachel, Tiberius, Rio, Arnold}. On 2026-05-19 (merged
+        in 26898e1e) Sam was promoted out of the reserved overflow slot into the
+        regular pool, Arnold took over the overflow slot, and the pool grew to
+        14 names. Hardcoding the roster meant every later addition reddened this
+        test, so it now reads the same config key the server reads
+        (`cc session voice persona pool`) and asserts the API agrees with it —
+        which is the actual contract. The overflow persona
+        (`cc session voice persona overflow name`, currently arnold) must NOT
+        appear in the allocatable pool.
+        """
         resp = requests.get(
             f"{BASE_URL}/api/cosa-voice/voice-persona/pool",
             headers = { "Authorization": f"Bearer {auth_token}" },
@@ -122,11 +163,19 @@ class TestVoicePersonaPool:
         assert "pool" in body
         assert "occupied_names" in body
         assert "free_names" in body
-        # Pool must contain exactly the 6 expected voices (Sam not in pool)
-        pool_names = [ p[ "name" ] for p in body[ "pool" ] ]
-        assert len( pool_names ) == 6, f"Expected 6-voice pool, got {pool_names}"
-        assert "Sam" not in pool_names, "Sam must NOT be in the allocatable pool"
-        assert set( pool_names ) == { "maria", "mr radio", "Rachel", "Tiberius", "Rio", "Arnold" }
+        # The API's pool must equal the configured pool, name for name.
+        pool_names    = [ p[ "name" ] for p in body[ "pool" ] ]
+        expected      = _configured_pool_names()
+        assert set( pool_names ) == set( expected ), (
+            f"pool disagrees with `cc session voice persona pool`:\n"
+            f"  api    = {sorted( pool_names )}\n"
+            f"  config = {sorted( expected )}"
+        )
+        # The overflow persona is reserved — it is never an allocatable member.
+        overflow = _configured_overflow_name()
+        assert overflow not in { n.lower() for n in pool_names }, (
+            f"overflow persona {overflow!r} must NOT be in the allocatable pool; got {pool_names}"
+        )
 
 
 class TestVoicePersonaAllocateAndRelease:
@@ -146,8 +195,14 @@ class TestVoicePersonaAllocateAndRelease:
         persona = body[ "voice_persona" ]
         assert persona is not None
         assert persona[ "voice_id" ]
-        assert persona[ "name" ] in { "maria", "mr radio", "Rachel", "Tiberius", "Rio", "Arnold" }
-        assert persona[ "voice_id" ] != "G7ILShrCNLfmS0A37SXS", "Sam's voice ID must NOT be allocated"
+        # Refreshed 2026-08-26: was a hardcoded 6-name set, and a Sam-voice-id
+        # exclusion. Sam joined the regular pool on 2026-05-19 (26898e1e), so his
+        # voice IS allocatable now; the reserved persona is whatever
+        # `cc session voice persona overflow name` points at (currently arnold).
+        assert persona[ "name" ] in set( _configured_pool_names() ), (
+            f"allocated {persona[ 'name' ]!r}, which is not in the configured pool "
+            f"{sorted( _configured_pool_names() )}"
+        )
         assert "assigned_at" in persona
 
         # Verify the bridge file was actually written
@@ -238,27 +293,35 @@ class TestVoicePersonaAllocateAndRelease:
 
 class TestVoicePersonaUniqueness:
 
-    def test_pool_exhaustion_returns_sam_overflow( self, auth_token ):
+    def test_pool_exhaustion_returns_the_overflow_persona( self, auth_token ):
         """
-        Allocate 6+ synthetic bridges, saturating the pool. The first 6
-        unique allocations should be from the pool with borrowed=False; any
-        additional allocation should be Sam with overflow=True (NOT a
-        hash-borrowed pool persona).
+        Saturate the pool with synthetic bridges; the spill must land on the
+        configured overflow persona, not on a hash-borrowed pool member.
 
-        Skipped when the live server already has occupied personas — in that
-        case the 6-allocation budget can't be guaranteed to fill the pool
-        from scratch. Use 8 synthetic bridges to push past any baseline
-        occupancy and assert the LAST allocation lands on Sam.
+        Refreshed 2026-08-26. This asserted the spill lands on SAM and that
+        every Sam allocation carries `overflow: True`. Both statements were
+        true when written and are false now: on 2026-05-19 (merged in 26898e1e)
+        Sam was promoted into the regular pool and ARNOLD took the overflow
+        slot, which is why the old version died on `KeyError: 'overflow'` — it
+        was reading that key off an ordinary pool allocation. The overflow
+        persona is now a config pointer
+        (`cc session voice persona overflow name`), so this reads it rather
+        than naming anyone.
+
+        The bridge count is also derived now: the pool grew 6 -> 14, so a fixed
+        8 bridges no longer exhausts it. We allocate len(pool) + 2.
 
         See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
         """
         SESSION_DIR.mkdir( parents=True, exist_ok=True )
         test_pid = os.getpid()
 
-        # 8 synthetic bridges — guaranteed to exhaust the 6-voice pool even if
-        # 1-2 personas are already occupied by ambient live sessions
-        sids    = [ str( uuid.uuid4() ) for _ in range( 8 ) ]
-        bridges = [ SESSION_DIR / f"cc-{test_pid + 93000 + i}.json" for i in range( 8 ) ]
+        # len(pool) + 2 synthetic bridges — exhausts the CONFIGURED pool with two
+        # to spare even if a couple of personas are already held by live sessions.
+        overflow_name = _configured_overflow_name()
+        n_bridges     = len( _configured_pool_names() ) + 2
+        sids    = [ str( uuid.uuid4() ) for _ in range( n_bridges ) ]
+        bridges = [ SESSION_DIR / f"cc-{test_pid + 93000 + i}.json" for i in range( n_bridges ) ]
         try:
             for sid, path in zip( sids, bridges ):
                 with open( path, "w" ) as f:
@@ -284,22 +347,17 @@ class TestVoicePersonaUniqueness:
                 assert resp.status_code == 200, f"/allocate failed: {resp.status_code} {resp.text}"
                 personas.append( resp.json()[ "voice_persona" ] )
 
-            # At least one of the 8 must be Sam (overflow) — the pool only
-            # holds 6 voices, so allocations 7-8 (or earlier if the live pool
-            # was already partially occupied) must spill to overflow.
-            sam_allocations = [ p for p in personas if p.get( "name" ) == "sam" ]
-            assert sam_allocations, (
-                "Expected at least one Sam-overflow allocation when "
-                f"saturating the pool with 8 synthetic bridges; got: "
-                f"{[ p.get( 'name' ) for p in personas ]}"
+            # Spilling past the pool must land on the configured overflow persona.
+            overflow_allocations = [ p for p in personas
+                                     if ( p.get( "name" ) or "" ).lower() == overflow_name ]
+            assert overflow_allocations, (
+                f"Expected at least one {overflow_name!r} overflow allocation when saturating "
+                f"the {len( _configured_pool_names() )}-voice pool with {n_bridges} synthetic "
+                f"bridges; got: {[ p.get( 'name' ) for p in personas ]}"
             )
-            # Every Sam allocation must carry overflow=True
-            assert all( p[ "overflow" ] is True for p in sam_allocations ), (
-                f"Sam allocations must have overflow=True; got: {sam_allocations}"
-            )
-            # Sam allocations must NOT also be borrowed (mutually exclusive)
-            assert all( p.get( "borrowed", False ) is False for p in sam_allocations ), (
-                "Sam allocations should have borrowed=False (overflow supplants borrow)"
+            # Overflow supplants hash-borrowing — an overflow allocation is never borrowed.
+            assert all( p.get( "borrowed", False ) is False for p in overflow_allocations ), (
+                f"overflow allocations should have borrowed=False; got: {overflow_allocations}"
             )
 
         finally:
