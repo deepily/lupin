@@ -102,16 +102,66 @@ def test_the_last_terminal_frame_wins_when_several_arrive():
 
 
 # ---------------------------------------------------------------------------
-# NO THIRD STATE — a timeout stops the run, exactly as v1 does
+# THE THIRD STATE — named, counted, and it must NOT kill the pass
+#
+# This block asserted the OPPOSITE until 2026-08-25 21:39, when Mr Radio ruled. The
+# reasoning it replaces was "mirror v1, let the timeout propagate". The asymmetry is
+# deliberate and is the whole reason these two arms differ here: v1 can afford to raise
+# because it has ALREADY DUMPED its artifact; a v2 kill loses the entire run and produces
+# no artifact at all — precisely the failure the poll exists to end.
 # ---------------------------------------------------------------------------
-def test_a_timeout_propagates_and_is_never_recorded_as_a_state():
-    class Boom( Exception ): pass
-    def ws( job_id ): raise Boom( "collect timed out" )
+def test_a_timed_out_wait_does_not_kill_the_pass():
+    def ws( job_id ): raise RuntimeError( "v2 WS collect timed out for job 'jid-1'" )
     wrapped = ve.terminal_waiting_ask( lambda q: _waiting_reply(), ws, clock=_Clock( 0.0, 1.0 ) )
-    with pytest.raises( Boom ):
-        wrapped( "u" )
-    # The point is the ABSENCE of a swallow: no record is returned, so no row can read as
-    # "neither observed nor waiting". That third state was this row's Q4 hazard.
+    rec = wrapped( "u" )                      # must RETURN, not raise
+    assert rec[ "wait_timed_out" ] is True
+    assert rec[ "terminal_waited" ] is False, "it is not observed — the harness gave up"
+    assert "collect timed out" in rec[ "wait_timeout_detail" ], (
+        "the row must NAME what it caught, so a non-timeout RuntimeError cannot be counted "
+        "as a timeout anonymously"
+    )
+
+
+def test_a_timed_out_wait_keeps_the_enqueue_span_and_is_kept_out_of_the_gate():
+    """
+    The span stays honest in the raw record AND unusable to the paired gate. Leaving it in
+    would reintroduce the exact enqueue-vs-completion bias this row exists to remove, this
+    time through the timeout path.
+    """
+    def ws( job_id ): raise RuntimeError( "collect timed out" )
+    wrapped = ve.terminal_waiting_ask( lambda q: _waiting_reply(), ws, clock=_Clock( 0.0, 9.0 ) )
+    rec = wrapped( "u" )
+    rec[ "expected_command" ] = "agent router go to weather"
+    assert rec[ "client_span_ms" ] == 583.0, "the enqueue span is kept, flagged — not rewritten"
+
+    metrics = ve.compute_metrics( [ rec ] )
+    assert metrics[ "waits_timed_out_n" ] == 1
+    assert metrics[ "spans_by_utterance" ] == {}, "a timed-out row must not reach the paired gate"
+    assert metrics[ "client_p50_ms" ] is None
+
+
+def test_a_timed_out_wait_is_counted_apart_from_observed_and_from_waiting():
+    """Three rows, three states — the count is what stops the third being read as another."""
+    def ws_ok( job_id ):   return _frames( "queued", "completed" )
+    def ws_slow( job_id ): raise RuntimeError( "collect timed out" )
+
+    observed = ve.terminal_waiting_ask( lambda q: _waiting_reply( "jid-obs" ), ws_ok,
+                                        clock=_Clock( 0.0, 2.0 ) )( "u-observed" )
+    timed_out = ve.terminal_waiting_ask( lambda q: _waiting_reply( "jid-slow" ), ws_slow,
+                                         clock=_Clock( 0.0, 2.0 ) )( "u-timeout" )
+    still_waiting = _waiting_reply( "jid-wait" )       # never wrapped: no one looked at all
+    still_waiting[ "utterance" ] = "u-waiting"
+    observed[ "utterance" ]  = "u-observed"
+    timed_out[ "utterance" ] = "u-timeout"
+    for r in ( observed, timed_out, still_waiting ): r[ "expected_command" ] = "agent router go to weather"
+
+    metrics = ve.compute_metrics( [ observed, timed_out, still_waiting ] )
+    assert metrics[ "waits_timed_out_n" ]  == 1, "the timed-out row is counted on its own"
+    assert metrics[ "cache_observed_n" ]   == 1, "only the completed row is observed"
+    assert metrics[ "cache_unobserved_n" ] == 2, (
+        "both non-observed rows are still unobserved — the new count SPLITS them, it does "
+        "not remove either from the honest total"
+    )
 
 
 # ---------------------------------------------------------------------------

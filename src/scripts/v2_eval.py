@@ -702,6 +702,13 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
         - routing_accuracy is scored over ELIGIBLE ok records only, and the exclusion
           is published as routing_eligible_n / routing_excluded_n /
           routing_excluded_share so it is auditable rather than silent.
+        - a row whose terminal wait TIMED OUT (`wait_timed_out`, set by
+          terminal_waiting_ask) is published as `waits_timed_out_n` and is kept OUT of
+          both client-span sets. It keeps its enqueue span in the raw record, so leaving
+          it in the span sets would feed an enqueue span to the paired gate — the exact
+          bias row a2e360f8 removed. It stays inside cache_unobserved_n /
+          errors_unobserved_n: the count SPLITS the unobserved rows, it does not shrink
+          them.
 
     🔴 WHY mappable_commands EXISTS (row d8d019f6, 2026-08-20). v1_eval_arm.py:440 says
     in as many words "The v2 arm must exclude the SAME utterances", and this module had
@@ -804,11 +811,26 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
     # F1 client-send instrument (additive): the comparable-across-arms span. Server-stamped
     # first_useful stays exactly as-is above; this is a SECOND, client-clock number measured
     # the same way the v1 arm measures around /api/push, so the paired gate has one instrument.
-    client_spans = [ r[ "client_span_ms" ] for r in ok if r.get( "client_span_ms" ) is not None ]
+    #
+    # 🔴 A TIMED-OUT WAIT IS EXCLUDED FROM BOTH SPAN SETS (row a2e360f8, Mr Radio's
+    # ruling 2026-08-25). Such a row keeps its ENQUEUE span so the raw record stays honest,
+    # and a waiting row with no route_reason is still `ok` — so without this filter the very
+    # bias this row exists to remove would come straight back in through the timeout path.
+    # It is counted instead, as `waits_timed_out_n`.
+    def _span_usable( record ):
+        return record.get( "client_span_ms" ) is not None and not record.get( "wait_timed_out" )
+    client_spans = [ r[ "client_span_ms" ] for r in ok if _span_usable( r ) ]
     # The paired median-Δ gate (paired_eval) needs per-utterance identity, not a flat list —
     # it pairs v2's span for utterance u against v1's span for the SAME u. Key by utterance so
     # the two arms can be aligned; provenance guarantees both measured the same utterance set.
-    spans_by_utterance = { r[ "utterance" ]: r[ "client_span_ms" ] for r in ok if r.get( "client_span_ms" ) is not None }
+    spans_by_utterance = { r[ "utterance" ]: r[ "client_span_ms" ] for r in ok if _span_usable( r ) }
+
+    # The third state, named and counted. A wait that timed out is NOT observed (its status
+    # is still `waiting`, so it already lands in cache_unobserved_n / errors_unobserved_n)
+    # — but it is not the same thing as a row that simply had not answered yet: here the
+    # harness LOOKED and gave up. Counting it separately is what stops it being read as one
+    # of the other two states.
+    waits_timed_out_n = sum( 1 for r in records if r.get( "wait_timed_out" ) )
 
     # F2 parity with the v1 arm: routing is scored ONLY over utterances whose expected
     # command is mappable. An unmappable utterance is EXCLUDED from the denominator, never
@@ -850,6 +872,9 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
         "cache_measurable"    : n_observed > 0,
         "cache_observed_n"    : n_observed,
         "cache_unobserved_n"  : n_unobserved,
+        # Rows where the harness waited for a terminal frame and gave up — kept apart from
+        # both `observed` and plain `waiting`, and kept OUT of the paired gate's spans.
+        "waits_timed_out_n"   : waits_timed_out_n,
         # How many OBSERVED rows carried a similarity at all. The §6a floor sweep has
         # zero evidence when this is 0 — every floor then reads 0.0 by construction
         # rather than by measurement. See threshold_table.
@@ -1455,11 +1480,20 @@ def terminal_waiting_ask( ask, ws_recv_events, clock=time.monotonic ):
         - a `waiting` reply carrying a job_id BLOCKS for the terminal frame, then returns
           the record with `client_span_ms` re-measured send->terminal, `payload.status`
           replaced by the terminal to_state, and `terminal_waited` True.
-        - it does NOT swallow the timeout. v1 lets EvalIntegrityError propagate and kill the
-          pass rather than feed a short span into the gate; this does the same, which is why
-          there is NO third state here. A wait that times out does not become "we looked and
-          never found out" - it stops the run. That was the hazard named in this row's Q4,
-          and mirroring v1 removes it rather than managing it.
+        - a wait that TIMES OUT gets its OWN NAMED STATE and does NOT kill the pass
+          (Mr Radio's ruling, 2026-08-25 21:39). The record comes back with
+          `terminal_waited` False, `wait_timed_out` True, `wait_timeout_detail` carrying
+          the listener's own message, and `client_span_ms` LEFT AS THE ENQUEUE SPAN -
+          which compute_metrics then keeps out of the paired gate's span set, so it can
+          never read as a completion span.
+        - THIS IS DELIBERATELY NOT WHAT v1 DOES, and the asymmetry is the point. v1 raises
+          because it has ALREADY DUMPED its artifact (test_v2_paired_live.py:462) - it can
+          afford to stop. A v2 kill loses the whole run and produces NO artifact at all,
+          which is precisely the failure this poll exists to end. A successor reading the
+          divergence as an inconsistency and "fixing" it back would restore that failure.
+        - the third state is NAMED AND COUNTED rather than folded into `waiting`, for the
+          same reason the cache and error families split observed from unobserved: a third
+          state with no name and no count gets read as one of the other two.
         - a `waiting` reply with NO job_id keeps its original span and is marked
           `terminal_waited` False, so it is visible rather than silently short.
     """
@@ -1473,7 +1507,17 @@ def terminal_waiting_ask( ask, ws_recv_events, clock=time.monotonic ):
         if not job_id:
             record[ "terminal_waited" ] = False
             return record
-        events   = ws_recv_events( job_id )     # BLOCKS; RAISES on timeout, exactly like v1
+        try:
+            events = ws_recv_events( job_id )   # BLOCKS; RAISES on collect timeout
+        except RuntimeError as e:
+            # BOTH arms' EvalIntegrityError subclass RuntimeError, and catching anything
+            # narrower would make this module import v1_eval_arm for a class alone. The
+            # message is recorded rather than discarded so a non-timeout RuntimeError
+            # cannot be counted as a timeout ANONYMOUSLY - the row names what it caught.
+            record[ "terminal_waited" ]     = False
+            record[ "wait_timed_out" ]      = True
+            record[ "wait_timeout_detail" ] = str( e )
+            return record
         recv_ts  = clock()
         terminal = next( ( ev for ev in reversed( events )
                            if ev.get( "to_state" ) in V2_TERMINAL_STATES ), None )
@@ -1686,6 +1730,7 @@ def render_report(
         ( "HTTP errors (non-200)", "n_http_error" ),
         ( "incomplete (work did not finish)", "n_incomplete" ),
         ( "responses not observed (still waiting)", "cache_unobserved_n" ),
+        ( "waits timed out (n)",   "waits_timed_out_n" ),
         ( "cache-hit rate",        "cache_hit_rate" ),
         ( "cache-candidate rate",  "cache_candidate_rate" ),
         ( "replay-failure rate",   "replay_failure_rate" ),
