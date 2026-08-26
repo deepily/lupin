@@ -228,3 +228,7 @@ lupin-worktrees/
 # hand-run harness that still writes into the tree cannot re-introduce a tracked corpus.
 src/tmp/dm_traffic.jsonl
 src/rnd/**/live-runs/*.jsonl
+
+# A worktree carrying this file is PINNED — deliberately held at an old sha.
+# Any reaper must skip it, and its staleness is intended rather than drift.
+.worktree-pin
