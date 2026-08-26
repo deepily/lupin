@@ -163,10 +163,29 @@ def test_waiting_does_not_move_any_other_denominator():
     assert m[ "routing_accuracy" ]    == 1.0
     assert m[ "p50_first_useful_ms" ] == 418.4
     assert m[ "client_p50_ms" ]       == 444.8
-    assert m[ "replay_failure_rate" ] == 0.0   # honest: replay is attempted synchronously
-    assert m[ "router_error_rate" ]   == 0.0
-    assert m[ "extract_error_rate" ]  == 0.0
-    assert m[ "agent_error_rate" ]    == 0.0
+    # ⚠️ THESE FOUR CHANGED FROM 0.0 TO None (row 647f3733 follow-up, 2026-08-25), and the
+    # line they replace carried a claim the data does not support. It read:
+    #     assert m[ "replay_failure_rate" ] == 0.0  # honest: replay is attempted synchronously
+    # If replay really were attempted synchronously before the enqueue, a waiting row could
+    # carry replay_error and the rate would be honest. MEASURED across all 12
+    # io/v2-flow/eval-*/records.jsonl files — 300 rows carrying one of the four error
+    # reasons — the pairing is:
+    #     replay_error  done 163 · failed  99
+    #     agent_error   done  13 · failed  25
+    #     waiting: ZERO, for all four reasons
+    # Not one error reason has ever been observed on a waiting row. So on an all-waiting
+    # pass the numerator is structurally 0 and a 0.0 is a confident zero from a blind
+    # instrument — the identical defect this file was written to kill, one metric family
+    # over. `None` renders "unmeasurable"; see test_v2_eval_unobserved_error_rates.py.
+    #
+    # WHAT THIS TEST STILL GUARDS IS UNCHANGED: every assertion above this comment — n,
+    # n_ok, n_incomplete, n_answered, routing_eligible_n, routing_accuracy and both latency
+    # numbers — is untouched. Only the error family moved, and only onto the observation
+    # predicate the cache family already uses.
+    assert m[ "replay_failure_rate" ] is None
+    assert m[ "router_error_rate" ]   is None
+    assert m[ "extract_error_rate" ]  is None
+    assert m[ "agent_error_rate" ]    is None
 
 
 def test_cache_excluded_n_still_counts_the_command_rule_not_the_observation_gap():

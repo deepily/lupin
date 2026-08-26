@@ -774,6 +774,13 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
     extract_errors  = [ r for r in answered if reported_route_reason( r ) == ROUTE_EXTRACT_ERROR ]
     agent_errors    = [ r for r in answered if reported_route_reason( r ) == ROUTE_AGENT_ERROR ]
 
+    # The denominator the four error rates ACTUALLY have evidence for. An answered row whose
+    # outcome is not observed cannot carry an error reason, so it belongs in neither the
+    # numerator nor the denominator — see the block in the returned dict for the receipt.
+    errors_observed   = [ r for r in answered if is_outcome_observed( r ) ]
+    errors_observed_n = len( errors_observed )
+    errors_unobserved_n = n_answered - errors_observed_n
+
     latencies = [ v for v in ( first_useful_ms( r ) for r in ok ) if v is not None ]
 
     # F1 client-send instrument (additive): the comparable-across-arms span. Server-stamped
@@ -829,10 +836,37 @@ def compute_metrics( records: List[ Dict[ str, Any ] ],
         # zero evidence when this is 0 — every floor then reads 0.0 by construction
         # rather than by measurement. See threshold_table.
         "cache_scored_n"      : len( cache_candidates ),
-        "replay_failure_rate" : _rate( len( replay_failures ),  n_answered ),
-        "router_error_rate"   : _rate( len( router_errors ),    n_answered ),
-        "extract_error_rate"  : _rate( len( extract_errors ),   n_answered ),
-        "agent_error_rate"    : _rate( len( agent_errors ),     n_answered ),
+        # 🔴 DENOMINATOR IS *OBSERVED* ANSWERED ROWS, NOT ALL ANSWERED (row 647f3733
+        # follow-up, 2026-08-25). A 200 that has not resolved yet cannot carry any of the
+        # four error reasons, so counting it in the denominator makes the numerator
+        # structurally 0 and publishes a CONFIDENT ZERO from a blind instrument — the
+        # identical failure `is_outcome_observed` was introduced to fix for the cache family
+        # (row 2ec6ad9c). is_outcome_observed's own docstring argued the error rates should
+        # keep the wider denominator because "a waiting response is still a completed
+        # *request*". True about the request, and beside the point about the RATE: the
+        # evidence those four rates read is the terminal outcome, and on a waiting row it is
+        # absent rather than negative.
+        #
+        # MEASURED on ts-f06f5961 (eval-2026-08-25-19-31-31): 200 answered, **0**
+        # outcome-observed, every status None, and reported_route_reason returning only
+        # args_none (122) and unknown_command (78) — not one of the four error reasons. All
+        # four rates published 0.0. That 0.0 meant "nothing was observable", and it read as
+        # "no errors occurred".
+        #
+        # FULLY-OBSERVED RUNS ARE UNCHANGED BY CONSTRUCTION: when every answered row is
+        # observed, errors_observed_n == n_answered and every rate is identical to before.
+        # `n_answered` is still published so a reader can see both denominators.
+        "replay_failure_rate" : _rate( len( replay_failures ),  errors_observed_n ),
+        "router_error_rate"   : _rate( len( router_errors ),    errors_observed_n ),
+        "extract_error_rate"  : _rate( len( extract_errors ),   errors_observed_n ),
+        "agent_error_rate"    : _rate( len( agent_errors ),     errors_observed_n ),
+        # Same three-field shape as the cache family, for the same reason: a None rate must
+        # tell the reader WHICH of the two causes it is. `errors_measurable` False means the
+        # harness could not SEE any terminal outcome; True with a None rate cannot occur
+        # (a True implies a non-zero denominator), so False is the whole alarm.
+        "errors_measurable"   : errors_observed_n > 0,
+        "errors_observed_n"   : errors_observed_n,
+        "errors_unobserved_n" : errors_unobserved_n,
         "routing_eligible_n"  : len( eligible ),
         "routing_excluded_n"  : excluded_n,
         "routing_excluded_share" : _rate( excluded_n, n ),
@@ -1444,6 +1478,25 @@ def _fmt( value: Optional[ float ] ) -> str:
     return "n/a" if value is None else str( value )
 
 
+def _fmt_error_rate( metrics: Dict[ str, Any ], key: str ) -> str:
+    """
+    An ERROR-RATE cell — blind rather than empty, exactly like the cache family.
+
+    Row 647f3733 follow-up. These four rates read the TERMINAL OUTCOME of a request, and
+    on a response that has not resolved that evidence is absent, not negative. A pass in
+    which nothing resolved therefore produced `0.0` from zero observations, which reads
+    as "no errors" — measured on ts-f06f5961, where all 200 answered rows were
+    unobserved and all four rates printed 0.0.
+
+    Same two-part treatment the cache cell already uses: say "unmeasurable" when there is
+    no evidence at all, and carry the denominator when there is some, so a real rate
+    resting on a sliver cannot pass for a verdict on the whole pass.
+    """
+    if not metrics[ "errors_measurable" ]:
+        return UNMEASURABLE_CELL
+    return f"{_fmt( metrics[ key ] )} (n={metrics[ 'errors_observed_n' ]})"
+
+
 def _fmt_cache( metrics: Dict[ str, Any ], key: str ) -> str:
     """
     A CACHE metric cell — the one family that can be blind rather than empty.
@@ -1527,9 +1580,15 @@ def render_report(
         ( "would-be-wrong (count)","would_be_wrong" ),
     ]
     _cache_rate_keys = { "cache_hit_rate", "cache_candidate_rate" }
+    # The four rates whose evidence is the terminal outcome — blind, not empty, when
+    # nothing resolved (row 647f3733 follow-up).
+    _error_rate_keys = { "replay_failure_rate", "router_error_rate",
+                         "extract_error_rate",  "agent_error_rate" }
     for label, key in rows:
         if key in _cache_rate_keys:
             cold_cell, warm_cell = _fmt_cache( cold_metrics, key ), _fmt_cache( warm_metrics, key )
+        elif key in _error_rate_keys:
+            cold_cell, warm_cell = _fmt_error_rate( cold_metrics, key ), _fmt_error_rate( warm_metrics, key )
         else:
             cold_cell, warm_cell = _fmt( cold_metrics[ key ] ), _fmt( warm_metrics[ key ] )
         lines.append( f"| {label} | {cold_cell} | {warm_cell} |" )
