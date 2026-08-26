@@ -187,6 +187,68 @@ importlib._bootstrap._find_and_load = _find_and_load_watching_reimports
 # src/cosa/tests/) has run and `tests` is importable. Fail-SAFE lives in the pure
 # predicate: it is silent unless BOTH tree roots resolve AND differ, so a correct
 # main-tree or matched-worktree run never trips.
+# ══════════════════════════════════════════════════════════════════════════════
+# GUARD: a coverage figure nobody can attribute (row aa41fa66)
+# ══════════════════════════════════════════════════════════════════════════════
+# Neither `data_file` nor COVERAGE_FILE is set anywhere in this repo, so every
+# session working in lupin writes the SAME `.coverage` at the repo root — and
+# pytest-cov ERASES that file at startup. A twenty-minute tier run and a
+# nine-second targeted run share one mutable file, the short one wins, and NOTHING
+# IN THE OUTPUT SAYS SO: the run exits 0 and prints a floor-reached line.
+#
+# MEASURED (María, 2026-08-25): a 19:44-20:04 tier run reported "Required test
+# coverage of 96.0% reached. Total coverage: 96.59%" — GREEN, and false. 391 files,
+# ALL under src/cosa, 34,322 statements against 62,305 in the same session's 19:04
+# run. ~28,000 statements vanished from a frame the config says holds them,
+# src/lib among them at 0.0%. THE DIRECTION IS THE HAZARD: the vanished files are
+# the known-worse-than-average ones, so dropping them RAISED the mean —
+# 95.62 -> 96.59 while nothing improved. A red gate did not turn green; the report
+# stopped measuring the red part.
+#
+# WHY A GUARD AND NOT A DEFAULT. The obvious fix — set the path ourselves — does
+# not work, measured four ways (row aa41fa66): coverage's config expansion reads
+# the environment and cannot compute a PID; COVERAGE_FILE outranks `data_file`
+# anyway; `parallel = true` makes it WORSE, since each run's own combine globs the
+# shared prefix and concurrent runs would MERGE rather than ignore each other; and
+# setting COVERAGE_FILE from this file is simply TOO LATE — pytest-cov reads it
+# before the rootdir conftest is imported, so a per-PID basename came back
+# rewritten and a per-PID directory fell back to the root `.coverage` entirely.
+# An EXPORTED COVERAGE_FILE is honored exactly. By the time any repo code runs the
+# path is already chosen, so the one thing this file can still do is REFUSE TO
+# PRODUCE AN UNATTRIBUTABLE FIGURE.
+#
+# Escape hatch for a deliberate shared-file run: LUPIN_ALLOW_SHARED_COVERAGE=1.
+def pytest_configure( config ):
+    """
+    Refuse a coverage run that cannot be attributed to this process.
+
+    Requires:
+        - config is the pytest Config for this session
+
+    Ensures:
+        - raises pytest.UsageError when --cov is active and COVERAGE_FILE is unset
+          or blank, aborting BEFORE any measurement is written
+        - returns silently when --cov is inactive, when COVERAGE_FILE is exported,
+          or when LUPIN_ALLOW_SHARED_COVERAGE is set
+    """
+    cov_active = bool( getattr( config.option, "cov_source", None ) ) and \
+                 not getattr( config.option, "no_cov", False )
+    if not cov_active: return
+    if os.environ.get( "LUPIN_ALLOW_SHARED_COVERAGE" ): return
+    if os.environ.get( "COVERAGE_FILE", "" ).strip(): return
+
+    raise pytest.UsageError(
+        "COVERAGE_FILE is not set, so this --cov run would write the shared "
+        "repo-root .coverage that every other session also writes and pytest-cov "
+        "erases at startup. A concurrent run would silently overwrite this one and "
+        "the resulting figure would be unattributable — that is how a tier run "
+        "reported 96.59% while ~28,000 statements had quietly left the denominator "
+        "(row aa41fa66). Export a path of your own first, e.g.\n"
+        "    export COVERAGE_FILE=/tmp/cov-$USER-$$.data\n"
+        "To run against the shared file on purpose, set LUPIN_ALLOW_SHARED_COVERAGE=1."
+    )
+
+
 def pytest_runtest_setup( item ):
     """Name the test the guard will blame, and honour its opt-out marker (row 7c84b8b8)."""
     _current_test[ "id" ]     = item.nodeid
