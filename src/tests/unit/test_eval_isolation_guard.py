@@ -242,17 +242,16 @@ def test_pin_carries_leak_fix_asks_is_ancestor_with_the_fix_sha_first():
         guard.pin_carries_leak_fix( "" )
 
 
-def test_default_pin_is_read_from_v1_eval_arm_when_not_given():
-    # No pinned_sha → the guard asks about v1_eval_arm.V1_PIN_SHA, the one constant the re-pin
+def test_default_pin_is_the_guards_own_constant_when_not_given():
+    # No pinned_sha → the guard asks about its own V1_PIN_SHA, the one constant the re-pin
     # moves; the question reaches pin_carries_leak_fix with exactly that value.
-    import v1_eval_arm
     asked = {}
     def fake_carries( pin_sha, **_k ):
         asked[ "pin" ] = pin_sha
         return True
     with patch.object( guard, "pin_carries_leak_fix", fake_carries ):
         guard.require_leak_free_corpus( { "agent router go to deep research" }, agentic_commands=_AGENTIC_CMDS )
-    assert asked[ "pin" ] == v1_eval_arm.V1_PIN_SHA
+    assert asked[ "pin" ] == guard.V1_PIN_SHA
 
 
 def test_git_is_ancestor_reads_the_real_repo_and_refuses_to_guess():
@@ -269,11 +268,10 @@ def test_the_shipped_pin_carries_the_leak_fix_so_the_premise_and_the_pin_agree()
     # THE test the row asked for: goes RED the day someone moves V1_PIN_SHA below bf77852b —
     # at which point the guard would start refusing again and the report's v1_pin_why line
     # ("leak-free") would be false. Real git, real pin.
-    import v1_eval_arm
-    assert guard.pin_carries_leak_fix( v1_eval_arm.V1_PIN_SHA ) is True
+    assert guard.pin_carries_leak_fix( guard.V1_PIN_SHA ) is True
     # …and it is the REFACTORED path too, as the rationale says (the cost is named, not hidden):
-    assert guard._git_is_ancestor( guard.REQUEST_PATH_REFACTOR_SHA, v1_eval_arm.V1_PIN_SHA ) is True
-    assert "leak-free" in v1_eval_arm.V1_PIN_RATIONALE and "REFACTORED" in v1_eval_arm.V1_PIN_RATIONALE
+    assert guard._git_is_ancestor( guard.REQUEST_PATH_REFACTOR_SHA, guard.V1_PIN_SHA ) is True
+    assert "leak-free" in guard.V1_PIN_RATIONALE and "REFACTORED" in guard.V1_PIN_RATIONALE
 
 
 def test_agentic_command_names_reads_the_live_registry_and_simple_is_disjoint():

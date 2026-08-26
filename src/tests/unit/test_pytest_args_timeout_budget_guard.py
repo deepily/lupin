@@ -24,7 +24,7 @@ from cosa.rest.pytest_args_policy import (
 # The real numbers from the night this cost 4.8 hours.
 _BUDGETS   = { "integration": 30000, "unit": 300 }
 _DEFAULT   = 600
-_ATTEMPT11 = [ "-m", "paired_eval_live", "src/tests/integration/test_v2_paired_live.py",
+_ATTEMPT11 = [ "-m", "embedding_cost_live", "src/tests/integration/test_embedding_cost_live.py",
                "-v", "--timeout", "5400" ]
 
 
@@ -69,7 +69,7 @@ def test_a_timeout_longer_than_the_budget_passes():
 
 def test_no_timeout_flag_passes():
     """The overwhelmingly common submit. Must cost nothing."""
-    assert _validate( [ "-m", "paired_eval_live", "-v" ], "integration" ) is None
+    assert _validate( [ "-m", "embedding_cost_live", "-v" ], "integration" ) is None
 
 
 def test_empty_args_pass():
@@ -176,7 +176,7 @@ def test_the_job_constructor_still_builds_a_normal_paired_submit():
 
     job = TestSuiteJob(
         test_types  = [ "integration" ],
-        pytest_args = [ "-m", "paired_eval_live",
+        pytest_args = [ "-m", "embedding_cost_live",
                         "src/tests/integration/test_v2_paired_live.py", "-v" ],
         user_id     = "user-123",
         user_email  = "test@test.com",
@@ -220,7 +220,7 @@ def test_the_submit_endpoint_returns_400_naming_both_numbers():
 
     request = TestSuiteSubmitRequest(
         test_types  = "integration",
-        pytest_args = "-m paired_eval_live src/tests/integration/test_v2_paired_live.py -v --timeout 5400",
+        pytest_args = "-m embedding_cost_live src/tests/integration/test_embedding_cost_live.py -v --timeout 5400",
     )
     with pytest.raises( HTTPException ) as caught:
         asyncio.run( submit_test_suite(

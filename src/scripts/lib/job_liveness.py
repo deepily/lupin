@@ -3,7 +3,7 @@ Is the thing I am watching actually alive? — a liveness check that cannot matc
 
 Bug 07786db9. A run monitor decided a paired eval was alive with:
 
-    proc=$(pgrep -af "paired_eval_live" 2>/dev/null | head -1)
+    proc=$(pgrep -af "embedding_cost_live" 2>/dev/null | head -1)
     if [ -n "$proc" ]; then st="RUNNING ts-c16c33dd"; fi
 
 `pgrep -af` matches the FULL COMMAND LINE of every process, and the monitor's own
@@ -25,7 +25,7 @@ like one of its answers is the defect this module exists for. Hence UNKNOWN.
 
 Usage from a shell monitor, replacing the pgrep one-liner:
 
-    python3 src/scripts/lib/job_liveness.py "pytest.*paired_eval_live"
+    python3 src/scripts/lib/job_liveness.py "pytest.*embedding_cost_live"
     # prints RUNNING / DEAD / UNKNOWN, exit 0 / 1 / 2
 
 Generated on: 2026-08-17

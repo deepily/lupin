@@ -1,5 +1,6 @@
 """
-The falsifier for the span asymmetry (row a2e360f8, Mr Radio's v1_eval_arm.py:373 catch).
+The falsifier for the span asymmetry (row a2e360f8, Mr Radio's catch in the since-deleted
+v1_eval_arm.py:373).
 
 v1 measures send -> observed COMPLETION. v2 measured send -> reply, which under
 `v2 executor = queued` is the ENQUEUE ACK. The paired median-delta gate therefore compared
@@ -199,8 +200,11 @@ def test_the_two_arms_agree_on_what_terminal_means():
     """If these sets ever diverge the gate compares two different events under one name."""
     scripts = os.path.join( os.environ[ "LUPIN_ROOT" ], "src", "scripts" )
     if scripts not in sys.path: sys.path.insert( 0, scripts )
-    import v1_eval_arm
-    assert ve.V2_TERMINAL_STATES == v1_eval_arm._TERMINAL_STATES
+    # v1_eval_arm is DELETED (row e2099400 §2). The set it used to own moved to
+    # ws_job_listener with the listener; the property is unchanged — the two must agree on
+    # what "finished" means, or the terminal wait is watching for a different event.
+    import ws_job_listener
+    assert ve.V2_TERMINAL_STATES == ws_job_listener._TERMINAL_STATES
 
 
 def test_frames_with_no_terminal_state_still_remeasure_but_do_not_invent_a_status():

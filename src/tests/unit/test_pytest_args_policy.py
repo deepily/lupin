@@ -191,7 +191,7 @@ def test_unbalanced_quotes_are_refused_at_parse( project_root ):
     "-v",
     "-k doc_viewer_multi_repo",
     "-k 'doc_viewer_multi_repo and not Visual' -v",
-    "-m paired_eval_live src/tests/integration/test_v2_paired_live.py -v",
+    "-m embedding_cost_live src/tests/integration/test_embedding_cost_live.py -v",
     "--auto-proxy --cost-cap-usd 5.00",
     "-k multiplexer_phase6b --update-snapshots",
     "--include-opus",

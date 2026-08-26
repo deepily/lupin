@@ -270,22 +270,10 @@ KNOWN_DIVERGENT_ENV = {
         "cloud-test": "2026-07-26 — see CHROME_PATH.",
         "cloud-gpu" : "2026-07-26 — same.",
     },
-    "LUPIN_V1_ARM_BASE_URL": {
-        "dev-dev"   : "2026-08-17 Mr. Radio — names the pinned v1 baseline server standing on "
-                      "the dev HOST at :7997, reachable only via host.docker.internal. It is "
-                      "read by the v2 paired-eval run (row d8d019f6), which is a :8000 "
-                      "monopolize-mode suite; the dev server never runs it. Setting it here "
-                      "would advertise a v1 arm that nothing on this leg calls.",
-        "cloud-test": "2026-08-17 — no such host. The cloud legs have no :7997 baseline server "
-                      "and no host-gateway route to one; the value would name nothing.",
-        "cloud-gpu" : "2026-08-17 — same.",
-    },
-    "LUPIN_PAIRED_N": {
-        "dev-dev"   : "2026-08-17 Mr. Radio — sample size for the v2 paired-eval run, which is "
-                      "a :8000 suite only. See LUPIN_V1_ARM_BASE_URL: same run, same venue.",
-        "cloud-test": "2026-08-17 — the paired eval does not run on the cloud legs.",
-        "cloud-gpu" : "2026-08-17 — same.",
-    },
+    # LUPIN_V1_ARM_BASE_URL and LUPIN_PAIRED_N had exemptions here until 2026-08-26. Both
+    # were removed from docker-compose.yml with the V1 excision (row e2099400 §2), so an
+    # exemption for them would now be an entry excusing a variable that does not exist —
+    # which is how this table rots into something nobody trusts.
     "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": {
         "cloud-test": "2026-07-26 — test credentials, dev-box venues only.",
         "cloud-gpu" : "2026-07-26 — same.",
