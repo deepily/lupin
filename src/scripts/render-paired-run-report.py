@@ -89,6 +89,103 @@ def composition_table( v1_counts, v2_counts, expected_per_command=None ):
     return lines, flagged
 
 
+def provenance_block( v1, v2 ):
+    """
+    The provenance header — WHICH v1, WHICH v2, and under what sampling.
+
+    🔴 WHY THIS EXISTS (row 224fbb68, Krishna 2026-08-25). This report carried NO
+    provenance at all. Counted across the full rendered output, each of these
+    appeared exactly ZERO times: the v1 sha, the v2 sha, `git_sha`, `written_by`,
+    `seed`, `n_per_command`. The stamp lives in the JSON and was dropped at exactly
+    the point a human reads it.
+
+    That is not cosmetic. Mr Radio's 08-21 ruling on row 647f3733 requires, verbatim:
+    "REPORT MUST SAY: referent sha 15536409, contains bf77852b, pre-drift alternative
+    b0735467 remains available by pinning; whether the referent choice moves any
+    headline number is UNMEASURED." The renderer could not satisfy that ruling — it
+    printed none of it. And the 08-14 ruling's whole premise is that drift is a
+    LABELLING problem: "a measurement stamped with the sha it was taken against is
+    comparable forever." An unstamped report throws that away.
+
+    Requires:
+        - v1, v2 are arm artifacts or None
+
+    Ensures:
+        - returns a list of markdown lines, always non-empty
+        - names each arm's git_sha, or says plainly that the arm wrote none
+        - flags a v1 sha that is not the pinned referent, rather than printing it flat
+        - flags `written_by == "unknown-caller"`, which is the backstop that row
+          224fbb68 found had never once fired
+        - flags differing sample_signatures — two arms sampled differently are not a
+          paired measurement, whatever the delta says
+    """
+    from v1_eval_arm import V1_PIN_SHA, V1_PIN_RATIONALE
+
+    def _p( art, key, default="—" ):
+        if art is None: return default
+        return art.get( "provenance", {} ).get( key, default )
+
+    out = [ "## Provenance", "" ,
+            "| field | v1 arm | v2 arm |", "|---|---|---|" ]
+    for label, key in ( ( "git_sha", "git_sha" ), ( "corpus", "corpus" ), ( "seed", "seed" ),
+                        ( "n_per_command", "n_per_command" ), ( "sampled_n", "sampled_n" ),
+                        ( "sample_signature", "sample_signature" ) ):
+        a = _p( v1, key ); b = _p( v2, key )
+        if key == "sample_signature":
+            a = str( a )[ :12 ] if a != "—" else a
+            b = str( b )[ :12 ] if b != "—" else b
+        out.append( f"| {label} | {a} | {b} |" )
+    for label, key in ( ( "written_at", "written_at" ), ( "written_by", "written_by" ) ):
+        a = ( v1 or {} ).get( key, "—" ); b = ( v2 or {} ).get( key, "—" )
+        out.append( f"| {label} | {a} | {b} |" )
+    out.append( "" )
+
+    # The referent, named and judged — the ruling's requirement, derived from the
+    # constant rather than hard-coded so it cannot drift away from the arm itself.
+    v1_sha = _p( v1, "git_sha" )
+    if v1_sha == "—":
+        out.append( "🔴 **The v1 arm wrote no git_sha** — this report cannot say which v1 it measured." )
+    elif str( v1_sha ).startswith( V1_PIN_SHA ) or str( V1_PIN_SHA ).startswith( str( v1_sha ) ):
+        out.append( f"**Referent**: v1 pinned at `{V1_PIN_SHA}` — {V1_PIN_RATIONALE}." )
+        out.append( "" )
+        out.append( "The pre-drift alternative `b0735467` remains available by pinning; it is "
+                    "unrefactored but LEAKY (predates `bf77852b`, the 8aa89f42 cross-user "
+                    "fallback_defaults fix). **Whether the referent choice moves any headline "
+                    "number here is UNMEASURED.**" )
+    else:
+        out.append( f"🔴 **REFERENT MISMATCH — this run measured v1 at `{v1_sha}`, but the pin is "
+                    f"`{V1_PIN_SHA}`.** Do not compare these numbers to a run taken against the pin." )
+        # The pre-drift sha is called out BY NAME only when it is actually the one, so the
+        # generic branch does not emit "if b0735467 is b0735467" at a reader.
+        if str( v1_sha ).startswith( "b0735467" ):
+            out.append( "" )
+            out.append( "That sha is the PRE-DRIFT alternative, and it is **LEAKY**: it predates "
+                        "`bf77852b`, the 8aa89f42 cross-user `fallback_defaults` fix — a "
+                        "SEQUENTIAL-REPLAY CONTAMINANT that corrupts the measurement itself, not "
+                        "merely the code under test. Rejected as the referent on row 647f3733." )
+    out.append( "" )
+
+    # `unknown-caller` was built as the tell that nothing identified itself as a real
+    # run. Row 224fbb68 measured that nothing ever SET the variable it reads, so the
+    # tell could never fire. Surfacing it here is what gives it back its meaning.
+    for name, art in ( ( "v1", v1 ), ( "v2", v2 ) ):
+        if art is not None and art.get( "written_by" ) == "unknown-caller":
+            out.append( f"⚠️ **{name} arm `written_by` is `unknown-caller`** — nothing identified "
+                        f"itself as a real run. This is either a scaffold/unit-test artifact or a "
+                        f"runner that did not inject `LUPIN_TEST_SUITE_JOB_ID`. Do not cite these "
+                        f"numbers as a run result until you know which." )
+    if any( art is not None and art.get( "written_by" ) == "unknown-caller" for art in ( v1, v2 ) ):
+        out.append( "" )
+
+    sig1, sig2 = _p( v1, "sample_signature" ), _p( v2, "sample_signature" )
+    if sig1 != "—" and sig2 != "—" and sig1 != sig2:
+        out.append( "🔴 **SAMPLE SIGNATURES DIFFER** — the two arms did not draw the same sample, "
+                    "so this is not a paired measurement however the delta reads." )
+        out.append( "" )
+
+    return out
+
+
 def render( art_dir, corpus_name="simple" ):
     """Build the full report string. Returns (text, ok) — ok is False when a run is unreadable."""
     v1, v2 = load_artifacts( art_dir )
@@ -102,7 +199,10 @@ def render( art_dir, corpus_name="simple" ):
                         f"or it died. No paired number is possible; what follows is one-armed." )
             out.append( "" )
 
-    # --- provenance + the median-Δ verdict, from the real gate --------------------
+    # --- provenance header -------------------------------------------------------
+    out += provenance_block( v1, v2 )
+
+    # --- the median-Δ verdict, from the real gate --------------------------------
     if v1 is not None and v2 is not None:
         import paired_eval
         verdict = paired_eval.build_paired_verdict( v1, v2 )

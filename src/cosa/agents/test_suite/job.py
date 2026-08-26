@@ -1362,6 +1362,23 @@ class TestSuiteJob( AgenticJobBase ):
                     "LUPIN_TEST_MONOPOLIZE_PARENT_ID" : self.id_hash,
                     # Caller-supplied env (allowlist-filtered in __init__) overrides defaults.
                     **self.env_vars,
+                    # 🔴 PROVENANCE — DELIBERATELY AFTER **self.env_vars, so a caller cannot
+                    # overwrite it (row 224fbb68). Everything above is a default a caller may
+                    # override; this is a FACT about who ran the suite, and a run that can
+                    # relabel itself provides no provenance at all.
+                    #
+                    # WHY IT EXISTS: test_v2_paired_live.py:359 reads
+                    #     written_by = os.environ.get( "LUPIN_TEST_SUITE_JOB_ID" ) or "unknown-caller"
+                    # and stamps it into the paired-run artifact. Krishna measured that NOTHING
+                    # in the tree ever set that variable — no runner, no script, no compose file
+                    # — so `written_by` had been "unknown-caller" on every artifact ever written.
+                    # The dump function's own docstring calls that value the tell that nothing
+                    # identified itself as a real run; the tell could never fire, and a previous
+                    # session nearly read a scaffold artifact as a real result.
+                    #
+                    # The LUPIN_TEST_ prefix is already inside _ENV_VAR_ALLOWED_PREFIXES, so the
+                    # plumbing to carry it existed and was simply unused.
+                    "LUPIN_TEST_SUITE_JOB_ID" : self.id_hash,
                 }
             )
 

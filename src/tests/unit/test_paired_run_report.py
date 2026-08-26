@@ -204,3 +204,128 @@ def test_the_clean_tick_no_longer_claims_the_comparison_is_sound( monkeypatch, t
     text, _ = report.render( str( tmp_path ) )
     assert "compares like with like" not in text
     assert "neither arm lost ground the other kept" in text
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Provenance header (row 224fbb68)
+#
+# THE DEFECT: this report carried NO provenance at all. Counted across the full
+# rendered output, each of these appeared exactly ZERO times — the v1 sha, the v2
+# sha, `git_sha`, `written_by`, `seed`, `n_per_command`. The stamp lives in the
+# JSON and was dropped precisely where a human reads it.
+#
+# It is a RULING, not a nicety. Mr Radio, row 647f3733, 2026-08-21, verbatim:
+# "REPORT MUST SAY: referent sha 15536409, contains bf77852b, pre-drift
+# alternative b0735467 remains available by pinning; whether the referent choice
+# moves any headline number is UNMEASURED." The renderer could not satisfy it.
+# These tests move the enforcement from whoever remembers the ruling to the harness.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _prov_artifact( git_sha, written_by="ts-abcd1234", signature="sig-aaaa" ):
+    return {
+        "metrics"    : { "spans_by_utterance": {}, "n": 100, "ok_n": 100, "failure_rate": 0.0 },
+        "provenance" : { "git_sha": git_sha, "corpus": "simple", "seed": 1024,
+                         "n_per_command": 20, "sampled_n": 100,
+                         "sample_signature": signature },
+        "written_at" : "2026-08-25T23:00:00",
+        "written_by" : written_by,
+    }
+
+
+def _render_prov( v1_sha, **kw ):
+    from v1_eval_arm import V1_PIN_SHA          # noqa: F401 — imported for the pin value in tests
+    return "\n".join( report.provenance_block( _prov_artifact( v1_sha, **kw ),
+                                               _prov_artifact( "f86ee2d7", **kw ) ) )
+
+
+def test_the_report_names_the_v1_sha_it_measured():
+    """
+    The ruling's core requirement. A report that cannot say WHICH v1 it measured is
+    not comparable to anything — the 08-14 ruling's premise is that drift is a
+    labelling problem, and this is the label.
+    """
+    from v1_eval_arm import V1_PIN_SHA
+    text = _render_prov( V1_PIN_SHA )
+    assert V1_PIN_SHA in text
+    assert "f86ee2d7" in text, "the v2 sha must be named too"
+
+
+def test_the_pinned_referent_carries_its_rationale_and_the_unmeasured_caveat():
+    """The ruling names three things beyond the sha; all three must survive rendering."""
+    from v1_eval_arm import V1_PIN_SHA
+    text = _render_prov( V1_PIN_SHA )
+    assert "bf77852b" in text,  "must say the referent carries the leak fix"
+    assert "b0735467" in text,  "must say the pre-drift alternative remains available by pinning"
+    assert "UNMEASURED" in text, "must say the referent choice's effect on headline numbers is unmeasured"
+
+
+def test_a_run_against_the_rejected_pre_drift_sha_is_flagged_not_printed_flat():
+    """
+    The 08-20 artifact really was written against `b0735467`. Printed without comment
+    it reads as just another sha; it is the REJECTED referent and it is LEAKY.
+    """
+    text = _render_prov( "b0735467" )
+    assert "REFERENT MISMATCH" in text
+    assert "LEAKY" in text
+    assert "bf77852b" in text, "must say WHY it is leaky, not merely that it is"
+
+
+def test_the_mismatch_branch_does_not_emit_a_tautology_for_other_shas():
+    """
+    Scope guard on my own first draft: the generic branch used to read
+    'If <sha> is b0735467, that arm is LEAKY' — which renders as
+    'If b0735467 is b0735467' on the one case that matters. The pre-drift sha is
+    now named only when it is actually the one.
+    """
+    text = _render_prov( "deadbeef" )
+    assert "REFERENT MISMATCH" in text
+    assert "b0735467" not in text.split( "REFERENT MISMATCH" )[ 1 ], (
+        "an unrelated sha must not drag the pre-drift warning in with it"
+    )
+
+
+def test_unknown_caller_is_surfaced_as_an_alarm():
+    """
+    `unknown-caller` was built as the tell that nothing identified itself as a real
+    run — and row 224fbb68 measured that nothing ever SET the variable it reads, so
+    the tell could never fire. Surfacing it here is what gives it back its meaning.
+    """
+    from v1_eval_arm import V1_PIN_SHA
+    text = _render_prov( V1_PIN_SHA, written_by="unknown-caller" )
+    assert "unknown-caller" in text
+    assert "Do not cite these numbers" in text
+
+
+def test_a_real_job_id_raises_no_alarm():
+    """The alarm must stay quiet on a genuine run, or it becomes noise."""
+    from v1_eval_arm import V1_PIN_SHA
+    text = _render_prov( V1_PIN_SHA, written_by="ts-f06f5961" )
+    assert "unknown-caller" not in text
+
+
+def test_differing_sample_signatures_are_flagged_as_not_a_paired_measurement():
+    """Two arms that did not draw the same sample are not paired, whatever the delta says."""
+    from v1_eval_arm import V1_PIN_SHA
+    v1 = _prov_artifact( V1_PIN_SHA, signature="sig-aaaa" )
+    v2 = _prov_artifact( "f86ee2d7",  signature="sig-bbbb" )
+    text = "\n".join( report.provenance_block( v1, v2 ) )
+    assert "SAMPLE SIGNATURES DIFFER" in text
+
+
+def test_a_missing_arm_says_so_rather_than_rendering_a_blank_sha():
+    """An absent artifact must not read as a run with an empty label."""
+    text = "\n".join( report.provenance_block( None, _prov_artifact( "f86ee2d7" ) ) )
+    assert "wrote no git_sha" in text
+
+
+def test_the_provenance_header_appears_in_the_full_rendered_report( tmp_path ):
+    """
+    End-to-end, not just the helper: the block must actually reach the document a
+    human reads. The defect was that the data existed and never made it to the page.
+    """
+    from v1_eval_arm import V1_PIN_SHA
+    for arm, sha in ( ( "v1", V1_PIN_SHA ), ( "v2", "f86ee2d7" ) ):
+        ( tmp_path / f"{arm}-arm-artifact.json" ).write_text( json.dumps( _prov_artifact( sha ) ) )
+    text, _ok = report.render( str( tmp_path ) )
+    assert "## Provenance" in text
+    assert V1_PIN_SHA in text

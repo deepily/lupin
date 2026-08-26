@@ -380,3 +380,35 @@ def test_websocket_parser_is_untouched_by_the_typescript_branch():
 
 def test_unknown_suite_types_still_return_none():
     assert TestSuiteJob._parse_non_pytest_stdout( "unit", "# pass 5\n" ) is None
+
+
+def test_the_runner_injects_its_own_job_id_for_artifact_provenance():
+    """
+    `written_by` was "unknown-caller" on EVERY artifact ever written (row 224fbb68).
+
+    test_v2_paired_live.py reads `LUPIN_TEST_SUITE_JOB_ID` and stamps it into the
+    paired-run artifact, calling "unknown-caller" the tell that nothing identified
+    itself as a real run. Krishna measured that nothing in the tree ever SET that
+    variable — so the tell could never fire, and a previous session nearly read a
+    scaffold artifact as a real result.
+
+    Ensures:
+        - the runner injects the variable at all
+        - it carries the job's own id
+        - it is placed so a caller's env_vars CANNOT overwrite it — provenance that
+          a run can relabel is not provenance
+    """
+    source = ( Path( cu.get_project_root() ) / "src/cosa/agents/test_suite/job.py" ).read_text( encoding="utf-8" )
+
+    assert '"LUPIN_TEST_SUITE_JOB_ID" : self.id_hash' in source, (
+        "the runner must inject its own job id, or every artifact keeps stamping "
+        "'unknown-caller' and the backstop stays dead"
+    )
+
+    # Order is the whole guarantee: **self.env_vars must come BEFORE the injection.
+    env_spread = source.index( "**self.env_vars" )
+    injection  = source.index( '"LUPIN_TEST_SUITE_JOB_ID"' )
+    assert env_spread < injection, (
+        "LUPIN_TEST_SUITE_JOB_ID is spread-over by **self.env_vars — a caller could "
+        "relabel whose run wrote an artifact. Move the injection after the spread."
+    )
