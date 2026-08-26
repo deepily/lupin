@@ -62,7 +62,9 @@ from cosa.rest.v2.registry import resolve   # noqa: E402  — the table the CRUD
 # The provenance-stamp contract lives in paired_eval (the paired orchestrator, which imports
 # neither arm, so there is no cycle). v2's main stamps make_provenance over the sample it
 # measured, so the paired gate can bind this arm to the v1 arm by signature.
-from paired_eval import make_provenance   # noqa: E402
+# ⚠️ WAS `from paired_eval import make_provenance` — a MODULE-LEVEL import of a script the
+# V1 excision deletes, so v2 would have died at import, not degraded (row e2099400 §2 Step 2).
+from eval_provenance import make_provenance   # noqa: E402
 
 # The snapshot-isolation guard is the neutral home both arms reach acyclically (it imports
 # neither arm). v2's per-arm clean-step composes its config cross-check + measurement-db

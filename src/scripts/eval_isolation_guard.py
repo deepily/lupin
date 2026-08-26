@@ -407,6 +407,26 @@ def agentic_command_names() -> Set[ str ]:
 
 
 LEAK_FIX_SHA              = "bf77852b"   # the fix for the 8aa89f42 fallback_defaults leak
+
+# ── The pinned v1 baseline sha (MOVED here 2026-08-26, row e2099400 §2 Step 2) ────────
+# It lived in v1_eval_arm, and THIS FILE — a keeper — imported it back out, which is a
+# third edge out of the excision's delete list. It belongs here anyway: the comment that
+# came with it already says the guard's premise is derived from this constant.
+# WHY THIS PIN (rows 647f3733 + 297b1fc3, 2026-08-21 — stated here so the report names the
+# choice AND its cost, and so the isolation guard's premise is derived from this constant
+# rather than hard-coded): 15536409 carries bf77852b, the fix for the 8aa89f42
+# fallback_defaults leak — a SEQUENTIAL-REPLAY CONTAMINANT that would corrupt the measurement
+# itself — so the arm is LEAK-FREE. It ALSO carries the 9805783d request-path refactor, so the
+# measured v1 is the REFACTORED request path, not the one Rick's criteria were written against.
+# The trade was chosen deliberately: a leak corrupts what is measured; the refactor is EXPECTED
+# — not yet measured — to change the path's structure, not the numbers reported. The other
+# pin, b0735467, is unrefactored but leaky. Moving this constant below bf77852b turns
+# test_eval_isolation_guard's premise test red on purpose.
+V1_PIN_SHA       = "15536409"
+V1_PIN_RATIONALE = ( "leak-free (carries bf77852b, the 8aa89f42 fix) but REFACTORED request path "
+                     "(carries 9805783d); the refactor's effect on the reported numbers is EXPECTED "
+                     "nil, NOT measured — rows 647f3733/297b1fc3" )
+
 REQUEST_PATH_REFACTOR_SHA = "9805783d"   # the v1 request-path refactor the fix sits on top of
 
 
@@ -491,8 +511,7 @@ def require_leak_free_corpus( corpus_commands, *, agentic_commands: Optional[ Se
     if not tripped:
         return commands
     if pinned_sha is None:
-        from v1_eval_arm import V1_PIN_SHA   # lazy: v1_eval_arm -> paired_eval -> v2_eval -> this module
-        pinned_sha = V1_PIN_SHA
+        pinned_sha = V1_PIN_SHA   # module-local since 2026-08-26; was a lazy import out of v1_eval_arm
     carries = pin_carries_fix if pin_carries_fix is not None else pin_carries_leak_fix( pinned_sha )
     if carries:
         return commands   # the leak is fixed at this pin — an arg-extracting corpus is admitted

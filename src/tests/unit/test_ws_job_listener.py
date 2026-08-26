@@ -1,5 +1,5 @@
 """
-Real-socket tests for the v1-arm WS producer (WsJobEventListener / ws_recv_events).
+Real-socket tests for the queue-WS producer (WsJobEventListener / ws_recv_events).
 
 This is the seam that feeds the paired v1 baseline: it captures job_state_transition
 frames off the live queue WebSocket and hands one job's frames to parse_transitions.
@@ -32,7 +32,12 @@ if _LUPIN_ROOT:
     if _SCRIPTS not in sys.path:
         sys.path.insert( 0, _SCRIPTS )
 
-import v1_eval_arm as arm                                     # noqa: E402
+import ws_job_listener as arm                                  # noqa: E402
+# ⚠️ MOVED WITH THE CODE, 2026-08-26 (row e2099400 §2 Step 2). These tests used to
+# import v1_eval_arm; the listener now lives in ws_job_listener so it survives the V1
+# excision. The alias stays `arm` so the move is a one-line diff and every assertion
+# below is verifiably the SAME assertion — a relocation that also rewrites its tests
+# cannot tell you the behaviour was preserved.
 
 
 # ---------------------------------------------------------------------------

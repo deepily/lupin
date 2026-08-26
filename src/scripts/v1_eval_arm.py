@@ -104,20 +104,11 @@ from paired_eval import make_provenance   # noqa: E402
 # The v1 pin sha this arm is measured against (design §2a). Stamped in the report
 # header so the baseline is non-expiring and the comparison reproducible.
 #
-# WHY THIS PIN (rows 647f3733 + 297b1fc3, 2026-08-21 — stated here so the report names the
-# choice AND its cost, and so the isolation guard's premise is derived from this constant
-# rather than hard-coded): 15536409 carries bf77852b, the fix for the 8aa89f42
-# fallback_defaults leak — a SEQUENTIAL-REPLAY CONTAMINANT that would corrupt the measurement
-# itself — so the arm is LEAK-FREE. It ALSO carries the 9805783d request-path refactor, so the
-# measured v1 is the REFACTORED request path, not the one Rick's criteria were written against.
-# The trade was chosen deliberately: a leak corrupts what is measured; the refactor is EXPECTED
-# — not yet measured — to change the path's structure, not the numbers reported. The other
-# pin, b0735467, is unrefactored but leaky. Moving this constant below bf77852b turns
-# test_eval_isolation_guard's premise test red on purpose.
-V1_PIN_SHA       = "15536409"
-V1_PIN_RATIONALE = ( "leak-free (carries bf77852b, the 8aa89f42 fix) but REFACTORED request path "
-                     "(carries 9805783d); the refactor's effect on the reported numbers is EXPECTED "
-                     "nil, NOT measured — rows 647f3733/297b1fc3" )
+# `V1_PIN_SHA` / `V1_PIN_RATIONALE` MOVED to eval_isolation_guard.py (row e2099400 §2
+# Step 2). The guard is a KEEPER that already reasons about the pin, and it reached back
+# into this file for the constant — a third import out of the delete list. Re-exported so
+# this module and its tests are unchanged until it goes.
+from eval_isolation_guard import V1_PIN_SHA, V1_PIN_RATIONALE   # noqa: E402
 
 # The six degradation paths that must all be present + distinct (design §7 floor).
 # v1 surfaces failures through the completion metadata's `error` / status; a v1
@@ -550,52 +541,16 @@ _ST_RUNNING   = "running"
 _ST_COMPLETED = "completed"
 
 
-def _iso_to_epoch( iso: Any ) -> Optional[float]:
-    """
-    Ensures:
-        - parses an ISO-8601 string (the event `timestamp`, aware) to epoch seconds
-        - returns None for None / non-string / unparseable — never raises, so one
-          malformed stamp cannot crash a whole pass
-    """
-    import datetime
-    if not isinstance( iso, str ):
-        return None
-    try:
-        return datetime.datetime.fromisoformat( iso ).timestamp()
-    except ValueError:
-        return None
+# `_iso_to_epoch` MOVED with parse_transitions (row e2099400 §2 Step 2) — the reducer is
+# its only caller. Re-exported so this module's own tests are unchanged until it goes.
+from ws_job_listener import _iso_to_epoch              # noqa: E402
 
 
-def parse_transitions( events: Sequence[Dict[str, Any]] ) -> Dict[str, Any]:
-    """
-    Reduce ONE job's `job_state_transition` events into the transitions dict
-    assemble_v1_record consumes.
-
-    Requires:
-        - events is the list of job_state_transition payloads for a SINGLE job
-          (each { to_state, timestamp (ISO), metadata? }), already job-filtered
-
-    Ensures:
-        - returns { queued_ts, running_ts, completed_ts, metadata }, timestamps in
-          epoch seconds (QUEUED/RUNNING/COMPLETED transitions); metadata is the
-          COMPLETED event's metadata (the completion payload), else None
-        - a terminal FAILURE (failed/cancelled/…) leaves completed_ts + metadata
-          None ⇒ the record reads no_completion (honest: no usable span), never a
-          fabricated completion
-        - never raises (a malformed timestamp becomes None via _iso_to_epoch)
-    """
-    out: Dict[str, Any] = { "queued_ts": None, "running_ts": None, "completed_ts": None, "metadata": None }
-    for ev in events:
-        to = ev.get( "to_state" )
-        ts = _iso_to_epoch( ev.get( "timestamp" ) )
-        if to == _ST_QUEUED:
-            out[ "queued_ts" ] = ts
-        elif to == _ST_RUNNING:
-            out[ "running_ts" ] = ts
-        elif to == _ST_COMPLETED:
-            out[ "completed_ts" ] = ts
-            out[ "metadata" ]     = ev.get( "metadata" )
-    return out
+# `parse_transitions` MOVED to ws_job_listener.py (row e2099400 §2 Step 2) — it reduces
+# queue-WS frames, which is the listener's own vocabulary rather than v1 scoring, and
+# the listener's tests still need it once this file is deleted. Re-exported so every
+# caller and test here is unchanged until then.
+from ws_job_listener import parse_transitions          # noqa: E402
 
 
 # ──────────────────────────────────── routing-command map (R-A1 seam)
@@ -1001,189 +956,19 @@ def _default_collect_fn( ws_recv_events: Callable[[str], Sequence[Dict[str, Any]
 
 # ──────────────────────────────────────────── the live WS producer (the seam)
 #
-# _default_collect_fn needs a `ws_recv_events( job_id )` producer. This is it: a
-# PERSISTENT listener on the queue WebSocket, started BEFORE the pass pushes any job.
-#
-# WHY PERSISTENT, NOT PER-JOB. run_v1_pass pushes a job then blocks in collect_fn to
-# watch it (v1_eval_arm.py run_v1_pass). A listener that connected AFTER the push would
-# race the server and miss the QUEUED / QUEUED→RUNNING frames, so queued_ts/running_ts
-# would read None and the v1 span would be silently understated — the exact "authenticates
-# but measures wrong, quietly" failure this whole row exists to kill. Connecting once, up
-# front, and buffering every frame by job_id removes the race by construction.
-#
-# WHY IT REFUSES RATHER THAN RETURNING A PARTIAL BUFFER (Mr Radio's constraint). A span
-# computed from whatever frames happened to arrive before a timeout — or from an empty
-# buffer for a job that emitted nothing — is a number wrong in the direction nobody
-# audits, and it feeds straight into the go/no-go. So a job that never reaches a terminal
-# state RAISES; it never hands back a non-terminal buffer that reads as data.
-#
-# The frame shape is the SHIPPED one: websocket_manager builds { "type": <event>,
-# "timestamp": <iso>, **data }, and queue_util.emit_job_state_transition's data is
-# { job_id, from_state, to_state, timestamp, metadata? }. So each buffered frame already
-# carries to_state / timestamp / metadata — exactly what parse_transitions reduces.
+# MOVED OUT, 2026-08-26 (row e2099400 §2 Step 2). The listener, its terminal-state set and
+# make_ws_recv_events now live in `ws_job_listener.py`, because `v2_eval` imports
+# make_ws_recv_events for its own terminal wait (row a2e360f8) and THIS FILE IS BEING
+# DELETED. Leaving the listener here would have taken v2's terminal wait down with the
+# excision. Re-exported below so every existing caller and test in this module is unchanged
+# until the file goes.
+from ws_job_listener import (          # noqa: E402
+    WsJobEventListener,
+    make_ws_recv_events,
+    _QUEUE_SUBSCRIBED_EVENTS,
+    _TERMINAL_STATES,
+)
 
-# Queue events this listener must be subscribed to (the server filters outbound frames
-# against this list). Mirrors QueueTransport's list, trimmed to what the seam needs.
-_QUEUE_SUBSCRIBED_EVENTS = ( "job_state_transition", "auth_success", "auth_error", "connect" )
-
-# to_state values that END a job's watch: a real completion or a real terminal failure.
-# STALLED is deliberately NOT terminal — it can recover to COMPLETED, so we keep waiting
-# (the per-job timeout bounds it). Matches the JobState string values (job_state.py).
-_TERMINAL_STATES = frozenset( { "completed", "failed", "cancelled", "interrupted" } )
-
-
-class WsJobEventListener:
-    """
-    A persistent queue-WebSocket listener that buffers `job_state_transition` frames by
-    job_id, so `ws_recv_events( job_id )` can hand a single job's frames to parse_transitions.
-
-    Requires:
-        - base_url points at the (pinned-worktree) v1 server answering /ws/queue/<sid>.
-        - token is a JWT for the queue WS auth_request (same user whose jobs are pushed,
-          so the server's per-user emit reaches this listener).
-        - start() is called BEFORE any job is pushed — otherwise early frames race the
-          connect and are missed (the mis-measurement this class exists to prevent).
-
-    Ensures:
-        - start() connects, sends the auth_request, and BLOCKS until auth_success (or
-          raises on connect/auth failure), so a caller that returns from start() has a
-          live, subscribed socket.
-        - a background thread buffers every job_state_transition frame under its job_id.
-        - ws_recv_events( job_id ) BLOCKS until that job has a frame whose to_state is
-          terminal (completed/failed/cancelled/interrupted), then returns the job's frames
-          in arrival order.
-        - RAISES EvalIntegrityError when collect_timeout elapses with no terminal frame —
-          including a job with no frames at all — rather than returning a partial buffer
-          that would become a wrong-direction span. Never fabricates a completion.
-        - stop() ends the listener thread and closes the socket.
-    """
-
-    def __init__(
-        self,
-        base_url        : str,
-        token           : str,
-        session_id      : str   = "v1-eval-listener",
-        *,
-        collect_timeout : float = 120.0,
-        connect_timeout : float = 10.0,
-    ) -> None:
-        self.base_url        = base_url
-        self.token           = token
-        self.session_id      = session_id
-        self.collect_timeout = collect_timeout
-        self.connect_timeout = connect_timeout
-        self._events : Dict[ str, List[ Dict[ str, Any ] ] ] = {}
-        self._cond           = threading.Condition()
-        self._ready          = threading.Event()   # set on auth_success OR fatal error
-        self._stop           = threading.Event()
-        self._error : Optional[ BaseException ] = None
-        self._thread : Optional[ threading.Thread ] = None
-        self._loop = None
-
-    def _ws_url( self ) -> str:
-        parts  = urlsplit( self.base_url )
-        scheme = "wss" if parts.scheme == "https" else "ws"
-        return f"{scheme}://{parts.netloc}/ws/queue/{self.session_id}"
-
-    async def _serve( self ) -> None:
-        """Connect, authenticate, then buffer frames until stop() — the live socket loop."""
-        import websockets
-        try:
-            async with websockets.connect( self._ws_url(), open_timeout=self.connect_timeout ) as ws:
-                await ws.send( json.dumps( {
-                    "type"              : "auth_request",
-                    "token"             : self.token,
-                    "session_id"        : self.session_id,
-                    "subscribed_events" : list( _QUEUE_SUBSCRIBED_EVENTS ),
-                } ) )
-                while not self._stop.is_set():
-                    try:
-                        raw = await asyncio.wait_for( ws.recv(), timeout=1.0 )
-                    except asyncio.TimeoutError:
-                        continue                      # tick: re-check self._stop
-                    frame = json.loads( raw )
-                    ftype = frame.get( "type" )
-                    if ftype == "auth_success":
-                        self._ready.set()
-                        continue
-                    if ftype == "auth_error":
-                        raise EvalIntegrityError( f"v1 WS auth_error: {frame}" )
-                    if ftype == "job_state_transition":
-                        job_id = frame.get( "job_id" )
-                        with self._cond:
-                            self._events.setdefault( job_id, [] ).append( frame )
-                            self._cond.notify_all()
-        except Exception as exc:                      # connect/auth/transport failure
-            self._error = exc
-        finally:
-            self._ready.set()                         # unblock start() on success OR failure
-
-    def _thread_main( self ) -> None:
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop( self._loop )
-        self._loop.run_until_complete( self._serve() )
-
-    def start( self ) -> "WsJobEventListener":
-        """Spawn the listener thread and block until authenticated (or raise)."""
-        self._thread = threading.Thread( target=self._thread_main, name="v1-ws-listener", daemon=True )
-        self._thread.start()
-        if not self._ready.wait( self.connect_timeout + 2.0 ):
-            raise EvalIntegrityError( "v1 WS listener did not become ready (no auth_success within timeout)" )
-        if self._error is not None:
-            raise self._error
-        return self
-
-    def ws_recv_events( self, job_id: str ) -> List[ Dict[ str, Any ] ]:
-        """
-        Block until `job_id` reaches a terminal to_state, then return its frames.
-
-        Ensures:
-            - returns the job's buffered frames (arrival order) once any carries a terminal
-              to_state.
-            - RAISES EvalIntegrityError when collect_timeout elapses with no terminal frame
-              (a job with zero frames included) — never returns a partial/empty buffer, so
-              a stuck or silent job fails the run loudly instead of feeding a short span
-              into the go/no-go.
-        """
-        deadline = time.monotonic() + self.collect_timeout
-        with self._cond:
-            while True:
-                events = self._events.get( job_id, [] )
-                if any( ev.get( "to_state" ) in _TERMINAL_STATES for ev in events ):
-                    return list( events )
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    seen = [ ev.get( "to_state" ) for ev in events ]
-                    raise EvalIntegrityError(
-                        f"v1 WS collect timed out for job {job_id!r} after {self.collect_timeout}s with no "
-                        f"terminal state (saw {len( events )} frame(s): {seen}) — refusing to return a partial "
-                        f"span; the paired number would be wrong in the direction nobody audits"
-                    )
-                self._cond.wait( timeout=remaining )
-
-    def stop( self ) -> None:
-        """End the listener thread and close the socket."""
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join( timeout=5.0 )
-
-
-def make_ws_recv_events(
-    base_url        : str,
-    token           : str,
-    session_id      : str   = "v1-eval-listener",
-    *,
-    collect_timeout : float = 120.0,
-) -> Tuple[ WsJobEventListener, Callable[ [ str ], List[ Dict[ str, Any ] ] ] ]:
-    """
-    Start a WsJobEventListener and return ( listener, listener.ws_recv_events ).
-
-    The RUN wrapper calls this BEFORE the pass, wires ws_recv_events into
-    _default_collect_fn, runs both passes, then calls listener.stop(). Returning the
-    listener (not just the callable) keeps stop() in the caller's hands.
-    """
-    listener = WsJobEventListener( base_url, token, session_id, collect_timeout=collect_timeout ).start()
-    return listener, listener.ws_recv_events
 
 
 def crud_fork_class_to_command( registry: Optional[Dict[str, Any]] = None ) -> Dict[str, str]:

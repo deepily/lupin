@@ -71,13 +71,15 @@ for _p in ( _src_path, _scripts_dir ):
 import cosa.utils.util as du   # noqa: E402
 
 
-# The provenance-stamp fields every arm artifact must carry. `sample_signature` is the
-# load-bearing one: two arms measured the same utterances IFF their signatures match.
-# `git_sha` is the load-bearing one for WHICH TREE: it is the sha the arm read back from the
-# server it actually measured, so a number is auditable to the code that produced it. It is
-# in this tuple — not merely printed — so an absent sha is a MISSING FIELD that refuses the
-# pairing, rather than a blank the report renders as if it were fine (row c9b43538).
-PROVENANCE_FIELDS = ( "arm", "corpus", "seed", "n_per_command", "sample_signature", "sampled_n", "git_sha" )
+# `PROVENANCE_FIELDS`, `compute_sample_signature` and `make_provenance` MOVED to
+# eval_provenance.py (row e2099400 §2 Step 2). v2_eval imports make_provenance AT MODULE
+# LEVEL and this file is being deleted, so every v2 eval would have died at import.
+# Re-exported so this module and its tests are unchanged until it goes.
+from eval_provenance import (                     # noqa: E402
+    PROVENANCE_FIELDS,
+    compute_sample_signature,
+    make_provenance,
+)
 
 # What a git_sha field must NOT be. `read_running_server_sha` returns "" when the server
 # does not answer, so "present but empty" is the shape a skipped read actually takes — it has
@@ -108,63 +110,6 @@ INSTRUMENT = (
 )
 
 
-# ---------------------------------------------------------------------------
-# The sample signature — what actually binds two arms to one measured sample.
-# ---------------------------------------------------------------------------
-def compute_sample_signature( pairs: Sequence[ Tuple[ str, str ] ] ) -> str:
-    """
-    A deterministic, order-independent fingerprint of the (utterance, command) pairs.
-
-    Requires:
-        - pairs is a sequence of (utterance, expected_command) 2-tuples.
-
-    Ensures:
-        - returns the sha256 hex of the SORTED, DEDUPED pair set, so two arms that
-          measured the same utterances (in any order) produce the same signature and
-          two arms that measured different utterances cannot collide.
-        - binds BOTH the utterance text AND its expected command (a unit separator
-          between the two keeps "a","bc" distinct from "ab","c").
-    """
-    encoded = sorted( { f"{utterance}\x1f{command}" for utterance, command in pairs } )
-    joined  = "\x1e".join( encoded )
-    return hashlib.sha256( joined.encode( "utf-8" ) ).hexdigest()
-
-
-def make_provenance(
-    arm           : str,
-    corpus        : str,
-    seed          : Optional[ int ],
-    n_per_command : Optional[ int ],
-    sampled_pairs : Sequence[ Tuple[ str, str ] ],
-    git_sha       : str,
-) -> Dict[ str, Any ]:
-    """
-    Build the provenance stamp an arm attaches to its serialized result.
-
-    Requires:
-        - arm is "v1" or "v2"; corpus is the corpus name both arms load.
-        - seed / n_per_command describe the sampler (None on a limit-based run that
-          did not sample — such an arm can never pair with a seeded one, by design).
-        - sampled_pairs is the exact (utterance, expected_command) set the arm measured.
-        - git_sha is the sha READ BACK from the server this arm measured — never a
-          constant and never a guess. It is a REQUIRED argument rather than an optional
-          one on purpose: an arm that cannot say which tree it ran on must fail at the
-          stamp, where the caller can still fix it, and not at the report, where a blank
-          is indistinguishable from a legitimate one (row c9b43538).
-
-    Ensures:
-        - returns a dict carrying exactly PROVENANCE_FIELDS, with sample_signature
-          computed from sampled_pairs and sampled_n = len( sampled_pairs ).
-    """
-    return {
-        "arm"              : arm,
-        "corpus"           : corpus,
-        "seed"             : seed,
-        "n_per_command"    : n_per_command,
-        "sample_signature" : compute_sample_signature( sampled_pairs ),
-        "sampled_n"        : len( sampled_pairs ),
-        "git_sha"          : git_sha,
-    }
 
 
 # ---------------------------------------------------------------------------
