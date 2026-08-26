@@ -244,7 +244,29 @@ omit   = [
 # row. SCOPE CAVEAT: 96.26% reflects the unit+cosa tiers only; lupin_app (server
 # runtime) reads 27.2% here because its paths run under the :8000 integration/e2e
 # tiers, not measured in this baseline. Raise this floor as the ramp advances.
-fail_under = 96
+#
+# ── RAISED 96 -> 98 on 2026-08-26 (Rick's ratified decision 4: raise per milestone) ──
+# Measured at sha 0b0e6880, tracked-dirty=1 (one .md from another session, no code):
+#     62,225 statements · 960 missing · 18,542 branches · 175 partial · 98.46%
+#     27,608 passed · 0 failed · 35 skipped · 9 xfailed · 21m47s
+#     unit + cosa tiers, isolated COVERAGE_FILE, on a box verified clear of other suites
+# The floor is the integer BELOW the measurement, same rule as before — a floor above
+# the truth is a gate that is red about nothing.
+#
+# ⚠️ I PREDICTED A DIP AND IT WENT UP 2.15 POINTS (96.30 -> 98.46). Saying so here
+# because I said the opposite out loud before the run. The prediction was about the
+# EXCISION alone, which removes v1 tests that incidentally covered code that stays;
+# what it left out is that §3a and §3b both removed statements that were at ZERO —
+# ~610 of CPython's json and 524 of src/lib — and dropping pure-zero code from a
+# denominator raises the percentage mechanically. Those two effects plus the day's
+# test-writing are mixed in this one number, so the EXCISION'S OWN SIGN IS STILL
+# UNMEASURED. Isolating it needs a run at 22ad69b3 against one at 75ad1bd8; until
+# somebody spends that hour, "the excision did not cost us coverage" is not a claim
+# this run supports.
+#
+# WHERE THE REMAINING 960 ARE: lupin_app 367 (its runtime is the :8000 tiers — the
+# ratified fold-in, §3c, is not done yet), cosa 334, lupin_cli 255, lupin_mcp 4.
+fail_under = 98
 # exclude_also APPENDS to defaults (keeps `# pragma: no cover` working)
 exclude_also = [
     # ⚠️ EXCLUDED BY POLICY, NOT BECAUSE IT IS UNREACHABLE (row 3c0d3d1c, 2026-07-25).
