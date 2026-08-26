@@ -835,3 +835,47 @@ def test_a_quoted_argument_before_the_pathspec_does_not_shift_the_scan( repo ):
     )
     assert "THE PATHS THIS COMMIT NAMES" in verdict.deny_reason
     assert "src/theirs.py" in verdict.deny_reason
+
+
+@pytest.mark.parametrize( "command", [
+    "python3 - <<'PY'\nprint( 'no terminator here" ,        # unterminated, and not a commit
+    "cat <<'EOF'\nsome text\nEOF\necho done",               # a heredoc, still not a commit
+] )
+def test_a_command_that_commits_nothing_gets_no_notice( repo, command ):
+    """
+    A guard that talks about commits during commands that are not commits is noise,
+    and noise is how a notice stops being read. Measured: before the pre-filter,
+    every unterminated heredoc anywhere produced a commit-scope notice.
+    """
+    verdict = evaluate_commit_scope( "Bash", { "command": command }, session_id=MY_SESSION, cwd=repo )
+    assert verdict.deny_reason is None
+    assert verdict.notice is None
+
+
+def test_a_commit_mentioned_ONLY_inside_a_heredoc_is_not_a_commit( repo ):
+    """The prose describes a commit; the command runs none. Nothing to review."""
+    command = "cat > notes.md <<'EOF'\ngit commit -am x\nis how you would do it\nEOF"
+    verdict = evaluate_commit_scope(
+        "Bash", { "command": command }, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/theirs.py" ),
+    )
+    assert verdict.deny_reason is None and verdict.notice is None
+
+
+@pytest.mark.parametrize( "command", [
+    "git commit -F m.txt -- src/theirs.py 2>&1 | tail -3",     # the fleet's usual shape
+    "git commit -F m.txt -- src/theirs.py > out.log",
+    "git commit -F m.txt -- src/theirs.py 2> err.log",
+    "git commit -F m.txt -- src/theirs.py >out.log",          # target ATTACHED to the operator
+    "git commit -F m.txt -- src/theirs.py 2>err.log",
+] )
+def test_an_ordinary_redirection_does_not_stop_the_review( repo, command ):
+    """
+    `2>&1 | tail` ends almost every commit this fleet runs. Treating any < or > as
+    "unsure" made the mandated pathspec shape unreviewable in practice — measured on
+    this guard's own commit, twice.
+    """
+    reason = evaluate_commit_scope(
+        "Bash", { "command": command }, session_id=MY_SESSION, cwd=repo, staged_reader=_reader(),
+    ).deny_reason
+    assert "src/theirs.py" in reason

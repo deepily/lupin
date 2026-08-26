@@ -410,6 +410,48 @@ _LONG_NO_ARG = {
 _PATHSPEC_MAGIC = ( ":", "*", "?", "[" )
 
 
+_REDIRECTION_RE = re.compile( r"^\d*(?:>>|>|<)&?\d*$" )
+
+
+def _without_redirections( tokens ):
+    """
+    Drop `2>&1`, `> file`, `>> file`, `< file` — a redirection changes where output
+    GOES, never which files a commit carries.
+
+    It used to be a reason to give up entirely, and that was measured wrong the
+    moment it shipped: almost every commit this fleet runs ends `2>&1 | tail -3`,
+    so "any < or > means unsure" made the mandated `git commit -- <paths>` shape
+    unreviewable in practice. A guard that gives up on the common case is off.
+
+    Requires:
+        - tokens is the shlex-split token list after `commit`
+
+    Ensures:
+        - returns the tokens with redirection operators and their targets removed
+        - a BARE operator (`>`, `2>`) also consumes the token after it — that is
+          its filename, and reading it as a path would name a file the commit does
+          not touch
+        - returns None if `<<` survives here: the heredoc stripper should have
+          removed it, so its presence means something was not understood
+        - never raises
+    """
+    if any( "<<" in token for token in tokens ): return None
+
+    kept, i = [], 0
+    while i < len( tokens ):
+        token = tokens[ i ]
+        if _REDIRECTION_RE.match( token ):
+            i += 2 if token.endswith( ( ">", "<" ) ) else 1      # bare operator eats its target
+            continue
+        if token.startswith( ( ">", ">>", "<" ) ) or re.match( r"^\d+[<>]", token ):
+            i += 1                                              # >file / 2>file — target attached
+            continue
+        kept.append( token )
+        i += 1
+
+    return kept
+
+
 def _pathspec_of( command: str, match ):
     """
     The paths a `git commit <paths>` names — or an "I am not sure" (row 292dd3d8).
@@ -434,8 +476,10 @@ def _pathspec_of( command: str, match ):
         - returns ( [], None ) when the command names no paths at all (an ordinary
           index commit — the caller reviews the index as before)
         - returns ( None, why ) when ANY doubt remains: quoting that will not parse,
-          a redirection, an unrecognised long option, an optional-argument option,
-          or pathspec magic. The caller ALLOWS and says `why`
+          a heredoc the stripper did not remove, an unrecognised long option, an
+          optional-argument option, or pathspec magic. The caller ALLOWS and says `why`
+        - ordinary redirections (`2>&1`, `> log`) are DROPPED, not a reason to give
+          up — they change where output goes, never what the commit carries
         - never raises
     """
     tail = command[ match.end(): ]
@@ -446,9 +490,9 @@ def _pathspec_of( command: str, match ):
     except ValueError:
         return None, "the command's quoting does not parse"
 
-    for token in tokens:
-        if "<" in token or ">" in token:
-            return None, "the command carries a redirection this guard will not try to read"
+    tokens = _without_redirections( tokens )
+    if tokens is None:
+        return None, "the command carries a redirection this guard will not try to read"
 
     paths, i = [], 0
     while i < len( tokens ):
@@ -781,13 +825,19 @@ def evaluate_commit_scope(
         command = tool_input.get( "command", "" )
         if not isinstance( command, str ) or not command: return allow
 
+        # CHEAP PRE-FILTER FIRST. Without it, every Bash command carrying an
+        # unterminated heredoc got a commit-scope notice — including the ones that
+        # commit nothing at all. A guard that talks about commits during commands
+        # that are not commits is noise, and noise is how a notice stops being read.
+        if _mentions_git_commit( command ) is None: return allow
+
         # A `git commit` quoted inside a heredoc is DATA, not the command being run.
         command = _strip_heredoc_bodies( command )
         if command is None:
             return CommitScopeVerdict( None, _notice_for( "a heredoc opens and never closes, so what is command and what is text cannot be told apart" ) )
 
         match = _mentions_git_commit( command )
-        if match is None: return allow
+        if match is None: return allow                # the only `git commit` was inside the heredoc
 
         if _ack_in_prefix( match.group( "prefix" ) ): return allow
 
