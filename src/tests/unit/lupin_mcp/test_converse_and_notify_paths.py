@@ -186,3 +186,129 @@ class TestNotifyToolDelegates:
         assert seen[ "field" ] == "message"
         assert seen[ "msg" ]   == "a message"
         assert seen[ "impl" ][ "priority" ] == "low"
+
+
+class TestSoloChorusCrossTalkCue:
+    """
+    The last uncovered branch in `_notify_impl`, and the one whose two arms do
+    OPPOSITE things to the same input.
+
+    Setup: speakerphone OFF, a claude.code sender, and the caller asking for
+    silent TTS. In SOLO only one session can hold speakerphone, so a silent-TTS
+    notification from a phone-mode session is a leak symptom and the ding is
+    forced back ON to make it audible. In CHORUS that same call is the normal
+    pattern (this session is in phone mode while a sibling holds speakerphone),
+    so suppress_ding is preserved. Inverting it there would ding the user on
+    every routine notification.
+    """
+
+    @staticmethod
+    def _arrange( monkeypatch, tts_mode ):
+        import lupin_cli.claude_code.hooks.lib.session_bridge as sb
+        import cosa.utils.util as _cu
+        sent = {}
+        monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "session_id": "aaaaaaaa" } )
+        monkeypatch.setattr( sb, "get_speakerphone", lambda sid: False )     # speakerphone OFF
+        if isinstance( tts_mode, Exception ):
+            def boom():
+                raise tts_mode
+            monkeypatch.setattr( _cu, "get_tts_interaction_mode", boom )
+        else:
+            monkeypatch.setattr( _cu, "get_tts_interaction_mode", lambda: tts_mode )
+        monkeypatch.setattr( cv, "_outbox_has_backlog", lambda: False )
+
+        class _Sent:
+            success = True
+            status  = "delivered"
+            message = ""
+        monkeypatch.setattr( cv, "notify_user_async",
+                             lambda request, debug: sent.update( req=request ) or _Sent() )
+        return sent
+
+    def test_solo_forces_the_ding_back_on_as_a_leak_cue( self, monkeypatch, caplog ):
+        sent = self._arrange( monkeypatch, "solo" )
+        with caplog.at_level( "INFO", logger=cv.logger.name ):
+            cv._notify_impl( "hello", suppress_ding=True )
+        assert sent[ "req" ].suppress_ding is False
+        assert "solo cross-talk cue" in caplog.text
+
+    def test_chorus_preserves_the_callers_silent_request( self, monkeypatch, caplog ):
+        sent = self._arrange( monkeypatch, "chorus" )
+        with caplog.at_level( "DEBUG", logger=cv.logger.name ):
+            cv._notify_impl( "hello", suppress_ding=True )
+        assert sent[ "req" ].suppress_ding is True
+        assert "chorus passthrough" in caplog.text
+
+    def test_an_unreadable_mode_defaults_to_chorus_and_stays_silent( self, monkeypatch ):
+        # Defaulting to solo would ding the user on every routine notification
+        # whenever the config was briefly unreadable.
+        sent = self._arrange( monkeypatch, RuntimeError( "config unavailable" ) )
+        cv._notify_impl( "hello", suppress_ding=True )
+        assert sent[ "req" ].suppress_ding is True
+
+    def test_speakerphone_on_forces_high_priority_and_strips_code_fences( self, monkeypatch ):
+        # The other arm of the same branch: fenced code is TTS-hostile, and a
+        # low-priority speakerphone message would never reach the listener.
+        import lupin_cli.claude_code.hooks.lib.session_bridge as sb
+        sent = {}
+        monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "session_id": "aaaaaaaa" } )
+        monkeypatch.setattr( sb, "get_speakerphone", lambda sid: True )
+        monkeypatch.setattr( cv, "_outbox_has_backlog", lambda: False )
+
+        class _Sent:
+            success = True
+            status  = "delivered"
+            message = ""
+        monkeypatch.setattr( cv, "notify_user_async",
+                             lambda request, debug: sent.update( req=request ) or _Sent() )
+
+        cv._notify_impl( "before\n```py\ncode()\n```\nafter",
+                         priority="low", suppress_ding=False )
+
+        req = sent[ "req" ]
+        assert req.priority.value == "high"
+        assert req.suppress_ding is True
+        assert "code()" not in req.message
+
+
+class TestSpokenBrevityUnitExtraction:
+    """
+    ⚠️ The enforce kill-switch is currently FALSE in this repo's config, so the
+    guard is a no-op as configured and a test that relied on the ambient value
+    would pass without exercising anything. These pin it ON explicitly, which
+    both tests the real behavior and keeps the assertions independent of an INI
+    that Rick can flip either way.
+    """
+
+    @pytest.fixture( autouse=True )
+    def _enforced( self, monkeypatch ):
+        monkeypatch.setattr( cv, "_get_spoken_enforce", lambda: True )
+        monkeypatch.setattr( cv, "_get_spoken_char_cap", lambda: 500 )
+
+    def test_a_question_list_is_measured_per_question( self ):
+        # The list arm labels each unit so an over-long question names ITSELF
+        # rather than the whole batch — otherwise the caller has to guess which.
+        with pytest.raises( ValueError ) as ei:
+            cv._enforce_spoken_brevity(
+                [ { "question": "ok?" }, { "question": "x" * 550 } ],
+                False, field="questions" )
+        assert "questions[1].question" in str( ei.value )
+        assert "override_size_limitation=True" in str( ei.value )
+
+    def test_a_short_question_list_passes( self ):
+        cv._enforce_spoken_brevity( [ { "question": "ok?" } ], False, field="questions" )
+
+    def test_non_dict_entries_in_the_list_are_skipped_not_measured( self ):
+        # A malformed entry must not crash the guard that runs before every ask.
+        cv._enforce_spoken_brevity( [ "bare string", 42, { "question": "ok?" } ],
+                                    False, field="questions" )
+
+    def test_the_override_lets_a_long_message_through_deliberately( self ):
+        cv._enforce_spoken_brevity( "x" * 550, True, field="message" )
+
+    @pytest.mark.parametrize( "spoken", [ 42, { "question": "ok?" }, None ] )
+    def test_a_value_that_is_neither_text_nor_a_question_list_is_left_alone( self, spoken ):
+        # Nothing to measure, so nothing to reject. The guard runs ahead of every
+        # ask and notify, so an unexpected type must fall through rather than
+        # raise and take the call down with it.
+        cv._enforce_spoken_brevity( spoken, False, field="message" )
