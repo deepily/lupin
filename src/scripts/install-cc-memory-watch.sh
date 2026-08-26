@@ -95,4 +95,8 @@ fi
 echo "Installed + started: ${UNIT_NAME}"
 echo "  deployed: ${DEPLOY_DIR}/cc_memory_watch.py"
 echo "  samples:  ${LOG_DIR}/cc-memory-samples.log"
-echo "  verify:   PYTHONPATH=${LUPIN_ROOT}/src python3 -m pytest src/tests/unit/test_cc_memory_watch_deploy_parity.py -q"
+# Point at the SANCTIONED runner, never a bare python3 -m pytest. A bare python3
+# is whatever is on PATH; under-provisioned it under-collects and reports the
+# reduced count as the whole suite (rows c98bce3f, fc74c1d4). A printed command
+# is one somebody will paste, so it has to be the right one.
+echo "  verify:   ./src/tests/run-unit-tests.sh -k cc_memory_watch_deploy_parity"
