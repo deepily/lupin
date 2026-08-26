@@ -2,6 +2,28 @@
 """
 Presentation Generator LIVE-RUN endpoint smoke test — Phase D verification.
 
+⚠️ VENUE: :8000 (test), NOT :7999 — AND THIS FILE IS STILL RUN BY THE :7999 SMOKE TIER,
+   SO IT IS EXPECTED RED THERE. Recorded 2026-08-26 (row 554e5d3e); NOT MOVED, deliberately.
+
+   Criterion tripped (CLAUDE.md § TESTING VENUES — a file is :8000 if ANY apply):
+     - real LLM spend (a live content-generation run, billed per token)
+     - runtime > 2 minutes
+   Evidence, from this file:
+     - usage lines pass `--cost-cap-usd 2.00` and `--cost-cap-usd 5.00`
+     - a documented variant runs `--timeout 1200` (20 min)
+     - the header block already names `POST /api/test-suite/submit` as the door
+   WHY IT WAS NOT MOVED. `run-smoke-tests.sh` runs the whole `src/tests/smoke/` directory,
+   so this file is executed on :7999 by the smoke merge gate regardless of what its
+   docstring says. Relocating it, or excluding it from the runner the way
+   test_proxy_integration.py is excluded, would deselect it from that gate — a change to
+   what the gate covers, which is an owner's decision and not a drive-by while clearing a
+   red list. So it stays, it stays red on :7999, and the reason is written here instead of
+   being re-derived by the next reader.
+
+   HOW TO RUN IT PROPERLY: submit via `POST /api/test-suite/submit` against :8000 on a
+   verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`,
+   exit 0 = IDLE). Never side-door it via curl or a direct queue push.
+
 Validates the full HTTP submit-and-poll lifecycle against a running server
 with REAL Claude API calls, the 4 orchestrator voice gates, and the full
 visual rendering pipeline. Uses the scripted notification proxy (profile:

@@ -2,6 +2,30 @@
 """
 Presentation Generator RENDER-ONLY endpoint smoke test — Tier 2 validation.
 
+⚠️ VENUE: :8000 (test), NOT :7999 — AND THIS FILE IS STILL RUN BY THE :7999 SMOKE TIER,
+   SO IT IS EXPECTED RED THERE. Recorded 2026-08-26 (row 554e5d3e); NOT MOVED, deliberately.
+
+   Criterion tripped (CLAUDE.md § TESTING VENUES — a file is :8000 if ANY apply):
+     - mutates persistent state (submits a real job that outlives the test)
+     - needs the notification proxy
+   Evidence, from this file:
+     - posts to `SUBMIT_ENDPOINT = "/api/v2/submit"` and polls for completion
+     - requires `--auto-proxy` (documented in the usage block)
+     - the header block already names `POST /api/test-suite/submit` as the door
+     - NOTE: $0 content cost (render-only skips generation) does NOT make it
+       :7999-eligible — a queued job is persistent state by the rubric
+   WHY IT WAS NOT MOVED. `run-smoke-tests.sh` runs the whole `src/tests/smoke/` directory,
+   so this file is executed on :7999 by the smoke merge gate regardless of what its
+   docstring says. Relocating it, or excluding it from the runner the way
+   test_proxy_integration.py is excluded, would deselect it from that gate — a change to
+   what the gate covers, which is an owner's decision and not a drive-by while clearing a
+   red list. So it stays, it stays red on :7999, and the reason is written here instead of
+   being re-derived by the next reader.
+
+   HOW TO RUN IT PROPERLY: submit via `POST /api/test-suite/submit` against :8000 on a
+   verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`,
+   exit 0 = IDLE). Never side-door it via curl or a direct queue push.
+
 Validates the render-only pipeline (Phases 6-8) by submitting an existing
 YAML intermediate file. Skips content generation (Phases 1-5, $0 cost).
 Tests Marp rendering, visual rendering (Mermaid/Matplotlib/D2), and delivery.

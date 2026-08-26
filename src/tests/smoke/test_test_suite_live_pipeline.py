@@ -2,6 +2,27 @@
 """
 Smoke test for Test Suite agent via live pipeline.
 
+⚠️ VENUE: :8000 (test), NOT :7999 — AND THIS FILE IS STILL RUN BY THE :7999 SMOKE TIER,
+   SO IT IS EXPECTED RED THERE. Recorded 2026-08-26 (row 554e5d3e); NOT MOVED, deliberately.
+
+   Criterion tripped (CLAUDE.md § TESTING VENUES — a file is :8000 if ANY apply):
+     - runtime > 2 minutes
+     - enqueues real work (drives a TestSuiteJob end-to-end through the queue)
+   Evidence, from this file:
+     - `DEFAULT_TIMEOUT = 1200  # 20 min (real E2E can take ~19 min)`
+     - submits through the live pipeline: request -> TodoFifoQueue -> TestSuiteJob
+   WHY IT WAS NOT MOVED. `run-smoke-tests.sh` runs the whole `src/tests/smoke/` directory,
+   so this file is executed on :7999 by the smoke merge gate regardless of what its
+   docstring says. Relocating it, or excluding it from the runner the way
+   test_proxy_integration.py is excluded, would deselect it from that gate — a change to
+   what the gate covers, which is an owner's decision and not a drive-by while clearing a
+   red list. So it stays, it stays red on :7999, and the reason is written here instead of
+   being re-derived by the next reader.
+
+   HOW TO RUN IT PROPERLY: submit via `POST /api/test-suite/submit` against :8000 on a
+   verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`,
+   exit 0 = IDLE). Never side-door it via curl or a direct queue push.
+
 Verifies the full end-to-end pipeline:
   TestSuiteSubmitRequest -> REST endpoint -> TodoFifoQueue -> TestSuiteJob
 
