@@ -364,3 +364,53 @@ def test_end_to_end_the_escape_hatch_lets_a_deliberate_contended_run_through():
         assert "check skipped" in done.stderr, "an override that says nothing is a silent hole"
     finally:
         foreign.terminate(); foreign.wait( timeout=10 )
+
+
+# ── a test that spawns a --cov child must not be flaky-by-construction ───────
+
+_COV_ARG   = re.compile( r'["\']--cov[=\s"\']' )
+_HATCH_SET = re.compile( r'LUPIN_ALLOW_CONTENDED_COVERAGE["\']?\s*\]?\s*[:=]' )
+
+# Files that hand --cov to a subprocess for a reason OTHER than measuring something.
+_NOT_A_COVERAGE_CHILD = {
+    "test_contended_coverage_guard.py": "its --cov strings are arguments to the refusal check itself",
+    "test_pytest_args_policy.py"      : "asserts on argument STRINGS; spawns no coverage child",
+}
+
+# ⚠️ ONLY CHILDREN THAT GO THROUGH THE WRAPPER CAN BE REFUSED. The guard lives in
+# run_pytest_with_diagnosis; a test that invokes `sys.executable -m pytest` directly never
+# meets it and is not flaky-by-construction. The first version of this check ignored that and
+# accused test_coverage_file_guard.py, which spawns its children directly — a false positive,
+# and a guard that cries wolf is a guard that gets an exemption entry instead of a fix.
+_ROUTES_THROUGH_WRAPPER = re.compile( r'run_pytest_with_diagnosis|pytest-with-diagnosis' )
+
+
+def test_a_test_that_spawns_a_coverage_child_engages_the_escape_hatch():
+    """
+    ⚠️ THE GUARD'S OWN FAILURE MODE, AND IT NEARLY SHIPPED. A test whose child asks for --cov
+    is refused whenever ANY other suite is on the box — and on a shared box that is most of
+    the time. Measured on the day the guard landed: five tests in
+    test_runner_coverage_blindness.py went red together because a peer session was four
+    minutes into `pytest src/cosa/tests/`. Nothing was wrong with those tests.
+
+    Such children produce no number anyone cites — they exercise a wrapper's warning, or probe
+    collection — so the right move is the escape hatch, and the wrong move is what a hurried
+    reader would do instead: conclude the guard is noisy and delete it. This walks src/tests so
+    the next such child is caught when it is written.
+    """
+    offenders = []
+    for directory, _dirs, names in os.walk( os.path.join( PROJECT_ROOT, "src", "tests" ) ):
+        if "__pycache__" in directory: continue
+        for name in sorted( names ):
+            if not ( name.startswith( "test_" ) and name.endswith( ".py" ) ): continue
+            if name in _NOT_A_COVERAGE_CHILD:                                 continue
+            path = os.path.join( directory, name )
+            body = open( path ).read()
+            if not _COV_ARG.search( body ):                continue
+            if "subprocess" not in body:                   continue
+            if not _ROUTES_THROUGH_WRAPPER.search( body ): continue
+            if _HATCH_SET.search( body ):                  continue
+            offenders.append( os.path.relpath( path, PROJECT_ROOT ) )
+    assert not offenders, (
+        "these tests spawn a --cov child without engaging LUPIN_ALLOW_CONTENDED_COVERAGE, so "
+        f"they go red whenever a peer session runs any suite: {offenders}" )

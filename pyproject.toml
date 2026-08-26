@@ -217,6 +217,21 @@ omit   = [
     # test suites — they must be measured, not omitted by an over-broad filename glob.
     "*/cosa/agents/*/__main__.py",  # CLI entrypoints — glue, run only via `python -m`
     "*/cosa/training/*",            # GPU + user-run-only; untestable in CI per never-grab-GPU mandate
+    # ── Anything outside our own tree (row e2099400 §3a, 2026-08-26) ──────────────
+    # ~610 statements of CPython's own `json` module were sitting in the denominator of a
+    # 100% mandate: json/encoder.py 235 @ 0%, decoder.py 206 @ 3%, scanner.py 56 @ 0%,
+    # tool.py 41 @ 0%, __init__.py 61 @ 6%. MECHANISM, measured 2026-08-26 rather than
+    # guessed: src/tests/unit/test_runner_coverage_blindness.py spawns child pytests with
+    # `--cov=json` (its scope needs something real to measure) and those children INHERITED
+    # the parent's COVERAGE_FILE, so their stdlib data was written straight into the tier's
+    # own data file. That source is fixed in the test itself; these patterns are the floor
+    # under it, because the next leak will come from a test nobody has written yet.
+    # ⚠️ Not a way to hide our own code: `source` lists only src/ directories, so nothing
+    # of ours can match these.
+    "*/lib/python3*/*",             # any interpreter's stdlib (uv, system, container)
+    "/usr/lib/python*/*",           # a system interpreter's stdlib
+    "*/site-packages/*",            # third-party packages
+    "*/.venv/*",                    # anything inside a virtualenv
 ]
 
 [tool.coverage.report]

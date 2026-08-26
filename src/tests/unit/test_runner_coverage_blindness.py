@@ -61,15 +61,24 @@ def _suite( tmp_path, red ):
         - red is a bool: True writes one deliberately failing test
 
     Ensures:
-        - the suite imports `json` and calls into it, so a `--cov=json` scope has something
-          real to measure — a scope the run never touches produces no table for a DIFFERENT
-          reason, and that shape is exercised deliberately in its own test below
+        - the suite imports a small module of OURS and calls into it, so the `--cov` scope
+          used below has something real to measure — a scope the run never touches produces
+          no table for a DIFFERENT reason, and that shape is exercised deliberately in its
+          own test below
         - returns the directory path as a str
+
+    ⚠️ THE MEASURED MODULE USED TO BE THE STDLIB `json`, AND THAT WAS THE BUG (row e2099400
+    §3a). `--cov=json` measured CPython's own json package, and because the children
+    inherited this process's COVERAGE_FILE, five stdlib modules — ~610 statements — landed
+    in the repo's coverage denominator at ~0%. The scope is now one of our own modules, and
+    the children get their own data file in _run below. Either change alone would have
+    stopped it; both are here because this file's whole subject is instruments that go
+    wrong quietly.
     """
     body = (
-        "import json\n"
+        "from cosa.utils import coverage_contention\n"
         "def test_touches_the_measured_module():\n"
-        "    assert json.loads( '{\"a\": 1}' )[ 'a' ] == 1\n"
+        "    assert coverage_contention.looks_like_pytest( '/opt/venv/bin/pytest -q' ) is True\n"
     )
     if red:
         body += "def test_forced_red():\n    assert False, 'deliberate red'\n"
@@ -100,7 +109,27 @@ def _run( suite_dir, *pytest_args ):
         f'-q -p no:cacheprovider --rootdir "{suite_dir}" -p no:randomly {args}\n'
         f'exit $?\n'
     )
-    env = dict( os.environ, LUPIN_ROOT=PROJECT_ROOT )
+    # ⚠️ THE CHILD GETS ITS OWN COVERAGE_FILE, AND THAT IS NOT HOUSEKEEPING (row e2099400 §3a).
+    # These children run `--cov` on purpose — the scope needs something real to measure.
+    # Inheriting the parent's COVERAGE_FILE wrote their json data into the TIER's data file, so
+    # five CPython stdlib modules appeared in the repo's coverage report at ~0%: json/encoder.py
+    # 235 statements, decoder.py 206, scanner.py 56, tool.py 41, __init__.py 61. That is ~610
+    # statements of code we do not own, sitting in the denominator of a 100% mandate. Measured
+    # and reproduced 2026-08-26 by running this file under --cov with an isolated data file and
+    # reading the result back: 5 measured files, 5 of them outside src/, all five of them these.
+    env = dict( os.environ,
+                LUPIN_ROOT    = PROJECT_ROOT,
+                COVERAGE_FILE = os.path.join( suite_dir, ".coverage-child" ),
+                # ⚠️ AND THE CONTENDED-COVERAGE GUARD IS TURNED OFF FOR THESE CHILDREN, ON
+                # PURPOSE (row e2099400 decision 4). That guard refuses a --cov run while any
+                # other suite is on the box, because a contended coverage NUMBER is silently
+                # wrong. These children produce no number anyone will ever cite — they exist
+                # to make the wrapper print (or not print) a warning. Without this, the whole
+                # file goes red whenever a peer session happens to be running tests, which is
+                # most of the time on this box: caught here on the day the guard landed, with
+                # a peer four minutes into `pytest src/cosa/tests/`. A guard that reddens
+                # honest tests for reasons unrelated to them is a guard somebody deletes.
+                LUPIN_ALLOW_CONTENDED_COVERAGE = "1" )
     return subprocess.run(
         [ "bash", "-c", script ], cwd=PROJECT_ROOT, env=env,
         capture_output=True, text=True, timeout=300
@@ -117,7 +146,7 @@ def test_red_run_with_no_cov_on_fail_is_reported_as_blind( tmp_path ):
     report. The run must still exit 1 (the wrapper never touches the status) AND the reader
     must be told no number was produced.
     """
-    proc = _run( _suite( tmp_path, red=True ), "--cov=json", "--cov-fail-under=0", "--no-cov-on-fail" )
+    proc = _run( _suite( tmp_path, red=True ), "--cov=cosa.utils.coverage_contention", "--cov-fail-under=0", "--no-cov-on-fail" )
 
     assert proc.returncode == 1, f"the wrapper must re-raise pytest's status verbatim; got {proc.returncode}"
     assert "coverage: platform" not in proc.stdout, \
@@ -132,7 +161,7 @@ def test_the_block_names_the_flag_when_the_flag_is_what_caused_it( tmp_path ):
     `--no-cov-on-fail` is in the command it is the known cause, so the block must name it
     and give the remedy — otherwise this check just relocates the confusion.
     """
-    proc = _run( _suite( tmp_path, red=True ), "--cov=json", "--cov-fail-under=0", "--no-cov-on-fail" )
+    proc = _run( _suite( tmp_path, red=True ), "--cov=cosa.utils.coverage_contention", "--cov-fail-under=0", "--no-cov-on-fail" )
 
     assert "--no-cov-on-fail was passed" in proc.stderr, \
         f"the block did not name the flag that caused it.\n--- stderr ---\n{proc.stderr}"
@@ -146,7 +175,7 @@ def test_a_scope_the_run_never_imports_is_also_reported_as_blind( tmp_path ):
     warn "No data to report" and print no table. Same absent number, different cause — and
     the block must distinguish them rather than blaming a flag that was never passed.
     """
-    proc = _run( _suite( tmp_path, red=True ), "--cov=email.headerregistry", "--cov-fail-under=0" )
+    proc = _run( _suite( tmp_path, red=True ), "--cov=cosa.utils.pytest_collection_diagnosis", "--cov-fail-under=0" )
 
     assert BLOCK_HEADLINE in proc.stderr, \
         f"an unimported --cov scope produced no number and no warning.\n--- stderr ---\n{proc.stderr}"
@@ -163,7 +192,7 @@ def test_quiet_when_the_red_run_DID_produce_a_table( tmp_path ):
     Red, coverage requested, table printed. Nothing is wrong: the reader got their number
     alongside a failure. A block here would be noise on the most ordinary red run there is.
     """
-    proc = _run( _suite( tmp_path, red=True ), "--cov=json", "--cov-fail-under=0" )
+    proc = _run( _suite( tmp_path, red=True ), "--cov=cosa.utils.coverage_contention", "--cov-fail-under=0" )
 
     assert "coverage: platform" in proc.stdout, \
         f"the table this case depends on was not printed — the assertion below would pass vacuously.\n{proc.stdout[-2000:]}"
@@ -177,7 +206,7 @@ def test_quiet_on_a_green_run( tmp_path ):
     case because "we only look at red" is a real scoping decision, not an implementation
     detail — if someone later makes the check unconditional, this is what objects.
     """
-    proc = _run( _suite( tmp_path, red=False ), "--cov=json", "--cov-fail-under=0" )
+    proc = _run( _suite( tmp_path, red=False ), "--cov=cosa.utils.coverage_contention", "--cov-fail-under=0" )
 
     assert proc.returncode == 0, f"this case needs a genuinely green run; got {proc.returncode}\n{proc.stdout[-2000:]}"
     assert BLOCK_HEADLINE not in proc.stderr, f"fired on a green run.\n--- stderr ---\n{proc.stderr}"
