@@ -107,10 +107,30 @@ def test_emit_records_the_canonical_name_for_an_alias():
 # the synthetic one above; this is the one that reddens on production data when data
 # exists. Both were run against the reverted fix, and both went red.
 
+# The v2 arm names every run directory `eval-<timestamp>`; nothing else it writes carries a
+# records.jsonl. Anchoring on that prefix is what makes "newest" mean "newest V2 RUN".
+V2_RUN_DIR_GLOB = "eval-*"
+
+
 def _newest_run_records():
-    """The most recent v2 eval records.jsonl, or None. Never raises."""
+    """The most recent v2 eval records.jsonl, or None. Never raises.
+
+    🔴 THE PREFIX IS LOAD-BEARING (Mr Radio, 2026-08-26). This globbed `*` and so claimed
+    ANY records.jsonl under io/v2-flow as a v2 run. A v1-arm run written alongside it —
+    same filename, different schema, newer mtime — won `max( …, getmtime )`, and the test
+    failed reporting "the corpus is not what this asserts against". The corpus was fine; the
+    file was not a v2 run at all. A false accusation pointed at the wrong subject entirely.
+
+    NARROWING HERE LOSES NOTHING, verified rather than assumed: at the time of the change all
+    12 directories under io/v2-flow holding a records.jsonl were named `eval-*` and all 12
+    carried payload.command. The prefix selects exactly the same set and excludes foreign
+    artifacts. (Contrast the serial-bridge-guard glob, which must stay wide — there, narrowing
+    dropped real signal. Here the wide form only admitted files this test cannot read.)
+    """
     import glob
-    candidates = glob.glob( os.path.join( os.environ[ "LUPIN_ROOT" ], "io", "v2-flow", "*", "records.jsonl" ) )
+    candidates = glob.glob(
+        os.path.join( os.environ[ "LUPIN_ROOT" ], "io", "v2-flow", V2_RUN_DIR_GLOB, "records.jsonl" )
+    )
     return max( candidates, key=os.path.getmtime ) if candidates else None
 
 
@@ -162,3 +182,38 @@ def test_every_command_in_a_real_run_is_drawn_from_the_known_vocabulary():
         f"{os.path.basename( os.path.dirname( records_path ) )} contains commands that reach output "
         f"outside the known vocabulary — every count grouped by payload.command splits on these: {escapes}"
     )
+
+
+class TestNewestRunRecordsPicksOnlyV2Runs:
+    """
+    The selector, pinned. `_newest_run_records` decides WHICH file the guard above reads, so a
+    selector that picks the wrong file makes the guard report on something it never measured.
+
+    The failure this pins actually happened (2026-08-26): a v1-arm run wrote its own
+    records.jsonl beside the v2 runs — same filename, different schema, newer mtime — and the
+    guard read it and failed naming the corpus. Both tests below FAIL if the `eval-*` prefix is
+    dropped back to `*`, which is what makes the prefix a guard rather than a preference.
+    """
+
+    def _make( self, tmp_path, monkeypatch, name, mtime ):
+        run_dir = tmp_path / "io" / "v2-flow" / name
+        run_dir.mkdir( parents=True )
+        records = run_dir / "records.jsonl"
+        records.write_text( '{"utterance":"u","payload":{"command":"agent router go to todo"}}\n' )
+        os.utime( records, ( mtime, mtime ) )
+        monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
+        return str( records )
+
+    def test_a_newer_non_eval_directory_never_displaces_the_newest_eval_run( self, tmp_path, monkeypatch ):
+        wanted = self._make( tmp_path, monkeypatch, "eval-2026-08-25-19-31-31", mtime=1_000 )
+        self._make( tmp_path, monkeypatch, "v1-arm-n60-2026-08-26-10-01-33", mtime=9_000 )   # NEWER
+        assert _newest_run_records() == wanted
+
+    def test_the_newest_eval_run_still_wins_among_eval_runs( self, tmp_path, monkeypatch ):
+        self._make( tmp_path, monkeypatch, "eval-2026-08-16-13-24-46", mtime=1_000 )
+        wanted = self._make( tmp_path, monkeypatch, "eval-2026-08-25-19-31-31", mtime=5_000 )
+        assert _newest_run_records() == wanted
+
+    def test_no_eval_run_at_all_returns_none_rather_than_raising( self, tmp_path, monkeypatch ):
+        self._make( tmp_path, monkeypatch, "v1-arm-n60-2026-08-26-10-01-33", mtime=9_000 )
+        assert _newest_run_records() is None

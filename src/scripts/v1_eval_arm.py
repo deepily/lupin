@@ -1186,17 +1186,104 @@ def make_ws_recv_events(
     return listener, listener.ws_recv_events
 
 
+def crud_fork_class_to_command( registry: Optional[Dict[str, Any]] = None ) -> Dict[str, str]:
+    """
+    The classes the dispatcher constructs INSTEAD of the registry class when the
+    `crud for dataframes agents enabled` flag is ON, mapped to the SAME command.
+
+    🔴 WHY THIS EXISTS — THE HARNESS WAS SCORING ITS OWN BLIND SPOT AS 60 WRONG ANSWERS
+    (Mr Radio, 2026-08-26). `MODE_TO_AGENT` names only the registry class, but a command
+    with a CRUD fork constructs the FORK when the flag is on, and `job_type` is the
+    RUNNING object's class name. So `agent router go to todo` ran `TodoCrudAgent`,
+    `resolve_command` found only `TodoListAgent` in the map, returned None, and every todo
+    row scored as a routing MISS.
+
+    MEASURED, not reasoned: in the n=60 run, todo scored 0/60. Probing all 60 utterances of
+    that identical sample against the live pinned server returned `agent_type='TodoCrudAgent'`
+    **60 out of 60**, and `resolve_command` mapped 0 of them. The router was right every
+    time; the instrument could not read the answer. Correcting the map moves that cohort
+    from 0/60 to 60/60 — the single largest error in that arm's number.
+
+    ⚠️ CALENDAR HAS THE SAME FORK and was never exercised: this corpus's calendar utterances
+    are all outside the mappable set, so the defect sat on exactly one command and would have
+    surfaced on a different corpus as a second mystery zero.
+
+    Requires:
+        - registry maps a full routing command → a spec that MAY carry `crud_factory`
+          (defaults to the live cosa.rest.v2.registry.REGISTRY).
+
+    Ensures:
+        - returns { fork_class_name: command } for every spec declaring a `crud_factory`
+        - a fork class reachable from more than one command is DROPPED, not guessed —
+          the same honest-under-count discipline build_class_to_command applies
+        - never raises
+    """
+    if registry is None:
+        from cosa.rest.v2.registry import REGISTRY as registry
+
+    by_class: Dict[str, str] = {}
+    ambiguous: set = set()
+    for command, spec in registry.items():
+        fork = getattr( spec, "crud_factory", None )
+        if fork is None:
+            continue
+        name = getattr( fork, "__name__", str( fork ) )
+        if name in by_class and by_class[ name ] != command:
+            ambiguous.add( name )
+        else:
+            by_class[ name ] = command
+    for name in ambiguous:
+        by_class.pop( name, None )
+    return by_class
+
+
 def load_v1_class_to_command():   # pragma: no cover - imports the live v1 registry from the pinned worktree
     """
-    Build the routing-command map from the LIVE v1 registry (MODE_TO_AGENT),
-    resolved through LUPIN_ROOT — so it reads the PINNED WORKTREE's v1 code, not
-    the dirty main tree (design §2a). Returns ( class_to_command, ambiguous ).
+    Build the routing-command map from the LIVE v1 registry (MODE_TO_AGENT) PLUS the
+    CRUD forks the dispatcher may construct for those same commands, resolved through
+    LUPIN_ROOT — so it reads the PINNED WORKTREE's v1 code, not the dirty main tree
+    (design §2a). Returns ( class_to_command, ambiguous ).
+
+    Both halves are required because the two answer different questions: MODE_TO_AGENT says
+    what the command is REGISTERED to, and `crud_fork_class_to_command` says what it may
+    actually RUN. `job_type` reports the latter. See that function for the measurement.
+
     The WS-transition collector is deliberately NOT stubbed here: it is built and
     exercised WITH the live run against the worktree server, never shipped as an
     untested boundary that reads as done.
     """
     from cosa.rest.todo_fifo_queue import MODE_TO_AGENT
-    return build_class_to_command( MODE_TO_AGENT )
+    by_class, ambiguous = build_class_to_command( MODE_TO_AGENT )
+    return merge_fork_map( by_class, crud_fork_class_to_command() ), ambiguous
+
+
+def merge_fork_map( by_class: Dict[str, str], forks: Dict[str, str] ) -> Dict[str, str]:
+    """
+    Fold the CRUD forks into the registry map. ADDS names; never RE-POINTS one.
+
+    Extracted from `load_v1_class_to_command` because it was inlined there behind a
+    `# pragma: no cover` live boundary, and a mutation proved the consequence: flipping
+    the conflict check to an unconditional overwrite passed the whole suite. No live
+    collision exists today, so nothing could have caught it in place — an unreachable
+    guard is still an untested one, and this lineage has been bitten twice by exactly
+    that shape. As a pure function it is testable on fixtures.
+
+    Requires:
+        - by_class maps agent-class name → routing command (the registry half)
+        - forks maps fork-class name → the command whose fork it is
+
+    Ensures:
+        - a fork name absent from by_class is ADDED
+        - a fork name already claiming the SAME command is a no-op
+        - a fork name already claiming a DIFFERENT command is LEFT ALONE — re-pointing an
+          existing route would silently change which command an observed class scores as
+        - the input dict is not mutated; a new dict is returned
+    """
+    merged = dict( by_class )
+    for name, command in forks.items():
+        if merged.get( name, command ) == command:
+            merged[ name ] = command
+    return merged
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

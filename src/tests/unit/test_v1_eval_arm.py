@@ -143,6 +143,121 @@ def test_build_class_to_command_same_command_not_ambiguous():
     m, amb = v1.build_class_to_command( { "a": _Math, "b": _Math }, template="fixed" )
     assert m == { "_Math": "fixed" } and amb == [ ]
 
+
+# ─────────────────────────────────── crud_fork_class_to_command (row e2099400)
+#
+# THE DEFECT THIS PINS, and it manufactured 60 wrong answers before anyone looked:
+# `MODE_TO_AGENT` names the class a command is REGISTERED to, but the dispatcher builds
+# the CRUD FORK when `crud for dataframes agents enabled` is on — and `job_type` reports
+# the RUNNING object's class name. So `agent router go to todo` ran `TodoCrudAgent`, the
+# map held only `TodoListAgent`, `resolve_command` returned None, and all 60 todo rows in
+# the n=60 run scored as routing MISSES. Probing that identical 60-utterance sample against
+# the live pinned server returned `TodoCrudAgent` 60/60. The router was right every time.
+
+
+class _TodoFork: pass
+class _CalFork:  pass
+
+class _Spec:
+    """Minimal stand-in for AgentSpec — only `crud_factory` is read here."""
+    def __init__( self, crud_factory=None ): self.crud_factory = crud_factory
+
+
+def test_a_spec_with_a_crud_fork_maps_the_FORK_name_to_the_same_command():
+    got = v1.crud_fork_class_to_command( { "agent router go to todo": _Spec( _TodoFork ) } )
+    assert got == { "_TodoFork": "agent router go to todo" }
+
+
+def test_a_spec_with_no_crud_fork_contributes_nothing():
+    assert v1.crud_fork_class_to_command( { "agent router go to math": _Spec( None ) } ) == { }
+
+
+def test_a_spec_object_lacking_the_attribute_entirely_is_skipped_not_crashed():
+    class _Bare: pass                      # no crud_factory attribute at all
+    assert v1.crud_fork_class_to_command( { "agent router go to math": _Bare() } ) == { }
+
+
+def test_a_fork_reachable_from_two_commands_is_DROPPED_not_guessed():
+    # Same discipline build_class_to_command applies: an honest under-count beats a
+    # coin-flip between two commands.
+    got = v1.crud_fork_class_to_command( { "cmd one": _Spec( _TodoFork ),
+                                           "cmd two": _Spec( _TodoFork ) } )
+    assert "_TodoFork" not in got
+
+
+def test_the_same_fork_declared_twice_for_ONE_command_is_not_ambiguous():
+    got = v1.crud_fork_class_to_command( { "cmd one": _Spec( _TodoFork ) } )
+    assert got == { "_TodoFork": "cmd one" }
+
+
+def test_two_distinct_forks_both_survive():
+    got = v1.crud_fork_class_to_command( { "a": _Spec( _TodoFork ), "b": _Spec( _CalFork ) } )
+    assert got == { "_TodoFork": "a", "_CalFork": "b" }
+
+
+# ── THE GUARD: the live registry and the live map must agree ──────────────────
+#
+# The tests above prove the helper's shape against fixtures. This one is the guard that
+# would actually have CAUGHT the defect: it asks the REAL registry which commands have a
+# fork, and asserts the REAL map can resolve each fork's class name. A fixture can only
+# prove the code does what its author expected; this fails when the two live sources drift.
+
+def test_every_live_crud_fork_resolves_through_the_live_map():
+    from cosa.rest.v2.registry import REGISTRY
+
+    forks = { getattr( spec.crud_factory, "__name__" ): command
+              for command, spec in REGISTRY.items()
+              if getattr( spec, "crud_factory", None ) is not None }
+    assert forks, "the registry declares no CRUD fork — this guard would pass vacuously"
+
+    class_to_command, _ambiguous = v1.load_v1_class_to_command()
+    unresolved = { name: cmd for name, cmd in forks.items()
+                   if v1.resolve_command( name, class_to_command ) != cmd }
+    assert unresolved == { }, (
+        "a command's CRUD fork is not in the routing map, so every utterance the dispatcher "
+        f"sends to it will score as a routing MISS: {unresolved}"
+    )
+
+
+# ── merge_fork_map: the branch a mutation proved was unguarded ────────────────
+#
+# Extracted from load_v1_class_to_command precisely BECAUSE it was untestable inside it:
+# with the merge inlined behind a `# pragma: no cover` boundary, replacing the conflict
+# check with an unconditional overwrite passed all 89 tests. No live collision exists, so
+# only a fixture can pin it.
+
+def test_merge_adds_a_fork_name_that_is_absent():
+    assert v1.merge_fork_map( { "A": "cmd-a" }, { "B": "cmd-b" } ) == { "A": "cmd-a", "B": "cmd-b" }
+
+
+def test_merge_is_a_noop_when_the_fork_already_claims_the_SAME_command():
+    assert v1.merge_fork_map( { "A": "cmd-a" }, { "A": "cmd-a" } ) == { "A": "cmd-a" }
+
+
+def test_merge_REFUSES_to_repoint_a_name_that_claims_a_DIFFERENT_command():
+    # The mutation this exists to catch: an unconditional `merged[name] = command` here
+    # silently re-points an existing route, so an observed class scores as the wrong command.
+    assert v1.merge_fork_map( { "A": "cmd-a" }, { "A": "cmd-ZZZ" } ) == { "A": "cmd-a" }
+
+
+def test_merge_does_not_mutate_its_input():
+    original = { "A": "cmd-a" }
+    v1.merge_fork_map( original, { "B": "cmd-b" } )
+    assert original == { "A": "cmd-a" }
+
+
+def test_merge_with_no_forks_returns_an_equal_but_distinct_dict():
+    original = { "A": "cmd-a" }
+    got = v1.merge_fork_map( original, { } )
+    assert got == original and got is not original
+
+
+def test_the_registry_class_still_resolves_after_the_fork_is_folded_in():
+    """The fix must ADD a name, never re-point one."""
+    class_to_command, _ = v1.load_v1_class_to_command()
+    assert v1.resolve_command( "TodoListAgent", class_to_command ) == "agent router go to todo"
+    assert v1.resolve_command( "TodoCrudAgent", class_to_command ) == "agent router go to todo"
+
 def test_build_class_to_command_non_class_value_uses_str():
     m, amb = v1.build_class_to_command( { "m": "raw" } )
     assert m == { "raw": "agent router go to m" } and amb == [ ]

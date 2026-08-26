@@ -60,6 +60,14 @@ from lupin_cli.notifications.notification_models import (
 )
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
 from lupin_cli.notifications.notify_user_async import notify_user_async
+
+# The priorities speakerphone mode may LIFT to "high" — the RECOGNISED ones that are not
+# already at or above it. Derived from the enum rather than written out, so a new member
+# cannot silently fall outside the set. Anything NOT in here (including a typo) is left
+# untouched so it reaches NotificationPriority(...) validation and gets reported.
+_SPEAKERPHONE_LIFTABLE_PRIORITIES = frozenset(
+    p.value for p in NotificationPriority if p.value not in ( "high", "urgent" )
+)
 from cosa.utils.notification_utils import (
     format_questions_for_tts,
     convert_questions_for_api,
@@ -1379,7 +1387,15 @@ def _notify_impl(
         if active:
             # Speakerphone ON — enforce speakerphone-render params
             suppress_ding = True
-            if priority not in ( "high", "urgent" ):
+            # 🔴 LIFT ONLY A *VALID* PRIORITY (row e2099400, 2026-08-26).
+            # This used to read `if priority not in ( "high", "urgent" )`, which swallowed
+            # an INVALID value too: a typo'd `priority="urgnet"` was rewritten to "high",
+            # sailed through the NotificationPriority(...) validation below because the bad
+            # value no longer existed, and the call reported "Notification sent (delivered)".
+            # Measured: caller asks "not-a-priority" → request ships NotificationPriority.HIGH.
+            # A priority nobody chose is worse than a rejected call, so an unrecognised value
+            # now falls through to the validation below and is REPORTED.
+            if priority in _SPEAKERPHONE_LIFTABLE_PRIORITIES:
                 priority = "high"
             message = strip_fenced_code_blocks( message )
             logger.debug( "_notify_impl speakerphone ON: forced priority=high, suppress_ding=True, stripped fenced code" )
