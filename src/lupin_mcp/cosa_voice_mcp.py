@@ -561,6 +561,21 @@ def _die_no_session_id():
     except Exception as e:
         logger.error( f"Failed to send error notification: {e}" )
 
+    # SAY WHY ON THE WAY OUT. os._exit skips every flush, atexit hook and
+    # exception path, so a caller that imports this module — a test process
+    # above all — dies with no traceback, no summary and no logging record:
+    # pytest reports a truncated run and nothing anywhere names the cause.
+    # logger.critical above is captured by pytest and lost with it; an
+    # explicitly-flushed stderr write is not. Two lines, no behaviour change
+    # for the server, and the difference between a silent kill and a named one.
+    sys.stderr.write(
+        "[cosa-voice] FATAL: Claude Code session ID never resolved; "
+        "os._exit(1) from _die_no_session_id(). No session bridge file was "
+        "detected. If you are seeing this from a test run, the process was "
+        "terminated here — the suite did not finish.\n"
+    )
+    sys.stderr.flush()
+
     os._exit( 1 )
 
 
