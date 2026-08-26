@@ -17,6 +17,9 @@ from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
     _human_size,
     _size_of,
     _staged_paths,
+    _commits_the_whole_worktree,
+    _mentions_git_commit,
+    _modified_tracked_paths,
     LARGE_FILE_BYTES,
 )
 
@@ -434,3 +437,183 @@ def test_deny_response_shape():
             "permissionDecisionReason" : "because",
         }
     }
+
+
+# ── Row 292dd3d8 — `git commit -a` writes what the INDEX NEVER HELD ───────────
+# The guard weighs `git diff --cached`. `-a` stages every modified tracked file
+# inside git, at commit time, AFTER this hook has returned. Measured 2026-08-25:
+# `git commit -am` with an empty index was ALLOWED unconditionally while carrying
+# every peer modification in the tree.
+
+def _modified( *paths ):
+    """A modified-tracked reader returning a fixed set."""
+    return lambda cwd: list( paths )
+
+
+@pytest.mark.parametrize( "command", [
+    'git commit -am "x"',        # the short cluster — the common spelling
+    'git commit -a -m "x"',
+    'git commit --all -m x',
+    'git commit -va -m x',       # an a buried in a longer cluster
+] )
+def test_commit_dash_a_is_refused_for_a_peer_file_it_never_staged( repo, command ):
+    tool, payload = _bash( command )
+    reason = commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader(), modified_reader=_modified( "src/theirs.py" ),
+    )
+    assert reason is not None
+    assert "src/theirs.py" in reason
+
+
+def test_commit_dash_a_still_passes_when_the_whole_tree_is_mine( repo ):
+    """Not refuse-always: -a is fine when everything it sweeps is this seat's."""
+    tool, payload = _bash( 'git commit -am "x"' )
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/mine_one.py" ), modified_reader=_modified( "src/mine_two.py" ),
+    ) is None
+
+
+def test_a_plain_commit_ignores_the_modified_set_entirely( repo ):
+    """Without -a, an unstaged peer file is NOT going to be committed — allow."""
+    tool, payload = _bash( 'git commit -m "x"' )
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/mine_one.py" ), modified_reader=_modified( "src/theirs.py" ),
+    ) is None
+
+
+def test_amend_is_not_all( repo ):
+    """`--amend` starts like `--all` and is a different flag. Do not false-trip."""
+    tool, payload = _bash( 'git commit --amend --no-edit' )
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/mine_one.py" ), modified_reader=_modified( "src/theirs.py" ),
+    ) is None
+
+
+def test_an_a_inside_the_message_does_not_count_as_dash_a( repo ):
+    """The flag scan runs on the quote-blanked command, so prose cannot trip it."""
+    tool, payload = _bash( 'git commit -m "add all the files -a"' )
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/mine_one.py" ), modified_reader=_modified( "src/theirs.py" ),
+    ) is None
+
+
+def test_an_unreadable_modified_set_fails_open_not_shut( repo ):
+    """A guard must never wedge a commit because a second git read failed."""
+    tool, payload = _bash( 'git commit -am "x"' )
+    assert commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/mine_one.py" ), modified_reader=lambda cwd: None,
+    ) is None
+
+
+def test_the_union_does_not_double_count_a_path_in_both_sets( repo ):
+    """A file both staged AND modified is one file, not two — the count proves it."""
+    tool, payload = _bash( 'git commit -am "x"' )
+    reason = commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/theirs.py" ), modified_reader=_modified( "src/theirs.py" ),
+    )
+    assert "(1 file(s))" in reason
+    assert "1 file(s) this commit would carry" in reason
+
+
+def test_the_dash_a_refusal_does_not_say_staged( repo ):
+    """Telling a seat to `git restore --staged` a file it never staged is a wrong map."""
+    tool, payload = _bash( 'git commit -am "x"' )
+    reason = commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader(), modified_reader=_modified( "src/theirs.py" ),
+    )
+    assert "git restore --staged" not in reason
+    assert "drop -a and commit your paths by name" in reason
+    assert "THE FULL SET THIS COMMIT WOULD CARRY" in reason
+
+
+def test_a_plain_commit_still_speaks_of_the_staged_set( repo ):
+    """The -a wording must not leak onto the ordinary path."""
+    tool, payload = _bash( 'git commit -m "x"' )
+    reason = commit_scope_deny_reason(
+        tool, payload, session_id=MY_SESSION, cwd=repo,
+        staged_reader=_reader( "src/theirs.py" ),
+    )
+    assert "THE FULL STAGED SET" in reason
+    assert "git restore --staged" in reason
+
+
+@pytest.mark.parametrize( "command,expected", [
+    ( "git commit -am x",        True  ),
+    ( "git commit --all",        True  ),
+    ( "git commit -a",           True  ),
+    ( "git commit -m x",         False ),
+    ( "git commit --amend",      False ),
+    ( "git commit --no-verify",  False ),
+    ( "git commit",              False ),
+] )
+def test_the_dash_a_detector_reads_the_flags_it_should( command, expected ):
+    assert _commits_the_whole_worktree( command, _mentions_git_commit( command ) ) is expected
+
+
+def test_modified_tracked_paths_returns_none_outside_a_repo( tmp_path ):
+    assert _modified_tracked_paths( str( tmp_path ) ) is None
+
+
+def test_modified_tracked_paths_reads_a_real_worktree( tmp_path ):
+    """The real git path for the -a set, exercised — not only the injected reader."""
+    import subprocess
+    repo = str( tmp_path )
+    for args in ( [ "init", "-q" ], [ "config", "user.email", "t@t" ], [ "config", "user.name", "t" ] ):
+        subprocess.run( [ "git" ] + args, cwd=repo, capture_output=True )
+    ( tmp_path / "tracked.py" ).write_text( "one\n" )
+    subprocess.run( [ "git", "add", "tracked.py" ], cwd=repo, capture_output=True )
+    subprocess.run( [ "git", "commit", "-qm", "seed" ], cwd=repo, capture_output=True,
+                    env={ **os.environ, "LUPIN_COMMIT_SCOPE_ACK": "1" } )
+    ( tmp_path / "tracked.py" ).write_text( "two\n" )     # modified, NOT staged
+
+    assert _modified_tracked_paths( repo ) == [ "tracked.py" ]
+
+
+def test_modified_tracked_paths_fails_open_when_git_raises( monkeypatch ):
+    """A timeout or a missing git binary must return None, never propagate."""
+    import lupin_cli.claude_code.hooks.lib.commit_scope_guard as guard
+
+    def _boom( *args, **kwargs ):
+        raise OSError( "git not found" )
+
+    monkeypatch.setattr( guard.subprocess, "run", _boom )
+
+    assert guard._modified_tracked_paths( "/anywhere" ) is None
+
+
+def test_the_real_modified_reader_is_used_when_none_is_injected( tmp_path, monkeypatch ):
+    """The production -a path: no modified_reader argument means real git."""
+    monkeypatch.chdir( tmp_path )
+    tool, payload = _bash( "git commit -am x" )
+
+    # tmp_path is not a repo, so both real readers return None -> fail-open allow.
+    assert commit_scope_deny_reason( tool, payload ) is None
+
+
+def test_a_heredoc_body_quoting_dash_a_does_not_make_this_a_dash_a_commit():
+    """
+    Measured the moment the -a support shipped: `git commit -F - <<'EOF'` whose
+    heredoc body quotes `git commit -am "x"` was refused as a -a commit. An
+    unbounded flag scan walks past the command into the next line's text — and a
+    guard that refuses honest commits is a guard somebody turns off.
+    """
+    command = 'git commit -F - <<\'MSG\'\nprobe output:\n    git commit -am "x"  -> ALLOWED\nMSG'
+    assert _commits_the_whole_worktree( command, _mentions_git_commit( command ) ) is False
+
+
+@pytest.mark.parametrize( "command", [
+    'git commit -m x; git commit -am y',      # a real -a, but in the NEXT command
+    'git commit -m x && git commit --all',
+    'git commit -m x | tee log',
+] )
+def test_the_scan_stops_at_the_end_of_this_command( command ):
+    """The first match's flags are this command's flags — not the whole line's."""
+    assert _commits_the_whole_worktree( command, _mentions_git_commit( command ) ) is False

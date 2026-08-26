@@ -67,6 +67,15 @@ is why that module needs total normalisation and this one does not. Claiming
 completeness here would be the same defect this fleet keeps catching.
 
 SAFETY — this runs inside the hot-path PreToolUse hook, so two non-negotiables:
+  • STILL BLIND TO A PATHSPEC COMMIT, named rather than hidden. `git commit -a` is
+    now covered — the reviewed set becomes the index plus every modified tracked
+    file (row 292dd3d8). `git commit <paths>` is NOT: it commits the named paths
+    straight from the working tree, the index stays empty, and an empty set reads
+    here as nothing to object to. It is a smaller hazard than `-a` — the committer
+    typed those paths deliberately, so it cannot sweep a file nobody named — and
+    parsing a pathspec out of a git command line (options with arguments, `--`,
+    `-m <msg>`) is fiddly enough that a wrong parser would refuse honest commits.
+    Left open on purpose, not overlooked.
   • FAIL-OPEN: ANY error → allow (return None). A guard must never break a tool
     call. The `git diff --cached` read is bounded by a timeout and every failure
     mode of it — not a repo, git absent, slow disk — returns None.
@@ -171,6 +180,67 @@ def _mentions_git_commit( command: str ):
         - never raises
     """
     return _GIT_COMMIT_RE.search( _blank_quoted_spans( command ) )
+
+
+def _commits_the_whole_worktree( command: str, match ) -> bool:
+    """
+    Does this `git commit` carry -a / --all — i.e. will it commit files the index
+    never held? (row 292dd3d8)
+
+    The guard weighs `git diff --cached`. `git commit -a` stages every modified
+    TRACKED file inside git, at commit time — after this hook has already returned.
+    So on a `-a` commit the set this guard reviewed is not the set that gets
+    written, and measured 2026-08-25 a `git commit -am` with an empty index was
+    ALLOWED unconditionally while carrying every peer modification in the tree.
+
+    Requires:
+        - command is the raw Bash command; match is the _mentions_git_commit match
+
+    Ensures:
+        - True for `-a`, `--all`, and short clusters carrying an a (`-am`, `-va`)
+        - False for `--amend`, which is a different flag that merely starts the
+          same way, and for an `a` inside a quoted message
+        - never raises
+    """
+    # BOUND THE SCAN TO THIS COMMAND. Measured the moment this shipped: my own
+    # `git commit -F - <<'EOF'` was refused as a `-a`, because the heredoc BODY
+    # quoted `git commit -am "x"` and an unbounded tail scan walked straight into
+    # it. A flag scan that runs past the end of the command reads the next
+    # command's flags — and a guard that refuses honest commits gets switched off.
+    tail = _blank_quoted_spans( command )[ match.end(): ]
+    tail = re.split( r"[;&|\n]", tail, maxsplit=1 )[ 0 ]
+    for token in tail.split():
+        if token == "--all": return True
+        if token.startswith( "--" ): continue          # --amend and friends are not --all
+        if token.startswith( "-" ) and "a" in token[ 1: ]: return True
+    return False
+
+
+def _modified_tracked_paths( cwd=None ) -> Optional[ list ]:
+    """
+    Every tracked file with unstaged modifications — precisely what `-a` sweeps in.
+
+    Ensures:
+        - returns the list of modified tracked paths, possibly empty
+        - `--no-relative` for the same load-bearing reason as _staged_paths: a
+          relative read from a subdirectory silently returns fewer paths, and
+          fewer paths reads to the caller as less to object to
+        - returns None when the read fails for ANY reason (caller then ALLOWS)
+    """
+    try:
+        done = subprocess.run(
+            [ "git", "diff", "--no-relative", "--name-only" ],
+            cwd            = cwd,
+            capture_output = True,
+            text           = True,
+            timeout        = GIT_TIMEOUT_SECONDS,
+        )
+        if done.returncode != 0: return None
+
+        return [ line for line in done.stdout.splitlines() if line.strip() ]
+
+    except Exception:
+        return None
 
 
 def _staged_paths( cwd=None ) -> Optional[ list ]:
@@ -340,7 +410,7 @@ def _large_files( paths: list, cwd=None ) -> list:
     return found
 
 
-def _deny_reason_for( foreign: dict, large: list, staged: list, cwd=None ) -> str:
+def _deny_reason_for( foreign: dict, large: list, staged: list, cwd=None, *, swept_by_dash_a=False ) -> str:
     """
     Compose the refusal: the foreign files and their apparent owner, then sizes.
 
@@ -352,15 +422,19 @@ def _deny_reason_for( foreign: dict, large: list, staged: list, cwd=None ) -> st
 
     Ensures:
         - names every offending file, and the peer session where one is known
-        - always prints the FULL staged set, because the unscoped list is the
-          thing the original defect was missing
+        - always prints the FULL set, because the unscoped list is the thing the
+          original defect was missing
+        - says "committed", not "staged", when swept_by_dash_a — on a `-a` commit
+          the seat staged none of this, and telling it to `git restore --staged`
+          a file it never staged sends it somewhere the file is not (row 292dd3d8)
         - never raises
     """
     lines = []
+    noun  = "file(s) this commit would carry" if swept_by_dash_a else "staged file(s)"
 
     if foreign:
         lines.append(
-            f"`git commit` writes the WHOLE INDEX, and {len( foreign )} staged file(s) are "
+            f"`git commit` writes the WHOLE INDEX, and {len( foreign )} {noun} are "
             "NOT claimed by this session's manifest section:"
         )
         lines.append( "" )
@@ -369,6 +443,10 @@ def _deny_reason_for( foreign: dict, large: list, staged: list, cwd=None ) -> st
             lines.append( f"  {path}" + ( f"   ← claimed by session {owner}" if owner else "   ← claimed by no session" ) )
         lines.append( "" )
         lines.append(
+            "`git commit -a` stages every modified TRACKED file at commit time, so it "
+            "carries peer work you never staged and never saw in `git diff --cached`. "
+            "Commit the paths you mean by name instead."
+            if swept_by_dash_a else
             "`git add` does not clear the index, so a peer's staged work commits under "
             "YOUR name. That happened on 2026-08-25 (commit 7c8c4f83, four files): the "
             "staging was correct and the CHECK was path-scoped, which structurally "
@@ -387,12 +465,18 @@ def _deny_reason_for( foreign: dict, large: list, staged: list, cwd=None ) -> st
         )
         lines.append( "" )
 
-    lines.append( f"THE FULL STAGED SET ({len( staged )} file(s)) — this is the unscoped list:" )
+    lines.append(
+        f"THE FULL SET THIS COMMIT WOULD CARRY ({len( staged )} file(s)) — index + everything -a sweeps in:"
+        if swept_by_dash_a else
+        f"THE FULL STAGED SET ({len( staged )} file(s)) — this is the unscoped list:"
+    )
     for path in sorted( staged ):
         lines.append( f"  {path}" )
 
     lines.extend( [
         "",
+        "  · not yours     →  drop -a and commit your paths by name"
+        if swept_by_dash_a else
         "  · not yours     →  git restore --staged <path>",
         "  · yours         →  add it to your section of .claude-session.md, or",
         "                     re-run with LUPIN_COMMIT_SCOPE_ACK=1 git commit ...",
@@ -408,9 +492,10 @@ def commit_scope_deny_reason(
     tool_name,
     tool_input,
     *,
-    session_id    = None,
-    cwd           = None,
-    staged_reader = None,
+    session_id      = None,
+    cwd             = None,
+    staged_reader   = None,
+    modified_reader = None,
 ) -> Optional[ str ]:
     """
     Return a deny-reason iff a Bash `git commit` would carry unaccounted files.
@@ -420,12 +505,17 @@ def commit_scope_deny_reason(
         - tool_input is the hook payload's tool_input (dict) carrying "command"
         - session_id is the hook payload's session id (full UUID or 8-char)
         - staged_reader is None (real git) or injected for testing
+        - modified_reader is None (real git) or injected for testing — the
+          modified-tracked set a `-a` commit sweeps in on top of the index
 
     Ensures:
         - None unless ALL hold: tool_name is Bash, the command invokes `git
-          commit` in command position, the ack prefix is absent, the staged set
+          commit` in command position, the ack prefix is absent, the reviewed set
           is readable and non-empty, and it contains either a path this session's
           manifest section does not claim or an oversized file
+        - the reviewed set is the index, PLUS every modified tracked file when the
+          command carries -a / --all — because that is what such a commit writes,
+          and reviewing only the index would wave it through (row 292dd3d8)
         - a CLEAN single-seat index returns None — the guard is not refuse-always
         - FAIL-OPEN: any unexpected error, and any absence of a manifest section
           for this session, → None
@@ -444,6 +534,15 @@ def commit_scope_deny_reason(
 
         reader = staged_reader or _staged_paths
         staged = reader( cwd )
+
+        # `-a` commits what the INDEX never held (row 292dd3d8), so on a `-a` the
+        # set to review is the index PLUS every modified tracked file. Read it the
+        # same fail-open way: unreadable → treat as nothing extra, never wedge.
+        sweeps = _commits_the_whole_worktree( command, match )
+        if sweeps:
+            swept  = ( modified_reader or _modified_tracked_paths )( cwd ) or []
+            staged = list( dict.fromkeys( list( staged or [] ) + swept ) )
+
         # Unreadable index → allow (fail-open). Empty index → the commit fails on
         # its own and there is nothing to review.
         if not staged: return None
@@ -455,7 +554,7 @@ def commit_scope_deny_reason(
             # No manifest, or no section for this session: this seat never adopted
             # the discipline, so it must not be wedged by it. Size alone can still
             # refuse — that hazard has nothing to do with ownership.
-            return _deny_reason_for( {}, large, staged, cwd ) if large else None
+            return _deny_reason_for( {}, large, staged, cwd, swept_by_dash_a=sweeps ) if large else None
 
         foreign = {}
         for path in staged:
@@ -464,7 +563,7 @@ def commit_scope_deny_reason(
 
         if not foreign and not large: return None
 
-        return _deny_reason_for( foreign, large, staged, cwd )
+        return _deny_reason_for( foreign, large, staged, cwd, swept_by_dash_a=sweeps )
 
     except Exception:                    # pragma: no cover - fail-open backstop: every statement above is total over the validated inputs; kept because a hot-path guard must never raise
         return None
