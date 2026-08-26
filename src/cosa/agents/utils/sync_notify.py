@@ -38,7 +38,9 @@ from cosa.utils.config_loader import get_api_config, load_api_key
 # `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
 # It does NOT return members whose budget is carried in a Pydantic FIELD rather
 # than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
-# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`.
+# inside `notify_user_async()`'s retry loop as a bare `requests.post( timeout=request.timeout )`.
+# (Cited by SYMBOL, not by line: this used to read `notify_user_async.py:197-201` and a
+#  seven-line fix above it silently repointed both copies at an unrelated comment block.)
 # Two such members were missed on the first pass for exactly this reason.
 # The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
 # Run BOTH, or the set you get back is the set the first grep can see.

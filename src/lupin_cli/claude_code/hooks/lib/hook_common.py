@@ -83,7 +83,8 @@ TMUX_INJECTION_DELAY = 0.25
 #
 # 🔴 THIS MEMBER IS CARRIED IN A PYDANTIC FIELD, NOT PASSED AT THE CALL.
 # `AsyncNotificationRequest( timeout=… )` is consumed at
-# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`
+# inside `notify_user_async()`'s retry loop as a bare `requests.post( timeout=request.timeout )`
+# (cited by SYMBOL, not by line — the old `:197-201` form rotted under a fix above it)
 # — bare governs BOTH the connect and the read leg, so the read leg is exposed
 # to a `:7999` reload just like a direct call site. The first pass raised the
 # direct `urlopen` sites in this package and left this one at 3s, because
