@@ -83,7 +83,7 @@ class AgentSpec:
     _required_args: Optional[ tuple[ str, ... ] ] = None
     # ── added by the 2026.08.15 single-source design (phase 1) ──
     cls           : CommandClass      = CommandClass.CONVERSATIONAL
-    job_factory   : Optional[ Callable[ ..., Any ] ] = None   # agentic: builds the Job (wired in phase 5)
+    job_factory   : Optional[ Callable[ ..., Any ] ] = None   # agentic: builds the Job — wired from JOB_BUILDERS (d2e23ecb)
     cli_module    : Optional[ str ]   = None                  # None ⇒ API-invoked (test_suite)
     cli_style     : Optional[ str ]   = None                  # "package" | "module" — documentation only (§6)
     arg_spec      : Optional[ ArgSpec ] = None                # the expeditor's carrier, §5.1.1
@@ -193,7 +193,9 @@ def _agentic_spec( command, entry ):
         - cli_style is "module" for a *.cli module-with-__main__-guard, "package"
           for a package needing __main__.py, or None when there is no CLI. It is
           documentation only in phase 1 — no guard branches on it (§6 assertion 5′)
-        - job_factory is None in phase 1; phase 5 wires factory dispatch by lookup
+        - job_factory is the command's builder from agentic_job_factory.JOB_BUILDERS
+          (row d2e23ecb, phase 5 step 2), or None if the table has no entry — which
+          test_1b_factory_branches_equal_the_owned_agentic_set makes a red test
     """
     cli_module = entry.get( "cli_module" )
     if cli_module is None:
@@ -202,9 +204,15 @@ def _agentic_spec( command, entry ):
         cli_style = "module"
     else:
         cli_style = "package"
+    # Deferred import, INSIDE the function: `create_agentic_job` looks commands up in
+    # this registry, so a module-level import here would close the loop. The factory
+    # module itself is cheap to import (its job-class imports are deferred inside the
+    # builders), so paying it lazily costs nothing but breaks the cycle.
+    from cosa.rest.agentic_job_factory import JOB_BUILDERS
     return AgentSpec(
         command        = command,
         cls            = CommandClass.AGENTIC,
+        job_factory    = JOB_BUILDERS.get( command ),
         cli_module     = cli_module,
         cli_style      = cli_style,
         arg_spec       = ArgSpec.from_entry( entry ),

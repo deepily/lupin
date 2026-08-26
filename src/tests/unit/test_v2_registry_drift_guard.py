@@ -94,10 +94,27 @@ def _training_all_keys():
 
 
 def _factory_commands():
-    """The command strings the job factory has an if/elif branch for — what
-    `create_agentic_job` can actually build."""
-    text = cu.get_file_as_string( cu.get_project_root() + FACTORY_SOURCE )
-    return set( re.findall( r'command\s*==\s*"([^"]+)"', text ) )
+    """The command strings the job factory can actually build — read from the
+    registry's populated `job_factory` field.
+
+    THIS USED TO REGEX-SCRAPE `command == "..."` OUT OF THE FACTORY SOURCE, and that
+    had to change with phase 5 step 2 (row d2e23ecb) for a reason worth writing down.
+    Three tests call this helper, and they do not fail the same way when it goes wrong:
+
+        test_1b  asserts  factory_set == owned_set          — an EQUALITY
+        test_2   asserts  conversational & factory == set() — an INTERSECTION
+        test_3   asserts  control/none  & factory == set()  — an INTERSECTION
+
+    Delete the if/elif chain and the old scraper returns the EMPTY SET. test_1b goes
+    red, which is loud and would have been noticed. But both intersections against an
+    empty set are trivially empty, so test_2 and test_3 keep PASSING while checking
+    nothing at all — two guards silently defanged by a migration that looks correct.
+    (Caught by Mr Radio 🦉 on review, not by me.)
+
+    Reading the registry preserves the meaning of all three: a conversational command
+    that acquired a builder still shows up in this set, chain or no chain."""
+    from cosa.rest.v2.registry import REGISTRY
+    return { command for command, spec in REGISTRY.items() if spec.job_factory is not None }
 
 
 def _card_commands():
@@ -241,6 +258,34 @@ class TestAgenticDriftGuard( unittest.TestCase ):
             factory, owned,
             f"factory<->registry drift — in factory not owned: {sorted( factory - owned )}; "
             f"owned but no factory branch (dead-end): {sorted( owned - factory )}"
+        )
+
+    def test_1b2_every_owned_agentic_command_has_a_builder_and_no_stray_builders( self ):
+        """Phase 5 step 2 (row d2e23ecb) — the completeness half of factory dispatch.
+
+        test_1b reads the REGISTRY's populated job_factory field, so it cannot see a
+        stray key in JOB_BUILDERS: the registry only ever builds specs for commands it
+        owns, and `JOB_BUILDERS.get( command )` on a command nobody owns is never
+        called. A builder table entry for a command the registry does not list would
+        therefore be invisible to every assertion in this file.
+
+        So this reads the TABLE directly and holds it equal to the owned set, both
+        directions — the dispatch lookup cannot resolve for a command with no builder,
+        and a builder nobody can reach is dead code pretending to be routing."""
+        from cosa.rest.agentic_job_factory import JOB_BUILDERS
+        builders = set( JOB_BUILDERS )
+        owned    = set( JOB_COMMANDS )
+        self.assertEqual(
+            builders, owned,
+            f"JOB_BUILDERS<->registry drift — builder with no owned command (unreachable): "
+            f"{sorted( builders - owned )}; owned command with no builder (unbuildable): "
+            f"{sorted( owned - builders )}"
+        )
+        unbound = sorted( c for c, spec in JOB_COMMANDS.items() if spec.job_factory is None )
+        self.assertEqual(
+            unbound, [],
+            f"owned agentic commands whose registry job_factory is None — dispatch by "
+            f"lookup would return None for these: {unbound}"
         )
 
     def test_1c_training_agentic_keys_equal_the_owned_agentic_set( self ):

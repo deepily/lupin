@@ -647,6 +647,36 @@ def _build_test_fix_expediter_resume( command, args_dict, user_id, user_email, s
     )
 
 
+# ── The command → builder table (row d2e23ecb, phase 5 step 2) ────────────────
+# The ONE place a command is bound to the function that builds its job. The registry
+# reads this to populate `AgentSpec.job_factory`, and `create_agentic_job` dispatches
+# by that lookup — so a new agentic command is added by adding a builder and an entry
+# here, never by hand-editing a branch chain.
+#
+# WHY THE TABLE LIVES HERE AND NOT IN THE REGISTRY. The builders are defined in this
+# module, and the registry does not import this module today. Putting the table in the
+# registry would make the registry import the factory AND the factory import the
+# registry — a cycle. This direction has none: registry → factory, one way.
+# `create_agentic_job`'s own registry lookup imports INSIDE the function for the same
+# reason.
+#
+# Keys are exactly the eleven `command ==` strings the branch chain used to test,
+# copied from it rather than retyped.
+JOB_BUILDERS = {
+    "agent router go to deep research"             : _build_deep_research,
+    "agent router go to podcast generator"         : _build_podcast_generator,
+    "agent router go to research to podcast"       : _build_research_to_podcast,
+    "agent router go to claude code"               : _build_claude_code,
+    "agent router go to presentation generator"    : _build_presentation_generator,
+    "agent router go to research to presentation"  : _build_research_to_presentation,
+    "agent router go to swe team"                  : _build_swe_team,
+    "agent router go to test suite"                : _build_test_suite,
+    "agent router go to bug fix expediter"         : _build_bug_fix_expediter,
+    "agent router go to test fix expediter"        : _build_test_fix_expediter,
+    "agent router go to test fix expediter resume" : _build_test_fix_expediter_resume,
+}
+
+
 def create_agentic_job( command, args_dict, user_id, user_email, session_id, debug=False, verbose=False,
                         scheduled_at=None, monopolize=False, spawned_by_id_hash=None ):
     """
