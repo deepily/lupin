@@ -526,3 +526,79 @@ def test_git_tree_of_returns_none_above_every_repo( tmp_path ):
 class _FakeFrame:
     def __init__( self, filename ):
         self.f_code = type( "C", (), { "co_filename": filename } )()
+
+
+def test_git_tree_of_swallows_an_unreadable_path( monkeypatch ):
+    """The walk must never raise into a caller that only asked for the project root."""
+    monkeypatch.setattr( cu.os.path, "abspath", lambda p: ( _ for _ in () ).throw( OSError( "nope" ) ) )
+
+    assert cu._git_tree_of( "/anything" ) is None
+
+
+def test_the_frame_walk_gives_up_when_it_runs_out_of_frames( tmp_path, monkeypatch, capsys ):
+    """
+    A direct caller at module level has no deeper frame. `sys._getframe` raises
+    ValueError there, and the walk must stop rather than let the outer except
+    swallow it — which is how the first version failed silently.
+    """
+    _clear_warn_cache()
+    monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
+
+    def _only_this_module( depth ):
+        if depth < 3: return _FakeFrame( cu.__file__ )      # every frame is util.py …
+        raise ValueError( "call stack is not deep enough" ) # … then the stack ends
+    monkeypatch.setattr( cu.sys, "_getframe", _only_this_module )
+
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""                    # no caller found → say nothing
+
+
+def test_a_caller_equal_to_the_root_itself_is_inside_it( tmp_path, monkeypatch, capsys ):
+    """The `caller == root_abs` arm — an exact match is not 'outside'."""
+    _clear_warn_cache()
+    root = tmp_path / "lupin"
+    ( root / ".git" ).mkdir( parents=True )
+    monkeypatch.setenv( "LUPIN_ROOT", str( root ) )
+    monkeypatch.setattr(
+        cu.sys, "_getframe",
+        lambda depth: _FakeFrame( str( root ) ) if depth == 1 else _FakeFrame( cu.__file__ ),
+    )
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""
+
+
+def test_two_paths_to_the_SAME_tree_do_not_warn( tmp_path, monkeypatch, capsys ):
+    """
+    A symlinked or otherwise aliased path into the same tree is not a wrong tree.
+    The comparison is on realpath for exactly this reason.
+    """
+    _clear_warn_cache()
+    root = tmp_path / "lupin"
+    ( root / ".git" ).mkdir( parents=True )
+    alias = tmp_path / "alias"
+    alias.symlink_to( root )
+
+    monkeypatch.setenv( "LUPIN_ROOT", str( root ) )
+    monkeypatch.setattr(
+        cu.sys, "_getframe",
+        lambda depth: _FakeFrame( str( alias / "script.py" ) ) if depth == 1 else _FakeFrame( cu.__file__ ),
+    )
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""
+
+
+def test_the_frame_walk_is_bounded( tmp_path, monkeypatch, capsys ):
+    """
+    Deep recursion inside this module must not turn the walk into an unbounded
+    climb on a hot-path function. It stops at 12 and says nothing.
+    """
+    _clear_warn_cache()
+    monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
+    monkeypatch.setattr( cu.sys, "_getframe", lambda depth: _FakeFrame( cu.__file__ ) )   # always this module
+
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""
