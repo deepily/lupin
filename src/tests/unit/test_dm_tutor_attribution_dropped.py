@@ -22,6 +22,7 @@ different half of the same surface; see §4 of the doc for why it is not wired i
 import pytest
 
 from cosa.rest.routers.dm import (
+    _DM_TUTOR_DEFAULTS,
     _apply_dm_tutor,
     _attribution_prose,
     _count_attributions,
@@ -212,8 +213,18 @@ def test_the_guard_never_raises( monkeypatch ):
 # ── The send path ────────────────────────────────────────────────────────────
 
 def _config( **overrides ):
-    """The tutor config the send path reads, with the guard on by default."""
-    config = {
+    """
+    The tutor config the send path reads, with the guard on by default.
+
+    ⚠️ SEEDED FROM `_DM_TUTOR_DEFAULTS`, not from a hand-written literal — the same
+    lesson `test_dm_tutor_send_path._cfg` records. The send path indexes its config
+    directly, so a hand-written dict missing a newly-added key raises KeyError inside
+    `_apply_dm_tutor`, which catches it and delivers the ORIGINAL; every "the tutor
+    fired" test then fails with an assertion about delivered text that names nothing
+    about config. It happened here when `product_names` was added (row f3d96537).
+    """
+    config = dict( _DM_TUTOR_DEFAULTS )
+    config.update( {
         "enabled"                 : True,
         "trigger_claims"          : 1,
         "gate_enabled"            : False,
@@ -221,7 +232,7 @@ def _config( **overrides ):
         "fab_guard_strict"        : True,
         "attribution_guard"       : True,
         "attribution_min_persons" : 3,
-    }
+    } )
     config.update( overrides )
     return config
 

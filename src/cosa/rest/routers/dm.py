@@ -713,6 +713,77 @@ DM_TUTOR_VERSION = "dm-tutor-1"
 # structure, and a test pins the two together.
 DM_TUTOR_NOTICE = "This DM was condensed in transit. Need more detail? Ask the sender one question"
 
+# The SEED list of product names that end in a code extension. They are not files, nobody
+# can open them, and a rewrite saying "the Node.js test" has cited nothing — so blocking
+# that message is refusing real mail, which is this guard's own failure mode. Measured:
+# exactly one of the 4,489 delivered rewrites in the corpus is blocked by its absence.
+#
+# 🔴 A LIST AND NOT A SHAPE RULE, ON MARÍA'S RULING (row f3d96537). The shape rule I
+# reached for first — "a slashless token whose stem is a single capitalised word is a
+# product name" — FAILS OPEN: `README.md`, `CLAUDE.md` and `TODO.md` all fit it, this
+# fleet cites them constantly, and a FABRICATED `CLAUDE.md` would have walked straight
+# through. An explicit list fails CLOSED: a token the list has never been told about is
+# still checked.
+#
+# ⚠️ THIS IS THE SEED, NOT THE AUTHORITY. The live list comes from the INI key
+# `dm tutor fabrication guard product names`, read per send like the attribution keys, so
+# adding a name the day somebody is wrongly blocked costs an edit and a bounce rather than
+# a deploy — which is the whole point of an allow-list (María, 2026-08-26).
+_FAB_NOT_PATHS = frozenset(
+    "node.js next.js nuxt.js vue.js ember.js backbone.js three.js d3.js react.js "
+    "express.js nest.js svelte.js jquery.js chart.js socket.io".split()
+)
+
+
+def _parse_path_fab_mode( raw ):
+    """
+    Resolve the INI path-guard mode, failing toward the STRONGER check.
+
+    ⚠️ A TYPO MUST NOT SILENTLY WEAKEN A GUARD (María, 2026-08-26). The first cut treated
+    "anything that is not `pointer`" as the legacy branch, so `Pointr` in the ini would have
+    rolled the fleet back to the blind pattern with nothing said. An unrecognised value now
+    resolves to `pointer` AND says so on stdout: the reader gets a wrong-looking config
+    reported, never a guard quietly doing less than it says.
+
+    Requires:
+        - raw is a string or None
+
+    Ensures:
+        - returns "legacy" only for the exact word, case- and whitespace-insensitive
+        - returns "pointer" for None, blank, "pointer", and anything unrecognised
+        - prints a warning naming the unrecognised value, and nothing for the valid ones
+        - never raises
+
+    Raises:
+        - nothing
+    """
+    value = ( raw or "" ).strip().lower()
+    if value in ( "", "pointer" ): return "pointer"
+    if value == "legacy":          return "legacy"
+    print( f"[dm-tutor] WARNING: unrecognised path fabrication guard mode {raw!r}, using 'pointer'" )
+    return "pointer"
+
+
+def _parse_product_names( raw ):
+    """
+    Read the INI product-name list into a lowercase frozenset.
+
+    Requires:
+        - raw is a string ( whitespace- or comma-separated ) or None
+
+    Ensures:
+        - returns the seed list `_FAB_NOT_PATHS` when raw is None or blank, so a missing
+          key behaves exactly like the shipped default rather than exempting nothing
+        - returns the parsed names, lowercased, otherwise
+        - never raises
+
+    Raises:
+        - nothing
+    """
+    if not raw or not str( raw ).strip(): return _FAB_NOT_PATHS
+    return frozenset( n.lower() for n in str( raw ).replace( ",", " " ).split() if n.strip() )
+
+
 _DM_TUTOR_DEFAULTS = {
     "enabled"         : False,   # OFF unless config says otherwise — see below
     "trigger_claims"  : 4,       # fires on MORE THAN this many claims
@@ -731,6 +802,16 @@ _DM_TUTOR_DEFAULTS = {
     # message that mentions one person in passing can lose the mention without costing
     # the reader anything; one built on who-did-what cannot.
     "attribution_min_persons": 3,
+    # Which PATH-fabrication check runs (row f3d96537). "pointer" — the default and what
+    # ships — asks the restore side's recogniser, so a bare `filename.py` is seen. Any
+    # other value rolls back to the pre-2026-08-26 pattern, which still refuses an invented
+    # slashed path. THERE IS NO "OFF": a switch whose off position refuses less than the
+    # state before the change is a downgrade, not a rollback (María, 2026-08-26).
+    "path_fab_mode"          : "pointer",
+    # Names the path-fabrication check must never call an invented pointer. Seeded from
+    # `_FAB_NOT_PATHS` and overridable by INI, so the day a real product name is refused
+    # the fix is a config edit rather than a deploy (row f3d96537, María's note).
+    "product_names"          : _FAB_NOT_PATHS,
 }
 
 
@@ -762,6 +843,10 @@ def get_dm_tutor_config():
             "fab_guard_strict": cm.get( "dm tutor fabrication guard strict", default=True,  return_type="boolean" ),
             "attribution_guard"      : cm.get( "dm tutor attribution guard enabled",     default=True, return_type="boolean" ),
             "attribution_min_persons": cm.get( "dm tutor attribution guard min persons", default=3,    return_type="int" ),
+            "path_fab_mode"          : _parse_path_fab_mode(
+                cm.get( "dm tutor path fabrication guard mode", default="pointer" ) ),
+            "product_names"          : _parse_product_names(
+                cm.get( "dm tutor fabrication guard product names", default=None ) ),
         }
     except Exception as e:
         print( f"[dm-tutor] WARNING: config read failed, tutor OFF for this send: {e}" )
@@ -836,7 +921,31 @@ def _restore_dropped_pointers( original, rewritten ):
 
 _FAB_NUM  = re.compile( r"\b\d[\d,.]*\b" )
 _FAB_HEX  = re.compile( r"\b[0-9a-f]{7,40}\b" )
-_FAB_PATH = re.compile( r"(?:[A-Za-z][\w+.-]*://\S+|(?:[\w.@%+-]+/)+[\w.@%+-]*)" )
+# THE PRE-2026-08-26 PATH PATTERN, KEPT ONLY AS THE ROLLBACK BRANCH (row f3d96537).
+# It is NOT what runs: `dm tutor path fabrication guard mode` defaults to "pointer" and
+# `_fabricated_paths` is the live check. This exists so that OFF means THE OLD BEHAVIOUR
+# rather than NO behaviour — a kill switch whose off position is weaker than the state
+# before the change is a downgrade, not a rollback (María's ruling, 2026-08-26).
+#
+# ⚠️ YES, THAT IS TWO CODE PATHS, and the `fab_guard_strict` comment below is right to warn
+# against them. The difference is what the dial is FOR: strict/lenient is a threshold, and
+# a threshold with two implementations can drift. This is a ROLLBACK, and a rollback that
+# does not restore the prior behaviour exactly is not one. The legacy branch is pinned by
+# tests so it cannot rot unnoticed.
+_FAB_PATH_LEGACY = re.compile( r"(?:[A-Za-z][\w+.-]*://\S+|(?:[\w.@%+-]+/)+[\w.@%+-]*)" )
+
+
+# 🔴 THE LIVE CHECK NO LONGER USES THE PATTERN ABOVE, AND THAT IS THE FIX (row f3d96537).
+# It was a THIRD path pattern living beside the two in `cosa.agents.dm_tutor.sentences`,
+# and it required a URL scheme or at least one slash — so a bare `filename.py` was not a
+# path to it. The restore side's recogniser has always known that shape; its own
+# docstring says "a path, URL or bare filename". Two patterns for one idea in one
+# module, and the gap between them is where an invented filename walked through:
+# `seven-guards-in-dm.py` was manufactured out of the prose "seven guards in dm.py" and
+# delivered into the slot Rick ruled protected (a0151611). Measured, not asserted:
+#     _FAB_PATH.findall( "seven-guards-in-dm.py" )     -> []
+#     restorable_pointers( "seven-guards-in-dm.py" )   -> ['seven-guards-in-dm.py']
+# So the repair is REUSE, not a fourth pattern. See `_fabricated_paths`.
 _FAB_CAP  = re.compile( r"\b([A-Z][A-Za-z'’-]{2,})\b" )
 _FAB_WORD = re.compile( r"[A-Za-z'’-]+" )
 
@@ -949,7 +1058,113 @@ def _strict_exempt( token, wordlist ):
     return token.lower().replace( "\u2019", "'" ) in wordlist
 
 
-def _fabricated_facts( original, rewritten, strict=True ):
+# ⚠️ A SENTENCE-FINAL FULL STOP HID A FABRICATED PATH, and an existing test caught it
+# before this shipped. "See src/cosa/rest/routers/dm.py." tokenises as
+# `src/cosa/rest/routers/dm.py.` — trailing dot included — which carries no code
+# extension at its END, so the recogniser's own path-signal test discards it and the
+# invented path becomes invisible. This lifts terminal punctuation off the word before
+# the recogniser reads it. Exactly the family of the trailing-lookahead lesson recorded
+# on `_RESCOPE_QUANTITY` above: a guard that sees mid-sentence and not sentence-final is
+# a guard with a branch nobody runs.
+_FAB_TERMINAL_STOP = re.compile( r"(?<=[\w])([.,;:!?)\]}])(?=\s|$)" )
+
+
+def _fabricated_paths_legacy( original, rewritten ):
+    """
+    The pre-2026-08-26 path check, verbatim: a set difference over `_FAB_PATH_LEGACY`.
+
+    Reached only when `dm tutor path fabrication guard mode` is "legacy". It cannot see a
+    bare filename — that blindness IS the defect of row f3d96537 — but it does refuse an
+    invented SLASHED path or URL, which is what makes it a rollback rather than a downgrade.
+
+    Requires:
+        - original and rewritten are strings
+
+    Ensures:
+        - returns the sorted slash- or scheme-bearing tokens in `rewritten` absent from
+          `original`, and [] when there are none
+        - never raises
+
+    Raises:
+        - nothing
+    """
+    try:
+        return sorted( set( _FAB_PATH_LEGACY.findall( rewritten ) )
+                       - set( _FAB_PATH_LEGACY.findall( original ) ) )
+    except Exception:
+        return []
+
+
+def _fabricated_paths( original, rewritten, product_names=_FAB_NOT_PATHS ):
+    """
+    Pointer-shaped tokens the rewrite asserts that the original never vouched for.
+
+    ⚠️ THE DEFECT THIS FIXES WAS LIVE (María, 2026-08-26, row f3d96537). The condenser
+    read the prose "seven guards in dm.py" and delivered `seven-guards-in-dm.py` — a
+    filename nobody has ever written, in the slot Rick ruled protected (a0151611). The
+    old check could not see it: it carried its own path pattern requiring a slash or a
+    URL scheme, so a bare filename was not a path to it, while the RESTORE side's
+    recogniser had known that shape all along. This asks the restore side's question.
+
+    ⚠️ AND IT IS NOT A SET DIFFERENCE OVER TOKENS, WHICH IS THE PART THAT COSTS MAIL.
+    Measured on the 4,489 delivered rewrites in the corpus, a plain token-set difference
+    flags 47 of them (1.05%) — because `restorable_pointers` lifts the WHOLE path out of
+    the original, so a rewrite abbreviating `src/cosa/rest/todo_fifo_queue.py` to
+    `todo_fifo_queue.py` reads as an invention. That is honest mail, and refusing it is
+    this guard's own failure mode. So membership is a SUBSTRING test against the whole
+    original — the exact mirror of `_restore_dropped_pointers`, which asks `p not in
+    rewritten`. Same idea, same direction, one shape.
+
+    Two further ways a rewrite can be faithful and still look novel, each earned by
+    reading the hits rather than assumed:
+      · CASE. "Registry.py" opening a sentence is `registry.py` capitalised, not a new
+        file — 11 of the 26 substring hits were exactly this.
+      · AN ELIDED SUFFIX. A sender writes "executor.py:106, :108, :115"; the rewrite
+        expands ":108" to "executor.py:108" and cites precisely what was meant.
+
+    ⚠️ ALL THREE RELAXATIONS ARE FITTED, NOT VALIDATED. They were derived by reading the
+    hits on this corpus, so a rate computed on that same corpus is in-sample and must not
+    be quoted as the cost. The out-of-sample figure is in the writeup.
+
+    Requires:
+        - original and rewritten are strings
+        - product_names is a set of lowercase names
+
+    Ensures:
+        - returns a sorted list of pointer tokens in `rewritten` that `original` does not
+          vouch for, and [] when there are none
+        - a token already present in `original` in any letter case is never returned
+        - a token of the form `file.ext:LINE` is not returned when `original` carries
+          both the file and that `:LINE` suffix
+        - a name in `product_names` is never returned
+        - a pointer that ENDS a sentence is seen: terminal punctuation is lifted off the
+          word before the recogniser reads it
+        - never raises: an unreadable comparison returns [], which leaves the tutor
+          exactly as safe as it was before this check existed
+
+    Raises:
+        - nothing
+    """
+    try:
+        from cosa.agents.dm_tutor.sentences import restorable_pointers
+        low   = original.lower()
+        found = set()
+        for token in restorable_pointers( _FAB_TERMINAL_STOP.sub( r" \1", rewritten ) ):
+            candidate = token.lower()
+            if candidate in low:            continue
+            if candidate in product_names:  continue
+            base, _, line = candidate.rpartition( ":" )
+            # An elided suffix the sender did write: "executor.py:106, :108".
+            if base and line.isdigit() and base in low and ( ":" + line ) in low: continue
+            found.add( token )
+        return sorted( found )
+    except Exception:
+        # A guard that raises must not take the send path with it.
+        return []
+
+
+def _fabricated_facts( original, rewritten, strict=True, product_names=_FAB_NOT_PATHS,
+                       path_mode="pointer" ):
     """
     Checkable facts the rewrite asserts that the original never did. Empty = clean.
 
@@ -970,6 +1185,10 @@ def _fabricated_facts( original, rewritten, strict=True ):
     Ensures:
         - returns { class: [values] } for numbers, hex ids, paths and capitalised names
           present in `rewritten` but NOT in `original`
+        - `path_mode="legacy"` falls back to the PRE-2026-08-26 pattern, which
+          still refuses an invented slashed path or URL and cannot see a bare filename;
+          EVERY other value, recognised or not, asks the restore side's recogniser. The
+          rollback is to the old behaviour, never to none, and a typo cannot cause one
         - NAMES are matched POSITION-INDEPENDENTLY against every word of the original,
           case-folded. An earlier version excluded sentence-initial words to cut false
           positives and thereby missed a fabricated name in the commonest position of
@@ -994,10 +1213,18 @@ def _fabricated_facts( original, rewritten, strict=True ):
             return {
                 "number" : set( _FAB_NUM.findall( text ) ),
                 "hex_id" : set( _FAB_HEX.findall( text ) ),
-                "path"   : set( _FAB_PATH.findall( text ) ),
             }
         before, after = classes( original ), classes( rewritten )
         found = { k: sorted( after[ k ] - before[ k ] ) for k in before if after[ k ] - before[ k ] }
+
+        # PATHS are asked separately, because the honest question is not a set difference
+        # over tokens. See `_fabricated_paths`.
+        # `!= "legacy"`, not `== "pointer"`: an unrecognised value resolves to the STRONGER
+        # check here too, so a caller that skips `_parse_path_fab_mode` cannot weaken it.
+        invented_paths = ( _fabricated_paths_legacy( original, rewritten )
+                           if path_mode == "legacy"
+                           else _fabricated_paths( original, rewritten, product_names=product_names ) )
+        if invented_paths: found[ "path" ] = invented_paths
 
         original_words = { w.lower() for w in _FAB_WORD.findall( original ) }
         # V3-strict (row ddf7581e). `strict=False` reproduces the pre-V3 behaviour
@@ -1544,7 +1771,9 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
         # fabricated, and BEFORE the gate so a fabricating rewrite is refused on the
         # stronger ground of the two.
         fabricated = _fabricated_facts( body_text, rewritten,
-                                        strict=config[ "fab_guard_strict" ] )
+                                        strict=config[ "fab_guard_strict" ],
+                                        product_names=config[ "product_names" ],
+                                        path_mode=config[ "path_fab_mode" ] )
         if fabricated:
             meta[ "tutor_outcome" ]     = "fabrication_blocked"
             meta[ "tutor_fabricated" ]  = fabricated
