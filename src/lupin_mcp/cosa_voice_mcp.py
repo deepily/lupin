@@ -1743,10 +1743,14 @@ def ask_multiple_choice(
         )
         # On timeout returns: {"answers": {"Database": "PostgreSQL"}}
     """
-    logger.debug( f"ask_multiple_choice() called with {len( questions )} questions" )
-
+    # Validate BEFORE logging. `len( questions )` on the line above this guard
+    # raised TypeError for a null/unsized argument, so the guard right below it
+    # was unreachable for exactly the input it was written to reject — the tool
+    # crashed instead of returning its error dict.
     if not questions or not isinstance( questions, list ):
         return { "error": "questions must be a non-empty list" }
+
+    logger.debug( f"ask_multiple_choice() called with {len( questions )} questions" )
 
     _enforce_spoken_brevity( questions, override_size_limitation, field="questions" )
 
@@ -2034,10 +2038,14 @@ def ask_open_ended_batch(
         ])
         # Returns: {"answers": {"Topic": "quantum computing", "Budget": "10"}}
     """
-    logger.debug( f"ask_open_ended_batch() called with {len( questions )} questions" )
-
+    # Validate BEFORE logging. `len( questions )` on the line above this guard
+    # raised TypeError for a null/unsized argument, so the guard right below it
+    # was unreachable for exactly the input it was written to reject — the tool
+    # crashed instead of returning its error dict.
     if not questions or not isinstance( questions, list ):
         return { "error": "questions must be a non-empty list" }
+
+    logger.debug( f"ask_open_ended_batch() called with {len( questions )} questions" )
 
     _enforce_spoken_brevity( questions, override_size_limitation, field="questions" )
 
