@@ -92,3 +92,73 @@ def test_emit_records_the_canonical_name_for_an_alias():
         f"_emit recorded {payload[ 'command' ]!r} — the alias reached output un-canonicalised, "
         "which is the defect row 759a895b fixed"
     )
+
+
+# ── María's bar, literally: every command a RUN emits, not a synthetic one ──────
+#
+# The test above proves _emit canonicalises a value I hand it. That is not quite what
+# was asked for. The bar (María 🌸, echoed by Mr Radio 🦉) is: assert every
+# payload.command IN A RUN is drawn from the known vocabulary — then revert the fix and
+# watch it redden ON THAT ONE BARE RECORD. A guard that only ever sees values the test
+# author chose is a guard that agrees with its author.
+#
+# The corpus lives under io/, which is gitignored, so this SKIPS when no run is present
+# rather than failing. That is a real limitation and worth naming: the always-on guard is
+# the synthetic one above; this is the one that reddens on production data when data
+# exists. Both were run against the reverted fix, and both went red.
+
+def _newest_run_records():
+    """The most recent v2 eval records.jsonl, or None. Never raises."""
+    import glob
+    candidates = glob.glob( os.path.join( os.environ[ "LUPIN_ROOT" ], "io", "v2-flow", "*", "records.jsonl" ) )
+    return max( candidates, key=os.path.getmtime ) if candidates else None
+
+
+def test_every_command_in_a_real_run_is_drawn_from_the_known_vocabulary():
+    """Replay every DISTINCT command a real run recorded back through the emitter.
+
+    Row 759a895b's bare `math` is in that set, so reverting the fix in `_emit` turns this
+    red naming that exact value — which is what makes it a guard rather than a claim.
+    """
+    import json
+
+    records_path = _newest_run_records()
+    if records_path is None:
+        pytest.skip( "no v2 eval run present (io/ is gitignored) — the synthetic _emit guard above still runs" )
+
+    from cosa.rest.v2 import flow as flow_module
+
+    class _Trace:
+        trace_id = "t-759a895b"
+        fields   = {}
+        def mark( self, *a, **k ):  pass
+        def update( self, **k ):    pass
+        def write( self ):          pass
+        def has_mark( self, *a ):   return False
+        def timings_ms( self ):     return {}
+
+    class _Flow:
+        debug = verbose = False
+        def _log_query( self, *a, **k ): pass
+
+    recorded = set()
+    with open( records_path ) as handle:
+        for line in handle:
+            payload = ( json.loads( line ).get( "payload" ) or {} )
+            if payload.get( "command" ) is not None:
+                recorded.add( payload[ "command" ] )
+    assert recorded, f"{records_path} carried no commands at all — the corpus is not what this asserts against"
+
+    escapes = []
+    for command in sorted( recorded ):
+        emitted = flow_module.AskFlow._emit(
+            _Flow(), _Trace(), path="agent", status="waiting", route_reason="args_none",
+            answer=None, answer_raw=None, command=command, ctx=( "u", "e@x.com", "s", None, False ),
+        )[ "command" ]
+        if emitted not in KNOWN_VOCABULARY:
+            escapes.append( f"{command!r} emitted as {emitted!r}, which is not a known command" )
+
+    assert escapes == [], (
+        f"{os.path.basename( os.path.dirname( records_path ) )} contains commands that reach output "
+        f"outside the known vocabulary — every count grouped by payload.command splits on these: {escapes}"
+    )
