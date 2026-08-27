@@ -11,6 +11,7 @@ Uses native async: client.aio.models.generate_images() — no run_in_executor ne
 """
 
 import os
+import sys
 import asyncio
 import logging
 from typing import Optional
@@ -22,6 +23,65 @@ COST_PER_IMAGE_1K = 0.067
 
 # Default cost per second of video (Veo 2 pricing, March 2026)
 COST_PER_VIDEO_SECOND = 0.20
+
+
+# Rick, 2026-08-26, verbatim: "we can even add code that pushes a pretty loud
+# error message to the console whenever image generation is called That way hey
+# we'd have to fix it AFTER the board gets to 0".
+#
+# This fires on EVERY call, not only on failure, and it is deliberately not an
+# exception: the API-key path below WORKS, and turning a working call into a
+# crash would be a downgrade. It is a banner you cannot miss and cannot forget,
+# which is the whole point — the tracking row for this was dropped, so a note in
+# a document would have been the thing nobody reads.
+_IMAGE_GEN_NOTICE = """
+================================================================================
+LOUD NOTICE - GEMINI IMAGE GENERATION IS RUNNING ON AN APPROVED EXCEPTION
+================================================================================
+This client authenticates with an API KEY, not the GCP project id. That is the
+pattern Rick rejected on 2026-08-16 and then, the same day, approved as a
+STANDING EXCEPTION rather than a defect. Do not "fix" it by converting the
+client - that conversion was written, tested, and reverted once already.
+
+THE BLOCKER IS NOT THIS CODE. Imagen is not reachable on the GCP project
+(hello-world-foo-423219). models.get returns 404 NOT_FOUND for both
+imagen-4.0-generate-001 and imagen-3.0-generate-002, in BOTH `global` and
+`us-central1`, measured three separate times over nine days:
+
+    model                     08-16      08-21      08-25
+    imagen-4.0-generate-001   404/404    404/404    404/404
+    imagen-3.0-generate-002   404/404    404/404    404/404
+
+Not a region problem, and not an auth problem: the Vertex auth path itself was
+proven working on 2026-08-25 (ADC present, gemini-3.1-flash-lite answers in
+both locations). Only the Imagen models 404.
+
+THE ONE ACTION THAT CLEARS THIS IS NOT A CODE CHANGE: enabling Imagen on the
+GCP project. That is Rick's - his project, his billing - and Imagen commonly
+needs explicit enablement or allowlisting rather than a plain API toggle. Until
+he does it, converting this client trades working image generation for a 404.
+Narrative and full measurements: TODO.md (dropped store row b02b2daa).
+================================================================================
+"""
+
+
+def _emit_image_gen_notice():
+    """
+    Print the standing-exception notice to the console and the log.
+
+    Ensures:
+        - writes the notice to stderr and to logger.error, on every call
+        - never raises (a notice that can break its caller is not a notice)
+    """
+    try:
+        print( _IMAGE_GEN_NOTICE, file=sys.stderr, flush=True )
+        logger.error(
+            "GeminiImageClient: image generation called on the approved API-key exception - "
+            "Imagen 404s on the GCP project; enabling Imagen is Rick's action, not a code fix. "
+            "See TODO.md (dropped row b02b2daa)."
+        )
+    except Exception:
+        pass
 
 
 class GeminiImageClient:
@@ -125,6 +185,11 @@ class GeminiImageClient:
             bool: True on success, False on failure
         """
         from google.genai import types
+
+        # Fires on EVERY call, before the budget check, so it cannot be skipped by
+        # an early return. See _IMAGE_GEN_NOTICE for why this is a banner and not
+        # an exception.
+        _emit_image_gen_notice()
 
         # Budget check
         if self.cost_total >= self.budget_limit:

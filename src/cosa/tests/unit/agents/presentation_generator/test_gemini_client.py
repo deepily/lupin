@@ -79,6 +79,50 @@ def _img_client( gen_images ):
     return client
 
 
+class TestImageGenNotice:
+    """
+    The standing-exception notice must reach the console on EVERY call to
+    generate_image, including the calls that return early.
+
+    Rick asked for this on 2026-08-26: "we can even add code that pushes a
+    pretty loud error message to the console whenever image generation is
+    called". The store row that tracked the underlying problem was dropped, so
+    this notice is now the only thing that will remind anyone — which makes it
+    worth a test that fails if someone quietly deletes it.
+    """
+
+    def test_notice_fires_on_a_successful_generation( self, capsys, tmp_path ):
+        c   = GeminiImageClient()
+        gen = MagicMock()
+        gen.rai_filtered_reason = None
+        gen.image = MagicMock()
+        with patch.object( c, "_get_client", return_value=_img_client( [ gen ] ) ):
+            assert _run( c.generate_image( "p", str( tmp_path / "o.png" ) ) ) is True
+        err = capsys.readouterr().err
+        assert "LOUD NOTICE" in err
+        assert "hello-world-foo-423219" in err, "the notice must name the project that 404s"
+        assert "enabling Imagen" in err, "the notice must name the one action that clears this"
+
+    def test_notice_fires_even_when_the_budget_check_returns_early( self, capsys ):
+        """
+        The early return is the path most likely to skip the notice, so it gets
+        its own test: a notice placed after the budget check would be silent
+        exactly when a run is being cut short.
+        """
+        c = GeminiImageClient( budget_limit=0.05 )
+        c.cost_total = 0.05
+        assert _run( c.generate_image( "p", "/o.png" ) ) is False
+        assert "LOUD NOTICE" in capsys.readouterr().err
+
+    def test_notice_never_raises_when_the_console_is_broken( self ):
+        """
+        A notice that can break its caller is not a notice. If stderr is
+        unwritable the call must still complete.
+        """
+        with patch( "builtins.print", side_effect=OSError( "stderr gone" ) ):
+            gcmod._emit_image_gen_notice()          # must not raise
+
+
 class TestGenerateImage:
     def test_budget_reached( self ):
         c = GeminiImageClient( budget_limit=0.05 )
