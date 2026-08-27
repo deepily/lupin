@@ -132,6 +132,13 @@ class TestNotifyImplFallbacks:
         monkeypatch.setattr( cv, "_outbox_has_backlog", lambda: False )
         monkeypatch.setattr( cv, "notify_user_async", lambda request, debug: _Failed() )
         monkeypatch.setattr( cv, "_spool_failed_notify", lambda request: True )
+        # Pin the bridge read: _notify_impl consults live speakerphone state on
+        # every non-internal call, and in chorus mode an absent flag defaults to
+        # ON — so an unpinned test takes the lift branch on some boxes and not
+        # others. These assertions are about the send/spool path, not the mode.
+        import lupin_cli.claude_code.hooks.lib.session_bridge as sb
+        monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "session_id": "aaaaaaaa" } )
+        monkeypatch.setattr( sb, "get_speakerphone", lambda sid: False )
 
         assert cv._notify_impl( "hello" ) == "Queued for durable retry (server down)"
 
@@ -144,6 +151,13 @@ class TestNotifyImplFallbacks:
         monkeypatch.setattr( cv, "_outbox_has_backlog", lambda: False )
         monkeypatch.setattr( cv, "notify_user_async", lambda request, debug: _Failed() )
         monkeypatch.setattr( cv, "_spool_failed_notify", lambda request: False )
+        # Pin the bridge read: _notify_impl consults live speakerphone state on
+        # every non-internal call, and in chorus mode an absent flag defaults to
+        # ON — so an unpinned test takes the lift branch on some boxes and not
+        # others. These assertions are about the send/spool path, not the mode.
+        import lupin_cli.claude_code.hooks.lib.session_bridge as sb
+        monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "session_id": "aaaaaaaa" } )
+        monkeypatch.setattr( sb, "get_speakerphone", lambda sid: False )
 
         assert cv._notify_impl( "hello" ) == "Failed: server down"
 
@@ -155,6 +169,13 @@ class TestNotifyImplFallbacks:
         monkeypatch.setattr( cv, "_outbox_has_backlog", lambda: True )
         monkeypatch.setattr( cv, "_spool_failed_notify", lambda request: True )
         monkeypatch.setattr( cv, "notify_user_async", must_not_send )
+        # Pin the bridge read: _notify_impl consults live speakerphone state on
+        # every non-internal call, and in chorus mode an absent flag defaults to
+        # ON — so an unpinned test takes the lift branch on some boxes and not
+        # others. These assertions are about the send/spool path, not the mode.
+        import lupin_cli.claude_code.hooks.lib.session_bridge as sb
+        monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "session_id": "aaaaaaaa" } )
+        monkeypatch.setattr( sb, "get_speakerphone", lambda sid: False )
 
         assert cv._notify_impl( "hello" ) == "Queued (ordered behind backlog)"
 
