@@ -66,7 +66,35 @@ def functions( src ):
         if cut: body = body[ : cut.start() + 1 ]
         yield m.group( 2 ), body
 
+def classify( src, label="<memory>" ):
+    """
+    Rows for ONE source string: ( label, test_name, drivers, unpinned ).
+
+    Split out from sweep() so the self-test below can feed it synthetic sources.
+    A detector that can only be exercised against the tree it was tuned on cannot
+    be shown to still detect anything.
+    """
+    rows = []
+    if not any( d in src for d in BRIDGE_DRIVERS ): return rows
+    # A file-level autouse fixture pinning a reader covers every test in it.
+    file_pins = { r for r in ISOLATORS
+                  if re.search( r"autouse=True[\s\S]{0,400}" + re.escape( r ), src ) }
+    helpers = helper_bodies( src )
+    for fn, body in functions( src ):
+        # Inline any helper this test calls, so pins living there count.
+        for h in HELPER.findall( body ):
+            body += helpers.get( h, "" )
+        drivers = sorted( { d for d in BRIDGE_DRIVERS if d in body } )
+        if not drivers: continue
+        # Exposed only when NO isolator appears — any one of them is enough.
+        isolated = [ i for i in ISOLATORS if i in body or i in file_pins ]
+        unpinned = [] if isolated else [ "get_speakerphone" ]
+        rows.append( ( label, fn, drivers, unpinned ) )
+    return rows
+
+
 def sweep( test_root=TEST_ROOT ):
+    """Every test under test_root, classified. Reports only; touches nothing."""
     rows = []
     for dirpath, _dirs, files in os.walk( test_root ):
         if "/logs" in dirpath: continue
@@ -74,24 +102,57 @@ def sweep( test_root=TEST_ROOT ):
             if not name.endswith( ".py" ): continue
             path = os.path.join( dirpath, name )
             src  = open( path, encoding="utf-8", errors="replace" ).read()
-            if not any( d in src for d in BRIDGE_DRIVERS ): continue
-            # A file-level autouse fixture pinning a reader covers every test in it.
-            file_pins = { r for r in ISOLATORS
-                          if re.search( rf"autouse=True[\s\S]{{0,400}}{r}", src ) }
-            helpers = helper_bodies( src )
-            for fn, body in functions( src ):
-                # Inline any helper this test calls, so pins living there count.
-                for h in HELPER.findall( body ):
-                    body += helpers.get( h, "" )
-                drivers = sorted( { d for d in BRIDGE_DRIVERS if d in body } )
-                if not drivers: continue
-                # Exposed only when NO isolator appears — any one of them is enough.
-                isolated = [ i for i in ISOLATORS if i in body or i in file_pins ]
-                unpinned = [] if isolated else [ "get_speakerphone" ]
-                rows.append( ( os.path.relpath( path, test_root ), fn, drivers, unpinned ) )
+            rows += classify( src, os.path.relpath( path, test_root ) )
     return rows
 
+
+# ── The positive control travels WITH the detector ───────────────────────────
+# Mr Radio's point, 2026-08-26: "0 of 41", measured on the tree this was tuned
+# against, is fitted to the data. A sweep that has quietly STOPPED DETECTING
+# reports the same 0 as a genuinely clean tree, and nothing in that number tells
+# the two apart. So the control lives here and runs on every invocation.
+
+_EXPOSED = (
+    "class TestProbe:\n"
+    "    def test_it_drives_the_real_impl_unpinned( self, monkeypatch ):\n"
+    "        cv._notify_impl( \"hello\" )\n"
+)
+
+# One line per isolator the sweep claims to recognise. If any stops being seen,
+# the sweep starts inventing work — which is the failure that cost an evening.
+_ISOLATED = {
+    "direct pin"      : "        monkeypatch.setattr( sb, \"get_speakerphone\", lambda sid: False )\n",
+    "sid pinned"      : "        monkeypatch.setattr( cv, \"_get_cc_metadata\", lambda: {} )\n",
+    "dir redirected"  : "        monkeypatch.setattr( sb, \"SESSION_DIR\", tmp )\n",
+    "internal call"   : "        cv._notify_impl( \"hello\", _internal_call=True )\n",
+    "driver replaced" : "        monkeypatch.setattr( cv, \"_notify_impl\", lambda **k: \"sent\" )\n",
+}
+
+
+def self_test():
+    """
+    Prove the detector still fires, and still stays quiet.
+
+    Ensures:
+        - returns [] when the negative control is flagged and every isolator is
+          recognised; otherwise one string per failure, naming which
+    """
+    bad = []
+    if not [ r for r in classify( _EXPOSED, "probe" ) if r[ 3 ] ]:
+        bad.append( "NEGATIVE CONTROL FAILED: an unpinned driver was NOT flagged — "
+                    "the sweep has stopped detecting and its 0 means nothing" )
+    for name, line in _ISOLATED.items():
+        if [ r for r in classify( _EXPOSED + line, "probe" ) if r[ 3 ] ]:
+            bad.append( f"FALSE POSITIVE: isolator no longer recognised — {name}" )
+    return bad
+
+
 if __name__ == "__main__":
+    failures = self_test()
+    for f in failures: print( f"WARNING  {f}" )
+    print( f"self-test: {'PASSED' if not failures else 'FAILED'} "
+           f"(1 negative control + {len( _ISOLATED )} isolators)\n" )
+
     rows = sweep()
     bad  = [ r for r in rows if "get_speakerphone" in r[ 3 ] ]
     print( f"{len( rows )} test(s) drive bridge-reading code; {len( bad )} do NOT pin get_speakerphone\n" )
