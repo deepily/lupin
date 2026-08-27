@@ -455,3 +455,39 @@ def test_the_live_hook_prints_the_env_line_before_any_early_return():
         "the [test-env] line is written after the network guard's early return — on a "
         "default run the mode is off, so it would never print"
     )
+
+
+def test_the_format_contract_covers_EVERY_diagnostic_line_not_just_this_one():
+    """
+    The contract was keyed to `[tree-state]` alone, and it should never have been.
+
+    Rio added a `[test-env]` line beside it (925bd701) and it is safe today — but the
+    substring and ordering rules exist so that a LATER edit cannot grow a count-shaped
+    field, and a rule that only guards one line does not guard the next one somebody
+    adds. The conftest is a shared surface; the contract belongs to the surface, not to
+    whichever line was written first.
+
+    Asserted over REAL output: every bracketed diagnostic line the root conftest emits
+    must carry no "N passed" / "N failed" / "N error" substring, and none of them may be
+    the last line.
+    """
+    root = os.environ[ "LUPIN_ROOT" ]
+    done = subprocess.run(
+        [ sys.executable, "-m", "pytest", LIVE_TARGET, "-q", "--no-header", "-p", "no:cacheprovider" ],
+        cwd=root, capture_output=True, text=True, timeout=180,
+        env={ **os.environ, "PYTHONPATH": os.path.join( root, "src" ) },
+    )
+    lines = [ l for l in done.stdout.splitlines() if l.strip() ]
+    diagnostics = [ l for l in lines if l.startswith( "[" ) ]
+
+    assert len( diagnostics ) >= 2, (
+        f"expected at least the tree-state and test-env lines, got {diagnostics!r} — "
+        f"if a diagnostic was removed, remove it from this contract deliberately"
+    )
+    for line in diagnostics:
+        assert line != lines[ -1 ], f"a diagnostic line is the last line: {line!r}"
+        for word in ( "passed", "failed", "error" ):
+            assert not re.search( rf"\d+\s+{word}", line ), (
+                f"diagnostic line carries a '<n> {word}' substring, which a consumer of "
+                f"pytest's summary would read as a result count: {line!r}"
+            )
