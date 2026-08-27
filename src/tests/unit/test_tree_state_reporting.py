@@ -18,6 +18,8 @@ Venue: :7999-eligible — no subprocess, no network, no mutation.
 import importlib.util
 import os
 import re
+import subprocess
+import sys
 
 import pytest
 
@@ -243,3 +245,51 @@ def test_the_real_pytest_parser_still_reads_the_right_count_with_the_line_presen
     assert re.findall( r"(\d+)\s+passed", captured ) == [ "10" ], (
         "the tree-state line perturbed the count the pytest parser reads"
     )
+
+
+# ---------------------------------------------------------------------------
+# THE ORDERING CLAUSE (Mr Radio, 2026-08-26). His durable sentence carries one
+# guarantee the substring rules do not: the line "is never the last line", which
+# protects a consumer that reads the LAST line rather than regex-searching. That
+# ordering is pytest's, not this code's — this module cannot enforce it, so it is
+# VERIFIED on a live run instead of asserted from a fixture. A fixture written in
+# the order I expect would only prove I can write a fixture.
+# ---------------------------------------------------------------------------
+
+# A different file, so the run cannot recurse into this one. Measured at ~0.5s.
+LIVE_TARGET = "src/tests/unit/test_arbiter_snapshot_store.py"
+
+
+def test_on_a_live_run_the_line_is_present_and_is_never_the_last_line():
+    """
+    The full durable sentence, checked end to end against real pytest output:
+    the tree-state line contains no "N passed", "N failed" or "N error" substring
+    AND is never the last line, so no consumer of pytest's summary can misread it.
+
+    Runs pytest as a subprocess against a small unit file. It must run inside the
+    repo, because the line comes from the ROOT conftest — a temp-directory target
+    would never load it and the test would pass by measuring nothing.
+    """
+    root = os.environ[ "LUPIN_ROOT" ]
+    done = subprocess.run(
+        [ sys.executable, "-m", "pytest", LIVE_TARGET, "-q", "--no-header", "-p", "no:cacheprovider" ],
+        cwd=root, capture_output=True, text=True, timeout=180,
+        env={ **os.environ, "PYTHONPATH": os.path.join( root, "src" ) },
+    )
+    lines = [ l for l in done.stdout.splitlines() if l.strip() ]
+    assert lines, f"the probe run produced no output (exit {done.returncode})"
+
+    tree_lines = [ l for l in lines if l.startswith( "[tree-state]" ) ]
+    assert len( tree_lines ) == 1, (
+        f"expected exactly one tree-state line in a real run, got {len( tree_lines )} — "
+        f"the hook is either not wired or firing more than once"
+    )
+
+    assert lines[ -1 ] != tree_lines[ 0 ], "the tree-state line IS the last line"
+    assert re.search( r"\d+\s+(passed|failed|error)", lines[ -1 ] ), (
+        f"premise gone — the last line is no longer pytest's count: {lines[ -1 ]!r}"
+    )
+    for word in ( "passed", "failed", "error" ):
+        assert not re.search( rf"\d+\s+{word}", tree_lines[ 0 ] ), (
+            f"the live tree-state line carries a '<n> {word}' substring"
+        )
