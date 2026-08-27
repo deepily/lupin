@@ -614,15 +614,29 @@ class SessionIdUnavailable( RuntimeError ):
 
 def _die_no_session_id():
     """
-    Send error notification and hard-exit — real session ID never arrived.
+    Send error notification, then hard-exit ON THE SERVER or raise off it.
+
+    ⚠️ THE CONTRACT CHANGED 2026-08-26 (row `87ae7234`). This used to promise
+    "never returns" unconditionally. It now branches on `_IS_MCP_SERVER`, because a
+    library that calls `os._exit` takes its HOST process down with no traceback and
+    no summary — which is how a test suite came to report a truncated run with
+    nothing anywhere naming the cause.
 
     Requires:
         - Lupin FastAPI server is running (for notification delivery)
+        - `_IS_MCP_SERVER` is True only in the MCP server process, set positively at
+          the `if __name__ == "__main__":` entry point
 
     Ensures:
         - Sends high-priority alert from sender_id claude.code@{PROJECT}.deepily.ai#mcp-error
-        - Terminates MCP server process via os._exit( 1 )
-        - Never returns
+          on BOTH paths — the alert is not the server's privilege
+        - ON THE SERVER: writes a named reason to flushed stderr, then terminates via
+          os._exit( 1 ) and never returns
+        - OFF THE SERVER: never returns either, but by RAISING — the host process
+          survives and the caller gets something it can catch
+
+    Raises:
+        - SessionIdUnavailable when this process is not the MCP server
     """
     error_sender = f"claude.code@{PROJECT}.deepily.ai#mcp-error"
     logger.critical( "Sending error notification and terminating MCP server" )
@@ -678,8 +692,14 @@ def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
 
     Ensures:
         - Returns SENDER_ID with real session ID on success
-        - Calls _die_no_session_id() and never returns on failure
+        - Calls _die_no_session_id() on failure, which exits the MCP server process
+          and RAISES SessionIdUnavailable in any other process (row `87ae7234`) —
+          either way this function does not return a value on that path
         - Zero overhead after first resolution (Event.wait on set event returns instantly)
+
+    Raises:
+        - SessionIdUnavailable (via _die_no_session_id) when resolution failed and
+          this process is not the MCP server
     """
     if not _session_ready.wait( timeout=timeout ):
         _die_no_session_id()
