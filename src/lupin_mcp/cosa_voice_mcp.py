@@ -414,6 +414,31 @@ _SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
 _session_ready    = threading.Event()   # Gate: blocks tool calls until session ID resolved
 _session_failed   = False               # True if real ID never arrived (fallback only)
 
+# POSITIVE SERVER DISCRIMINATOR — row 87ae7234.
+# `_die_no_session_id` calls os._exit(1), which is correct for the MCP server and
+# catastrophic for anything that merely IMPORTS this module: os._exit skips every
+# flush, atexit hook and exception path, so an importing process dies with no
+# traceback and no summary. Four call sites in this module can reach it.
+#
+# This flag decides which process we are, and it is set POSITIVELY at the single
+# entry point (the `if __name__ == "__main__":` block at the bottom of this file)
+# rather than inferred from an environment variable, from PYTEST_CURRENT_TEST, or
+# from the ABSENCE of something. An inference stops matching silently when the
+# world changes; a positive assignment at the entry point does not.
+#
+# It lives in that block because that is where this codebase ALREADY means "I am
+# the server" — `_maybe_start_commons_archival_daemon()` is there for the same
+# reason — so server-only state stays in one known place instead of inventing a
+# second convention.
+#
+# WARNING: IF YOU ADD A NEW ENTRY POINT — a console_scripts / [project.scripts]
+# shim that IMPORTS this module and calls into it rather than running the file —
+# YOU MUST SET THIS FLAG THERE TOO. Otherwise a real server reads False and a
+# genuine session-id failure raises instead of exiting, leaving a server up that
+# cannot serve. There are none today: zero entry-points are declared, and every
+# registered launch runs `python .../cosa_voice_mcp.py` in script mode.
+_IS_MCP_SERVER    = False
+
 # Validate repo service account (non-blocking — logs + notifies on failure)
 _validate_repo_account( PROJECT )
 
@@ -435,6 +460,87 @@ _banner_lines   = [
 ]
 for _line in _banner_lines:
     logger.info( _line )
+
+
+def _watch_bridge_for_changes( stop_event=None, poll_interval=2.0, max_iterations=None ):
+    """
+    Watch the resolved bridge file and update SESSION_ID / SENDER_ID when it changes.
+
+    PHASE 2 of the session watcher, split out of `_session_watcher_thread` so a test
+    can start it DELIBERATELY and assert on what it did — row `87ae7234`. Phase 1
+    (the one-shot resolve that sets `_session_ready`) stays where it was and still
+    runs at import: it is load-bearing, nothing here is.
+
+    Requires:
+        - phase 1 has run, so SESSION_ID / SENDER_ID hold their resolved values
+        - poll_interval is a positive number of seconds
+
+    Ensures:
+        - returns when stop_event is set, or after max_iterations polls, or never
+          (the server's case: both arguments omitted)
+        - updates the SESSION_ID / SENDER_ID globals when the bridge file's session
+          id changes, and logs the transition
+        - a per-iteration exception is logged and the loop CONTINUES — one bad poll
+          must never end the watch
+        - does not raise
+    """
+    global SESSION_ID, SENDER_ID
+
+    last_mtime      = 0.0
+    last_session_id = SESSION_ID
+    iterations      = 0
+
+    logger.info( "Session watcher: entering persistent monitoring loop" )
+
+    while stop_event is None or not stop_event.is_set():
+        if max_iterations is not None and iterations >= max_iterations: return
+        iterations += 1
+        try:
+            # A stop_event waits INTERRUPTIBLY so a test does not pay the poll
+            # interval to shut the loop down; without one this is the original sleep.
+            if stop_event is not None:
+                if stop_event.wait( timeout=poll_interval ): return
+            else:
+                time.sleep( poll_interval )
+
+            # Clear cache so _find_session_file() does a fresh lookup
+            clear_cached_session_id()
+
+            result = _find_session_file()
+            if result is None:
+                continue
+
+            bridge_path, _source = result
+
+            # Check if file was modified
+            try:
+                current_mtime = bridge_path.stat().st_mtime
+            except OSError:
+                continue
+
+            if current_mtime <= last_mtime:
+                continue
+
+            last_mtime = current_mtime
+
+            # Re-read the session ID
+            file_id = _read_session_file( bridge_path )
+            if not file_id:
+                continue
+
+            new_suffix = file_id[:8]
+            if new_suffix != last_session_id:
+                old_sender      = SENDER_ID
+                SESSION_ID      = new_suffix
+                SENDER_ID       = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
+                last_session_id = new_suffix
+                logger.info(
+                    f"Session ID changed: {old_sender} -> {SENDER_ID} "
+                    f"(context clear detected)"
+                )
+
+        except Exception as e:
+            logger.error( f"Session watcher error: {e}" )
 
 
 def _session_watcher_thread():
@@ -483,55 +589,7 @@ def _session_watcher_thread():
         _session_ready.set()
 
     # ── Phase 2: Persistent bridge file watcher ─────────────────────────
-    # Track the last-seen mtime and session ID for change detection
-    last_mtime      = 0.0
-    last_session_id = SESSION_ID
-    poll_interval   = 2.0  # seconds
-
-    logger.info( "Session watcher: entering persistent monitoring loop" )
-
-    while True:
-        try:
-            time.sleep( poll_interval )
-
-            # Clear cache so _find_session_file() does a fresh lookup
-            clear_cached_session_id()
-
-            result = _find_session_file()
-            if result is None:
-                continue
-
-            bridge_path, _source = result
-
-            # Check if file was modified
-            try:
-                current_mtime = bridge_path.stat().st_mtime
-            except OSError:
-                continue
-
-            if current_mtime <= last_mtime:
-                continue
-
-            last_mtime = current_mtime
-
-            # Re-read the session ID
-            file_id = _read_session_file( bridge_path )
-            if not file_id:
-                continue
-
-            new_suffix = file_id[:8]
-            if new_suffix != last_session_id:
-                old_sender     = SENDER_ID
-                SESSION_ID     = new_suffix
-                SENDER_ID      = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
-                last_session_id = new_suffix
-                logger.info(
-                    f"Session ID changed: {old_sender} -> {SENDER_ID} "
-                    f"(context clear detected)"
-                )
-
-        except Exception as e:
-            logger.error( f"Session watcher error: {e}" )
+    _watch_bridge_for_changes()
 
 
 _watcher_thread = threading.Thread(
@@ -540,6 +598,18 @@ _watcher_thread = threading.Thread(
     daemon=True
 )
 _watcher_thread.start()
+
+
+class SessionIdUnavailable( RuntimeError ):
+    """
+    Raised instead of hard-exiting when the session ID never resolved and this
+    process is NOT the MCP server.
+
+    The MCP server must die on this condition — it cannot serve tools without a
+    session id. An importing process must NOT: a library that calls os._exit takes
+    its host down with no traceback, which is how a test suite came to report a
+    truncated run with nothing anywhere naming the cause.
+    """
 
 
 def _die_no_session_id():
@@ -576,6 +646,15 @@ def _die_no_session_id():
     # logger.critical above is captured by pytest and lost with it; an
     # explicitly-flushed stderr write is not. Two lines, no behaviour change
     # for the server, and the difference between a silent kill and a named one.
+    if not _IS_MCP_SERVER:
+        # NOT the server — raise, do not kill the host. The caller gets a named
+        # exception it can catch and a traceback naming this function.
+        raise SessionIdUnavailable(
+            "Claude Code session ID never resolved and this process is not the MCP "
+            "server, so _die_no_session_id() raised instead of calling os._exit(1). "
+            "No session bridge file was detected."
+        )
+
     sys.stderr.write(
         "[cosa-voice] FATAL: Claude Code session ID never resolved; "
         "os._exit(1) from _die_no_session_id(). No session bridge file was "
@@ -4756,5 +4835,10 @@ def task_edit(
 
 
 if __name__ == "__main__":
+    # THE POSITIVE ASSIGNMENT — the only place this is set. It must come BEFORE
+    # mcp.run() so a resolution failure during startup still hard-exits the server
+    # exactly as it always has. See the flag's definition for why this is not an
+    # environment check, and for what a future console_scripts entry point owes.
+    _IS_MCP_SERVER = True
     _maybe_start_commons_archival_daemon()
     mcp.run()

@@ -198,9 +198,18 @@ class TestWatcherMonitoringLoop:
 # ── the hard-exit path ────────────────────────────────────────────────────────
 
 class TestDieNoSessionId:
+    """
+    CHANGED 2026-08-26 (row `87ae7234`): the hard exit is now gated on
+    `_IS_MCP_SERVER`, the positive discriminator the `if __name__ == "__main__":`
+    block sets before `mcp.run()`. These tests set it, because they are testing the
+    SERVER's behaviour and the server is where it is set. The importer's path — where
+    the flag is False and a named exception is raised instead — is asserted in
+    `TestDieNoSessionIdOffTheServer` below.
+    """
 
     def test_alerts_from_the_mcp_error_sender_then_exits_nonzero( self, monkeypatch ):
         sent = {}
+        monkeypatch.setattr( cv, "_IS_MCP_SERVER", True )
         monkeypatch.setattr( cv, "notify_user_async",
                              lambda request, debug: sent.update( req=request ) )
         monkeypatch.setattr( cv.os, "_exit", lambda code: ( _ for _ in () ).throw( _Exited( code ) ) )
@@ -218,6 +227,7 @@ class TestDieNoSessionId:
         # that must not keep sending mis-attributed traffic.
         def boom( request, debug ):
             raise RuntimeError( "server down" )
+        monkeypatch.setattr( cv, "_IS_MCP_SERVER", True )
         monkeypatch.setattr( cv, "notify_user_async", boom )
         monkeypatch.setattr( cv.os, "_exit", lambda code: ( _ for _ in () ).throw( _Exited( code ) ) )
 
@@ -225,6 +235,50 @@ class TestDieNoSessionId:
             cv._die_no_session_id()
 
         assert "Failed to send error notification" in caplog.text
+
+
+class TestDieNoSessionIdOffTheServer:
+    """
+    The other side of the same gate. `os._exit` in a library takes the HOST process
+    down with no traceback and no summary — a test suite dies mid-run with nothing
+    naming the cause. Off the server, this must raise something catchable instead.
+    """
+
+    def test_it_raises_a_named_exception_instead_of_exiting( self, monkeypatch ):
+        exits = []
+        monkeypatch.setattr( cv, "_IS_MCP_SERVER", False )
+        monkeypatch.setattr( cv, "notify_user_async", lambda request, debug: None )
+        monkeypatch.setattr( cv.os, "_exit", lambda code: exits.append( code ) )
+
+        with pytest.raises( cv.SessionIdUnavailable ) as ei:
+            cv._die_no_session_id()
+
+        assert exits == [], "os._exit must not be reached off the server"
+        assert "not the MCP server" in str( ei.value ), (
+            "the exception should say WHY it raised rather than exited"
+        )
+
+    def test_it_still_alerts_before_raising( self, monkeypatch ):
+        """
+        The alert is not the server's privilege — a session id that never resolved is
+        worth announcing either way. Only the process death is gated.
+        """
+        sent = {}
+        monkeypatch.setattr( cv, "_IS_MCP_SERVER", False )
+        monkeypatch.setattr( cv, "notify_user_async",
+                             lambda request, debug: sent.update( req=request ) )
+
+        with pytest.raises( cv.SessionIdUnavailable ):
+            cv._die_no_session_id()
+
+        assert sent[ "req" ].sender_id.endswith( "#mcp-error" )
+
+    def test_the_module_default_is_the_safe_one( self ):
+        """
+        A discriminator defaulting to the dangerous value is not a control. Import
+        must leave it False; only the entry point sets it True.
+        """
+        assert cv._IS_MCP_SERVER is False
 
 
 # ── the gate every ask and notify passes through ──────────────────────────────
