@@ -5,16 +5,29 @@ Smoke test — end-to-end voice injection via UserPromptSubmit hook.
 Tests the complete flow: write JSONL buffer -> pipe mock payload through
 hook -> verify additionalContext output -> verify buffer consumed.
 
+🔴 READ THIS BEFORE CHANGING THE PATCHES BELOW. What was found here on
+2026-08-26 was a DEFECT, not a flaky test. The intermittent red was the symptom;
+the defect was that this file had no isolation at all and was reaching into
+production state every time it ran.
+
 Everything here drives the REAL user_prompt_submit.main(), which resolves a
-session id and then reads and writes that session's state. A fake session id is
-NOT isolation: resolve_stable_session_id() does not reject an unknown id, it
-falls back to whatever live Claude Code session the bridge directory points at —
-measured 2026-08-26, that was a colleague's running seat, not the one invoking
-pytest. Both e2e tests therefore patch the session-id resolvers on
-user_prompt_submit itself (not on session_bridge, where the patch never reaches
-the copy main() calls) and assert afterwards that the synthetic id was the one
-used. Keep that assertion: it is the only thing standing between this file and a
-live session's DM inbox.
+session id and then reads and writes that session's state. A made-up session id
+is NOT isolation: resolve_stable_session_id() does not reject an unknown id, it
+falls back to whatever live Claude Code session the bridge directory points at.
+Measured — the id it returned belonged to a colleague's running seat, not to the
+process invoking pytest. main() then called surface_dm_inbox() for that session,
+which does a live GET /api/dm/list and ADVANCES that session's DM high-water
+mark. Advancing it marks messages as already-shown, so a test run could consume
+a real DM addressed to a real person, and nothing in the output would say so.
+The two failures in twenty runs were simply the occasions when a DM happened to
+land inside the window and made the damage visible.
+
+So the fix is not "stop the red". Both e2e tests patch the session-id resolvers
+on user_prompt_submit itself (not on session_bridge, where the patch never
+reaches the copy main() actually calls), stub the two contributors that leave
+this process, and then ASSERT the synthetic id was the one used. Keep that
+assertion. It is the only thing standing between this file and a live
+colleague's inbox, and it fails on every run rather than on unlucky ones.
 """
 import io
 import json
