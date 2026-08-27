@@ -30,10 +30,20 @@ import lupin_mcp.cosa_voice_mcp as m
 
 @pytest.fixture
 def restore_globals():
-    """Snapshot and restore the two globals the watcher rewrites."""
+    """
+    Snapshot and restore every module global these tests touch.
+
+    ⚠️ `_session_ready` and `_session_failed` are in here because leaving them out
+    cost two unrelated tests in a sibling file — measured, not anticipated. Phase 1's
+    tests replace the Event and a failed resolution flips the flag; both outlive the
+    test unless restored, and the 41 files importing this module see the wreckage.
+    """
     session, sender = m.SESSION_ID, m.SENDER_ID
+    ready, failed   = m._session_ready, m._session_failed
     yield
-    m.SESSION_ID, m.SENDER_ID = session, sender
+    m.SESSION_ID, m.SENDER_ID   = session, sender
+    m._session_ready            = ready
+    m._session_failed           = failed
 
 
 class _Bridge:
@@ -330,3 +340,135 @@ class TestTheMtimeGuardDoesItsOwnWork:
 # where a reader looks for it. It is redundancy for legibility, not a control — and
 # recording that is better than leaving a future reader to re-derive it, or to
 # "strengthen" a test that was never testing anything.
+
+
+class TestPhaseOneDoesNotWatch:
+    """
+    THE DEFECT THIS ROW WAS FILED FOR, held by an assertion rather than by a hang.
+
+    `_session_watcher_thread` used to fall from phase 1 straight into the forever
+    poll, so IMPORTING the module started a loop that ran for the life of the
+    process and credited 31 lines of session_bridge.py to no test. Phase 2 is now
+    started only by `_start_bridge_watch()`, called from the server's own main block.
+
+    Restoring the old fall-through makes the phase-1 tests HANG rather than fail —
+    caught by mutation, and a hang is a bad signal: it looks like a slow box. These
+    two turn it into a red.
+    """
+
+    def test_phase_one_returns_instead_of_watching( self, restore_globals ):
+        import time as _t
+        with patch.multiple( m,
+                             wait_for_session_id=lambda **k: "cccccccc-rest",
+                             _get_cc_metadata=lambda: { "source": "session_file" },
+                             _get_sender_id=lambda proj, sid: "s",
+                             _watch_bridge_for_changes=lambda *a, **k: pytest.fail(
+                                 "phase 1 called the watcher - the fall-through is back, "
+                                 "and importing this module starts a poll loop again" ) ):
+            m._session_ready = threading.Event()
+            started = _t.monotonic()
+            m._session_watcher_thread()
+            elapsed = _t.monotonic() - started
+
+        assert elapsed < 2.0, f"phase 1 did not return promptly ({elapsed:.1f}s)"
+
+    def test_phase_one_still_opens_the_gate_on_the_way_out( self, restore_globals ):
+        """
+        POSITIVE CONTROL, and the reason phase 1 may not simply be deleted. Every
+        gated tool call blocks on `_session_ready`; suppressing phase 1 takes a suite
+        from `333 passed` to a silent `EXIT=1`. Splitting phase 2 off must not cost
+        this.
+        """
+        with patch.multiple( m,
+                             wait_for_session_id=lambda **k: ( _ for _ in () ).throw(
+                                 RuntimeError( "no bridge" ) ),
+                             _watch_bridge_for_changes=lambda *a, **k: None ):
+            m._session_ready = threading.Event()
+            m._session_watcher_thread()
+
+            assert m._session_ready.is_set(), (
+                "the gate must open even when resolution FAILED - it is set in a "
+                "finally, and every gated tool call waits on it"
+            )
+
+
+class TestStartBridgeWatch:
+    """
+    `_start_bridge_watch` is the gate itself — the one call that makes phase 2 run.
+    Both of its guarantees were unheld until mutation said so: removing the
+    phase-1 wait passed 358 tests, and so did deleting the call from the entry point.
+    """
+
+    def test_it_waits_for_phase_one_before_polling( self, restore_globals ):
+        """
+        Phase 2 reads the RESOLVED session id as its baseline. Starting before phase 1
+        finishes would baseline against the fallback and then report the real id as a
+        context clear that never happened.
+        """
+        called = []
+        m._session_ready = threading.Event()          # deliberately never set
+
+        with patch.object( m, "_watch_bridge_for_changes",
+                           lambda *a, **k: called.append( 1 ) ):
+            t = m._start_bridge_watch( ready_timeout=0.05 )
+            t.join( timeout=2.0 )
+
+        assert called == [], "phase 2 polled before phase 1 had resolved anything"
+        assert not t.is_alive(), "the watch thread did not exit when the gate stayed shut"
+
+    def test_it_polls_once_phase_one_has_opened_the_gate( self, restore_globals ):
+        """POSITIVE CONTROL — without this the test above passes on a no-op."""
+        called = []
+        m._session_ready = threading.Event()
+        m._session_ready.set()
+
+        with patch.object( m, "_watch_bridge_for_changes",
+                           lambda *a, **k: called.append( 1 ) ):
+            t = m._start_bridge_watch( ready_timeout=2.0 )
+            t.join( timeout=2.0 )
+
+        assert called == [ 1 ], "phase 2 never started even though the gate was open"
+
+    def test_the_thread_it_starts_is_a_daemon_named_for_the_watch( self, restore_globals ):
+        m._session_ready = threading.Event()
+        with patch.object( m, "_watch_bridge_for_changes", lambda *a, **k: None ):
+            t = m._start_bridge_watch( ready_timeout=0.05 )
+            assert t.daemon is True, "a non-daemon watch would block interpreter exit"
+            assert t.name == "session-id-watcher"
+            t.join( timeout=2.0 )
+
+
+class TestTheEntryPointStartsTheWatch:
+    """
+    The companion to `TestTheEntryPointActuallySetsTheFlag`, and unheld for the same
+    reason: the call lives inside `if __name__ == "__main__":`, so no import executes
+    it. Deleting it passed 358 tests — and a real server would then never notice a
+    context clear, silently keeping a stale session id for its whole life.
+    """
+
+    def test_the_main_block_calls_start_bridge_watch( self ):
+        import ast
+        body  = TestTheEntryPointActuallySetsTheFlag._main_block()
+        calls = [ n.value.func.id for n in body
+                  if isinstance( n, ast.Expr ) and isinstance( n.value, ast.Call )
+                  and isinstance( n.value.func, ast.Name ) ]
+
+        assert "_start_bridge_watch" in calls, (
+            "the entry point does not start the bridge watch. A real MCP server would "
+            f"never detect a context clear. Calls found: {calls}"
+        )
+
+    def test_the_watch_starts_before_mcp_run( self ):
+        """`mcp.run()` blocks for the process's life — anything after it never runs."""
+        import ast
+        body = TestTheEntryPointActuallySetsTheFlag._main_block()
+
+        watch_at = run_at = None
+        for i, n in enumerate( body ):
+            if not ( isinstance( n, ast.Expr ) and isinstance( n.value, ast.Call ) ): continue
+            f = n.value.func
+            if isinstance( f, ast.Name ) and f.id == "_start_bridge_watch": watch_at = i
+            if isinstance( f, ast.Attribute ) and f.attr == "run":          run_at   = i
+
+        assert watch_at is not None and run_at is not None, ( watch_at, run_at )
+        assert watch_at < run_at, "the watch must start BEFORE mcp.run(), which never returns"

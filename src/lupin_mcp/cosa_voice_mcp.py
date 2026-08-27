@@ -545,20 +545,22 @@ def _watch_bridge_for_changes( stop_event=None, poll_interval=2.0, max_iteration
 
 def _session_watcher_thread():
     """
-    Persistent daemon thread that resolves and monitors the CC session_id.
+    Resolve the CC session_id once, then signal `_session_ready`. PHASE 1 ONLY.
 
-    Phase 1 (Initial resolution):
-        Polls for the real CC session_id via wait_for_session_id(). Signals
-        _session_ready so gated tool calls can proceed.
+    ⚠️ CHANGED 2026-08-26 (row `87ae7234`). This used to fall straight into phase 2's
+    forever-poll, so IMPORTING this module started a loop that ran for the life of the
+    process — including a test process, where it executed 31 lines of session_bridge.py
+    that no test reached and coverage.py credited anyway. Phase 2 is now started
+    SEPARATELY and only by the server; see `_start_bridge_watch`.
 
-    Phase 2 (Continuous monitoring):
-        Watches the resolved bridge file for changes (mtime check every 2s).
-        If the session ID changes (context clear), updates SESSION_ID and
-        SENDER_ID atomically. Clears the session bridge cache before each
-        poll to ensure fresh resolution.
+    Phase 1 STAYS at import and is load-bearing: `_wait_for_sender_id` blocks on
+    `_session_ready`, which this sets in a `finally`. Suppressing phase 1 takes a suite
+    from `333 passed` to a silent `EXIT=1` — measured, not assumed.
 
-    This replaces the one-shot _upgrade_session_id_background() to handle
-    context clears that overwrite the bridge file mid-session.
+    Ensures:
+        - sets `_session_ready` on every path, success or failure
+        - sets `_session_failed` when resolution raised
+        - RETURNS once resolution is done — it no longer watches
     """
     global SESSION_ID, SENDER_ID, _session_failed
 
@@ -588,13 +590,46 @@ def _session_watcher_thread():
     finally:
         _session_ready.set()
 
-    # ── Phase 2: Persistent bridge file watcher ─────────────────────────
-    _watch_bridge_for_changes()
+
+def _start_bridge_watch( ready_timeout=15.0 ):
+    """
+    Start phase 2 — THE SERVER ONLY, and only by explicit call.
+
+    Row `87ae7234`. Phase 2 watches the bridge file so a context clear updates
+    SESSION_ID mid-session. Only a long-lived MCP server needs that; an importing
+    process does not, and a test process actively must not — a loop nobody drives
+    still executes product lines, and coverage.py credits them to no test at all.
+
+    THE GATE IS THE CALL ITSELF. There is no environment sniff and no
+    PYTEST_CURRENT_TEST check: phase 2 runs because the entry point ASKED for it,
+    beside `_IS_MCP_SERVER = True`, in the one block that already means "I am the
+    server". A flag read from the environment would have to be set correctly in five
+    separate launch configs, and a missed one would silently disable context-clear
+    detection in a real server; a call in the main block cannot be missed.
+
+    Requires:
+        - phase 1 has been started (this waits for `_session_ready` before polling,
+          because phase 2 reads the resolved SESSION_ID as its baseline)
+
+    Ensures:
+        - returns the started daemon Thread, or None if phase 1 never resolved
+        - never raises
+    """
+    def _run():
+        # Phase 2's baseline is the resolved id, so it must not start before phase 1.
+        if not _session_ready.wait( timeout=ready_timeout ):
+            logger.warning( "Bridge watch not started: session never resolved" )
+            return
+        _watch_bridge_for_changes()
+
+    thread = threading.Thread( target=_run, name="session-id-watcher", daemon=True )
+    thread.start()
+    return thread
 
 
 _watcher_thread = threading.Thread(
     target=_session_watcher_thread,
-    name="session-id-watcher",
+    name="session-id-resolver",
     daemon=True
 )
 _watcher_thread.start()
@@ -4860,5 +4895,8 @@ if __name__ == "__main__":
     # exactly as it always has. See the flag's definition for why this is not an
     # environment check, and for what a future console_scripts entry point owes.
     _IS_MCP_SERVER = True
+    # PHASE 2 STARTS HERE AND NOWHERE ELSE (row `87ae7234`). Importing this module
+    # must not start a poll loop that credits coverage to no test.
+    _start_bridge_watch()
     _maybe_start_commons_archival_daemon()
     mcp.run()

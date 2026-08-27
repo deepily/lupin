@@ -66,23 +66,37 @@ def _sleeper( iterations ):
 
 
 def _run_watcher( monkeypatch, iterations=1 ):
+    """
+    Drive PHASE 2 for `iterations` polls.
+
+    ⚠️ CHANGED 2026-08-26 (row `87ae7234`): this used to call
+    `_session_watcher_thread()`, which fell straight from phase 1 into the forever
+    poll. Phase 2 is now `_watch_bridge_for_changes()` and the server starts it
+    explicitly, so the loop is reached DIRECTLY here. The `_StopLoop`/sleeper
+    mechanism is unchanged — the no-stop_event path still calls `time.sleep`.
+    """
     monkeypatch.setattr( cv.time, "sleep", _sleeper( iterations ) )
     with pytest.raises( _StopLoop ):
-        cv._session_watcher_thread()
+        cv._watch_bridge_for_changes()
 
 
 # ── phase 1: initial resolution ───────────────────────────────────────────────
 
 class TestWatcherInitialResolution:
+    """
+    ⚠️ `_session_watcher_thread` is PHASE 1 ONLY as of 2026-08-26 (row `87ae7234`).
+    It resolves the id, sets `_session_ready` in a `finally`, and RETURNS. It no
+    longer falls into the poll loop, so these tests no longer need a sentinel to
+    escape one. Phase 1 still runs at import and is load-bearing — suppressing it
+    takes a suite from `333 passed` to a silent `EXIT=1`.
+    """
 
     def test_a_resolved_id_upgrades_both_the_session_and_the_sender( self, monkeypatch, caplog ):
         monkeypatch.setattr( cv, "wait_for_session_id", lambda **k: "bbbbbbbb-1111-2222" )
         monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "source": "session_file" } )
         monkeypatch.setattr( cv, "CANONICAL_PROJECT", "lupin", raising=False )
-        monkeypatch.setattr( cv.time, "sleep", _sleeper( 0 ) )
-
-        with caplog.at_level( "INFO", logger=cv.logger.name ), pytest.raises( _StopLoop ):
-            cv._session_watcher_thread()
+        with caplog.at_level( "INFO", logger=cv.logger.name ):
+            cv._session_watcher_thread()      # phase 1 only — it RETURNS now
 
         assert cv.SESSION_ID == "bbbbbbbb"
         assert cv.SENDER_ID  == "claude.code@lupin.deepily.ai#bbbbbbbb"
@@ -97,9 +111,7 @@ class TestWatcherInitialResolution:
         """
         monkeypatch.setattr( cv, "wait_for_session_id", lambda **k: "aaaaaaaa-x" )
         monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "source": "fallback" } )
-        monkeypatch.setattr( cv.time, "sleep", _sleeper( 0 ) )
-
-        with caplog.at_level( "WARNING", logger=cv.logger.name ), pytest.raises( _StopLoop ):
+        with caplog.at_level( "WARNING", logger=cv.logger.name ):
             cv._session_watcher_thread()
 
         assert "No session bridge file found" in caplog.text
@@ -114,9 +126,7 @@ class TestWatcherInitialResolution:
         def boom( **k ):
             raise RuntimeError( "no bridge ever appeared" )
         monkeypatch.setattr( cv, "wait_for_session_id", boom )
-        monkeypatch.setattr( cv.time, "sleep", _sleeper( 0 ) )
-
-        with caplog.at_level( "CRITICAL", logger=cv.logger.name ), pytest.raises( _StopLoop ):
+        with caplog.at_level( "CRITICAL", logger=cv.logger.name ):
             cv._session_watcher_thread()
 
         assert cv._session_failed is True
