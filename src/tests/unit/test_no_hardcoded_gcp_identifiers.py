@@ -26,6 +26,7 @@ project guard still reports green.
 
 Venue: :7999-eligible — pure `git ls-files` + file reads. No network, no mutation.
 """
+import ast
 import os
 import re
 import subprocess
@@ -150,6 +151,15 @@ def supplying_occurrences( text ):
         - `${VAR:-...}` / `${VAR:=...}` DO match: they are silent defaults
         - anything else containing the literal is treated as supplying, so a new
           syntax nobody anticipated fails CLOSED rather than sailing through
+
+    KNOWN HOLE — LINE-BASED, SO IT CANNOT SEE A MULTI-LINE STRING. Quote state is
+    tracked WITHIN one line and only `#` is stripped, so the body of a Python
+    triple-quoted block reads as code and its prose lands as a hit. That is why
+    `.py` is routed to `_py_supplying_occurrences` below instead of here. Every
+    other suffix still uses this function and still has the hole; it has simply
+    never bitten, because no `.yml`/`.json`/`.tf` file in this tree writes prose
+    about the project id inside a multi-line scalar. If one ever does, teach the
+    parser for that suffix — do NOT add an exemption.
     """
     hits = []
     for lineno, raw in enumerate( text.splitlines(), start=1 ):
@@ -159,6 +169,92 @@ def supplying_occurrences( text ):
         if _is_inert_error_message( code, idx ): continue
         hits.append( ( lineno, raw.strip() ) )
     return hits
+
+
+# Positions in which a string constant CANNOT hand its value to anything: an
+# `in`/`==` test, an assert's message, and a bare string expression statement (a
+# docstring). Deliberately an INERT list rather than a SUPPLYING list — everything
+# not named here is treated as supplying, so an ast node nobody anticipated fails
+# CLOSED, exactly as the line-based predicate does.
+PY_INERT_PARENTS = ( ast.Compare, ast.Assert, ast.Expr )
+
+
+def _py_literal_lineno( node, idx ):
+    """
+    The line the literal actually sits on, not the line the string STARTS on.
+
+    A triple-quoted constant reports `node.lineno` at its opening quotes, which for
+    a 28-line banner is nowhere near the id. Reading a failure message that names a
+    line the literal is not on is how someone concludes the guard is broken.
+
+    Requires:
+        - node is an ast.Constant holding a str
+        - idx is the index of the literal inside node.value
+
+    Ensures:
+        - returns node.lineno plus the number of newlines preceding idx
+    """
+    return node.lineno + node.value[ :idx ].count( "\n" )
+
+
+def _py_supplying_occurrences( text ):
+    """
+    Lines where the literal appears in a Python position that can SUPPLY it.
+
+    The line-based predicate cannot see a multi-line string, so a prose banner
+    assigned to a constant reads as an assignment. POSITION alone does not separate
+    the two either: a banner assigned to `_IMAGE_GEN_NOTICE` is an assignment RHS, the same
+    position as a real `PROJECT_ID = "<id>"`. Two properties are needed.
+
+    Requires:
+        - text is the full contents of a .py file
+
+    Ensures:
+        - a literal in an inert position never matches (see PY_INERT_PARENTS)
+        - a literal in a MULTI-LINE string never matches: a supplied project id is
+          a value, and a value is never a paragraph
+        - a literal in a single-line string anywhere else DOES match — assignment
+          RHS, keyword argument, call argument, dict value, os.environ subscript,
+          and an f-string fragment, which is how a real id is embedded in a URL
+        - a file that does not parse falls back to the line-based predicate rather
+          than returning [], so a syntax error cannot silently disarm the guard
+
+    Raises:
+        - nothing; SyntaxError is caught and degraded to the line-based path
+    """
+    try:
+        tree = ast.parse( text )
+    except SyntaxError:
+        return supplying_occurrences( text )
+
+    parents = {}
+    for node in ast.walk( tree ):
+        for child in ast.iter_child_nodes( node ): parents[ child ] = node
+
+    lines = text.splitlines()
+    hits  = []
+    for node in ast.walk( tree ):
+        if not ( isinstance( node, ast.Constant ) and isinstance( node.value, str ) ): continue
+        idx = node.value.find( SANDBOX_PROJECT_ID )
+        if idx == -1: continue
+        if isinstance( parents.get( node ), PY_INERT_PARENTS ): continue
+        if "\n" in node.value: continue
+        lineno = _py_literal_lineno( node, idx )
+        raw    = lines[ lineno - 1 ].strip() if lineno - 1 < len( lines ) else ""
+        hits.append( ( lineno, raw ) )
+    return sorted( hits )
+
+
+def supplying_occurrences_for( rel_path, text ):
+    """
+    Route a file to the predicate that can actually read it.
+
+    Ensures:
+        - `.py` is parsed with ast; every other suffix keeps the line-based path
+        - the return shape is identical either way: [ (lineno, line) ]
+    """
+    if rel_path.endswith( ".py" ): return _py_supplying_occurrences( text )
+    return supplying_occurrences( text )
 
 
 def test_no_hardcoded_gcp_project_id_on_any_executable_surface():
@@ -176,7 +272,7 @@ def test_no_hardcoded_gcp_project_id_on_any_executable_surface():
     exemption fixes one script and re-arms the guard for the next one, and it
     would have silently exempted a real assignment added to it later.
     """
-    offenders = { f: supplying_occurrences( _read( f ) ) for f in scanned_files() }
+    offenders = { f: supplying_occurrences_for( f, _read( f ) ) for f in scanned_files() }
     offenders = { f: hits for f, hits in offenders.items() if hits }
     assert not offenders, (
         f"{len( offenders )} tracked executable file(s) hardcode the sandbox project id "
@@ -242,6 +338,137 @@ def test_the_live_offenders_are_exactly_the_two_prose_hits_in_lupin_vm():
     text = _read( "src/scripts/lupin-vm.sh" )
     assert SANDBOX_PROJECT_ID in text, "premise gone — the file no longer names the id at all"
     assert supplying_occurrences( text ) == [], "a supplying occurrence appeared in lupin-vm.sh"
+
+
+# ---------------------------------------------------------------------------
+# CONTROLS for the .py predicate (row e2099400 follow-up, 2026-08-26). The
+# line-based predicate flagged two prose hits in gemini_client.py and its test.
+# POSITION alone does not clear them — the banner is an assignment RHS, the same
+# position as a real assignment — so the .py path tests position AND shape. These
+# controls exist because a predicate that returned [] for every .py file would
+# make THE GUARD pass on any tree, which is the failure this narrowing can cause.
+# ---------------------------------------------------------------------------
+
+_PY_BANNER = (
+    "_IMAGE_GEN_NOTICE = \"\"\"\n"
+    "LOUD NOTICE\n"
+    "Imagen is not reachable on the GCP project\n"
+    f"({SANDBOX_PROJECT_ID}). models.get returns 404.\n"
+    "\"\"\"\n"
+)
+
+
+def test_a_python_prose_banner_is_not_an_offender():
+    """
+    The case that started this: a multi-line constant printed to stderr. It IS an
+    assignment RHS, so a position-only rule would still flag it. Shape is what
+    separates a paragraph from a value.
+    """
+    assert _py_supplying_occurrences( _PY_BANNER ) == []
+
+
+def test_a_python_assertion_about_the_id_is_not_an_offender():
+    """`assert "<id>" in err` tests the id, it does not supply it."""
+    text = f'def t( err ):\n    assert "{SANDBOX_PROJECT_ID}" in err, "must name it"\n'
+    assert _py_supplying_occurrences( text ) == []
+
+
+def test_a_python_docstring_naming_the_id_is_not_an_offender():
+    """A bare string expression statement is a record, like a `#` comment."""
+    text = f'def t():\n    """See {SANDBOX_PROJECT_ID} for why."""\n    return 1\n'
+    assert _py_supplying_occurrences( text ) == []
+
+
+@pytest.mark.parametrize( "source,label", [
+    ( f'PROJECT_ID = "{SANDBOX_PROJECT_ID}"\n',                       "assignment RHS" ),
+    ( f'client( project="{SANDBOX_PROJECT_ID}" )\n',                  "keyword argument" ),
+    ( f'client( "{SANDBOX_PROJECT_ID}" )\n',                          "call argument" ),
+    ( f'CFG = {{ "project": "{SANDBOX_PROJECT_ID}" }}\n',             "dict value" ),
+    ( f'os.environ[ "GOOGLE_CLOUD_PROJECT" ] = "{SANDBOX_PROJECT_ID}"\n', "environ subscript" ),
+    ( f'url = f"https://x/projects/{SANDBOX_PROJECT_ID}/models"\n',   "f-string fragment" ),
+    ( f'PROJECT_ID: str = "{SANDBOX_PROJECT_ID}"\n',                  "annotated assignment" ),
+    ( f'def f( project="{SANDBOX_PROJECT_ID}" ): pass\n',             "default argument" ),
+    ( f'def f(): return "{SANDBOX_PROJECT_ID}"\n',                    "return value" ),
+] )
+def test_a_real_python_supply_is_still_caught( source, label ):
+    """
+    EVERY supplying position, one case each. If the narrowing is over-eager, the
+    arm it broke is named rather than left to a single collapsed assertion.
+    """
+    assert len( _py_supplying_occurrences( source ) ) == 1, f"{label} slipped through"
+
+
+def test_the_reported_line_is_where_the_literal_sits_not_where_the_string_starts():
+    """
+    ast reports a triple-quoted constant at its OPENING QUOTES. For the live banner
+    that is ten lines above the id. A failure message naming a line the literal is
+    not on is how a reader concludes the guard is broken and stops trusting it.
+
+    The expectation is DERIVED FROM THE SOURCE rather than computed by hand — a
+    hand-computed offset is a second thing that can be wrong, and it was on the
+    first draft of this test.
+    """
+    source = 'X = """a\nb\nc' + SANDBOX_PROJECT_ID + '"""\n'
+    expected = next( n for n, line in enumerate( source.splitlines(), start=1 )
+                       if SANDBOX_PROJECT_ID in line )
+
+    node = ast.parse( source ).body[ 0 ].value
+    assert node.lineno == 1, "premise: the constant opens on line 1"
+    assert expected    == 3, "premise: the id sits two lines below that"
+    assert _py_literal_lineno( node, node.value.find( SANDBOX_PROJECT_ID ) ) == expected
+
+    # And a single-line constant must report its own line unchanged.
+    one = ast.parse( f'X = "{SANDBOX_PROJECT_ID}"\n' ).body[ 0 ].value
+    assert _py_literal_lineno( one, one.value.find( SANDBOX_PROJECT_ID ) ) == 1
+
+
+def test_the_live_banner_would_report_the_line_the_id_is_actually_on():
+    """
+    The real file, not a fixture: gemini_client.py's banner constant opens at 37
+    while the id sits at 47 — the ten-line gap this offset exists to close.
+    """
+    src  = _read( "src/cosa/agents/presentation_generator/gemini_client.py" )
+    node = next( n for n in ast.walk( ast.parse( src ) )
+                   if isinstance( n, ast.Constant ) and isinstance( n.value, str )
+                   and SANDBOX_PROJECT_ID in n.value )
+    actual = next( n for n, line in enumerate( src.splitlines(), start=1 )
+                     if SANDBOX_PROJECT_ID in line )
+    assert node.lineno < actual, "premise gone — the constant no longer opens above the id"
+    assert _py_literal_lineno( node, node.value.find( SANDBOX_PROJECT_ID ) ) == actual
+
+
+def test_an_unparseable_python_file_falls_back_rather_than_disarming():
+    """
+    A SyntaxError must not return [] — that would let a broken file hide a real
+    assignment. It degrades to the line-based predicate, which still catches it.
+    """
+    text = f'def broken( :\nPROJECT_ID = "{SANDBOX_PROJECT_ID}"\n'
+    assert len( _py_supplying_occurrences( text ) ) == 1
+
+
+def test_the_dispatcher_sends_python_to_ast_and_everything_else_to_the_line_scanner():
+    """The routing itself, asserted — not assumed from the two predicates passing."""
+    assert supplying_occurrences_for( "a/b.py",  _PY_BANNER ) == []
+    assert supplying_occurrences_for( "a/b.sh",  _PY_BANNER ) != [], (
+        "the line-based path must still see the banner — that is the hole .py routing exists to close"
+    )
+
+
+def test_the_live_python_files_are_inert_and_still_name_the_id():
+    """
+    Pins WHY the tree is green, the same way the lupin-vm.sh control does. If
+    someone adds a real assignment to either file the guard goes red, and this
+    test documents that neither file was ever literal-free.
+    """
+    for rel in ( "src/cosa/agents/presentation_generator/gemini_client.py",
+                 "src/cosa/tests/unit/agents/presentation_generator/test_gemini_client.py" ):
+        text = _read( rel )
+        assert SANDBOX_PROJECT_ID in text, f"premise gone — {rel} no longer names the id"
+        assert supplying_occurrences_for( rel, text ) == [], f"a supplying occurrence appeared in {rel}"
+        assert supplying_occurrences( text ) != [], (
+            f"premise gone — {rel} no longer trips the LINE-based predicate, so it no "
+            f"longer demonstrates why the .py path is needed"
+        )
 
 
 def test_guard_covers_the_vertex_toggle_script():
