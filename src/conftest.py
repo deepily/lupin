@@ -314,6 +314,19 @@ def _git_reader( repo_root ):
     return read
 
 
+def _coarse_age( seconds ):
+    """
+    A duration as one coarse token — minutes, then hours, then days.
+
+    Shared by `_fetch_age` and the coverage-file disclosure so the two ages read the
+    same way. A reader comparing "fetched=2d-ago" against a coverage file's age should
+    not have to work out whether the two units mean the same thing.
+    """
+    if seconds < 3600:    return f"{int( seconds // 60 )}m"
+    if seconds < 86400:   return f"{int( seconds // 3600 )}h"
+    return f"{int( seconds // 86400 )}d"
+
+
 def _fetch_age( git ):
     """
     How long ago this repo last FETCHED, as a coarse string, or None.
@@ -336,10 +349,33 @@ def _fetch_age( git ):
         seconds = time.time() - os.path.getmtime( path )
     except OSError:
         return None
-    if seconds < 3600:    return f"{int( seconds // 60 )}m"
-    if seconds < 86400:   return f"{int( seconds // 3600 )}h"
-    return f"{int( seconds // 86400 )}d"
+    return _coarse_age( seconds )
 
+
+
+def _coverage_file_at_start():
+    """
+    What COVERAGE_FILE named, and whether that file ALREADY EXISTED, read once at import.
+
+    ⚠️ REPORTS EXISTENCE AND AGE, AND INFERS NOTHING FURTHER. Whether a pre-existing file
+    gets combined into, overwritten, or ignored depends on how the run was invoked, and a
+    diagnostic that guessed at that would be asserting something it did not measure. It
+    states what was on disk when this process started; the reader draws the conclusion.
+
+    WHY IT IS READ AT IMPORT: conftest is imported before collection, and the data file is
+    written at the END of a run — so a file present now is a PRIOR run's, which is exactly
+    the thing worth knowing. Read it later and this process's own output is indistinguishable
+    from someone else's.
+    """
+    path = os.environ.get( "COVERAGE_FILE" )
+    if not path: return ( None, None )
+    try:
+        return ( path, _coarse_age( time.time() - os.path.getmtime( path ) ) )
+    except OSError:
+        return ( path, None )                # absent, or unreadable — both mean "not a prior run I can date"
+
+
+_COVERAGE_FILE_AT_START = _coverage_file_at_start()
 
 def tree_state_line( git ):
     """
@@ -473,7 +509,13 @@ def pytest_terminal_summary( terminalreporter, exitstatus, config ):
     # A DEFAULTED MODE IS NOT THE SAME CLAIM AS A CHOSEN ONE, so the two are distinguished:
     # "off (defaulted)" says nobody asked for this, where a bare "off" would read as a decision.
     mode_txt     = _NETWORK_MODE if _NETWORK_MODE_RAW is not None else f"{_NETWORK_MODE} (defaulted)"
-    coverage_txt = os.environ.get( "COVERAGE_FILE" ) or "UNSET"
+    cov_path, cov_age = _COVERAGE_FILE_AT_START
+    if cov_path is None:
+        coverage_txt = "UNSET"
+    elif cov_age is None:
+        coverage_txt = f"{cov_path} (fresh)"
+    else:
+        coverage_txt = f"{cov_path} (pre-existing, {cov_age}-ago)"
     terminalreporter.write_line( f"[test-env] network={mode_txt} coverage-file={coverage_txt}" )
 
     if _NETWORK_MODE not in ( "count", "block" ):

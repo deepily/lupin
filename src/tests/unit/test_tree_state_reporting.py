@@ -392,14 +392,17 @@ class _Reporter:
         self.lines.append( line )
 
 
-def _env_line( monkeypatch, network_raw, coverage_file ):
-    """Drive the real hook with the environment set, and return its [test-env] line."""
+def _env_line( monkeypatch, network_raw, coverage_at_start=( None, None ) ):
+    """
+    Drive the real hook and return its [test-env] line.
+
+    `coverage_at_start` patches the CONSTANT, not the environment variable, because the
+    file's state is captured once at import — patching the env here would prove nothing
+    about what the line reports.
+    """
     monkeypatch.setattr( root_conftest, "_NETWORK_MODE_RAW", network_raw )
     monkeypatch.setattr( root_conftest, "_NETWORK_MODE", ( network_raw or "off" ).strip().lower() )
-    if coverage_file is None:
-        monkeypatch.delenv( "COVERAGE_FILE", raising=False )
-    else:
-        monkeypatch.setenv( "COVERAGE_FILE", coverage_file )
+    monkeypatch.setattr( root_conftest, "_COVERAGE_FILE_AT_START", coverage_at_start )
 
     reporter = _Reporter()
     root_conftest.pytest_terminal_summary( reporter, 0, None )
@@ -413,7 +416,7 @@ def test_the_env_line_prints_even_when_the_network_guard_is_disarmed( monkeypatc
     THE CASE THIS EXISTS FOR. With the mode off the guard's own report returns early and
     says nothing, so a disarmed run and an armed run with zero dials looked identical.
     """
-    assert _env_line( monkeypatch, None, None ) == "[test-env] network=off (defaulted) coverage-file=UNSET"
+    assert _env_line( monkeypatch, None ) == "[test-env] network=off (defaulted) coverage-file=UNSET"
 
 
 def test_a_defaulted_mode_is_not_reported_as_a_chosen_one( monkeypatch ):
@@ -421,24 +424,70 @@ def test_a_defaulted_mode_is_not_reported_as_a_chosen_one( monkeypatch ):
     "off" set on purpose and "off" because nobody set anything are different claims. A bare
     "off" would read as a decision somebody made.
     """
-    assert "network=off (defaulted)" in _env_line( monkeypatch, None, None )
-    assert "network=off"             in _env_line( monkeypatch, "off", None )
-    assert "(defaulted)"         not in _env_line( monkeypatch, "off", None )
+    assert "network=off (defaulted)" in _env_line( monkeypatch, None )
+    assert "network=off"             in _env_line( monkeypatch, "off" )
+    assert "(defaulted)"         not in _env_line( monkeypatch, "off" )
 
 
 def test_the_armed_modes_are_named( monkeypatch ):
     """The mode that decides whether an outbound dial raises is the one worth naming."""
-    assert "network=block" in _env_line( monkeypatch, "block", None )
-    assert "network=count" in _env_line( monkeypatch, "count", None )
+    assert "network=block" in _env_line( monkeypatch, "block" )
+    assert "network=count" in _env_line( monkeypatch, "count" )
 
 
 def test_the_coverage_file_is_named_or_said_to_be_unset( monkeypatch ):
     """
-    A coverage run refuses outright without COVERAGE_FILE, and two runs sharing one file
-    combine into a figure neither of them earned — so which file was in force is evidence.
+    A coverage run refuses outright without COVERAGE_FILE — the state behind a false green
+    that read 96.59% — so an unset file is stated rather than left blank.
     """
-    assert _env_line( monkeypatch, "block", "/tmp/a.coverage" ).endswith( "coverage-file=/tmp/a.coverage" )
-    assert _env_line( monkeypatch, "block", None ).endswith( "coverage-file=UNSET" )
+    assert _env_line( monkeypatch, "block", ( None, None ) ).endswith( "coverage-file=UNSET" )
+
+
+def test_a_file_that_already_existed_is_not_reported_like_a_fresh_one( monkeypatch ):
+    """
+    THE CASE THIS EXISTS FOR. A path that IS set can still be a stale file somebody else
+    wrote, and a figure combined into it is one neither run earned. "fresh" and
+    "pre-existing" must not render the same way.
+    """
+    fresh = _env_line( monkeypatch, "block", ( "/tmp/a.data", None ) )
+    stale = _env_line( monkeypatch, "block", ( "/tmp/a.data", "2d" ) )
+    assert fresh.endswith( "coverage-file=/tmp/a.data (fresh)" )
+    assert stale.endswith( "coverage-file=/tmp/a.data (pre-existing, 2d-ago)" )
+    assert fresh != stale
+
+
+def test_the_age_is_carried_verbatim_so_a_stale_file_reads_as_stale( monkeypatch ):
+    """An age that is present must reach the line — a dropped age reads as a fresh file."""
+    for age in ( "7m", "3h", "2d" ):
+        assert f"(pre-existing, {age}-ago)" in _env_line( monkeypatch, "block", ( "/tmp/a.data", age ) )
+
+
+def test_the_coarse_age_is_the_same_one_the_fetch_age_uses():
+    """
+    Shared formatting, asserted rather than assumed. A reader comparing fetched=2d-ago with
+    a coverage file's age should not have to check whether the units mean the same thing.
+    """
+    assert root_conftest._coarse_age( 59 * 60 )      == "59m"
+    assert root_conftest._coarse_age( 3 * 3600 )     == "3h"
+    assert root_conftest._coarse_age( 2 * 86400 )    == "2d"
+
+
+def test_the_coverage_state_is_captured_at_import_not_at_report_time( monkeypatch, tmp_path ):
+    """
+    WHY IT MUST BE EARLY: the data file is written at the END of a run, so a file present at
+    import is a PRIOR run's. Read it at report time and this process's own output would be
+    indistinguishable from somebody else's.
+    """
+    absent = tmp_path / "never-written.data"
+    monkeypatch.setenv( "COVERAGE_FILE", str( absent ) )
+    assert root_conftest._coverage_file_at_start() == ( str( absent ), None )
+
+    absent.write_text( "x" )
+    path, age = root_conftest._coverage_file_at_start()
+    assert path == str( absent ) and age is not None      # now datable, because it exists
+
+    monkeypatch.delenv( "COVERAGE_FILE", raising=False )
+    assert root_conftest._coverage_file_at_start() == ( None, None )
 
 
 def test_the_live_hook_prints_the_env_line_before_any_early_return():
