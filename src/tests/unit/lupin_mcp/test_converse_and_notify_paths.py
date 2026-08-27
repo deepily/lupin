@@ -163,6 +163,12 @@ class TestNotifyImplFallbacks:
             raise AssertionError( "an invalid request must never reach the transport" )
         monkeypatch.setattr( cv, "notify_user_async", must_not_run )
 
+        # Speakerphone state is read LIVE from the session bridge, so an unpinned
+        # test measures whichever box it runs on. Pinned OFF here: this is the arm
+        # where an unrecognised value must reach validation untouched.
+        import lupin_cli.claude_code.hooks.lib.session_bridge as sb
+        monkeypatch.setattr( sb, "get_speakerphone", lambda sid: False )
+
         assert "validation error" in cv._notify_impl( "hello", notification_type="not-a-type" )
 
     def test_a_bad_priority_is_a_validation_error_not_a_crash( self, monkeypatch ):
@@ -170,7 +176,59 @@ class TestNotifyImplFallbacks:
             raise AssertionError( "an invalid request must never reach the transport" )
         monkeypatch.setattr( cv, "notify_user_async", must_not_run )
 
+        # Speakerphone state is read LIVE from the session bridge, so an unpinned
+        # test measures whichever box it runs on. Pinned OFF here: this is the arm
+        # where an unrecognised value must reach validation untouched.
+        import lupin_cli.claude_code.hooks.lib.session_bridge as sb
+        monkeypatch.setattr( sb, "get_speakerphone", lambda sid: False )
+
         assert "validation error" in cv._notify_impl( "hello", priority="not-a-priority" )
+
+    def test_speakerphone_on_does_not_launder_an_unrecognised_priority( self, monkeypatch ):
+        """
+        The speakerphone arm of the same check — and the only one that exercises
+        the lifting path at all.
+
+        WHY IT EXISTS (row e2099400): speakerphone ON used to rewrite ANY priority
+        outside ( "high", "urgent" ) to "high". An unrecognised value was rewritten
+        along with the valid ones, so by the time NotificationPriority( priority )
+        ran the bad value no longer existed — the call shipped HIGH and reported
+        "Notification sent (delivered)". A priority nobody chose, delivered silently.
+
+        The OFF-arm tests above cannot catch that: with speakerphone OFF the bad
+        value is never rewritten, so they stay green against the defect. This one
+        goes red against the old predicate and is the actual regression guard.
+
+        Requires:
+            - speakerphone reads True, so the lift branch is entered
+
+        Ensures:
+            - nothing reaches the transport
+            - the caller is told, rather than getting a success string
+        """
+        import lupin_cli.claude_code.hooks.lib.session_bridge as sb
+        shipped = []
+        monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "session_id": "aaaaaaaa" } )
+        monkeypatch.setattr( sb, "get_speakerphone", lambda sid: True )
+        monkeypatch.setattr( cv, "_outbox_has_backlog", lambda: False )
+
+        class _Sent:
+            success = True
+            status  = "delivered"
+            message = ""
+        # Capture rather than raise: asserting on WHAT SHIPPED names the corruption
+        # ("shipped as high") instead of only reporting that something was sent.
+        monkeypatch.setattr( cv, "notify_user_async",
+                             lambda request, debug: shipped.append( request ) or _Sent() )
+
+        result = cv._notify_impl( "hello", priority="not-a-priority" )
+
+        assert not shipped, (
+            "an unrecognised priority was laundered into a valid one and shipped as "
+            f"{shipped[ 0 ].priority.value!r} — the lift must not rewrite a value "
+            "that validation would have rejected"
+        )
+        assert "validation error" in result
 
 
 class TestNotifyToolDelegates:
