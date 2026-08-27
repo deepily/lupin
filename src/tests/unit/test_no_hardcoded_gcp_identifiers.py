@@ -313,6 +313,46 @@ def supplying_occurrences_for( rel_path, text ):
     return supplying_occurrences( text )
 
 
+def repin_guidance( offenders, texts ):
+    """
+    The half of PINNED_PROSE a person actually meets: what to do when a red is a
+    prose edit rather than a new hardcode.
+
+    A pin is a hash of one line's exact text, so ADDING A SPACE to the banner turns
+    it red — which is the mechanism working, and is indistinguishable from a real
+    hardcode if the message only ever says "hardcodes the sandbox project id". The
+    guidance carries the recomputed pin so re-pinning is a copy, not a puzzle.
+
+    Requires:
+        - offenders maps rel_path -> [ (lineno, line) ]
+        - texts maps rel_path -> THE EXACT TEXT THAT WAS SCANNED
+
+    Ensures:
+        - the recomputed hash comes from `texts`, never from a fresh read: a report
+          rendered against a re-read source is a different measurement than the one
+          that produced the finding, and it can disagree with it
+        - returns "" when no offender sits in a file PINNED_PROSE already knows
+    """
+    known = [ ( f, n ) for f, hits in offenders.items() for n, _ in hits
+                       if any( pf == f for pf, _pn in PINNED_PROSE ) ]
+    if not known: return ""
+
+    lines = []
+    for f, n in known:
+        source = texts[ f ].splitlines()
+        raw    = source[ n - 1 ] if n - 1 < len( source ) else ""
+        lines.append( f'    ( "{f}", {n} ): "{_line_pin( raw )}",' )
+    return (
+        "\n\nONE OR MORE OF THESE IS IN A FILE PINNED_PROSE ALREADY KNOWS. If you EDITED "
+        "prose that names the id — even by one space — the pin no longer matches and that "
+        "is the mechanism working, not a new hardcode. Re-read the line, satisfy yourself "
+        "it still supplies nothing, then update PINNED_PROSE to:\n"
+        + "\n".join( lines )
+        + "\nIf the line is a real assignment, do NOT pin it — a single-line value can "
+          "never be pinned, and pinning is not an exemption route."
+    )
+
+
 def test_no_hardcoded_gcp_project_id_on_any_executable_surface():
     """
     THE GUARD. Scans what git tracks — not what someone remembered to list.
@@ -328,7 +368,8 @@ def test_no_hardcoded_gcp_project_id_on_any_executable_surface():
     exemption fixes one script and re-arms the guard for the next one, and it
     would have silently exempted a real assignment added to it later.
     """
-    offenders = { f: supplying_occurrences_for( f, _read( f ) ) for f in scanned_files() }
+    texts     = { f: _read( f ) for f in scanned_files() }
+    offenders = { f: supplying_occurrences_for( f, text ) for f, text in texts.items() }
     offenders = { f: hits for f, hits in offenders.items() if hits }
     assert not offenders, (
         f"{len( offenders )} tracked executable file(s) hardcode the sandbox project id "
@@ -336,6 +377,7 @@ def test_no_hardcoded_gcp_project_id_on_any_executable_surface():
         f"ANTHROPIC_VERTEX_PROJECT_ID — a literal here can silently bill the wrong "
         f"project while every guard reports green. Offenders (file: line): "
         + "; ".join( f"{f}: {[ n for n, _ in hits ]}" for f, hits in offenders.items() )
+        + repin_guidance( offenders, texts )
     )
 
 
@@ -530,6 +572,41 @@ def test_a_single_line_supply_can_never_be_pinned():
     assert _is_pinned_prose( rel, lineno, "    " + raw, "a\n" + raw ) is False, (
         "re-indenting the pinned line kept its pin — _line_pin must hash the exact text"
     )
+
+
+def test_a_broken_pin_tells_the_reader_how_to_re_pin_it():
+    """
+    Mr Radio's probe, made permanent: add ONE SPACE to the banner line and the pin
+    stops matching. That red is correct, and on its own it reads as "you hardcoded
+    the project id" — which is the wrong instruction for someone who just reformatted
+    a paragraph. The message must name the pin and hand over the recomputed hash.
+    """
+    rel  = "src/cosa/agents/presentation_generator/gemini_client.py"
+    ( _pf, lineno ), _pin = next( iter( PINNED_PROSE.items() ) )
+    source = _read( rel ).splitlines()
+    edited = list( source )
+    edited[ lineno - 1 ] = edited[ lineno - 1 ] + " "          # one trailing space
+    text   = "\n".join( edited ) + "\n"
+
+    hits = supplying_occurrences_for( rel, text )
+    assert len( hits ) == 1, "one added space must break the pin — that is the mechanism"
+
+    guidance = repin_guidance( { rel: hits }, { rel: text } )
+    assert "PINNED_PROSE" in guidance,       "the message never names the mechanism that fired"
+    assert _line_pin( edited[ lineno - 1 ] ) in guidance, (
+        "the message must carry the RECOMPUTED hash — otherwise re-pinning is a puzzle"
+    )
+    assert "never be pinned" in guidance,    "the message must refuse to be read as an exemption route"
+
+
+def test_no_guidance_is_offered_for_a_file_the_inventory_has_never_heard_of():
+    """
+    A plain hardcode in an unrelated file must NOT be met with instructions on how
+    to pin it. Guidance that appears everywhere teaches people the pin is the way
+    out of a red.
+    """
+    offenders = { "src/scripts/some_new_script.py": [ ( 3, 'X = "..."' ) ] }
+    assert repin_guidance( offenders, { "src/scripts/some_new_script.py": '\n\nX = "..."' } ) == ""
 
 
 def test_the_pinned_inventory_cannot_grow_silently():
