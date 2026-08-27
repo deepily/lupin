@@ -67,7 +67,7 @@ def looks_like_pytest( cmdline: str ) -> bool:
 
     A token counts as an invocation when its basename is exactly "pytest" AND it is
     in a program position: first on the line (a PATH-resolved `pytest -q`), given as
-    a path (`/opt/venv/bin/pytest`), or preceded by `-m` (`python3 -m pytest`).
+    an ABSOLUTE path (`/opt/venv/bin/pytest`), or preceded by `-m` (`python3 -m pytest`).
 
     Requires:
         - cmdline is a string (may be empty)
@@ -77,21 +77,38 @@ def looks_like_pytest( cmdline: str ) -> bool:
         - a path that merely CONTAINS the word pytest (a runner script named
           run-pytest-direct.sh, an open editor buffer, /usr/bin/pytest-watch)
           returns False
+        - a RELATIVE path ending in pytest returns False — it is overwhelmingly a
+          quoted `pgrep -f "bin/pytest ..."` search pattern rather than a program
         - never raises
 
-    ⚠️ KNOWN GAP, accepted deliberately: a bare `pytest` behind an env prefix
-    (`env FOO=1 pytest -q`) is not matched — it is neither first nor a path nor
-    after -m. Every sanctioned runner in this tree invokes pytest BY PATH
-    (src/scripts/lib/resolve-venv-pytest.sh refuses anything else), so the shape
-    does not occur here; widening the rule to cover it re-admits the false
-    positives above, which cost more.
+    ⚠️ TWO KNOWN GAPS, both accepted deliberately, and for the same reason: every
+    sanctioned runner in this tree invokes pytest by an ABSOLUTE path
+    (src/scripts/lib/resolve-venv-pytest.sh resolves under $LUPIN_ROOT and refuses to
+    fall back to a bare `python3 -m pytest`), so neither shape occurs here, and
+    widening the rule to cover either one re-admits the false positives above — which
+    cost more, because a false positive refuses EVERY coverage run in the tree.
+        1. a bare `pytest` behind an env prefix (`env FOO=1 pytest -q`) — neither
+           first, nor absolute, nor after -m.
+        2. a RELATIVE path (`.venv/bin/pytest -q`, typed by hand from the repo root).
+           This is the one gap opened on 2026-08-26 to close the quoted-pattern false
+           positive, and it is the cheaper trade: a hand-typed relative invocation is
+           rare and visible, while the false positive was silent and total.
     """
     if not cmdline: return False
     tokens = cmdline.split()
     for index, token in enumerate( tokens ):
         if os.path.basename( token ) != "pytest": continue
         if index == 0: return True
-        if "/" in token: return True
+        # ⚠️ ABSOLUTE paths only. This read `if "/" in token` until 2026-08-26 and that
+        # matched the QUOTED SEARCH PATTERN inside a peer's wait-for-the-box loop —
+        # `pgrep -f "bin/pytest src/"` splits to a token whose basename is "pytest" and
+        # which contains a slash, so an IDLE session waiting for the box read as a running
+        # suite and every coverage run in the tree was refused (row e2099400, measured
+        # against the live command line, twice). Every sanctioned runner invokes pytest by
+        # an ABSOLUTE path — src/scripts/lib/resolve-venv-pytest.sh resolves under
+        # $LUPIN_ROOT and refuses a bare fallback — so requiring the leading slash costs
+        # nothing real and drops the whole quoted-pattern class.
+        if token.startswith( "/" ): return True
         if tokens[ index - 1 ] == "-m": return True
     return False
 

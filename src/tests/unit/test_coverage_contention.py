@@ -63,6 +63,57 @@ def test_mere_mentions_of_pytest_are_not_invocations( cmdline ):
     assert cc.looks_like_pytest( cmdline ) is False, f"false positive on: {cmdline}"
 
 
+# ── The wait-for-the-box loop is NOT a running suite ─────────────────────────
+#
+# WHAT HAPPENED, 2026-08-26 ~20:06 EDT. Three sessions wanted the box. Two were sitting in
+# a shell loop polling `pgrep` until it went quiet; the third asked the runner for a
+# coverage run and was REFUSED with "another test suite is already running on this box" and
+# handed the waiter's pid as the culprit. Nothing was running. The waiters were waiting for
+# each other, and the guard was the reason the queue could never drain.
+#
+# THE MECHANISM is one character wide. `cmdline.split()` chops the wait loop's script text
+# on whitespace, and one of the pieces is the QUOTED SEARCH PATTERN `"bin/pytest` — whose
+# basename is exactly "pytest" and which contains a slash. The old rule said a slash means
+# a path means a program. So a string that exists only to LOOK FOR pytest was read as
+# BEING pytest.
+#
+# This is the command line as it actually appeared in /proc, trimmed to the eval body.
+
+WAITING_SESSION_CMDLINE = (
+    'eval until ! pgrep -f "m pytest src/tests" >/dev/null 2>&1 '
+    '&& ! pgrep -f "pytest src/tests/unit" >/dev/null 2>&1 '
+    '&& ! pgrep -f "bin/pytest src/" >/dev/null 2>&1; do sleep 20; done'
+)
+
+
+def test_a_session_waiting_for_the_box_is_not_a_running_suite():
+    """
+    THE REGRESSION. Verbatim command line, not a paraphrase of one — a shortened
+    reconstruction would not carry the `"bin/pytest` fragment that does the damage,
+    and a test that cannot fail on the original is not a guard against it.
+    """
+    assert cc.looks_like_pytest( WAITING_SESSION_CMDLINE ) is False, (
+        "a session POLLING for pytest was read as RUNNING pytest — this is the defect "
+        "that refused every coverage run in the tree on 2026-08-26"
+    )
+
+
+def test_the_waiting_session_still_gets_no_answer_through_the_public_finder():
+    """One rung up: the false positive must not survive in find_foreign_pytest either."""
+    table = [ ( 4242, WAITING_SESSION_CMDLINE ), ( 4243, "sleep 20" ) ]
+    assert cc.find_foreign_pytest( process_table=lambda: table, ancestors=[] ) == []
+
+
+def test_the_absolute_path_that_the_runners_actually_use_is_still_caught():
+    """
+    THE CONTROL ON THE FIX. Narrowing a guard can always be done by making it match
+    nothing. This is the exact shape run-unit-tests.sh prints — `using pytest at
+    /mnt/DATA01/.../.venv/bin/pytest` — and it must still be seen.
+    """
+    real = "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.venv/bin/pytest src/tests/unit -q --cov"
+    assert cc.looks_like_pytest( real ) is True
+
+
 # ── find_foreign_pytest: whose pytest is it? ─────────────────────────────────
 
 def test_a_foreign_pytest_is_found():
