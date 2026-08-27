@@ -19,7 +19,18 @@ import os, re
 TEST_ROOT = "/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/tests"
 
 # Entry points whose own code reads live bridge state on the way through.
-BRIDGE_DRIVERS = [ "_notify_impl", "_converse_impl", "_flip_speakerphone" ]
+# The per-driver counts caught two errors in this list on their first run, which
+# is the reason they are printed at all:
+#   · "_converse_impl" DOES NOT EXIST — the function is `converse` (:1337), and
+#     it never reaches the gate. It matched nothing and inflated the apparent
+#     breadth of this sweep from two drivers to three.
+#   · "_flip_speakerphone" does not READ speakerphone state — it WRITES it via
+#     set_speakerphone. Its 8 tests cannot carry this defect, so counting them
+#     padded the denominator 33 -> 41.
+# get_speakerphone has exactly ONE call site in cosa_voice_mcp.py — :1515, inside
+# _notify_impl — so that is the whole scope of this detector. Bridge WRITES are a
+# real but separate hazard and are deliberately out of scope here.
+BRIDGE_DRIVERS = [ "_notify_impl" ]
 # The readers a test must pin to be hermetic.
 BRIDGE_READERS = [ "get_speakerphone", "_get_cc_metadata" ]
 
@@ -29,7 +40,11 @@ BRIDGE_READERS = [ "get_speakerphone", "_get_cc_metadata" ]
 # redirect into a tmpdir. Naming the isolators is the whole correctness of this.
 ISOLATORS = [
     "get_speakerphone",      # the reader pinned directly, either patch style
-    "_get_cc_metadata",      # sid pinned, so the bridge lookup is deterministic
+    "_get_cc_metadata",      # sid pinned to a fake id: find_session_path_by_id misses
+                             # and get_speakerphone returns False. NOTE this holds only
+                             # while no real bridge carries that id — and NOT for a real
+                             # sid whose bridge lacks the field, where the default is
+                             # mode-aware and TRUE in chorus.
     "SESSION_DIR",           # bridge directory redirected — the read cannot find a live file
     "_internal_call",        # the gate is `if not _internal_call:` — the read never happens
     '"_notify_impl"',        # the driver itself is replaced, so the real one never runs
@@ -147,7 +162,32 @@ def self_test():
     return bad
 
 
+# ── Exit codes ────────────────────────────────────────────────────────────────
+# A caller has to tell "the detector is broken" from "the detector found work",
+# and a single non-zero conflates them: the first is urgent and means every other
+# number in the run is worthless, the second is ordinary and means there is a
+# test to pin. EXIT_BROKEN takes precedence — when the self-test fails, the
+# sweep's own count is not evidence of anything and must not be acted on.
+EXIT_CLEAN  = 0     # self-test passed, nothing unpinned
+EXIT_WORK   = 1     # self-test passed, unpinned tests found — go pin them
+EXIT_BROKEN = 2     # self-test FAILED — the detector is untrustworthy, ignore its count
+
+
+def _driver_counts( rows ):
+    """Tests seen per driver — a driver contributing 0 is a blinded sweep, visibly.
+
+    Mr Radio, 2026-08-26: blinding the detector dropped the total 41 -> 8, and
+    "that drop is itself a tell, but only to someone who remembers 41." Nobody
+    remembers 41. A per-driver line needs no memory: `_notify_impl: 0` is wrong
+    on its face. A hardcoded expected total would rot as the tree grows; this
+    does not.
+    """
+    return { d: sum( 1 for r in rows if d in r[ 2 ] ) for d in BRIDGE_DRIVERS }
+
+
 if __name__ == "__main__":
+    import sys
+
     failures = self_test()
     for f in failures: print( f"WARNING  {f}" )
     print( f"self-test: {'PASSED' if not failures else 'FAILED'} "
@@ -155,9 +195,20 @@ if __name__ == "__main__":
 
     rows = sweep()
     bad  = [ r for r in rows if "get_speakerphone" in r[ 3 ] ]
-    print( f"{len( rows )} test(s) drive bridge-reading code; {len( bad )} do NOT pin get_speakerphone\n" )
+    print( f"{len( rows )} test(s) drive bridge-reading code; {len( bad )} do NOT pin get_speakerphone" )
+    for driver, n in sorted( _driver_counts( rows ).items() ):
+        flag = "   <- ZERO: this driver is not being seen at all" if n == 0 else ""
+        print( f"    {driver:<20} {n:>3}{flag}" )
+    print()
+
     seen = None
     for rel, fn, drivers, unpinned in sorted( bad ):
         if rel != seen:
             print( f"  {rel}" ); seen = rel
         print( f"      {fn}  ->  {', '.join( drivers )}  [unpinned: {', '.join( unpinned )}]" )
+
+    if failures:
+        print( "\nThe self-test failed, so the counts above are NOT evidence — fix the "
+               "detector before acting on them." )
+        sys.exit( EXIT_BROKEN )
+    sys.exit( EXIT_WORK if bad else EXIT_CLEAN )
