@@ -52,6 +52,8 @@ def git_for( mapping ):
 
 HEALTHY = {
     ( "rev-parse", "--short", "HEAD" )        : "abc1234",
+    ( "rev-parse", "--show-toplevel" )        : "/repos/lupin",
+    ( "rev-parse", "--path-format=absolute", "--git-common-dir" ) : "/repos/lupin/.git",
     ( "rev-parse", "--abbrev-ref", "HEAD" )   : "wip-branch",
     ( "rev-parse", "--abbrev-ref", "@{upstream}" ) : "origin/wip-branch",
     ( "status", "--porcelain" )               : " M src/a.py\n?? scratch.txt\n",
@@ -64,6 +66,7 @@ def test_a_healthy_tree_states_sha_distance_ref_and_dirt():
     """The whole point in one line: which tree, how far back, and was it clean."""
     line = tree_state_line( git_for( HEALTHY ) )
     assert "sha=abc1234" in line
+    assert "root=/repos/lupin" in line, "a line that does not name the repo it measured can name the wrong one"
     assert "branch=wip-branch" in line
     assert "behind=12" in line
     assert "ahead=3" in line
@@ -293,3 +296,81 @@ def test_on_a_live_run_the_line_is_present_and_is_never_the_last_line():
         assert not re.search( rf"\d+\s+{word}", tree_lines[ 0 ] ), (
             f"the live tree-state line carries a '<n> {word}' substring"
         )
+
+
+# ---------------------------------------------------------------------------
+# RIO'S AUDIT (2026-08-26). Three ways the line could be confidently wrong rather
+# than honestly unknown. Each was reproduced before being fixed.
+# ---------------------------------------------------------------------------
+
+def test_the_line_names_the_repository_it_measured():
+    """
+    `git -C <dir>` walks UP to the nearest ancestor repo. A directory that is not
+    itself a repo — a worktree whose gitdir pointer was deleted, a scratch dir nested
+    in the tree — therefore yields a fully confident line about a DIFFERENT
+    repository, with no hedge of any kind.
+
+    Rio measured exactly that: a nested non-repo directory returned the MAIN repo's
+    sha. Six worktrees live inside this repo under `.claude/worktrees/tfe-*` at a sha
+    ~1,581 commits from the branch; all still hold their pointer, so this is one
+    deletion away rather than live, and no one's worktree was deleted to prove the
+    last step. `root=` is what makes the walk-up visible.
+    """
+    line = tree_state_line( git_for( HEALTHY ) )
+    assert "root=/repos/lupin" in line
+
+    unresolvable = dict( HEALTHY ); del unresolvable[ ( "rev-parse", "--show-toplevel" ) ]
+    assert "root=?" in tree_state_line( git_for( unresolvable ) ), (
+        "an unreadable toplevel must print as unknown, not be omitted — an absent field "
+        "reads as a field that did not matter"
+    )
+
+
+def test_behind_carries_the_age_of_the_last_fetch():
+    """
+    `behind=` is measured against `@{upstream}`, the last-FETCHED ref. Staying offline
+    is right, but a bare `behind=0` reads as "up to date" when it means "up to date AS
+    OF whenever I last fetched". The ref's own tip age cannot answer this — an
+    untouched ref looks fresh forever — so the mtime of FETCH_HEAD is used.
+    """
+    line = tree_state_line( git_for( HEALTHY ) )
+    assert "fetched=" in line, "a distance with no fetch age overstates how current it is"
+
+    blind = dict( HEALTHY ); del blind[ ( "rev-parse", "--path-format=absolute", "--git-common-dir" ) ]
+    assert "fetched=UNKNOWN" in tree_state_line( git_for( blind ) )
+
+
+def test_a_decode_failure_is_contained_rather_than_raised():
+    """
+    `text=True` decodes stdout, and a ref name with invalid bytes raises
+    UnicodeDecodeError — which is NEITHER an OSError nor a SubprocessError. The first
+    version let it escape the reader AND this function; the caller's `except Exception`
+    contained it, but that net carries `pragma: no cover`, so the only thing holding it
+    up was the one line nobody tests.
+    """
+    def hostile( *args ):
+        raise UnicodeDecodeError( "utf-8", b"\xff", 0, 1, "invalid start byte" )
+
+    line = tree_state_line( hostile )
+    assert "UNKNOWN" in line, "a decode failure must degrade to UNKNOWN, not propagate"
+
+
+def test_the_git_call_budget_is_what_the_docs_claim():
+    """
+    The worst case is the NO-UPSTREAM path, which is also the detached-worktree path —
+    the one this diagnostic most exists for. Each call carries `timeout=5`, so the
+    budget is the run's worst-case cost and it must not drift silently.
+    """
+    no_upstream = { k: v for k, v in HEALTHY.items()
+                    if k != ( "rev-parse", "--abbrev-ref", "@{upstream}" ) }
+    no_upstream[ ( "rev-parse", "--abbrev-ref", "HEAD" ) ]       = "HEAD"
+    no_upstream[ ( "worktree", "list", "--porcelain" ) ]         = "worktree /r\nHEAD f\nbranch refs/heads/m\n"
+    no_upstream[ ( "rev-list", "--count", "HEAD..m" ) ]          = "5"
+    no_upstream[ ( "rev-list", "--count", "m..HEAD" ) ]          = "0"
+
+    git = git_for( no_upstream )
+    tree_state_line( git )
+    assert len( git.calls ) == 9, (
+        f"the git-call budget moved to {len( git.calls )}; each call carries timeout=5, so this "
+        f"is the worst-case cost of the diagnostic and the docs quote it"
+    )

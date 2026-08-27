@@ -12,6 +12,7 @@ import importlib._bootstrap
 import os
 import socket
 import subprocess
+import time
 import sys
 import traceback
 from unittest.mock import patch
@@ -276,20 +277,67 @@ def pytest_runtest_setup( item ):
 # MOTIVATION NOTE: this reports; it decides nothing. Whether a stale worktree should
 # be refreshed or reaped stays manager-gated and is deliberately not ruled here.
 #
+# ORDERING HOLDS BY MECHANISM: `_pytest.terminal.TerminalReporter.pytest_sessionfinish`
+# is a hookimpl WRAPPER — it yields, calls `config.hook.pytest_terminal_summary(...)`
+# (every plugin's line, this one included), and only THEN `self.summary_stats()`, which
+# writes the counts line. So this line cannot be last on any run shape. After a pytest
+# upgrade, read that one function rather than re-running a fixture and hoping.
+#
 # ⚠️ THE UNKNOWN CASE IS PRINTED TOO, for the same reason the network guard prints its
 # zero: an instrument that goes quiet when it cannot answer is indistinguishable from
 # one that was never armed, and silence would read as "not behind".
 
 def _git_reader( repo_root ):
-    """A callable running one read-only git command, returning stdout or None."""
+    """
+    A callable running one read-only git command, returning stdout or None.
+
+    Ensures:
+        - returns None for ANY failure, including a decode failure. `text=True`
+          decodes stdout, and a ref name carrying invalid bytes raises
+          UnicodeDecodeError — which is neither an OSError nor a SubprocessError, so
+          the first version of this let it escape the reader AND `tree_state_line`
+          (Rio's audit, 2026-08-26, measured with an injected reader). The caller's
+          `except Exception` did contain it, but that net carries `pragma: no cover`,
+          so the only thing holding it up was the one line nobody tests.
+    """
     def read( *args ):
         try:
             done = subprocess.run( [ "git", "-C", repo_root, *args ],
                                    capture_output=True, text=True, timeout=5 )
-        except ( OSError, subprocess.SubprocessError ):
+        except ( OSError, subprocess.SubprocessError, UnicodeDecodeError, ValueError ):
             return None
-        return done.stdout.strip() if done.returncode == 0 else None
+        try:
+            return done.stdout.strip() if done.returncode == 0 else None
+        except UnicodeDecodeError:                       # a lazily-decoded stream
+            return None
     return read
+
+
+def _fetch_age( git ):
+    """
+    How long ago this repo last FETCHED, as a coarse string, or None.
+
+    `behind=` is computed against `@{upstream}` — the last-FETCHED ref — so a bare
+    `behind=0` reads as "up to date" when it means "up to date AS OF whenever I last
+    fetched" (Rio's audit). The ref's own tip age does not answer this: an untouched
+    ref looks fresh forever. FETCH_HEAD's mtime is the moment a fetch actually ran.
+    """
+    # `--git-path` returns a path relative to the git process's CWD, which is the
+    # reader's directory and NOT this process's — resolving it here reported a real
+    # two-day-old FETCH_HEAD as UNKNOWN, i.e. hid the exact staleness it exists to
+    # show. `--path-format=absolute --git-common-dir` is unambiguous, and COMMON is
+    # the right one: a linked worktree's own gitdir has no FETCH_HEAD, the shared one
+    # does.
+    common = git( "rev-parse", "--path-format=absolute", "--git-common-dir" )
+    if not common: return None
+    path = os.path.join( common, "FETCH_HEAD" )
+    try:
+        seconds = time.time() - os.path.getmtime( path )
+    except OSError:
+        return None
+    if seconds < 3600:    return f"{int( seconds // 60 )}m"
+    if seconds < 86400:   return f"{int( seconds // 3600 )}h"
+    return f"{int( seconds // 86400 )}d"
 
 
 def tree_state_line( git ):
@@ -304,6 +352,15 @@ def tree_state_line( git ):
     Ensures:
         - returns a single line, always: an UNKNOWN line when the sha cannot be read,
           never "" and never None. A silent instrument reads as "nothing to report"
+        - NAMES THE REPOSITORY IT MEASURED (`root=`). `git -C <dir>` walks UP to the
+          nearest ancestor repo, so a directory that is not itself a repo — a worktree
+          whose gitdir pointer was deleted, a scratch dir nested in the tree — yields
+          a fully confident line about a DIFFERENT repository, with no hedge at all
+          (Rio's audit, 2026-08-26: a nested non-repo dir returned the main repo's sha).
+          Printing the resolved toplevel makes a walk-up visible instead of silent
+        - STAMPS FETCH AGE beside the distance, because `@{upstream}` is the last
+          FETCHED ref: a bare `behind=0` reads as "up to date" when it means "up to
+          date as of whenever I last fetched"
         - names the comparison ref it used, because "behind 88" means nothing without
           it, and the ref differs between a tracking branch and a detached worktree
         - reports dirty separately from behind: a clean tree 88 commits back and a
@@ -312,15 +369,41 @@ def tree_state_line( git ):
         - performs NO network access: `@{upstream}` reads the last-fetched ref, so a
           run stays offline and cannot hang on a remote
 
+    THE LINE IS NEVER THE LAST LINE — BY MECHANISM, NOT BY OBSERVATION (Mr Radio,
+    2026-08-26). In `_pytest.terminal`, `TerminalReporter.pytest_sessionfinish` is a
+    hookimpl WRAPPER: it `yield`s, then calls `config.hook.pytest_terminal_summary(...)`
+    — every plugin's line, including this one — and only afterwards calls
+    `self.summary_stats()`, which writes the counts line. So the counts line follows
+    every terminal-summary hook by construction, and this line cannot be last on any
+    run shape without someone changing pytest. After a pytest upgrade, check that one
+    function rather than re-running a fixture and hoping the sample covered your case.
+
     Raises:
-        - nothing. A diagnostic must never be able to change a suite's outcome.
+        - nothing that this module can produce. Every git call goes through a reader
+          that returns None on OSError, SubprocessError, UnicodeDecodeError and
+          ValueError. The earlier "Raises: nothing" was WRONG — a UnicodeDecodeError
+          escaped both the reader and this function until Rio measured it.
     """
+    try:
+        return _tree_state_line( git )
+    except Exception:
+        # TOTAL BY CONSTRUCTION, not by the caller's net. The caller does wrap this,
+        # but that wrapper carries `pragma: no cover` — so before this, the only thing
+        # standing between a decode failure and a propagating exception was the one
+        # line nobody tests (Rio's audit). Now the guarantee lives where the docstring
+        # makes it, and a test drives it with a git that raises.
+        return "[tree-state] UNKNOWN — the tree-state probe failed; this run's result cannot be tied to a tree"
+
+
+def _tree_state_line( git ):
+    """The body of `tree_state_line`; see it for the contract."""
     sha = git( "rev-parse", "--short", "HEAD" )
     if not sha:
         return "[tree-state] UNKNOWN — cannot read HEAD; this run's result cannot be tied to a tree"
 
     branch = git( "rev-parse", "--abbrev-ref", "HEAD" ) or "?"
     if branch == "HEAD": branch = "detached"
+    root = git( "rev-parse", "--show-toplevel" ) or "?"
 
     ref = git( "rev-parse", "--abbrev-ref", "@{upstream}" ) or _primary_branch( git )
     dirty = git( "status", "--porcelain" )
@@ -331,17 +414,19 @@ def tree_state_line( git ):
     dirty_txt = "dirty=?" if tracked_dirty is None else f"tracked-dirty={tracked_dirty}"
 
     if not ref:
-        return ( f"[tree-state] sha={sha} branch={branch} {dirty_txt} "
+        return ( f"[tree-state] sha={sha} root={root} branch={branch} {dirty_txt} "
                  f"behind=UNKNOWN — no upstream and no primary branch to compare against" )
 
     behind = git( "rev-list", "--count", f"HEAD..{ref}" )
     ahead  = git( "rev-list", "--count", f"{ref}..HEAD" )
     if behind is None or ahead is None:
-        return ( f"[tree-state] sha={sha} branch={branch} {dirty_txt} "
+        return ( f"[tree-state] sha={sha} root={root} branch={branch} {dirty_txt} "
                  f"behind=UNKNOWN vs {ref} — the comparison ref could not be walked" )
 
-    return ( f"[tree-state] sha={sha} branch={branch} behind={behind} ahead={ahead} "
-             f"vs {ref} {dirty_txt}" )
+    fetched = _fetch_age( git )
+    fetch_txt = f"fetched={fetched}-ago" if fetched else "fetched=UNKNOWN"
+    return ( f"[tree-state] sha={sha} root={root} branch={branch} behind={behind} "
+             f"ahead={ahead} vs {ref} {fetch_txt} {dirty_txt}" )
 
 
 def _primary_branch( git ):
