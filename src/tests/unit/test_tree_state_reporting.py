@@ -392,7 +392,7 @@ class _Reporter:
         self.lines.append( line )
 
 
-def _env_line( monkeypatch, network_raw, coverage_at_start=( None, None ) ):
+def _env_line( monkeypatch, network_raw, coverage_at_start=( None, None, None ) ):
     """
     Drive the real hook and return its [test-env] line.
 
@@ -440,7 +440,7 @@ def test_the_coverage_file_is_named_or_said_to_be_unset( monkeypatch ):
     A coverage run refuses outright without COVERAGE_FILE — the state behind a false green
     that read 96.59% — so an unset file is stated rather than left blank.
     """
-    assert _env_line( monkeypatch, "block", ( None, None ) ).endswith( "coverage-file=UNSET" )
+    assert _env_line( monkeypatch, "block", ( None, None, None ) ).endswith( "coverage-file=UNSET" )
 
 
 def test_a_file_that_already_existed_is_not_reported_like_a_fresh_one( monkeypatch ):
@@ -449,8 +449,8 @@ def test_a_file_that_already_existed_is_not_reported_like_a_fresh_one( monkeypat
     wrote, and a figure combined into it is one neither run earned. "fresh" and
     "pre-existing" must not render the same way.
     """
-    fresh = _env_line( monkeypatch, "block", ( "/tmp/a.data", None ) )
-    stale = _env_line( monkeypatch, "block", ( "/tmp/a.data", "2d" ) )
+    fresh = _env_line( monkeypatch, "block", ( "/tmp/a.data", None, None ) )
+    stale = _env_line( monkeypatch, "block", ( "/tmp/a.data", "2d", None ) )
     assert fresh.endswith( "coverage-file=/tmp/a.data (fresh)" )
     assert stale.endswith( "coverage-file=/tmp/a.data (pre-existing, 2d-ago)" )
     assert fresh != stale
@@ -459,7 +459,7 @@ def test_a_file_that_already_existed_is_not_reported_like_a_fresh_one( monkeypat
 def test_the_age_is_carried_verbatim_so_a_stale_file_reads_as_stale( monkeypatch ):
     """An age that is present must reach the line — a dropped age reads as a fresh file."""
     for age in ( "7m", "3h", "2d" ):
-        assert f"(pre-existing, {age}-ago)" in _env_line( monkeypatch, "block", ( "/tmp/a.data", age ) )
+        assert f"(pre-existing, {age}-ago)" in _env_line( monkeypatch, "block", ( "/tmp/a.data", age, None ) )
 
 
 def test_the_coarse_age_is_the_same_one_the_fetch_age_uses():
@@ -480,14 +480,14 @@ def test_the_coverage_state_is_captured_at_import_not_at_report_time( monkeypatc
     """
     absent = tmp_path / "never-written.data"
     monkeypatch.setenv( "COVERAGE_FILE", str( absent ) )
-    assert root_conftest._coverage_file_at_start() == ( str( absent ), None )
+    assert root_conftest._coverage_file_at_start() == ( str( absent ), None, None )
 
     absent.write_text( "x" )
-    path, age = root_conftest._coverage_file_at_start()
-    assert path == str( absent ) and age is not None      # now datable, because it exists
+    path, age, unknown = root_conftest._coverage_file_at_start()
+    assert path == str( absent ) and age is not None and unknown is None
 
     monkeypatch.delenv( "COVERAGE_FILE", raising=False )
-    assert root_conftest._coverage_file_at_start() == ( None, None )
+    assert root_conftest._coverage_file_at_start() == ( None, None, None )
 
 
 def test_the_live_hook_prints_the_env_line_before_any_early_return():
@@ -540,3 +540,49 @@ def test_the_format_contract_covers_EVERY_diagnostic_line_not_just_this_one():
                 f"diagnostic line carries a '<n> {word}' substring, which a consumer of "
                 f"pytest's summary would read as a result count: {line!r}"
             )
+
+
+# ── "I could not look" is not "I looked and it was not there" ──────────────────
+#
+# Caught by Mr. Radio on 1f72dac8, inside the increment built to prevent exactly this
+# shape: one `except OSError` rendered an unreadable file and an absent one identically
+# as "(fresh)". The absent case is merely unproven; the unreadable case is WRONG, because
+# a directory coverage cannot stat is one it cannot write either — so the run that reads
+# "fresh" is the run about to fail.
+
+def test_a_missing_parent_is_fresh_but_an_unreadable_one_is_unknown( monkeypatch, tmp_path ):
+    """
+    THE TWO CONTROLS, so the distinction cannot collapse back into one except clause.
+    Both raise an OSError; only one of them is evidence the file is not there.
+    """
+    missing_parent = tmp_path / "no-such-dir" / "x.data"
+    monkeypatch.setenv( "COVERAGE_FILE", str( missing_parent ) )
+    assert root_conftest._coverage_file_at_start() == ( str( missing_parent ), None, None )
+
+    walled = tmp_path / "walled"
+    walled.mkdir()
+    target = walled / "x.data"
+    target.write_text( "x" )
+    walled.chmod( 0o000 )
+    try:
+        monkeypatch.setenv( "COVERAGE_FILE", str( target ) )
+        path, age, unknown = root_conftest._coverage_file_at_start()
+        assert path == str( target )
+        assert age is None
+        assert unknown == "EACCES", f"an unreadable file must name why, got {unknown!r}"
+    finally:
+        walled.chmod( 0o755 )                # never leave a tmp dir the runner cannot clean
+
+
+def test_an_unknown_stat_does_not_render_as_a_fresh_file( monkeypatch ):
+    """The rendering must keep them apart too — a correct probe with a lying line is a lie."""
+    fresh   = _env_line( monkeypatch, "block", ( "/tmp/a.data", None, None ) )
+    blind   = _env_line( monkeypatch, "block", ( "/tmp/a.data", None, "EACCES" ) )
+    assert fresh.endswith( "(fresh)" )
+    assert blind.endswith( "(unknown: EACCES)" )
+    assert fresh != blind
+
+
+def test_an_errno_with_no_name_still_reports_something_rather_than_nothing( monkeypatch ):
+    """An unnamed errno is still a reason. A blank would read as no problem at all."""
+    assert "(unknown: 12345)" in _env_line( monkeypatch, "block", ( "/tmp/a.data", None, "12345" ) )

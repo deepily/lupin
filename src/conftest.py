@@ -9,6 +9,7 @@ tree-specific fixtures belong in `src/tests/conftest.py` /
 """
 
 import importlib._bootstrap
+import errno
 import os
 import socket
 import subprocess
@@ -357,6 +358,9 @@ def _coverage_file_at_start():
     """
     What COVERAGE_FILE named, and whether that file ALREADY EXISTED, read once at import.
 
+    THREE OUTCOMES, KEPT APART: dated (it existed), fresh (it genuinely was not there), and
+    unknown (the stat itself failed, so nothing here is a claim about the file).
+
     ⚠️ REPORTS EXISTENCE AND AGE, AND INFERS NOTHING FURTHER. Whether a pre-existing file
     gets combined into, overwritten, or ignored depends on how the run was invoked, and a
     diagnostic that guessed at that would be asserting something it did not measure. It
@@ -368,11 +372,18 @@ def _coverage_file_at_start():
     from someone else's.
     """
     path = os.environ.get( "COVERAGE_FILE" )
-    if not path: return ( None, None )
+    if not path: return ( None, None, None )
     try:
-        return ( path, _coarse_age( time.time() - os.path.getmtime( path ) ) )
-    except OSError:
-        return ( path, None )                # absent, or unreadable — both mean "not a prior run I can date"
+        return ( path, _coarse_age( time.time() - os.path.getmtime( path ) ), None )
+    except FileNotFoundError:
+        return ( path, None, None )          # genuinely not there yet — this run will write it
+    except OSError as e:                     # ⚠️ NOT folded into the clause above, deliberately
+        # "I could not look" is not "I looked and it was not there". Measured: a parent at
+        # chmod 000 raises PermissionError and a path under a missing parent raises
+        # FileNotFoundError, and one `except OSError` rendered BOTH as (fresh) — the second
+        # merely unproven, the FIRST actively wrong, because coverage will not be able to
+        # write there either. A reader needs to tell a fresh run from a blind one.
+        return ( path, None, errno.errorcode.get( e.errno, str( e.errno ) ) )
 
 
 _COVERAGE_FILE_AT_START = _coverage_file_at_start()
@@ -509,9 +520,11 @@ def pytest_terminal_summary( terminalreporter, exitstatus, config ):
     # A DEFAULTED MODE IS NOT THE SAME CLAIM AS A CHOSEN ONE, so the two are distinguished:
     # "off (defaulted)" says nobody asked for this, where a bare "off" would read as a decision.
     mode_txt     = _NETWORK_MODE if _NETWORK_MODE_RAW is not None else f"{_NETWORK_MODE} (defaulted)"
-    cov_path, cov_age = _COVERAGE_FILE_AT_START
+    cov_path, cov_age, cov_unknown = _COVERAGE_FILE_AT_START
     if cov_path is None:
         coverage_txt = "UNSET"
+    elif cov_unknown is not None:
+        coverage_txt = f"{cov_path} (unknown: {cov_unknown})"
     elif cov_age is None:
         coverage_txt = f"{cov_path} (fresh)"
     else:
