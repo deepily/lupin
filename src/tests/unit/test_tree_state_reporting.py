@@ -17,6 +17,7 @@ Venue: :7999-eligible — no subprocess, no network, no mutation.
 """
 import importlib.util
 import os
+import re
 
 import pytest
 
@@ -181,4 +182,64 @@ def test_the_live_hook_prints_the_line_before_any_early_return():
     assert call < early, (
         "tree_state_line is called after the network guard's early return — on a default "
         "run the mode is off, so the line would never print"
+    )
+
+
+# ---------------------------------------------------------------------------
+# FORMAT CONTRACT (added 2026-08-26 after Mr Radio ran the suite and checked the
+# real output against the repo's parsers). The line shares stdout with whatever
+# reads a run's result, so its shape is not cosmetic — it is an interface.
+#
+# WHAT HIS CHECK ACTUALLY ESTABLISHED, corrected: of the three parsers, only ONE
+# reads pytest output — `swe_team/test_runner.py:76`. The other two are
+# `_parse_node_tap_summary` (Node/TAP, the TypeScript suite) and a branch of
+# `_parse_non_pytest_stdout`; both are named for what they parse and do not match
+# pytest output with or without this line. My earlier review listed all three as if
+# each were a risk, which overstated the surface. The real check is the one pytest
+# parser, and it is pinned below against REAL captured output.
+# ---------------------------------------------------------------------------
+
+COUNT_WORDS = ( "passed", "failed", "error", "errors", "skipped", "xfailed", "xpassed" )
+
+
+def test_the_line_can_never_be_mistaken_for_a_pytest_COUNT_line():
+    r"""
+    The durable statement about the format: the line may carry digits, but never a
+    bare number followed by a count word. `(\d+)\s+passed` is how the one pytest
+    parser in this repo reads a run, so a line that grew such a substring would not
+    merely add noise — it would change the number a caller believes.
+    """
+    line = tree_state_line( git_for( HEALTHY ) )
+    for word in COUNT_WORDS:
+        assert not re.search( rf"\d+\s+{word}", line ), (
+            f"the tree-state line contains a '<n> {word}' substring; a pytest-output "
+            f"parser would read it as a result count"
+        )
+
+
+def test_the_line_is_exactly_one_line_and_carries_no_braces():
+    """
+    One line, so it cannot be split across a parser's line-anchored regex; no braces,
+    so it cannot be scooped up by anything hunting a JSON payload in stdout — the
+    hazard the import-time watcher thread already demonstrated on this tree.
+    """
+    line = tree_state_line( git_for( HEALTHY ) )
+    assert "\n" not in line, "a multi-line diagnostic can straddle a ^...$ parser"
+    assert "{" not in line and "}" not in line
+
+
+def test_the_real_pytest_parser_still_reads_the_right_count_with_the_line_present():
+    """
+    The check that actually matters, run against REAL captured output rather than a
+    fixture: with the tree-state line in the stream, the one pytest parser in this
+    repo must still return the run's true count.
+    """
+    captured = (
+        "..........                                                        [100%]\n"
+        + tree_state_line( git_for( HEALTHY ) ) + "\n"
+        + "[unit-network:block] outbound connections: 0\n"
+        + "10 passed in 0.11s\n"
+    )
+    assert re.findall( r"(\d+)\s+passed", captured ) == [ "10" ], (
+        "the tree-state line perturbed the count the pytest parser reads"
     )
