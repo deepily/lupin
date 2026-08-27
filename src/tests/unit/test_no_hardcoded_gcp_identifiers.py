@@ -331,10 +331,25 @@ def repin_guidance( offenders, texts ):
         - the recomputed hash comes from `texts`, never from a fresh read: a report
           rendered against a re-read source is a different measurement than the one
           that produced the finding, and it can disagree with it
-        - returns "" when no offender sits in a file PINNED_PROSE already knows
+        - guidance is keyed on the LINE, never on the file. An offender qualifies
+          only if it looks like a BROKEN PIN: either it sits at a line the inventory
+          pins (so the pinned text was edited), or its own text still hashes to a
+          pin recorded for that file (so the pinned prose MOVED)
+        - a brand-new supply in a pinned file therefore gets NO guidance
+
+    A file-level key was the first cut and it was wrong: appending a real multi-line
+    YAML supply to gemini_client.py earned re-pin instructions WITH THE HASH ALREADY
+    COMPUTED, in the one file where somebody is most likely to try it. Guidance that
+    reaches a new hardcode does not merely fail to help — it hands over the way out.
     """
+    def looks_like_a_broken_pin( f, n ):
+        if ( f, n ) in PINNED_PROSE: return True                    # pinned line, text edited
+        source = texts[ f ].splitlines()
+        raw    = source[ n - 1 ] if n - 1 < len( source ) else ""
+        return _line_pin( raw ) in [ pin for ( pf, _pn ), pin in PINNED_PROSE.items() if pf == f ]
+
     known = [ ( f, n ) for f, hits in offenders.items() for n, _ in hits
-                       if any( pf == f for pf, _pn in PINNED_PROSE ) ]
+                       if looks_like_a_broken_pin( f, n ) ]
     if not known: return ""
 
     lines = []
@@ -597,6 +612,92 @@ def test_a_broken_pin_tells_the_reader_how_to_re_pin_it():
         "the message must carry the RECOMPUTED hash — otherwise re-pinning is a puzzle"
     )
     assert "never be pinned" in guidance,    "the message must refuse to be read as an exemption route"
+
+
+def test_a_new_supply_appended_to_a_PINNED_file_gets_no_guidance():
+    """
+    Mr Radio's second probe, made permanent. Append a real multi-line YAML supply to
+    gemini_client.py — the one file the inventory knows — and it must be an offender
+    with NO re-pin instructions.
+
+    The first cut keyed guidance on the FILE, so this earned a ready-made pin line
+    with the hash already computed, in exactly the file where somebody is most
+    likely to reach for it. Guidance that reaches a new hardcode does not merely
+    fail to help; it hands over the way out.
+    """
+    rel      = "src/cosa/agents/presentation_generator/gemini_client.py"
+    appended = _read( rel ) + (
+        f'\n\nCFG = """\nproject_id: {SANDBOX_PROJECT_ID}\nregion: us-central1\n"""\n'
+    )
+    hits = supplying_occurrences_for( rel, appended )
+    assert len( hits ) == 1, "premise: the appended YAML supply is caught"
+    assert repin_guidance( { rel: hits }, { rel: appended } ) == "", (
+        "a NEW hardcode in a pinned file was offered re-pin instructions — guidance must "
+        "key on the line, not the file"
+    )
+
+
+def test_guidance_follows_pinned_prose_when_it_MOVES():
+    """
+    The other half of keying on the line: insert a line above the banner and the
+    pinned prose is now at a different line number, so (file, line) no longer
+    matches. Its TEXT is unchanged, so it is still the thing we justified, and the
+    reader must be told to re-pin rather than be told they hardcoded an id.
+    """
+    rel     = "src/cosa/agents/presentation_generator/gemini_client.py"
+    shifted = "# a line added at the top\n" + _read( rel )
+    hits    = supplying_occurrences_for( rel, shifted )
+    assert len( hits ) == 1, "premise: shifting the file breaks the pin's line key"
+
+    guidance = repin_guidance( { rel: hits }, { rel: shifted } )
+    assert "PINNED_PROSE" in guidance, "moved prose must still be recognised as a broken pin"
+    ( _pf, lineno ), _pin = next( iter( PINNED_PROSE.items() ) )
+    assert f'", {lineno + 1} )' in guidance, "guidance must name the line the prose moved TO"
+
+
+def test_guidance_names_only_the_broken_pin_when_a_real_supply_sits_beside_it():
+    """
+    Both at once — the prose moved AND a real supply was added. The reader gets a
+    re-pin line for the prose and nothing that would let them pin the supply.
+    """
+    rel  = "src/cosa/agents/presentation_generator/gemini_client.py"
+    both = "# a line added at the top\n" + _read( rel ) + (
+        f'\n\nCFG = """\nproject_id: {SANDBOX_PROJECT_ID}\nregion: us-central1\n"""\n'
+    )
+    hits = supplying_occurrences_for( rel, both )
+    assert len( hits ) == 2, "premise: both the moved prose and the new supply are offenders"
+
+    guidance   = repin_guidance( { rel: hits }, { rel: both } )
+    supply_line = next( n for n, line in hits if "project_id:" in line )
+    assert "PINNED_PROSE" in guidance,          "the moved prose must still be recognised"
+    assert f'", {supply_line} )' not in guidance, (
+        "the real supply was handed a pin line alongside the prose — guidance must name "
+        "only the broken pin"
+    )
+
+
+def test_a_pin_from_ANOTHER_file_never_qualifies_prose_in_this_one( monkeypatch ):
+    """
+    The moved-prose arm looks a line's text up among pins RECORDED FOR THAT FILE.
+    With one entry in the live inventory, "this file's pins" and "all pins" are the
+    same list, so dropping the file scope changes nothing today and a mutation of
+    it survives. It stops being harmless the moment a second pin lands.
+
+    So this asserts the arm against an INJECTED inventory rather than the live one:
+    a pin justified about `a/x.py` must not qualify identical prose in `b/y.py`.
+    """
+    import sys
+
+    prose = f"see ({SANDBOX_PROJECT_ID}) for why this 404s"
+    monkeypatch.setattr( sys.modules[ __name__ ], "PINNED_PROSE",
+                         { ( "a/x.py", 5 ): _line_pin( prose ) } )
+
+    assert repin_guidance( { "a/x.py": [ ( 5, prose ) ] }, { "a/x.py": "\n" * 4 + prose } ) != "", (
+        "premise: in its OWN file at its OWN line, this pin qualifies"
+    )
+    assert repin_guidance( { "b/y.py": [ ( 1, prose ) ] }, { "b/y.py": prose } ) == "", (
+        "a pin justified about another file qualified prose here — pins do not travel"
+    )
 
 
 def test_no_guidance_is_offered_for_a_file_the_inventory_has_never_heard_of():
