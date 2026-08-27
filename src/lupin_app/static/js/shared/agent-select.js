@@ -25,6 +25,51 @@
 export const AGENTS_ENDPOINT = "/api/v2/agents";
 
 /**
+ * The shapes GET /api/v2/agents actually returns.
+ *
+ * These are not a guess at the payload — they are a transcription of the response
+ * models in `src/cosa/rest/routers/v2_ask.py` (`AgentOption`, `AutoRouteOption`,
+ * `AgentsResponse`), field for field, with `Optional[str]` written as `string|null`
+ * because that is what a Pydantic optional serialises to. Only the fields this
+ * module reads are listed; the rest of the projection is real but irrelevant here.
+ *
+ * `payload` is typed nullable everywhere below because a failed fetch is a state
+ * this module already handles — see the "Returns [] on a missing or malformed
+ * payload" clause on buildAgentSelectOptions.
+ *
+ * @typedef {Object} AgentEntry
+ * @property {string} command
+ * @property {string} display_name
+ * @property {string} cls
+ * @property {string|null} [description]
+ * @property {boolean} [user_initiable]
+ * @property {string[]} [required_args]
+ */
+
+/**
+ * @typedef {Object} AutoRouteSentinel
+ * @property {string} value
+ * @property {string} label
+ * @property {string} description
+ */
+
+/**
+ * @typedef {Object} AgentsPayload
+ * @property {AutoRouteSentinel} [auto_route]
+ * @property {AgentEntry[]} [agents]
+ */
+
+/**
+ * One rendered <option>, as buildAgentSelectOptions returns it.
+ *
+ * @typedef {Object} AgentSelectOption
+ * @property {string} value
+ * @property {string} label
+ * @property {string|null|undefined} description
+ * @property {string|null} group
+ */
+
+/**
  * Which heading each command class renders under.
  *
  * A map of CLASS names to headings — four entries that change when the CommandClass
@@ -40,6 +85,13 @@ export const AGENTS_ENDPOINT = "/api/v2/agents";
  * under a heading named after the failure path it shares a class with. That is why
  * the grouping is NOT a plain projection of `cls`: an exception with a written
  * reason, not an accident.
+ *
+ * Typed string-keyed rather than as a closed union of the four class names, because
+ * the lookup below already writes `|| agent.cls`. That fallback IS the statement that
+ * an unrecognised class is expected and rendered under its own name; a closed type
+ * would contradict code that is already there.
+ *
+ * @type {Record<string, string>}
  */
 const GROUP_HEADINGS = {
     conversational : "Quick Agents",
@@ -70,11 +122,18 @@ const GROUP_HEADINGS = {
  *       what the user sees; within a group, payload order
  *     - Returns [] on a missing or malformed payload rather than throwing into a
  *       page-load path — the caller renders the failure, see renderAgentSelect
+ *
+ * @param {AgentsPayload|null|undefined} payload
+ * @returns {AgentSelectOption[]}
  */
 export function buildAgentSelectOptions( payload ) {
     const autoRoute = payload && payload.auto_route;
     if ( !autoRoute || !autoRoute.value ) return [];
 
+    // Annotated because the first element's `group` is null and every later one is a
+    // string — inferred from the literal alone, the array would be typed as
+    // null-group-only and the push below would read as an error in correct code.
+    /** @type {AgentSelectOption[]} */
     const options = [ {
         value       : autoRoute.value,
         label       : autoRoute.label,
@@ -114,11 +173,16 @@ export function buildAgentSelectOptions( payload ) {
  *       shortened list looks exactly like a working one
  *     - Returns the option values in render order, so a caller (and a test) can read
  *       what was rendered without walking the DOM
+ *
+ * @param {HTMLSelectElement} selectEl
+ * @param {AgentsPayload|null|undefined} payload
+ * @returns {string[]}
  */
 export function renderAgentSelect( selectEl, payload ) {
     const options = buildAgentSelectOptions( payload );
     selectEl.replaceChildren();
 
+    /** @type {Map<string, HTMLOptGroupElement>} */
     const groups = new Map();
     for ( const option of options ) {
         const element = selectEl.ownerDocument.createElement( "option" );
@@ -174,6 +238,15 @@ export function renderAgentSelect( selectEl, payload ) {
  * it either: `assert auto["value"] == AUTO_ROUTE_VALUE` reads the same constant on
  * both sides, so it stayed green with the sentinel blanked (measured 2026-08-23; a
  * truthiness assert now sits beside it in test_v2_agents_endpoint.py).
+ *
+ * `value` is nullable because the call site's own variable is: notifications.js reads
+ * `selectEl ? selectEl.value : null`. The null never arrives — the same expression
+ * short-circuits on `!selectEl` first — but the signature describes what the code
+ * accepts, and a null compared against a string sentinel is simply not the sentinel.
+ *
+ * @param {string|null} value
+ * @param {AgentsPayload|null|undefined} payload
+ * @returns {boolean}
  */
 export function isAutoRoute( value, payload ) {
     const autoRoute = payload && payload.auto_route;
@@ -198,13 +271,25 @@ export function isAutoRoute( value, payload ) {
  *       missing args comes back needs_input, which phase 4 turns into an inline
  *       question; until then it renders in the response pane as it does today
  *     - Returns {} for an unknown command rather than throwing
+ *
+ * `command` is nullable for the same reason as isAutoRoute's `value`, and an
+ * unmatched command already returns {} — the documented unknown-command path.
+ *
+ * @param {string|null} command
+ * @param {string} text
+ * @param {AgentsPayload|null|undefined} payload
+ * @returns {Record<string, string>}
  */
 export function argsForCommand( command, text, payload ) {
     const agents = ( payload && Array.isArray( payload.agents ) ) ? payload.agents : [];
     const agent  = agents.find( ( candidate ) => candidate.command === command );
     if ( !agent || !Array.isArray( agent.required_args ) ) return {};
     if ( agent.required_args.length !== 1 ) return {};
-    return { [ agent.required_args[ 0 ] ]: text };
+    // The cast states what the `length !== 1` check one line up already guarantees:
+    // element 0 exists. `noUncheckedIndexedAccess` types every array read as
+    // possibly-undefined and cannot see that check. A runtime guard here would be
+    // a new branch no caller can reach — this asserts, it does not defend.
+    return { [ /** @type {string} */ ( agent.required_args[ 0 ] ) ]: text };
 }
 
 /**
@@ -226,6 +311,9 @@ export function argsForCommand( command, text, payload ) {
  * Ensures:
  *     - Returns false and writes nothing when there is no target
  *     - Otherwise sets target.LUPIN_AGENT_SELECT to the full surface and returns true
+ *
+ * @param {(Window & typeof globalThis)|null|undefined} target
+ * @returns {boolean}
  */
 export function publishOnWindow( target ) {
     if ( !target ) return false;

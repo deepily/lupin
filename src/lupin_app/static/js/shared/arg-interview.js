@@ -20,6 +20,32 @@
  */
 
 /**
+ * The response bodies this module reads.
+ *
+ * Transcribed from `AskResponse` and `ResumeRequest` in
+ * `src/cosa/rest/routers/v2_ask.py` rather than guessed: `Optional[str]` is written
+ * `string|null`, which is what a Pydantic optional serialises to, and `websocket_id`
+ * is nullable there for the same reason it is nullable at the call site —
+ * notifications.js initialises `this.queueSessionId` to null and fills it when the
+ * queue socket connects.
+ *
+ * @typedef {Object} FlowResult
+ * @property {string} [path]
+ * @property {string} [status]
+ * @property {string|null} [answer]
+ * @property {string|null} [pending_id]
+ * @property {string[]} [args_missing]
+ */
+
+/**
+ * A FlowResult that isAnswerable has said yes to — the question text and the
+ * pending id are both present, which is precisely what that check verifies.
+ *
+ * @typedef {FlowResult & { answer: string, pending_id: string }} AnswerableResult
+ */
+
+
+/**
  * Is this response a question the user can actually answer?
  *
  * 🔴 THE DISTINCTION THAT MATTERS: `path === "needs_input"` is NOT enough. The flow
@@ -42,6 +68,13 @@
  * Ensures:
  *     - true only when the flow asked a question AND left something to resume
  *     - never throws on a missing or malformed result
+ *
+ * Declared as a type predicate because that is the same statement the Ensures clause
+ * above already makes — a true here means the answer text and the pending id are both
+ * there — and it is what lets renderArgQuestion read them without a cast.
+ *
+ * @param {FlowResult|null|undefined} result
+ * @returns {result is AnswerableResult}
  */
 export function isAnswerable( result ) {
     if ( !result ) return false;
@@ -54,6 +87,11 @@ export function isAnswerable( result ) {
  * Ensures:
  *     - carries the pending_id the question came with, never one the caller invented
  *     - carries websocket_id so the resumed turn's TTS reaches the same session
+ *
+ * @param {FlowResult} result
+ * @param {string} answer
+ * @param {string|null} websocketId
+ * @returns {{ pending_id: string|null|undefined, answer: string, websocket_id: string|null }}
  */
 export function resumeBody( result, answer, websocketId ) {
     return { pending_id: result.pending_id, answer: answer, websocket_id: websocketId };
@@ -75,6 +113,10 @@ export function resumeBody( result, answer, websocketId ) {
  *       re-querying the DOM by id — there is no id to collide with
  *     - renders NOTHING and returns null when the result is not answerable, so a
  *       caller that forgets to check cannot produce a dead box
+ *
+ * @param {HTMLElement} containerEl
+ * @param {FlowResult|null|undefined} result
+ * @returns {{ input: HTMLInputElement, button: HTMLButtonElement }|null}
  */
 export function renderArgQuestion( containerEl, result ) {
     if ( !isAnswerable( result ) ) {
@@ -96,7 +138,10 @@ export function renderArgQuestion( containerEl, result ) {
     // The argument being asked for, exposed for the tests and for anyone reading the
     // DOM to see WHICH argument stalled — args_missing[0] is the one the flow asked.
     if ( Array.isArray( result.args_missing ) && result.args_missing.length ) {
-        input.setAttribute( "data-arg", result.args_missing[ 0 ] );
+        // The cast states what the `.length` check on the line above already
+        // guarantees; `noUncheckedIndexedAccess` types every array read as
+        // possibly-undefined and cannot see that check.
+        input.setAttribute( "data-arg", /** @type {string} */ ( result.args_missing[ 0 ] ) );
     }
 
     const button = doc.createElement( "button" );
@@ -119,6 +164,9 @@ export function renderArgQuestion( containerEl, result ) {
  *     - the container is emptied AND hidden — an emptied-but-visible container leaves
  *       a stray bordered gap in the card that reads as a rendering bug
  *     - safe to call when nothing was ever rendered
+ *
+ * @param {HTMLElement|null|undefined} containerEl
+ * @returns {void}
  */
 export function clearArgQuestion( containerEl ) {
     if ( !containerEl ) return;
@@ -129,6 +177,9 @@ export function clearArgQuestion( containerEl ) {
 /**
  * Publish for the classic-script consumer. See shared/agent-select.js:publishOnWindow
  * for why this is an exported function rather than a load-time `if ( typeof window )`.
+ *
+ * @param {(Window & typeof globalThis)|null|undefined} target
+ * @returns {boolean}
  */
 export function publishOnWindow( target ) {
     if ( !target ) return false;
