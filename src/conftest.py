@@ -11,6 +11,7 @@ tree-specific fixtures belong in `src/tests/conftest.py` /
 import importlib._bootstrap
 import os
 import socket
+import subprocess
 import sys
 import traceback
 from unittest.mock import patch
@@ -257,6 +258,108 @@ def pytest_runtest_setup( item ):
     _current_test[ "exempt" ] = item.get_closest_marker( "allows_outbound_network" ) is not None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# EVERY GREEN STATES THE TREE IT WAS EARNED ON (row e2099400)
+# ══════════════════════════════════════════════════════════════════════════════
+# A pass is a statement about a TREE, not about a repository. On a tree several
+# people commit to, "the suite is green" decays the moment somebody else lands a
+# commit, and nothing in the output says which tree earned it. The same defect one
+# layer over: a coverage data file read seventy minutes apart reported 99% and then
+# 38% for one file, because a report is rendered against the source ON DISK NOW
+# rather than the source that was MEASURED (2026-08-26, row e2099400).
+#
+# So the run says so itself. Every pytest run — pass or fail — prints the sha it ran
+# on, how far behind its comparison ref it is, and whether the tree was dirty. Then a
+# green quoted tomorrow carries the tree it belongs to, and a stale one is visible
+# instead of being re-derived by whoever doubts it.
+#
+# MOTIVATION NOTE: this reports; it decides nothing. Whether a stale worktree should
+# be refreshed or reaped stays manager-gated and is deliberately not ruled here.
+#
+# ⚠️ THE UNKNOWN CASE IS PRINTED TOO, for the same reason the network guard prints its
+# zero: an instrument that goes quiet when it cannot answer is indistinguishable from
+# one that was never armed, and silence would read as "not behind".
+
+def _git_reader( repo_root ):
+    """A callable running one read-only git command, returning stdout or None."""
+    def read( *args ):
+        try:
+            done = subprocess.run( [ "git", "-C", repo_root, *args ],
+                                   capture_output=True, text=True, timeout=5 )
+        except ( OSError, subprocess.SubprocessError ):
+            return None
+        return done.stdout.strip() if done.returncode == 0 else None
+    return read
+
+
+def tree_state_line( git ):
+    """
+    One line naming the tree a run was earned on.
+
+    Requires:
+        - git is a callable taking git arguments and returning stdout, or None on
+          any failure. Injected so this is testable without a repository, and so a
+          hostile git can be exercised rather than hoped about.
+
+    Ensures:
+        - returns a single line, always: an UNKNOWN line when the sha cannot be read,
+          never "" and never None. A silent instrument reads as "nothing to report"
+        - names the comparison ref it used, because "behind 88" means nothing without
+          it, and the ref differs between a tracking branch and a detached worktree
+        - reports dirty separately from behind: a clean tree 88 commits back and a
+          dirty tree at the tip are different claims, and both invalidate a quoted
+          figure in different ways
+        - performs NO network access: `@{upstream}` reads the last-fetched ref, so a
+          run stays offline and cannot hang on a remote
+
+    Raises:
+        - nothing. A diagnostic must never be able to change a suite's outcome.
+    """
+    sha = git( "rev-parse", "--short", "HEAD" )
+    if not sha:
+        return "[tree-state] UNKNOWN — cannot read HEAD; this run's result cannot be tied to a tree"
+
+    branch = git( "rev-parse", "--abbrev-ref", "HEAD" ) or "?"
+    if branch == "HEAD": branch = "detached"
+
+    ref = git( "rev-parse", "--abbrev-ref", "@{upstream}" ) or _primary_branch( git )
+    dirty = git( "status", "--porcelain" )
+    tracked_dirty = (
+        len( [ l for l in dirty.splitlines() if l and not l.startswith( "??" ) ] )
+        if dirty is not None else None
+    )
+    dirty_txt = "dirty=?" if tracked_dirty is None else f"tracked-dirty={tracked_dirty}"
+
+    if not ref:
+        return ( f"[tree-state] sha={sha} branch={branch} {dirty_txt} "
+                 f"behind=UNKNOWN — no upstream and no primary branch to compare against" )
+
+    behind = git( "rev-list", "--count", f"HEAD..{ref}" )
+    ahead  = git( "rev-list", "--count", f"{ref}..HEAD" )
+    if behind is None or ahead is None:
+        return ( f"[tree-state] sha={sha} branch={branch} {dirty_txt} "
+                 f"behind=UNKNOWN vs {ref} — the comparison ref could not be walked" )
+
+    return ( f"[tree-state] sha={sha} branch={branch} behind={behind} ahead={ahead} "
+             f"vs {ref} {dirty_txt}" )
+
+
+def _primary_branch( git ):
+    """
+    The branch checked out in the FIRST worktree, used when there is no upstream.
+
+    A detached worktree has no upstream at all, and it is exactly the tree most
+    likely to be far behind — so falling back to "no comparison" there would leave
+    the case this exists for as the one case it cannot answer.
+    """
+    listing = git( "worktree", "list", "--porcelain" )
+    if not listing: return None
+    for line in listing.splitlines():
+        if line.startswith( "branch " ):
+            return line.split( " ", 1 )[ 1 ].strip().replace( "refs/heads/", "" )
+    return None
+
+
 def pytest_terminal_summary( terminalreporter, exitstatus, config ):
     """
     Report every outbound dial the run made, or say plainly that it made none.
@@ -265,6 +368,13 @@ def pytest_terminal_summary( terminalreporter, exitstatus, config ):
     nothing is indistinguishable from a guard that was never armed — which is the exact
     shape of defect it exists to catch.
     """
+    # FIRST, and outside every early return below: a run that ends before this has
+    # printed is a green with no tree attached, which is the whole defect.
+    try:
+        terminalreporter.write_line( tree_state_line( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ) ) )
+    except Exception:                                    # pragma: no cover - a diagnostic may never fail a run
+        terminalreporter.write_line( "[tree-state] UNKNOWN — the tree-state probe itself failed" )
+
     if _NETWORK_MODE not in ( "count", "block" ):
         return
     if not _outbound_attempts:
