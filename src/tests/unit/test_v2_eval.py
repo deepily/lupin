@@ -659,6 +659,32 @@ def test_write_outputs( tmp_path ):
 # ---------------------------------------------------------------------------
 # main + arg parser + _default_client_factory
 # ---------------------------------------------------------------------------
+class _FakeWsListener:
+    """A queue-WS listener that opens no socket (row 7e2125a7, D5).
+
+    `main` now waits for terminal outcomes by default, which means it builds a listener
+    before the first push. The unit tier must never open that socket, so every `main()`
+    call here injects this through the `ws_listener_factory` seam — the same seam
+    `client_factory` and `probe_models_fn` already use.
+
+    Its `ws_recv_events` is deliberately a raiser: no stub client in this file answers
+    `waiting`, so `terminal_waiting_ask` never calls it. If a future stub DOES answer
+    `waiting`, this fails loudly by name instead of quietly returning a fabricated
+    terminal frame — which would be the wrapper reporting a completion that never
+    happened, the exact defect it exists to prevent.
+    """
+    def __init__( self ): self.started = False; self.stopped = False
+    def start( self ):    self.started = True; return self
+    def stop( self ):     self.stopped = True
+    def ws_recv_events( self, job_id ):
+        raise AssertionError( f"_FakeWsListener was asked to wait on [{job_id}] — a stub "
+                              f"answered 'waiting'; give that test a real terminal frame" )
+
+
+def _fake_ws_listener_factory( base_url, client ):
+    return _FakeWsListener()
+
+
 class _StubClient:
     def ask( self, question ):
         return { "utterance": question, "ok": True, "status_code": 200,
@@ -710,6 +736,7 @@ def test_main_happy_path_explicit_args( tmp_path ):
     result = ve.main(
         argv=[ "--corpus", "weather", "--passes", "2", "--max-router-error-rate", "1.0" ],
         client_factory=lambda url: _StubClient(),
+        ws_listener_factory=_fake_ws_listener_factory,
         project_root=root,
         timestamp="2026-08-14-02-30-00",
         read_sha_fn=lambda base_url: _STUB_SHA,
@@ -727,6 +754,7 @@ def test_main_stamps_provenance_and_writes_paired_artifact( tmp_path ):
     result = ve.main(
         argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0", "--seed", "7", "--n-per-command", "5" ],
         client_factory=lambda url: _StubClient(),
+        ws_listener_factory=_fake_ws_listener_factory,
         project_root=str( tmp_path ),
         timestamp="2026-08-14-02-30-00",
         read_sha_fn=lambda base_url: _STUB_SHA,
@@ -774,7 +802,8 @@ def test_main_defaults_use_injected_helpers( tmp_path, monkeypatch ):
     # Same reasoning for the model-server probe: patch the DEFAULT rather than inject one,
     # since this test is about what main reaches for when nothing is passed in.
     monkeypatch.setattr( ve, "_default_model_probe", _NO_PROBE )
-    result = ve.main( argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0" ] )
+    result = ve.main( argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0" ],
+                      ws_listener_factory=_fake_ws_listener_factory )
     assert result[ "cold" ][ "n" ] == 2
     assert os.path.isdir( result[ "out_dir" ] )
 
@@ -919,6 +948,7 @@ def test_main_cold_guard_raises_on_warm_cold( tmp_path ):
         ve.main(
             argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0" ],
             client_factory=lambda url: _ReplayClient(),
+            ws_listener_factory=_fake_ws_listener_factory,
             project_root=str( tmp_path ),
             timestamp="2026-08-14-02-30-00",
             read_sha_fn=lambda base_url: _STUB_SHA,
@@ -931,6 +961,7 @@ def test_main_allow_warm_cold_skips_the_guard( tmp_path ):
     result = ve.main(
         argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0", "--allow-warm-cold" ],
         client_factory=lambda url: _ReplayClient(),
+        ws_listener_factory=_fake_ws_listener_factory,
         project_root=str( tmp_path ),
         timestamp="2026-08-14-02-30-00",
         read_sha_fn=lambda base_url: _STUB_SHA,
@@ -961,6 +992,7 @@ def test_main_refuses_before_any_question_when_a_model_port_is_dead( tmp_path, m
         ve.main(
             argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0" ],
             client_factory=lambda url: _CountingClient(),
+            ws_listener_factory=_fake_ws_listener_factory,
             project_root=str( tmp_path ),
             timestamp="2026-08-14-02-30-00",
             read_sha_fn=lambda base_url: _STUB_SHA,
@@ -980,6 +1012,7 @@ def test_main_probes_again_between_the_passes( tmp_path ):
     ve.main(
         argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0" ],
         client_factory=lambda url: _StubClient(),
+        ws_listener_factory=_fake_ws_listener_factory,
         project_root=str( tmp_path ),
         timestamp="2026-08-14-02-30-00",
         read_sha_fn=lambda base_url: _STUB_SHA,
@@ -998,6 +1031,7 @@ def test_main_records_the_sha_the_server_reported( tmp_path ):
     result = ve.main(
         argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0" ],
         client_factory=lambda url: _StubClient(),
+        ws_listener_factory=_fake_ws_listener_factory,
         project_root=str( tmp_path ),
         timestamp="2026-08-14-02-30-00",
         read_sha_fn=lambda base_url: _STUB_SHA,
@@ -1017,6 +1051,7 @@ def test_main_refuses_when_the_server_cannot_identify_itself( tmp_path ):
         ve.main(
             argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0" ],
             client_factory=lambda url: _StubClient(),
+            ws_listener_factory=_fake_ws_listener_factory,
             project_root=str( tmp_path ),
             timestamp="2026-08-14-02-30-00",
             read_sha_fn=lambda base_url: "",

@@ -50,6 +50,7 @@ SUITE_SCRIPTS = {
     "all"            : "src/tests/run-all-tests.sh",
     "presentation"   : "src/tests/run-presentation-regression.sh",
     "cosa"           : "src/tests/run-cosa-tests.sh",   # in-tree CoSA test tree (row c9d3ddcb); joined the merge pyramid 2026-08-13 (row d83d025b)
+    "v2_eval"        : "src/tests/run-v2-eval.sh",     # CJ Flow v2 paired eval (row 7e2125a7 D6). NOT in ALL_SUITE_COMPONENTS — ~105 min on the metered LLM path; see the runner's header
 }
 
 # Test types that accept a file path as the first positional pytest arg
@@ -66,6 +67,10 @@ SUITES_SUPPORTING_JUNIT_XML = frozenset( {
     "unit", "smoke", "smoke_direct", "pytest_direct",
     "integration", "e2e", "all", "cosa",
 } )
+# NOTE (row 7e2125a7 D6): "v2_eval" is deliberately NOT here either. run-v2-eval.sh
+# wraps a plain python script, not pytest — an injected --junit-xml would reach
+# v2_eval.py's argparse as an unknown flag and kill the run at second one. It reports
+# through _parse_non_pytest_stdout, the same treatment as websocket and presentation.
 # NOTE (bug 89bfcc8f): "presentation" is deliberately NOT here. Its backing
 # script (run-presentation-regression.sh) is a MULTI-TIER orchestrator, not a
 # single pytest run — it ignores an injected --junit-xml, so the file is never
@@ -96,6 +101,10 @@ SUITE_TIMEOUTS_SECONDS = {
     "all"            : 3600,   # 60 min (sequential pyramid, ~25-35 min observed)
     "presentation"   : 1800,   # 30 min (render-only + Sonnet; +Opus/R2P with flags)
     "cosa"           : 900,    # 15 min (~8,800 tests; both-roots hand run was ~11 min for 21,721 on 2026-08-06 — ~1.5x margin)
+    "v2_eval"        : 9000,   # 150 min. MEASURED from io/v2-flow/eval-2026-08-21-11-37-48: cold ~93 min + warm ~11 min = ~105 min serial,
+                               # and that warm figure is the INLINE one — under `v2 executor = queued` with terminal waits the warm pass gets LONGER,
+                               # not shorter, because it waits for work the inline run did synchronously. ~1.4x margin over the measured inline total,
+                               # deliberately generous on that account. Provenance: src/rnd/v0.2.0/2026.08.26-v2-warm-replay-relabels-the-route.md §7.4
 }
 SUITE_TIMEOUT_DEFAULT_SECONDS = 600  # 10 min fallback for unknown types
 
@@ -134,6 +143,12 @@ STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 # to catch). Placed right after "unit": both are fast, server-free pytest, so
 # they fail early together. Keep this list identical (order included) to
 # run-all-tests.sh's SUITES array — test_typescript_suite_gate.py asserts it.
+# 🔴 "v2_eval" is registered in SUITE_SCRIPTS but is deliberately ABSENT from this list
+# (row 7e2125a7 D6). It is individually submittable, never part of "all": it runs ~105
+# minutes and spends real money on the metered firewalled LLM path, so putting it in the
+# merge pyramid would attach an hour and a half of billed work to every merge. Same
+# treatment as "presentation". Registration and gate-membership are separate decisions,
+# and conflating them is how a suite ends up either unreachable or unaffordable.
 ALL_SUITE_COMPONENTS = [ "unit", "cosa", "typescript", "smoke", "websocket", "integration", "e2e" ]
 
 
@@ -2112,7 +2127,7 @@ class TestSuiteJob( AgenticJobBase ):
         Returns:
             dict | None: Parsed counts or None if format unrecognized.
         """
-        if suite_type not in ( "websocket", "typescript", "presentation" ):
+        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval" ):
             return None
         if not stdout:
             return None

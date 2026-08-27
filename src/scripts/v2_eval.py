@@ -1955,6 +1955,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
                          help="stratified sample size per command (PER ARM, design §5)" )
     parser.add_argument( "--max-router-error-rate", type=float, default=0.20,
                          help="run-integrity ceiling on router_error_rate" )
+    parser.add_argument( "--no-observe-terminal", action="store_true",
+                         help="do NOT wait for terminal outcomes on `waiting` replies (row 7e2125a7 D5). "
+                              "Only sensible under `v2 executor = inline`, where nothing answers `waiting` "
+                              "and the wait is already a no-op; under `queued` it makes every span an "
+                              "ENQUEUE span and every deferred failure invisible." )
     parser.add_argument( "--allow-warm-cold", action="store_true",
                          help="skip the F3 cold-start guard (use only when the store is deliberately pre-warmed)" )
     return parser
@@ -1967,6 +1972,7 @@ def main(
     timestamp      : Optional[ str ] = None,
     read_sha_fn    : Optional[ Callable[ [ str ], str ] ] = None,
     probe_models_fn: Optional[ Callable[ [ str ], None ] ] = None,
+    ws_listener_factory: Optional[ Callable[ [ str, Any ], Any ] ] = None,
 ) -> Dict[ str, Any ]:
     """
     Run the two-pass eval and write the report.
@@ -2030,13 +2036,45 @@ def main(
     probe = probe_models_fn if probe_models_fn is not None else _default_model_probe
     probe( "before the cold pass" )
 
-    cold_records = run_pass( corpus, client.ask, "cold", fail_fast=True,
-                             allow_warm_cold=args.allow_warm_cold )
-    # AGAIN between the passes. A long run can OUTLIVE its dependency: the box can die at
-    # minute ten as easily as before minute zero, and the warm pass is the expensive half.
-    # The pass boundary is the cheapest point where a mid-run death is still catchable.
-    probe( "between the cold and warm passes" )
-    warm_records = run_pass( corpus, client.ask, "warm" )
+    # ---- STEP D5 (row 7e2125a7): OBSERVE TERMINAL OUTCOMES, don't stop at the enqueue ack.
+    #
+    # `terminal_waiting_ask` was written for exactly this and then wired to NOTHING — it had
+    # a definition, a docstring, and a unit test, and both passes below called `client.ask`
+    # raw. That is why the 2026-08-25 queued run "never observed terminal outcomes at all":
+    # not an oversight in scheduling, an instrument that was built and never connected.
+    #
+    # WHY IT MUST BE ON BY DEFAULT. Under `v2 executor = queued` the flow answers `waiting`
+    # the moment work is handed off, and `SUCCESS_STATUSES` counts that as success. Measured
+    # unwired, a queued warm pass reports a HIGHER cache-hit rate than the inline one for
+    # precisely the rows that are broken — a dead snapshot comes back `exact_hit,
+    # cache_hit=True` and dies later, off the HTTP response, where nothing is looking.
+    # A run that produces a more confident wrong number is worse than no run.
+    #
+    # WHY THE OPT-OUT IS EXPLICIT AND NOT A SILENT FALLBACK. If the listener cannot be built
+    # we RAISE. Degrading quietly to raw `ask` would produce a clean-looking artifact whose
+    # spans are enqueue spans — the same shape of confident-wrong figure this whole row is
+    # about, and it would carry no marker saying so. Opting out is a decision somebody types.
+    ask_fn   = client.ask
+    listener = None
+    if not args.no_observe_terminal:
+        ws_factory = ws_listener_factory if ws_listener_factory is not None else _default_ws_listener_factory
+        listener   = ws_factory( args.base_url, client )
+        listener.start()                      # MUST precede the first push, or early frames race the connect
+        ask_fn     = terminal_waiting_ask( client.ask, listener.ws_recv_events )
+
+    try:
+        cold_records = run_pass( corpus, ask_fn, "cold", fail_fast=True,
+                                 allow_warm_cold=args.allow_warm_cold )
+        # AGAIN between the passes. A long run can OUTLIVE its dependency: the box can die at
+        # minute ten as easily as before minute zero, and the warm pass is the expensive half.
+        # The pass boundary is the cheapest point where a mid-run death is still catchable.
+        probe( "between the cold and warm passes" )
+        warm_records = run_pass( corpus, ask_fn, "warm" )
+    finally:
+        # The socket closes even when a pass raises. An eval that dies mid-run has already
+        # cost its money; leaking the listener thread on top of that helps nobody.
+        if listener is not None:
+            listener.stop()
 
     # INSURANCE BEFORE ANY REFUSAL (row d8d019f6): both passes are done and the records are
     # in memory only. guard_run_integrity below CAN raise, and when it did on ts-23613e7d it
@@ -2093,6 +2131,32 @@ def _default_model_probe( context: str ) -> None:   # pragma: no cover - live so
     from cosa.utils.model_server_liveness import require_live
     require_live( config_mgr=ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ),
                   context=context )
+
+
+def _default_ws_listener_factory( base_url: str, client: Any ) -> Any:   # pragma: no cover - live socket boundary
+    """
+    Build the queue-WS listener `terminal_waiting_ask` needs (row 7e2125a7, D5).
+
+    Requires:
+        - base_url is the server this run is asking; the listener opens /ws/queue on it.
+        - client is the authenticated HttpAskClient, so the listener reuses ITS bearer —
+          the server emits queue frames per-user, and a listener authenticated as anyone
+          else would sit on a live socket receiving nothing, which reads as "every job
+          timed out" rather than as "wrong user".
+
+    Ensures:
+        - returns an unstarted WsJobEventListener; the caller starts it BEFORE the first
+          push, because a frame that arrives during the connect is a frame nobody buffered.
+
+    Injected as `ws_listener_factory` in tests, so the unit tier never opens a socket —
+    the same seam `client_factory` and `probe_models_fn` already use.
+
+    The import is local rather than module-level on purpose: `ws_job_listener` pulls in
+    `websockets`, and a `--no-observe-terminal` run on a box without it should still work.
+    A module-level import would make an optional dependency mandatory for everyone.
+    """
+    from ws_job_listener import WsJobEventListener
+    return WsJobEventListener( base_url, client.bearer, session_id="v2-eval-listener" )
 
 
 def _default_client_factory( base_url: str ) -> HttpAskClient:
