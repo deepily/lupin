@@ -181,6 +181,19 @@ TS_CONCURRENCY="${TS_CONCURRENCY:-4}"           # matches package.json's cap
 source "$PROJECT_ROOT/src/scripts/lib/jstest-slice.sh"
 JSTEST_RUNTIME_MAX="${JSTEST_RUNTIME_MAX:-$(( TS_TIMEOUT_SECS + 100 ))}"
 
+# STATE THE TREE BEFORE THE RUN, not after (store row 11253df9, gap 3). This tier is
+# node/c8, so the root conftest's hook never fires and a green here carried no tree at
+# all. It is emitted BEFORE the run for two reasons: after the run it would be the LAST
+# line, which the output contract forbids for every diagnostic; and `_parse_node_tap_summary`
+# reads a trailing `^# pass N$`, which a leading line cannot disturb.
+#
+# ⚠️ SO THE TWO PATHS DIFFER IN *WHEN*, NOT IN WHAT: pytest reports the tree at the END of
+# its run, this reports it at the START. Both render the identical line from the identical
+# module. Closing gap 1 (report a start sha AND an end sha) would unify them; until then
+# this difference is real and is written down rather than smoothed over.
+source "$PROJECT_ROOT/src/scripts/lib/tree-state.sh"
+emit_tree_state
+
 jstest_slice_exec timeout "$TS_TIMEOUT_SECS" npx c8 \
     --all \
     $CHECK_COVERAGE \

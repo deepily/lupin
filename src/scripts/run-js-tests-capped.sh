@@ -19,6 +19,12 @@ JS_TIMEOUT_SECS="${JS_TIMEOUT_SECS:-900}"
 JS_CONCURRENCY="${JS_CONCURRENCY:-4}"
 JSTEST_RUNTIME_MAX="${JSTEST_RUNTIME_MAX:-$(( JS_TIMEOUT_SECS + 100 ))}"
 
+# State the tree before the run — see the note in run-typescript-tests.sh for why this is
+# BEFORE and not after. `jstest_slice_exec` replaces this shell, so anything emitted after
+# it would never run at all.
+source "$PROJECT_ROOT/src/scripts/lib/tree-state.sh"
+emit_tree_state
+
 jstest_slice_exec timeout "$JS_TIMEOUT_SECS" \
     node --test-concurrency="$JS_CONCURRENCY" --import tsx \
          --test "src/tests/**/*.test.ts" "$@"
