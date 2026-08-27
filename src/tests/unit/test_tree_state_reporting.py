@@ -557,7 +557,7 @@ def test_a_missing_parent_is_fresh_but_an_unreadable_one_is_unknown( monkeypatch
     """
     missing_parent = tmp_path / "no-such-dir" / "x.data"
     monkeypatch.setenv( "COVERAGE_FILE", str( missing_parent ) )
-    assert root_conftest._coverage_file_at_start() == ( str( missing_parent ), None, None )
+    assert root_conftest._coverage_file_at_start() == ( str( missing_parent ), None, "no parent dir" )
 
     walled = tmp_path / "walled"
     walled.mkdir()
@@ -586,3 +586,31 @@ def test_an_unknown_stat_does_not_render_as_a_fresh_file( monkeypatch ):
 def test_an_errno_with_no_name_still_reports_something_rather_than_nothing( monkeypatch ):
     """An unnamed errno is still a reason. A blank would read as no problem at all."""
     assert "(unknown: 12345)" in _env_line( monkeypatch, "block", ( "/tmp/a.data", None, "12345" ) )
+
+
+def test_fresh_is_only_said_when_the_run_could_actually_write_there( monkeypatch, tmp_path ):
+    """
+    "fresh" is a PROMISE ABOUT THE NEXT WRITE, not just an observation that nothing is there.
+    Under a missing parent, coverage cannot write the file either — so the absence predicts a
+    failing run rather than a first one, and "fresh" makes a promise the line cannot keep.
+    """
+    writable = tmp_path / "x.data"                       # parent exists, file does not
+    monkeypatch.setenv( "COVERAGE_FILE", str( writable ) )
+    assert root_conftest._coverage_file_at_start() == ( str( writable ), None, None )
+
+    unwritable = tmp_path / "no-such-dir" / "x.data"     # nothing can write here
+    monkeypatch.setenv( "COVERAGE_FILE", str( unwritable ) )
+    assert root_conftest._coverage_file_at_start() == ( str( unwritable ), None, "no parent dir" )
+
+
+def test_a_bare_filename_is_fresh_because_the_cwd_exists_by_construction( monkeypatch ):
+    """dirname is "" for a bare filename. Treating that as a missing parent would be wrong."""
+    monkeypatch.setenv( "COVERAGE_FILE", "just-a-name.data" )
+    assert root_conftest._coverage_file_at_start() == ( "just-a-name.data", None, None )
+
+
+def test_the_missing_parent_case_renders_as_its_own_state( monkeypatch ):
+    """It must not read as fresh, and the line itself must say why."""
+    line = _env_line( monkeypatch, "block", ( "/tmp/gone/x.data", None, "no parent dir" ) )
+    assert line.endswith( "(unknown: no parent dir)" )
+    assert "(fresh)" not in line

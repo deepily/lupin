@@ -358,8 +358,10 @@ def _coverage_file_at_start():
     """
     What COVERAGE_FILE named, and whether that file ALREADY EXISTED, read once at import.
 
-    THREE OUTCOMES, KEPT APART: dated (it existed), fresh (it genuinely was not there), and
-    unknown (the stat itself failed, so nothing here is a claim about the file).
+    FOUR OUTCOMES, KEPT APART: dated (it existed), fresh (absent, and this run CAN write it),
+    and two flavours of unknown — the stat failed, or the parent directory is missing so no
+    write will land there either. "fresh" is a promise about the next write, so it is only
+    said when the directory to write into actually exists.
 
     ⚠️ REPORTS EXISTENCE AND AGE, AND INFERS NOTHING FURTHER. Whether a pre-existing file
     gets combined into, overwritten, or ignored depends on how the run was invoked, and a
@@ -376,7 +378,14 @@ def _coverage_file_at_start():
     try:
         return ( path, _coarse_age( time.time() - os.path.getmtime( path ) ), None )
     except FileNotFoundError:
-        return ( path, None, None )          # genuinely not there yet — this run will write it
+        # ⚠️ "fresh" PROMISES THIS RUN WILL WRITE HERE, so it is only honest when the
+        # directory exists. Under a missing parent, coverage cannot write it either — the
+        # file is absent for a reason that predicts a failing run, not because nobody has
+        # got to it yet. dirname is "" for a bare filename, which means the cwd, and the
+        # cwd exists by construction.
+        parent = os.path.dirname( path ) or "."
+        if os.path.isdir( parent ): return ( path, None, None )
+        return ( path, None, "no parent dir" )
     except OSError as e:                     # ⚠️ NOT folded into the clause above, deliberately
         # "I could not look" is not "I looked and it was not there". Measured: a parent at
         # chmod 000 raises PermissionError and a path under a missing parent raises
