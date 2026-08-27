@@ -6,9 +6,12 @@ Verifies the contract that the SessionStart hook depends on:
     POST /api/cosa-voice/voice-persona/{session_id}/release
     GET  /api/cosa-voice/voice-persona/pool
 
-This test creates a synthetic bridge file in the real ~/.claude/sessions/
-directory (the same one the live server reads), POSTs /allocate, verifies
-the bridge gained a voice_persona field, then cleans up.
+This test creates a synthetic bridge file in the session-bridge directory the
+live server reads, POSTs /allocate, verifies the bridge gained a voice_persona
+field, then cleans up. That directory is resolved by _resolve_session_dir()
+below and then CHECKED against the server by the `server_sees_session_dir`
+fixture — the tests that write bridges skip, with the mismatch named, rather
+than fail when this process and the server do not share one directory.
 
 Venue: :7999 (AI-discretionary). Test is non-destructive (the bridge file
 created/torn down is named with a unique UUID and the PID is the test PID,
@@ -31,7 +34,43 @@ import requests
 
 
 BASE_URL    = os.environ.get( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
-SESSION_DIR = Path.home() / ".claude" / "sessions"
+
+
+def _resolve_session_dir() -> Path:
+    """
+    The directory this test must write its synthetic bridges into: the one the
+    RUNNING SERVER reads, not the one this pytest process's home happens to be.
+
+    Fixed 2026-08-26. This was `Path.home() / ".claude" / "sessions"`, which made
+    the result depend on which account invoked pytest. Measured on the dev box:
+    as the account whose home the server mounts, 8 passed; with HOME pointed
+    somewhere else, 6 of the same 8 failed with 404, because the bridges landed
+    where the server never looks. A test whose result tracks the caller's home
+    directory is not testing the endpoints.
+
+    Resolution order, most specific first:
+      1. LUPIN_HOST_SESSIONS_DIR — the HOST side of the docker-compose bind mount
+         that gives the container its ~/.claude/sessions (docker-compose.yml, the
+         `source:` of the lupin-rest-dev sessions bind). This is the only value
+         that is correct when the caller's home and the server's differ.
+      2. sessions_dir() — the same single resolution point every server-side
+         reader uses, so we honour LUPIN_HOOK_SESSIONS_DIR and fall back to
+         ~/.claude/sessions exactly the way the server does.
+
+    Neither is a guarantee, which is why `server_sees_session_dir` below checks
+    contact with the server instead of trusting this function.
+
+    Ensures:
+        - returns a Path; never raises
+    """
+    host_side = os.environ.get( "LUPIN_HOST_SESSIONS_DIR" )
+    if host_side:
+        return Path( host_side )
+    from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+    return sessions_dir()
+
+
+SESSION_DIR = _resolve_session_dir()
 
 
 # ── configured-pool readers (added 2026-08-26) ──────────────────────────────
@@ -87,10 +126,90 @@ def auth_token():
     return resp.json()[ "tokens" ][ "access_token" ]
 
 
+# ── Contact check: does the server actually read the directory we write? ────
+
+@pytest.fixture( scope="module" )
+def server_sees_session_dir( auth_token ):
+    """
+    Prove, once per module, that a bridge written to SESSION_DIR is visible to
+    the server — and skip with a usable message when it is not.
+
+    Added 2026-08-26. _resolve_session_dir() is a better guess than Path.home()
+    was, but it is still a guess: it cannot see a container that mounts a
+    different host directory, a server running as another account, or a bind
+    mount that is not what the compose file says. So this asks the server
+    instead of assuming. It writes a throwaway bridge and reads it back through
+    GET /voice-persona/{session_id}, which 404s when the server cannot find the
+    bridge and allocates nothing, so the probe costs no persona and mutates no
+    shared state.
+
+    A skip here means "this box cannot run these tests", which is an honest
+    result. A pass means the two sides genuinely share a directory, not that
+    they happened to match.
+
+    Ensures:
+        - returns SESSION_DIR when the server can see a bridge written there
+        - pytest.skip() naming both the directory and the remedy otherwise
+        - removes its probe bridge either way
+    """
+    SESSION_DIR.mkdir( parents=True, exist_ok=True )
+    probe_sid  = str( uuid.uuid4() )
+    probe_path = SESSION_DIR / f"cc-{os.getpid() + 96000}.json"
+    try:
+        with open( probe_path, "w" ) as f:
+            json.dump(
+                {
+                    "session_id"        : probe_sid,
+                    "stable_session_id" : probe_sid,
+                    "session_ids"       : [ probe_sid ],
+                    "cwd"               : "/tmp",
+                    "cc_pid"            : os.getpid(),
+                    "hook_ppid"         : 1
+                },
+                f
+            )
+        try:
+            resp = requests.get(
+                f"{BASE_URL}/api/cosa-voice/voice-persona/{probe_sid}",
+                headers = { "Authorization": f"Bearer {auth_token}" },
+                timeout = 5
+            )
+        except requests.exceptions.ConnectionError:
+            pytest.skip( f"Server not reachable at {BASE_URL}" )
+
+        if resp.status_code == 404:
+            pytest.skip(
+                "SKIPPED — this test process and the server are reading different "
+                "session-bridge directories, so these tests cannot say anything about "
+                "the endpoints here.\n"
+                f"  WHAT HAPPENED : wrote a bridge to {probe_path}, then asked the server "
+                f"for that session and got 404.\n"
+                f"  WHY           : this process resolved the directory to {SESSION_DIR} "
+                f"(HOME={os.path.expanduser( '~' )}). The server reads the host side of the "
+                "docker-compose bind mount that supplies its ~/.claude/sessions, which "
+                "defaults to /home/rruiz/.claude/sessions.\n"
+                "  HOW TO FIX IT : point both at one directory, then re-run — either run "
+                "pytest as the account whose home the server mounts, or export "
+                "LUPIN_HOST_SESSIONS_DIR=<the host path in the `source:` of the "
+                "lupin-rest-dev sessions bind in docker-compose.yml>. "
+                "LUPIN_HOST_SESSIONS_DIR is read first by _resolve_session_dir() precisely "
+                "so the two sides can be reconciled without editing either one."
+            )
+        assert resp.status_code == 200, (
+            f"session-dir contact probe got an unexpected {resp.status_code}: {resp.text}"
+        )
+        return SESSION_DIR
+    finally:
+        try:
+            probe_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 # ── Bridge fixture: create a synthetic bridge in the real SESSION_DIR ────────
 
 @pytest.fixture
-def synthetic_bridge():
+def synthetic_bridge( server_sees_session_dir ):
     """
     Create a synthetic bridge file with a unique session_id under the real
     ~/.claude/sessions/ directory. The PID is the test process's PID so the
@@ -293,7 +412,7 @@ class TestVoicePersonaAllocateAndRelease:
 
 class TestVoicePersonaUniqueness:
 
-    def test_pool_exhaustion_returns_the_overflow_persona( self, auth_token ):
+    def test_pool_exhaustion_returns_the_overflow_persona( self, auth_token, server_sees_session_dir ):
         """
         Saturate the pool with synthetic bridges; the spill must land on the
         configured overflow persona, not on a hash-borrowed pool member.
@@ -376,7 +495,7 @@ class TestVoicePersonaUniqueness:
                 except FileNotFoundError:
                     pass
 
-    def test_two_concurrent_sessions_get_distinct_voices( self, auth_token ):
+    def test_two_concurrent_sessions_get_distinct_voices( self, auth_token, server_sees_session_dir ):
         """
         Allocate personas for TWO synthetic bridges. They must be distinct.
         This is the core anti-collision guarantee.
