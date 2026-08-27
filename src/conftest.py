@@ -53,7 +53,8 @@ import pytest
 # THE ESCAPE HATCH IS A MARKER, never an environment default:
 # @pytest.mark.allows_outbound_network on a test that genuinely needs the network, so the
 # exemption lives in the file that needs it and is greppable.
-_NETWORK_MODE       = os.environ.get( "LUPIN_UNIT_NETWORK", "off" ).strip().lower()
+_NETWORK_MODE_RAW   = os.environ.get( "LUPIN_UNIT_NETWORK" )
+_NETWORK_MODE       = ( _NETWORK_MODE_RAW or "off" ).strip().lower()
 _LOOPBACK_HOSTS     = { "127.0.0.1", "::1", "localhost", "0.0.0.0", "" }
 _outbound_attempts  = []                       # (test id, address, formatted frames)
 _current_test       = { "id": "<collection>", "exempt": False }
@@ -459,6 +460,21 @@ def pytest_terminal_summary( terminalreporter, exitstatus, config ):
         terminalreporter.write_line( tree_state_line( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ) ) )
     except Exception:                                    # pragma: no cover - a diagnostic may never fail a run
         terminalreporter.write_line( "[tree-state] UNKNOWN — the tree-state probe itself failed" )
+
+    # SECOND, and also outside every early return: the environment that SHAPED this run.
+    #
+    # ⚠️ PRINTED UNCONDITIONALLY, INCLUDING network=off. The mode-gated report below says
+    # nothing at all when the guard is disarmed — so a run with the guard off and a run with
+    # the guard on and zero dials looked IDENTICAL in the output. Measured 2026-08-26: a unit
+    # tier reported 5 errors that a baseline on the same code did not, and the whole of the
+    # difference was that one run exported LUPIN_UNIT_NETWORK and the other did not. Nothing
+    # in either result named the variable that decided it, so the gap read as a code change.
+    #
+    # A DEFAULTED MODE IS NOT THE SAME CLAIM AS A CHOSEN ONE, so the two are distinguished:
+    # "off (defaulted)" says nobody asked for this, where a bare "off" would read as a decision.
+    mode_txt     = _NETWORK_MODE if _NETWORK_MODE_RAW is not None else f"{_NETWORK_MODE} (defaulted)"
+    coverage_txt = os.environ.get( "COVERAGE_FILE" ) or "UNSET"
+    terminalreporter.write_line( f"[test-env] network={mode_txt} coverage-file={coverage_txt}" )
 
     if _NETWORK_MODE not in ( "count", "block" ):
         return

@@ -374,3 +374,84 @@ def test_the_git_call_budget_is_what_the_docs_claim():
         f"the git-call budget moved to {len( git.calls )}; each call carries timeout=5, so this "
         f"is the worst-case cost of the diagnostic and the docs quote it"
     )
+
+
+# ── the environment that shaped the run (row e2099400 follow-on) ───────────────
+#
+# A result is a statement about a tree AND about the harness that ran it. Measured
+# 2026-08-26: a unit tier reported 5 errors that a baseline on the same code did not,
+# and the entire difference was that one run exported LUPIN_UNIT_NETWORK and the other
+# left it unset. Nothing in either result named the variable that decided it, so the
+# gap read as a code change until someone went looking.
+
+class _Reporter:
+    """A terminalreporter that keeps its lines instead of printing them."""
+    def __init__( self ):
+        self.lines = []
+    def write_line( self, line ):
+        self.lines.append( line )
+
+
+def _env_line( monkeypatch, network_raw, coverage_file ):
+    """Drive the real hook with the environment set, and return its [test-env] line."""
+    monkeypatch.setattr( root_conftest, "_NETWORK_MODE_RAW", network_raw )
+    monkeypatch.setattr( root_conftest, "_NETWORK_MODE", ( network_raw or "off" ).strip().lower() )
+    if coverage_file is None:
+        monkeypatch.delenv( "COVERAGE_FILE", raising=False )
+    else:
+        monkeypatch.setenv( "COVERAGE_FILE", coverage_file )
+
+    reporter = _Reporter()
+    root_conftest.pytest_terminal_summary( reporter, 0, None )
+    matches = [ l for l in reporter.lines if l.startswith( "[test-env]" ) ]
+    assert len( matches ) == 1, f"expected exactly one [test-env] line, got {reporter.lines}"
+    return matches[ 0 ]
+
+
+def test_the_env_line_prints_even_when_the_network_guard_is_disarmed( monkeypatch ):
+    """
+    THE CASE THIS EXISTS FOR. With the mode off the guard's own report returns early and
+    says nothing, so a disarmed run and an armed run with zero dials looked identical.
+    """
+    assert _env_line( monkeypatch, None, None ) == "[test-env] network=off (defaulted) coverage-file=UNSET"
+
+
+def test_a_defaulted_mode_is_not_reported_as_a_chosen_one( monkeypatch ):
+    """
+    "off" set on purpose and "off" because nobody set anything are different claims. A bare
+    "off" would read as a decision somebody made.
+    """
+    assert "network=off (defaulted)" in _env_line( monkeypatch, None, None )
+    assert "network=off"             in _env_line( monkeypatch, "off", None )
+    assert "(defaulted)"         not in _env_line( monkeypatch, "off", None )
+
+
+def test_the_armed_modes_are_named( monkeypatch ):
+    """The mode that decides whether an outbound dial raises is the one worth naming."""
+    assert "network=block" in _env_line( monkeypatch, "block", None )
+    assert "network=count" in _env_line( monkeypatch, "count", None )
+
+
+def test_the_coverage_file_is_named_or_said_to_be_unset( monkeypatch ):
+    """
+    A coverage run refuses outright without COVERAGE_FILE, and two runs sharing one file
+    combine into a figure neither of them earned — so which file was in force is evidence.
+    """
+    assert _env_line( monkeypatch, "block", "/tmp/a.coverage" ).endswith( "coverage-file=/tmp/a.coverage" )
+    assert _env_line( monkeypatch, "block", None ).endswith( "coverage-file=UNSET" )
+
+
+def test_the_live_hook_prints_the_env_line_before_any_early_return():
+    """
+    WIRING, asserted on the source. The network guard's summary returns early when its mode
+    is off — the default — so an env line placed after that return would never print on the
+    one run that most needs it.
+    """
+    source = open( ROOT_CONFTEST ).read()
+    body   = source[ source.index( "def pytest_terminal_summary(" ) : ]
+    call   = body.index( "[test-env]" )
+    early  = body.index( '_NETWORK_MODE not in ( "count", "block" )' )
+    assert call < early, (
+        "the [test-env] line is written after the network guard's early return — on a "
+        "default run the mode is off, so it would never print"
+    )
