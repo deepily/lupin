@@ -28,6 +28,24 @@ SUPPRESSION IS NOT AN OPTION, and this is measured rather than assumed: no-op'in
 `EXIT=0 / 333 passed` to `EXIT=1` with no summary, because that daemon resolves the
 session id and the failure path ends in `os._exit( 1 )`.
 
+SCOPE BUCKETS. A line executed only by a background thread is not automatically a
+finding. A module-scope declaration - a `class` statement, a dataclass field, a dict
+literal, a decorator - executes when the module is IMPORTED, and if the import
+happened on a worker thread the tracer credits it to that worker. Measured on the
+2026-08-26 sweep: 2,085 of 7,580 reported lines were declarations, 1,840 of them under
+one thread. Those are neither earned nor defects, so they are BUCKETED, not dropped:
+which modules were imported only from a worker thread is a real signal and dropping it
+destroys the evidence that found the lazy-import cascade. The verdict - and the exit
+code - keys on `call_time` ALONE.
+
+  call_time     inside a function body, non-test thread, absent from MainThread  <- the finding
+  module_scope  a declaration executed at import                                 <- reported, never counted
+  allowed       the thread is on --allow-thread                                  <- reported, never counted
+
+A `def` LINE IS NOT PART OF ITS BODY. Classification walks `node.body`, never the
+function's own `lineno..end_lineno` span: a `def` and its decorators execute at import,
+so crediting them to the body would manufacture call-time findings that never happened.
+
 WHAT A FINDING MEANS, AND WHAT IT DOES NOT. A reported line was executed by a
 non-test thread and by nothing else. That is always true of the report; whether it
 is a DEFECT depends on the thread. A daemon started at import credits lines nobody
@@ -41,11 +59,12 @@ Usage:
         [--allow-thread NAME]... [--json OUT] [--quiet]
 
 Exit codes:
-    0  no thread-credited lines outside the allow-list
-    1  thread-credited lines found (the report names thread, file and lines)
+    0  no CALL-TIME thread-credited lines outside the allow-list
+    1  call-time thread-credited lines found (the report names thread, file and lines)
     2  the run failed, so the attribution means nothing
 """
 import argparse
+import ast
 import json
 import os
 import subprocess
@@ -120,6 +139,132 @@ def exclusive_lines( attribution, allow_threads ):
     return findings
 
 
+def _stmt_span( stmt ):
+    """
+    The full line span a single statement occupies, decorators included.
+
+    Requires:
+        - stmt is an ast statement node carrying lineno/end_lineno
+
+    Ensures:
+        - returns a range covering stmt's own lines
+        - a decorated nested def/class starts at its FIRST decorator, because those
+          decorator expressions run when the enclosing function is called
+    """
+    start = stmt.lineno
+    if isinstance( stmt, ( ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef ) ):
+        for decorator in stmt.decorator_list:
+            start = min( start, decorator.lineno )
+    end = stmt.end_lineno if stmt.end_lineno is not None else stmt.lineno
+    return range( start, end + 1 )
+
+
+def call_time_lines( source ):
+    """
+    The line numbers in `source` that execute only when a function is CALLED.
+
+    Requires:
+        - source is the full text of a parseable Python module
+
+    Ensures:
+        - returns a set of 1-based line numbers belonging to statements inside some
+          function body
+        - a `def`/`async def` line, and the decorators of a module-scope function, are
+          NEVER included on account of the function they introduce - a def executes at
+          import, and crediting it to its own body invents call-time lines
+        - a class body at module scope is module-scope; the same class body written
+          inside a function is call-time
+        - raises SyntaxError if source does not parse
+    """
+    lines = set()
+    for node in ast.walk( ast.parse( source ) ):
+        if not isinstance( node, ( ast.FunctionDef, ast.AsyncFunctionDef ) ): continue
+        for stmt in node.body:
+            lines.update( _stmt_span( stmt ) )
+    return lines
+
+
+def make_scope_classifier():
+    """
+    Build `is_call_time( path, line )`, parsing each file at most once.
+
+    Ensures:
+        - returns a callable answering whether that line executes inside a function body
+        - a file that cannot be read or parsed answers True for every line: the tool
+          must not silently drop a finding it was unable to classify
+    """
+    cache = {}
+
+    def is_call_time( path, line ):
+        if path not in cache:
+            try:
+                with open( path ) as fh: cache[ path ] = call_time_lines( fh.read() )
+            except ( OSError, SyntaxError, ValueError ):
+                cache[ path ] = None
+        known = cache[ path ]
+        if known is None: return True
+        return line in known
+
+    return is_call_time
+
+
+def bucket_findings( attribution, allow_threads, is_call_time ):
+    """
+    Split the reduction into the three buckets the verdict is read from.
+
+    Requires:
+        - attribution maps thread name -> file -> list of line numbers
+        - allow_threads is a collection of thread names to bucket as `allowed`
+        - is_call_time( path, line ) answers whether a line runs inside a function body
+
+    Ensures:
+        - returns { "call_time": {...}, "module_scope": {...}, "allowed": {...} },
+          each a {thread: {file: [lines]}} map, every one of them sorted
+        - an allow-listed thread lands whole in `allowed` and is never classified,
+          so an exemption can never be mistaken for a clean scope
+        - only `call_time` is the finding; the other two are reported, never counted
+    """
+    raw     = exclusive_lines( attribution, set() )
+    buckets = { "call_time": {}, "module_scope": {}, "allowed": {} }
+
+    for thread in raw:
+        for fn, lines in raw[ thread ].items():
+            if thread in allow_threads:
+                buckets[ "allowed" ].setdefault( thread, {} )[ fn ] = list( lines )
+                continue
+            at_call_time = [ ln for ln in lines if is_call_time( fn, ln ) ]
+            declared     = [ ln for ln in lines if ln not in set( at_call_time ) ]
+            if at_call_time: buckets[ "call_time"    ].setdefault( thread, {} )[ fn ] = at_call_time
+            if declared:     buckets[ "module_scope" ].setdefault( thread, {} )[ fn ] = declared
+
+    return buckets
+
+
+def verdict_exit_code( buckets ):
+    """
+    The exit code, keyed on `call_time` ALONE.
+
+    Ensures:
+        - returns 1 when any call-time line was found, 0 otherwise
+        - module-scope declarations and allow-listed threads NEVER fail the check;
+          keying on them would leave the change cosmetic
+    """
+    return 1 if buckets[ "call_time" ] else 0
+
+
+def _count( bucket ):
+    return sum( len( ls ) for files in bucket.values() for ls in files.values() )
+
+
+def _print_bucket( bucket ):
+    for thread in sorted( bucket ):
+        print( f"  thread {thread!r}:" )
+        for fn in sorted( bucket[ thread ] ):
+            lines = bucket[ thread ][ fn ]
+            print( f"    {len( lines ):5d}  {fn}" )
+            print( f"           {lines}" )
+
+
 def main( argv=None ):
     parser = argparse.ArgumentParser(
         description="Report product lines executed only by a non-test thread."
@@ -141,27 +286,33 @@ def main( argv=None ):
         print( f"[thread-credited] CANNOT ATTRIBUTE: {e}", file=sys.stderr )
         return 2
 
-    findings = exclusive_lines( attribution, set( args.allow_thread ) )
+    buckets = bucket_findings( attribution, set( args.allow_thread ), make_scope_classifier() )
 
     if args.json:
-        with open( args.json, "w" ) as fh: json.dump( findings, fh, indent=2, sort_keys=True )
+        with open( args.json, "w" ) as fh: json.dump( buckets, fh, indent=2, sort_keys=True )
 
-    if not findings:
-        print( f"[thread-credited] none - every product line under '{args.target}' was reached by "
-               f"the test thread." )
-        return 0
+    call_time = _count( buckets[ "call_time"    ] )
+    declared  = _count( buckets[ "module_scope" ] )
+    allowed   = _count( buckets[ "allowed"      ] )
 
-    total = sum( len( ls ) for files in findings.values() for ls in files.values() )
-    print( f"[thread-credited] {total} line(s) were executed ONLY by a background thread under "
-           f"'{args.target}'. No test reached them." )
-    if not args.quiet:
-        for thread in sorted( findings ):
-            print( f"  thread {thread!r}:" )
-            for fn in sorted( findings[ thread ] ):
-                lines = findings[ thread ][ fn ]
-                print( f"    {len( lines ):5d}  {fn}" )
-                print( f"           {lines}" )
-    return 1
+    if not call_time:
+        print( f"[thread-credited] none - no product line under '{args.target}' was executed inside "
+               f"a function body by a background thread alone." )
+    else:
+        print( f"[thread-credited] {call_time} call-time line(s) were executed ONLY by a background "
+               f"thread under '{args.target}'. No test reached them." )
+        if not args.quiet: _print_bucket( buckets[ "call_time" ] )
+
+    if declared:
+        print( f"[thread-credited] {declared} further line(s) are module-scope declarations executed "
+               f"on import by a worker thread. Reported, NOT counted." )
+        if not args.quiet: _print_bucket( buckets[ "module_scope" ] )
+
+    if allowed:
+        print( f"[thread-credited] {allowed} further line(s) belong to allow-listed thread(s): "
+               f"{', '.join( sorted( buckets[ 'allowed' ] ) )}. Reported, NOT counted." )
+
+    return verdict_exit_code( buckets )
 
 
 if __name__ == "__main__":
