@@ -27,6 +27,7 @@ from cosa.rest.queue_auth import authorize_queue_filter
 from cosa.rest.auth_middleware import is_admin
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
+from cosa.rest.job_persistence import persist_job_cancelled, CANCELLABLE_QUEUES
 from cosa.rest.queue_util import emit_job_state_transition
 
 router = APIRouter(prefix="/api", tags=["queues"])
@@ -1061,7 +1062,6 @@ async def cancel_job(
     # runs it. Measured 2026-08-28: a cancelled job returned across a bounce 26
     # minutes later. Marking it CANCELLED (terminal) is what makes the message below
     # true of the SYSTEM and not just of this process.
-    from cosa.rest.job_persistence import persist_job_cancelled
     persist_job_cancelled( job_id )
 
     _emit_job_removed( user_id, job_id, "todo" )
@@ -1129,8 +1129,15 @@ async def delete_all_queue_jobs(
     print( f"[API] DELETE /api/queue/{queue_name}/all - user: {user_id}, admin: {is_admin( current_user )}" )
 
     if is_admin( current_user ):
+        # Read the ids BEFORE clear() — after it there is nothing left to name, and an
+        # admin clear that leaves every row `pending` restores the whole queue on the
+        # next start. This is the widest-blast-radius path of the three.
+        cancelled_ids = ( [ j.id_hash for j in queue.get_all_jobs() ]
+                          if queue_name in CANCELLABLE_QUEUES else [] )
         count = queue.size()
         queue.clear()
+        for id_hash in cancelled_ids:
+            persist_job_cancelled( id_hash )
         items_deleted = count
     else:
         jobs = queue.get_jobs_for_user( user_id )
@@ -1140,6 +1147,8 @@ async def delete_all_queue_jobs(
                 job.request_cancel()
             deleted = queue.delete_by_id_hash( job.id_hash )
             if deleted:
+                if queue_name in CANCELLABLE_QUEUES:
+                    persist_job_cancelled( job.id_hash )
                 items_deleted += 1
 
     print( f"[API] Deleted {items_deleted} jobs from {queue_name} queue by user {user_id}" )
@@ -1238,6 +1247,12 @@ async def delete_queue_job(
     deleted = queue.delete_by_id_hash( job_id )
     if not deleted:
         raise HTTPException( status_code=404, detail=f"Failed to delete job {job_id} from {queue_name} queue" )
+
+    # Same ledger write as the /cancel door — a delete from `todo` IS a cancellation,
+    # whichever endpoint the caller used. Guarded by queue because done/dead rows are
+    # already terminal and `run` deletes on its normal completion path.
+    if queue_name in CANCELLABLE_QUEUES:
+        persist_job_cancelled( job_id )
 
     # Emit WebSocket event for UI synchronization (canonical dual-emit:
     # owner + watching admins, deduplicated). See

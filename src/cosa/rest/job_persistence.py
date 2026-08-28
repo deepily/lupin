@@ -358,6 +358,16 @@ def persist_job_paused_state( job_id, paused ):
         print( f"[WARN] persist_job_paused_state failed for {job_id}: {e}" )
 
 
+# Queues whose rows are still PRE-EXECUTION, so a delete from them is a cancellation
+# the ledger must record. `done` and `dead` rows are ALREADY terminal — writing
+# CANCELLED over a COMPLETED or FAILED row would destroy the outcome, which is worse
+# than the resurrection bug this whole mechanism exists to fix. `run` is excluded for
+# a different reason: the running queue calls delete_by_id_hash on its NORMAL
+# completion paths (running_fifo_queue.py, 8 call sites), so a blanket ledger write
+# at the deletion point would mark every finished job cancelled.
+CANCELLABLE_QUEUES = frozenset( { "todo" } )
+
+
 def persist_job_cancelled( job_id ):
     """
     Mark a cancelled job CANCELLED in the ledger so a restart cannot resurrect it.

@@ -240,6 +240,31 @@ class TestPersistCancelled:
         # caller reports as a failed cancel.
         persist_job_cancelled( "j1" )
 
+    def test_only_the_PRE_EXECUTION_queue_is_cancellable( self ):
+        """
+        🔴 WHY THIS IS NOT SIMPLY "WRITE THE LEDGER WHEREVER WE DELETE".
+
+        Mr Radio's read was that the ledger write belongs at the deletion point so
+        every door inherits it. Right instinct, wrong altitude — putting it in
+        delete_by_id_hash would be worse than the bug:
+
+          - running_fifo_queue calls delete_by_id_hash on its NORMAL completion
+            paths (8 call sites), so every finished job would be marked cancelled;
+          - `done` and `dead` rows are ALREADY terminal, so the write would stamp
+            CANCELLED over a real COMPLETED or FAILED outcome, destroying the result.
+
+        Only `todo` holds rows that are pre-execution AND whose deletion means the
+        user meant "don't run this". That is the whole membership, and it is asserted
+        rather than commented so widening it is a deliberate act.
+        """
+        from cosa.rest.job_persistence import CANCELLABLE_QUEUES
+        assert CANCELLABLE_QUEUES == frozenset( { "todo" } )
+        for terminal_or_active in ( "run", "done", "dead" ):
+            assert terminal_or_active not in CANCELLABLE_QUEUES, (
+                f"'{terminal_or_active}' must not be cancellable — deleting from it either "
+                f"races normal completion or overwrites a real outcome"
+            )
+
 
 # =============================================================================
 # 4. persist_job_paused_state()
