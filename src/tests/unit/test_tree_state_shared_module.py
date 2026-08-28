@@ -19,7 +19,7 @@ import sys
 
 import pytest
 
-from cosa.utils.tree_state import _coarse_age, _git_reader, tree_state_line
+from cosa.utils.tree_state import _coarse_age, _git_reader, _primary_branch, main, tree_state_line
 
 ROOT      = os.environ[ "LUPIN_ROOT" ]
 HELPER    = os.path.join( ROOT, "src", "scripts", "lib", "tree-state.sh" )
@@ -123,3 +123,56 @@ def test_coarse_age_moved_with_its_three_callers():
     assert _coarse_age( 30 )      == "0m"
     assert _coarse_age( 3600 )    == "1h"
     assert _coarse_age( 86400 )   == "1d"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The reader's failure arms and the module entry point
+# ═════════════════════════════════════════════════════════════════════════════
+# INHERITED GAPS, closed 2026-08-28 while working gap 1 (row 11253df9). These lines were
+# reachable only through a subprocess — `main()` — or through a hostile git that no test
+# built, so the module sat at 90% under a 100% mandate. None of them is new code; they are
+# the arms Rio's audit added and nobody drove in-process.
+
+def test_the_reader_returns_none_when_git_cannot_be_run( monkeypatch ):
+    """
+    A missing or unrunnable git must degrade, never propagate. This is the arm that makes
+    the module's "Raises: nothing" contract true rather than aspirational.
+    """
+    def boom( *a, **kw ): raise OSError( "no git here" )
+    monkeypatch.setattr( subprocess, "run", boom )
+    assert _git_reader( ROOT )( "rev-parse", "HEAD" ) is None
+
+
+def test_the_reader_returns_none_when_the_stream_decodes_lazily_and_fails( monkeypatch ):
+    """
+    THE ARM RIO MEASURED: `text=True` can defer the decode, so touching `.stdout` raises
+    UnicodeDecodeError AFTER `subprocess.run` returned cleanly. That is neither an OSError
+    nor a SubprocessError, so it escaped both the reader and the line until it was caught.
+    """
+    class LazyDecodeFailure:
+        returncode = 0
+        @property
+        def stdout( self ): raise UnicodeDecodeError( "utf-8", b"\xff", 0, 1, "invalid" )
+    monkeypatch.setattr( subprocess, "run", lambda *a, **kw: LazyDecodeFailure() )
+    assert _git_reader( ROOT )( "rev-parse", "HEAD" ) is None
+
+
+def test_the_primary_branch_fallback_returns_none_when_no_worktree_names_a_branch():
+    """
+    A listing that exists but names no branch — every worktree detached. The caller then
+    renders the "no upstream and no primary branch" line rather than a confident comparison
+    against a ref it invented.
+    """
+    def git( *args ):
+        return "worktree /repo\nHEAD abc1234\ndetached\n" if args[ 0 ] == "worktree" else None
+    assert _primary_branch( git ) is None
+
+
+def test_main_prints_one_line_in_process_and_returns_zero( capsys ):
+    """
+    IN-PROCESS, not as a subprocess. The existing subprocess test proves the exit status a
+    runner sees; it cannot measure the body, so `main` was uncovered while looking tested.
+    """
+    assert main() == 0
+    out = capsys.readouterr().out.splitlines()
+    assert len( out ) == 1 and out[ 0 ].startswith( "[tree-state]" )

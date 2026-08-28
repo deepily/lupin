@@ -275,7 +275,9 @@ from cosa.utils.tree_state import (
     _fetch_age,
     _git_reader,
     _primary_branch,
+    _run_span,
     _tree_state_line,
+    capture_start_sha,
     tree_state_line,
 )
 
@@ -354,6 +356,22 @@ def _coverage_file_at_start():
 _COVERAGE_FILE_AT_START = _coverage_file_at_start()
 
 
+# THE SHA THIS RUN STARTED ON — captured HERE, at import, for the same reason
+# `_COVERAGE_FILE_AT_START` is: a "state at start" value has to be read at the start, and
+# the two live beside each other so a reader finds them together.
+#
+# The `[tree-state]` line is emitted from the terminal-summary hook, i.e. at the END of a
+# run — so a commit landing mid-run was invisible (row 11253df9, gap 1). Measured: the
+# branch moved 20+ commits inside one session, and the unit tier alone runs ~13 minutes, so
+# this is an ordinary occurrence rather than a corner. With this, the line describes an
+# INTERVAL and says plainly when the two ends differ.
+#
+# ONE git call, not a second full probe. The gap is a SHA question; branch/behind/ahead/
+# fetched/dirty at start answer questions nobody asked at eight times the cost. Design:
+# `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2.
+_TREE_STATE_START_SHA = capture_start_sha( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ) )
+
+
 
 def pytest_terminal_summary( terminalreporter, exitstatus, config ):
     """
@@ -366,7 +384,7 @@ def pytest_terminal_summary( terminalreporter, exitstatus, config ):
     # FIRST, and outside every early return below: a run that ends before this has
     # printed is a green with no tree attached, which is the whole defect.
     try:
-        terminalreporter.write_line( tree_state_line( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ) ) )
+        terminalreporter.write_line( tree_state_line( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ), _TREE_STATE_START_SHA ) )
     except Exception:                                    # pragma: no cover - a diagnostic may never fail a run
         terminalreporter.write_line( "[tree-state] UNKNOWN — the tree-state probe itself failed" )
 
