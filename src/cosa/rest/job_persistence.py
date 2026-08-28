@@ -56,10 +56,18 @@ from cosa.config.configuration_manager import ConfigurationManager
 # false, and a retraction sourced from it is indistinguishable from diligence — a
 # correct fix was one message from being withdrawn on it.
 #
-# ⇒ To inspect a job that ran on :8000, run the query INSIDE lupin-rest-test:
-#       docker exec lupin-rest-test bash -lc 'cd /var/lupin && \
-#         PYTHONPATH=/var/lupin/src LUPIN_ROOT=/var/lupin python3 -c "..."'
-#   And print `select current_database()` beside any count you intend to act on.
+# ⇒ GO AT THE DATABASE CONTAINER AND NAME THE DATABASE (Mr Radio's route, and
+#   better than "remember to run it inside lupin-rest-test" — that still depends
+#   on standing in the right place, which is the thing that failed):
+#
+#       docker exec lupin-postgres psql -U lupin_dev -d lupin_db_test -c "..."
+#
+#   THERE IS NO DEFAULT TO FALL THROUGH TO, verified both ways 2026-08-28:
+#     · a wrong name errors    -> FATAL: database "lupin_db_typo" does not exist
+#     · OMITTING -d also errors -> psql tries the USERNAME as the database and
+#                                  fails; it does not quietly pick one
+#   So you either name the box you meant or you get told. That property is what
+#   the in-container route lacks: it reads *a* database successfully either way.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -388,10 +396,18 @@ def persist_job_paused_state( job_id, paused ):
 # Queues whose rows are still PRE-EXECUTION, so a delete from them is a cancellation
 # the ledger must record. `done` and `dead` rows are ALREADY terminal — writing
 # CANCELLED over a COMPLETED or FAILED row would destroy the outcome, which is worse
-# than the resurrection bug this whole mechanism exists to fix. `run` is excluded for
-# a different reason: the running queue calls delete_by_id_hash on its NORMAL
-# completion paths (running_fifo_queue.py, 8 call sites), so a blanket ledger write
-# at the deletion point would mark every finished job cancelled.
+# than the resurrection bug this whole mechanism exists to fix.
+#
+# `run` is excluded for TWO INDEPENDENT reasons, and the second is Mr Radio's:
+#   (1) CORRECTNESS — the running queue calls delete_by_id_hash on its NORMAL
+#       completion paths (running_fifo_queue.py, 8 call sites), so a blanket ledger
+#       write at the deletion point would mark every finished job cancelled.
+#   (2) UNNECESSARY — a running row cannot come back anyway: mark_interrupted_jobs()
+#       stamps it INTERRUPTED at the next startup, which is terminal, so
+#       get_restorable_jobs() never sees it. The resurrection this exists to stop is
+#       a `todo`-only failure.
+# Reason (1) alone justifies the exclusion; reason (2) is why it costs nothing.
+# Recorded separately so a reader who refutes one does not conclude the exclusion falls.
 CANCELLABLE_QUEUES = frozenset( { "todo" } )
 
 
