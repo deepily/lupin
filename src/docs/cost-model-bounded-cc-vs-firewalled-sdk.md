@@ -132,9 +132,11 @@ Even though Path A is "free" in marginal-cost terms, the Max plan is NOT infinit
 
 ⚠️ **Corrected 2026-08-17 (Rick's ruling, row `f0b3f630`).** This table used to say `12 AM – 9 AM EDT` was ideal because Rick is asleep. That was true about Rick and false about the machine: measured boot history, unbroken since Aug 5, shows the host is **powered off ~10:53 PM – 7:17 AM**. Jobs scheduled there did not run early, quietly, or at all — they sat until the next boot and drained hours late.
 
+⚠️ **Corrected AGAIN 2026-08-20 (Rick's ruling), and this doc had not caught up.** The `7:17 AM` above came from a single boot on Aug 6. Across the 12 morning boots since Aug 4 the **median is 09:24 and eleven of twelve are after 08:52**, so a job at 7:30 still sits dead 1.5-2.5h on almost every day. **10 AM - 1 PM EDT is the only window reliably both up and quiet.** CLAUDE.md § Off-peak scheduling rule is the source of truth; re-derive with `last -x reboot | head -20` rather than trusting this table.
+
 | Window (EDT) | State | Bounded-job-friendliness |
 |---|---|---|
-| ~10:53 PM – 7:17 AM | **Host powered OFF** | ☠️ **Never schedule here** — the job does not run until boot |
+| ~11 PM – 9 AM | **Host powered OFF, and usually still down past 8:52 AM** | ☠️ **Never schedule here** — the job does not run until boot |
 | 9 PM – 10:53 PM | Peak interactive Claude Code work | ❌ Avoid scheduled batch here |
 | **7:30 AM – 10 AM** | Box up, Rick barely on | 🟢 **Ideal for batch / long-running** |
 | 10 AM – 9 PM | Light-to-moderate interactive use | 🟡 OK for short jobs; avoid heavy batch |

@@ -7,10 +7,24 @@ EXECUTOR: AI
     it to a human to type the CLI defeats the acceptance criterion in the same
     document. It is owned by the AI and submitted on a schedule.
 
-VENUE: :8000, SCHEDULED, post-midnight off-peak (12 AM - 9 AM EDT)
+VENUE: :8000, SCHEDULED — 10 AM to 1 PM EDT, NOT post-midnight
     It spends real inference and needs a live server, so it runs on the test server
-    via `POST /api/test-suite/submit` in the off-peak window — NEVER on :7999, NEVER
-    via curl, NEVER side-door injected (cascade ruling R-D5, Lupin venue rules).
+    via `POST /api/test-suite/submit` — NEVER on :7999, NEVER via curl, NEVER
+    side-door injected (cascade ruling R-D5, Lupin venue rules).
+
+    🔴 THIS LINE USED TO SAY "post-midnight off-peak (12 AM - 9 AM EDT)" AND THAT
+    WINDOW IS DEAD. The host is powered off overnight and on most days is still down
+    well past 8:52 AM, so a job placed there does not run late — it does not run at
+    all until the next boot, then drains hours off-schedule. CLAUDE.md has corrected
+    that window TWICE (2026-08-17 and 2026-08-20, both Rick's rulings) and this
+    docstring still carried the version both corrections overturned. On 2026-08-28 a
+    seat read this header, scheduled for 00:15, and had to be told by a peer.
+
+    The rule is Rick's SLEEP versus the BOX's uptime — they are not the same hours.
+    Measured boots, not inferred: `last -x reboot | head -20`. Re-derive rather than
+    trust this line; it has been wrong before. CLAUDE.md § Off-peak scheduling rule
+    is the source of truth, and it says 10 AM - 1 PM is the only window reliably both
+    up and quiet.
 
 What it does (plan §9, §7, §6a):
     Two passes over the same corpus. COLD measures router accuracy + first-response
@@ -1754,7 +1768,7 @@ def render_report(
     lines.append( "" )
     lines.append( NOT_GONOGO_BANNER )
     lines.append( "" )
-    lines.append( "**EXECUTOR: AI** · venue :8000 scheduled (post-midnight off-peak) · `speak=false, interactive=false`" )
+    lines.append( "**EXECUTOR: AI** · venue :8000 scheduled (10 AM - 1 PM EDT) · `speak=false, interactive=false`" )
     lines.append( f"**sample**: stratified, seed `{seed}`, n_per_command `{n_per_command}` (reproducible — same seed, same sample)" )
     lines.append( "" )
     lines.append( "## Headline metrics (cold vs warm)" )

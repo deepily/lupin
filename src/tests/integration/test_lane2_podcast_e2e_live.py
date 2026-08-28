@@ -22,8 +22,14 @@ job to done, and verify the finished artifact names the planted facts. It assert
 CONTENT, not filename, which is the whole point of the seed. It is NOT a unit test of
 any component and it does not stand in for the podcast unit tiers.
 
-VENUE: :8000 SCHEDULED, post-midnight off-peak, via `POST /api/test-suite/submit`
-ONLY. It spends real inference and needs a live server. Never :7999, never curl,
+VENUE: :8000 SCHEDULED, 10 AM - 1 PM EDT, via `POST /api/test-suite/submit`
+ONLY. It spends real inference and needs a live server.
+
+🔴 NOT post-midnight. This header used to say "post-midnight off-peak"; the host is
+powered off overnight and usually still down past 8:52 AM, so a job placed there does
+not run late, it does not run until the next boot. CLAUDE.md § Off-peak scheduling rule
+has overturned that window twice (2026-08-17, 2026-08-20) and is the source of truth —
+re-derive with `last -x reboot | head -20` rather than trusting any copy of it. Never :7999, never curl,
 never side-doored.
 
 LIVE PRECONDITIONS (the run fails by construction without them):

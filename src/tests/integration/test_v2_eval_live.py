@@ -14,8 +14,14 @@ NOT the §1 go/no-go table — there is no v1 baseline here, so it produces no
 INVEST/STOP/SPLIT verdict. The report itself prints that disclaimer at the top
 (v2_eval.NOT_GONOGO_BANNER). The paired v1-vs-v2 verdict instrument is a separate build.
 
-VENUE: :8000 SCHEDULED, post-midnight off-peak, via `POST /api/test-suite/submit` ONLY —
+VENUE: :8000 SCHEDULED, 10 AM - 1 PM EDT, via `POST /api/test-suite/submit` ONLY —
 it spends real inference and needs the live server (Lupin venue rules; cascade R-D5).
+
+🔴 NOT post-midnight. This header used to say "post-midnight off-peak"; the host is
+powered off overnight and usually still down past 8:52 AM, so a job placed there does
+not run late, it does not run until the next boot. CLAUDE.md § Off-peak scheduling rule
+has overturned that window twice (2026-08-17, 2026-08-20) and is the source of truth —
+re-derive with `last -x reboot | head -20` rather than trusting any copy of it.
 Never :7999, never curl, never side-doored. On :7999 (or any server with the v2 flow
 gate off) the harness's own integrity guard fails the run loudly, which is correct.
 
