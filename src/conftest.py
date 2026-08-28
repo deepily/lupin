@@ -54,66 +54,38 @@ import pytest
 # THE ESCAPE HATCH IS A MARKER, never an environment default:
 # @pytest.mark.allows_outbound_network on a test that genuinely needs the network, so the
 # exemption lives in the file that needs it and is greppable.
-_NETWORK_MODE_RAW   = os.environ.get( "LUPIN_UNIT_NETWORK" )
-_NETWORK_MODE       = ( _NETWORK_MODE_RAW or "off" ).strip().lower()
-_LOOPBACK_HOSTS     = { "127.0.0.1", "::1", "localhost", "0.0.0.0", "" }
-_outbound_attempts  = []                       # (test id, address, formatted frames)
-_current_test       = { "id": "<collection>", "exempt": False }
+# 🔴 THE STATE LIVES IN A MODULE, NOT HERE — ONE COPY, HOWEVER OFTEN THIS FILE IS LOADED
+# (row 89c3900a, measured 2026-08-28). It used to live in this file, and THIS FILE IS
+# LOADED TWICE as two separate module objects: `pytest_runtest_setup` recorded the marker
+# into one copy's dict while the socket patch actually installed read a DIFFERENT dict that
+# nobody ever wrote to. So every `allows_outbound_network` marker in the repo was inert on a
+# whole-directory run — including the one in this guard's own test sandbox — and every
+# recorded attempt was blamed on `<collection>` instead of a test. The control was exact:
+#
+#   pytest src/tests/unit/                          -k TestLiveMistralRegression  ->  5 ERRORS
+#   pytest src/tests/unit/test_dm_quality_judge.py  -k TestLiveMistralRegression  ->  5 PASSED
+#
+# ⚠️ WHY this file is loaded twice is NOT established, and the fix does not depend on
+# knowing. A module under `cosa/` lives at exactly one key in `sys.modules`, so every copy
+# of this conftest binds the SAME dict and the SAME list — the cause becomes irrelevant
+# rather than removed. Full account, including one hypothesis tested and rejected, in
+# `cosa/utils/unit_network_guard.py`.
+from cosa.utils.unit_network_guard import (
+    NETWORK_MODE     as _NETWORK_MODE,
+    NETWORK_MODE_RAW as _NETWORK_MODE_RAW,
+    arm              as _arm_network_guard,
+    caller_frames    as _caller_frames,
+    current_test     as _current_test,
+    is_loopback      as _is_loopback,
+    network_guard    as _network_guard,
+    outbound_attempts as _outbound_attempts,
+    set_current_test as _set_current_test,
+)
 
-_real_socket_connect    = socket.socket.connect
-_real_socket_connect_ex = socket.socket.connect_ex
-
-
-def _is_loopback( address ):
-    """
-    Ensures:
-        - returns True for anything that is not a routed address, so AF_UNIX and
-          in-process transports are never touched
-        - returns True for loopback: TestClient and the real-socket arms in
-          test_model_server_liveness.py bind 127.0.0.1 deliberately, and a guard that
-          breaks legitimate tests gets switched off — which is worse than no guard
-    """
-    if not isinstance( address, tuple ) or not address:
-        return True
-    host = address[ 0 ]
-    if host in _LOOPBACK_HOSTS:
-        return True
-    return isinstance( host, str ) and host.startswith( "127." )
-
-
-def _caller_frames():
-    """The repo frames beneath the connect, so a report names the CULPRIT, not the victim."""
-    frames = [ f for f in traceback.extract_stack()[ :-2 ]
-               if "/site-packages/" not in f.filename and "/lib/python" not in f.filename ]
-    return [ f"{f.filename}:{f.lineno} in {f.name}" for f in frames[ -6: ] ]
-
-
-def _network_guard( real ):
-    def wrapper( self, address, *args, **kwargs ):
-        if _NETWORK_MODE in ( "count", "block" ) and not _is_loopback( address ) \
-           and not _current_test[ "exempt" ]:
-            frames = _caller_frames()
-            _outbound_attempts.append( ( _current_test[ "id" ], address, frames ) )
-            if _NETWORK_MODE == "block":
-                raise RuntimeError(
-                    f"OUTBOUND NETWORK BLOCKED in a unit test (row 7c84b8b8).\n"
-                    f"  test    : {_current_test[ 'id' ]}\n"
-                    f"  address : {address}\n"
-                    f"  from    :\n    " + "\n    ".join( frames ) + "\n"
-                    f"  A unit test that dials out passes or fails on whether a server "
-                    f"happened to be up. Inject the seam, or mark the test with "
-                    f"@pytest.mark.allows_outbound_network if it genuinely needs the network."
-                )
-        return real( self, address, *args, **kwargs )
-    return wrapper
-
-
-if _NETWORK_MODE in ( "count", "block" ):
-    # Patched at IMPORT, not in a fixture: the dial-out that started this lives in a
-    # `@pytest.mark.skipif( not _mistral_reachable(), ... )` argument, which evaluates at
-    # COLLECTION — before any fixture exists to catch it.
-    socket.socket.connect    = _network_guard( _real_socket_connect )
-    socket.socket.connect_ex = _network_guard( _real_socket_connect_ex )
+# Armed at IMPORT, not in a fixture — the dial that started row 7c84b8b8 evaluated at
+# COLLECTION, before any fixture existed to catch it. Idempotent, so a second load of this
+# file does not wrap the guard around itself.
+_arm_network_guard()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -257,8 +229,8 @@ def pytest_configure( config ):
 
 def pytest_runtest_setup( item ):
     """Name the test the guard will blame, and honour its opt-out marker (row 7c84b8b8)."""
-    _current_test[ "id" ]     = item.nodeid
-    _current_test[ "exempt" ] = item.get_closest_marker( "allows_outbound_network" ) is not None
+    _set_current_test( item.nodeid,
+                       item.get_closest_marker( "allows_outbound_network" ) is not None )
 
 
 # ONE IMPLEMENTATION, EVERY CALLER. These used to be defined here, which meant the
