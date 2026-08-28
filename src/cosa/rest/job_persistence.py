@@ -358,6 +358,49 @@ def persist_job_paused_state( job_id, paused ):
         print( f"[WARN] persist_job_paused_state failed for {job_id}: {e}" )
 
 
+def persist_job_cancelled( job_id ):
+    """
+    Mark a cancelled job CANCELLED in the ledger so a restart cannot resurrect it.
+
+    🔴 THE DEFECT THIS CLOSES. Cancelling a queued job called only
+    `delete_by_id_hash`, which mutates the in-memory queue_dict and nothing else.
+    The job_history row stayed `pending`, and `get_restorable_jobs()` selects
+    exactly `status == PENDING` — so the next server start handed the cancelled
+    job back to the queue and it ran.
+
+    Measured 2026-08-28: ts-f679f52c was cancelled at 12:34 with the endpoint's own
+    "Job removed from the queue before it started. No work was lost.", the queue read
+    empty at 12:54, :8000 was bounced at 12:58, and the job was back at 13:00. For a
+    metered ~105-minute eval that is real money spent at a time nobody chose — and
+    that one had been cancelled precisely BECAUSE its slot was wrong.
+
+    So the endpoint's success message was true of the process and false of the
+    system, which is the worst of the three available answers.
+
+    Requires:
+        - job_id is a non-empty string (the id_hash)
+
+    Ensures:
+        - status is set to CANCELLED (terminal) for the matching row
+        - no-op when the row does not exist — a non-agentic job is absent from
+          job_history and cancelling it is still legitimate
+        - never raises: a ledger write must not turn a successful cancellation into
+          an error the caller reports as a failed cancel
+    """
+    if not _is_persistence_enabled():
+        return
+
+    try:
+        with get_db() as session:
+            row = session.get( JobHistory, job_id )
+            if row is None:
+                return
+            row.status     = JobState.CANCELLED.value
+            row.updated_at = datetime.now( timezone.utc )
+    except Exception as e:
+        print( f"[WARN] persist_job_cancelled failed for {job_id}: {e}" )
+
+
 def persist_job_started_from_metadata( job_id, metadata ):
     """
     UPDATE job_history row: status='running', started_at=now().

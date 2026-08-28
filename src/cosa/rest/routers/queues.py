@@ -1055,6 +1055,15 @@ async def cancel_job(
                           f"most likely just started. Retry the cancel."
         )
 
+    # The in-memory delete above is only half a cancellation. job_history keeps the
+    # row `pending`, and get_restorable_jobs() selects exactly PENDING — so without
+    # this line the next server start hands the cancelled job back to the queue and
+    # runs it. Measured 2026-08-28: a cancelled job returned across a bounce 26
+    # minutes later. Marking it CANCELLED (terminal) is what makes the message below
+    # true of the SYSTEM and not just of this process.
+    from cosa.rest.job_persistence import persist_job_cancelled
+    persist_job_cancelled( job_id )
+
     _emit_job_removed( user_id, job_id, "todo" )
 
     print( f"[API] Queued job {job_id} cancelled before starting, by user {user_id}" )

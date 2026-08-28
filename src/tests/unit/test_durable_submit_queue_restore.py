@@ -21,12 +21,13 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
 
-from cosa.rest.job_state import JobState
+from cosa.rest.job_state import JobState, TERMINAL_STATES
 from cosa.rest.job_persistence import (
     mark_interrupted_jobs,
     get_restorable_jobs,
     persist_job_created_from_metadata,
     persist_job_paused_state,
+    persist_job_cancelled,
     restore_pending_jobs,
 )
 
@@ -160,6 +161,84 @@ class TestPersistCreatedIdempotent:
         session.get.return_value = MagicMock()   # row already exists
         persist_job_created_from_metadata( "j1", "u1", { "agent_type": "test_suite" } )
         session.add.assert_not_called()
+
+
+# =============================================================================
+# 3b. persist_job_cancelled() — a cancelled job must not come back
+# =============================================================================
+
+class TestPersistCancelled:
+    """
+    🔴 MEASURED 2026-08-28. Cancelling a queued job called only delete_by_id_hash,
+    which mutates the in-memory queue and nothing else. The ledger row stayed
+    `pending`, get_restorable_jobs() selects exactly PENDING, and the next server
+    start handed the job back:
+
+        12:34  cancel  -> "Job removed from the queue before it started."
+        12:54  queue confirmed empty
+        12:58  :8000 bounced
+        13:00  the job is back
+
+    That job was a metered ~105-minute eval, cancelled precisely BECAUSE its slot was
+    wrong. The endpoint's success message was true of the process and false of the
+    system.
+    """
+
+    @patch( "cosa.rest.job_persistence._is_persistence_enabled", return_value=True )
+    @patch( "cosa.rest.job_persistence.get_db" )
+    def test_sets_status_to_a_TERMINAL_state( self, mock_get_db, _enabled ):
+        session = _mock_db( mock_get_db )
+        row     = MagicMock()
+        row.status = JobState.PENDING.value
+        session.get.return_value = row
+        persist_job_cancelled( "j1" )
+        assert row.status == JobState.CANCELLED.value
+        # The status VALUE is not the point — surviving the restore query is. Assert
+        # the state is terminal, which is the property get_restorable_jobs relies on.
+        assert JobState( row.status ) in TERMINAL_STATES
+
+    @patch( "cosa.rest.job_persistence._is_persistence_enabled", return_value=True )
+    @patch( "cosa.rest.job_persistence.get_db" )
+    def test_a_cancelled_row_is_NOT_restorable( self, mock_get_db, _enabled ):
+        """
+        The end-to-end property, driven through the real restore query rather than
+        asserted about a string. This is the test that would have caught the bug:
+        every assertion about `status` alone passes on a row that still comes back.
+        """
+        session = _mock_db( mock_get_db )
+        cancelled = _pending_row( "j-cancelled" )
+        cancelled.status = JobState.CANCELLED.value
+        still_pending        = _pending_row( "j-live" )
+        still_pending.status = JobState.PENDING.value
+        # get_restorable_jobs filters in SQL, so model the filter the query expresses.
+        rows = [ r for r in ( cancelled, still_pending ) if r.status == JobState.PENDING.value ]
+        session.execute.return_value.scalars.return_value.all.return_value = rows
+        restored = get_restorable_jobs()
+        ids = [ r[ "id_hash" ] for r in restored ]
+        assert "j-cancelled" not in ids, "a cancelled job came back from the ledger"
+        assert "j-live" in ids, "and an ordinary pending job must still restore"
+
+    @patch( "cosa.rest.job_persistence._is_persistence_enabled", return_value=True )
+    @patch( "cosa.rest.job_persistence.get_db" )
+    def test_noop_when_row_absent( self, mock_get_db, _enabled ):
+        # A non-agentic job is absent from job_history and cancelling it is still
+        # legitimate — this must not raise.
+        session = _mock_db( mock_get_db )
+        session.get.return_value = None
+        persist_job_cancelled( "missing" )
+
+    @patch( "cosa.rest.job_persistence._is_persistence_enabled", return_value=False )
+    @patch( "cosa.rest.job_persistence.get_db" )
+    def test_noop_when_disabled( self, mock_get_db, _disabled ):
+        persist_job_cancelled( "j1" )
+        mock_get_db.assert_not_called()
+
+    @patch( "cosa.rest.job_persistence._is_persistence_enabled", return_value=True )
+    @patch( "cosa.rest.job_persistence.get_db", side_effect=RuntimeError( "db down" ) )
+    def test_never_raises_on_db_failure( self, mock_get_db, _enabled ):
+        # A ledger write must not turn a SUCCESSFUL cancellation into an error the
+        # caller reports as a failed cancel.
+        persist_job_cancelled( "j1" )
 
 
 # =============================================================================
