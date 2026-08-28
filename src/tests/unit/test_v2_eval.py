@@ -812,6 +812,51 @@ def test_sample_manifest_stays_silent_when_every_command_filled( tmp_path ):
     assert manifest[ "total_kept" ] == result[ "provenance" ][ "sampled_n" ], "manifest and provenance agree"
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# BASE URL — the same server has two addresses and only one works from each side
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_resolve_base_url_inside_the_container_uses_the_listening_port():
+    """
+    🔴 THE DEFECT THIS PINS. `lupin-rest-test` LISTENS on 7999 and PUBLISHES 8000
+    (`docker port` → `7999/tcp -> 0.0.0.0:8000`). The old default was the bare host
+    address, correct for a hand-run and wrong for the venue this suite is REGISTERED
+    to run in — the runner executes inside the container, where :8000 raises
+    OSError errno 99, "Cannot assign requested address".
+
+    Measured 2026-08-28: two submitted runs died in ~2.5s each on the sha read,
+    before a single question was asked. The suite had a runner, a 150-minute
+    timeout budget and a scheduling window, and could not complete through the
+    only sanctioned door on any of them.
+    """
+    assert ve.resolve_base_url( None, in_container=True ) == "http://localhost:7999"
+
+
+def test_resolve_base_url_on_the_host_uses_the_published_port():
+    # The other side of the same coin — a hand-run on the host must keep working.
+    assert ve.resolve_base_url( None, in_container=False ) == "http://localhost:8000"
+
+
+def test_resolve_base_url_never_overrides_an_explicit_choice():
+    # Somebody naming a venue outranks any inference, on EITHER side. A resolver that
+    # quietly rewrote an explicit --base-url would be a worse bug than the one it fixes.
+    for where in ( True, False ):
+        assert ve.resolve_base_url( "http://elsewhere:1234", in_container=where ) == "http://elsewhere:1234"
+
+
+def test_resolve_base_url_treats_blank_as_unset():
+    # argparse hands through an empty string if someone writes `--base-url ""`. Returning
+    # "" would defer the failure to a connection error with no address in it.
+    assert ve.resolve_base_url( "", in_container=True )   == "http://localhost:7999"
+    assert ve.resolve_base_url( "   ", in_container=False ) == "http://localhost:8000"
+
+
+def test_the_two_addresses_are_actually_different():
+    # Guards the pair against a copy-paste that makes both constants the same value —
+    # every test above would still pass, and the bug would be back.
+    assert ve.HOST_BASE_URL != ve.CONTAINER_BASE_URL
+
+
 def test_main_defaults_use_injected_helpers( tmp_path, monkeypatch ):
     root = str( tmp_path )
     _seed_trace( tmp_path, _WEATHER_QUESTIONS )

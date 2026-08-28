@@ -1413,6 +1413,55 @@ class HttpAskClient:
         }
 
 
+HOST_BASE_URL      = "http://localhost:8000"    # published port, seen from the HOST
+CONTAINER_BASE_URL = "http://localhost:7999"    # the port the app actually LISTENS on
+
+
+def resolve_base_url( explicit: Optional[ str ], in_container: bool ) -> str:
+    """
+    Pick the base url this run should ask, given where the run is EXECUTING.
+
+    🔴 THE SAME SERVER HAS TWO ADDRESSES AND ONLY ONE OF THEM WORKS FROM EACH SIDE.
+    `lupin-rest-test` LISTENS on 7999 inside the container and PUBLISHES that as 8000
+    on the host (`docker port` → `7999/tcp -> 0.0.0.0:8000`). So:
+
+        from the host       :8000 works, :7999 does not
+        inside the container :7999 works, :8000 raises OSError errno 99,
+                             "Cannot assign requested address"
+
+    The old default was the bare host address, which is correct for a hand-run and
+    WRONG for the venue this suite is registered to run in. The registered runner
+    executes INSIDE the container, so every submitted v2_eval run died at second one
+    on the sha read, before a single question was asked.
+
+    Measured 2026-08-28: two submitted runs failed in ~2.5s each with errno 99. The
+    suite has a registered runner, a timeout budget, and a scheduling window, and it
+    could not have completed through the only sanctioned door on any of them.
+
+    An EXPLICIT --base-url always wins — this only fills the blank.
+
+    Requires:
+        - explicit is the user's --base-url, or None when they did not pass one
+        - in_container says whether this process is running inside the container
+
+    Ensures:
+        - explicit given          → returned unchanged, wherever we are
+        - no explicit, container  → CONTAINER_BASE_URL
+        - no explicit, host       → HOST_BASE_URL
+        - Pure: no I/O, no environment reads; the caller detects and passes in_container
+    """
+    if explicit is not None and explicit.strip() != "":
+        return explicit
+    return CONTAINER_BASE_URL if in_container else HOST_BASE_URL
+
+
+def running_in_container() -> bool:   # pragma: no cover - filesystem boundary
+    """True when this process is inside the container. `/.dockerenv` is created by
+    the runtime at container build, is present in every lupin image, and needs no
+    environment cooperation from whoever launched us."""
+    return os.path.exists( "/.dockerenv" )
+
+
 def read_running_server_sha( base_url: str ) -> str:   # pragma: no cover - live HTTP boundary
     """
     Ask the RUNNING v2 server what sha it booted from, so this arm's numbers are auditable
@@ -1961,7 +2010,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser( description="CJ Flow v2 two-pass eval harness (EXECUTOR: AI)" )
     parser.add_argument( "--corpus",  default="simple", help="corpus name (simple|weather)" )
     parser.add_argument( "--passes",  type=int, default=2, help="number of passes (must be 2 for cache-hit)" )
-    parser.add_argument( "--base-url", default="http://localhost:8000", help="server base url (:8000 scheduled)" )
+    parser.add_argument( "--base-url", default=None,
+                         help="server base url. Default resolves by where the run EXECUTES: "
+                              ":8000 from the host, :7999 inside the container (same server, two addresses)" )
     parser.add_argument( "--limit",   type=int, default=None, help="cap utterances per command (pre-sample)" )
     parser.add_argument( "--seed",    type=int, default=1024,
                          help="stratified-sample seed (stamped in the report; reproducibility, design §5)" )
@@ -2029,6 +2080,10 @@ def main(
     # comparison. There is no pin to assert against here — v2 runs whatever is deployed — so
     # this RECORDS rather than asserts. Reading it before the passes means a server that cannot
     # identify itself stops the run before it spends hours, not after.
+    # Resolve the venue BEFORE the first network call. `args.base_url` is None unless the
+    # caller named one; see resolve_base_url for why the default cannot be a constant.
+    args.base_url = resolve_base_url( args.base_url, running_in_container() )
+
     read_sha    = read_sha_fn if read_sha_fn is not None else read_running_server_sha
     v2_git_sha  = read_sha( args.base_url )
     if not isinstance( v2_git_sha, str ) or v2_git_sha.strip() == "":
