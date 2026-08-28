@@ -32,6 +32,13 @@ Rehearsal answered "not yet" repeatedly, and that was the value. Nearly every it
 - **Root causes that were not where anyone looked.** An empty podcast script traced to a curly brace in the model's closing remarks. A demo-line crash traced to that same morning's label fix. Spanish prosody was **refuted** as marker loss — it was a measurement bug. A "safety net that had never run" and a "bug that was never in the code" both got written up, because a wrong premise costs more than a wrong fix.
 - **Ungated tests, found and closed.** 24 disambiguation tests were guarded by nobody. Three permanently-red tests were closed along with a catalogue that had been teaching the wrong cause. An unrestored `importlib.reload` was contained after it 500'd tests roughly 150 files later.
 - **Fleet housekeeping.** 33 stray heartbeat holds were swept — and the rule against them was already written; the arbiter was fixed so it can see the hold it is poking through; a DM pilot that looked dead turned out to have an expired schedule.
+- **Every green now states the tree it was earned on.** A test result used to name a pass rate and nothing about the code it ran against. Each tier now reports the sha it **started** on as well as the one it ended on, so a run that straddles a mid-run commit says `TREE MOVED MID-RUN` instead of quietly averaging two trees; the node tiers emit it from the same code as the pytest tiers. Coverage figures now expire when the tree moves, because a number counted off one tree is a census, not a property.
+- **The coverage frame was widened to include the things it had never been able to see.** The denominator was `cosa` alone, leaving **~40,581 lines across 85 files** — the heartbeat/Stop-hook, the MCP server, and the arbiter, the three surfaces fleet liveness actually runs on — outside every measurement while `--cov-fail-under` passed green. Six packages now enter by **directory path, not package name**, because name-based scoping only counts a file once something imports it: an un-exercised module stays invisible precisely when it matters most. Honest baseline **98.46%**. The same sweep found ~610 statements of **CPython's own `json` module** sitting inside our denominator.
+- **A coverage figure nobody can attribute is now refused outright.** Every session wrote the same repo-root `.coverage`, which pytest-cov erases at startup, so a long run and a short one silently ate each other. One tier reported **96.59% — green and false**, with ~28,000 statements gone from the denominator; because the vanished files were the worse-than-average ones, the mean went **up** while nothing improved.
+- **Cancelled jobs came back from the dead.** Cancelling a queued job only mutated the in-memory queue — the ledger row stayed `pending`, and the restore query selects exactly `pending`, so the next restart handed the job back and ran it. Measured on a **metered 105-minute evaluation** that had been cancelled *because* its slot was wrong. Fixed at all three delete doors, with the guard scoped so a normal completion is never mislabelled as a cancellation.
+- **Two venues, two databases — and a host shell reads the wrong one.** Neither container sets `DB_NAME`, so a plain host shell inherits the *Development* block and queries **dev** even when the job being chased ran on the test server. The empty answer it returns reads exactly like *"these jobs are never persisted"*, which is false. An empty result from the wrong box is not evidence.
+- **A conftest loaded twice, and every network guard in the repo was inert.** Guard state lived in a module that pytest loaded as two separate objects, so the marker was written into one dictionary while the socket patch read another. Consequence, hidden behind a green suite: **every `allows_outbound_network` marker in the repo did nothing on a whole-directory run** — including the guard's own sandbox. Two things about it remain honestly unexplained rather than papered over.
+- **V1 excised, and the smoke suite rehabilitated.** Seventeen files, the marker, the compose pair and a pinned worktree went in one deliberate pass with the edges the plan had missed written down. Nine smoke files were found testing things the product had renamed or replaced, and the multiplexer smoke tests turned out never to have got past the login screen.
 
 ---
 
@@ -214,21 +221,24 @@ The first decision proxy for AI agents with academic-grade statistical rigor:
 - **Morning coffee batch review**: Non-urgent decisions queued for human review at your convenience
 - **Ratification API**: Post-hoc approval with trust feedback loop
 
-### Battle-tested -- 24,500+ automated tests
+### Battle-tested -- 29,000+ automated tests
 
 | Suite | Count | Coverage |
 |-------|-------|----------|
-| Unit tests (Python) | 20,600 | Core logic, trust engine, hooks, credentials, prediction engine, agentic orchestrators, task store, arbiter -- 11,571 in the app tree, 9,029 in the in-tree CoSA framework |
-| Unit tests (TypeScript) | 2,307 | Multiplexer audio, transport, stores, render — behind a hard 100% c8 gate |
-| E2E UI (Playwright) | 678 | Full browser-driven flows including 12-page visual regression |
-| Smoke tests | 437 | Fast sanity sweeps across the app and the Lupin smoke suite |
-| Integration tests | 432 | End-to-end API workflows against dedicated dual-container test server |
-| Parity oracle, cutover E2E, and other suites | 50 | Multiplexer-vs-legacy parity, store-owed cutover, targeted end-to-end checks |
-| WebSocket tests | 43 | Connection, auth, event routing, session management |
-| **Total authored test cases** | **24,547** | 22,240 Python + 2,307 TypeScript |
+| Unit tests (Python, app tree) | 16,247 | Core logic, trust engine, hooks, credentials, prediction engine, agentic orchestrators, task store, arbiter |
+| Unit tests (Python, in-tree CoSA) | 8,853 | The agent framework: queues, routers, agents, memory, config |
+| Unit tests (TypeScript) | 2,424 | Multiplexer audio, transport, stores, render — behind a hard 100% c8 gate |
+| E2E UI (Playwright) | 663 | Full browser-driven flows including visual regression |
+| Integration tests | 421 | End-to-end API workflows against a dedicated dual-container test server |
+| Smoke tests | 404 | Fast sanity sweeps across the app and the Lupin smoke suite |
+| Top-level and cross-cutting suites | 148 | Parity oracle, cutover E2E, websocket bridge, targeted end-to-end checks |
+| WebSocket multiplexer transport | 7 | Connection, auth, event routing, session management |
+| **Total authored test cases** | **29,167** | 26,743 Python + 2,424 TypeScript |
 | Interactive proxy scenarios | 12 | Calculator, CRUD, and Expediter agents via auto-proxy (script-driven, not counted above) |
 
-Counts are of authored test functions (`def test_*` / `it(` / `test(`) across `src/tests/` and `src/cosa/tests/`, as of 2026-08-07. A repo-wide grep returns a slightly larger number; the extra matches are self-test functions embedded in production modules, which are not part of any suite. **The suite figure is the one to quote.**
+Counts are of authored test functions (`def test_*` / `it(` / `test(`) across `src/tests/` and `src/cosa/tests/`, **re-derived 2026-08-28** — the previous table was a 2026-08-07 snapshot. Rows are grouped by directory so anyone can reproduce the number; WebSocket coverage is no longer a single row because those tests now live where the code they exercise lives. A repo-wide grep returns a slightly larger number; the extra matches are self-test functions embedded in production modules, which are not part of any suite. **The suite figure is the one to quote.**
+
+**Coverage: 98.46%**, lines and branches, over 62,225 statements — measured 2026-08-26 across the unit and CoSA tiers, with the gate floor set at 98. The floor is deliberately the integer *below* the measurement: a gate set above the truth is a gate that is red about nothing. The remaining 960 uncovered statements are concentrated in the server runtime, whose paths execute under the test-server tiers that are not yet folded into this figure — so the number is honest about the half of the system it can see, and explicit that a whole-system figure does not yet exist.
 
 Built and maintained by a single engineer. Every PR must pass all tiers before merge, at 100% line, branch, and function coverage. A hash-chained attestation ledger records that each tier actually ran -- a green report that cannot prove it executed is not a green report.
 
@@ -326,7 +336,7 @@ Over 1,000 dated planning and research documents in [`src/rnd/`](src/rnd/README.
 
 ## Version history
 
-**v0.2.0** (August 2026, in progress) — The demo that had to survive a real room. A vague spoken request ("make me a podcast about that thing I was researching") driven end to end through the Runtime Argument Expeditor, with first-turn document disambiguation, a shared keyword pre-filter and hard cap on the fuzzy matcher, and the search-paths key emptied after `/src` was found flooding the matcher with 6,670 candidates. Human approval gates for podcast and presentation now **fail open** — 600-second wait, timeout resolves the default, and the prompt discloses that silence continues — proven live on `:8000` in both the human-answered and silent-timeout directions. A floating in-tab podcast overlay ("Play Here") plays a finished episode without leaving presentation mode, with real playback asserted under a genuine click gesture. Presentation gained author-set slide-count override, up-front chunking of large decks behind a pinned progress bubble, and a fix for a truncation detector that was failing open on an unknown `stop_reason`. Cross-session DM verbosity became its own experiment: a two-arm pilot, a quality judge, and a **literal freeze protocol** (extract → placehold → validate → restore) with 494 tests, byte-exact identity round-trip across all 2,951 real messages, and every guard falsified by revert. Root causes that were not where anyone looked: an empty podcast script from a curly brace in the model's closing remarks; a demo crash caused by that morning's own label fix; Spanish prosody **refuted** as marker loss when it was a measurement bug. 24 ungated disambiguation tests found and closed; 33 stray heartbeat holds swept. 24,547 tests.
+**v0.2.0** (August 2026, in progress) — The demo that had to survive a real room. A vague spoken request ("make me a podcast about that thing I was researching") driven end to end through the Runtime Argument Expeditor, with first-turn document disambiguation, a shared keyword pre-filter and hard cap on the fuzzy matcher, and the search-paths key emptied after `/src` was found flooding the matcher with 6,670 candidates. Human approval gates for podcast and presentation now **fail open** — 600-second wait, timeout resolves the default, and the prompt discloses that silence continues — proven live on `:8000` in both the human-answered and silent-timeout directions. A floating in-tab podcast overlay ("Play Here") plays a finished episode without leaving presentation mode, with real playback asserted under a genuine click gesture. Presentation gained author-set slide-count override, up-front chunking of large decks behind a pinned progress bubble, and a fix for a truncation detector that was failing open on an unknown `stop_reason`. Cross-session DM verbosity became its own experiment: a two-arm pilot, a quality judge, and a **literal freeze protocol** (extract → placehold → validate → restore) with 494 tests, byte-exact identity round-trip across all 2,951 real messages, and every guard falsified by revert. Root causes that were not where anyone looked: an empty podcast script from a curly brace in the model's closing remarks; a demo crash caused by that morning's own label fix; Spanish prosody **refuted** as marker loss when it was a measurement bug. 24 ungated disambiguation tests found and closed; 33 stray heartbeat holds swept. The second half of the branch turned the instruments on themselves: every test tier now reports the sha it **started** on as well as the one it ended on (a run straddling a mid-run commit says so rather than averaging two trees); the coverage frame widened from `cosa` alone to six packages by directory path, pulling **~40,581 previously invisible lines** — the heartbeat/Stop-hook, the MCP server, the arbiter — into a denominator that had been passing green without them; a `--cov` run with no isolated data file is now **refused outright** after a shared file let one tier report 96.59% with ~28,000 statements missing; a conftest loading twice was found to have made **every network-access marker in the repo inert** on a directory run; cancelled jobs were found resurrecting across a restart, including a metered 105-minute evaluation; and V1 was excised in one deliberate pass. **29,167 tests, 98.46% coverage.**
 
 *Earlier releases (v0.1.9 back to v0.1.3) have moved to [VERSION-HISTORY.md](VERSION-HISTORY.md).*
 
@@ -336,7 +346,7 @@ Over 1,000 dated planning and research documents in [`src/rnd/`](src/rnd/README.
 
 ## Project status
 
-Lupin is an active research platform at v0.2.0 (dev). Developed by a solo engineer, it combines voice-first agent orchestration, PEFT fine-tuning, and Bayesian decision theory into a production-grade stack backed by 24,547 automated tests across seven tiers (Python unit, TypeScript unit, WebSocket, smoke, integration, Playwright E2E, parity oracle), full CI discipline, and a FastAPI + PostgreSQL + pgvector architecture. Through a series of ambitious refactorings made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology, Lupin has evolved from single-user PoC sketches into a multi-user platform running on GCP.
+Lupin is an active research platform at v0.2.0 (dev). Developed by a solo engineer, it combines voice-first agent orchestration, PEFT fine-tuning, and Bayesian decision theory into a production-grade stack backed by 29,167 automated tests across seven tiers (Python unit, TypeScript unit, WebSocket, smoke, integration, Playwright E2E, parity oracle), full CI discipline, and a FastAPI + PostgreSQL + pgvector architecture. Through a series of ambitious refactorings made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology, Lupin has evolved from single-user PoC sketches into a multi-user platform running on GCP.
 
 ---
 
@@ -412,7 +422,7 @@ SWE-team spin-up · post-game retrospectives · session start / checkpoint / end
 history archival with velocity forecasting · bug-fix mode · skills management · the
 installation wizard · the KISS brevity mandate
 
-**The automate-everything test pyramid** — 24,547 authored test cases across seven tiers ·
+**The automate-everything test pyramid** — 29,167 authored test cases across seven tiers ·
 Python unit · TypeScript unit · integration · smoke · end-to-end UI · WebSocket · parity
 oracle · 100% line, branch, and function coverage gates · Playwright with 12-page visual
 regression · interactive proxy testing driven by a Phi-4 fuzzy script matcher · hash-chained
