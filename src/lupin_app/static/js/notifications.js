@@ -9480,6 +9480,61 @@ class NotificationsUI {
         return chaseMs > nowMs;
     }
 
+    _formatTaskListCount( live, parked ) {
+        /**
+         * Header text for the task-list count, split LIVE vs PARKED.
+         *
+         * WHY THE HEADER CHANGED. The old header printed one number — every open
+         * row — so a board of 3 workable rows and 5 deliberately-deferred ones
+         * read as "8 tasks". Every conversation about driving the board to zero
+         * then started from a number that was 60% rows nobody intended to touch.
+         * Parked rows are approved-not-now, blocked on nothing, and self-expiring;
+         * counting them alongside live work makes the remaining-work figure fiction.
+         *
+         * ZERO PARKED PRINTS THE BARE NUMBER. A clean board says "3", not
+         * "Live: 3 · Parked: 0 · Total: 3" — the split is a disclosure that only
+         * earns its space when there is something to disclose.
+         *
+         * Requires:
+         *     - live and parked are non-negative counts (non-numeric tolerated)
+         *
+         * Ensures:
+         *     - parked > 0  → "Live: L · Parked: P · Total: L+P"
+         *     - parked <= 0 → String( live )
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        const l = Number.isFinite( live )   ? live   : 0;
+        const p = Number.isFinite( parked ) ? parked : 0;
+        if ( p <= 0 ) return String( l );
+        return `Live: ${l} · Parked: ${p} · Total: ${l + p}`;
+    }
+
+    _taskListCountText( openTasks, now ) {
+        /**
+         * Count a set of OPEN rows into the header's live/parked/total text.
+         *
+         * PARKED IS A STATUS PLUS A LIVE CLOCK, NOT A FLAG. The parked side is
+         * `_taskIsParked()` — park-ACTIVE only — so a parked row whose chase time
+         * has passed counts as LIVE here, exactly as the store counts it as owed
+         * again. That means this number can move with no row changing: a park
+         * expiring at 09:00 shifts one row from the parked side to the live side
+         * on the next 60s poll, and that is correct, not drift.
+         *
+         * Requires:
+         *     - openTasks is an array of rows already filtered to non-terminal
+         *       (this function does NOT re-apply the open filter)
+         *     - now is epoch-millis, or omitted to read the clock at call time
+         *
+         * Ensures:
+         *     - returns _formatTaskListCount( live, park-active )
+         *     - a non-array argument counts as 0 rather than throwing
+         *     - Pure: no DOM, no side effects
+         */
+        const rows   = Array.isArray( openTasks ) ? openTasks : [];
+        const parked = rows.filter( t => this._taskIsParked( t, now ) ).length;
+        return this._formatTaskListCount( rows.length - parked, parked );
+    }
+
     _taskGroupOwnerKey( group ) {
         /**
          * Stable accordion key for an owner group: the persona itself, or the
@@ -9610,7 +9665,8 @@ class NotificationsUI {
          *     - stampUpdated: true on a real fetch; false to skip re-stamping
          *
          * Ensures:
-         *     - count reflects the OPEN rows shown; last-known rows survive an outage
+         *     - count reflects the OPEN rows shown, SPLIT live vs park-active;
+         *       last-known rows survive an outage
          *     - never throws, never renders blank
          */
         const container = document.getElementById( "task-list-container" );
@@ -9647,7 +9703,7 @@ class NotificationsUI {
 
         const openTasks = composite.tasks.filter( t => this.isTaskOpenStatus( ( t || {} ).status ) );
         this._taskListLastGoodTasks = openTasks;
-        if ( countEl ) countEl.textContent = String( openTasks.length );
+        if ( countEl ) countEl.textContent = this._taskListCountText( openTasks );
 
         const truncation = this._renderTaskListTruncationBanner( composite );
 
@@ -9794,7 +9850,7 @@ class NotificationsUI {
         const lastGood  = this._taskListLastGoodTasks;
         if ( lastGood && lastGood.length > 0 ) {
             container.innerHTML = indicator + this.renderTaskListTable( this.groupTasksByOwner( lastGood ), undefined, this.loadCollapsedTaskOwners() );
-            if ( countEl ) countEl.textContent = String( lastGood.length );
+            if ( countEl ) countEl.textContent = this._taskListCountText( lastGood );
         } else {
             container.innerHTML = indicator + `<p class="task-list-message task-list-empty">No tasks loaded yet.</p>`;
             if ( countEl ) countEl.textContent = "0";
