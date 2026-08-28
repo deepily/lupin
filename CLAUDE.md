@@ -325,6 +325,12 @@ find . -name ".git" -type d | grep -v "^./.git$"
 
 **MANDATE**: Every automated test runs on exactly one of two servers. Pick by rubric, never by habit.
 
+> 🔴 **THE TWO VENUES ALSO HAVE TWO DATABASES, and a host shell silently reads the wrong one.** Neither container sets `DB_NAME`, so each falls through to its own config block: `lupin-rest-dev` → **`lupin_db_dev`**, `lupin-rest-test` → **`lupin_db_test`**. A host shell inherits the *Development* block, so `PYTHONPATH=src python3` on the host queries **dev** even when the job you are chasing ran on `:8000`.
+>
+> **Measured 2026-08-28**, both directions inside a minute: host/dev returned **205 rows, zero `ts-` rows, nothing newer than the previous day**; the same query inside `lupin-rest-test` returned **4 rows, all same-day**, including the one at issue. The host answer reads exactly like *"test_suite jobs are never persisted"* — which is false, and a correct fix was one message from being retracted on it. **An empty result from the wrong box is not evidence; it is a confident answer to a question you did not ask.**
+>
+> ⇒ To inspect anything a `:8000` run wrote, query **inside the container**, and print `select current_database()` beside any count you intend to act on.
+
 ### :7999 (dev) — AI-discretionary
 
 The AI may run these at any time without asking the user.

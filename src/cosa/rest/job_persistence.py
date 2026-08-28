@@ -36,6 +36,33 @@ from cosa.config.configuration_manager import ConfigurationManager
 
 
 # ---------------------------------------------------------------------------
+# 🔴 READING job_history? THE SERVER YOU ASK DECIDES WHICH DATABASE YOU SEE.
+#
+# Neither container sets DB_NAME, so each falls through to its own config block
+# and lands on a DIFFERENT database:
+#
+#     lupin-rest-dev   Lupin: Development  ->  lupin_db_dev
+#     lupin-rest-test  Lupin: Testing      ->  lupin_db_test
+#
+# A host shell inherits the DEVELOPMENT block, so `PYTHONPATH=src python3` on the
+# host queries lupin_db_dev — even when the job you are chasing ran on :8000.
+#
+# MEASURED 2026-08-28, both directions in one minute:
+#     host / dev   205 rows, ZERO ts- rows, nothing newer than 08-27
+#     in-container   4 rows, all same-day, the row in question sitting at pending
+#
+# That is not an empty result, it is the WRONG QUESTION answered confidently. The
+# host view reads exactly like "test_suite jobs are never persisted", which is
+# false, and a retraction sourced from it is indistinguishable from diligence — a
+# correct fix was one message from being withdrawn on it.
+#
+# ⇒ To inspect a job that ran on :8000, run the query INSIDE lupin-rest-test:
+#       docker exec lupin-rest-test bash -lc 'cd /var/lupin && \
+#         PYTHONPATH=/var/lupin/src LUPIN_ROOT=/var/lupin python3 -c "..."'
+#   And print `select current_database()` beside any count you intend to act on.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # Agentic job type filter
 # ---------------------------------------------------------------------------
 
