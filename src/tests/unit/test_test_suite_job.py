@@ -737,6 +737,47 @@ class TestSyntheticFailureRecords:
         # Empty text → no-op even for known suite
         assert TestSuiteJob._write_stdout_log( "unit", "" ) is None
 
+    def test_every_runnable_suite_can_write_a_stdout_log( self ):
+        """
+        🔴 A SUITE MISSING FROM _LOG_BASENAMES THROWS ITS STDOUT AWAY, SILENTLY.
+
+        `_write_stdout_log` no-ops on a falsy basename, so a suite registered in
+        SUITE_SCRIPTS but absent from _LOG_BASENAMES runs, fails, and leaves NO record
+        of why. Measured 2026-08-28: a v2_eval run failed in 2.5s; the report said
+        "0 passed, 1 failed" with no reason, the remediation snapshot carried
+        `failures: []`, and no log existed anywhere. v2_eval, cosa and presentation
+        were all missing.
+
+        It is worst for the NON-pytest suites — they have no junit-xml fallback, so
+        stdout is the only account of the run they produce.
+
+        This asserts the two tables agree, so registering the NEXT suite trips a test
+        rather than an operator staring at an unexplained failure.
+        """
+        from cosa.agents.test_suite.job import TestSuiteJob, SUITE_SCRIPTS
+        missing = ( set( SUITE_SCRIPTS )
+                    - set( TestSuiteJob._LOG_BASENAMES )
+                    - TestSuiteJob._SUITES_EXEMPT_FROM_STDOUT_LOG )
+        assert missing == set(), (
+            f"these suites can be run but cannot write a stdout log, so a failure in one "
+            f"leaves no explanation on disk: {sorted( missing )}. Add a basename to "
+            f"_LOG_BASENAMES, or name it in _SUITES_EXEMPT_FROM_STDOUT_LOG with a reason."
+        )
+
+    def test_the_three_suites_added_on_2026_08_28_actually_write( self, tmp_path, monkeypatch ):
+        """
+        The table-agreement test above passes if someone types a key with an empty-ish
+        value that is still truthy. This drives the real writer for the three suites the
+        08-28 finding named, so the fix is exercised rather than asserted.
+        """
+        import pathlib
+        from cosa.agents.test_suite.job import TestSuiteJob
+        monkeypatch.setattr( TestSuiteJob, "_ARTIFACT_DIR", str( tmp_path ) )
+        for suite in ( "v2_eval", "cosa", "presentation" ):
+            path = TestSuiteJob._write_stdout_log( suite, f"{suite} said something\n" )
+            assert path is not None, f"{suite} still discards its stdout"
+            assert pathlib.Path( path ).read_text() == f"{suite} said something\n"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # "all" Expansion (Bug 1B — per-component suite_results)

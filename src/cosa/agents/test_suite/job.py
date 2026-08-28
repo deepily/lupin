@@ -1712,7 +1712,27 @@ class TestSuiteJob( AgenticJobBase ):
         "integration"  : "integration-latest.log",
         "e2e"          : "e2e-ui-latest.log",
         "all"          : "all-tests-latest.log",
+        # ⚠️ ADDED 2026-08-28. These three are registered in SUITE_SCRIPTS and were
+        # MISSING here, and a suite absent from this map has its stdout silently thrown
+        # away: `_write_stdout_log` no-ops on a falsy basename, so the run's only
+        # explanation of itself never reaches disk.
+        #
+        # Measured the same day: a v2_eval run failed in 2.5 seconds. The report said
+        # "0 passed, 1 failed" with no reason, the remediation snapshot carried
+        # `failures: []`, and the container log held only the notify traffic. There was
+        # no artifact anywhere naming what went wrong — the run had an explanation and
+        # this dict discarded it.
+        #
+        # It bites the NON-pytest suites hardest, which is the reverse of harmless: they
+        # have no junit-xml to fall back on, so stdout is the ONLY record they produce.
+        "presentation" : "presentation-latest.log",
+        "cosa"         : "cosa-latest.log",
+        "v2_eval"      : "v2_eval-latest.log",
     }
+
+    # Every suite that can be RUN must be able to explain itself. Kept next to the map
+    # so the next suite registration trips the test rather than the operator.
+    _SUITES_EXEMPT_FROM_STDOUT_LOG = frozenset()
 
     @classmethod
     def _log_symlink_path( cls, suite_type: str ) -> Optional[ str ]:
