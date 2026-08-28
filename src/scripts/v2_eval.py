@@ -2009,7 +2009,7 @@ def main(
     pairs  = load_corpus( args.corpus, project_root=root, limit=args.limit )
     # B3: stratified + seeded PER ARM (design §5) — same sampler as v1, so the arms measure
     # the same population; a flat first-N would let the biggest command dominate.
-    corpus, _sample_manifest = stratified_sample( pairs, args.n_per_command, args.seed )
+    corpus, sample_manifest = stratified_sample( pairs, args.n_per_command, args.seed )
     # WHICH TREE served the v2 numbers (row c9b43538). The v1 arm has always read its sha back
     # from the running server; v2 had no equivalent, so even a forced check covered half the
     # comparison. There is no pin to assert against here — v2 runs whatever is deployed — so
@@ -2109,10 +2109,23 @@ def main(
     # The paired step (paired_eval) consumes {metrics, provenance}; write the v2 arm artifact.
     artifact_path = os.path.join( out_dir, "v2-arm-artifact.json" )
     with open( artifact_path, "w" ) as handle:
-        json.dump( { "metrics": warm_metrics, "provenance": provenance }, handle )
+        # WHY sample_manifest IS HERE. `provenance.n_per_command` records what the run
+        # ASKED FOR; the sampler keeps min( asked, available ) and stamps the ask either
+        # way. So a run capped by --limit writes `n_per_command: 60` over a 20-per-command
+        # draw, and the only trace is `sampled_n`, which you have to divide by the command
+        # count to notice. That is exactly how a v2 arm was read as pairable with a v1 arm
+        # it shares 18 of 100 utterances with (2026-08-28).
+        #
+        # The sampler ALREADY computes the honest numbers — per-command kept/available and
+        # an under_quota list — and this call site was throwing them away. The v1 arm has
+        # always carried its manifest; v2 dropping it is what made the two artifacts
+        # asymmetric in the one field that would have caught the mismatch.
+        json.dump( { "metrics": warm_metrics, "provenance": provenance,
+                     "sample_manifest": sample_manifest }, handle )
     paths[ "artifact" ] = artifact_path
 
-    return { "out_dir": out_dir, "paths": paths, "cold": cold_metrics, "warm": warm_metrics, "provenance": provenance }
+    return { "out_dir": out_dir, "paths": paths, "cold": cold_metrics, "warm": warm_metrics,
+             "provenance": provenance, "sample_manifest": sample_manifest }
 
 
 def _default_model_probe( context: str ) -> None:   # pragma: no cover - live socket boundary

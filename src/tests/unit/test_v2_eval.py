@@ -773,6 +773,44 @@ def test_main_stamps_provenance_and_writes_paired_artifact( tmp_path ):
     # The report stamps the seed so the sample reproduces.
     assert "seed `7`" in open( result[ "paths" ][ "report" ] ).read()
 
+    # ⚠️ THE DISAGREEMENT THIS TEST ALREADY WITNESSED, now disclosed. Two lines up,
+    # n_per_command is 5 and sampled_n is 2 — the sampler kept min( asked, available )
+    # and provenance stamped the ASK. Read alone, that field says a 5-per-command draw
+    # over a 2-utterance sample. On 2026-08-28 the same shape had a real v2 arm read as
+    # pairable with a v1 arm it shares 18 of 100 utterances with: the artifact said
+    # n_per_command 60, the records held 20.
+    #
+    # The sampler always computed the honest counts; the call site was discarding them.
+    manifest = artifact[ "sample_manifest" ]
+    assert manifest[ "n_per_command" ] == 5, "the ASK is still recorded"
+    assert manifest[ "total_kept" ] == 2, "and now so is what was actually KEPT"
+    assert manifest[ "under_quota" ] != [], "the under-filled commands are NAMED, not implied"
+    for command, counts in manifest[ "per_command" ].items():
+        assert counts[ "kept" ] == min( 5, counts[ "available" ] ), f"{command} kept min( asked, available )"
+
+
+def test_sample_manifest_stays_silent_when_every_command_filled( tmp_path ):
+    # THE OTHER HALF, and the one that makes the assertion above mean something. If
+    # under_quota were non-empty on every run, "the artifact names the under-filled
+    # commands" would be true and useless. A draw the corpus can actually satisfy must
+    # come back with an EMPTY under_quota and total_kept equal to the ask times the
+    # command count — otherwise the field is a constant, not a signal.
+    import json as _json
+    _seed_trace( tmp_path, _WEATHER_QUESTIONS )
+    result = ve.main(
+        argv=[ "--corpus", "weather", "--max-router-error-rate", "1.0", "--seed", "7", "--n-per-command", "1" ],
+        client_factory=lambda url: _StubClient(),
+        ws_listener_factory=_fake_ws_listener_factory,
+        project_root=str( tmp_path ),
+        timestamp="2026-08-14-02-30-00",
+        read_sha_fn=lambda base_url: _STUB_SHA,
+        probe_models_fn=_NO_PROBE,
+    )
+    with open( result[ "paths" ][ "artifact" ] ) as h:
+        manifest = _json.load( h )[ "sample_manifest" ]
+    assert manifest[ "under_quota" ] == [], "a satisfiable draw names nobody"
+    assert manifest[ "total_kept" ] == result[ "provenance" ][ "sampled_n" ], "manifest and provenance agree"
+
 
 def test_main_defaults_use_injected_helpers( tmp_path, monkeypatch ):
     root = str( tmp_path )
