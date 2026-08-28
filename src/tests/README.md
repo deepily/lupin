@@ -2,6 +2,30 @@
 
 Comprehensive six-tier testing approach to ensure code quality, reliability, and security.
 
+## 🔴 BEFORE ANY `--cov` RUN — export COVERAGE_FILE
+
+```bash
+export COVERAGE_FILE=/tmp/cov-$USER-$$.data
+```
+
+Since `dfb53168`, `pytest --cov` with `COVERAGE_FILE` unset is **refused outright** —
+a `pytest.UsageError` raised before any measurement is written, carrying this remedy in
+the message. Runs without `--cov` are untouched; an exported `COVERAGE_FILE` behaves
+exactly as before. To share the repo-root file on purpose: `LUPIN_ALLOW_SHARED_COVERAGE=1`.
+
+**Why the refusal exists.** Every session was writing the same repo-root `.coverage`,
+which pytest-cov erases at startup, so a long run and a short one silently ate each other.
+A tier run reported **96.59% — green and false**, with ~28,000 statements gone from the
+denominator; because the vanished files were the worse-than-average ones, the mean went
+**up** while nothing improved (row `aa41fa66`). A contended run measured **82% / 1320
+missing** where the identical tree alone read **89% / 853** — directionally hostile, since
+coverage looking *worse* invites tests for a hole that is not there (row noted in TODO.md
+Decisions Log, 2026-08-26).
+
+**Scope boundary — `source`, `omit` and `fail_under` were NOT touched by `dfb53168`.**
+`fail_under` belongs to the coverage-ramp owner and stays there. The guard decides *where a
+run writes*, never *what threshold it must clear*.
+
 ## Test Hierarchy
 
 ### 1. Unit Tests (`src/tests/unit/`)
