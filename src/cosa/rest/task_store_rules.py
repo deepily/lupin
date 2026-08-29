@@ -1618,6 +1618,87 @@ def validate_patch( fields: dict ) -> list:
     return errors
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL-CALL MARKUP TAIL — DETECTION ONLY, NEVER MUTATION (row 91ccbc26)
+#
+# WHY THIS IS A DETECTOR AND NOT A STRIPPER, established by measurement rather
+# than taste. Row 91ccbc26 records two writes — sam's and Rio's, different rows,
+# different authors, different fragment sizes — where a free-text field ended up
+# holding the tail of the writer's own tool-call envelope. A differential probe
+# (2026-08-29, Maya) sent one 242-byte canary through two entry paths: raw HTTP,
+# and an MCP tool call. Identical sha256 both ways. The HTTP/JSON boundary, the
+# Pydantic model and the repository assignment (`item.park_reason = park_reason`)
+# neither add, strip nor reject markup — the corruption enters ABOVE the JSON
+# boundary, in the caller's composition of the tool call.
+#
+# 🔴 THE CONSEQUENCE THAT SHAPES THIS CODE: a corrupted write and an HONEST
+# quote are BYTE-IDENTICAL here. That was proven by deliberately sending the
+# exact corruption bytes as legitimate content. So nothing at this boundary can
+# tell the two apart, and therefore:
+#   · rejecting the shape refuses honest reasons — including any reason that
+#     documents THIS defect, which necessarily quotes the tail;
+#   · stripping it deletes real authored content, which is worse than the
+#     defect it claims to fix.
+# What CAN be fixed is the property both incidents actually shared: SILENCE.
+# Neither write failed, neither warned, and both were caught only by a human
+# re-reading his own prose later. These helpers are pure and non-mutating: they
+# report a suspicion and change nothing. The caller decides what to do with it.
+#
+# THE SIGNATURE is deliberately narrow — a field that ENDS in a run of close
+# tags and whitespace, which is what an absorbed close-attempt looks like and
+# what both specimens were. It is NOT "contains angle brackets": a reason that
+# quotes code or XML mid-sentence and then goes on speaking is ordinary writing
+# and must not be flagged. The unit tests pin both directions.
+_MARKUP_TAIL_RE = re.compile( r"(?:</[A-Za-z_][\w.:-]*>\s*)+\Z" )
+
+# The free-text fields a caller composes as prose, and which the probe confirmed
+# are ALL equally exposed — `reason` rides every transition and `note` every
+# amendment, and both stored a canary verbatim exactly as `park_reason` did.
+# Guarding only the field we happened to notice would be half a fix.
+MARKUP_PRONE_FIELDS = ( "park_reason", "reason", "note", "body", "title" )
+
+
+def trailing_markup_run( text ):
+    """
+    Return the run of XML close-tags-plus-whitespace ENDING `text`, if any.
+
+    Requires:
+        - text is anything; only a str can produce a non-empty result
+
+    Ensures:
+        - returns the matched trailing run verbatim (a str) when text ends in
+          one or more close tags, each optionally followed by whitespace
+        - returns "" for a non-str, for "", and for any text that does not END
+          in such a run — markup EARLIER in the string is ordinary content and
+          is never reported
+        - NEVER mutates or truncates: the caller still holds the full value
+    """
+    if not isinstance( text, str ): return ""
+    match = _MARKUP_TAIL_RE.search( text )
+    if match is None: return ""
+    return match.group( 0 )
+
+
+def markup_tail_advisory( fields ):
+    """
+    Build a NON-MUTATING advisory naming every field that ends in a markup run.
+
+    Requires:
+        - fields is a dict mapping field name -> candidate value
+
+    Ensures:
+        - returns a dict { field_name: the trailing run } holding ONE entry per
+          field whose value ends in a close-tag run; {} when none do
+        - non-str values and clean values are simply absent from the result
+        - the input dict is never modified and no value is ever rewritten
+    """
+    advisory = { }
+    for name, value in fields.items():
+        run = trailing_markup_run( value )
+        if run: advisory[ name ] = run
+    return advisory
+
+
 def quick_smoke_test():
     """
     Quick smoke test for task_store_rules — exercises every validator at the
