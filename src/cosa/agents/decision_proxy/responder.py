@@ -53,20 +53,29 @@ class DecisionResponder( BaseResponder ):
         port                = DEFAULT_SERVER_PORT,
         dry_run             = False,
         debug               = False,
-        verbose             = False
+        verbose             = False,
+        enabled             = True
     ):
         """
         Initialize the decision responder.
 
         Args:
             trust_mode: Operating mode ("shadow", "suggest", "active")
-            accepted_senders: List of sender IDs this proxy will respond to
+            accepted_senders: Allowlist of sender IDs this proxy will respond to.
+                     FAIL-CLOSED (960a4ec9): an empty/omitted list rejects EVERY
+                     sender, never accepts all. The shipped path populates it with
+                     the swe.* bot addresses.
             embedding_provider: Optional EmbeddingProvider for generating question embeddings
             host: Server hostname for REST API
             port: Server port for REST API
             dry_run: Display decisions without acting
             debug: Enable debug output
             verbose: Enable verbose output
+            enabled: Master run switch (960a4ec9). When False the proxy processes
+                     no decision events and cannot submit — enforcing the
+                     `decision proxy enabled` INI flag the splainer promises
+                     ("when false, the proxy will not run"). Constructor default is
+                     True (permissive library default); __main__ passes the INI value.
         """
         super().__init__(
             host    = host,
@@ -77,6 +86,7 @@ class DecisionResponder( BaseResponder ):
         )
 
         self.trust_mode         = trust_mode
+        self.enabled            = enabled
         self.accepted_senders   = accepted_senders or []
         self.smart_router       = SmartRouter( debug=debug )
         self.domain_strategy    = None  # Set by profile loader
@@ -91,6 +101,7 @@ class DecisionResponder( BaseResponder ):
             "decisions_acted"      : 0,
             "decisions_deferred"   : 0,
             "sender_rejected"      : 0,
+            "disabled_skipped"     : 0,
         } )
 
     def set_domain_strategy( self, strategy ):
@@ -126,10 +137,14 @@ class DecisionResponder( BaseResponder ):
 
         elif event_type == "job_state_transition":
             if self.verbose:
+                # from_state / to_state are the keys emit_job_state_transition()
+                # actually sends (queue_util.py:65-71). This read from_queue /
+                # to_queue, which the event has never carried, so the "?" defaults
+                # meant this line printed "? -> ?" on every transition. Row e3417974.
                 job_id     = event_data.get( "job_id", "?" )
-                from_queue = event_data.get( "from_queue", "?" )
-                to_queue   = event_data.get( "to_queue", "?" )
-                print( f"{self.LOG_PREFIX} Job state: {job_id} {from_queue} -> {to_queue}" )
+                from_state = event_data.get( "from_state", "?" )
+                to_state   = event_data.get( "to_state", "?" )
+                print( f"{self.LOG_PREFIX} Job state: {job_id} {from_state} -> {to_state}" )
 
         elif self.verbose:
             print( f"{self.LOG_PREFIX} Event: {event_type}" )
@@ -149,6 +164,15 @@ class DecisionResponder( BaseResponder ):
         Args:
             event_data: notification_queue_update event payload
         """
+        # Master run switch (960a4ec9): a disabled proxy processes nothing and
+        # therefore cannot submit — this is the enforcement that makes the splainer
+        # promise ("when false, the proxy will not run") true. Guard is FIRST, before
+        # any extraction/classification, so nothing downstream can reach submit_response.
+        if not self.enabled:
+            self.stats[ "disabled_skipped" ] += 1
+            if self.debug: print( f"{self.LOG_PREFIX} Disabled (decision proxy enabled=false) — no-op" )
+            return
+
         # Extract notification from the event
         notification = event_data.get( "notification", event_data )
 
@@ -178,8 +202,24 @@ class DecisionResponder( BaseResponder ):
             print( f"{self.LOG_PREFIX} ERROR: No notification_id in event" )
             return
 
-        # Check sender ID against accepted list
-        if self.accepted_senders and sender_id not in self.accepted_senders:
+        # Check sender ID against accepted list — FAIL-CLOSED (960a4ec9 Option C).
+        # An EMPTY allowlist now means "trust no one", not "trust everyone": the
+        # previous `self.accepted_senders and ...` guard skipped the check whenever
+        # the list was empty, so a Responder with an empty allowlist did no sender
+        # filtering at all (fail-open).
+        #
+        # The empty allowlist IS reachable in production — do NOT justify this flip
+        # with "no caller hits the empty default": __main__._load_swe_profile sets
+        # the three swe.* addresses on SUCCESS, but its `except ImportError` arm
+        # leaves accepted_senders at the empty default AND leaves domain_strategy
+        # None. Under the old fail-open guard that path let every sender past this
+        # gate and relied on the None-strategy shadow layer as the SOLE backstop.
+        # Fail-closed rejects them here instead. Either way nothing submits (a None
+        # strategy shadows everything), so the flip changes no OUTCOME on that path —
+        # its value is restoring sender filtering as an INDEPENDENT layer rather than
+        # trusting the shadow layer to be the only one. The shipped success path
+        # (a non-empty list) behaves identically under both forms.
+        if sender_id not in self.accepted_senders:
             self.stats[ "sender_rejected" ] += 1
             if self.debug: print( f"{self.LOG_PREFIX} Sender rejected: {sender_id}" )
             return
@@ -247,25 +287,14 @@ class DecisionResponder( BaseResponder ):
 
         try:
             from cosa.agents.decision_proxy.proxy_decision_embeddings import ProxyDecisionEmbeddings
-            from cosa.agents.decision_proxy.config import DEFAULT_PROXY_LANCEDB_TABLE
+            from cosa.agents.decision_proxy.config import DEFAULT_PROXY_DECISIONS_TABLE
 
-            import cosa.utils.util as cu
             from cosa.config.configuration_manager import ConfigurationManager
-            from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
             config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-            table_name = config_mgr.get( "swe team trust proxy lancedb table", default=DEFAULT_PROXY_LANCEDB_TABLE )
-
-            # Ask the backend BEFORE building a path (decision 2b20a6d6). Under
-            # postgres the store routes to PredictionDecisionRepository and any
-            # db_path handed to it is ignored — so none is built.
-            if is_postgres_backend( config_mgr ):
-                db_path = None
-            else:
-                db_path = cu.get_project_root() + config_mgr.get( "solution snapshots lancedb path" )
+            table_name = config_mgr.get( "swe team trust proxy decisions table", default=DEFAULT_PROXY_DECISIONS_TABLE )
 
             self._embedding_store = ProxyDecisionEmbeddings(
-                db_path    = db_path,
                 table_name = table_name,
                 debug      = self.debug,
             )

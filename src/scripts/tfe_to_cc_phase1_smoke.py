@@ -63,7 +63,7 @@ CLUSTER_C6 = {
             "error_message"     : "assert 5 == 10",
             "traceback_excerpt" : (
                 "src/tests/unit/test_runtime_argument_expeditor.py:360: AssertionError\n"
-                ">       assert len( AGENTIC_AGENTS ) == 5\n"
+                ">       assert len( JOB_ARG_CONTRACTS ) == 5\n"
                 "E       assert 10 == 5\n"
                 "E        +  where 10 = len({ ...ten entries... })"
             ),

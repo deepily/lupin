@@ -492,6 +492,48 @@ class TestParsePersonaChain( unittest.TestCase ):
     def test_int_returns_empty( self ):
         self.assertEqual( parse_persona_chain( 42 ), [] )
 
+    # ── JSON-array-string tolerance (row e071e834, fix part 1) ────────────────
+    # A caller that passed persona_preference as json.dumps(list) sent the chain
+    # as a JSON-array STRING; the old comma-split mangled every element and killed
+    # the `*` wildcard (→ 409 → nameless seat). The parser now tolerates that form.
+    def test_json_array_string_with_wildcard_preserved( self ):
+        # THE bug shape: without the fix this split to ['["arnold"','"krishna"','"*"]']
+        # and the wildcard was lost. Now it round-trips.
+        self.assertEqual(
+            parse_persona_chain( '["arnold", "krishna", "*"]' ),
+            [ "arnold", "krishna", "*" ],
+        )
+        self.assertIn( PERSONA_CHAIN_WILDCARD, parse_persona_chain( '["arnold", "krishna", "*"]' ) )
+
+    def test_json_array_string_multi_named( self ):
+        self.assertEqual(
+            parse_persona_chain( '["Tiffany", "maya", "chloe", "*"]' ),
+            [ "Tiffany", "maya", "chloe", "*" ],
+        )
+
+    def test_json_array_string_single_element( self ):
+        self.assertEqual( parse_persona_chain( '["Tiberius"]' ), [ "Tiberius" ] )
+
+    def test_json_array_string_dedups_like_a_list( self ):
+        self.assertEqual( parse_persona_chain( '["Rio", "RIO", "rio"]' ), [ "Rio" ] )
+
+    def test_json_array_string_skips_non_string_items( self ):
+        self.assertEqual( parse_persona_chain( '["Rio", 42, null, "*"]' ), [ "Rio", "*" ] )
+
+    def test_bare_csv_still_works_after_json_tolerance( self ):
+        # The intended CSV form is unchanged — no regression.
+        self.assertEqual( parse_persona_chain( "arnold,krishna,*" ), [ "arnold", "krishna", "*" ] )
+
+    def test_malformed_bracket_string_falls_through_to_comma_split( self ):
+        # A string that starts with '[' but is NOT valid JSON falls through to the
+        # bare comma-split rather than raising or vanishing.
+        self.assertEqual( parse_persona_chain( "[not-valid-json" ), [ "[not-valid-json" ] )
+
+    def test_json_non_list_falls_through_to_comma_split( self ):
+        # Valid JSON that is NOT a list (e.g. an object) is not a chain; fall
+        # through to the comma-split of the raw string.
+        self.assertEqual( parse_persona_chain( '{"a": 1}' ), [ '{"a": 1}' ] )
+
 
 class TestResolveSessionStartPersonaChain( unittest.TestCase ):
     def test_spawn_chain_wins_over_everything( self ):
@@ -676,6 +718,70 @@ class TestAllocatePersonaChainForSession( unittest.TestCase ):
         self.assertEqual( len( res[ "outcomes" ] ), 1 )
         self.assertEqual( res[ "outcomes" ][ 0 ][ "name" ], "Rio" )
         self.assertEqual( res[ "persona" ][ "name" ], "nora" )
+        mock_wild.assert_called_once_with( ANY, "sid", declared_managers=None )
+
+    # ── Empty-guard (row e071e834, fix part 3): a NON-wildcard element that
+    # canonicalizes to EMPTY is ALARMED + SKIPPED, never aborts — the walk
+    # continues to the wildcard so `*` still guarantees a name. ────────────────
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_empty_key_element_skipped_wildcard_still_fires( self, mock_named, mock_wild ):
+        # "!!!" canonicalizes to "" (all punctuation). It must be recorded + skipped,
+        # NOT allocated and NOT abort; the `*` then allocates so the seat gets a name.
+        mock_wild.return_value = { "name": "nora", "assigned_at": "t" }
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "!!!,*" )
+        self.assertEqual( res[ "status" ], "ok" )
+        self.assertEqual( res[ "satisfied_by" ], PERSONA_CHAIN_WILDCARD )
+        self.assertTrue( res[ "wildcard_used" ] )
+        self.assertEqual( res[ "outcomes" ], [ { "name": "!!!", "status": "malformed_empty_key" } ] )
+        self.assertEqual( res[ "persona" ][ "name" ], "nora" )
+        # the malformed element was NEVER handed to the named allocator
+        mock_named.assert_not_called()
+        mock_wild.assert_called_once_with( ANY, "sid", declared_managers=None )
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_empty_key_element_does_not_block_a_following_named( self, mock_named, mock_wild ):
+        # A malformed element must not stop the walk reaching a legit NAMED element.
+        mock_named.return_value = { "status": "ok", "persona": { "name": "nora", "assigned_at": "t" }, "available": [] }
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "!!!,Nora" )
+        self.assertEqual( res[ "status" ], "ok" )
+        self.assertEqual( res[ "satisfied_by" ], "Nora" )
+        self.assertFalse( res[ "wildcard_used" ] )
+        self.assertEqual( res[ "outcomes" ], [ { "name": "!!!", "status": "malformed_empty_key" } ] )
+        # only the LEGIT named element reached the allocator, not the malformed one
+        mock_named.assert_called_once_with( ANY, "sid", "Nora" )
+        mock_wild.assert_not_called()
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_all_malformed_no_wildcard_is_exhausted( self, mock_named, mock_wild ):
+        # Every element canonicalizes to empty and there is no `*` → exhausted
+        # (the existing LOUD 409 path), and the named allocator is never called.
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "!!!,@@@" )
+        self.assertEqual( res[ "status" ], "exhausted" )
+        self.assertEqual(
+            res[ "outcomes" ],
+            [ { "name": "!!!", "status": "malformed_empty_key" },
+              { "name": "@@@", "status": "malformed_empty_key" } ],
+        )
+        mock_named.assert_not_called()
+        mock_wild.assert_not_called()
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_wildcard_exempt_from_empty_guard_despite_empty_canonical( self, mock_named, mock_wild ):
+        # maria's catch (2026-08-17): canonical_persona_key('*') == '' on CLEAN input,
+        # so the empty-guard MUST exempt the wildcard explicitly — otherwise it would
+        # skip a legit `*` and defeat the whole point. Prove the trap AND the exemption.
+        from lupin_mcp.persona_normalization import canonical_persona_key
+        self.assertEqual( canonical_persona_key( "*" ), "" )   # the trap: wildcard → empty
+        mock_wild.return_value = { "name": "nora", "assigned_at": "t" }
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "*" )
+        self.assertEqual( res[ "status" ], "ok" )
+        self.assertTrue( res[ "wildcard_used" ] )
+        self.assertEqual( res[ "satisfied_by" ], PERSONA_CHAIN_WILDCARD )
+        self.assertEqual( res[ "outcomes" ], [] )             # `*` NOT flagged malformed
         mock_wild.assert_called_once_with( ANY, "sid", declared_managers=None )
 
     @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )

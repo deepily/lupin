@@ -575,9 +575,6 @@ coverage_requirements = {
 ./src/tests/run-lupin-smoke-tests.sh --category all
 cd src/cosa && python3 tests/smoke/infrastructure/cosa_smoke_runner.py
 
-# Performance baseline comparison
-python3 src/scripts/benchmark_snapshot_managers.py
-
 # Coverage analysis
 coverage run -m pytest src/tests/unit/
 coverage report --show-missing

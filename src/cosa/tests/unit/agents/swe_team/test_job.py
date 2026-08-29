@@ -19,6 +19,24 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import cosa.agents.swe_team.job as job_mod
+# ⚠️ LOAD-BEARING IMPORT, NOT AN UNUSED ONE (row 905e9345). MEASURED 2026-08-17.
+#
+# `_execute_dry_run` imports EngineeringClassifier INSIDE a `patch.dict( sys.modules, ... )`,
+# and patch.dict RESTORES its pre-patch snapshot on exit — dropping every module first
+# loaded while inside it (1447 of them, measured). That import chain reaches
+# proxy/__init__ -> engineering_strategy -> scipy -> NUMPY, whose C extension cannot be
+# loaded twice in one process. The next test's import then raises `cannot load module more
+# than once per process`, `job.py`'s `except Exception` swallows it, log_decision never
+# runs, and the assertion reads 0 instead of 7 with no error surfacing anywhere.
+#
+# Importing it HERE, at module scope, puts it in the pre-patch snapshot so the restore
+# keeps it — which is what lets each test in this file stand alone. Same shape as the
+# sqlalchemy guard in src/conftest.py (row e1da2b5f); that guard watches only sqlalchemy,
+# so it was blind to this one.
+#
+# CAN-FAIL CONTROL: an identical copy of this file WITHOUT this import fails 1 of 18 in
+# the same directory with the same command; with it, 18 pass.
+import cosa.agents.swe_team.proxy.engineering_classifier  # noqa: F401
 from cosa.agents.swe_team.job import SweTeamJob
 from cosa.rest.job_state import JobState
 

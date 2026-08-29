@@ -15,6 +15,7 @@ import pytest
 from cosa.rest.db.embedding_regeneration import (
     DEFAULT_CHAR_BUDGET,
     MAX_CHAR_BUDGET,
+    OFF_PEAK_END_HOUR,
     MIN_CHAR_BUDGET,
     AdaptiveBudget,
     EMBEDDING_DIM,
@@ -197,9 +198,30 @@ class TestIsOffPeak:
     def test_inside_window( self, hour ):
         assert is_off_peak( hour ) is True
 
-    @pytest.mark.parametrize( "hour", [ 9, 14, 21, 23 ] )
-    def test_outside_window( self, hour ):
-        assert is_off_peak( hour ) is False
+    @pytest.mark.parametrize( "hour", [ 9, 10 ] )
+    def test_the_morning_hours_rick_widened_the_window_for( self, hour ):
+        # Rick, 2026-08-13: the run starts after breakfast, not before 9am. These two
+        # hours used to be REFUSED and are the whole reason OFF_PEAK_END_HOUR moved.
+        assert is_off_peak( hour ) is True
+
+    @pytest.mark.parametrize( "hour", [ 11, 14, 21, 23 ] )
+    def test_the_default_window_now_accepts_every_hour( self, hour ):
+        # Rick, 2026-08-17: "update the clock/gate so it's permissive and runs at my
+        # discretion." These hours were REFUSED under end_hour=11 and are accepted now.
+        # This supersedes the earlier test_the_window_still_closes, which asserted 11:00
+        # was the first hour outside — that boundary is gone by ruling, not by accident.
+        assert is_off_peak( hour ) is True
+
+    def test_the_default_boundary_is_the_end_of_the_day( self ):
+        # 24 is the open interval's edge: every real hour 0..23 is inside.
+        assert OFF_PEAK_END_HOUR == 24
+        assert is_off_peak( OFF_PEAK_END_HOUR ) is False
+
+    def test_end_hour_is_a_parameter_not_a_hardcode( self ):
+        # The boundary travels with the argument, so a caller can tighten it without
+        # editing the module.
+        assert is_off_peak( 5, end_hour=4 ) is False
+        assert is_off_peak( 3, end_hour=4 ) is True
 
 
 class TestShouldProceed:
@@ -220,12 +242,26 @@ class TestShouldProceed:
     def test_unknown_busy_state_blocks_even_with_force( self ):
         assert "refusing to guess" in should_proceed( busy=None, hour_edt=2, force=True )
 
-    def test_on_peak_blocks_without_force( self ):
-        reason = should_proceed( busy=False, hour_edt=21 )
-        assert "off-peak" in reason and "--force" in reason
+    def test_no_hour_is_refused_by_the_default_clock( self ):
+        # Rick's 2026-08-17 ruling: the clock is permissive, the run is at his
+        # discretion. 21:00 was the canonical refusal case and now proceeds unforced.
+        assert should_proceed( busy=False, hour_edt=21 ) is None
 
     def test_on_peak_proceeds_with_force( self ):
         assert should_proceed( busy=False, hour_edt=21, force=True ) is None
+
+    def test_the_clock_refusal_path_still_exists_for_a_tightened_window( self, monkeypatch ):
+        # The permissive DEFAULT is a policy choice, not a deleted mechanism. Reimpose a
+        # window and the refusal still fires, still names --force, and --force still
+        # bypasses the clock only. Patching is_off_peak rather than OFF_PEAK_END_HOUR is
+        # deliberate: is_off_peak binds end_hour as a DEFAULT ARGUMENT at definition time,
+        # so rebinding the module constant would not reach it and the test would pass
+        # while proving nothing.
+        import cosa.rest.db.embedding_regeneration as er
+        monkeypatch.setattr( er, "is_off_peak", lambda hour, end_hour=11: False )
+        reason = er.should_proceed( busy=False, hour_edt=21 )
+        assert "off-peak" in reason and "--force" in reason
+        assert er.should_proceed( busy=False, hour_edt=21, force=True ) is None
 
     def test_clock_check_is_skipped_when_hour_is_none( self ):
         assert should_proceed( busy=False, hour_edt=None ) is None
@@ -472,6 +508,217 @@ class TestSplitBatch:
             if not halves: singles += 1
             else: work.extend( halves )
         assert singles == 8
+
+
+# --------------------------------------------------------------------------- #
+# Split-retry vs a DEAD SERVER — bug 13b35b37.
+#
+# The splitter exists for one failure: the batch was too big for the memory free
+# at that instant. Shrinking is the remedy. A server that is not answering is the
+# opposite case — every size fails identically — and splitting there produces one
+# doomed retry per row. Observed 2026-08-17: a 100-row batch split to 100 single
+# rows, each failing on the same dead socket, consuming the whole run budget and
+# regenerating nothing.
+# --------------------------------------------------------------------------- #
+class TestUnreachableServerIsNotABatchSizeProblem:
+
+    class _CountingProvider:
+        """Records how many times the splitter asked for embeddings."""
+        def __init__( self, error ):
+            self.error = error
+            self.calls = 0
+        def generate_embeddings_batch( self, texts, content_type=None ):
+            self.calls += 1
+            raise self.error
+
+    def test_transport_failure_aborts_after_exactly_one_attempt( self ):
+        # The whole point: ONE call, then propagate. Not 2, not 199.
+        import cosa.rest.db.embedding_regeneration as er
+        from cosa.memory.embedding_provider import EmbeddingProviderUnreachable
+
+        provider = self._CountingProvider( EmbeddingProviderUnreachable( "nothing is listening" ) )
+        rows     = [ ( i, f"text {i}" ) for i in range( 100 ) ]
+
+        with pytest.raises( EmbeddingProviderUnreachable ):
+            er._embed_with_split_retry( provider, rows, "prose" )
+
+        assert provider.calls == 1, ( f"a dead server was retried {provider.calls} times; "
+                                      f"splitting cannot revive a socket" )
+
+    def test_a_compute_failure_still_splits( self ):
+        # The fix must not disarm the splitter for the case it was built for.
+        import cosa.rest.db.embedding_regeneration as er
+
+        provider = self._CountingProvider( RuntimeError( "CUDA out of memory" ) )
+        rows     = [ ( i, f"text {i}" ) for i in range( 4 ) ]
+
+        result = er._embed_with_split_retry( provider, rows, "prose" )
+
+        assert provider.calls > 1, "an oversized batch must still be split and retried"
+        assert [ r[ 0 ] for r in result ] == [ 0, 1, 2, 3 ]
+        assert all( vector is None for _, vector in result )
+
+    def test_the_exception_is_a_runtimeerror_so_existing_callers_still_catch_it( self ):
+        # Subclassing is what keeps this a safe change for every other call site.
+        from cosa.memory.embedding_provider import EmbeddingProviderUnreachable
+        assert issubclass( EmbeddingProviderUnreachable, RuntimeError )
+
+
+# --------------------------------------------------------------------------- #
+# shadow_column_ddl — the step that did not exist.
+#
+# fill wrote into three columns that nothing created. The first live fill died on
+# `column "input_embedding_regen" does not exist` (2026-08-17). Generating the DDL
+# from REGEN_SPECS means adding a spec cannot leave its column uncreated.
+# --------------------------------------------------------------------------- #
+class TestExcludedIdsClause:
+    """
+    fill skips EXCLUDED_IDS in Python; verify counts scope in SQL. Until 2026-08-17
+    those two disagreed, so an excluded row sat in verify's denominator forever —
+    unfillable by design, uncountable as filled. The decisions spec could never
+    verify clean and the swap it gates could never run. Found live: `1 of 909
+    in-scope row(s) have no regenerated vector`, that row being clamp-001.
+    """
+
+    def test_returns_empty_for_a_table_with_no_exclusions( self ):
+        from cosa.rest.db.embedding_regeneration import excluded_ids_clause
+        assert excluded_ids_clause( "input_and_output", "id" ) == ""
+
+    def test_excludes_the_registered_id( self ):
+        from cosa.rest.db.embedding_regeneration import excluded_ids_clause
+        clause = excluded_ids_clause( "prediction_decisions", "id" )
+        assert "clamp-001" in clause
+        assert "NOT IN" in clause
+
+    def test_starts_with_and_so_it_appends_to_an_existing_where( self ):
+        # It is concatenated onto a WHERE that already has a predicate.
+        from cosa.rest.db.embedding_regeneration import excluded_ids_clause
+        assert excluded_ids_clause( "prediction_decisions", "id" ).startswith( " AND " )
+
+    def test_uses_the_given_pk_column( self ):
+        from cosa.rest.db.embedding_regeneration import excluded_ids_clause
+        assert "id::text NOT IN" in excluded_ids_clause( "prediction_decisions", "id" )
+
+    def test_quotes_are_doubled_so_an_id_cannot_break_the_statement( self ):
+        import cosa.rest.db.embedding_regeneration as er
+        original = er.EXCLUDED_IDS
+        try:
+            er.EXCLUDED_IDS = { "t": frozenset( { "o'brien" } ) }
+            clause = er.excluded_ids_clause( "t", "id" )
+            assert "'o''brien'" in clause
+        finally:
+            er.EXCLUDED_IDS = original
+
+    def test_every_excluded_id_appears( self ):
+        import cosa.rest.db.embedding_regeneration as er
+        original = er.EXCLUDED_IDS
+        try:
+            er.EXCLUDED_IDS = { "t": frozenset( { "a", "b", "c" } ) }
+            clause = er.excluded_ids_clause( "t", "id" )
+            for row_id in ( "a", "b", "c" ):
+                assert f"'{row_id}'" in clause
+        finally:
+            er.EXCLUDED_IDS = original
+
+    def test_scope_and_skip_agree_for_every_spec( self ):
+        # The property that was violated: a row fill skips must not be counted by
+        # the scope query. Asserted against the real specs, not a fixture.
+        from cosa.rest.db.embedding_regeneration import ( excluded_ids_clause, is_excluded,
+                                                          REGEN_SPECS, EXCLUDED_IDS )
+        for spec in REGEN_SPECS:
+            clause = excluded_ids_clause( spec.table, spec.pk )
+            for row_id in EXCLUDED_IDS.get( spec.table, frozenset() ):
+                assert is_excluded( spec.table, row_id ), "fill must skip it"
+                assert str( row_id ) in clause,           "and scope must not count it"
+
+
+class TestBulkUpdateShadowSql:
+    """
+    The batched-write template that collapses a whole 1024-row chunk into one
+    execute_values round trip. Measured 2026-08-16 (row 5e848dd8): the bottleneck
+    was Python/SQLAlchemy per-statement overhead, not Postgres.
+    """
+
+    def test_has_single_values_placeholder_for_execute_values( self ):
+        # execute_values expands exactly one %s into the VALUES rows.
+        from cosa.rest.db.embedding_regeneration import bulk_update_shadow_sql
+        sql = bulk_update_shadow_sql( "public.input_and_output", "id", "input_embedding_regen" )
+        assert sql.count( "%s" ) == 1
+
+    def test_updates_the_named_shadow_column_from_the_values_alias( self ):
+        from cosa.rest.db.embedding_regeneration import bulk_update_shadow_sql
+        sql = bulk_update_shadow_sql( "public.input_and_output", "id", "input_embedding_regen" )
+        assert "SET input_embedding_regen = data.vec::vector" in sql
+
+    def test_casts_the_text_literal_back_to_a_vector( self ):
+        # The pending pairs carry vec as str(list(...)); without ::vector the
+        # assignment against a pgvector column would fail.
+        from cosa.rest.db.embedding_regeneration import bulk_update_shadow_sql
+        sql = bulk_update_shadow_sql( "regen_probe.io_clone", "id", "output_final_embedding_regen" )
+        assert "data.vec::vector" in sql
+
+    def test_aliases_target_so_schema_qualified_name_still_yields_legal_pk_ref( self ):
+        # A bare "schema.table.pk" in WHERE is brittle; aliasing to t keeps it legal.
+        from cosa.rest.db.embedding_regeneration import bulk_update_shadow_sql
+        sql = bulk_update_shadow_sql( "regen_probe.io_clone", "id", "input_embedding_regen" )
+        assert "UPDATE regen_probe.io_clone AS t " in sql
+        assert "WHERE t.id = data.id" in sql
+
+    def test_join_key_uses_the_given_primary_key_name( self ):
+        from cosa.rest.db.embedding_regeneration import bulk_update_shadow_sql
+        sql = bulk_update_shadow_sql( "public.prediction_decisions", "id", "question_embedding_regen" )
+        assert "WHERE t.id = data.id" in sql
+
+    def test_every_regen_spec_produces_a_wellformed_statement( self ):
+        from cosa.rest.db.embedding_regeneration import bulk_update_shadow_sql, REGEN_SPECS
+        for spec in REGEN_SPECS:
+            sql = bulk_update_shadow_sql( f"public.{spec.table}", spec.pk, spec.shadow_column )
+            assert sql.startswith( f"UPDATE public.{spec.table} AS t SET {spec.shadow_column} = data.vec::vector" )
+            assert sql.count( "%s" ) == 1
+
+
+class TestShadowColumnDdl:
+
+    def test_one_statement_per_spec_in_spec_order( self ):
+        from cosa.rest.db.embedding_regeneration import shadow_column_ddl, REGEN_SPECS
+        statements = shadow_column_ddl()
+        assert len( statements ) == len( REGEN_SPECS )
+        for statement, spec in zip( statements, REGEN_SPECS ):
+            assert spec.shadow_column in statement
+            assert spec.table in statement
+
+    def test_every_shadow_column_in_the_specs_is_covered( self ):
+        # The anti-drift property: no spec may be silently missing its DDL.
+        from cosa.rest.db.embedding_regeneration import shadow_column_ddl, REGEN_SPECS
+        blob = " ".join( shadow_column_ddl() )
+        for spec in REGEN_SPECS:
+            assert spec.shadow_column in blob, f"{spec.label} has no DDL"
+
+    def test_statements_are_idempotent_and_carry_the_right_dimension( self ):
+        from cosa.rest.db.embedding_regeneration import shadow_column_ddl, EMBEDDING_DIM
+        for statement in shadow_column_ddl():
+            assert "ADD COLUMN IF NOT EXISTS" in statement
+            assert f"vector({EMBEDDING_DIM})" in statement
+
+    def test_no_default_clause_so_the_add_stays_metadata_only( self ):
+        # A DEFAULT would force Postgres to rewrite a 351,000-row table. The absence
+        # of that keyword is the whole reason this is safe to run on a live table.
+        from cosa.rest.db.embedding_regeneration import shadow_column_ddl
+        for statement in shadow_column_ddl():
+            assert "DEFAULT" not in statement.upper()
+
+    def test_the_prefix_reaches_the_ddl_so_a_clone_can_be_built( self ):
+        from cosa.rest.db.embedding_regeneration import shadow_column_ddl
+        for statement in shadow_column_ddl( prefix="regen_probe." ):
+            assert "regen_probe." in statement
+
+    def test_a_narrowed_spec_list_produces_only_its_own_ddl( self ):
+        from cosa.rest.db.embedding_regeneration import shadow_column_ddl, REGEN_SPECS
+        one = [ REGEN_SPECS[ 0 ] ]
+        statements = shadow_column_ddl( one )
+        assert len( statements ) == 1
+        assert REGEN_SPECS[ 0 ].shadow_column in statements[ 0 ]
+        assert REGEN_SPECS[ 1 ].shadow_column not in statements[ 0 ]
 
 
 # --------------------------------------------------------------------------- #

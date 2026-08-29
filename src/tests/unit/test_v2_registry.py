@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""
+CJ Flow v2 — registry guard (plan §9; revised by cascade handoff R-A2 / R-D4 /
+R-A5 / R-D10). Unit A deliverable.
+
+EXECUTOR: AI — every assertion is machine-run; no human step, no live server,
+no inference. Runs on :7999-class unit venue (pure import + file read).
+
+Coverage: this file exercises all of `src/cosa/rest/v2/registry.py` — resolve()'s
+hit / alias / miss arms, AgentSpec.required_args' three arms (declared_args →
+JOB_ARG_CONTRACTS → literal), and the four-bucket partition. Asserts 100% lines +
+branches of registry.py when run with
+  --cov=cosa.rest.v2.registry --cov-branch --cov-report=term-missing
+
+The drift guard (test_every_template_command_is_bucketed) is the plan's named
+defence against the three-mechanism routing drift reappearing: every command the
+router can emit must sit in exactly ONE of four buckets — a v2 agent, the deferred
+set, a mode-control command, or the receptionist. R-A2 added the fourth bucket
+(CONTROL_COMMANDS) after the router template's `agent router go to automatic` broke
+a three-bucket set-equality on its first run.
+
+Run: PYTHONPATH=src src/cosa/.venv/bin/python -m pytest \
+     src/tests/unit/test_v2_registry.py -v
+"""
+
+import re
+import types
+import unittest
+from itertools import combinations
+
+import cosa.utils.util as cu
+from cosa.rest.v2.registry import (
+    AgentSpec,
+    CommandClass,
+    ANSWER_COMMANDS,
+    JOB_COMMANDS,
+    SPEAKABLE_JOBS,
+    CONTROL_COMMANDS,
+    NO_MATCH,
+    resolve,
+    resolve_agentic,
+    _build_registry,
+)
+from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
+
+ROUTER_TEMPLATE = "/src/conf/prompts/agent-router-template-completion.txt"
+
+
+def _template_commands():
+    """The set of routing commands the router template can emit.
+
+    The template's <command> tags are the enumerated commands PLUS one empty
+    `<command></command>` — the response-format answer slot the model fills in,
+    not a command — which is excluded. `none` IS an emittable command (the router's
+    no-command outcome) and is kept.
+    """
+    text = cu.get_file_as_string( cu.get_project_root() + ROUTER_TEMPLATE )
+    return { c for c in re.findall( r"<command>(.*?)</command>", text ) if c }
+
+
+class TestRegistryDriftGuard( unittest.TestCase ):
+    """The §9 set-equality — the defence against the three-mechanism drift."""
+
+    def test_every_template_command_is_bucketed_exactly_once( self ):
+        template = _template_commands()
+        buckets = [ set( ANSWER_COMMANDS ), set( SPEAKABLE_JOBS ),
+                    set( CONTROL_COMMANDS ), set( NO_MATCH ) ]
+        covered = set().union( *buckets )
+
+        # Both directions: no template command uncovered, and no bucket carries a
+        # command the template cannot emit (R-A2 / R-D4).
+        self.assertEqual( template, covered )
+
+        # Partition: no command lands in two buckets at once.
+        for a, b in combinations( buckets, 2 ):
+            self.assertEqual( a & b, set(), f"command in two buckets: {a & b}" )
+
+    # test_bucket_counts REMOVED (phase 1, Rachel's ruling 2026-08-15): a count
+    # derived from the registry and asserted against the registry is a tautology
+    # that can never go red, and the set-equality above proves strictly more — a
+    # count cannot fail unless a set-equality would have failed first.
+
+
+class TestRegistryConstruction( unittest.TestCase ):
+    """M4 (Tiffany's mutation): a duplicate command must FAIL LOUD, not be silently
+    dropped by a dict comprehension (last-wins). The invariant is now ENFORCED at
+    construction — a raise — so there is no count-comparison guard over it (that
+    would be vacuous: a violation raises at import before any test could observe an
+    inequality). This falsifiable check is what survives."""
+
+    def test_duplicate_command_raises( self ):
+        a = AgentSpec( "agent router go to dup", cls=CommandClass.CONVERSATIONAL )
+        b = AgentSpec( "agent router go to dup", cls=CommandClass.CONTROL )
+        with self.assertRaises( ValueError ):
+            _build_registry( ( a, ), ( b, ) )
+
+    def test_build_registry_keeps_every_distinct_command( self ):
+        a = AgentSpec( "agent router go to a", cls=CommandClass.CONVERSATIONAL )
+        b = AgentSpec( "agent router go to b", cls=CommandClass.CONTROL )
+        built = _build_registry( ( a, ), ( b, ) )
+        self.assertEqual( set( built ), { "agent router go to a", "agent router go to b" } )
+
+
+class TestAgenticSetOwnership( unittest.TestCase ):
+    """The registry now OWNS the agentic set (§5.1); these guard the two seams
+    that ownership opens — cls vs the source table, and the interim DEFERRED name."""
+
+    # test_cls_agentic_matches_agentic_agents REMOVED (Rachel 2026-08-15): the
+    # AGENTIC specs are built by iterating JOB_ARG_CONTRACTS, so set(JOB_COMMANDS)
+    # == set(JOB_ARG_CONTRACTS) is true BY CONSTRUCTION — a tautology like the count.
+    # The invariant is enforced instead by the construction warning at registry.py's
+    # _AGENTIC comprehension.
+
+    def test_deferred_is_template_emittable_agentic_subset( self ):
+        # SPEAKABLE_JOBS is a bounded interim (retired phase 2). Pin it to the
+        # template-emittable agentic subset so it cannot silently drift from the
+        # owned set: the AGENTIC commands absent from the template (bug fix expediter,
+        # test fix expediter [START], heartbeat poker) are excluded here. (test suite
+        # and test fix expediter resume ARE in the template and so ARE in the set.)
+        template          = _template_commands()
+        emittable_agentic = { c for c in JOB_COMMANDS if c in template }
+        self.assertEqual( SPEAKABLE_JOBS, emittable_agentic )
+
+
+class TestResolve( unittest.TestCase ):
+
+    def test_full_command_resolves_to_spec( self ):
+        spec = resolve( "agent router go to weather", crud_enabled=False )
+        self.assertIsInstance( spec, AgentSpec )
+        self.assertEqual( spec.command, "agent router go to weather" )
+
+    def test_short_form_alias_resolves_to_spec( self ):
+        self.assertEqual( resolve( "weather", crud_enabled=False ).command, "agent router go to weather" )
+        self.assertEqual( resolve( "todo list", crud_enabled=False ).command, "agent router go to todo" )
+
+    def test_deferred_command_resolves_to_none( self ):
+        self.assertIsNone( resolve( "agent router go to deep research", crud_enabled=False ) )
+
+    def test_control_command_resolves_to_none( self ):
+        self.assertIsNone( resolve( "agent router go to automatic", crud_enabled=False ) )
+
+    def test_receptionist_resolves_to_none( self ):
+        self.assertIsNone( resolve( "agent router go to receptionist", crud_enabled=False ) )
+
+    def test_unknown_command_resolves_to_none( self ):
+        self.assertIsNone( resolve( "agent router go to nowhere", crud_enabled=False ) )
+
+    def test_agentic_command_resolves_to_none_in_resolve( self ):
+        # §5.1.3: resolve() stays scoped to CONVERSATIONAL — an owned agentic
+        # command must still return None here, unchanged from before phase 1.
+        self.assertIsNone( resolve( "agent router go to deep research", crud_enabled=False ) )
+
+    def test_resolve_agentic_returns_spec( self ):
+        spec = resolve_agentic( "agent router go to deep research" )
+        self.assertIsInstance( spec, AgentSpec )
+        self.assertEqual( spec.command, "agent router go to deep research" )
+
+    def test_resolve_agentic_returns_none_for_conversational( self ):
+        self.assertIsNone( resolve_agentic( "agent router go to weather" ) )
+
+    def test_resolve_agentic_returns_none_for_unknown( self ):
+        self.assertIsNone( resolve_agentic( "agent router go to nowhere" ) )
+
+
+class TestRequiredArgsResolutionOrder( unittest.TestCase ):
+    """The §3a migration path — declared_args → JOB_ARG_CONTRACTS → literal tuple."""
+
+    def test_literal_tuple_arm( self ):
+        # weather has no declared_args and is not in JOB_ARG_CONTRACTS → literal tuple.
+        self.assertEqual( resolve( "agent router go to weather", crud_enabled=False ).required_args, ( "location", ) )
+
+    def test_empty_when_no_source( self ):
+        # math: no declared_args, not in JOB_ARG_CONTRACTS, no literal → ().
+        self.assertEqual( resolve( "agent router go to math", crud_enabled=False ).required_args, () )
+
+    def test_agentic_agents_table_arm( self ):
+        # A spec whose command IS in JOB_ARG_CONTRACTS reads its required_user_args.
+        command = "agent router go to deep research"
+        expected = tuple( JOB_ARG_CONTRACTS[ command ][ "required_user_args" ] )
+        spec = AgentSpec( command, factory=object )   # object has no declared_args
+        self.assertEqual( spec.required_args, expected )
+
+    def test_agent_declared_args_arm_wins( self ):
+        # A factory that declares its own args short-circuits the tables (phase-2
+        # destination). Uses a command that IS in JOB_ARG_CONTRACTS to prove the
+        # declaration wins over the table.
+        class _Declaring:
+            @classmethod
+            def declared_args( cls ):
+                return types.SimpleNamespace( required=( "foo", ), optional=() )
+
+        spec = AgentSpec( "agent router go to deep research", factory=_Declaring )
+        self.assertEqual( spec.required_args, ( "foo", ) )
+
+
+if __name__ == "__main__":
+    unittest.main()

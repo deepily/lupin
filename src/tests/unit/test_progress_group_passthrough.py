@@ -56,13 +56,26 @@ def assert_valid_pg_id( value ):
 class TestPodcastGeneratorVoiceIoPassthrough:
     """Verify podcast_generator/voice_io.notify() forwards progress_group_id."""
 
+    # voice_io.notify's dispatch gate is `_force_cli_mode or _cosa_interface is None`
+    # — it does NOT read `_voice_available`. The core `_cosa_interface` global is
+    # None by default and is only set to the podcast interface as a side-effect of
+    # the FIRST import of podcast_generator.voice_io in the process. Once any earlier
+    # test has imported that module, this test's own import is a no-op and the gate
+    # sees whatever `_cosa_interface` was left at (None) — so notify prints and never
+    # reaches the dispatcher. These tests therefore pin BOTH gate inputs explicitly
+    # (context-managed, auto-restored) so the outcome does not depend on collection
+    # order (bug 69fb89cd, polluter #2 — an order-dependent victim, not a dirty
+    # teardown elsewhere).
+
     @pytest.mark.asyncio
     async def test_progress_group_id_passed_to_core( self ):
         """progress_group_id reaches the AsyncNotificationRequest via dispatcher."""
-        with patch( "cosa.agents.utils.voice_io._voice_available", True ), \
+        from cosa.agents.podcast_generator import voice_io
+        from cosa.agents.podcast_generator import cosa_interface as podcast_cosa_interface
+        with patch( "cosa.agents.utils.voice_io._cosa_interface", podcast_cosa_interface ), \
+             patch( "cosa.agents.utils.voice_io._force_cli_mode", False ), \
              patch( "cosa.agents.utils.agent_notification_dispatcher._notify_user_async" ) as mock_send:
 
-            from cosa.agents.podcast_generator import voice_io
             await voice_io.notify(
                 "Test message",
                 priority          = "low",
@@ -76,10 +89,12 @@ class TestPodcastGeneratorVoiceIoPassthrough:
     @pytest.mark.asyncio
     async def test_progress_group_id_none_by_default( self ):
         """progress_group_id defaults to None when not provided."""
-        with patch( "cosa.agents.utils.voice_io._voice_available", True ), \
+        from cosa.agents.podcast_generator import voice_io
+        from cosa.agents.podcast_generator import cosa_interface as podcast_cosa_interface
+        with patch( "cosa.agents.utils.voice_io._cosa_interface", podcast_cosa_interface ), \
+             patch( "cosa.agents.utils.voice_io._force_cli_mode", False ), \
              patch( "cosa.agents.utils.agent_notification_dispatcher._notify_user_async" ) as mock_send:
 
-            from cosa.agents.podcast_generator import voice_io
             await voice_io.notify( "No group" )
 
             request = mock_send.call_args[ 0 ][ 0 ]
@@ -228,12 +243,26 @@ class TestSweTeamHooksPassthrough:
 class TestPodcastGeneratorGroupIdGeneration:
     """Verify Podcast Generator generates valid progress group IDs."""
 
-    def test_audio_progress_group_id_attribute_exists( self ):
-        """PodcastOrchestratorAgent defines _audio_progress_group_id attribute."""
-        import inspect
+    def test_a_fresh_agent_has_no_audio_tag_yet( self ):
+        """A tag belongs to a RUN, not to the object — a new agent holds none.
+
+        Replaces a grep for the attribute name in __init__ (row 122f07a1). That
+        check passed on any build that merely mentioned the word; this one fails
+        if a stale tag is ever baked in at construction, which is what would make
+        two runs share a UI line.
+        """
         from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
-        source = inspect.getsource( PodcastOrchestratorAgent.__init__ )
-        assert "_audio_progress_group_id" in source, "Missing _audio_progress_group_id in __init__"
+        from cosa.agents.podcast_generator.config import PodcastConfig
+
+        agent = PodcastOrchestratorAgent(
+            research_doc_path = "/io/dr/report.md",
+            user_id           = "u@test.com",
+            config            = PodcastConfig(),
+        )
+        assert agent._audio_progress_group_id is None, (
+            f"a freshly built agent must not carry an audio tag; got "
+            f"{agent._audio_progress_group_id!r}"
+        )
 
     def test_pg_id_format_inline_generation( self ):
         """Inline f"pg-{uuid.uuid4().hex[:8]}" generates valid format."""
@@ -248,152 +277,272 @@ class TestPodcastGeneratorGroupIdGeneration:
 
 
 # =============================================================================
-# Phase 4A: SWE Team — delegation loop group ID
+# Phase 4: SWE Team — where each progress group ID starts and stops
+# =============================================================================
+#
+# WHAT THESE USED TO BE, AND WHY THEY CHANGED (row 122f07a1). Every test below
+# was an `assert "<literal>" in inspect.getsource( <method> )`. That shape is a
+# grep: it goes green on a build that keeps the text and guts the behaviour, and
+# red on a rename that breaks nothing. Worse, the rule that actually matters here
+# is INVISIBLE to a grep. In orchestrator.py the delegation ID is created ONCE
+# ABOVE the task loop, so every task's status line updates ONE slot in place;
+# the verification ID is created INSIDE the loop, so each task gets its OWN slot.
+# Move either line across its loop boundary and the source text is byte-identical
+# — `delegation_group_id = f"pg-..."` still reads exactly the same — while the UI
+# silently starts overwriting one task's result with another's. The tests below
+# drive the real methods with the SDK stubbed and read the IDs that reach the
+# notification seam, so that move is precisely what reddens them.
+
+
+def _collect_hook_group_ids( mock_hook ):
+    """Every progress_group_id that reached notification_hook, call order preserved."""
+    return [ c.kwargs[ "progress_group_id" ] for c in mock_hook.await_args_list ]
+
+
+def _collect_notify_group_ids( mock_notify, contains ):
+    """
+    progress_group_id values that reached orchestrator._notify, filtered by message.
+
+    Filtering on the message text is how a caller asks for "the delegation ones"
+    or "the verified ones" without depending on call ordering.
+    """
+    out = []
+    for c in mock_notify.await_args_list:
+        if contains not in c.kwargs.get( "message", "" ): continue
+        out.append( c.kwargs.get( "progress_group_id" ) )
+    return out
+
+
+class TestSweTeamDelegationLoopGroupIds:
+    """
+    The delegation loop shares one group ID; each verification cycle gets its own.
+
+    Drives _execute_live over three tasks with every collaborator stubbed, then
+    reads what reached _notify. A grep cannot tell the two rules apart — both
+    generator lines look identical — but the emitted notifications can.
+    """
+
+    def _drive( self, task_count ):
+        """Run _execute_live end to end with stubs; return the _notify mock."""
+        import cosa.agents.swe_team.orchestrator as orch_mod
+        from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
+        from cosa.agents.swe_team.config import SweTeamConfig
+        from cosa.agents.swe_team.state import TaskSpec, DelegationResult, VerificationResult
+
+        specs = [ TaskSpec( title=f"task-{i}", objective="o", output_format="f" )
+                  for i in range( task_count ) ]
+        coder = [ DelegationResult( task_index=i, task_title=f"task-{i}", status="success",
+                                    output="done", files_changed=[ "a.py" ] )
+                  for i in range( task_count ) ]
+        verds = [ VerificationResult( task_index=i, task_title=f"task-{i}", passed=True,
+                                      tester_output="ok", status="passed" )
+                  for i in range( task_count ) ]
+
+        orch = SweTeamOrchestrator(
+            task_description = "Build X",
+            config           = SweTeamConfig( trust_mode="disabled", enable_checkins=False ),
+            job_id           = "swe-pg",
+        )
+        notify = AsyncMock()
+        with patch.object( orch, "_notify", notify ), \
+             patch.object( orch, "_emit_state", AsyncMock() ), \
+             patch.object( orch_mod, "ProgressLog", MagicMock() ), \
+             patch.object( orch_mod, "FeatureList", MagicMock() ), \
+             patch.object( orch_mod.cu, "get_project_root", MagicMock( return_value="/tmp" ) ), \
+             patch.object( orch, "_decompose_task", AsyncMock( return_value=specs ) ), \
+             patch.object( orch, "_gated_confirmation", AsyncMock( return_value=True ) ), \
+             patch.object( orch, "_delegate_task", AsyncMock( side_effect=coder ) ), \
+             patch.object( orch, "_verify_result", AsyncMock( side_effect=verds ) ), \
+             patch.object( orch, "_check_in_with_user", AsyncMock( return_value=None ) ):
+            asyncio.run( orch._execute_live( MagicMock() ) )
+        return notify
+
+    def test_one_delegation_group_id_covers_every_task( self ):
+        """All three "Delegating task N/3" notifications share ONE valid group ID.
+
+        RED ON REVERT: move the delegation_group_id assignment inside the task
+        loop and each task gets its own ID — three distinct values here.
+        """
+        group_ids = _collect_notify_group_ids( self._drive( 3 ), "Delegating task" )
+
+        assert len( group_ids ) == 3, f"expected one delegation notify per task, got {group_ids}"
+        assert len( set( group_ids ) ) == 1, (
+            "the delegation loop must reuse ONE group ID so the three status "
+            f"notifications update one line in place; got {group_ids}"
+        )
+        assert_valid_pg_id( group_ids[ 0 ] )
+
+    def test_each_task_gets_its_own_verification_group_id( self ):
+        """Per-task verification notifications carry DISTINCT group IDs.
+
+        RED ON REVERT: hoist the verify_group_id assignment above the task loop
+        and all three collapse to one — task 3's verdict would overwrite task 1's.
+        """
+        verify_ids = _collect_notify_group_ids( self._drive( 3 ), "verified" )
+
+        assert len( verify_ids ) == 3, f"expected one verified notify per task, got {verify_ids}"
+        assert len( set( verify_ids ) ) == 3, (
+            "each task's verification cycle must open its OWN group so one task's "
+            f"result does not overwrite another's; got {verify_ids}"
+        )
+        for pg in verify_ids: assert_valid_pg_id( pg )
+
+    def test_verification_ids_never_collide_with_the_delegation_id( self ):
+        """A verification group is never the delegation group."""
+        notify        = self._drive( 2 )
+        delegation_id = set( _collect_notify_group_ids( notify, "Delegating task" ) )
+        verify_ids    = set( _collect_notify_group_ids( notify, "verified" ) )
+
+        assert delegation_id and verify_ids
+        assert delegation_id.isdisjoint( verify_ids ), (
+            "a verification notification landing in the delegation group would "
+            f"overwrite the running delegation status line; shared={delegation_id & verify_ids}"
+        )
+
+
+# =============================================================================
+# Phase 4B/4C/4D: SWE Team — one group ID per SDK stream
 # =============================================================================
 
-class TestSweTeamDelegationGroupId:
-    """Verify task delegation loop generates delegation_group_id via source inspection."""
 
-    def test_execute_live_generates_delegation_group_id( self ):
-        """_execute_live() generates a delegation_group_id before the task loop."""
-        import inspect
-        from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
-        source = inspect.getsource( SweTeamOrchestrator._execute_live )
-        assert "delegation_group_id" in source
-        assert 'progress_group_id = delegation_group_id' in source
+def _run_stream( method_name, call_args, result_message_count=3 ):
+    """
+    Drive one orchestrator SDK-stream method with sdk_query stubbed.
 
-    def test_execute_live_delegation_group_id_format( self ):
-        """delegation_group_id uses the uuid inline pattern."""
-        import inspect
-        from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
-        source = inspect.getsource( SweTeamOrchestrator._execute_live )
-        assert 'delegation_group_id = f"pg-{uuid.uuid4().hex[ :8 ]}"' in source
+    _delegate_task / _verify_result / _redelegate_with_feedback each open a stream
+    and forward every ResultMessage in it through notification_hook. The rule is
+    the same for all three: every message in ONE stream shares ONE group ID, and a
+    second stream gets a different one. Returns the IDs that reached the hook.
+    """
+    import cosa.agents.swe_team.orchestrator as orch_mod
+    from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
+    from cosa.agents.swe_team.config import SweTeamConfig
 
-    def test_execute_live_verify_group_id_present( self ):
-        """_execute_live() also generates verify_group_id for the verification loop."""
-        import inspect
-        from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
-        source = inspect.getsource( SweTeamOrchestrator._execute_live )
-        assert "verify_group_id" in source
-        assert 'progress_group_id = verify_group_id' in source
+    messages = [ MagicMock( spec=orch_mod.ResultMessage ) for _ in range( result_message_count ) ]
+
+    async def _stream( *a, **kw ):
+        for m in messages: yield m
+
+    orch = SweTeamOrchestrator(
+        task_description = "Build X",
+        config           = SweTeamConfig( trust_mode="disabled" ),
+        job_id           = "swe-pg",
+    )
+    hook = AsyncMock()
+    with patch.object( orch_mod, "sdk_query", _stream ), \
+         patch.object( orch, "_build_agent_options", return_value=MagicMock() ), \
+         patch.object( orch, "_emit_state", AsyncMock() ), \
+         patch.object( orch, "_notify", AsyncMock() ), \
+         patch.object( orch_mod, "post_tool_hook", AsyncMock() ), \
+         patch.object( orch_mod, "notification_hook", hook ):
+        asyncio.run( getattr( orch, method_name )( *call_args ) )
+    return _collect_hook_group_ids( hook )
 
 
-# =============================================================================
-# Phase 4B: SWE Team — coder SDK stream group ID
-# =============================================================================
+def _spec():
+    from cosa.agents.swe_team.state import TaskSpec
+    return TaskSpec( title="impl", objective="o", output_format="f" )
+
+
+def _coder_result( status="success" ):
+    from cosa.agents.swe_team.state import DelegationResult
+    return DelegationResult( task_index=0, task_title="impl", status=status,
+                             output="prev", files_changed=[ "a.py" ] )
+
+
+def _assert_one_group_per_stream( ids, method_name ):
+    assert len( ids ) == 3, f"{method_name}: expected 3 forwarded messages, got {ids}"
+    assert len( set( ids ) ) == 1, (
+        f"{method_name}: every message in one stream must share one group ID so the "
+        f"UI updates one line in place instead of appending three; got {ids}"
+    )
+    assert_valid_pg_id( ids[ 0 ] )
+
 
 class TestSweTeamCoderStreamGroupId:
-    """Verify _delegate_task() generates coder_group_id via source inspection."""
+    """_delegate_task groups its whole coder stream under one ID."""
 
-    def test_delegate_task_generates_coder_group_id( self ):
-        """_delegate_task() generates a coder_group_id."""
-        import inspect
-        from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
-        source = inspect.getsource( SweTeamOrchestrator._delegate_task )
-        assert "coder_group_id" in source
-        assert 'coder_group_id = f"pg-{uuid.uuid4().hex[ :8 ]}"' in source
+    def test_every_coder_message_shares_one_group_id( self ):
+        """RED ON REVERT: generate the ID inside the message loop, or pass None."""
+        _assert_one_group_per_stream(
+            _run_stream( "_delegate_task", ( _spec(), 0, MagicMock() ) ), "_delegate_task"
+        )
 
-    def test_delegate_task_passes_coder_group_id_to_hook( self ):
-        """notification_hook() call in _delegate_task() receives coder_group_id."""
-        import inspect
-        from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
-        source = inspect.getsource( SweTeamOrchestrator._delegate_task )
-        assert "progress_group_id=coder_group_id" in source
+    def test_two_delegations_do_not_share_a_group_id( self ):
+        """A second task opens its OWN group — not the first task's.
 
+        RED ON REVERT: hoist coder_group_id to a module constant.
+        """
+        first  = _run_stream( "_delegate_task", ( _spec(), 0, MagicMock() ), result_message_count=1 )
+        second = _run_stream( "_delegate_task", ( _spec(), 1, MagicMock() ), result_message_count=1 )
+        assert first[ 0 ] != second[ 0 ], (
+            "two coder streams sharing a group ID would make the second task's output "
+            f"overwrite the first's; both were {first[ 0 ]}"
+        )
 
-# =============================================================================
-# Phase 4C: SWE Team — tester SDK stream group ID
-# =============================================================================
 
 class TestSweTeamTesterStreamGroupId:
-    """Verify _verify_result() generates tester_group_id via source inspection."""
+    """_verify_result groups its whole tester stream under one ID."""
 
-    def test_verify_result_generates_tester_group_id( self ):
-        """_verify_result() generates a tester_group_id."""
-        import inspect
-        from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
-        source = inspect.getsource( SweTeamOrchestrator._verify_result )
-        assert "tester_group_id" in source
-        assert 'tester_group_id = f"pg-{uuid.uuid4().hex[ :8 ]}"' in source
+    def test_every_tester_message_shares_one_group_id( self ):
+        _assert_one_group_per_stream(
+            _run_stream( "_verify_result", ( _spec(), _coder_result(), 0, MagicMock() ) ),
+            "_verify_result",
+        )
 
-    def test_verify_result_passes_tester_group_id_to_hook( self ):
-        """notification_hook() call in _verify_result() receives tester_group_id."""
-        import inspect
-        from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
-        source = inspect.getsource( SweTeamOrchestrator._verify_result )
-        assert "progress_group_id=tester_group_id" in source
+    def test_tester_group_is_not_the_coder_group( self ):
+        """The tester stream never reuses a coder stream's group."""
+        coder  = _run_stream( "_delegate_task", ( _spec(), 0, MagicMock() ), result_message_count=1 )
+        tester = _run_stream( "_verify_result", ( _spec(), _coder_result(), 0, MagicMock() ),
+                              result_message_count=1 )
+        assert coder[ 0 ] != tester[ 0 ], (
+            "the tester's output would overwrite the coder's in the same DOM slot; "
+            f"both were {coder[ 0 ]}"
+        )
 
 
 class TestSweTeamRedelegateGroupId:
-    """Verify _redelegate_with_feedback() generates redelegate_group_id."""
+    """_redelegate_with_feedback groups its retry stream under one ID."""
 
-    def test_redelegate_generates_group_id( self ):
-        """_redelegate_with_feedback() generates a redelegate_group_id."""
-        import inspect
-        from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
-        source = inspect.getsource( SweTeamOrchestrator._redelegate_with_feedback )
-        assert "redelegate_group_id" in source
-        assert 'redelegate_group_id = f"pg-{uuid.uuid4().hex[ :8 ]}"' in source
+    def test_every_redelegate_message_shares_one_group_id( self ):
+        _assert_one_group_per_stream(
+            _run_stream( "_redelegate_with_feedback",
+                         ( _spec(), 0, _coder_result( "failure" ), "feedback", 2, MagicMock() ) ),
+            "_redelegate_with_feedback",
+        )
 
-    def test_redelegate_passes_group_id_to_hook( self ):
-        """notification_hook() call in _redelegate_with_feedback() receives redelegate_group_id."""
-        import inspect
-        from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
-        source = inspect.getsource( SweTeamOrchestrator._redelegate_with_feedback )
-        assert "progress_group_id=redelegate_group_id" in source
-
-
-class TestDeepResearchGroupId:
-    """Verify Deep Research cli.py generates research_group_id."""
-
-    def test_run_research_generates_group_id( self ):
-        """run_research() generates a research_group_id."""
-        import inspect
-        from cosa.agents.deep_research.cli import run_research
-        source = inspect.getsource( run_research )
-        assert "research_group_id" in source
-        assert 'research_group_id = f"pg-{uuid.uuid4().hex[ :8 ]}"' in source
-
-    def test_run_research_passes_group_id_to_notify( self ):
-        """voice_io.notify() calls in run_research() receive research_group_id."""
-        import inspect
-        from cosa.agents.deep_research.cli import run_research
-        source = inspect.getsource( run_research )
-        assert "progress_group_id=research_group_id" in source
+    def test_each_retry_opens_a_fresh_group( self ):
+        """Two retries of the same task do not share a group ID."""
+        one = _run_stream( "_redelegate_with_feedback",
+                           ( _spec(), 0, _coder_result( "failure" ), "fb", 2, MagicMock() ),
+                           result_message_count=1 )
+        two = _run_stream( "_redelegate_with_feedback",
+                           ( _spec(), 0, _coder_result( "failure" ), "fb", 3, MagicMock() ),
+                           result_message_count=1 )
+        assert one[ 0 ] != two[ 0 ], (
+            "retry 3 landing in retry 2's group would overwrite the earlier attempt's "
+            f"output; both were {one[ 0 ]}"
+        )
 
 
-class TestPodcastGeneratorOrchestratorGroupIds:
-    """Verify Podcast Generator orchestrator generates per-language and audio group IDs."""
-
-    def test_do_all_async_generates_audio_group_id( self ):
-        """do_all_async() generates _audio_progress_group_id per language."""
-        import inspect
-        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
-        source = inspect.getsource( PodcastOrchestratorAgent.do_all_async )
-        assert '_audio_progress_group_id' in source
-        assert 'self._audio_progress_group_id     = f"pg-{uuid.uuid4().hex[ :8 ]}"' in source
-
-    def test_do_all_async_generates_lang_group_id( self ):
-        """do_all_async() generates a separate lang_audio_group_id per language."""
-        import inspect
-        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
-        source = inspect.getsource( PodcastOrchestratorAgent.do_all_async )
-        assert "lang_audio_group_id" in source
-        assert 'progress_group_id = lang_audio_group_id' in source
-
-    def test_audio_progress_callback_uses_group_id( self ):
-        """_audio_progress_callback() passes self._audio_progress_group_id to notify."""
-        import inspect
-        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
-        source = inspect.getsource( PodcastOrchestratorAgent._audio_progress_callback )
-        assert "progress_group_id = self._audio_progress_group_id" in source
-
-    def test_do_audio_only_async_generates_group_id( self ):
-        """do_audio_only_async() also generates its own _audio_progress_group_id."""
-        import inspect
-        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
-        source = inspect.getsource( PodcastOrchestratorAgent.do_audio_only_async )
-        assert '_audio_progress_group_id' in source
+# =============================================================================
+# Deep Research and Podcast tags — MOVED OUT (row 122f07a1)
+# =============================================================================
+#
+# The twelve source-text assertions that lived here (TestDeepResearchGroupId and
+# TestPodcastGeneratorOrchestratorGroupIds) are gone, replaced by tests that DRIVE
+# those pipelines and read the tags that actually reach the notification seam.
+# They now live beside the harnesses that can run them, because this file has no
+# way to reach either pipeline:
+#
+#   Deep Research  -> src/cosa/tests/unit/agents/deep_research/test_cli.py
+#                     ::TestSubqueryLoopProgressGroup   (rr_env is the harness)
+#   Podcast        -> src/tests/unit/test_podcast_orchestrator.py
+#                     ::TestAudioProgressGroupTags      (_wire_pipeline is the harness)
+#
+# The podcast set also covers the `_audio_progress_group_id` attribute that a grep
+# here used to look for in __init__: a run that never opens a tag now fails by
+# name rather than by the word being absent from a constructor.
 
 
 # =============================================================================

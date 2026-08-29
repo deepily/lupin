@@ -67,6 +67,9 @@ class TestAgentBase( unittest.TestCase ):
                 df_path_key                                : "/data.csv",
             }.get( key, default )
         mock_config.get.side_effect = cfg_get
+        # The df-path branch now uses get_required(); without this the Mock
+        # returns a Mock and the path concatenation blows up in the test only.
+        mock_config.get_required.side_effect = lambda key, silent=False, return_type=None: cfg_get( key )
 
         mock_proc = Mock()
         if processor_raises:

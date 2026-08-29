@@ -765,12 +765,19 @@ def get_session_metadata() -> dict:
     }
 
 
-def find_session_by_id( session_id ):
+def find_session_by_id( session_id, exact=False ):
     """
     Scan ~/.claude/sessions/cc-*.json for a session_id match.
 
     Supports both full UUID and 8-char prefix matching. Skips files
     from dead PIDs to avoid returning stale sessions.
+
+    ⚠️ EXACT MODE (opt-in, `exact=True`): full-UUID compare ONLY — the 8-char
+    prefix fallback is disabled. Callers targeting an IRREVERSIBLE, self-aimed
+    action (self_respin's `/clear`) MUST use this: two live seats whose ids share
+    a first-8-char prefix would otherwise resolve to the wrong pane, aiming the
+    clear at someone else's session. The DEFAULT stays prefix-tolerant so the
+    existing callers (arbiter poke, manager_resolver, arbiter_job) are unchanged.
 
     Requires:
         - session_id is a non-empty string
@@ -778,11 +785,14 @@ def find_session_by_id( session_id ):
     Ensures:
         - Returns full session data dict if a match is found
         - Returns None if no match or session_id is empty
+        - exact=True: matches ONLY on full-id equality (no prefix fallback)
+        - exact=False (default): full-id OR 8-char-prefix equality (legacy)
         - Skips bridge files whose PID is dead
         - Never raises exceptions
 
     Args:
-        session_id: Full session UUID or 8-char prefix to match
+        session_id: Full session UUID (or, when exact=False, an 8-char prefix) to match
+        exact: when True, require a full-id match — no 8-char prefix fallback
 
     Returns:
         dict or None: Session data dict, or None
@@ -812,9 +822,9 @@ def find_session_by_id( session_id ):
                 if val and val not in all_ids:
                     all_ids.append( val )
 
-            # Full match or 8-char prefix match against any known ID
+            # Full match always; 8-char prefix match ONLY when not in exact mode
             for known_id in all_ids:
-                if known_id == session_id or known_id[:8] == session_id[:8]:
+                if known_id == session_id or ( not exact and known_id[:8] == session_id[:8] ):
                     return data
 
         except ( json.JSONDecodeError, OSError ):
@@ -823,7 +833,7 @@ def find_session_by_id( session_id ):
     return None
 
 
-def find_session_path_by_id( session_id ):
+def find_session_path_by_id( session_id, exact=False ):
     """
     Scan ~/.claude/sessions/cc-*.json for a session_id match and return the file path.
 
@@ -832,17 +842,29 @@ def find_session_path_by_id( session_id ):
 
     Supports both full UUID and 8-char prefix matching. Skips files from dead PIDs.
 
+    ⚠️ EXACT MODE (opt-in, `exact=True`): full-UUID compare ONLY — the 8-char prefix
+    fallback is disabled, mirroring find_session_by_id(exact=True). Callers targeting
+    an IRREVERSIBLE, self-aimed action MUST use it: self_respin resolves this seat's
+    bridge to poll its post-/clear rewrite mtime, and a first-8-char prefix collision
+    with another live seat would poll the WRONG pane's bridge — reading its write as
+    "reset proven" and typing the wake into the un-cleared pane. Same reason the
+    sibling tmux resolver uses exact (row 275cb0b9). The DEFAULT stays prefix-tolerant
+    so the existing caller (speakerphone toggle) is unchanged.
+
     Requires:
         - session_id is a non-empty string
 
     Ensures:
         - Returns Path if a match is found
         - Returns None if no match or session_id is empty
+        - exact=True: matches ONLY on full-id equality (no prefix fallback)
+        - exact=False (default): full-id OR 8-char-prefix equality (legacy)
         - Skips bridge files whose PID is dead
         - Never raises exceptions
 
     Args:
-        session_id: Full session UUID or 8-char prefix to match
+        session_id: Full session UUID (or, when exact=False, an 8-char prefix) to match
+        exact: when True, require a full-id match — no 8-char prefix fallback
 
     Returns:
         Path or None: Bridge file path on match, or None
@@ -872,7 +894,7 @@ def find_session_path_by_id( session_id ):
                     all_ids.append( val )
 
             for known_id in all_ids:
-                if known_id == session_id or known_id[:8] == session_id[:8]:
+                if known_id == session_id or ( not exact and known_id[:8] == session_id[:8] ):
                     return path
 
         except ( json.JSONDecodeError, OSError ):
@@ -1119,6 +1141,29 @@ def get_bridge_mtime( session_id ) -> Optional[ float ]:
 BRIDGE_FORMAT_VERSION = 2
 
 
+# Bridge field carrying the IMPLICIT manager-figure answer, resolved at
+# registration time and stamped here (bug e5d600bd, Rick's Option A 2026-08-15).
+#
+# 🔴 WHY A STATIC FIELD AND NOT A SERVER-SIDE COMPUTE. The implicit source of
+# is_manager_figure — "is this session's allocated persona one of the repo's
+# NAMED standing personas (COSA_VOICE_PREFERRED_PERSONA__<PROJECT>)?" — can ONLY
+# be answered where the caller's real environment lives: the SessionStart hook.
+# The server (tasks.py:652 G1 guard, and any future v2 experiment stratum
+# classifier) runs in the lupin-rest-dev container, whose env carries ZERO
+# COSA_VOICE_PREFERRED_PERSONA__* vars and LUPIN_ROOT=/var/lupin — so a
+# server-side compute resolved every caller to project "lupin" with an empty
+# persona chain and the implicit source was universally dead. register_session
+# has the real env; it computes the answer and stamps it here, and the server
+# reads this static field instead of trying (and failing) to re-derive it.
+#
+# Value is a bool (the implicit answer only — the EXPLICIT source, role=="manager",
+# is a separate live bridge field is_manager_figure() still checks first). Absent
+# on legacy bridges written before this fix; is_manager_figure() falls back to the
+# env-based compute for those, so a pre-fix bridge self-heals on its next
+# SessionStart re-registration. See src/lupin_cli/.../lib/manager_figure.py.
+MANAGER_FIGURE_BRIDGE_FIELD = "manager_figure_implicit"
+
+
 def _get_default_speakerphone():
     """
     Return the mode-aware default for `speakerphone_on` when a bridge has no
@@ -1306,6 +1351,48 @@ def set_speakerphone( session_id, on ):
         # Drop the v1 field if it lingers from a pre-Phase-2 bridge, to avoid
         # two-source-of-truth ambiguity. The v2 field is now authoritative.
         data.pop( "conversation_mode_active", None )
+        return atomic_write_json( path, data )
+    except ( json.JSONDecodeError, OSError ):
+        return False
+
+
+def set_manager_figure_implicit( session_id, flag ):
+    """
+    Stamp the IMPLICIT manager-figure answer onto the bridge (bug e5d600bd).
+
+    Read-modify-write the bridge JSON to set MANAGER_FIGURE_BRIDGE_FIELD,
+    preserving all other fields. Called from register_session's SessionStart
+    hook AFTER voice-persona allocation, using the caller's real environment —
+    the only place the COSA_VOICE_PREFERRED_PERSONA__<PROJECT> chain is visible.
+    The server-side is_manager_figure() then reads this static field instead of
+    re-deriving it from the container env (where the chain is empty). Mirrors the
+    set_speakerphone read-modify-write pattern; does NOT create a missing bridge.
+
+    Requires:
+        - session_id is a non-empty string (full UUID or 8-char prefix)
+        - flag is a bool (the implicit-source answer)
+
+    Ensures:
+        - Returns True if bridge was found and successfully updated
+        - Returns False if bridge not found or write failed
+        - Never raises exceptions
+        - Preserves all existing fields in the bridge JSON (read-modify-write)
+
+    Args:
+        session_id: Session ID to look up
+        flag:       Implicit manager-figure answer to stamp
+
+    Returns:
+        bool: True on successful write, False otherwise
+    """
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return False
+
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        data[ MANAGER_FIGURE_BRIDGE_FIELD ] = bool( flag )
         return atomic_write_json( path, data )
     except ( json.JSONDecodeError, OSError ):
         return False
@@ -1818,7 +1905,48 @@ def prune_dead_persona_bridges():
     return pruned
 
 
-def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona: bool = True ):
+def _append_stale_bridge( stale_out, path, mtime_age, pid_alive ):
+    """
+    Record an aged-out bridge in the caller's visibility bucket.
+
+    Requires:
+        - stale_out is a list the caller owns
+        - mtime_age is the bridge's age in seconds
+
+    Ensures:
+        - appends a dict naming the bridge, its age, whether its PID is alive, and
+          whether it was KEPT — so an exclusion is never invisible
+        - never raises; a bridge that cannot be read still gets an entry, because a
+          silently-dropped unreadable bridge is the same failure this bucket exists
+          to prevent
+
+    Raises:
+        - nothing
+    """
+    session_id = None
+    try:
+        with open( path ) as handle:
+            data       = json.load( handle )
+        session_id = data.get( "stable_session_id" ) or data.get( "session_id" )
+    except ( json.JSONDecodeError, OSError ):
+        pass
+
+    stale_out.append( {
+        "bridge"        : path.name,
+        "session_id"    : session_id,
+        "mtime_age_s"   : round( mtime_age, 1 ),
+        "mtime_age_h"   : round( mtime_age / 3600.0, 2 ),
+        "pid_alive"     : pid_alive,
+        # The whole point of the bucket: say which way it went.
+        "included"      : pid_alive,
+        "why"           : ( "bridge aged out but the PROCESS IS ALIVE — kept, because PID "
+                            "liveness outranks mtime (bug 6afc8b3e)" if pid_alive else
+                            "bridge aged out and liveness could not be confirmed — excluded" ),
+    } )
+
+
+def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona: bool = True,
+                          stale_out=None ):
     """
     Scan all bridge files for live CC sessions, with an optional persona filter.
 
@@ -1850,16 +1978,36 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
        skipped. Inside a container this check is bypassed because host PIDs
        are invisible from the container's PID namespace.
 
-    2. **mtime TTL** (both host and container) — bridges whose file mtime
-       is older than `stale_threshold_seconds` are skipped regardless of
-       context. Belt-and-suspenders against the residual case where the
+    2. **mtime TTL** (fallback ONLY) — bridges older than
+       `stale_threshold_seconds` are skipped **unless their PID is proven
+       alive**. Belt-and-suspenders against the residual case where the
        host-side prune at SessionStart didn't fire (e.g., server bounced
-       mid-day with no new sessions). The cc-notification-listener
-       heartbeat updates bridge mtime periodically, so an actively-used
-       session keeps its mtime fresh within this window.
+       mid-day with no new sessions), and the only liveness signal available
+       inside a container, where host PIDs are invisible.
 
-    A dead-PID OR stale-mtime bridge is treated as "free" — its slot is
-    implicitly reclaimed by being filtered out here.
+    🔴 **PID LIVENESS OUTRANKS mtime (bug 6afc8b3e).** This TTL used to apply
+    unconditionally, which silently deleted LIVE sessions from every roster:
+    a seat whose process was running but whose bridge had not been rewritten
+    in 12h was filtered out as dead and appeared in no bucket at all — not
+    `personas`, not `unnamed_seats`, not any count. Two real seats were
+    invisible for 14h+ while `ps` showed them up. The monitor exists to catch
+    the seat that has been alive longest, and that was the one seat it could
+    not see. The docstring claimed "the cc-notification-listener heartbeat
+    updates bridge mtime periodically"; those listeners were alive and the
+    mtime had not moved, so an IDLE-but-alive seat aged out — and an idle seat
+    still holds context and can be woken.
+
+    Raising the constant is the DIAGNOSTIC, not the fix — a bigger number only
+    moves the cliff.
+
+    A dead-PID bridge, or an aged-out bridge whose liveness cannot be
+    confirmed, is treated as "free" — its slot is implicitly reclaimed by
+    being filtered out here.
+
+    **`stale_out`** — pass a list to receive every aged-out bridge, INCLUDING
+    the ones that were kept, each entry saying which way it went and why.
+    Silent exclusion is the failure this bucket closes: a monitor that returns
+    fewer sessions than exist is a monitor that lies.
 
     See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
          src/rnd/v0.1.8/2026.06.17-unified-task-store-followups-plan.md (L4 / d57dbfea)
@@ -1892,17 +2040,36 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
         if "buffer" in path.name or "listener" in path.name:
             continue
 
+        pid_is_alive = False
         if trust_host_pids:
             file_pid = _extract_pid_from_filename( path.name )
             if file_pid is not None and not _is_pid_alive( file_pid ):
                 continue
+            pid_is_alive = file_pid is not None
 
         try:
             mtime_age = now - path.stat().st_mtime
-            if mtime_age > stale_threshold_seconds:
-                continue
         except OSError:
             continue
+
+        # 🔴 PID LIVENESS OUTRANKS mtime (bug 6afc8b3e, Rio). The mtime TTL used to run
+        # unconditionally, so a session whose PROCESS IS PROVEN ALIVE vanished from every
+        # roster once its bridge went 12h without a rewrite — and the monitor exists to
+        # catch exactly the long-lived seat that ages out. Two real seats were invisible
+        # for 14h+ while `ps` showed them running.
+        #
+        # Raising the constant is the DIAGNOSTIC, not the fix: a bigger number only moves
+        # the cliff. The TTL keeps its real job — bridges we CANNOT check, i.e. inside a
+        # container where host PIDs are invisible, or a filename carrying no PID.
+        if mtime_age > stale_threshold_seconds:
+            if not pid_is_alive:
+                if stale_out is not None:
+                    _append_stale_bridge( stale_out, path, mtime_age, pid_alive=False )
+                continue
+            # Alive but aged out: KEPT, and also surfaced so the anomaly is visible
+            # rather than merely survived.
+            if stale_out is not None:
+                _append_stale_bridge( stale_out, path, mtime_age, pid_alive=True )
 
         try:
             with open( path ) as f:

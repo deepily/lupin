@@ -1,6 +1,6 @@
 """
 Unit tests for runtime_argument_expeditor/agent_registry.py:
-  - AGENTIC_AGENTS         : the 10-entry routing registry (structure spot-checks)
+  - JOB_ARG_CONTRACTS         : the 10-entry routing registry (structure spot-checks)
   - get_cli_help           : subprocess --help capture + process-lifetime cache
   - get_user_visible_args  : subprocess --user-visible-args JSON capture + cache
 
@@ -20,17 +20,19 @@ import cosa.agents.runtime_argument_expeditor.agent_registry as ar
 
 class TestRegistryStructure( unittest.TestCase ):
 
-    def test_ten_agents_with_required_keys( self ):
-        self.assertEqual( len( ar.AGENTIC_AGENTS ), 10 )
-        for key, entry in ar.AGENTIC_AGENTS.items():
+    def test_every_agent_has_required_keys( self ):
+        # count assert deleted 2026-08-15 (Rachel): len(JOB_ARG_CONTRACTS)==N reads its own
+        # source and catches only stale-count churn; the drift guard's four-way set-equality
+        # subsumes it. The per-entry required-field loop below is the real structural check.
+        for key, entry in ar.JOB_ARG_CONTRACTS.items():
             for field in ( "cli_module", "required_user_args", "system_provided",
                            "arg_mapping", "fallback_questions", "fallback_defaults",
                            "display_name", "job_prefix" ):
                 self.assertIn( field, entry, f"{key} missing {field}" )
 
     def test_known_entries( self ):
-        self.assertEqual( ar.AGENTIC_AGENTS[ "agent router go to deep research" ][ "required_user_args" ], [ "query" ] )
-        self.assertIsNone( ar.AGENTIC_AGENTS[ "agent router go to test suite" ][ "cli_module" ] )
+        self.assertEqual( ar.JOB_ARG_CONTRACTS[ "agent router go to deep research" ][ "required_user_args" ], [ "query" ] )
+        self.assertIsNone( ar.JOB_ARG_CONTRACTS[ "agent router go to test suite" ][ "cli_module" ] )
 
 
 class TestGetCliHelp( unittest.TestCase ):

@@ -1,55 +1,99 @@
-# .gitleaks.toml — secret-scan gate config (authored 2026-06-10, GCP-M2, Rio ⚡).
+# gitleaks configuration for the secret-scan build gate
+# Added 2026-08-24 — row a3c23605.
 #
-# PURPOSE: make `secret-scan-gate.sh` (gitleaks) a MEANINGFUL build-context gate by
-# allow-listing ONLY documented documentation/test EXAMPLE credentials — which are
-# illustrative placeholders, never live secrets. Every real-secret rule (openai-api-key,
-# aws, gcp-*, private-key, slack, stripe, etc.) stays FULLY ENFORCED everywhere via
-# `useDefault = true`. Each allowlist below is rule-scoped + path/pattern-scoped so a
-# REAL secret — even in a doc or test file — still trips the gate. This is a scoping
-# correction, NOT a bypass (ratified by Tiberius 2026-06-10; auditable per-entry).
+# WHAT THIS FILE IS, AND IS NOT
+# It aligns the SCAN SCOPE with the BUILD CONTEXT. src/scripts/secret-scan-gate.sh
+# exists to guarantee that no image can be built carrying a plaintext secret. The
+# thing that can carry one is what the Dockerfile COPYs. A path this repo never
+# ships is out of scope for that question by definition — excluding it is not an
+# exemption from secret scanning, it is the gate scanning what it claims to scan.
 #
-# Origin: the gate's first real run (2026-06-10) flagged 125 findings = 1 real
-# (a live OpenAI key in an ephemera notebook — rotated + scrubbed + ignorelisted;
-# see .gitleaksignore) + 124 doc/test examples (this file). Design of record:
-# src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.06.10-m2-arbiter-ride-along-and-vm-cutover.md §10
+# THIS IS NOT A PLACE TO SILENCE A REAL FINDING. If a secret is genuinely present
+# in a path the image ships, the fix is to remove the secret. Every entry below
+# names WHY the path cannot reach the image, so the next reader can check the
+# claim instead of trusting it.
+#
+# AUTHORITY for "does the image ship this?" is docker/lupin/Dockerfile's COPY list
+# plus .dockerignore. As of 2026-08-24 the image receives ONLY:
+#   package.json package-lock.json pyproject.toml uv.lock
+#   src/cosa src/lupin_app src/lib src/lupin_cli src/lupin_mcp src/scripts
+#   src/migrations src/docs src/resources src/templates
+#   src/conf/{*.ini,*.map,*.json,*.js} src/conf/{auth,mcp,prompts,tools}
+#   src/conf/long-term-memory/{*.csv,*.jsonl,*.db}
+#   docker/lupin/{scripts,claude-config,bin}
+# If that COPY list grows, revisit this file — a newly-shipped path must NOT be
+# silently covered by an exclusion written when it was not shipped.
 
 [extend]
 useDefault = true
 
-# --- Allowlist 1: documentation example credentials -------------------------
-# Markdown docs (API refs, websocket/auth guides, R&D notes) carry illustrative
-# `curl -H "Authorization: Bearer <token>"` and `api_key: "..."` examples using
-# mock tokens (mock_token_email_*, <token>, ${VAR}). Scoped to the two example-prone
-# rules; real-secret rules remain enforced in .md files.
-[[allowlists]]
-description = "Documentation example Bearer tokens / api-keys in Markdown + R&D docs"
-targetRules = ["curl-auth-header", "generic-api-key"]
+[allowlist]
+description = "Paths that cannot reach the image, plus named false positives"
+
 paths = [
-  '''.*\.md$''',
+    # --- never COPY'd, and .dockerignore'd as well -------------------------
+    '''^io/''',                     # runtime output: hook logs, test-suite reports
+    '''^src/rnd/''',                # research + planning docs
+    '''^src/tests/''',              # test fixtures, incl. the scanner's OWN test payloads
+    '''^src/ephemera/''',
+    '''^src/conf/keys/''',          # real provider keys — excluded from the image ON PURPOSE
+    '''^src/lupin-mobile/''',       # separate repo (Dart SDK snapshots trip entropy rules)
+    '''^src/lupin-plugin-firefox/''',# separate repo
+
+    # --- build artifacts: .dockerignore'd 2026-08-24, same row -------------
+    '''(^|/)coverage/''',           # V8/istanbul coverage JSON — high-entropy, no secrets
+    '''(^|/)node_modules/''',
+    '''(^|/)__pycache__/''',
+    '''(^|/)\.venv/''',
+
+    # --- local dev state, never in the build context -----------------------
+    '''^\.env''',                   # .dockerignore lines 91-92; the REAL secrets live here
+    '''^\.claude/''',               # local session + settings state
+    '''^\.git/''',
+
+    # --- src/conf/long-term-memory: ONLY *.csv, *.jsonl, *.db are COPY'd ----
+    # so a .sql dump sitting beside them is not shipped.
+    '''^src/conf/long-term-memory/.*\.sql$''',
+
+    # --- src/tmp: scratch traffic snapshots, not in the Dockerfile COPY list -
+    '''^src/tmp/''',
+
+    # --- committed proof-run logs: .dockerignore'd 2026-08-24, same row ------
+    # Evidence from past verification runs; never a runtime input.
+    '''^src/scripts/.*\.log$''',
 ]
 
-# --- Allowlist 2: test fixtures / mock credentials --------------------------
-# Hard-coded test doubles in test code + smoke scripts (e.g. test_kagi_api_key_123,
-# self.test_api_key = "..."). Same two rules only.
-[[allowlists]]
-description = "Mock credentials in test files + smoke scripts"
-targetRules = ["curl-auth-header", "generic-api-key"]
-paths = [
-  '''.*/tests?/.*''',
-  '''.*/test_[^/]*\.py$''',
-  '''.*_test\.py$''',
-  '''.*smoke_test\.sh$''',
-]
+# Match against the whole LINE, not just the extracted secret — every entry below
+# is about the SHAPE of the surrounding code, which the bare secret cannot show.
+regexTarget = "line"
 
-# --- Allowlist 3: curl docstring examples embedded in source modules --------
-# A router/source docstring may show `curl -H "Authorization: Bearer mock_token_…"`.
-# condition=AND: allowed ONLY when the curl-auth-header rule fires AND the captured
-# token matches a known PLACEHOLDER shape — so a REAL bearer token in source still trips.
-[[allowlists]]
-description = "curl docstring examples with placeholder bearer tokens in source"
-condition = "AND"
-targetRules = ["curl-auth-header"]
-regexTarget = "secret"
 regexes = [
-  '''(?i)^(mock_token|mock_|test_|your_|example|placeholder|<[^>]+>|\$\{?[a-z_]+\}?|redacted|changeme|x{3,}).*''',
+    # Shell composing an auth header from a VARIABLE is not a secret — it is the
+    # code that USES one. Only unexpanded refs ($VAR / ${VAR}) qualify.
+    '''(Authorization:\s*Bearer|X-API-Key:)\s*["']?\$[{(]?[A-Za-z_][A-Za-z0-9_]*''',
+
+    # The project's DOCUMENTED mock auth scheme: `Bearer mock_token_email_{email}`
+    # (see CLAUDE.md § WEBSOCKET DEVELOPMENT NOTES). It is a literal string the dev
+    # server accepts by design; it authenticates nothing anywhere else.
+    '''mock_token_[A-Za-z0-9_@.]+''',
+
+    # A TRUNCATED value cannot be a working credential. Documentation writes
+    # secrets as a recognisable prefix followed by an ellipsis — `eyJhbGci...`,
+    # `ck_live_abc123def456...`. The ellipsis is the tell, and a real leaked key
+    # would not carry one.
+    '''[A-Za-z0-9._\-]{10,}\.\.\.''',
+
+    # RFC 2606 reserved example domains, used throughout the API docs.
+    '''(@|//)example\.(com|org|net)\b''',
+]
+
+# A detected "secret" containing any of these is a placeholder or a test fixture.
+# Kept deliberately literal: each one is a string that appears in this repo, not a
+# generic word that could mask a real key.
+stopwords = [
+    "invalid_key_12345",
+    "test_kagi_api_key_123",
+    "a1b2c3d4e5f6",
+    "generated-secret-key-32-bytes-hex",
+    "YOUR_API_KEY",
 ]

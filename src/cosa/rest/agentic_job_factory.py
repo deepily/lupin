@@ -100,31 +100,92 @@ def _parse_optional_float( value, default=None ):
         return default
 
 
-def create_agentic_job( command, args_dict, user_id, user_email, session_id, debug=False, verbose=False ):
+def _stamp_queue_directives( job, scheduled_at, monopolize, spawned_by_id_hash ):
     """
-    Factory function to create the correct agentic job based on command.
+    Put the caller's queue directives on a freshly-built job.
+
+    Only a value the caller actually SET is written, which is what every v1 door did
+    (`if request_body.scheduled_at: job.scheduled_at = ...`). The difference matters:
+    the job's constructor already chose defaults, and writing an unset None or False
+    over them would let a submission that said nothing about scheduling overwrite a
+    job class that had an opinion.
+
+    A NONE JOB IS A REAL CASE ON ONE OF THE TWO CALL PATHS, and it is why this starts
+    with a guard rather than trusting its caller. `resume_job` returns None when the
+    checkpoint read finds no row, or a row with no routing command — so a caller asking
+    to resume a job that is not there gets None back, and stamping a schedule onto None
+    raises AttributeError out of the door instead of the "no such job" the caller can
+    act on. The factory's own contract is that an unknown command returns None; this
+    keeps that answer intact rather than converting it into a crash (Pocholo, reviewing
+    the commit that added the stamping).
 
     Requires:
-        - command is a recognized agentic routing command string
-        - args_dict contains the required arguments for the target job
-        - user_id, user_email, session_id are non-empty strings
+        - job is a constructed AgenticJobBase subclass instance, or None
 
     Ensures:
-        - Returns appropriate Job instance for the command
-        - Returns None if command is unrecognized
-
-    Args:
-        command: Routing command key (e.g., "agent router go to deep research")
-        args_dict: Complete argument dictionary
-        user_id: System user ID
-        user_email: User's email address
-        session_id: WebSocket session ID
-        debug: Enable debug output
-        verbose: Enable verbose output
-
-    Returns:
-        AgenticJobBase subclass instance, or None
+        - returns None unchanged when handed None — the caller's "no such job" answer
+        - sets job.scheduled_at only when scheduled_at is truthy
+        - sets job.monopolize only when monopolize is truthy
+        - sets job.spawned_by_id_hash only when spawned_by_id_hash is truthy
+        - returns the same job object it was handed
     """
+    if job is None:        return None
+    if scheduled_at:       job.scheduled_at       = scheduled_at
+    if monopolize:         job.monopolize         = monopolize
+    if spawned_by_id_hash: job.spawned_by_id_hash = spawned_by_id_hash
+    return job
+
+
+# --------------------------------------------- the common tail, and who skips it
+
+def _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Apply the tail every freshly-CONSTRUCTED job takes: record what built it, then stamp
+    the caller's queue directives.
+
+    Requires:
+        - job is a constructed AgenticJobBase subclass instance
+
+    Ensures:
+        - sets job.routing_command and job.original_args, which job_history reads to
+          reconstruct the original job faithfully (BFE's resubmit path depends on it)
+        - returns the job with queue directives stamped
+
+    NOT EVERY BUILDER CALLS THIS, AND THAT IS DELIBERATE -- see FINISH_EXEMPT.
+    """
+    job.routing_command = command
+    job.original_args   = dict( args_dict )
+    return _stamp_queue_directives( job, scheduled_at, monopolize, spawned_by_id_hash )
+
+
+# EVERY BUILDER EITHER CALLS _finish OR IS NAMED HERE WITH ITS REASON.
+#
+# WHY AN EXPLICIT LIST RATHER THAN "the ones that do not, do not". Ten of the eleven
+# branches fell through to a common tail and one returned early -- a distinction invisible
+# in the branch table, and one a reader moving eleven bodies could flatten without
+# noticing. Flattening it would OVERWRITE a resumed job's original routing_command and
+# args with the resume args, silently, and job_history would then describe the wrong job.
+# A list a drift test can read is the difference between a decision and an omission.
+FINISH_EXEMPT = {
+    "_build_test_fix_expediter_resume":
+        "resume_job() returns a job already carrying its ORIGINAL routing_command and "
+        "args from job_history. Passing it through _finish would overwrite both with the "
+        "resume args. It stamps the queue directives itself, so a caller who says "
+        "'resume this one at ten in the morning' still gets what they asked for.",
+}
+
+
+def _build_deep_research( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                        scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to deep research`.
+
+    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
+    Rick's ruling 2: pure refactor, no behaviour change).
+    """
+    # DEFERRED, exactly as in the branch this body came from. These imports sat inside
+    # the factory function, not at module scope -- keeping them deferred preserves the
+    # original import TIMING as well as the original body (phase 5 pass A, row d2e23ecb).
     from cosa.agents.bug_fix_expediter.job              import BugFixExpediterJob
     from cosa.agents.claude_code.job                     import ClaudeCodeJob
     from cosa.agents.deep_research.job                   import DeepResearchJob
@@ -135,264 +196,529 @@ def create_agentic_job( command, args_dict, user_id, user_email, session_id, deb
     from cosa.agents.swe_team.job                        import SweTeamJob
     from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
     from cosa.agents.test_suite.job                      import TestSuiteJob
-    from cosa.agents.heartbeat_poker_job                 import HeartbeatPokerJob, RecipientSpec
-    from cosa.agents.heartbeat_poker_commons_gateway     import LupinCommonsGateway
+    job = DeepResearchJob(
+        query              = args_dict.get( "query", "" ),
+        user_id            = user_id,
+        user_email         = user_email,
+        session_id         = session_id,
+        budget             = _parse_optional_float( args_dict.get( "budget" ) ),
+        no_confirm         = True,
+        dry_run            = _parse_boolean( args_dict.get( "dry_run" ) ),
+        force_failure_mode = args_dict.get( "force_failure_mode" ),
+        audience           = args_dict.get( "audience" ),
+        audience_context   = args_dict.get( "audience_context" ),
+        debug              = debug,
+        verbose            = verbose
+    )
+    return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
 
-    if command == "agent router go to deep research":
-        job = DeepResearchJob(
-            query              = args_dict.get( "query", "" ),
-            user_id            = user_id,
-            user_email         = user_email,
-            session_id         = session_id,
-            budget             = _parse_optional_float( args_dict.get( "budget" ) ),
-            no_confirm         = True,
-            dry_run            = _parse_boolean( args_dict.get( "dry_run" ) ),
-            force_failure_mode = args_dict.get( "force_failure_mode" ),
-            audience           = args_dict.get( "audience" ),
-            audience_context   = args_dict.get( "audience_context" ),
-            debug              = debug,
-            verbose            = verbose
-        )
+def _build_podcast_generator( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                        scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to podcast generator`.
 
-    elif command == "agent router go to podcast generator":
-        # Parse target_languages if provided as string
-        languages = None
-        if args_dict.get( "languages" ):
-            if isinstance( args_dict[ "languages" ], list ):
-                languages = args_dict[ "languages" ]
-            else:
-                languages = [ lang.strip() for lang in args_dict[ "languages" ].split( "," ) ]
-
-        job = PodcastGeneratorJob(
-            research_path      = args_dict.get( "research", "" ),
-            user_id            = user_id,
-            user_email         = user_email,
-            session_id         = session_id,
-            target_languages   = languages,
-            dry_run            = _parse_boolean( args_dict.get( "dry_run" ) ),
-            force_failure_mode = args_dict.get( "force_failure_mode" ),
-            audience           = args_dict.get( "audience" ),
-            audience_context   = args_dict.get( "audience_context" ),
-            debug              = debug,
-            verbose            = verbose
-        )
-
-    elif command == "agent router go to research to podcast":
-        # Parse target_languages if provided as string
-        languages = None
-        if args_dict.get( "languages" ):
-            if isinstance( args_dict[ "languages" ], list ):
-                languages = args_dict[ "languages" ]
-            else:
-                languages = [ lang.strip() for lang in args_dict[ "languages" ].split( "," ) ]
-
-        job = DeepResearchToPodcastJob(
-            query            = args_dict.get( "query", "" ),
-            user_id          = user_id,
-            user_email       = user_email,
-            session_id       = session_id,
-            budget           = _parse_optional_float( args_dict.get( "budget" ) ),
-            target_languages = languages,
-            dry_run          = _parse_boolean( args_dict.get( "dry_run" ) ),
-            audience         = args_dict.get( "audience" ),
-            audience_context = args_dict.get( "audience_context" ),
-            debug            = debug,
-            verbose          = verbose
-        )
-
-    elif command == "agent router go to claude code":
-        job = ClaudeCodeJob(
-            prompt          = args_dict.get( "prompt", "" ),
-            project         = args_dict.get( "project", "lupin" ),
-            user_id         = user_id,
-            user_email      = user_email,
-            session_id      = session_id,
-            task_type       = args_dict.get( "task_type", "BOUNDED" ),
-            max_turns       = _parse_optional_int( args_dict.get( "max_turns" ) ),
-            timeout_seconds = _parse_optional_int( args_dict.get( "timeout_seconds" ) ),
-            dry_run         = _parse_boolean( args_dict.get( "dry_run" ) ),
-            debug           = debug,
-            verbose         = verbose
-        )
-
-    elif command == "agent router go to presentation generator":
-        job = PresentationGeneratorJob(
-            source_path             = args_dict.get( "source", "" ),
-            user_id                 = user_id,
-            user_email              = user_email,
-            session_id              = session_id,
-            target_duration_minutes = _parse_optional_int( args_dict.get( "target_duration_minutes" ) ),
-            audience                = args_dict.get( "audience" ),
-            audience_context        = args_dict.get( "audience_context" ),
-            theme                   = args_dict.get( "theme" ),
-            content_model           = args_dict.get( "content_model" ),
-            render_only             = _parse_boolean( args_dict.get( "render_only" ) ),
-            dry_run                 = _parse_boolean( args_dict.get( "dry_run" ) ),
-            force_failure_mode      = args_dict.get( "force_failure_mode" ),
-            debug                   = debug,
-            verbose                 = verbose
-        )
-
-    elif command == "agent router go to research to presentation":
-        job = DeepResearchToPresentationJob(
-            query                   = args_dict.get( "query", "" ),
-            user_id                 = user_id,
-            user_email              = user_email,
-            session_id              = session_id,
-            budget                  = _parse_optional_float( args_dict.get( "budget" ) ),
-            target_duration_minutes = _parse_optional_int( args_dict.get( "target_duration_minutes" ) ),
-            theme                   = args_dict.get( "theme" ),
-            lead_model              = args_dict.get( "lead_model" ),
-            dry_run                 = _parse_boolean( args_dict.get( "dry_run" ) ),
-            audience                = args_dict.get( "audience" ),
-            audience_context        = args_dict.get( "audience_context" ),
-            debug                   = debug,
-            verbose                 = verbose,
-        )
-
-    elif command == "agent router go to swe team":
-        job = SweTeamJob(
-            task           = args_dict.get( "task", args_dict.get( "prompt", "" ) ),
-            user_id        = user_id,
-            user_email     = user_email,
-            session_id     = session_id,
-            dry_run        = _parse_boolean( args_dict.get( "dry_run" ) ),
-            dry_run_phases = _parse_optional_int( args_dict.get( "dry_run_phases" ) ) or 10,
-            dry_run_delay  = _parse_optional_float( args_dict.get( "dry_run_delay" ) ) or 1.5,
-            lead_model     = args_dict.get( "lead_model" ),
-            worker_model   = args_dict.get( "worker_model" ),
-            budget         = _parse_optional_float( args_dict.get( "budget" ) ),
-            timeout        = _parse_optional_int( args_dict.get( "timeout" ) ),
-            trust_mode     = args_dict.get( "trust_mode" ),
-            debug          = debug,
-            verbose        = verbose
-        )
-
-    elif command == "agent router go to test suite":
-        # Parse test_types: comma-separated string → list
-        test_types_raw = args_dict.get( "test_types", "integration,e2e" )
-        if isinstance( test_types_raw, str ):
-            test_types = [ t.strip() for t in test_types_raw.split( "," ) if t.strip() ]
+    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
+    Rick's ruling 2: pure refactor, no behaviour change).
+    """
+    # DEFERRED, exactly as in the branch this body came from. These imports sat inside
+    # the factory function, not at module scope -- keeping them deferred preserves the
+    # original import TIMING as well as the original body (phase 5 pass A, row d2e23ecb).
+    from cosa.agents.bug_fix_expediter.job              import BugFixExpediterJob
+    from cosa.agents.claude_code.job                     import ClaudeCodeJob
+    from cosa.agents.deep_research.job                   import DeepResearchJob
+    from cosa.agents.deep_research_to_podcast.job        import DeepResearchToPodcastJob
+    from cosa.agents.deep_research_to_presentation.job   import DeepResearchToPresentationJob
+    from cosa.agents.podcast_generator.job               import PodcastGeneratorJob
+    from cosa.agents.presentation_generator.job          import PresentationGeneratorJob
+    from cosa.agents.swe_team.job                        import SweTeamJob
+    from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
+    from cosa.agents.test_suite.job                      import TestSuiteJob
+    # Parse target_languages if provided as string
+    languages = None
+    if args_dict.get( "languages" ):
+        if isinstance( args_dict[ "languages" ], list ):
+            languages = args_dict[ "languages" ]
         else:
-            test_types = test_types_raw
+            languages = [ lang.strip() for lang in args_dict[ "languages" ].split( "," ) ]
 
-        # Parse pytest_args: JSON list or quote-aware string → list.
-        # shlex.split, NOT str.split: a quoted expression like -k "a or b" must
-        # survive as ONE -k value. The naive word-split shattered it — pytest
-        # read the bare `or` as a file arg and exited 4, a silent zero-test run
-        # that LOOKED submitted (2026-06-11, found independently by two sessions).
-        pytest_args_raw = args_dict.get( "pytest_args", "" )
-        if isinstance( pytest_args_raw, list ):
-            pytest_args = pytest_args_raw
-        elif pytest_args_raw and pytest_args_raw.lower() not in _SEMANTIC_NONE:
-            try:
-                pytest_args = shlex.split( pytest_args_raw )
-            except ValueError as e:
-                # Unbalanced quotes must fail LOUD at submit time — the silent
-                # alternative is exactly the zero-test run this fix removes.
-                raise ValueError( f"Malformed pytest_args {pytest_args_raw!r}: {e}" )
+    job = PodcastGeneratorJob(
+        research_path      = args_dict.get( "research", "" ),
+        user_id            = user_id,
+        user_email         = user_email,
+        session_id         = session_id,
+        target_languages   = languages,
+        dry_run            = _parse_boolean( args_dict.get( "dry_run" ) ),
+        force_failure_mode = args_dict.get( "force_failure_mode" ),
+        audience           = args_dict.get( "audience" ),
+        audience_context   = args_dict.get( "audience_context" ),
+        debug              = debug,
+        verbose            = verbose
+    )
+    return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
+
+def _build_research_to_podcast( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                        scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to research to podcast`.
+
+    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
+    Rick's ruling 2: pure refactor, no behaviour change).
+    """
+    # DEFERRED, exactly as in the branch this body came from. These imports sat inside
+    # the factory function, not at module scope -- keeping them deferred preserves the
+    # original import TIMING as well as the original body (phase 5 pass A, row d2e23ecb).
+    from cosa.agents.bug_fix_expediter.job              import BugFixExpediterJob
+    from cosa.agents.claude_code.job                     import ClaudeCodeJob
+    from cosa.agents.deep_research.job                   import DeepResearchJob
+    from cosa.agents.deep_research_to_podcast.job        import DeepResearchToPodcastJob
+    from cosa.agents.deep_research_to_presentation.job   import DeepResearchToPresentationJob
+    from cosa.agents.podcast_generator.job               import PodcastGeneratorJob
+    from cosa.agents.presentation_generator.job          import PresentationGeneratorJob
+    from cosa.agents.swe_team.job                        import SweTeamJob
+    from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
+    from cosa.agents.test_suite.job                      import TestSuiteJob
+    # Parse target_languages if provided as string
+    languages = None
+    if args_dict.get( "languages" ):
+        if isinstance( args_dict[ "languages" ], list ):
+            languages = args_dict[ "languages" ]
         else:
-            pytest_args = []
+            languages = [ lang.strip() for lang in args_dict[ "languages" ].split( "," ) ]
 
-        job = TestSuiteJob(
-            test_types          = test_types,
-            user_id             = user_id,
-            user_email          = user_email,
-            session_id          = session_id,
-            pytest_args         = pytest_args,
-            dry_run             = _parse_boolean( args_dict.get( "dry_run" ) ),
-            auto_fix_on_failure = _parse_optional_boolean( args_dict.get( "auto_fix_on_failure" ) ),
-            env_vars            = args_dict.get( "env_vars" ) or None,
-            debug               = debug,
-            verbose             = verbose
-        )
+    job = DeepResearchToPodcastJob(
+        query            = args_dict.get( "query", "" ),
+        user_id          = user_id,
+        user_email       = user_email,
+        session_id       = session_id,
+        budget           = _parse_optional_float( args_dict.get( "budget" ) ),
+        target_languages = languages,
+        dry_run          = _parse_boolean( args_dict.get( "dry_run" ) ),
+        audience         = args_dict.get( "audience" ),
+        audience_context = args_dict.get( "audience_context" ),
+        debug            = debug,
+        verbose          = verbose
+    )
+    return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
 
-    elif command == "agent router go to bug fix expediter":
-        job = BugFixExpediterJob(
-            dead_job_id           = args_dict.get( "dead_job_id", "" ),
-            user_id               = user_id,
-            user_email            = user_email,
-            session_id            = session_id,
-            extra_context         = args_dict.get( "extra_context", "" ),
-            dry_run               = _parse_boolean( args_dict.get( "dry_run" ) ),
-            lead_model_override   = args_dict.get( "lead_model_override" )   or None,
-            worker_model_override = args_dict.get( "worker_model_override" ) or None,
-            thinking_effort       = args_dict.get( "thinking_effort" )       or None,
-            debug                 = debug,
-            verbose               = verbose
-        )
+def _build_claude_code( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                        scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to claude code`.
 
-    elif command == "agent router go to test fix expediter":
-        # Parse optional original_test_types / original_pytest_args (comma-separated)
-        test_types_arg = args_dict.get( "original_test_types", [] )
-        if isinstance( test_types_arg, str ):
-            test_types_arg = [ s.strip() for s in test_types_arg.split( "," ) if s.strip() ]
-        pytest_args_arg = args_dict.get( "original_pytest_args", [] )
-        if isinstance( pytest_args_arg, str ):
-            pytest_args_arg = [ s.strip() for s in pytest_args_arg.split( " " ) if s.strip() ]
+    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
+    Rick's ruling 2: pure refactor, no behaviour change).
+    """
+    # DEFERRED, exactly as in the branch this body came from. These imports sat inside
+    # the factory function, not at module scope -- keeping them deferred preserves the
+    # original import TIMING as well as the original body (phase 5 pass A, row d2e23ecb).
+    from cosa.agents.bug_fix_expediter.job              import BugFixExpediterJob
+    from cosa.agents.claude_code.job                     import ClaudeCodeJob
+    from cosa.agents.deep_research.job                   import DeepResearchJob
+    from cosa.agents.deep_research_to_podcast.job        import DeepResearchToPodcastJob
+    from cosa.agents.deep_research_to_presentation.job   import DeepResearchToPresentationJob
+    from cosa.agents.podcast_generator.job               import PodcastGeneratorJob
+    from cosa.agents.presentation_generator.job          import PresentationGeneratorJob
+    from cosa.agents.swe_team.job                        import SweTeamJob
+    from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
+    from cosa.agents.test_suite.job                      import TestSuiteJob
+    job = ClaudeCodeJob(
+        prompt          = args_dict.get( "prompt", "" ),
+        project         = args_dict.get( "project", "lupin" ),
+        user_id         = user_id,
+        user_email      = user_email,
+        session_id      = session_id,
+        task_type       = args_dict.get( "task_type", "BOUNDED" ),
+        max_turns       = _parse_optional_int( args_dict.get( "max_turns" ) ),
+        timeout_seconds = _parse_optional_int( args_dict.get( "timeout_seconds" ) ),
+        dry_run         = _parse_boolean( args_dict.get( "dry_run" ) ),
+        debug           = debug,
+        verbose         = verbose
+    )
+    return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
 
-        job = TestFixExpediterJob(
-            remediation_snapshot_path = args_dict.get( "remediation_snapshot_path", "" ),
-            source_test_suite_job_id  = args_dict.get( "source_test_suite_job_id", "" ),
-            user_id                   = user_id,
-            user_email                = user_email,
-            session_id                = session_id,
-            original_test_types       = test_types_arg,
-            original_pytest_args      = pytest_args_arg,
-            dry_run                   = _parse_boolean( args_dict.get( "dry_run" ) ),
-            lead_model_override       = args_dict.get( "lead_model_override" )   or None,
-            worker_model_override     = args_dict.get( "worker_model_override" ) or None,
-            thinking_effort           = args_dict.get( "thinking_effort" )       or None,
-            debug                     = debug,
-            verbose                   = verbose,
-        )
+def _build_presentation_generator( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                        scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to presentation generator`.
 
-    elif command == "agent router go to heartbeat poker":
-        # recipients: list of {identifier, identifier_type, role} dicts → RecipientSpec list
-        recipients = [
-            RecipientSpec(
-                identifier      = r[ "identifier" ],
-                identifier_type = r.get( "identifier_type", "persona" ),
-                role            = r[ "role" ],
-            )
-            for r in ( args_dict.get( "recipients" ) or [] )
-        ]
+    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
+    Rick's ruling 2: pure refactor, no behaviour change).
+    """
+    # DEFERRED, exactly as in the branch this body came from. These imports sat inside
+    # the factory function, not at module scope -- keeping them deferred preserves the
+    # original import TIMING as well as the original body (phase 5 pass A, row d2e23ecb).
+    from cosa.agents.bug_fix_expediter.job              import BugFixExpediterJob
+    from cosa.agents.claude_code.job                     import ClaudeCodeJob
+    from cosa.agents.deep_research.job                   import DeepResearchJob
+    from cosa.agents.deep_research_to_podcast.job        import DeepResearchToPodcastJob
+    from cosa.agents.deep_research_to_presentation.job   import DeepResearchToPresentationJob
+    from cosa.agents.podcast_generator.job               import PodcastGeneratorJob
+    from cosa.agents.presentation_generator.job          import PresentationGeneratorJob
+    from cosa.agents.swe_team.job                        import SweTeamJob
+    from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
+    from cosa.agents.test_suite.job                      import TestSuiteJob
+    job = PresentationGeneratorJob(
+        source_path             = args_dict.get( "source", "" ),
+        user_id                 = user_id,
+        user_email              = user_email,
+        session_id              = session_id,
+        target_duration_minutes = _parse_optional_int( args_dict.get( "target_duration_minutes" ) ),
+        target_slide_count      = _parse_optional_int( args_dict.get( "target_slide_count" ) ),
+        audience                = args_dict.get( "audience" ),
+        audience_context        = args_dict.get( "audience_context" ),
+        theme                   = args_dict.get( "theme" ),
+        content_model           = args_dict.get( "content_model" ),
+        render_only             = _parse_boolean( args_dict.get( "render_only" ) ),
+        dry_run                 = _parse_boolean( args_dict.get( "dry_run" ) ),
+        force_failure_mode      = args_dict.get( "force_failure_mode" ),
+        debug                   = debug,
+        verbose                 = verbose
+    )
+    return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
 
-        # termination_signal_kinds: list, or comma-separated string
-        kinds_raw = args_dict.get( "termination_signal_kinds", "" )
-        if isinstance( kinds_raw, list ):
-            termination_signal_kinds = kinds_raw
-        else:
-            termination_signal_kinds = [ k.strip() for k in str( kinds_raw ).split( "," ) if k.strip() ]
+def _build_research_to_presentation( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                        scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to research to presentation`.
 
-        job = HeartbeatPokerJob(
-            recipients                = recipients,
-            cadence_seconds           = _parse_optional_int( args_dict.get( "cadence_seconds" ) ) or 180,
-            termination_topic         = args_dict.get( "termination_topic", "" ),
-            termination_signal_kinds  = termination_signal_kinds,
-            workstream_id             = args_dict.get( "workstream_id", "" ),
-            commons                   = LupinCommonsGateway.from_environment( sender_session_id=session_id ),
-            deadman_consecutive_pokes = _parse_optional_int( args_dict.get( "deadman_consecutive_pokes" ) ) or 3,
-            max_duration_seconds      = _parse_optional_int( args_dict.get( "max_duration_seconds" ) ) or 43_200,
-            scheduled_at              = args_dict.get( "scheduled_at" ),
-            monopolize                = _parse_boolean( args_dict.get( "monopolize" ) ),
-            user_id                   = user_id,
-            user_email                = user_email,
-            session_id                = session_id,
-            debug                     = debug,
-            verbose                   = verbose,
-        )
+    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
+    Rick's ruling 2: pure refactor, no behaviour change).
+    """
+    # DEFERRED, exactly as in the branch this body came from. These imports sat inside
+    # the factory function, not at module scope -- keeping them deferred preserves the
+    # original import TIMING as well as the original body (phase 5 pass A, row d2e23ecb).
+    from cosa.agents.bug_fix_expediter.job              import BugFixExpediterJob
+    from cosa.agents.claude_code.job                     import ClaudeCodeJob
+    from cosa.agents.deep_research.job                   import DeepResearchJob
+    from cosa.agents.deep_research_to_podcast.job        import DeepResearchToPodcastJob
+    from cosa.agents.deep_research_to_presentation.job   import DeepResearchToPresentationJob
+    from cosa.agents.podcast_generator.job               import PodcastGeneratorJob
+    from cosa.agents.presentation_generator.job          import PresentationGeneratorJob
+    from cosa.agents.swe_team.job                        import SweTeamJob
+    from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
+    from cosa.agents.test_suite.job                      import TestSuiteJob
+    job = DeepResearchToPresentationJob(
+        query                   = args_dict.get( "query", "" ),
+        user_id                 = user_id,
+        user_email              = user_email,
+        session_id              = session_id,
+        budget                  = _parse_optional_float( args_dict.get( "budget" ) ),
+        target_duration_minutes = _parse_optional_int( args_dict.get( "target_duration_minutes" ) ),
+        target_slide_count      = _parse_optional_int( args_dict.get( "target_slide_count" ) ),
+        theme                   = args_dict.get( "theme" ),
+        lead_model              = args_dict.get( "lead_model" ),
+        dry_run                 = _parse_boolean( args_dict.get( "dry_run" ) ),
+        audience                = args_dict.get( "audience" ),
+        audience_context        = args_dict.get( "audience_context" ),
+        debug                   = debug,
+        verbose                 = verbose,
+    )
+    return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
 
+def _build_swe_team( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                        scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to swe team`.
+
+    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
+    Rick's ruling 2: pure refactor, no behaviour change).
+    """
+    # DEFERRED, exactly as in the branch this body came from. These imports sat inside
+    # the factory function, not at module scope -- keeping them deferred preserves the
+    # original import TIMING as well as the original body (phase 5 pass A, row d2e23ecb).
+    from cosa.agents.bug_fix_expediter.job              import BugFixExpediterJob
+    from cosa.agents.claude_code.job                     import ClaudeCodeJob
+    from cosa.agents.deep_research.job                   import DeepResearchJob
+    from cosa.agents.deep_research_to_podcast.job        import DeepResearchToPodcastJob
+    from cosa.agents.deep_research_to_presentation.job   import DeepResearchToPresentationJob
+    from cosa.agents.podcast_generator.job               import PodcastGeneratorJob
+    from cosa.agents.presentation_generator.job          import PresentationGeneratorJob
+    from cosa.agents.swe_team.job                        import SweTeamJob
+    from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
+    from cosa.agents.test_suite.job                      import TestSuiteJob
+    job = SweTeamJob(
+        task           = args_dict.get( "task", args_dict.get( "prompt", "" ) ),
+        user_id        = user_id,
+        user_email     = user_email,
+        session_id     = session_id,
+        dry_run        = _parse_boolean( args_dict.get( "dry_run" ) ),
+        dry_run_phases = _parse_optional_int( args_dict.get( "dry_run_phases" ) ) or 10,
+        dry_run_delay  = _parse_optional_float( args_dict.get( "dry_run_delay" ) ) or 1.5,
+        lead_model     = args_dict.get( "lead_model" ),
+        worker_model   = args_dict.get( "worker_model" ),
+        budget         = _parse_optional_float( args_dict.get( "budget" ) ),
+        timeout        = _parse_optional_int( args_dict.get( "timeout" ) ),
+        trust_mode     = args_dict.get( "trust_mode" ),
+        debug          = debug,
+        verbose        = verbose
+    )
+    return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
+
+def _build_test_suite( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                        scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to test suite`.
+
+    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
+    Rick's ruling 2: pure refactor, no behaviour change).
+    """
+    # DEFERRED, exactly as in the branch this body came from. These imports sat inside
+    # the factory function, not at module scope -- keeping them deferred preserves the
+    # original import TIMING as well as the original body (phase 5 pass A, row d2e23ecb).
+    from cosa.agents.bug_fix_expediter.job              import BugFixExpediterJob
+    from cosa.agents.claude_code.job                     import ClaudeCodeJob
+    from cosa.agents.deep_research.job                   import DeepResearchJob
+    from cosa.agents.deep_research_to_podcast.job        import DeepResearchToPodcastJob
+    from cosa.agents.deep_research_to_presentation.job   import DeepResearchToPresentationJob
+    from cosa.agents.podcast_generator.job               import PodcastGeneratorJob
+    from cosa.agents.presentation_generator.job          import PresentationGeneratorJob
+    from cosa.agents.swe_team.job                        import SweTeamJob
+    from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
+    from cosa.agents.test_suite.job                      import TestSuiteJob
+    # Parse test_types: comma-separated string → list
+    test_types_raw = args_dict.get( "test_types", "integration,e2e" )
+    if isinstance( test_types_raw, str ):
+        test_types = [ t.strip() for t in test_types_raw.split( "," ) if t.strip() ]
     else:
+        test_types = test_types_raw
+
+    # Parse pytest_args: JSON list or quote-aware string → list.
+    # shlex.split, NOT str.split: a quoted expression like -k "a or b" must
+    # survive as ONE -k value. The naive word-split shattered it — pytest
+    # read the bare `or` as a file arg and exited 4, a silent zero-test run
+    # that LOOKED submitted (2026-06-11, found independently by two sessions).
+    pytest_args_raw = args_dict.get( "pytest_args", "" )
+    if isinstance( pytest_args_raw, list ):
+        pytest_args = pytest_args_raw
+    elif pytest_args_raw and pytest_args_raw.lower() not in _SEMANTIC_NONE:
+        try:
+            pytest_args = shlex.split( pytest_args_raw )
+        except ValueError as e:
+            # Unbalanced quotes must fail LOUD at submit time — the silent
+            # alternative is exactly the zero-test run this fix removes.
+            raise ValueError( f"Malformed pytest_args {pytest_args_raw!r}: {e}" )
+    else:
+        pytest_args = []
+
+    job = TestSuiteJob(
+        test_types          = test_types,
+        user_id             = user_id,
+        user_email          = user_email,
+        session_id          = session_id,
+        pytest_args         = pytest_args,
+        dry_run             = _parse_boolean( args_dict.get( "dry_run" ) ),
+        auto_fix_on_failure = _parse_optional_boolean( args_dict.get( "auto_fix_on_failure" ) ),
+        env_vars            = args_dict.get( "env_vars" ) or None,
+        debug               = debug,
+        verbose             = verbose
+    )
+    return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
+
+def _build_bug_fix_expediter( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                        scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to bug fix expediter`.
+
+    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
+    Rick's ruling 2: pure refactor, no behaviour change).
+    """
+    # DEFERRED, exactly as in the branch this body came from. These imports sat inside
+    # the factory function, not at module scope -- keeping them deferred preserves the
+    # original import TIMING as well as the original body (phase 5 pass A, row d2e23ecb).
+    from cosa.agents.bug_fix_expediter.job              import BugFixExpediterJob
+    from cosa.agents.claude_code.job                     import ClaudeCodeJob
+    from cosa.agents.deep_research.job                   import DeepResearchJob
+    from cosa.agents.deep_research_to_podcast.job        import DeepResearchToPodcastJob
+    from cosa.agents.deep_research_to_presentation.job   import DeepResearchToPresentationJob
+    from cosa.agents.podcast_generator.job               import PodcastGeneratorJob
+    from cosa.agents.presentation_generator.job          import PresentationGeneratorJob
+    from cosa.agents.swe_team.job                        import SweTeamJob
+    from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
+    from cosa.agents.test_suite.job                      import TestSuiteJob
+    job = BugFixExpediterJob(
+        dead_job_id           = args_dict.get( "dead_job_id", "" ),
+        user_id               = user_id,
+        user_email            = user_email,
+        session_id            = session_id,
+        extra_context         = args_dict.get( "extra_context", "" ),
+        dry_run               = _parse_boolean( args_dict.get( "dry_run" ) ),
+        lead_model_override   = args_dict.get( "lead_model_override" )   or None,
+        worker_model_override = args_dict.get( "worker_model_override" ) or None,
+        thinking_effort       = args_dict.get( "thinking_effort" )       or None,
+        debug                 = debug,
+        verbose               = verbose
+    )
+    return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
+
+def _build_test_fix_expediter( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                        scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to test fix expediter`.
+
+    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
+    Rick's ruling 2: pure refactor, no behaviour change).
+    """
+    # DEFERRED, exactly as in the branch this body came from. These imports sat inside
+    # the factory function, not at module scope -- keeping them deferred preserves the
+    # original import TIMING as well as the original body (phase 5 pass A, row d2e23ecb).
+    from cosa.agents.bug_fix_expediter.job              import BugFixExpediterJob
+    from cosa.agents.claude_code.job                     import ClaudeCodeJob
+    from cosa.agents.deep_research.job                   import DeepResearchJob
+    from cosa.agents.deep_research_to_podcast.job        import DeepResearchToPodcastJob
+    from cosa.agents.deep_research_to_presentation.job   import DeepResearchToPresentationJob
+    from cosa.agents.podcast_generator.job               import PodcastGeneratorJob
+    from cosa.agents.presentation_generator.job          import PresentationGeneratorJob
+    from cosa.agents.swe_team.job                        import SweTeamJob
+    from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
+    from cosa.agents.test_suite.job                      import TestSuiteJob
+    # Parse optional original_test_types / original_pytest_args (comma-separated)
+    test_types_arg = args_dict.get( "original_test_types", [] )
+    if isinstance( test_types_arg, str ):
+        test_types_arg = [ s.strip() for s in test_types_arg.split( "," ) if s.strip() ]
+    pytest_args_arg = args_dict.get( "original_pytest_args", [] )
+    if isinstance( pytest_args_arg, str ):
+        pytest_args_arg = [ s.strip() for s in pytest_args_arg.split( " " ) if s.strip() ]
+
+    job = TestFixExpediterJob(
+        remediation_snapshot_path = args_dict.get( "remediation_snapshot_path", "" ),
+        source_test_suite_job_id  = args_dict.get( "source_test_suite_job_id", "" ),
+        user_id                   = user_id,
+        user_email                = user_email,
+        session_id                = session_id,
+        original_test_types       = test_types_arg,
+        original_pytest_args      = pytest_args_arg,
+        dry_run                   = _parse_boolean( args_dict.get( "dry_run" ) ),
+        lead_model_override       = args_dict.get( "lead_model_override" )   or None,
+        worker_model_override     = args_dict.get( "worker_model_override" ) or None,
+        thinking_effort           = args_dict.get( "thinking_effort" )       or None,
+        debug                     = debug,
+        verbose                   = verbose,
+    )
+    return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
+
+def _build_test_fix_expediter_resume( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                        scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to test fix expediter resume`.
+
+    Body moved VERBATIM from the branch it replaces (phase 5 pass A, row d2e23ecb;
+    Rick's ruling 2: pure refactor, no behaviour change).
+
+    EXEMPT FROM _finish BY DESIGN -- reason in FINISH_EXEMPT below.
+    """
+    # DEFERRED, exactly as in the branch this body came from. These imports sat inside
+    # the factory function, not at module scope -- keeping them deferred preserves the
+    # original import TIMING as well as the original body (phase 5 pass A, row d2e23ecb).
+    from cosa.agents.bug_fix_expediter.job              import BugFixExpediterJob
+    from cosa.agents.claude_code.job                     import ClaudeCodeJob
+    from cosa.agents.deep_research.job                   import DeepResearchJob
+    from cosa.agents.deep_research_to_podcast.job        import DeepResearchToPodcastJob
+    from cosa.agents.deep_research_to_presentation.job   import DeepResearchToPresentationJob
+    from cosa.agents.podcast_generator.job               import PodcastGeneratorJob
+    from cosa.agents.presentation_generator.job          import PresentationGeneratorJob
+    from cosa.agents.swe_team.job                        import SweTeamJob
+    from cosa.agents.test_fix_expediter.job              import TestFixExpediterJob
+    from cosa.agents.test_suite.job                      import TestSuiteJob
+    # Voice resume — mirrors POST /api/test-fix-expediter/resume-from
+    # (queues.py:1857). resume_from is already fuzzy-matched by the expeditor's
+    # tfe_checkpoint_match handler; resolve it to a single stalled job, then
+    # rebuild via resume_job(). No single match (not-found / still-ambiguous) →
+    # return None so the flow routes to the receptionist to speak the failure
+    # (the voice path has no HTTP channel for a 404/ambiguous response).
+    from cosa.agents.test_fix_expediter.resume_resolver import resolve_resume_target
+    target = resolve_resume_target( args_dict.get( "resume_from", "" ), user_email )
+    if target.job_id is None:
+        return None
+    overrides = {
+        "lead_model_override"   : args_dict.get( "lead_model_override" ),
+        "worker_model_override" : args_dict.get( "worker_model_override" ),
+        "thinking_effort"       : args_dict.get( "thinking_effort" ),
+    }
+    overrides = { k: v for k, v in overrides.items() if v is not None }
+    # resume_job() returns a fully-formed job carrying its ORIGINAL routing_command
+    # and args from job_history; return it directly rather than falling through to
+    # the common tail, which would overwrite those with the resume args.
+    # The resume path skips the common tail below, so it stamps here — a caller
+    # who says "resume this one at ten in the morning" means it just as much as a
+    # caller starting fresh work.
+    return _stamp_queue_directives(
+        resume_job( target.job_id, args_overrides=overrides or None ),
+        scheduled_at, monopolize, spawned_by_id_hash
+    )
+
+
+# ── The command → builder table (row d2e23ecb, phase 5 step 2) ────────────────
+# The ONE place a command is bound to the function that builds its job. The registry
+# reads this to populate `AgentSpec.job_factory`, and `create_agentic_job` dispatches
+# by that lookup — so a new agentic command is added by adding a builder and an entry
+# here, never by hand-editing a branch chain.
+#
+# WHY THE TABLE LIVES HERE AND NOT IN THE REGISTRY. The builders are defined in this
+# module, and the registry does not import this module today. Putting the table in the
+# registry would make the registry import the factory AND the factory import the
+# registry — a cycle. This direction has none: registry → factory, one way.
+# `create_agentic_job`'s own registry lookup imports INSIDE the function for the same
+# reason.
+#
+# Keys are exactly the eleven `command ==` strings the branch chain used to test,
+# copied from it rather than retyped.
+JOB_BUILDERS = {
+    "agent router go to deep research"             : _build_deep_research,
+    "agent router go to podcast generator"         : _build_podcast_generator,
+    "agent router go to research to podcast"       : _build_research_to_podcast,
+    "agent router go to claude code"               : _build_claude_code,
+    "agent router go to presentation generator"    : _build_presentation_generator,
+    "agent router go to research to presentation"  : _build_research_to_presentation,
+    "agent router go to swe team"                  : _build_swe_team,
+    "agent router go to test suite"                : _build_test_suite,
+    "agent router go to bug fix expediter"         : _build_bug_fix_expediter,
+    "agent router go to test fix expediter"        : _build_test_fix_expediter,
+    "agent router go to test fix expediter resume" : _build_test_fix_expediter_resume,
+}
+
+
+def create_agentic_job( command, args_dict, user_id, user_email, session_id, debug=False, verbose=False,
+                        scheduled_at=None, monopolize=False, spawned_by_id_hash=None ):
+    """
+    Build the agentic Job for `command`, or None if nothing owns that command.
+
+    PHASE 5 STEP 2 (row d2e23ecb): dispatch is a REGISTRY LOOKUP. The eleven-branch
+    if/elif chain and `_legacy_create_agentic_job` are both gone; step 1 had already
+    moved the branch bodies into one builder each and proved the move by comparison,
+    so this commit changes only HOW a builder is reached.
+
+    Adding an agentic command is now: write a builder, add it to JOB_BUILDERS, list the
+    command in the registry. No branch to hand-edit, and `test_1b2` fails if you do
+    only two of the three.
+
+    THE None CONTRACT IS DELIBERATE AND LOAD-BEARING. The chain ended in an `else` that
+    printed and returned None, and callers rely on it — `todo_fifo_queue` treats None as
+    "not an agentic command" and routes on. A dict lookup that raised KeyError on a miss
+    would be a behaviour change wearing a refactor's clothes, so the miss path is spelled
+    out here rather than left to `[]`.
+
+    Requires:
+        - command is a routing command string; args_dict carries that job's required args
+        - user_id, user_email, session_id are non-empty strings
+
+    Ensures:
+        - returns the Job the registry's job_factory builds for `command`
+        - returns None, and prints, if no registry entry owns `command` or its entry has
+          no job_factory — the same observable behaviour the if/elif chain had
+        - queue directives (scheduled_at / monopolize / spawned_by_id_hash) are stamped by
+          the builder, via _finish for ten of them and directly for the exempt one
+    """
+    # Deferred: the registry imports THIS module for JOB_BUILDERS, so a module-level
+    # import here would be a cycle. Same reason as registry._agentic_spec's own import.
+    from cosa.rest.v2.registry import JOB_COMMANDS
+
+    spec = JOB_COMMANDS.get( command )
+    if spec is None or spec.job_factory is None:
         print( f"[agentic_job_factory] Unknown command: {command}" )
         return None
 
-    # Populate CJ Flow persistence fields on every constructed job so job_history
-    # persists both the routing command and the exact args_dict the job was built from.
-    # BFE's resubmit path reads these to reconstruct the original job faithfully.
-    job.routing_command = command
-    job.original_args   = dict( args_dict )
-    return job
+    return spec.job_factory( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                             scheduled_at, monopolize, spawned_by_id_hash )
 
 
 def resume_job( job_id_hash, config_mgr=None, args_overrides=None ):

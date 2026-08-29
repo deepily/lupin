@@ -6,7 +6,7 @@ using PostgreSQL repository pattern.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, List, Tuple
 
 from sqlalchemy.exc import IntegrityError
@@ -135,7 +135,13 @@ def authenticate_user( email: str, password: str ) -> Tuple[bool, str, Optional[
                 "email_verified"  : user.email_verified,
                 "is_active"       : user.is_active,
                 "created_at"      : user.created_at.isoformat() if user.created_at else None,
-                "last_login_at"   : datetime.utcnow().isoformat()  # Just updated
+                # AWARE - the line above serialises created_at off a TIMESTAMPTZ
+                # column and therefore carries +00:00, while this one used to be
+                # naive and carried none. Both land in the same dict, and
+                # admin-users.js renders both with new Date( ... ), which reads a
+                # zone-less string as LOCAL - so one column was right and the column
+                # beside it was shifted by the operator's offset (row 3b4002fe).
+                "last_login_at"   : datetime.now( timezone.utc ).isoformat()  # Just updated
             }
 
             return True, "Authentication successful", user_data

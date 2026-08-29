@@ -95,7 +95,12 @@ class WebSocketTester:
                 
                 # Check if we received expected events
                 event_types = {event.get("type") for event in events}
-                expected_events = {"sys_time_update", "queue_todo_update", "queue_running_update", "queue_done_update", "queue_dead_update"}
+                # NOTE: an `expected_events` set used to be built here naming four
+                # retired queue_*_update events. It was never read — the only check
+                # below is for sys_time_update — so it read like an assertion while
+                # asserting nothing, against names nothing emits. Removed rather
+                # than corrected: this function only claims to check sys_time_update.
+                # Row e3417974.
                 
                 print(f"\n📋 Received event types: {event_types}")
                 

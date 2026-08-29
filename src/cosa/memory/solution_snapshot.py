@@ -20,6 +20,25 @@ from cosa.memory.embedding_provider import get_embedding_provider
 from cosa.memory.normalizer import Normalizer
 from cosa.rest.job_state import JobState
 
+# Classes whose snapshots are REPLAYABLE WITHOUT CODE: the answer was computed by
+# pure-Python helpers, not by Python source we can re-run, so run_code() serves the
+# cached answer instead of executing. Named here rather than spelled inside run_code
+# because a writer has to ask the same question — "can this row ever be served?" —
+# before it writes a row that cannot be (bug 38815328).
+#
+# NOT the same list as the already-formatted set in run_formatter(): that one asks
+# whether the conversational answer needs an LLM pass, which is a different question
+# about a different field, and merging them would couple two unrelated decisions.
+CODELESS_AGENT_CLASSES = ( "CalculatorAgent", )
+
+# Both spellings of the todo command map to the todo dataframe. v1 wrote
+# "agent router go to todo list"; the v2 registry's full form is "agent router go to
+# todo" and carries the longer one as an alias, so rows written by the two flows
+# disagree on the string while meaning the same command. Keying on one of them leaves
+# the other's replays running without their dataframe.
+TODO_ROUTING_COMMANDS = ( "agent router go to todo list", "agent router go to todo" )
+
+
 class SolutionSnapshot( RunnableCode ):
     """
     Captures and persists a complete solution to a question.
@@ -253,12 +272,16 @@ class SolutionSnapshot( RunnableCode ):
 
         # QueueableJob protocol compliance - status tracking attributes
         self.state                 = JobState.PENDING
-        self.started_at            = ""
-        self.completed_at          = ""
+        # None, not "" — see agent_base.py and row 4a9ebc4b.
+        self.started_at            = None
+        self.completed_at          = None
 
         # Scheduling attributes (CJ Flow) — snapshots are always immediate, never monopolize/pause
         self.scheduled_at          = None
         self.monopolize            = False
+
+        # Runtime brake marker (QueueableJob protocol) — written by RunningFifoQueue, never here
+        self.brake_terminal_claimed = False
 
         # Is there is no synonymous questions to be found then just recycle the current question
         # Handle corrupted data: ensure synonymous_questions is a valid dict/OrderedDict
@@ -331,8 +354,15 @@ class SolutionSnapshot( RunnableCode ):
         # Gist embedding generation removed (dead code — gist text still used for L3 matching)
         self.question_gist_embedding = question_gist_embedding if question_gist_embedding else []
 
-        # If the code embedding is empty, generate it
-        if len( code ) > 0 and not code_embedding:
+        # If the code embedding is empty, generate it.
+        # Guard the JOINED TEXT, not len( code ) — bug b35af923: a list that is
+        # non-empty but holds only blank lines (["" ] is the shape the producer
+        # below used to hand us) passes a length check and joins to "", which the
+        # embeddings endpoint refuses with a 422 that kills the job AFTER it has
+        # already answered the user. Mirrors the same all-blank test used by
+        # run_code() below.
+        code_text = " ".join( code ).strip() if code else ""
+        if code_text and not code_embedding:
             self.code_embedding = self._embedding_provider.generate_embedding( " ".join( code ), content_type="code" )
             dirty = True
         else:
@@ -443,7 +473,7 @@ class SolutionSnapshot( RunnableCode ):
         synonymous_question_gists=OrderedDict( { agent.question_gist: 100.0 } ),
                             error=agent.prompt_response_dict.get( "error", "" ),
                  solution_summary=agent.prompt_response_dict.get( "explanation", "N/A" ),
-                             code=agent.prompt_response_dict.get( "code", [ "" ] ),
+                             code=agent.prompt_response_dict.get( "code", [] ),   # [] not [ "" ] — bug b35af923; matches this class's own ctor default
                      code_returns=agent.prompt_response_dict.get( "returns", "N/A" ),
                      code_example=agent.prompt_response_dict.get( "example", "N/A" ),
                          thoughts=agent.prompt_response_dict.get( "thoughts", "N/A" ),
@@ -879,7 +909,7 @@ class SolutionSnapshot( RunnableCode ):
         # agent) saves snapshots with empty code by design — its answer was computed by
         # pure-Python helpers, not Python source we can re-run. Short-circuit to return
         # the cached answer in the code_response_dict shape that downstream code expects.
-        if self.agent_class_name == "CalculatorAgent":
+        if self.agent_class_name in CODELESS_AGENT_CLASSES:
             if self.answer:
                 self.code_response_dict = { "return_code": 0, "output": self.answer }
                 return self.code_response_dict
@@ -893,7 +923,7 @@ class SolutionSnapshot( RunnableCode ):
         if not self.code or all( line.strip() == "" for line in self.code ):
             raise ValueError( "Cannot execute empty code list — snapshot has no executable code" )
 
-        if self.routing_command == "agent router go to todo list":
+        if self.routing_command in TODO_ROUTING_COMMANDS:
             path_to_df = "/src/conf/long-term-memory/todo.csv"
         elif self.routing_command == "agent router go to calendar":
             path_to_df = "/src/conf/long-term-memory/events.csv"

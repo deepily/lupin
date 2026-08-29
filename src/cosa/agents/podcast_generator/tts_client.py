@@ -109,10 +109,14 @@ class PodcastTTSClient:
         - Calls progress_callback to report generation progress
     """
 
-    # ElevenLabs WebSocket URL template
+    # ElevenLabs WebSocket URL template.
+    # enable_ssml_parsing=true is REQUIRED for <break time="x.xs"/> pause tags to
+    # render on the stream-input endpoint (default off → tags spoken/ignored).
+    # Pause-only prosody per Rick's 2026-08-15 ruling; expressive audio tags are
+    # Eleven v3 only and out of scope for our turbo/multilingual models.
     WS_URL_TEMPLATE = (
         "wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input"
-        "?model_id={model_id}&output_format=pcm_24000"
+        "?model_id={model_id}&output_format=pcm_24000&enable_ssml_parsing=true"
     )
 
     def __init__(
@@ -560,22 +564,36 @@ class PodcastTTSClient:
 
     def _clean_text_for_tts( self, text: str ) -> str:
         """
-        Clean text for TTS synthesis by removing prosody annotations.
+        Clean text for TTS synthesis.
 
-        Removes *[annotation]* markers but preserves the text content.
+        Removes ONLY the dead `*[annotation]*` vocabulary (e.g. *[excited]*,
+        *[laughs]*) — those expressive audio tags are Eleven v3 only and render
+        as nothing on our turbo/multilingual models. The pause-only markers the
+        script LLM now emits — SSML `<break time="x.xs"/>`, ellipsis, dashes,
+        CAPS — are DELIBERATELY PRESERVED so they reach synthesis. Pause-only
+        prosody per Rick's 2026-08-15 ruling.
+
+        Requires:
+            - text is a string
+
+        Ensures:
+            - every `*[...]*` marker is removed
+            - `<break ...>` tags, ellipsis, dashes, and CAPS survive verbatim
+            - internal whitespace is collapsed to single spaces and trimmed
 
         Args:
-            text: Raw dialogue text with annotations
+            text: Raw dialogue text with markers
 
         Returns:
-            str: Clean text ready for TTS
+            str: Clean text ready for TTS, with pause markers intact
         """
         import re
 
-        # Remove prosody annotations *[...]*
+        # Remove ONLY the dead *[...]* audio-tag vocabulary. <break>, ellipsis,
+        # dashes and CAPS are intentionally left untouched.
         clean = re.sub( r'\*\[[^\]]+\]\*', '', text )
 
-        # Clean up extra whitespace
+        # Clean up extra whitespace (does not affect <break time="x.xs"/> tags).
         clean = re.sub( r'\s+', ' ', clean ).strip()
 
         return clean
@@ -764,6 +782,15 @@ def quick_smoke_test():
         assert "pause" not in clean_text
         assert "So what you're saying is amazing!" == clean_text
         print( f"  Clean text: '{clean_text}'" )
+
+        # Pause-only markers must SURVIVE the clean (dead *[...]* still stripped)
+        pause_text = 'Wait *[excited]* for it... <break time="1.5s"/> HUGE news!'
+        pause_clean = client._clean_text_for_tts( pause_text )
+        assert '<break time="1.5s"/>' in pause_clean  # SSML break preserved
+        assert "..." in pause_clean                    # ellipsis preserved
+        assert "HUGE" in pause_clean                   # caps preserved
+        assert "*[" not in pause_clean                 # dead marker still gone
+        print( f"  Pause markers preserved: '{pause_clean}'" )
 
         # Test 6: API key check
         print( "Testing API key detection..." )

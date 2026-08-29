@@ -18,6 +18,8 @@ allowed_prefixes:
 allowed_root_files:
   - README.md
   - CHANGELOG.md
+  - WHATS-NEW.md
+  - VERSION-HISTORY.md
   - bug-fix-queue.md
   - TODO.md
   - CLAUDE.md

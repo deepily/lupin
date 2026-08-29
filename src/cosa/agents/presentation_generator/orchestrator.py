@@ -62,6 +62,45 @@ class VoiceGateNotAnsweredError( RuntimeError ):
     """
 
 
+def _build_auto_continue_disclosure( timeout_seconds: int ) -> str:
+    """
+    Build the "silence means keep going" sentence appended to a presentation
+    review-gate question.
+
+    Kept local (a mirror of podcast_generator.orchestrator.
+    build_auto_continue_disclosure, worded for presentations) rather than
+    imported, so building a gate prompt does not drag the whole
+    podcast_generator package __init__ at load. It is a small duplicated
+    one-liner; de-duping it into a shared helper is tracked separately (same
+    rationale as the label-map decoupling, bug 81040071).
+
+    The four presentation gates FAIL OPEN: if the user does not answer within
+    the review timeout — or the ask cannot be delivered — generation continues
+    on its own via response_default at the gate. The user must be able to
+    hear/read that silence does this, so this sentence rides in the QUESTION
+    text (format_questions_for_tts speaks the question, not the options).
+
+    Requires:
+        - timeout_seconds is a positive int
+
+    Ensures:
+        - returns one natural-language sentence naming the wait in whole minutes
+          (floored, minimum 1) and stating that silence continues generation
+
+    Raises:
+        - ValueError if timeout_seconds is not a positive int
+    """
+    if not isinstance( timeout_seconds, int ) or isinstance( timeout_seconds, bool ) or timeout_seconds <= 0:
+        raise ValueError( f"timeout_seconds must be a positive int, got {timeout_seconds!r}" )
+
+    minutes = max( 1, timeout_seconds // 60 )
+    unit    = "minute" if minutes == 1 else "minutes"
+    return (
+        f"If you don't respond within about {minutes} {unit}, "
+        f"I'll keep going and finish the presentation automatically."
+    )
+
+
 class PresentationOrchestratorAgent:
     """
     Top-level orchestrator for presentation generation — single job, multi-phase, async.
@@ -82,14 +121,21 @@ class PresentationOrchestratorAgent:
         - Can be stopped externally via request_stop()
     """
 
+    # Above this many slides, elaborate in batches instead of one call.
+    # Measured 2026-08-05 on the live test server: 20 slides built end to end,
+    # while 40 and 60 both returned well-formed JSON containing ZERO slides.
+    # Those failures reported stop_reason "end_turn" (not truncated), so the
+    # truncation-driven fallback could not rescue them.
+    LARGE_DECK_CHUNK_THRESHOLD = 20
+
     def __init__(
         self,
-        source_path : str,
-        user_id     : str,
-        config      : Optional[ PresentationConfig ] = None,
-        dry_run     : bool = False,
-        debug       : bool = False,
-        verbose     : bool = False
+        source_path  : str,
+        user_id      : str,
+        config       : Optional[ PresentationConfig ] = None,
+        offline_mode : bool = False,
+        debug        : bool = False,
+        verbose      : bool = False
     ):
         """
         Initialize the presentation orchestrator.
@@ -98,16 +144,26 @@ class PresentationOrchestratorAgent:
             source_path: Path to the source document (markdown/text)
             user_id: System user ID for event routing
             config: Presentation configuration (uses defaults if None)
-            dry_run: Run without API calls — ingest real, analyze/outline/elaborate mock
+            offline_mode: OFFLINE / MOCK-LLM mode — NOT a true no-side-effects dry run.
+                It does REAL document ingest and WRITES A REAL YAML to disk (Phase 5
+                _serialize_async runs unguarded); only the LLM-driven steps are mocked
+                (analyze/outline/elaborate return fixtures, visuals use PlaceholderRenderer,
+                and the human review gates auto-approve without voice). No Anthropic/Gemini
+                API calls are made. Production never constructs the orchestrator this way —
+                the job's dry-run path returns its own breadcrumb simulator BEFORE building
+                the orchestrator — so this flag is exercised ONLY by the orchestrator's unit
+                tests to run the pipeline offline. Renamed from dry_run (row ec8ca1ce) so it
+                stops sharing a word with the JOB's dry_run, which writes NOTHING. (For that
+                true writes-nothing dry run see PresentationGeneratorJob._execute_dry_run.)
             debug: Enable debug output
             verbose: Enable verbose output
         """
-        self.source_path = source_path
-        self.user_id     = user_id
-        self.config      = config or PresentationConfig()
-        self.dry_run     = dry_run
-        self.debug       = debug
-        self.verbose     = verbose
+        self.source_path  = source_path
+        self.user_id      = user_id
+        self.config       = config or PresentationConfig()
+        self.offline_mode = offline_mode
+        self.debug        = debug
+        self.verbose      = verbose
 
         # State management
         self.state            = OrchestratorState.INITIALIZED
@@ -592,6 +648,51 @@ class PresentationOrchestratorAgent:
 
         return sections
 
+    def _slide_budget( self ):
+        """
+        Resolve the target slide budget for this run.
+
+        Requires:
+            - self.config.target_duration_minutes is a positive number
+            - self.config.slides_per_minute is a positive number
+
+        Ensures:
+            - Returns config.target_slide_count verbatim when it is not None
+              (explicit override — an author-set slide count)
+            - Otherwise returns int( target_duration_minutes * slides_per_minute )
+              (today's duration-driven formula)
+
+        Returns:
+            int: The resolved slide budget
+        """
+        if self.config.target_slide_count is not None:
+            return self.config.target_slide_count
+        return int( self.config.target_duration_minutes * self.config.slides_per_minute )
+
+    def _slide_count_drift_message( self, produced_count, budget ):
+        """
+        Build the soft-target drift-warning message, or None when no warning is due.
+
+        Requires:
+            - produced_count is a non-negative int (slides the outline produced)
+            - budget is a positive int (the resolved slide budget)
+
+        Ensures:
+            - Returns None when no explicit target_slide_count was set (the default
+              duration path is expected to drift toward budget-3 and must stay silent)
+            - Returns None when produced_count equals budget (target hit exactly)
+            - Otherwise returns a one-line message naming BOTH the requested budget
+              and the produced count (soft target — warn only, never fail/retry)
+
+        Returns:
+            Optional[str]: The drift message, or None
+        """
+        if self.config.target_slide_count is None:
+            return None
+        if produced_count == budget:
+            return None
+        return f"Slide-count drift: requested {budget} slides, outline produced {produced_count}."
+
     async def _analyze_async( self, source_content: str ) -> List[ NarrativeSection ]:
         """
         Phase 2: Analyze narrative structure using Claude.
@@ -627,7 +728,7 @@ class PresentationOrchestratorAgent:
         raw_sections = self._presentation_state.get( "raw_sections", [] )
 
         # Dry-run: generate mock NarrativeSections from parsed sections
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Phase 2: Analyze — DRY RUN (mock)" )
             arc_cycle = [ ArcPosition.SETUP, ArcPosition.ARGUMENT, ArcPosition.EVIDENCE,
                           ArcPosition.CONCLUSION, ArcPosition.CTA ]
@@ -654,7 +755,14 @@ class PresentationOrchestratorAgent:
                 target_duration   = self.config.target_duration_minutes,
                 slides_per_minute = self.config.slides_per_minute,
                 audience          = self.config.audience,
-                audience_context  = getattr( self.config, "audience_context", None ),
+                audience_context  = self.config.audience_context,
+                max_source_chars  = self.config.max_source_chars,
+                # Resolved budget (honors an explicit target_slide_count) so this
+                # prompt and the outline prompt agree by construction (T2).
+                slide_budget      = self._slide_budget(),
+                # Gate-1 revision feedback, so "Revise" actually re-analyzes with it
+                # instead of re-rolling the identical prompt.
+                human_feedback    = self._presentation_state.get( "human_feedback" ),
             )
 
             # Call Claude
@@ -697,7 +805,7 @@ class PresentationOrchestratorAgent:
 
             # Calculate totals
             total_proposed = sum( s.proposed_slides for s in narrative_sections )
-            slide_budget = int( self.config.target_duration_minutes * self.config.slides_per_minute )
+            slide_budget = self._slide_budget()
 
             if self.debug:
                 print( f"[Orchestrator] Narrative analysis: {len( narrative_sections )} sections, "
@@ -759,10 +867,10 @@ class PresentationOrchestratorAgent:
             SLIDE_TYPES,
         )
 
-        slide_budget = int( self.config.target_duration_minutes * self.config.slides_per_minute )
+        slide_budget = self._slide_budget()
 
         # Dry-run: generate mock SlideOutlines from narrative sections
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Phase 3: Outline — DRY RUN (mock)" )
             outlines = []
             # Structural formula: 2 opening + N body + 3 closing
@@ -801,7 +909,7 @@ class PresentationOrchestratorAgent:
                 slide_budget       = slide_budget,
                 title_style        = self.config.title_style,
                 audience           = self.config.audience,
-                audience_context   = getattr( self.config, "audience_context", None ),
+                audience_context   = self.config.audience_context,
                 human_feedback     = human_feedback,
             )
 
@@ -847,6 +955,14 @@ class PresentationOrchestratorAgent:
                 f"({opening_count} opening, {body_count} body, {closing_count} closing)",
                 priority="low"
             )
+
+            # T2b — soft-target drift warning (Rick's ruling: warn, do NOT fail/retry).
+            # Decision extracted to _slide_count_drift_message for unit-testability;
+            # it is gated on an EXPLICIT target_slide_count so the default duration
+            # path — where landing near budget-3 is expected — stays silent.
+            drift_message = self._slide_count_drift_message( len( outlines ), slide_budget )
+            if drift_message is not None:
+                await voice_io.notify( drift_message, priority="medium" )
 
             return outlines
 
@@ -903,7 +1019,7 @@ class PresentationOrchestratorAgent:
         from .state import PresenterNotes
 
         # Dry-run: generate mock SlideModels from outlines
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Phase 4: Elaborate — DRY RUN (mock)" )
             avg_timing = ( self.config.target_duration_minutes * 60 ) // max( 1, len( slide_outline ) )
             slides = []
@@ -930,6 +1046,26 @@ class PresentationOrchestratorAgent:
         source_content = self._presentation_state.get( "source_content", "" )
         human_feedback = self._presentation_state.get( "human_feedback" )
 
+        # PROACTIVE CHUNKING for large decks.
+        #
+        # A single all-at-once elaboration call reliably fails above ~20 slides:
+        # measured 2026-08-05, decks of 40 and 60 both came back as well-formed
+        # JSON carrying ZERO slides, while 20 built end to end. That failure is
+        # NOT truncation — stop_reason was "end_turn" — so the truncation-driven
+        # fallback below never fires for it and cannot rescue a large deck.
+        #
+        # Chunking up front is the same work the fallback already does (batches
+        # of 6, concatenated), just chosen by deck size instead of by a failure
+        # we now know does not get reported. The all-at-once path and its
+        # D6-STRICT fail-loud handling below are UNCHANGED for normal decks.
+        if len( slide_outline ) > self.LARGE_DECK_CHUNK_THRESHOLD:
+            if self.debug: print( f"[Orchestrator] Large deck ({len( slide_outline )} slides) — elaborating in batches" )
+            await voice_io.notify( f"Large deck ({len( slide_outline )} slides) — elaborating in batches...", priority="low" )
+            slide_dicts = await self._elaborate_chunked( slide_outline, source_content, human_feedback )
+            if not slide_dicts:
+                raise ValueError( "Elaboration produced no slides in chunked mode" )
+            return self._slides_from_dicts( slide_dicts )
+
         try:
             # Build prompt
             prompt = get_elaboration_prompt(
@@ -937,8 +1073,9 @@ class PresentationOrchestratorAgent:
                 source_content          = source_content,
                 target_duration_minutes = self.config.target_duration_minutes,
                 audience                = self.config.audience,
-                audience_context        = getattr( self.config, "audience_context", None ),
+                audience_context        = self.config.audience_context,
                 human_feedback          = human_feedback,
+                max_source_chars        = self.config.max_source_chars,
             )
 
             # Call API
@@ -980,26 +1117,7 @@ class PresentationOrchestratorAgent:
                 raise ValueError( "Elaboration produced no slides after truncation fallback" )
 
             # Convert to SlideModel instances
-            slides = []
-            for d in slide_dicts:
-                notes_dict = d.get( "presenter_notes", {} )
-                notes = PresenterNotes(
-                    transition     = notes_dict.get( "transition" ),
-                    talking_points = notes_dict.get( "talking_points", [] ),
-                    timing_seconds = notes_dict.get( "timing_seconds", 60 ),
-                    emphasis       = notes_dict.get( "emphasis" ),
-                )
-                slides.append( SlideModel(
-                    number             = d[ "number" ],
-                    arc_position       = d[ "arc_position" ],
-                    type               = d[ "type" ],
-                    title              = d[ "title" ],
-                    subtitle           = d.get( "subtitle" ),
-                    visual_type        = d[ "visual_type" ],
-                    visual_description = d.get( "visual_description" ),
-                    content_bullets    = d.get( "content_bullets", [] ),
-                    presenter_notes    = notes,
-                ) )
+            slides = self._slides_from_dicts( slide_dicts )
 
             # Calculate timing
             total_timing = sum( s.presenter_notes.timing_seconds for s in slides )
@@ -1035,6 +1153,46 @@ class PresentationOrchestratorAgent:
             await voice_io.notify( f"Elaboration error: {str( e )[ :80 ]}", priority="urgent" )
             return []
 
+    def _slides_from_dicts( self, slide_dicts: List[ dict ] ) -> List[ "SlideModel" ]:
+        """
+        Convert parsed elaboration dicts into SlideModel instances.
+
+        Shared by the all-at-once path and the chunked path so both produce
+        identical model construction.
+
+        Requires:
+            - each dict carries number, arc_position, type, title, visual_type
+
+        Ensures:
+            - returns one SlideModel per dict, in the order given
+            - presenter_notes defaults to 60s timing when unspecified
+        """
+        from .state import PresenterNotes
+
+        slides = []
+        for d in slide_dicts:
+            notes_dict = d.get( "presenter_notes", {} )
+            notes = PresenterNotes(
+                transition         = notes_dict.get( "transition" ),
+                talking_points     = notes_dict.get( "talking_points", [] ),
+                timing_seconds     = notes_dict.get( "timing_seconds", 60 ),
+                timing_seconds_raw = notes_dict.get( "timing_seconds_raw" ),
+                emphasis           = notes_dict.get( "emphasis" ),
+            )
+            slides.append( SlideModel(
+                number             = d[ "number" ],
+                arc_position       = d[ "arc_position" ],
+                type               = d[ "type" ],
+                title              = d[ "title" ],
+                subtitle           = d.get( "subtitle" ),
+                visual_type        = d[ "visual_type" ],
+                visual_description = d.get( "visual_description" ),
+                content_bullets    = d.get( "content_bullets", [] ),
+                presenter_notes    = notes,
+            ) )
+
+        return slides
+
     async def _elaborate_chunked(
         self,
         slide_outline: List[ SlideOutline ],
@@ -1058,19 +1216,44 @@ class PresentationOrchestratorAgent:
         batch_size = 6
         all_dicts  = []
 
+        # One PINNED progress bubble for the whole batch sequence: every update
+        # carries the same progress_group_id, so the UI updates one element in
+        # place instead of appending a message per batch (same pattern podcast
+        # uses per-language, podcast_generator/orchestrator.py:666-726).
+        #
+        # This exists because batched elaboration is SILENT for a long time: a
+        # 32-slide deck spent 10m25s between "Phase 4" and "Phase 5" with no
+        # output at all (measured 2026-08-05), which reads as a hung job.
+        batch_group_id = f"pg-{uuid.uuid4().hex[ :8 ]}"
+        total_batches  = ( len( slide_outline ) + batch_size - 1 ) // batch_size
+
         for i in range( 0, len( slide_outline ), batch_size ):
             batch = slide_outline[ i : i + batch_size ]
 
             if self.debug:
                 print( f"[Orchestrator] Chunked elaboration: slides {batch[ 0 ].number}-{batch[ -1 ].number}" )
 
+            # Sign of life, never a failure point. A progress line must NEVER
+            # abort an elaboration that is already many paid API calls deep, so
+            # every failure here is swallowed and logged.
+            try:
+                await voice_io.notify(
+                    f"Elaborating slides {batch[ 0 ].number}-{batch[ -1 ].number} of "
+                    f"{len( slide_outline )} (batch {i // batch_size + 1} of {total_batches})...",
+                    priority          = "low",
+                    progress_group_id = batch_group_id,
+                )
+            except Exception as e:
+                logger.warning( f"Batch progress notify failed (continuing): {e}" )
+
             prompt = get_elaboration_prompt(
                 slide_outlines          = batch,
                 source_content          = source_content,
                 target_duration_minutes = self.config.target_duration_minutes,
                 audience                = self.config.audience,
-                audience_context        = getattr( self.config, "audience_context", None ),
+                audience_context        = self.config.audience_context,
                 human_feedback          = human_feedback,
+                max_source_chars        = self.config.max_source_chars,
             )
 
             response = await self.api_client.call_for_elaboration(
@@ -1365,7 +1548,7 @@ class PresentationOrchestratorAgent:
                 rendered = await renderer.render(
                     visual_type        = visual_type,
                     visual_description = visual_desc,
-                    api_client         = self.api_client if not self.dry_run else None,
+                    api_client         = self.api_client if not self.offline_mode else None,
                     slide_title        = slide_title,
                     output_dir         = visuals_dir,
                     slide_index        = i,
@@ -1411,7 +1594,7 @@ class PresentationOrchestratorAgent:
         """
         Build the visual renderer registry for Phase 7.
 
-        In dry_run mode, all types use PlaceholderRenderer (no API calls).
+        In offline_mode, all types use PlaceholderRenderer (no API calls).
 
         Returns:
             VisualRendererRegistry: Configured registry
@@ -1421,7 +1604,7 @@ class PresentationOrchestratorAgent:
         fallback = PlaceholderRenderer()
         registry = VisualRendererRegistry( fallback=fallback, debug=self.debug )
 
-        if not self.dry_run:
+        if not self.offline_mode:
             mermaid = MermaidRenderer( debug=self.debug, verbose=self.verbose )
             registry.register( mermaid )
             matplotlib_renderer = MatplotlibRenderer( debug=self.debug, verbose=self.verbose )
@@ -1535,13 +1718,17 @@ class PresentationOrchestratorAgent:
 
     async def _export_pptx_async( self, presentation: Optional[ PresentationModel ] ) -> None:
         """
-        Phase 8.5: Export Marp Markdown to PowerPoint via Marp CLI.
+        Phase 8.5: Build a PowerPoint deck from the PresentationModel via python-pptx.
+
+        Row f507034e. Marp's ``--pptx`` rasterized every slide to a PNG, so decks
+        carried zero selectable text. Rick ruled python-pptx (2026-08-16): build
+        the deck from the structured model so every slide gets real, selectable
+        text runs. Genuine raster visuals rendered by Phase 7 into ``visuals/``
+        are embedded as pictures. The look differs from Marp — an accepted trade.
 
         Requires:
             - presentation is a valid PresentationModel
-            - self._presentation_state[ "marp_path" ] is set by Phase 6
             - self.config.pptx_export_enabled is True
-            - Marp CLI binary available in PATH
 
         Ensures:
             - PPTX file written alongside .md and .yaml
@@ -1552,35 +1739,30 @@ class PresentationOrchestratorAgent:
             if self.debug: print( "[Orchestrator] PPTX export disabled in config" )
             return
 
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] PPTX export skipped (dry run)" )
             return
 
-        marp_path = self._presentation_state.get( "marp_path" )
-        if not marp_path or not os.path.exists( marp_path ):
-            logger.warning( "Phase 8.5: No marp_path — skipping PPTX export" )
+        if presentation is None:
+            logger.warning( "Phase 8.5: No presentation model — skipping PPTX export" )
             return
 
         try:
-            user_id = self._presentation_state.get( "user_id", "unknown" )
-            pptx_path = self.config.get_output_path( user_id, presentation.title, file_type="pptx" )
-            marp_dir  = os.path.dirname( marp_path )
+            user_id     = self._presentation_state.get( "user_id", "unknown" )
+            pptx_path   = self.config.get_output_path( user_id, presentation.title, file_type="pptx" )
+            visuals_dir = os.path.join( os.path.dirname( pptx_path ), "visuals" )
 
-            if self.debug: print( f"[Orchestrator] Phase 8.5: Exporting PPTX → {pptx_path}" )
-
-            proc = await asyncio.create_subprocess_exec(
-                "marp", "--pptx", "--allow-local-files", marp_path, "-o", pptx_path,
-                cwd    = marp_dir,
-                stdout = asyncio.subprocess.PIPE,
-                stderr = asyncio.subprocess.PIPE,
+            theme_config = self._load_theme_config(
+                self.config.templates_path, self.config.default_theme, debug=self.debug
             )
-            stdout, stderr = await proc.communicate()
 
-            if proc.returncode != 0:
-                error_msg = stderr.decode( "utf-8", errors="replace" ).strip()
-                logger.warning( f"Phase 8.5: Marp CLI exited {proc.returncode}: {error_msg[ :200 ]}" )
-                await voice_io.notify( f"PPTX export failed: {error_msg[ :100 ]}", priority="medium" )
-                return
+            if self.debug: print( f"[Orchestrator] Phase 8.5: Building PPTX → {pptx_path}" )
+
+            from .renderers import PptxDeckRenderer
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, PptxDeckRenderer.build, presentation, theme_config, visuals_dir, pptx_path
+            )
 
             self._presentation_state[ "pptx_path" ] = pptx_path
 
@@ -1589,9 +1771,6 @@ class PresentationOrchestratorAgent:
 
             await voice_io.notify( f"PPTX exported: {file_size // 1024}KB", priority="low" )
 
-        except FileNotFoundError:
-            logger.warning( "Phase 8.5: Marp CLI binary not found in PATH — skipping PPTX export" )
-            await voice_io.notify( "PPTX export skipped: Marp CLI not installed", priority="medium" )
         except Exception as e:
             logger.error( f"Phase 8.5 failed: {e}", exc_info=True )
             await voice_io.notify( f"PPTX export failed: {str( e )[ :100 ]}", priority="medium" )
@@ -1645,6 +1824,60 @@ class PresentationOrchestratorAgent:
 
         return answers[ header ]
 
+    async def _present_fail_open_gate(
+        self,
+        *,
+        question: str,
+        header: str,
+        options: list,
+        title: str,
+        abstract: Optional[ str ] = None,
+        continue_label: str = "Approve",
+    ) -> dict:
+        """
+        Present a presentation review gate that FAILS OPEN.
+
+        All four presentation gates route through here so their fail-open shape
+        is identical and cannot drift gate-to-gate (a fail-open Gate 1 that dies
+        at Gate 2 is the same failure moved later). Mirrors the podcast
+        script-review gate (podcast_generator/orchestrator.py). Two things make
+        a silent OR undeliverable gate continue instead of dead-lettering the job:
+
+        1. The auto-continue disclosure (synced to the review timeout) is
+           appended to the question, so the user hears/reads that silence keeps
+           generation going — format_questions_for_tts speaks the question, not
+           the options, so the sentence must ride in the question.
+        2. response_default={header: continue_label} + a timeout, so voice_io
+           returns continue_label when no human answers within the timeout OR
+           the ask cannot be dispatched (503) — rather than raising
+           VoiceGateNoDefaultError, which is what dead-lettered job pr-b1ea3708.
+
+        Requires:
+            - self.config.review_timeout_seconds is a positive int
+            - options lists an entry whose label == continue_label
+
+        Ensures:
+            - the disclosure sentence is appended to the question
+            - returns voice_io.present_choices(...) with response_default set so
+              a silent/undeliverable gate resolves to {header: continue_label}
+        """
+        timeout = self.config.review_timeout_seconds
+        return await voice_io.present_choices(
+            questions        = [ {
+                "question"    : question + " " + _build_auto_continue_disclosure( timeout ),
+                "header"      : header,
+                "multiSelect" : False,
+                "options"     : options,
+            } ],
+            timeout          = timeout,
+            title            = title,
+            abstract         = abstract,
+            response_default = { header: continue_label },
+            # Blocking approval gate — alert at HIGH so the TTS reaches Rick
+            # driving by voice from across the room (mirrors the podcast gate).
+            priority         = "high",
+        )
+
     async def _gate_1_narrative_review( self, sections: List[ NarrativeSection ] ) -> bool:
         """
         Gate 1: User reviews narrative arc mapping.
@@ -1674,7 +1907,7 @@ class PresentationOrchestratorAgent:
             if self.debug: print( "[Orchestrator] Gate 1: No sections to review — refusing to proceed" )
             return False
 
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Gate 1: DRY RUN — auto-approve" )
             return True
 
@@ -1683,7 +1916,7 @@ class PresentationOrchestratorAgent:
 
         # Build summary for user
         total_slides = sum( s.proposed_slides for s in sections )
-        slide_budget = int( self.config.target_duration_minutes * self.config.slides_per_minute )
+        slide_budget = self._slide_budget()
 
         summary_lines = [ f"**Narrative Arc Analysis** ({len( sections )} sections, {total_slides} proposed slides, budget: {slide_budget})\n" ]
         for i, section in enumerate( sections, 1 ):
@@ -1697,17 +1930,14 @@ class PresentationOrchestratorAgent:
 
         # Present to user via voice I/O
         try:
-            result = await voice_io.present_choices(
-                questions=[ {
-                    "question" : "How does this narrative arc look for your presentation?",
-                    "header"   : "Narrative Arc",
-                    "multiSelect" : False,
-                    "options"  : [
-                        { "label": "Approve", "description": "Proceed to slide outline generation" },
-                        { "label": "Revise",  "description": f"Re-analyze with feedback ({max_revisions - revision_count} revisions remaining)" },
-                        { "label": "Cancel",  "description": "Stop presentation generation" },
-                    ]
-                } ],
+            result = await self._present_fail_open_gate(
+                question = "How does this narrative arc look for your presentation?",
+                header   = "Narrative Arc",
+                options  = [
+                    { "label": "Approve", "description": "Proceed to slide outline generation" },
+                    { "label": "Revise",  "description": f"Re-analyze with feedback ({max_revisions - revision_count} revisions remaining)" },
+                    { "label": "Cancel",  "description": "Stop presentation generation" },
+                ],
                 title    = "Gate 1: Narrative Arc Review",
                 abstract = summary,
             )
@@ -1788,7 +2018,7 @@ class PresentationOrchestratorAgent:
             if self.debug: print( "[Orchestrator] Gate 2: No outline to review — refusing to proceed" )
             return False
 
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Gate 2: DRY RUN — auto-approve" )
             return True
 
@@ -1816,17 +2046,14 @@ class PresentationOrchestratorAgent:
         if self.debug: print( "[Orchestrator] Gate 2: Presenting outline for review" )
 
         try:
-            result = await voice_io.present_choices(
-                questions=[ {
-                    "question"    : "How does this slide outline look?",
-                    "header"      : "Slide Outline",
-                    "multiSelect" : False,
-                    "options"     : [
-                        { "label": "Approve", "description": "Proceed to content elaboration" },
-                        { "label": "Revise",  "description": f"Re-generate outline with feedback ({max_revisions - revision_count} revisions remaining)" },
-                        { "label": "Cancel",  "description": "Stop presentation generation" },
-                    ]
-                } ],
+            result = await self._present_fail_open_gate(
+                question = "How does this slide outline look?",
+                header   = "Slide Outline",
+                options  = [
+                    { "label": "Approve", "description": "Proceed to content elaboration" },
+                    { "label": "Revise",  "description": f"Re-generate outline with feedback ({max_revisions - revision_count} revisions remaining)" },
+                    { "label": "Cancel",  "description": "Stop presentation generation" },
+                ],
                 title    = "Gate 2: Slide Outline Review",
                 abstract = summary,
             )
@@ -1904,7 +2131,7 @@ class PresentationOrchestratorAgent:
             if self.debug: print( "[Orchestrator] Gate 3: No slides to review — refusing to proceed" )
             return False
 
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Gate 3: DRY RUN — auto-approve" )
             return True
 
@@ -1914,6 +2141,20 @@ class PresentationOrchestratorAgent:
         # Build condensed summary
         total_timing = sum( s.presenter_notes.timing_seconds for s in slides )
         total_minutes = total_timing / 60
+
+        # Disclose whether the reported duration is clamp-affected (bug d5ecb753).
+        # Gate 3 is where the deck duration is READ and acted on, so a clamped
+        # total presented as a plain number is the defect itself — an over-emitting
+        # model gets flattened to the ceiling and the estimate silently understates
+        # what the model asked for. summarize_timing_clamps reads the persisted raw
+        # values; SlideModel guarantees timing_seconds_raw, so no defensive access.
+        from .prompts.elaboration import MAX_TIMING_PER_SLIDE, summarize_timing_clamps
+        clamp_summary = summarize_timing_clamps( [
+            { "number": s.number, "presenter_notes": {
+                "timing_seconds"     : s.presenter_notes.timing_seconds,
+                "timing_seconds_raw" : s.presenter_notes.timing_seconds_raw,
+            } } for s in slides
+        ] )
 
         # Count visual types
         visual_counts = {}
@@ -1936,6 +2177,14 @@ class PresentationOrchestratorAgent:
             )
 
         summary_lines.append( f"\n**Total estimated**: {total_minutes:.1f}m (target: {self.config.target_duration_minutes}m)" )
+        if clamp_summary[ "clamped_count" ] > 0:
+            summary_lines.append(
+                f"**⚠ Duration is model-estimated and clamp-affected**: {clamp_summary[ 'clamped_count' ]} of "
+                f"{len( slides )} slides hit the {MAX_TIMING_PER_SLIDE}s ceiling. The model's raw total "
+                f"({clamp_summary[ 'raw_total' ] / 60:.1f}m) and the clamped {clamp_summary[ 'clamped_total' ] / 60:.1f}m "
+                f"shown above are BOTH unreliable — the model overshoots its own 60-90s/slide guidance, so raw is an "
+                f"overestimate and clamped is arbitrary. For a real duration, measure the script word count."
+            )
         if visual_total > 0:
             summary_lines.append( f"**Slides with visuals**: {visual_total} of {len( slides )} ({visual_summary})" )
 
@@ -1944,17 +2193,14 @@ class PresentationOrchestratorAgent:
         if self.debug: print( "[Orchestrator] Gate 3: Presenting content for review" )
 
         try:
-            result = await voice_io.present_choices(
-                questions=[ {
-                    "question"    : "How does the elaborated content look?",
-                    "header"      : "Content Review",
-                    "multiSelect" : False,
-                    "options"     : [
-                        { "label": "Approve", "description": "Proceed to serialization" },
-                        { "label": "Revise",  "description": f"Re-elaborate with feedback ({max_revisions - revision_count} revisions remaining)" },
-                        { "label": "Cancel",  "description": "Stop presentation generation" },
-                    ]
-                } ],
+            result = await self._present_fail_open_gate(
+                question = "How does the elaborated content look?",
+                header   = "Content Review",
+                options  = [
+                    { "label": "Approve", "description": "Proceed to serialization" },
+                    { "label": "Revise",  "description": f"Re-elaborate with feedback ({max_revisions - revision_count} revisions remaining)" },
+                    { "label": "Cancel",  "description": "Stop presentation generation" },
+                ],
                 title    = "Gate 3: Content Review",
                 abstract = summary,
             )
@@ -2010,7 +2256,7 @@ class PresentationOrchestratorAgent:
         Gate 4: User reviews final rendered output.
 
         Presents a summary of rendered visuals to the user for approval.
-        In dry_run mode, auto-approves without voice interaction.
+        In offline_mode, auto-approves without voice interaction.
 
         Requires:
             - presentation is a PresentationModel (may be None)
@@ -2021,7 +2267,7 @@ class PresentationOrchestratorAgent:
         Returns:
             bool: True if approved, False if cancelled
         """
-        if self.dry_run:
+        if self.offline_mode:
             if self.debug: print( "[Orchestrator] Gate 4: DRY RUN — auto-approve" )
             return True
 
@@ -2040,16 +2286,13 @@ class PresentationOrchestratorAgent:
         )
 
         try:
-            result = await voice_io.present_choices(
-                questions=[ {
-                    "question"    : f"Gate 4: {visuals_rendered} visual{'s' if visuals_rendered != 1 else ''} rendered. Approve?",
-                    "header"      : "Visual Review",
-                    "multiSelect" : False,
-                    "options"     : [
-                        { "label": "Approve", "description": "Proceed to delivery" },
-                        { "label": "Cancel",  "description": "Stop presentation generation" },
-                    ]
-                } ],
+            result = await self._present_fail_open_gate(
+                question = f"Gate 4: {visuals_rendered} visual{'s' if visuals_rendered != 1 else ''} rendered. Approve?",
+                header   = "Visual Review",
+                options  = [
+                    { "label": "Approve", "description": "Proceed to delivery" },
+                    { "label": "Cancel",  "description": "Stop presentation generation" },
+                ],
                 title    = "Gate 4: Visual Review",
                 abstract = summary,
             )

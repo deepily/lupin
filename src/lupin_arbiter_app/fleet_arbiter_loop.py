@@ -47,7 +47,14 @@ from cosa.agents.heartbeat_arbiter.operator_gate_routing import DEFAULT_DIGEST_C
 # 6929f4ac outward-twin backstop (§9.2): the per-session hold reader — defaulted
 # real here so the :8001 service actually resurfaces a dark session's aged user-gate
 # to Rick (without this wiring the seam stays None → the backstop is decorative).
-from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold as _default_hold_reader
+#
+# row 011f1f90 (2026-08-06): the default was plain read_hold, which resolves
+# fleet_data_root ONLY — so a hold leaked to a repo root was invisible to this VETO
+# and the parked session got poked forever. It is now read_hold_via_bridge, which
+# sources the session's OWN cwd from its bridge and finds a repo-root hold in ANY
+# project. The factory wraps it with the arbiter log_fn (below) so the cwd=None
+# fallback is visible, not a silent return to the blind path.
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold_via_bridge
 # The hold sweep is REPORT + RECLAIM as of 2026-07-26 (row 11461241, Rick's direct
 # ruling — "wire it: the arbiter calls the janitor"). It was report-only from
 # 2026-07-16 while hold files still carried untriaged hand-written memento cargo.
@@ -69,6 +76,10 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_hold import prune_stale_hold_file
 # would keep every one of them forever and report a clean green.
 from lupin_cli.claude_code.hooks.lib.dm_inbox_hwm_janitor import report_hwm_files as _default_hwm_reporter
 from lupin_cli.claude_code.hooks.lib.dm_inbox_hwm_janitor import sweep_and_reclaim_hwm_files as _default_hwm_deleter
+# The three milder bookmark families (ask-answer / task-store-map / heartbeat-acked),
+# row bd5c27e1 — the same live-set-gated mechanism as the dm-inbox sweep above.
+from lupin_cli.claude_code.hooks.lib.bookmark_janitor import report_bookmark_files as _default_bookmark_reporter
+from lupin_cli.claude_code.hooks.lib.bookmark_janitor import sweep_and_reclaim_bookmark_files as _default_bookmark_deleter
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions as _find_active_voice_persona_sessions
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_sessions as _find_active_sessions
 from lupin_mcp.persona_normalization import canonical_persona_key
@@ -605,6 +616,28 @@ def make_follow_through_watcher_factory(
             log_fn( "follow_through_escalation_error", item=str( item.id ), error=str( e ) )
 
     def factory( job ) -> Any:
+        # GATE BEFORE IMPORT (2026-08-10). The watcher module's import chain reaches
+        # cosa.rest.db.database -> sqlalchemy -> pgvector -> psycopg2-binary. On the
+        # standalone :8001 host venv (deliberately LIGHT — see
+        # src/scripts/requirements-arbiter.txt) those are absent, so this import
+        # raised ModuleNotFoundError inside the ArbiterConsumerJob ctor and KILLED the
+        # fleet-arbiter thread on its first tick — while the flag was OFF. The service
+        # stayed active(running) and /health kept returning 200, so the fleet section
+        # sat at `status: awaiting, session_count: 0` for two days.
+        #
+        # Reading the flag FIRST makes the enable-gate mean what the docstring above
+        # already promises ("no DB ... until the flag is flipped"): disabled => no
+        # import, no DB dependency, nothing to install on the watcher host. The job
+        # ctor treats a None watcher as inert (layer (a) of _sweep_follow_through).
+        #
+        # Re-read per call, NOT hoisted to wiring time: the supervisor rebuilds the
+        # job every cycle (run() -> self._job_factory()), so a live config flip is
+        # picked up on the next tick without a service restart — the behavior the
+        # watcher's own per-sweep flag read already provided.
+        # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+        if not config_mgr.get( "follow through escalation enabled", default=False, return_type="boolean" ):
+            log_fn( "follow_through_watcher_inert", reason="follow through escalation enabled = false (no DB import)" )
+            return None
         from cosa.rest.follow_through_escalation_watcher import FollowThroughEscalationWatcher
         return FollowThroughEscalationWatcher(
             config_mgr,
@@ -737,7 +770,11 @@ def build_fleet_arbiter_job_factory(
     # 6929f4ac: wire the real hold reader by default so the :8001 service activates
     # the outward-twin backstop (open-gate→ACTIVE classify override + dark-session
     # gate resurface); an injected fake overrides it for tests.
-    hold_reader_fn = hold_reader_fn if hold_reader_fn is not None else _default_hold_reader
+    # row 011f1f90: the default is read_hold_via_bridge wrapped with THIS factory's
+    # log_fn, so a repo-root hold is now visible to the veto AND the cwd=None
+    # fallback (no_bridge / bridge_without_cwd / bridge_error) emits one journal
+    # line instead of silently restoring the blind fleet-only read.
+    hold_reader_fn = hold_reader_fn if hold_reader_fn is not None else ( lambda sid: read_hold_via_bridge( sid, log_fn=log_fn ) )
     # A2/A3 (fcb5dbc0): wire the real fleet-wide operator-gate reader by default so the
     # :8001 service activates the operator-gate urgency routing; a fake overrides it.
     operator_gates_fn = operator_gates_fn if operator_gates_fn is not None else _default_operator_gates_fn
@@ -838,6 +875,10 @@ class FleetArbiterLoop:
         hwm_janitor_fn       : Optional[ Callable ] = None,
         hwm_deleter_fn       : Optional[ Callable ] = None,
         enable_hwm_deletion  : bool = False,
+        bookmark_janitor_fn  : Optional[ Callable ] = None,
+        bookmark_deleter_fn  : Optional[ Callable ] = None,
+        enable_bookmark_deletion : bool = False,
+        construct_retry_seconds : float = 60.0,
     ) -> None:
         self._job_factory    = job_factory
         self._log_fn         = log_fn if log_fn is not None else _default_log_fn
@@ -878,10 +919,20 @@ class FleetArbiterLoop:
         self._hwm_janitor_fn      = hwm_janitor_fn if hwm_janitor_fn is not None else _default_hwm_reporter
         self._hwm_deleter_fn      = hwm_deleter_fn if hwm_deleter_fn is not None else _default_hwm_deleter
         self._enable_hwm_deletion = bool( enable_hwm_deletion )
+        # The three milder bookmark families ride the same seam, their own switch —
+        # FALSE by default for the same reason: an omitted parameter must never delete.
+        self._bookmark_janitor_fn      = bookmark_janitor_fn if bookmark_janitor_fn is not None else _default_bookmark_reporter
+        self._bookmark_deleter_fn      = bookmark_deleter_fn if bookmark_deleter_fn is not None else _default_bookmark_deleter
+        self._enable_bookmark_deletion = bool( enable_bookmark_deletion )
         self._stop           = threading.Event()
         self._current_job    = None
         self._thread         = None
         self.cycles          = 0
+        # Back-off between failed job CONSTRUCTIONS (2026-08-10). Without a pause a
+        # persistent ctor fault (e.g. a missing dependency) would spin the thread hot
+        # and flood the journal. Injectable so a unit test can drive the retry path
+        # without a real sleep.
+        self._construct_retry_seconds = float( construct_retry_seconds )
 
     def run( self ) -> None:
         """
@@ -890,13 +941,32 @@ class FleetArbiterLoop:
         Ensures:
             - relaunches a fresh job after each clean cap-exit until stop()
             - a job blow-up is swallowed+logged (the supervisor outlives one bad job)
+            - a job CONSTRUCTION blow-up is likewise swallowed+logged and retried on
+              the next cycle (2026-08-10) — see the comment at the try below
             - exits promptly when stop() has been signalled
             - never raises
         """
         while not self._stop.is_set():
             self._sweep_hold_files()             # b39562e4 pt2: hold janitor — REPORT-ONLY (deletes nothing)
             self._sweep_hwm_files()              # 8758d0b1: DM-inbox HWM janitor — its own switch
-            job = self._job_factory()
+            self._sweep_bookmark_files()         # bd5c27e1: ask-answer / task-map / acked — its own switch
+            # CONSTRUCTION IS INSIDE THE GUARD (2026-08-10). This line used to sit
+            # OUTSIDE any try, so a raise in the job ctor propagated out of run(),
+            # killed the thread, and never retried — the supervisor's stated promise
+            # ("the supervisor outlives one bad job") covered do_all() only. A
+            # ModuleNotFoundError in the ctor's watcher-factory therefore turned a
+            # missing dependency into a permanently dead loop that no health surface
+            # reported. Retrying keeps a transient/self-healing fault self-healing,
+            # and makes a persistent one LOUD (one log line per cycle) instead of
+            # silent-once-at-boot.
+            # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+            try:
+                job = self._job_factory()
+            except Exception as e:
+                self._log_fn( "fleet_arbiter_job_construct_error", error=f"{type( e ).__name__}: {e}" )
+                if self._stop.wait( self._construct_retry_seconds ):
+                    break
+                continue
             self._current_job = job
             self.cycles += 1
             self._log_fn( "fleet_arbiter_job_start", cycle=self.cycles )
@@ -979,6 +1049,13 @@ class FleetArbiterLoop:
                 self._log_fn( "fleet_arbiter_hold_report_no_roots",
                               roots_requested   = report[ "roots_requested" ],
                               roots_unreachable = report[ "roots_unreachable" ] )
+            if report[ "location_zone" ] is None:
+                # LOUD: the location zone was UNJUDGEABLE (unresolved or fail-closed
+                # shallow), so misplaced=0 below is NOT a clean bill of health — the
+                # detector could not judge location at all. Distinct event so a
+                # fail-closed zone never masquerades as "no leaks" (row 011f1f90).
+                self._log_fn( "fleet_arbiter_hold_location_unjudged",
+                              files_seen = report[ "files_found" ] )
             self._log_fn( "fleet_arbiter_hold_report",
                           roots_swept             = report[ "roots_swept" ],
                           roots_unreachable       = report[ "roots_unreachable" ],
@@ -988,6 +1065,13 @@ class FleetArbiterLoop:
                           cargo_bearing           = counts[ "cargo_bearing" ],
                           ttl_unusable            = counts[ "ttl_unusable" ],
                           anchor_disagreement     = counts[ "anchor_disagreement" ],
+                          # row 011f1f90: LOCATION as a first-class field, NOT folded into
+                          # cargo_bearing. The resilient veto now makes a misplaced hold
+                          # FUNCTION, so this count + the paths are the surviving signal that
+                          # the file is still in the wrong place. deleting them stays Rick's call.
+                          location_zone           = report[ "location_zone" ],
+                          misplaced               = counts[ "misplaced" ],
+                          misplaced_paths         = report[ "misplaced_paths" ],
                           kept_reasons            = counts[ "reachable_but_kept_reasons" ],
                           skipped_dirs_with_holds = report[ "skipped_dirs_with_holds" ],
                           deletion_enabled        = self._enable_hold_deletion,
@@ -1081,6 +1165,67 @@ class FleetArbiterLoop:
                           paths              = pruned )
         except Exception as e:               # reclamation must never kill the supervisor
             self._log_fn( "fleet_arbiter_hwm_reclaim_error", error=str( e ) )
+
+    def _sweep_bookmark_files( self ) -> None:
+        """
+        REACH and CLASSIFY the three milder bookmark families — `.ask-answer-hwm-*`,
+        `.task-store-map-*`, `.heartbeat-acked-*` — then RECLAIM what the same-clock,
+        same-live-set classification proved orphaned AND aged. Row bd5c27e1.
+
+        A SIBLING of _sweep_hwm_files, deliberately separate from the dm-inbox sweep:
+        that family's mis-deletion silently loses DMs and keeps its own proven module;
+        these three are strictly milder (a benign duplicate, and two that regenerate).
+        The live-set gate still protects every one of them — a live session's bookmark
+        is never reaped, at any age — and a None live-set keeps EVERYTHING, the same
+        fail-safe that makes the dm-inbox sweep affordable.
+
+        SAME CLOCK, SAME LIVE-SET for report and act (one frozen `now_ts`), so the
+        report's `prunable` tally is a PREDICTION of the deletion count; a
+        disagreement is itself the finding.
+
+        Ensures:
+            - emits `fleet_arbiter_bookmark_report` EVERY cycle (per-family tallies), so
+              "swept nothing" is never inferred from silence
+            - emits `fleet_arbiter_bookmark_report_no_roots` distinctly on zero roots
+            - deletes ONLY when enable_bookmark_deletion is set, and only what the
+              same-clock classification marked prunable
+            - swallows + logs any exception; a janitor must never kill the supervisor
+        """
+        try:
+            roots  = list( self._hold_roots_fn() or [ ] )     # same roots — same runtime-state family location
+            live   = self._live_session_ids_fn()
+            now_ts = time.time()                              # ONE clock: evidence AND act
+            report = self._bookmark_janitor_fn( base_dirs=roots, live_session_ids=live, now_ts=now_ts )
+            counts = report[ "counts" ]
+            if not report[ "roots_swept" ]:
+                self._log_fn( "fleet_arbiter_bookmark_report_no_roots",
+                              roots_requested   = report[ "roots_requested" ],
+                              roots_unreachable = report[ "roots_unreachable" ] )
+            self._log_fn( "fleet_arbiter_bookmark_report",
+                          roots_swept       = report[ "roots_swept" ],
+                          roots_unreachable = report[ "roots_unreachable" ],
+                          files_seen        = report[ "files_found" ],
+                          prunable          = counts[ "prunable" ],
+                          kept              = counts[ "keep" ],
+                          kept_reasons      = counts[ "reachable_but_kept_reasons" ],
+                          per_family        = counts[ "per_family" ],
+                          live_set_present  = ( live is not None ),
+                          deletion_enabled  = self._enable_bookmark_deletion )
+        except Exception as e:                   # janitor must never kill the supervisor
+            self._log_fn( "fleet_arbiter_bookmark_janitor_error", error=str( e ) )
+            return                               # no classification ⇒ nothing is proven prunable
+
+        if not self._enable_bookmark_deletion:
+            return
+        try:
+            pruned = self._bookmark_deleter_fn( base_dirs=roots, live_session_ids=live, now_ts=now_ts )
+            self._log_fn( "fleet_arbiter_bookmark_reclaimed",
+                          deleted            = len( pruned ),
+                          predicted_prunable = counts[ "prunable" ],
+                          agrees             = ( len( pruned ) == counts[ "prunable" ] ),
+                          paths              = pruned )
+        except Exception as e:               # reclamation must never kill the supervisor
+            self._log_fn( "fleet_arbiter_bookmark_reclaim_error", error=str( e ) )
 
     def start( self ) -> None:
         """Spawn the daemon supervisor thread."""

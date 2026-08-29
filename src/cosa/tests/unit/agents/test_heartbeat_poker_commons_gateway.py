@@ -37,18 +37,32 @@ class FakeStore:
         return self._read_entries
 
 
-class RecordingHttpPost:
-    """Stand-in for requests.post — records calls; optionally raises."""
+class FakeResponse:
+    """Minimal requests.Response stand-in — carries a status_code and text."""
 
-    def __init__( self, raise_exc=None ):
+    def __init__( self, status_code=200, text="" ):
+        self.status_code = status_code
+        self.text        = text
+
+
+class RecordingHttpPost:
+    """
+    Stand-in for requests.post — records calls; optionally raises, or returns a
+    scripted status. requests.post returns a Response (never raises) on a 413,
+    so the default and the `status` path both return a FakeResponse.
+    """
+
+    def __init__( self, raise_exc=None, status=200, text="" ):
         self.calls  = []
         self._raise = raise_exc
+        self._status = status
+        self._text   = text
 
     def __call__( self, url, json=None, headers=None, timeout=None ):
         self.calls.append( { "url": url, "json": json, "headers": headers, "timeout": timeout } )
         if self._raise is not None:
             raise self._raise
-        return { "status": 200 }
+        return FakeResponse( status_code=self._status, text=self._text )
 
 
 def _make_gateway( store=None, http_post=None ):
@@ -136,11 +150,40 @@ def test_send_to_fires_dm_send_push():
     assert call[ "headers" ][ "X-API-Key" ] == "test-key"
 
 
-def test_send_to_swallows_push_failure():
+def test_send_to_logs_transport_failure( capsys ):
+    # A raised transport error (timeout/refused) must NOT propagate, the disk post
+    # still happens, and the failure is LOGGED (not swallowed) so the stopping rule
+    # can read it. This is the behaviour the DM-verbosity pilot flipped from swallow.
     http  = RecordingHttpPost( raise_exc=RuntimeError( "network down" ) )
     store = FakeStore()
     _make_gateway( store=store, http_post=http ).send_to( _WATCHER, "poke-body" )  # must NOT raise
     assert len( store.post_calls ) == 1          # disk post still happened
+    err = capsys.readouterr().err
+    assert "HEARTBEAT_POKE_SEND_FAILED" in err
+    assert "recipient=tiberius" in err
+    assert "status=None"        in err           # None marks a transport-level failure
+    assert "network down"       in err
+
+
+def test_send_to_logs_413_response( capsys ):
+    # requests.post returns a Response with status 413 under the rejecting arm — it
+    # does NOT raise — so the refusal only surfaces if the status code is inspected.
+    # Force a 413 RESPONSE (not an exception): green-on-exception-only would hide
+    # the exact defect being fixed.
+    http  = RecordingHttpPost( status=413, text="DM refused: too long." )
+    store = FakeStore()
+    _make_gateway( store=store, http_post=http ).send_to( _WATCHER, "poke-body" )  # must NOT raise
+    assert len( store.post_calls ) == 1          # disk post still happened
+    err = capsys.readouterr().err
+    assert "HEARTBEAT_POKE_SEND_FAILED" in err
+    assert "recipient=tiberius" in err
+    assert "status=413"         in err
+
+
+def test_send_to_2xx_logs_nothing( capsys ):
+    # A successful push emits no failure line — the log is a signal, not noise.
+    _make_gateway( http_post=RecordingHttpPost( status=200 ) ).send_to( _WATCHER, "poke-body" )
+    assert "HEARTBEAT_POKE_SEND_FAILED" not in capsys.readouterr().err
 
 
 def test_send_to_post_and_push_share_question_id():

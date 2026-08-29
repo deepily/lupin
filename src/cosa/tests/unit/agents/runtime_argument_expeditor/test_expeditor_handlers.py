@@ -19,6 +19,7 @@ import pytest
 
 import cosa.agents.runtime_argument_expeditor.expeditor as ex_mod
 from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
+from cosa.agents.io_models.utils.fuzzy_file_prefilter import MAX_CANDIDATES
 
 
 # Submodules this file fakes via `patch.dict( sys.modules, {...} )`. patch.dict restores
@@ -62,8 +63,6 @@ def _mk_expeditor( debug=False ):
     cfg.get.side_effect = lambda key, default=None, **kw: default
     with patch.object( ex_mod, "LlmClientFactory", MagicMock() ):
         o = RuntimeArgumentExpeditor( cfg, debug=debug )
-    o._job_id       = None
-    o._bearer_token = None
     o.llm_spec_key  = "rae-llm-spec"
     return o
 
@@ -171,6 +170,115 @@ class TestFuzzyFileMatch( unittest.TestCase ):
             o.llm_factory.get_client = MagicMock( return_value=MagicMock( run=MagicMock( return_value="<xml/>" ) ) )
             out = o._handle_fuzzy_file_match( "u@x" )
         self.assertTrue( out.endswith( "/report.md" ) )
+
+    # ------------------------------------------------------------------
+    # The pre-filter call is exercised END-TO-END (f5a1ca0d). The tests above
+    # only ever build a 1-2 file docs_map, so the pre-filter runs but never
+    # narrows — the cap that keeps phi-4's context from overflowing was
+    # inspection-verified only. These drive a LARGE candidate set through the
+    # real handler and assert the file_list the LLM receives is capped.
+    # ------------------------------------------------------------------
+
+    def _run_with_large_walk( self, o, description, matches, n_files=MAX_CANDIDATES * 4, extra_files=None ):
+        """
+        Build an n_files candidate map via os.walk, run the real handler, and
+        return (result_path, prompt_sent_to_llm). Count candidate paths in the
+        prompt with prompt.count( "- src/" ) — every candidate rel path is under
+        src/, and the template glues the FIRST entry onto the description line,
+        so a line-prefix count would undercount by one.
+        """
+        files = [ f"doc-{i}.md" for i in range( n_files ) ]
+        if extra_files:
+            files = extra_files + files
+        cm = _inner_config_mgr()   # search path "/src", template + llm spec set
+        captured = {}
+        def _run( prompt ):
+            captured[ "prompt" ] = prompt
+            return "<xml/>"
+        with _patch_config_mgr( cm ), _patch_fuzzy_model( matches ), \
+             patch.object( ex_mod.cu, "get_project_root", return_value="/p" ), \
+             patch.object( ex_mod.cu, "get_file_as_string", return_value="t {description} {file_list}" ), \
+             patch.object( ex_mod, "PromptTemplateProcessor" ) as PTP, \
+             patch.object( ex_mod.os.path, "exists", side_effect=lambda p: p.endswith( "/src" ) ), \
+             patch.object( ex_mod.os, "walk", return_value=[ ( "/p/src", [], files ) ] ), \
+             patch.object( o, "_ask_for_arg", return_value=description ):
+            PTP.return_value.process_template.side_effect = lambda t, n: t
+            o.llm_factory.get_client = MagicMock( return_value=MagicMock( run=MagicMock( side_effect=_run ) ) )
+            out = o._handle_fuzzy_file_match( "u@x" )
+        return out, captured.get( "prompt", "" )
+
+    def test_large_map_zero_overlap_bails_to_ask_exact_path( self ):
+        # 200 files, a description that overlaps NO path → prefilter flags the
+        # capped slice 'arbitrary' → the handler must BAIL to _ask_for_arg for an
+        # exact path and NEVER hand the model an unranked list (the confident-
+        # wrong-pick failure). Proven end-to-end: the LLM is never called.
+        o = _mk_expeditor()
+        files = [ f"doc-{i}.md" for i in range( MAX_CANDIDATES * 4 ) ]
+        cm = _inner_config_mgr()
+        llm_client = MagicMock( run=MagicMock( return_value="<xml/>" ) )
+        with _patch_config_mgr( cm ), \
+             patch.object( ex_mod.cu, "get_project_root", return_value="/p" ), \
+             patch.object( ex_mod.os.path, "exists", side_effect=lambda p: p.endswith( "/src" ) ), \
+             patch.object( ex_mod.os, "walk", return_value=[ ( "/p/src", [], files ) ] ), \
+             patch.object( o, "_ask_for_arg", side_effect=[ "zzznomatch qqqunrelated", "/exact/path.md" ] ) as ask:
+            o.llm_factory.get_client = MagicMock( return_value=llm_client )
+            out = o._handle_fuzzy_file_match( "u@x" )
+        self.assertEqual( out, "/exact/path.md" )   # the bail's exact-path answer
+        self.assertEqual( ask.call_count, 2 )        # description, then exact-path bail
+        llm_client.run.assert_not_called()           # never sent an arbitrary list to the model
+
+    def test_small_map_zero_overlap_resolves_through_handler( self ):
+        # Mr Radio's edge: a SMALL folder (Rick's ~8 docs) with a non-overlapping
+        # description must NOT bail — it is complete, so the LLM sees all of it
+        # and resolves. Breaking this to fix the large case would be a regression.
+        o = _mk_expeditor()
+        files = [ f"doc-{i}.md" for i in range( 8 ) ]
+        cm = _inner_config_mgr()
+        with _patch_config_mgr( cm ), _patch_fuzzy_model( [ "src/doc-3.md" ] ), \
+             patch.object( ex_mod.cu, "get_project_root", return_value="/p" ), \
+             patch.object( ex_mod.cu, "get_file_as_string", return_value="t {description} {file_list}" ), \
+             patch.object( ex_mod, "PromptTemplateProcessor" ) as PTP, \
+             patch.object( ex_mod.os.path, "exists", side_effect=lambda p: p.endswith( "/src" ) ), \
+             patch.object( ex_mod.os, "walk", return_value=[ ( "/p/src", [], files ) ] ), \
+             patch.object( o, "_ask_for_arg", return_value="zzznomatch qqqunrelated" ):
+            PTP.return_value.process_template.side_effect = lambda t, n: t
+            o.llm_factory.get_client = MagicMock( return_value=MagicMock( run=MagicMock( return_value="<xml/>" ) ) )
+            out = o._handle_fuzzy_file_match( "u@x" )
+        self.assertTrue( out.endswith( "/doc-3.md" ) )   # resolved, did not bail
+
+    def test_large_map_narrowed_by_keyword_through_handler( self ):
+        # 200 decoys + TWO files sharing the top keyword score → a tie at the top,
+        # so the deterministic dominant-match check declines (row 8e70a34d) and the
+        # LLM-narrowing path under test runs: the model receives a capped,
+        # target-bearing list and picks the target.
+        o = _mk_expeditor()
+        target = "kissbrevity-target.md"
+        out, prompt = self._run_with_large_walk(
+            o, "kissbrevity target", [ f"src/{target}" ],
+            extra_files=[ target, "kissbrevity-target-two.md" ],
+        )
+        self.assertLessEqual( prompt.count( "- src/" ), MAX_CANDIDATES )
+        self.assertIn( f"- src/{target}", prompt )
+        self.assertTrue( out.endswith( f"/{target}" ) )
+
+    def test_large_map_unique_dominant_resolves_without_llm( self ):
+        # 200 decoys + ONE uniquely-named target → the deterministic dominant-match
+        # check resolves it and the phi-4 LLM is NEVER consulted (row 8e70a34d: the
+        # clearly-named doc removes a model turn).
+        o = _mk_expeditor()
+        target = "kissbrevity-target.md"
+        files  = [ target ] + [ f"doc-{i}.md" for i in range( MAX_CANDIDATES * 4 ) ]
+        cm = _inner_config_mgr()
+        llm_client = MagicMock( run=MagicMock( return_value="<xml/>" ) )
+        with _patch_config_mgr( cm ), \
+             patch.object( ex_mod.cu, "get_project_root", return_value="/p" ), \
+             patch.object( ex_mod.os.path, "exists", side_effect=lambda p: p.endswith( "/src" ) ), \
+             patch.object( ex_mod.os, "walk", return_value=[ ( "/p/src", [], files ) ] ), \
+             patch.object( o, "_ask_for_arg", return_value="kissbrevity target" ):
+            o.llm_factory.get_client = MagicMock( return_value=llm_client )
+            out = o._handle_fuzzy_file_match( "u@x" )
+        self.assertTrue( out.endswith( f"/{target}" ) )
+        llm_client.run.assert_not_called()
 
     def test_fuzzy_no_matches_asks_fallback( self ):
         o = _mk_expeditor( debug=True )

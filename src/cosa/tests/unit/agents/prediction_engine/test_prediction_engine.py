@@ -273,11 +273,20 @@ def test_predict_dispatches_to_each_type( wired_engine, monkeypatch ):
     monkeypatch.setattr( wired_engine, "_predict_yes_no", lambda *a: "YN" )
     monkeypatch.setattr( wired_engine, "_predict_multiple_choice", lambda *a, **k: "MC" )
     monkeypatch.setattr( wired_engine, "_predict_open_ended", lambda *a: "OE" )
-    monkeypatch.setattr( wired_engine, "_predict_open_ended_batch", lambda *a: "OEB" )
+    # The batch handler's result gets a batch_question_key stamped onto its metadata,
+    # so it must be a PredictionResult (not a bare sentinel string).
+    oeb_result = PredictionResult(
+        response_type = cfg.RESPONSE_TYPE_OPEN_ENDED_BATCH,
+        category      = "c",
+        strategy      = cfg.STRATEGY_COLD_START,
+        metadata      = {},
+    )
+    monkeypatch.setattr( wired_engine, "_predict_open_ended_batch", lambda *a: oeb_result )
     assert wired_engine.predict( { "message": "m", "response_type": "yes_no" } ) == "YN"
     assert wired_engine.predict( { "message": "m", "response_type": "multiple_choice" } ) == "MC"
     assert wired_engine.predict( { "message": "m", "response_type": "open_ended" } ) == "OE"
-    assert wired_engine.predict( { "message": "m", "response_type": "open_ended_batch" } ) == "OEB"
+    assert wired_engine.predict( { "message": "m", "response_type": "open_ended_batch" } ) is oeb_result
+    assert "batch_question_key" in oeb_result.metadata
 
 
 def test_predict_handler_exception_is_cold_start( wired_engine, monkeypatch ):
@@ -692,6 +701,180 @@ def test_open_ended_batch_llm_failure_falls_back( engine, monkeypatch ):
     assert r.strategy == cfg.STRATEGY_CBR_RETRIEVAL
     assert r.predicted_value == { "answers": { "Topic": "AI" } }
     assert r.metadata[ "tier" ] == "llm_fallback"
+
+
+# ---------------------------------------------------------------------------
+# batch content-key (bug cdb5a76f — a batch's count-preamble message collides
+# across unrelated batches; the CBR key must carry per-question content)
+# ---------------------------------------------------------------------------
+
+# Two different 3-question batches. Their spoken/notification message is the SAME
+# content-free preamble ("I have 3 questions for you."), which is exactly what let
+# the podcast batch retrieve a Vertex/judge/push batch's answers at similarity 1.0.
+_PODCAST_OPTS = { "questions": [
+    { "header": "languages",        "question": "Which languages should the podcast use?" },
+    { "header": "audience",         "question": "Who is the intended audience?" },
+    { "header": "audience_context", "question": "What context should the audience assume?" },
+] }
+_VERTEX_OPTS = { "questions": [
+    { "header": "Vertex project", "question": "Which Vertex project?" },
+    { "header": "Judge project",  "question": "Which judge project?" },
+    { "header": "Push",           "question": "Push or hold?" },
+] }
+_BATCH_PREAMBLE = "I have 3 questions for you."
+
+
+def test_batch_question_key_distinguishes_same_count_batches():
+    """Two different 3-question batches must yield DIFFERENT content keys."""
+    k_podcast = PredictionEngine._batch_question_key( _BATCH_PREAMBLE, _PODCAST_OPTS )
+    k_vertex  = PredictionEngine._batch_question_key( _BATCH_PREAMBLE, _VERTEX_OPTS )
+    assert k_podcast != k_vertex
+    assert _BATCH_PREAMBLE not in k_podcast        # the content-free preamble is gone
+    assert "languages: Which languages should the podcast use?" in k_podcast
+    assert "Vertex project: Which Vertex project?" in k_vertex
+
+
+def test_batch_question_key_fallbacks_to_message():
+    """Missing / malformed / empty response_options fall back to the message."""
+    assert PredictionEngine._batch_question_key( "msg", None )            == "msg"
+    assert PredictionEngine._batch_question_key( "msg", "not-a-dict" )    == "msg"
+    assert PredictionEngine._batch_question_key( "msg", {} )              == "msg"
+    assert PredictionEngine._batch_question_key( "msg", { "questions": [] } ) == "msg"
+    # A questions list whose entries yield no text at all → fallback.
+    assert PredictionEngine._batch_question_key( "msg", { "questions": [ {}, "x", { "header": "", "question": "" } ] } ) == "msg"
+
+
+def test_batch_question_key_partial_entries():
+    """Entries missing a header or question still contribute their available text."""
+    opts = { "questions": [
+        { "question": "just a question" },      # no header
+        { "header": "just a header" },          # no question
+    ] }
+    key = PredictionEngine._batch_question_key( "msg", opts )
+    assert key == "just a question | just a header"
+
+
+def test_select_retrieval_case_content_key_breaks_cross_batch_collision( engine ):
+    """
+    A poison case stored as the OLD code stored it (question = the count preamble)
+    exact-matches the preamble (the bug) but NOT a content key (the fix).
+    """
+    vertex_dv = json.dumps( { "answers": { "Push": "hold" } } )
+    poison    = _case( 100.0, question=_BATCH_PREAMBLE, decision_value=vertex_dv )
+
+    # Pre-fix seam: message == preamble → exact match (documents the collision).
+    _, exact_old = engine._select_retrieval_case( [ poison ], _BATCH_PREAMBLE )
+    assert exact_old is not None
+
+    # Post-fix seam: message == podcast content key → no exact match to the poison.
+    podcast_key    = PredictionEngine._batch_question_key( _BATCH_PREAMBLE, _PODCAST_OPTS )
+    _, exact_new   = engine._select_retrieval_case( [ poison ], podcast_key )
+    assert exact_new is None
+
+
+def test_predict_batch_embeds_and_matches_on_content_key( wired_engine, monkeypatch ):
+    """predict() must embed AND match the batch on the content key, not the preamble."""
+    captured = {}
+    monkeypatch.setattr( wired_engine, "_generate_embedding",
+                         lambda text: captured.__setitem__( "emb", text ) or [ 0.1 ] )
+    def fake_oeb( message, category, embedding ):
+        captured[ "msg" ] = message
+        return PredictionResult(
+            response_type = cfg.RESPONSE_TYPE_OPEN_ENDED_BATCH,
+            category      = category,
+            strategy      = cfg.STRATEGY_COLD_START,
+            metadata      = {},
+        )
+    monkeypatch.setattr( wired_engine, "_predict_open_ended_batch", fake_oeb )
+    monkeypatch.setattr( wired_engine.classifier, "classify",
+                         lambda m, sender_id=None: ( "uncategorized", 1.0 ) )
+
+    result = wired_engine.predict( {
+        "message"          : _BATCH_PREAMBLE,
+        "response_type"    : cfg.RESPONSE_TYPE_OPEN_ENDED_BATCH,
+        "response_options" : _PODCAST_OPTS,
+    } )
+
+    assert captured[ "emb" ] == captured[ "msg" ]                 # embed + match same key
+    assert _BATCH_PREAMBLE not in captured[ "msg" ]               # NOT the preamble
+    assert "languages: Which languages should the podcast use?" in captured[ "msg" ]
+    assert result.metadata[ "batch_question_key" ] == captured[ "msg" ]   # stamped for storage
+
+
+def test_predict_batch_metadata_none_skips_stamp( wired_engine, monkeypatch ):
+    """A batch result with metadata=None is returned as-is (no stamp, no crash)."""
+    monkeypatch.setattr( wired_engine, "_generate_embedding", lambda text: [ 0.1 ] )
+    no_meta = PredictionResult(
+        response_type = cfg.RESPONSE_TYPE_OPEN_ENDED_BATCH,
+        category      = "uncategorized",
+        strategy      = cfg.STRATEGY_COLD_START,
+        metadata      = None,
+    )
+    monkeypatch.setattr( wired_engine, "_predict_open_ended_batch", lambda *a: no_meta )
+    monkeypatch.setattr( wired_engine.classifier, "classify",
+                         lambda m, sender_id=None: ( "uncategorized", 1.0 ) )
+    result = wired_engine.predict( {
+        "message"          : _BATCH_PREAMBLE,
+        "response_type"    : cfg.RESPONSE_TYPE_OPEN_ENDED_BATCH,
+        "response_options" : _PODCAST_OPTS,
+    } )
+    assert result is no_meta
+    assert result.metadata is None
+
+
+def test_store_decision_keys_batch_on_content_not_preamble( wired_engine, monkeypatch ):
+    """_store_decision must store the batch under its content key, not the preamble."""
+    store = FakeStore()
+    monkeypatch.setattr( wired_engine, "_get_embedding_store", lambda: store )
+    content_key = PredictionEngine._batch_question_key( _BATCH_PREAMBLE, _PODCAST_OPTS )
+    pr = PredictionResult(
+        response_type = cfg.RESPONSE_TYPE_OPEN_ENDED_BATCH,
+        category      = "uncategorized",
+        strategy      = cfg.STRATEGY_CBR_RETRIEVAL,
+        metadata      = { "original_message": _BATCH_PREAMBLE, "batch_question_key": content_key },
+    )
+    wired_engine._store_decision( "nid", pr, { "answers": { "languages": "en" } }, cfg.RESPONSE_TYPE_OPEN_ENDED_BATCH )
+    assert store.added
+    assert store.added[ 0 ][ "question" ] == content_key
+    assert store.added[ 0 ][ "question" ] != _BATCH_PREAMBLE
+
+
+def test_legacy_poison_case_cannot_exact_match_or_reach_confidence_one( engine, monkeypatch ):
+    """
+    Even if a legacy preamble-keyed poison row were retrieved (worst case), a
+    content-key batch query can neither exact-match it (no confidence 1.0, so it
+    cannot clear the 0.9 auto-submit floor) nor pick it up above the fallback's
+    max_similarity. Empirically the poison sits at ~0.43 cosine to a content key
+    (< the 0.85 retrieval floor), so in practice it is not even retrieved.
+    """
+    vertex_dv = json.dumps( { "answers": { "Vertex project": "hello-world-foo", "Push": "hold" } } )
+    poison    = _case( 88.0, question=_BATCH_PREAMBLE, decision_value=vertex_dv )
+    monkeypatch.setattr( engine, "_get_embedding_store", lambda: FakeStore( cases=[ poison ] ) )
+    # Force Tier-2 to fail so the WORST path (llm_fallback → top_case) is exercised.
+    monkeypatch.setattr( engine, "_build_synthesis_prompt", lambda m, c: "PROMPT" )
+    monkeypatch.setattr( engine, "_get_llm_client", lambda: FakeLlmClient( raise_on_run=True ) )
+
+    podcast_key = PredictionEngine._batch_question_key( _BATCH_PREAMBLE, _PODCAST_OPTS )
+    r = engine._predict_open_ended_batch( podcast_key, "uncategorized", [ 0.1 ] )
+
+    assert r.metadata[ "tier" ] != "exact_match"     # the 1.0 auto-submit path is closed
+    assert r.confidence < 1.0                          # capped at max_similarity (0.88), never 1.0
+    assert r.confidence == pytest.approx( 0.88 )
+
+
+def test_store_decision_non_batch_still_uses_original_message( wired_engine, monkeypatch ):
+    """Non-batch types (no batch_question_key) still key on original_message."""
+    store = FakeStore()
+    monkeypatch.setattr( wired_engine, "_get_embedding_store", lambda: store )
+    pr = PredictionResult(
+        response_type = cfg.RESPONSE_TYPE_OPEN_ENDED,
+        category      = "input",
+        strategy      = cfg.STRATEGY_CBR_RETRIEVAL,
+        metadata      = { "original_message": "What is the topic?" },
+    )
+    wired_engine._store_decision( "nid", pr, "AI", cfg.RESPONSE_TYPE_OPEN_ENDED )
+    assert store.added
+    assert store.added[ 0 ][ "question" ] == "What is the topic?"
 
 
 # ---------------------------------------------------------------------------

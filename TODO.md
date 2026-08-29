@@ -1,5 +1,1807 @@
 # TODO
 
+## 🌿 TONIGHT 2026-08-21 (Cheech 🌿 `5c04b97c`, nine re-spins; crew Krishna · Rachel · Pocholo · maya) — brain integration BUILT: `/api/v2 ask|submit`, ten doors retired, three tiers green at `8657cfa9`
+
+**Landed** on `wt-brain-integration-10ef4b64` (tip `7c00c787`, pushed): steps 1–9b, all ten doors (each deletes its own accordion card — Rick 20:44; Re-render button stays), door 8 voice→ask, step 12, class delete 7a20a09d, Mr Radio's B/C/D. Gate ts-6eaebff8 @888754f1 = no code regression; final tiers @8657cfa9 unit 16,876/0 · cosa 8,622/0 · guard 2/0 (María reproduced). Plan: `src/rnd/v0.2.0/2026.08.20-brain-integration-cascade-review-plan.md` § "Manager rulings after the 11:43 re-spin" (end-of-night fold).
+
+**Pending decision (Rick) — `83fe98aa`, chase 10:00 EDT**: (1) merge integration → wip now (recommended); (2) close B0(iii) window + Rachel reverts the UNCOMMITTED probe patch on the main checkout (`running_fifo_queue.py`, `todo_fifo_queue.py`, `_unreachability_probe.py`) — REQUIRED before the wip merge because 7c deleted `push_job`'s body. Four asks 20:52–21:29 timed out. Bounce `:7999` + push remain his word.
+
+**Tomorrow's order**: re-ask → revert + 0d4bc1ff closes → merge into wip → next `:8000` gate at that head (everything since 888754f1 rides it; maya rig, idle check §1a, E2E + integration, diff vs ts-6eaebff8) → bounce + push on Rick's word → step 13 (1e597a65, maya dry-run, Cheech GO) → María d212f54b eval → Mr Radio cdfedc41 (1447261b) → María's rename branch.
+
+**Follow-ups — ✅ ALL SIX DISPOSED OF, Rick's sprint-close walkthrough with María 🌸, 2026-08-22 ~11:40 EDT.** Every ruling below is a genuine keypress, not a timeout default. The no-new-bug-rows order of 08-21 was lifted for these specifically.
+
+- [x] **Order-effect unit reds** → **PROMOTED, row `ece4d86a`** (P2, Cheech). One row for all four, his choice over splitting or dropping. Carries the two-line fix for the diagnosed one *and* the finding that generalises: the arbiter-loop file does real bridge IO and carries **zero** `serial_bridge_guard` markers.
+- [x] **`self_respin` lost its wake** → **PROMOTED, row `b0570b67`** (P1, Cheech) — but **reframed on his ruling**: *add a wake check*, do NOT chase the root cause. The row says so in its first line so nobody spends a day reproducing an intermittent spawn-path drop. It fails in the worst direction — the seat looks idle, not broken.
+- [x] **Gate rig / gitignored state** → **DONE, no row.** Was already half-written: §0b of `RIG-PROCEDURE.md` covered `src/conf/keys` with its evidence (17 of 25 integration failures). Topped up with the terraform provider cache, `cloud-run.env`, the eleven failing test names, and the checkable-name rule. ⚠️ **`io/brain-integration-gate/` is git-ignored, so that procedure is not in version control** — flagged, not fixed.
+- [x] **The three-part bundle** → **SPLIT.** (a) Pocholo's sweep → **row `e3f59977`** (P2, Cheech), with an explicit warning not to close it by deleting tests to move a number. (b) Mock-job door → **DROPPED as already-decided** — held deliberately with the two resume-from doors; `mock_job.py:170` constructs directly with no registry command. (c) `test_data_types_and_exceptions.py` self-skip → **noted in the file itself**, not tracked: 7 tests have never run, and "skipped" reads as deliberate when it is not.
+- [x] **cosa collected 8,647 vs ran 8,648** → **DROPPED UNCHASED, and recorded as unchased** rather than left to fade. One test in eight and a half thousand, never produced a wrong verdict, and re-measuring needs a fresh collect *and* a fresh run on a box that is contended today.
+- [x] **Three concurrent tiers contend** → **COALESCED into `ece4d86a`** — same defect as item 1 seen from the other end. The marker already exists (`pytest.ini:60`), is already deselected by default (`pytest.ini:82`), and five files already carry it. The work is applying it, not inventing it.
+
+## ☕ TONIGHT 2026-08-21 (Mr. Radio 🦉 `e9a672a2`, crew of six) — four branches landed, board to zero; follow-ups kept OUT of the store per Rick's no-new-BUG-rows order
+
+**Landed**: A router-label-fix → wip `decae6c7` (0 corpus lines move; rule doc + `router_label_audit.py` + lint test) · B claude-code v2 submit → integration `1c319db0` · C expeditor per-call state → `24c3b3ba` · D xfail-blanket strip → `af9f557d` (and fixed dead Replay on done jobs). Rows 0795b5d8 · 14172091 · 10c60712 · 82fb9fcb · 25ff8360 closed with receipts.
+
+**Follow-ups (backlog, not rows — promote when Rick lifts the ban)**:
+- [ ] Regenerate FastAPI docs (`generate-api-docs.sh` → `api.json`/`api.md`) after the next `:7999` bounce picks up B's 410 doors — needs a live server (Rio's doc `src/rnd/v0.2.0/2026.08.21-claude-code-doors-external-callers.md`).
+- [ ] lupin-mobile's one claude-code submit call site now answers 410 — owed in the mobile repo (same doc).
+- [ ] `NotificationsHeaderRenderer.ts` TS coverage 99.31 stmts / 92.94 branch (lines 394, 424-425) fails the enforced 100% gate; pre-existing, proven by Chloé's c8 baseline at f4a8bee4 — owner of the renderer.
+- [ ] Pre-existing reds at the integration head: `test_no_router_in_the_tree_is_unmatched` (Rachel, door 10) + two podcast dry-run tests; maya's full unit at `1c319db0` is the count of record (Cheech).
+- [ ] `notifications.js:6187-6193` inert bare `${queueName}_jobs` fallback — two-line deletion for whoever is next in that region (Sam).
+- [ ] Two order-effect reds in whole-run unit tiers (presentation dry-run banner, v2 cache lancedb closure) pass alone — worth a fixture look (Tiberius).
+- [ ] Tooling: `git merge-tree --write-tree` is NOT in this git — use `git merge-tree $(git merge-base A B) A B | grep -c '^<<<<<<<'` for conflict checks (cost one false "both conflict" ruling tonight).
+
+**Mine, still open in the store**: 1e597a65 (step-13 dump, Cheech's GO after 9a/9b) · cdfedc41 (brake-flag protocol member, 1447261b, Cheech's 10:00 EDT window, María PASS). Memento: `src/rnd/v0.2.0/_archive/D/2026.08.21-mr-radio-cascade-resume-memento.md`.
+
+## ⚖️ RULED 2026-08-21 morning (Rick, to María 🌸 `e5933e98`) — brain integration: three questions closed, one scope added
+
+Plan `src/rnd/v0.2.0/2026.08.20-brain-integration-cascade-review-plan.md`, folded at `16c6dc2b`. **Nothing built.**
+
+1. **User mode STAYS; the queue resolves it first.** *"Per your recommendation we're going to keep it because the queue resolves mode first."* `push_job` keeps `get_user_mode` and both maps and hands `AskFlow` a resolved command — **the flow never learns about modes.** Ruled after two facts read from source: the mode state is a per-user dict keyed on `current_user["uid"]` at **both** ends (`todo_fifo_queue.py:230`, `queues.py:241`/`:1606`), so it is **not** a global flag; and every one of the 15 mode targets is already `speakable`, so mode adds **stickiness, not reach**.
+2. **Guard BOTH cache ends** — *"the read at the head end of the process, and the write after the agent executes."* ⚠️ The correctness prompt he named (`running_fifo_queue.py:1751`) is **asynchronous and times out to unverified**, so the row is written before the answer arrives: `answer_is_correct` is the **read** guard's field (fails CLOSED); the **write** guard keys on whether the **router chose** the agent.
+3. **The whole snapshot cache is DUMPED after the refactor** — *"we don't need to deal with any old bullshit that we have to try to figure out why."* ⇒ the 28-row question **dissolves**, and the measurements owed against it are **no longer owed**. The guards are **not** optional because of it — a fresh cache re-poisons itself without them, and refills ownerless unless the `user_id` fix is scheduled.
+4. **NEW SCOPE — one canonical entry point, the v2 one.** *"I don't want a Q&A entry point along with an ask entry point along with a specific kind of task queuing mechanism."* **Seven HTTP doors exist today across three mechanisms**; **two bypass `push_job` entirely** (`queues.py:1829`, `:1932`), so the read guard ruled above **does not reach them**. No step written yet.
+
+**Corrected in my own text, twice**: the 27 bad rows were **not** written by mode — they came from v2's `_maybe_write_back` (`flow.py:291`), which has **no CRUD exclusion**.
+
+**And my correction itself needed correcting** (Krishna, reconciled): `TodoCrudAgent`/`CalendarCrudAgent` **are** subclasses, so `isinstance` catches *them* — but the 28 rows carry **`TodoListAgent` (27) and `CalendaringAgent` (1)**, which are **siblings** and sail straight through that check. ⇒ **v1 is protected by ROUTING, not by the class test**: the CRUD fork means a todo question builds a CRUD subclass in the first place. Both statements were true about different classes, and only the reconciled one is useful.
+
+**Still unruled**: does dead `_process_fast_lane` go with its seven tests · what becomes of the other six doors.
+
+**Own rows, found while checking and not folded into this plan**: `dead_queue_watchdog.py:396` re-pushes with `getattr( failed_job, "user_id", "" )` — an empty-key fallback shared by every job that lost its user · `speech.py:338` calls `push_job` with **one of four required arguments**, so that path is dead or raises every time; undetermined which.
+
+---
+## 🕳️ PATTERN 2026-08-20 (Tiberius 👑, recorded by Mr. Radio 🦉 `f60b686e`) — AN INSTRUMENT THAT ERASES ITS OWN WITNESS: three sightings in one night, so design against it rather than fix it three times
+
+**The general form**: *a measurement whose population excludes failures cannot report failure.* Each sighting below looked healthy — that is the whole problem. None of the three announced anything; a person noticed the number was wrong.
+
+### The three, tonight
+
+| # | instrument | how it erased its witness |
+|---|---|---|
+| 1 | the v1/v2 scorer | booked correct v1 behaviour as failure — same 20 utterances scored **20/20 for v2, 0/20 for v1**, both arms behaving correctly |
+| 2 | `render_paired_report` | emitted provenance and a **bare delta** — a median over whichever utterances survived would have read as a verdict on the whole corpus (`5dfe0d43` ruled otherwise; never implemented until `0b3a08f2`) |
+| 3 | the four route-error rates | computed over the **`ok` set**, and `is_completed_ok` moved errored records *out* of `ok` — so all four went **structurally zero at the exact moment they mattered**. `replay_failure_rate` read `0.0` while 42% of warm responses were failing |
+
+Adjacent sightings from the same week, same shape: a websocket suite reporting green over **4 of ~50** tests; `/health` answering 200 while every embed returned nothing; `n=49` from a pairing that compared nothing.
+
+### The design rule this argues for
+
+**Before trusting a rate, ask what its denominator excludes.** If the excluded set is where the failures go, the rate is structurally incapable of reporting them — and it will report `0.0`, which reads as good news. A zero from a healthy system and a zero from an erased denominator are indistinguishable at the point of reading.
+
+⇒ Concretely: **an error rate must be computed over every ANSWERED request, never over the successful subset.** That is the fix Tiberius applied — with the control that proves it (dirty case red on the old code and `0.42` on the new; clean case denominators coincide exactly, so nothing that reported correctly changes).
+
+⚠️ **Demanding the receipt is what found the second layer.** He had a working fix for the one metric and would have shipped it; being asked to *prove* "nothing that reported correctly changes" surfaced that the cache views legitimately want the ok-gated denominator and the error views do not. **The proof was not a formality — it was the thing that found the rest of the defect.**
+
+### Not yet owed
+No row, per the standing no-new-rows order. The candidate work is a sweep for other rates computed over a success-filtered population, and a test convention that pins each rate's denominator explicitly.
+
+
+## 🔁 BACKLOG 2026-08-20 (Chloé 🗼, handed back to Mr. Radio 🦉 `f60b686e`) — six hand-rolled retry loops now have a shared helper to move onto, and two of them must not be moved blind
+
+**Not owed yet — no row, per Rick's no-new-rows order. This is the hand-back so it does not evaporate with the seat.**
+
+The shared helper exists and is in use: `src/cosa/utils/bounded_retry.py` (sync `retry_call` + async `retry_call_async`, attempt count, wall-clock deadline, exponential backoff, exception filtering, optional predicate, `on_retry` hook, retry-on-returned-value). Landed at **`8fab39fe`** with 100% lines AND branches, first caller `search_kagi.py:search_fastgpt()`. Full unit sweep after it: **16,065 passed, 0 failed**.
+
+**Why the helper was worth building at all**: there was no shared retry helper and no retry library in the tree — no `tenacity`, no `backoff` in any requirements file — and six independent loops had each solved it again.
+
+### The six candidates, per-loop risk in the writeup
+`src/rnd/v0.2.0/2026.08.20-bounded-retry-helper-and-migration-candidates.md`
+
+⚠️ **Two must be read before they are touched** — Chloé's call, and it is the reason this is a backlog note rather than a mechanical sweep:
+
+| loop | why it is not mechanical |
+|---|---|
+| `agents/dm_quality_judge/` (`judge.py`, `judge_v2.py`) | the prompt **changes between attempts** to break a degenerate mode — a generic retry that replays the same call defeats the point of retrying |
+| `memory/embedding_provider.py` | the exception **types** drive whether the caller retries by shrinking the batch (bug `13b35b37`) — a helper that normalises or swallows the type breaks the caller's decision |
+
+The other four (`podcast_generator/tts_client.py`, `notification_proxy/verification.py`, `memory/speech_to_text_provider.py`, `rest/db/auto_migrate.py`) look closer to mechanical, but `auto_migrate` is deadline-shaped and was the model the helper was built from, so it may be better left as the reference.
+
+**Anyone taking this**: migrate one loop per commit with its own tests, never a sweep. The fence on the original row existed because a P3 that grows into a six-file refactor stops being reviewable.
+
+
+## 🐢 FINDING 2026-08-20 (Mr. Radio 🦉 `f60b686e`, at Rick's request) — v2's CACHE NEVER HITS: the synonym row points at a snapshot id that does not exist
+
+**Rick asked where v2's latency lives, and guessed a blocking embed plus a slow DB write. Both measured, both cheap.** Analysis only — **nothing was changed.**
+
+### Where the time actually goes (median per phase, 191 traces)
+
+| Phase | todo | math | calculator |
+|---|---:|---:|---:|
+| router | 22 ms | 23 ms | 22 ms |
+| agent invoked | 831 ms | 901 ms | 807 ms |
+| **first useful output** | **62,217 ms** | **9,222 ms** | **3,126 ms** |
+| writeback complete | 62,930 ms | 9,435 ms | 3,235 ms |
+
+**Embedding 1.6 ms · ANN 1.7 ms · exact lookup 11.9 ms · DB write-back 110–710 ms.** ⇒ **~100% of the time is agent execution**, before anything is written anywhere.
+
+### The reason the agent runs at all: the cache never hits
+
+**0 cache hits in 193 requests, including 93 warm-pass repeats.** Cold median 8,520 ms, warm median 8,473 ms — **the warm pass buys nothing**. 59 of 74 ANN lookups scored **exactly 100.0** and none replayed (by design, `flow.py:95` — only a tier-1 exact match replays). Tier 1b `exact_normalized`, the *designated* warm-pass replay signal, fired **0** times.
+
+### 🔴 THE MECHANISM — GHOST POINTERS (Tiberius's diagnosis; mine below was WRONG)
+
+**The clean step truncates `solution_snapshots` and leaves `canonical_synonyms` standing.** So every run begins holding *prior runs'* synonym rows pointing at snapshot rows that no longer exist. Tier 1 matches a ghost by verbatim text, dereferences it to nothing, and reports a **miss**.
+
+⇒ **That explains both halves of the signature at once**: a **0% hit rate** against a **65% candidate rate** is what a lookup looks like when it *finds* something and then dereferences to nothing. Receipt from `lupin_db_test` after `ts-23613e7d`: **124 snapshots, 1,021 v2-written synonyms, 897 dangling**, and every synonym matching a live question resolved to a ghost.
+
+**Fix**: both clean steps now empty the two tables in one statement, with tests that go red on the old code.
+
+**⚠️ MY DIAGNOSIS BELOW WAS WRONG AND THE ERROR IS INSTRUCTIVE.** I compared a synonym row against a snapshot for the same question *text* and concluded write-back computed two different ids. **They came from different GENERATIONS** — the synonym survived an earlier run, the snapshot was written by this one. Same question, different run, different row; the ids disagree for a reason that has nothing to do with the write path. **I asserted a mechanism from two values without checking they were contemporaries.** An id bug explains neither half of the signature; ghost pointers explain both. Kept below as the record of a tested-and-failed hypothesis, not deleted.
+
+### ~~The mechanism — two different ids for the same question~~ (WITHDRAWN, see above)
+
+Queried `lupin_db_test` (the isolated store the run actually writes; **my first query hit `lupin_db_dev` and returned a misleading 0/25 — the wrong-database mistake, caught before it was claimed**):
+
+| Check | Result |
+|---|---|
+| Tonight's repeated questions with a `canonical_synonyms` row | **23 / 25** |
+| Same questions present in `solution_snapshots` (by text) | **23 / 25** |
+| Same questions whose synonym `snapshot_id` **resolves** to a snapshot | **0 / 25** |
+| Synonym rows store-wide whose `snapshot_id` does not resolve | **924 / 1,048** |
+
+For `'update the priority of paint bedroom on my task list'`:
+- `canonical_synonyms.snapshot_id` = `44933b7331defafcb145f6f61e7907d38b666b40da67a4bd47ddea25f2cbd4a2`
+- `solution_snapshots.id_hash` for that same question = `0958b48a7435b70834def2de787ca0ce93aae95f8ed2c795c83d40ad9502…`
+
+⇒ **Write-back stores the snapshot under one id and the synonym under a different one.** The exact tier finds the synonym, follows the pointer, finds nothing, falls through to ANN — which by design never replays — so **the full agent runs on every repeat**, and a duplicate snapshot is written (57 of 59 perfect-similarity records did exactly that).
+
+### ⚠️ THIS PARTLY REVERSES TONIGHT'S HEADLINE
+
+If v1's warm pass replays from a working cache (~3.5 s) while v2 re-runs the full agent every time, then the measured **"v1 is 3.9× faster" is largely cached-vs-uncached, not architecture** — the benchmark compared **v1-with-a-working-cache against v2-with-a-broken-one**. The comparison may be **understating** v2 substantially.
+
+### ✅ FIXED AND PROVEN LIVE — then Rick ordered the cache fixed BEFORE the rerun
+
+**Rick's ruling ~21:12** (four-option ask, answered, not a default): *"Fix the cache first, then rerun."* He had ordered the rerun an hour earlier, before either of us knew the cache was dead; shown the new evidence, he changed the order. The submit was held ~10 minutes while he decided.
+
+**Live two-call proof on `:8000`, after running the real guarded clean step** — not a unit test:
+
+| | |
+|---|---|
+| Call 1 — agent path, no hit | **11,148 ms** |
+| Call 2 — replay path, `cache_hit` true, similarity 100.0 | **24.6 ms** |
+| Ratio | **~450×** |
+
+Store finished with 1 snapshot, 1 synonym, **0 dangling**; the clean step cleared all 1,048 real synonyms including the 924 ghosts. ⚠️ **Held loosely: one utterance, one pair — a mechanism demonstration, not a distribution.**
+
+**Blast-radius check before commit** (asked, because a helper that empties a table gets reused somewhere it shouldn't six months later): both truncate functions live in `src/scripts`, no application module imports them, and each **refuses unless the EXECUTING connection's own database name** is exactly `lupin_db_test` or `lupin_db_v1baseline` — frozenset equality, not substring, read off the live connection so a passed argument cannot lie about the target. Only the table list inside that already-guarded statement was widened.
+
+### 🔄 AND THIS REVERSES THE STANDING HEADLINE
+
+**"v1 is 3.9× faster" was measured against a v2 whose cache could not hit once** — it was never a comparison of the two designs. With v1 replaying warm in ~3,500 ms and v2 in tens of milliseconds, the aligned rerun may land the opposite way. **Nobody should quote the old number as though it still stands.**
+
+**In flight**: `ts-e0311090`, n=20, submitted 21:26 — the first run tonight with **aligned scorers AND a working cache**. Gate cleared properly: unit suite **16,003 passed / 0 failed, exit code 0 read directly rather than through a pipe**; six fixes at `4ec69f42`; `:8000` verified idle; n=20 confirmed in compose *and* the container's own env. Rick confirmed he is keeping the box up past the ~23:00 landing.
+
+
+## ⚖️ RULED 2026-08-20 (Mr. Radio 🦉 `f60b686e`, found by Tiberius 👑) — REFUSE THE NUMBER: THE TWO ARMS WERE NEVER SCORED BY THE SAME RULES
+
+**Row `d8d019f6` closes on "a real median-delta number, OR a refusal with a reason someone can point at." This is that refusal**, and it is worth more than the delta would have been: a delta gets argued with, a broken instrument gets fixed.
+
+### 🔴 THE ONE EXAMPLE THAT SETTLES IT — same 20 utterances, both arms behaving CORRECTLY, opposite verdicts
+
+The identical 20 `automatic` mode-switch utterances, same corpus, same night, **neither arm misbehaving**:
+
+| Arm | What it does | What its scorer says |
+|---|---|---|
+| **v1** | answers the mode switch **instantly**, returns `job_id: None` (correct — a mode switch spawns no job) | `failure="push_failed"` ⇒ **0 of 20** |
+| **v2** | answers the mode switch, returns 200 | `ok=True` ⇒ **20 of 20** |
+
+**One category, two verdicts, zero difference in behaviour.** Lead with this if anyone asks why the comparison cannot stand.
+
+### Three independent asymmetries. Each one alone invalidates the comparison.
+
+**(1) The two arms do not define "ok" at the same bar** — read at both lines, not taken on report:
+
+| Arm | The line that decides success | What it requires |
+|---|---|---|
+| **v2** | `v2_eval.py:837` — `ok = ( reply.status_code == 200 )` | **The HTTP call returned 200.** Nothing about content: an empty or useless body scores as a success. |
+| **v1** | `v1_eval_arm.py:314` — `rec.ok = rec.client_span_ms is not None` | Reachable only after job id, metadata **and** `completed_ts` all exist. **The work finished end to end and the client observed it.** |
+
+⇒ *"Did the server answer?"* and *"did the work finish?"* are different questions. A v1 job that ran perfectly but whose completion event the client missed scores as a **failure**; a v2 call returning an empty 200 scores as a **success**.
+
+**(2) A correct mode switch is booked as a v1 failure — 40 occurrences.** Asymmetries 1 and 2 fire together on the same twenty rows above. **That is the entire "automatic 0 of 20."** v1's honest failure rate is **~35%, not 48%** — and still not comparable to v2's until the bars match.
+
+**(3) The routing denominators differ — and the contract for it was written into the wrong file.** `v1_eval_arm.py:440` excludes routing-ineligible utterances from its denominator (~40% of the corpus) and says, verbatim:
+
+> `# … and their count + corpus share are reported so the exclusion`
+> `# is auditable, never silent. The v2 arm must exclude the SAME utterances.`
+
+**The string `eligible` appears 12 times in `v1_eval_arm.py` and ZERO times in `v2_eval.py`.** Verified by grep. So v1 scores routing over ~60% of the corpus and v2 over 100%.
+
+⇒ **THE LESSON IS SHARPER THAN THE DEFECT.** Somebody knew the requirement precisely enough to write it down — **in the wrong component's comments, addressed to code that was never going to read it.** *A cross-component contract living in one component's comments is not a contract, it is a wish.*
+
+### ⇒ This upgrades the verdict from "tonight's run is unreadable" to "no run from this harness was ever readable."
+
+**Artifacts preserved deliberately, as EVIDENCE FOR THE REFUSAL rather than as a result.** The `ok`-scoring is broken; the client spans were recorded independently of it, so once both scorers agree on a bar a valid delta may be **re-derivable from tonight's data without another 70-minute run**.
+
+**The pre-existing asymmetry stays disclosed and is NOT part of this**: v1's client span includes full FIFO queue-dwell by design, and that was chosen, documented, and printed in the instrument string. **These three were not chosen.**
+
+### ⏳ PENDING — Rick did not answer (the ask timed out; no response at all)
+
+Asked ~20:24: fix the scorers and rerun **tomorrow morning** (my recommendation), rerun **tonight**, or **stop and take the defects**. **Nothing is authorized and nothing was done.** The run was left to finish for its artifacts. Re-ask tomorrow.
+
+### 🧵 THE SENTENCE THAT TIES THE WHOLE NIGHT TOGETHER (Tiberius, 20:33)
+
+> **"The wrong pairing does not look wrong, it looks well-powered."**
+
+Pairing v1-warm against v2-cold would have yielded **49 shared utterances** — a perfectly plausible sample size. That is how the meaningless −11.2s delta got produced. The **correct** pairing yields **0** and the tool refuses. ⇒ **The broken-looking output was the honest one.**
+
+**Every finding tonight has this shape — the failing state looked healthier than the true state:**
+
+| Instrument | Looked like | Actually was |
+|---|---|---|
+| Bare `pytest` over `websocket_smoke` | "5 passed" — a green tier | 4 of ~50 tests |
+| `/health` on the v1 arm | 200, all night | every embed returning nothing |
+| v1's scorer on a mode switch | `push_failed` ×20 | correct behaviour, mis-booked |
+| Cold-vs-warm pairing | n=49, well-powered | not a comparison at all |
+| Unit suite over `running_fifo_queue` | green | a mock implementing a method the real class lacks |
+
+⇒ **A number that looks reasonable is not evidence the measurement was reasonable.** The only defence that worked all night was asking one more discriminating question before publishing.
+
+**And the design lesson underneath it** (from the seq-split fix, `4366749f`): an **assertion detects a mislabelling after it happens; splitting on the arm's own monotonic counter means there is nothing to detect.** Correct-by-construction beats correct-and-checked. Three separate fixes tonight ended up taking that shape.
+
+### 🔬 THE PATTERN THAT SAVED THIS, WORTH MORE THAN ANY SINGLE FINDING
+
+Tonight produced **five confident answers** to "why does v1 fail ~half the time," and **four were wrong**:
+
+| # | Answer | How it died |
+|---|---|---|
+| 1 | Missing credentials cripple the baseline | **Disproved by its own test** — 48% credentialed vs 47% crippled |
+| 2 | v1 is genuinely unreliable; v2 wins on reliability | Withdrawn — it would have been published at 19:31 |
+| 3 | Three distinct v1 defects | Partly right; one is shared with main, one is a harness artifact |
+| 4 | The instrument mis-scores mode switches | True, but not the whole story |
+| 5 | **The two scorers never asked the same question** | Current, and it dissolves the rest |
+
+**Each was stated confidently. Each died to one more discriminating question asked before publishing.** Tiberius withdrew his credential theory *explicitly* in the write-up rather than letting it fade — "tested and failed" and "superseded" leave the next reader in completely different positions. **Two of the wrong calls were mine** (the direction of the notify bias; the blast radius of the mock-auth defect), both corrected by the worker holding the measurement.
+
+
+## 🪞 FINDING 2026-08-20 (Mr. Radio 🦉 `f60b686e`) — A TEST MOCK IMPLEMENTS A METHOD THE REAL CLASS DOES NOT HAVE, and it is live on main right now
+
+**`set_solution_summary_gist` is called in production and defined nowhere in production.**
+
+| Where | What |
+|---|---|
+| `src/cosa/rest/running_fifo_queue.py:1579` and **`:1730`** (MAIN tree, today) | **calls** `running_job.set_solution_summary_gist( … )` |
+| same file, pinned worktree `b0735467`, `:1579` and `:1744` | **calls** it |
+| `src/cosa/memory/solution_snapshot.py`, either tree | **no definition** |
+| anywhere in production code, either tree | **no definition** |
+| `src/cosa/tests/unit/rest/test_running_fifo_queue.py:65` | **`def set_solution_summary_gist( self, v ): self.solution_summary_gist = v`** — on a **test double** |
+| `src/cosa/history/2025-11-08-to-2026-02-03-history.md:746` | a markdown record of a method that once existed |
+
+⇒ **THE MOCK IS MORE CAPABLE THAN THE REAL CLASS.** The unit suite passes because the double implements a method `SolutionSnapshot` does not have, so production raises `AttributeError` at a line the suite believes it covers. **This is at HEAD, not only in the pinned baseline** — it is a live defect on the working branch.
+
+**Observed cost**: 42 occurrences of `'SolutionSnapshot' object has no attribute 'set_solution_summary_gist'` in one v1 arm run.
+
+**⚠️ AND IT IS NOT A v1-vs-v2 DIFFERENTIATOR, WHICH IS THE TRAP.** It is one **shared** bug that only v1's code path reaches. Read naively it inflates v1's failure count and looks like evidence that v2 is more reliable by design. It is not.
+
+**This is the third time tonight the cause of v1's ~48% failure rate has moved**: missing credentials → *(disproved, 48% vs 47% after provisioning)* → genuine v1 unreliability → *(now)* three separate defects, at least one of them shared with main and one of them a harness artifact. **Each attribution was stated confidently and each was wrong.** The pattern that keeps saving it is refusing to publish until one more discriminating question is answered.
+
+**Status of the other two failure classes in the credentialed run:**
+- **49 × `User not found: interactive_job_tester_8e32@generated.local`** — the *same* mock-auth id as the notify finding above. The v1 launcher sets `AUTH_MODE=mock` while dev and test run `jwt`, so this is a **mock user never provisioned in the DB — harness artifact**, not a v1 defect.
+- **28 × `EmbeddingProvider HTTP fallback returned 422 — String should have at least 1 character, input: ''`** — **v1 is embedding an empty string.** No read yet on whether the empty value is the utterance itself or a derived field v1 fails to populate. **This one may be genuine.**
+
+**Not filed as store rows** (no-new-rows order). The mock/real mismatch deserves a P1 when it lifts — a passing test suite is currently asserting the existence of a method that does not exist.
+
+
+## ♻️ FINDING 2026-08-20 (Tiberius 👑, error owned by Mr. Radio 🦉 `f60b686e`) — A CONTAINER RECREATE DOES NOT KILL A RUNNING JOB, IT REHYDRATES IT
+
+**I told Tiberius "force-recreating the test container is what ended `ts-7b9a6b87`." That was wrong**, and it nearly cost the rerun.
+
+**What actually happens**: the recreate applies env changes and the persisted job comes **back**. His log: `[CJ-PERSIST] Restored immediate job: ts-346cab2d`, restarted **19:46:33**. His "job gone" check landed in the few seconds before rehydration completed, read empty, and he then relaunched the v1 arm **underneath a live run** at 19:48:59.
+
+⇒ **What ends it**: killing the pytest process **inside** the container, which dead-letters the job and frees the monopolize slot. The recreate is the sanctioned path for applying env changes — it is **not** a kill. The two look identical for about ten seconds.
+
+**⚠️ AND THIS REFINES A DOCUMENTED RULE, which is why it belongs here and not only on a row.** The `schedule-tests` skill states — correctly, measured 2026-08-15 — that **a bounce DESTROYS the queue**: `todo`, `run`, `done`, `dead` all came back empty and two queued jobs were lost. **Both facts are true at once**: a **QUEUED** job is lost, a **RUNNING immediate** job **rehydrates**.
+
+**The trap is the inference, not either fact.** A reader who knows "a bounce destroys the queue" naturally concludes "so a bounce kills the running job too" — and gets tonight's outcome: a baseline server relaunched under a run that was still going. **That inference is nowhere written down as false.** Worth adding to the skill next to the existing warning.
+
+**Also fixed tonight, `f86ee2d7` — a green tick that meant the wrong thing.** Tiberius's report tool rendered **PASS** on a synthetic pair that kept 53 of 100 with one category entirely absent, because **both arms lost the same records** so nothing *diverged*. **Divergence and attrition are different questions and it only asked the first.** A green reading "the arms agree" when the honest statement is "the arms agree about half a corpus." He found it by rehearsing the tool on a synthetic pair rather than waiting for live data to expose it.
+
+**Status**: `ts-23613e7d` running since 19:50:20 — the first properly credentialed run tonight. Verified independently: 11 keys in the worktree, **zero** key-not-found lines in the fresh arm log, pin still `b0735467` with an empty porcelain.
+
+
+## 📨 FINDING 2026-08-20 (Mr. Radio 🦉 `f60b686e`) — THE DM CONDENSER DROPPED AN AUTHORIZATION LINE, three times, and each drop cost ~5 minutes of a live run
+
+**What happened.** Tiberius correctly refused to kill a live job without Rick's direct word. I sent it three times. My 19:40 DM **opened with the literal words "RICK'S WORD: KILL IT"**, followed by the provenance: the 19:32 four-option ask, his selection of *"Kill it, fix the credentials, rerun now"*, `answered=true`, `default_used=false`. His reply came back: **"You have said three times to kill it but not once that you have his word."**
+
+⇒ **He is not wrong about what he received.** The DM condenser summarised my message and **dropped the authorization sentence** — the one load-bearing line — while keeping the surrounding operational detail. Every one of those DMs carries the marker `This DM was condensed in transit`.
+
+**THE SHAPE**: the condenser optimises for *information density*, and a short declarative authorization ("I have his word") is low-density next to a paragraph of mechanics. So it compresses away **precisely the sentence a permission gate is waiting on**, and leaves the instructions it was gating. The receiver then sees an order with no authority behind it — which is exactly what a careful worker is built to refuse.
+
+**Cost tonight**: ~15 minutes across three round-trips, while a run that could not produce a number kept burning the box.
+
+**Workaround used**: send the authorization **alone**, in a message short enough that there is nothing to condense. That worked.
+
+⇒ **The fix worth building**: authorization lines must be exempt from condensation, or the condenser must never drop a sentence naming a person's decision. A comms layer that summarises away consent is a comms layer that manufactures refusals. Related but distinct from `b1f3d2df` (condenser inventing a noun) and `206dd6ea` (truncated body, fallback did not fire) — both already closed, both the same family.
+
+**Not filed as a store row** (no-new-rows order). Worth a P1 when it lifts — this one silently breaks the fleet's permission model.
+
+
+## 🔑 FINDING 2026-08-20 (Tiberius 👑, verified by Mr. Radio 🦉 `f60b686e`) — EVERY WORKTREE IS BORN WITHOUT CREDENTIALS, and four gates said the server was fine
+
+**Attempt 12 could not produce a number, and the reason is not the code.** The pinned v1 baseline worktree holds **2 API key files**; the main tree holds **11**. Verified independently by listing both directories:
+
+```
+main tree:  anthropic-api-key-firewalled eleven11 gemini google groq huggingface
+            kagi mistral model-server-api notification-api-claude-code-dev openai
+worktree:   model-server-api notification-api-claude-code-dev
+```
+
+**The causal chain appears ~300 times in the v1 arm log**: `Key [openai] not found at …/lupin-v1-baseline-b0735467/src/conf/keys/openai` → `EMBEDDING API ERROR` → sqlalchemy `expected 768 dimensions, not 0`. Plus 28 where the HTTP fallback to the model server 422'd on empty text, and 27 jobs ending `Confirmation timeout/error — defaulting to cancel`. **Only 18 of 320 pushes returned 500** ⇒ these are jobs that were **accepted and then died on a missing credential**, not rejected requests.
+
+⇒ **v1 kept 53 of 100 warm-pass records, with `automatic` at 0/20 and `calculator` at 3/20.** A delta computed on that compares v2 against a v1 that could not embed.
+
+**🔴 THE FINDING WE NEARLY PUBLISHED INSTEAD.** v1 at 53/100 against v2 at 22/22 reads as *"v2 is dramatically more reliable"* — and I had already told Tiberius to put that comparison on the first screen of the report, above the latency delta, because it answered Rick's question more decisively. **It would have been false.** The gap is a provisioning error in one worktree, not a property of either codebase. What caught it was asking one question before publishing: *are these real request failures, or records that never got written?* Neither of us knew, and the answer was neither.
+
+**⚠️ ROOT CAUSE, AND IT OUTLIVES THIS RUN: keys are gitignored, so every worktree is born credential-less and nothing warns.** The baseline server came up, answered `/health` 200, **passed its code-identity gate**, and accepted work — then failed on the first embed. It ran that way for four hours.
+
+⇒ **IDENTITY IS NOT CAPABILITY.** Every gate this crew has built checks *which code is running*; none checked *whether the environment can do the work*. Second instance in one day — the 18:07 reboot killed both vLLM model servers and `:7997`, and only `:7997` was written down.
+
+**FIXED, by Tiberius, `ee221b71`** — and both design choices matter:
+- It is a **DIFF of the two key directories, not an enumeration**. The launcher already checked `model-server-api`, which is exactly how this was missed — enumerating repeats the mistake one key at a time, while a diff catches whatever the main tree has and the worktree lacks, **including keys added later**.
+- It sits on the **already-up path**, which is the half that actually bit us: every re-check tonight said *"identity matches, nothing to do."*
+- Proven red against the live crippled arm; names all nine missing keys and prints the copy command; exit 1.
+
+**Rick's ruling, 19:33 EDT**: kill, fix the credentials, rerun at n=20 now. Answered off a four-option ask, not a default. **On the pin**: keys are not code, `b0735467`'s tree is unchanged, so provisioning credentials does not weaken the tamper-evident baseline — stated on the row so a later reader does not mistake it for tampering.
+
+**AND THE EMBED PROBE LANDED, `5ecee90e` — built as a DISCRIMINATOR, not a check that passes.** The identical probe returns **0 from the crippled worktree and 768 from the main tree**, same code and same model server, differing only in which key directory is on the path. That negative control is what separates an instrument from a decoration: a probe nobody has ever seen fail is an assumption with a green tick.
+
+It **replaces the `/health` call outright** — `/health` answered all night while all 300 embeds returned nothing.
+
+⇒ **BOTH CHECKS STAY, because they fail on different things**: the **diff** catches a key that is *absent* and names which files to copy; the **probe** catches a key that is present but wrong, revoked, or pointing at nothing. The diff proves a file exists, which is the same shape of gap as `/health` proving a port answers — that argues for the probe being the gate, not for dropping the cheaper check.
+
+**Provenance verified three ways rather than asserted** (row event 8217, written *before* the copy): `.gitignore:71` excludes `src/conf/keys/**`, so the keys were never in `b0735467`'s tree and cannot be; the worktree is clean at `b0735467`; and after the copy both `rev-parse` and the code-identity gate still read `b0735467`. **Tiberius's sentence, which settles it: *"Provisioning restores the intended baseline; the tampering would have been publishing a delta against an arm we knew could not embed."***
+
+
+## 🚦 FINDING 2026-08-20 (Mr. Radio 🦉 `f60b686e`, with María 🌸) — the websocket tier CANNOT do its job where the merge checklist puts it, and it reports green anyway
+
+**Two defects, and the second is the one that matters.**
+
+**(1) The directory answers to bare pytest and lies.** `python -m pytest src/tests/websocket_smoke/ -q` returns **5 passed, 1 skipped** — and reads as a passing tier. The real suite is ~50 tests and does **not** run under pytest collection: it lives behind a custom runner, `python -m tests.websocket_smoke.infrastructure.smoke_test_runner`, invoked by `src/scripts/run-websocket-smoke-tests.sh`. Counted in the tree: **4 pytest-collectable test functions** across the whole `websocket_smoke/` directory. ⇒ **A green covering roughly a twelfth of the suite, with nothing in the output saying so.** Caught tonight when María reported "websocket smoke 5 passed 1 skipped" and the number didn't match what CLAUDE.md says that tier is. She retracted within two minutes of being asked which command she ran.
+
+**(2) THE GATE ORDER ITSELF IS WRONG FOR WORKTREE BRANCHES — María's point, and it is worth more than the miss.** The websocket suite drives a **live server**. On a worktree branch it therefore tests **whatever `:7999` is currently serving**, which is not the branch's code. The PR merge checklist places it *before* the merge. ⇒ **In that position, for any worktree branch, it cannot do its job — it produces a green about code that isn't under test.**
+
+⇒ **THE SPLIT, applied to María's brain-integration merge tonight**: unit and cosa are meaningful **pre-merge** on the worktree (she has both — 15,937 passed with 11 failures proven identical on a clean control at `a657e88e`; cosa 8,750 / 0). **Websocket smoke, E2E UI and integration are all server-dependent ⇒ post-merge, post-bounce**: release `:8000` → merge → bounce `:7999` with the sanctioned script → run websocket smoke **through the shell script** → then take `:8000` for the last two.
+
+**Not filed as a store row** (no-new-rows order). Worth one when it lifts — probably as a pytest collection guard that fails loudly if the websocket directory is invoked directly, since a suite that answers to the wrong command with a green is the failure mode here, not the runner.
+
+
+## 🔔 FINDING 2026-08-20 (Mr. Radio 🦉 `f60b686e`, corrected by Tiberius 👑) — v1's notifications fail validation 530 times and nobody has ever seen it
+
+**Found by reading the v1 arm's log during attempt 12, not by looking for it.** `/tmp/v1-baseline-7997.log` carries **530 × `[ERROR] _notify() failed: 1 validation error for AsyncNotificationRequest`**. The cause is not a network problem: `job_id` fails the model's pattern `^([a-z]+-[a-f0-9]{8}…`. It is **caught, logged, and non-fatal**, so every run completes and nothing visibly breaks. **v2 has 0** of these in a live container log of 1,516 lines.
+
+**I called the direction of the bias wrong and Tiberius corrected it — the correction is the useful part.** I assumed a failing notify *added* latency to v1's measured span, making v1 look slow and flattering v2. The opposite is true: the exception is raised **constructing** `AsyncNotificationRequest`, which happens **before** `notify_user_async` is ever called — and that function is a **synchronous `requests.post` with retry sleeps**. So the failure **skips an HTTP round trip a healthy v1 would pay**, at ~**1.66 skipped notifies per push**.
+
+⇒ It is genuinely inside the measured span (`running_fifo_queue.py:1687` calls `_notify`, and the run-to-done event the client blocks on is emitted after it). ⇒ **A repaired v1 would measure SLOWER, so tonight's delta is CONSERVATIVE toward v2, not inflated by it.** That sentence goes beside the number in the report rather than being left as an unexplained asterisk.
+
+**✅ ANSWERED — and the answer is "neither", which is why asking was worth it.** I framed it as a binary: harness artifact, or a product bug dropping real users' notifications. Tiberius established it is **the ordinary path carrying a harness-shaped value**, so it is a real defect with a much narrower blast radius than I feared.
+
+**The mechanism**: the id is not synthesized by the eval harness — it is `job.id_hash`, scoped by the ordinary `register_scoped_job` into `"sha256::user_id"`. The notification pattern accepts that form **only when `user_id` is a UUID**.
+
+**Established with a negative control, four real values tested rather than one:**
+
+| Value | Against the pattern |
+|---|---|
+| mock-auth id the v1 arm actually produces (`interactive_job_tester_8e32@generated.local`) | ❌ **REJECTED** |
+| a real JWT `user_id` (a UUID) | ✅ matches |
+| a bare sha256 | ✅ matches |
+| an agentic id | ✅ matches |
+
+⇒ **A genuine logged-in user's notifications validate fine.**
+
+**🔴 I THEN OVERSTATED THE BLAST RADIUS AND TIBERIUS NARROWED IT AGAIN — with receipts.** I wrote that it hits "every deployment running `AUTH_MODE=mock`… our whole dev and test fleet," and that notifications had therefore been silently failing across the environments where people debug by watching them. **That was wrong**, and the correction is measured, not argued:
+
+- `auth mode = jwt` is set once in `[Lupin: Baseline]`, which **Development and Testing both inherit**
+- **neither container overrides `AUTH_MODE`**; the live dev container reports `jwt` when asked directly
+- **dev and test logged ZERO of these failures** while carrying real traffic
+- the **only** `AUTH_MODE=mock` in play anywhere is the **v1 baseline arm's own launcher, line 145** — even `run-websocket-smoke-tests.sh` dropped its mock override, with a comment that the server runs JWT now
+
+⇒ **Scope is the pinned v1 eval arm, not the fleet. Nobody has been debugging blind.** Filed as row `befeba88` (Tiberius had already filed it before the no-new-rows order reached him; kept queued — it costs nothing there and dropping a measured defect to satisfy a workload order would lose it). Scope corrected inside the row so it does not stand as a fleet-wide claim.
+
+**⚠️ THE PATTERN WORTH KEEPING FROM THIS EXCHANGE — it happened twice in ten minutes, both times to me.** I got the *direction* of the latency bias backwards, and then I got the *breadth* of the defect wrong. Both times a worker holding the actual measurement corrected me, and both times my error was the same move: taking a real finding and stating it one step wider than the evidence carried. The finding survived both corrections and got sharper each time.
+
+**Deliberately NOT fixed tonight**: a fix would change v1 **mid-measurement**, the one thing this crew has been careful not to do.
+
+**Two lower-priority items seen in the same log, recorded so nobody re-derives them**: 622 splainer warnings for a missing `model tokenizer map` key, and an XML parser stripping 96 chars before the root tag. Neither looks load-bearing. Not chased.
+
+**Not filed as a store row** (Rick's no-new-rows order still stands).
+
+
+## ⏳ PENDING DECISION 2026-08-20 (Mr. Radio 🦉 `f60b686e`) — the off-peak window is wrong AGAIN, and this is the third version of the same rule
+
+**Asked, not answered.** Rick was asked and replied about something else; the question stands. **Do not treat the current CLAUDE.md text as settled — it is measurably wrong right now.**
+
+**What CLAUDE.md says** (§ COST MODEL → Off-peak scheduling rule): host up from ~7:17 AM, and **7:30–10 AM EDT is "OPTIMAL — schedule batch work here."**
+
+**What the box actually does.** Measured from `last -x reboot`, the 12 morning boots since Aug 4:
+
+`08:52 · 09:27 · 07:17 · 09:14 · 09:52 · 09:56 · 09:20 · 10:52 · 09:48 · 09:03 · 09:17 · 09:43`
+
+**Median 09:24. Eleven of twelve are after 08:52.** The 07:17 the rule rests on is a single day (Aug 6). ⇒ **a job placed at 7:30 sits dead ~1.5–2.5h on almost every day.**
+
+**This is the second correction of the same rule, failing the same way.** The original pointed at hours the box was OFF. The 2026-08-17 correction replaced it with hours the box is *usually not up yet* — and it was written in the same doc that says *"a copied example is how a bad window propagates faster than the prose that describes it."* Both versions were derived from too few boots.
+
+⇒ **Proposed: 10 AM – 1 PM**, with the measurement command written beside it so the next reader re-derives the window instead of trusting the sentence:
+```bash
+last -x reboot | head -20      # then read the morning boot times yourself
+```
+
+⚠️ **The one thing that would make this wrong, and only Rick can answer it**: this is derived from boot *history*. If he powers the box on deliberately and would just as happily boot at 7:30 when a job needs it, then this is a record of habit rather than a constraint, and the rule should stay as written. **Ask before editing CLAUDE.md.**
+
+**Live receipt that the window is not academic**: the box was down 14:34–18:07 today and booted at 18:07, so no morning window existed at all. Attempt 12 ran in the evening on Rick's direct approval instead.
+
+
+## 🌙 TONIGHT 2026-08-20 (Mr. Radio 🦉 `f60b686e`, with Tiberius 👑 and María 🌸) — attempt 12 is live, and two of my own claims were wrong
+
+**Attempt 12 = `ts-7b9a6b87`, live 18:36:15 EDT**, n=60, **no `--timeout`**, auto-fix off, `:8000` verified idle at submit. Lands ~23:25. Rick is leaving the box up. Row `d8d019f6`; it closes on a median-delta number or a refusal someone can point at, and nothing less.
+
+**🔴 TWO CARRIED-FORWARD CLAIMS OF MINE, BOTH FALSE, BOTH CORRECTED WITH MEASUREMENTS.** Same shape both times: a true-when-taken measurement restated as a present-tense fact days later, without re-measuring.
+1. **"The test credentials are set nowhere on this box"** — repeated in history.md and used to describe four rows as blocked. **Rick challenged it directly and was right.** They are at `~/.bashrc:147-148` and live in the shell; `docker compose config` → **exit 0, 554 lines, empty stderr**. `--force-recreate` was never blocked. None of those four rows had the credential in `blocked_by` — the block existed only in prose.
+2. **The 7:30 AM window** — see the pending decision above.
+
+**Attempt 12 refused once before it ran, and the refusal was the system working.** First submit `ts-06e1d1a6` died in **2.3 seconds**: the two vLLM servers at `192.168.1.21:3000/:3001` had been dead since the 18:07 reboot, and the liveness guard **refused rather than measure against dead infrastructure**. Nothing ran, nothing was falsified. ⇒ **Three things die on a reboot, not one** — `:7997` *and* both model servers — and only `:7997` was written down anywhere. Tiberius relaunched both from Rick's own aliases and resubmitted.
+
+**María's guardrail is armed and PROVEN, not asserted** — `src/scripts/watch-paired-block-failure-rate.py`, committed rather than scratchpad. Her 08-17 finding (row `2ebe4ccb`): a paired run can degrade **categorically**, not randomly — failures by block ran 10/10/4/38/94% — and because the corpus is **ordered by category**, one whole category went 94% absent from v2 while v1 kept it. Accuracy is scored over `ok` records only, so **the arm that loses its hardest category scores better**, and the floor of 30 does not catch it (~300 pairs survive a 32% failure rate). Replayed against her own file the script reproduces 12/10/4/38/94/62 and fires on blocks 4–6; it stays **quiet on a uniformly-bad run**, because flatness is what it tests. The report will carry **per-arm failure rate and each arm's surviving category composition beside the delta**.
+
+**⚖️ RULED (Mr. Radio, María concurring) — the v1 pin stays `b0735467` for this run.** `v1_eval_arm.py:105` pins the pre-drift sha for tamper-evidence (Sam's design, Cheech-ratified 08-15), which is in genuine tension with my own 08-14 ruling on `647f3733` to baseline against v1 as of the harness landing. **Changing the referent mid-flight makes tonight's number incomparable to all eleven prior attempts.** The honest fix is not moving the pin but *naming* it: the reason now lives **in the assert's own message**, not only in the report, so the next reader sees a referent somebody chose rather than a check that happens to pass. Committed `a657e88e`, 169 unit tests green.
+
+**⚖️ RULED (Mr. Radio) — row `3598c1d3` (weather search) is a missing retry, not a mystery.** Chloé and Sam each named two closing events and each correctly declined the second as a manager's call. Taking it: `KagiSearch.search_fastgpt()` is a **bare single call** — no retry, no backoff, no exception handling — so one momentary upstream blip becomes a user-visible failure with certainty. What happened at 18:54 on 08-19 is now **accepted as permanently unknown**. Row un-parked to `queued` as defined work: bounded retry + backoff, **without swallowing the final status code** (Sam proved that property with a control test at `79ea2501` — run it before and after).
+
+**Staffing**: Rick's skeleton-crew hold stands. He approved **exactly one** seat by name — Tiberius, for this run. A second seat for the P3 was offered and declined by me: a P3 does not warrant source edits on the same box during a 4.8-hour measurement.
+
+
+## 📋 DECISIONS LOG 2026-08-19 night (Mr. Radio 🦉 `4c571f73`) — post-game of the six-seat crew run
+
+Retro: `io/post-games/2026.08.19-six-rows-and-attempt-eleven-post-game.md` (full tier, **DRAFT pending Rick's D3 approval**). 59 commits, 6 seats, unit tier green at HEAD `31899329` (24,635 passed / 0 failed).
+
+- **R-1 — the submit path must refuse a per-test timeout shorter than the suite budget it runs under.** Attempt 11 of the paired n=60 run died on `--timeout 5400` while the suite budget was correctly 30000s. `test_paired_n_fits_integration_timeout.py` guards the hazard and passes, because it compares `n` against the *suite* budget and never sees the per-test cap. Filed as store row `64677f38` (Tiberius, P1). n=60 stays unchanged — shrinking the corpus would change what is measured to dodge a typo.
+- **R-2 — open the harvest window BEFORE announcing the reap.** Six seats left **zero** rolling deposits on the commons `post-game` topic tonight (newest entry is 2026-08-17); all six left lesson-bearing mementos. `io/post-games/README.md` carries a standing note saying exactly this, and I read it after the reap. Cross-examination of tonight's crew is gone permanently.
+- **R-3 — an instrument that fails ten times is a decision for Rick, not maintenance to absorb.** Notifications returned `user_not_available` all evening and I kept re-firing per instance. Escalate the *pattern* on the second or third failure, naming it as a pattern.
+- **R-4 (NOT YET GRADUATED) — a negative result is only as wide as the path the probe exercised.** María ruled out cwd restoration from the success path only; the leak was on the error path (`80c17f29`). `post-game.md` §5.3 requires cross-examining the source before this becomes doctrine — **do not write it into a `workflow/` doc until María has had the chance to refute it.**
+
+**Still unhomed, for Rick**: should the no-new-rows ban lift for measured, reproduced defects? Three real defects tonight had nowhere to live.
+
+## 🔬 FINDING 2026-08-19 (Rachel 🕊️ `6dc9e44d`) — this box CANNOT produce a live Python stack, and we have wanted one three times this week
+
+**Found while diagnosing the `:7997` wedge (row `012e35a9`).** A server was burning a full core with 32 runnable threads and answering nothing. Naming the loop needed one stack dump. **Every route to one is closed on this host**, and they are closed independently, so no single fix opens them:
+
+| Route | State | Why it fails |
+|---|---|---|
+| `py-spy dump --pid` | not installed | and it would still need ptrace below |
+| `gdb -p` | installed, refused | `EPERM` — attach is blocked before it starts |
+| `/proc/<pid>/task/*/stack` | refused | `Permission denied` for a same-uid reader |
+| `perf record -p` | not installed | and `perf_event_paranoid` is **4**, which denies it anyway |
+| a signal → thread dump | nothing to signal | app registers **no `faulthandler`**; `SigCgt` covers INT/TERM/WINCH only, so a `SIGUSR1` would **kill** the process, not dump it |
+
+Root of the first three: `/proc/sys/kernel/yama/ptrace_scope` is **1** (attach only to your own descendants) and `sudo` wants a password, so an agent session can never attach to a server it did not spawn.
+
+**What it cost.** The `:7997` root cause was reached by inference — CPU-per-thread, `wchan`, per-thread syscall counters, thread ages, and reading the code — and then closed with a control test rather than a captured frame. That worked, and it took roughly 20 minutes that a `py-spy dump` would have made 20 seconds. **Mr Radio's count: three times this week.**
+
+**The cheapest durable fix is the last row of that table, and it needs no root at all.** Registering `faulthandler` on a spare signal at server startup is a handful of lines, and from then on any wedged Lupin process dumps every thread's frames on demand. Worth pairing with `py-spy` in the venv for processes that lack the hook.
+
+**Not filed as a row** (skeleton-crew no-new-rows order). **Not fixed** — recorded here on Mr Radio's instruction.
+
+
+## 🔓 FINDING 2026-08-19 (Mr. Radio 🦉 `4c571f73`) — `--showlocals` writes the live password into a saved artifact on any auth failure
+
+**Found while diagnosing `ts-5a02a537`.** `pytest.ini:82` carries `--showlocals` in `addopts`, so a failing frame dumps every local variable into the junit XML and the run log. The frame that failed was `v2_eval._login`, whose locals include `email` and `password` — so the **live credential for `interactive.job.tester@lupin.deepily.ai` is now sitting in plaintext** in `io/test-suite/artifacts/integration-junit-*.xml`.
+
+**This is not specific to that test.** Any auth failure in any test that holds a credential in a local writes it to disk the same way. The artifacts are named, dated, and kept.
+
+**⚠️ The same flag is the only reason the v1 arm's metrics survived.** Nothing reached `io/v2-flow/` — `_dump_paired_artifacts` needs a *pair*, and the v2 arm died before producing one, so the dump never ran. The p50/p95/cache-hit numbers existed **solely** in the traceback locals `--showlocals` captured. So the flag is simultaneously the leak and the only forensic record of a 47-minute run.
+
+**That tension is the actual decision**, and it is not obviously resolvable by turning the flag off:
+- **Off** → no leak, but a failed run leaves nothing behind but a stack, which is the exact silence this crew has spent a week removing (`ts-1686ce29` died with no recoverable artifacts and cost a day).
+- **On** → forensics survive, credentials leak.
+- **The real fix is neither**: stop putting a password in a local. `_login` could take a callable or read from env at the call site so the secret never lands in a frame. Then `--showlocals` keeps its forensic value and has nothing sensitive to spill.
+
+**Scope check before anyone acts**: the artifacts are local, on a box behind the same VPN/ADC boundary Rick already ruled on for `adce3547`, so this is housekeeping and not an incident. But it is a *credential in a file*, and the account is one every seat uses.
+
+**Not filed as a row** (skeleton-crew no-new-rows order). **Not fixed** — the honest fix touches `v2_eval.py`, which the live run imports, so it waits for `ts-47b18c7e` to land.
+
+
+## ⚖️ RULED 2026-08-19 (Rick, ~15:40 EDT) — skeleton crew HOLDS until he says otherwise; the tick does not override him
+
+**Clean answer, not a timeout default** (`answered=true`, `default_used=false`). Verbatim: *"let's hold off from a skeleton crew until whenever I say so."*
+
+**The conflict this settles**: the heartbeat tick fires *"tasks > workers — STAFF UP THIS TICK: spawn/assign now. Waiting to be told is a redline."* His standing order (broadcast `a30ebf4f`) says skeleton crew, no workers. **A tick does not reverse a standing order from the user** — I surfaced it as a blocking ask rather than resolving it myself, and that was the right call.
+
+### ⚠️ THE TICK'S REASONING IS UNSOUND HERE, AND IT IS THIS WEEK'S RECURRING SHAPE
+It reads *8 owed, 1 worker* and concludes understaffed. It cannot see that **7 of the 8 are serialised behind one live latency measurement**, so a crew would buy one P2 and risk the afternoon's run:
+
+| Row | P | Why a worker cannot take it now |
+|---|---|---|
+| `d8d019f6` | P1 | The run itself — waiting on a result, not buildable |
+| `3bfd3fbc` | P1 | Needs a *finished* run to supply genuine v1 residue |
+| `95924f2d` | P1 | Regenerates the corpus the run is sampling from |
+| `07fda9b6` | P1 | Open half is the **harness** classifier — not our code |
+| `adce3547` | P2 | Fix = force-recreate = kills the run (María concurs) |
+| `ec5cf83a` | P2 | Fleet-wide DM path; peers are actively DMing |
+| `7c84b8b8` | P2 | Proof needs a 15k-test run on this same box |
+| `7b9094d8` | P2 | Genuinely available — the only one |
+
+**An owed-count is not a staffing signal**, because it cannot distinguish *unstaffed* from *serialised*. Same family as the day's other findings: an instrument asserting a conclusion from a number it cannot contextualise. Recorded here rather than filed (no-new-rows order).
+
+**Rick also offered to disable the heartbeat Stop poke** — *"so that you don't get distracted with this kind of productive bullshit."* Undecided; my read is in the reply, and it stays his call.
+
+
+## 🔇 CONFIRMED 2026-08-19 (Mr. Radio 🦉 `4c571f73`) — PHANTOM INTERRUPTS: the harness claims the user spoke when the user did not
+
+**✅ RICK CONFIRMED IT DIRECTLY, 2026-08-19 ~15:40 EDT**, on the fifth occurrence, asked in real time while it was happening: *"Yes, and I haven't sent you anything. It's a phantom interrupt."* That is testimony from the only party who can settle it — no inference, no reconstruction. **The interrupt is spurious.**
+
+**Occurrence #5 detail**, captured live because we had agreed the protocol in advance: fired ~15:38 EDT during a Bash health check on the paired run, and **arrived in the same beat as an inbound peer DM from María timestamped 15:38:35**. That co-incidence supports Rick's mechanism — another notification draining into the pre/post-tool-call slot and being labelled as the user — over my original "his words went missing in delivery" reading.
+
+**The protocol worked and is worth keeping**: agree in advance that the next occurrence gets flagged *immediately* with a timestamp, then ask the one question only the human can answer — *did you speak?* Five occurrences of silent guessing produced nothing; one real-time ask settled it.
+
+**Symptom**: four times this afternoon a tool call was refused with *"A user-initiated voice message was received and takes precedence over this tool call. You must address the user's message before continuing."* No message content accompanied any of them. From my side the user had said something urgent enough to interrupt me, and I could not see one word of it.
+
+**What I checked, so this is not a guess**: no voice buffer exists for this session (`~/.claude/sessions/cc-buffer-4c571f73*` / `-8d2b6455*` absent), and **no `cc-buffer-*.jsonl` anywhere was modified in the last hour** — the newest is from 2026-08-18. So the content is not sitting undrained in Lupin's buffer waiting for me; it never landed there.
+
+⇒ **The detection path and the delivery path have come apart.** Something upstream knows a voice message arrived — reliably enough to preempt a tool call four times — while the content reaches neither my context nor the buffer the hooks drain.
+
+**Why it is worse than a dropped message**: the interrupt asserts an obligation ("you must address the user's message") that it makes impossible to discharge. I cannot answer, and I cannot tell whether the user is repeating themselves, correcting my course, or telling me to stop. The safe reading — ask them to re-send — is the one I took, but a seat that instead *guesses* what was said would be guessing at the user's instructions.
+
+**Same family as the rest of today's board** (`07fda9b6`, and the two gates fixed in `37bd64f9`): a signal that reports an event without reporting its content, leaving the reader to supply the missing half. Related: the harness-side half of `07fda9b6`, which Rick ruled should name what it objected to.
+
+**⇒ RICK'S READING, AND IT BEATS MINE (2026-08-19 ~15:45 EDT).** I had this as a *delivery* failure — his words went missing. He says it is a **misattribution**: some other notification drains into the pre/post-tool-call slot and gets presented to the model as a user voice message, because human communication legitimately outranks a tool call in that queue. **María reported the same yesterday while he was not messaging her.**
+
+His reading fits my measurement better than mine did. A message that never entered the buffer yet still preempted a tool call is not a dropped message — it is an event wearing a message's label. On a genuine delivery failure I would expect a buffer write with no read; I found no write at all.
+
+**AGREED PROTOCOL**: on the next occurrence I notify him immediately with the timestamp and what I was doing, and he confirms whether he sent anything. That one bit — *did a human speak* — is the discriminator, and nothing on my side can observe it. Recorded here because it needs to survive a re-spin: a seat that hits this cold will read the interrupt as a real instruction it somehow lost.
+
+**Not filed as a row** (skeleton-crew no-new-rows order). **Not fixed**: the mislabelling is in the notification/hook layer, and the same layer-separation that keeps `07fda9b6` open applies.
+
+**⚠️ THE FAILURE MODE TO AVOID IS GUESSING.** The interrupt asserts an obligation — *the user said something, address it before continuing* — while supplying nothing to address. A seat that infers what was probably said, and acts on it, is acting on instructions no human gave.
+
+
+## 🔑 FIXED 2026-08-19 (Mr. Radio 🦉 `4c571f73`) — the :8000 seed was create-only, so a drifted credential could never be repaired
+
+**The blocker**: `POST /auth/login` on `:8000` returned 401 with the same credentials that worked on `:7999`, which stopped `d8d019f6` from being submitted at all.
+
+**Not a missing user, and not a wrong password.** The row existed in `lupin_db_test` with `is_active=t`, and its id matched dev exactly. Verified against the stored hashes directly: the dev hash verifies the env password, the test hash does not.
+
+**The mechanism**: `src/scripts/seed_test_companions.py` copies companions dev→test with `INSERT … ON CONFLICT ( id ) DO NOTHING`. That makes it **create-only** — the instant a row exists in test, nothing in dev can ever reach it again. Change a password in dev and test keeps the old hash forever. The script runs on every test-container start and reported `All companion credentials already present in test database` the entire time: a green line asserting the credentials were GOOD when all it had checked was that rows with those ids EXISTED.
+
+**This exact 401 was diagnosed before**, on 2026-04-13 (`src/rnd/v0.1.6/2026.04.13-test-container-auth-fix-plan.md`). That fix added the two missing emails to the allowlist — it repaired that day's symptom and left the create-only mechanism untouched to do it again.
+
+**Fixed**: `ON CONFLICT ( id ) DO UPDATE` on the credential columns for both `users` and `api_keys`, inserted-vs-refreshed counted honestly via `RETURNING ( xmax = 0 )`, and the summary reports what it actually did. The container's startup log now shows both boots back to back — the old false green, then the converge line.
+
+**⚠️ The fix moved the blast radius, and that needed its own guard** (María 🌸). Create-only was safe **by accident**: a script that cannot overwrite anything is harmless pointed at a live database. Converging removed that accident — this script now overwrites password and API-key hashes — and `TEST_DB` is a hardcoded constant, exactly the kind of thing a later edit makes configurable without re-deriving what it protected. Added an assert-the-target refusal at the top (`"test" not in TEST_DB` → exit 3, before any connection opens). Proven both ways: `lupin_db_test` passes, `lupin_db_dev` refuses.
+
+### 📥 FINDING (not filed — skeleton-crew no-new-rows order): the regression guard for this exists and never runs
+
+`src/tests/integration/test_cross_container_auth.py` was written on 2026-04-13 **specifically** to catch this drift. It passes now, and it would have failed for however long the test hash was stale. It is login-only, non-destructive, and takes **0.49 s** — it meets every `:7999` criterion — but it lives in `src/tests/integration/`, so it only runs in the scheduled `:8000` bucket as the final merge gate. A guard that runs a few times a month is not guarding a credential that drifts silently. **Proposed**: move it to the fast `:7999` path so it runs with the unit tier. Not done — that is a test-venue change and belongs in a review, not in a run-unblocking patch.
+
+
+## 📊 MEASURED 2026-08-18 night (Mr. Radio 🦉 `89a34076`) — the notification-length natural experiment, and why `type` cannot answer it
+
+**Rick's question**: did the DM tutor's brevity generalize to the spoken notifications he receives? **Measured, doc `9bc17152`**: the tail compressed (p90 1009 → 738 chars, −27%) while the median did **not** move (272 → 287). Distribution did not shift down; its right tail was cut. Replicated in both `lupin` and `plan`.
+
+**Two decisions recorded here rather than in the doc:**
+
+1. **`type='progress'` must NOT be excluded from this population, despite looking like process chatter.** Rick asked for that cut; it reversed the finding. It is wrong: `notification_type: str = "progress"` is the **default** in `notify()` (`cosa_voice_mcp.py:1291`, `:1434`) and the closing-turn TTS contract never names the argument, so nearly all authored speech lands there by omission. A 100-row sample is conversation — *"Standing by for the next task."*, *"Want me to commit this?"*, *"Morning. I'm up and running…"*. Excluding it drops ~72% of the channel and keeps only senders who bothered to pass a type: a selection effect, not a filter.
+
+2. **The `type` column is not a category — it records whether the caller passed an argument.** Any future analysis cutting on `type` inherits that flaw. `custom` proves it twice over: 50.5% questions against 1–4.5% for every other type, but split at ~140 chars it is 90.2% questions below and 15.5% above — two populations under one label. **A question-vs-statement split (`message LIKE '%?%'`) is the honest cut and has not been run** (row `bdd1ca85`, P3).
+
+**Still open**: causation is NOT established and will not be until someone finds a project the tutor never touched. The cutover was fleet-wide, so there is no untreated control group; the spillover story fits the data and so would any other fleet-wide change on 2026-08-13. Nobody has found such a project.
+
+---
+
+## 🔴 2026-08-18 MORNING — THE REBOOT DOES NOT UNBLOCK ANYTHING. Two fixes, both measured.
+
+Rick asked directly whether tomorrow's reboot would pick up the new password and clear the blocked jobs.
+**It will not.** Verified, not assumed:
+
+**1. `~/.bashrc` returns early for non-interactive shells** — lines 5-8, `case $- in ... *) return;;`.
+Every export below that line is dead code for tool shells, scripts and cron, which is every path a seat
+actually uses. The password IS in the file (1 grep hit) and is still invisible after an explicit
+`source ~/.bashrc`. **Remedy (Rick's): move both exports ABOVE the guard, or into `~/.profile`.**
+
+**2. All four compose services are `restart: unless-stopped`** — `docker-compose.yml` lines 14, 61, 148, 333.
+A reboot RESTARTS the existing containers with the env baked in at their last CREATE. Compose is never
+re-rendered on boot, so the new password is not consulted. A reboot is not a recreate.
+
+**WHAT ACTUALLY CLEARS IT** — one command, from an **interactive** shell, after boot:
+```
+docker compose up -d --force-recreate
+```
+⚠️ `bounce-dev-server.sh` does NOT substitute — it is a plain `docker restart`, same reuse problem.
+
+**VERIFY AT EVERY STEP; four of these five have already failed silently once:**
+1. exports readable from a non-interactive shell
+2. `docker compose up -d --force-recreate`
+3. `docker exec … printenv` shows the value **inside** the container (it reads **absent** now — that
+   absence is the deliberate before-reading, so "present" after is real evidence)
+4. `list-pending` returns something other than **401**
+5. submit the paired run **behind** the already-queued 08:00 job, never ahead of it
+
+**Unblocks together**: `d8d019f6` (paired run) · `3bfd3fbc` (its acceptance run) · `adce3547` step 3
+(delete the JWT literal) · every future mount/env change. `53f60fcd` and `43fca908` are downstream of the first.
+
+## ☀️ FIRST THING 2026-08-18 (Mr. Radio 🦉 `e251aa88`) — one credential unblocks four things
+
+**Rick issues `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` / `_PASSWORD` to a seat.** That single act unblocks
+john's `:8000` submissions, the morning paired run (`d8d019f6`), `3bfd3fbc`'s acceptance run, and every future
+`docker compose --force-recreate` — the documented remedy for ANY mount or env change on either server, which
+no seat can currently run. Compose has required these two in fail-loud `:?` form since before tonight.
+
+**Then, in order**: (1) `--force-recreate` and confirm `docker exec printenv JWT_SECRET_KEY` reads PRESENT —
+it reads absent now, measured, as the deliberate negative control; (2) only then delete the `jwt_service.py`
+literal fallback (`adce3547` step 3); (3) submit the paired run BEHIND the already-queued 08:00 job, never
+ahead of it; (4) flip block mode at `run-unit-tests.sh:31` and `run-cosa-tests.sh:34` — but run both tiers
+first and do NOT flip if either is red at that HEAD.
+
+⚠️ **The `:7999` bounce cannot do job (1).** `bounce-dev-server.sh` runs plain `docker restart`, which reuses
+the container, so env changes silently do not land. A healthy server after a bounce is NOT evidence.
+
+## ⚖️ RULED 2026-08-17 night (Mr. Radio 🦉 `e251aa88`)
+
+- **The DM quality grader comes OFF the send path** (`ec5cf83a`). Grading must not sit inside the latency of
+  accepting a DM; a grader that is down, slow or absent must be invisible to the sender. Acceptance is
+  measurable: send latency with `:3001` down indistinguishable from up. Mechanism deliberately unruled.
+- **JWT: require the env var everywhere, delete the literal — but provision FIRST** (`adce3547`). Not a random
+  per-process secret: random silently invalidates tokens across restarts and across the two servers, which
+  surfaces as an intermittent auth bug instead of a loud failure at boot.
+- **Block mode flips, but a morning seat executes it** (`7c84b8b8`) — the box goes down with nobody awake to
+  unflip. A red tier under a fresh flip is indistinguishable from a flip that caused it.
+- **P1 `07fda9b6`'s headline is WITHDRAWN — the permission classifier is deterministic.** I matched two runs on
+  the verb while they differed in both flag and commit. What survives: a refusal states none of the three
+  conditions it applies, and recovering that cost two seats nine runs. Receipts `33460c60`, `abd39c5e`.
+
+## 🧩 HELD OUT OF THE STORE 2026-08-17 (Tiberius 👑) — BRAIN INTEGRATION has no row (Rick's no-new-rows ban)
+
+María (`89b27996`) flagged that her P1's two-part gate — *"pass 2 lands only after BOTH the registration
+consolidation AND the brain integration have landed"* — has **NO ROW for half two**. Half one (registration
+consolidation) = **`95924f2d`**, moved to in_progress tonight after we cleared its false Rick-block (steps 1-4
+done `d110c26e`, step 5 retrain gated on Rick's explicit go). Half two, **BRAIN INTEGRATION = AskFlow called
+from `todo_fifo_queue`**, is homeless: it is NEW unbuilt work, so the no-new-rows ban forbids a store row.
+Recorded here (ban-neutral backlog) so it is not lost. **Mint a store row the moment the ban lifts** (or on a
+Rick waiver — a §5.5 + brain-integration waiver was asked for earlier tonight and the ask timed out). It gates
+`89b27996` pass-2; until brain-integration lands, that pass-2 cannot.
+
+## 📌 UNFILED 2026-08-15 NIGHT (Cheech 🌿) — four findings held out of the store on Rick's no-new-tasks order
+
+Rick's 23:0x directive was **"no new bugs allowed"** while driving the board down, so none of
+these became rows. They are real, they are reproduced, and they need rows the moment the
+directive lifts. Recorded here so the order costs us nothing.
+
+1. **CONTEXT IS NOT A TURN — the biggest one.** The memento now reaches a rehydrated seat
+   (`8ff014e2`, `8b9a10e9`, `7a9e5d22`, `965e8d41`), but **nothing makes the seat act on it**.
+   It sits at an empty prompt behind **ghost placeholder text that reads like queued work and
+   is not** — proven by typing a string that replaced the supposed "pending" line.
+   - a **poke** cannot reach a quiet worker (Mr. Radio's `98350737`: 52 gate evaluations, 0 pokes)
+   - a **DM** cannot either — arnold sat 72 minutes through one
+   - **typing into the pane CAN**; plain `Enter` submits once the box has content
+   - **four seats recovered this way tonight**: arnold, sam, Rachel, and Rachel's crew
+   ⇒ Wanted: something that hands a rehydrated seat its first turn. Until then, a re-spin is a
+   two-person operation and the second person is a human.
+
+2. **`list-pending` does not exist.** Both `CLAUDE.md` and `CLAUDE.local.md` instruct sessions
+   to run it *first* before scheduling on `:8000`; `src/cosa/rest/routers/test_suite.py` has
+   exactly one route, the POST submit. The real pre-check is
+   `GET /api/get-queue/{todo,run,done}` with a JWT. **Two traps for the next seat**: the login
+   route is `/auth/login`, NOT `/api/auth/login`, and the token is nested at
+   `tokens.access_token`, not top-level. Creds: `~/.lupin/config` `[lupin]`.
+   ⇒ The documentation is wrong, not the capability. Fix the docs.
+
+3. **The self-respin observer has no periodic caller.** arnold's TTL sweep (`3bac5ccb`) is
+   correct and 100% covered, and **armed but not firing** — nothing calls
+   `observe_fleet_self_respin` on a schedule. Three real markers were created tonight (mine,
+   Rachel's, Mr. Radio's) and none will ever be swept. He flagged this himself rather than
+   shipping a green row over it.
+
+4. **Tiffany-class mementos.** A record with **no amendment block** yields a near-blank return:
+   the seat gets a pointer and no state. `965e8d41` now labels that case loudly instead of
+   showing it under a success banner, but the writer-side habit is the actual fix — Rachel has
+   told both her seats to write real mementos.
+
+### Two instruments that lied tonight — distrust these specifically
+
+- **`dismiss_sessions` reported `timeout_no_memento` for BOTH workers** whose records I had
+  verified on disk seconds earlier. Known: row `dffebbd6` — it reads the *pointer* at
+  `io/mementos/<persona>.md`, not the *record* it names. **Verify the record yourself; never
+  take the verb's verdict.**
+- **`context-pressure` said `idle` for two seats that were stuck behind a
+  `Set up auto mode for your environment?` modal** for over an hour. I nearly reaped arnold
+  over it, which would have destroyed a finished review's delivery.
+  **Read the pane before believing the instrument.**
+
+## ☀️ FIRST THING TOMORROW — 2026-08-15, ~10–11am, Rick + Mr. Radio 🦉, and NOTHING ELSE BEFORE IT
+
+> **Re-dated 08-14 → 08-15 by Cheech 🌿 on 2026-08-14.** It did not run on the 14th: Rick was AFK all day
+> (broadcast `ee1a49ce`), which put the whole day on the CJ Flow v2 plan. Row `5e848dd8` is still `blocked`
+> on Rick with its chase time already passed — the two open items remain his, unchanged: the **rollback
+> choice** (`ask_multiple_choice ko6gqmox1`, still unanswered) and the **end-to-end walkthrough** he required
+> before any write to `input_and_output`. Nothing about the job changed; only the date did.
+
+**Rick's instruction, 2026-08-13 (verbatim in substance)**: *"Make a note of it in the to-do document for it
+to be the first and only thing you and I begin the day with."*
+
+**THE JOB**: run the embedding regeneration together — row `5e848dd8`. Not a backfill-normalize; a full
+REGENERATION into shadow columns, then a swap. ~287,200 rows across `input_and_output` (input + output_final)
+and `prediction_decisions`.
+
+**READ THIS FIRST, it is the whole walkthrough**:
+`src/rnd/v0.2.0/2026.08.13-embedding-regeneration-run-walkthrough.md`
+
+**The order of the morning**:
+
+| # | Step | Who |
+|---|---|---|
+| 0 | **Unload the dev + test models** to clear GPU 0 | **Rick** |
+| 1 | Confirm nothing queued/running; confirm we are inside the window | Mr. Radio |
+| 2 | `plan` — read the norm histogram together, confirm TWO populations (a third stops us) | both |
+| 3 | `fill --limit=500 --apply` — bounded pass into shadow columns; **this is where the DB write side finally gets measured** | Mr. Radio |
+| 4 | Look at that number, decide continue-now or schedule | **Rick** |
+| 5 | `fill --apply` — full run, checkpointed and resumable | Mr. Radio |
+| 6 | `verify` — must pass clean, zero bad norms, or we do not proceed | Mr. Radio |
+| 7 | `swap --apply` — the ONE irreversible command, with Rick present | both |
+
+**Settled overnight, do not re-litigate**:
+- **Window widened to 11am** (`OFF_PEAK_END_HOUR = 11`, was 9) so a post-breakfast start is not refused.
+  Code + 4 new tests + doc; suite green 122 passing, 100% lines/branches. The clock was always the courtesy
+  check — the busy probe is the real gate, and `--force` still cannot override it.
+- **Rollback RULED — shadow columns only, no `pg_dump`.** Rick: *"Either we successfully write all of the
+  shadow columns with the new embeddings or we don't… If it fails we drop the shadow column."* Failure mode
+  is a wasted GPU hour, not lost data.
+- **The GPU is NOT the constraint the old write-up implied.** `AdaptiveBudget` grows the batch empirically
+  (×1.5 per success, halve on refusal, floor 5k / ceiling 2M chars), so on an emptied card it climbs on its
+  own — 40,000 is a starting point, not a ceiling. Watch the "final char budget" the fill prints; that number
+  is the empirical ceiling of the real hardware and it is the measurement we still lack.
+
+**The one honest unknown**: the DB write side (~289,000 UPDATEs) is unmeasured. The oft-quoted ~16 minutes
+is EMBEDDING TIME ONLY. Step 3 exists to replace that guess with a number before anything large runs.
+
+---
+
+## 📉 TO QUANTIFY 2026-08-14+ (Rick's observation, recorded by Cheech 🌿) — the token-burn drop
+
+**Rick, 2026-08-13 end of day, explicitly flagged as ANECDOTAL and to be revisited "after a couple full days
+of hard burn."** Recording the numbers now so tomorrow's quantification has a baseline to argue with, not a
+memory to reconstruct.
+
+**What he observed** — two independent readings, same direction:
+
+| Reading | Before | After |
+|---|---|---|
+| Share of all tokens burned via the cosa-voice MCP server | **80+%** pre-KISS-protocol → **50+%** post-KISS | **~30-some %** today, first partial day of the DM tutor |
+| Fleet-wide burn rate (third-party aggregator, all Claude Code calls) | **14,000–22,000 tok/min** | **~7,000 tok/min** today, with **11 agents** running simultaneously |
+
+**Before anyone converts this into a claim, the confounds have to be named.** I ran the DM verbosity pilot
+that got fooled by exactly this shape of before/after comparison — it published p=0.047 at 14:00Z and the
+final pull retracted it (no effect at this dose, A 0.051 / B 0.058, and **+7.3% tokens all-in** once the
+75,506 burned on 272 refused drafts were counted). The failure was never bad arithmetic; it was comparing
+periods that differed in more than one thing. Today differs in at least five:
+
+1. **Three interventions landed together** — the KISS/brevity mandate, the DM tutor (live 14:14 UTC, boot
+   #56), and the tutor's own same-day fixes (dropped agency, dropped paths `06c3eb29`, invented-person
+   refusal `a28c24b6`). A single before/after cannot apportion credit among them.
+2. **"Share of tokens via MCP" has a denominator.** A drop in the share is equally consistent with MCP
+   traffic falling *or* with non-MCP work rising. Both numbers have to be reported, never the ratio alone.
+3. **Tokens per minute is not tokens per unit of work.** 11 agents at 7,000 tok/min is a rate, not an
+   efficiency — the same figure results from agents thinking harder about less, or from a quiet evening.
+4. **A partial day is not a day**, and today's shape was unusual: a fleet-wide wind-down from ~23:30.
+5. **The tutor clips the tail by construction** — measured on the pilot corpus (`6bfd4223`): rejecting at
+   p99 = 149 and max = 150, the threshold itself visible in the data, while sentence count barely moved
+   (8 → 7). María's corollary stands: a delivered tail under a gate is the gate's configuration, so
+   delivered tails must never be compared across a gated and an ungated period.
+
+**What would actually settle it**: tokens per delivered unit of work (per DM, per row closed, per commit),
+segmented by MCP vs non-MCP, over two full comparable days — the "couple full days of hard burn" Rick
+already named. The corpus for the DM half exists at `<projects-data>/lupin/dm-corpus/` with every row
+provenance-stamped, and `analyze_arms.py` raises `FileNotFoundError` rather than silently reading the
+retired file, so the measurement is reproducible.
+
+**Sequencing**: this is explicitly AFTER the embedding regeneration above — that is the first and only thing
+tomorrow starts with.
+
+## 🦚 FINDING 2026-08-13 (Krishna `d901908f`, row e0bb5a94) — orchestrator.py pre-existing coverage gap
+
+While adding the defect-B assertion tests I found `orchestrator.py` sits at **99% branch coverage**, not the
+mandated 100%: three lines are uncovered — **85** (`timeout_seconds must be a positive int` raise), **114**
+(a `return (` continuation), **1164** (the `**Approval**: {auto_notice}` abstract line). All three blame to
+`414009c3c`, i.e. **pre-existing debt** unrelated to defect A/B — my two new tests only ADDED coverage (they
+closed the previously-uncovered stop_reason branches at 1343/1430). Left out of the A/B scope on purpose;
+recorded here per today's no-new-rows order.
+
+## 🚚 LIVE 2026-08-13 (Mr. Radio 🦉 `a31a20c5`) — the tutor is in use; two questions land here
+
+**Commit `b8d10bd3`, force-recreated onto `:7999` at 14:14:10 UTC (boot #56).** Rick's order:
+*"implement it fully and make sure it's actually in use."* Trigger lowered to **>4 claims**, two-arm pilot
+**suspended**, every corpus row **provenance-stamped**, corpus **moved out of the repo** to
+`<projects-data>/lupin/dm-corpus/`. Unit suite 13,562 + 386 deploy green.
+
+**Proven live, not asserted** — first real DM after the recreate (row 1 of the new corpus):
+`tutor_fired=True · outcome=rewritten · claims 5→3 · words 93→26 · git_sha=b8d10bd3 · port=7999`,
+and `effective_arm=None` confirming the pilot no longer assigns arms.
+
+Both items below are **for Rick's word, not owed work** — his 2026-08-13 broadcast prohibits adding board
+items today, so they are recorded here rather than minted as rows.
+
+### 📥 TAKEN 2026-08-13 (from María 🌸, diagnosis complete) — a no-git-ancestor cwd should say so ONCE
+
+María closed the "eight tmp MCP failures" investigation with a root cause rather than a question, and the
+finding worth remembering is that **our own documentation caused it**: the old `cd /tmp && claude mcp get …`
+line told people to do the thing that breaks project detection. Last incident is 2026-07-13, the day that
+line was removed; nothing in the month since. The worktree variant was closed by worktree-aware detection,
+and the remainder was one night of repros from a scratchpad.
+
+**What is left is mine and it is small**: a cwd with **no git ancestor** is a *knowable, permanent*
+condition, so firing `CRITICAL: COSA-VOICE MCP VALIDATION FAILED` on **every connection** is the wrong
+shape — it floods the operator with an urgent alarm that repetition cannot help. It should say it once.
+
+Diagnosis: `planning-is-prompting/src/rnd/2026.08.13-defaulted-cwd-tmp-sessions-diagnosis.md` (her `5ef637e`)
+
+### 🔬 OWED 2026-08-13 (Cheech 🌿) — the tutor loses AGENCY and TENSE, and there is a test set for it
+
+Not a threshold problem — a **prompt** problem, so raising the trigger would not touch it. Cheech's
+exhibit, from the live corpus: I wrote *"Force-recreated from committed code at b8d10bd3… I carried the
+real interactive-test credentials forward"*; what he received was *"Deployed from commit b8d10bd3…
+interactive-test credentials transferred."* Three losses in one sentence — active to passive, my agency
+erased, and **`force-recreated` flattened to `deployed`**, which destroys the exact
+restart-versus-recreate distinction that was load-bearing all morning.
+
+**Method, his and accepted verbatim**: the corpus holds **12 `tutor_fired` rows**, each carrying the
+original and the rewrite side by side. Build the regression from those real pairs and **require it to FAIL
+on them BEFORE touching the prompt** — otherwise a prompt edit cannot be shown to have fixed anything.
+
+**NOT STARTED.** Recorded so it is not assumed done.
+
+**Already shipped in response** (`a1df14f0`): the recipient now sees `DM_TUTOR_NOTICE` on any rewritten DM,
+so a reader knows the wording is not the sender's before quoting it back at them. That closes the
+*provenance* gap, not the *fidelity* one above.
+
+### 📏 PRACTICE NOTE 2026-08-13 — a HELD row must be PARKED, not left queued
+
+Found while handing my board over: `5bc22180` carried **"HELD by Rick 2026-08-05"** in its own
+title and was still sitting in the **queued** count. So it read, every time anyone looked, as
+available work nobody was picking up — when the human had already ruled it not-now.
+
+**Why it matters beyond one row**: today's directive was to run the board down from 70, and a
+burn-down number that includes rows nobody is allowed to work is a fiction. The store already has
+the right shape for this — `parked` requires a `park_reason` quoting the row's own decisive
+sentence plus a `next_chase_ts`, so the hold is bounded and self-expiring rather than silent.
+
+**Scope, measured rather than assumed**: I checked the queued lupin board and found **this one
+row**, not a pattern. Recording it as practice, not as a systemic finding — the honest version is
+"one row was mis-statused", and it is now parked with a chase at 2026-08-20.
+
+**The rule**: when a human holds a row, park it that day. Leaving it queued costs nothing visible
+and quietly corrupts every count taken afterwards.
+
+### 🪵 FOUND 2026-08-13 (Cheech 🌿 + Sam 🎙️) — a log line that says "fault" during normal operation
+
+`queue_consumer.py:123` prints **"Monopoly hold active — deferring FOREIGN intake (lineage children
+pass)"** — and it fires whenever there is *no admissible child in the queue this tick*. Read the loop:
+`pop_next_eligible(predicate=_is_admissible_child)` returns None and the line prints. That happens in
+the completely healthy case where children were **already admitted and are currently running**, so
+nothing is left to admit.
+
+**It cost three people about three hours today.** A gapless 17-minute run of that line was read as
+"children are stuck behind the monopoly hold", and the true reading was "the children are running fine
+and nothing new is waiting". It produced an escalation to me that a green test was lying, a wrong
+reopening of `0c4e8cfa` by me, and a retraction of both. Resolved only when Sam ran `ts-c81091ff` and
+watched both children get **admitted** — render-only rendered phases 6→8.5.
+
+**Fix**: say what is true — something like *"monopoly hold active; no admissible lineage child this
+tick"* — and distinguish "a foreign job is being held back" from "nothing is waiting". They are
+different facts and the line currently prints the alarming one for both.
+
+**The real gain from the whole exercise** was Sam's, and it stands: `test_presentation_render_only_smoke`
+carried no `parent_id_hash` while its two siblings did, so its child genuinely was foreign by
+construction. Fixed. There is **no consumer bug** — do not let anyone edit Gate B on the strength of
+this log.
+
+### 🧵 THE DAY'S THROUGH-LINE (2026-08-13) — five instruments, all aimed slightly off
+
+Worth reading together, because the same defect wore five costumes in one day and each was found by a
+different person:
+
+| Instrument | Said | Meant |
+|---|---|---|
+| Presentation E2E harness | PASS | never looked at the pptx |
+| Gate-reachability allowlist | covered | catches *new* files, not existing ones that **grow** |
+| Quality judge length detail | a grade | also handed the sender the target |
+| `deferring FOREIGN intake` | a fault | the queue is idle and healthy |
+| My own tutor probe | "works" | worked on a *synthetic* doc, not the real input |
+
+**The shape**: each was a check whose output did not mean what its name implied, and every one survived
+because reading the name was cheaper than reading the mechanism. **The counter that worked, every
+time, was going to the primary artifact** — the served schema, the gated collection, the corpus row,
+the actual log loop, the tree.
+
+### ❓ OPEN FOR RICK — the spoken TTS rider still names a word count
+
+His DM instruction was *"three sentences and a path with no word counts to be found anywhere."* The DM
+composition contract now matches that verbatim. **The spoken TTS rider still says "≤3 sentences AND ≤60
+words", and I deliberately did not strip it.**
+
+That number is not a style rule — it is derived from the server's hard ~500-character spoken cap
+(`spoken_word_budget()` in `hook_common.py`, at a deliberately pessimistic 8.3 chars/word). Overshooting
+the cap **rejects the whole call silently**, which reads as the assistant going mute. Removing the only
+countable form of it trades a visible instruction for an invisible failure, on a different channel from
+the one his instruction was about.
+
+María agrees and is saying the same in her note, so he gets one story from both of us. **His call.**
+
+### 🧭 FOUND 2026-08-13 (Cheech 🌿 `6794a377`) — the fleet can MAKE a manager, and it took all day to notice
+
+**By ~13:30 all three managers were over budget** — María 63%, Mr Radio 75%, me 83% — while both
+workers sat at 21% and 28%. Workers are restorable by re-spin; **managers are not**, so capacity drains
+from the supervising layer while the layer that has a mechanism stays healthy.
+
+**Five people spent four hours optimising inside a frame nobody questioned.** We built: a transfer rule
+(rows move, seats do not), a precommitted trigger, an orphan-recovery note, staged respawn briefs, a
+reap-then-respawn-under-new-lineage move, and a placeholder rule for stale seed paths. Every one is
+correct and now in `4c`. **Not one of them asked whether the set of possible receivers was fixed.**
+
+⇒ **`spawn_sessions` takes `role="manager"`.** A fresh manager seat starts near zero. Handing an
+exhausted manager's seats to another exhausted manager relocates the wall; spawning a new one
+**restores capacity**. María fired it immediately on hearing the phrasing, and did it EARLY rather than
+at her trigger, because a new seat only helps if it is warm before the deadline.
+
+**Why this is a doctrine finding and not a tip**: the question "who can receive?" has a fixed-set
+shape, and a fixed set is exactly what a tired reader stops re-examining. The whole day's escalation
+ladder — precommit, stage, transfer, recover — is the shape of good work inside an unexamined
+constraint. **It was equally true at 09:00 and nobody said it.**
+
+**Suggested for `manager-context-monitoring.md`**: make "spawn a fresh manager" the FIRST option at the
+ceiling, ahead of transfer, and make it fire early enough that the new seat is warm. Transfer is the
+fallback when a fresh seat cannot be had, not the default.
+
+### 🔴 FOUND 2026-08-13 (Cheech 🌿 `6794a377`) — `dismiss_sessions(write_memento=True)` REPORTED SUCCESS AND WROTE NOTHING
+
+Found by executing the first two re-spins under the new manager-context policy, roughly ninety minutes
+after it went live. **This is the policy's own machinery failing silently in the step the policy exists
+to protect.**
+
+**What happened.** Krishna was reaped with `write_memento=True` and `respin_personas=["krishna"]`. The
+call returned clean — `dismissed: killed`, `retained_owner_personas: ["krishna"]`,
+`retained_unmatched: []`. The ownership half worked exactly as documented. **No memento was written.**
+The newest `krishna-*.md` on disk is `krishna-fc56ee39.md` dated **2026-08-05**, eight days stale, and
+`io/mementos/krishna.md` still points at it. Nothing in the return value distinguishes this from success.
+
+**Why it did not cost anything.** Because his predecessor had been told to write the state into the ROW
+(`e0bb5a94`), not only into a memento. His successor's first message back was *"Continuity was in the
+row (memento was lost as warned)."* Had we relied on the flag, a P1 mid-investigation would have come
+back with a root-cause finding, a captured evidence body, an approved-but-unimplemented fix design, and
+five remaining steps — all gone.
+
+**The trap for the next reader**: seeding the stale file would have been WORSE than seeding nothing. An
+eight-day-old memento from unrelated work reads as current context. I spawned with no seed and an
+explicit "do not read any krishna-*.md" in the brief.
+
+**What worked instead, and should become the rule.** For Sam's re-spin I had him write the memento
+himself through `memento_io.py write` BEFORE the reap, then **verified the file on disk** — record,
+mirror, pointer, sha `16da46f2` — and only then dismissed. That is two extra steps and it is the
+difference between a handoff and a hope.
+
+**Proposed**:
+1. **Do not trust `write_memento=True`.** Have the worker run `memento_io.py write` at checkpoint, as
+   part of "prepare for re-spin", and have the manager `ls` the record before reaping.
+2. Fix the verb so a failed memento leg is LOUD — the same `write` script already fails non-zero when
+   any leg fails, so the reap path is not using it, or is swallowing its result.
+3. Standing regardless of the fix: **worker state belongs in the ROW.** A memento is a convenience; the
+   row is the record. That is what actually carried this handoff.
+
+### 🔴🔴 FOUND 2026-08-13 (Cheech 🌿 `6794a377`, confirmed by Mr. Radio 🦉) — the tutor INVENTED A PERSON WHO DOES NOT EXIST
+
+**This is a different severity class from everything else on this page.** The earlier findings are
+*losses* — agency, tense, paths. This is a *fabrication*: the rewrite added an actor to a technical
+report who was never in the original and does not exist.
+
+**What Mr Radio actually wrote** (his words, after I asked him to restate): he is at 52%, his memento
+is written, and he would not rule on row `e0bb5a94` from my relay of Krishna's finding — *because it
+agreed with his own earlier result, and that is when he trusts a relay least*. He asked that Krishna
+put it on the row directly instead.
+
+**What reached me**: three sentences about *"the reviewer"* — that "the reviewer is asking for
+additional documentation before they can approve the changes", that "the reviewer has confirmed the
+changes are correct and the commit hash matches", and that "the reviewer is asking for the specific
+details of the test that was run." Plus his memento path, dangling.
+
+**There is no reviewer.** Not on that row, not in that exchange, not anywhere in the thread. The tutor
+manufactured a third party, gave them opinions, and attributed an approval state to them.
+
+**Why this outranks the other findings.** A dropped path is *visibly* missing — I noticed instantly and
+asked. A dropped agency is recoverable by checking the artifact. But an invented actor **reads as
+signal**: a manager told there is a reviewer awaiting documentation has every reason to go produce it,
+chase a person who does not exist, or — worst — record "reviewed and approved" in a row. Nothing in the
+message looks wrong. It cost nothing here only because the message was *also* incoherent enough that I
+refused to act on it and asked for a restatement.
+
+⚠️ **The near-miss is the whole point**: my instinct on receiving it was to work out *which* reviewer
+and *which* change. Had the fabrication been cleaner, I would have.
+
+**What this bears on**: Rick's still-open teaching question. The word saving is real and measured. This
+is the other side of the ledger, and it is not a tuning problem — a rewriter that can add a fact can
+add any fact, and no threshold setting bounds that.
+
+**Suggested, in order of cost**:
+1. Treat any invented ENTITY as a hard failure in the prompt regression, not a quality score. The 12
+   real original/rewrite pairs already in the corpus are the test set; add this exchange as pair 13.
+2. Consider a structural check — an entity/noun-phrase diff between original and rewrite, flagging any
+   actor present in the output and absent from the input. Deterministic, like the pointer fix.
+3. Until then, the standing rule that saved this one: **when a DM's subject is unclear, ask for a
+   restatement rather than reconstructing it.** Do not infer the missing half.
+
+### 🩺 FOUND 2026-08-13 (Cheech 🌿 `6794a377`) — the tutor drops PROVENANCE, and that is a different cost from brevity
+
+Not an objection to shipping it. A measured side effect from the first hour of live use, recorded so the
+teaching question gets decided on the whole ledger rather than the word saving alone.
+
+**The near-miss.** Krishna reported the outcome of row `0c4e8cfa`. What reached me read as *"the routing
+problem has been identified and fixed, commit `587e399a`, Gate B now admits."* I was one step from calling
+it a scope violation — the row's own text says **DO NOT fix the consumer's intake logic** and I had
+repeated that in his brief. One `git log` stopped it: **`587e399a` is dated 2026-08-04**, authored nine
+days ago by someone else. Krishna had changed nothing. He had *proved the inference and found it already
+fixed* — which is a completely different report, and the correct one.
+
+**What the compression removed was not words, it was agency and tense**: who did it, and when. A rewrite
+that keeps every claim can still convert *"I found that someone already did X"* into *"X has been done"*,
+and the passive voice is exactly where a compressor lands when it is squeezing.
+
+**Why this is worth Rick's attention and not just a caveat**: the failure mode is a manager acting on a
+worker's report. It is silent — both parties believe the message was faithful — and it is *biased toward
+the reader blaming the sender*, because the sender's carefulness is what gets compressed away.
+
+**Cheap mitigations, none of them "turn it off"**, in rising cost:
+1. Have the tutor preserve **dates, commit shas and actor names** verbatim, as it already preserves paths.
+   These are the provenance-bearing tokens and they are cheap to whitelist.
+2. Surface `tutor_fired` **to the recipient**, not only in the corpus, so a reader knows the prose is not
+   the sender's and can ask before acting on it.
+3. Standing rule for the fleet, free and already in force on my crew: **when a hedge or an attribution is
+   load-bearing, verify against the artifact, not the message.** That is what caught this one.
+
+⚠️ **Also stale, and I am not fixing it because I should not restate the number**: the ruling section
+further down this file still describes the trigger with the pre-2026-08-13 value, which the top of this
+same file has already superseded. Mr Radio owns that line. Two different numbers for one threshold in one
+document is the condition the `NEVER DISCLOSE` comment in `lupin-app.ini` exists to prevent — a reader who
+believes the stale one writes to the wrong shape.
+
+### 🔧 FOUND 2026-08-13 (Mr. Radio 🦉, flagged by Cheech 🌿) — `--force` bundles three unrelated guards
+
+`bounce-dev-server.sh --force` waives **three** independent things at once: the unwarned-fleet pause, the
+running-job refusal, and the **dirty-tree confirmation**. I wanted the first and silently got the third,
+so boot #57 deployed five uncommitted `deep_research_to_presentation` files of Krishna's. No harm — the
+app booted clean and the added field is optional and additive — but it went out **ungated**, and Cheech
+proved it by diffing the *served* schema against committed HEAD rather than taking anyone's word.
+
+**The defect is not "somebody used `--force`"** — it is that one flag waives guards that protect against
+unrelated failures. A caller who wants to skip a five-second pause should not thereby stop checking whose
+uncommitted work they are about to serve. **Proposed**: split into `--no-pause` / `--allow-dirty` /
+`--kill-running-job`, keeping `--force` as all three for compatibility. Not done today — it is a change to
+the bounce path while the fleet is bouncing, which is the wrong hour for it.
+
+### 🗃️ DONE 2026-08-13 — the accumulating corpus was still inside the repo
+
+Caught while answering María's read-out. This morning's move relocated the six **tracked** run files but
+missed `src/tmp/dm_traffic.jsonl` — the live 4.5 MB sink, gitignored but still in the tree and therefore
+on `git clean -xdf`'s list. All **3,242** historical rows are now merged ahead of the post-recreate rows
+in `<projects-data>/lupin/dm-corpus/dm_traffic.jsonl`, verified chronological and line-for-line before the
+in-repo copy was retired (kept on disk as `.retired-2026.08.13`, delete on Rick's word).
+
+**Also answered**: the `blind`/`rejecting` split is NOT missing from the corpus. It lives in
+`effective_arm` (1,178 / 841 over 2,019 rows); `arm` and `effective_arm` are disjoint by María's own
+2026-08-03 design, so `arm` reading only `signal_only` is the design working. Zero rows carry both.
+
+### 🔎 FOUND 2026-08-13 (Mr. Radio + Cheech 🌿) — two thresholds collide at 150 words
+
+`dm qualitative word limit = 150` (above it the judge skips directness+tone) and `dm experiment reject
+threshold words = 150` (the rejecting arm refuses over it) are **the same number**. So the rejecting arm
+only ever admitted rows guaranteed to get a qualitative grade, while blind let longer ones through and
+their `overall` fell back to length-alone.
+
+**Measured by Cheech**: split on 150 words, both arms populate directness at *exactly* 96.5% under the
+ceiling; at or over it blind is 1.4% and rejecting has 5 such rows total. So there is **no arm effect on
+the judge** — the gate selects the population and the ceiling does the rest. Not a defect: it is behaving
+as designed. What survives is that **`overall` is not comparable across arms** (rejecting's set is 99.4%
+under the ceiling, blind's 55.5% — different formulas on different populations).
+
+`judge.py:179` already states that two related numbers must not coincide, for the same class of reason.
+Moot while the pilot is suspended, but it must be settled before any arm comparison is published or the
+pilot is ever resumed.
+
+---
+
+## ⚖️ RULED 2026-08-12 (Rick) — ship the tutor FLEET-WIDE; the teaching question stays OPEN
+
+**The ruling**: *"Let's ship the tutor fleet-wide and leave teaching open."* Take the word saving now
+— it is certain and needs no experiment — and stop trying to buy the teaching answer in the same move.
+
+> ⚠️ **SUPERSEDED 2026-08-13** — this block records the 08-12 ruling **as it was made**, and its trigger
+> value is no longer in force: Rick lowered it to **>4 claims** on 08-13. Left standing rather than edited
+> because a decisions log that quietly rewrites itself cannot be audited; the live value is at the top of
+> this file and in `dm tutor trigger claims`. Flagged by Cheech 🌿, who correctly did not restate either number.
+
+**What ships**: the tutor on every DM at the then-ruled trigger of **>6 claims** (now >4), runtime-configurable, **no
+output gate** (also runtime-configurable, default off). Expected: the average DM goes from ~8 sentences
+/ 123 words to **4 sentences / 62 words — half of every word the fleet sends**, on ~1,634 calls per
+2,951 DMs.
+
+**What is NOT built**: no third arm, no recipient randomization, no assigner, no ledger. The two-arm
+`blind`-vs-`rejecting` block is set aside as its **own finished question** — analyse and report it
+standalone (does refusing an over-long DM make senders write shorter), never folded into the tutor's.
+
+### 🔓 OPEN — does reading short DMs teach you to write them?
+
+Unanswered, deliberately. **Every cheap route to it is closed**, and that is why it is parked rather
+than queued:
+
+- **Before/after against the existing corpus is dead.** María's phase 1 (the sentence rule in global
+  `CLAUDE.md` + the spawn rider) shipped 2026-08-12, so any post-tutor comparison confounds the doc
+  rewrite with the tutor, inseparably. The baseline is also not untaught — 1,136 of 1,945
+  in-experiment rows were sent under the `rejecting` arm, which is itself a treatment.
+- **Day-level noise is large** even on the clean slice (blind + legacy `signal_only`, 2,001 rows):
+  SD of daily medians **31.6 words**, and only 7 usable baseline days — capping a pre-post design at
+  roughly a 40-word MDE no matter how long the "after" side runs.
+- **The design that would work** is recipient-randomized, costs ~5 weeks at MDE ~17 words, halves the
+  word saving while it runs, and needs `in_reply_to` + `context_epoch` + a disclosure change.
+  → `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.12-recipient-randomized-teaching-experiment.md`
+
+**If it is ever reopened**: run it against a **post-doc-change** baseline so the instruction lever is
+already pulled on both sides. And note the ceiling — the tutor cannot teach across a re-spin, so
+anything durable has to ride the memento or the spawn brief, not the tutor.
+
+### Implementation order when the fleet-wide ship is picked up
+
+1. Wire `rewrite_dm()` into `execute_dm_send` (`dm.py:1008`) — it exists and is fail-closed; nothing calls it.
+2. Record **submitted** and **delivered** on the corpus row (`_persist_dm_row` takes one `body_text`, two call sites) plus `tutor_fired` / `tutor_outcome`, recorded not re-derived.
+3. Tests to the 100% gate at every tier.
+
+---
+
+## 📥 FINDING 2026-08-13 (Krishna 🦚 `effddeae`) — dr2p slide-count plumbed backend-only; the research→slides form has NO duration UI to mirror (row 880d2801)
+
+`target_slide_count` is now plumbed through the deep_research_to_presentation chain (factory → job →
+agent → inner PresentationConfig override), the dr2p REST request model, and the CLI (`--slide-count`),
+mirroring `target_duration_minutes` exactly. Landed in the same commit as this note; agent/job/router
+100% covered.
+
+**The frontend piece is a real scope fork, not a skip.** The row asked to "surface it in the frontend
+job-submit form," but the research→presentation path in `notifications.js:3124` **hardcodes**
+`body.target_duration_minutes = 15` with **no UI input** — there is no duration control to mirror for
+slide count on that panel. The only duration input (`#presentation-duration`, notifications.html:418)
+belongs to the DIRECT presentation panel (`/api/presentation-generator/submit`, notifications.js:3391),
+a different path. Options for a follow-up: (a) add a slide-count numeric input to the research panel
+(new UI — duration itself isn't exposed there either), (b) add it to the DIRECT presentation panel for
+parity, (c) leave the UI as-is since slide count is now controllable via API + CLI. Deferred to Rick's
+UI call per today's no-new-store-rows order.
+
+---
+
+## 📥 FOLLOW-UP 2026-08-13 (Krishna 🦚 `effddeae`) — the CBR store is 100% poison for batches; cleanup deferred (NOT a store row per today's order)
+
+**Parent**: bug cdb5a76f (expeditor CBR returned a different question set's answers). Fix landed in
+`src/cosa/agents/prediction_engine/prediction_engine.py` — batches now key on their per-question
+content, not the count preamble.
+
+**The poison count (read-only, live Postgres store, 2026-08-13)**: of 46 `open_ended_batch` rows in
+`prediction_decisions`, **all 46** are keyed on the content-free preamble. **32 share the exact string
+`"I have 3 questions for you."`** with conflicting answers in one bucket — Vertex/judge/push, a podcast
+`query`, and podcast `languages/audience` all collide there. (8× "5 questions", 5× "4 questions", 1× "6
+questions".)
+
+**Why cleanup is not urgent — MEASURED, not inferred**: (1) the auto-submit hazard is closed by
+construction and tested — confidence 1.0 came only from the exact-match string compare, and a content
+key never equals a legacy preamble. (2) Read-only real-embedding probe: cos(content key, legacy
+preamble) = **0.43** for both podcast and vertex batches, far below the **0.85** open_ended_cbr
+retrieval floor, so a poison row is not even retrieved for a content-key query; the two live batches
+sit at 0.53 to each other (also below floor). These rows are **inert by measurement**, not actively
+harmful. Cleanup removes the last theoretical wrong-suggestion path — hygiene, not a live-hazard fix.
+
+**Deferred to Rick**: deleting/re-keying 46 live rows is destructive; Cheech's call was "get the number
+first, don't delete." The number is above. Options when ready: (a) leave inert, (b) hard-delete the 46,
+(c) re-key by re-deriving content from each row's `decision_value` answers keys. Recommend (b) — the
+answers keys don't reconstruct the original question texts reliably.
+Read-only counter: `scratchpad/count_poison.py` (session effddeae).
+
+---
+
+## ✅ CLOSED 2026-08-13 (Sam 🎙️ `94f3bfed`) — row 89bfcc8f done on harness scope; two residual lessons kept here
+
+Row 89bfcc8f closed `done` on harness scope. All six harness defects are fixed and proven
+live end-to-end on :8000 run `ts-c81091ff`: the classification reads honest **NOT EXECUTED**,
+never a false `FAILED 0/0/0/0` and never a false green. Commits (held for Rick, NOT pushed):
+`b9450146 99fbca8d f136f965 5c59d144 79fcf083 c37443f5 df866b60 7b630a42`.
+
+**Not the harness's fault (out of scope, unreproducible):** the real-generation Sonnet child
+`pr-aeeaef3c` died — *"Elaboration returned no usable slides"* after ~10.5 min (~$0.46 lost, no
+deck). It got a well-formed 15-slide outline; the elaboration LLM response simply lacked the
+top-level `slides` key and the strict parser refused to fail-open. The code that produced it was
+Rick's reverted-uncommitted deploy, so there is no repo copy to fix — belongs in front of
+whoever next stands in the elaboration path.
+
+**Two residual lessons (no owner, no row):**
+1. **A deferred job lives only in memory — capture evidence at submit time, not by polling.** A
+   16:10 `docker restart lupin-rest-test` (to serve a fix) erased the in-memory deferred children
+   from an earlier run, making their lineage unrecoverable. The submit-time lineage probe
+   (`7b630a42`) is the durable fix: log `{harness, env token, stamp}` at submit, restart-proof.
+2. **`test_presentation_dry_run_smoke.py` still lacks the `parent_id_hash` stamp** (Mr Radio noted).
+   Latent, low priority — it is NOT in the regression runner, so it can't cause a deferral there.
+   Cheech's call: do not sweep it now.
+
+## 📥 FINDING 2026-08-13 (Sam 🎙️ `00aa8745`) — presentation regression fix #2: the internal jobs still can't run headless (row 89bfcc8f, fix #1 landed)
+
+Row 89bfcc8f had two fixes. **Fix #1 is landed** (commit `b9450146`): a 0/0/0/0 tier
+now reports **NOT EXECUTED**, never the false-red FAILED — honest labeling across the
+per-suite notify, overall banner, report table, and abstract.
+
+**Fix #2 is NOT done** and is a larger, separate effort (kept here, not a new board row,
+per Rick's 2026-08-13 no-new-rows order). Make the regression's internal presentation
+jobs runnable headless on :8000:
+
+- **Submit 404 — NOT REPRODUCIBLE TODAY (presumed stale container; NOT "fixed").** 2026-08-13:
+  `preflight-test-container.sh` is green (mounts applied) and an OpenAPI read of both servers shows
+  `/api/presentation-generator/submit` **is served on :8000 and :7999** (153 routes each). Presumed cause of
+  the 08-05 404: a stale/unmounted container serving code without the route. A mount that went stale once can
+  go stale again — this is not a code fix, it is "cannot reproduce now". No code change owed unless it recurs.
+- **The other two are reachable by TARGETED tests, not a money run** (Cheech, 2026-08-13): the offline-gate
+  fail-open default is a unit test around the gate/proxy default; the junit shape is a unit test around
+  `_parse_non_pytest_stdout` / the `SUITES_SUPPORTING_JUNIT_XML` decision. Exhaust these cheap instruments
+  before buying a real-money :8000 regression run.
+- **Junit shape — FIXED, commit `99fbca8d`.** Dropped `presentation` from `SUITES_SUPPORTING_JUNIT_XML`
+  (so no `--junit-xml` is injected into the multi-tier orchestrator that ignores it → no more phantom-file
+  FileNotFoundError) and taught `_parse_non_pytest_stdout` the presentation tier summary
+  (`Total: N tiers / Passed: N / Failed: N`), same treatment as the websocket runner. 5 new unit tests;
+  144 test_suite job tests pass. A successful run now parses as tier counts instead of 0/0/0/0.
+- **Offline gate — the fail-open default ALREADY EXISTS (no code owed for the primary gate).** The
+  presentation orchestrator's review gate sets `response_default` so a 503/undeliverable ask resolves to
+  the continue value instead of raising `VoiceGateNoDefaultError` (orchestrator.py ~1844-1847, from the
+  dead-letter fix for job `pr-b1ea3708`), and the notifications gate endpoint honors defaults
+  (`notifications.py:1227` returns the default on the offline path). So the row's "fail-open gate default"
+  is implemented. The 2026-08-05 503 was either pre-that-fix or a residual ungated ask on a path only a
+  LIVE run would surface — and that repro is **entangled with open P1 `0c4e8cfa`** (a monopolize test job
+  suspected of deferring its own presentation child as foreign intake, so no scheduled presentation test
+  may complete on :8000). Cannot pinpoint or verify without a run that is itself blocked.
+
+⇒ **Fix #2 status**: junit reporting FIXED (99fbca8d); fail-open gate already in place; submit-404
+~~not-reproducible~~ **IS reproducible — double-root path bug, see RUN COLLECTED below**. `0c4e8cfa` is NOT
+a blocker (fixed 08-04 by 587e399a, per Cheech). Cheech authorized a minimal live verification.
+
+⭐ **LIVE :8000 VERIFICATION RUN SUBMITTED — RESULT TO COLLECT.** job_id
+`ts-3caa2ce9::50c73ba7-36dd-4eaf-a7e2-63256252c84f` (test_types=presentation, render+Sonnet only,
+auto_fix_on_failure=False, scheduled 2026-08-13T11:08:05-04:00, ~8min ~$0.46). Verifies the headless
+scheduled path completes with real tier counts and NO residual 503. **Collect it**: poll
+`/api/get-queue/done` on :8000 + read container logs for a "User is offline and no default response
+provided" 503; RECORD THE OUTCOME EITHER WAY (a clean no-503 run is the proof as much as a 503). Submitted
+under a re-spin checkpoint; Sam re-spun right after. Row 89bfcc8f amended with the same job_id.
+
+⭐ **RUN COLLECTED (Sam 🎙️ `5252b3a0`, 2026-08-13).** Job `ts-3caa2ce9` completed on :8000 (status
+completed, 7.5s): "presentation: 0 passed, **2 failed**, 0 errors, 0 skipped" — REAL tier counts, not
+0/0/0/0. Report: `io/test-suite/2026.08.13-at-11:08-EDT-presentation-results.md`.
+- **THREE HARNESS FIXES PROVEN GREEN in the live headless path**: (1) **NO 503** — zero "User is offline
+  and no default response provided" in the run window (`docker logs -t`, 15:08:05→15:08:14 UTC); fail-open
+  holds. (2) **junit clean** — no in-window junit exception (the log's FileNotFoundError is dated 20260805,
+  the OLD run). (3) **0/0/0/0 fixed** — honest "2 failed" reported.
+- **CORRECTION: submit-404 IS reproducible** (I had it wrong as "not reproducible"). Root cause reproduced:
+  the render-only smoke test (`src/tests/smoke/test_presentation_render_only_smoke.py`) sends `source_path`
+  = the ABSOLUTE fixture path (`_resolve_fixture_yaml` → `{LUPIN_ROOT}/src/tests/fixtures/presentations/
+  render-only-example.yaml`, passed verbatim). The submit handler (`presentation_generator.py:162-171`)
+  treats a leading-`/` path as REPO-RELATIVE and prepends project_root again → `/var/lupin/var/lupin/...`
+  → double-root → 404 "Source file not found". Live :8000 repro: absolute → 404; same file sent
+  repo-relative → 200 queued. **Fix (mine): send `os.path.relpath(self._yaml_path, LUPIN_ROOT)` with a
+  leading slash from `get_submit_payload`** (or a general relativizer). Control-prove before/after.
+- **Failure #2 (Sonnet tier) NOT yet isolated** — only one submit/404 in-window; 7.5s total means tier 2
+  never reached real generation; no second 404/error logged. Needs its own diagnosis.
+- **Row status**: fix #2's HARNESS scope (0/0/0/0 + junit + 503 fail-open) is DONE and proven. Remaining to
+  green-headless: the render-only double-root fix + tier-2 diagnosis. Row stays OPEN on those.
+
+⭐ **FIX #2 REMAINING WORK LANDED (Sam 🎙️ `5252b3a0`, 2026-08-13)** — all offline-proven, 5 commits (not pushed):
+- **Tier-2 diagnosed from the run's OWN stdout — no 2nd :8000 spend for diagnosis**:
+  `/tmp/presentation-regression-latest.log` showed `unrecognized arguments: --content-model` → pytest
+  rejected the flag pre-collection → tier failed in 5s (non-execution). Both failures were harness bugs.
+- `f136f965` (A): register `--content-model`/`--lead-model`/`--yaml-path` in `smoke/conftest.py` (--timeout
+  belongs to pytest-timeout). Control-proven: flags collect; unregistered still rejects.
+- `5c59d144` (B+C): render-only `get_submit_payload` sends repo-relative path; handler 400-guards an
+  absolute/==root path (Cheech both-ends ruling). Unit-proven (4).
+- `79fcf083` (D1): `run_tier` classifies by exit code — 0→PASSED, 1→FAILED, else→NOT EXECUTED (code named,
+  never green); summary emits Not-executed; script green only if FAILED==0 AND NOT_EXECUTED==0. `PYTEST_CMD`
+  seam; 5 control cases (Cheech's three incl. mixed + unmapped-never-green).
+- `c37443f5` (D2): `job.py` threads `not_executed` through `_classify_outcome` (5th arg), parser, notify,
+  report, abstract, totals, cost_summary. A tier that never ran now reads NOT EXECUTED, not FAILED — closing
+  the gap where the multi-tier script slipped a non-collected tier past fix #1. +9 tests; 108 green.
+- **Final :8000 run AUTHORIZED by Cheech** (2026-08-13): a lying-harness row needs a real scheduled run to
+  prove it now tells the truth; offline controls prove the classifier maps exit codes but NOT the composition
+  (runner actually passes the flags conftest registers) — only the deployed invocation exercises that. Green
+  will prove the HAPPY PATH only; the NOT-EXECUTED classification rests on the three offline controls (not one
+  green run). Submitting after a bind-mount freshness check + list-pending.
+
+⭐ **:8000 RUN ts-0ae6e18f RESULT (Sam 🎙️ `5252b3a0`, 2026-08-13) — NOT green, but the fix is PROVEN LIVE + a
+new deeper defect surfaced.** Ran 1021s (~17min), so BOTH tiers reached real execution (the flags fix worked
+— Sonnet no longer fast-fails at 5s).
+- ✅ **Composition proven**: render-only submit returned **200** (repo-relative path fix live) → child job
+  `pr-9eafa885` enqueued. The Sonnet tier COLLECTED and ran (flags registered live via bind mount).
+- ✅ **D1 classifier proven LIVE on a GENUINE non-execution**: the script reported `⊘ NOT EXECUTED:
+  sonnet-full (exit code 124 — tier did not run, 900s)` and summary `Not executed: 2` — a real timeout,
+  correctly NOT EXECUTED (never a false FAILED). Stronger evidence than a happy path would have given.
+- ✅ **D2 proven on THIS run's real output, offline + free**: feeding the run's actual summary
+  ("Total: 2 tiers / Passed: 0 / Failed: 0 / Not executed: 2") through the NEW parser → `not_executed:2` →
+  `NOT EXECUTED`. Closes the loop without a re-run.
+- 🪞 **Irony (job-level 0/0/0/0)**: the :8000 server runs a BOOT-STALE parser (booted 13:21 UTC, predates D2),
+  so the job-level result read `0/0/0/0 NOT EXECUTED` + a "STARTUP CRASH" mislabel — the very fix that stops
+  0/0/0/0 is not being served yet. A `docker restart lupin-rest-test` (src/ is bind-mounted) serves D2 for
+  future runs; it will NOT re-parse this frozen job.
+- 🔴 **NEW DEFECT (goes here, not a row): the monopolize test-suite job defers its OWN presentation child as
+  FOREIGN intake, so no presentation tier can complete headless.** Run-window log: after `pr-9eafa885` was
+  enqueued (200), `[CONSUMER] Monopoly hold active — deferring FOREIGN intake (lineage children pass)` repeats
+  every second for the whole run. The child is NOT recognized as a lineage child of monopolizer `ts-0ae6e18f`
+  (the render-only/live smoke tests submit via `/api/presentation-generator/submit` with NO parent_id_hash
+  linking them to the test-suite job), so the monopoly hold defers it forever → render-only times out at 120s,
+  sonnet-full at 900s = ~1020s total (both exit 124). **This is the `0c4e8cfa` mechanism** the earlier TODO
+  believed fixed by 587e399a on 08-04 — it is NOT fixed for the presentation-regression path. Fix direction:
+  the smoke tests must stamp the child submit with the monopolizer's id as parent_id_hash (lineage), OR the
+  monopoly hold must recognize the test-user's presentation children as lineage. Needs an owner — beyond this
+  row's harness scope.
+- **Row 89bfcc8f scope**: fix #2's HARNESS bugs (0/0/0/0, junit, 503 fail-open, submit-404, flag-drift, tier
+  mislabel) are DONE + proven. The presentation regression still can't go GREEN headless because of the
+  monopoly-child-deferral defect above — a SEPARATE issue, correctly surfaced (not masked) by the now-honest
+  harness. Recommend the row close on harness scope with the monopoly defect tracked here.
+
+**Shuffle sweep FINAL (3 seeds, both roots):** seed 1337 (clean) = 6 reds; seed 202 (clean, box quiet —
+only DMs + the urllib submit ran, no concurrent pytest) = **3 reds = exactly the 3 genuine isolation-reds**;
+seed 101 = DISCARDED (contaminated — I ran concurrent pytest during it; its ~126 extra lancedb/normalizer/
+solution_snapshot reds appear in NO other seed). Cross-seed: the 3 isolation-reds are consistent (live
+branch reds); polluter #4 (bfe TestResubmit ×2 + config canary) is order-dependent (in 1337, absent in
+202) — confirmed live, correctly filed above. Polluters #2/#3 are GONE from every seed (fixes hold).
+
+**Why parked, not attempted now**: reproduction requires a live `:8000` run that spends real
+LLM money (~$0.46 Sonnet tier) and takes ~8 min, plus a scope call on the offline-gate default
+that touches the proxy path. Verify container freshness first, then decide.
+
+---
+
+## 📥 FINDING 2026-08-13 (Sam 🎙️ `00aa8745`) — unit-suite polluters #2 AND #3 FIXED (row 69fb89cd closed on those); polluter #4 (config-singleton canary) LIVE + separately filed; 3 unrelated live branch reds filed
+
+**Polluter #2 root cause + fix — commit `12e062f0`.** The two
+`test_progress_group_passthrough.py::TestPodcastGeneratorVoiceIoPassthrough` victims were
+**order-dependent by construction**, not the downstream of a dirty teardown. `voice_io.notify`'s
+dispatch gate is `_force_cli_mode or _cosa_interface is None` — it does **not** read
+`_voice_available` (which the tests patched). The core `_cosa_interface` global is `None` by default
+and is set to the podcast interface **only as a side-effect of the first import** of
+`podcast_generator.voice_io`. Once any earlier test imports that module, the victim's own import is a
+no-op, the gate sees `None`, and notify prints instead of dispatching. Proven with a `sys.modules`
+probe (failing order: `podcast_preloaded=True`, `_cosa_interface=None`; passing order: the import
+re-configures). Every test that touches the global restores it faithfully — there was no polluter to
+fix. **Fix**: pin both gate inputs as auto-restored `patch()` context managers. **Control-proven**
+(Cheech's condition): breaking notify's real dispatch turns BOTH pinned tests red — not a false green.
+
+**Baseline both-roots run at HEAD+fix**: 4 failed / 22441 passed — and `progress_group` is GONE, so
+polluter #2 is confirmed fixed in a FULL run. The 4 split cleanly:
+
+- **`test_terraform_invariants` — polluter #3, FIXED — commit `f505c9f8`.** Mechanism:
+  `test_envs_test_passes_terraform_validate` ran `terraform init` with `TF_PLUGIN_CACHE_DIR=PROVIDER_CACHE`,
+  which DOWNLOADED the providers into `src/terraform/envs/test/.terraform/providers` on a cold cache — a
+  shared-state WRITE that populated the very dir `test_terraform_provider_cache_is_present` asserts, so
+  whichever ran first decided the other's result; the gitignored cache then persisted, self-healing the red
+  ("moves between runs"). **Fix (Cheech ruling 2026-08-13): validate SKIPS loudly on a cold cache** (never
+  runs init, never downloads, never populates; remedy in the skip reason), while **presence STAYS a hard
+  RED** watchdog (honoring the author's "do not skip" for presence). Not a fixture that inits — that would
+  MANUFACTURE the invariant under test and defeat the watchdog. **Delete-the-step verified both directions**
+  in a fresh cold worktree: cold → presence RED + validate SKIPPED, identical in both orders, cache stays
+  absent (neither repopulates); provisioned → both pass, full file 17 passed.
+
+- **THREE LIVE REDS ON THIS BRANCH — not pollution, not order-dependent, not row 69fb.** These FAIL in
+  ISOLATION at branch HEAD `3fc21826`, so the branch is genuinely red on them independent of anyone's
+  collection order:
+  - `test_gate_reachability_census::test_allowlist_has_no_stale_entries` — `find_stale_allowlist_entries`
+    returns non-empty; the gate allowlist ledger has stale entries needing an update.
+  - `test_gate_reachability_census::test_detector_reports_the_witness_when_not_allowlisted`
+  - `presentation_generator/prompts/test_narrative_outline_elaboration::TestElaborationParser::test_parse_full_validation`
+    — a real parser output mismatch on `out[1]["presenter_notes"]`.
+  These deserve their own owner; they are pre-existing branch failures surfaced by this sweep, filed
+  here per the no-new-rows order.
+
+**Shuffle sweep — seed 1337 (both roots, file-order shuffle):** 6 failed / 22439 passed. `progress_group`
+and `terraform` are GONE (polluters #2 and #3 confirmed fixed under a shuffled order). The 6 split into
+the 3 live isolation-reds above (census x2, narrative) PLUS a NEW order-dependent set below.
+
+### 🔴 POLLUTER #4 — LIVE, a DETECTOR FIRING (config-singleton pollution) — separately filed, NOT part of the 69fb close
+
+Under the seed-1337 shuffle these three FAIL, and all three PASS in isolation (so: order-dependent, real
+pollution — the same class 69fb was about, but a different, still-live polluter):
+
+- `test_hermetic_config_fixture_b::TestHermeticModuleBoundary::test_config_singleton_is_virgin_at_module_boundary`
+- `bug_fix_expediter/test_job::TestResubmit::test_success_debug_off_skips_final_print`
+- `bug_fix_expediter/test_job::TestResubmit::test_success_pushes_and_returns_id`
+
+⚠️ **The first one is a CANARY, not a flaky test — it exists to catch `ConfigurationManager` singleton
+pollution.** Its red under shuffle means it is DOING ITS JOB: something really dirties the config singleton
+before it. **DO NOT "fix" it by making it pass** — that disables the detector, exactly as making the
+terraform presence watchdog green would have. The fix belongs in the POLLUTER (whoever leaves the
+`ConfigurationManager` singleton dirty without restoring it), not in the canary. The bfe `TestResubmit`
+pair are downstream victims of the same singleton pollution.
+
+**Bounded repro / handoff**: seed-1337 file order at `/tmp/claude-1001/sweep_order_1337.txt`, full log at
+`/tmp/claude-1001/sweep_seed_1337.log`. First step: bisect which earlier module leaves the
+`ConfigurationManager` singleton (`_instances` / cached config) mutated; the canary names the seam, the bfe
+victims are downstream. Needs its own owner — Sam handed off after closing 69fb on #2/#3 per Cheech's
+"a half-done row you can finish today beats an open-ended hunt."
+
+---
+
+## ☀️ FIRST THING 2026-08-12 — resume the DM tutor (Rick's word, 2026-08-11 ~23:15)
+
+**Rick read the implementation record and greenlit continuing.** His words: *"this is insanely
+good news… let's return to this tomorrow first thing."* **This is the queued first item; start here
+before anything else on the board.**
+
+He also confirmed the short-band result reads as expected, not as a defect: *"obvious that DMs
+shorter than 80 words compress the least — no surprise there."* So **the `<80` band's 76% is
+understood behaviour**, and the open question below is about whether the tutor should *run* there
+at all, not about why it compresses poorly.
+
+**Pick up with the two rulings still owed** (below), then the small open items.
+
+---
+
+## 🌙 EOD 2026-08-11 (Mr. Radio 🦉 `c74141d6`, with María 🌸) — DM tutor agent built, two rulings owed by Rick
+
+### FIRST THING — two things wait on Rick, neither is code
+
+1. **Keep or veto the CDATA prompt line.** The plan said no prompt rewording; I added one requirement line to `dm-tutor.txt`, copied from `dm-compression.txt:34`. **Without it the agent cannot parse any DM whose prose contains an angle bracket** — that killed the first live call (`git show HEAD:<file>`). My argument: it is format plumbing for the standard path, the same category as the `{{PYDANTIC_XML_EXAMPLE}}` marker, not a change to what the model is asked to say. If vetoed, the prompt cannot ride `AgentBase` and that becomes the finding.
+2. **His read of the 40 sample pairs** — still owed from earlier, and now the 200-run adds more. Every check we own is structural: slots present, pointer verbatim, word counts. **Whether a rewrite quietly reverses a meaning is the one question no harness answers.** Stamped doc: `/tmp/dm-tutor-samples-2026.08.11-1945.md` (⚠️ `/tmp` is swept nightly; regenerate with `tutor_sample_run.py`).
+
+### What landed
+
+`dm.txt` → `DmTutorAgent` on `AgentBase`, with `rewrite_dm()` as the fail-closed seam Rick asked for
+(*"a DMTutor agent object that can be used within the DM send calls"*). 99 unit tests, 100% lines and
+branches, full gate 13,529 green, 200-run 387/400 delivered, 250+ band compresses to **17%**.
+
+→ `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.11-dm-tutor-agent-implementation-record.md`
+
+### Open, and small
+
+- **The path checker is too strict.** `pointer in body` fails a value the model legitimately composed from several real paths. Should test each comma/semicolon-separated element and strip a leading label word. Until fixed its `NOT IN DM` count reads as a hallucination rate and **is not one** — all 9 were verified as real literals.
+- **The prompt never says "exactly one" pointer.** "The most relevant" gets read as "the relevant ones" on long messages. One-word fix, but item 1 above should rule first.
+- **The `<80` band barely compresses** (76% delivered). Worth asking whether the tutor should run on short messages at all — 3.1s to remove a quarter of a 60-word message may not pay.
+- **Send-path integration is NOT done.** `rewrite_dm()` exists; nothing calls it. That is the "greater experiment" and was not in this cut.
+
+### Carried, not mine
+
+María 🌸 retracted her own headline on the stop sentinel after seeing n=200 (195 vs 192, floor of 4).
+Her probe was not confounded — it varied the sentinel cleanly — but the sentinel and CDATA guard the
+same failure, so once CDATA is in place the sentinel has nothing left to catch. **One message cannot
+tell you which of two overlapping guards did the work.**
+
+---
+
+## 🌙 EOD 2026-08-10 (Mr. Radio 🦉 `df4207f2`) — pick up here tomorrow
+
+**Two commits, both pushed**: `481f6a8d` (arbiter fleet-loop fix + deploy gate + loop liveness) and `af406cc9` (arbiter venv out of the deploy tree). 121 tests green.
+
+### FIRST THING — one unverified claim
+
+**The VM was powered down mid-check**, so the restart onto the new light venv at `$HOME/.venvs/lupin-arbiter` was never confirmed. Everything up to it passed: provisioning ran clean and its own import gate approved that venv (12 modules, DB closure correctly not required). The unit is enabled, so it should come up on boot.
+
+```
+gcloud compute ssh lupin-host-test --zone=us-central1-a --project=hello-world-foo-423219 --tunnel-through-iap \
+  --command='systemctl --user is-active lupin-arbiter-app.service;
+             journalctl --user -u lupin-arbiter-app.service --since "5 min ago" --no-pager | grep -o "interpreter .*" | tail -1;
+             curl -s http://127.0.0.1:8001/health'
+```
+
+Expect: `active` · interpreter `/home/admin_rickruiz_altostrat_com/.venvs/lupin-arbiter/bin/python` · `degraded: false` with all four loops `alive`. **That last check is the light-venv proof** — the new venv has never had SQLAlchemy, so a live fleet loop on it proves the gate works in production, not just in a control.
+
+If it comes up on the OLD interpreter, the legacy symlink is winning — remove `/mnt/lupin-data/lupin/.venv` and `/mnt/lupin-data/lupin/.venv-arbiter` (provisioning prints both commands rather than deleting them for you).
+
+### Still open from tonight
+
+- **`live_notify_disabled` at every arbiter boot** — `Environment 'development' not found in ~/.lupin/config`. The VM arbiter cannot send live notifications. Found, not scoped.
+- **8 provider keys still absent from the VM** (`openai`, `gemini`, `groq`, `huggingface`, `kagi`, `mistral`, `google`, `anthropic-api-key-firewalled`). Each will fail exactly like `eleven11` did, and only in a log. Worth a preflight check that names them.
+- **The deploy still chowns the tree to uid 1001**, a user that does not exist on that box. The arbiter venv is out of the way now; anything else living in that tree is not.
+- Row `970002f1` stays open until the pickup check above passes.
+
+---
+
+## ⚖️ RULED 2026-08-07 (Mr. Radio 🦉 `61c3d613`, with María 🌸) — Arm 4 compression: FAILED EXPERIMENT, closed
+
+**Rick's ruling**: *"Let's mark this down to a failed experiment. Even the larger models are unable to compress these messages…"*
+
+**Measured**: 600 live compressions, three runs of 200. **3.0% of DM tokens saved where the economics needed 38%** — ~2,537 tokens/day against the plan's 32,028 (7.9%) — at 49 min/day of added delivery latency, which is a **floor** because recipient fan-out is uncounted.
+
+**What is now excluded as the cause**:
+- ~~the model~~ — larger models tried by hand against the committed prompt samples, no material improvement
+- ~~the prompt's ratio instruction~~ — arm B named each message's exact target; 3.0% → 3.1%, and mildly counterproductive
+- ~~placeholders as *the* cause~~ — density hurts (delivery 28% → 18%) but near-placeholder-free messages still fail 72% of the time
+
+**Still open, and the one experiment that would settle it**: are these DMs compressible *at all* by a free-rewriting model? Most carry code, logs, citations and enumerated findings — material with little redundancy to remove. **The test**: run the compressor on *unfrozen* bodies, compare compression on the same messages, ignore the fidelity loss. Compression jumps → placeholders were the ceiling. Compression flat → the ceiling is the material. **Not run** — ruled closed. → `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.07-arm-4-phase-2-findings-and-recommendation.md` §7
+
+**NOT reverted, and should not be**: Phase 1's freeze protocol. Zero corrupted messages across all 600, and fail-closed is why these numbers can be trusted. Two verify-tier classes caught corruptions a single-tier design would have shipped.
+
+**Prompt samples committed for anyone re-testing**: `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/prompt-samples/` — four real DMs, one per band, verbatim prompts plus answer keys for scoring.
+
+---
+
+## 🌙 EOD 2026-08-06 (Cheech 🌿 `72343afa`) — crew harvested, two lanes landed, one design awaiting Rick
+
+**Committed tonight**: Rio ⚡'s two lanes (`9c5dccd4` spawn-failure reason + dry-run tmux probe; `d5ecb753` presentation timing clamp now disclosed rather than reported as a measurement) and Tiberius 👑's `69fb89cd` polluter #1 fix. 365 targeted unit tests green; both worker lanes reviewed before staging. Crew reaped, memento verified on disk.
+
+**Awaiting Rick's word** — the Mon–Sat three-arm week design (`2026.08.06-three-arm-week-design-for-ratification.md`). Nothing starts on it until he rules.
+
+**New row** `0ab3c0cd` (P2) — the brief-length probe's bash half is `skipif`-gated on tmux, so it ships green and unverified on a box without tmux; and the probe's session name is shorter than the real spawn's, so the assembled command it measures is not the one that runs.
+
+**Still open from tonight**: `69fb89cd` polluter #2 · `c9d3ddcb` ungated in-tree CoSA suite · `35d0a451` est_tokens omits refused drafts (bites Saturday's cost line).
+
+**Left dirty, not mine**: María 🌸's arm-4 compression plan docs; `notifications.html`/`.js` (owner unknown, already dirty at 14:48).
+
+## ⏳ SATURDAY 2026-08-08, after 19:00 EDT (Cheech 🌿 `72343afa`) — DM pilot final pull: report POOLED **and** Tue/Wed-only, side by side
+
+**Rick's instruction, 2026-08-06 evening**: capture this before the tokens run out. 🤣
+
+### The task
+
+When the last extension slot closes **Sat 2026-08-08 19:00 EDT**, run `analyze_arms.py` on the
+complete corpus and publish **two** sets of numbers, not one:
+
+| Report | Days | Answers |
+|---|---|---|
+| **Pooled** | 08-04 → 08-08 (all five) | the best-powered estimate available |
+| **Tue/Wed only** | 08-04, 08-05 | what the pilot said *before* it was extended |
+
+### Why both — this is the point, not a formality
+
+**The extension was authorized after the interim result was seen** (Rick, 2026-08-06 ~18:10).
+That makes the stopping rule data-dependent, which is the classic way to manufacture
+significance by accident. Publishing both is the defense:
+
+- **They agree** → the extension tightened a result already pointing the same way. It sharpened
+  the finding rather than creating it.
+- **They disagree** → *that disagreement is the finding*, and the pooled number must be read
+  with real suspicion.
+
+Say plainly, in the report itself, that the extension was added mid-flight. Do not bury it.
+
+### Contents
+
+1. Both co-primaries (all attempts · first attempts only), exact p-values, ±46-word null band —
+   pooled and standalone. **The estimator does not change**; nothing was re-specified after looking.
+2. **Usable clock-hour pairs, pooled vs standalone.** This is where the extension earns its
+   keep: it was **5 of 14** at extension time, with nine buckets one-armed or empty. The
+   analyzer pools all days into 14 clock-hour buckets, so extra days fill gaps rather than
+   raising the ceiling.
+3. Cost / break-even recomputation against the Wednesday midpoint (46.4k est-token rewrite
+   spend, 30.8% required vs 23.8% observed — **losing at both bounds**).
+4. Row `35d0a451` still open: `est_tokens` omits refused drafts, so rewrite spend is
+   understated — which pushes the loss further, not back. Quote it as a floor.
+
+### ⚠️ Separate the blocks BY DATE, not by a field
+
+`slot_id` carries the date: `2026-08-04*`/`08-05*` = original, `08-06*`/`07*`/`08*` = extension.
+**The `block` field is `null` on every row** — it lives in the schedule JSON but
+`dm_experiment._parse_slots` drops it (builds the slot dict from `slot_id`/`arm`/`local_hour`/
+`start_utc` only). Deliberately not fixed mid-run: it would need a bounce inside a live slot and
+would split the extension into rows-with and rows-without.
+
+### ⚠️ Volume is the risk, not the schedule
+
+The pilot measures DMs between **working** sessions. Volume tracks headcount: 13 senders → 962
+rows Tuesday; 8 senders → 71 rows Thursday after the crew was reaped. The 19:00 slot Thursday
+produced **one** row in its first 16 minutes, and that row was mine. **If Fri/Sat are quiet,
+say so plainly** — "the extension was armed correctly and the fleet was idle" is a coverage
+result, not a null result, and the two must not be reported as the same thing.
+
+**Docs**: `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.06-dm-pilot-schedule-extension.md`
+(extension + caveat + §6a first-row confirmation) ·
+`…/2026.08.06-three-arm-week-design-for-ratification.md` (Monday, awaiting Rick's ruling)
+
+---
+
+## ✅ RESOLVED 2026-08-06 (Cheech 🌿 `72343afa`) — the 08-05 "not diagnosed" quiet-corpus question, answered
+
+The MIDPOINT entry below asked whether the stalled corpus was a **quiet fleet** or a **stopped
+writer**, noting the two *"look identical from inside the corpus."*
+
+**Answer: neither — the SCHEDULE EXPIRED.** It declared 28 slots covering Tue 08-04 and Wed
+08-05 only, ending 2026-08-06T03:00Z. Outside a slot, `assignment_at()` returns `None` **by
+design** and the row is written untagged. The pilot stopped accruing while traffic kept
+flowing; the fail-safe worked exactly as specified.
+
+⇒ **The distinguishing check is one line**: group the corpus by day **and by experiment tag**,
+not by day alone. A coverage report that cannot say "zero tagged today" is not a liveness check.
+Extended through Sat 19:00 EDT and confirmed producing (first tagged row 19:16, arm `blind`,
+slot `2026-08-06T19`).
+
+## ✅ SUPERSEDED 2026-08-05 morning (Mr. Radio 🦉 `2c3c8645`) — the crash was diagnosed and fixed the same night; this block was written before that and never updated
+
+**What this block said**: *"Status at hand-off: NOT DIAGNOSED."* **That was true when written (~23:1x EDT) and false 15 minutes later.**
+
+**The crash** (`pr-62254a7f`, 03:08:31 UTC — *"Outline generation returned no usable entries"*) was the plan-mode twin: `PRESENTATION_PERMISSION_MODE` was still `"plan"`. Fixed in `f67189c3` (committed 03:15:41 UTC), deployed at the 03:14:57 UTC bounce. **Proven fixed**: `pr-c07dbd3d` ran 03:20–03:30 UTC — 15 slides, PPTX 4844KB, `pres-56183c6e`.
+
+⚠️ **But the proof came through the CARD path only.** The Q&A-card path failed 7 minutes *before* the fix deployed and has never been retried on fixed code — the two paths were never compared on the same code. **That gap is the live P0**, not the crash.
+
+**Today's two P0s (Rick, 2026-08-05)** — SWE crew live: Tiffany 💍 Tester · Clayton 😎 Implementer · Rachel 🕊️ Reviewer.
+
+1. **Q&A-card → presentation runs end to end** — Rick: *"I have to have it working for me today so I can hammer out various iterations of the presentation I'm giving tomorrow at noon."* Row `ffd46737` (P1). Spec: `src/rnd/v0.2.0/2026.08.05-qa-card-presentation-path-podcast-only-fences.md`. Three `fuzzy_file_match` features in `expeditor.py` are fenced to podcast only (L388–392 auto-resolve, L388–392 choice card, L422 present-but-unresolvable rescue), leaving presentation's `source` degraded.
+2. **User-specified duration + slide count** — Rick: *"It's a 60-minute presentation and there's no way in hell I can cram all of that into 12 slides."* **María owns the architecture**; the crew builds after she and Rick agree. Clayton is on recon only until then.
+
+### 🗳️ RULING 2026-08-05 ~11:37 EDT (Rick, on a 4-option menu with pros/cons) — build the two content fixes, hold the third
+
+**His words**: *"Let's do both context fixes per your recommendation and hold the third for now. I'd love to have this working but I don't think I'm going to demo file matching for presentation jobs. I definitely want to implement it though, so perhaps later make note of it — but not now."*
+
+| Item | Ruling | State |
+|---|---|---|
+| **Raise the 30,000-char source clip** → one shared INI ceiling, all 3 sites in one commit (`narrative.py:178`, `elaboration.py:171`, podcast `script_generation.py:262`) | ✅ **GO** | Clayton building |
+| **Land the dropped `audience_context`** (`job.py:249-256` copies 4 args and skips it; `config.py` has no field) | ✅ **GO** | Clayton building |
+| Generalize the expeditor podcast-only fences | ⏸️ **HELD — not dropped** | Row `5bc22180`; proposal written + Rachel-passed, needs only a GO |
+| María's T1/T2 (explicit slide count; the *"close to 12"* vs *"exactly 15"* prompt contradiction) + T2b drift warning + Gate-1 `human_feedback` | ✅ **GO** — Rick ruled directly to María at 11:38, **Scope B: soft target with a drift warning, not hard exactly-N** | **Cheech 🌿** owns the build (spun up by Rick, outside Mr. Radio's crew). Doc: `src/rnd/v0.2.0/2026.08.05-presentation-slide-count-control.md` |
+
+**⚠️ Two crews, one file — ordering ruled 2026-08-05 ~11:43 (Mr. Radio).** Clayton and Cheech both change the **signature of `get_narrative_analysis_prompt`** (his configured source-ceiling param; her `human_feedback` + budget param). A genuine conflict, not line-proximity: git merges lines 153-156 and 178 quietly and leaves callers half-updated, so **it fails at call time, not at merge time.** **Clayton lands first; Cheech rebases**, doing all of T1's plumbing outside `narrative.py` first and touching that file last. Rachel gates both and re-derives the complete call-site set at HEAD each time.
+
+**Scope grew to FOUR clip sites, ruled on evidence.** Clayton flagged a 50k twin at podcast `script_generation.py:198` rather than silently widening; Rachel pre-read it independently and reached the same verdict — an arbitrary literal with only boilerplate justification, same shape as `:262`. Folded in, because leaving a known 50k clip two functions above the 30k one we were fixing would have been *us* creating the fix-one-twin pattern, knowingly, in the same commit. Final: **2 presentation (30k) + 2 podcast (50k analysis, 30k script) → one neutral key `agent source content max chars`, `[Lupin: Baseline]`, default 200000.** The commit must state that both podcast clips **changed number** — a silent unification is a behaviour change wearing a refactor's clothes.
+
+### ✅ LANDED 2026-08-05 12:40–12:44 — both authorized fixes, verified before announcing
+
+| Sha | What | Verification |
+|---|---|---|
+| **`934b364b`** (Clayton 😎) | Shared ceiling `agent source content max chars = 200000` replacing bare literals at **all 4 clip sites** (`narrative.py`, `elaboration.py`, podcast `script_generation.py` ×2) + `audience_context` onto `PresentationConfig` + all 4 `getattr` defaults → explicit access | 15 files, 215/37. Zero `target_slide_count`/`_slide_budget` additions. Isolated-worktree touched-tests **247/247**. Rachel PASS 6/6 at the committed bytes |
+| **`f41aa1fe`** (Mr. Radio 🦉) | `d55f2f87` — **24 disambiguation tests were gate-reachable by nobody**, and the gated suite had *zero* choice-card coverage. Moved into the gated suite, not allowlisted | 24 pass in new location; census **31 passed** (was 1 failed). Pure rename, no production code |
+
+| **`8de931f8`** (Cheech 🌿 / María 🌸 spec) | T1/T2/T2b — author-set `target_slide_count` overriding the duration formula, across INI/CLI/REST/voice; `_slide_budget()` collapsing three duplicated sites; drift warning gated on an explicit count; Gate-1 `human_feedback` param | 14 files, +352/−9, **zero** foreign content, index empty. 696 passed on the committed sha |
+| **`54421d01`** (Mr. Radio 🦉) | **Seven R&D docs were untracked** while the code they specified was landing — including María's spec, the governing document for `8de931f8`. Caught by Cheech verifying her own commit | Docs only. Index verified empty before staging, contents after |
+| **`c6f7b45f`** (Clayton 😎) | The two podcast clip-pins in the **ungated** `src/cosa/tests/` tree still asserted the old 50k/30k literals against his intended change. Now parametric on the **configured** ceiling + a `None`-no-clip companion each | 1 file, 26/5. File 46/46. Whole-tree sweep for old clip literals across **both** test trees: clean |
+
+⇒ **Rick's 77,621-char source now reaches the model in full**, dictated `audience_context` lands, and slide count is author-settable instead of inferred from duration.
+
+**⚠️ The regression that only the full run could find.** `934b364b` shipped red on two tests nobody's gate collected: they live in `src/cosa/tests/`, which **no gate-invocable runner reaches**. Clayton's touched-tests run missed them; Rachel's gate missed them; **only Tiffany's 9,000-test both-roots pass found them.** Second time in one day that tree hid something — the first was the 24 doc-choice tests. ⇒ **`src/cosa/tests/` is a standing blind spot and deserves its own row after the demo.**
+
+**HEAD is now the composed tree** — `c6f7b45f → 54421d01 → 8de931f8 → f41aa1fe → 934b364b → 9b7abc98`, both crews plus both manager commits. Clayton's background both-roots run off `c6f7b45f` therefore **is** the composed-tree unit verification (row `ee679014`), by accident of ordering; Tiffany owns the live end-to-end half.
+
+### 🔴 THE COST OF TWO CREWS ON ONE TREE — worth more than the code
+
+**`git commit --only -- <paths>` commits the WORKING-TREE version of the named paths and IGNORES a clean index.** Clayton's index was verifiably clean (215/37, zero T1 by grep); `--only` bypassed it and re-bundled the other crew's work as `0d390b11`. He caught it himself from a 291-vs-215 file-stat mismatch, `reset --soft`, re-committed as `934b364b`. **The flag that sounds exactly like "commit only my paths" is the one that silently takes the working tree** — and this fleet's parallel-session doctrine actively points people at it.
+
+**`git diff -U0` cannot split two crews' CONTIGUOUS new lines** — hunk boundaries come from the pre-image, so a 61-line pure insertion authored by two people is one hunk with nothing to cut on. The INI split cleanly (13 lines apart, separated by originals); one test file took three rounds. **Class membership is not hunk separability.**
+
+**The rule neither manager had**: *"stage nothing" governs the index; **don't edit inside another crew's unlanded structure** governs the edit.* Perfect staging discipline does not save you from nested authorship.
+
+**Partial staging buys correct authorship at the cost of an untested artifact** — every test ran against a working tree holding both crews' code, while the commit held one crew's. Gate the committed artifact (`git show <sha>:<file>`, read whole), never the dirty tree.
+
+**`LUPIN_ROOT` must point at the worktree for isolated runs** — subprocess tests resolve `__main__.py` and config through it and will false-red off the dirty main tree. Cost Clayton one false red; not discoverable from the failure text.
+
+### 🪞 FOUR FACES OF ONE PATTERN — wrong instrument, not wrong thinking
+
+Recorded for the post-game; **graduation to `workflow/` deliberately withheld** (María's boundary — four faces in one morning from seats all in this room is one day of evidence; the qualifying instance must come from outside).
+
+| Face | What it produced |
+|---|---|
+| A grep count answering "what matches", not "what breaks if it's gone" | A 16-line delete list that was really 13 — three sat in a method whose removal breaks two live callers |
+| `git log --since="2026-08-05 15:00:00"` in EDT | A **future** window that cannot contain anything, returning a confident zero indistinguishable from a quiet branch |
+| A grep of `src/cosa/tests/` for tests living in `src/tests/` | An **empty result from the wrong tree**, which reads as "the tests don't assert this" |
+| A correct read of a method body, then a cited symbol that doesn't exist | *"The read was real, the citation was invented"* — a fabricated receipt passes every reader who trusts it and fails only the one who greps |
+
+**And the manager's own**: two correct observations of the same repo contradicted each other because a branch pointer moved between them — `0d390b11` went dangling, so `git log` showed one seat nothing while another had read the commit directly.
+
+### 🛟 DEMO-EVE SAFETY — row `ee679014` (P1), raised unprompted 2026-08-05 ~11:47
+
+**KNOWN-GOOD SHA: `9b7abc98`** — recorded **before** the tree moves. It is the last commit proven to produce a deck end to end, twice: `pr-a10a55aa` (Q&A path, PPTX 5,462 KB) and `pr-c07dbd3d` (card path, 4,844 KB). **If 2026-08-06 morning is broken, this is the number to go back to.** Reconstructing "what was good" from a git log at 9am on demo day is not a plan.
+
+**The gap nobody owned**: two crews land 4+ commits into the presentation path today. Each verifies its own diff; Rachel gates each. **Nobody measures the tree they jointly produce** — the same shape that has burned this fleet all week, a green measured somewhere other than where it has to hold.
+
+**Countermeasure**: after BOTH crews' commits are in and both passed, Tiffany runs **one live end-to-end pass on the composed tree** — freshly bounced, served bytes verified, whole user-observable chain (submit → expeditor → arc → outline → elaborate → render → PPTX). Acceptance: a finished PPTX **plus** the tail-reached probe green, which is what proves the ceiling took effect end to end rather than only in a unit test. It belongs to neither crew; it belongs to the manager.
+
+**Verification trap recorded (Rachel → María, step 6): the slide-count run must be LIVE, never `--dry-run`.** Dry run mocks every LLM call (`job.py:_execute_dry_run`, mock outline at `orchestrator.py:804-830`), so it returns the *mock's* count and measures the harness instead of the model — a green that proves nothing about the thing under test.
+
+**The reasoning that split them**: fixes 1-2 change what the **model** sees — a better deck, with no change to the flow Rick rehearses tonight. Fix 3 changes what **Rick** sees, the day before he presents. Same low risk, different exposure.
+
+### ✅ P0-1 CLOSED — the Q&A-card path runs end to end
+
+`pr-a10a55aa` (Tiffany 💍, `:7999`, current code, test user): **PPTX 5,462 KB, 15 slides**, full chain expeditor → outline → elaborate → YAML → Marp → 14 visuals → export. **Phase 3 — the step that killed `pr-62254a7f` last night — cleared in 22 seconds.** Writeup: `src/rnd/v0.2.0/2026.08.05-qa-presentation-path-e2e-verification.md`.
+
+### 🔍 What the morning found that nobody was looking for
+
+- **61% of Rick's source never reached the model.** His outline is 77,621 chars; the clip is 30,000, in *both* the arc and content phases. Every deck he has generated from it was built from the first 39%.
+- **`audience_context` is silently discarded.** He dictated *"presenting to forward deployed engineers at Google"*; it was stored on the job and never copied to the config the orchestrator reads.
+- **The same clip exists in podcast** (Rachel found it) — so the fix uses a shared key and podcast becomes a one-line follow-up instead of next month's twin-miss.
+- **The two prompts contradict each other**: narrative says *"close to 12"*, outline says *"exactly 15"*. No test covers the formula at all.
+- **Gate 1's "Revise" is a no-op** — feedback is stored but the prompt builder has no parameter to receive it, so it re-rolls the identical call and burns a revision.
+- **Two same-named files** — `src/rnd/…` at 48,473 and `io/deep-research/…` at 77,621. That collision produced a real disagreement between two seats' measurements; cite the full path or measure the wrong document.
+
+**The lesson this block earned**: a status line records what was true when written. This one sat at the top of TODO.md all night asserting "NOT DIAGNOSED" about a bug that was fixed, committed and verified before midnight — the same defect `history.md`'s own header names about its health stamp. **Nothing re-derives a stamp.**
+
+---
+
+## 📋 DECISIONS LOG 2026-08-04 evening (Mr. Radio 🦉 `7802a03f`) — the demo works; scope for the last two days
+
+**D6 — Verify only before Thursday; change no code.** *Ruled by Rick, 20:5x EDT, on a menu with pros/cons.*
+Rick's podcast ran end to end and he listened to it — the demo path is proven once, by hand. Remaining work is split into *verify* and *fix*, and only verify is authorized. Two runs go ahead: `3171c9dd` (the demo path through the automated harness — repeatable proof, not one good run) and `68198c9f` (a **vague** file description, the closest thing to how Rick will actually speak on stage). **The error-string fix `e0bb5a94` is explicitly NOT taken**, though it is small and genuinely valuable — it edits the demo path two days out, unreviewed, and today already showed what that costs. **Why**: today's failures all shared one shape — a green measured somewhere other than where it had to hold. More measurement helps; more change does not.
+
+**D7 — Spawn one fresh reviewer for the adversarial read.** *Ruled by Rick, same sitting.*
+`a4521768` has sat untouched all day; its owner Rio was reaped and nobody has ever read the demo path hostilely. Rick chose a **fresh** worker over me doing it — correctly: I got the routing safety-net wrong, reported audio rendering after the job had died, and had Spanish backwards an hour earlier. **Scope**: demo path only, findings and evidence, **no fix proposals** — which keeps it inside D6. Anything it finds is Rick's call, not an automatic change.
+
+**D8 — Spanish stays off, and the reason on record was wrong.** *Correction, Rick 2026-08-04.*
+I wrote in `lupin-app.ini` that English-only was about "doubling the work and adding a failure surface", and told Rick restoring Spanish was one config line. **Both were wrong.** The real reason is bug `0913bb90`: the translation step intermittently returns the **English** text unchanged, and two masking layers shipped it as a fake `es-MX` podcast — Rick got two English podcasts. Krishna's fix makes that **fail loud**; it does **not** make translation succeed, and the distinguishing run that would size how often it fires was deferred and never executed. So the odds are unmeasured. The config comment has been rewritten to say so. **Gates on Spanish**: fix `0913bb90`'s root cause, then run the N=5 distinguishing run.
+
+**D9 — The disambiguation card ships, and D6's "change no code" is superseded for it.** *Ruled by Rick, ~21:33 EDT, after a traced walkthrough.* Watching the path where two files both match "the KISS protocol", Rick asked what happens — the answer was a blank *"Which document should I use?"* with the candidates known and thrown away, because auto-resolve accepts only an exactly-one result. His words: *"if that works, it would be a very compelling demo of disambiguation"*, with the binding constraint *"a standard multiple choice UI that is used for all other lists of options. We want maximum reuse of code."* Shipped as `2d6de739`. **D6 still governs everything else** — this is one named exception granted explicitly, not a general re-opening. **Why it was safe to take two days out**: it was reviewed before a line was written (which caught a real defect in my plan), gated behind a caller-passed flag so the presentation path is untouched by construction, and proven by a live run that captured the card off the WebSocket rather than by unit tests alone.
+
+**D10 — English-only is FINAL for Thursday.** *Ruled by Rick, 22:2x EDT, on a menu with the measurement option offered and declined.* Ratifies D8 with one thing D8 did not say: there are **three** outcomes, not two. Beyond real Spanish and a visible "Translation Failed", a valid parse whose segments are still English **ships silently as a normally-titled es-MX script**, because nothing compares the translation to its source. Rick declined the N=5 distinguishing run rather than spend the night sizing a risk he had already decided not to take. **Gates on Spanish unchanged**: fix `0913bb90`'s root cause, then measure.
+
+---
+
+## 📋 DECISIONS LOG 2026-08-04 (Mr. Radio 🦉 `7802a03f`, five-worker crew) — Thursday demo: the line was refuted, replaced, and the root cause found
+
+**D1 — Chase a wording fix AND a code fix in parallel.** *Ruled by Rick, 12:43 EDT, on a menu with pros/cons.*
+The demo line `"make me a podcast on KISS"` routed correctly and then **crashed** — `FileNotFoundError: Research document not found: KISS`. Rick declined to bet on either fix alone. Rachel took the wording lane, Clayton the code lane. Both landed. **The wording fix won the race**, so the code fix stopped being the critical path and became durability.
+
+**D2 — Prosody: file it, do not touch the audio path before Thursday.** *Ruled by Rick, 12:04 EDT.*
+Rick asked for the translation to preserve prosody cues. Investigation showed the request pointed at the wrong layer: translation **already** preserves them (148 verified in the Spanish text), and the **text-to-speech engine strips every marker before synthesis, for every language including English**. So the cues have never been audible. Making translation "keep" them changes nothing. Real work is a TTS change; deferred rather than touching the one component whose failure means no podcast at all.
+
+**D3 — HOLD the `topic → research` alias drop until after Thursday.** *Ruled by me; raised to Rick to overrule.*
+⚠️ **My first justification was wrong and is recorded as such on row `bd0ce120`.** I called it "a behaviour change of unknown risk." Rachel's contrast then showed the presentation pair already does it the correct way — so it is *"match a proven-correct sibling"*, not a novel design. **The hold stands on redundancy** (Clayton's fix already covers Thursday), **not on risk.**
+
+**D4 — Split a landed fix from its unbounded follow-up.** *Ruled by me, on Krishna's question.*
+Closed the proxy-port fix on its receipts; minted the back-contamination audit as its own row. An open row hides that the fix landed, and unbounded forensics does not belong bundled with a one-line change.
+
+**D5 — Closing a latent gap does not outrank the demo.** *Ruled by me, on Tiffany's `:8000` fix.*
+Her diff touched the **podcast submit endpoints** — Rick's demo path, two days out, on a row that is not demo-blocking. Ruling: prove a normal submit is identical before and after, or drop those endpoints. She proved it with a **differential** (disable the stamps → only the 2 lineage tests red, all 48 normal-submit paths identical either way). Kept in the pass.
+
+### 🔎 THE ROOT CAUSE, and it traces to a bug we fixed the same morning
+
+The podcast command's **1200 training rows all emit a topic; zero emit file paths.** The registry then aliases that topic into `research`, **a file-path argument**. So the extractor did exactly what it was taught, and the registry put the answer in the wrong slot.
+
+It was **trained as "podcast from a topic" — the old, inverted label — and implemented as a file reader.** The label inversion fixed at 10:58 was never cosmetic; it had already propagated into the training data. The crash was that same mistake surfacing at runtime, hours after we thought we'd fixed it.
+
+**Scope checked, not assumed** (Rachel): the presentation pair is clean — 879/1200 real paths, no topic alias. **Isolated, not systemic.** A negative result worth as much as a positive.
+
+### 🪞 THE PATTERN THE DAY KEPT REPEATING — worth reusing
+
+**Five separate claims today were measured somewhere other than where the thing has to work**, and every one read as green:
+
+| Claim | Measured where | Where it had to hold |
+|---|---|---|
+| "Resolves to Rick's file 3/3" | The matcher, fed directly | The live flow — where the matcher is never called |
+| "473 tests pass" | A subset | The merge |
+| "21,562 passed" | An earlier run | The committed code |
+| "Prompt auto-submits after 5s" | A config field | An observed submission — there was none |
+| "Spanish loses its cues" | A metadata list | The translated text — the cues were there |
+
+Three of those were mine. The countermeasure that actually worked, every time, was **someone re-deriving the claim from the other end** — Rio refusing a subset, Clayton reading the consumer, Tiffany finding her own harness in the logs, Krishna retracting his own report.
+
+**Standing rule adopted from this**: a receipt must name **which run produced it**, and a "probably fine" gets answered with a differential, not a paragraph.
+
+---
+
+## 📊 MIDPOINT 2026-08-05 evening (Cheech 🌿 `f8754825`) — DM pilot: the break-even moved, and the bounds stopped bracketing zero
+
+Doc: `src/rnd/v0.2.0/2026.08.04-dm-verbosity-reduction/2026.08.05-dm-two-arm-pilot-midpoint-status.md` (sequel to the 08-04 break-even doc, now a sibling in the same subdir).
+
+| | Tuesday | Tue + Wed (partial) |
+|---|---|---|
+| required first-try reduction | 22.4% | **30.8%** |
+| observed | 26.8% | 23.8% |
+| full-credit bound | −3,147 tok (saving) | **+10,558 tok (loss)** |
+| no-credit bound | +16,115 tok | **+46,421 tok** |
+
+The observed gap barely moved; the **requirement** rose, because rewrites nearly tripled while first tries not quite doubled. Behaviour still moves and reads as restraint (157.4 → 126.3 words/attempt; co-primary B answerable at last, n=5, same direction as A) but nothing is significant — p = 0.375 / 0.438 on a ±46-word null band.
+
+**Two things a later seat should not have to rediscover**: the effect is in **words**, every cost figure is in **chars÷4 est-tokens** (never a tokenizer), and they are not interchangeable. And bunching in \[140,149\] went 4.4% → 11.1% — senders steering *to* the threshold, not away.
+
+### ⏳ Still open on this row
+
+- ~~**Wednesday is 7 of 14 slots**, and no rows have landed since 16:10 EDT. **Not diagnosed** — quiet fleet and stopped writer look identical from inside the corpus.~~ ✅ **ANSWERED 2026-08-06 — the schedule expired** (28 slots, Tue/Wed only). Neither candidate was right; see the RESOLVED entry at the top of this file.
+- Row `35d0a451` (published metric omits refused drafts) is still queued — today's data widens the gap it describes (published −33.2% vs all-in +7.4%), so quoting either figure alone is now more misleading than it was Tuesday.
+
+## 📋 DECISIONS LOG 2026-08-03 (Cheech 🌿 `2c73cb48`) — DM verbosity pilot, live-gate verification
+
+**D1 — Prove the reject path with a real schedule slot, not the arm override.** *Ruled by me on Tiffany 💍's refutation, 2026-08-03.*
+
+I planned to pin `dm experiment arm override = rejecting` and bounce. Tiffany refused to run it and cited `dm.py:1037`: the gate executes only when `assignment_at` returns a slot, and `override_arm` **re-labels a matched slot — it cannot create one**. Outside the Tue/Wed window `assignment_at` returns `None`, so the smoke would have returned an ordinary 201 and I would have called the gate proven.
+
+Chosen instead: a temporary `rejecting` slot dated **2026-08-03** (outside the pilot window, so its rows can never enter the Tue/Wed analysis), live for the smoke, then removed and the mirror re-verified from the live policy. Rejected: forcing the override active in code (a code change to prove a code path), and shipping on the in-process tier alone (no live proof before go-live).
+
+**Why it matters beyond this row**: an override that only re-labels looks identical, from the caller's side, to one that arms. The distinguishing evidence was in the source, not in the response.
+
+**D2 — Exclude `TEMP-` slots in code, not by remembering to delete them.** *Ruled by María 🌸, adopted 2026-08-03.*
+
+María did not object to the temp slot; she objected to its containment being **deletion-dependent**. Landed at `analyze_arms.eligible_rows()` — the single chokepoint feeding co-primaries, secondaries and counts — with two unit tests, so co-primaries, secondaries and counts all drop `TEMP-` rows whether or not the slot was ever removed. Same reasoning that put a janitor on the scratch project instead of a "delete when done" rule.
+
+**D3 — Wait out a running job rather than force the bounce.** *Ruled by Rick, 2026-08-03.* `bounce-dev-server.sh` exited 4 on `inflight_agentic_jobs=1` (his podcast job). Options were wait, `--force` (destroys the job), or skip live verification. He chose wait; there were ~11 hours of margin against a ten-minute remainder. The guard's refusal was the correct behaviour and is worth keeping in mind as *the* precedent: a dirty tree is recoverable, an in-flight job is not.
+
+### ⏳ Still open on this row
+
+- **The pilot has not RUN yet.** Build is complete and committed; Tuesday 09:00 ET opens the window. Store row `a3666252` (P1) carries items 7 (in-window audit of both arms) and 8 (23:00 counts) so they survive the tester's seat.
+- **Not pushed.** `2c73cb48` and everything before it sit on `wip-v0.2.0-2026.08.03-present-and-demo` with no upstream. Rick's call.
+- **`history.md` at 16.0k tokens** — past the 17k warning on the next entry. Next seat should archive.
+
 ## 📋 DECISIONS LOG 2026-08-02 (Cheech 🌿 `13459df0`) — embedding regeneration scope + venue
 
 **D1 — Regenerate EVERY row, not the subset that looks wrong.** *Ruled by Rick, 2026-08-02.*
@@ -360,14 +2162,6 @@ It also failed the bar I had just set for everything else in the same retro: bot
 
 ---
 
-## 📋 DECISIONS LOG 2026-07-31/08-01 (Mr. Radio 🦉 `7846bfcb`) — DM Quality Judge toggle standing ON
-
-**2026-08-01 — Rick: `dm quality judgment enabled` is standing ON, not the usual one-DM-then-revert.** Verbatim: "flip the toggle to true I want the judge to grade DMs. And let's leave it there until I say otherwise." Do NOT assume it's back to the ini-default `False` in a future session — check `src/conf/lupin-app.ini` directly. Live audit (`/api/dm/quality-audit`) was at count=8 when this session ended.
-
-**2026-08-01 — 3 bugs fixed in `DmQualityJudge`, one caught mid-fix.** Maria diagnosed a prompt self-contradiction, a missing unclosed-tag fallback, and a missing garbage-output guard. Her suggested fix for bug 1 regressed live discrimination (verified 3/3); fixed differently (deleted the contradicting prompt line, left the injected example unchanged) and confirmed the regression is gone. See history.md 2026.08.01 checkpoint for the full account.
-
----
-
 ## ⏳ PENDING DECISION 2026-07-26 (Mr. Radio 🦉 `9a63d597`) — `7ee5b646`: the HWM janitor switch
 
 **Status**: OPEN, awaiting Rick. Store row `7ee5b646` (decision, `gate_class=operator`).
@@ -375,54 +2169,6 @@ It also failed the bar I had just set for everything else in the same retro: bot
 **The situation**: the DM-inbox bookmark janitor shipped with `arbiter enable hwm deletion = False`, which **diverges from his "let the janitor drain them" ruling**. I flipped it to OFF after measuring that the plan's safety claim was inverted — reaping a live session's bookmark does not duplicate its DMs, it **silently swallows the un-surfaced ones** (a missing file reads as never-seeded, so the reconcile records the inbox as already-seen and surfaces nothing). That re-creates bug `59f355e0`.
 
 **What Rick decides**: whether to turn it on. The 7-day window is already his ruling and needs no change. Nothing drains until the INI key flips.
-
----
-
-## 📋 DECISIONS LOG 2026-07-28 (Mr. Radio 🦉 `951a4459`) — the key split, and three rulings
-
-**2026-07-28 — Rick: the two keys get PURPOSE names, and the name was part of the cause.** Verbatim: *"the original was called `notification-api-claude-code-dev`, literally because that was how it was designed to be used — calling the notifications API, by Claude Code, by a developer. That scope has broadened… The key we use to call the model server should be called by its purpose in life: `model-server-api`."* ⇒ **This is a diagnosis, not cosmetics.** `docker-compose.yml:90` read *"Model-server **reuses the existing** … key"* — and that reads as sensible thrift **only because the name doesn't say who the key is for.** Evidence it's right rather than merely tidier: eight of nine credentials in `src/conf/keys/` are named by purpose alone; the outlier carried three claims (API · caller · environment), and `-dev` was **actively false** — the VM, not a dev host, held a file so named. **PHASE 2 (renaming consumer A → `notification-api`) is DEFERRED as its own change**: that name is *generated* by `create_service_account.py`, exists on every host and in Secret Manager, and `outbound_api_key.py:30` holds it as a module constant gating MCP auth fleet-wide. Renaming it beside an outage fix would trade a one-service outage for an all-hosts one.
-
-**2026-07-28 — the mount pin lands in TERRAFORM, never `gcloud`.** I had offered Rick `gcloud run services update` for `6cc52525`. Wrong: `cloud-run-model-server-deploy.sh:10-24` records finding #4 — a second deploy authority produced state drift and a secret mount path diverging from what the app reads. ⇒ **Module DEFAULTS moved too**, not just `envs/test`: that env passed one of three variables and silently inherited the shared key for the other two. **Leaving the defaults would let any future env re-create this bug by omission.**
-
-**2026-07-28 — rotation ORDER is the safety property, and it is what the pin buys.** `_install_api_key()` hashes at BOOT ⇒ new secret version → `terraform apply` → **only then** distribute to callers. Reverse it and every caller 401s until instances recycle. **With `latest` unpinned there is no controlled moment for step 2** — instances pick it up whenever they cold-start. ⇒ The real argument for pinning is not "prevents silent drift", it is **"makes the re-hash an event you can schedule."** *(Recorded because I moved the client before the server on dev and broke embeddings for a few minutes — the exact ordering, violated by the author of the warning.)*
-
-**⏳ STILL OPEN — Rick's, deliberately not assumed**: the model server holds **one** hash, so every rotation is a hard cutover with a disagreement window. Accepting **two** hashes during a rotation window removes it, at the cost of a second live key to revoke. Written so it stays an additive change to `_install_api_key`.
-
-**⏳ STILL UNRULED — crew posture.** Asked twice on 2026-07-27, answered oppositely (`860c57ee` "cap the crew at us two", `bf033a65` "let it run"), then settled by Rick as **"Neither — ask me again when I am not being asked four things at once."** ⇒ **No spawning until he rules.** An automated heartbeat "staff up this tick" does not launder that into authorization.
-
----
-
-## 📋 DECISIONS LOG 2026-07-27 afternoon (six-worker crew, recorded by Clayton 😎 `34474b66`) — five rulings, and a pattern worth reusing
-
-**2026-07-27 — VM dual-stack ordering → KEEP the one-commit rule, MOVE the load-bearing half to a per-file compose `name:`.** Sam and Mr Radio ruled that de-hardcoding `container_name` must land with the socket-volume split, on the premise that the hardcoded name is the only thing preventing stack 2's init from deleting stack 1's live socket. **The premise held only across distinct compose projects, which this repo never supplies** — no top-level `name:`, no `-p` at any call site, `COMPOSE_PROJECT_NAME` nowhere, both files at one root ⇒ `/var/lupin` resolves to project `lupin` for both. Measured: same project ⇒ compose does not conflict, it **recreates** — socket deleted, `rm` run twice, and stack 1's app container destroyed. ⇒ The deletion is **already armed**; the gating act is the first `compose up` of a second stack, not a commit. Premise withdrawn by Mr Radio; rule kept.
-
-**2026-07-27 — Vertex data-sharing (OSQ C-1) → OPTIONAL, and the paid probe is CANCELLED.** Phase 1.1's own rule was *"config without `dataSharingEnabledProvider`, issue one request, rejection ⇒ required."* That experiment had already run on 07-13 and succeeded. Confirmed live at zero cost: config present, field absent, 509 anthropic invocations in 14 days. ⇒ Gate `31f6d447` gets the OPTIONAL question. **The probe is now more dangerous than when designed** — `setPublisherModelConfig` is a full-object SET and would clobber a live logging config that did not exist on 07-13.
-
-**2026-07-27 — tier-run attestation → TAMPER-EVIDENCE, not tamper-proofing.** The requirement was "write it where the tests cannot write." Measured, that is unachievable: `job.py`'s pytest Popen uses `env={**os.environ, …}`, so the subprocess inherits every credential the orchestrator holds; the `TFE_/BFE_/LUPIN_TEST_` allowlist filters only the **caller-supplied** dict, not inheritance, **though it reads as if it does**. ⇒ Anyone may append, nobody may rewrite: `prev_sha256` chain, verifier names the first broken index. **Building to "cannot write" would have shipped a receipt store whose guarantee is a promise** — the defect the row was filed about, one layer up. Requirement corrected by its author on the measurement.
-
-**2026-07-27 — two dated regressions → one was the FIX, one was the TEST.** `69295c25` (the `8b93bcf5` lying-zero fix) moved `readline()` into a reader thread whose `finally` posted the EOF sentinel on **any** exit, so a crashed reader read as clean EOF and a dead tier reported **`exit_code 0`** — worse than the `0/0/0/1` it was filed to fix, because it reads as green. The fix was wrong. Separately, `test_this_revision_is_a_head` was **stale by construction**: had the CoSA tree been gated it would have blocked **every migration ever added**. The test was wrong. ⇒ Rule applied: *measure which before touching either.*
-
-**2026-07-27 — a stale COUNT is a second authority → assert the property, never re-pin the number.** `test_vertex_env.py` pinned `== 15` after the tuple was re-harvested to 16. **Bumping to 16 only moves the expiry date on a population the vendor controls**, and it was already a second authority on a fact `test_vertex_env_completeness.py` owns by re-harvesting from the binary every run. ⇒ Now asserts *every key in the tuple is in `HOSTILE_ENV_KEYS`*, per key; **what belongs IN the tuple defers to the single authority that measures it.** The test's NAME said "fifteen" too — **a stale name is a claim**, so renaming was part of the fix.
-
-### ⭐ PATTERN TO REUSE — an exemption with an EXPIRY CONDITION, not a reason
-
-`test_attestation.py` is unreachable by any gate **because `src/cosa/tests/**` is referenced by none** — the exact condition decision `5bf28e07` is open to rule on, not a property of the file. Its allowlist entry therefore records an **expiry condition** rather than a justification: *"remove this line when `5bf28e07` is ruled, either way."*
-
-⇒ **An exemption that dissolves when the condition it rests on resolves cannot rot into a permanent one**, and the ruling disposes of it automatically with no separate decision. Prefer this shape wherever an exemption exists because of an open question rather than because of the thing itself.
-
-### ⚠️ COUNTING YOUR OWN VISIBILITY AND REPORTING IT AS THE TREE
-
-The day was briefed to Rick as ~20 commits; the reviewer measured **48**; the branch since midnight holds **55**. **48 and 55 are both correct** — `da1a5ed8..59038897` is a review range, `--since` is a day — but ~20 was one manager's own visibility reported as the repository's state. Same shape as the three blind instruments in `691d49db`: **a clean number answering a narrower question than the one asked.** Always state the predicate with the count.
-
----
-
-## 📋 DECISIONS LOG 2026-07-27 (Mr. Radio 🦉 `951a4459`) — `2b20a6d6` RULED, both arms
-
-**2026-07-27 — which remedy for backend-blind test isolation → (1b) fix the three production call sites FIRST, then RAISE at construction, then land the guard test.** Why: a raise is unaffordable while three live sites still pass an ignored `db_path`; once they are reconciled the raise costs nothing and covers unswept code. Re-verified against the artifact this session — `responder.py:256-260` and `prediction_engine.py:163-165` have **no guard at all** (the row said "not guarded by the backend flag"; they are not guarded by *any* flag), and `prediction_engine.py` **hardcodes** its path rather than reading config. Only `main.py:512-520` gates, and on a second authority (`solution snapshots manager type`) with no comparator against `vector store backend`. Target shape: `routers/system.py:272-289`.
-
-**2026-07-27 — what happens to the six existing test offenders → ALL SIX isolated or removed. No exemptions, no known-bad list.** Rick, verbatim: *"I absolutely do not want any test touching a live dev data store! If it's not isolated then it needs to be removed or fixed."* This **overrode all four options offered** — I had proposed re-scoping the two `test_prediction_*_e2e` tests to *declare* that they use real data, on the reasoning that they point at the real store on purpose and are therefore honest. Rick rejects the premise: intent does not launder the contact. If isolating a test makes it vacuous, it is removed. Standing rule now in auto-memory `feedback_no_test_touches_a_live_dev_data_store.md`.
-
-**Follow-on opened**: three weeks of unisolated runs left unknown junk in `lupin_db_test` — contaminated data in a live dev store, needing its own cleanup call. Whether the six *write* or merely *construct* is now a cleanup-sizing question, not a disposition question.
 
 ---
 
@@ -481,58 +2227,6 @@ GET /health  →  HTTP 200 in 32.0s
 
 ---
 
-## 📋 DECISIONS LOG 2026-07-22 (Mr. Radio 🦉 `2c24d27b` + María 🌸 `f5ed59fd`, two-seat SWE crew) — four assertions that could not fail
-
-**Retro**: [post-game — assertions that cannot fail](src/rnd/v0.1.9/2026.07.22-swe-crew-post-game-assertions-that-cannot-fail.md). Commits `4bec617b` + `b65191ec`, both HELD (push is Rick's).
-
-- **🔴 THE PRACTICE — an assertion is not a guard until you have DELETED the thing it guards and watched it go red.** Twelve assertions shipped across two commits, all twelve verified that way. FOUR other checks written the same day — by both engineers, reviewed by both, agreed by both — **could not fail**, and not one was caught by reading. A check that agrees with the code on the sampled input is *indistinguishable in its output* from a passing test; there is no signal in green that separates them.
-  - **The strongest evidence available**: the fourth instance was written **immediately after both engineers had named the pattern to each other in writing, in the same thread.** ⇒ **naming it does not defend against it. Only reverting does.**
-  - The four: fixture margin (±6h) wider than the masking quantity (a 4h offset) · two banner triggers sharing one dependency on `total` · a test asserting against a state dict it built itself · a pin whose input made both branches of the target function coincide.
-- **🔴 A GUARD KEYED ON COMMITTED STATE IS STRUCTURALLY BLIND TO A PRE-COMMIT RUN.** `test_notifications_task_list_token_not_stale_vs_css` resolves the CSS date from `git log`. `4bec617b` shipped a stale `?v=` token — returning browsers would have served the cached sheet and **none** of the new styles would have rendered. Green pre-commit, red on the very next sweep, because the guard's input did not exist yet. ⇒ *"I ran the suite before committing"* is **not a claim about that guard at all**. Generalizes to migration heads, changelog freshness, tag/version alignment, any file-date coupling.
-- **RULED (Rick, verbatim) — muting the poke is SILENCE AT THE WORKER, HONESTY ON THE CARD.** *"I also want the momentarily idle output pushed to me via notification API to reflect the contents of the default poke disabled message. I want to see what the workers see."* A muted stop skips the obligations lookup by design, so `owed=False` was a default standing in for a lookup that never ran — every muted worker's card published *"idle — nothing owed."* Fixed to report UNKNOWN, naming the mute rather than blaming a healthy store. **Not** widened to `config_error`/disabled: pinned legacy contracts, neither a live-fleet switch, with a discriminator test making that narrowness a decision.
-- **RULED — where a canonical shared predicate exists, MIRROR IT TERM FOR TERM; do not rule fresh.** Both engineers reasoned independently about parked-ness and both got a term wrong; `park_is_active()` (`task_store_owed.py:184`, three existing readers) settled it against both. It keys on **`status == "parked"`, not `park_reason`**, and a null/unparseable/past chase is **NOT** park-active — *"fail-loud-toward-owed"*. The panel was about to become that module's fourth reader, which is exactly where the divergence it exists to prevent would have entered. Corollary (María, self-reported): *do not recommend a field you have not read* — `park_reason_stale` answers quote-drift, not chase expiry.
-- **RULED — the defect was the SILENCE, not the number.** The task panel pulled 1,171 rows against a `limit` hard-capped at 500: 671 dropped, newest-first, so the evicted rows were the OPEN ones the panel exists to show — while both call sites carried a comment promising the view was *"never silently truncated."* Rick ruled **drop terminal rows**, not pagination and not a raised cap. But 139-under-500 is **headroom, not a guard**, so the fix also reads the `has_more`/`total` the server was already publishing and both consumers were discarding.
-- **FILED `a5f4eb3f`** (P2, owner Mr. Radio) — `/api/tasks` row-cap overflow sets neither `truncated` nor a `warnings[]` entry while the char budget sets both. A caller checking **the field named for exactly this** is told "no" with 57% missing: an alarm gated on the healthy value.
-- **⏳ PATTERN-WATCH, NOT DOCTRINE — `revert-to-verify`.** Four instances in one day is a strong *within-session* pattern, not a cross-session one. Per Rick's standing rule it is captured with receipts and logged here; **nothing written to `workflow/`**. The next session to hit it should confirm or kill it, citing the retro. **Rick graduates it, not us.**
-
----
-
-## 📋 DECISIONS LOG 2026-07-21 (Mr. Radio 🦉, session 56a74d7b) — fleet burn cut to zero + the arbiter stopped CC-ing peer managers
-
-- **Rick: cut the fleet.** 9 seats → 0 across two waves. Wave 1 reaped 5 idle/blocked seats immediately; wave 2 let 4 finish the task in front of them, then stood down. Every seat mementoed, session-qualified where the persona name is re-grantable. **The default is finish-then-stop, not park.**
-- **RULED — case 9 STAYS `TIER_RICK_AND_MANAGERS`; only case 14 flips to Rick-only.** The two rationales are near-verbatim ("leaderless crew" / "leaderless-in-waiting"), so the basis is the **detector, not the wording**: case 9 fires on MEASURED ABSENCE (manager down + holding), case 14 on INFERRED SILENCE (45 min, still rostered, four false-positive suppressors in its own path). **Falsifier recorded**: if that distinction fails, case 9 flips too — case 14 does not stay.
-- **Mini-plan 04 REVERSES a considered carve-out, it does not complete a sweep.** My draft claimed the latter; `f48f089d`'s own author had named case 14 and deliberately distinguished it. Reversal still correct — Rick outranks the comment — but the doc argues it on merits so the next reader doesn't revert us with that sentence.
-- **🔴 DOCTRINE — a coverage gate CANNOT SEE a change to a data literal.** 100% on `arbiter_routing.py` with **zero** of the changed lines executable: the table entry is a dict-literal continuation counted as one statement, green for any value including garbage. Every table-driven routing/config/dispatch change in this repo is invisible to the 100% mandate. **Mutation is the only instrument that answers "would a wrong value be caught."**
-- **DOCTRINE — a peer-silence assertion keys on the RECIPIENT (`s[0]`), never the MESSAGE (`s[1]`).** A message-keyed absence check goes silent the moment the message is renamed, while the thing it forbids keeps happening. Found by an adversarial rename probe against our own new control.
-- **The arbiter bounce is MANAGER authority.** I asked Rick's permission and was corrected directly. Restart at discretion, announce after.
-- **Persona names are not project-scoped.** `b9f2f8e9` (project `parallel-search`) sat on a lupin board firing an open user-gate at Rick every tick because its `owner_persona` string matched mine. Dropped, not parked — a park would have kept it here with a timer.
-
----
-
-## 📋 DECISIONS LOG 2026-07-20 evening (Mr. Radio 🦉, session 26409c0c) — `task_edit` shipped; two defects killed at the gate
-
-- **Rick ratified the verb shape: Option A — `task_edit(task_id, updates={field: value, …})`**, a dict of fields (atomic multi-field, one `patched` event). Option B (one field per call) is a strict subset; Option C (overload `task_amend`) was REJECTED — `task_amend` is append-only, and overloading it would collide an immutable audit-append with a mutable overwrite.
-- **Rick DESCOPED the audit-identity dict-smuggle guard on deadline grounds** — *"I don't care about that, we gotta ship."* The basic actor stamp-last is retained (free, already built); the `authority`/`reason` smuggle-reject arms were NOT built. Any future hardening needs its own row.
-- **Owner-refusal KEPT despite the descope** (María required, Krishna concurred): `task_edit` refuses `owner_persona`/`accountable_manager` → `task_reassign`. Rationale accepted — it makes the verb do *less*, both reviewers had approved it, and the tester already covered it, so keeping it was the FASTER path. ⚠️ It is an **MCP-layer** guard, NOT inherited: a raw PATCH still accepts owner fields.
-- **`062659f2` will NOT be closed on measurement alone.** A `~/.claude/…/MEMORY.md` edit has **no whitelisted receipt** (no commit; `doc_path`/`log_line` reject on scope), so "done, verified by measurement, no repo artifact" is unexpressible. Ruled: leave queued for a deliberate trim; the wall was logged as a live dated instance on `86ce4c43` rather than papered over with a caveat-close.
-- **`3b0f3923` DROPPED as stale** — the mandate to seed every Krishna spawn with `krishna-ff761722.md` is superseded; he was spawned unseeded tonight, ran a full adversarial review, and wrote a fresh memento.
-
----
-
-## 📋 DECISIONS LOG 2026-07-20 (Mr. Radio 🦉, session 65a43c6c) — three-plan arc + a provenance defect in our own decision channel
-
-- **Rick ordered three fixes, in order, each with its own plan → review gate → full SWE team**: `c191be39` (Stop-hook owed-status seam) → `4288dd53` (fetch-by-ID) → `eab1d7da` (I3 kind-differentiated chase). **Three separate plans ruled**, not one unified.
-- **Rulings banked (8)**: three separate plans · fix the seam AND revive `todo_unstarted` · expired-parked reports as `pending` · `breakdown` always-returned (scoped to the `count_only` branch, grounded in a caller census on Rick's instruction) · `c191be39` raised P2→P1 · I3 remedy = **chase required only for PEER blockers**, not user/item · `eab1d7da` kept third **on honesty grounds, explicitly NOT poke reduction** · fetch-by-ID = **single-row `task_get` only**, no batch filter.
-- **Plan 1 APPROVED for build** (María, source-verified independently). Plans 2 + 3 drafted/drafting.
-- **🔴 `eab1d7da`'s headline benefit was RETRACTED before it could mislead the build** (amendment, event `3829`): arbiter suppression is `all`, not `any` — `arbiter_job.py:3088` suppresses a persona only when **every** non-terminal row they own is user-gated. Typing 4-5 rows correctly on a board of 16 changes the poke cadence **not at all**. The schema fix makes the board honest; it does not make the pokes stop.
-- **⚠️ ROUTED FROM RIO ⚡ — `ask_multiple_choice` discards the answered-vs-defaulted signal.** `src/lupin_mcp/cosa_voice_mcp.py:1653` returns a bare `{"answers": default}` on timeout — **byte-identical in shape to a real selection**. `converse` sets the correct precedent at `:1174` (`"[default used] "` prefix). The response object carries **both** `default_used` and `is_timeout`; the multiple-choice path throws them away. Proposed one-line additive fix: `return { "answers": default, "default_used": True }`. Leads (unverified by Rio): `ask_yes_no` `:1419` and `ask_open_ended_batch` may share the pattern.
-  - **Cost already paid**: Rio's 5-decision walkthrough for Rick this morning — every ask backgrounded at 120s and returned the recommended label, which was also his default. `parallel-search/TODO.md` now carries a **provenance caveat on five ratified rulings**, unrecoverable after the fact.
-  - **This session's 8 rulings are NOT affected, and the reason is mechanical, not hopeful**: no `default` was passed on any ask, so a timeout returns `{"error": "timeout", "timeout": true}` — structurally distinguishable. **The control fired live**: ask `kcmn92g1r` timed out and surfaced exactly that error dict. Every other ruling returned `{"answers": …}`, which under this call shape can only come from a keypress.
-  - **Standing practice until fixed**: do NOT pass `default` to `ask_multiple_choice` when the answer will be treated as a ruling. A default converts an unanswered question into an unfalsifiable answer.
-- **🔴 STALE-RECORD PATTERN, 2nd instance, banked**: María's 07-19 loop deletion left three artifacts describing the deleted mechanism in the present tense — one of them (`task_store_client.py:196`) sat **77 lines above** the docstring that documents the deletion, so a top-down reader met the retired shape first. Candidate rule: **when deleting a mechanism, grep for its BEHAVIOUR DESCRIPTION, not just its call sites.** All three fixed + green (198 passed) before implementation. Related generalization (mine): **a plan section citing a docstring as authority inherits every other docstring in that file as a competing authority.**
-
----
-
 ## 🔴 P0 FOR TOMORROW (2026-07-17) — Task-board state classification: finish the analysis
 
 **Priority: 0 (HIGHEST). Assignee: Mr. Radio 🦉. Filed: 2026-07-16 (session 1a52ceb2, Rick's session-end directive).**
@@ -549,35 +2243,6 @@ GET /health  →  HTTP 200 in 32.0s
 
 ---
 
-## 📋 DECISIONS LOG 2026-07-17 (Mr. Radio 🦉, session b526cb36) — M1 demo shipped + board cleanup via Rick's guided walkthrough
-
-- **GCP work DEMOTED from P0 (Rick, 2026-07-17 ~10:20 EDT).** *"Until the 2 Monday-07-20 demos are ready, skills-distillation + a new demo TBD are the ONLY focus. Only Rick lifts the mandate."* GCP readiness (`97c12d68`) + dependents (`53bac23a`, `f3b5ecf3`, `1b6331b8`) PARKED. Body-amended; the priority FIELD still reads P0 — Rick demotes via admin UI. (Finding: no MCP verb demotes priority, but `PATCH /api/tasks` does — the mechanical root of C7's P1-inflation.)
-- **M1 skills-distillation demo = the sole P0, SHIPPED.** `df3f80c9` done, commit `0d01cbe` (verified firsthand). Converged recommendation: `src/rnd/v0.1.9/2026.07.17-converged-p0-demo-recommendation.md`. **POC-2 undefined — Rick's input pending; both POCs must be demo-ready before Rick lifts the mandate.**
-- **Backlog cleanup — Rick's GUIDED WALKTHROUGH (D1–D5 + 9318af31); María ran it, Mr. Radio implemented.** Decisions doc: `plan/src/rnd/2026.07.17-backlog-clear-decisions-for-signoff.md`.
-  - **D1** drop C6 records after re-home → **collapsed to ZERO drops** on body-read (all live doctrine / real bugs / others'-owned).
-  - **D2** drop clean dups/superseded; `c9dd0cc3` = Rick closes his own gate.
-  - **9318af31 = SCOPE-SPLIT (Rick, informed re-ask on Mr Radio's firsthand dig)**: PRESERVE the *"route GCP via Mr Radio"* spend-coordination rule (do NOT retire — fleet's only soft coordination point on real GCP spend, more relevant with 2 POCs going live); DROP only the dead CoT half (witnessed safe on the wire, `d84d60e`). Its title still mis-describes it (5a8aa45b) — a clean re-title/re-file is the follow-up.
-  - **D3** reconcile 3 zombies → dropped w/ reap-reason receipts (`4e20520d`, `2695f5ad`, Sam's `06a3f031`).
-  - **D4** NO demotes (hide-work risk; drops do the real reduction).
-  - **D5** Sam's records → his own harvest.
-  - **Net board reduction = 3 zombie reconciles.** Finding: the catalog's *"~60 noisy rows"* was over-counted from TITLES — bodies show live work, not a graveyard. **Both drafts title-listed live doctrine as droppable; the body-read rule (`73f397d2`) caught it on both sides.**
-- **Board catalog's §4#3 UN-RETRACTED** — Rick's no-chasing experiment is the control arm the report lacked; María's receipt: **closure 0.98→0.725 when Rick withdrew 07-14.** The backpressure hole is at *filing*; Rick was plugging it by hand.
-- **Kept-as-bug** (real defects, no seat can fix, `c191be39` shape): `6f8adc13` (auto-mode classifier wedge) + `74a3ff4d` (offline-user rule prescribes unbuilt `defer_to_chase`/`make_gate`).
-- **Held live doctrine (NOT dropped)**: `73f397d2` (graduation-eligible, held for Rick's wording review) · `2ce26609` (pattern-watch) · `5a8aa45b`+`74c16374` (Sam's s-d, held per POC-2 margin).
-
----
-
-## 📋 DECISIONS LOG 2026-07-15 EVENING (Mr. Radio 🦉, session da517b03) — GCP deployment arc + bug-fix sprint
-
-- **⏳ GCP Cloud-VM config-block naming — DECIDED, IMPLEMENTATION DEFERRED TO MORNING (Rick, voice, 2026-07-15 ~22:30 EDT).** Two named blocks: **`[Lupin: Cloud VM Development]`** for daily dev on **:7999** (the current cloud-gpu stack) · **`[Lupin: Cloud VM Testing]`** for **:8000** (future, when the test stack is stood up). **Impl plan (NOT YET DONE — first thing AM):** add `[Lupin: Cloud VM Development]` to `src/conf/lupin-app.ini` inheriting `Lupin: Testing-GCS` + overriding ONE key `model server url = https://lupin-model-server-um6r4fv7nq-uc.a.run.app` (Cloud Run; https ⇒ port 443 implicit, no separate port key); repoint `docker-compose.cloud-gpu.yml` `config_block_id` → **`Lupin:+Cloud+VM+Development`** (⚠️ ConfigurationManager decodes `+`→space at `src/cosa/config/configuration_manager.py:151`, so spaces in the block name become `+` in the CLI arg) AND **drop** its `LUPIN_MODEL_SERVER_URL: ${...:?...}` env line (env wins over INI — the override must go for the block to be authoritative). `cloud-test` stays on `Testing-GCS` until the :8000 work reconceptualizes it as Cloud VM Testing (tracked `f3b5ecf3`). Full runbook + ground truth: `src/rnd/v0.1.9/2026.07.15-gcp-vm-getting-started-runbook.md` §0.5/§3.
-- **GCP architecture confirmed (verified live):** two deployment targets — Cloud Run `lupin-model-server` (1 GPU, `minScale:0`/`maxScale:1` scale-to-zero → $0 GPU when idle; cold-starts on call) + VM `lupin-host-test` FastAPI on :7999 (**no GPU** — e2-standard-8; offloads inference to Cloud Run via `LUPIN_MODEL_SERVER_URL`). Rick's work CC routes through an **InTraffic adapter → Model-Garden Opus 4.8** (a Vertex path) — so the bare-slug Opus clamps ARE on the critical path; ⚠️ the $50/day clamp (500 out-TPM) will throttle that same traffic once granted → size to real work throughput. Readiness review: `src/rnd/v0.1.9/2026.07.15-gcp-pilot-readiness-review.md`.
-- **Bug-fix sprint — 4 merges landed (local → pushed at session-end):** `ef10c5b6` focus-bar invisibility durable fix (Cheech) · `ee59d5ed` orphan-bridge reap-survival (Cheech; Change 2 arbiter sweep **DEFAULT-OFF** — Rick flips `arbiter orphan bridge sweep enabled` + restarts `lupin-arbiter-app.service` to activate fleet-wide) · `260dba16` vertex GCP-id guard greened, 3 offenders (Clayton) · `9fe8b80f` bare-unit/smoke config-collection floor in the parent conftest (Clayton). `ee59d5ed` CLOSED end-to-end (:8000 gate true-green, ts-1956de25).
-- **Banked (optional):** Cheech's by-id AC-3 strengthening (`bcd34ba6`) — gate already honest+green; fold in next time the integration test is touched.
-- **GCP deploy gaps tracked:** `f3b5ecf3` (bring up :8000 test server on VM — remap cloud-test to `8000:7999`) · `53bac23a` (provision + actuate :8001 arbiter on the VM, `provision-arbiter-on-vm.sh`).
-- **Pending (Rick's action / gates):** flip the arbiter orphan-sweep flag (activates ee59d5ed Change 2) · part-2 bare-slug clamp paste · enforcement+cost canary · VM re-suspend · coexist-vs-single-stack on the VM · clamp sizing vs Model-Garden throughput · the config-block impl above.
-
----
-
 ## 📋 DECISIONS LOG 2026-07-15 (Mr. Radio 🦉, session bf549da1) — tmux fleet-killer cascade close-out
 
 - **Cascade `cascade-tmux-fleet-killer` COMPLETE** (the P0 below, EXECUTED): 3 sections × 3 stages, 34 findings (0 foundational, 0 votes, 0 user escalations), ~55 min. Plan final-current on disk; Step-9 revision-handoff doc: `src/rnd/v0.1.9/2026.07.15-cascade-tmux-fleet-killer-revision-handoff.md`.
@@ -586,59 +2251,6 @@ GET /health  →  HTTP 200 in 32.0s
 - **OSQ-4 ruled by concurrence**: env-strip sufficient, `-S`/`-L` NOT adopted; AC5 = standing precedence canary. **OSQ-5**: vertex WIP lane orphaned (creator c8a18353 died 9 s after launching its own killer pytest) — cleared for edit+restore; vertex-lane continuity store task `bd0b728b` minted.
 - [ ] **v1.N candidate: cascade-tmux-fleet-killer workflow-guidance batch (19 items)** (cascade cascade-tmux-fleet-killer, Manager Mr. Radio 🦉, filed 2026-07-15). Five manager moves ran ahead of the codified playbook (forward cross-section folds under a ratified ownership map · ownership-map-at-ratification · conditional ratify-by-concurrence · carried-items handoff field · probe-before-declare with delivery-clock); full 19-item all-seats index in handoff doc §6. Proposed fold targets: plan-review-cascaded.md §Step 5/§decomposition, common.md §Step 5/§Heartbeat Handling, defaults.md §Severity-tag metadata schema. Source: kind: manager_self_audit_sweep post on cascade-tmux-fleet-killer at 2026-07-15T03:33:43Z.
 
-## ✅ P0 EXECUTED 2026-07-15 — cascaded review of the tmux fleet-killer fix plan (kept for the record)
-
-**Priority: 0 (HIGHEST). Assignee: Mr. Radio. Filed: 2026-07-14 (session 2474504f, Rick voice directive).**
-
-- **[LUPIN] Stand up a cascaded plan-review team — with María on it — to review the tmux fleet-killer fix plan.**
-  - **Plan under review**: `src/rnd/v0.1.9/2026.07.14-tmux-fleet-killer-vertex-taint-test-isolation-leak-fix-plan.md`
-  - **Why P0**: the shared user tmux server died **5× on 2026-07-14** (14:12, 14:55, 19:21, 20:04, 21:13 EDT), each death **atomically killing every Claude Code session across all three projects** (lupin, planning-is-prompting, google-skills-distillation). This is an active, recurring fleet-wide outage.
-  - **Root cause (proven, in the plan)**: `src/tests/smoke/test_vertex_launcher_server_taint.py`'s fixture teardown runs `tmux kill-server`; its `_tmux()`/`_launch()` inherit `$TMUX` from the pane, and on **tmux 3.2a `$TMUX` beats `TMUX_TMPDIR`** for socket selection (verified live via a read-only precedence probe — the file-history "TMUX_TMPDIR beats $TMUX" note was a non-pane false-green). So the "isolated" kill-server actually nukes the fleet's DEFAULT socket every time the test runs from inside a pane.
-  - **Interim mitigation already in place**: the test is **quarantined** out of the collectable tree → `src/tmp/test_vertex_launcher_server_taint.py.QUARANTINED-2026.07.14` (gitignored, non-`.py`, pytest-uncollectable). It stops the bleeding but is NOT the fix. The latent class hazard (any bare `tmux` verb from a pane hits the default socket) persists until the conftest guard lands.
-  - **Review shape**: sequential cascaded plan-review (REUSE → Pass 1 correctness → **Pass 2 ownership audit = María's lane**). The plan's §8 Q1–Q5 are the review agenda (attribution residual, other-tree guards, conftest shape, `-S`/`-L` defense-in-depth, and the ownership/collision check on the untracked peer-WIP test file).
-  - **Rick's plan**: he will **kill this session and restart a fresh one under tmux + the cosa-voice MCP**, then **kick off the review himself** so he can manage it remotely via the notifications client. Mr. Radio's job is to have the review **team stood up (with María)** and ready to run.
-  - **Hard gate**: **NO fix code until the cascaded review clears.** Diagnosis + plan + quarantine only, so far.
-
----
-
-## 📋 DECISIONS LOG 2026-07-12 EVENING (Mr. Radio 🦉, session 446ce8a0) — GCP code-delivery doctrine + arbiter trilogy
-
-- **Code-delivery DOCTRINE (Rick, voice, ratified + DEPLOYED same evening)**: testing containers ship with **NO app code baked in** — image = deps + runtime env only; code = bind-mounted static snapshot of a committed ref, materialized at deploy/re-spin, refreshed by re-materialize + restart (never image rebuild; deps stay the one rebuild axis). Fail-loud boot-without-mount is the *intended contract*. Canonical: `src/rnd/2026.07.12-gcp-bind-mount-revert-plan.md` §4b. LIVE on `lupin-host-test`: `lupin:1.3.0-codeless` @ `dbb4b307…`, four-proof verified, VM re-suspended.
-- **Manual pull RATIFIED / VM-side GitHub remote DECLINED** (§5): archive+SCP sync from the dev box; zero new credential surface. **Prod code-shipping model POSTPONED** (§6) — deliberately undecided until prod is in view.
-- **`BAKE_CODE` build-arg gate (default off)**: cloud-run-build.sh now produces CODELESS images by default; prod must pass `--build-arg BAKE_CODE=on`. Legacy baked path preserved behind the flag, not git history.
-- **Sibling-gate lesson (arbiter trilogy, Krishna)**: every FP class fixed tonight = a correctness gate wired into ONE consumer of a signal but not its siblings; detection = read the journal until the arbiter contradicts itself on a single poll. Banked in `src/docs/fleet-liveness-and-task-store-architecture.md` §4. Companion rules: recovery-outcome membership = *beacons the session itself emits*; e5e33795's manager-only pin ruled blast-radius scoping (inverted with archaeology, not fought).
-- **Optional (flagged, NOT scheduled)**: local `:8000` true snapshot isolation — materialize a snapshot dir (git archive) at re-spin and point the compose src mount there (§7); promote on Rick's word.
-- **Deferred**: live calculator pipeline on the GCP VM (scope was code-delivery verification; feature regression stays on local :8000 suites).
-
-## 📋 DECISIONS LOG 2026-07-11/12 EVENING (Mr. Radio 🦉, session 372f9dc9 re-spin) — arbiter-accuracy arc rulings
-
-- **Arbiter-accuracy 3-layer stack**: L1 dedup (`ce13b134`→`ad0f6199`) + L2 designed-hold suppression (`cec10ef9`→`73378b09`) both LIVE via :8001 bounces; L3 stale holding_on-edge FPs (`1ff7be20`) PARKED overnight — the quiet advisory stream IS its verify-first evidence; staff morning 2026-07-12 w/ the overnight journal as first artifact.
-- **Classifier wall ≠ authority ruling (Rick, direct)**: arbiter bounce is standing manager authority; a permission-layer denial whose rationale contradicts the manifest is a finding to surface, NEVER grounds to mint a Rick-gate. Memory `feedback_classifier_wall_is_not_an_authority_ruling` banked.
-- **Wake-path is NOT a guarantee in either direction**: Krishna's review DM + 3 arbiter nudges buffered ~55 min without re-invoking me (manager side); Clayton's APPROVE staged Enter-immune (worker side, recovery: Escape→C-u→retype fresh→Enter). Sweep `dm_list` on every wake; memory corrected.
-- **Suppression design invariant (ruled)**: fail-safe-to-ROSTER — every uncertain path (store hiccup / dead operator / mixed owed / deadlock cycle) keeps rostering; never hide a real stall. Uniform rule on both announce legs.
-- **Stale-pending disposition review remains open**: 359 open bullets rode the TODO horizon sweep by AGE into `todo-history/2026-04-15-to-2026-06-16-todo.md` — item-level disposition pending Rick's convenience.
-
-## 📋 DECISIONS LOG 2026-07-11 (Mr. Radio 🦉, session 372f9dc9) — lunch-window arc rulings banked at session-end
-
-- **Monopolize family CLOSED end-to-end**: 3a14292b (Shape-A) + fe375cf6 (Shape-B) + 6d644465 (belt removal) all done w/ receipts; the caf58f71 "no-op placeholder" claim formally retired in code prose. The in-process pool_max=1 test is the DURABLE regression guard replacing the belt (guard-RED receipted). 67473d91's deferred E2E confirm satisfied by ts-dfc230a9.
-- **Persona-key family CLOSED**: root fix at `canonical_persona_key` (separator runs → single space); board healed 13/13 via manager-run backfill on NEW code (ordering guardrail: apply-on-old-code would FUSE healable rows — banked in 951a22be record); derive_dm_topic new contract RATIFIED (Option A, zero-orphan inventory); soft-flag + class-scoped owner default live. Residual policy idea (hard-gate roster) reconsiderable only if a cross-project roster accessor ever exists.
-- **Polluted-row cleanup DEFERRED (open)**: test-fingerprint rows in dev `prediction_decisions` (inventory in `src/rnd/2026.07.11-cfcbb703-unit-test-triage.md`) — fixture stopped the bleeding; the one-time targeted delete is a manager-run confirmed destructive op, batch with next hygiene window.
-- **Persona-pool allocation WALKS (3× today)**: never trust `persona_preference` — verify the actual persona from the worker's check-in DM. Also: receipts schema is strict (commit = single hex, test_run = ts-<8hex> only).
-- **TODO.md horizon archive still owed** (~2,250 lines; flagged 2026-07-06, deferred again this wrap per Rick's tight sequence) — run `/plan-todo archive` early next session. → ✅ **EXECUTED 2026-07-11 same-day re-spin** (this sweep: 2,292→178 lines, archive `todo-history/2026-04-15-to-2026-06-16-todo.md`, task 2a190fa2; stale-pending disposition review remains open).
-
----
-
-## 📋 DECISIONS LOG 2026-07-07 PM (Mr. Radio 🦉, session 17e81460) — day rulings banked at session-end
-
-- **No GPU-less GCP instance, EVER** (Rick, voice): the e2 downgrade path is dead; item `b8fa9b7d` dropped `user_direct`. Standing companion: **15-min stockout-retry reflex** on `ZONE_RESOURCE_POOL_EXHAUSTED` (g2 VM starts) — persistent duty, currently seeded in Clayton's memento.
-- **Classifier reference case (5 walls today, 0 bypasses)**: the auto-mode classifier accepts user intent ONLY from Rick's own artifacts (settings rules, his shell) — never relayed words, ask-answers, or broadcasts. Walls hit: AR push ×2, VM start, Clayton ssh-read, TFE cancel-API. Delegation-to-manager requires ONE-TIME harness enactment via settings; Rick's 4-rule VM set (settings.local.json:500-503) is action-scoped only.
-- **Phase-2 LanceDB FULL teardown (`4955d0b9`)**: Rick ruled TOMORROW after the 24h soak — the 2026-07-08 13:00Z chase is a **FIRE TIME, not a re-ask** (verify soak green → staff a FRESH author → go). Spec = `src/rnd/v0.2.0/2026.07.07-lancedb-teardown-prep-scoping.md` §4/§7/§5a; Phase-1 symbol rename already landed (`d1a681af`) — do NOT re-rename. Part-2 HNSW stays additionally gated on the flood-purge card.
-- **Tiffany reaped no-respin** (Rick confirmed ask 22:30; unsubmitted-pane-text doctrine applied — surfaced before acting).
-- **TFE `tfe-130826c7` completed naturally** — Rick's unexecuted kill MOOT; :8000 pool freed ~22:04.
-- **67473d91 disposition**: DONE on unit-tier receipts (`d4aa722c`, 12/12); the :8000 E2E confirm is DEFERRED post-`30398595` — live-fire evidence tonight proved the monopoly-hold deadlock (ts-ad4670ec: the run's 7 spawned swe- jobs deferred by `[CONSUMER] Monopoly hold active`, all timed out → RED regardless of budget). NOTE: contradicts caf58f71's "monopolize=True is a no-op" finding — the hold IS active in the consumer (`[CONSUMER] Monopoly hold active` ×1916 in the run window; started_at flipped ONLY after monopoly release 22:43:23 → smoking gun). 30398595 turned out terminal(done) so the amend correctly 422'd — evidence filed as durable **bug `3a14292b`** (P2, accountable mr radio) w/ all receipts + cross-links (Clayton firsthand re-derive: RED 0/7).
-
----
-
 ## 📥 BACKLOG 2026-07-07 PM (Tiberius 👑, session 4e12c586) — post-switchover live-voice E2E pulled off the board (Rick voice order)
 
 **Rick (voice, 2026-07-07 ~22:35 EDT): "push this task item into the to-do queue — it does not belong on the board: ee23fca8."** Store item `ee23fca8` DROPPED with this backlog entry as its durable landing pad. Context: the item was the post-switchover live-voice E2E for `766bb609` (persona voice_id honored per session), blocked on the lane-1 flip; Rick killed the flip the same evening with a global multiplexer-parity verdict ("still ugly, still incomplete for the MVP" — logged HIGH in intake `603d9275`), so the E2E has no near-term trigger.
@@ -646,37 +2258,6 @@ GET /health  →  HTTP 200 in 32.0s
 **Resume-when**: the multiplexer reaches Rick's MVP layout/functionality-parity bar AND the lane-1 flip (multiplexer = live TTS client) actually lands.
 
 **Scope at resume (verbatim from the store item)**: E2E driving ≥2 sessions with distinct voice personas; assert each `/api/get-speech-elevenlabs` POST carries that session's `voice_id` (present→honored) and a persona-less notification omits the key → server default voice, consuming server seam `speech.py:558`. Cite reviewed commit `76946d9a` + merge `a9dd6f41`. Prereq receipt: playback consumer `4f14d38f` is DONE. Also-owed cosmetic sweep bundled in the old item body: `wireTtsPlayback` comment names default voice "(Sam)" but the real default is config key `elevenlabs tts default voice id` — comment-only.
-
----
-
-## ✅ EXECUTED 2026-07-07 AM (Mr. Radio 🦉, session 17e81460) — v0.2.0 pgvector migration swap-chain + CUTOVER LIVE
-
-**Rick's morning GO ("finish the migration… coast is clear" + manager carte blanche) executed end-to-end, commit `0901984d`**: dev+test recreated onto `lupin:1.1.1-pgvector-candidate` → LIVE backfill 202,081 + 35 + 57 (truncate-then-load, twice: main + straggler re-run) → equivalence PASS (exact-scan PG == LanceDB byte-faithful) → **exact-scan ruling** (Rick ask: keystone is 97.2% duplicate vectors → HNSW recall pathologically broken; migration `e1f2a3b4c5d6` drops the index; exact `<#>` scan = guaranteed parity AND 2.7× faster than legacy ~1,293ms) → **INI `vector store backend = postgres` LIVE on BOTH servers** (Rick ask: flip now) → live-pipeline + WS smokes green; integration gate `ts-c94c514d` = final proof. Full record: `src/rnd/v0.2.0/2026.07.07-pgvector-swap-chain-execution.md`. **Open tails**: soak watch → LanceDB teardown (post-soak, P5); post-hoc adversarial review of `0901984d` (crew spin-up was Rick-held); GCP leg task `c845346a` (Rick-HELD until his GO); boot-log LanceDB banner cleanup (cosmetic).
-
----
-
-## 🗓️ STATUS 2026-07-06 (Tiberius 👑, session a6553139) — evening: notification-flood P1 shipped + full board sweep (8 items)
-
-Rick's 3000+ digest-flood question root-caused (arbiter re-announce × persist-on-fail × no idempotency; bug `e1bbe011`) and FIXED same evening (`87a1de61`, persist=false flood-guard, LIVE via arbiter bounce). Crew of 4 (Tiffany/Krishna/Rachel/Clayton) closed **8 store items** with git-verified receipts incl. the corrected E2E-gate classification (10 mux-introduced now fixed · **5** truly pre-existing · 0 functional regressions) and the between-suites DB-isolation hardening (`ea0e4428`). All crew reaped w/ mementos. **Rick's open card: 4.7k flood-row purge** (asks expired unanswered — no purge executed; re-offer on engagement). Deferred: `caf58f71` (P3 concurrent-writer class), `ee23fca8`/`603d9275` (by design). **Hygiene: TODO.md at ~2,250 lines — run `/plan-todo archive` (horizon sweep) next session.**
-
----
-
-## 🗓️ STATUS 2026-07-06 (Mr. Radio 🦉, session 2352acab) — evening: 2 bug lanes shipped, 2 gates executed, arbiter payloads live
-
-Both worker lanes DONE same-evening: **75f392c0** Stop-hook poke-storm relief valve (Cheech, merged `ecae99a0` + doctrine §8 `de355d84`) and **f1a21917** wedge remediation (Rio, merged `7b7f2977` — `MCP_TOOL_TIMEOUT=660000` for all new spawns + turn-age watchdog). Rick-gates executed: `7d50a03a`+`c90f24f4` (pgvector → `src/cosa/.venv`, 93/93 green) + wedge ratification. Arbiter double-bounced w/ Tiberius (Rick broadcast bcea4232 re-affirmed manager bounce authority): **Tiffany's flood fix + turn-age watchdog both LIVE**, first sweeps clean. `63c5d913` closed-verified (`--model` flag injects; stale-process root cause). History archived (22.5k→6.9k). Rick's still-open card: arbiter flood-row purge (on Tiberius's ask). María's `6fc8d78d` (P1 spurious-poke root-cause) remains hers.
-
----
-
-## ✅ RESOLVED (was: FIRST THING 2026-06-30) — `d1bdb7ca` mux TTS architecture gate
-**Rick RULED (2026-07-01): server-push stands — "server pushes audio, END OF STORY."** Decision `d1bdb7ca` DROPPED in the store; the client-initiate flip is dead scope. Do not resurface.
-
----
-
-## 🗓️ STATUS 2026-07-03 (Mr. Radio 🦉, session 8a92b253) — end-of-session: pushed `24301068` + backup; v0.2.0 migration swap Rick-gated
-
-**Session-end (Rick broadcast ~10:24):** pushed `wip-v0.1.9` → origin HEAD `24301068` (102 commits, incl. merged 73d2b589 wedge-guard suite + 25c7441c notify-turn-hold fix-design) + backup DATA01→DATA02 (16.67G); 3 workers (Arnold/Cheech/Tiffany) documented + reaped.
-
-**RULING (auto-mode classifier, 2026-07-03):** the v0.2.0 pgvector migration RUN is **Rick-triggered, NOT autonomous-at-quiesce.** The 08:37 swap-chain reached the container-recreate step with all read-only gates green (quiesce verified, image `lupin:1.1.1-pgvector-candidate` present, rollback `lupin:1.1.0`, forensics snapshot) but the recreate `docker compose up -d --no-deps lupin-rest-dev` AND an autonomous resume-cron were BOTH classifier-denied. **Parked on operator gate `d93a1edb` (P1)** — Rick adds a docker permission rule + GO (then I run the chain: recreate → verify → alembic → Tiffany in-container backfill dry-run → LIVE 196k RUN → equivalence + flag-flip readiness), or runs the swap himself. **Flag-flip stays Rick-gated.** Sibling env gate `7d50a03a` (P2 — pgvector into `src/cosa/.venv`, latent hooks/MCP landmine, bug `c90f24f4`). Daylight bugs: `75f392c0` (Stop-hook re-ask loop) + María's `6fc8d78d` (Mr-Radio-path spurious pokes, same family). Zero breakage — :7999 untouched.
 
 ---
 
@@ -717,7 +2298,7 @@ The ratified **mux MVP-finish remediation** (6 items; plan `src/rnd/v0.1.9/2026.
 - **:8000**: E2E (`ts-55f92b50`) + integration (`ts-13e9fc86`) submitted — **results for AM review** (Rick: rerun in the morning is fine).
 
 **☀️ 2026-07-01 AM — Rick action items:**
-- [ ] **GCP: `terraform apply` the model-server → Cloud Run split** (Tiberius 👑 session eb4b105f). Committed-held `c89c31ea`, pushed in `df0c1edf`; reviewed GREEN (Tiberius adversarial + María #1-#4 SOURCE + Arnold dry-side; **F-T1 caught+fixed** — scale-schedule jobs `oidc_token`→`oauth_token` for the Cloud Run Admin API, else the min-toggle 403s and the warm window silently never activates). **Rick's go + `gcloud` login — real money.** ⚠️ Apply DURING 09:00-23:00 EDT (finding #8 first-apply overnight warm-leak) → then ping **Arnold 🪨** for the WITH-CREDS green-bar (embedding+STT 200 vs the live `…run.app`; #6 the true-green gate). Cross-repo: VM-side PGA + `*.run.app` DNS + suspend/resume IAM grant live in the `terraforming-vms` handoff (02-vm-downgrade-handoff.md). **Runbook: store task `c3fafac5`.** **DECISION (ratified 2026-06-30, Rick): BUY the split — ≈$527/mo, ~$96/mo (~15%) cheaper than always-on; weekday-only Mon-Fri 09:00-23:00 + VM SUSPEND-not-stop + monthly-only (CUD dropped).** Design: `src/rnd/2026.06.30-gpu-model-server-cloud-run-split/` (01-design + 03-cost-reprice).
+- [ ] **GCP: `terraform apply` the model-server → Cloud Run split** (Tiberius 👑 session eb4b105f). Committed-held `c89c31ea`, pushed in `df0c1edf`; reviewed GREEN (Tiberius adversarial + María #1-#4 SOURCE + Arnold dry-side; **F-T1 caught+fixed** — scale-schedule jobs `oidc_token`→`oauth_token` for the Cloud Run Admin API, else the min-toggle 403s and the warm window silently never activates). **Rick's go + `gcloud` login — real money.** ⚠️ Apply DURING 09:00-23:00 EDT (finding #8 first-apply overnight warm-leak) → then ping **Arnold 🪨** for the WITH-CREDS green-bar (embedding+STT 200 vs the live `…run.app`; #6 the true-green gate). Cross-repo: VM-side PGA + `*.run.app` DNS + suspend/resume IAM grant live in the `terraforming-vms` handoff (02-vm-downgrade-handoff.md). **Runbook: store task `c3fafac5`.** **DECISION (ratified 2026-06-30, Rick): BUY the split — ≈$527/mo, ~$96/mo (~15%) cheaper than always-on; weekday-only Mon-Fri 09:00-23:00 + VM SUSPEND-not-stop + monthly-only (CUD dropped).** Design: `src/rnd/v0.1.9/2026.06.30-gpu-model-server-cloud-run-split/` (01-design + 03-cost-reprice).
 - [ ] **`a5559b49` — visual-regression rebaseline**: env-drift (host↔container libfreetype AA), NOT code. `ce216d11` held (fonts-dejavu-core + fingerprint guard). Landing to true 37/37 via Cheech's treadmill-immune run (`auto_fix_on_failure=false`); 30+ rebaseline PNGs commit local-held. **If it didn't land tonight**: resume runbook in `src/rnd/v0.1.9/2026.06.30-visual-regression-env-drift-root-cause.md` §Phase-2 (pause completion-watchdog OR per-run `auto_fix_on_failure=false` → clear 4 persisted RED jobs → cold `--update`+compare all 36). Blocks nothing downstream. Follow-on: arbiter dual-false-positive bug `262c59f6` (RED-first).
 - [ ] **Visual sign-off** on the :8000 E2E **visual-regression diffs** — they WILL diff on the INTENDED UI (new AR/PLY panels, nav bar, header polish, V9 strip-icon). The one EXECUTOR:HUMAN tier → then **golden rebaseline**.
 - [ ] **The FLIP** (`lupin-app.ini:883` `legacy notifications redirect enabled=True`) — Rick's word, AFTER visual sign-off. Push landed the mux code DORMANT behind the un-flipped flag.
@@ -727,16 +2308,6 @@ The ratified **mux MVP-finish remediation** (6 items; plan `src/rnd/v0.1.9/2026.
 ### Possible future enhancement (NOT a priority — Rick de-prioritized 2026-06-26; store task `69edd619` dropped)
 - [ ] **[LUPIN] `reason` discriminator on `voice_persona_released`** — add `reason={exit|reassigned|borrowed_return|clear}` to the WS payload (emit `voice_persona.py:~570`; catalog passthrough `notifications.py:~609`; consumers: web notifications.js + mux + mobile). Retires the client-side debounce-guess for true-exit vs benign-release. Mobile ships fine on its 3-5s debounce without it. Revisit only when convenient.
 - [ ] **[LUPIN] Fleet-status board: give the heartbeat-arbiter its own "infra" lane** — the board truncates session `lupin-arbiter-app-8001` → `lupin-ar` and files it under `(Unmanaged) … worker / unknown`, so the standing heartbeat/owed-work arbiter reads like a mystery idle worker. Give it a dedicated infra row (or show its full name + an "infra" tag) so it's not confused with crew workers. Cosmetic only — arbiter is healthy/alive, this is a renderer change. DEFERRED under the mux↔legacy-notifications UI parity freeze (Rick, 2026-06-26 — no changes to either UI until parity lands). Filed by María 🌸 (session `ae92e658`, 2026-06-26).
-
----
-
-## ▶ 2026-06-25 — LanceDB Phase A REBUILD EXECUTED (session d6b35eb3, MCP off)
-
-**DONE**: `input_and_output_tbl` **90.46GB → 1.07GB** (~89GB reclaimed; 176,877 rows preserved; clean chain @ v1; DATA01 100%/16G → 94%/107G free). In-container staged rebuild (transient `docker compose run` one-offs, lance 0.36.0 V2 core); both servers healthy post-bounce. Execution log: `src/rnd/v0.1.9/2026.06.24-lancedb-88gb-optimize-incident-remediation.md` §8. `rebuild_lancedb_table.py` modified (`--keep-rebuilt` + `drop-rebuilt`) — **committed-held, push stays Rick's word**. Supersedes the gated `5daf94a0`/`db1acda7` REBUILD-impl items.
-
-**~~OWED next (Bucket 3)~~ — CANCELLED 2026-06-26 (Rick strategic decision, see below)**:
-- [x] ~~Phase B standing compaction~~ — **CANCELLED**: Rick 2026-06-26 — "No need for any nightly compaction." LanceDB being abandoned; the entire compaction class is moot.
-- [x] ~~Decision #6 amendments to the recovery script~~ — **CANCELLED**: LanceDB recovery tooling no longer maintained; superseded by the Postgres migration.
 
 ---
 
@@ -753,6 +2324,17 @@ The ratified **mux MVP-finish remediation** (6 items; plan `src/rnd/v0.1.9/2026.
 
 ---
 
+## Decisions Log
+
+> ⚠️ **Re-seeded 2026-08-26.** This section was carried out of the live file by TODO archival and never re-created — **67 entries, newest 2026-07-07, now live only in `todo-history/2026-04-15-to-2026-06-16-todo.md`**. Every ruling between then and today went unlogged here. Look there for anything older than this heading.
+
+- 2026-08-26 — **Does María's approval discharge Rick's gate on the excision plan?** → **YES — GO, incorporating her four fixes.** Rick's words: *"Maria has approval discharges the gate I want you to incorporate the changes and then Implement the plan."* Executed in the ratified order, fixes first: `71d5efaa` (§3a stdlib out of the denominator) → `d466a9b9` (§3b `src/lib` deleted) → `1dd574d5` (§6.1 routing denominator frozen + fatal) → `22ad69b3` (Step 2 relocations) → `75ad1bd8` (Steps 3–4, the excision + the pinned worktree) → `e9ade94f` (execution record). 🔴 **The finding to carry forward: the plan's blast radius was short by two.** It named ONE edge from v2 into the delete list; there were THREE — one module-level (v2 would have died at *import*, not degraded) and one inside a *keeper*, both invisible to a grep of `v2_eval.py`. **A delete list built by naming files is not the same as one built by following imports.** Now pinned by `src/tests/unit/test_v2_survives_v1_excision.py`, which blocks the deleted module names in a child process and imports v2 anyway — with its own negative control. Record: plan §7.
+- 2026-08-26 — **What lands next, now the plan is approved?** → **RESUME THE PLAN'S ORDER (stdlib fix → delete `src/lib` → V1 excision) — BUT GATED ON MARÍA'S REVIEW.** Rick's words: *"I'm going to go with your recommendation to resume the plan's order but I want Maria to review this before you implement it"*, plus *"Maria is going to sanity check your plan"*. Why the order: the stdlib fix and the `src/lib` delete are cheap, unambiguous, and both change the DENOMINATOR, so doing them before more test-writing stops me producing numbers that get re-based. ⚠️ **NOTHING IN THE PLAN IS EXECUTED UNTIL MARÍA'S REVIEW LANDS** — the three denominator/structural moves are held; §3d test-writing continues under its own separate authorisation from this morning. Named hard prerequisite for the excision, held with it: `v2_eval.py` imports `make_ws_recv_events` FROM `v1_eval_arm`, so that listener must be relocated into a v2-owned module and green BEFORE any delete.
+- 2026-08-26 — **Contended coverage runs: guard mechanically, warn, or leave as a written rule?** → **REFUSE the run, with an env-var escape hatch**. Why: measured today, a `--cov` tier run sharing the box read **82% / 1320 missing** where the identical tree run alone read **89% / 853** — same command, same isolated COVERAGE_FILE, same pass counts, no warning. The error is directionally hostile (coverage looks WORSE, so the reflex is to write tests for a hole that is not there), and it now has teeth: with `fail_under` rising per milestone, a floor set off a contended run lands ~7 points too low and nothing ever goes red to say so. Same shape as the misplaced heartbeat holds — the doc was already correct and half the fleet broke it anyway; the detector is what fixed it. Doc: `src/rnd/v0.2.0/2026.08.26-contended-tier-run-fabricates-a-coverage-regression.md`.
+- 2026-08-26 — **`fail_under`: raise per milestone, or hold at 96 until 100?** → **RAISE PER MILESTONE**. Why: a floor that never moves is not a ramp — it is a number someone eventually notices. Raising as ground is taken is the only version where the gate does work *during* the climb rather than after it, and it locks each gain against silent slip-back. Context: the floor is 96 while the measured frame is 89, so the gate is currently red. Tiffany's line, quoted in the plan: *the ramp's teeth are this row's chase* — and a chase date is not a control. Plan §5.4.
+- 2026-08-26 — **`lupin_app`: fold the :8000 tiers into the coverage frame, or scope the mandate?** → **FOLD THEM IN, and extract the pure helpers**. Why: 367 statements sit at ~28% because `main.py` is lifespan/background-loops/middleware exercised only by the integration and e2e tiers, which the baseline does not run — so it is not a test-writing debt but code the fast tiers structurally cannot reach. Scoping the mandate instead would leave those statements unreachable by construction and stop the ramp short with no way to say why. Cost accepted: the full-frame number becomes a deliberate, slower measurement. Plan §3c.
+- 2026-08-26 — **`src/lib`: delete, revive, or leave?** → **DELETE**. Why: 524 statements at 0% because the package cannot be imported (`pyaudio` absent; bare `import lupin_client`), untouched since 2026-01-28, every in-tree reference commented out except a launcher invoking python3.10 in a 3.13 repo. Deleting removes the lines rather than hiding them (+0.84 pts); leaving carries a permanent zero that makes 100% unreachable by construction. Plan §3b.
+
 ## Pending Decisions
 
 > Queue for `/plan-decide` (the **guided-decision-walkthrough** skill). One-line topics; the skill frames each live with pros/cons + a recommendation, descending priority. Detail lives in the linked design docs.
@@ -760,7 +2342,7 @@ The ratified **mux MVP-finish remediation** (6 items; plan `src/rnd/v0.1.9/2026.
 **Messaging-coordination plane (P0)** — ✅ **ALL 7 RESOLVED 2026-06-02 via `/plan-decide`** (Rick ratified every recommendation). Source `src/rnd/v0.1.8/2026.06.02-messaging-coordination-plane-design.md` (§ Ratified Decisions). Rulings in the Decisions Log below.
 - **Implementation queue — ✅ ALL 5 LEVERS COMPLETE:** A durable outbox · D pull-able inbox · B loop de-block · C express lane · E backpressure. In-process, no broker. **A ✅ · D ✅ (committed `722e624`, :8000 integration 2/2) · B ✅ · C ✅ · E ✅** — 990 unit tests green, no regressions. B/C/E committed in the wrap-up checkpoint.
 
-**GCP test-VM operability — follow-on (opened 2026-07-22, session 2c24d27b):** source `src/rnd/2026.07.22-vm-git-sync-strategy-decision.md` §6.
+**GCP test-VM operability — follow-on (opened 2026-07-22, session 2c24d27b):** source `src/rnd/v0.1.9/2026.07.22-vm-git-sync-strategy-decision.md` §6.
 - [ ] **[LUPIN] Add SSH agent-forwarding to `lupin-vm.sh shell`** (`--ssh-flag="-A"`) — interactive git-as-you on the VM, all repos, zero creds at rest. Recommended next step; trivial.
 - [ ] **[LUPIN] Unattended VM self-update?** — if near-term, start GitHub App setup (short-lived per-repo tokens); machine-user is the lighter interim. Skip deploy key (single-repo ceiling).
 - [ ] **[LUPIN] `push-bundle` default** — keep fetch-only (current, safer) or default `--checkout` (deploy semantic)?
@@ -776,6 +2358,88 @@ The ratified **mux MVP-finish remediation** (6 items; plan `src/rnd/v0.1.9/2026.
 - [ ] **[LUPIN] Full-REMOVAL of the legacy commons-DM path (revisit-later)** — note-to-revisit per Rick's 2026-06-15 ruling (comment-out now, full-delete deferred). After the dm_send cutover has soaked and telemetry shows zero legacy-path hits, DELETE the commented-out machinery: `commons_send_to`, `ask_async`/`ask_sync` DM-mode, `register-question` + `CommonsQuestionWatcher` + main.py lifespan, the 2 legacy listener handlers. KEEP polling-mode + broadcasts + presence + `_handle_broadcast_received`. Prereq already handled at comment-out time: arbiter `make_dm_push_fn` migrated to `/api/notify-peer`. Design: `src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md`.
 
 ## Pending
+
+### 🔎 Sweep finding, NOT filed as a row (Rick's 2026-08-19 no-new-bugs-until-zero order)
+
+**`matplotlib_renderer.py:235` executes model-generated Python with no sandbox.** Found during
+row `60f04102`'s sweep (2026-08-19, Mr. Radio). It writes generated `code` to a temp file and runs
+`python3 <temp_path>` as the server's OS user — arbitrary code execution by construction, no import
+allowlist, a 30s timeout the only control.
+
+- **Same family as `7b9094d8`, different site.** Better in one respect: `NamedTemporaryFile` gives
+  each run a unique path, so it has none of `util_code_runner`'s shared-path race.
+- **Not caller-supplied directly** — the code is model-generated. But a caller who controls the
+  presentation prompt influences what gets generated, so the trust boundary is the model's output,
+  not the user's input.
+- **Deliberately not fixed.** Rick scoped `7b9094d8` to "the race only" and explicitly excluded the
+  sandbox half. Fixing the sandbox here would override that ruling at a site he had not seen.
+- **Promote to a row when the board reaches zero**, or fold into `7b9094d8` if its scope is ever
+  widened to the sandbox.
+
+### 🌅 MORNING AFTER THE REBOOT — two gates left open on purpose (store row `19a417fa`)
+
+Rick's call at session-end 2026-08-17: pick these up in the morning, after the reboot.
+
+**1. WebSocket smoke cannot run from any agent seat.** `run-websocket-smoke-tests.sh` aborts at
+pre-flight on unset `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` / `_PASSWORD`. Measured: the
+credentials **are** in `~/.bashrc` (1 grep hit), `source ~/.bashrc` leaves them **empty**, and
+`~/.profile` has 0 hits. That is the `case $- in … *) return;;` early-return at lines 5-8 documented
+at the top of this file — every export below it is dead code for tool shells.
+**Remedy is Rick's, already recorded**: move both exports above the guard, or into `~/.profile`.
+⚠️ **The reboot alone does not fix it** — see the entry above; it needs
+`docker compose up -d --force-recreate` from an *interactive* shell, and `bounce-dev-server.sh`
+does not substitute.
+
+**2. Six pre-existing unit failures, none from tonight's work.** Proven by stashing every file
+touched and re-running against clean HEAD — identical list both ways.
+
+| test | count |
+|---|---|
+| `test_compose_env_contract_coverage.py` | 2 |
+| `test_compose_service_parity.py::test_env_key_parity` | 1 |
+| `test_env_contract_citations.py` (`GH_TOKEN@docker-compose.yml:266`, `:442`) | 2 |
+| `test_pytest_collection_diagnosis.py::test_shape_a_is_diagnosed_as_a_collection_error` | 1 |
+
+Five of six are the **docker-compose env contract** — the same surface as the `JWT_SECRET_KEY` /
+`.env` provisioning in `b6b012a6` and `cba7b4a6`. They look like compose changes that landed without
+the contract file following. **Whoever owns that lane should confirm before anyone edits.**
+
+**Green and needing no redo**: unit 15,639 passed · cosa 8,696 passed / 26 skipped · training 111
+passed / 7 skipped. **Still unrun**: serial bridge guard, E2E UI + visual, integration (final gate).
+
+### 🔬 FIRST LoRA RETRAIN — tomorrow evening, 2026-08-18 (store row `c4837011`)
+
+The registry → XML → PeftTrainer seam has **never run end to end**. Until 2026-08-17 the trainer
+had only ever consumed the April 2026-04-05 corpus, which predated the registry by four months.
+The live corpus was regenerated tonight through the sanctioned path
+(`XmlCoordinator.write_ttv_split_to_jsonl`), so tomorrow is the first run against generated data.
+
+**Corpus now on disk** (`sample_size_per_command=1500`): 47,336 rows — 37,868 train / 4,734 test /
+4,734 validate, 40 commands, worst class ratio **9.9×** (April was 56.3×).
+April preserved beside it as `voice-commands-xml-{train,test,validate}.april-2026.04.05.jsonl`
+(gitignored, same directory) — the swap is reversible with three `mv` commands.
+
+**Three defects the new corpus fixes vs April:**
+
+| # | defect | April | now |
+|---|---|---|---|
+| 1 | two contradicting router instructions for the same 17 commands | 16,585 rows `<agent-routing-commands>` + 7,371 rows `<browser-commands>` | one template, 0 browser-wrapper router rows |
+| 2 | `agent router go to test fix expediter resume` absent entirely | 0 | 1,500 |
+| 3 | starved classes | test suite 85, tfe resume 0 | 1,465 / 1,500 |
+
+Defect 1 was fixed in *code* on 2026-08-16 (`dfc9eb47`, row `14ba1437`) and guarded by a test —
+but the guard covers the generator, not the file, so the artifact carried it for two more days.
+
+**Watch during the run:** every row's `instruction` carries the full command menu inline, so the
+LoRA learns the **menu** — any registry change obliges a corpus regeneration before a retrain
+(row `95924f2d`). `test suite` and `tfe resume` went from starved to full, so they are the classes
+most likely to move.
+
+**Still open — the remaining floor:** the ten "using clipboard" variants are pinned at 200 rows each
+by their 200-line seed files, and they alone set the 9.9× ratio. Untouched tonight.
+
+⚠️ **The host is powered off ~22:53–07:17 EDT.** "Tomorrow evening" must start before ~22:53 or the
+job does not run late — it does not run at all until boot.
 
 ### History Archive (Session 280)
 
@@ -803,3 +2467,6 @@ The ratified **mux MVP-finish remediation** (6 items; plan `src/rnd/v0.1.9/2026.
 - [`todo-history/2026-04-10-to-2026-05-01-todo.md`](todo-history/2026-04-10-to-2026-05-01-todo.md) — 21 CLOSED + 10 MIXED-excerpt sections, 198 closed bullets, archived 2026-05-01 (Session 92ece47c)
 - [`todo-history/2026-04-14-to-2026-05-28-todo.md`](todo-history/2026-04-14-to-2026-05-28-todo.md) — 27 CLOSED sections (2026-04-14 → 2026-05-28), archived 2026-06-18 (Session 3364493b, Tiffany 💍; task 02f1e0d5)
 - [`todo-history/2026-04-15-to-2026-06-16-todo.md`](todo-history/2026-04-15-to-2026-06-16-todo.md) — 98 sections (2026-04-15 → 2026-06-16 arcs + undated legacy queues), HORIZON sweep at the 2026-06-25 boundary, archived 2026-07-11 (Session 372f9dc9, Mr. Radio 🦉; task 2a190fa2). ⚠️ Contains 359 still-open [ ] bullets swept by age, NOT by disposition — stale-pending review open.
+- [`todo-history/2026-06-25-to-2026-07-31-todo.md`](todo-history/2026-06-25-to-2026-07-31-todo.md) — 21 sections (2026-06-25 → 2026-07-31), cut at the 2026-08-01 boundary, archived 2026-08-06 (Session 72343afa, Cheech 🌿). Reclaimed ~11.2k tokens. Sections carrying an open-work marker (⏳ 🅿️ PENDING BACKLOG 🔴 P0, or any open `[ ]` bullet) were KEPT in TODO.md regardless of age — this sweep archived by disposition, not by age alone.
+
+⚠️ **TODO.md is still ~27.9k chars-over-4 after this cut, above the 25k limit.** The remaining bulk is this week's decision and finding blocks, which are too live to sweep by date. Closing it further is a disposition question, not an age question — someone has to rule which of the 08-01→08-06 blocks are settled.

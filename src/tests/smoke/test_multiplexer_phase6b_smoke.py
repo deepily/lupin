@@ -36,6 +36,8 @@ import time
 
 import pytest
 
+from tests.smoke.multiplexer_auth import seed_multiplexer_auth
+
 BASE_URL          = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 MULTIPLEXER_URL   = f"{BASE_URL}/app/multiplexer"
 
@@ -182,6 +184,7 @@ def test_phase6b_functional_smoke():
         browser = p.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
             page    = context.new_page()
             page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
             _wait_for_test_hook( page )
@@ -248,6 +251,7 @@ def test_phase6b_no_pending_markers_after_mount():
         browser = p.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
             page    = context.new_page()
             page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
             _wait_for_test_hook( page )
@@ -295,6 +299,7 @@ def test_phase6b_perf_gate():
         browser = p.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
             page    = context.new_page()
             page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
             _wait_for_test_hook( page )
@@ -334,6 +339,7 @@ def test_phase6b_boot_complete_handshake():
         browser = p.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
             page    = context.new_page()
             page.on( "console", lambda msg: console_messages.append( msg.text ) )
             page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
@@ -412,6 +418,7 @@ def test_phase6b_audio_chunks_arrive_after_mount():
         browser = p.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
             page    = context.new_page()
             page.on( "console", lambda msg: console_messages.append( msg.text ) )
             page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
@@ -473,6 +480,7 @@ def test_phase6b_css_canary_no_body_drift():
         browser = p.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
         try:
             context = browser.new_context()
+            seed_multiplexer_auth( context )
             page    = context.new_page()
             page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
             _wait_for_test_hook( page )

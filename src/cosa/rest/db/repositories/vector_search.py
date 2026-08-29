@@ -1,19 +1,16 @@
 """
 Shared dot-product (inner-product) nearest-k search for the pgvector repos.
 
-Metric ruling (design §4.2, P0-confirmed): the live LanceDB path searches with
-``.metric("dot")`` on every ANN column, and the keystone vectors are NOT
-L2-normalized — so the correct pgvector mirror is INNER PRODUCT, the ``<#>``
-operator (``max_inner_product`` in pgvector's SQLAlchemy binding), NEVER cosine
-``<=>``.
+Metric ruling (design §4.2, P0-confirmed): every ANN column is searched by DOT
+PRODUCT and the keystone vectors are NOT L2-normalized — so the operator is
+INNER PRODUCT, ``<#>`` (``max_inner_product`` in pgvector's SQLAlchemy binding),
+NEVER cosine ``<=>``.
 
-Similarity scale parity with LanceDB:
-    LanceDB dot search reports ``_distance = 1 - dot`` and callers derive
-    ``similarity_pct = (1 - _distance) * 100 = dot * 100``.
-    pgvector's ``<#>`` returns the NEGATIVE inner product, so
-    ``dot = -(col <#> q)`` and therefore ``similarity_pct = -(col <#> q) * 100``.
-    This module returns that same ``dot * 100`` scale so thresholds + the
-    equivalence harness compare like-for-like against the LanceDB path.
+Similarity scale:
+    Callers expect ``similarity_pct = dot * 100``. pgvector's ``<#>`` returns the
+    NEGATIVE inner product, so ``dot = -(col <#> q)`` and therefore
+    ``similarity_pct = -(col <#> q) * 100``. This module returns that scale, so
+    thresholds and the equivalence harness compare like-for-like.
 
 ``metric="cosine"`` — added 2026-08-02 (bug 78f21b1b), Rick's ruling
 ------------------------------------------------------------------
@@ -62,8 +59,7 @@ def dot_topk(
 ) -> List[Tuple[float, Any]]:
     """
     Return the top-``limit`` rows of ``model`` by descending dot product against
-    ``query_embedding`` on ``vector_column`` — the pgvector mirror of LanceDB's
-    ``.search(...).metric("dot").limit(k)``.
+    ``query_embedding`` on ``vector_column``.
 
     Requires:
         - session is an active SQLAlchemy Session
@@ -76,11 +72,11 @@ def dot_topk(
         - orders by ``vector_column <#> query_embedding`` ASC (strongest dot first)
           and returns at most ``limit`` rows AFTER applying ``exclude_filter``
         - each element is ``( similarity_pct, entity )`` with
-          ``similarity_pct = -(col <#> q) * 100`` (i.e. dot * 100 — LanceDB scale)
+          ``similarity_pct = -(col <#> q) * 100`` (i.e. dot * 100)
         - when clamp is True, similarity_pct is clamped to [0.0, 100.0]
           (mirrors ProxyDecisionEmbeddings.find_similar)
         - when threshold_pct is not None, rows whose similarity_pct <
-          threshold_pct are dropped (applied AFTER the limit, as LanceDB does)
+          threshold_pct are dropped (applied AFTER the limit)
         - result is sorted by similarity_pct descending
 
     Raises:

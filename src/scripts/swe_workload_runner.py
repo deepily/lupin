@@ -3,7 +3,7 @@
 SWE Team workload runner — submits catalog tasks and captures proxy decisions.
 
 Authenticates against the running server, submits tasks from the workload
-catalog sequentially via POST /api/swe-team/submit with dry_run=true, polls
+catalog sequentially via POST /api/v2/submit with dry_run=true, polls
 the done queue for completion, then queries PostgreSQL for all proxy decisions
 created by each job. Writes a JSONL manifest to io/decision-proxies/ for
 downstream analysis and integration test fixture generation.
@@ -62,7 +62,9 @@ from scripts.swe_workload_catalog import WORKLOAD_CATALOG, get_tasks_by_category
 # Configuration
 # ---------------------------------------------------------------------------
 BASE_URL        = os.environ.get( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
-SUBMIT_ENDPOINT = "/api/swe-team/submit"
+# The dedicated door /api/swe-team/submit is retired (410); one front door now.
+SUBMIT_ENDPOINT = "/api/v2/submit"
+ROUTING_COMMAND = "agent router go to swe team"
 DONE_ENDPOINT   = "/api/get-queue/done"
 POLL_INTERVAL   = 2
 DEFAULT_TIMEOUT = 120
@@ -145,13 +147,24 @@ def submit_task( task, headers, ws_id, dry_run=True, trust_mode=None ):
         - Returns ( job_id, None ) on success
         - Returns ( None, error_msg ) on failure
     """
-    payload = {
-        "task"         : task[ "task" ],
-        "dry_run"      : dry_run,
-        "websocket_id" : ws_id,
+    args = {
+        "task"    : task[ "task" ],
+        "dry_run" : dry_run,
     }
     if trust_mode:
-        payload[ "trust_mode" ] = trust_mode
+        args[ "trust_mode" ] = trust_mode
+
+    # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and answers
+    # 410 naming /api/v2/submit, which takes the routing command as a string and the
+    # agent's own arguments in `args`. `websocket_id` and `parent_id_hash` stay TOP-LEVEL:
+    # they are instructions about the request and the queue, not arguments to the agent,
+    # and `args` is checked against the command's own argument contract, which neither is in.
+    payload = {
+        "command"      : ROUTING_COMMAND,
+        "args"         : args,
+        "question"     : task[ "task" ],
+        "websocket_id" : ws_id,
+    }
 
     try:
         resp = requests.post(

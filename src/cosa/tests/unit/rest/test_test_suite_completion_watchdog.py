@@ -62,11 +62,15 @@ def _job( snapshot=None, **over ):
     return job
 
 
-def _wd( enabled=True, max_failures=50, todo_queue=None, repair_tracker=None, debug=True ):
+def _wd( enabled=True, max_failures=50, todo_queue=None, repair_tracker=None, debug=True,
+         ask_flow=None ):
+    # Step 12: the dispatch submits through the ask flow. The queue is still held —
+    # the gates read it — but nothing here pushes onto it any more.
     return TestSuiteCompletionWatchdog(
         config_mgr=_cfg( enabled, max_failures ),
         todo_queue=todo_queue if todo_queue is not None else Mock( name="todo" ),
         repair_tracker=repair_tracker, debug=debug,
+        ask_flow=ask_flow if ask_flow is not None else Mock( name="flow" ),
     )
 
 
@@ -259,21 +263,33 @@ class TestDispatchTfe( unittest.TestCase ):
                     side_effect=RuntimeError( "factory boom" ) ):
             self.assertIsNone( wd._dispatch_tfe( _job(), _snapshot() ) )
 
-    def test_push_raises( self ):
-        todo = Mock(); todo.push.side_effect = RuntimeError( "push boom" )
-        wd = _wd( enabled=True, todo_queue=todo )
+    def test_submit_raises( self ):
+        flow = Mock(); flow.submit.side_effect = RuntimeError( "submit boom" )
+        wd = _wd( enabled=True, ask_flow=flow )
         with patch( "cosa.rest.agentic_job_factory.create_agentic_job",
                     return_value=SimpleNamespace( id_hash="tfe-1" ) ):
             self.assertIsNone( wd._dispatch_tfe( _job(), _snapshot() ) )
 
+    def test_no_ask_flow_returns_none_and_never_pushes( self ):
+        """A wiring gap must not become a private door back onto the queue."""
+        todo = Mock()
+        wd = TestSuiteCompletionWatchdog( config_mgr=_cfg( True, 50 ), todo_queue=todo,
+                                          repair_tracker=None, debug=True, ask_flow=None )
+        with patch( "cosa.rest.agentic_job_factory.create_agentic_job",
+                    return_value=SimpleNamespace( id_hash="tfe-1" ) ):
+            self.assertIsNone( wd._dispatch_tfe( _job(), _snapshot() ) )
+        todo.push.assert_not_called()
+
     def test_success_with_tracker_records( self ):
         todo    = Mock()
+        flow    = Mock()
         tracker = Mock()
-        wd = _wd( enabled=True, todo_queue=todo, repair_tracker=tracker )
+        wd = _wd( enabled=True, todo_queue=todo, repair_tracker=tracker, ask_flow=flow )
         with patch( "cosa.rest.agentic_job_factory.create_agentic_job",
                     return_value=SimpleNamespace( id_hash="tfe-1" ) ):
             self.assertEqual( wd._dispatch_tfe( _job(), _snapshot() ), "tfe-1" )
-        todo.push.assert_called_once()
+        flow.submit.assert_called_once()
+        todo.push.assert_not_called()
         tracker.record_attempt.assert_called_once()
 
     def test_success_without_tracker( self ):

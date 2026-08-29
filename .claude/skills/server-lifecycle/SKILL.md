@@ -95,8 +95,10 @@ See `feedback_fastapi_auto_reload.md` for the reversal and the incident history 
 Once authorized to bounce `:7999`, the courtesy bar:
 
 - **Best**: post an advisory ("bouncing :7999 in ~10s to pick up <reason>") a few seconds before bouncing.
-- **Acceptable fallback**: probe `GET /api/get-queue/run` + `/api/get-queue/todo`. If both empty AND `inflight=0` on pool-status, bounce silently.
-- **Never**: bounce silently when queues have entries. Ask first.
+- **Acceptable fallback**: `PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 7999` and read the **exit code** — `0` IDLE, `1` BUSY, `2` UNKNOWN. Bounce silently only on `0`.
+- **Never**: bounce silently on `1` or `2`. Ask first.
+
+> ⚠️ **This bullet used to say "if both queue listings are empty AND `inflight=0` on pool-status".** Both halves were unreliable (row `e6b8fe56`, measured 2026-08-25): `/api/get-queue/{q}` is **user-filtered** — a peer's job is not in your listing, and `?user_filter=*` answers **403** to a non-admin — and no pool field moves at all for work that is queued or running inline on the consumer thread. The check above reads the unfiltered, unauthenticated `GET /api/busy` instead, and **UNKNOWN is not idle**.
 
 See `feedback_dev_server_bounce_courtesy.md` for the rationale.
 

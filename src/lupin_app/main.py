@@ -70,7 +70,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons, arbiter, tasks, fcm, dm
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons, arbiter, tasks, fcm, dm, v2_ask
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 from cosa.rest.job_persistence import mark_interrupted_jobs, record_server_available
 
@@ -97,6 +97,12 @@ jobs_done_queue = None
 jobs_dead_queue = None
 jobs_run_queue = None
 jobs_notification_queue = None
+# The v2 AskFlow, built in lifespan (step 12). In-process callers read it here the
+# same way they already read jobs_todo_queue — a watchdog, an expediter or the
+# boot-time restore that wants to put work on the queue goes through this flow now,
+# so the guarded write-back applies to their work too. None means the app has not
+# finished booting; every reader raises rather than falling back to a direct push.
+ask_flow = None
 snapshot_mgr = None
 io_tbl = None
 id_generator = None
@@ -587,7 +593,7 @@ async def lifespan( app: FastAPI ):
         None - Control returns to FastAPI after initialization
     """
     # Startup
-    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task, fcm_wake_service
+    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, ask_flow, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task, fcm_wake_service
     
     # Monotonic mark for the managed-bounce all-clear uptime stamp (R5).
     _startup_monotonic = time.monotonic()
@@ -667,67 +673,31 @@ async def lifespan( app: FastAPI ):
     from cosa.rest.db.schema_drift import emit_startup_drift_alarm
     schema_drift_report = emit_startup_drift_alarm( debug=app_debug )
 
-    # Suppress LanceDB cosmetic warnings if configured
-    # These warnings are non-functional - queries execute correctly regardless
-    # Warnings occur when using .search() for metadata filtering (not vector similarity)
-    if config_mgr.get( "suppress lancedb warnings", default=True, return_type="boolean" ):
-        import logging
-        import warnings
-
-        # Suppress via warnings module (catches Rust layer warnings)
-        warnings.filterwarnings( "ignore", message=".*nprobes is not set.*" )
-        warnings.filterwarnings( "ignore", message=".*nearest has not been called.*" )
-
-        # Set LanceDB loggers to ERROR level only (suppress WARN, INFO, DEBUG)
-        logging.getLogger( "lance" ).setLevel( logging.ERROR )
-        logging.getLogger( "lance.dataset" ).setLevel( logging.ERROR )
-        logging.getLogger( "lance.dataset.scanner" ).setLevel( logging.ERROR )
-
-        if app_debug:
-            print( "✓ LanceDB warning suppression enabled (cosmetic warnings hidden)" )
-    else:
-        if app_debug:
-            print( "⚠ LanceDB warning suppression disabled (all warnings visible)" )
-
     # Initialize the ID generator singleton
     id_generator = TwoWordIdGenerator()
 
     # Initialize solution snapshot manager using factory pattern
-    manager_type = config_mgr.get( "solution snapshots manager type", default="file_based" )
+    manager_type = config_mgr.get( "solution snapshots manager type", default="postgres" )
     
-    if manager_type.lower() == "lancedb":
-        lancedb_table = config_mgr.get( "solution snapshots lancedb table", default="solution_snapshots" )
+    if manager_type.lower() == "postgres":
+        # The Postgres-native manager (row 5ff7b8f5, 2026-08-17). No storage location
+        # to build: the table is fixed by the ORM model and the connection comes from
+        # the DB layer, so the only key read here is the reporting-only table name.
+        #
+        # This branch is what makes `solution snapshots manager type = postgres` a
+        # legal value at STARTUP. It was added on 2026-08-17 after the else-arm below
+        # was found rejecting every value but "lancedb", which would have failed the
+        # server on its next bounce — latent, because reload is off and the running
+        # process still held the pre-flip config. The LanceDB arm that sat above this
+        # one is gone with the manager class it named (row 8098838f); it had already
+        # been building this same table-name-only config, so nothing about what runs
+        # here has changed.
+        config = {
+            "table_name" : config_mgr.get( "solution snapshots postgres table", default="solution_snapshots" )
+        }
 
-        # TWO AUTHORITIES, RECONCILED (decision 2b20a6d6). `solution snapshots manager
-        # type` names the MANAGER class; `vector store backend` names the STORAGE the
-        # manager routes to. Nothing compared them before, so this block built a LanceDB
-        # path unconditionally and the manager silently ignored it under postgres.
-        # `vector store backend` is the storage authority — ask it before building a path.
-        from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
-
-        if is_postgres_backend( config_mgr ):
-            config = {
-                "table_name" : lancedb_table
-            }
-
-            if app_debug:
-                print( "Using Postgres+pgvector solution snapshot storage (no LanceDB path built)" )
-
-        else:
-            lancedb_path = config_mgr.get( "solution snapshots lancedb path", default="/src/conf/long-term-memory/lupin.lancedb" )
-
-            # Convert relative path to absolute
-            if lancedb_path.startswith( "/" ):
-                lancedb_path = du.get_project_root() + lancedb_path
-
-            config = {
-                "db_path"    : lancedb_path,
-                "table_name" : lancedb_table
-            }
-
-            if app_debug:
-                print( f"Using LanceDB solution snapshot manager: {lancedb_path}" )
-
+        if app_debug:
+            print( "Using Postgres+pgvector solution snapshot manager" )
 
     else:
         # # Use file-based backend (default)
@@ -739,7 +709,10 @@ async def lifespan( app: FastAPI ):
         # if app_debug:
         #     print( f"Using file-based solution snapshot manager: {path_to_snapshots}" )
         # throw value error
-        raise ValueError( "As of v0.1.0, only lancedb solution snapshot type supported" )
+        raise ValueError(
+            f"Unsupported 'solution snapshots manager type' = {manager_type!r}; "
+            "the only supported value is 'postgres'"
+        )
     
     # Create manager using factory pattern for true swappability
     snapshot_mgr = SolutionSnapshotManagerFactory.create_manager(
@@ -765,6 +738,32 @@ async def lifespan( app: FastAPI ):
     jobs_done_queue = FifoQueue( websocket_mgr=websocket_manager, queue_name="done", emit_enabled=True )
     jobs_dead_queue = FifoQueue( websocket_mgr=websocket_manager, queue_name="dead", emit_enabled=True )
     jobs_run_queue = RunningFifoQueue( app, websocket_manager, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, config_mgr=config_mgr, emit_speech_callback=None )
+
+    # ── The v2 AskFlow, built HERE and nowhere else (step 12) ──────────────────
+    # It used to be built by the request-time FastAPI dependency, which meant it did
+    # not exist until the first HTTP request. Three things that run at boot need it
+    # before then — the catch-up restore, the standing arbiter submit, and both queue
+    # watchdogs — so construction moves into lifespan, immediately after the queues it
+    # depends on and before anything that uses it.
+    #
+    # ONE object, three names, each with a different reader, all set on the lines
+    # below so nobody has to hunt for the others:
+    #   ask_flow                     — the module global, read by the in-process callers
+    #                                  that already read jobs_todo_queue this way (BFE
+    #                                  Phase 6 resubmit, TFE Phase 6 validation).
+    #   app.state.ask_flow           — where an app-scoped reader would look for it.
+    #   v2_ask.install_ask_flow(...) — hands it to the /api/v2/ask|submit dependency, so
+    #                                  the HTTP door runs the same flow, not a second one.
+    #
+    # `v2 executor = queued` makes that flow hand work to jobs_todo_queue instead of
+    # running it on the caller's thread — which is what keeps the six prebuilt-job
+    # callers behaving as they did when they pushed directly.
+    from cosa.rest.routers.v2_ask import build_ask_flow, install_ask_flow
+    ask_flow, ask_flow_enabled = build_ask_flow( config_mgr, todo_queue=jobs_todo_queue )
+    app.state.ask_flow         = ask_flow
+    install_ask_flow( ask_flow, ask_flow_enabled )
+    print( f"[V2] AskFlow built in lifespan (enabled={ask_flow_enabled}, executor={type( ask_flow.executor ).__name__})" )
+
     
     # Initialize the FCM silent-relay wake sender (S6). Boots DISABLED with one
     # clear log line until Firebase credentials are provisioned (OSQ-7) — never
@@ -1052,7 +1051,7 @@ async def lifespan( app: FastAPI ):
     from cosa.rest.watchdogs import init_watchdogs
     from cosa.rest.repair_attempt_tracker import init_tracker
     init_tracker( config_mgr, debug=app_debug )
-    init_watchdogs( config_mgr, jobs_todo_queue, debug=app_debug )
+    init_watchdogs( config_mgr, jobs_todo_queue, debug=app_debug, ask_flow=ask_flow )
 
     # Initialize API Resource Manager singleton (Phase 1 CJ Flow async multi-lane).
     # No agents call it yet — wiring ensures the infrastructure is alive from boot
@@ -1060,42 +1059,24 @@ async def lifespan( app: FastAPI ):
     from cosa.utils.api_resource_manager import init_arm
     init_arm()
 
-    # Restore scheduled jobs that survived the restart (preserved by mark_interrupted_jobs)
+    # Restore pre-execution jobs that survived the restart (preserved by
+    # mark_interrupted_jobs): future-scheduled, downtime-catch-up, AND immediate
+    # submits with no scheduled_at (row 2817b0f5 — a queued job must survive a bounce).
     try:
-        from cosa.rest.job_persistence import get_restorable_jobs
+        from cosa.rest.job_persistence import get_restorable_jobs, restore_pending_jobs
         from cosa.rest.agentic_job_factory import create_agentic_job
+        from cosa.rest.queue_extensions import user_job_tracker
 
-        restorable = get_restorable_jobs()
-        for job_data in restorable:
-            routing_cmd = job_data[ "routing_command" ]
-            if not routing_cmd:
-                print( f"[CJ-PERSIST] Cannot restore {job_data[ 'id_hash' ]}: no routing_command" )
-                continue
-
-            job = create_agentic_job(
-                command    = routing_cmd,
-                args_dict  = job_data.get( "metadata_json", {} ),
-                user_id    = job_data[ "user_id" ],
-                user_email = job_data[ "user_email" ],
-                session_id = job_data[ "session_id" ],
-                debug      = app_debug,
-            )
-            if job is None:
-                print( f"[CJ-PERSIST] Cannot restore {job_data[ 'id_hash' ]}: factory returned None" )
-                continue
-
-            job.scheduled_at = job_data[ "scheduled_at" ]
-            if job_data.get( "monopolize" ):
-                job.monopolize = True
-
-            jobs_todo_queue.push( job )
-            print( f"[CJ-PERSIST] Restored scheduled job: {job_data[ 'id_hash' ]} "
-                   f"(type={job_data[ 'job_type' ]}, scheduled_at={job_data[ 'scheduled_at' ]})" )
-
-        if restorable:
-            print( f"[CJ-PERSIST] Restored {len( restorable )} scheduled job(s)" )
+        # Third argument is the ASK FLOW now, not the queue (step 12) — the restore
+        # submits through the flow like every other caller. It still registers the
+        # scoped id itself: the user-job tracker is not rebuilt at boot, and without
+        # that registration a restored job runs but is invisible to /api/get-queue.
+        restore_pending_jobs(
+            get_restorable_jobs(), create_agentic_job, ask_flow,
+            register_scoped_job=user_job_tracker.register_scoped_job, debug=app_debug
+        )
     except Exception as e:
-        print( f"[WARN] Scheduled job restoration failed: {e}" )
+        print( f"[WARN] Job restoration failed: {e}" )
 
     # v2.2 closed-loop (B1 standing cadence): auto-submit ONE standing
     # Heartbeat-Arbiter observer into CJ Flow. Single-instance-guarded (skips if a
@@ -1106,7 +1087,7 @@ async def lifespan( app: FastAPI ):
     # When the standalone :8001 lupin-arbiter-app service owns Loop B, flip the flag
     # False so the in-process arbiter does NOT submit — never two arbiters actuating.
     from cosa.rest.arbiter_bootstrap import submit_arbiter_if_enabled
-    submit_arbiter_if_enabled( jobs_todo_queue, jobs_run_queue, config_mgr )
+    submit_arbiter_if_enabled( jobs_todo_queue, jobs_run_queue, config_mgr, ask_flow=ask_flow )
 
     # Schema-drift SECOND channel. Scheduled here — not at detection time —
     # because the notification queue does not exist yet when the check runs, and
@@ -1317,7 +1298,8 @@ async def add_security_headers( request: Request, call_next ):
     Ensures:
         - Security headers added to response
         - X-Content-Type-Options: nosniff (prevent MIME sniffing)
-        - X-Frame-Options: DENY (prevent clickjacking)
+        - X-Frame-Options: SAMEORIGIN (blocks cross-origin clickjacking, permits
+          this app framing its own pages)
         - X-XSS-Protection: 1; mode=block (XSS protection)
         - Strict-Transport-Security: enforce HTTPS
 
@@ -1327,16 +1309,22 @@ async def add_security_headers( request: Request, call_next ):
     response = await call_next( request )
 
     response.headers["X-Content-Type-Options"] = "nosniff"
-    # X-Frame-Options: DENY everywhere EXCEPT the document-viewer page, which is
-    # intentionally embedded SAME-ORIGIN in the notifications Reading Pane iframe
-    # (master-detail layout, 2026-05-21). DENY blocks ALL framing — even
-    # same-origin — which surfaced as Chrome's "localhost refused to connect"
-    # inside the pane when following a doc-link. SAMEORIGIN still blocks
-    # cross-origin clickjacking (only this same app can frame the viewer).
-    if request.url.path == "/app/docs":
-        response.headers["X-Frame-Options"] = "SAMEORIGIN"
-    else:
-        response.headers["X-Frame-Options"] = "DENY"
+    # X-Frame-Options: SAMEORIGIN globally — a RULE, not a list (row c9ef4ef5).
+    #
+    # This used to be blanket DENY plus a hardcoded exact-path allowlist that had
+    # already grown twice for the identical reason: /app/docs (2026-05-21, Reading
+    # Pane iframe) and /app/audio (2026-08-03, bug 4cfabc0f, podcast overlay).
+    # Two instances is a pattern, and the failure mode is silent — a new embeddable
+    # page renders BLANK inside the frame with Chrome's "refused to connect" and no
+    # error anywhere, until someone remembers to hand-edit a tuple in this file. The
+    # cost landed on whoever added the NEXT overlay, never on whoever set the rule.
+    #
+    # Every framing in this app is same-origin: Cheech's 2026-08-03 sweep measured
+    # the notifications client setting exactly two iframe srcs and no others. So
+    # SAMEORIGIN is not a relaxation of the real control — it still blocks every
+    # cross-origin framer, which is what clickjacking needs — it just stops the
+    # allowlist from ever needing a fourth entry.
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
@@ -1380,6 +1368,7 @@ app.include_router(arbiter.router)
 app.include_router(tasks.router)
 app.include_router(fcm.router)
 app.include_router(dm.router)   # /api/dm/* — notification-native AI↔AI DM (relocated legacy peer-DM route)
+app.include_router(v2_ask.router)   # /api/v2/ask — CJ Flow v2 unified ask endpoint (unit D)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")

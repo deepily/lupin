@@ -116,6 +116,7 @@ Postgres tz-aware comparison is NOT proven here.
 from datetime import datetime, timedelta
 
 import pytest
+from unittest.mock import patch
 from sqlalchemy import Column, DateTime, Integer, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -126,6 +127,7 @@ from cosa.rest.task_store_owed import (
     park_is_active,
 )
 from cosa.rest.task_store_rules import VALID_STATUSES
+import cosa.rest.task_store_owed as owed_mod
 
 # ---------------------------------------------------------------------------
 # Seat-1 landing gate — LOUD, never a skip
@@ -996,24 +998,52 @@ def test_tz_aware_timestamps_compare_without_being_re_stamped():
 # Independence — the duplication licence
 # ===========================================================================
 
-def test_the_twins_are_genuinely_independent():
+def test_breaking_the_python_twin_does_not_move_the_sql_twin( session ):
     """
-    §3.2: neither twin may call the other, and they share no helper.
+    §3.2 independence, PROVEN BY PERTURBATION: corrupt one twin, the other holds.
 
-    If the SQL twin delegates to the Python one (or both route through a common
-    helper), the mutant sweep cannot move the two sides apart and every gate
-    above degrades to proving that a helper equals itself.
+    HOW THIS IS CHECKED, AND WHY IT CHANGED (row 122f07a1). This used to read both
+    functions' source text and assert neither mentioned the other's name. That
+    check could not see the case its own docstring worried about most — the two
+    routing through a SHARED HELPER — because a shared helper mentions neither
+    name. It also died on a rename that broke nothing. Replacing the live symbol
+    with a wrong one and requiring the other side to be unmoved catches direct
+    delegation, indirect delegation, and a shared helper alike.
+
+    RED ON REVERT: make the SQL twin call `park_reason_is_stale` (directly, or via
+    a helper both share) and its answers follow the corrupted Python twin here.
     """
-    import inspect
+    truth = _sql_side( session )
+    assert truth, "the SQL twin calls nothing stale — the matrix has gone vacuous"
 
-    py_src  = inspect.getsource( park_reason_is_stale )
-    sql_src = inspect.getsource( park_reason_is_stale_clause )
+    with patch.object( owed_mod, "park_reason_is_stale", lambda *a, **kw: True ):
+        under_corruption = _sql_side( session )
 
-    assert "park_reason_is_stale_clause" not in py_src, (
-        "the Python twin calls the SQL twin — the parity gate is now circular"
+    assert under_corruption == truth, (
+        f"the SQL twin moved when the PYTHON twin was corrupted, so it is reading "
+        f"the Python one — directly or through a shared helper. The parity gate is "
+        f"circular: {truth} -> {under_corruption}"
     )
-    assert "park_reason_is_stale(" not in sql_src, (
-        "the SQL twin calls the Python twin — the parity gate is now circular"
+
+
+def test_breaking_the_sql_twin_does_not_move_the_python_twin( session ):
+    """The mirror: corrupt the SQL twin, the Python predicate is unmoved.
+
+    RED ON REVERT: make `park_reason_is_stale` build and evaluate the SQL clause.
+    """
+    truth = _python_side()
+    assert truth, "the Python twin calls nothing stale — the matrix has gone vacuous"
+
+    def _always_true_clause( model ):
+        from sqlalchemy import literal
+        return literal( True )
+
+    with patch.object( owed_mod, "park_reason_is_stale_clause", _always_true_clause ):
+        under_corruption = _python_side()
+
+    assert under_corruption == truth, (
+        f"the Python twin moved when the SQL twin was corrupted, so it is reading "
+        f"the SQL one. The parity gate is circular: {truth} -> {under_corruption}"
     )
 
 

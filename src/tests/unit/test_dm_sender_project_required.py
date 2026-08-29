@@ -93,6 +93,17 @@ class TestSpyControl( unittest.TestCase ):
         self.assertNotEqual( spy( "sid", project="plan" ), spy( "sid", project="lupin" ) )
 
 
+# Row ec5cf83a: grading + the corpus row it rides on run OFF the send path, on a
+# background worker. Tests that assert on the GRADE or the ROW inject this runner,
+# which executes the deferred job in the caller's thread — so the assertion reads a
+# finished job instead of racing one. Production's default refuses to defer under
+# pytest at all (dm._submit_deferred_grade's self-guard), which is what keeps a unit
+# test from ever reaching the live grader.
+def _run_deferred_inline( job ):
+    job()
+    return True
+
+
 class _CoreHarness( unittest.TestCase ):
 
     def setUp( self ):
@@ -119,6 +130,26 @@ class _CoreHarness( unittest.TestCase ):
         _corpus_patch = patch.object( dm, "_DM_TRAFFIC_JSONL", self.corpus_path )
         _corpus_patch.start()
         self.addCleanup( _corpus_patch.stop )
+        # The two-arm pilot (2026.08.04) forks execute_dm_send by the arrival instant.
+        # These baseline tests use the real clock, so once the schedule JSON is committed
+        # a run DURING the live window (Tue/Wed 09:00-23:00 ET) would flip them into the
+        # experiment path and break their arm/quality assertions. Pin the policy INACTIVE
+        # so assignment_at is always None here — the outside-window contract this suite
+        # was written against, independent of the wall clock.
+        import cosa.rest.dm_experiment as dm_experiment
+        dm_experiment.set_policy( dm_experiment.make_inactive_policy() )
+        self.addCleanup( dm_experiment.reset_policy )
+        # Row 7c84b8b8: execute_dm_send grades every ACCEPTED send INLINE against a live model
+        # (_maybe_grade_dm_quality -> judge -> the vLLM endpoint), two calls per send. Nothing in
+        # this file's names suggests it, and a stack-capturing sweep on 2026-08-17 traced eight
+        # outbound connections from these four tests to 192.168.1.21:3001 — a unit test whose
+        # result depended on a server being up. Pin the judgment toggle OFF, which is the shipped
+        # CONTROL arm of that feature, so the send path runs its real code and returns without a
+        # grade. Not a stub of _maybe_grade_dm_quality: the call still happens, it just takes the
+        # branch that costs nothing. No assertion in this file reads the grade.
+        _judgment_patch = patch.object( dm, "get_dm_quality_judgment_enabled", lambda: False )
+        _judgment_patch.start()
+        self.addCleanup( _judgment_patch.stop )
 
     def _run( self, body ):
         return self.execute_dm_send(
@@ -462,10 +493,11 @@ class TestDmQualityAuditIsWired( unittest.TestCase ):
 
 class TestDmQualityJudgeMergedIntoSend( _CoreHarness ):
     """
-    Phase 2: the injected grade_quality_fn seam decides whether execute_dm_send's
-    201 result carries a `quality` field. Control (grader returns None) → no field,
-    the Phase 1 baseline shape. Treatment (grader returns a grade) → the grade is
-    appended verbatim. The grader is only reached on the ACCEPTED (201) path.
+    Phase 2 seam, as amended by row ec5cf83a: the injected grade_quality_fn decides
+    what the GRADE says; it no longer decides anything about the 201, which never
+    carries a `quality` field now that grading happens after the send returns. What
+    still holds: the grader sees the delivered body, and it is reached only on the
+    ACCEPTED (201) path — a refused send pays for no judge call.
     """
 
     def _run_with_grader( self, body, grader ):
@@ -478,6 +510,7 @@ class TestDmQualityJudgeMergedIntoSend( _CoreHarness ):
             persist_fn            = self.persist,
             new_id_fn             = lambda: "fixed-msg-id",
             grade_quality_fn      = grader,
+            defer_grade_fn        = _run_deferred_inline,
         )
 
     def test_control_grader_none_appends_no_quality_field( self ):
@@ -485,7 +518,14 @@ class TestDmQualityJudgeMergedIntoSend( _CoreHarness ):
         self.assertEqual( result[ "http_status" ], 201 )
         self.assertNotIn( "quality", result )
 
-    def test_treatment_grade_is_appended_verbatim( self ):
+    def test_treatment_grade_is_NOT_in_the_response_it_is_in_the_corpus_row( self ):
+        """
+        Row ec5cf83a REPLACED test_treatment_grade_is_appended_verbatim, which asserted
+        `result["quality"] == grade`. That assertion pinned the defect: the response
+        could only carry the grade by waiting for two live model calls first. The grade
+        did not disappear — it moved to the row, which is the only reader that ever
+        used it.
+        """
         grade = {
             "length"     : { "emoji": "⭐", "weight":  2, "detail": "12 words, target ~60" },
             "directness" : { "emoji": "👍", "weight":  1, "detail": "leads with the result" },
@@ -494,7 +534,12 @@ class TestDmQualityJudgeMergedIntoSend( _CoreHarness ):
         }
         result = self._run_with_grader( _make_send_body( sender_project="plan" ), lambda body: grade )
         self.assertEqual( result[ "http_status" ], 201 )
-        self.assertEqual( result[ "quality" ], grade )
+        self.assertNotIn( "quality", result )
+        row = json.loads( open( self.corpus_path, encoding="utf-8" ).read().splitlines()[ 0 ] )
+        self.assertEqual( row[ "len_grade" ],  2 )
+        self.assertEqual( row[ "directness" ], 1 )
+        self.assertEqual( row[ "tone" ],       2 )
+        self.assertEqual( row[ "overall" ],    2 )
 
     def test_grader_receives_the_raw_body_not_the_stamped_one( self ):
         seen = {}
@@ -530,6 +575,7 @@ class TestDmTrafficJsonlCorpus( _CoreHarness ):
             persist_fn            = self.persist,
             new_id_fn             = lambda: "fixed-msg-id",
             grade_quality_fn      = grader,
+            defer_grade_fn        = _run_deferred_inline,
         )
 
     _GRADE = {
@@ -584,17 +630,48 @@ class TestDmTrafficJsonlCorpus( _CoreHarness ):
         self.assertFalse( os.path.exists( self.corpus_path ) )
 
     def test_write_failure_is_fail_soft_and_the_dm_still_sends( self ):
-        """GATE (c) — FORCE the except arm. The sink path points into a directory that
-        does not exist, so the append raises FileNotFoundError inside the writer. The
-        DM must still return 201 dispatched=True, and no file may appear (proving the
-        write genuinely threw and was swallowed, not silently succeeded)."""
+        """GATE (c) — FORCE the except arm. The DM must still return 201
+        dispatched=True, and no file may appear (proving the write genuinely threw and
+        was swallowed, not silently succeeded).
+
+        ⚠️ THE OLD FORCING TRICK NO LONGER FORCES ANYTHING (2026-08-13). This test used
+        to point the sink into a directory that did not exist. Since the corpus moved
+        OUT of the repo, the writer calls os.makedirs(exist_ok=True) first — because
+        the fleet data dir is not created by a checkout and will not exist on a fresh
+        box or a fresh container mount — so a missing parent is now CREATED and the
+        write SUCCEEDS. The test kept its name and its assertions and would have
+        quietly stopped exercising the except arm at all.
+
+        A regular FILE standing where the parent directory must be is unfixable by
+        makedirs (NotADirectoryError / FileExistsError), so the except arm is genuinely
+        forced again."""
         import cosa.rest.routers.dm as dm
-        missing = os.path.join( tempfile.mkdtemp(), "no_such_dir", "dm.jsonl" )
-        with patch.object( dm, "_DM_TRAFFIC_JSONL", missing ):
+        blocker = os.path.join( tempfile.mkdtemp(), "i_am_a_file_not_a_dir" )
+        with open( blocker, "w", encoding="utf-8" ) as f: f.write( "x" )
+        unwritable = os.path.join( blocker, "dm.jsonl" )
+        with patch.object( dm, "_DM_TRAFFIC_JSONL", unwritable ):
             result = self._run_with_grader( _make_send_body( sender_project="plan" ), lambda b: self._GRADE )
         self.assertEqual( result[ "http_status" ], 201 )
         self.assertTrue( result[ "dispatched" ] )
-        self.assertFalse( os.path.exists( missing ) )
+        self.assertFalse( os.path.exists( unwritable ) )
+
+    def test_a_missing_corpus_directory_is_created_rather_than_dropping_the_row( self ):
+        """The NEW behaviour the test above had to stop relying on, asserted directly.
+
+        The corpus lives outside the repo now, so its directory is not created by a
+        checkout — on a fresh box, a fresh container mount, or the first send after the
+        relocation, the parent simply is not there. If the writer treated that as a
+        write failure, the corpus would silently collect NOTHING until somebody
+        happened to mkdir it, and the fail-soft swallow means nobody would be told."""
+        import cosa.rest.routers.dm as dm
+        fresh = os.path.join( tempfile.mkdtemp(), "not_yet_created", "dm.jsonl" )
+        self.assertFalse( os.path.exists( os.path.dirname( fresh ) ) )
+        with patch.object( dm, "_DM_TRAFFIC_JSONL", fresh ):
+            result = self._run_with_grader( _make_send_body( sender_project="plan", body="short one." ), lambda b: None )
+        self.assertEqual( result[ "http_status" ], 201 )
+        self.assertTrue( os.path.exists( fresh ), "the row was dropped instead of the dir being created" )
+        row = json.loads( open( fresh, encoding="utf-8" ).read().splitlines()[ 0 ] )
+        self.assertEqual( row[ "words" ], 2 )
 
     def test_a_send_path_test_never_writes_the_real_production_corpus( self ):
         """GUARD (row 334569d6 CHANGES-REQUESTED). The harness MUST redirect the sink

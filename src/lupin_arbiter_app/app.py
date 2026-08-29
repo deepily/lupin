@@ -42,6 +42,7 @@ def create_app(
     fleet_arbiter_loop    : Optional[ Any ]                = None,
     context_pressure_loop : Optional[ Any ]                = None,
     turn_age_watchdog_loop : Optional[ Any ]               = None,
+    self_respin_observer_loop : Optional[ Any ]            = None,
 ) -> FastAPI:
     """
     Build the lupin-arbiter-app FastAPI app.
@@ -50,7 +51,8 @@ def create_app(
         - now_fn (if provided) is a 0-arg callable returning an aware datetime
         - started_at (if provided) is an aware datetime
         - health_loop / fleet_arbiter_loop / context_pressure_loop /
-          turn_age_watchdog_loop (if provided) expose start() / stop()
+          turn_age_watchdog_loop / self_respin_observer_loop (if provided) expose
+          start() / stop()
 
     Ensures:
         - returns a FastAPI app exposing GET /health
@@ -67,11 +69,11 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan( _app: FastAPI ):
-        for lp in ( health_loop, fleet_arbiter_loop, context_pressure_loop, turn_age_watchdog_loop ):
+        for lp in ( health_loop, fleet_arbiter_loop, context_pressure_loop, turn_age_watchdog_loop, self_respin_observer_loop ):
             if lp is not None:
                 lp.start()
         yield
-        for lp in ( turn_age_watchdog_loop, context_pressure_loop, fleet_arbiter_loop, health_loop ):   # stop in reverse start order
+        for lp in ( self_respin_observer_loop, turn_age_watchdog_loop, context_pressure_loop, fleet_arbiter_loop, health_loop ):   # stop in reverse start order
             if lp is not None:
                 lp.stop()
 
@@ -82,18 +84,67 @@ def create_app(
     app.state.fleet_arbiter_loop     = fleet_arbiter_loop
     app.state.context_pressure_loop  = context_pressure_loop
     app.state.turn_age_watchdog_loop = turn_age_watchdog_loop
+    app.state.self_respin_observer_loop = self_respin_observer_loop
+
+    def _loop_liveness() -> dict:
+        """
+        Per-loop thread liveness, read from the THREAD ITSELF (2026-08-10).
+
+        Why this exists: on 2026-08-08 the fleet-arbiter thread died on its first
+        tick (ModuleNotFoundError in the job ctor) and STAYED dead for two days.
+        The process was fine, so `systemctl status` said active(running) and this
+        very endpoint returned {"status":"ok"} the whole time. The only visible
+        symptom was an empty panel three hops downstream. A dead worker thread
+        inside a live process must be reportable AT the process.
+
+        `is_alive()` is asked of the real Thread object, never a "we started it"
+        flag — a flag records an intention, and the intention was true the entire
+        time the loop was dead.
+
+        Ensures:
+            - one entry per WIRED loop; absent loops are omitted (not reported dead)
+            - a loop object without a `_thread` reports "not_started"
+            - never raises — health must answer even when a loop is in a bad state
+        Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+        """
+        out = { }
+        for name, lp in ( ( "health_watcher",          health_loop ),
+                          ( "fleet_arbiter",           fleet_arbiter_loop ),
+                          ( "context_pressure_writer", context_pressure_loop ),
+                          ( "turn_age_watchdog",       turn_age_watchdog_loop ),
+                          ( "self_respin_observer",    self_respin_observer_loop ) ):
+            if lp is None: continue
+            try:
+                thread = getattr( lp, "_thread", None )
+                if thread is None:
+                    out[ name ] = "not_started"
+                else:
+                    out[ name ] = "alive" if thread.is_alive() else "DEAD"
+            except Exception as e:                       # health never raises
+                out[ name ] = f"unknown ({type( e ).__name__})"
+        return out
 
     @app.get( "/health" )
     def health() -> dict:
-        """Cheap, always-answer liveness for systemd/cron supervision (deploy §7)."""
+        """
+        Cheap, always-answer liveness for systemd/cron supervision (deploy §7).
+
+        `status` stays "ok" whenever the PROCESS is answering — supervisors key on
+        it and must not be flapped by a worker-thread fault. The new `loops` map
+        and the `degraded` boolean carry the thread-level truth, so a dead loop is
+        greppable in one call instead of invisible (2026-08-10).
+        """
         now    = now_fn()
         uptime = ( now - started_at ).total_seconds()
+        loops  = _loop_liveness()
         return {
             "status"         : "ok",
             "service"        : "lupin-arbiter-app",
             "version"        : __version__,
             "started_at"     : started_at.isoformat(),
             "uptime_seconds" : uptime,
+            "loops"          : loops,
+            "degraded"       : any( v == "DEAD" for v in loops.values() ),
         }
 
     @app.get( "/state" )
@@ -128,6 +179,13 @@ def create_app(
                                  else { "status": "awaiting", "session_count": 0, "sessions": [ ] },
             "context_pressure" : context_pressure if context_pressure is not None
                                  else { "status": "awaiting", "personas": { } },
+            # 2026-08-10: carried here as well as /health because the :7999
+            # reverse-proxy (`GET /api/arbiter/fleet-state`) returns THIS body
+            # verbatim to the Fleet Status panel. Without it, a permanently dead
+            # fleet loop and a genuinely quiet fleet render identically — one
+            # `"status": "awaiting", "sessions": []` for both. The panel can now
+            # tell the operator which one it is looking at.
+            "loops"            : _loop_liveness(),
         }
 
     return app
@@ -438,10 +496,19 @@ def assemble_app(
     # whose failure is invisible does not get to be on out of the box; an operator
     # turns it on once the live-set fail-safe has been watched in the report logs,
     # which this emits every cycle whether deletion is enabled or not.
+    #
+    # The three milder bookmark families — ask-answer HWM, task-store-map, heartbeat-acked
+    # (row bd5c27e1) — ride a THIRD switch. Their failure modes are strictly milder than the
+    # dm-inbox HWM's silent DM loss: a reaped ask-answer HWM merely RE-SURFACES owed answers
+    # (a benign duplicate — no seed suppression), and the other two REGENERATE on next need.
+    # Still DEFAULT FALSE (report-only) to start: the same live-set fail-safe is watched in the
+    # per-cycle report logs before an operator opts deletion in, and put-into-service of a
+    # destructive capability stays a deliberate, INI-revocable act — not an out-of-the-box default.
     fleet_arbiter_loop = FleetArbiterLoop(
         fleet_arbiter_factory, log_fn=arbiter_log_fn,
-        enable_hold_deletion = cfg.get( "arbiter enable hold deletion", default=True, return_type="boolean" ),
-        enable_hwm_deletion  = cfg.get( "arbiter enable hwm deletion",  default=False, return_type="boolean" ),
+        enable_hold_deletion     = cfg.get( "arbiter enable hold deletion",     default=True,  return_type="boolean" ),
+        enable_hwm_deletion      = cfg.get( "arbiter enable hwm deletion",      default=False, return_type="boolean" ),
+        enable_bookmark_deletion = cfg.get( "arbiter enable bookmark deletion", default=False, return_type="boolean" ),
     )
 
     # ── context-headroom writer: gated on `arbiter context watch enabled` ──
@@ -464,12 +531,33 @@ def assemble_app(
         advisory_fn = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=arbiter_log_fn ),
     )
 
+    # ── self-re-spin observer (row 275cb0b9, GAP 2): the production caller ──
+    # observe_fleet_self_respin + sweep_returned_markers had NO caller outside a smoke
+    # test, so DEAD_NO_RETURN never fired and RETURNED markers never swept (11 piled
+    # up). This runs both on the live tick. The pressure read is the arbiter's OWN
+    # in-process store section (NOT an HTTP self-call — and NOT the container-scoped
+    # host.docker.internal URL that broke the host-side verb). Self-gates on `arbiter
+    # self respin observer enabled` (default false): start() no-ops until it flips, so
+    # wiring it in is behavior-neutral. The FLAG IS READ BEFORE THE IMPORT (a disabled
+    # feature must not impose its deps — the 2026-08-08 fleet-loop-down lesson).
+    if cfg.get( "arbiter self respin observer enabled", default=False, return_type="boolean" ):
+        from cosa.agents.heartbeat_arbiter.self_respin_observer import SelfRespinObserverLoop
+        self_respin_observer_loop = SelfRespinObserverLoop(
+            cfg,
+            fetch_pressure_fn = lambda: ( store.get().get( "context_pressure" ) or { "personas": None } ),
+            advisory_fn       = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=arbiter_log_fn ),
+        )
+    else:
+        log_fn( "self_respin_observer_disabled", reason="arbiter self respin observer enabled = false" )
+        self_respin_observer_loop = None
+
     # ── health watcher (L2): gated on the master enable ──
     if not cfg.get( "arbiter health watch enabled", default=True, return_type="boolean" ):
         log_fn( "health_watcher_disabled", reason="arbiter health watch enabled = false" )
         return create_app( snapshot_store=store, health_loop=None, fleet_arbiter_loop=fleet_arbiter_loop,
                            context_pressure_loop=context_pressure_loop,
-                           turn_age_watchdog_loop=turn_age_watchdog_loop )
+                           turn_age_watchdog_loop=turn_age_watchdog_loop,
+                           self_respin_observer_loop=self_respin_observer_loop )
 
     def _csv( key, default ):
         raw = cfg.get( key, default=default ) or default
@@ -507,7 +595,8 @@ def assemble_app(
     )
     return create_app( snapshot_store=store, health_loop=health_loop, fleet_arbiter_loop=fleet_arbiter_loop,
                        context_pressure_loop=context_pressure_loop,
-                       turn_age_watchdog_loop=turn_age_watchdog_loop )
+                       turn_age_watchdog_loop=turn_age_watchdog_loop,
+                       self_respin_observer_loop=self_respin_observer_loop )
 
 
 def _pending_ledger_path( cfg ):

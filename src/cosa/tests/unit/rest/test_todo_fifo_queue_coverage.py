@@ -13,7 +13,7 @@ plus `parse_salutations`, the user-mode methods, `_is_fit`, `_notify_rejection`,
 Boundary-mock discipline: every heavy constructor dependency (LlmClientFactory,
 Gister, GistNormalizer, Normalizer, QueryLogTable, EmbeddingManager,
 get_embedding_provider) is patched at import-site; the concrete agent classes,
-ConfirmationDialogue, RuntimeArgumentExpeditor, LupinSearch, create_agentic_job,
+RuntimeArgumentExpeditor, LupinSearch, create_agentic_job,
 notify_user_sync, emit_job_state_transition, and the FifoQueue notify path are
 all patched per-test. ZERO real LLM/embedding/DB/network/agent execution.
 
@@ -24,9 +24,20 @@ Run: PYTHONPATH=src:src/cosa/tests/unit/infrastructure \
 
 import sys
 import unittest
+from dataclasses import replace
 from unittest.mock import Mock, MagicMock, patch
 
 import cosa.rest.todo_fifo_queue as tfq
+import cosa.rest.v2.registry as reg
+from cosa.rest.v2.registry import resolve
+
+# The conversational agents push_job no longer names: since row 10ef4b64 their class
+# comes from the REGISTRY, so patching the class in this module's namespace no longer
+# intercepts construction. Patch the table entry instead — see _route.
+_REGISTRY_BUILT = frozenset( {
+    "MathAgent", "CalculatorAgent", "DateAndTimeAgent", "TodoListAgent",
+    "CalendaringAgent", "WeatherAgent", "TodoCrudAgent", "CalendarCrudAgent",
+} )
 from cosa.rest.todo_fifo_queue import TodoFifoQueue, MODE_TO_AGENT, AGENTIC_MODE_MAP
 from cosa.agents.runtime_argument_expeditor.expeditor import BATCH_DECLINED, BATCH_UNREACHABLE
 from cosa.rest.queue_protocol import QueueableJob
@@ -194,6 +205,37 @@ class TestNotifyRejectionAndDumpCode( _TFQBase ):
 
 
 # ───────────────────── push_job: rejection + cache-hit paths ─────────────────────
+
+def _registry_stub( testcase, command, agent, expect, crud_enabled ):
+    """
+    Context manager: assert the registry binds `command` to `expect`, then swap that
+    entry's factories for a stub returning `agent`.
+
+    The injection point for the six conversational agents moved in row 10ef4b64 — they
+    are built from the registry table now, so `patch.object( tfq, "MathAgent", ... )`
+    misses and a REAL agent is constructed, violating this file's ZERO-real-agent
+    contract. Patch the table entry instead.
+
+    Requires:
+        - command resolves to a conversational AgentSpec
+        - expect is the class NAME the caller expects for this command
+
+    Ensures:
+        - fails the test if the registry binds command to some other class
+        - yields a patch.dict context in which push_job builds `agent`
+    """
+    # One resolver now (step 2b): the same call answers what the fork produces AND
+    # what gets patched, so the check and the patch can no longer drift apart.
+    forked = resolve( command, crud_enabled )
+    testcase.assertEqual(
+        forked.factory.__name__, expect,
+        f"registry bound {command!r} to {forked.factory.__name__}, expected {expect}"
+    )
+    spec = resolve( command, crud_enabled=False )
+    stub = replace( spec, factory=lambda **kw: agent, crud_factory=lambda **kw: agent )
+    return patch.dict( reg.ANSWER_COMMANDS, { spec.command: stub } )
+
+
 class TestPushJobRejectionAndCache( _TFQBase ):
     """Exercises push_job rejection arms and the snapshot cache-hit branches."""
 
@@ -241,7 +283,8 @@ class TestPushJobRejectionAndCache( _TFQBase ):
         agent = Mock(); agent.id_hash = "ag1"
         with patch.object( tfq, "notify_user_sync", return_value=resp ), \
              patch.object( self.queue, "_get_routing_command", return_value=( "agent router go to math", "" ) ), \
-             patch.object( tfq, "MathAgent", return_value=agent ), \
+             _registry_stub( self, "agent router go to math", agent, "MathAgent",
+                             self.queue._crud_agents_enabled() ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), \
              patch.object( self.queue, "_dump_code" ), patch( "builtins.print" ):
             r = self.queue.push_job( "what time is it", "ws1", "u1", "u@x.com" )
@@ -261,27 +304,17 @@ class TestPushJobRejectionAndCache( _TFQBase ):
         self.snap_mgr.get_snapshots_by_question.return_value = [ ( 50.0, snap ) ]
         agent = Mock(); agent.id_hash = "ag2"
         with patch.object( self.queue, "_get_routing_command", return_value=( "agent router go to weather", "" ) ), \
-             patch.object( tfq, "WeatherAgent", return_value=agent ), \
+             _registry_stub( self, "agent router go to weather", agent, "WeatherAgent",
+                             self.queue._crud_agents_enabled() ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
             r = self.queue.push_job( "what is the weather", "ws1", "u1", "u@x.com" )
         self.assertEqual( r[ "job_id" ], "ag2" )
 
-    def test_not_accepting_jobs_confirmation_runs_snapshot( self ):
-        # queue not accepting → ConfirmationDialogue confirms → run previous best
-        snap = Mock(); snap.id_hash = "snap1"
-        self.queue.push_blocking_object( { "best_snapshot": snap, "question": "orig q" } )
-        conf = Mock(); conf.confirmed.return_value = True
-        with patch.object( tfq, "ConfirmationDialogue", return_value=conf ), \
-             patch.object( self.queue, "_queue_best_snapshot", return_value={ "message": "q", "job_id": "j4" } ) as mk, \
-             patch.object( self.queue, "_dump_code" ), patch( "builtins.print" ):
-            r = self.queue.push_job( "yes please", "ws1", "u1", "u@x.com" )
-        self.assertEqual( r[ "job_id" ], "j4" )
-        mk.assert_called_once()
-
     def test_refactor_skips_snapshot_search( self ):
         agent = Mock(); agent.id_hash = "ag3"
         with patch.object( self.queue, "_get_routing_command", return_value=( "agent router go to math", "" ) ), \
-             patch.object( tfq, "MathAgent", return_value=agent ), \
+             _registry_stub( self, "agent router go to math", agent, "MathAgent",
+                             self.queue._crud_agents_enabled() ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
             r = self.queue.push_job( "refactor this code", "ws1", "u1", "u@x.com" )
         self.assertEqual( r[ "job_id" ], "ag3" )
@@ -297,14 +330,48 @@ class TestPushJobRouting( _TFQBase ):
         self.snap_mgr.get_snapshots_by_question.return_value = []   # no cache → LLM routing
 
     def _route( self, command, question="do something", user_mode=None, agent_cls=None, agent_attr=None ):
+        """
+        Drive one push_job routing branch with a stub agent, and return its result.
+
+        ⚠️ TWO INJECTION POINTS, and which one applies moved in row 10ef4b64. push_job used
+        to name every agent class itself, so patching this module's namespace intercepted
+        construction. The six conversational agents now come from the REGISTRY, so that
+        patch no longer bites — it silently misses and a REAL agent gets built, breaking
+        this file's own "ZERO real agent execution" contract. That is exactly how these
+        twelve tests caught the change, and the right fix is to patch where the object is
+        looked up now, not to relax the assertion.
+
+        For a registry-built agent this is STRICTLY STRONGER than the old form: it first
+        asserts the table hands back the class the caller named, THEN swaps that entry's
+        factory for the stub. The old version only proved something got pushed; this also
+        proves the right binding was chosen, including the CRUD fork.
+
+        Requires:
+            - command is a routing string push_job can reach
+            - agent_attr, when given, names the agent class expected for this command
+
+        Ensures:
+            - returns push_job's result dict
+            - no real agent, push, or notify happens
+        """
         agent = Mock(); agent.id_hash = "ag"
-        ctx = []
         if user_mode:
             self.queue.set_user_mode( "u1", user_mode )
         with patch.object( self.queue, "_get_routing_command", return_value=( command, "" ) ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), \
              patch( "builtins.print" ):
+            if agent_attr in _REGISTRY_BUILT:
+                # ⚠️ THE EFFECTIVE COMMAND, not the one passed in. A user_mode BYPASSES the
+                #    router and push_job synthesises "agent router go to <mode>" itself, so
+                #    test_user_mode_direct_routing passes "ignored" as the command. Resolving
+                #    that would return None and the unpack below would raise — a test failing
+                #    for a reason that has nothing to do with what it checks.
+                effective = f"agent router go to {user_mode}" if user_mode else command
+                with _registry_stub( self, effective, agent, agent_attr,
+                                     self.queue._crud_agents_enabled() ):
+                    return self.queue.push_job( question, "ws1", "u1", "u@x.com" )
             if agent_attr:
+                # Still built by push_job itself (ReceptionistAgent) — namespace patch holds.
                 with patch.object( tfq, agent_attr, return_value=agent ):
                     return self.queue.push_job( question, "ws1", "u1", "u@x.com" )
             return self.queue.push_job( question, "ws1", "u1", "u@x.com" )
@@ -359,14 +426,40 @@ class TestPushJobRouting( _TFQBase ):
             r = self.queue.push_job( "search and summarize quantum computing", "ws1", "u1", "u@x.com" )
         search.search_and_summarize_the_web.assert_called_once()
 
-    def test_else_unknown_command_searches( self ):
-        search = Mock(); search.get_results.return_value = "summary"
-        with patch.object( self.queue, "_get_routing_command", return_value=( "totally unknown command", "" ) ), \
-             patch.object( tfq, "LupinSearch", return_value=search ), \
-             patch.object( self.queue, "_notify" ), patch.object( self.queue, "push" ), \
-             patch( "builtins.print" ):
-            r = self.queue.push_job( "weird question", "ws1", "u1", "u@x.com" )
-        search.search_and_summarize_the_web.assert_called_once()
+    def test_unknown_command_hands_off_to_receptionist( self ):
+        # 720ce725 branch 1 — a GENUINE non-resolution: _get_routing_command returns
+        # ("unknown","") on any XML parse failure / gibberish. Behavior must be a
+        # receptionist hand-off, NOT a silent web-search of the user's question.
+        agent = Mock(); agent.id_hash = "ag"
+        with patch.object( self.queue, "_get_routing_command", return_value=( "unknown", "" ) ), \
+             patch.object( tfq, "ReceptionistAgent", return_value=agent ) as mk_rec, \
+             patch.object( self.queue, "_search_and_summarize_safely" ) as mk_search, \
+             patch.object( self.queue, "push" ) as mk_push, \
+             patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
+            r = self.queue.push_job( "what time is it", "ws1", "u1", "u@x.com" )
+        # observable behavior: receptionist constructed + job pushed, no web-search
+        mk_rec.assert_called_once()
+        mk_search.assert_not_called()
+        mk_push.assert_called_once()
+        self.assertEqual( r[ "job_id" ], "ag" )
+
+    def test_unwired_command_fails_loudly( self ):
+        # 720ce725 branch 2 — the router EMITTED a command string that resolves
+        # nowhere (not conversational, not receptionist/none, not in JOB_ARG_CONTRACTS).
+        # Behavior must be a LOUD error-return: no web-search, no receptionist
+        # smoothing the routing bug into a friendly non-answer, no job pushed.
+        with patch.object( self.queue, "_get_routing_command",
+                           return_value=( "agent router go to nonexistent", "" ) ), \
+             patch.object( tfq, "ReceptionistAgent" ) as mk_rec, \
+             patch.object( self.queue, "_search_and_summarize_safely" ) as mk_search, \
+             patch.object( self.queue, "push" ) as mk_push, \
+             patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
+            r = self.queue.push_job( "route me nowhere", "ws1", "u1", "u@x.com" )
+        mk_search.assert_not_called()        # NOT web-searched (the old defect)
+        mk_rec.assert_not_called()           # NOT smoothed over by the receptionist
+        mk_push.assert_not_called()          # no job created
+        self.assertIn( "unroutable command (no wiring)", r[ "message" ].lower() )
+        self.assertIsNone( r[ "job_id" ] )
 
     def test_user_mode_direct_routing( self ):
         # user in 'math' mode → bypass LLM, command synthesized
@@ -377,14 +470,15 @@ class TestPushJobRouting( _TFQBase ):
     def test_ding_for_new_job_emits_sound( self ):
         agent = Mock(); agent.id_hash = "ag"
         with patch.object( self.queue, "_get_routing_command", return_value=( "agent router go to math", "" ) ), \
-             patch.object( tfq, "MathAgent", return_value=agent ), \
+             _registry_stub( self, "agent router go to math", agent, "MathAgent",
+                             self.queue._crud_agents_enabled() ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
             self.queue.push_job( "add two numbers", "ws1", "u1", "u@x.com" )
         # math sets ding_for_new_job=True → websocket emits the sound update
         self.ws.emit.assert_any_call( 'notification_sound_update', { 'soundFile': '/static/gentle-gong.mp3' } )
 
     def test_agentic_command_via_llm_disambiguation( self ):
-        cmd = next( iter( tfq.AGENTIC_AGENTS ) )
+        cmd = next( iter( tfq.JOB_ARG_CONTRACTS ) )
         with patch.object( self.queue, "_get_routing_command", return_value=( cmd, "args" ) ), \
              patch.object( self.queue, "_confirm_agentic_routing", return_value=cmd ), \
              patch.object( self.queue, "_handle_agentic_command", return_value="submitted" ) as mk, \
@@ -394,7 +488,7 @@ class TestPushJobRouting( _TFQBase ):
         mk.assert_called_once()
 
     def test_agentic_command_user_cancels( self ):
-        cmd = next( iter( tfq.AGENTIC_AGENTS ) )
+        cmd = next( iter( tfq.JOB_ARG_CONTRACTS ) )
         with patch.object( self.queue, "_get_routing_command", return_value=( cmd, "args" ) ), \
              patch.object( self.queue, "_confirm_agentic_routing", return_value=None ), \
              patch( "builtins.print" ):
@@ -402,11 +496,11 @@ class TestPushJobRouting( _TFQBase ):
         self.assertIn( "cancelled", r[ "message" ].lower() )
 
     def test_agentic_command_explicit_mode_skips_disambiguation( self ):
-        # find an agentic mode whose mapped command is in AGENTIC_AGENTS
+        # find an agentic mode whose mapped command is in JOB_ARG_CONTRACTS
         mode = next( iter( AGENTIC_MODE_MAP ) )
         cmd  = AGENTIC_MODE_MAP[ mode ]
-        if cmd not in tfq.AGENTIC_AGENTS:
-            self.skipTest( "mapped command not in AGENTIC_AGENTS registry" )
+        if cmd not in tfq.JOB_ARG_CONTRACTS:
+            self.skipTest( "mapped command not in JOB_ARG_CONTRACTS registry" )
         self.queue.set_user_mode( "u1", mode )
         with patch.object( self.queue, "_handle_agentic_command", return_value="ok" ) as mk, \
              patch( "builtins.print" ):
@@ -480,13 +574,32 @@ class TestConfirmAgenticRouting( _TFQBase ):
     """Exercises _confirm_agentic_routing timeout/cancel/parse/reverse-lookup arms."""
 
     def _cmd( self ):
-        return next( iter( self.queue.PRODUCT_NAMES ) )
+        return next( iter( self.queue.CARD_LABELS ) )
 
-    def test_timeout_returns_command( self ):
+    def test_timeout_aborts_none( self ):
+        # Row cad45cf1: a silent timeout must NOT masquerade as a confirmation of
+        # the detected command — it aborts (returns None) instead of auto-running.
         cmd = self._cmd()
         resp = Mock(); resp.is_timeout = True; resp.is_error = False
         with patch.object( tfq, "notify_user_sync", return_value=resp ), patch( "builtins.print" ):
-            self.assertEqual( self.queue._confirm_agentic_routing( cmd, "", "u1", "u@x.com", "q" ), cmd )
+            self.assertIsNone( self.queue._confirm_agentic_routing( cmd, "", "u1", "u@x.com", "q" ) )
+
+    def test_error_aborts_none( self ):
+        # Row cad45cf1: a notification-system error is also not a confirmation → abort.
+        cmd = self._cmd()
+        resp = Mock(); resp.is_timeout = False; resp.is_error = True
+        with patch.object( tfq, "notify_user_sync", return_value=resp ), patch( "builtins.print" ):
+            self.assertIsNone( self.queue._confirm_agentic_routing( cmd, "", "u1", "u@x.com", "q" ) )
+
+    def test_timeout_seconds_read_from_config_not_literal( self ):
+        # Row cad45cf1: the wait window comes from the config key, not a hardcoded 30.
+        cmd = self._cmd()
+        self.queue.config_mgr = _cfg( { "agentic routing confirm timeout seconds": 47 } )
+        resp = Mock(); resp.is_timeout = False; resp.is_error = False; resp.response_value = "Cancel"
+        with patch.object( tfq, "notify_user_sync", return_value=resp ) as m_notify, patch( "builtins.print" ):
+            self.queue._confirm_agentic_routing( cmd, "", "u1", "u@x.com", "q" )
+        sent_request = m_notify.call_args[ 0 ][ 0 ]
+        self.assertEqual( sent_request.timeout_seconds, 47 )
 
     def test_cancel_returns_none( self ):
         cmd = self._cmd()
@@ -496,7 +609,7 @@ class TestConfirmAgenticRouting( _TFQBase ):
 
     def test_json_answer_reverse_lookup( self ):
         cmd  = self._cmd()
-        name = self.queue.PRODUCT_NAMES[ cmd ]
+        name = self.queue.CARD_LABELS[ cmd ]
         resp = Mock(); resp.is_timeout = False; resp.is_error = False
         resp.response_value = '{"answers": {"Command": "' + name + '"}}'
         with patch.object( tfq, "notify_user_sync", return_value=resp ), patch( "builtins.print" ):
@@ -516,7 +629,7 @@ class TestHandleAgenticCommand( _TFQBase ):
     """Exercises _handle_agentic_command disabled/cancel/job-None/success arms."""
 
     def _cmd( self ):
-        return next( iter( tfq.AGENTIC_AGENTS ) )
+        return next( iter( tfq.JOB_ARG_CONTRACTS ) )
 
     def test_disabled( self ):
         self.queue.config_mgr = _cfg( { "runtime argument expeditor enabled": False } )
@@ -524,7 +637,13 @@ class TestHandleAgenticCommand( _TFQBase ):
         self.assertIn( "disabled", msg.lower() )
 
     def _run_expeditor_failure( self, reason ):
-        exp = Mock(); exp.expedite.return_value = None; exp._last_expedite_reason = reason
+        # The failure reason now travels back on the context the QUEUE created and
+        # handed in (row 10c60712) — the stub writes where the real expeditor writes.
+        exp = Mock()
+        def _expedite( **kwargs ):
+            kwargs[ "context" ].reason = reason
+            return None
+        exp.expedite.side_effect = _expedite
         with patch.object( tfq, "RuntimeArgumentExpeditor", return_value=exp ), \
              patch.object( tfq, "emit_job_state_transition" ), \
              patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
@@ -580,7 +699,7 @@ class TestPushJobAgentic( _TFQBase ):
     """Exercises push_job_agentic success / unknown-command / construction-exception arms."""
 
     def _cmd( self ):
-        return next( iter( tfq.AGENTIC_AGENTS ) )
+        return next( iter( tfq.JOB_ARG_CONTRACTS ) )
 
     def test_success( self ):
         job = Mock(); job.JOB_TYPE = "deep_research"; job.id_hash = "x"
@@ -696,7 +815,8 @@ class TestBranchFills( _TFQBase ):
         self.snap_mgr.get_snapshots_by_question.return_value = []
         agent = Mock(); agent.id_hash = "ag"
         with patch.object( self.queue, "_get_routing_command", return_value=( "agent router go to math", "" ) ), \
-             patch.object( tfq, "MathAgent", return_value=agent ), \
+             _registry_stub( self, "agent router go to math", agent, "MathAgent",
+                             self.queue._crud_agents_enabled() ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), patch( "builtins.print" ):
             self.queue.push_job( "add numbers", "ws1", "u1", "u@x.com" )   # 418 else arm
 
@@ -706,7 +826,8 @@ class TestBranchFills( _TFQBase ):
         self.snap_mgr.get_snapshots_by_question.return_value = []
         agent = Mock(); agent.id_hash = "ag"
         with patch.object( self.queue, "_get_routing_command", return_value=( "agent router go to math", "" ) ), \
-             patch.object( tfq, "MathAgent", return_value=agent ), \
+             _registry_stub( self, "agent router go to math", agent, "MathAgent",
+                             self.queue._crud_agents_enabled() ), \
              patch.object( self.queue, "push" ), patch.object( self.queue, "_notify" ), \
              patch.object( self.queue, "_dump_code" ), patch( "builtins.print" ):
             self.queue.push_job( "add numbers", "ws1", "u1", "u@x.com" )   # 439-443 + 664 router debug
@@ -724,8 +845,8 @@ class TestBranchFills( _TFQBase ):
         self.queue.debug = True
         mode = next( iter( AGENTIC_MODE_MAP ) )
         cmd  = AGENTIC_MODE_MAP[ mode ]
-        if cmd not in tfq.AGENTIC_AGENTS:
-            self.skipTest( "mapped command not in AGENTIC_AGENTS registry" )
+        if cmd not in tfq.JOB_ARG_CONTRACTS:
+            self.skipTest( "mapped command not in JOB_ARG_CONTRACTS registry" )
         self.queue.set_user_mode( "u1", mode )
         self.snap_mgr.get_snapshots_by_question.return_value = []
         with patch.object( self.queue, "_handle_agentic_command", return_value="ok" ), patch( "builtins.print" ):
@@ -733,7 +854,7 @@ class TestBranchFills( _TFQBase ):
 
     def test_handle_agentic_command_debug( self ):
         self.queue.debug = True
-        cmd = next( iter( tfq.AGENTIC_AGENTS ) )
+        cmd = next( iter( tfq.JOB_ARG_CONTRACTS ) )
         exp = Mock(); exp.expedite.return_value = { "query": "q" }
         job = Mock(); job.JOB_TYPE = "deep_research"; job.id_hash = "x"
         with patch.object( tfq, "RuntimeArgumentExpeditor", return_value=exp ), \

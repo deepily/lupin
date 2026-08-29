@@ -4,7 +4,7 @@ E2E smoke test for Phase 7 proxy notification flow.
 
 Validates the proxy notification pipeline end-to-end:
 
-    1. Submit SWE Team job via /api/swe-team/submit with trust_mode=suggest, dry_run=true
+    1. Submit SWE Team job via /api/v2/submit with trust_mode=suggest, dry_run=true
     2. Poll done queue for job completion
     3. Verify proxy decisions were created: GET /api/proxy/pending/{email}
     4. Verify batch ID endpoint: GET /api/proxy/batch-id returns valid pr-{hex}-{N} format
@@ -212,13 +212,31 @@ class ProxyNotificationSmokeTest:
     def test_swe_submit_with_trust_mode( self ):
         """Test 3: Submit SWE Team dry-run job with trust_mode=suggest."""
         try:
-            resp = requests.post(
-                f"{BASE_URL}/api/swe-team/submit",
-                json={
-                    "task"       : "Add a health check endpoint for proxy notification smoke test",
+            task = "Add a health check endpoint for proxy notification smoke test"
+            # Lineage tag (row 7451bebe / bug 5ed4f187): a child pytest inside a monopolizing
+            # test-suite job must thread LUPIN_TEST_MONOPOLIZE_PARENT_ID or the consumer's Gate B
+            # defers it as a foreign writer and it starves 900s.
+            parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+
+            # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and
+            # answers 410 naming /api/v2/submit, which takes the routing command as a string
+            # and the agent's own arguments in `args`. `websocket_id` and `parent_id_hash` stay
+            # TOP-LEVEL: they are instructions about the request and the queue, not arguments to
+            # the agent, and `args` is checked against the command's own argument contract.
+            payload = {
+                "command"  : "agent router go to swe team",
+                "args"     : {
+                    "task"       : task,
                     "dry_run"    : True,
                     "trust_mode" : "suggest",
                 },
+                "question" : task,
+            }
+            if parent_id:
+                payload[ "parent_id_hash" ] = parent_id
+            resp = requests.post(
+                f"{BASE_URL}/api/v2/submit",
+                json=payload,
                 headers=self.headers,
                 timeout=REQUEST_TIMEOUT
             )

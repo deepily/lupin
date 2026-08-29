@@ -19,6 +19,7 @@
 #   LUPIN_MODEL_SERVER_URL=https://lupin-model-server-XXXX.run.app   # Cloud Run output
 #   CLOUD_SQL_CONNECTION_NAME=<your-gcp-project-id>:us-central1:lupin-pg16-test
 #   DB_PASSWORD=<from Secret Manager `lupin-db-password` at deploy>
+#   JWT_SECRET_KEY=<signing secret; unset silently uses the in-repo dev literal>
 #   LUPIN_IMAGE=<AR path>/lupin:1.1.0      (or local `lupin:1.1.0`)
 # Optional (defaults shown):
 #   DB_USER=lupin_app  DB_NAME=lupin_db_test
@@ -183,6 +184,17 @@ services:
       DB_NAME: ${DB_NAME:-lupin_db_test}
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD (from Secret Manager lupin-db-password)}
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing-GCS"
+      # JWT signing secret (row adce3547 / bug 8df98a96, 2026-08-18). REQUIRED, and
+      # `:?` rather than a default for a reason. HISTORY, because it explains the shape:
+      # jwt_service.py used to raise only when ENVIRONMENT=production — which no service
+      # sets — so unset did NOT fail, it silently signed with a fixed secret committed to
+      # that source file. Both cloud services had been missing this variable since they
+      # were written, so both were in exactly that state. The literal is now deleted and
+      # jwt_service.py raises on unset in every environment; this `:?` is the second line
+      # of defence rather than the only one. Value lives in the UNTRACKED host env file,
+      # never a tracked one.
+      # ⚠️ Env resolves at container CREATE: a change needs `up -d --force-recreate`.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in the host env file — see row adce3547}
       LUPIN_API_URL: http://localhost:7999
       # ── THE ENV SWITCH ─────────────────────────────────────────────────────
       # Cloud Run model-server URL. The provider resolvers read this env var
@@ -246,7 +258,28 @@ services:
   # local single-VM GPU-container variant.)
 
 volumes:
-  cloudsql-socket:                          # shared Auth-Proxy ↔ app unix-socket dir
+  # shared Auth-Proxy ↔ app unix-socket dir — tmpfs ON PURPOSE.
+  #
+  # A unix socket is a rendezvous point for two LIVE processes. It has no business
+  # outliving them, and when it does it is not a socket any more — it is a file that
+  # makes the next proxy fail to bind and the next app connect to nothing.
+  #
+  # Confirmed on lupin-host-test 2026-08-17: lupin-cloudsql-proxy crash-looping on
+  # `bind: address already in use`, while lupin-cloudsql-socket-init — the container
+  # written to clear exactly this — read `Exited (0) 13 days ago`. It is restart:"no",
+  # and Docker's restart policy IGNORES depends_on, so on every reboot/resume the two
+  # unless-stopped containers came back WITHOUT it. The app then hit a socket with no
+  # listener: `Connection refused`, `Application startup failed. Exiting.` (bug
+  # cd101a7e, and the recurrence of 300bc7ca that the init container did not stop.)
+  #
+  # tmpfs makes the directory die with the host, so there is nothing left to go stale.
+  # The init container stays as belt-and-braces for the `compose up` path; this is the
+  # braces, and it is the half that works on the path that actually broke.
+  cloudsql-socket:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
   claude-creds:                             # CC OAuth login store for lupin-rest
 
 networks:

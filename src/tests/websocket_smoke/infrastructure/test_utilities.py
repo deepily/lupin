@@ -356,9 +356,15 @@ class WebSocketTestUtilities:
         """
         # Default event subscriptions for testing
         if subscribed_events is None:
+            # job_state_transition is THE queue transition event. The four
+            # queue_*_update names that used to sit here were retired in July 2025
+            # and appear ZERO times in product code — subscribing to them could
+            # only ever produce silence. Nothing in this suite asserted on them,
+            # so this is a correctness fix to the subscription, not a gate that
+            # was failing to fail. Row e3417974.
             subscribed_events = [
                 "auth_success", "auth_error", "connect", "sys_ping",
-                "queue_todo_update", "queue_running_update", "queue_done_update", "queue_dead_update"
+                "job_state_transition"
             ]
         
         auth_message = {

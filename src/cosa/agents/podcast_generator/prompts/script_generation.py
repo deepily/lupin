@@ -8,10 +8,17 @@ two hosts having complementary roles.
 """
 
 import json
+import logging
 import re
 from typing import Optional
 
 from ..config import HostPersonality, LANGUAGE_NAMES
+from cosa.agents.io_models.utils.json_object_recovery import (
+    extract_json_object,
+    recover_json_object,
+)
+
+logger = logging.getLogger( __name__ )
 
 
 # =============================================================================
@@ -117,18 +124,19 @@ Your task is to transform research content into natural, engaging conversation.
 SCRIPT FORMAT:
 Use this minimalist markdown format for each dialogue segment:
 
-**[Host Name - Role]**: Dialogue text with *[prosody annotations]* as needed.
+**[Host Name - Role]**: Dialogue text with pacing markers like <break time="1.0s"/> as needed.
 
-PROSODY ANNOTATIONS:
-Embed these markers in the text where appropriate:
-- *[pause]* - Brief pause for effect
-- *[long_pause]* - Longer pause (2-3 seconds)
-- *[laughs]* or *[chuckles]* - Light laughter
-- *[whispers]* - Lower volume, conspiratorial tone
-- *[excited]* - Higher energy, faster pace
-- *[thoughtful]* - Slower, contemplative
-- *[emphasis]* - Stress on next few words
-- *[questioning]* - Upward inflection
+PACING & EMPHASIS MARKERS:
+Write these DIRECTLY into the dialogue text — they are the ONLY markers our
+voice engine renders. Use them sparingly and only where they add impact:
+- <break time="1.5s"/> - An explicit silent pause. Maximum 3.0 seconds. Use
+  before a revelation or at a topic shift. Write it verbatim, in seconds.
+- Ellipsis ( ... ) - A short, hesitant pause mid-thought.
+- Dash ( - ) - A brief pause or a self-interruption.
+- CAPITALIZATION of a word - Vocal emphasis on that word.
+
+DO NOT use bracketed emotion tags such as [excited], [laughs], *[pause]*, or
+*[whispers]* — our voice engine ignores them and they will be stripped.
 
 DIALOGUE GUIDELINES:
 1. Make conversation feel natural, not scripted
@@ -148,7 +156,7 @@ Return a JSON object with this structure:
         {
             "speaker": "Host Name",
             "role": "curious|expert",
-            "text": "Dialogue with *[prosody]* markers",
+            "text": "Dialogue with <break time=\"1.0s\"/> pacing markers",
             "topic_reference": "which topic this covers"
         }
     ],
@@ -165,7 +173,8 @@ def get_content_analysis_prompt(
     research_content: str,
     max_topics: int = 5,
     audience: Optional[ str ] = None,
-    audience_context: Optional[ str ] = None
+    audience_context: Optional[ str ] = None,
+    max_source_chars: Optional[ int ] = None,
 ) -> str:
     """
     Generate prompt for content analysis phase.
@@ -187,8 +196,10 @@ def get_content_analysis_prompt(
     Returns:
         str: Complete prompt for content analysis
     """
-    # Truncate if very long to stay within context limits
-    content_preview = research_content[ :50000 ] if len( research_content ) > 50000 else research_content
+    # Truncate research to the configured ceiling (was a hardcoded 50000). The
+    # ceiling is passed in from config (PodcastConfig.max_source_chars, loaded
+    # from the shared `agent source content max chars` INI key); None = no clip.
+    content_preview = research_content[ :max_source_chars ] if ( max_source_chars is not None and len( research_content ) > max_source_chars ) else research_content
 
     audience_instruction = ""
     if audience:
@@ -221,6 +232,7 @@ def get_script_generation_prompt(
     target_language         : str = "en",
     audience                : Optional[ str ] = None,
     audience_context        : Optional[ str ] = None,
+    max_source_chars        : Optional[ int ] = None,
 ) -> str:
     """
     Generate prompt for script generation phase.
@@ -251,8 +263,10 @@ def get_script_generation_prompt(
     Returns:
         str: Complete prompt for script generation
     """
-    # Truncate research for context window management
-    research_preview = research_content[ :30000 ] if len( research_content ) > 30000 else research_content
+    # Truncate research to the configured ceiling (was a hardcoded 30000). The
+    # ceiling is passed in from config (PodcastConfig.max_source_chars, loaded
+    # from the shared `agent source content max chars` INI key); None = no clip.
+    research_preview = research_content[ :max_source_chars ] if ( max_source_chars is not None and len( research_content ) > max_source_chars ) else research_content
 
     # Build host descriptions
     host_a_desc = host_a_personality.to_prompt_description()
@@ -269,7 +283,7 @@ def get_script_generation_prompt(
 IMPORTANT - LANGUAGE REQUIREMENT:
 Generate this podcast script in {language_name}.
 - Write natural, conversational dialogue as native speakers would speak
-- Preserve all prosody markers (*[pause]*, *[excited]*, etc.) UNCHANGED in English
+- Preserve all pacing markers (<break time="x.xs"/>, ellipsis, dashes, CAPS) UNCHANGED
 - Keep host names (Maria, Mr. Radio) UNCHANGED
 - Adapt idioms, examples, and cultural references to be appropriate for {language_name} speakers
 - Do NOT translate literally - create authentic, natural-sounding dialogue
@@ -356,7 +370,7 @@ USER FEEDBACK:
 INSTRUCTIONS:
 1. Address all points in the feedback
 2. Maintain the same overall structure unless changes are requested
-3. Keep prosody annotations where appropriate
+3. Keep pacing markers (<break time="x.xs"/>, ellipsis, dashes, CAPS) where appropriate
 4. Ensure the revised script still flows naturally
 
 Return the revised script in the same JSON format."""
@@ -371,75 +385,13 @@ Return the revised script in the same JSON format."""
 # These helpers recover the JSON object best-effort. They are also imported by
 # api_client.py (single source of truth — see CLAUDE.md one-name rule).
 
-def extract_json_object( text: str ) -> Optional[ str ]:
-    """
-    Extract the last balanced JSON object from text by matching braces.
-
-    Recovers a JSON object embedded in surrounding prose (e.g. "Here's the
-    script: { ... }"). Ports the BFE/TFE forensic-parser approach.
-
-    Requires:
-        - text is a string
-
-    Ensures:
-        - returns the substring of the last balanced {...} object, or None
-    """
-    close_idx = text.rfind( "}" )
-    if close_idx == -1:
-        return None
-
-    depth = 0
-    for i in range( close_idx, -1, -1 ):
-        if text[ i ] == "}":
-            depth += 1
-        elif text[ i ] == "{":
-            depth -= 1
-            if depth == 0:
-                return text[ i : close_idx + 1 ]
-
-    return None
-
-
-def lenient_json_loads( response_content: str ) -> Optional[ dict ]:
-    """
-    Best-effort recovery of a JSON object from a (possibly chatty) completion.
-
-    Strategy (D6-LENIENT):
-        1. Strip leading/trailing markdown code fences.
-        2. Try a direct `json.loads`.
-        3. On failure, extract the last balanced {...} object from the prose
-           and retry.
-
-    Requires:
-        - response_content is a string
-
-    Ensures:
-        - returns the parsed dict, or None if no JSON object can be recovered
-    """
-    content = response_content.strip()
-
-    # Strip markdown code fences
-    if content.startswith( "```json" ):
-        content = content[ 7: ]
-    if content.startswith( "```" ):
-        content = content[ 3: ]
-    if content.endswith( "```" ):
-        content = content[ :-3 ]
-    content = content.strip()
-
-    try:
-        return json.loads( content )
-    except json.JSONDecodeError:
-        pass
-
-    extracted = extract_json_object( content )
-    if extracted is None:
-        return None
-
-    try:
-        return json.loads( extracted )
-    except json.JSONDecodeError:
-        return None
+# `extract_json_object` and `recover_json_object` now live in the shared helper
+# `cosa.agents.io_models.utils.json_object_recovery` (de-dup 52cde456: the podcast
+# and presentation copies were byte-identical). The fence-preference fix and the
+# loud-None logging land there, for both agents at once. The historical local name
+# `lenient_json_loads` is kept as an alias so this module's importers
+# (api_client.py, tests) are unchanged.
+lenient_json_loads = recover_json_object
 
 
 # =============================================================================
@@ -491,21 +443,28 @@ def parse_script_response( response_content: str ) -> dict:
     Ensures:
         - Returns dictionary with title, segments, key_topics
         - Recovers JSON embedded in surrounding prose (bounded-CC tolerant)
-        - Returns default structure if no JSON object can be recovered
+        - RAISES ValueError if no JSON object can be recovered (P0 4317efd1) —
+          the caller (orchestrator initial-generation) dead-letters the job with
+          an honest failure rather than presenting an empty script for approval.
 
-    Floor invariant: a recovered object with zero segments still yields an
-    empty-segment script; the downstream audio phase enforces the
-    "no segments → real failure" floor (orchestrator Phase 5 guards), so a
-    cosmetic formatting drift never silently produces a broken podcast.
+    Fail-loud posture (P0 4317efd1): a previous version returned a silent
+    "Untitled Podcast" / 0-segment fallback here, which flowed all the way to the
+    human approval gate looking like a normal (if empty) result. That is why the
+    zero-segment failure hid since March. Unrecoverable output now raises; the
+    orchestrator additionally floors a genuinely-empty (parsed-but-0-segment)
+    script BEFORE the approval gate.
 
     Args:
         response_content: Raw response from Claude
 
     Returns:
         dict: Parsed script data
+
+    Raises:
+        ValueError: if the response contains no recoverable JSON object.
     """
-    parsed = lenient_json_loads( response_content )
-    if parsed is not None:
+    parsed = recover_json_object( response_content )
+    if isinstance( parsed, dict ):
         # Validate required fields
         if "segments" not in parsed:
             parsed[ "segments" ] = []
@@ -513,13 +472,16 @@ def parse_script_response( response_content: str ) -> dict:
             parsed[ "title" ] = "Untitled Podcast"
         return parsed
 
-    # Return default structure if no JSON object can be recovered
-    return {
-        "title"                      : "Untitled Podcast",
-        "segments"                   : [],
-        "key_topics"                 : [],
-        "estimated_duration_minutes" : 0,
-    }
+    # Unrecoverable (None, or a non-object JSON value) → FAIL LOUD (P0 4317efd1).
+    # recover_json_object has already logged the full raw body at ERROR. Raising
+    # here — instead of returning a silent empty fallback — makes the
+    # initial-generation call site dead-letter the job with an honest
+    # "script generation failed", rather than handing the user a 0-segment
+    # "Untitled Podcast" to approve.
+    raise ValueError(
+        "Podcast script response contained no recoverable JSON object — the model "
+        "output could not be parsed into a script."
+    )
 
 
 def extract_prosody_from_text( text: str ) -> tuple[ str, list[ str ] ]:
@@ -603,7 +565,7 @@ def quick_smoke_test():
         )
         assert "Mexican Spanish" in spanish_prompt
         assert "LANGUAGE REQUIREMENT" in spanish_prompt
-        assert "Preserve all prosody markers" in spanish_prompt
+        assert "Preserve all pacing markers" in spanish_prompt
         assert "Keep host names" in spanish_prompt
         print( "✓ Spanish script prompt includes language instruction" )
 

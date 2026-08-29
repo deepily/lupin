@@ -11,6 +11,7 @@ The algorithm ensures:
 """
 
 import re
+import uuid
 from typing import Dict, Optional
 
 
@@ -67,6 +68,52 @@ def email_to_system_id( email: str ) -> str:
     suffix = hex( abs( hash_val ) )[-4:]
     
     return f"{base_name}_{suffix}"
+
+
+# The namespace mock user ids are minted under. A fixed uuid5 namespace is what makes
+# the mapping deterministic — the same email yields the same id on every request, in
+# every process, across restarts — without any table to keep. Changing this constant
+# renames every mock user, so it is a constant on purpose and not a config key.
+MOCK_USER_ID_NAMESPACE = uuid.UUID( "6f2b9e0a-0b1e-5c7a-9a3d-4f1c8e2d7b60" )
+
+
+def email_to_user_uuid( email: str ) -> str:
+    """
+    Convert an email to the UUID-shaped user id mock auth hands out.
+
+    WHY THIS EXISTS (row befeba88): under AUTH_MODE=mock the user id was the system
+    id — "interactive_job_tester_8e32". The ordinary API path scopes a job id as
+    "{sha256}::{user_id}", and AsyncNotificationRequest's pattern requires a UUID after
+    the "::", so every queue notification raised a validation error that was caught,
+    printed and dropped: 530 of them in one baseline log, and a mock-auth environment
+    that looked like it had working notifications and did not.
+
+    The fix chosen over widening the validator (Mr Radio's ruling, 2026-08-21): mock
+    and JWT should produce the SAME id shape. Under JWT the user id is the database
+    row's UUID; under mock it is this — minted from the email, so it needs no database
+    and is stable across requests, processes and restarts.
+
+    Requires:
+        - email is a non-empty string containing '@'
+
+    Ensures:
+        - returns the canonical string form of a UUID (36 chars, 8-4-4-4-12)
+        - the same email always returns the same id
+        - different emails return different ids
+
+    Raises:
+        - ValueError if email is empty or contains no '@'
+
+    Args:
+        email: the mock user's email (e.g. "interactive_job_tester_8e32@generated.local")
+
+    Returns:
+        str: a UUID string (e.g. "50c73ba7-36dd-4eaf-a7e2-63256252c84f")
+    """
+    if not email or '@' not in email:
+        raise ValueError( f"Invalid email address: {email}" )
+
+    return str( uuid.uuid5( MOCK_USER_ID_NAMESPACE, email.strip().lower() ) )
 
 
 def system_id_to_display_name( system_id: str ) -> str:

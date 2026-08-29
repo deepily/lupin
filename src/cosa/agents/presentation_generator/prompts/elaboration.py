@@ -107,6 +107,7 @@ def get_elaboration_prompt(
     audience: Optional[ str ] = None,
     audience_context: Optional[ str ] = None,
     human_feedback: Optional[ str ] = None,
+    max_source_chars: Optional[ int ] = None,
 ) -> str:
     """
     Build user message for slide elaboration.
@@ -165,12 +166,14 @@ def get_elaboration_prompt(
     if audience_context:
         audience_block += f"\n\nAdditional audience context: {audience_context}"
 
-    # Truncate source content if very long
+    # Truncate source content if it exceeds the configured ceiling. The ceiling
+    # is passed in from config (see PresentationConfig.max_source_chars, loaded
+    # from the shared `agent source content max chars` INI key); None = no clip.
     truncated = source_content
     truncation_note = ""
-    if len( source_content ) > 30000:
-        truncated = source_content[ :30000 ]
-        truncation_note = "\n\n[NOTE: Document was truncated to 30,000 characters. Focus on the provided content.]"
+    if max_source_chars is not None and len( source_content ) > max_source_chars:
+        truncated = source_content[ :max_source_chars ]
+        truncation_note = f"\n\n[NOTE: Document was truncated to {max_source_chars:,} characters. Focus on the provided content.]"
 
     # Revision feedback
     feedback_block = ""
@@ -251,10 +254,23 @@ def parse_elaboration_response( response_content: str ) -> List[ dict ]:
         logger.debug( f"Raw content (first 500 chars): {response_content[ :500 ]}" )
         raise ValueError( "Elaboration response did not contain a recoverable JSON object" )
 
-    # Extract slides list (STRICT: missing / empty / non-list is a real defect)
-    slides = parsed.get( "slides", [] ) if isinstance( parsed, dict ) else []
-    if not isinstance( slides, list ) or not slides:
-        logger.error( f"Elaboration 'slides' missing/empty/not-a-list: {type( slides )}" )
+    # Extract slides list (STRICT: missing / empty / non-list is a real defect).
+    # Each branch names the predicate it actually failed. The prior single
+    # "missing/empty/not-a-list: <type>" message printed "<class 'list'>" for the
+    # empty-list case — a self-contradiction ("not-a-list: list") that hid which
+    # condition really fired (bug 957cb7b8).
+    if not isinstance( parsed, dict ):
+        logger.error( f"Elaboration parsed content is not a dict: {type( parsed ).__name__}" )
+        raise ValueError( "Elaboration returned no usable slides" )
+    if "slides" not in parsed:
+        logger.error( "Elaboration response missing 'slides' key" )
+        raise ValueError( "Elaboration returned no usable slides" )
+    slides = parsed[ "slides" ]
+    if not isinstance( slides, list ):
+        logger.error( f"Elaboration 'slides' is not a list: {type( slides ).__name__}" )
+        raise ValueError( "Elaboration returned no usable slides" )
+    if not slides:
+        logger.error( "Elaboration 'slides' is an empty list" )
         raise ValueError( "Elaboration returned no usable slides" )
 
     # Validate each slide
@@ -268,22 +284,31 @@ def parse_elaboration_response( response_content: str ) -> List[ dict ]:
         if not isinstance( raw_notes, dict ):
             raw_notes = {}
 
-        timing = raw_notes.get( "timing_seconds", DEFAULT_TIMING_PER_SLIDE )
+        # Capture the model's PRE-CLAMP timing, then clamp for layout (bug
+        # d5ecb753). Keeping the raw value lets the clamp be SEEN downstream
+        # instead of a clamped value being silently reported as the model's
+        # estimate. raw stays None when the model omitted timing or emitted a
+        # non-integer — there is no model value to keep in either case, and both
+        # still fall back to DEFAULT_TIMING_PER_SLIDE exactly as before.
         try:
-            timing = int( timing )
-            timing = max( MIN_TIMING_PER_SLIDE, min( MAX_TIMING_PER_SLIDE, timing ) )
+            timing_seconds_raw = int( raw_notes.get( "timing_seconds" ) )
         except ( ValueError, TypeError ):
+            timing_seconds_raw = None
+        if timing_seconds_raw is None:
             timing = DEFAULT_TIMING_PER_SLIDE
+        else:
+            timing = max( MIN_TIMING_PER_SLIDE, min( MAX_TIMING_PER_SLIDE, timing_seconds_raw ) )
 
         talking_points = raw_notes.get( "talking_points", [] )
         if not isinstance( talking_points, list ):
             talking_points = []
 
         presenter_notes = {
-            "transition"     : raw_notes.get( "transition", None ),
-            "talking_points" : talking_points,
-            "timing_seconds" : timing,
-            "emphasis"       : raw_notes.get( "emphasis", None ),
+            "transition"         : raw_notes.get( "transition", None ),
+            "talking_points"     : talking_points,
+            "timing_seconds"     : timing,
+            "timing_seconds_raw" : timing_seconds_raw,
+            "emphasis"           : raw_notes.get( "emphasis", None ),
         }
 
         # Validate content_bullets
@@ -317,7 +342,82 @@ def parse_elaboration_response( response_content: str ) -> List[ dict ]:
         logger.error( "Elaboration 'slides' contained no usable dict entries" )
         raise ValueError( "Elaboration returned no usable slides" )
 
+    # The clamp announces itself (bug d5ecb753): if it altered any slide's model
+    # timing, say how many and by how much — so a clamped deck-duration is never
+    # mistaken for the model's own estimate. The persisted raw values (above)
+    # let the flat-vs-varied question answer itself on the next real run.
+    clamp_summary = summarize_timing_clamps( validated )
+    if clamp_summary[ "clamped_count" ] > 0:
+        logger.warning(
+            "Timing clamp altered %d of %d slides: model raw total %ds vs clamped %ds "
+            "(max overshoot %ds/slide, ceiling %ds). Both are model estimates and unreliable "
+            "-- the model overshoots its own 60-90s/slide guidance; measure the script word "
+            "count for a real duration.",
+            clamp_summary[ "clamped_count" ], clamp_summary[ "total_slides" ],
+            clamp_summary[ "raw_total" ], clamp_summary[ "clamped_total" ],
+            clamp_summary[ "max_overshoot" ], MAX_TIMING_PER_SLIDE
+        )
+
     return validated
+
+
+def summarize_timing_clamps( slides: List[ dict ] ) -> dict:
+    """
+    Report how the timing clamp altered the model's raw per-slide timing across
+    a parsed deck (bug d5ecb753).
+
+    The clamp at MAX_TIMING_PER_SLIDE flattens every over-budget slide to a flat
+    ceiling value, which is why an over-emitting model reads as a "pinned
+    constant" and why deck-duration reports built from the clamped field are a
+    fiction. This summary makes the clamp visible: how many slides it hit, and
+    by how much the model overshot.
+
+    Requires:
+        - slides is a list of slide dicts as returned by
+          parse_elaboration_response (each presenter_notes carries both
+          timing_seconds and timing_seconds_raw)
+
+    Ensures:
+        - Returns { total_slides, clamped_count, raw_total, clamped_total,
+                    max_overshoot, clamped }, where `clamped` lists
+                    { number, raw, clamped } for each slide the clamp altered
+        - Only slides carrying a raw model value (timing_seconds_raw is not None)
+          contribute to raw_total / clamped_total / clamped — a slide the model
+          left blank had no value for the clamp to alter, so it is never counted
+        - raw_total and clamped_total are summed over the SAME slides, so their
+          difference is exactly what the clamp removed
+        - max_overshoot is the largest single-slide (raw - clamped), or 0 when
+          nothing was clamped
+        - Never raises
+
+    Args:
+        slides: parsed slide dicts
+
+    Returns:
+        dict: the clamp summary
+    """
+    clamped       = []
+    raw_total     = 0
+    clamped_total = 0
+    for slide in slides:
+        notes  = slide.get( "presenter_notes", {} ) if isinstance( slide, dict ) else {}
+        raw    = notes.get( "timing_seconds_raw" )
+        capped = notes.get( "timing_seconds" )
+        if raw is None:
+            continue
+        raw_total     += raw
+        clamped_total += capped
+        if raw != capped:
+            clamped.append( { "number": slide.get( "number" ), "raw": raw, "clamped": capped } )
+    max_overshoot = max( ( c[ "raw" ] - c[ "clamped" ] for c in clamped ), default=0 )
+    return {
+        "total_slides"  : len( slides ),
+        "clamped_count" : len( clamped ),
+        "raw_total"     : raw_total,
+        "clamped_total" : clamped_total,
+        "max_overshoot" : max_overshoot,
+        "clamped"       : clamped,
+    }
 
 
 # =============================================================================

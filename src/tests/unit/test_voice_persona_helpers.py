@@ -455,6 +455,14 @@ class TestFindActiveSessions:
             assert results == []
 
     def test_skips_stale_mtime( self ):
+        """
+        AMENDED for bug 6afc8b3e: the TTL filters a stale bridge only when liveness
+        CANNOT be confirmed. This used to write the bridge under os.getpid() — a
+        process that is alive by definition — and assert it was filtered, which is
+        exactly the defect Rio measured: two running seats invisible for 14h+.
+        Container context makes the TTL the deciding signal again, which is the
+        behaviour this test was actually protecting.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
             path = _write_bridge( sessions_dir, os.getpid(),
@@ -462,10 +470,28 @@ class TestFindActiveSessions:
             old = time.time() - 100_000   # well past the 10s threshold below
             os.utime( path, ( old, old ) )
 
-            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=False ):
                 results = find_active_sessions( stale_threshold_seconds=10, require_persona=False )
 
             assert results == []
+
+    def test_stale_mtime_is_KEPT_when_the_process_is_alive( self ):
+        """The other half of 6afc8b3e: on the host, a live PID outranks the TTL."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            path = _write_bridge( sessions_dir, os.getpid(),
+                                  _bridge_without_persona( "alive001-aaaa-bbbb-cccc-dddddddddddd" ) )
+            old = time.time() - 100_000
+            os.utime( path, ( old, old ) )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=True ):
+                results = find_active_sessions( stale_threshold_seconds=10, require_persona=False )
+
+            assert len( results ) == 1, "a running process must not vanish because its bridge aged"
 
     def test_skips_dead_pid( self ):
         with tempfile.TemporaryDirectory() as tmp:
@@ -953,9 +979,16 @@ class TestAllocatePersonaExtraN:
 
 class TestFindActiveVoicePersonaSessionsTTL:
     """
-    The mtime TTL guard fires regardless of host-vs-container context. Bridges
-    whose file mtime is older than stale_threshold_seconds are treated as free,
-    even when the dead-PID filter is bypassed inside a container.
+    The mtime TTL treats aged-out bridges as free — but ONLY where liveness cannot
+    be confirmed.
+
+    ⚠️ AMENDED by bug 6afc8b3e. This class used to open "the mtime TTL guard fires
+    regardless of host-vs-container context", and its stale-bridge cases wrote the
+    bridge under os.getpid() — a live process — then asserted it was filtered. That
+    is the defect, not the contract: Rio measured two RUNNING seats absent from every
+    roster for 14h+ because their bridges had not been rewritten. PID liveness now
+    outranks the TTL, so the stale-filtering cases run in CONTAINER context, where
+    host PIDs are invisible and the TTL is genuinely the only signal left.
 
     See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
     """
@@ -977,9 +1010,31 @@ class TestFindActiveVoicePersonaSessionsTTL:
             # Push mtime back 50000 seconds (~14h, > 12h default)
             old_time = time.time() - 50000
             os.utime( path, ( old_time, old_time ) )
-            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+            # Container context: host PIDs invisible, so the TTL is the only signal.
+            # On the host this same bridge is now KEPT — see the sibling test below.
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=False ):
                 results = find_active_voice_persona_sessions()
-            assert results == [], "Stale-mtime bridge must be filtered"
+            assert results == [], "Stale-mtime bridge must be filtered when liveness is unknowable"
+
+    def test_stale_mtime_named_seat_is_KEPT_on_the_host( self ):
+        """
+        Bug 6afc8b3e: the mtime filter ran BEFORE the persona branch, so a NAMED seat
+        with a stale bridge disappeared identically to a nameless one. Its persona slot
+        was then reclaimable while the session still held the voice.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            path = _write_bridge( sessions_dir, os.getpid(),
+                                  _bridge_with_persona( "stale333-aaaa-bbbb-cccc-dddddddddddd", "Rio" ) )
+            old_time = time.time() - 50000
+            os.utime( path, ( old_time, old_time ) )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=True ):
+                results = find_active_voice_persona_sessions()
+            assert len( results ) == 1, "a live named seat must keep its persona slot"
 
     def test_caller_can_widen_ttl( self ):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1000,7 +1055,11 @@ class TestFindActiveVoicePersonaSessionsTTL:
             # Push 60s into the past (older than tight 30s TTL)
             old_time = time.time() - 60
             os.utime( path, ( old_time, old_time ) )
-            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+            # Container context — a tightened TTL still bites where liveness is
+            # unknowable. On the host a live PID outranks any TTL, however tight.
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=False ):
                 results = find_active_voice_persona_sessions( stale_threshold_seconds=30 )
             assert results == [], "Tight TTL must filter the 60s-old bridge"
 

@@ -627,7 +627,8 @@ class VoiceGateNoDefaultError( RuntimeError ):
 _DEFAULT_SOURCE_NON_INTERACTIVE = "non_interactive"   # no tty, queue/Docker
 _DEFAULT_SOURCE_CLI_BLANK       = "cli_blank_entry"   # prompt shown, user hit enter
 _DEFAULT_SOURCE_CLI_BAD_INDEX   = "cli_bad_index"     # number outside the option range
-_DEFAULT_SOURCE_DISPATCH_FAILED = "dispatch_failed"   # voice call raised (503, timeout…)
+_DEFAULT_SOURCE_DISPATCH_FAILED = "dispatch_failed"   # voice call could not reach a human (503/transport/pre-MCP)
+_DEFAULT_SOURCE_ANSWER_TIMEOUT  = "answer_timeout"    # ask REACHED a human who did not answer in time (row 38a0b373)
 _DEFAULT_SOURCE_CLI_UNPARSEABLE = "cli_unparseable"   # entry could not be parsed at all
 _DEFAULT_SOURCE_NO_SELECTION    = "no_selection"      # dispatch returned, carried no choice
 
@@ -755,7 +756,8 @@ async def present_choices(
     title: Optional[ str ] = None,
     abstract: Optional[ str ] = None,
     job_id: Optional[ str ] = None,
-    response_default: Optional[ dict ] = None
+    response_default: Optional[ dict ] = None,
+    priority: Optional[ str ] = None
 ) -> dict:
     """
     Present multiple-choice questions (voice-first).
@@ -862,15 +864,33 @@ async def present_choices(
 
         return { "answers": answers, "default_used": False, "answered": True }
 
+    # Local import (matches the dispatcher's idiom) to avoid any load-time cycle
+    # through the agents package. Row 38a0b373.
+    from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError
+
     try:
+        # Pass priority ONLY when the caller set one, so agent cosa_interfaces
+        # that do not accept a priority kwarg are unaffected (default-None path
+        # calls them exactly as before). A blocking gate passes priority="high".
+        _priority_kwargs = { "priority": priority } if priority is not None else {}
         result = await _cosa_interface.present_choices(
-            questions=questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id
+            questions=questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id,
+            **_priority_kwargs
         )
+    except VoiceGateTimeoutError as e:
+        # The dispatcher raises this deliberately so a caller can stall and
+        # checkpoint (swallowing it into options[0] defeated that — row be8830a3).
+        # Row 38a0b373: split the fail-open source by whether the ask actually
+        # REACHED a human. delivered=True → a real silence-timeout (answer_timeout);
+        # delivered=False → the ask never got through (dispatch_failed). A log
+        # reader must be able to tell those apart — they fail open for opposite
+        # reasons.
+        source = _DEFAULT_SOURCE_ANSWER_TIMEOUT if getattr( e, "delivered", False ) else _DEFAULT_SOURCE_DISPATCH_FAILED
+        logger.warning( f"Voice present_choices timed out (delivered={getattr( e, 'delivered', False )}): {e}" )
+        return _resolve_default( questions, response_default, source )
     except Exception as e:
-        # The dispatcher raises deliberately here (VoiceGateTimeoutError on a
-        # 503 "user is offline", transport errors, pre-MCP validation failures)
-        # precisely so a caller can stall and checkpoint. Swallowing it into
-        # options[0] defeated that one layer up — row be8830a3.
+        # Any OTHER failure (transport, pre-MCP validation) — the ask did not
+        # reach a human, so the honest label is dispatch_failed.
         logger.warning( f"Voice present_choices failed: {e}" )
         return _resolve_default( questions, response_default, _DEFAULT_SOURCE_DISPATCH_FAILED )
 

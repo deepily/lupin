@@ -19,7 +19,24 @@ from typing import Optional
 # Agent Registry
 # ============================================================================
 
-AGENTIC_AGENTS = {
+# The two per-user directories every file-typed argument is searched in. They are
+# shared because they describe the USER's document library, not any one agent's taste:
+# both the podcast and the presentation generator scan both today. An agent that needs
+# somewhere else declares its own tuple; this is a default, not a rule.
+#
+# `{user_email}` is filled in at resolve time. Extensions are per-root because the
+# presentations directory holds re-renderable YAML intermediates and nothing else — a
+# .md in there would be a rendered output, not a source.
+DEFAULT_FILE_SEARCH_ROOTS = (
+    { "path": "io/deep-research/{user_email}" },
+    { "path": "io/presentations/{user_email}", "extensions": ( ".yaml", ".yml" ) },
+)
+
+# What a file-typed argument is searched for when its root does not narrow it.
+DEFAULT_FILE_EXTENSIONS = ( ".md", ".yaml", ".yml", ".txt" )
+
+
+JOB_ARG_CONTRACTS = {
     "agent router go to deep research" : {
         "job_prefix"         : "dr",
         "cli_module"         : "cosa.agents.deep_research.cli",
@@ -56,7 +73,11 @@ AGENTIC_AGENTS = {
         "arg_mapping"        : {
             "research"         : "research",
             "document_path"    : "research",
-            "topic"            : "research",
+            # NO `"topic" : "research"` — row 9d89afe2. `research` is a FILE PATH, and all
+            # 1200 trained rows for this command emit topic="<subject phrase>", so the alias
+            # delivered a spoken subject as a filename (FileNotFoundError on a file nobody
+            # named). Unmapped, `topic` keeps its own name, `research` stays MISSING, and the
+            # fuzzy_file_match handler below fires and asks which document was meant.
             "audience"         : "audience",
             "audience_context" : "audience_context",
         },
@@ -73,6 +94,19 @@ AGENTIC_AGENTS = {
         },
         "special_handlers"   : {
             "research" : "fuzzy_file_match",
+        },
+        # WHAT KIND OF THING THIS ARGUMENT IS, said once (row a1420538). The expeditor
+        # used to learn "research is a file" from the handler tag above and then work
+        # out WHERE to look by building a config key from the display name, falling
+        # back to the podcast's key when that key was absent — so every other agent's
+        # file argument was searched using the podcast's configuration. The roots are
+        # declared here instead, beside the argument they belong to.
+        "file_args"          : {
+            "research" : {
+                "kind"             : "file",
+                "search_roots"     : DEFAULT_FILE_SEARCH_ROOTS,
+                "search_paths_key" : "podcast generator source search paths",
+            },
         },
     },
     "agent router go to research to podcast" : {
@@ -140,6 +174,9 @@ AGENTIC_AGENTS = {
             "target_duration_minutes" : "target_duration_minutes",
             "duration"                : "target_duration_minutes",
             "minutes"                 : "target_duration_minutes",
+            "target_slide_count"      : "target_slide_count",
+            "slide_count"             : "target_slide_count",
+            "slides"                  : "target_slide_count",
             "audience"                : "audience",
             "audience_context"        : "audience_context",
             "theme"                   : "theme",
@@ -149,18 +186,27 @@ AGENTIC_AGENTS = {
         "fallback_questions" : {
             "source"                  : "Which document should I convert to a presentation, or which YAML to re-render? Describe it or say the filename.",
             "target_duration_minutes" : "How long should the presentation be in minutes? Say a number, or 'default' for 15 minutes.",
+            "target_slide_count"      : "How many slides should the presentation have? Say a number, or 'default' to derive it from the duration.",
             "audience"                : "Who is the target audience? Options: beginner, general, expert, or academic.",
             "audience_context"        : "Any additional context about the audience? Say 'none' to skip.",
             "theme"                   : "Which presentation theme? Say 'default' or a theme name.",
         },
         "fallback_defaults" : {
             "target_duration_minutes" : "default",
+            "target_slide_count"      : "default",
             "audience"                : "general",
             "audience_context"        : "none",
             "theme"                   : "default",
         },
         "special_handlers" : {
             "source" : "fuzzy_file_match",
+        },
+        "file_args"        : {
+            "source" : {
+                "kind"             : "file",
+                "search_roots"     : DEFAULT_FILE_SEARCH_ROOTS,
+                "search_paths_key" : "presentation generator source search paths",
+            },
         },
     },
     "agent router go to research to presentation" : {
@@ -248,6 +294,33 @@ AGENTIC_AGENTS = {
         },
     },
 
+    "agent router go to test fix expediter" : {
+        # START a fresh TFE run — SYSTEM-TRIGGERED, not voice. The test-suite
+        # completion watchdog dispatches this command
+        # (test_suite_completion_watchdog.py:259) with source_test_suite_job_id =
+        # the just-failed job's id_hash. That arg is a job hash no user can speak, so
+        # this command is EXEMPT from the router prompt (the drift-guard exemption
+        # carries the stated reason + the still-trained residual). It keeps a registry
+        # entry so the watchdog's dispatch resolves and the registry OWNS it.
+        # cli_module is None (like test_suite): system-dispatched with the arg already
+        # supplied, so the voice expeditor never interviews for it — no CLI help, and
+        # no shared-module help conflict with the resume entry below.
+        "job_prefix"         : "tfe",
+        "cli_module"         : None,
+        "job_class_path"     : "cosa.agents.test_fix_expediter.job.TestFixExpediterJob",
+        "display_name"       : "Test Fix Expediter",
+        "required_user_args" : [ "source_test_suite_job_id" ],
+        "system_provided"    : [ "user_id", "user_email", "session_id" ],
+        "arg_mapping"        : {
+            "source_test_suite_job_id" : "source_test_suite_job_id",
+            "job_id"                   : "source_test_suite_job_id",
+        },
+        "fallback_questions" : {
+            "source_test_suite_job_id" : "Which test-suite job's failures should I fix? Paste its job ID.",
+        },
+        "fallback_defaults"  : {},
+    },
+
     "agent router go to test fix expediter resume" : {
         # Voice-driven resume of a stalled Test Fix Expediter job.
         # Session 9056c113 doc 16 Phase 2 — wires into existing REST endpoint
@@ -317,7 +390,7 @@ def get_cli_help( command_key ):
     Capture --help output for an agentic agent's CLI module.
 
     Requires:
-        - command_key is a key in AGENTIC_AGENTS
+        - command_key is a key in JOB_ARG_CONTRACTS
 
     Ensures:
         - Returns help text string on success
@@ -325,7 +398,7 @@ def get_cli_help( command_key ):
         - Results are cached per-process-lifetime in _help_cache
 
     Args:
-        command_key: Key from AGENTIC_AGENTS (e.g., "agent router go to deep research")
+        command_key: Key from JOB_ARG_CONTRACTS (e.g., "agent router go to deep research")
 
     Returns:
         str or None: CLI help text or None on failure
@@ -333,7 +406,7 @@ def get_cli_help( command_key ):
     if command_key in _help_cache:
         return _help_cache[ command_key ]
 
-    agent_entry = AGENTIC_AGENTS.get( command_key )
+    agent_entry = JOB_ARG_CONTRACTS.get( command_key )
     if not agent_entry:
         return None
 
@@ -373,14 +446,14 @@ def get_user_visible_args( command_key ):
     Get list of user-visible args for an agent by calling its CLI with --user-visible-args.
 
     Requires:
-        - command_key exists in AGENTIC_AGENTS
+        - command_key exists in JOB_ARG_CONTRACTS
 
     Ensures:
         - Returns list of arg name strings, or None on failure
         - Results are cached for process lifetime
 
     Args:
-        command_key: Key from AGENTIC_AGENTS (e.g., "agent router go to deep research")
+        command_key: Key from JOB_ARG_CONTRACTS (e.g., "agent router go to deep research")
 
     Returns:
         list or None: List of user-visible arg names, or None on failure
@@ -388,7 +461,7 @@ def get_user_visible_args( command_key ):
     if command_key in _user_visible_cache:
         return _user_visible_cache[ command_key ]
 
-    entry = AGENTIC_AGENTS.get( command_key )
+    entry = JOB_ARG_CONTRACTS.get( command_key )
     if not entry:
         return None
 
@@ -435,8 +508,9 @@ def quick_smoke_test():
     # Test 1: Registry structure
     print( "\n1. Testing registry structure..." )
     try:
-        assert len( AGENTIC_AGENTS ) == 10, f"Expected 10 agents, got {len( AGENTIC_AGENTS )}"
-        for key, entry in AGENTIC_AGENTS.items():
+        # (count guard deleted 2026-08-15, María: len()==N reads its own source and
+        # catches nothing; the drift guard's set-equality is the real content check.)
+        for key, entry in JOB_ARG_CONTRACTS.items():
             assert "cli_module" in entry, f"Missing cli_module in {key}"
             assert "required_user_args" in entry, f"Missing required_user_args in {key}"
             assert "system_provided" in entry, f"Missing system_provided in {key}"
@@ -454,29 +528,29 @@ def quick_smoke_test():
     # Test 2: Key lookups
     print( "\n2. Testing key lookups..." )
     try:
-        dr = AGENTIC_AGENTS.get( "agent router go to deep research" )
+        dr = JOB_ARG_CONTRACTS.get( "agent router go to deep research" )
         assert dr is not None
         assert dr[ "required_user_args" ] == [ "query" ]
         print( "   ✓ Deep research lookup works" )
 
-        pg = AGENTIC_AGENTS.get( "agent router go to podcast generator" )
+        pg = JOB_ARG_CONTRACTS.get( "agent router go to podcast generator" )
         assert pg is not None
         assert pg[ "required_user_args" ] == [ "research" ]
         assert "special_handlers" in pg
         print( "   ✓ Podcast generator lookup works (has special_handlers)" )
 
-        rp = AGENTIC_AGENTS.get( "agent router go to research to podcast" )
+        rp = JOB_ARG_CONTRACTS.get( "agent router go to research to podcast" )
         assert rp is not None
         assert rp[ "required_user_args" ] == [ "query" ]
         print( "   ✓ Research to podcast lookup works" )
 
-        st = AGENTIC_AGENTS.get( "agent router go to swe team" )
+        st = JOB_ARG_CONTRACTS.get( "agent router go to swe team" )
         assert st is not None
         assert st[ "required_user_args" ] == [ "task" ]
         assert st[ "display_name" ] == "SWE Team"
         print( "   ✓ SWE Team lookup works" )
 
-        missing = AGENTIC_AGENTS.get( "nonexistent command" )
+        missing = JOB_ARG_CONTRACTS.get( "nonexistent command" )
         assert missing is None
         print( "   ✓ Missing key returns None" )
 

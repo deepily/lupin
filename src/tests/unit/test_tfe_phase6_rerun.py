@@ -150,7 +150,7 @@ class TestPhase6DispatchAffected:
         fake_job.id_hash = "ts-validation-xyz"
         fake_job.metadata = None
 
-        mock_queue = MagicMock()
+        mock_flow = MagicMock()
 
         with (
             patch(
@@ -158,8 +158,8 @@ class TestPhase6DispatchAffected:
                 return_value=fake_job,
             ) as mock_factory,
             patch(
-                "lupin_app.main.jobs_todo_queue",
-                mock_queue,
+                "lupin_app.main.ask_flow",
+                mock_flow,
                 create=True,
             ),
         ):
@@ -180,8 +180,12 @@ class TestPhase6DispatchAffected:
         assert fake_job.metadata[ "tfe_source_test_suite_job_id" ] == "ts-abc12345"
         assert fake_job.metadata[ "tfe_fix_count" ] == 2
 
-        # Pushed to queue
-        mock_queue.push.assert_called_once_with( fake_job )
+        # Submitted through the ask flow, not pushed onto the queue (step 12). It is
+        # a PREBUILT job, so it goes to `submit`: the factory above already named the
+        # command, and `ask` would re-route work whose command is decided.
+        mock_flow.submit.assert_called_once()
+        assert mock_flow.submit.call_args.kwargs[ "job" ] is fake_job
+        mock_flow.ask.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_full_scope_dispatches_all( self ):
@@ -202,7 +206,7 @@ class TestPhase6DispatchAffected:
                 return_value=fake_job,
             ) as mock_factory,
             patch(
-                "lupin_app.main.jobs_todo_queue",
+                "lupin_app.main.ask_flow",
                 MagicMock(),
                 create=True,
             ),
@@ -229,7 +233,7 @@ class TestPhase6DispatchAffected:
                 return_value=fake_job,
             ) as mock_factory,
             patch(
-                "lupin_app.main.jobs_todo_queue",
+                "lupin_app.main.ask_flow",
                 MagicMock(),
                 create=True,
             ),
@@ -280,8 +284,8 @@ class TestPhase6FailureModes:
         fake_job.id_hash = "ts-x"
         fake_job.metadata = None
 
-        broken_queue = MagicMock()
-        broken_queue.push = MagicMock( side_effect=RuntimeError( "queue broken" ) )
+        broken_flow = MagicMock()
+        broken_flow.submit = MagicMock( side_effect=RuntimeError( "flow broken" ) )
 
         with (
             patch(
@@ -289,8 +293,8 @@ class TestPhase6FailureModes:
                 return_value=fake_job,
             ),
             patch(
-                "lupin_app.main.jobs_todo_queue",
-                broken_queue,
+                "lupin_app.main.ask_flow",
+                broken_flow,
                 create=True,
             ),
         ):
@@ -317,7 +321,7 @@ class TestPhase6RecursionGuard:
                 return_value=fake_job,
             ),
             patch(
-                "lupin_app.main.jobs_todo_queue",
+                "lupin_app.main.ask_flow",
                 MagicMock(),
                 create=True,
             ),

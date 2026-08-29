@@ -87,18 +87,18 @@ test("corner controls: buttons are PURE DOM — no inline onclick (clicks ride d
 
 test("corner controls: progress-group bubble ALSO carries pause + stop buttons (both branches)", () => {
   const el = renderNotificationItem(makeNotification({ progress_group_id: "grp-7" }), { appTimezone: "UTC" });
-  assert.notEqual(el.querySelector(".notification-corner-pause-btn"), null);
-  assert.notEqual(el.querySelector(".notification-corner-stop-btn"), null);
+  assert.ok( el.querySelector(".notification-corner-pause-btn") !== null );
+  assert.ok( el.querySelector(".notification-corner-stop-btn") !== null );
   // sanity: it really is the progress-group branch.
-  assert.notEqual(el.querySelector(".progress-group-head"), null);
+  assert.ok( el.querySelector(".progress-group-head") !== null );
 });
 
 // --- Corner ⏸/⏹ gated to incoming (legacy !isResponse) --------------------
 
 test("corner controls: outgoing (response) bubble renders NEITHER corner button", () => {
   const el = renderNotificationItem(makeNotification({ direction: "outgoing" }), { appTimezone: "UTC" });
-  assert.equal(el.querySelector(".notification-corner-pause-btn"), null);
-  assert.equal(el.querySelector(".notification-corner-stop-btn"), null);
+  assert.ok( el.querySelector(".notification-corner-pause-btn") === null );
+  assert.ok( el.querySelector(".notification-corner-stop-btn") === null );
 });
 
 // --- Proxy-ratify-link gate (progress_group_id startsWith 'pr-') -----------
@@ -115,10 +115,10 @@ test("ratify-link: proxy bubble (pr- group) renders the ratify link with data-ba
 
 test("ratify-link: non-proxy progress-group (grp- prefix) renders NO ratify link", () => {
   const el = renderNotificationItem(makeNotification({ progress_group_id: "grp-7" }), { appTimezone: "UTC" });
-  assert.equal(el.querySelector(".proxy-ratify-link"), null);
+  assert.ok( el.querySelector(".proxy-ratify-link") === null );
 });
 
 test("ratify-link: non-progress-group bubble renders NO ratify link", () => {
   const el = renderNotificationItem(makeNotification(), { appTimezone: "UTC" });
-  assert.equal(el.querySelector(".proxy-ratify-link"), null);
+  assert.ok( el.querySelector(".proxy-ratify-link") === null );
 });

@@ -113,7 +113,9 @@ class PresentationDryRunSmokeTest( LivePipelineTestBase ):
     """
 
     TEST_NAME       = "Presentation Generator Dry Run"
-    SUBMIT_ENDPOINT = "/api/presentation-generator/submit"
+    # The dedicated door /api/presentation-generator/submit is retired (410); one front door now.
+    SUBMIT_ENDPOINT = "/api/v2/submit"
+    ROUTING_COMMAND = "agent router go to presentation generator"
     DEFAULT_TIMEOUT = 180
     POLL_INTERVAL   = 2
     SCENARIOS       = PRESENTATION_DRY_RUN_SCENARIOS
@@ -138,10 +140,29 @@ class PresentationDryRunSmokeTest( LivePipelineTestBase ):
         if "payload" in scenario:
             return scenario[ "payload" ]
 
-        return {
-            "source_path" : scenario[ "source_path" ],
-            "dry_run"     : scenario.get( "dry_run", True ),
+        args = {
+            "source"  : scenario[ "source_path" ],
+            "dry_run" : scenario.get( "dry_run", True ),
         }
+        # Lineage tag (row 7451bebe / bug 5ed4f187): a child pytest inside a monopolizing
+        # test-suite job must thread LUPIN_TEST_MONOPOLIZE_PARENT_ID or the consumer's Gate B
+        # defers it as a foreign writer and it starves 900s.
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+
+        # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and
+        # answers 410 naming /api/v2/submit, which takes the routing command as a string
+        # and the agent's own arguments in `args`. The path arrives as `source` — the name
+        # the job factory already reads — and `parent_id_hash` stays TOP-LEVEL because it
+        # is a queue directive (Gate B lineage), not an argument to the agent, and `args`
+        # is checked against the command's own argument contract.
+        body = {
+            "command"  : self.ROUTING_COMMAND,
+            "args"     : args,
+            "question" : scenario[ "source_path" ],
+        }
+        if parent_id:
+            body[ "parent_id_hash" ] = parent_id
+        return body
 
     # ═══════════════════════════════════════════════════════════════════════
     # Mode Management

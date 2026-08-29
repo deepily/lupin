@@ -349,7 +349,10 @@ class XmlCoordinator:
         instructions, inputs, outputs, prompts, commands = self._get_5_empty_lists()
 
         # For each browser command, load the corresponding file and generate prompts
-        for compound_command in self.prompt_generator.agent_router_compound_commands.keys():
+        # The REGISTRY decides which commands get rows and in what order (row 95924f2d,
+        # step 4); the JSON only says where each command's phrasings live. The loop
+        # variable is therefore a registry string, so the row's answer below is too.
+        for compound_command in self.prompt_generator.registry_ordered_training_commands( self.prompt_generator.agent_router_compound_commands ):
 
             du.print_banner( f"Building prompts for compound AGENT ROUTER command [{compound_command}]", prepend_nl=True, end="\n" )
             counter = 1
@@ -614,7 +617,8 @@ class XmlCoordinator:
 
         default_factor = 1
 
-        for simple_command in self.prompt_generator.agent_router_simple_commands.keys():
+        # Registry-ordered, registry-labelled — see the compound builder (row 95924f2d).
+        for simple_command in self.prompt_generator.registry_ordered_training_commands( self.prompt_generator.agent_router_simple_commands ):
 
             factor = augmentation_config.get( simple_command, {} ).get( "factor", default_factor )
 
@@ -631,7 +635,11 @@ class XmlCoordinator:
                     _, augmented_line = self.prompt_generator.insert_interjection( augmented_line, self.prompt_generator.interjections )
                     _, augmented_line = self.prompt_generator.prepend_salutation( augmented_line, self.prompt_generator.salutations )
 
-                    instruction = self.prompt_generator.vox_cmd_instruction_template.format( command_choices=self.prompt_generator.agent_router_commands )
+                    # 14ba1437: use the AGENT-ROUTER wrapper, matching the sibling builders at :387 (compound)
+                    # and :805 (agentic). This site trained 5 simple commands (todo/math/calculator/automatic/none)
+                    # under the BROWSER wrapper ("a browser on your computer would understand", <browser-commands>),
+                    # a train/serve mismatch against the served agent-routing prompt.
+                    instruction = self.prompt_generator.agent_router_instruction_template.format( command_choices=self.prompt_generator.agent_router_commands )
                     human_says  = self.prompt_generator.common_human_says_template.format( voice_command=augmented_line )
                     input_text  = self.prompt_generator.common_input_template.format( human_says=human_says, response_format=self.prompt_generator.common_response_format )
                     output      = self.prompt_generator.common_output_template.format( command=simple_command, args="" )
@@ -666,6 +674,39 @@ class XmlCoordinator:
         with open( config_path, "r" ) as f:
             return json.load( f )
 
+    # The single source of truth for which placeholder sources a config entry may
+    # name. test_swe_team_training_data.py validates the config against THIS —
+    # it used to keep its own hardcoded copy, which went stale the moment a
+    # getter was added and failed the config rather than the drift.
+    PLACEHOLDER_GETTER_NAMES = (
+        "research_topics", "document_paths", "claude_code_tasks", "swe_team_tasks",
+        "test_types", "tfe_plan_paths", "audience_levels", "audience_contexts",
+        "renderer_names", "duration_minutes",
+    )
+
+    def _placeholder_getter_dispatch( self ):
+        """
+        Maps a config `source` name to the getter that supplies its values.
+
+        Requires:
+            - self.prompt_generator is initialized
+
+        Ensures:
+            - Returns a dict whose keys are exactly PLACEHOLDER_GETTER_NAMES
+        """
+        return {
+            "research_topics"   : self.prompt_generator.get_research_topics,
+            "document_paths"    : self.prompt_generator.get_document_paths,
+            "claude_code_tasks" : self.prompt_generator.get_claude_code_tasks,
+            "swe_team_tasks"    : self.prompt_generator.get_swe_team_tasks,
+            "test_types"        : self.prompt_generator.get_test_types,
+            "tfe_plan_paths"    : self.prompt_generator.get_tfe_plan_paths,
+            "audience_levels"   : self.prompt_generator.get_audience_levels,
+            "audience_contexts" : self.prompt_generator.get_audience_contexts,
+            "renderer_names"    : self.prompt_generator.get_renderer_names,
+            "duration_minutes"  : self.prompt_generator.get_duration_minutes,
+        }
+
     def _get_placeholder_values_by_name( self, getter_name, requested_length=None ):
         """
         Dispatch placeholder getter by name string from config.
@@ -679,16 +720,7 @@ class XmlCoordinator:
         Raises:
             - ValueError if getter_name is unknown
         """
-        dispatch = {
-            "research_topics"   : self.prompt_generator.get_research_topics,
-            "document_paths"    : self.prompt_generator.get_document_paths,
-            "claude_code_tasks" : self.prompt_generator.get_claude_code_tasks,
-            "swe_team_tasks"    : self.prompt_generator.get_swe_team_tasks,
-            "audience_levels"   : self.prompt_generator.get_audience_levels,
-            "audience_contexts" : self.prompt_generator.get_audience_contexts,
-            "renderer_names"    : self.prompt_generator.get_renderer_names,
-            "duration_minutes"  : self.prompt_generator.get_duration_minutes,
-        }
+        dispatch = self._placeholder_getter_dispatch()
         getter = dispatch.get( getter_name )
         if getter is None:
             raise ValueError( f"Unknown placeholder getter: '{getter_name}'. Available: {list( dispatch.keys() )}" )
@@ -714,7 +746,10 @@ class XmlCoordinator:
 
         # Use the shared agent router instruction template with ALL agent router commands
         # This integrates agentic jobs into the unified training pipeline
-        for command_name, config in agentic_commands.items():
+        # Registry-ordered, registry-labelled — see the compound builder (row 95924f2d).
+        for command_name in self.prompt_generator.registry_ordered_training_commands( agentic_commands ):
+
+            config = agentic_commands[ command_name ]
 
             du.print_banner( f"Building prompts for AGENTIC JOB command [{command_name}]", prepend_nl=True, end="\n" )
             counter = 1
@@ -1094,23 +1129,50 @@ class XmlCoordinator:
             - Sets appropriate file permissions
         """
         import os
+        from datetime import datetime, timezone
+        import cosa.training.corpus_fingerprint as cf
 
         du.print_banner( "Writing train, test, validate splits to jsonl...", prepend_nl=True )
         print( f"   train_df.shape: {train_df.shape[ 0 ]:,} x {train_df.shape[ 1 ]}" )
         print( f"    test_df.shape: {test_df.shape[ 0 ]:,} x {test_df.shape[ 1 ]}" )
         print( f"validate_df.shape: {validate_df.shape[ 0 ]:,} x {validate_df.shape[ 1 ]}" )
 
-        path = self.path_prefix + "/src/ephemera/prompts/data/voice-commands-xml-train.jsonl"
-        train_df.to_json( path, orient="records", lines=True )
-        os.chmod( path, 0o666 )
+        for df, filename in ( ( train_df, "voice-commands-xml-train.jsonl" ), ( test_df, "voice-commands-xml-test.jsonl" ), ( validate_df, "voice-commands-xml-validate.jsonl" ) ):
 
-        path = self.path_prefix + "/src/ephemera/prompts/data/voice-commands-xml-test.jsonl"
-        test_df.to_json( path, orient="records", lines=True )
-        os.chmod( path, 0o666 )
+            path = self.path_prefix + "/src/ephemera/prompts/data/" + filename
+            self._rotate_previous_artifact( path )
+            df.to_json( path, orient="records", lines=True )
+            os.chmod( path, 0o666 )
 
-        path = self.path_prefix + "/src/ephemera/prompts/data/voice-commands-xml-validate.jsonl"
-        validate_df.to_json( path, orient="records", lines=True )
-        os.chmod( path, 0o666 )
+        # Stamp the corpus this artifact was built from, so a later run can refuse
+        # rather than silently train on a dataset built from a different corpus.
+        stamp = cf.write_stamp( self.path_prefix, datetime.now( timezone.utc ).isoformat() )
+        print( f"Stamped corpus fingerprint {stamp[ 'corpus_hash' ]} over {len( stamp[ 'files' ] )} corpus files." )
+
+    def _rotate_previous_artifact( self, path: str ) -> bool:
+        """
+        Keep one previous copy of a generated artifact before it is overwritten.
+
+        Regeneration is irreversible and the outputs are git-ignored, so without
+        this the only copy of a good dataset is destroyed by the next run.
+
+        Requires:
+            - path names the artifact about to be written
+
+        Ensures:
+            - renames an existing artifact to <path>.prev, replacing any older .prev
+            - returns True when a copy was kept, False when there was nothing to keep
+            - never raises when the artifact does not yet exist
+        """
+        import os
+
+        if not os.path.exists( path ): return False
+
+        previous = path + ".prev"
+        os.replace( path, previous )
+        print( f"Kept previous copy: {previous}" )
+
+        return True
 
     def compare_validation_results( self, before_df: pd.DataFrame, after_df: pd.DataFrame, title: str="Validation Comparison" ) -> pd.DataFrame:
         """

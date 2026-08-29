@@ -14,22 +14,31 @@ Responsibilities:
 
 import jwt
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, List
 from cosa.config.configuration_manager import ConfigurationManager
 
 # Initialize configuration
 config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
-# Load JWT configuration
+# Load JWT configuration.
+#
+# There is NO built-in signing secret, in any environment. The previous form raised only
+# when ENVIRONMENT == "production" — which no service sets — so every other deployment fell
+# through to a fixed string literal committed to this file. A default that is identical in
+# every checkout is a shared secret: anyone reading the repository could forge a token for
+# any user_id, email and role against any deployment still using it. The two warning prints
+# that accompanied it were a hope, not a control; nothing refused to run.
+#
+# Unset now fails here, before the module finishes importing, so a missing secret is a boot
+# failure rather than tokens signed with a value anyone can read. Row adce3547.
 SECRET_KEY = os.getenv( "JWT_SECRET_KEY" )
 if not SECRET_KEY:
-    if os.getenv( "ENVIRONMENT" ) == "production":
-        raise ValueError( "JWT_SECRET_KEY environment variable must be set in production!" )
-    else:
-        print( "[JWT] ⚠️  WARNING: Using default development secret key" )
-        print( "[JWT] ⚠️  Set JWT_SECRET_KEY environment variable for production" )
-        SECRET_KEY = "dev-secret-key-DO-NOT-USE-IN-PRODUCTION-8x7mp3"
+    raise ValueError(
+        "JWT_SECRET_KEY environment variable must be set — there is no default signing secret. "
+        "Set it in the untracked .env / host env file (never a tracked one); generate a value with "
+        "python -c \"import secrets; print( secrets.token_urlsafe( 32 ) )\"."
+    )
 
 ALGORITHM                     = config_mgr.get( "jwt algorithm", "HS256" )
 ACCESS_TOKEN_EXPIRE_MINUTES   = config_mgr.get( "jwt access token expire minutes", 30, return_type="int" )
@@ -63,7 +72,7 @@ def create_access_token( user_id: str, email: str, roles: List[str] ) -> str:
         raise ValueError( "user_id and email are required" )
 
     # Calculate expiration
-    expire = datetime.utcnow() + timedelta( minutes=ACCESS_TOKEN_EXPIRE_MINUTES )
+    expire = datetime.now( timezone.utc ) + timedelta( minutes=ACCESS_TOKEN_EXPIRE_MINUTES )
 
     # Build payload
     payload = {
@@ -71,7 +80,7 @@ def create_access_token( user_id: str, email: str, roles: List[str] ) -> str:
         "email" : email,
         "roles" : roles if roles else ["user"],
         "exp"   : expire,
-        "iat"   : datetime.utcnow(),
+        "iat"   : datetime.now( timezone.utc ),
         "jti"   : _generate_jti()  # Unique token ID
     }
 
@@ -107,14 +116,14 @@ def create_refresh_token( user_id: str, email: str ) -> str:
         raise ValueError( "user_id and email are required" )
 
     # Calculate expiration
-    expire = datetime.utcnow() + timedelta( days=REFRESH_TOKEN_EXPIRE_DAYS )
+    expire = datetime.now( timezone.utc ) + timedelta( days=REFRESH_TOKEN_EXPIRE_DAYS )
 
     # Build payload
     payload = {
         "sub"        : user_id,
         "email"      : email,
         "exp"        : expire,
-        "iat"        : datetime.utcnow(),
+        "iat"        : datetime.now( timezone.utc ),
         "jti"        : _generate_jti(),
         "token_type" : "refresh"  # Distinguish from access tokens
     }
@@ -266,12 +275,12 @@ def quick_smoke_test():
         # Test 6: Expired token detection
         print( "Testing expired token detection..." )
         # Create token that expired in the past
-        past_expire = datetime.utcnow() - timedelta( minutes=1 )
+        past_expire = datetime.now( timezone.utc ) - timedelta( minutes=1 )
         expired_payload = {
             "sub"   : "test_user",
             "email" : "test@example.com",
             "exp"   : past_expire,
-            "iat"   : datetime.utcnow() - timedelta( minutes=2 )
+            "iat"   : datetime.now( timezone.utc ) - timedelta( minutes=2 )
         }
         expired_token = jwt.encode( expired_payload, SECRET_KEY, algorithm=ALGORITHM )
 

@@ -85,9 +85,23 @@ def test_handle_event_routes_notification_queue_update():
 
 
 def test_handle_event_job_state_transition_verbose_prints( capsys ):
+    # The payload below is the one emit_job_state_transition() really sends.
+    # This test used to feed from_queue/to_queue — keys the event has NEVER
+    # carried — so it asserted the handler could read a payload that does not
+    # exist, and the real one printed "? -> ?" for a year. Row e3417974.
+    r = _responder( verbose=True )
+    _run( r.handle_event( "job_state_transition",
+                          { "job_id": "j1", "from_state": "queued", "to_state": "running" } ) )
+    assert "Job state: j1 queued -> running" in capsys.readouterr().out
+
+
+def test_handle_event_job_state_transition_does_not_read_retired_keys( capsys ):
+    """A payload carrying ONLY the retired keys must not render as if it worked."""
     r = _responder( verbose=True )
     _run( r.handle_event( "job_state_transition", { "job_id": "j1", "from_queue": "a", "to_queue": "b" } ) )
-    assert "Job state: j1 a -> b" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "a -> b" not in out
+    assert "Job state: j1 ? -> ?" in out
 
 
 def test_handle_event_job_state_transition_quiet( capsys ):
@@ -143,8 +157,25 @@ def test_decision_event_sender_accepted_proceeds_to_shadow():
     assert r.stats[ "decisions_shadowed" ] == 1
 
 
+def test_empty_allowlist_rejects_every_sender_fail_closed():
+    # 960a4ec9 Option C: fail-closed. An empty allowlist means "trust no one", so
+    # the default sender is rejected at the gate and nothing downstream runs. Goes
+    # RED under the old fail-open guard (empty list => check skipped => shadowed==1).
+    #
+    # This is NOT a hypothetical state: __main__._load_swe_profile's `except
+    # ImportError` arm leaves accepted_senders empty (and domain_strategy None), so
+    # a profile-import failure lands a live Responder in exactly this shape. This
+    # test is that reachable path.
+    r = _responder()                                # empty allowlist (the default)
+    r.submit_response = MagicMock( return_value=True )
+    _run( r._handle_decision_event( _event() ) )    # sender "s@x"
+    assert r.stats[ "sender_rejected" ] == 1
+    assert r.stats[ "decisions_shadowed" ] == 0
+    r.submit_response.assert_not_called()           # rejected at the gate → nothing acts
+
+
 def test_decision_event_dry_run_yes_no_sends_no():
-    r = _responder( dry_run=True )
+    r = _responder( dry_run=True, accepted_senders=[ "s@x" ] )
     r.submit_response = MagicMock( return_value=True )
     _run( r._handle_decision_event( _event( response_type="yes_no" ) ) )
     r.submit_response.assert_called_once_with( "nid-1", "no" )
@@ -152,20 +183,20 @@ def test_decision_event_dry_run_yes_no_sends_no():
 
 
 def test_decision_event_dry_run_non_yes_no_sends_cancel():
-    r = _responder( dry_run=True )
+    r = _responder( dry_run=True, accepted_senders=[ "s@x" ] )
     r.submit_response = MagicMock( return_value=True )
     _run( r._handle_decision_event( _event( response_type="text" ) ) )
     r.submit_response.assert_called_once_with( "nid-1", "cancel" )
 
 
 def test_decision_event_no_strategy_shadows_quiet():
-    r = _responder()
+    r = _responder( accepted_senders=[ "s@x" ] )
     _run( r._handle_decision_event( _event() ) )
     assert r.stats[ "decisions_shadowed" ] == 1
 
 
 def test_decision_event_no_strategy_shadows_debug( capsys ):
-    r = _responder( debug=True )
+    r = _responder( debug=True, accepted_senders=[ "s@x" ] )
     _run( r._handle_decision_event( _event() ) )
     assert "No strategy loaded" in capsys.readouterr().out
 
@@ -174,6 +205,9 @@ def test_decision_event_no_strategy_shadows_debug( capsys ):
 # _handle_decision_event — strategy actions
 # ============================================================================
 def _with_strategy( result, **kwargs ):
+    # Fail-closed sender gate (960a4ec9 C): a responder that should PROCEED must
+    # allow the default _event() sender, or it is rejected before the strategy runs.
+    kwargs.setdefault( "accepted_senders", [ "s@x" ] )
     r = _responder( **kwargs )
     ds = MagicMock()
     ds.evaluate.return_value = result
@@ -265,14 +299,14 @@ def test_decision_event_unknown_action_falls_through():
 # notification extraction variants
 # ----------------------------------------------------------------------------
 def test_decision_event_nested_notification_payload():
-    r = _responder()
+    r = _responder( accepted_senders=[ "s@x" ] )
     _run( r._handle_decision_event( { "notification": _event() } ) )
     assert r.stats[ "decisions_shadowed" ] == 1     # reached no-strategy shadow → id resolved
 
 
 def test_decision_event_notification_id_falls_back_to_id_field():
-    r = _responder()
-    payload = { "response_requested": True, "id": "by-id", "message": "?" }
+    r = _responder( accepted_senders=[ "s@x" ] )
+    payload = { "response_requested": True, "id": "by-id", "message": "?", "sender_id": "s@x" }
     _run( r._handle_decision_event( payload ) )
     assert r.stats[ "decisions_shadowed" ] == 1     # `id` used as notification_id
 
@@ -301,24 +335,18 @@ def test_get_embedding_store_initializes_on_success():
     cm = MagicMock()
     cm.get.return_value = "value"
     fake_cfg.ConfigurationManager.return_value = cm
-    # _get_embedding_store now asks the backend before building a LanceDB path
-    # (decision 2b20a6d6). The stub ConfigurationManager answers "value" to every key,
-    # including `vector store backend`, which get_vector_store_backend correctly
-    # rejects as invalid — so the pin supplies a real backend value.
-    from cosa.rest.db.repositories import vector_store_backend
 
     with patch.dict( sys.modules, {
             "cosa.agents.decision_proxy.proxy_decision_embeddings": fake_pde,
-            "cosa.config.configuration_manager": fake_cfg } ), \
-         patch.object( vector_store_backend, "get_vector_store_backend",
-                       return_value=vector_store_backend.LANCEDB ), \
-         patch( "cosa.utils.util.get_project_root", return_value="/root" ):
+            "cosa.config.configuration_manager": fake_cfg } ):
         store = r._get_embedding_store()
     assert store is sentinel_store
     assert r._embedding_store is sentinel_store
 
-    # The LanceDB arm was taken, so a real path was built and handed over.
-    assert fake_pde.ProxyDecisionEmbeddings.call_args.kwargs[ "db_path" ] is not None
+    # No location is built or handed over — the store is Postgres-backed.
+    kwargs = fake_pde.ProxyDecisionEmbeddings.call_args.kwargs
+    assert "db_path" not in kwargs
+    assert kwargs[ "table_name" ] == "value"
 
 
 def test_get_embedding_store_swallows_init_failure( capsys ):
@@ -494,3 +522,51 @@ def test_print_stats_outputs_all_counters( capsys ):
     out = capsys.readouterr().out
     assert "Decision Proxy Statistics" in out
     assert "Events Received" in out
+
+
+# ============================================================================
+# `enabled` master switch (row 960a4ec9) — a disabled proxy cannot submit
+# ----------------------------------------------------------------------------
+# The splainer promises "when false, the proxy will not run"; before this the
+# flag was read into config and never consulted. These assert the ENFORCEMENT:
+# with enabled=False the decision pipeline is a no-op and submit_response is
+# never reached — on the ACT path (the real submit) and the DRY-RUN path alike.
+# The contrast test proves the guard is not simply blocking everything.
+# ============================================================================
+def _act_responder( enabled, dry_run=False ):
+    r = _responder( enabled=enabled, dry_run=dry_run, accepted_senders=[ "s@x" ] )
+    r.submit_response = MagicMock( return_value=True )
+    strategy = MagicMock()
+    strategy.evaluate = MagicMock( return_value=_result( action="act", value="yes" ) )
+    r.set_domain_strategy( strategy )
+    return r
+
+
+def test_disabled_proxy_cannot_submit_on_act_path():
+    r = _act_responder( enabled=False )
+    _run( r._handle_decision_event( _event() ) )
+    r.submit_response.assert_not_called()
+    assert r.stats[ "disabled_skipped" ] == 1
+    assert r.stats[ "decisions_acted" ] == 0
+    assert r.stats[ "responses_sent" ] == 0
+
+
+def test_disabled_proxy_cannot_submit_on_dry_run_path():
+    # dry-run submits a cancel BEFORE any strategy runs — the disabled guard must
+    # still preempt it, or a disabled proxy would emit cancels.
+    r = _responder( enabled=False, dry_run=True )
+    r.submit_response = MagicMock( return_value=True )
+    _run( r._handle_decision_event( _event( response_type="yes_no" ) ) )
+    r.submit_response.assert_not_called()
+    assert r.stats[ "disabled_skipped" ] == 1
+
+
+def test_enabled_proxy_still_submits_on_act_path():
+    # The load-bearing contrast: the SAME event with enabled=True DOES reach
+    # submit — so the disabled assertions above mean "the flag stopped it", not
+    # "this path never submits anyway".
+    r = _act_responder( enabled=True )
+    _run( r._handle_decision_event( _event() ) )
+    r.submit_response.assert_called_once_with( "nid-1", "yes" )
+    assert r.stats[ "disabled_skipped" ] == 0
+    assert r.stats[ "responses_sent" ] == 1

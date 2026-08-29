@@ -59,6 +59,7 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
         session_id: str,
         budget: Optional[ float ] = None,
         target_duration_minutes: Optional[ int ] = None,
+        target_slide_count: Optional[ int ] = None,
         theme: Optional[ str ] = None,
         lead_model: Optional[ str ] = None,
         dry_run: bool = False,
@@ -87,6 +88,7 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
             session_id: WebSocket session for notifications
             budget: Maximum budget in USD for Deep Research (None = unlimited)
             target_duration_minutes: Override presentation duration (None = use default)
+            target_slide_count: Explicit slide count overriding the duration formula (None = use default)
             theme: Override presentation theme (None = use default)
             dry_run: Simulate execution without API calls
             audience: Target audience level (beginner/general/expert/academic)
@@ -106,6 +108,7 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
         self.query                   = query
         self.budget                  = budget
         self.target_duration_minutes = target_duration_minutes
+        self.target_slide_count      = target_slide_count
         self.theme                   = theme
         self.lead_model              = lead_model
         self.dry_run                 = dry_run
@@ -224,6 +227,7 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
                 audience                = self.audience,
                 audience_context        = self.audience_context,
                 target_duration_minutes = self.target_duration_minutes,
+                target_slide_count      = self.target_slide_count,
                 theme                   = self.theme,
                 cli_mode                = False,  # Voice-driven mode for queue
                 debug                   = self.debug,
@@ -262,6 +266,52 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
                 "total_cost_usd" : result.total_cost,
             }
             self.artifacts[ "cost_summary" ] = self.cost_summary
+
+            # ── Completion report: build a rich abstract with clickable links so the
+            #    promoted running→done card renders View Presentation WITHOUT a page
+            #    reload. Before this, the real path returned a bare "Pipeline complete!"
+            #    string and stored NO abstract, so _transition_to_done emitted
+            #    abstract=None → blank done card (bug 2da4095a). Mirrors
+            #    presentation_generator/job.py:304-335. ──
+            import urllib.parse
+            io_base = cu.get_project_root() + "/io/"
+
+            def _doc_link( path, label ):
+                if path and path.startswith( io_base ):
+                    rel = path.replace( io_base, "" )
+                    return f"[{label}](/app/docs?path={urllib.parse.quote( rel )})"
+                return path
+
+            research_link = _doc_link( result.research_path, "📄 View" )
+            yaml_link     = _doc_link( result.yaml_path,     "View YAML" )
+            marp_link     = _doc_link( result.marp_path,     "View Presentation" )
+
+            completion_abstract = f"""**Research → Presentation Complete!**
+
+**Research Report**: {research_link}
+
+**Slides**: {result.slide_count} slides
+
+**YAML**: {yaml_link}
+
+**Presentation**: {marp_link}
+
+**Cost**: ${result.total_cost:.4f}"""
+
+            # Store the abstract in artifacts so it rides the running→done transition
+            # (running_fifo_queue._transition_to_done reads artifacts.get("abstract")).
+            self.artifacts[ "abstract" ] = completion_abstract
+
+            try:
+                await voice_io.notify(
+                    f"Research to presentation complete. Total cost ${result.total_cost:.4f}.",
+                    priority   = "medium",
+                    abstract   = completion_abstract,
+                    job_id     = self.id_hash,
+                    queue_name = "run",
+                )
+            except Exception as notify_err:
+                print( f"[DeepResearchToPresentationJob] completion notify failed: {notify_err}" )
 
             # Return conversational answer
             return f"Pipeline complete! Research report and presentation generated. Total cost: ${result.total_cost:.4f}. Presentation: {self.marp_path}"
@@ -363,6 +413,9 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
 
 **Stats**: $0.00 total | 0 tokens | 12.0s (simulated)"""
 
+        # Store the abstract in artifacts so it rides the running→done transition (bug 9b481811 sweep)
+        self.artifacts[ "abstract" ] = completion_abstract
+
         # Notify completion
         await voice_io.notify(
             "Dry run complete! Pipeline simulation finished.",
@@ -399,6 +452,7 @@ def quick_smoke_test():
             session_id              = "session456",
             budget                  = 2.00,
             target_duration_minutes = 15,
+            target_slide_count      = 12,
             theme                   = "default",
             debug                   = True
         )
@@ -425,6 +479,7 @@ def quick_smoke_test():
         assert job.query == "test query for smoke test"
         assert job.budget == 2.00
         assert job.target_duration_minutes == 15
+        assert job.target_slide_count == 12
         assert job.theme == "default"
         assert job.user_email == "test@test.com"
         assert job.state == JobState.PENDING

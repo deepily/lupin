@@ -99,7 +99,7 @@ class MockAgenticJob( AgenticJobBase ):
 def _make_running_queue( max_workers: int = 2 ):
     """Build a RunningFifoQueue with stub dependencies + mocked side-effects.
 
-    Patches heavy init dependencies (LanceDB I/O table, spaCy GistNormalizer)
+    Patches heavy init dependencies (the I/O table, spaCy GistNormalizer)
     so the 49K-row table load + spaCy pipeline don't dominate test runtime.
     """
     # Config mgr: minimal stub returning the requested max_workers
@@ -115,7 +115,7 @@ def _make_running_queue( max_workers: int = 2 ):
     dead = FifoQueue()
 
     # Patch heavy construction-time deps for fast test startup.
-    # RunningFifoQueue.__init__ instantiates InputAndOutputTable() (LanceDB
+    # RunningFifoQueue.__init__ instantiates InputAndOutputTable() (store
     # 49K-row table) and GistNormalizer (spaCy pipeline) — both can take
     # tens of seconds. Pool tests don't exercise either; MagicMock suffices.
     with patch( "cosa.rest.running_fifo_queue.InputAndOutputTable" ) as MockIOT, \

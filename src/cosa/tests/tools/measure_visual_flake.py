@@ -176,7 +176,7 @@ def classify_visual_flake( aa: "AaScatterResult", cs: "ContentShiftResult" ) -> 
     )
 
 
-def measure(                                        # pragma: no cover - thin orchestration: reads bytes into the two comparators (each 100%-covered by test_visual_aa_scatter_tolerant.py / test_visual_content_shift.py) then delegates to the 100%-covered classify_visual_flake. No decision logic of its own; the image stack is exercised by the comparators' own suites.
+def measure(                                        # pragma: no cover - straight-line delegation with no branch of its own: it reads bytes, hands them to the two comparators, and returns classify_visual_flake's answer unchanged
     actual_png           : bytes,
     golden_png           : bytes,
     *,

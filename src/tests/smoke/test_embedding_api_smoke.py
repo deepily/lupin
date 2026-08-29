@@ -1,7 +1,7 @@
 """
 Smoke test for the server's batch embedding endpoint.
 
-Locks in the HTTP contract that the LanceDB-GCS integration tests depend on:
+Locks in the HTTP contract that the GCS integration tests depend on:
 tests route embeddings through :8000's POST /api/embeddings/batch rather
 than instantiating ProseEmbeddingEngine in-process (which would OOM the GPU).
 

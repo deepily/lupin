@@ -11,6 +11,7 @@ Comprehensive smoke tests for the Lupin audio and text-to-speech system includin
 """
 
 import sys
+import pytest
 import os
 
 # Bootstrap using LUPIN_ROOT for standalone script execution
@@ -222,11 +223,14 @@ class AudioTTSSmokeTests:
             
             self.validator.assert_websocket_event(ping_event, "sys_ping")
             
-        except Exception as e:
-            # Audio WebSocket might have different behavior
+        except TimeoutError as e:
+            # No ping arrived inside the window — the one outcome worth tolerating
+            # here, since ping cadence is timing-dependent. This used to be a bare
+            # `except Exception`, which also swallowed the assert_websocket_event
+            # below it (that helper raises AssertionError), so a malformed ping
+            # event could not fail the test.
             if self.debug:
-                print(f"[DEBUG] Audio WebSocket test: {e}")
-            pass
+                print(f"[DEBUG] Audio WebSocket ping not seen within timeout: {e}")
             
         finally:
             await self.client.close_websocket(websocket)
@@ -253,6 +257,19 @@ class AudioTTSSmokeTests:
             while time.time() - timeout_start < 10.0:  # 10 second timeout
                 try:
                     event = await asyncio.wait_for(websocket.recv(), timeout=2.0)
+                    
+                    # Audio chunks arrive as BINARY frames — recv() hands back
+                    # bytes, and json.loads chokes on the first one ("'utf-8'
+                    # codec can't decode byte 0xff in position 0", 0xff being an
+                    # MP3 frame header). That is the streaming path working, not
+                    # failing, so the frame is counted and skipped rather than
+                    # parsed. The old `except Exception: pass` around this whole
+                    # block hid the decode error entirely, which is why a test
+                    # that cannot read the stream it subscribes to still passed.
+                    if isinstance(event, (bytes, bytearray)):
+                        events_received.append("audio_streaming_chunk")
+                        continue
+                    
                     event_data = json.loads(event)
                     event_type = event_data.get("type")
                     
@@ -275,16 +292,15 @@ class AudioTTSSmokeTests:
                 except asyncio.TimeoutError:
                     break
             
-            # We might not receive events in test environment, which is OK
+            # We might not receive events in test environment, which is OK —
+            # the inner `except asyncio.TimeoutError: break` above already covers
+            # that. There used to be an outer `except Exception: pass` here as
+            # well, which additionally swallowed the assert_response_ok on the TTS
+            # request and both assert_json_contains calls on the event payloads,
+            # so a failed TTS request or a malformed event could not fail the test.
             if self.debug:
                 print(f"[DEBUG] Audio events received: {events_received}")
                 
-        except Exception as e:
-            if self.debug:
-                print(f"[DEBUG] Audio streaming test: {e}")
-            # This test might not work in all environments
-            pass
-            
         finally:
             await self.client.close_websocket(websocket)
     
@@ -317,15 +333,14 @@ class AudioTTSSmokeTests:
             assert first_data["status"] in ["success", "processing"]
             assert second_data["status"] in ["success", "processing"]
             
-            # Try cached speech endpoint if available
-            try:
-                cached_response = await self.audio_helper.get_cached_speech(test_text)
-                # This endpoint might not exist or might return 404 if not cached
-                assert cached_response.status_code in [200, 404, 501], \
-                    "Cached speech endpoint should handle requests gracefully"
-            except Exception:
-                # Cached endpoint might not be implemented
-                pass
+            # Try cached speech endpoint if available.
+            # The "cached endpoint might not be implemented" case is already
+            # covered by the status codes accepted below — an unrouted path
+            # answers 404, it does not raise — so the `except Exception: pass`
+            # that used to wrap this only ever caught the assertion itself.
+            cached_response = await self.audio_helper.get_cached_speech(test_text)
+            assert cached_response.status_code in [200, 404, 501], \
+                f"Cached speech endpoint should handle requests gracefully, got {cached_response.status_code}"
                 
         finally:
             await self.client.close_websocket(audio_ws)
@@ -372,23 +387,27 @@ class AudioTTSSmokeTests:
     
     async def test_audio_authentication(self):
         """Test audio endpoint authentication requirements."""
-        # Test without authentication
-        try:
-            headers = {}  # No auth header
-            response = await self.client.http_request(
-                "POST", 
-                "/api/get-speech", 
-                json={
-                    "session_id": self.client.session_id,
-                    "text": "Test message"
-                },
-                headers=headers
-            )
-            # Should either require auth or allow without auth
-            assert response.status_code in [200, 401], \
-                "Audio endpoint should handle auth consistently"
-        except Exception:
-            pass
+        # Test without authentication.
+        #
+        # Two things used to be wrong here at once. The `except Exception: pass`
+        # swallowed the assertion, and `headers = {}` never produced an
+        # unauthenticated request — LupinTestClient.http_request re-attaches the
+        # bearer token whenever the caller supplies no Authorization key, and an
+        # empty dict has none. So this sent a fully authenticated request, got
+        # 200, and passed on the wrong branch of an assertion that accepted both.
+        #
+        # Now it genuinely sends no token, and requires the refusal.
+        response = await self.client.http_request(
+            "POST",
+            "/api/get-speech",
+            json={
+                "session_id": self.client.session_id,
+                "text": "Test message"
+            },
+            authenticate=False
+        )
+        assert response.status_code == 401, \
+            f"Unauthenticated /api/get-speech should be rejected with 401, got {response.status_code}"
         
         # Test with authentication (normal case) - establish WebSocket first
         audio_ws = await self.client.websocket_connect(
@@ -530,6 +549,52 @@ class AudioTTSSmokeTests:
         print(f"{'='*60}")
         
         return passed == total
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# pytest collection bridge (row e5e964f4)
+#
+# WHY THIS EXISTS. The methods above hang off a plain class that takes an
+# __init__, and pytest refuses to collect a test class with a constructor. So
+# `pytest src/tests/lupin_smoke/` used to collect ZERO tests from this file,
+# report success, and EXIT 0 — with nothing in its output saying the file had
+# been skipped. Three of the directory's four files behaved that way, which is
+# how a deliberately-red test here stayed invisible to anyone verifying with
+# pytest instead of the shell runner.
+#
+# This bridge does not replace `run-lupin-smoke-tests.sh`, which still invokes
+# this module as a script. It makes the same methods reachable from pytest as
+# well, so both runners see the same result instead of disagreeing silently.
+#
+# The suite instance is module-scoped ON PURPOSE: the shell runner builds ONE
+# instance and walks every method on it, and each construction performs a real
+# login. A fresh instance per test would log in 10 times per file and diverge
+# from the behaviour the runner exercises.
+
+_SMOKE_METHODS = [
+    "test_get_speech_endpoint_basic",
+    "test_get_speech_playback_modes",
+    "test_get_speech_validation",
+    "test_session_id_validation",
+    "test_audio_websocket_connection",
+    "test_audio_streaming_events",
+    "test_tts_caching_mechanism",
+    "test_concurrent_tts_requests",
+    "test_audio_authentication",
+    "test_tts_auth_header_format_regression",
+]
+
+
+@pytest.fixture( scope="module" )
+def smoke_suite():
+    """One suite instance per module, matching how the shell runner drives it."""
+    return AudioTTSSmokeTests( debug=False )
+
+
+@pytest.mark.parametrize( "method_name", _SMOKE_METHODS )
+def test_lupin_smoke( smoke_suite, method_name ):
+    """Run one smoke method under pytest. Named per method so a failure points at it."""
+    asyncio.run( getattr( smoke_suite, method_name )() )
 
 
 async def main():

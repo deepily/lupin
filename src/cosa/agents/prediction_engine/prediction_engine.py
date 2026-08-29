@@ -134,8 +134,8 @@ class PredictionEngine:
             self.hint_voting_enabled                = DEFAULT_HINT_VOTING_ENABLED
             self.hint_vote_min_confidence_threshold = DEFAULT_HINT_VOTE_MIN_CONFIDENCE_THRESHOLD
 
-        # Retained for backend-flag resolution in _get_embedding_store (decision
-        # 2b20a6d6). None is legitimate — is_postgres_backend() then builds its own.
+        # Retained for _get_embedding_store. None is legitimate — the store then
+        # resolves its own configuration.
         self._config_mgr = config_mgr
 
         # Initialize classifier
@@ -159,25 +159,12 @@ class PredictionEngine:
         return self._embedding_provider
 
     def _get_embedding_store( self ):
-        """Lazy-load the decision embedding store (postgres or LanceDB per the backend flag)."""
+        """Lazy-load the decision embedding store."""
         if self._embedding_store is None:
             try:
                 from cosa.agents.decision_proxy.proxy_decision_embeddings import ProxyDecisionEmbeddings
-                from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
-
-                # Ask the backend BEFORE building a path (decision 2b20a6d6). The path
-                # was previously hardcoded here — a THIRD authority for the same fact,
-                # unreachable by config. It now comes from the same key the rest of the
-                # LanceDB path-builders read, and only when LanceDB is actually active.
-                if is_postgres_backend( self._config_mgr ):
-                    lancedb_path = None
-                elif self._config_mgr is not None:
-                    lancedb_path = cu.get_project_root() + self._config_mgr.get( "solution snapshots lancedb path" )
-                else:
-                    lancedb_path = cu.get_project_root() + "/src/conf/long-term-memory/lupin.lancedb"
 
                 self._embedding_store = ProxyDecisionEmbeddings(
-                    db_path       = lancedb_path,
                     table_name    = self.lancedb_table,
                     embedding_dim = 768,
                     debug         = self.debug
@@ -217,8 +204,17 @@ class PredictionEngine:
                 metadata      = { "reason": "engine_disabled" }
             )
 
-        # Generate embedding for the message
-        embedding = self._generate_embedding( message )
+        # Generate embedding for the message. An open_ended_batch's notification
+        # message is a content-free count preamble ("I have N questions for you.")
+        # that collides across unrelated batches (bug cdb5a76f) — embed the
+        # per-question content key instead, symmetric with the storage key in
+        # _store_decision so retrieval and storage speak the same language.
+        if response_type == RESPONSE_TYPE_OPEN_ENDED_BATCH:
+            retrieval_text = self._batch_question_key( message, notification_dict.get( "response_options" ) )
+        else:
+            retrieval_text = message
+
+        embedding = self._generate_embedding( retrieval_text )
 
         # Dispatch by response type
         try:
@@ -233,7 +229,13 @@ class PredictionEngine:
                 return self._predict_open_ended( message, category, embedding )
 
             elif response_type == RESPONSE_TYPE_OPEN_ENDED_BATCH:
-                return self._predict_open_ended_batch( message, category, embedding )
+                # Pass the content key as the match text so exact-match compares
+                # batch content to batch content, and stamp it so _store_decision
+                # keys the stored case on the same content (not the preamble).
+                result = self._predict_open_ended_batch( retrieval_text, category, embedding )
+                if result.metadata is not None:
+                    result.metadata[ "batch_question_key" ] = retrieval_text
+                return result
 
             # Unknown response type — cold start
             return PredictionResult(
@@ -329,6 +331,50 @@ class PredictionEngine:
                     exact_case = ( similarity_pct, record )
 
         return ( candidate_cases, exact_case )
+
+    @staticmethod
+    def _batch_question_key( message: str, response_options: Any ) -> str:
+        """
+        Build a content-bearing CBR key for an open_ended_batch from its per-question texts.
+
+        The batch's notification message is a content-free count preamble
+        ("I have N questions for you.") — correct for TTS, useless as a semantic
+        key, because every N-question batch collides on it and can retrieve an
+        UNRELATED batch's answers at similarity 1.0 (bug cdb5a76f). Keying on the
+        actual question texts ("header: question" per entry) restores batch identity.
+
+        Requires:
+            - message is the notification message (the fallback key)
+            - response_options is the dict passed to predict() (may be None)
+
+        Ensures:
+            - Returns "header: question" per entry, joined by " | ", when
+              response_options carries a non-empty "questions" list
+            - Falls back to message when response_options is missing / malformed /
+              empty, or when no entry yields any text
+        """
+        if not isinstance( response_options, dict ):
+            return message
+        questions = response_options.get( "questions" )
+        if not isinstance( questions, list ) or not questions:
+            return message
+
+        parts = []
+        for q in questions:
+            if not isinstance( q, dict ):
+                continue
+            header   = str( q.get( "header",   "" ) ).strip()
+            question = str( q.get( "question", "" ) ).strip()
+            if header and question:
+                parts.append( f"{header}: {question}" )
+            elif question:
+                parts.append( question )
+            elif header:
+                parts.append( header )
+
+        if not parts:
+            return message
+        return " | ".join( parts )
 
     def _predict_yes_no( self, message: str, category: str, embedding: Optional[list] ) -> PredictionResult:
         """
@@ -1375,8 +1421,12 @@ class PredictionEngine:
             if store is None or provider is None:
                 return
 
-            # Extract the message from metadata if available
-            message = prediction_result.metadata.get( "original_message", "" ) if prediction_result.metadata else ""
+            # Extract the storage key from metadata. For an open_ended_batch prefer
+            # the content-bearing batch_question_key over the count-preamble
+            # original_message — storing the preamble is what let unrelated batches
+            # collide at similarity 1.0 (bug cdb5a76f). Retrieval embeds the same key.
+            meta    = prediction_result.metadata or {}
+            message = meta.get( "batch_question_key" ) or meta.get( "original_message", "" )
             if not message:
                 return  # Can't store without the original message
 

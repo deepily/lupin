@@ -37,7 +37,9 @@ class CalcIntent( BaseXMLModel ):
     </calc_intent>
 
     Fields (all str per BaseXMLModel convention — LLM I/O is always text):
-        operation: Calculation type (convert, compare_prices, mortgage)
+        operation: Calculation type (arithmetic, convert, compare_prices, mortgage)
+        operator: Arithmetic operator (add, subtract, multiply, divide, modulo, power)
+        operands: JSON array of numbers for arithmetic, e.g. [34, 67, 129]
         value: Primary numeric value (amount to convert)
         value_2: Secondary numeric value (unused currently, reserved)
         from_unit: Source unit for conversion
@@ -51,7 +53,9 @@ class CalcIntent( BaseXMLModel ):
         raw_query: Original natural language query
     """
 
-    operation   : str = Field( ..., description="Calculation type: convert, compare_prices, mortgage, unsupported" )
+    operation   : str = Field( ..., description="Calculation type: arithmetic, convert, compare_prices, mortgage, unsupported" )
+    operator    : str = Field( default="", description="Arithmetic operator: add, subtract, multiply, divide, modulo, power" )
+    operands    : str = Field( default="", description="JSON array of numbers for arithmetic, e.g. [34, 67, 129]" )
     value       : str = Field( default="", description="Primary numeric value" )
     value_2     : str = Field( default="", description="Secondary numeric value (reserved)" )
     from_unit   : str = Field( default="", description="Source unit for conversion" )
@@ -79,7 +83,12 @@ class CalcIntent( BaseXMLModel ):
 
     # Valid operations (ClassVar to avoid Pydantic treating as fields)
     VALID_OPERATIONS: ClassVar[ List[ str ] ] = [
-        "convert", "compare_prices", "mortgage", "unsupported"
+        "arithmetic", "convert", "compare_prices", "mortgage", "unsupported"
+    ]
+
+    # Valid arithmetic operators — mirrors calc_operations.ARITHMETIC_OPERATORS
+    VALID_OPERATORS: ClassVar[ List[ str ] ] = [
+        "add", "subtract", "multiply", "divide", "modulo", "power"
     ]
 
     def get_confidence_float( self ):
@@ -131,6 +140,31 @@ class CalcIntent( BaseXMLModel ):
             parsed = json.loads( self.items )
             return parsed if isinstance( parsed, list ) else []
         except ( json.JSONDecodeError, TypeError ):
+            return []
+
+    def get_operands_list( self ):
+        """
+        Parse operands JSON string to a list of floats.
+
+        Requires:
+            - self.operands is a JSON array string of numbers, or empty
+
+        Ensures:
+            - Returns a list of floats
+            - Returns empty list if parsing fails, is empty, or the array
+              holds anything that is not a number
+        """
+        if not self.operands or not self.operands.strip() or self.operands.strip() == "[]":
+            return []
+        try:
+            parsed = json.loads( self.operands )
+        except ( json.JSONDecodeError, TypeError ):
+            return []
+        if not isinstance( parsed, list ):
+            return []
+        try:
+            return [ float( operand ) for operand in parsed ]
+        except ( ValueError, TypeError ):
             return []
 
     def get_principal_float( self ):
@@ -228,7 +262,9 @@ class CalcIntent( BaseXMLModel ):
             - Placeholders are descriptive but clearly not real data
         """
         return cls(
-            operation    = "[operation: convert, compare_prices, mortgage, or unsupported]",
+            operation    = "[operation: arithmetic, convert, compare_prices, mortgage, or unsupported]",
+            operator     = "[arithmetic operator: add, subtract, multiply, divide, modulo, or power]",
+            operands     = "[JSON array of the numbers to combine, e.g. [34, 67, 129]]",
             value        = "[numeric value to convert]",
             value_2      = "[secondary value if needed]",
             from_unit    = "[source unit name]",
@@ -273,6 +309,14 @@ class CalcIntent( BaseXMLModel ):
             convert_intent = cls( operation="convert", value="10", from_unit="km", to_unit="miles" )
             assert convert_intent.get_value_float() == 10.0
             if debug: print( "  ✓ Value parsing" )
+
+            # Test operands parsing
+            arithmetic_intent = cls( operation="arithmetic", operator="add", operands="[34, 67, 129]" )
+            assert arithmetic_intent.get_operands_list() == [ 34.0, 67.0, 129.0 ]
+            assert cls( operation="arithmetic", operands="" ).get_operands_list() == []
+            assert cls( operation="arithmetic", operands="not json" ).get_operands_list() == []
+            assert cls( operation="arithmetic", operands='["a"]' ).get_operands_list() == []
+            if debug: print( "  ✓ Operands JSON parsing" )
 
             # Test items parsing
             items_json = '[{"name": "Brand A", "price": 3.49, "quantity": 12, "unit": "oz"}]'

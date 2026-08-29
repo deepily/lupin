@@ -1063,7 +1063,7 @@ def main():
             print( f"GCS bucket: {gcs_bucket}" )
             print( f"Output location: {gcs_bucket.rstrip( '/' )}/{user_email}/" )
         else:
-            local_path = cu.get_project_root() + config_mgr.get( "deep research output path" )
+            local_path = cu.get_project_root() + config_mgr.get_required( "deep research output path" )
             print( f"Output location: {local_path}/{user_email}/" )
         if gcs_fallback:
             print( "  (Fell back from GCS due to access issues)" )
@@ -1120,7 +1120,7 @@ def main():
                 if args.save_to_directory:
                     output_dir = args.save_to_directory
                 else:
-                    output_dir = cu.get_project_root() + config_mgr.get( "deep research output path" )
+                    output_dir = cu.get_project_root() + config_mgr.get_required( "deep research output path" )
 
                 print( "\n  Generating abstract for frontmatter..." )
                 abstract = asyncio.run( generate_abstract_for_cli(

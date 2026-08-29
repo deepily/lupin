@@ -4,6 +4,30 @@ Smoke test — end-to-end voice injection via UserPromptSubmit hook.
 
 Tests the complete flow: write JSONL buffer -> pipe mock payload through
 hook -> verify additionalContext output -> verify buffer consumed.
+
+🔴 READ THIS BEFORE CHANGING THE PATCHES BELOW. What was found here on
+2026-08-26 was a DEFECT, not a flaky test. The intermittent red was the symptom;
+the defect was that this file had no isolation at all and was reaching into
+production state every time it ran.
+
+Everything here drives the REAL user_prompt_submit.main(), which resolves a
+session id and then reads and writes that session's state. A made-up session id
+is NOT isolation: resolve_stable_session_id() does not reject an unknown id, it
+falls back to whatever live Claude Code session the bridge directory points at.
+Measured — the id it returned belonged to a colleague's running seat, not to the
+process invoking pytest. main() then called surface_dm_inbox() for that session,
+which does a live GET /api/dm/list and ADVANCES that session's DM high-water
+mark. Advancing it marks messages as already-shown, so a test run could consume
+a real DM addressed to a real person, and nothing in the output would say so.
+The two failures in twenty runs were simply the occasions when a DM happened to
+land inside the window and made the damage visible.
+
+So the fix is not "stop the red". Both e2e tests patch the session-id resolvers
+on user_prompt_submit itself (not on session_bridge, where the patch never
+reaches the copy main() actually calls), stub the two contributors that leave
+this process, and then ASSERT the synthetic id was the one used. Keep that
+assertion. It is the only thing standing between this file and a live
+colleague's inbox, and it fails on every run rather than on unlucky ones.
 """
 import io
 import json
@@ -60,12 +84,25 @@ def test_e2e_voice_injection():
         payload  = { "session_id": session_id }
         captured = io.StringIO()
 
+        # The voice buffer is only ONE of the four things main() concatenates into
+        # additionalContext. The other three are the peer-DM inbox, the late-answer
+        # catch-up, and the speakerphone rider. The first two reach OUT of this
+        # process: surface_dm_inbox() does a live `GET /api/dm/list` against the
+        # running server and reads/writes a high-water-mark file under the fleet
+        # data root. Left unstubbed they make this test's output depend on whether
+        # a colleague happened to send a DM while it ran. See the note on
+        # test_e2e_empty_prompt_passthrough for the measurement.
+        dm_stub     = MagicMock( return_value="" )
+        answer_stub = MagicMock( return_value="" )
+
         with patch( "lupin_cli.claude_code.hooks.lib.hook_common.SESSION_DIR", sessions_dir ), \
              patch( "sys.stdin", io.StringIO( json.dumps( payload ) ) ), \
              patch( "sys.stdout", captured ), \
              patch( "lupin_cli.claude_code.hooks.lib.hook_common.log_payload" ), \
              patch( "lupin_cli.claude_code.hooks.user_prompt_submit.speakerphone_reminder_block",
                     return_value="" ), \
+             patch( "lupin_cli.claude_code.hooks.user_prompt_submit.surface_dm_inbox", dm_stub ), \
+             patch( "lupin_cli.claude_code.hooks.user_prompt_submit.surface_owed_answers", answer_stub ), \
              patch( "lupin_cli.claude_code.hooks.user_prompt_submit.resolve_stable_session_id",
                     return_value=session_id ), \
              patch( "lupin_cli.claude_code.hooks.user_prompt_submit.get_claude_session_id",
@@ -74,6 +111,16 @@ def test_e2e_voice_injection():
                 user_prompt_submit.main()
             except SystemExit:
                 pass
+
+        # The hook must have run against the SYNTHETIC session, never the real one
+        # this pytest process is nested inside. If the session-id patches above name
+        # the wrong module, main() silently resolves the live session id instead and
+        # every downstream read/write lands on a running colleague's state.
+        assert dm_stub.call_count == 1, "main() should reconcile the DM inbox exactly once"
+        assert dm_stub.call_args[ 0 ][ 0 ] == session_id, (
+            f"hook ran against {dm_stub.call_args[ 0 ][ 0 ]!r}, not the synthetic "
+            f"{session_id!r} — the session-id patch target is wrong"
+        )
 
         # Parse output
         output = captured.getvalue().strip()
@@ -94,11 +141,39 @@ def test_e2e_voice_injection():
 
 
 def test_e2e_empty_prompt_passthrough():
-    """Empty buffer -> hook emits {} -> normal prompt flow."""
+    """
+    Empty buffer -> hook emits {} -> normal prompt flow.
+
+    Determinism fix, 2026-08-26. This test used to fail intermittently — measured
+    2 failures in 20 consecutive runs, and the failure text contained REAL DMs
+    from real colleagues, timestamped inside the test window. Two separate
+    mistakes combined:
+
+    1. It patched `session_bridge.get_claude_session_id`, but user_prompt_submit
+       imports that name directly, so the patch never reached the copy main()
+       actually calls. main() also calls `resolve_stable_session_id` FIRST, which
+       was not patched at all.
+    2. `resolve_stable_session_id( "nobuffe1-fake-uuid" )` does not reject an
+       unknown id — measured, it returns the LIVE session id of whatever Claude
+       Code process is running pytest. So the deliberately-fake id isolated
+       nothing, and the hook ran against a real, running session.
+
+    The consequence was worse than the red: `surface_dm_inbox()` then did a live
+    `GET /api/dm/list` for that real session and advanced its high-water-mark
+    file, which marks genuine DMs as already-shown. A test run could swallow a
+    colleague's message.
+
+    The fix patches the two resolvers on the module that actually calls them, and
+    stubs the two contributors that reach outside this process. The assertions
+    below check the isolation directly instead of hoping no DM arrives.
+    """
     from lupin_cli.claude_code.hooks import user_prompt_submit
 
     session_id = "nobuffe1-fake-uuid"
     captured   = io.StringIO()
+
+    dm_stub     = MagicMock( return_value="" )
+    answer_stub = MagicMock( return_value="" )
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         sessions_dir = Path( tmp_dir ) / ".claude" / "sessions"
@@ -112,12 +187,28 @@ def test_e2e_empty_prompt_passthrough():
              patch( "lupin_cli.claude_code.hooks.lib.hook_common.log_payload" ), \
              patch( "lupin_cli.claude_code.hooks.user_prompt_submit.speakerphone_reminder_block",
                     return_value="" ), \
-             patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_claude_session_id",
+             patch( "lupin_cli.claude_code.hooks.user_prompt_submit.surface_dm_inbox", dm_stub ), \
+             patch( "lupin_cli.claude_code.hooks.user_prompt_submit.surface_owed_answers", answer_stub ), \
+             patch( "lupin_cli.claude_code.hooks.user_prompt_submit.resolve_stable_session_id",
+                    return_value=session_id ), \
+             patch( "lupin_cli.claude_code.hooks.user_prompt_submit.get_claude_session_id",
                     return_value=session_id ):
             try:
                 user_prompt_submit.main()
             except SystemExit:
                 pass
+
+    # The isolation guard. This is what makes the test deterministic: it asserts
+    # the hook ran on the synthetic session rather than waiting to see whether a
+    # real DM leaked into the output. Point either resolver patch at the wrong
+    # module and this fails on every run, not on unlucky ones.
+    assert dm_stub.call_count == 1, "main() should reconcile the DM inbox exactly once"
+    assert dm_stub.call_args[ 0 ][ 0 ] == session_id, (
+        f"hook ran against {dm_stub.call_args[ 0 ][ 0 ]!r}, not the synthetic "
+        f"{session_id!r} — the session-id patch target is wrong, so this test was "
+        f"reading and mutating a live session's DM inbox"
+    )
+    assert answer_stub.call_args[ 0 ][ 0 ] == session_id
 
     result = json.loads( captured.getvalue().strip() )
     assert result == {}, f"Expected empty dict, got: {result}"

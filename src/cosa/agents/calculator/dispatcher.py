@@ -35,7 +35,13 @@ def dispatch( intent, debug=False ):
 
     if debug: print( f"calculator.dispatcher.dispatch: operation={op}" )
 
-    if op == "convert":
+    if op == "arithmetic":
+        return calc_operations.arithmetic(
+            operands = intent.get_operands_list(),
+            operator = intent.operator
+        )
+
+    elif op == "convert":
         return calc_operations.convert(
             value     = intent.get_value_float(),
             from_unit = intent.from_unit,
@@ -77,7 +83,10 @@ def format_result_for_voice( result, operation ):
     if status == "error":
         return f"Sorry, there was a problem: {message}"
 
-    if operation == "convert":
+    if operation == "arithmetic":
+        return _format_arithmetic_for_voice( result )
+
+    elif operation == "convert":
         return _format_convert_for_voice( result )
 
     elif operation == "compare_prices":
@@ -88,6 +97,27 @@ def format_result_for_voice( result, operation ):
 
     # Fallback
     return message if message else f"Calculation completed with status {status}."
+
+
+def _format_arithmetic_for_voice( result ):
+    """
+    Format an arithmetic result for TTS.
+
+    Requires:
+        - result contains expression and result keys
+
+    Ensures:
+        - Returns natural phrasing like "789 minus 456 is 333."
+    """
+    expression = result[ "expression" ]
+    value      = result[ "result" ]
+
+    if isinstance( value, int ):
+        display_value = f"{value:,}"
+    else:
+        display_value = f"{round( value, 4 ):,}"
+
+    return f"{expression} is {display_value}."
 
 
 def _format_convert_for_voice( result ):
@@ -259,6 +289,19 @@ def quick_smoke_test():
     passed = True
 
     try:
+        # Test dispatch — arithmetic
+        intent = CalcIntent( operation="arithmetic", operator="subtract", operands="[789, 456]" )
+        result = dispatch( intent, debug=True )
+        assert result[ "status" ] == "ok"
+        assert result[ "result" ] == 333
+        print( f"  ✓ dispatch arithmetic: 789 - 456 → {result[ 'result' ]}" )
+
+        # Test voice formatting — arithmetic
+        voice = format_result_for_voice( result, "arithmetic" )
+        assert "333" in voice
+        assert "minus" in voice
+        print( f"  ✓ format arithmetic: {voice}" )
+
         # Test dispatch — convert
         intent = CalcIntent( operation="convert", value="10", from_unit="km", to_unit="miles" )
         result = dispatch( intent, debug=True )

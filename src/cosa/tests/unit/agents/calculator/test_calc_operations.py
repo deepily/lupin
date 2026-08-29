@@ -1,18 +1,112 @@
 """
 Unit tests for cosa.agents.calculator.calc_operations.
 
-Pure calculation functions (no LLM): convert / _convert_temperature / compare_prices /
-mortgage. Tested exhaustively across success + every error branch. The only mock is a
+Pure calculation functions (no LLM): arithmetic / convert / _convert_temperature /
+compare_prices / mortgage. Tested exhaustively across success + every error branch. The only mock is a
 targeted patch of _convert_temperature to exercise convert()'s defensive None-guard
 (unreachable with valid canonical temperature units).
 
 Created 2026-05-31 (CoSA coverage campaign, calculator package — Tiffany 💍). New file.
+Extended 2026-08-24 with TestArithmetic (row 11af54f8 — Krishna 🦚).
 """
 
 import unittest
 from unittest.mock import patch
 
 from cosa.agents.calculator import calc_operations as ops
+
+
+class TestArithmetic( unittest.TestCase ):
+    """Unit tests for arithmetic() — the calculator's own plain-math operation."""
+
+    def test_subtract_two( self ):
+        """Test a two-operand subtraction."""
+        r = ops.arithmetic( [ 789, 456 ], "subtract" )
+        self.assertEqual( r[ "status" ], "ok" )
+        self.assertEqual( r[ "result" ], 333 )
+        self.assertEqual( r[ "expression" ], "789 minus 456" )
+
+    def test_add_nary( self ):
+        """Test add folds over more than two operands."""
+        self.assertEqual( ops.arithmetic( [ 34, 67, 129 ], "add" )[ "result" ], 230 )
+
+    def test_multiply_nary( self ):
+        """Test multiply folds over more than two operands."""
+        self.assertEqual( ops.arithmetic( [ 2, 3, 4 ], "multiply" )[ "result" ], 24 )
+
+    def test_divide( self ):
+        """Test an exact division returns an int."""
+        self.assertEqual( ops.arithmetic( [ 45, 9 ], "divide" )[ "result" ], 5 )
+
+    def test_divide_fractional( self ):
+        """Test a non-integral division keeps its fraction."""
+        self.assertEqual( ops.arithmetic( [ 10, 4 ], "divide" )[ "result" ], 2.5 )
+
+    def test_modulo( self ):
+        """Test a remainder with a non-zero answer."""
+        self.assertEqual( ops.arithmetic( [ 345, 22 ], "modulo" )[ "result" ], 15 )
+
+    def test_power( self ):
+        """Test exponentiation."""
+        self.assertEqual( ops.arithmetic( [ 2, 10 ], "power" )[ "result" ], 1024 )
+
+    def test_folds_left_to_right( self ):
+        """Test subtraction folds left, so [100, 20, 5] is (100-20)-5."""
+        self.assertEqual( ops.arithmetic( [ 100, 20, 5 ], "subtract" )[ "result" ], 75 )
+
+    def test_operator_case_insensitive( self ):
+        """Test the operator is trimmed and lowercased before lookup."""
+        self.assertEqual( ops.arithmetic( [ 3, 4 ], "  ADD  " )[ "operator" ], "add" )
+
+    def test_string_operands_coerced( self ):
+        """Test numeric strings are accepted as operands."""
+        self.assertEqual( ops.arithmetic( [ "789", "456" ], "subtract" )[ "result" ], 333 )
+
+    def test_none_operator_errors( self ):
+        """Test a missing operator errors."""
+        self.assertEqual( ops.arithmetic( [ 1, 2 ], None )[ "status" ], "error" )
+
+    def test_unknown_operator_errors( self ):
+        """Test an operator outside the table errors."""
+        self.assertEqual( ops.arithmetic( [ 1, 2 ], "frobnicate" )[ "status" ], "error" )
+
+    def test_too_few_operands_errors( self ):
+        """Test fewer than two operands errors."""
+        self.assertEqual( ops.arithmetic( [ 5 ], "add" )[ "status" ], "error" )
+
+    def test_empty_operands_errors( self ):
+        """Test an empty operand list errors."""
+        self.assertEqual( ops.arithmetic( [], "add" )[ "status" ], "error" )
+
+    def test_non_numeric_operand_errors( self ):
+        """Test a non-numeric operand errors."""
+        self.assertEqual( ops.arithmetic( [ 1, "banana" ], "add" )[ "status" ], "error" )
+
+    def test_divide_by_zero_errors( self ):
+        """Test division by zero errors instead of raising."""
+        r = ops.arithmetic( [ 45, 0 ], "divide" )
+        self.assertEqual( r[ "status" ], "error" )
+        self.assertIn( "divide by zero", r[ "message" ] )
+
+    def test_modulo_by_zero_errors( self ):
+        """Test a remainder modulo zero errors instead of raising."""
+        r = ops.arithmetic( [ 45, 0 ], "modulo" )
+        self.assertEqual( r[ "status" ], "error" )
+        self.assertIn( "modulo zero", r[ "message" ] )
+
+    def test_zero_to_negative_power_errors( self ):
+        """Test 0 ** -1 is reported out of range, not raised."""
+        self.assertEqual( ops.arithmetic( [ 0, -1 ], "power" )[ "status" ], "error" )
+
+    def test_overflow_errors( self ):
+        """Test an overflowing power is reported out of range, not raised."""
+        self.assertEqual( ops.arithmetic( [ 10, 1000000 ], "power" )[ "status" ], "error" )
+
+    def test_complex_result_errors( self ):
+        """Test a negative base with a fractional exponent has no real answer."""
+        r = ops.arithmetic( [ -8, 0.5 ], "power" )
+        self.assertEqual( r[ "status" ], "error" )
+        self.assertIn( "no real-number answer", r[ "message" ] )
 
 
 class TestConvert( unittest.TestCase ):

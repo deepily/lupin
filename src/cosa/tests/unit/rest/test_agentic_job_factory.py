@@ -2,12 +2,11 @@
 """
 Unit tests — `cosa.rest.agentic_job_factory` (comprehensive coverage).
 
-Complements `test_agentic_job_factory_heartbeat.py` (which owns the
-`agent router go to heartbeat poker` branch). This file covers:
+This file covers:
 
     - the four private parser helpers (`_parse_optional_int`, `_parse_boolean`,
       `_parse_optional_boolean`, `_parse_optional_float`) across every arm,
-    - all ten non-heartbeat command branches of `create_agentic_job()`, with
+    - every command branch of `create_agentic_job()`, with
       each concrete Job class boundary-mocked at its source module so NO heavy
       agent / LLM / network init runs and ZERO API spend occurs,
     - `resume_job()` across its full success/failure branch matrix.
@@ -421,6 +420,181 @@ class TestCreateAgenticJobBranches( unittest.TestCase ):
 # ---------------------------------------------------------------------------
 # resume_job — full branch matrix
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Queue directives — scheduled_at / monopolize / spawned_by_id_hash
+# ---------------------------------------------------------------------------
+class _BareJob:
+    """A job with its OWN opinions already set, standing in for a real Job class.
+
+    A MagicMock cannot show this defect: every attribute read off a mock answers
+    something, so an overwrite and a preserved value look identical.
+    """
+
+    def __init__( self, scheduled_at=None, monopolize=False, spawned_by_id_hash=None ):
+        self.scheduled_at       = scheduled_at
+        self.monopolize         = monopolize
+        self.spawned_by_id_hash = spawned_by_id_hash
+
+
+class TestStampQueueDirectives( unittest.TestCase ):
+    """
+    Exercises `_stamp_queue_directives`, the seam that carries a caller's queue
+    directives onto a built job.
+
+    WHY IT EXISTS. Every endpoint retiring into `/api/v2/submit` set these three on
+    the job by hand after this factory returned — `deep_research.py:172`,
+    `podcast_generator.py:530`, `swe_team.py:154`, `mock_job.py:185` and the rest —
+    and this factory named neither `scheduled_at` nor `monopolize` anywhere. Since
+    it reads its arguments key by name, a directive it did not name was dropped in
+    silence. As those doors retire there is no handler left to do the stamping, so
+    it happens here instead.
+
+    Ensures:
+        - a directive the caller SET lands on the job
+        - a directive the caller did NOT set leaves the job's own value alone
+        - the same job object comes back, not a copy
+    """
+
+    def test_a_set_directive_lands_on_the_job( self ):
+        job = ajf._stamp_queue_directives( _BareJob(), "2026-08-22T10:30:00-04:00", True, "ts-parent" )
+        self.assertEqual( job.scheduled_at, "2026-08-22T10:30:00-04:00" )
+        self.assertTrue( job.monopolize )
+        self.assertEqual( job.spawned_by_id_hash, "ts-parent" )
+
+    def test_an_unset_directive_does_not_overwrite_the_jobs_own_value( self ):
+        """
+        RED ON REVERT: drop the `if` guards and write the three unconditionally, and a
+        submission that said nothing about scheduling silently disarms a job class that
+        had already decided for itself — the monopolize flag being the one that hurts,
+        because a job that must run alone would quietly start running beside others.
+        """
+        job = _BareJob( scheduled_at="2026-08-22T11:00:00-04:00", monopolize=True,
+                        spawned_by_id_hash="ts-its-own" )
+        ajf._stamp_queue_directives( job, None, False, None )
+
+        self.assertEqual( job.scheduled_at, "2026-08-22T11:00:00-04:00" )
+        self.assertTrue( job.monopolize, "an unset monopolize must not disarm a job that set it" )
+        self.assertEqual( job.spawned_by_id_hash, "ts-its-own" )
+
+    def test_a_none_job_comes_back_as_none_rather_than_crashing( self ):
+        """
+        `resume_job` returns None on two paths — no checkpoint row, or a row with no
+        routing command — so a caller asking to resume a job that is not there gets None.
+        Stamping a schedule onto None raises AttributeError out of the door, turning the
+        factory's own "no such job" answer into a crash.
+
+        RED ON REVERT: drop the `if job is None` guard and this raises AttributeError
+        (Pocholo, on the commit that added the stamping).
+        """
+        self.assertIsNone( ajf._stamp_queue_directives( None, "2026-08-22T10:30:00-04:00", True, "ts-parent" ) )
+
+    def test_it_returns_the_same_object( self ):
+        """Not a copy: the caller returns what comes back, and a copy would strand the
+        constructor's work on an object nobody keeps."""
+        job = _BareJob()
+        self.assertIs( ajf._stamp_queue_directives( job, None, False, None ), job )
+
+
+class TestCreateAgenticJobCarriesTheDirectives( unittest.TestCase ):
+    """
+    The directives reach a job built through the real factory, on BOTH return paths.
+
+    Ensures:
+        - the common tail stamps a normally-constructed job
+        - the TFE-resume branch, which returns early and skips that tail, stamps too
+    """
+
+    def setUp( self ):
+        self._patchers = []
+        self.mocks     = {}
+        for module_path, cls_name in _JOB_CLASSES:
+            p = patch( f"{module_path}.{cls_name}", MagicMock( name=cls_name ) )
+            self.mocks[ cls_name ] = p.start()
+            self._patchers.append( p )
+
+    def tearDown( self ):
+        for p in reversed( self._patchers ):
+            p.stop()
+
+    def test_the_common_tail_stamps_the_job( self ):
+        """RED ON REVERT: return the bare job from the tail and all three asserts fail."""
+        self.mocks[ "DeepResearchJob" ].return_value = _BareJob()
+        job = create_agentic_job(
+            command            = "agent router go to deep research",
+            args_dict          = { "query": "q" },
+            user_id            = "u1",
+            user_email         = "u@test.com",
+            session_id         = "s1",
+            scheduled_at       = "2026-08-22T10:30:00-04:00",
+            monopolize         = True,
+            spawned_by_id_hash = "ts-parent",
+        )
+        self.assertEqual( job.scheduled_at, "2026-08-22T10:30:00-04:00" )
+        self.assertTrue( job.monopolize )
+        self.assertEqual( job.spawned_by_id_hash, "ts-parent" )
+
+    def test_the_resume_branch_stamps_too( self ):
+        """That branch returns before the common tail, so it does its own stamping — a
+        caller resuming a stalled job at ten in the morning means it just as much as a
+        caller starting fresh work.
+
+        RED ON REVERT: return `resume_job(...)` bare and this fails.
+        """
+        resumed = _BareJob()
+        with patch( "cosa.agents.test_fix_expediter.resume_resolver.resolve_resume_target" ) as resolver, \
+             patch.object( ajf, "resume_job", return_value=resumed ) as resume:
+            resolver.return_value = MagicMock( job_id="tfe-123" )
+            job = create_agentic_job(
+                command            = "agent router go to test fix expediter resume",
+                args_dict          = { "resume_from": "the stalled one" },
+                user_id            = "u1",
+                user_email         = "u@test.com",
+                session_id         = "s1",
+                scheduled_at       = "2026-08-22T10:30:00-04:00",
+                monopolize         = True,
+            )
+        resume.assert_called_once()
+        self.assertIs( job, resumed )
+        self.assertEqual( job.scheduled_at, "2026-08-22T10:30:00-04:00" )
+        self.assertTrue( job.monopolize )
+
+    def test_a_resume_that_finds_no_job_still_answers_none( self ):
+        """The whole path, not just the helper: a resume whose checkpoint read comes back
+        empty must return the factory's ordinary None, which the flow degrades on, rather
+        than raising past it.
+
+        RED ON REVERT: drop the None guard in the stamp and this raises AttributeError.
+        """
+        with patch( "cosa.agents.test_fix_expediter.resume_resolver.resolve_resume_target" ) as resolver, \
+             patch.object( ajf, "resume_job", return_value=None ):
+            resolver.return_value = MagicMock( job_id="tfe-123" )
+            job = create_agentic_job(
+                command      = "agent router go to test fix expediter resume",
+                args_dict    = { "resume_from": "a job that is not there" },
+                user_id      = "u1",
+                user_email   = "u@test.com",
+                session_id   = "s1",
+                scheduled_at = "2026-08-22T10:30:00-04:00",
+            )
+        self.assertIsNone( job )
+
+    def test_a_caller_that_names_no_directive_changes_nothing( self ):
+        """The default path — every existing caller of this factory, which passes none of
+        the three and must keep getting exactly the job it got before."""
+        self.mocks[ "DeepResearchJob" ].return_value = _BareJob(
+            scheduled_at="2026-08-22T11:00:00-04:00", monopolize=True )
+        job = create_agentic_job(
+            command    = "agent router go to deep research",
+            args_dict  = { "query": "q" },
+            user_id    = "u1",
+            user_email = "u@test.com",
+            session_id = "s1",
+        )
+        self.assertEqual( job.scheduled_at, "2026-08-22T11:00:00-04:00" )
+        self.assertTrue( job.monopolize )
+        self.assertIsNone( job.spawned_by_id_hash )
+
+
 class TestResumeJob( unittest.TestCase ):
     """
     Exercises `resume_job` reconstruction.

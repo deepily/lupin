@@ -65,6 +65,35 @@ def _isolate_hook_log_dir( tmp_path, monkeypatch ):
     monkeypatch.setenv( "LUPIN_HOOK_LOG_DIR", str( tmp_path / "hook-logs" ) )
 
 
+@pytest.fixture( autouse=True )
+def _isolate_fleet_data_root( tmp_path, monkeypatch ):
+    """
+    Redirect the FLEET DATA ROOT to a per-test tmp dir via DEEPILY_DATA_DIR, so
+    no unit test writes into the real projects-data/<repo>/ directory.
+
+    Why (the third sibling of the two isolations above): SessionStart now stamps
+    a re-spin boot receipt on EVERY boot, and `_build_memento_block` is driven
+    directly by several register_session unit suites. A test that passes no
+    repo_root gets the AMBIENT one — the real repo — and its receipt lands in the
+    real fleet dir, which is the directory the wake check reads. Measured
+    2026-08-23: four register_session suites planted 9 receipts there between
+    them, one carrying a real persona, a live memento_slot and a booted_at of
+    that second. A healthy-looking receipt in the live directory, written by the
+    test suite, is a false green waiting for a same-id re-spin.
+
+    Rick's ruling on decision 2b20a6d6 (2026-07-27) is the standing rule: no test
+    touches a live data store; if it is not isolated it gets fixed. This is the
+    one place that cannot be forgotten by the next suite to arrive — passing the
+    directory correctly at each call site (which the stamp now also does) fixes
+    the callers that supply a repo_root, and this fixes the ones that do not.
+
+    `fleet_data_root()` reads DEEPILY_DATA_DIR at CALL time, so the redirect holds
+    regardless of import order. A test that needs the real root monkeypatches it
+    away locally.
+    """
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "fleet-data" ) )
+
+
 # ---------------------------------------------------------------------------
 # RETIRED 2026-07-27 — the `_PG_ISOLATION_MODULES` allowlist and its
 # `_isolate_pg_vector_store` per-test-schema fixture (bug cfcbb703 Family B).
@@ -80,11 +109,9 @@ def _isolate_hook_log_dir( tmp_path, monkeypatch ):
 # isolated then it needs to be removed or fixed." A list of sanctioned offenders is
 # neither.
 #
-# Both covered modules — test_data_origin and test_proxy_decision_embeddings — now
-# carry their own autouse `_pin_lancedb_backend` fixture, which pins the backend flag
-# so their tmpdir LanceDB stores are REAL isolation rather than a shared-store
-# redirect. `resolve_lancedb_path` (vector_store_backend.py) now raises at
-# construction if any future test hands a db_path to a postgres-routed class, so a
-# new offender fails loudly at its own call site instead of needing to be remembered
-# here.
+# There is one store now, and no constructor takes a location, so a test CANNOT
+# redirect a store by handing it a path — the shape that caused this is designed
+# out rather than policed. test_vector_store_path_guard.py holds that line: it
+# proves no store class accepts a location parameter at all, so a new offender
+# fails there loudly instead of needing to be remembered here.
 # ---------------------------------------------------------------------------

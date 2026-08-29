@@ -59,9 +59,19 @@ logger = logging.getLogger( __name__ )
 PODCAST_SCRIPT_TOOLS = []
 
 # With tools=[] there is nothing to permit, so the permission mode never gates
-# a real tool. "plan" keeps the session read-only as belt-and-suspenders should
-# any built-in ever leak through.
-PODCAST_PERMISSION_MODE = "plan"
+# a real tool — the read-only guarantee comes from the empty allow-list above.
+#
+# It was previously "plan" as belt-and-suspenders. That reasoning was wrong:
+# "plan" does not merely restrict tools, it puts the model in PLAN MODE, which
+# changes what it produces. Asked for a podcast script, a model in plan mode
+# writes a PLAN for a podcast script — 8,050 characters of prose that the JSON
+# parser then correctly rejects with "no recoverable JSON object". Observed on
+# job pg-efc6b2c8 (2026-08-04), where the response opened by apologising that it
+# could not create `/home/rruiz/.claude/plans/create-a-podcast-script-*.md`.
+#
+# Valid values, read from the installed SDK (claude_agent_sdk/types.py:24,
+# v0.1.56): "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk".
+PODCAST_PERMISSION_MODE = "default"
 
 
 def _temperature_to_steer( temperature: float ) -> str:

@@ -88,25 +88,20 @@ def test_init_runs_only_once( make_factory ):
 
 
 def test_init_loads_vendor_config( make_factory ):
-    """__init__ populates vendor URL/env-var/default-param maps."""
+    """__init__ populates vendor URL + default-param maps (env-var NAME lives in VENDOR_CONFIG)."""
     f = make_factory()
     assert f.VENDOR_URLS[ "openai" ] == "https://api.openai.com/v1"
-    assert f.VENDOR_API_ENV_VARS[ "openai" ] == "OPENAI_API_KEY"
-    assert f.VENDOR_API_ENV_VARS[ "vllm" ] is None            # local vendor → None
+    assert f.VENDOR_CONFIG[ "openai" ][ "env_var" ] == "OPENAI_API_KEY"
     assert f.CLIENT_DEFAULT_PARAMS[ "temperature" ] == "0.7"
 
 
 # =========================================================================== #
-# _load_vendor_urls / _load_vendor_env_vars override paths
+# _load_vendor_urls override path
 # =========================================================================== #
-def test_vendor_maps_honor_ini_overrides( make_factory ):
-    """INI values override the hardcoded vendor URL + env-var defaults."""
-    f = make_factory( values={
-        "llm vendor url openai"     : "http://override/v1",
-        "llm vendor env var openai" : "MY_OPENAI_KEY",
-    } )
+def test_vendor_urls_honor_ini_overrides( make_factory ):
+    """INI values override the hardcoded vendor URL defaults (URL is a per-deployment axis)."""
+    f = make_factory( values={ "llm vendor url openai": "http://override/v1" } )
     assert f.VENDOR_URLS[ "openai" ] == "http://override/v1"
-    assert f.VENDOR_API_ENV_VARS[ "openai" ] == "MY_OPENAI_KEY"
 
 
 # =========================================================================== #
@@ -208,13 +203,27 @@ def test_vendor_client_unsupported_raises( make_factory ):
 
 
 def test_vendor_client_chat_env_key_from_environment( make_factory ):
-    """A chat vendor whose env-var is already set uses it (no get_api_key)."""
+    """A chat vendor whose env-var is trusted (nobody else writes it) uses the env value."""
     f = make_factory()
-    os.environ[ "OPENAI_API_KEY" ] = "env-key"
-    client = f._get_vendor_specific_client( "openai:gpt-4", debug=True )
+    os.environ[ "ANTHROPIC_API_KEY" ] = "env-key"
+    client = f._get_vendor_specific_client( "anthropic:claude-3", debug=True )
     assert isinstance( client, _StubChat )
-    assert client.kwargs[ "model_name" ] == "openai:gpt-4"
+    assert client.kwargs[ "model_name" ] == "anthropic:claude-3"
     assert client.kwargs[ "api_key" ] == "env-key"
+
+
+def test_vendor_client_openai_ignores_shared_env_key( make_factory ):
+    """openai's env var doubles as the shared compat target, so it resolves its OWN key fresh.
+
+    Even with OPENAI_API_KEY already set process-global (e.g. a groq compat-write), openai
+    must NOT adopt it — it fetches key-for-openai via du.get_api_key. Guards the api_key half
+    of the cross-client leak Arnold's isolation test asserts.
+    """
+    f = make_factory()
+    os.environ[ "OPENAI_API_KEY" ] = "leaked-from-another-vendor"
+    client = f._get_vendor_specific_client( "openai:gpt-4", debug=True )
+    assert client.kwargs[ "api_key" ] == "key-for-openai"          # own key, not the leaked env value
+    assert os.environ[ "OPENAI_API_KEY" ] == "key-for-openai"      # and it reclaims the shared var
 
 
 def test_vendor_client_chat_env_key_via_get_api_key( make_factory ):
@@ -233,6 +242,33 @@ def test_vendor_client_set_openai_env_compat( make_factory ):
     f._get_vendor_specific_client( "groq:llama-3", debug=True )
     assert os.environ[ "OPENAI_API_KEY" ] == "key-for-groq"
     assert os.environ[ "OPENAI_BASE_URL" ] == f.VENDOR_URLS[ "groq" ]
+
+
+def test_vendor_client_env_var_name_from_vendor_config( make_factory ):
+    """The env-var NAME comes from VENDOR_CONFIG (a provider constant), and google-gla → GEMINI_API_KEY.
+
+    Regression for 7f361ccf (fix b): the env-var name is NOT an INI knob. google-gla's
+    provider hardcodes GEMINI_API_KEY, so that is the name the factory writes.
+    """
+    f = make_factory()
+    os.environ.pop( "GEMINI_API_KEY", None )
+    client = f._get_vendor_specific_client( "google-gla:gemini-2.0", debug=True )
+    assert isinstance( client, _StubChat )
+    assert client.kwargs[ "api_key" ] == "key-for-gemini"
+    assert os.environ[ "GEMINI_API_KEY" ] == "key-for-gemini"
+
+
+def test_vendor_client_missing_key_raises_readable_error( make_factory, monkeypatch ):
+    """A missing key file (du.get_api_key → None) raises a readable auth error, not TypeError.
+
+    Regression for 7f361ccf near-miss: `os.environ[env_var] = None` raised an opaque
+    TypeError. It must fail with a ValueError naming the vendor + env var + key file.
+    """
+    f = make_factory()
+    monkeypatch.setattr( factory_mod.du, "get_api_key", lambda name: None )
+    os.environ.pop( "GEMINI_API_KEY", None )
+    with pytest.raises( ValueError, match="No API key for vendor 'google-gla'" ):
+        f._get_vendor_specific_client( "google-gla:gemini-2.0" )
 
 
 def test_vendor_client_local_vllm_completion( make_factory ):
@@ -342,3 +378,120 @@ def test_agentwrapper_run_reraises_quietly_when_no_debug( monkeypatch, capsys ):
     with pytest.raises( ValueError, match="boom" ):
         w.run( "hi" )
     assert "Error in AgentWrapper.run" not in capsys.readouterr().out
+
+
+# =========================================================================== #
+# The google-genai VENDOR dispatch (raw "google-genai:" descriptor + client_type
+# =="genai" branch) was a SECOND route to GeminiVertexClient with no real caller —
+# no INI descriptor used it, nothing constructed the key dynamically. Removed as
+# dead code (bug 1b6c0b1f); its 3 tests went with it. The LIVE route is the
+# vertex:// config-key path, covered below.
+# =========================================================================== #
+
+
+# =========================================================================== #
+# vertex:// CONFIG-KEY reachability — row 3405f0b2 (the silent-wrong-client fix)
+# =========================================================================== #
+# The tutor names its model by a CONFIG KEY (llm spec key for dm tutor rewrite =
+# dm_tutor/phi_4). get_client() takes the exists->config path for such a key and
+# NEVER consults VENDOR_CONFIG, so the google-genai vendor entry alone is
+# unreachable via that route — a config spec would silently build a ChatClient and
+# the study would run on the wrong client without knowing. The vertex:// prefix arm
+# (an elif BEFORE the ChatClient else; the else is untouched) closes that.
+import cosa.agents.gemini_vertex_client as gvc_mod
+from cosa.agents.gemini_vertex_client import GeminiVertexClient
+
+
+def test_vertex_config_key_reaches_gemini_client( make_factory, monkeypatch ):
+    """get_client on a CONFIG KEY whose value is vertex://<location>@<model_id>
+    returns a GeminiVertexClient — NOT a silently-substituted ChatClient."""
+    monkeypatch.setattr( gvc_mod, "resolve_gcp_project_id", lambda *a, **k: "test-proj" )
+    f = make_factory(
+        exists_keys = [ "dm_tutor/flash_lite" ],
+        values      = {
+            "dm_tutor/flash_lite"        : "vertex://global@gemini-3.1-flash-lite",
+            "dm_tutor/flash_lite_params" : {},
+        },
+    )
+    client = f.get_client( "dm_tutor/flash_lite" )
+    assert isinstance( client, GeminiVertexClient )          # the fix: reachable
+    assert not isinstance( client, _StubChat )               # and NOT a silent ChatClient
+    assert client.model_name == "gemini-3.1-flash-lite"
+    assert client.location   == "global"                     # location is recorded, not defaulted
+
+
+def test_vertex_config_key_forwards_params_to_client( make_factory, monkeypatch ):
+    """Bug 3067adf6: the factory must thread the spec-key `_params` dict into the
+    GeminiVertexClient so temperature/max_tokens actually reach generate_content —
+    they were dropped, running the Flash-Lite arm at the SDK default and confounding
+    the paired comparison. Asserts the values arrive MAPPED to SDK field names."""
+    monkeypatch.setattr( gvc_mod, "resolve_gcp_project_id", lambda *a, **k: "test-proj" )
+    f = make_factory(
+        exists_keys = [ "dm_tutor/flash_lite" ],
+        values      = {
+            "dm_tutor/flash_lite"        : "vertex://global@gemini-3.1-flash-lite",
+            "dm_tutor/flash_lite_params" : { "temperature": 0.0, "max_tokens": 4096 },
+        },
+    )
+    client = f.get_client( "dm_tutor/flash_lite" )
+    assert isinstance( client, GeminiVertexClient )
+    # the params were threaded AND key-mapped (max_tokens -> max_output_tokens)
+    assert client._gen_config_kwargs == { "temperature": 0.0, "max_output_tokens": 4096 }
+
+
+def test_vertex_spec_without_location_fails_loud( make_factory, monkeypatch ):
+    """A vertex:// spec missing the <location>@ segment RAISES — the paired study
+    must record where each arm ran, so this never defaults silently."""
+    monkeypatch.setattr( gvc_mod, "resolve_gcp_project_id", lambda *a, **k: "test-proj" )
+    f = make_factory(
+        exists_keys = [ "no_loc" ],
+        values      = { "no_loc": "vertex://gemini-3.1-flash-lite", "no_loc_params": {} },
+    )
+    with pytest.raises( ValueError ):
+        f.get_client( "no_loc" )
+
+
+def test_vertex_spec_known_bad_region_fails_loud( make_factory, monkeypatch ):
+    """Bug 1b79bef5: the vertex:// arm only checked for the '@' separator, so a spec
+    with a known-bad region (us-central1, which 404s for this model) built a client
+    that would fail at first call. It must RAISE at get_client(), before construction."""
+    monkeypatch.setattr( gvc_mod, "resolve_gcp_project_id", lambda *a, **k: "test-proj" )
+    f = make_factory(
+        exists_keys = [ "bad_region" ],
+        values      = {
+            "bad_region"        : "vertex://us-central1@gemini-3.1-flash-lite",
+            "bad_region_params" : {},
+        },
+    )
+    with pytest.raises( ValueError, match="known-bad" ):
+        f.get_client( "bad_region" )
+
+
+def test_non_vertex_config_spec_still_returns_chat( make_factory ):
+    """The ChatClient else is untouched: an ordinary config spec still builds a chat client."""
+    f = make_factory(
+        exists_keys = [ "plain" ],
+        values      = { "plain": "gpt-4o", "plain_params": {} },
+    )
+    assert isinstance( f.get_client( "plain" ), _StubChat )
+
+
+# =========================================================================== #
+# client_type dispatch: unknown EXPLICIT value fails loud — row 3405f0b2 adjacent
+# =========================================================================== #
+def test_unknown_explicit_client_type_raises( make_factory, monkeypatch ):
+    """A vendor entry with an EXPLICIT unknown client_type RAISES rather than silently
+    returning a ChatClient — a typo'd/future-unwired type must not become a wrong client."""
+    f = make_factory()
+    monkeypatch.setitem( f.VENDOR_CONFIG, "bogusvendor", { "client_type": "bogus" } )
+    with pytest.raises( ValueError, match="Unknown client_type" ):
+        f.get_client( "bogusvendor:some-model" )
+
+
+def test_omitted_client_type_still_defaults_to_chat( make_factory, monkeypatch ):
+    """An OMITTED client_type still defaults to 'chat' → ChatClient — the default is
+    preserved; only an explicit unknown value fails loud."""
+    f = make_factory()
+    # groq, minus its explicit client_type key: omitted -> config.get default 'chat'.
+    monkeypatch.setitem( f.VENDOR_CONFIG, "groq", { "env_var": "GROQ_API_KEY", "key_name": "groq" } )
+    assert isinstance( f.get_client( "groq:llama-x" ), _StubChat )

@@ -32,6 +32,29 @@ import cosa.utils.util_stopwatch as sw
 from cosa.config.configuration_manager import ConfigurationManager
 
 
+class EmbeddingProviderUnreachable( RuntimeError ):
+    """
+    The embedding service could not be reached at all — a TRANSPORT failure.
+
+    Raised only after this module has already spent every configured retry and
+    backoff, so it means the service is definitively not answering: DNS failure,
+    connection refused, unroutable host, or a per-attempt timeout that never
+    completed a request.
+
+    Why it is its own type: callers that retry by SHRINKING the request (batch
+    splitters, adaptive budgets) need to tell "the request was too large" — where
+    a smaller retry is the correct remedy — from "nothing is listening", where
+    every retry at every size is guaranteed to fail identically. Without this
+    distinction a batch splitter converts one dead dependency into one doomed
+    retry per row (bug 13b35b37, found 2026-08-17: a 100-row batch split all the
+    way to 100 single-row retries, every one failing on the same dead socket).
+
+    Subclasses RuntimeError deliberately: every existing `except RuntimeError`
+    and `except Exception` caller keeps working unchanged. Only callers that
+    WANT the distinction have to ask for it.
+    """
+
+
 class EmbeddingProvider:
     """
     Routing layer that delegates embedding generation to the configured engine.
@@ -357,7 +380,7 @@ class EmbeddingProvider:
                 if self.debug: print( f"[{label}] attempt {attempt + 1}/{attempts} failed ({last_failure}); retrying in {delay:.1f}s" )
                 time.sleep( delay )
 
-        raise RuntimeError(
+        raise EmbeddingProviderUnreachable(
             f"{label} unreachable at {url} after {attempts} attempt(s): {last_failure}. "
             f"Per-attempt timeout was {timeout}s — if the model server is scale-to-zero, "
             f"a cold start has been measured at 31.5-66.0s, so raise "

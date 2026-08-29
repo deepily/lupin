@@ -29,14 +29,18 @@ import time
 from fastapi import HTTPException
 from fastapi.responses import PlainTextResponse
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+import cosa.rest.routers.deep_research as mod
 from cosa.rest.routers.deep_research import (
-    get_todo_queue,
     submit_research,
     get_report,
     deep_research_health,
-    DeepResearchSubmitRequest,
-    DeepResearchSubmitResponse,
 )
+from cosa.rest.routers._retired_doors import RETIRED_DOORS, V2_SUBMIT
+
+PATH = "/api/deep-research/submit"
 
 _MOD = "cosa.rest.routers.deep_research"
 
@@ -56,134 +60,55 @@ def _job( id_hash="init_hash", last_q="research the topic" ):
     return job
 
 
-class TestGetTodoQueue( unittest.TestCase ):
+class TestTheSubmitDoorIsRetired( unittest.TestCase ):
     """
-    Ensures:
-        - get_todo_queue returns main_module.jobs_todo_queue
-    """
+    WHAT USED TO BE HERE. `TestGetTodoQueue` and `TestSubmitResearch` — the identity 400s,
+    the session-id fallback, every optional-field arm, the lineage stamp, the factory-None
+    and push-failure 500s. That handler is gone: `/api/deep-research/submit` is a tombstone
+    naming `/api/v2/submit`. There is nothing to rewrite those tests INTO; the behaviour
+    did not move within this module, it moved to a door with its own suite.
 
-    def test_returns_main_module_todo_queue( self ):
-        """Ensures: dependency reads jobs_todo_queue off lupin_app.main."""
-        mock_main = MagicMock()
-        mock_main.jobs_todo_queue = "Q"
-        with _patch_fastapi_main( mock_main ):
-            self.assertEqual( get_todo_queue(), "Q" )
-
-
-class TestSubmitResearch( unittest.TestCase ):
-    """
-    Unit tests for `submit_research`.
-
-    Requires:
-        - DeepResearchJob import, create_agentic_job, user_job_tracker boundary-mocked
-
-    Ensures:
-        - 400 validations, session fallback, success arms, factory-None 500, push 500
+    THE GET ROUTES BELOW ARE UNTOUCHED. `get_report` and `deep_research_health` read a
+    finished report and answer a health check — neither queues work, so neither is a door
+    in the sense this retirement is about, and their coverage stands exactly as it was.
     """
 
-    def setUp( self ):
-        """Ensures: a default authenticated user + mocked queue per test."""
-        self.user  = { "uid": "user_1234567890", "email": "u@test.com" }
-        self.queue = MagicMock()
+    def _client( self ):
+        app = FastAPI()
+        app.include_router( mod.router )
+        return TestClient( app, raise_server_exceptions=False )
 
-    def _call( self, body ):
-        return asyncio.run( submit_research(
-            request_body = body,
-            current_user = self.user,
-            todo_queue   = self.queue,
-        ) )
+    def test_it_answers_410_and_names_the_submit_door( self ):
+        response = self._client().post( PATH, json={ "query": "the state of AI" } )
+        self.assertEqual( response.status_code, 410 )
+        self.assertIn( V2_SUBMIT, response.json()[ "detail" ] )
 
-    def test_missing_uid_400( self ):
-        """Ensures: a token without uid raises 400 (before the try block)."""
-        self.user = { "email": "u@test.com" }
-        with self.assertRaises( HTTPException ) as ctx:
-            self._call( DeepResearchSubmitRequest( query="q" ) )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "User ID not found", ctx.exception.detail )
+    def test_it_refuses_an_unauthenticated_caller_the_same_way( self ):
+        """No auth on a tombstone: a 401 reads like a credentials problem, not a retired door."""
+        self.assertEqual( self._client().post( PATH, json={ } ).status_code, 410 )
 
-    def test_missing_email_400( self ):
-        """Ensures: a token without email raises 400 (before the try block)."""
-        self.user = { "uid": "user_1234567890" }
-        with self.assertRaises( HTTPException ) as ctx:
-            self._call( DeepResearchSubmitRequest( query="q" ) )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "User email not found", ctx.exception.detail )
+    def test_the_surviving_get_routes_are_still_mounted( self ):
+        """The point of retiring a DOOR rather than a module: everything that was not a
+        door keeps working."""
+        paths = { route.path for route in self._client().app.routes }
+        self.assertIn( "/api/deep-research/report", paths )
+        self.assertIn( "/api/deep-research/health", paths )
 
-    def test_success_minimal_session_fallback( self ):
-        """Ensures: minimal body queues a job; websocket_id None → api-<uid8> fallback."""
-        self.queue.size.return_value = 2
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "dr-scoped"
-        with patch( f"{_MOD}.create_agentic_job", return_value=_job() ) as m_create, \
-             patch( f"{_MOD}.user_job_tracker", tracker ):
-            result = self._call( DeepResearchSubmitRequest( query="state of AI" ) )
+    def test_the_table_says_this_door_retires_into_submit_not_ask( self ):
+        self.assertEqual( RETIRED_DOORS[ PATH ], V2_SUBMIT )
 
-        self.assertIsInstance( result, DeepResearchSubmitResponse )
-        self.assertEqual( result.status, "queued" )
-        self.assertEqual( result.job_id, "dr-scoped" )
-        self.assertEqual( result.queue_position, 2 )
-        self.assertIn( "Deep research job queued", result.message )
-        _, kwargs = m_create.call_args
-        self.assertEqual( kwargs[ "session_id" ], "api-user_123" )
-        self.assertEqual( kwargs[ "args_dict" ], { "query": "state of AI" } )
-        self.queue.push.assert_called_once()
+    def test_the_handler_only_refuses( self ):
+        """RED ON REVERT: give the handler a body again and it stops raising."""
+        import asyncio
+        with self.assertRaises( HTTPException ) as caught:
+            asyncio.run( submit_research() )
+        self.assertEqual( caught.exception.status_code, 410 )
 
-    def test_success_all_optional_arms( self ):
-        """Ensures: budget + dry_run + force_failure_mode + audience + audience_context + lead_model + scheduling thread through."""
-        self.queue.size.return_value = 5
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "dr-2"
-        job = _job()
-        body = DeepResearchSubmitRequest(
-            query              = "topic",
-            budget             = 3.0,
-            websocket_id       = "ws-abc",
-            lead_model         = "claude-opus-4-8",
-            dry_run            = True,
-            force_failure_mode = "rate_limit",
-            audience           = "expert",
-            audience_context   = "researchers",
-            scheduled_at       = "2026-01-01T00:00:00",
-            monopolize         = True,
-        )
-        with patch( f"{_MOD}.create_agentic_job", return_value=job ) as m_create, \
-             patch( f"{_MOD}.user_job_tracker", tracker ):
-            result = self._call( body )
-
-        self.assertEqual( result.status, "queued" )
-        self.assertEqual( result.job_id, "dr-2" )
-        _, kwargs = m_create.call_args
-        ad = kwargs[ "args_dict" ]
-        self.assertEqual( kwargs[ "session_id" ], "ws-abc" )              # provided websocket_id
-        self.assertEqual( ad[ "budget" ], "3.0" )
-        self.assertTrue( ad[ "dry_run" ] )
-        self.assertEqual( ad[ "force_failure_mode" ], "rate_limit" )
-        self.assertEqual( ad[ "audience" ], "expert" )
-        self.assertEqual( ad[ "audience_context" ], "researchers" )
-        self.assertEqual( job.lead_model, "claude-opus-4-8" )            # applied post-factory
-        self.assertEqual( job.scheduled_at, "2026-01-01T00:00:00" )
-        self.assertTrue( job.monopolize )
-
-    def test_factory_none_500( self ):
-        """Ensures: create_agentic_job None → 500 (inner HTTPException wrapped by broad except)."""
-        with patch( f"{_MOD}.create_agentic_job", return_value=None ), \
-             patch( f"{_MOD}.user_job_tracker", MagicMock() ):
-            with self.assertRaises( HTTPException ) as ctx:
-                self._call( DeepResearchSubmitRequest( query="q" ) )
-        self.assertEqual( ctx.exception.status_code, 500 )
-        self.assertIn( "Failed to submit research job", ctx.exception.detail )
-
-    def test_push_failure_500( self ):
-        """Ensures: an exception during job push maps to 500."""
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "h"
-        self.queue.push.side_effect = RuntimeError( "queue down" )
-        with patch( f"{_MOD}.create_agentic_job", return_value=_job() ), \
-             patch( f"{_MOD}.user_job_tracker", tracker ):
-            with self.assertRaises( HTTPException ) as ctx:
-                self._call( DeepResearchSubmitRequest( query="q" ) )
-        self.assertEqual( ctx.exception.status_code, 500 )
-        self.assertIn( "Failed to submit research job", ctx.exception.detail )
+    def test_the_job_building_machinery_is_gone_from_this_module( self ):
+        for name in ( "create_agentic_job", "user_job_tracker", "get_todo_queue",
+                      "DeepResearchSubmitRequest", "DeepResearchSubmitResponse" ):
+            self.assertFalse( hasattr( mod, name ),
+                              f"{name} survives in a module whose only POST is a tombstone" )
 
 
 class TestGetReportGcs( unittest.TestCase ):

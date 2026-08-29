@@ -20,11 +20,11 @@ class TestAgentRegistryEntry:
     """agent_registry.py has the TFE resume entry with expected shape."""
 
     def test_tfe_resume_entry_exists( self ):
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS as AGENT_REGISTRY
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS as AGENT_REGISTRY
         assert "agent router go to test fix expediter resume" in AGENT_REGISTRY
 
     def test_tfe_resume_entry_has_required_fields( self ):
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS as AGENT_REGISTRY
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS as AGENT_REGISTRY
         entry = AGENT_REGISTRY[ "agent router go to test fix expediter resume" ]
 
         assert entry[ "display_name" ] == "TFE Resume"
@@ -32,7 +32,7 @@ class TestAgentRegistryEntry:
         assert entry[ "special_handlers" ][ "resume_from" ] == "tfe_checkpoint_match"
 
     def test_tfe_resume_arg_mapping_covers_common_synonyms( self ):
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS as AGENT_REGISTRY
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS as AGENT_REGISTRY
         entry = AGENT_REGISTRY[ "agent router go to test fix expediter resume" ]
         mapping = entry[ "arg_mapping" ]
 

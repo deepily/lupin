@@ -398,7 +398,7 @@ test("Test 12: forceRenderForTesting() triggers a synchronous full re-render", (
   container.innerHTML = "<div class='external-tampering'></div>";
   // forceRenderForTesting wipes + re-renders.
   renderer.forceRenderForTesting();
-  assert.equal(container.querySelector(".external-tampering"), null);
+  assert.ok( container.querySelector(".external-tampering") === null );
   assert.equal(container.querySelectorAll(".jobs-bucket").length, 5);
 
   renderer.unmount();
@@ -837,7 +837,7 @@ test("Test 22: 2xx response discards restoreState; no rollback (5B-3)", async ()
   const addeds   = delta.filter(e => e.payload.changeKind === "added");
   assert.equal(removeds.length, 1, "exactly one removed event");
   assert.equal(addeds.length,   0, "no added event (no rollback)");
-  assert.equal(root.querySelector('[data-id-hash="del-22"]'), null, "card stays gone");
+  assert.ok( root.querySelector('[data-id-hash="del-22"]') === null, "card stays gone" );
 
   renderer.unmount();
   jobs.disposeForTesting();
@@ -869,9 +869,9 @@ test("Test 23: 404 response is treated as success per Q-B10 (5B-4)", async () =>
   const delta = events.slice(before);
   assert.equal(delta.filter(e => e.payload.changeKind === "removed").length, 1);
   assert.equal(delta.filter(e => e.payload.changeKind === "added").length,   0, "404 is success — no rollback");
-  assert.equal(root.querySelector('[data-id-hash="del-23"]'), null);
+  assert.ok( root.querySelector('[data-id-hash="del-23"]') === null );
   // No error stripe rendered on success-path 404.
-  assert.equal(root.querySelector(".job-card-error-stripe"), null);
+  assert.ok( root.querySelector(".job-card-error-stripe") === null );
 
   renderer.unmount();
   jobs.disposeForTesting();
@@ -1044,23 +1044,14 @@ test("Test 28: .job-delete-button renders with NO inert markers post-render (W1)
   emitJobAdded(bus, makeJob({ id_hash: "del-28b", status: "done" }));
 
   // No `aria-disabled="true"` should remain on any delete button after render.
-  assert.equal(
-    root.querySelector('.job-delete-button[aria-disabled="true"]'),
-    null,
-    "aria-disabled='true' should be stripped",
-  );
+  assert.ok( root.querySelector('.job-delete-button[aria-disabled="true"]') === null,
+    "aria-disabled='true' should be stripped", );
   // No "Delete coming in Phase 6b" title should remain.
-  assert.equal(
-    root.querySelector('.job-delete-button[title="Delete coming in Phase 6b"]'),
-    null,
-    "Phase 6b placeholder title should be stripped",
-  );
+  assert.ok( root.querySelector('.job-delete-button[title="Delete coming in Phase 6b"]') === null,
+    "Phase 6b placeholder title should be stripped", );
   // tabindex=-1 is also stripped (was part of the disabled state).
-  assert.equal(
-    root.querySelector('.job-delete-button[tabindex="-1"]'),
-    null,
-    "tabindex='-1' should be stripped",
-  );
+  assert.ok( root.querySelector('.job-delete-button[tabindex="-1"]') === null,
+    "tabindex='-1' should be stripped", );
 
   // Sanity: buttons themselves still exist.
   assert.equal(root.querySelectorAll(".job-delete-button").length, 2);
@@ -1205,7 +1196,7 @@ test("Test 32: hydration_failed from a NON-jobs source is ignored (no banner)", 
     ts      : Date.now(),
   });
 
-  assert.equal(root.querySelector(".jobs-hydration-error"), null, "non-jobs source must be ignored");
+  assert.ok( root.querySelector(".jobs-hydration-error") === null, "non-jobs source must be ignored" );
 
   renderer.unmount();
   jobs.disposeForTesting();
@@ -1226,7 +1217,7 @@ test("Test 33: Retry success removes the banner + hydrates the buckets (consumer
   (banner!.querySelector(".jobs-hydration-retry") as HTMLButtonElement).click();
   await flushMicrotasks();
 
-  assert.equal(root.querySelector(".jobs-hydration-error"), null, "Retry success removes the banner");
+  assert.ok( root.querySelector(".jobs-hydration-error") === null, "Retry success removes the banner" );
   // Two get calls: the failed hydrate + the successful retry.
   assert.equal(api.calls.filter(p => p.startsWith("/api/job-history")).length, 2);
 
@@ -1271,7 +1262,7 @@ test("Lane 0a: Jobs renders the 📝 section-header; count = 4 live buckets (his
   const header = root.querySelector(".section-header") as HTMLElement;
   assert.ok(header, "section-header bar present");
   assert.ok(header.querySelector("h3")!.textContent!.includes("📝 Jobs"), "📝 Jobs title in h3");
-  assert.equal(root.querySelector(".jobs-pane-header"), null, "inert static header is gone");
+  assert.ok( root.querySelector(".jobs-pane-header") === null, "inert static header is gone" );
 
   const count = root.querySelector(".section-header-count") as HTMLElement;
   assert.equal(count.textContent, "0", "count 0 initially");
@@ -1355,7 +1346,7 @@ test("Test 32: delete-all on RUNNING bucket → DELETE /api/queue/run/all + clea
   assert.deepEqual(api.calls.filter(c => c.startsWith("DELETE ")), ["DELETE /api/queue/run/all"]);
   assert.equal(jobs.bucket("running").length, 0, "bucket cleared after 2xx");
   const bucketEl = root.querySelector('[data-bucket="running"]') as HTMLElement;
-  assert.notEqual(bucketEl.querySelector(".jobs-bucket-empty"), null, "re-rendered empty");
+  assert.ok( bucketEl.querySelector(".jobs-bucket-empty") !== null, "re-rendered empty" );
   renderer.unmount(); jobs.disposeForTesting();
 });
 
@@ -1625,29 +1616,32 @@ test("Test 43: retry ↻ renders on dead + history cards, NOT on live todo/runni
   const deadCard = root.querySelector('[data-bucket="dead"] .job-card') as HTMLElement;
   const runCard  = root.querySelector('[data-bucket="running"] .job-card') as HTMLElement;
   const histCard = root.querySelector('[data-bucket="history"] .job-card') as HTMLElement;
-  assert.notEqual(deadCard.querySelector(".job-retry-button"), null, "dead card has retry");
-  assert.notEqual(histCard.querySelector(".job-retry-button"), null, "history card has retry");
-  assert.equal(runCard.querySelector(".job-retry-button"), null, "running (live) card has no retry");
+  assert.ok( deadCard.querySelector(".job-retry-button") !== null, "dead card has retry" );
+  assert.ok( histCard.querySelector(".job-retry-button") !== null, "history card has retry" );
+  assert.ok( runCard.querySelector(".job-retry-button") === null, "running (live) card has no retry" );
   renderer.unmount(); jobs.disposeForTesting();
 });
 
-test("Test 44: retry click confirm → POST /api/job-history/{id}/retry with the wired websocket_id (W5)", async () => {
+test("Test 44: retry click confirm → POST /api/v2/ask re-asking the stored question with the wired websocket_id (W5)", async () => {
   const bus  = createEventBusForTesting();
   const api  = makeStubApi();
   const jobs = createJobStore({ bus });
   const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api, websocketId: "wise-penguin" });
   const root = makeRoot();
   renderer.mount(root);
-  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead" }));
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead", meta: { question_text: "what is 2 + 2?" } }));
 
   const restore = stubConfirm(true);
   (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
   await flushMicrotasks();
   restore();
 
+  // The door moved AND the body changed shape: the retired /api/job-history/{id}/retry
+  // sent only a websocket_id because the SERVER held the question. /api/v2/ask is a
+  // question door, so the client now sends the question it holds.
   assert.ok(
-    api.calls.some(c => c === 'POST /api/job-history/dead-1/retry {"websocket_id":"wise-penguin"}'),
-    "retry POST carries the wired websocket_id",
+    api.calls.some(c => c === 'POST /api/v2/ask {"question":"what is 2 + 2?","websocket_id":"wise-penguin"}'),
+    "retry re-asks the stored question and carries the wired websocket_id",
   );
   renderer.unmount(); jobs.disposeForTesting();
 });
@@ -1659,7 +1653,7 @@ test("Test 45: retry without a wired websocketId sends websocket_id:'' (W5 fallb
   const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });   // no websocketId
   const root = makeRoot();
   renderer.mount(root);
-  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead" }));
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead", meta: { question_text: "what is 2 + 2?" } }));
 
   const restore = stubConfirm(true);
   (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
@@ -1667,9 +1661,37 @@ test("Test 45: retry without a wired websocketId sends websocket_id:'' (W5 fallb
   restore();
 
   assert.ok(
-    api.calls.some(c => c === 'POST /api/job-history/dead-1/retry {"websocket_id":""}'),
-    "retry POST falls back to an empty websocket_id",
+    api.calls.some(c => c === 'POST /api/v2/ask {"question":"what is 2 + 2?","websocket_id":""}'),
+    "retry falls back to an empty websocket_id",
   );
+  renderer.unmount(); jobs.disposeForTesting();
+});
+
+test("Test 45b: a card with no stored question does not POST and does not prompt (2026-08-21 cutover)", async () => {
+  // The retry door used to work from the id alone — the server looked the question up.
+  // Now the client re-asks, so a card whose row carries no question text has nothing to
+  // send. Posting an empty question would be rejected at the door with nothing useful to
+  // show; warn and stop instead. Reachable for a card built from a WebSocket event rather
+  // than a hydrated history row.
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api, websocketId: "wise-penguin" });
+  const root = makeRoot();
+  renderer.mount(root);
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead", meta: {} }));
+
+  let prompted = false;
+  const restore = stubConfirm(true);
+  const realConfirm = globalThis.confirm;
+  globalThis.confirm = ((msg?: string) => { prompted = true; return realConfirm(msg as string); }) as typeof globalThis.confirm;
+  (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
+  await flushMicrotasks();
+  globalThis.confirm = realConfirm;
+  restore();
+
+  assert.deepEqual(api.calls.filter(c => c.startsWith("POST ")), [], "no POST without a question");
+  assert.equal(prompted, false, "no confirm dialog either — there is nothing to confirm");
   renderer.unmount(); jobs.disposeForTesting();
 });
 
@@ -1680,7 +1702,7 @@ test("Test 46: retry confirm-CANCEL aborts with no POST (W5)", async () => {
   const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api, websocketId: "wise-penguin" });
   const root = makeRoot();
   renderer.mount(root);
-  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead" }));
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead", meta: { question_text: "what is 2 + 2?" } }));
 
   const restore = stubConfirm(false);
   (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
@@ -1698,7 +1720,12 @@ test("Test 47: retry POST failure logs + changes nothing (W5)", async () => {
   const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api, websocketId: "wise-penguin" });
   const root = makeRoot();
   renderer.mount(root);
-  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead" }));
+  // The question is REQUIRED for this test to test what it says. After the 2026-08-21
+  // cutover the click returns early — warning, and changing nothing — when the row has
+  // no question text, which would satisfy both assertions below without a POST ever
+  // being attempted. Caught by running it: the test stayed green while covering the
+  // wrong branch.
+  emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead", meta: { question_text: "what is 2 + 2?" } }));
 
   const origWarn = console.warn; let warned = false; console.warn = () => { warned = true; };
   const restore = stubConfirm(true);
@@ -1706,6 +1733,11 @@ test("Test 47: retry POST failure logs + changes nothing (W5)", async () => {
   await flushMicrotasks();
   restore(); console.warn = origWarn;
 
+  // makeControllableApi records the bare path (makeStubApi records "POST <path> <body>").
+  assert.ok(
+    api.calls.includes("/api/v2/ask"),
+    "the retry must actually have been attempted — otherwise this test passes on the no-question early return",
+  );
   assert.equal(warned, true, "retry failure logged");
   assert.equal(jobs.bucket("dead").length, 1, "dead card still present after a failed retry");
   renderer.unmount(); jobs.disposeForTesting();

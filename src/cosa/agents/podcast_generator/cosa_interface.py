@@ -157,7 +157,8 @@ async def present_choices(
     timeout: int = 120,
     title: Optional[ str ] = None,
     abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None
+    job_id: Optional[ str ] = None,
+    priority: Optional[ str ] = None
 ) -> dict:
     """
     Present multiple-choice questions and get user's selection.
@@ -168,6 +169,9 @@ async def present_choices(
         title: Optional title for the notification
         abstract: Optional supplementary context
         job_id: Optional job ID for routing to job card
+        priority: "low"/"medium"/"high"/"urgent". None → the dispatcher's
+            default_priority. Blocking asks should pass "high" so the TTS alert
+            reaches a remote user.
 
     Returns:
         dict: {"answers": {...}} with selections keyed by header
@@ -175,7 +179,7 @@ async def present_choices(
     _dispatcher.sender_id   = SENDER_ID
     _dispatcher.target_user = TARGET_USER
     return await _dispatcher.present_choices(
-        questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id
+        questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id, priority=priority
     )
 
 

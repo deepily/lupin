@@ -451,6 +451,12 @@ def assess_fleet_context_pressure(
         - returns a list[ WorkerContextPressure ]
         - window_size is read from the bridge (pinned at spawn); falls back to
           default_window when the key is absent
+        - a live seat with NO persona allocated is ENUMERATED too, with
+          persona=None (row 9c720767). The persona-required projection
+          (find_active_voice_persona_sessions) hides a nameless seat entirely,
+          so the pressure feed could never show the one seat nobody is watching.
+          Reading the all-sessions view (require_persona=False) restores it; the
+          writer then reports it explicitly with its age.
         - DEAD/IDLE workers get pressure=None + an explanatory recommendation
         - never raises on a single bad bridge (skips it)
     """
@@ -459,8 +465,8 @@ def assess_fleet_context_pressure(
     now     = time.time()
     results = []
 
-    for bridge_path, session_id, persona in session_bridge.find_active_voice_persona_sessions(
-            stale_threshold_seconds=stale_threshold_seconds ):
+    for bridge_path, session_id, persona in session_bridge.find_active_sessions(
+            stale_threshold_seconds=stale_threshold_seconds, require_persona=False ):
         try:
             with open( bridge_path, "r" ) as f:
                 bridge = json.load( f )
@@ -468,7 +474,13 @@ def assess_fleet_context_pressure(
         except ( OSError, ValueError ):
             continue
 
-        persona_name = persona.get( "name", "unknown" ) if isinstance( persona, dict ) else str( persona )
+        # A named persona → its name; a nameless seat (empty dict, or a
+        # name-less/empty value) → None, stated plainly so the writer can report
+        # it as a persona-null row rather than mislabel it "unknown".
+        if isinstance( persona, dict ):
+            persona_name = persona.get( "name" ) if persona else None
+        else:
+            persona_name = str( persona ) if persona else None
         tmux_session = bridge.get( "tmux_session" )
         listener_pid = bridge.get( "listener_pid" )
         cc_pid       = bridge.get( "cc_pid" )                 # claude-CLI pid (None on a pre-rename bridge)
@@ -520,7 +532,8 @@ def render_fleet_table( workers ):
             pending = f"{w.pressure.pending_input_estimate:>8,}"
         else:
             pct, state, pending = "   —  ", w.liveness.value, "       —"
-        rows.append( f"{w.persona:<12} {w.liveness.value:<7} {pct:>6}  {state:<9} {pending:>8}  {w.recommendation}" )
+        persona = w.persona or "(unnamed)"       # a nameless live seat still renders a row
+        rows.append( f"{persona:<12} {w.liveness.value:<7} {pct:>6}  {state:<9} {pending:>8}  {w.recommendation}" )
     return "\n".join( rows )
 
 

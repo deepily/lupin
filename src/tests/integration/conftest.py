@@ -20,7 +20,7 @@ import os
 # This ensures config_mgr singleton initializes with Testing block
 os.environ["LUPIN_CONFIG_MGR_CLI_ARGS"] = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
 
-# GCS (LanceDB) integration tests resolve the project through google.auth.default(),
+# GCS integration tests resolve the project through google.auth.default(),
 # which reads ADC — see gcs_utils.py. They do NOT need GOOGLE_CLOUD_PROJECT, and
 # hardcoding it here is actively dangerous: GOOGLE_CLOUD_PROJECT OUTRANKS
 # ANTHROPIC_VERTEX_PROJECT_ID for Vertex clients, so a literal here can silently
@@ -495,25 +495,12 @@ def gcs_credentials_available():
         - Skip message includes clear remediation steps
 
     Usage:
-        Inject into GCS-dependent fixtures. NOTE the backend pin — without it the
-        ambient `vector store backend` is postgres and the manager ignores gcs_config
-        entirely, exercising the SHARED store instead of GCS (decision 2b20a6d6):
-
-        @pytest.fixture( scope="class", autouse=True )
-        def _pin_lancedb_backend():
-            from unittest.mock import patch
-            from cosa.rest.db.repositories import vector_store_backend
-            with patch.object( vector_store_backend, "get_vector_store_backend",
-                               return_value=vector_store_backend.LANCEDB ):
-                yield
+        Inject into GCS-dependent fixtures:
 
         @pytest.fixture
-        def gcs_manager(gcs_credentials_available):
+        def gcs_client(gcs_credentials_available):
             # gcs_credentials_available validates before this runs
-            manager = SolutionSnapshotManager( gcs_config )
-            assert manager._use_postgres is False, "backend pin failed"
-            manager.initialize()  # Won't fail due to auth
-            return manager
+            return storage.Client()  # Won't fail due to auth
 
     Returns:
         bool: True if credentials valid (otherwise skips)

@@ -193,6 +193,20 @@ class TestNotificationRequestValidation:
         assert "api_key" not in params  # Now in HTTP headers
         assert "idempotency_key" not in params  # bug f433fbae D2: None → omitted
 
+    def test_to_api_params_human_only_sent_only_when_true( self ):
+        """human_only rides to_api_params ONLY when True (default omitted) — row 804afce6."""
+        on = NotificationRequest(
+            message="Self-re-spin now?", response_type=ResponseType.YES_NO,
+            target_user="test@example.com", human_only=True,
+        )
+        assert on.to_api_params()[ "human_only" ] == "true"
+
+        off = NotificationRequest(
+            message="ordinary ask", response_type=ResponseType.YES_NO,
+            target_user="test@example.com",
+        )
+        assert "human_only" not in off.to_api_params()
+
     def test_to_api_params_includes_idempotency_key_when_set( self ):
         """bug f433fbae D2: a set idempotency_key is forwarded so the server can
         de-dup a re-POST of the same ask."""

@@ -10,7 +10,7 @@ line + branch + function on every non-`# pragma: no cover` symbol:
     execute_dm_list (bad-since 400 / thread view / inbox view / limit clamp hi+lo / since passthrough)
 
 The async route handlers (post_dm_send, post_dm_respond, get_dm, list_dms) are
-`# pragma: no cover` thin I/O wiring — exercised by integration/smoke, not here.
+a `no cover` pragma: thin I/O wiring, checked by the integration and smoke tiers rather than here.
 
 Design: src/rnd/v0.1.8/2026.06.16-dm-api-namespace-design.md
 """
@@ -125,12 +125,24 @@ class TestPersistDmSendSync( unittest.TestCase ):
 class TestExecuteDmSend( unittest.TestCase ):
 
     def setUp( self ):
+        import cosa.rest.routers.dm as dm
         from cosa.rest.routers.dm import execute_dm_send
         self.execute_dm_send = execute_dm_send
         self.queue        = MagicMock()
         self.persist      = MagicMock( return_value="db-123" )
         # 2-arg seam (row 12b5a766): the core now hands the CALLER's project through.
         self.build_sender = lambda s, project=None: f"sender::{s}"
+        # Row 7c84b8b8: execute_dm_send grades every ACCEPTED send INLINE against a live
+        # model, two calls per send. A census on 2026-08-17 caught this class dialling
+        # 192.168.1.21:3001 on nearly every test — 66 tests took 58 seconds, waiting on a
+        # server none of their names mention. The cosa tier joined the merge pyramid on
+        # 2026-08-13, so "the unit tier" is two directories now and this half had never
+        # been swept. Pin the judgment toggle OFF — the shipped CONTROL arm, so the send
+        # path still runs its real code and takes the branch that costs nothing. No
+        # assertion in this file reads the grade.
+        _judgment_patch = patch.object( dm, "get_dm_quality_judgment_enabled", lambda: False )
+        _judgment_patch.start()
+        self.addCleanup( _judgment_patch.stop )
 
     def _run( self, resolve_result, body=None, new_id="fixed-msg-id" ):
         return self.execute_dm_send(

@@ -128,7 +128,7 @@ test("empty sessions → 'No active sessions', no toggle, stamp set", () => {
   emit(true);
   const msg = root.querySelector(".fleet-status-empty");
   assert.equal(msg?.textContent, "No active sessions.");
-  assert.equal(root.querySelector(".fleet-offline-toggle"), null);
+  assert.ok( root.querySelector(".fleet-offline-toggle") === null );
   assert.match(root.querySelector(".fleet-status-updated")!.textContent!, /^updated \d{2}:\d{2}:\d{2}/);
 });
 
@@ -241,11 +241,11 @@ test("unmount unsubscribes + clears; later events do not repaint; re-mount OK", 
   r.mount(root);
   assert.ok(root.querySelector(".fleet-status-container"));
   r.unmount();
-  assert.equal(root.querySelector(".fleet-status-container"), null);
+  assert.ok( root.querySelector(".fleet-status-container") === null );
 
   store.setComposite(goodSessions({ sessions: [{ persona: "A", role: "manager" }] }));
   bus.emit<StoreFleetStatusChangedPayload>({ type: "store_fleet_status_changed", payload: { stampUpdated: true }, source: "t", ts: 0 });
-  assert.equal(root.querySelector(".fleet-status-table"), null); // no repaint after unmount
+  assert.ok( root.querySelector(".fleet-status-table") === null ); // no repaint after unmount
 
   assert.doesNotThrow(() => r.mount(root));
 });

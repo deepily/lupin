@@ -42,13 +42,13 @@ def _run( coro ):
     return asyncio.run( coro )
 
 
-def _agent( source_path="/io/src/doc.md", user_id="u@test.com", dry_run=False, debug=False ):
+def _agent( source_path="/io/src/doc.md", user_id="u@test.com", offline_mode=False, debug=False ):
     return PresentationOrchestratorAgent(
-        source_path = source_path,
-        user_id     = user_id,
-        config      = PresentationConfig(),
-        dry_run     = dry_run,
-        debug       = debug,
+        source_path  = source_path,
+        user_id      = user_id,
+        config       = PresentationConfig(),
+        offline_mode = offline_mode,
+        debug        = debug,
     )
 
 

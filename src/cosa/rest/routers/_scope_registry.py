@@ -22,6 +22,8 @@ Generated on: 2026-05-12
 
 import os
 import re
+import json
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
@@ -75,12 +77,57 @@ SECRETS_BLOCKLIST_PATTERNS = (
     re.compile( r"^\.pgpass$" ),
     re.compile( r"^\.credentials" ),                              # F4/F5: any .credentials*
 
-    # Common credential-bearing names (word-boundary anchored to avoid
-    # false-positives on substrings like "secretive_methods" or
-    # "credentialism" — both legitimate filenames that should NOT be blocked).
-    re.compile( r"\bcredentials?\b", re.IGNORECASE ),
-    re.compile( r"\bsecrets?\b",     re.IGNORECASE ),
-    re.compile( r"\bpassword\b",     re.IGNORECASE ),             # F4 add
+    # Common credential-bearing names. The boundary is anchored to avoid
+    # false-positives on substrings like "secretive_methods" or "credentialism"
+    # — both legitimate filenames that should NOT be blocked.
+    #
+    # ⚠️ `\b` IS THE WRONG BOUNDARY HERE, and it left a real hole open.
+    # An underscore is a WORD character, so `\bcredentials\b` does not match
+    # inside `application_default_credentials.json` — the default filename
+    # gcloud writes for Application Default Credentials. Measured 2026-08-17:
+    # `credentials.json` was blocked while `application_default_credentials.json`
+    # was SERVED, and the doc viewer serves anything under `src`. Found by
+    # Tiffany 💍 while reviewing whether to mount those very credentials into a
+    # test container — the file we were about to place on disk was the file the
+    # blocklist did not cover.
+    #
+    # `(?<![a-z0-9])` / `(?![a-z0-9])` treat `_`, `-` and `.` as separators the
+    # way a filename does, while still refusing to fire inside a longer word.
+    # So `credentialism.txt` and `secretive_methods.py` stay served, and
+    # `application_default_credentials.json` / `my_secrets.yaml` do not.
+    re.compile( r"(?<![a-z0-9])credentials?(?![a-z0-9])", re.IGNORECASE ),
+    re.compile( r"(?<![a-z0-9])secrets?(?![a-z0-9])",     re.IGNORECASE ),
+    re.compile( r"(?<![a-z0-9])password(?![a-z0-9])",     re.IGNORECASE ),
+
+    # 🔴 THREE MORE FILENAMES A REAL GOOGLE KEY CARRIES, none of which contains the
+    # word "credentials" or "secret", and none covered by the service-account family
+    # above. MEASURED on this branch before these lines: `adc.json`,
+    # `authorized_user.json` and `firebase-adminsdk-*.json` were all SERVED, and so
+    # were the `gcp-key.json` / `bigquery-key.json` shapes (`\.key$` below does not
+    # fire on a `.json` file).
+    #
+    # `token.json` is DELIBERATELY ABSENT: it is genuinely ambiguous, the content
+    # check is what catches a real one, and there is already a test asserting it stays
+    # served by name. Not every credential filename belongs on a path blocklist.
+    #
+    # ANCHORED TO `.json` DELIBERATELY. Every candidate was measured against the whole
+    # served tree first: a bare `*-key*.json` blocks `config-key-migration-map.json`
+    # (30 copies of a legitimate config doc), so the key rule names providers instead.
+    # These four measure ZERO hits across 907,074 files in the mounted tree.
+    #
+    # This is the path floor; the content check below is the payload floor. A key
+    # renamed to `notes.json` defeats every pattern here and is caught there — which
+    # is why both exist rather than either alone.
+    re.compile( r"(?<![a-z0-9])adminsdk[^/]*\.json$",           re.IGNORECASE ),
+    re.compile( r"(?<![a-z0-9])authorized[-_]user[^/]*\.json$",  re.IGNORECASE ),
+    re.compile( r"^adc\.json$",                                  re.IGNORECASE ),
+
+    # `gcp-key.json` / `bigquery-key.json` shapes. `\.key$` below does not fire on a
+    # `.json` file, so these were served too. Named providers ONLY, not a bare
+    # `*-key*.json`: the bare form was measured and blocks
+    # `config-key-migration-map.json`, 30 copies of a legitimate config doc across
+    # the tree. Provider-prefixed form measures ZERO hits on the served tree.
+    re.compile( r"(?<![a-z0-9])(gcp|gcloud|gce|bigquery|firebase|aws|azure)[-_][^/]*keys?[^/]*\.json$", re.IGNORECASE ),
 
     # Key/cert file extensions
     re.compile( r"\.pem$", re.IGNORECASE ),
@@ -89,6 +136,21 @@ SECRETS_BLOCKLIST_PATTERNS = (
     re.compile( r"\.p12$", re.IGNORECASE ),
     re.compile( r"\.gpg$", re.IGNORECASE ),                       # F4 add
     re.compile( r"\.asc$", re.IGNORECASE ),                       # F4 add
+
+    # ----- Service-account / key-file NAME family (bug afdc938f) -----
+    # Generalised, NOT the seven literal filenames Tiffany measured as served —
+    # patching this family by literal name has already failed twice. These cover the
+    # separator variants of one idea ("a service-account key file"), and the CONTENT
+    # check (`is_credential_file`) is what catches the name nobody predicted.
+    #
+    # Deliberately ABSENT: bare `token` and bare `keyfile`. Both are ambiguous by
+    # name — `token.json` is a legitimate tokenizer file in ML repos — so blocking
+    # them here would refuse real documents. Content decides those, correctly in
+    # both directions: a tokenizer carries no private_key, a credential does.
+    re.compile( r"service[-_. ]?account", re.IGNORECASE ),
+    re.compile( r"\bsa[-_]key\b",         re.IGNORECASE ),
+    re.compile( r"\bsvc[-_. ]?acct\b",    re.IGNORECASE ),
+    re.compile( r"\bgcp[-_. ]?sa\b",      re.IGNORECASE ),
 
     # SSH key filenames
     re.compile( r"id_rsa",     re.IGNORECASE ),
@@ -133,6 +195,569 @@ SECRETS_BLOCKLIST_PATTERNS = (
     re.compile( r"^\.kube$",         re.IGNORECASE ),
     re.compile( r"^\.docker$",       re.IGNORECASE ),
 )
+
+
+# ---------------------------------------------------------------------------
+# CONTENT-based credential detection (bug afdc938f)
+# ---------------------------------------------------------------------------
+#
+# ⚠️ WHY CONTENT AND NOT SEVEN MORE FILENAMES. This family has now been patched
+# twice by name. 023e72cb fixed `\bcredentials\b` failing on
+# `application_default_credentials.json` — correct, and scoped to the one filename
+# that had been caught rather than to the family. Tiffany then measured seven more
+# still SERVED: service-account.json, sa_key.json, service_account.json,
+# svc-acct.json, gcp-sa.json, token.json, keyfile.json. Adding those seven is the
+# same fix that just failed, applied a third time; the eighth name nobody predicted
+# is served the moment someone commits it.
+#
+# A name is a guess about content. The content is the fact. A GCP service-account
+# key is the same secret in the same JSON shape under ANY name, so this reads the
+# bytes and decides.
+#
+# It also cannot false-positive the way a name rule does: `token.json` and
+# `keyfile.json` are ambiguous by name — a tokenizer file is legitimately called
+# `token.json` in ML repos — but a tokenizer carries no `private_key`, so a content
+# check blocks the credential and serves the tokenizer. That is precisely the case
+# a name-only blocklist has to get wrong in one direction or the other.
+
+# How much of a file is read to decide. Big enough to carry the signature fields of
+# a service-account key or an ADC file (both are a few KB, and the fields sit near
+# the top), small enough that deciding never means slurping an arbitrary file.
+CREDENTIAL_SNIFF_BYTES = 8192
+
+# The SECOND-stage bound, used only when the first window was filled by something
+# that is trying to be a JSON container. Clayton measured a real ADC whose signature
+# fields sat past 8192 behind one big leading field: the truncated branch scans the
+# window as text, so a signature outside the window is a signature that does not
+# exist. Reading further is what closes that, and it stays BOUNDED — a credential is
+# a few KB, so a megabyte is generous by three orders of magnitude while still never
+# meaning "slurp an arbitrary file".
+CREDENTIAL_MAX_SNIFF_BYTES = 1_048_576
+
+# The field SIGNATURES, per Tiffany's constraint 1 — a GCP service-account key is
+# identified by carrying type=service_account + private_key + client_email, and a
+# user ADC file by refresh_token + client_secret. Any ONE of these fields is enough
+# to refuse: a document with a legitimate reason to contain `private_key` as a
+# JSON key holding a real secret string is not a document, it is a key.
+_CREDENTIAL_JSON_KEYS = (
+    "private_key",              # GCP SA keys, and any PKCS#8 blob carried in JSON
+    "private_key_id",
+    "refresh_token",            # OAuth user creds — what token.json usually holds
+    "client_secret",
+)
+
+_CREDENTIAL_TYPE_VALUES = (
+    "service_account",
+    "authorized_user",
+    "external_account",
+)
+
+# PEM private-key blocks, whatever the file is called or wrapped in.
+_PEM_PRIVATE_KEY = re.compile(
+    r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----"
+)
+
+# Syntactic placeholder values — `<your client secret>`, `${CLIENT_SECRET}`,
+# `{{ client_secret }}`. A credential FIELD whose value is one of these carries no
+# secret, so a spec or a template that shows the field keeps being served. This is a
+# shape test, not a vocabulary list: no word has to be guessed in advance, and a real
+# secret cannot be spelled this way without ceasing to be the secret.
+_PLACEHOLDER_VALUE = re.compile( r"^\s*(?:<[^>]*>|\$\{[^}]*\}|\{\{[^}]*\}\})\s*$" )
+
+# A JSON \uXXXX escape. The truncated branch scans RAW TEXT, so a key spelled
+# `"refresh_token"` reads as a different string there than it does once parsed.
+# Putting the escapes back before the scan is what closes that.
+_JSON_UNICODE_ESCAPE = re.compile( r"\\u([0-9a-fA-F]{4})" )
+
+# What a JSON container starts with, once the invisible lead-in is gone. An ARRAY
+# counts: `[ {ADC} ]` is a credential file, and reading only objects served it.
+_JSON_CONTAINER_OPENERS = ( "{", "[" )
+
+# How many JSON-shaped STRINGS one file may be re-parsed for. The walk crosses objects
+# and arrays, and it used to stop at a string — so a whole key carried as JSON TEXT
+# inside another JSON file was never opened. That is the normal shape of terraform
+# tfvars, a kubernetes secret and a compose env file, not an exotic attack.
+#
+# BOUNDED on purpose: without a budget, a document full of JSON-shaped strings turns
+# one serve/refuse decision into thousands of parses. Sixty-four is far past any real
+# nesting — the measured shapes carry one or two — and far short of a cost anyone
+# notices on a single file fetch.
+CREDENTIAL_MAX_NESTED_PARSES = 64
+
+
+def is_credential_file( full_path: str ) -> bool:
+    """
+    Return True iff the FILE AT `full_path` is credential material — FAIL CLOSED.
+
+    The doc viewer's last line of defence: the whitelist said yes and the name
+    blocklist said yes, and the bytes still get the final word.
+
+    🔴 FAIL CLOSED (Tiffany's constraint 2). Unreadable, wrongly-encoded, gone,
+    permission-denied — every one of them returns True and BLOCKS. A content check
+    that serves a file it could not read is worse than no check at all, because it
+    looks like protection while providing none. The one thing that must never happen
+    is "I could not tell, so I served it".
+
+    🔴 NOT GATED ON THE EXTENSION (constraint 3). Every text file is sniffed, not
+    just `*.json`. Gating on `.json` would let `key.txt` walk straight through and
+    would re-introduce, one layer down, the exact filename dependency this check
+    exists to remove.
+
+    🔴 BOUNDED READ, IN TWO STAGES (constraint 4). The first CREDENTIAL_SNIFF_BYTES
+    decide almost every file. If that window is FILLED by something that is trying to
+    be a JSON container, the read widens once to CREDENTIAL_MAX_SNIFF_BYTES, because
+    a signature outside the window is a signature this function cannot see — Clayton
+    measured a real credential hidden that way behind one big leading field. Both
+    stages are bounded, so deciding still never means slurping an arbitrary file.
+
+    ⚠️ ACCEPTED LIMIT, stated rather than assumed: a JSON container larger than
+    CREDENTIAL_MAX_SNIFF_BYTES whose only credential material sits past that mark is
+    SERVED. Closing that would mean refusing every large JSON document on the grounds
+    that it might be hiding something, which costs more than it buys.
+
+    Requires:
+        - full_path is a filesystem path the caller intends to serve
+
+    Ensures:
+        - True for a JSON object AT ANY NESTING DEPTH, inside objects or arrays, or
+          carried as JSON TEXT inside a string, declaring type service_account /
+          authorized_user / external_account, or carrying private_key /
+          private_key_id / refresh_token / client_secret with a real string value, or
+          with a list holding one
+        - True for any PEM PRIVATE KEY block, bare or wrapped
+        - True when the file cannot be read or decoded, for ANY reason
+        - False only when the prefix was read successfully AND carries no signature —
+          so a tokenizer legitimately named token.json is served, while a credential
+          under the same name is refused
+
+    Raises:
+        - nothing; every failure path blocks instead
+    """
+    return credential_verdict( full_path ) != "clean"
+
+
+def credential_verdict( full_path: str ) -> str:
+    """
+    Say WHY the file is being refused, not just that it is — FAIL CLOSED either way.
+
+    WHAT THIS SPLITS (row ee1670bc). `is_credential_file` answers one bit, and two very
+    different facts were collapsing into it. An unreadable file — a disk error, a
+    permission bit, a bind-mount that never came up — blocked, correctly, and then the
+    doc viewer told the reader "this file's CONTENT is credential material". That is a
+    true refusal attached to a false explanation, and it sends whoever is debugging to
+    look for a credential that was never there.
+
+    THE FLOOR DOES NOT MOVE. Unreadable still refuses. `is_credential_file` is now
+    defined as `credential_verdict( path ) != "clean"`, so its contract is unchanged
+    down to the unreadable case, and every mutation proof written against it still
+    holds. Only the EXPLANATION becomes available to the caller.
+
+    Requires:
+        - full_path is a filesystem path the caller intends to serve
+
+    Ensures:
+        - "unreadable"  the bytes could not be obtained or decoded, for ANY reason —
+                        missing, permission-denied, not utf-8, a failing disk. The
+                        caller should say so; it is not a statement about content
+        - "credential"  the bytes were read and carry credential material
+        - "clean"       the bytes were read and carry no signature — the ONLY verdict
+                        that permits serving
+        - never "clean" for a file it could not read, and never raises: an error while
+          DECIDING is itself a refusal (that promise used to stop at the read — see
+          the wrap below)
+
+    Raises:
+        - nothing; every failure path refuses instead
+    """
+    try:
+        with open( full_path, "r", encoding="utf-8" ) as handle:
+            prefix = handle.read( CREDENTIAL_SNIFF_BYTES )
+            if _the_window_may_be_hiding_the_signature( prefix ):
+                prefix += handle.read( CREDENTIAL_MAX_SNIFF_BYTES - CREDENTIAL_SNIFF_BYTES )
+    except Exception:
+        # Unreadable, missing, permission-denied, or not utf-8 — all REFUSE, and now
+        # they refuse under their own name instead of borrowing the credential one.
+        return "unreadable"
+
+    # 🔴 THE FAIL-CLOSED PROMISE HAS TO COVER THE DECISION TOO (row de013b80, found by
+    # Tiffany correcting my diagnosis of the RecursionError). The handler above wraps
+    # ONLY the read, and this call used to sit outside it — so for the whole life of
+    # this check, ANY error raised while deciding walked straight out of the module and
+    # the reader got a 500, while the docstring promised every failure path blocks.
+    # That promise was true of reading and false of deciding.
+    #
+    # It refuses as "unreadable", not "credential": we could not complete the decision,
+    # which is a statement about our ability to tell, never about the file's content.
+    try:
+        return "credential" if _prefix_looks_like_credential( prefix ) else "clean"
+    except Exception:
+        return "unreadable"
+
+
+def _the_window_may_be_hiding_the_signature( prefix: str ) -> bool:
+    """
+    Return True iff the first window ran out mid-file on a JSON container, which is
+    the only case where reading further can change the answer.
+
+    A file SHORTER than the window was read whole, so there is nothing further to
+    see. Text that is not a JSON container is decided as prose and reading more of it
+    changes nothing. Everything else stops at one window.
+
+    Requires:
+        - prefix is the text read by the first stage
+
+    Ensures:
+        - True only when the window was filled AND the text opens a JSON object or
+          array once the invisible lead-in is stripped
+
+    Raises:
+        - nothing
+    """
+    if len( prefix ) < CREDENTIAL_SNIFF_BYTES:
+        return False
+
+    return _strip_leadin_noise( prefix )[ : 1 ] in _JSON_CONTAINER_OPENERS
+
+
+def _strip_leadin_noise( text: str ) -> str:
+    """
+    Drop every leading character a reader cannot see, in ANY order, until a visible
+    one appears.
+
+    Requires:
+        - text is decoded text (possibly empty)
+
+    Ensures:
+        - returns text with leading whitespace AND leading Unicode category Cf
+          (format) characters removed, interleaved in any order
+        - returns text unchanged when its first character is visible
+        - returns "" for text that is entirely invisible
+
+    Raises:
+        - nothing
+
+    WHY A CHARACTER CLASS AND NOT A LONGER lstrip() ARGUMENT: two strips in a fixed
+    order cannot handle interleaving. `lstrip( "﻿" )` then `lstrip()` leaves
+    `" ﻿{...}"` with the mark back at the front, which SERVED a complete ADC
+    credential. Category Cf is what U+FEFF, U+200B, U+2060 and the direction marks
+    are, so this closes the class rather than the one codepoint that got caught.
+    """
+    i = 0
+    while i < len( text ) and ( text[ i ].isspace() or unicodedata.category( text[ i ] ) == "Cf" ):
+        i += 1
+    return text[ i: ]
+
+
+def _prefix_looks_like_credential( prefix: str ) -> bool:
+    """
+    Decide on an already-read prefix. Split out so the decision is testable without
+    a filesystem, and so `is_credential_file` holds only the fail-closed IO.
+
+    Requires:
+        - prefix is decoded text, possibly TRUNCATED mid-token
+
+    Ensures:
+        - True on a PEM private-key header, which needs no parsing
+        - True on a parseable JSON value carrying a credential type or field AT ANY
+          DEPTH, inside objects or arrays
+        - True when the prefix is a TRUNCATED JSON container that already shows a
+          credential field — a key does not become safe because the read stopped
+          early, which is the same fail-closed rule applied to truncation
+        - False for an empty prefix, which carries no signature to act on
+
+    Raises:
+        - nothing
+    """
+    if not prefix:
+        return False
+
+    # 🔴 STRIP THE BOM BEFORE ANYTHING LOOKS AT THE TEXT. A UTF-8 byte-order mark
+    # read under encoding="utf-8" arrives as a literal ﻿ character, and it is
+    # NOT whitespace — `"﻿".isspace()` is False — so `lstrip()` leaves it in
+    # place. That defeated BOTH branches at once: `json.loads` raised on the leading
+    # mark, and the `startswith("{")` narrowing then said "this is prose, serve it".
+    #
+    # MEASURED before the fix: a BOM-prefixed ADC credential (refresh_token +
+    # client_secret) and a service-account key whose private_key carries no PEM
+    # header were both SERVED. The PEM shape still blocked, which is why this hid —
+    # the fixture that would have caught it had a PEM header doing the work.
+    # (Found by Tiffany on review of my own brace narrowing, which introduced it.)
+    #
+    # 🔴 SECOND PASS (Tiffany, review of the fix above): stripping the mark at
+    # position 0 only closed 4 of the 12 shapes that were serving. A space, tab or
+    # newline in FRONT of the mark shielded it — the whitespace lstrip() down at the
+    # narrowing runs LATER, so the mark was back at the front by the time the brace
+    # test looked. U+200B walked through untouched. Measured: 8 of 24 shapes still
+    # SERVED a complete ADC credential at ff6c9e46. Both call sites now go through
+    # the class-based strip, which is order-independent.
+    prefix = _strip_leadin_noise( prefix )
+
+    # PEM first: decisive, needs no parsing, catches a key pasted into any wrapper.
+    if _PEM_PRIVATE_KEY.search( prefix ):
+        return True
+
+    try:
+        parsed = json.loads( prefix )
+    except ( ValueError, TypeError, RecursionError ):
+        # 🔴 RecursionError IS IN THIS TUPLE ON PURPOSE (Tiffany, follow-up). `json.loads`
+        # raises it at roughly 20000 levels of nesting — a 39 KiB file of open brackets
+        # does it — and it escaped the detector, so the reader got a 500 instead of a
+        # verdict.
+        #
+        # ⚠️ NOT because of its ancestry. I first wrote here that RecursionError inherits
+        # from BaseException and not Exception. That is FALSE — the chain is
+        # RecursionError -> RuntimeError -> Exception -> BaseException, so a broad
+        # `except Exception` catches it fine. Tiffany corrected it within minutes.
+        # It escaped because of WHERE the broad handler sits: `is_credential_file` wraps
+        # only the FILE READ, and calls this function AFTER the try block. Nothing
+        # guards the decision. See the fail-closed wrap added there.
+        #
+        # Routing it here is not a special case: a document too deep to parse is a
+        # document we could not read, which is what this branch already handles.
+        #
+        # TRUNCATED or non-JSON. A service-account key longer than the sniff window
+        # lands here, so falling through to "serve it" would defeat the bounded read.
+        #
+        # ⚠️ ONLY for text that is TRYING to be a JSON container. Scanning arbitrary
+        # prose for these strings blocks documentation ABOUT credentials — an auth
+        # guide quoting `"type": "service_account"` is a document, and this test file
+        # itself would be refused. A truncated key still starts with `{` or `[`;
+        # prose does not, so the opening bracket is what separates them.
+        if _strip_leadin_noise( prefix )[ : 1 ] not in _JSON_CONTAINER_OPENERS:
+            return False
+
+        # Put JSON escapes back before scanning. This branch reads RAW TEXT, so a key
+        # written `"refresh_token"` is the same key to a parser and a different
+        # string to a substring scan — which is exactly how one walked through.
+        lowered = _decode_json_unicode_escapes( prefix ).lower()
+        if any( f'"{key}"' in lowered for key in _CREDENTIAL_JSON_KEYS ):
+            return True
+        return any( f'"{value}"' in lowered for value in _CREDENTIAL_TYPE_VALUES )
+
+    return _parsed_value_carries_a_credential( parsed )
+
+
+def _decode_json_unicode_escapes( text: str ) -> str:
+    """
+    Return `text` with every `\\uXXXX` escape replaced by the character it names.
+
+    Requires:
+        - text is decoded text, possibly truncated mid-token
+
+    Ensures:
+        - returns text with each \\uXXXX escape replaced by chr( XXXX )
+        - returns text unchanged when it carries no such escape
+
+    Raises:
+        - nothing
+    """
+    return _JSON_UNICODE_ESCAPE.sub( lambda match: chr( int( match.group( 1 ), 16 ) ), text )
+
+
+def _value_is_secret_material( value ) -> bool:
+    """
+    Return True iff `value` is a real secret string rather than a schema or a
+    template.
+
+    THE TRADE THIS ENCODES, decided deliberately rather than discovered later: once
+    the search goes to any depth, a bare key NAME stops being enough to refuse on. An
+    OpenAPI spec names `client_secret` under `securitySchemes` and a template shows
+    `"client_secret": "<yours>"` — both are documents, and both would be refused by a
+    name-only rule the moment it stopped looking only at the top level. A credential
+    carries the secret AS A STRING; a schema carries an object, and a template carries
+    a placeholder.
+
+    Requires:
+        - nothing; any parsed JSON value is acceptable
+
+    Ensures:
+        - True only for a non-blank string that is not a syntactic placeholder
+        - False for objects, arrays, numbers, booleans and null
+
+    Raises:
+        - nothing
+    """
+    if not isinstance( value, str ):
+        return False
+    if not value.strip():
+        return False
+
+    return _PLACEHOLDER_VALUE.match( value ) is None
+
+
+def _object_declares_a_credential( node: dict ) -> bool:
+    """
+    Return True iff this ONE object is itself credential material.
+
+    Requires:
+        - node is a parsed JSON object
+
+    Ensures:
+        - True when its `type` names a credential type value
+        - True when it carries a credential key holding secret material
+        - False otherwise
+
+    Raises:
+        - nothing
+    """
+    declared_type = node.get( "type" )
+    if isinstance( declared_type, str ) and declared_type.strip() in _CREDENTIAL_TYPE_VALUES:
+        return True
+
+    return any( _credential_field_carries_secret_material( node.get( key ) )
+                for key in _CREDENTIAL_JSON_KEYS )
+
+
+def _credential_field_carries_secret_material( value ) -> bool:
+    """
+    Return True iff a credential FIELD's value carries secret material, whether it
+    holds the secret directly or holds a LIST of secret lines.
+
+    WHY THE LIST ARM EXISTS (bug 0cbf69c0, found by Tiffany reviewing the depth fix):
+    `_value_is_secret_material` answers about ONE value and correctly says no to a
+    list, because a list is not a string. The walk then descends into the list's
+    ITEMS — but they are strings, not objects, so nothing ever tests them. A key
+    written as an array of PEM-less lines fell straight between the two, and with no
+    `type` field to catch it the file was SERVED.
+
+    Placeholder discrimination is kept, item by item: a list of `<your key here>`
+    lines is still a template, and templates are documents.
+
+    Requires:
+        - nothing; any parsed JSON value is acceptable, including None for a key the
+          object does not carry
+
+    Ensures:
+        - True for a real non-placeholder secret string
+        - True for a list holding at least one such string, at any list depth
+        - False for objects, numbers, booleans, null, and lists of placeholders
+
+    Raises:
+        - nothing
+    """
+    pending = [ value ]
+    while pending:
+        item = pending.pop()
+        if isinstance( item, list ):
+            # An explicit stack, like the walk above: list depth comes from the file,
+            # so recursion here would put the interpreter's stack in a file's hands.
+            pending.extend( item )
+        elif _value_is_secret_material( item ):
+            return True
+
+    return False
+
+
+def _parsed_value_carries_a_credential( parsed ) -> bool:
+    """
+    Return True iff a credential object sits ANYWHERE in the parsed value.
+
+    🔴 THE DEPTH FIX. The previous check read `key in parsed` on the top-level object
+    only, so six shapes walked through — the first of them being the client_secret
+    JSON the GCP console hands you, which puts every field one level down under
+    `"installed"` or `"web"`. Arrays were served outright. Nesting is not an attack
+    here so much as the NORMAL shape of a downloaded credential.
+
+    Walks with an explicit stack rather than recursion, so nesting depth is bounded by
+    the file, not by the interpreter's stack — no depth cap to tune, and no crash on a
+    deeply nested document.
+
+    🔴 THE PAYLOAD FIX (bug b17ffefd). The walk crossed objects and arrays and STOPPED
+    AT A STRING, so a whole credential carried as JSON TEXT inside another JSON file
+    was never opened: `{"google_credentials": "{\\"type\\": \\"service_account\\", ...}"}`
+    was served. That is the ordinary shape of terraform tfvars, a kubernetes secret and
+    a compose env file — the credential is a string as far as the outer document is
+    concerned, and a real key as far as anything reading it is concerned. A string that
+    opens a JSON container is now re-parsed and pushed back onto the stack, up to
+    CREDENTIAL_MAX_NESTED_PARSES times per file.
+
+    Requires:
+        - parsed is a value returned by json.loads
+
+    Ensures:
+        - True iff some object inside it satisfies _object_declares_a_credential,
+          including objects recovered from JSON carried inside a string
+        - False for scalars, which carry no fields to test
+
+    Raises:
+        - nothing
+    """
+    pending       = [ parsed ]
+    reparses_left = CREDENTIAL_MAX_NESTED_PARSES
+
+    while pending:
+        node = pending.pop()
+        if isinstance( node, dict ):
+            if _object_declares_a_credential( node ):
+                return True
+            pending.extend( node.values() )
+        elif isinstance( node, list ):
+            pending.extend( node )
+        elif isinstance( node, str ) and reparses_left > 0 and _opens_a_json_container( node ):
+            reparses_left -= 1
+            carried = _json_carried_in_a_string( node )
+            if carried is not None:
+                pending.append( carried )
+
+    return False
+
+
+def _opens_a_json_container( text: str ) -> bool:
+    """
+    Return True iff `text` starts a JSON object or array once the invisible lead-in is
+    gone. The cheap test that decides whether a parse is worth attempting at all.
+
+    Requires:
+        - text is decoded text, possibly empty
+
+    Ensures:
+        - True only when the first visible character is `{` or `[`
+
+    Raises:
+        - nothing
+    """
+    return _strip_leadin_noise( text )[ : 1 ] in _JSON_CONTAINER_OPENERS
+
+
+def _json_carried_in_a_string( text: str ) -> object:
+    """
+    Return the value parsed out of a string that carries JSON, or None when it does
+    not parse.
+
+    None means "there is nothing here to walk". A string that looked like a container
+    and did not parse is text — it carries no object for the field test to read, and
+    guessing at it would be the raw-substring scan the parsed path exists to avoid.
+
+    🔴 PARSE THE SAME TEXT THE GATE JUDGED (Tiffany, follow-up on the payload fix).
+    `_opens_a_json_container` strips the invisible lead-in before deciding a string is
+    worth parsing; this function used to parse the RAW string. So a value beginning
+    with a BOM or a zero-width space passed the gate and then failed the parse ON THE
+    VERY CHARACTER THE GATE HAD REMOVED, returned None, and the credential inside it
+    was SERVED. Two functions disagreeing about which text they are talking about is
+    the whole defect — they now read the same bytes.
+
+    MEASURED before this fix, all three SERVED a complete service-account key:
+    `{"note": "<BOM>{...key...}"}`, the same shape inside a list, and the zero-width
+    space in place of the BOM. Without a lead-in character the same payload BLOCKED,
+    which is why this hid — every fixture written for the payload fix was clean-led.
+
+    Requires:
+        - text is a string whose first visible character opens a JSON container
+
+    Ensures:
+        - returns the parsed value on success, lead-in noise removed first
+        - returns None when the text is not parseable JSON
+        - returns None when the text nests too deep for the parser rather than
+          letting RecursionError escape to the caller (see the note in
+          `_prefix_looks_like_credential` — it is NOT an Exception subclass)
+
+    Raises:
+        - nothing
+    """
+    try:
+        return json.loads( _strip_leadin_noise( text ) )
+    except ( ValueError, TypeError, RecursionError ):
+        return None
 
 
 def _is_secrets_path( relative_path: str ) -> bool:

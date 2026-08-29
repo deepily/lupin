@@ -55,20 +55,41 @@ def _load_swe_team_profile( responder, debug=False ):
         - Registers SWE categories with the responder
         - Returns True on success, False on import failure
     """
+    # BOTH imports below were previously wrong names that config/engineering_strategy
+    # never defined — `SweEngineeringStrategy` and `ACCEPTED_SENDERS` — so this block
+    # raised ImportError on EVERY start and the profile silently fell through to
+    # shadow-only with an empty allowlist (960a4ec9). The real symbols are the
+    # package-level `EngineeringStrategy` and the `swe_proxy_config_from_config_mgr`
+    # factory whose `accepted_senders` (INI-overridable, defaulting to the three
+    # swe.* addresses) is the allowlist.
     try:
-        from cosa.agents.swe_team.proxy.engineering_strategy import SweEngineeringStrategy
-        from cosa.agents.swe_team.proxy.config import ACCEPTED_SENDERS
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        from cosa.agents.swe_team.proxy.config import swe_proxy_config_from_config_mgr
+        from cosa.config.configuration_manager import ConfigurationManager
 
-        strategy = SweEngineeringStrategy( debug=debug )
+        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        swe_cfg    = swe_proxy_config_from_config_mgr( config_mgr )
+
+        strategy = EngineeringStrategy(
+            accepted_senders = swe_cfg[ "accepted_senders" ],
+            trust_mode       = responder.trust_mode,
+            debug            = debug,
+        )
         responder.set_domain_strategy( strategy )
-        responder.accepted_senders = ACCEPTED_SENDERS
+        responder.accepted_senders = swe_cfg[ "accepted_senders" ]
 
         if debug: print( "[DecisionProxy] SWE team profile loaded" )
         return True
 
-    except ImportError as e:
-        print( f"[DecisionProxy] SWE team profile not available: {e}" )
-        print( "[DecisionProxy] Running in shadow-only mode (no domain strategy)" )
+    except Exception as e:
+        # Widened from ImportError (extra-2 review): a NON-import failure out of
+        # swe_proxy_config_from_config_mgr or EngineeringStrategy construction would
+        # otherwise escape this handler and crash main() with a traceback — the same
+        # "dead profile" outcome, just louder and uglier. ANY load failure returns
+        # False so main() makes ONE clean refuse-to-start decision. Broad is correct
+        # here because the caller treats False as "refuse to start", never "continue
+        # degraded" — so nothing is masked, it is surfaced and then halted.
+        print( f"[DecisionProxy] SWE team profile failed to load ({type( e ).__name__}): {e}" )
         return False
 
 
@@ -132,6 +153,17 @@ async def main():
         print( f"\n[DecisionProxy] Credential error: {e}" )
         sys.exit( 1 )
 
+    # decision proxy enabled flag (960a4ec9): enforce the master switch the splainer
+    # promises ("when false, the proxy will not run"). Read the INI flag and refuse to
+    # start before connecting to the WebSocket — the flag is no longer inert.
+    from cosa.config.configuration_manager import ConfigurationManager
+    config_mgr    = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    proxy_enabled = config_mgr.get( "decision proxy enabled", default=False, return_type="boolean" )
+    if not proxy_enabled:
+        print( "\n[DecisionProxy] `decision proxy enabled` is false — the proxy will not run. "
+               "Set it true in lupin-app.ini to start." )
+        return
+
     # Show startup banner
     profile_info = AVAILABLE_PROFILES.get( args.profile, {} )
     print( "=" * 60 )
@@ -159,16 +191,26 @@ async def main():
         port       = args.port,
         dry_run    = args.dry_run,
         debug      = args.debug,
-        verbose    = args.verbose
+        verbose    = args.verbose,
+        enabled    = proxy_enabled
     )
 
     # Load domain profile
     loader_name = profile_info.get( "loader", "" )
     loader_func = globals().get( loader_name )
-    if loader_func:
-        loader_func( responder, debug=args.debug )
-    else:
-        print( f"[DecisionProxy] No loader for profile '{args.profile}' — shadow mode" )
+    # A FAILED profile load must be LOUD, not a silent shadow-only run (960a4ec9).
+    # main() previously ignored the loader's return value, so an ImportError left
+    # the responder with no strategy AND an empty allowlist, yet the proxy connected
+    # and announced itself IDENTICALLY to a healthy load — a dead profile
+    # indistinguishable from a live one from outside. Consume the result and refuse
+    # to start on failure, the same shape as the enabled=false refusal above.
+    if not loader_func:
+        print( f"[DecisionProxy] No loader for profile '{args.profile}' — refusing to start." )
+        sys.exit( 1 )
+    if not loader_func( responder, debug=args.debug ):
+        print( f"[DecisionProxy] Profile '{args.profile}' failed to load — refusing to start "
+               f"(a dead profile must not masquerade as a healthy one)." )
+        sys.exit( 1 )
 
     print( "\nListening for decisions... (Ctrl+C to stop)\n" )
 

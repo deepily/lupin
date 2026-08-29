@@ -5,7 +5,6 @@ from typing import Any, Optional, Dict, Type, List
 
 import requests
 
-from cosa.agents.confirmation_dialog import ConfirmationDialogue
 from cosa.rest.fifo_queue import FifoQueue  # CJ Flow ingress queue — receives all incoming jobs
 
 from cosa.agents.date_and_time_agent import DateAndTimeAgent
@@ -17,6 +16,8 @@ from cosa.agents.math_agent import MathAgent
 from cosa.crud_for_dataframes.todo_crud_agent import TodoCrudAgent
 from cosa.crud_for_dataframes.calendar_crud_agent import CalendarCrudAgent
 from cosa.agents.calculator.agent import CalculatorAgent
+from cosa.rest.salutations import SALUTATIONS, parse_salutations
+from cosa.rest.v2.registry import resolve   # the command->agent table (row 10ef4b64)
 from cosa.agents.llm_client_factory import LlmClientFactory
 from cosa.rest.agentic_job_factory import create_agentic_job
 from cosa.memory.gister import Gister
@@ -48,9 +49,10 @@ from lupin_cli.notifications.notification_models import (
 )
 
 # Runtime Argument Expeditor imports for agentic job routing
-from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor import (
     RuntimeArgumentExpeditor,
+    ExpediteContext,
     user_message_for_expedite_reason,
 )
 
@@ -77,8 +79,8 @@ MODE_METADATA = {
     "calculator"  : { "display_name": "Calculator",    "description": "Unit conversions, price comparison, mortgage" },
     # Agentic process modes (route through AGENTIC_MODE_MAP, not MODE_TO_AGENT)
     "deep_research"      : { "display_name": "Deep Research",       "description": "Investigate a topic in depth" },
-    "podcast"            : { "display_name": "Podcast Generator",   "description": "Create a podcast from a topic" },
-    "research_to_podcast": { "display_name": "Research to Podcast", "description": "Convert existing research to podcast" },
+    "podcast"            : { "display_name": "Podcast Generator",   "description": "Create a podcast from an existing document" },
+    "research_to_podcast": { "display_name": "Research to Podcast", "description": "Research a topic and create a podcast" },
     "claude_code"        : { "display_name": "Claude Code",         "description": "Run a coding task" },
     "swe_team"           : { "display_name": "SWE Team",            "description": "Multi-agent engineering team" },
     "presentation"              : { "display_name": "Presentation",              "description": "Generate slides from a document" },
@@ -86,9 +88,9 @@ MODE_METADATA = {
     "test_suite"                : { "display_name": "Test Suite",                "description": "Run integration and E2E tests" },
 }
 
-# Agentic mode keys → AGENTIC_AGENTS routing command strings
+# Agentic mode keys → JOB_ARG_CONTRACTS routing command strings
 # When user selects an agentic mode, this maps directly to the command
-# that enters the `elif command in AGENTIC_AGENTS:` branch
+# that enters the `elif command in JOB_ARG_CONTRACTS:` branch
 AGENTIC_MODE_MAP = {
     "deep_research"            : "agent router go to deep research",
     "podcast"                  : "agent router go to podcast generator",
@@ -99,6 +101,54 @@ AGENTIC_MODE_MAP = {
     "research_to_presentation" : "agent router go to research to presentation",
     "test_suite"               : "agent router go to test suite",
 }
+
+
+def get_routing_command( question, config_mgr, llm_factory, debug=False, verbose=False ):
+    """
+    Determine the routing command for a question via the LLM agent router.
+
+    Requires:
+        - question is a non-empty string
+        - config_mgr exposes .get( "prompt template for agent router" ) and
+          .get( "llm spec key for agent router" )
+        - llm_factory exposes .get_client( spec_key, debug=, verbose= )
+
+    Ensures:
+        - Returns a ( command, args ) tuple of strings
+        - Uses the LLM to determine the appropriate agent
+        - Parses the XML response for command and args
+        - Returns ( "unknown", "" ) on any XML parse failure
+
+    Raises:
+        - FileNotFoundError if prompt template missing
+        - LLM errors propagated
+    """
+    router_prompt_template_path = config_mgr.get( "prompt template for agent router" )
+    router_prompt_template = du.get_file_as_string( du.get_project_root() + router_prompt_template_path )
+
+    prompt = router_prompt_template.format( voice_command=question )
+    if debug and verbose: print( f"\n===== ROUTER PROMPT START =====\n{prompt}\n===== ROUTER PROMPT END =====\n" )
+
+    llm_spec_key = config_mgr.get( "llm spec key for agent router" )
+    llm_client = llm_factory.get_client( llm_spec_key, debug=debug, verbose=verbose )
+    response = llm_client.run( prompt )
+    if debug: print( f"LLM response: [{response}]" )
+
+    # Parse results using Pydantic CommandResponse model
+    try:
+        parsed = CommandResponse.from_xml( response )
+        command = parsed.command
+        args    = parsed.args or ""
+        if debug: print( f"Pydantic parsing extracted: command='{command}', args='{args}'" )
+    except XMLParsingError as e:
+        if debug: print( f"XML parsing failed: {e}" )
+        command, args = "unknown", ""
+    except Exception as e:
+        if debug: print( f"Unexpected error during XML parsing: {e}" )
+        command, args = "unknown", ""
+
+    return command, args
+
 
 class TodoFifoQueue( FifoQueue ):
     """
@@ -158,12 +208,10 @@ class TodoFifoQueue( FifoQueue ):
 
         if self.debug: print( "TodoFifoQueue: Text processors and three-level architecture components initialized" )
         
-        # Salutations to be stripped by a brute force method until the router parses them off for us
-        self.salutations = [ "computer", "little", "buddy", "pal", "ai", "jarvis", "alexa", "siri", "hal", "einstein",
-            "jeeves", "alfred", "watson", "samwise", "sam", "hawkeye", "oye", "hey", "there", "you", "yo",
-            "hi", "hello", "hola", "good", "morning", "afternoon", "evening", "night", "buenas", "buenos", "buen", "tardes",
-            "noches", "dias", "día", "tarde", "greetings", "my", "dear", "dearest", "esteemed", "assistant", "receptionist", "friend"
-        ]
+        # Salutations to be stripped by a brute force method until the router parses
+        # them off for us. The list moved to cosa.rest.salutations so the v2 flow reads
+        # the SAME one — two copies is how two surfaces disagree about what a greeting is.
+        self.salutations = SALUTATIONS
         self.hemming_and_hawing = [
             "", "", "", "umm...", "hmm...", "hmm...", "well...", "ahem..."
         ]
@@ -196,24 +244,9 @@ class TodoFifoQueue( FifoQueue ):
         Raises:
             - None
         """
-        # Normalize the transcription by removing extra spaces after punctuation
-        # From: https://chat.openai.com/share/5783e1d5-c9ce-4503-9338-270a4c9095b2
-        words = transcription.split()
-        prefix_holder = [ ]
-        
-        # Find the index where salutations stop
-        index = 0
-        for word in words:
-            if word.strip( ',.:;!?' ).lower() in self.salutations:
-                prefix_holder.append( word )
-                index += 1
-            else:
-                break
-        
-        # Get the remaining string after salutations
-        remaining_string = ' '.join( words[ index: ] )
-
-        return ' '.join( prefix_holder ), remaining_string
+        # The implementation moved to cosa.rest.salutations; this stays as the queue's
+        # door onto it, and honours self.salutations so a test can still swap the list.
+        return parse_salutations( transcription, self.salutations )
 
     # ========================================================================
     # User Mode Management Methods
@@ -375,6 +408,29 @@ class TodoFifoQueue( FifoQueue ):
         """
         Push a new job onto the queue based on the question.
 
+        🔴 DEAD AS OF STEP 6c (2026-08-21) — NOTHING IN PRODUCTION CALLS THIS.
+
+        This was the live voice path: a question came in, and everything below decided
+        what to do with it — fitness, cache, confirmation, routing, agent construction,
+        the queue push. All of that now lives in `AskFlow` (`cosa/rest/v2/flow.py`), and
+        the switch happened by CUTOVER rather than by this method delegating to it:
+
+            · 11a / 11b retired the router doors that called it; they answer 410.
+            · step 12 moved the seven internal callers to flow.submit() / flow.ask().
+            · door 8 — /api/upload-and-transcribe-mp3, the SPOKEN way in — hands the
+              transcription to the flow in-process (routers/speech.py).
+
+        The body survives only because steps 7b and 7c delete its internals next, and
+        the queue's own coverage suite still drives it. Do not add a caller: a sweep
+        (`src/tests/unit/test_6c_push_job_has_no_production_caller.py`) fails if any
+        production module calls `push_job(` again.
+
+        THE REASON THIS PARAGRAPH EXISTS rather than the deadness just being true: the
+        plan's step 0 closed a trap where `grep "def save_snapshot"` returned the
+        DEPRECATED manager first, and a reader followed it into code nobody runs. A
+        440-line `push_job` that still reads as the live voice path is that same trap,
+        set for the next person who greps for how a spoken question is handled.
+
         Requires:
             - question is a non-empty string
             - websocket_id is a non-empty string
@@ -395,7 +451,6 @@ class TodoFifoQueue( FifoQueue ):
         Raises:
             - None (exceptions handled internally)
         """
-        run_previous_best_snapshot = False
         similar_snapshots = [ ]
         
         # NEW: Pre-processing and validation
@@ -447,69 +502,53 @@ class TodoFifoQueue( FifoQueue ):
             print( f"  Gist:       '{query_gist}'" )
             print( f"Embeddings generated - V:{len( embedding_verbatim )} N:{len( embedding_normalized )}" )
 
-        # check to see if the queue isn't accepting jobs (because it's waiting for response to a previous request)
-        if not self.is_accepting_jobs():
-            
-            msg = f"The human responded '{question}'"
-            du.print_banner( msg )
-            confirmation_llm_spec      = self.config_mgr.get( "llm spec key for confirmation dialog" )
-            run_previous_best_snapshot = ConfirmationDialogue( confirmation_llm_spec, debug=self.debug, verbose=self.verbose ).confirmed( question )
-            
-        if run_previous_best_snapshot:
-                
-            blocking_object = self.pop_blocking_object()
-            
-            # unpack the blocking object, setting best score to 100 because the user has confirmed that it is an exact semantic match
-            best_score          = 100.0
-            best_snapshot       = blocking_object[ "best_snapshot" ]
-            last_question_asked = blocking_object[ "question" ]
-            
-            # update last question asked before we throw it on the queue
-            best_snapshot.last_question_asked = last_question_asked
+        # ⚰️ REMOVED — step 7c, 2026-08-21: the two-turn confirmation dialogue.
+        #
+        # WHAT WAS HERE: an `is_accepting_jobs()` gate, and behind it a `ConfirmationDialogue`
+        # LLM call that read the user's NEXT spoken question as a yes/no answer about the
+        # PREVIOUS one, then replayed a stashed "blocking object" snapshot at a hard-coded
+        # score of 100.0. It depended on `FifoQueue.push_blocking_object()` setting
+        # `_accepting_jobs = False`, which is why that method, `pop_blocking_object()` and
+        # `is_accepting_jobs()` were deleted with it.
+        #
+        # WHY IT WAS BAD: nothing in the running system ever armed a blocking object, so the
+        # gate never went false and the branch never ran — but everyone who touched push_job
+        # still had to read it and reason about it. And on the paths where it WOULD have run
+        # it was wrong twice over: it treated a fresh question as an answer to an older one,
+        # and it recorded a guessed match as a perfect 100.0.
+        #
+        # WHAT CARRIES CONFIRMATION NOW: AskFlow's near-match ask (step 6b) — a targeted
+        # yes/no about one named snapshot, where both "no" and a timeout fall through to
+        # ordinary routing.
+        #
+        # PROVED UNREACHABLE BEFORE DELETING, not just argued: a probe recorded every trip of
+        # the gate and the branch over 2026-08-21 16:30Z–23:07Z — six boots, 65
+        # /api/upload-and-transcribe-mp3 + 2 /api/v2/ask + 1 /api/push — and logged nothing,
+        # with a positive control proving the probe could fire. Caveat the window does not
+        # cover: both probes sat inside `push_job`, which step 6c pinned as having zero
+        # production callers, so the silence re-proves the cutover at least as much as the
+        # branch. The probe module retired with this block.
 
-            # Log query with match results (confirmed snapshot)
-            match_result = {
-                'snapshot_id': best_snapshot.id_hash,
-                'type': 'confirmed_match',
-                'confidence': 100.0
-            }
-            embeddings = {
-                'verbatim'   : embedding_verbatim,
-                'normalized' : embedding_normalized
-            }
-            self._log_query_with_results(
-                query_verbatim, query_normalized, query_gist,
-                user_id, websocket_id, embeddings, cache_hits, match_result
-            )
+        # DEMO KLUDGE: if the question doesn't start with "refactor", then we're going to search for similar snapshots
+        if not question.lower().strip().startswith( "refactor " ):
 
-            self._dump_code( best_snapshot )
-            return self._queue_best_snapshot( best_snapshot, best_score, user_id, user_email )
+            # salutations, question = self.parse_salutations( question )
+            # question_gist = self.get_gist( question )
 
-        # if we're not running the previous best snapshot, then we need to find a similar one before queuing the job
+            du.print_banner( f"push_job( '{( salutations + ' ' + question ).strip()}' )", prepend_nl=True )
+            # Top-1 + confirm strategy: no threshold filtering — all results returned by manager
+            # threshold_question = self.config_mgr.get( "similarity_threshold_question",      default=98.0, return_type="float" )  # OBSOLETE
+            # threshold_gist     = self.config_mgr.get( "similarity_threshold_question_gist", default=95.0, return_type="float" )  # OBSOLETE
+            threshold_confirmation = self.config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float" )
+            print( f"push_job(): Top-1 + confirm strategy (ask floor: {threshold_confirmation}%)" )
+
+            # We're searching for similar snapshots without any salutations prepended to the question.
+            # The snapshot manager internally handles hierarchical search (exact matches first, then similarity)
+            similar_snapshots = self.snapshot_mgr.get_snapshots_by_question( parsed_question, question_gist=question_gist )
+            print()
         else:
-
-            # make sure to remove a possible blocking object
-            self.pop_blocking_object()
-            # DEMO KLUDGE: if the question doesn't start with "refactor", then we're going to search for similar snapshots
-            if not question.lower().strip().startswith( "refactor " ):
-
-                # salutations, question = self.parse_salutations( question )
-                # question_gist = self.get_gist( question )
-
-                du.print_banner( f"push_job( '{( salutations + ' ' + question ).strip()}' )", prepend_nl=True )
-                # Top-1 + confirm strategy: no threshold filtering — all results returned by manager
-                # threshold_question = self.config_mgr.get( "similarity_threshold_question",      default=98.0, return_type="float" )  # OBSOLETE
-                # threshold_gist     = self.config_mgr.get( "similarity_threshold_question_gist", default=95.0, return_type="float" )  # OBSOLETE
-                threshold_confirmation = self.config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float" )
-                print( f"push_job(): Top-1 + confirm strategy (ask floor: {threshold_confirmation}%)" )
-
-                # We're searching for similar snapshots without any salutations prepended to the question.
-                # The snapshot manager internally handles hierarchical search (exact matches first, then similarity)
-                similar_snapshots = self.snapshot_mgr.get_snapshots_by_question( parsed_question, question_gist=question_gist )
-                print()
-            else:
-                print( "push_job(): Skipping snapshot search..." )
-                similar_snapshots = [ ]
+            print( "push_job(): Skipping snapshot search..." )
+            similar_snapshots = [ ]
         
         # Flag to track if we need LLM routing (set when no cache match or user declines confirmation)
         needs_llm_routing = False
@@ -658,15 +697,15 @@ class TodoFifoQueue( FifoQueue ):
             # NEW: Check user mode BEFORE LLM routing
             user_mode = self.get_user_mode( user_id )
 
-            # NOTE: AGENTIC_MODE_MAP MUST be checked BEFORE MODE_TO_AGENT.
-            # Agentic mode keys (test_suite, deep_research, podcast,
-            # research_to_podcast, claude_code, swe_team, presentation,
-            # research_to_presentation) appear in BOTH dicts. The f-string
-            # synthesis below produces e.g. "agent router go to test_suite"
-            # (with underscore), which doesn't match any registered command —
-            # AGENTIC_MODE_MAP holds the canonical "agent router go to test
-            # suite" (with space). Reversed order would land in the else
-            # branch downstream and trigger HTTP 500 with 'NoneType' .split.
+            # AGENTIC_MODE_MAP is checked before MODE_TO_AGENT for deterministic
+            # precedence. The two maps are DISJOINT by invariant — MODE_TO_AGENT
+            # holds only the direct single-token agents, AGENTIC_MODE_MAP the 8
+            # agentic modes; their key sets do not overlap (guarded by
+            # test_todo_fifo_queue_mode_routing.py::test_agentic_and_direct_dicts_disjoint_today,
+            # with a must-fail control). If a future change ever lets an agentic key
+            # into MODE_TO_AGENT, this order keeps the canonical "agent router go to
+            # <name>" (with spaces) winning over f-string synthesis, which would emit
+            # an underscore command ("...test_suite") that matches no registered command.
             if user_mode and user_mode in AGENTIC_MODE_MAP:
                 # Agentic mode - bypass LLM router, produce agentic routing command
                 command = AGENTIC_MODE_MAP[ user_mode ]
@@ -704,38 +743,31 @@ class TodoFifoQueue( FifoQueue ):
                 self._notify( f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} I'm gonna ask our research librarian about that", target_user=user_email )
                 msg = self._search_and_summarize_safely( question_gist )
             
-            elif command == "agent router go to calendar":
-                if self._crud_agents_enabled():
-                    agent = CalendarCrudAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                    msg = starting_a_new_job.format( agent_type="calendar (CRUD)" )
-                else:
-                    agent = CalendaringAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                    msg = starting_a_new_job.format( agent_type="calendaring" )
-                ding_for_new_job = True
-            elif command == "agent router go to calculator":
-                agent = CalculatorAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                msg = starting_a_new_job.format( agent_type="calculator" )
-                ding_for_new_job = True
-            elif command == "agent router go to math":
-                agent = MathAgent( question=salutation_plus_question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                msg = starting_a_new_job.format( agent_type="math" )
-                ding_for_new_job = True
-            elif command in ( "agent router go to todo", "agent router go to todo list" ):
-                if self._crud_agents_enabled():
-                    agent = TodoCrudAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                    msg = starting_a_new_job.format( agent_type="todo (CRUD)" )
-                else:
-                    agent = TodoListAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                    msg = starting_a_new_job.format( agent_type="todo list" )
-                ding_for_new_job = True
-            elif command in [ "agent router go to date and time", "agent router go to datetime" ]:
-                agent = DateAndTimeAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                msg = starting_a_new_job.format( agent_type="date and time" )
-                ding_for_new_job = True
-            elif command == "agent router go to weather":
-                agent = WeatherAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
-                msg = starting_a_new_job.format( agent_type="weather" )
-                # ding_for_new_job = False
+            elif resolve( command, self._crud_agents_enabled() ) is not None:
+                # ─── ONE TABLE LOOKUP, replacing six hand-written elif branches (row 10ef4b64) ───
+                # Rick, 2026-08-20: "those agents could be instantiated using a string key
+                # referencing a dictionary of prototypical Agent Objects... that doesn't take
+                # 10 elif branches." The dictionary already existed — cosa/rest/v2/registry.py —
+                # and only the HTTP route was asking it. ADDING A SEVENTH CONVERSATIONAL COMMAND
+                # NOW REQUIRES NO EDIT HERE; it is one AgentSpec row.
+                #
+                # ONE resolver, and it applies the CRUD fork itself (2b). The flag is read
+                # HERE rather than at the top of the chain so a non-conversational command
+                # still costs no config lookup, exactly as before.
+                voice_spec = resolve( command, self._crud_agents_enabled() )
+                factory, agent_label, ding_for_new_job = voice_spec.factory, voice_spec.label, voice_spec.dings
+                agent = factory(
+                    question=question, question_gist=question_gist, last_question_asked=salutation_plus_question,
+                    push_counter=self.push_counter, user_id=user_id, user_email=user_email,
+                    session_id=websocket_id, debug=True, verbose=False,
+                    auto_debug=self.auto_debug, inject_bugs=self.inject_bugs
+                )
+                msg = starting_a_new_job.format( agent_type=agent_label )
+                # ⚠️ MathAgent used to receive `salutation_plus_question` as its `question` while
+                # every other agent received the bare `question`. Rick ruled 2026-08-20 to DROP the
+                # quirk (it matches the registry's own risk-10 ruling), so math now gets the bare
+                # question like everything else. This IS a behaviour change and is deliberate — if a
+                # math regression ever appears, look here first.
             elif command in ( "agent router go to automatic", "agent router go to automatic routing mode" ):
                 previous_mode = self.clear_user_mode( user_id )
                 if previous_mode:
@@ -751,7 +783,7 @@ class TodoFifoQueue( FifoQueue ):
                 # Randomly grab hemming and hawing string and prepend it to a randomly chosen thinking string
                 msg = f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} {self.thinking[ random.randint( 0, len( self.thinking ) - 1 ) ]}".strip()
                 # ding_for_new_job = False
-            elif command in AGENTIC_AGENTS:
+            elif command in JOB_ARG_CONTRACTS:
                 # Skip disambiguation if user explicitly selected this agentic mode from dropdown
                 if user_mode and user_mode in AGENTIC_MODE_MAP:
                     msg = self._handle_agentic_command(
@@ -763,19 +795,36 @@ class TodoFifoQueue( FifoQueue ):
                         command, args, user_id, user_email, salutation_plus_question
                     )
                     if confirmed_command is None:
-                        msg = "Command cancelled by user."
+                        # None now covers explicit Cancel AND timeout/error abort (row cad45cf1)
+                        msg = "Command cancelled — no confirmation received."
                     else:
                         msg = self._handle_agentic_command(
                             confirmed_command, args, user_id, user_email, websocket_id, salutation_plus_question
                         )
                 # _handle_agentic_command handles push + notify internally; skip fallthrough
                 return { "message": msg, "job_id": None }
+            elif command == "unknown":
+                # 720ce725: a GENUINE non-resolution — XML parse failure / gibberish
+                # (_get_routing_command returns ("unknown","") on any parse failure) —
+                # hands off to the receptionist instead of silently WEB-SEARCHING the
+                # user's question (the old else did self._search_and_summarize_safely,
+                # answering a different question with no signal the route missed).
+                print( f"[ROUTER-MISS] unresolved command '{command}' → receptionist hand-off (reason=unknown_command)" )
+                agent = ReceptionistAgent( question=question, question_gist=question_gist, last_question_asked=salutation_plus_question, push_counter=self.push_counter, user_id=user_id, user_email=user_email, session_id=websocket_id, debug=True, verbose=False, auto_debug=self.auto_debug, inject_bugs=self.inject_bugs )
+                msg = f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} {self.thinking[ random.randint( 0, len( self.thinking ) - 1 ) ]}".strip()
             else:
-                msg = du.print_banner( f"TO DO: Implement else case command {command}" )
-                print( msg )
-                # TTS Migration (Session 98): Use notification service instead of emit_speech_callback
-                self._notify( f"{self.hemming_and_hawing[ random.randint( 0, len( self.hemming_and_hawing ) - 1 ) ]} {self.thinking[ random.randint( 0, len( self.thinking ) - 1 ) ]}", target_user=user_email )
-                msg = self._search_and_summarize_safely( question_gist )
+                # 720ce725 (María's design): the router EMITTED a command that resolves
+                # NOWHERE — not conversational, not receptionist/none, not in
+                # JOB_ARG_CONTRACTS. That is a routing/wiring bug, so FAIL LOUDLY:
+                # never a silent web-search (the old defect), never a receptionist
+                # smoothing a real bug into a friendly non-answer.
+                # Mechanism = loud error banner + honest user notify + no job (job_id
+                # None). Chosen over `raise` because push_job runs on the LIVE speech
+                # API path (routers/speech.py) where an unhandled raise would 500 the
+                # request; flagged for María/Tiberius in the landing report.
+                print( du.print_banner( f"ROUTER-MISS LOUD FAIL: router emitted unwired command {command!r} — no agent/factory handles it (720ce725)" ) )
+                self._notify( f"I heard a command I don't know how to run: {command}. That's a routing bug on my side, not your question.", target_user=user_email )
+                return { "message": f"Unroutable command (no wiring): {command}", "job_id": None }
                 
             if ding_for_new_job:
                 self.websocket_mgr.emit( 'notification_sound_update', { 'soundFile': '/static/gentle-gong.mp3' } )
@@ -944,47 +993,22 @@ class TodoFifoQueue( FifoQueue ):
 
     def _get_routing_command( self, question: str ) -> tuple[str, str]:
         """
-        Determine the routing command for a question.
-        
+        Thin delegating shim over the module-level get_routing_command.
+
         Requires:
             - question is a non-empty string
-            - Config has agent router prompt path
-            - LLM configuration is available
-            
+            - self.config_mgr, self.llm_factory, self.debug, self.verbose are set
+
         Ensures:
-            - Returns tuple of (command, args)
-            - Uses LLM to determine the appropriate agent
-            - Parses XML response for command and args
-            
+            - Returns a ( command, args ) tuple by delegating to
+              get_routing_command with this queue's config + LLM factory
+            - Behavior is identical to the former inline implementation
+
         Raises:
             - FileNotFoundError if prompt template missing
             - LLM errors propagated
         """
-        router_prompt_template_path = self.config_mgr.get( "prompt template for agent router" )
-        router_prompt_template = du.get_file_as_string( du.get_project_root() + router_prompt_template_path )
-        
-        prompt = router_prompt_template.format( voice_command=question )
-        if self.debug and self.verbose: print( f"\n===== ROUTER PROMPT START =====\n{prompt}\n===== ROUTER PROMPT END =====\n" )
-
-        llm_spec_key = self.config_mgr.get( "llm spec key for agent router" )
-        llm_client = self.llm_factory.get_client( llm_spec_key, debug=self.debug, verbose=self.verbose )
-        response = llm_client.run( prompt )
-        if self.debug: print( f"LLM response: [{response}]" )
-
-        # Parse results using Pydantic CommandResponse model
-        try:
-            parsed = CommandResponse.from_xml( response )
-            command = parsed.command
-            args    = parsed.args or ""
-            if self.debug: print( f"Pydantic parsing extracted: command='{command}', args='{args}'" )
-        except XMLParsingError as e:
-            if self.debug: print( f"XML parsing failed: {e}" )
-            command, args = "unknown", ""
-        except Exception as e:
-            if self.debug: print( f"Unexpected error during XML parsing: {e}" )
-            command, args = "unknown", ""
-
-        return command, args
+        return get_routing_command( question, self.config_mgr, self.llm_factory, debug=self.debug, verbose=self.verbose )
 
     def _crud_agents_enabled( self ):
         """
@@ -1000,10 +1024,10 @@ class TodoFifoQueue( FifoQueue ):
         return self.config_mgr.get( "crud for dataframes agents enabled", default="true" ).strip().lower() == "true"
 
     # Product name mapping for agentic command disambiguation
-    PRODUCT_NAMES = {
+    CARD_LABELS = {
         "agent router go to deep research"             : "Deep Dive (investigate a topic)",
-        "agent router go to podcast generator"         : "PodMaker (create a podcast from a topic)",
-        "agent router go to research to podcast"       : "Doc-to-Pod (convert existing research to podcast)",
+        "agent router go to podcast generator"         : "Doc-to-Pod (create a podcast from an existing document)",
+        "agent router go to research to podcast"       : "PodMaker (research a topic and create a podcast)",
         "agent router go to claude code"               : "Claude Code (run a coding task)",
         "agent router go to presentation generator"    : "SlideCraft (create a presentation from a document)",
         "agent router go to research to presentation"  : "Research-to-Slides (research a topic and create a presentation)",
@@ -1019,20 +1043,26 @@ class TodoFifoQueue( FifoQueue ):
         Shows what was detected and offers alternatives from the same confusable group.
 
         Requires:
-            - command is a valid AGENTIC_AGENTS key
+            - command is a valid JOB_ARG_CONTRACTS key
             - user_email is set for notification routing
 
         Ensures:
             - Returns confirmed command string, or None if cancelled
             - User sees product name, not internal command string
-            - On timeout, returns original detected command (safe default)
+            - On timeout or notification error, returns None (ABORTS): a silent
+              timeout must not masquerade as a confirmation of a possibly-wrong
+              detection, so the detected command is NOT auto-run. Row cad45cf1.
+            - The wait window is read from config key
+              "agentic routing confirm timeout seconds" (default 30), not a literal.
         """
-        detected_name = self.PRODUCT_NAMES.get( command, command )
+        detected_name = self.CARD_LABELS.get( command, command )
+
+        timeout_seconds = self.config_mgr.get( "agentic routing confirm timeout seconds", default=30, return_type="int" )
 
         # Build multiple choice options: detected option always first, then alternatives, then cancel
         options = []
         options.append( { "label": detected_name, "description": "This is what I detected" } )
-        for cmd, name in self.PRODUCT_NAMES.items():
+        for cmd, name in self.CARD_LABELS.items():
             if cmd != command:
                 options.append( { "label": name, "description": "Switch to this instead" } )
         options.append( { "label": "Cancel", "description": "Nevermind, cancel this command" } )
@@ -1041,7 +1071,7 @@ class TodoFifoQueue( FifoQueue ):
             message         = f"I think you want {detected_name}. Is that right?",
             response_type   = ResponseType.MULTIPLE_CHOICE,
             target_user     = user_email,
-            timeout_seconds = 30,
+            timeout_seconds = timeout_seconds,
             sender_id       = "agentic.router@lupin.deepily.ai",
             priority        = "high",
             title           = "Confirm Command",
@@ -1059,8 +1089,8 @@ class TodoFifoQueue( FifoQueue ):
         response = notify_user_sync( request, debug=self.debug )
 
         if response.is_timeout or response.is_error:
-            if self.debug: print( f"Confirmation timeout/error — proceeding with detected command [{command}]" )
-            return command  # Default: proceed with detected command on timeout
+            if self.debug: print( f"Confirmation timeout/error — ABORTING, not auto-running detected command [{command}]" )
+            return None  # No confirmation received: abort rather than masquerade a silent timeout as a "yes"
 
         # Parse response — handle both raw string and JSON formats
         selected = response.response_value
@@ -1082,7 +1112,7 @@ class TodoFifoQueue( FifoQueue ):
             return None
 
         # Reverse lookup: product name → command
-        for cmd, name in self.PRODUCT_NAMES.items():
+        for cmd, name in self.CARD_LABELS.items():
             if name == selected:
                 return cmd
 
@@ -1099,7 +1129,7 @@ class TodoFifoQueue( FifoQueue ):
         speculative ID; on cancel/failure the card moves to the dead queue.
 
         Requires:
-            - command is a key in AGENTIC_AGENTS
+            - command is a key in JOB_ARG_CONTRACTS
             - raw_args is a string (may be empty)
             - user_id, user_email, session_id are non-empty strings
             - original_question is the full voice command string
@@ -1128,7 +1158,7 @@ class TodoFifoQueue( FifoQueue ):
             return f"Runtime argument expeditor is disabled. Cannot process command: {command}"
 
         # ── Step 1: Generate speculative job ID ──────────────────────────
-        agent_entry = AGENTIC_AGENTS.get( command, {} )
+        agent_entry = JOB_ARG_CONTRACTS.get( command, {} )
         job_prefix  = agent_entry.get( "job_prefix", "aj" )
         spec_id     = f"{job_prefix}-{uuid.uuid4().hex[ :8 ]}"
         spec_id     = self.user_job_tracker.register_scoped_job( spec_id, user_id, session_id )
@@ -1155,6 +1185,10 @@ class TodoFifoQueue( FifoQueue ):
             verbose    = self.verbose
         )
 
+        # The reason this call fails comes back on OUR context, not on the shared
+        # expeditor (row 10c60712) — two callers in flight at once each read their
+        # own.
+        expedite_context = ExpediteContext()
         args_dict = expeditor.expedite(
             command           = command,
             raw_args          = raw_args,
@@ -1162,15 +1196,16 @@ class TodoFifoQueue( FifoQueue ):
             session_id        = session_id,
             user_id           = user_id,
             original_question = original_question,
-            job_id            = spec_id
+            job_id            = spec_id,
+            context           = expedite_context
         )
 
         # ── Step 4: Handle failure — say WHY, and only blame the user for a real "no" ──
-        # expedite() records the cause on _last_expedite_reason (bug 68198c9f). A
+        # expedite() records the cause on the caller's context (bug 68198c9f). A
         # prompt that could not be delivered, or timed out, is a machine failure — it
         # must never be reported as the user cancelling a job they never saw.
         if args_dict is None:
-            spoken, log_line = user_message_for_expedite_reason( expeditor._last_expedite_reason )
+            spoken, log_line = user_message_for_expedite_reason( expedite_context.reason )
             emit_job_state_transition( self.websocket_mgr, spec_id, JobState.QUEUED, JobState.CANCELLED, user_id )
             self.user_job_tracker.remove_job( spec_id )
             self._notify( spoken, target_user=user_email )
@@ -1259,7 +1294,7 @@ class TodoFifoQueue( FifoQueue ):
             - On unknown command or construction failure: returns error message
               with job_id=None and emits no state transitions
         """
-        agent_entry = AGENTIC_AGENTS.get( routing_command, {} )
+        agent_entry = JOB_ARG_CONTRACTS.get( routing_command, {} )
         job_prefix  = agent_entry.get( "job_prefix", "aj" )
 
         # Speculative card for UI consistency with /api/push flow

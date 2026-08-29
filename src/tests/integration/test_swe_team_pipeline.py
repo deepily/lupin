@@ -2,7 +2,7 @@
 """
 Integration tests for SWE Team pipeline — end-to-end dry-run validation.
 
-Submits catalog tasks via POST /api/swe-team/submit with dry_run=true, polls
+Submits catalog tasks via POST /api/v2/submit with dry_run=true, polls
 for completion, and validates:
     1. CJ Flow lifecycle (todo → running → done)
     2. Proxy decisions are created with correct data_origin
@@ -24,13 +24,15 @@ import time
 import pytest
 import requests
 
+from tests.integration.v2_queued import assert_handed_off
+
 # Server configuration
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
 def _swe_submit_body( task_text, ws_session_id ):
     """
-    Build the POST /api/swe-team/submit JSON body, threading the lineage token
+    Build the POST /api/v2/submit JSON body, threading the lineage token
     (bug 3a14292b) when present.
 
     When this suite runs INSIDE a monopolize test_suite sweep, that sweep exports
@@ -45,12 +47,18 @@ def _swe_submit_body( task_text, ws_session_id ):
         - task_text and ws_session_id are strings
 
     Ensures:
-        - returns a dict with task/dry_run/websocket_id
+        - returns a dict with command/args/websocket_id
         - includes parent_id_hash iff LUPIN_TEST_MONOPOLIZE_PARENT_ID is set
     """
+    # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and answers 410
+    # naming /api/v2/submit, which takes the routing command as a string and the agent's own
+    # arguments in `args`. `websocket_id` and `parent_id_hash` stay TOP-LEVEL: they are
+    # instructions about the request and the queue, not arguments to the agent, and `args`
+    # is checked against the command's own argument contract, which neither of them is in.
     body = {
-        "task"         : task_text,
-        "dry_run"      : True,
+        "command"      : "agent router go to swe team",
+        "args"         : { "task": task_text, "dry_run": True },
+        "question"     : task_text,
         "websocket_id" : ws_session_id,
     }
     parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
@@ -187,7 +195,7 @@ def submit_and_wait( task_text, auth_headers, ws_session_id, timeout=None ):
         timeout = swe_wait_budget_s( auth_headers )
 
     resp = requests.post(
-        f"{BASE_URL}/api/swe-team/submit",
+        f"{BASE_URL}/api/v2/submit",
         json=_swe_submit_body( task_text, ws_session_id ),
         headers=auth_headers,
         timeout=60
@@ -319,18 +327,19 @@ class TestSweTeamDryRunPipeline:
         """Job should go through CJ Flow: submit returns queued, poll returns done."""
         # Submit
         resp = requests.post(
-            f"{BASE_URL}/api/swe-team/submit",
+            f"{BASE_URL}/api/v2/submit",
             json=_swe_submit_body( "Fix the pagination off-by-one error", ws_session_id ),
             headers=auth_headers,
             timeout=60
         )
         assert resp.status_code == 200
 
-        data = resp.json()
-        assert data[ "status" ] == "queued"
-        assert data[ "queue_position" ] >= 0
-
-        job_id = data[ "job_id" ]
+        # The v2 hand-off status is "waiting", not "queued" — AskResponse.status is
+        # done | waiting | parked | needs_input | expired | failed (v2_ask.py:91), and
+        # AskResponse carries no queue_position at all. Both assertions predate the
+        # move of this door to v2 in 4f1501a2. assert_handed_off() is the shared check
+        # every other v2 caller uses, and it explains itself on failure.
+        job_id = assert_handed_off( resp.json() )
         assert job_id.startswith( "swe-" )
 
         # Poll until complete (shared-pool-aware budget — bug 67473d91)

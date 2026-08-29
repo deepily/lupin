@@ -151,12 +151,15 @@ def test_lifespan_starts_and_stops_turn_age_watchdog_loop():
 
 class _FakeCfg:
     """Fake ConfigurationManager for assemble_app's enable-gate branches."""
-    def __init__( self, enabled, context_enabled=True ):
-        self._enabled         = enabled
-        self._context_enabled = context_enabled
+    def __init__( self, enabled, context_enabled=True, observer_enabled=False ):
+        self._enabled          = enabled
+        self._context_enabled  = context_enabled
+        self._observer_enabled = observer_enabled
     def get( self, key, default=None, return_type="string" ):
         if key == "arbiter health watch enabled":
             return self._enabled                              # bool (boolean return_type)
+        if key == "arbiter self respin observer enabled":
+            return self._observer_enabled
         if key == "arbiter context watch enabled":
             return self._context_enabled
         if key == "arbiter health watch containers":
@@ -208,6 +211,39 @@ def test_assemble_app_wires_turn_age_watchdog_in_both_paths():
     app_disabled = assemble_app( _FakeCfg( enabled=False ), _FakeGateway() )
     assert isinstance( app_enabled.state.turn_age_watchdog_loop, TurnAgeWatchdog )
     assert isinstance( app_disabled.state.turn_age_watchdog_loop, TurnAgeWatchdog )
+
+
+def test_assemble_app_self_respin_observer_gated_off_by_default( capsys ):
+    """Default (flag false) → observer loop None + a disabled log; import is skipped."""
+    app = assemble_app( _FakeCfg( enabled=True ), _FakeGateway() )
+    assert app.state.self_respin_observer_loop is None
+    assert "self_respin_observer_disabled" in capsys.readouterr().out
+
+
+def test_assemble_app_self_respin_observer_wired_when_flag_on():
+    """flag true → the SelfRespinObserverLoop is built (row 275cb0b9, GAP 2)."""
+    from cosa.agents.heartbeat_arbiter.self_respin_observer import SelfRespinObserverLoop
+    app = assemble_app( _FakeCfg( enabled=True, observer_enabled=True ), _FakeGateway() )
+    assert isinstance( app.state.self_respin_observer_loop, SelfRespinObserverLoop )
+
+
+def test_assemble_app_self_respin_observer_wired_in_health_disabled_path():
+    """The observer is threaded into BOTH create_app calls — cover the health-disabled early return."""
+    from cosa.agents.heartbeat_arbiter.self_respin_observer import SelfRespinObserverLoop
+    app = assemble_app( _FakeCfg( enabled=False, observer_enabled=True ), _FakeGateway() )
+    assert isinstance( app.state.self_respin_observer_loop, SelfRespinObserverLoop )
+
+
+def test_lifespan_starts_and_stops_self_respin_observer_loop():
+    """The self-re-spin observer is the fifth lifespan-managed loop (start + stop + liveness)."""
+    a, b, c, d, e = _FakeLoop(), _FakeLoop(), _FakeLoop(), _FakeLoop(), _FakeLoop()
+    with TestClient( create_app( health_loop=a, fleet_arbiter_loop=b, context_pressure_loop=c,
+                                 turn_age_watchdog_loop=d, self_respin_observer_loop=e ) ) as client:
+        assert a.started and b.started and c.started and d.started and e.started
+        assert client.app.state.self_respin_observer_loop is e
+        # the loop appears in the thread-liveness map (_FakeLoop has no _thread → not_started)
+        assert client.get( "/health" ).json()[ "loops" ][ "self_respin_observer" ] == "not_started"
+    assert e.stopped is True
 
 
 def test_build_context_pressure_loop_reads_budget_policy_and_cadence():
@@ -337,3 +373,83 @@ def test_assemble_app_no_roster_env_yields_empty_declared( monkeypatch ):
     app = assemble_app( _FakeCfg( enabled=False ), _FakeGateway(), log_fn=lambda *a, **k: None )
     job = app.state.fleet_arbiter_loop._job_factory()
     assert job.declared_managers == [ ]
+
+
+# ── 2026-08-10: per-loop thread liveness in /health and /state ────────────────
+#
+# The gap this closes: a worker thread died on 2026-08-08 and stayed dead for two
+# days while /health returned {"status":"ok"} on every poll. The process was fine;
+# only the thread was gone. Liveness is now read from the Thread object itself,
+# because the "did we start it" intention was true the whole time it was dead.
+# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+
+class _ThreadedFakeLoop:
+    """A loop whose `_thread` liveness we control, mimicking the real loops' attr."""
+    def __init__( self, alive=True, thread=True ):
+        self.started = self.stopped = False
+        class _T:
+            def __init__( self, alive ): self._alive = alive
+            def is_alive( self ): return self._alive
+        self._thread = _T( alive ) if thread else None
+    def start( self ): self.started = True
+    def stop( self ):  self.stopped = True
+
+
+class _ExplodingLoop:
+    """`_thread` access raises — /health must still answer."""
+    def start( self ): pass
+    def stop( self ):  pass
+    @property
+    def _thread( self ): raise RuntimeError( "boom" )
+
+
+def test_health_reports_a_dead_loop_as_DEAD_and_sets_degraded():
+    """THE regression test for the two-day silence."""
+    alive, dead = _ThreadedFakeLoop( alive=True ), _ThreadedFakeLoop( alive=False )
+    with TestClient( create_app( health_loop=alive, fleet_arbiter_loop=dead ) ) as client:
+        body = client.get( "/health" ).json()
+        assert body[ "status" ]   == "ok"          # process answers → supervisors unaffected
+        assert body[ "degraded" ] is True          # …but the fault is visible
+        assert body[ "loops" ][ "health_watcher" ] == "alive"
+        assert body[ "loops" ][ "fleet_arbiter" ]  == "DEAD"
+
+
+def test_health_all_alive_is_not_degraded():
+    a, b = _ThreadedFakeLoop( alive=True ), _ThreadedFakeLoop( alive=True )
+    with TestClient( create_app( health_loop=a, fleet_arbiter_loop=b ) ) as client:
+        body = client.get( "/health" ).json()
+        assert body[ "degraded" ] is False
+        assert set( body[ "loops" ].values() ) == { "alive" }
+
+
+def test_health_omits_loops_that_are_not_wired():
+    """An absent loop is NOT reported dead — omission and death are different facts."""
+    with TestClient( create_app( health_loop=_ThreadedFakeLoop() ) ) as client:
+        loops = client.get( "/health" ).json()[ "loops" ]
+        assert list( loops ) == [ "health_watcher" ]
+        assert "fleet_arbiter" not in loops
+
+
+def test_health_reports_not_started_when_thread_is_absent():
+    with TestClient( create_app( fleet_arbiter_loop=_ThreadedFakeLoop( thread=False ) ) ) as client:
+        assert client.get( "/health" ).json()[ "loops" ][ "fleet_arbiter" ] == "not_started"
+
+
+def test_health_never_raises_when_a_loop_misbehaves():
+    with TestClient( create_app( fleet_arbiter_loop=_ExplodingLoop() ) ) as client:
+        r = client.get( "/health" )
+        assert r.status_code == 200
+        assert r.json()[ "loops" ][ "fleet_arbiter" ].startswith( "unknown (RuntimeError" )
+        assert r.json()[ "degraded" ] is False      # "unknown" is not a death claim
+
+
+def test_state_carries_loop_liveness_so_the_panel_can_tell_dead_from_quiet():
+    """
+    `fleet_arbiter: {"status":"awaiting","sessions":[]}` is what BOTH a dead loop and
+    a genuinely quiet fleet produce. /state now ships the discriminator, and the
+    :7999 proxy returns this body verbatim to the panel.
+    """
+    with TestClient( create_app( fleet_arbiter_loop=_ThreadedFakeLoop( alive=False ) ) ) as client:
+        body = client.get( "/state" ).json()
+        assert body[ "fleet_arbiter" ][ "sessions" ] == [ ]      # indistinguishable on its own…
+        assert body[ "loops" ][ "fleet_arbiter" ] == "DEAD"      # …but not anymore

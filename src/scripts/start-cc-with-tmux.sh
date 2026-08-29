@@ -57,6 +57,14 @@ while [[ $# -gt 0 ]]; do
         --dry-run  ) DRY_RUN=1;  shift ;;
         --vertex   ) VERTEX=1;   shift ;;
         --prompt   ) PROMPT="${2:-}"; shift 2 ;;
+        # WORK-AXIS directory (row 697a85fe). The child's cwd, and therefore the
+        # CLAUDE.md and git identity it picks up. DELIBERATELY SEPARATE from
+        # LUPIN_ROOT below, which stays the PLATFORM axis — venv, PYTHONPATH and
+        # hook binaries always come from lupin so the child can DM, set a topic and
+        # be reaped. Measured: planning-is-prompting/.venv cannot import fastmcp, so
+        # a child booted on the work repo's venv would be unreachable. Omit and the
+        # child inherits the caller's cwd, which is the prior behaviour.
+        --work-dir ) WORK_DIR="${2:-}"; shift 2 ;;
         -- )         shift; while [[ $# -gt 0 ]]; do POSITIONALS+=( "$1" ); shift; done; break ;;
         * )          POSITIONALS+=( "$1" ); shift ;;
     esac
@@ -289,19 +297,106 @@ fi
 # `claude` does not run there (F-A10).
 if [[ "$VERTEX" == "1" ]]; then PANE_GUARD_ARG="True"; else PANE_GUARD_ARG="False"; fi
 INNER+="python3 -c 'from cosa.utils.vertex_env import pane_guard; pane_guard( vertex_path=$PANE_GUARD_ARG )' || exit 1; "
+# ── Per-session memory ceiling — OOM incident 2026-08-22 (P0) ─────────────────
+# A single `node` reached ~229 GB RSS and the kernel OOM-killed it under
+# CONSTRAINT_NONE/global_oom. Because ~2 dozen sessions share ONE
+# tmux-server.service slice, one runaway is a whole-host event — and the kernel
+# picks by oom_score, so an INNOCENT session can be the victim. A transient
+# scope in its OWN slice makes the kill single-session.
+#
+# WHY A CGROUP AND NOT A NODE FLAG. There is no Node flag that bounds external
+# memory. --max-old-space-size bounds only V8 generations (default 4G on a
+# >=16G host) and blowing THAT aborts gracefully with "JavaScript heap out of
+# memory" — not a 229 GB SIGKILL. The blowup lives in Buffer/ArrayBuffer, which
+# nodejs/node#24225 has wanted a bound for since 2018 and still has none.
+# An OS/cgroup ceiling is the only thing that actually works.
+#
+# WHY --scope AND NOT --unit. `systemd-run --scope` EXECs the command, so the
+# pane's process is still `claude` itself: TTY untouched, and anything that
+# resolves a session by pane pid (listener status, context-pressure) is
+# unaffected. Verified here: pane_pid WAS the target process, no extra layer.
+#
+# MemorySwapMax=0 is what makes the cap REAL — MemoryMax alone lets the cgroup
+# swap past it. Measured 2026-08-22: MemoryMax=64M against a 512 MB allocator
+# RAN TO COMPLETION, because with memory.swap.max unset the cgroup reclaims by
+# swapping rather than killing; adding MemorySwapMax=0 produced rc 137 and
+# oom_kill 1 in the scope's own memory.events. The swap bound is not a
+# refinement of the cap, it is the half that makes it bind.
+#
+# WHY 8G AND NOT 24G — Rick ruled it 2026-08-25, and the arithmetic is the
+# reason. A per-session ceiling bounds one SESSION at any value; it bounds the
+# MACHINE only if ceiling x concurrency stays under RAM. Against the ~24
+# sessions live on the OOM day, on a 251 GiB box:
+#     4G  x24 =  96 GB   safe, but only ~5x the observed peak
+#     8G  x24 = 192 GB   fits, ~10x observed          <- this
+#     16G x24 = 384 GB   EXCEEDS the box
+#     24G x24 = 576 GB   over twice the box
+# So 16G and 24G do not protect the box at all: they stop ONE runaway while
+# several at once still take the machine down. Measured cost of 8G: across
+# 26,797 samples over 69 sessions the worst single Claude Code process was
+# 0.78 GB and the median 0.61, so 8G is ~10x anything real — while the 229 GB
+# runaway that started this is ~29x ABOVE the ceiling, so it dies early with
+# the transcript still readable.
+#
+# 🔴 NO MemoryHigh — DELIBERATE, DO NOT ADD IT BACK. A soft limit throttles and
+# reclaims instead of killing, which manufactures exactly the sustained reclaim
+# pressure systemd-oomd's PSI criterion selects victims on. It can therefore
+# help CAUSE the kill it was meant to soften, and oomd picks by pressure rather
+# than by fault — so the session it takes need not be the one at fault. The
+# capped JS-test lane reached this conclusion independently and pins it in a
+# test (src/tests/unit/test_jstest_lane.py, "a future edit helpfully adding
+# MemoryHigh must go red"); this launcher is now consistent with it. What was
+# here before: MemoryHigh=18G under MemoryMax=24G.
+#
+# Design: src/rnd/v0.2.0/2026.08.22-oom-incident-what-we-know-response.md
+CC_MEM_LIMIT="${CC_MEM_LIMIT:-8G}"
+if [[ "$CC_MEM_LIMIT" != "off" ]] \
+   && command -v systemd-run >/dev/null 2>&1 \
+   && [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
+    # '-' is systemd's slice-HIERARCHY separator, so the leaf is sanitized to
+    # [A-Za-z0-9_] and every worker hangs off one implicit ccworker.slice
+    # parent — which a single drop-in can later cap fleet-wide.
+    _cc_slice="ccworker-$( printf '%s' "$SESSION_NAME" | tr -c 'a-zA-Z0-9' '_' ).slice"
+    # Prefer a worker over tmux-server/orchestrator when the kernel must choose.
+    # oom_score_adj is inherited across both execs below. Raising is
+    # unprivileged; lowering is not. Scopes take no OOMScoreAdjust= property
+    # (systemd execs nothing for a scope), so this is set in the pane shell.
+    INNER+="echo 500 > /proc/self/oom_score_adj 2>/dev/null; "
+    INNER+="systemd-run --user --scope --quiet --collect"
+    INNER+=" -p MemoryAccounting=yes"
+    INNER+=" -p MemoryMax=$(printf '%q' "$CC_MEM_LIMIT")"
+    INNER+=" -p MemorySwapMax=0"
+    INNER+=" --slice=$(printf '%q' "$_cc_slice") -- "
+fi
 INNER+="$CLAUDE_CMD"
 
-# Per-project persona CHAINS. Forwarded into the tmux session via -e so the
+# Per-project persona CHAINS — DERIVED from the fleet roster, never typed twice
+# (row a1a84682, 2026-08-18). Forwarded into the tmux session via -e so the
 # SessionStart hook (register_session.py) sees them regardless of the tmux
 # server's frozen env or whether ~/.bashrc was sourced. The hook reads only the
 # key matching detect_project(), so unused keys are inert.
 # Chain syntax (2026-06-11, Rick): ordered comma-separated names; `*` means
 # "then take anything free"; no `*` = strict, loud fail on exhaustion.
-PERSONA_ENV_FLAGS=(
-    -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN=Mr. Radio,Cheech,*"
-    -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN_MOBILE=Tiffany,*"
-    -e "COSA_VOICE_PREFERRED_PERSONA__PLAN=María,*"
-    -e "COSA_VOICE_PREFERRED_PERSONA__SKILLS_DISTILLATION=Sam,*"
+#
+# WHY DERIVED. These four lines used to be hardcoded literals, and the roster
+# they were supposed to mirror lives in ~/.claude/fleet-roster.env. Two places
+# answered "who is a manager for this repo", different consumers read each
+# (roster → arbiter status + escalation + reserve-from-random; chain →
+# manager_figure, which gates task-store WRITES fail-closed), and nothing
+# compared them. They drifted to "Mr. Radio, Tiberius" vs "Mr. Radio,Cheech,*"
+# and it surfaced only when a human read a retired name off a status card.
+# Now the roster is the ONE source and the chain is `<roster>,*`: a repo gains
+# or loses a manager by editing ONE line in ONE file. A project with no roster
+# line gets no chain (random allocation) — declare it in the roster to give it
+# one. register_session's roster-drift check is the belt for the paths this
+# derivation does not own (hand-exported chains, bare terminals).
+PERSONA_ENV_FLAGS=()
+for _v in $( compgen -A variable | grep '^COSA_VOICE_MANAGERS__' || true ); do
+    if [[ -n "${!_v:-}" ]]; then
+        PERSONA_ENV_FLAGS+=( -e "COSA_VOICE_PREFERRED_PERSONA__${_v#COSA_VOICE_MANAGERS__}=${!_v},*" )
+    fi
+done
+PERSONA_ENV_FLAGS+=(
     # Disable Claude Code's terminal mouse capture inside tmux panes (Rick,
     # 2026-06-26). Forwarded via -e so it crosses the tmux boundary regardless of
     # the tmux server's frozen env (a bare parent export would NOT reach `claude`).
@@ -382,7 +477,62 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
         printf 'VERTEX-ENV:'; printf ' %q' "${VERTEX_ENV_FLAGS[@]}"; printf '\n'
     fi
     echo "tmux new-session -d -s '$SESSION_NAME' <persona-env> <vertex-env> \"$INNER\""
-    exit 0
+
+    # ── Brief-length probe (dry_run ONLY) — row 9c5dccd4 ─────────────────────────
+    # A brief too large for tmux's command-length limit makes the REAL
+    # `tmux new-session` at the bottom of this script die "command too long". The
+    # live path now surfaces that verbatim (the spawner reads the failed child's
+    # stderr into `reason`), but dry_run EXITS HERE, above that call — so without
+    # this probe an oversized brief dry-runs clean and lies about a spawn that
+    # would fail.
+    #
+    # Probe the box's OWN tmux at RUNTIME — never a baked constant, which would be
+    # wrong on a box with a different tmux build or env size and fail in the
+    # direction that looks fine. Fire the same invocation shape (the forwarded -e
+    # flags + a payload of the assembled command's exact byte length) as a no-op
+    # into a uniquely-named throwaway session, then kill it. The tmux that judges
+    # here is the one that runs the real spawn.
+    _probe_session="__lenprobe_$$_${SECONDS}_${RANDOM}"
+    _inner_bytes=$( printf '%s' "$INNER" | wc -c )
+    # tmux's "command too long" limit is on the WHOLE assembled command, not the
+    # payload arg alone (measured on tmux 3.2a: a session name 200 bytes longer
+    # lowered the max accepted payload by EXACTLY 200 bytes — row 0ab3c0cd F2).
+    # The real spawn (bottom of this script) differs from this probe by three
+    # things, and the session NAME is the only one that changes tmux's byte count:
+    #   - SERVER_SCRUB (`env -u …`) prefixes the real spawn but is consumed by env,
+    #     NOT part of tmux's argv, so it does not count toward the limit;
+    #   - the `-d` flag sits in a different position but the token multiset is
+    #     identical, so total bytes are unchanged;
+    #   - PERSONA/VERTEX -e flags are the same arrays at the same eval point.
+    # So byte-match the probe's TOTAL argv to the real spawn by folding the
+    # name-length delta into the payload. ':' + (len-1) spaces = a no-op command
+    # tmux parses in full.
+    _name_delta=$(( ${#SESSION_NAME} - ${#_probe_session} ))
+    _probe_payload_len=$(( _inner_bytes + _name_delta ))
+    # Clamp: only reachable far below the limit (tiny brief + long throwaway name),
+    # where the exact payload size is immaterial to the verdict.
+    if (( _probe_payload_len < 1 )); then _probe_payload_len=1; fi
+    _probe_payload=":$( printf '%*s' "$(( _probe_payload_len - 1 ))" '' )"
+    if _probe_err=$( tmux new-session -d -s "$_probe_session" \
+                        "${PERSONA_ENV_FLAGS[@]}" "${VERTEX_ENV_FLAGS[@]}" \
+                        "$_probe_payload" 2>&1 ); then
+        # Best-effort cleanup: the no-op payload usually self-exits and the
+        # session is already gone, so a failed kill is expected — never let it
+        # trip `set -e`.
+        tmux kill-session -t "$_probe_session" 2>/dev/null || true
+        echo "BRIEF-LENGTH-PROBE: ok — assembled command is $_inner_bytes bytes; this box's tmux accepts it."
+        exit 0
+    elif printf '%s' "$_probe_err" | grep -qi 'command too long'; then
+        # The decisive verdict: this brief WILL blow the live spawn. Fail loud,
+        # early, with the measured byte count — never a quiet dry_run pass.
+        echo "BRIEF-LENGTH-PROBE: FAIL — assembled command is $_inner_bytes bytes; this box's tmux rejects it as 'command too long'. The live spawn WILL fail; trim the brief/memento." >&2
+        exit 1
+    else
+        # Cannot probe (no tmux, or a non-length error). Per Cheech: dry_run SAYS
+        # it could not verify rather than passing quietly.
+        echo "BRIEF-LENGTH-PROBE: could NOT verify brief length — the probe tmux call errored for another reason: $_probe_err" >&2
+        exit 1
+    fi
 fi
 
 # ── F-A11 (REBUILT 2026-07-14) — NEVER BE THE PROCESS THAT BIRTHS A TAINTED SERVER ──────
@@ -469,7 +619,19 @@ else
     # forwards nothing — but it is NO LONGER unscrubbed. If this invocation CREATES the
     # server, SERVER_SCRUB is what stops it freezing a Vertex-tainted shell into an env
     # that every later session on this socket would inherit (F-A11, rebuilt above).
-    "${SERVER_SCRUB[@]}" tmux new-session -s "$SESSION_NAME" "${PERSONA_ENV_FLAGS[@]}" "${VERTEX_ENV_FLAGS[@]}" -d "$INNER"
+    # -c sets the WORK axis (row 697a85fe): the child's cwd, hence its CLAUDE.md
+    # and git identity. Empty WORK_DIR ⇒ no -c ⇒ inherit the caller's cwd, exactly
+    # as before. The PLATFORM axis is untouched — $INNER still sources lupin's venv
+    # and exports lupin's PYTHONPATH regardless of where the pane starts.
+    TMUX_WORKDIR_FLAGS=()
+    if [[ -n "${WORK_DIR:-}" ]]; then
+        if [[ ! -d "$WORK_DIR" ]]; then
+            echo "REFUSING TO LAUNCH: --work-dir '$WORK_DIR' is not a directory" >&2
+            exit 1
+        fi
+        TMUX_WORKDIR_FLAGS=( -c "$WORK_DIR" )
+    fi
+    "${SERVER_SCRUB[@]}" tmux new-session -s "$SESSION_NAME" "${PERSONA_ENV_FLAGS[@]}" "${VERTEX_ENV_FLAGS[@]}" "${TMUX_WORKDIR_FLAGS[@]}" -d "$INNER"
     if [[ "$HEADLESS" -eq 1 ]]; then
         # Headless: do NOT attach. Emit the session name for the caller to capture.
         echo "$SESSION_NAME"

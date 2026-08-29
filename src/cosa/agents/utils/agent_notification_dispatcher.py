@@ -553,11 +553,12 @@ class AgentNotificationDispatcher:
                 if not answers or all( not v for v in answers.values() ):
                     from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError
                     raise VoiceGateTimeoutError(
-                        phase   = "choices",
-                        message = (
+                        phase     = "choices",
+                        message   = (
                             f"present_choices returned empty answers after {timeout}s — "
                             f"treating as no-response timeout"
-                        )
+                        ),
+                        delivered = True,   # exit_code 0 came back → the ask reached a human, who did not answer (row 38a0b373)
                     )
                 return parsed
 
@@ -566,8 +567,9 @@ class AgentNotificationDispatcher:
             if response.exit_code == 2:
                 from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError
                 raise VoiceGateTimeoutError(
-                    phase   = "choices",
-                    message = f"present_choices timeout after {timeout}s — MCP exit_code=2"
+                    phase     = "choices",
+                    message   = f"present_choices timeout after {timeout}s — MCP exit_code=2",
+                    delivered = True,   # exit_code 2 is the MCP's own timeout signal → the ask reached the MCP/human (row 38a0b373)
                 )
 
             # Catch-all (no response value at all): also treat as timeout so

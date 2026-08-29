@@ -11,7 +11,7 @@ Subclasses define a SCENARIOS list and override hooks for:
 - get_mode_for_scenario( scenario ) — per-scenario mode switching
 - validate_result( scenario, job_data ) — custom validation logic
 - get_submit_payload( scenario, ws_id ) — custom request body
-- get_submit_endpoint() — endpoint URL (default: /api/push)
+- get_submit_endpoint() — endpoint URL (default: /api/v2/ask)
 
 Usage:
     class MyPipelineTest( LivePipelineTestBase ):
@@ -73,7 +73,7 @@ class LivePipelineTestBase:
     DEFAULT_TIMEOUT = 120
     POLL_INTERVAL   = 2
     REQUEST_TIMEOUT = 60
-    SUBMIT_ENDPOINT = "/api/push"
+    SUBMIT_ENDPOINT = "/api/v2/ask"
 
     # Credential env var prefix — override for tests using different accounts
     CREDENTIAL_ENV_PREFIX = "LUPIN_TEST_INTERACTIVE_MOCK_JOBS"
@@ -299,7 +299,7 @@ class LivePipelineTestBase:
         Return the API endpoint for submitting scenarios.
 
         Ensures:
-            - Returns URL string (default: /api/push)
+            - Returns URL string (default: /api/v2/ask)
         """
         return self.SUBMIT_ENDPOINT
 
@@ -333,6 +333,50 @@ class LivePipelineTestBase:
             - Returns headers dict with session ID
         """
         return { **headers, "X-Session-ID": ws_id }
+
+    # The statuses that mean the work is OVER when the response arrives. "waiting" is
+    # deliberately absent: it means the job went to a queue and must still be polled.
+    V2_TERMINAL_STATUSES = ( "done", "failed", "needs_input", "parked" )
+
+    def _terminal_result_or_none( self, push_data ):
+        """
+        Decide whether a submit response is already the finished result.
+
+        Requires:
+            - push_data is the decoded JSON body of the submit response
+
+        Ensures:
+            - Returns None when the caller should fall back to polling — either an
+              old-style queued response, or a v2 response whose status is "waiting"
+              (the queued executor ran it, so a job_id is coming back to be polled).
+            - Returns ( job_data, None ) for a terminal success, with the answer mapped
+              onto the `response_text` key every validator already reads.
+            - Returns ( None, error_msg ) for a terminal failure or a flow that stopped
+              to ask a question — a scenario that parks is a scenario that did not run,
+              and reporting it as a pass with an empty answer would be worse than a
+              failure.
+
+        Why map onto `response_text` rather than teach the validators a second key: the
+        scenario files and every validate_result override read `response_text`, and a
+        second spelling would mean each of them has to know which door it came through.
+        """
+        status = push_data.get( "status" )
+        if status not in self.V2_TERMINAL_STATUSES:
+            return None
+
+        if status == "failed":
+            return None, f"v2 flow FAILED: {push_data.get( 'error' ) or '(no error detail)'}"
+
+        if status in ( "needs_input", "parked" ):
+            missing = push_data.get( "args_missing" ) or []
+            return None, (
+                f"v2 flow stopped to ask for input (status={status}, missing={missing}) — "
+                f"the scenario never ran to an answer"
+            )
+
+        job_data = dict( push_data )
+        job_data[ "response_text" ] = push_data.get( "answer" ) or ""
+        return job_data, None
 
     def _submit_and_wait( self, scenario, headers, ws_id, timeout=None ):
         """
@@ -371,30 +415,46 @@ class LivePipelineTestBase:
             return None, f"HTTP {resp.status_code}: {resp.text[ :200 ]}"
 
         push_data = resp.json()
-        job_id    = push_data.get( "job_id" )
+
+        # BRANCH ON THE RESPONSE, NOT ON THE ENDPOINT (Cheech's ruling, 2026-08-21).
+        #
+        # `/api/push` queued the work and answered `{status: "queued", job_id, ...}`, so
+        # this harness submitted and then polled the done queue. `/api/v2/ask` does not
+        # queue: with `v2 executor = inline` the agent runs on the request thread
+        # (InlineExecutor._run_agent calls do_all()), flow.py never touches a queue, and
+        # the response IS the terminal result. Polling for such a job waits out the full
+        # timeout and then reports a job that was finished before the first poll.
+        #
+        # It is the RESPONSE and not the endpoint that decides, because both shapes come
+        # out of the same door: once the queued executor lands, an agentic job answers
+        # "waiting" with a job_id and must still be polled. An endpoint-only branch would
+        # be correct today and wrong the moment that merges.
+        terminal = self._terminal_result_or_none( push_data )
+        if terminal is not None:
+            job_data, error = terminal
+            return job_data, error
+
+        job_id = push_data.get( "job_id" )
 
         if not job_id:
             return None, f"No job_id in push response: {push_data}"
 
         print( f"    Submitted, job_id={job_id}, polling (timeout={timeout}s)..." )
 
-        # Poll done queue
+        # Poll for a TERMINAL state. Check DONE (success) AND DEAD (failure) each
+        # iteration: a job that dies is reported as dead immediately instead of
+        # waiting out the full timeout and then reporting a bare "timeout".
         elapsed = 0
         while elapsed < timeout:
             try:
-                done_resp = requests.get(
-                    f"{self.BASE_URL}/api/get-queue/done",
-                    headers=headers,
-                    timeout=30
-                )
+                done_job = self._find_job_in_queue( job_id, "done", headers )
+                if done_job is not None:
+                    return done_job, None
 
-                if done_resp.status_code == 200:
-                    done_data = done_resp.json()
-                    jobs      = done_data.get( "done_jobs_metadata", [] )
-
-                    for job in jobs:
-                        if job.get( "job_id" ) == job_id:
-                            return job, None
+                dead_job = self._find_job_in_queue( job_id, "dead", headers )
+                if dead_job is not None:
+                    err = dead_job.get( "error" ) or dead_job.get( "response_text" ) or "(no error detail)"
+                    return None, f"Job {job_id} FAILED (dead queue): {err}"
 
             except Exception as e:
                 print( f"    Poll error: {e}" )
@@ -402,7 +462,72 @@ class LivePipelineTestBase:
             time.sleep( self.POLL_INTERVAL )
             elapsed += self.POLL_INTERVAL
 
-        return None, f"Timeout after {timeout}s waiting for job_id={job_id}"
+        # Timeout reached. The harness stopped waiting — that is NOT the same fact
+        # as "the job failed" (bug e5473a72: a 900s poll reported FAIL for a job that
+        # SUCCEEDED). Ask the server what actually happened to the job and report
+        # THAT with the job id, so a reader tells "the job died" / "still running" /
+        # "done but I missed it" apart from "I stopped waiting".
+        state, job = self._resolve_job_state( job_id, headers )
+        if state == "done":
+            # The job DID complete; the poll simply missed it (e.g. it landed in the
+            # final interval). A slow-but-done job is a PASS, not a timeout failure.
+            return job, None
+        if state == "dead":
+            err = ( job or {} ).get( "error" ) or ( job or {} ).get( "response_text" ) or "(no error detail)"
+            return None, f"Job {job_id} FAILED (dead queue) — found on timeout after {timeout}s: {err}"
+        if state in ( "run", "todo" ):
+            return None, (
+                f"Job {job_id} STILL RUNNING after {timeout}s (server queue: '{state}'). "
+                f"The harness stopped waiting; the job did NOT fail. Raise the timeout for "
+                f"this build or shorten the build if this recurs."
+            )
+        return None, (
+            f"Job {job_id} NOT FOUND in any queue (done/dead/run/todo) after {timeout}s — "
+            f"state indeterminate; check the server logs for this job id."
+        )
+
+    def _find_job_in_queue( self, job_id, queue_name, headers ):
+        """
+        Return the job's metadata dict from the named queue, or None if absent.
+
+        Requires:
+            - queue_name is one of 'todo' | 'run' | 'done' | 'dead'
+
+        Ensures:
+            - Returns the matching job dict, or None (absent OR endpoint non-200).
+            - Each endpoint returns its rows under f"{queue_name}_jobs_metadata"
+              (queues.py:548 / 606 / 637).
+        """
+        resp = requests.get(
+            f"{self.BASE_URL}/api/get-queue/{queue_name}",
+            headers=headers,
+            timeout=30
+        )
+        if resp.status_code != 200:
+            return None
+        for job in resp.json().get( f"{queue_name}_jobs_metadata", [] ):
+            if job.get( "job_id" ) == job_id:
+                return job
+        return None
+
+    def _resolve_job_state( self, job_id, headers ):
+        """
+        Ask the server WHERE a job actually is, on timeout.
+
+        Ensures:
+            - Returns ( 'done'|'dead'|'run'|'todo', metadata_dict ) if found.
+            - Returns ( None, None ) if the job is absent from every queue.
+            - Order matters: DONE first (a completed job is the point of the fix),
+              then DEAD, then the in-flight queues.
+        """
+        for queue_name in ( "done", "dead", "run", "todo" ):
+            try:
+                job = self._find_job_in_queue( job_id, queue_name, headers )
+                if job is not None:
+                    return queue_name, job
+            except Exception as e:
+                print( f"    State-resolve error on '{queue_name}': {e}" )
+        return None, None
 
     # ═══════════════════════════════════════════════════════════════════════
     # Validation

@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+"""
+Row 95924f2d — the generator PIN (design 2026.08.16 §2.3; Rachel's zero-diff ruling).
+
+EXECUTOR: AI — pure import + file read, no server, no inference. :7999-class.
+
+The point of this file is one assertion: the checked-in router prompt equals what
+`router_prompt_generator.render_router_prompt()` emits right now. Hand-edit the
+prompt and it goes red — THAT is the step that converts the §9 drift guard from a
+detector into a preventer.
+
+Every other test here keeps the pin honest: a control proving the equality CAN
+fail (§3); the ratified held-out set (the START exemption reads as exempt, not
+drift); the fail-loud order cross-check; and 100% coverage of the generator module.
+
+Run: PYTHONPATH=src python -m pytest src/tests/unit/test_v2_router_prompt_generator.py -v
+Coverage: --cov=cosa.rest.v2.router_prompt_generator --cov-branch --cov-report=term-missing
+"""
+
+import os
+import re
+import tempfile
+import unittest
+from unittest import mock
+
+import cosa.utils.util as cu
+from cosa.rest.v2 import router_prompt_generator as gen
+
+
+def _on_disk_prompt():
+    return cu.get_file_as_string( cu.get_project_root() + gen.TEMPLATE_REL_PATH )
+
+
+# ── Independent GOLDEN scaffolding (Pocholo's finding, via Rachel 2026-08-16) ──
+# The generator's _HEADER / _FOOTER are the ONLY source of the served prose, so the
+# on-disk==render pin cannot catch a prose reword: edit the constant, regenerate,
+# and BOTH sides move together — green. This is the by-construction hole that lived
+# in `speakable`, now in the prose half. These goldens are a SECOND, independent
+# copy the generator never writes: render() must start with _GOLDEN_HEADER and end
+# with _GOLDEN_FOOTER, so rewording a Requirement/Task line in the generator moves
+# only one side and goes RED. Changing the served prose then costs a deliberate
+# TWO-file edit (generator constant + this golden), never a silent one.
+_GOLDEN_HEADER = (
+    "<s>[INST]### Instruction:\n"
+    "\n"
+    "Use the Task and Input given below to write a Response that can solve the following Task.\n"
+    "\n"
+    "### Task:\n"
+    "\n"
+    "Your job is to discern the intent of a human voice command transcription and translate it "
+    "into a standardized agent routing command that another LLM would understand.\n"
+    "\n"
+    "You will be given a human voice command as INPUT as well as a list of possible standardized "
+    "commands. You must choose the correct standardized command from the following list:\n"
+    "<agent-routing-commands>"
+)
+
+_GOLDEN_FOOTER = (
+    "</agent-routing-commands>\n"
+    "\n"
+    "Requirement: You MUST NOT use python code to answer this question.\n"
+    "Requirement: You MUST use your linguistic knowledge and intuition to answer this question.\n"
+    "Requirement: The first word of your response MUST be `<response>`\n"
+    "Hint: Anything that isn't a part of the command itself should be treated as arguments "
+    "related to the command.\n"
+    "\n"
+    "### Input:\n"
+    "\n"
+    "Below is the raw human voice command transcription formatted using simple XML:\n"
+    "\n"
+    "<human>\n"
+    "    <voice-command>{voice_command}</voice-command>\n"
+    "</human>\n"
+    "\n"
+    "The standardized command that you translate MUST be returned wrapped in simple, well-formed XML:\n"
+    "\n"
+    "<response>\n"
+    "    <command></command>\n"
+    "    <args></args>\n"
+    "</response>\n"
+    "[/INST]\n"
+    "### Response:\n"
+)
+
+
+class TestGeneratorPin( unittest.TestCase ):
+    """The preventer: on-disk == generated (a provable no-op on the served file)."""
+
+    def test_on_disk_prompt_equals_generator( self ):
+        """
+        The checked-in prompt must equal render_router_prompt() byte-for-byte.
+        Regenerate (`python -m cosa.rest.v2.router_prompt_generator`) after any
+        registry change; do NOT hand-edit the file.
+        """
+        self.assertEqual( _on_disk_prompt(), gen.render_router_prompt() )
+
+    def test_pin_detects_a_dropped_command( self ):
+        """
+        Control (§3): the equality above must be able to go RED. Drop one command
+        line from the emitted text and confirm it no longer matches — so a green
+        pin means agreement, not a comparison that cannot fail.
+        """
+        emitted   = gen.render_router_prompt()
+        first_cmd = gen.speakable_commands()[ 0 ]
+        mutated   = emitted.replace( f"    <command>{first_cmd}</command>\n", "", 1 )
+
+        self.assertNotEqual( mutated, emitted )
+        self.assertNotEqual( mutated, _on_disk_prompt() )
+
+
+class TestRatifiedSpeakableSet( unittest.TestCase ):
+    """The prompt lists exactly the 18 ratified commands; the 2 held-out stay out."""
+
+    HELD_OUT = (
+        "agent router go to bug fix expediter",
+        "agent router go to test fix expediter",     # START — exempt, not drift
+    )
+    SPEAKABLE_AGENTIC = (
+        "agent router go to deep research",
+        "agent router go to podcast generator",
+        "agent router go to research to podcast",
+        "agent router go to presentation generator",
+        "agent router go to research to presentation",
+        "agent router go to claude code",
+        "agent router go to swe team",
+        "agent router go to test fix expediter resume",
+        "agent router go to test suite",
+    )
+
+    def test_held_out_agentic_commands_are_absent( self ):
+        emitted = gen.render_router_prompt()
+        for command in self.HELD_OUT:
+            self.assertNotIn( f"<command>{command}</command>", emitted,
+                              f"held-out command leaked into the prompt: {command}" )
+
+    def test_speakable_agentic_commands_are_present( self ):
+        emitted = gen.render_router_prompt()
+        for command in self.SPEAKABLE_AGENTIC:
+            self.assertIn( f"<command>{command}</command>", emitted,
+                           f"speakable command missing from the prompt: {command}" )
+
+    def test_command_count_is_the_ratified_eighteen( self ):
+        self.assertEqual( len( gen.speakable_commands() ), 18 )
+
+    def test_emission_order_is_the_served_order( self ):
+        """Rachel's ruling: emit in served order for a provable no-op."""
+        self.assertEqual( tuple( gen.speakable_commands() ), gen._SERVED_ORDER )
+
+
+class TestOrderCrossCheck( unittest.TestCase ):
+    """`_SERVED_ORDER` is a presentation order guarded against the registry — it must
+    fail LOUD on drift in either direction, never emit a stale order silently."""
+
+    def test_missing_command_raises( self ):
+        """A speakable command absent from _SERVED_ORDER must raise, not vanish."""
+        with mock.patch.object( gen, "_SERVED_ORDER", gen._SERVED_ORDER[ :-1 ] ):
+            with self.assertRaises( ValueError ) as ctx:
+                gen.speakable_commands()
+        self.assertIn( "order drift", str( ctx.exception ) )
+
+    def test_extra_command_raises( self ):
+        """An order entry the registry does not mark speakable must raise too."""
+        with mock.patch.object( gen, "_SERVED_ORDER",
+                                gen._SERVED_ORDER + ( "agent router go to nowhere", ) ):
+            with self.assertRaises( ValueError ):
+                gen.speakable_commands()
+
+
+class TestScaffoldingGolden( unittest.TestCase ):
+    """The served prose is pinned to an INDEPENDENT golden the generator never writes.
+
+    A substring-present check (the earlier version of this class) could not catch a
+    reworded Requirement or Task line. start-with / end-with the full golden pins
+    every scaffolding byte OUTSIDE the command block. But start/end anchors do NOT
+    pin the SEAM — text injected between the command block and the closing tag (e.g.
+    a stray line prepended to the generator's _FOOTER) lands in the unpinned middle
+    and slides through both anchors green (found in break-testing, Sam 2026-08-16).
+    test_command_region_holds_only_command_lines closes that seam: the region
+    between the two goldens must contain ONLY well-formed <command> lines.
+    """
+
+    # 4-space-indented <command>NAME</command>, the ONLY shape allowed in the block.
+    _COMMAND_LINE = re.compile( r"^    <command>[^<>]*</command>$" )
+
+    def _command_region( self ):
+        """The bytes render() places BETWEEN the two goldens — the command block."""
+        rendered = gen.render_router_prompt()
+        self.assertTrue( rendered.startswith( _GOLDEN_HEADER ) )
+        self.assertTrue( rendered.endswith( _GOLDEN_FOOTER ) )
+        return rendered[ len( _GOLDEN_HEADER ) : len( rendered ) - len( _GOLDEN_FOOTER ) ]
+
+    def test_header_prose_matches_the_independent_golden( self ):
+        self.assertTrue( gen.render_router_prompt().startswith( _GOLDEN_HEADER ),
+                         "header prose drifted from the golden — a reword that moved only the generator" )
+
+    def test_footer_prose_matches_the_independent_golden( self ):
+        self.assertTrue( gen.render_router_prompt().endswith( _GOLDEN_FOOTER ),
+                         "footer prose drifted from the golden — a reword that moved only the generator" )
+
+    def test_golden_detects_a_prose_reword( self ):
+        """
+        Control: prove the golden pin CAN go red. A one-word reword of the header
+        must break start-with — so a green golden means the prose is intact, not a
+        check that cannot fail.
+        """
+        reworded = gen.render_router_prompt().replace( "### Task:", "### Tusk:", 1 )
+        self.assertFalse( reworded.startswith( _GOLDEN_HEADER ) )
+
+    def test_command_region_holds_only_command_lines( self ):
+        """
+        Seam pin: the region between the two goldens is the command block and NOTHING
+        else. Every non-empty line must be a well-formed <command> line — so junk
+        injected at the block/footer seam (which the start/end anchors miss) is caught.
+        """
+        for line in self._command_region().split( "\n" ):
+            if line == "": continue
+            self.assertRegex( line, self._COMMAND_LINE,
+                              f"non-command line in the pinned command region: {line!r}" )
+
+    def test_seam_pin_detects_injected_junk( self ):
+        """
+        Control: prove the seam pin CAN go red. Inject a stray line at the seam and
+        confirm at least one region line no longer reads as a command line — so a
+        green seam pin means the block is clean, not a check that cannot fail.
+        """
+        corrupted = self._command_region() + "ZZZDRIFT injected at the seam\n"
+        offenders = [ ln for ln in corrupted.split( "\n" )
+                      if ln != "" and not self._COMMAND_LINE.match( ln ) ]
+        self.assertTrue( offenders, "seam pin could not detect injected junk" )
+
+    def test_voice_command_slot_is_a_literal( self ):
+        """`{voice_command}` must reach the file unsubstituted for serve-time format()."""
+        self.assertIn( "<voice-command>{voice_command}</voice-command>", gen.render_router_prompt() )
+
+
+class TestWriter( unittest.TestCase ):
+    """write_router_prompt / main — both path arms, without touching the repo file."""
+
+    def test_write_to_explicit_path_roundtrips( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join( tmp, "prompt.txt" )
+            written = gen.write_router_prompt( target )
+            self.assertEqual( written, target )
+            with open( target ) as handle:
+                self.assertEqual( handle.read(), gen.render_router_prompt() )
+
+    def test_main_writes_the_default_path( self ):
+        """
+        main() resolves the default path under the project root. Redirect the root
+        to a temp dir so the default-path arm is covered without rewriting the
+        tracked prompt file.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs( os.path.join( tmp, "src", "conf", "prompts" ) )
+            with mock.patch.object( cu, "get_project_root", return_value=tmp ):
+                path = gen.main()
+            self.assertEqual( path, tmp + gen.TEMPLATE_REL_PATH )
+            with open( path ) as handle:
+                self.assertEqual( handle.read(), gen.render_router_prompt() )
+
+
+if __name__ == "__main__":
+    unittest.main()

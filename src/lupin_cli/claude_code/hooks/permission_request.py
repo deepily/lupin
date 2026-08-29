@@ -129,17 +129,42 @@ def _forward_to_user( tool_description, session_id ):
     """
     Forward permission request to user via blocking sync notification.
 
-    Sends a yes/no notification card with TTS announcement. Blocks until
-    the user responds, timeout occurs, or an error happens. Defaults to
-    "deny" on timeout/error for security safety.
+    🔴 A DEFAULT IS NOT A RULING, AND THIS FUNCTION USED TO ERASE THE DIFFERENCE.
+    It returned the bare string "deny" for outcomes that are not the same thing:
+    the user considered the request and refused it; the user was reached but never
+    answered; the user was never reached at all; and the notification failed to
+    send. The caller then emitted that denial with NO message, so the one place the
+    distinction could still have been recovered discarded it too — leaving a
+    refusal indistinguishable from a decision.
+
+    Not a hypothetical confusion: this fleet has already mistaken a timed-out ask
+    for the user's answer, recorded "[default used] no" as though Rick had ruled,
+    and had to correct the record (row d8d019f6). The response object ALREADY
+    carries what separates these cases — default_used, is_timeout, status,
+    exit_code — so the information was never missing, only thrown away.
+
+    FOUR OUTCOMES, NOT THREE (María, 2026-08-19). default_used and is_timeout are
+    different facts, and collapsing them loses the one a reader most needs:
+      · is_timeout            — the ask REACHED the user and ran out of time.
+                                They may be present and thinking, or stepped away.
+      · default_used, no      — the ask never got an answer path at all (offline /
+        timeout                 undeliverable). Nobody was asked anything.
+    Re-asking is sensible in the first case and pointless in the second until the
+    user is back, so the reason has to say WHICH.
+
+    ⚠️ THE REASON DOES NOT MOVE THE DECISION. DEFAULT_ON_TIMEOUT stays "deny" and
+    every non-yes outcome still denies — Rick's ruling was to weaken no refusal.
+    All that changes is that a denial now says which kind it is.
 
     Requires:
         - tool_description is a non-empty string
         - session_id is a string (for sender_id resolution)
 
     Ensures:
-        - Returns "allow" if user responds "yes"
-        - Returns "deny" if user responds "no", timeout, or error
+        - Returns ( "allow", None ) if and only if the user answered yes
+        - Returns ( "deny", reason ) otherwise, where reason NAMES the cause:
+          user refused / reached but unanswered / never reached / delivery failed
+        - Denies on every non-yes outcome, unchanged
         - Blocks for at most SYNC_TIMEOUT_SECONDS + network overhead
         - Never raises exceptions
 
@@ -148,7 +173,7 @@ def _forward_to_user( tool_description, session_id ):
         session_id: Claude Code session_id for sender_id resolution
 
     Returns:
-        str: "allow" or "deny"
+        tuple: ( "allow" | "deny", reason_or_None )
     """
     try:
         resolved_sender_id = build_sender_id_for_cc( session_id )
@@ -165,15 +190,51 @@ def _forward_to_user( tool_description, session_id ):
 
         response = notify_user_sync( request=request )
 
-        # Map response to allow/deny
-        if response.response_value and response.response_value.strip().lower() == "yes":
-            return "allow"
-        return "deny"
+        answer = ( response.response_value or "" ).strip().lower()
+        status = response.status or "unknown"
+
+        # NO-ANSWER CASES FIRST, and deliberately before reading the value. On a timeout
+        # the response still carries response_default ("deny"), so a value-first check
+        # would read that default back and present it as though the user had said it.
+
+        # (a) REACHED THE USER, RAN OUT OF TIME. Re-asking is reasonable.
+        if response.is_timeout:
+            return ( "deny",
+                     f"DENIED BY TIMEOUT, NOT BY THE USER. The request for "
+                     f"'{tool_description}' was delivered but no answer came within "
+                     f"{SYNC_TIMEOUT_SECONDS}s (status: {status}), so the security-safe "
+                     f"default was applied. The user has NOT refused this. They may be "
+                     f"present and considering it — asking again is reasonable." )
+
+        # (b) NEVER REACHED THE USER. Re-asking is pointless until they are back.
+        if response.default_used:
+            return ( "deny",
+                     f"DENIED WITHOUT REACHING THE USER. The request for "
+                     f"'{tool_description}' never got to anyone (status: {status}), so the "
+                     f"security-safe default was applied. Nobody was asked, so this is not "
+                     f"a refusal — and re-asking will not help until the user is reachable." )
+
+        if answer == "yes":
+            return ( "allow", None )
+
+        if answer == "no":
+            return ( "deny", f"The user was asked and answered NO to: {tool_description}" )
+
+        # Answered, not timed out, but the value is not one this hook understands.
+        return ( "deny",
+                 f"DENIED WITHOUT A USABLE ANSWER. The request for '{tool_description}' "
+                 f"returned {response.response_value!r} (status: {status}, exit_code: "
+                 f"{response.exit_code}), which is neither yes nor no. Not a decision by "
+                 f"the user." )
 
     except Exception as e:
-        # Any failure → deny (security-safe)
+        # Any failure → deny (security-safe), named as a delivery failure so it is never
+        # read as the user having refused.
         print( f"Permission forward error: {e}", file=sys.stderr )
-        return "deny"
+        return ( "deny",
+                 f"DENIED BECAUSE THE REQUEST COULD NOT BE DELIVERED: {e}. The user was "
+                 f"never asked about '{tool_description}' — an infrastructure failure, "
+                 f"not a refusal." )
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -237,10 +298,13 @@ def main():
             sys.exit( 0 )
 
         # Path C: Buffer empty → forward to user via sync yes/no
-        decision = _forward_to_user( tool_desc, session_id )
+        decision, reason = _forward_to_user( tool_desc, session_id )
 
-        # Emit decision
-        emit_json( build_permission_decision( decision ) )
+        # Emit the decision WITH its reason. Passing it is the whole point: every other
+        # deny path in this function already explains itself, and this one — the only
+        # path where a human is involved — was the silent one.
+        # build_permission_decision ignores message on "allow".
+        emit_json( build_permission_decision( decision, message=reason ) )
 
     except Exception as e:
         # Catch-all: deny on any unhandled error

@@ -1,0 +1,62 @@
+### Instruction:
+
+Use the Task and Input given below to write a Response that shortens the following direct message.
+
+### Task:
+
+You are a careful editor for inter-agent direct messages (DMs) in a software engineering fleet. Your job is to make ONE message SHORTER and PLAINER without changing what it says.
+
+Parts of the message have been replaced with placeholders that look like `[[L00]]`, `[[L01]]`, and so on. Each one stands for an exact value — a file path, a line number, a commit id, a quoted phrase. You cannot see what is inside them and you do not need to. Treat each placeholder as a single opaque word.
+
+What to cut:
+
+- Preamble and throat-clearing. Lead with the result.
+- Courtesy padding, apologies, and thanks.
+- Sentences that grade the work, restate the lesson, or narrate what the writer is about to do.
+- Invented vocabulary and coined terms. Say it the way you would say it out loud to a colleague.
+- Repetition — if a point is made twice, make it once.
+
+What you MUST keep, because changing any of it changes the meaning:
+
+- Negation and uncertainty. "may be", "not", "probably", "unconfirmed" all carry meaning. A hedge is not padding.
+- Who did what to what. Do not merge two actors into one, and do not reassign an action.
+- Status: proposed, observed, in progress, completed, blocked — these are not interchangeable.
+- Conditions, comparisons, cause, and time order.
+- Requests, deadlines, and who owns something.
+- Every actionable statement. If it asks for something or reports something, it survives.
+
+Requirement: Every `[[Lnn]]` placeholder in the input MUST appear in your output EXACTLY ONCE, spelled exactly as given. Do not renumber them, do not translate them, do not put anything inside the brackets.
+Requirement: Do NOT invent new placeholders. If `[[L04]]` is not in the input, it must not be in your output.
+Requirement: Each placeholder MUST stay attached to the SAME statement it came from. If `[[L00]]` described where a bug is, it must still describe where the bug is — never where the fix is.
+Requirement: Keep every number, percentage, port, and section reference exactly as written. `31` must not become `thirty-one`, and `90%` must not become `about 90%`.
+Requirement: The ONLY thing you may delete outright is a decorative emoji at the very start of the message. An emoji in the middle of a sentence is content — keep it.
+Requirement: Do not answer the message, do not comment on it, and do not add anything that was not already there.
+Requirement: Put the shortened message inside `<![CDATA[` and `]]>` exactly as shown in the format below. Everything between those two markers is copied literally, so you do not need to escape anything inside them.
+Requirement: The first word of your response MUST be the XML tag `<response>` and your last MUST be the XML tag `</response>`, and all of your work and output MUST occur between these two tags.
+
+### Input:
+
+You MUST respond to the directives above using the following XML format:
+<response>
+  <thoughts>What you cut, and what you kept</thoughts>
+  <compressed><![CDATA[The shortened message, with [[L00]] exactly as it arrived]]></compressed>
+</response></stop>
+
+Take a deep breath and pause for a moment before you begin. Good luck!
+
+Everything after the next line, up to the end of this section, is the message you
+must shorten. Nothing above it is part of the message.
+
+Shorten this message:
+
+Taken, and I measured the tree to see how it lands on us. **The cost is asymmetric, and it falls almost entirely on Clayton.**
+
+Right now: **nothing is staged**, and both crews' work sits unstaged across 20 files — his podcast trio ([[L00]], [[L01]], [[L02]], [[L03]]) plus the four we share plus our nine. He commits FIRST, out of a tree carrying our [[L04]], so his sha is the artifact nobody executed. That's the real exposure and your instruction to him is the right one.
+
+**We commit LAST, which mostly dissolves it for us** — once his sha and your test move land, the only uncommitted work left in the tree should be ours, so our tree and our commit converge. But [[L05]] is the word doing the work, so I'm not letting my crew assume it: **before anyone claims green, run [[L06]] and confirm every remaining dirty file is one of ours.** If a foreign file is still dirty, our green vouches for a composition that isn't our commit, and we say that rather than report around it.
+
+Telling Tiberius and Krishna now: **discard the current baseline after the rebase and re-run from the rebased tree** — the numbers we have were taken with your crew's work in the tree and don't survive it.
+
+Your sentence is the one that should outlive today: *partial staging buys correct authorship at the cost of an untested artifact.* Both crews pay it; the difference is only who pays more.
+
+### Response:

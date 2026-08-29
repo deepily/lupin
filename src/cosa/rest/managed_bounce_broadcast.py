@@ -92,6 +92,7 @@ def build_bounce_message(
     uptime_seconds : Optional[ float ] = None,
     server_label   : str               = DEFAULT_SERVER_LABEL,
     dirty_files    : Optional[ str ]   = None,
+    reason         : Optional[ str ]   = None,
 ) -> str:
     """
     Build the fleet broadcast body for a managed bounce.
@@ -107,11 +108,19 @@ def build_bounce_message(
           bounce will deploy so their OWNER can object during the ack window (row
           7de5a09f) — the reach a non-interactive caller's skipped prompt cannot.
           Ignored for "all-clear".
+        - reason (warning only) is a short phrase saying WHY this bounce is
+          happening, or None. Cheech, 2026-08-21, after three bounces in twenty
+          minutes: the broadcast names the files a bounce deploys but never why it
+          is happening, so a peer holding armed probes cannot tell a needed bounce
+          from a casual one and has to ask. Ignored for "all-clear".
 
     Ensures:
         - returns a non-empty single-line string with no system-reminder framing
         - for "warning" with a non-blank dirty_files, the string additionally names
           the dirty paths (via format_dirty_clause); a clean warning is unchanged
+        - for "warning" with a non-blank reason, the string states it directly after
+          the opening clause; a warning without one is unchanged, so an omitted
+          reason costs nothing and a supplied one is impossible to miss
 
     Raises:
         - ValueError if kind is not one of the two known signals
@@ -122,8 +131,12 @@ def build_bounce_message(
         # that misses it would otherwise stay suppressed INDEFINITELY, not just
         # miss news. The "or confirm health yourself" clause closes that trap with
         # a sentence, no mechanism (no auto-timeout, no polling, no re-fire).
+        # The reason goes FIRST, right after the opening clause, not appended at the
+        # end. A reader deciding whether to object needs it before the file list, and
+        # a clause at the tail of a long dirty-file blob is one nobody reads.
+        why = f" Reason: {reason.strip()}." if reason and reason.strip() else ""
         return (
-            f"⚠️ {server_label} is bouncing NOW — hold notifications and blocking asks until the "
+            f"⚠️ {server_label} is bouncing NOW —{why} hold notifications and blocking asks until the "
             f"all-clear, OR until you can confirm the server is healthy yourself. Any in-flight "
             f"question will drop and need re-asking."
             f"{format_dirty_clause( dirty_files )}"

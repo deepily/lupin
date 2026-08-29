@@ -109,6 +109,30 @@ class TestParseAnalysisResponse:
         with pytest.raises( ValueError ):
             parse_analysis_response( json.dumps( { "other": "data" } ) )
 
+    # Diagnostic-message regression (twin of bug 957cb7b8): each raise branch
+    # must log the predicate it ACTUALLY failed, never the "not-a-list: <class
+    # 'list'>" self-contradiction the empty path used to print.
+    def test_empty_sections_logs_empty_not_type_contradiction( self, caplog ):
+        with caplog.at_level( "ERROR" ):
+            with pytest.raises( ValueError ):
+                parse_analysis_response( json.dumps( { "sections": [] } ) )
+        assert "empty list" in caplog.text
+        assert "not-a-list" not in caplog.text
+        assert "<class 'list'>" not in caplog.text
+
+    def test_missing_sections_key_logs_missing( self, caplog ):
+        with caplog.at_level( "ERROR" ):
+            with pytest.raises( ValueError ):
+                parse_analysis_response( json.dumps( { "other": "data" } ) )
+        assert "missing 'sections' key" in caplog.text
+
+    def test_non_list_sections_logs_not_a_list_with_real_type( self, caplog ):
+        with caplog.at_level( "ERROR" ):
+            with pytest.raises( ValueError ):
+                parse_analysis_response( json.dumps( { "sections": "not a list" } ) )
+        assert "not a list" in caplog.text
+        assert "str" in caplog.text
+
     def test_invalid_arc_position_defaults( self ):
         """Unknown arc position defaults to 'argument'."""
         response = json.dumps( { "sections": [ {
@@ -187,6 +211,54 @@ class TestGetNarrativeAnalysisPrompt:
         )
         assert "15 slides" in prompt  # 15 * 1.0 = 15 total
 
+    def test_resolved_budget_overrides_duration_formula( self ):
+        """T2: a passed-in slide_budget wins over the duration formula, so this
+        prompt and the outline prompt agree. Budget 40 -> '40 slides' total and
+        '37 content' (40 - 3 structural), and NOT the formula's 15."""
+        prompt = get_narrative_analysis_prompt(
+            source_content = "Test content",
+            raw_sections   = [],
+            target_duration   = 15,       # formula alone would say 15
+            slides_per_minute = 1.0,
+            slide_budget      = 40,       # explicit resolved budget wins
+        )
+        assert "40 slides" in prompt
+        assert "37 content" in prompt     # 40 - 3 structural
+        assert "15 slides" not in prompt
+
+    def test_falls_back_to_formula_when_budget_unset( self ):
+        """slide_budget None -> the duration formula still governs (today's behavior)."""
+        prompt = get_narrative_analysis_prompt(
+            source_content = "Test content",
+            raw_sections   = [],
+            target_duration   = 15,
+            slides_per_minute = 1.0,
+            slide_budget      = None,
+        )
+        assert "15 slides" in prompt
+
+    def test_gate1_human_feedback_injected( self ):
+        """Gate-1 'Revise' feedback lands in the prompt (was a no-op before wiring)."""
+        prompt = get_narrative_analysis_prompt(
+            source_content = "Test content",
+            raw_sections   = [],
+            target_duration   = 15,
+            slides_per_minute = 1.0,
+            human_feedback    = "merge sections 3 and 4",
+        )
+        assert "merge sections 3 and 4" in prompt
+        assert "Revision Feedback" in prompt
+
+    def test_no_feedback_block_without_feedback( self ):
+        """No human_feedback -> no Revision Feedback block (default path unchanged)."""
+        prompt = get_narrative_analysis_prompt(
+            source_content = "Test content",
+            raw_sections   = [],
+            target_duration   = 15,
+            slides_per_minute = 1.0,
+        )
+        assert "Revision Feedback" not in prompt
+
     def test_includes_audience_guidelines( self ):
         """Prompt includes audience-specific guidelines when provided."""
         prompt = get_narrative_analysis_prompt(
@@ -236,16 +308,32 @@ class TestGetNarrativeAnalysisPrompt:
         )
         assert "machine learning" in prompt
 
-    def test_truncation_note_for_long_content( self ):
-        """Long content gets truncated with a note."""
-        long_content = "x" * 40000
+    def test_truncation_note_at_configured_ceiling( self ):
+        """Content over the configured ceiling gets clipped, and the note cites that ceiling."""
+        ceiling = 100
+        long_content = "A" * ceiling + "B" * 50   # only the A's survive the clip
         prompt = get_narrative_analysis_prompt(
             source_content = long_content,
             raw_sections   = [],
             target_duration   = 15,
             slides_per_minute = 1.0,
+            max_source_chars  = ceiling,
         )
         assert "truncated" in prompt.lower()
+        assert f"truncated to {ceiling:,}" in prompt   # the CONFIGURED ceiling, not a literal
+        assert "B" * 50 not in prompt                  # dropped content really is dropped
+
+    def test_no_truncation_when_ceiling_unset( self ):
+        """With no ceiling (None), even very long content is passed through whole."""
+        long_content = "A" * 40000 + "TAIL_MARKER"
+        prompt = get_narrative_analysis_prompt(
+            source_content = long_content,
+            raw_sections   = [],
+            target_duration   = 15,
+            slides_per_minute = 1.0,
+        )   # max_source_chars omitted → None → no clip
+        assert "truncated" not in prompt.lower()
+        assert "TAIL_MARKER" in prompt
 
     def test_no_audience_no_guidelines( self ):
         """Prompt works without audience parameter."""

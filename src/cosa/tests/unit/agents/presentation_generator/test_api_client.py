@@ -220,7 +220,10 @@ class TestCallApi:
         assert capture[ "options" ].system_prompt.startswith( "SYS" )
         assert "creative" in capture[ "options" ].system_prompt.lower()
         assert capture[ "options" ].tools == []
-        assert capture[ "options" ].permission_mode == "plan"
+        # "default", not "plan" — plan mode changes what the model PRODUCES, so it
+        # returned a plan FOR an outline and the parser rejected it (pr-62254a7f).
+        # tools=[] is what keeps this read-only.
+        assert capture[ "options" ].permission_mode == "default"
         assert capture[ "options" ].max_turns == c.config.content_max_turns
         assert c.cost_estimate.total_api_calls == 1
         assert c.cost_estimate.total_sdk_cost_usd == pytest.approx( 0.21 )
@@ -266,7 +269,7 @@ class TestCallApi:
         assert out.input_tokens  == 0
         assert out.output_tokens == 0
         assert out.sdk_cost_usd  == 0.0
-        assert out.stop_reason   == "end_turn"
+        assert out.stop_reason   is None   # None stop_reason stays UNKNOWN, not coerced to "end_turn" (bug 98d937c2)
         assert capsys.readouterr().out == ""
 
 

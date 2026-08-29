@@ -115,172 +115,83 @@ class TestCountInteractions( unittest.TestCase ):
         self.assertEqual( out, {} )
 
 
-class TestPushValidation( unittest.IsolatedAsyncioTestCase ):
+class TestPushIsRetired( unittest.IsolatedAsyncioTestCase ):
     """
-    Coverage for POST /api/push validation + failure branches not covered by
-    the happy-path test in test_queues_router.py.
+    `POST /api/push` is a 410 tombstone as of 2026-08-21 — Rick: ONE entry point, and it
+    is v2. This class used to cover the handler's validation and failure branches; the
+    handler is deleted, so those branches no longer exist to cover.
+
+    WHAT WENT AWAY WITH IT, named so it is not mistaken for coverage nobody wanted. The
+    old door hand-validated its body and answered 400 for: unparseable JSON, a body that
+    is not an object, a missing/blank/non-string `question`, and a missing/blank/
+    non-string `websocket_id`. It answered 500 when `push_job` raised, and tolerated a
+    non-dict result. `/api/v2/ask` replaces the validation with a Pydantic model
+    (`AskRequest`), which rejects a bad body with 422 rather than 400 and treats
+    `websocket_id` as optional — so the shapes are NOT equivalent, they are different by
+    design. The 400-vs-422 change is visible to every caller and belongs in the cutover
+    notes, not in a silent deletion.
     """
 
-    def setUp( self ):
-        self.user = { "uid": "u1", "email": "u1@x.com", "roles": [ "user" ] }
-        self.q    = Mock()
-
-    async def test_invalid_json_400( self ):
+    async def test_the_door_is_gone_and_says_where_to_go( self ):
         with self.assertRaises( HTTPException ) as ctx:
-            await push( request=_async_json_request( exc=ValueError( "bad" ) ),
-                        current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "Invalid JSON", ctx.exception.detail )
+            await push()
+        self.assertEqual( ctx.exception.status_code, 410 )
+        self.assertIn( "/api/v2/ask", ctx.exception.detail )
+        self.assertIn( "REMOVE BY",   ctx.exception.detail )
 
-    async def test_body_not_dict_400( self ):
+    async def test_it_refuses_before_touching_the_queue( self ):
+        """
+        The tombstone takes no queue dependency at all, which is the point: a refusal
+        that still resolved `get_todo_queue` would keep a dead door coupled to live
+        infrastructure. `push()` accepting zero arguments is the proof — this call would
+        raise TypeError, not 410, if a dependency came back.
+        """
         with self.assertRaises( HTTPException ) as ctx:
-            await push( request=_async_json_request( value=[ 1, 2 ] ),
-                        current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "must be a JSON object", ctx.exception.detail )
+            await push()
+        self.assertEqual( ctx.exception.status_code, 410 )
 
-    async def test_missing_question_400( self ):
+
+class TestPushAgenticIsRetired( unittest.IsolatedAsyncioTestCase ):
+    """
+    WHAT USED TO BE HERE: nine tests over the handler's hand-rolled validation — invalid
+    JSON, a body that was not an object, a missing or non-string routing_command, blanks
+    after stripping, a non-object args, the success shape, the construction 500 and the
+    unknown-command 400.
+
+    Those 400s are not lost, they moved: this door read the raw request and validated it
+    by hand, and `/api/v2/submit` takes a Pydantic model, so the same bad bodies now come
+    back as 422s from the model rather than 400s from a handler. That is a REAL change
+    visible to every caller — 400 becomes 422, and `websocket_id` goes from required to
+    optional — and it belongs in the cutover notes rather than in a silent deletion.
+    """
+
+    async def test_the_door_is_gone_and_says_where_to_go( self ):
         with self.assertRaises( HTTPException ) as ctx:
-            await push( request=_async_json_request( value={ "websocket_id": "w" } ),
-                        current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "Missing required field: question", ctx.exception.detail )
+            await push_agentic()
+        self.assertEqual( ctx.exception.status_code, 410 )
+        self.assertIn( "/api/v2/submit", ctx.exception.detail )
+        self.assertIn( "REMOVE BY",      ctx.exception.detail )
 
-    async def test_missing_websocket_400( self ):
+    async def test_it_names_submit_and_not_ask( self ):
+        """
+        This door is submit-shaped in the most literal way of any of the ten — it already
+        took the command as a parameter. Pointing it at `ask` would send an unattended,
+        service-to-service caller to the door whose whole job is to ask questions back.
+        """
+        from cosa.rest.routers._retired_doors import RETIRED_DOORS, V2_SUBMIT, V2_ASK
+        self.assertEqual( RETIRED_DOORS[ "/api/push-agentic" ], V2_SUBMIT )
+        self.assertNotEqual( RETIRED_DOORS[ "/api/push-agentic" ], V2_ASK )
+
+    async def test_it_refuses_before_touching_the_queue( self ):
+        """
+        The tombstone takes no queue dependency at all, which is the point: a refusal that
+        still resolved `get_todo_queue` would keep a dead door coupled to live
+        infrastructure. `push_agentic()` accepting zero arguments is the proof — this call
+        would raise TypeError, not 410, if a dependency came back.
+        """
         with self.assertRaises( HTTPException ) as ctx:
-            await push( request=_async_json_request( value={ "question": "hi" } ),
-                        current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "Missing required field: websocket_id", ctx.exception.detail )
-
-    async def test_question_not_string_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push( request=_async_json_request( value={ "question": 123, "websocket_id": "w" } ),
-                        current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "'question' must be a string", ctx.exception.detail )
-
-    async def test_websocket_not_string_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push( request=_async_json_request( value={ "question": "hi", "websocket_id": 9 } ),
-                        current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "'websocket_id' must be a string", ctx.exception.detail )
-
-    async def test_question_blank_after_strip_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push( request=_async_json_request( value={ "question": "   ", "websocket_id": "w" } ),
-                        current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "'question' cannot be empty", ctx.exception.detail )
-
-    async def test_websocket_blank_after_strip_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push( request=_async_json_request( value={ "question": "hi", "websocket_id": "   " } ),
-                        current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "'websocket_id' cannot be empty", ctx.exception.detail )
-
-    async def test_push_job_failure_500( self ):
-        self.q.push_job.side_effect = Exception( "queue down" )
-        with patch( "builtins.print" ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await push( request=_async_json_request( value={ "question": "hi", "websocket_id": "w" } ),
-                            current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 500 )
-        self.assertIn( "Failed to push job", ctx.exception.detail )
-
-    async def test_push_result_non_dict( self ):
-        # result is a bare string → job_id None, result = str(result)
-        self.q.push_job.return_value = "plain-ok"
-        with patch( "builtins.print" ):
-            out = await push( request=_async_json_request( value={ "question": "hi", "websocket_id": "w" } ),
-                              current_user=self.user, todo_queue=self.q )
-        self.assertIsNone( out[ "job_id" ] )
-        self.assertEqual( out[ "result" ], "plain-ok" )
-
-
-class TestPushAgentic( unittest.IsolatedAsyncioTestCase ):
-    """Coverage for POST /api/push-agentic."""
-
-    def setUp( self ):
-        self.user = { "uid": "u1", "email": "u1@x.com", "roles": [ "user" ] }
-        self.q    = Mock()
-
-    async def test_invalid_json_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push_agentic( request=_async_json_request( exc=ValueError( "x" ) ),
-                                current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-
-    async def test_body_not_dict_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push_agentic( request=_async_json_request( value="nope" ),
-                                current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "must be a JSON object", ctx.exception.detail )
-
-    async def test_missing_routing_command_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push_agentic( request=_async_json_request( value={ "websocket_id": "w" } ),
-                                current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "Missing required field: routing_command", ctx.exception.detail )
-
-    async def test_nonstring_field_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push_agentic( request=_async_json_request( value={ "routing_command": 5, "websocket_id": "w" } ),
-                                current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "must be a string", ctx.exception.detail )
-
-    async def test_blank_after_strip_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push_agentic( request=_async_json_request( value={ "routing_command": "  ", "websocket_id": "  " } ),
-                                current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "cannot be empty", ctx.exception.detail )
-
-    async def test_args_not_dict_400( self ):
-        with self.assertRaises( HTTPException ) as ctx:
-            await push_agentic( request=_async_json_request(
-                                    value={ "routing_command": "go", "websocket_id": "w", "args": [ 1 ] } ),
-                                current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "'args' must be a JSON object", ctx.exception.detail )
-
-    async def test_success( self ):
-        self.q.push_job_agentic.return_value = { "job_id": "dr-a1b2c3d4", "message": "queued" }
-        with patch( "builtins.print" ):
-            out = await push_agentic( request=_async_json_request(
-                                          value={ "routing_command": "agent router go to deep research",
-                                                  "websocket_id": "w", "args": { "x": 1 },
-                                                  "question": "Q", "monopolize": True } ),
-                                      current_user=self.user, todo_queue=self.q )
-        self.assertEqual( out[ "status" ], "queued" )
-        self.assertEqual( out[ "job_id" ], "dr-a1b2c3d4" )
-        self.assertEqual( out[ "result" ], "queued" )
-
-    async def test_push_job_agentic_raises_500( self ):
-        self.q.push_job_agentic.side_effect = Exception( "construct fail" )
-        with patch( "builtins.print" ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await push_agentic( request=_async_json_request(
-                                        value={ "routing_command": "go", "websocket_id": "w" } ),
-                                    current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 500 )
-        self.assertIn( "push-agentic failed", ctx.exception.detail )
-
-    async def test_no_job_id_400( self ):
-        # result is a dict without job_id → rejected as 400 with message
-        self.q.push_job_agentic.return_value = { "message": "unknown command" }
-        with patch( "builtins.print" ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await push_agentic( request=_async_json_request(
-                                        value={ "routing_command": "bogus", "websocket_id": "w" } ),
-                                    current_user=self.user, todo_queue=self.q )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "unknown command", ctx.exception.detail )
+            await push_agentic()
+        self.assertEqual( ctx.exception.status_code, 410 )
 
 
 class TestPoolStatus( unittest.IsolatedAsyncioTestCase ):
@@ -631,36 +542,207 @@ class TestCancelJob( unittest.IsolatedAsyncioTestCase ):
         self.user = { "uid": "u1", "email": "e", "roles": [ "user" ] }
 
     async def test_not_found_404( self ):
+        # Row 4b87fe61: a 404 now means BOTH queues were searched, not just running.
         rq = Mock(); rq.get_by_id_hash.side_effect = KeyError()
+        tq = Mock(); tq.get_by_id_hash.side_effect = KeyError()
         with patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await cancel_job( job_id="j", current_user=self.user, running_queue=rq )
+                await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
         self.assertEqual( ctx.exception.status_code, 404 )
 
     async def test_not_owner_403( self ):
         job = Mock(); job.user_id = "other"
         rq = Mock(); rq.get_by_id_hash.return_value = job
+        tq = Mock(); tq.get_by_id_hash.side_effect = KeyError()
         with patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await cancel_job( job_id="j", current_user=self.user, running_queue=rq )
+                await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
         self.assertEqual( ctx.exception.status_code, 403 )
 
     async def test_non_agentic_400( self ):
+        # Still a 400, but the message now names the lever that does work
+        # (row 4b87fe61 — an endpoint that only says what it will not do).
         job = Mock( spec=[ "user_id" ] ); job.user_id = "u1"   # plain Mock, not AgenticJobBase
         rq = Mock(); rq.get_by_id_hash.return_value = job
+        tq = Mock(); tq.get_by_id_hash.side_effect = KeyError()
         with patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await cancel_job( job_id="j", current_user=self.user, running_queue=rq )
+                await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
         self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "Only agentic jobs", ctx.exception.detail )
+        self.assertIn( "does not support graceful cancellation", ctx.exception.detail )
+        self.assertIn( "DELETE /api/queue/run/j", ctx.exception.detail )
 
     async def test_success( self ):
         job = _FakeAgenticJob(); job.user_id = "u1"; job.request_cancel = Mock()
         rq = Mock(); rq.get_by_id_hash.return_value = job
+        tq = Mock(); tq.get_by_id_hash.side_effect = KeyError()
         with patch( "builtins.print" ):
-            out = await cancel_job( job_id="j", current_user=self.user, running_queue=rq )
+            out = await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
         self.assertEqual( out[ "status" ], "cancel_requested" )
+        self.assertEqual( out[ "queue" ], "run" )
         job.request_cancel.assert_called_once()
+
+
+class TestCancelJobReachesQueuedJobs( unittest.IsolatedAsyncioTestCase ):
+    """
+    Falsification suite for row 4b87fe61: cancel must reach a job that has not
+    started yet.
+
+    Before the fix, cancel_job looked the job up in the RUNNING queue only, so a
+    queued job — the cheap, no-work-lost moment you most want to cancel at — came
+    back 404 "Job not found or not running". A caller who believed that 404 would
+    then watch the job start anyway.
+    """
+
+    def setUp( self ):
+        self.user  = { "uid": "u1", "email": "e", "roles": [ "user" ] }
+        self.admin = { "uid": "admin", "email": "a", "roles": [ "admin" ] }
+
+    def _queues( self, todo_job=None, running_job=None ):
+        """Build (running_queue, todo_queue) mocks; a None job means KeyError."""
+        rq = Mock()
+        tq = Mock()
+        if running_job is None:
+            rq.get_by_id_hash.side_effect = KeyError()
+        else:
+            rq.get_by_id_hash.return_value = running_job
+        if todo_job is None:
+            tq.get_by_id_hash.side_effect = KeyError()
+        else:
+            tq.get_by_id_hash.return_value = todo_job
+            tq.delete_by_id_hash.return_value = True
+        return rq, tq
+
+    async def test_queued_job_is_cancelled_not_404( self ):
+        """A job waiting in todo is cancelled, and the todo queue really loses it."""
+        job = _FakeAgenticJob(); job.user_id = "u1"
+        rq, tq = self._queues( todo_job=job )
+
+        mock_main = Mock(); mock_main.websocket_manager = Mock()
+        with _patch_fastapi_main( mock_main ), \
+             patch( "cosa.utils.util.get_current_datetime_iso", return_value="2025-08-05T12:00:00" ), \
+             patch( "builtins.print" ):
+            out = await cancel_job( job_id="ts-3fc47888", current_user=self.user,
+                                    running_queue=rq, todo_queue=tq )
+
+        self.assertEqual( out[ "status" ], "cancelled" )
+        self.assertEqual( out[ "queue" ], "todo" )
+        tq.delete_by_id_hash.assert_called_once_with( "ts-3fc47888" )
+
+    async def test_queued_non_agentic_job_is_also_cancelled( self ):
+        """The agentic-only restriction is a RUNNING-queue rule, not a queued-job rule."""
+        job = Mock( spec=[ "user_id" ] ); job.user_id = "u1"   # deliberately not agentic
+        rq, tq = self._queues( todo_job=job )
+
+        mock_main = Mock(); mock_main.websocket_manager = Mock()
+        with _patch_fastapi_main( mock_main ), \
+             patch( "cosa.utils.util.get_current_datetime_iso", return_value="2025-08-05T12:00:00" ), \
+             patch( "builtins.print" ):
+            out = await cancel_job( job_id="j", current_user=self.user,
+                                    running_queue=rq, todo_queue=tq )
+
+        self.assertEqual( out[ "status" ], "cancelled" )
+
+    async def test_cancelling_a_queued_job_emits_job_removed( self ):
+        """The UI must learn the card is gone, same as the delete path does."""
+        job = _FakeAgenticJob(); job.user_id = "u1"
+        rq, tq = self._queues( todo_job=job )
+
+        mock_main = Mock(); mock_main.websocket_manager = Mock()
+        with _patch_fastapi_main( mock_main ), \
+             patch( "cosa.utils.util.get_current_datetime_iso", return_value="2025-08-05T12:00:00" ), \
+             patch( "builtins.print" ):
+            await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
+
+        mock_main.websocket_manager.emit_to_user_and_admins_sync.assert_called_once()
+        args = mock_main.websocket_manager.emit_to_user_and_admins_sync.call_args[ 0 ]
+        self.assertEqual( args[ 1 ], "job_removed" )
+        self.assertEqual( args[ 2 ][ "queue" ], "todo" )
+
+    async def test_websocket_failure_does_not_fail_the_cancel( self ):
+        """A broken websocket must not turn a successful cancel into an error."""
+        job = _FakeAgenticJob(); job.user_id = "u1"
+        rq, tq = self._queues( todo_job=job )
+
+        mock_main = Mock()
+        mock_main.websocket_manager.emit_to_user_and_admins_sync.side_effect = RuntimeError( "boom" )
+        with _patch_fastapi_main( mock_main ), \
+             patch( "cosa.utils.util.get_current_datetime_iso", return_value="2025-08-05T12:00:00" ), \
+             patch( "builtins.print" ):
+            out = await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
+
+        self.assertEqual( out[ "status" ], "cancelled" )
+
+    async def test_queued_job_owned_by_someone_else_is_403( self ):
+        """Ownership is checked on the queued path too, not just the running one."""
+        job = _FakeAgenticJob(); job.user_id = "someone_else"
+        rq, tq = self._queues( todo_job=job )
+
+        with patch( "builtins.print" ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
+        self.assertEqual( ctx.exception.status_code, 403 )
+
+    async def test_admin_may_cancel_another_users_queued_job( self ):
+        """Admins keep the same override they have on every other job verb."""
+        job = _FakeAgenticJob(); job.user_id = "someone_else"
+        rq, tq = self._queues( todo_job=job )
+
+        mock_main = Mock(); mock_main.websocket_manager = Mock()
+        with _patch_fastapi_main( mock_main ), \
+             patch( "cosa.utils.util.get_current_datetime_iso", return_value="2025-08-05T12:00:00" ), \
+             patch( "builtins.print" ):
+            out = await cancel_job( job_id="j", current_user=self.admin, running_queue=rq, todo_queue=tq )
+        self.assertEqual( out[ "status" ], "cancelled" )
+
+    async def test_running_job_still_wins_over_a_stale_todo_entry( self ):
+        """If the job is running, cancel it gracefully — do not delete it from todo."""
+        running = _FakeAgenticJob(); running.user_id = "u1"; running.request_cancel = Mock()
+        todo    = _FakeAgenticJob(); todo.user_id = "u1"
+        rq, tq  = self._queues( todo_job=todo, running_job=running )
+
+        with patch( "builtins.print" ):
+            out = await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
+
+        self.assertEqual( out[ "status" ], "cancel_requested" )
+        running.request_cancel.assert_called_once()
+        tq.delete_by_id_hash.assert_not_called()
+
+    async def test_unknown_job_404_does_not_claim_it_is_merely_not_running( self ):
+        """The 404 must not imply 'exists but idle' when nothing was found at all."""
+        rq, tq = self._queues()
+
+        with patch( "builtins.print" ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await cancel_job( job_id="typo", current_user=self.user, running_queue=rq, todo_queue=tq )
+
+        self.assertEqual( ctx.exception.status_code, 404 )
+        detail = ctx.exception.detail
+        self.assertIn( "queued", detail )
+        self.assertIn( "running", detail )
+        self.assertNotEqual( detail, "Job not found or not running: typo" )
+
+    async def test_delete_failure_on_the_queued_path_is_reported( self ):
+        """A delete that reports no-op must not be dressed up as a successful cancel."""
+        job = _FakeAgenticJob(); job.user_id = "u1"
+        rq, tq = self._queues( todo_job=job )
+        tq.delete_by_id_hash.return_value = False
+
+        with patch( "builtins.print" ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
+        self.assertEqual( ctx.exception.status_code, 409 )
+
+    async def test_running_non_agentic_400_names_the_working_lever( self ):
+        """The 400 must say what to do instead, not just what it will not do."""
+        job = Mock( spec=[ "user_id" ] ); job.user_id = "u1"
+        rq, tq = self._queues( running_job=job )
+
+        with patch( "builtins.print" ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await cancel_job( job_id="j", current_user=self.user, running_queue=rq, todo_queue=tq )
+        self.assertEqual( ctx.exception.status_code, 400 )
+        self.assertIn( "/api/queue/run/", ctx.exception.detail )
 
 
 class TestDeleteAllQueueJobs( unittest.IsolatedAsyncioTestCase ):
@@ -794,8 +876,12 @@ class TestJobHistory( unittest.IsolatedAsyncioTestCase ):
     async def test_get_history_regular_user_with_exclude_ids( self ):
         with patch( "cosa.rest.job_persistence.query_job_history",
                     return_value={ "jobs": [ { "id": 1 } ], "total": 1 } ) as qh:
+            # user_filter MUST be passed explicitly — see the guard test in this class.
+            # Calling the endpoint directly bypasses FastAPI, so an omitted
+            # Query-defaulted parameter arrives as the Query OBJECT, not None.
             out = await get_job_history( current_user=self.user, status="failed", job_type="deep_research",
-                                         limit=10, offset=0, days=7, exclude_ids=" a , b ,, " )
+                                         limit=10, offset=0, days=7, exclude_ids=" a , b ,, ",
+                                         user_filter=None )
         # regular user → filtered to own uid; exclude_ids parsed to ["a","b"]
         _, kwargs = qh.call_args
         self.assertEqual( kwargs[ "user_id" ], "u1" )
@@ -806,11 +892,48 @@ class TestJobHistory( unittest.IsolatedAsyncioTestCase ):
         with patch( "cosa.rest.job_persistence.query_job_history",
                     return_value={ "jobs": [], "total": 0 } ) as qh:
             out = await get_job_history( current_user=self.admin, status=None, job_type=None,
-                                         limit=20, offset=0, days=None, exclude_ids=None )
+                                         limit=20, offset=0, days=None, exclude_ids=None,
+                                         user_filter=None )
         _, kwargs = qh.call_args
         self.assertIsNone( kwargs[ "user_id" ] )       # admin → all
         self.assertIsNone( kwargs[ "exclude_ids" ] )
         self.assertEqual( out[ "filtered_by" ], "all" )
+
+    def test_every_query_defaulted_param_is_known_to_the_direct_call_tests( self ):
+        """
+        THE GUARD FOR THE NEXT PARAMETER (row 8145f3e1).
+
+        Every test in this class calls `get_job_history` DIRECTLY, which skips FastAPI's
+        dependency resolution entirely. A parameter declared `= Query( None )` therefore
+        arrives as the Query OBJECT unless the test passes it, and `Query(None) is None`
+        is False — so the endpoint takes the "a filter was supplied" branch and behaves
+        as though the caller asked for something.
+
+        That is exactly how these tests broke: e205a3b1 added `user_filter`, the two
+        direct-call tests did not pass it, and the sentinel flowed into string code
+        (`'Query' object has no attribute 'startswith'`) and into the permission check
+        (a 403 where the test expected rows). ONE root cause, two unrelated-looking
+        symptoms — which is why it first read as two separate bugs.
+
+        Adding another `Query`-defaulted parameter would do it again, silently, to
+        whichever direct call forgot it. This set is the tripwire: extend it
+        deliberately, and update every direct call in this class in the same edit.
+        """
+        import inspect
+        from fastapi.params import Query as QueryParam
+
+        query_defaulted = {
+            name for name, param in inspect.signature( get_job_history ).parameters.items()
+            if isinstance( param.default, QueryParam )
+        }
+
+        self.assertEqual(
+            query_defaulted,
+            { "status", "job_type", "limit", "offset", "days", "exclude_ids", "user_filter" },
+            "get_job_history's Query-defaulted parameters changed. Every direct call in "
+            "this class must pass the new one explicitly, or it receives the Query object "
+            "instead of the default value. Update the calls, then update this set."
+        )
 
     async def test_get_detail_not_found_404( self ):
         with patch( "cosa.rest.job_persistence.get_job_by_id_hash", return_value=None ):
@@ -881,63 +1004,43 @@ class TestJobHistory( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( out[ "status" ], "deleted" )
 
 
-class TestRetryJobHistory( unittest.IsolatedAsyncioTestCase ):
-    """Coverage for POST /api/job-history/{job_id}/retry."""
+class TestRetryJobHistoryIsRetired( unittest.IsolatedAsyncioTestCase ):
+    """
+    `POST /api/job-history/{job_id}/retry` is a 410 tombstone as of 2026-08-21. It was a
+    queue door wearing a job-history URL: it read `question_text` off a stored row and
+    called `push_job` with it — its own comment said "the same pattern as POST /api/push".
 
-    def setUp( self ):
-        self.user = { "uid": "u1", "email": "e@x.com", "roles": [ "user" ] }
+    WHAT WENT AWAY WITH IT. The old handler answered 404 for an unknown job, 403 when the
+    caller neither owned the job nor was an admin, and 400 for a job whose status was not
+    retryable or a body with no `websocket_id`. The 403 DISSOLVES rather than moves:
+    `/api/v2/ask` asks a question as the calling user, so there is no other user's row to
+    be authorised against. The 404 and the status check do NOT dissolve — a client now
+    re-asks the stored question itself, so nothing checks that the job existed or was in
+    a retryable state. `notifications.js` already holds the question text
+    (`retryHistoryJob( jobId, questionText )` shows it in the confirm dialog), but
+    `JobsPaneRenderer.ts` does not — it has only the id hash, so the multiplexer's retry
+    button needs the question on the card before it can cut over. Named here because a
+    caller left without a path is not a caller that has been migrated.
+    """
 
-    async def test_not_found_404( self ):
-        with patch( "cosa.rest.job_persistence.get_job_by_id_hash", return_value=None ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await retry_job_history( job_id="j", request=_async_json_request( value={} ),
-                                         current_user=self.user, todo_queue=Mock() )
-        self.assertEqual( ctx.exception.status_code, 404 )
+    async def test_the_door_is_gone_and_says_where_to_go( self ):
+        with self.assertRaises( HTTPException ) as ctx:
+            await retry_job_history()
+        self.assertEqual( ctx.exception.status_code, 410 )
+        self.assertIn( "/api/v2/ask", ctx.exception.detail )
+        self.assertIn( "REMOVE BY",   ctx.exception.detail )
 
-    async def test_unauthorized_403( self ):
-        with patch( "cosa.rest.job_persistence.get_job_by_id_hash",
-                    return_value={ "user_id": "other", "status": "failed" } ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await retry_job_history( job_id="j", request=_async_json_request( value={} ),
-                                         current_user=self.user, todo_queue=Mock() )
-        self.assertEqual( ctx.exception.status_code, 403 )
-
-    async def test_wrong_status_400( self ):
-        with patch( "cosa.rest.job_persistence.get_job_by_id_hash",
-                    return_value={ "user_id": "u1", "status": "completed" } ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await retry_job_history( job_id="j", request=_async_json_request( value={} ),
-                                         current_user=self.user, todo_queue=Mock() )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "Cannot retry", ctx.exception.detail )
-
-    async def test_bad_json_400( self ):
-        with patch( "cosa.rest.job_persistence.get_job_by_id_hash",
-                    return_value={ "user_id": "u1", "status": "failed" } ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await retry_job_history( job_id="j", request=_async_json_request( exc=ValueError( "x" ) ),
-                                         current_user=self.user, todo_queue=Mock() )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "Invalid JSON", ctx.exception.detail )
-
-    async def test_missing_websocket_400( self ):
-        with patch( "cosa.rest.job_persistence.get_job_by_id_hash",
-                    return_value={ "user_id": "u1", "status": "interrupted" } ):
-            with self.assertRaises( HTTPException ) as ctx:
-                await retry_job_history( job_id="j", request=_async_json_request( value={ "websocket_id": "" } ),
-                                         current_user=self.user, todo_queue=Mock() )
-        self.assertEqual( ctx.exception.status_code, 400 )
-        self.assertIn( "Missing required field: websocket_id", ctx.exception.detail )
-
-    async def test_success( self ):
-        tq = Mock(); tq.push_job.return_value = { "job_id": "new" }
-        with patch( "cosa.rest.job_persistence.get_job_by_id_hash",
-                    return_value={ "user_id": "u1", "status": "failed", "question_text": "Q" } ), \
-             patch( "builtins.print" ):
-            out = await retry_job_history( job_id="j", request=_async_json_request( value={ "websocket_id": "w" } ),
-                                           current_user=self.user, todo_queue=tq )
-        self.assertEqual( out[ "status" ], "retried" )
-        self.assertEqual( out[ "original_job_id" ], "j" )
+    async def test_it_refuses_without_reading_the_job_row( self ):
+        """
+        No lookup, no auth check, no queue — a tombstone must not keep the dead door
+        wired to job_persistence. The handler takes NO arguments, not even the `job_id`
+        the route still declares, because it has nothing to look the job up for; that
+        zero-argument signature is what this call proves. Restore any dependency and this
+        raises TypeError instead of a clean 410.
+        """
+        with self.assertRaises( HTTPException ) as ctx:
+            await retry_job_history()
+        self.assertEqual( ctx.exception.status_code, 410 )
 
 
 class TestPauseResume( unittest.IsolatedAsyncioTestCase ):

@@ -5,7 +5,7 @@ WHAT THIS GUARDS, AND WHY IT EXISTS SEPARATELY.
 
 Most `:7999` clients pass their budget at the call site (`requests.post(
 timeout=… )`, `urlopen( …, timeout=… )`). Two do not: they set it as a Pydantic
-FIELD on `AsyncNotificationRequest`, which `notify_user_async.py:197-201` then
+FIELD on `AsyncNotificationRequest`, which `notify_user_async()`'s retry loop then
 consumes as a **bare** `requests.post( timeout=request.timeout )`. Bare governs
 BOTH the connect and the read leg, so the read leg is exposed to a `:7999`
 reload exactly like any direct call site.

@@ -1,0 +1,5 @@
+# Regenerable intermediates (3-4 MB each) - rebuild with `python3 drops.py` then `python3 classes.py`.
+# NOT committed because they are large AND derived from a LIVE corpus, so a rebuild will differ.
+single_drops.json
+classC.json
+role_hits.json

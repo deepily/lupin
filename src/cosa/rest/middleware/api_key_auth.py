@@ -51,6 +51,9 @@ def _validate_api_key_sync( api_key: str ) -> Optional[str]:
         - returns None if key invalid or inactive
         - updates last_used_at timestamp on success
         - timing-safe comparison (bcrypt)
+        - a row whose stored hash is malformed is SKIPPED and logged by id; it
+          never aborts the sweep, so keys ordered after it are still checked
+          (row 23a43f57)
 
     Raises:
         - None (returns None on error)
@@ -62,10 +65,38 @@ def _validate_api_key_sync( api_key: str ) -> Optional[str]:
             # Query all active keys (indexed lookup on is_active)
             active_keys = api_key_repo.get_active_keys()
 
-            # Check each key (timing-safe bcrypt comparison)
+            # Check each key (timing-safe bcrypt comparison).
+            #
+            # The per-row try/except is the whole point (row 23a43f57). checkpw
+            # RAISES ValueError on a stored value that is not a well-formed bcrypt
+            # hash — it does NOT return False. This loop used to sit bare inside the
+            # outer handler, so ONE malformed row did not merely fail to match
+            # itself: the raise escaped the loop and every key ordered AFTER it was
+            # never checked. Those owners got 401 on a good credential, and because
+            # get_active_keys returns rows in unspecified order, a key that worked
+            # yesterday could start failing with no change to the key.
+            #
+            # Such rows were easy to mint until 2026-08-24: the repository's
+            # create_key example showed a SHA-256 digest and the model called
+            # key_hash "SHA-256 hash of API key". Both are corrected, but rows
+            # already written that way are still in the table.
             for key_obj in active_keys:
-                # Bcrypt comparison (timing-safe)
-                if bcrypt.checkpw( api_key.encode( 'utf-8' ), key_obj.key_hash.encode( 'utf-8' ) ):
+                try:
+                    matched = bcrypt.checkpw(
+                        api_key.encode( 'utf-8' ), key_obj.key_hash.encode( 'utf-8' )
+                    )
+                except ( ValueError, TypeError ) as hash_error:
+                    # A data defect somebody must repair, not a routine miss — so it
+                    # is logged distinctly and by KEY ID. Never the stored hash and
+                    # never the incoming key: this line goes to shared logs.
+                    print(
+                        f"[API_KEY_AUTH] MALFORMED STORED HASH on api_keys.id={key_obj.id} "
+                        f"— skipping this row and continuing. Repair it: the value is not a "
+                        f"bcrypt hash (expected 60 chars beginning '$2'). Cause: {hash_error}"
+                    )
+                    continue
+
+                if matched:
                     # Valid key found - update last_used_at
                     key_obj.last_used_at = datetime.now( timezone.utc )
                     # Session will auto-commit on context exit

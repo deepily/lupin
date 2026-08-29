@@ -16,6 +16,7 @@ import time
 import requests
 from typing import Optional
 
+from cosa.agents.notification_proxy import option_sentinels
 from cosa.agents.notification_proxy.strategies.expediter_rules import ExpediterRuleStrategy
 from cosa.agents.notification_proxy.strategies.llm_fallback import LLMFallbackStrategy
 from cosa.agents.notification_proxy.strategies.llm_script_matcher import (
@@ -50,7 +51,9 @@ import cosa.utils.util as cu
 # `grep -rn _SERVER_TRANSPORT_TIMEOUT_SECONDS` returns every DIRECT call site.
 # It does NOT return members whose budget is carried in a Pydantic FIELD rather
 # than passed at the call — `AsyncNotificationRequest( timeout=… )`, consumed at
-# `notify_user_async.py:197-201` as a bare `requests.post( timeout=request.timeout )`.
+# inside `notify_user_async()`'s retry loop as a bare `requests.post( timeout=request.timeout )`.
+# (Cited by SYMBOL, not by line: this used to read `notify_user_async.py:197-201` and a
+#  seven-line fix above it silently repointed both copies at an unrelated comment block.)
 # Two such members were missed on the first pass for exactly this reason.
 # The second search is: `grep -rn "AsyncNotificationRequest(" -A14 | grep timeout`.
 # Run BOTH, or the set you get back is the set the first grep can see.
@@ -58,6 +61,17 @@ import cosa.utils.util as cu
 # TRADE: a hung server now stalls a response POST ~30s instead of ~10s. Not free.
 _SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
 
+
+
+# The two escapes every document choice card appends. Imported from the expeditor so
+# a rename there cannot leave this list quietly wrong — the sentinel would then be able
+# to "select" Cancel, which looks like the user declining.
+from cosa.agents.runtime_argument_expeditor.expeditor import (
+    DOC_CHOICE_CANCEL_LABEL,
+    DOC_CHOICE_DESCRIBE_LABEL,
+)
+
+CHOICE_ESCAPE_LABELS = ( DOC_CHOICE_DESCRIBE_LABEL, DOC_CHOICE_CANCEL_LABEL )
 
 
 class NotificationResponder:
@@ -193,10 +207,14 @@ class NotificationResponder:
 
         elif event_type == "job_state_transition":
             if self.verbose:
+                # from_state / to_state are the keys emit_job_state_transition()
+                # actually sends (queue_util.py:65-71). This read from_queue /
+                # to_queue, which the event has never carried, so the "?" defaults
+                # meant this line printed "? -> ?" on every transition. Row e3417974.
                 job_id     = event_data.get( "job_id", "?" )
-                from_queue = event_data.get( "from_queue", "?" )
-                to_queue   = event_data.get( "to_queue", "?" )
-                print( f"[Responder] Job state: {job_id} {from_queue} → {to_queue}" )
+                from_state = event_data.get( "from_state", "?" )
+                to_state   = event_data.get( "to_state", "?" )
+                print( f"[Responder] Job state: {job_id} {from_state} → {to_state}" )
 
         elif self.verbose:
             print( f"[Responder] Event: {event_type}" )
@@ -269,6 +287,18 @@ class NotificationResponder:
             print( f"[Responder] ERROR: No notification_id in event" )
             return
 
+        # human_only: this ask is reserved for a HUMAN (or its offline default) —
+        # the auto-answer proxy must LEAVE IT ALONE. Checked BEFORE the dry_run
+        # blanket-decline AND ahead of the strategy chain, so NO path submits an
+        # answer (row 804afce6: a proxy "no" to the self-re-spin ask would abort a
+        # manager's own re-spin — the "an absent user must not cost a manager"
+        # failure). Skipped, not answered — the human or the offline default decides.
+        if notification.get( "human_only" ):
+            self.stats[ "skipped" ] += 1
+            if self.verbose:
+                print( f"[Responder] Skipped (human_only — proxy must not answer): {title or message[ :50 ]}" )
+            return
+
         # Dry run: display notification, send cancel, skip strategies
         if self.dry_run:
             cancel_value = "no" if response_type == "yes_no" else "cancel"
@@ -310,6 +340,69 @@ class NotificationResponder:
             self.stats[ "skipped" ] += 1
             print( f"[Responder] No strategy produced an answer for: {title or message[ :50 ]}" )
             return
+
+        # A POSITIONAL SENTINEL becomes a real option label here, using the options
+        # that arrived with this notification (row 9046ef58). The document choice
+        # card's labels are run-time filenames, so no script entry can name one; the
+        # sentinel says WHICH option, and this turns it into WHAT it is called. Every
+        # ordinary answer passes through untouched.
+        if option_sentinels.looks_like_a_sentinel( answer ):
+            try:
+                resolved = option_sentinels.resolve(
+                    answer, notification, excluded_labels=CHOICE_ESCAPE_LABELS
+                )
+            except ValueError as error:
+                # A typo'd or mis-cased sentinel in a script file. The resolver refuses
+                # to forward it as a literal, and this refuses to take the whole proxy
+                # down for one bad entry: the run continues, this notification is a
+                # counted skip, and the reason is on stdout rather than inferred later
+                # from a cancelled job.
+                self.stats[ "skipped" ] += 1
+                print( f"[Responder] Bad sentinel in the Q&A script: {error}" )
+                return
+            if resolved is None:
+                # Submitting the sentinel string would reach the expeditor as an
+                # unknown label and cancel the run for a reason invisible from the
+                # outside. A counted skip says so out loud instead.
+                self.stats[ "skipped" ] += 1
+                print( f"[Responder] Sentinel {answer!r} matched no selectable option "
+                       f"for: {title or message[ :50 ]}" )
+                return
+            if self.debug: print( f"[Responder] Sentinel {answer.strip()} → option {resolved!r}" )
+            answer = resolved
+
+        # EVERY multiple-choice answer is now checked against the options that
+        # arrived with THIS card, whatever produced it (row a1420538). The sentinel
+        # block above only inspects sentinel-shaped values, so an answer from the
+        # script matcher, the rule strategy or the cloud LLM reached the card
+        # unchecked — which is how the prose the sentinels replaced could still be
+        # submitted by a different route. The live leftover was a prediction hint
+        # carrying that retired directive at confidence 0.9 against an auto-submit
+        # floor of 0.9; the floor is inclusive, so equal passes and nothing
+        # downstream was looking. A label the card never offered reads to the
+        # expeditor as an unknown pick and cancels the run, so this is a counted,
+        # printed skip instead — the same trade the unresolvable sentinel makes.
+        if notification.get( "response_type" ) == "multiple_choice":
+            # A header the card never asked under is NO answer rather than a wrong one:
+            # the reader looks under the question's own header, finds it absent, and
+            # falls to its default — the agent then reports that the user chose nothing
+            # (row adf5c1a1). Checked alongside the labels because a valid label under
+            # the wrong key passes the label check by construction.
+            unasked = option_sentinels.unasked_headers( answer, notification )
+            if unasked:
+                self.stats[ "skipped" ] += 1
+                print( f"[Responder] {strategy_name} answered under a header the card "
+                       f"never asked — not submitting {unasked!r} for: "
+                       f"{title or message[ :50 ]}" )
+                return
+
+            unoffered = option_sentinels.unoffered_values( answer, notification )
+            if unoffered:
+                self.stats[ "skipped" ] += 1
+                print( f"[Responder] {strategy_name} answered with something the card "
+                       f"never offered — not submitting {unoffered!r} for: "
+                       f"{title or message[ :50 ]}" )
+                return
 
         # Submit the response
         success = self._submit_response( notification_id, answer )

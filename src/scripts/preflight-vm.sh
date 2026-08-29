@@ -58,6 +58,10 @@ PHASE="full"
 VERBOSE=false
 CONTAINER="${PREFLIGHT_VM_CONTAINER:-lupin-rest-cloud-gpu}"
 COMPOSE_FILE="${PREFLIGHT_VM_COMPOSE:-$REPO_ROOT/docker-compose.cloud-gpu.yml}"
+# The env file compose is invoked with. C6's bootstrap exemption (row e7048496) asks
+# this file whether a var missing from the RUNNING container will be supplied by the
+# imminent recreate, so it needs the real path, not just a basename for a remedy line.
+ENV_FILE="${PREFLIGHT_VM_ENVFILE:-$REPO_ROOT/cloud-gpu.env}"
 VM_PREFIX="${PREFLIGHT_VM_PREFIX:-/mnt/lupin-data}"
 APP_URL="${PREFLIGHT_VM_APP_URL:-http://localhost:7999}"
 ARBITER_URL="${PREFLIGHT_VM_ARBITER_URL:-http://localhost:8001}"
@@ -163,6 +167,13 @@ if [ -r "$CONTRACT" ]; then
         # true-by-coincidence for 2 of 2 rows and became false for 8 of 11 the day
         # nine more CONTAINER rows landed. PROSE IS NOT A DELEGATION.
         [ "$surface" = "CONTAINER" ] && continue
+        # COMPOSE-surface vars are read by compose from the env-file at container
+        # CREATE and consumed OUTSIDE any `environment:` block (group_add, a mount
+        # source). They are never exported into the operator's shell, so asking the
+        # host shell about them reports UNSET about a variable that is doing its job.
+        # C6 asserts them, by the only witness that can see them: compose's own
+        # `${VAR:?}` regime plus a container that actually came up.
+        [ "$surface" = "COMPOSE" ] && continue
         # Resolve OPTIONAL / REQUIRED / OPTIONAL_UNLESS:<VAR>=<VAL> against the LIVE
         # env before choosing a tier — a conditionally-required var is only required
         # when its condition holds.
@@ -335,6 +346,61 @@ else
     report unknown BLOCK "unversioned manifest unreadable at $MANIFEST" "deploy the repo to the VM"
 fi
 
+# B4 — the permission stanza is APPLIED, not merely present.
+# B3 above proves the SOURCE file arrived. That is half the job: nothing reads it until the
+# merge runs, so a shipped-but-unapplied stanza passes B3 and still leaves every session on
+# this box stopping to ask permission. This asserts the LIVE settings file carries the rules.
+# WARN, not BLOCK: a VM that prompts too much is annoying, not unfit to deploy onto.
+PERM_APPLIER="$REPO_ROOT/src/scripts/apply_claude_permissions.py"
+PERM_SOURCE="${DEEPILY_DATA_DIR:-}/claude-permissions.json"
+if [ -z "${DEEPILY_DATA_DIR:-}" ]; then
+    report fail WARN "DEEPILY_DATA_DIR unset — cannot check whether Claude permissions are applied" \
+                "lupin-vm.sh push-env   # then open a new shell"
+elif [ ! -r "$PERM_SOURCE" ]; then
+    report fail WARN "Claude permission stanza absent at $PERM_SOURCE" \
+                "lupin-vm.sh push-unversioned"
+elif [ ! -r "$PERM_APPLIER" ]; then
+    report fail WARN "permission applier missing at $PERM_APPLIER" "deploy the repo to the VM"
+elif python3 "$PERM_APPLIER" --source "$PERM_SOURCE" --verify >/dev/null 2>&1; then
+    report pass WARN "Claude permissions applied to ~/.claude/settings.json"
+else
+    report fail WARN "Claude permissions shipped but NOT applied — sessions here will keep prompting" \
+                "python3 $PERM_APPLIER   # then restart any live Claude Code session"
+fi
+
+# B5 — ORPHANED BYTECODE: a .pyc whose .py is gone (row 70364793, 2026-08-18).
+# Deploys move by `git checkout`, and __pycache__ is gitignored, so git DELETES the
+# .py and LEAVES the .pyc behind. Nothing in the deploy path removes it and, until
+# this check, nothing looked for it. Runs in EVERY phase: PRE finds what the last
+# deploy left, POST finds what this one just created — the same defect at both ends.
+#
+# TIERED BY WHETHER IT CAN EXECUTE, measured on 3.13 (see pfv_pyc_orphan_class):
+#   SOURCELESS (sibling pkg/mod.pyc)      -> BLOCK. Python imports and runs it.
+#   DEAD       (pkg/__pycache__/mod.pyc)  -> WARN.  Python refuses to import it,
+#              but it is still code that no grep, diff or review can see.
+# Blocking on the inert form would be an alarm on something that cannot hurt you,
+# and a reader who triages one of those stops reading the tier.
+PYC_ROOT="${PREFLIGHT_VM_PYC_ROOT:-$REPO_ROOT/src}"
+pyc_orphans="$( pfv_scan_orphan_pyc "$PYC_ROOT" )"; pyc_rc=$?
+PYC_REMEDY="find $PYC_ROOT -name '__pycache__' -type d -prune -exec rm -rf {} + && find $PYC_ROOT -name '*.pyc' -delete"
+if [ $pyc_rc -eq 2 ]; then
+    report unknown BLOCK "cannot scan for orphaned bytecode — $PYC_ROOT is not a directory" \
+                "deploy the repo to the VM, or set PREFLIGHT_VM_PYC_ROOT"
+elif [ $pyc_rc -eq 1 ]; then
+    n_live="$( printf '%s\n' "$pyc_orphans" | grep -c '^SOURCELESS' )"
+    n_dead="$( printf '%s\n' "$pyc_orphans" | grep -c '^DEAD' )"
+    if [ "$n_live" -gt 0 ]; then
+        report fail BLOCK "$n_live sourceless .pyc under $PYC_ROOT — Python WILL import these: $( printf '%s\n' "$pyc_orphans" | grep '^SOURCELESS' | cut -f2 | head -3 | tr '\n' ' ' )" \
+                    "$PYC_REMEDY"
+    fi
+    if [ "$n_dead" -gt 0 ]; then
+        report fail WARN "$n_dead orphaned .pyc in __pycache__ under $PYC_ROOT — inert, but invisible to every grep and diff: $( printf '%s\n' "$pyc_orphans" | grep '^DEAD' | cut -f2 | head -3 | tr '\n' ' ' )" \
+                    "$PYC_REMEDY"
+    fi
+else
+    report pass BLOCK "no orphaned bytecode under $PYC_ROOT"
+fi
+
 if layer_runs B; then
 # B1/B2 — parity. POST-phase only: PRE runs before HEAD changes, so asserting the
 # old ref would be meaningless — and a meaningless assertion that passes is worse
@@ -355,6 +421,59 @@ for pair in "$REPO_ROOT" "${PLANNING_IS_PROMPTING_ROOT:-}"; do
         report pass BLOCK "$pair clean at $head_sha"
     fi
 done
+
+# B6 — the `.deployed-ref` provenance stamp agrees with the tree it claims to describe
+# (row c41ec7e6, 2026-08-24).
+#
+# WHAT IT IS FOR: the code-sync design promised that "what is running on the VM?" is one
+# `cat .deployed-ref`, not a code-grep. B1 above already proves the tree is clean at some
+# sha; this proves the FILE THAT ANSWERS THE QUESTION names that same sha.
+#
+# WHY IT WAS NEEDED: measured on this VM 2026-08-24, the stamp said df611aa7 / 2026-07-13
+# while the tree was at 24f8d88f / 2026-08-17 — five weeks apart. `lupin-vm.sh push-bundle`
+# moved the tree and never wrote the stamp; only deploy-cloud-test.sh wrote it (retired
+# 2026-08-26, row 0d175dac), and that was not the script this VM deploys with.
+# push-bundle now stamps, and this is the assertion that keeps the two from drifting
+# apart again quietly.
+#
+# WARN, NOT BLOCK: a wrong stamp does not make the VM unfit to deploy onto — the deploy
+# reads git, not this file. What it does is give every later reader a confident wrong
+# answer. It ALSO used to make deploy-cloud-test.sh's axis detector diff from a bogus
+# baseline, since that detector took its "previous" sha from here — measured, not
+# supposed, with the live VM's stale stamp on 2026-08-24:
+#
+#     dctl_detect_axis 1959ed18 dc4b655d  ->  code   (true baseline: no dep file moved)
+#     dctl_detect_axis df611aa7 dc4b655d  ->  deps   (stale stamp: 1257 commits of drift)
+#
+# i.e. a pure code change routed to a full image rebuild. ⚠️ THAT SECOND EFFECT IS GONE:
+# the script and its dctl_detect_axis were retired 2026-08-26 (row 0d175dac) and nothing
+# replaced the detector, so the block above is kept as the record of why this check was
+# built, not as a live consequence. The FIRST effect — a confident wrong answer for every
+# later reader — is unchanged and is what this check still earns its place on.
+# A misled operator, not an unsafe deploy — hence WARN. POST-phase with B1/B2 for the same reason
+# they are: in PRE the ref is about to move, so the assertion would be noise.
+DEPLOYED_REF_FILE="$REPO_ROOT/.deployed-ref"
+ref_head="$( sudo -n git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf '' )"
+ref_line="$( head -n1 "$DEPLOYED_REF_FILE" 2>/dev/null || printf '' )"
+if [ -z "$ref_head" ]; then
+    report unknown WARN "cannot read HEAD of $REPO_ROOT — .deployed-ref cannot be checked" \
+                  "sudo git -C $REPO_ROOT rev-parse HEAD"
+else
+    ref_status="$( pfv_deployed_ref_status "$ref_line" "$ref_head" )"
+    case "$ref_status" in
+        MATCH)
+            report pass WARN ".deployed-ref agrees with HEAD (${ref_head:0:8})" ;;
+        ABSENT)
+            report fail WARN "no .deployed-ref at $DEPLOYED_REF_FILE — 'what is running here?' has no one-cat answer" \
+                          "lupin-vm.sh push-bundle <branch> --checkout   # stamps it" ;;
+        MALFORMED)
+            report fail WARN ".deployed-ref field 1 is not a 40-hex sha: '$( printf '%s' "$ref_line" | awk '{print $1}' )'" \
+                          "lupin-vm.sh push-bundle <branch> --checkout   # rewrites the stamp" ;;
+        STALE)
+            report fail WARN ".deployed-ref says $( printf '%s' "$ref_line" | awk '{print substr($1,1,8)}' ) but the tree is at ${ref_head:0:8} — the stamp is being trusted and is wrong" \
+                          "lupin-vm.sh push-bundle <branch> --checkout   # re-stamps from the VM's own HEAD" ;;
+    esac
+fi
 
 # B4 — a committed .mcp.json with absolute dev paths pollutes every checkout.
 if sudo -n git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" ls-files --error-unmatch .mcp.json >/dev/null 2>&1; then
@@ -497,11 +616,45 @@ PY
             csurface="$( pfv_contract_field "$row" 2 )"
             cshape="$(   pfv_contract_field "$row" 4 )"
             creq="$(     pfv_contract_field "$row" 5 )"
-            [ "$csurface" = "CONTAINER" ] || continue
+            case "$csurface" in CONTAINER|COMPOSE) ;; *) continue ;; esac
             c6_checked=$(( c6_checked + 1 ))
 
             regime="$( pfv_compose_var_regime "$COMPOSE_FILE" "$cname" )"
             derived="$( pfv_regime_requirement "$regime" )"
+
+            # ── COMPOSE surface ──────────────────────────────────────────────
+            # The value shapes the container at CREATE (group_add, mount source)
+            # and is never injected into it, so `docker exec printenv` asks a
+            # question that can only ever answer UNSET. Asserting it there is how
+            # LUPIN_BRIDGE_GID and LUPIN_HOST_SESSIONS_DIR blocked a deploy on
+            # 2026-08-04 while both were correctly set in cloud-gpu.env.
+            #
+            # This is NOT a skip. The witness is compose's own regime: `${VAR:?}`
+            # ABORTS `up` when unset, so a container that is running is proof the
+            # value was supplied. That is why C1's "container is running" check is
+            # a genuine precondition here and not decoration — if the container is
+            # NOT up, we have no witness and must say so rather than pass.
+            if [ "$csurface" = "COMPOSE" ]; then
+                case "$regime" in
+                    REQUIRED)
+                        if docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; then
+                            report pass BLOCK "$cname supplied at container CREATE — $( basename "$COMPOSE_FILE" ) interpolates it \${VAR:?}, which aborts \`up\` when unset, and $CONTAINER is running   [surface: COMPOSE]"
+                        else
+                            report unknown BLOCK "$cname: cannot witness a COMPOSE-surface var while $CONTAINER is not running" \
+                                          "start the stack, then re-run: docker compose -f $( basename "$COMPOSE_FILE" ) --env-file $( basename "$ENV_FILE" ) up -d"
+                        fi ;;
+                    ABSENT)
+                        report fail WARN "$cname declared surface=COMPOSE but $( basename "$COMPOSE_FILE" ) never references it" \
+                                      "add the interpolation to $( basename "$COMPOSE_FILE" ), or correct its surface in env-contract.tsv" ;;
+                    *)
+                        # DEFAULTED/LITERAL/BARE/CONFLICT/UNKNOWN: compose tolerates an
+                        # unset value, so a running container proves NOTHING about it.
+                        # Never launder that into a pass.
+                        report unknown BLOCK "$cname is surface=COMPOSE but $( basename "$COMPOSE_FILE" ) treats it as $regime, not \${VAR:?} — a running container is NOT evidence it was supplied" \
+                                      "either interpolate it \${VAR:?} so absence aborts \`up\`, or correct its surface in env-contract.tsv" ;;
+                esac
+                continue
+            fi
 
             case "$regime" in
                 ABSENT)
@@ -523,18 +676,68 @@ PY
             ctier="BLOCK"
             [ "$derived" = "OPTIONAL" ] && ctier="WARN"
 
-            # `printenv` distinguishes UNSET (non-zero) from set-but-empty (zero,
-            # empty stdout). `sh -c 'printf %s "$VAR"'` collapses the two, and they
-            # have different remedies.
-            if cvalue="$( docker exec "$CONTAINER" printenv "$cname" 2>/dev/null )"; then
-                cset=true
+            # THE WITNESS IS /proc/1/environ, NOT `docker exec printenv` — which is the
+            # rule env-contract.tsv's own JWT_SECRET_KEY row states, and which this check
+            # was breaking while reading that very file. printenv derives a fresh
+            # environment from the container's CONFIG, so it cannot see an entrypoint that
+            # sources an env file over the top: a value that IS in the running process
+            # reads as UNSET and C6 blocks a deploy over it.
+            #
+            # The NUL→newline conversion runs INSIDE the container because bash command
+            # substitution silently DROPS NUL bytes — read raw, the whole environ arrives
+            # as one run-together line and nothing ever matches.
+            #
+            # printenv survives as a FALLBACK for a container with no shell or no readable
+            # /proc/1 (a distroless image, an app that is not PID 1). It is named in the
+            # output when it is used, because a weaker witness must not pass as the strong
+            # one. Both distinguish UNSET (non-zero) from set-but-empty (zero, empty
+            # stdout); `sh -c 'printf %s "$VAR"'` collapses the two and they have different
+            # remedies.
+            cset=false; cvalue=""; cwitness="/proc/1/environ"
+            if cenviron="$( docker exec "$CONTAINER" sh -c "tr '\\0' '\\n' < /proc/1/environ" 2>/dev/null )" \
+               && [ -n "$cenviron" ]; then
+                if cvalue="$( pfv_environ_lookup "$cname" <<< "$cenviron" )"; then cset=true; fi
             else
-                cset=false; cvalue=""
+                cwitness="docker exec printenv (WEAKER — cannot see an entrypoint-sourced env file)"
+                if cvalue="$( docker exec "$CONTAINER" printenv "$cname" 2>/dev/null )"; then
+                    cset=true
+                else
+                    cvalue=""
+                fi
             fi
 
             if [ "$cset" != true ]; then
-                report unknown "$ctier" "$cname is UNSET in the container (compose regime: $regime)" \
-                              "set $cname for this venue — $( basename "$COMPOSE_FILE" ) declares it $regime"
+                # ── BOOTSTRAP EXEMPTION (row e7048496) ───────────────────────────
+                # An environment variable can only enter a container at CREATE. Blocking
+                # PRE because the RUNNING container lacks a newly-REQUIRED var makes the
+                # deploy unpassable: the only thing that can supply it is the
+                # `up -d --force-recreate` that PRE just blocked. Measured live on
+                # lupin-host-test 2026-08-24 — the operator's only way out was
+                # LUPIN_SKIP_PREFLIGHT=1, which disables all 50 other assertions to clear
+                # one false blocker.
+                #
+                # So look at the env file the imminent recreate will read. Present there
+                # with a non-empty value => the property will be true a minute from now;
+                # that is a WARN naming what is about to satisfy it, not a block.
+                #
+                # ⚠️ SCOPED TO PHASE PRE, DELIBERATELY. In POST the recreate has ALREADY
+                # happened, so "will be satisfied by the imminent recreate" is false — and
+                # a var present in the env file yet absent from a just-created container is
+                # a WORSE finding than a plain miss, not a lesser one. POST keeps blocking.
+                pfv_env_file_supplies "$ENV_FILE" "$cname"; efrc=$?
+                if [ "$PHASE" = "pre" ] && [ "$efrc" -eq 0 ]; then
+                    report fail WARN "$cname is UNSET in the running container but IS supplied by $( basename "$ENV_FILE" ) — a var can only enter a container at CREATE, so the imminent recreate will satisfy it   [witness: $cwitness]" \
+                                  "no action needed before deploying; re-assert it after with: src/scripts/preflight-vm.sh --phase post"
+                else
+                    case $efrc in
+                        0) efnote="it IS in $( basename "$ENV_FILE" ), so a recreate should have injected it — that it did not is the finding" ;;
+                        1) efnote="$( basename "$ENV_FILE" ) declares it EMPTY, which \${VAR:?} rejects exactly as it rejects unset" ;;
+                        2) efnote="and it is absent from $( basename "$ENV_FILE" ) too" ;;
+                        *) efnote="and $( basename "$ENV_FILE" ) could not be read, so nothing here can say whether a recreate would supply it" ;;
+                    esac
+                    report unknown "$ctier" "$cname is UNSET in the container (compose regime: $regime) — $efnote   [witness: $cwitness]" \
+                                  "set $cname in $( basename "$ENV_FILE" ) for this venue, then: docker compose -f $( basename "$COMPOSE_FILE" ) --env-file $( basename "$ENV_FILE" ) up -d --no-deps --force-recreate $CONTAINER   # a RESTART will NOT re-read the environment"
+                fi
             else
                 pfv_shape_matches "$cvalue" "$cshape" "$VM_PREFIX"; crc=$?
                 case $crc in
@@ -564,7 +767,7 @@ PY
             esac
         done < <( pfv_parse_manifest "$CONTRACT" )
         [ "$c6_checked" -gt 0 ] \
-            || report unknown BLOCK "no surface=CONTAINER rows found in the contract — C6 asserted nothing" \
+            || report unknown BLOCK "no surface=CONTAINER or COMPOSE rows found in the contract — C6 asserted nothing" \
                           "check $CONTRACT is the file you think it is"
     else
         report unknown BLOCK "env contract unreadable at $CONTRACT — C6 asserted NOTHING" "deploy the repo to the VM"
@@ -700,6 +903,35 @@ c="$( http_code "$APP_URL/health" 30 )"
 c="$( http_code "$ARBITER_URL/health" 10 )"
 [ "$c" = "200" ] && report pass WARN "arbiter /health 200" \
                  || report fail WARN "arbiter /health returned '$c'" "systemctl --user restart lupin-arbiter-app.service"
+
+# D3b — A 200 FROM /health DOES NOT MEAN THE WATCHER IS WATCHING (2026-08-10).
+#       The fleet-arbiter THREAD died on its first tick (missing sqlalchemy) and stayed
+#       dead for two days while this exact check returned a clean 200 every run — the
+#       process was healthy, only its worker was gone. /health now reports per-thread
+#       liveness, so assert on THAT, and name which loop is down.
+#       Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+if [ "$c" = "200" ]; then
+    dead="$( curl -s --max-time 10 "$ARBITER_URL/health" 2>/dev/null \
+             | python3 -c "
+import json,sys
+try: b = json.load( sys.stdin )
+except Exception: print( 'UNPARSEABLE' ); raise SystemExit
+loops = b.get( 'loops' )
+if loops is None:
+    print( 'NO_LOOPS_FIELD' )                      # arbiter predates the liveness field
+else:
+    print( ','.join( sorted( n for n, v in loops.items() if v == 'DEAD' ) ) )
+" 2>/dev/null )"
+    case "$dead" in
+        "")                report pass WARN "arbiter loops all alive" ;;
+        NO_LOOPS_FIELD)    report fail WARN "arbiter /health has no 'loops' field — running code older than 2026-08-10; a dead worker thread would be invisible" \
+                                       "redeploy the arbiter checkout, then: systemctl --user restart lupin-arbiter-app.service" ;;
+        UNPARSEABLE)       report fail WARN "arbiter /health body did not parse as JSON" \
+                                       "curl -s $ARBITER_URL/health" ;;
+        *)                 report fail BLOCK "arbiter loop(s) DEAD: $dead — the service is up but not watching" \
+                                       "journalctl --user -u lupin-arbiter-app.service | grep -A20 'Exception in thread'; then fix the cause and restart" ;;
+    esac
+fi
 
 # D4 — ASSERT ACCEPTANCE, NOT PRESENCE, and prove the check can fail.
 #      os.path.exists() passes on the exact shape that broke (a mode-600 key), and a

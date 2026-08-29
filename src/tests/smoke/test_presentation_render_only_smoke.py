@@ -2,6 +2,30 @@
 """
 Presentation Generator RENDER-ONLY endpoint smoke test — Tier 2 validation.
 
+⚠️ VENUE: :8000 (test), NOT :7999 — AND THIS FILE IS STILL RUN BY THE :7999 SMOKE TIER,
+   SO IT IS EXPECTED RED THERE. Recorded 2026-08-26 (row 554e5d3e); NOT MOVED, deliberately.
+
+   Criterion tripped (CLAUDE.md § TESTING VENUES — a file is :8000 if ANY apply):
+     - mutates persistent state (submits a real job that outlives the test)
+     - needs the notification proxy
+   Evidence, from this file:
+     - posts to `SUBMIT_ENDPOINT = "/api/v2/submit"` and polls for completion
+     - requires `--auto-proxy` (documented in the usage block)
+     - the header block already names `POST /api/test-suite/submit` as the door
+     - NOTE: $0 content cost (render-only skips generation) does NOT make it
+       :7999-eligible — a queued job is persistent state by the rubric
+   WHY IT WAS NOT MOVED. `run-smoke-tests.sh` runs the whole `src/tests/smoke/` directory,
+   so this file is executed on :7999 by the smoke merge gate regardless of what its
+   docstring says. Relocating it, or excluding it from the runner the way
+   test_proxy_integration.py is excluded, would deselect it from that gate — a change to
+   what the gate covers, which is an owner's decision and not a drive-by while clearing a
+   red list. So it stays, it stays red on :7999, and the reason is written here instead of
+   being re-derived by the next reader.
+
+   HOW TO RUN IT PROPERLY: submit via `POST /api/test-suite/submit` against :8000 on a
+   verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`,
+   exit 0 = IDLE). Never side-door it via curl or a direct queue push.
+
 Validates the render-only pipeline (Phases 6-8) by submitting an existing
 YAML intermediate file. Skips content generation (Phases 1-5, $0 cost).
 Tests Marp rendering, visual rendering (Mermaid/Matplotlib/D2), and delivery.
@@ -196,7 +220,9 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
     """
 
     TEST_NAME       = "Presentation Generator Render Only"
-    SUBMIT_ENDPOINT = "/api/presentation-generator/submit"
+    # The dedicated door /api/presentation-generator/submit is retired (410); one front door now.
+    SUBMIT_ENDPOINT = "/api/v2/submit"
+    ROUTING_COMMAND = "agent router go to presentation generator"
     DEFAULT_TIMEOUT = 120  # 2 min — render is fast
     POLL_INTERVAL   = 2
     REQUEST_TIMEOUT = 120
@@ -230,13 +256,50 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
             - self._yaml_path is resolved (set in pre_run_hook)
 
         Ensures:
-            - Returns payload with render_only=True and YAML source path
+            - Returns payload with render_only=True and a REPO-RELATIVE source path
         """
-        return {
-            "source_path" : self._yaml_path,
-            "render_only" : True,
-            "dry_run"     : False,
+        # The submit endpoint treats a leading-"/" source_path as repo-relative
+        # and prepends project_root. _yaml_path is ABSOLUTE ({LUPIN_ROOT}/src/...),
+        # so sending it verbatim double-roots ({root}{root}/src/...) → 404. Strip
+        # the project root to a repo-relative path (keeps the leading "/").
+        project_root = os.environ.get( "LUPIN_ROOT", "/var/lupin" )
+        source_path  = self._yaml_path
+        if source_path.startswith( project_root ):
+            source_path = source_path[ len( project_root ): ]
+        # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and
+        # answers 410 naming /api/v2/submit, which takes the routing command as a string
+        # and the agent's own arguments in `args`. The path arrives as `source` — the name
+        # the job factory already reads — and `parent_id_hash` stays TOP-LEVEL because it
+        # is a queue directive (Gate B lineage), not an argument to the agent, and `args`
+        # is checked against the command's own argument contract.
+        payload = {
+            "command"  : self.ROUTING_COMMAND,
+            "args"     : {
+                "source"      : source_path,
+                "render_only" : True,
+                "dry_run"     : False,
+            },
+            "question" : source_path,
         }
+        # Lineage tag (bug 5ed4f187 / 0c4e8cfa): when this smoke runs as a child
+        # pytest inside a monopolizing test-suite job, the runner exports
+        # LUPIN_TEST_MONOPOLIZE_PARENT_ID (test_suite/job.py). Threading it as
+        # parent_id_hash lets the consumer's Gate B admit this child through the
+        # monopoly hold instead of deferring it as FOREIGN until it times out.
+        # The sibling live/r2p smokes already do this; render-only had missed it.
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+        if parent_id:
+            payload[ "parent_id_hash" ] = parent_id
+        # Lineage probe (bug 0c4e8cfa diagnosis): when LUPIN_TEST_LINEAGE_PROBE_FILE
+        # is set, record — AT SUBMIT TIME, restart-proof — the env token this
+        # subprocess actually SAW and the parent_id_hash it actually STAMPED. Three
+        # readable states: env null → token never reached the subprocess; env set +
+        # stamp applied → harness OK; env set + stamp absent → get_submit_payload bug.
+        _probe = os.environ.get( "LUPIN_TEST_LINEAGE_PROBE_FILE" )
+        if _probe:
+            with open( _probe, "a" ) as _fh:
+                _fh.write( f"render_only\t{parent_id}\t{payload.get( 'parent_id_hash' )}\n" )
+        return payload
 
     def get_mode_for_scenario( self, scenario ):
         """No mode switching needed."""
@@ -366,6 +429,7 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
             ( "fast_completion", self._check_fast_completion( job_data ) ),
             ( "low_cost",        self._check_low_cost( job_data ) ),
             ( "slide_count",     self._check_slide_count( job_data ) ),
+            ( "deck_file",       self._check_deck_file( job_data ) ),
             ( "no_stack_trace",  self._check_no_stack_trace( job_data ) ),
         ]
 
@@ -447,6 +511,38 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
             return { "ok": False, "detail": "slide_count=0 — render produced 0 slides" }
 
         return { "ok": False, "detail": "slide_count not found in artifacts or response_text" }
+
+    def _check_deck_file( self, job_data ):
+        """
+        Verify the FINISHED .pptx on disk via the authoritative recorded path
+        (job artifacts / done-queue metadata `pptx_path`) — NOT a basename
+        reconstructed from the .yaml stem, and NOT the intermediate slide-count
+        metadata `_check_slide_count` reads.
+
+        Row 63f4d4a6 (sibling of test_presentation_live_smoke): the render-only
+        harness also asserted only on metadata and never opened the deck. This
+        sub-check is the real-artifact gate — a render that never serialized a
+        .pptx (pptx_path absent/null) or produced a malformed one is a HARD
+        failure, so `validate_result`'s aggregate cannot be PASS without a real
+        multi-slide deck on disk. The verdict is the gated
+        `verify_presentation_deck` (unit-proven in tests/unit).
+        """
+        from cosa.agents.presentation_generator.deck_verdict import verify_presentation_deck
+
+        artifacts = job_data.get( "artifacts" ) or {}
+        recorded  = job_data.get( "pptx_path" ) or artifacts.get( "pptx_path" )
+        if not recorded:
+            return { "ok": False, "detail": "no pptx_path recorded — render never exported a deck (yaml-only)" }
+
+        abs_path = recorded
+        if not os.path.isabs( abs_path ):
+            import cosa.utils.util as cu
+            abs_path = os.path.join( cu.get_project_root(), recorded.lstrip( "/" ) )
+
+        verdict = verify_presentation_deck( abs_path )
+        if verdict:
+            return { "ok": True, "detail": f"real deck verified: {verdict.slide_count} slides, {verdict.size_bytes} bytes" }
+        return { "ok": False, "detail": f"deck check failed ({recorded}): {verdict.reason}" }
 
     def _check_no_stack_trace( self, job_data ):
         """Verify no stack_trace in job record."""

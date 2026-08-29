@@ -98,3 +98,19 @@ docs/_build/
 # OS files
 .DS_Store
 Thumbs.db
+
+# --- JS/Node coverage output (added 2026-08-24, row a3c23605) --------------
+# Build artifacts, never runtime inputs — nothing in the image reads them. They
+# were also 64 of the 67 secret-scan hits reachable by a COPY: V8 coverage JSON
+# is high-entropy, so the private-key rule fires on it. Excluding them removes
+# those findings by keeping build junk out of the image, which is correct on its
+# own terms — it is not an exemption from secret scanning.
+coverage/
+coverage/**
+**/coverage/
+**/coverage/**
+
+# --- committed proof/run logs (added 2026-08-24, row a3c23605) -------------
+# Output of past verification runs, checked in as evidence. Nothing at runtime
+# reads them, so they have no business in the image.
+src/scripts/**/*.log

@@ -13,6 +13,8 @@ Test classes:
     - TestPromptConstruction (2): Real template + PromptTemplateProcessor verification
     - TestMathAgentFallback (3): Fallback to MathAgent when intent extraction fails
     - TestUnsupportedOperationFallback (3): Unsupported op → MathAgent delegation
+    - TestArithmeticPipelineMocked (6): Arithmetic answered IN the calculator
+    - TestDelegationSitesSurvive (3): The three fallbacks that must NOT be deleted
 
 Run: pytest src/tests/unit/test_calculator_mock_pipeline.py -v
 """
@@ -602,6 +604,266 @@ class TestUnsupportedOperationFallback:
         assert result == "2 plus 2 equals 4."
         assert agent.prompt_response_dict is not None
         assert "code" in agent.prompt_response_dict
+
+
+# ============================================================================
+# TestArithmeticPipelineMocked — the calculator ANSWERS arithmetic itself
+# ============================================================================
+
+class TestArithmeticPipelineMocked:
+    """
+    Falsification suite for row 11af54f8: an arithmetic utterance routed to the
+    calculator must be ANSWERED by the calculator, not handed to MathAgent.
+
+    The instrument is _delegate_to_math_agent() — if it fires on any of these
+    inputs, the calculator was a waypoint and the row is not done.
+    """
+
+    @patch( "cosa.agents.calculator.agent.LlmClientFactory" )
+    def test_subtraction_answered_without_delegating( self, mock_factory_cls ):
+        """'How much is 789 minus 456?' — real corpus utterance, answered in-agent."""
+        agent = _create_mock_calculator_agent( "How much is 789 minus 456?" )
+
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = (
+            '<calc_intent>'
+            '<operation>arithmetic</operation>'
+            '<operator>subtract</operator>'
+            '<operands>[789, 456]</operands>'
+            '<confidence>0.98</confidence>'
+            '<raw_query>How much is 789 minus 456?</raw_query>'
+            '</calc_intent>'
+        )
+        mock_factory_cls.return_value.get_client.return_value = mock_llm
+
+        with patch.object( CalculatorAgent, "_delegate_to_math_agent" ) as mock_delegate:
+            answer = agent.do_all()
+
+        mock_delegate.assert_not_called()
+        assert agent._delegated_to_math is False
+        assert agent.code_response_dict[ "output" ][ "result" ] == 333
+        assert "333" in answer
+
+    @patch( "cosa.agents.calculator.agent.LlmClientFactory" )
+    def test_nary_sum_answered_without_delegating( self, mock_factory_cls ):
+        """'the total of 34, 67, and 129' — three operands, still no delegation."""
+        agent = _create_mock_calculator_agent( "How do you calculate the total of 34, 67, and 129?" )
+
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = (
+            '<calc_intent>'
+            '<operation>arithmetic</operation>'
+            '<operator>add</operator>'
+            '<operands>[34, 67, 129]</operands>'
+            '<confidence>0.97</confidence>'
+            '<raw_query>How do you calculate the total of 34, 67, and 129?</raw_query>'
+            '</calc_intent>'
+        )
+        mock_factory_cls.return_value.get_client.return_value = mock_llm
+
+        with patch.object( CalculatorAgent, "_delegate_to_math_agent" ) as mock_delegate:
+            answer = agent.do_all()
+
+        mock_delegate.assert_not_called()
+        assert agent.code_response_dict[ "output" ][ "result" ] == 230
+        assert "230" in answer
+
+    @patch( "cosa.agents.calculator.agent.LlmClientFactory" )
+    def test_product_answered_without_delegating( self, mock_factory_cls ):
+        """'What is the product of 64 and 23?' — real corpus utterance."""
+        agent = _create_mock_calculator_agent( "What is the product of 64 and 23?" )
+
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = (
+            '<calc_intent>'
+            '<operation>arithmetic</operation>'
+            '<operator>multiply</operator>'
+            '<operands>[64, 23]</operands>'
+            '<confidence>0.98</confidence>'
+            '<raw_query>What is the product of 64 and 23?</raw_query>'
+            '</calc_intent>'
+        )
+        mock_factory_cls.return_value.get_client.return_value = mock_llm
+
+        with patch.object( CalculatorAgent, "_delegate_to_math_agent" ) as mock_delegate:
+            answer = agent.do_all()
+
+        mock_delegate.assert_not_called()
+        assert agent.code_response_dict[ "output" ][ "result" ] == 1472
+        assert "1,472" in answer or "1472" in answer
+
+    @patch( "cosa.agents.calculator.agent.LlmClientFactory" )
+    def test_remainder_answered_without_delegating( self, mock_factory_cls ):
+        """'remainder when you divide 345 by 23' — modulo, answered in-agent.
+
+        345 is 23 x 15 exactly, so the true remainder is 0 — that is the answer
+        this utterance deserves, and the calculator must be the one giving it.
+        """
+        agent = _create_mock_calculator_agent( "What's the remainder when you divide 345 by 23?" )
+
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = (
+            '<calc_intent>'
+            '<operation>arithmetic</operation>'
+            '<operator>modulo</operator>'
+            '<operands>[345, 23]</operands>'
+            '<confidence>0.95</confidence>'
+            '</calc_intent>'
+        )
+        mock_factory_cls.return_value.get_client.return_value = mock_llm
+
+        with patch.object( CalculatorAgent, "_delegate_to_math_agent" ) as mock_delegate:
+            answer = agent.do_all()
+
+        mock_delegate.assert_not_called()
+        assert agent.code_response_dict[ "output" ][ "result" ] == 0
+        assert answer == "345 modulo 23 is 0."
+
+    @patch( "cosa.agents.calculator.agent.LlmClientFactory" )
+    def test_division_answered_without_delegating( self, mock_factory_cls ):
+        """'What is 45 divided by 9?' — real corpus utterance."""
+        agent = _create_mock_calculator_agent( "What is 45 divided by 9?" )
+
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = (
+            '<calc_intent>'
+            '<operation>arithmetic</operation>'
+            '<operator>divide</operator>'
+            '<operands>[45, 9]</operands>'
+            '<confidence>0.99</confidence>'
+            '</calc_intent>'
+        )
+        mock_factory_cls.return_value.get_client.return_value = mock_llm
+
+        with patch.object( CalculatorAgent, "_delegate_to_math_agent" ) as mock_delegate:
+            answer = agent.do_all()
+
+        mock_delegate.assert_not_called()
+        assert agent.code_response_dict[ "output" ][ "result" ] == 5
+        assert "5" in answer
+
+    @patch( "cosa.agents.calculator.agent.MathAgent" )
+    @patch( "cosa.agents.calculator.agent.LlmClientFactory" )
+    def test_divide_by_zero_raises_rather_than_answering( self, mock_factory_cls, mock_math_cls ):
+        """A bad arithmetic intent fails loudly — it does NOT silently delegate."""
+        agent = _create_mock_calculator_agent( "What is 45 divided by 0?" )
+
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = (
+            '<calc_intent>'
+            '<operation>arithmetic</operation>'
+            '<operator>divide</operator>'
+            '<operands>[45, 0]</operands>'
+            '<confidence>0.99</confidence>'
+            '</calc_intent>'
+        )
+        mock_factory_cls.return_value.get_client.return_value = mock_llm
+
+        agent.run_prompt()
+        with pytest.raises( CodeGenerationFailedException, match="divide by zero" ):
+            agent.run_code()
+        mock_math_cls.assert_not_called()
+
+
+# ============================================================================
+# TestDelegationSitesSurvive — the three fallbacks the row said must LIVE
+# ============================================================================
+
+class TestDelegationSitesSurvive:
+    """
+    Row 11af54f8 warned that deleting all three delegation sites would send
+    unparseable questions nowhere. These pin the two that must survive:
+    operation='unsupported', and 'convert' whose units are empty/unknown.
+    """
+
+    @patch( "cosa.agents.calculator.agent.MathAgent" )
+    @patch( "cosa.agents.calculator.agent.LlmClientFactory" )
+    def test_unsupported_still_delegates_after_arithmetic_exists( self, mock_factory_cls, mock_math_cls ):
+        """Algebra is still 'unsupported' and still reaches MathAgent."""
+        agent = _create_mock_calculator_agent( "solve x squared minus 8 x plus 15 equals 0" )
+        agent.user_id    = "test_user"
+        agent.session_id = "test_session"
+
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = (
+            '<calc_intent>'
+            '<operation>unsupported</operation>'
+            '<confidence>0.93</confidence>'
+            '</calc_intent>'
+        )
+        mock_factory_cls.return_value.get_client.return_value = mock_llm
+
+        mock_math_instance                       = MagicMock()
+        mock_math_instance.answer_conversational = "The roots are 3 and 5."
+        mock_math_instance.answer                = "3, 5"
+        mock_math_instance.code_response_dict    = { "return_code": 0, "output": "3, 5" }
+        mock_math_instance.prompt_response_dict  = { "code": [ "print( 1 )" ] }
+        mock_math_cls.return_value               = mock_math_instance
+
+        agent.run_prompt()
+        agent.run_code()
+
+        mock_math_instance.do_all.assert_called_once()
+        assert agent._delegated_to_math is True
+
+    @patch( "cosa.agents.calculator.agent.MathAgent" )
+    @patch( "cosa.agents.calculator.agent.LlmClientFactory" )
+    def test_empty_unit_convert_still_delegates( self, mock_factory_cls, mock_math_cls ):
+        """A 'convert' with no units is still handed off, not dispatched."""
+        agent = _create_mock_calculator_agent( "what is 12 of 40" )
+        agent.user_id    = "test_user"
+        agent.session_id = "test_session"
+
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = (
+            '<calc_intent>'
+            '<operation>convert</operation>'
+            '<value>12</value>'
+            '<from_unit></from_unit>'
+            '<to_unit></to_unit>'
+            '<confidence>0.4</confidence>'
+            '</calc_intent>'
+        )
+        mock_factory_cls.return_value.get_client.return_value = mock_llm
+
+        mock_math_instance                       = MagicMock()
+        mock_math_instance.answer_conversational = "That works out to 4.8."
+        mock_math_instance.answer                = "4.8"
+        mock_math_instance.code_response_dict    = { "return_code": 0, "output": "4.8" }
+        mock_math_instance.prompt_response_dict  = { "code": [ "print( 1 )" ] }
+        mock_math_cls.return_value               = mock_math_instance
+
+        agent.run_prompt()
+        agent.run_code()
+
+        mock_math_instance.do_all.assert_called_once()
+        assert agent._delegated_to_math is True
+
+    @patch( "cosa.agents.calculator.agent.MathAgent" )
+    @patch( "cosa.agents.calculator.agent.LlmClientFactory" )
+    def test_unparseable_response_still_delegates( self, mock_factory_cls, mock_math_cls ):
+        """Garbage LLM output still falls back — the first delegation site lives."""
+        agent = _create_mock_calculator_agent( "what is the derivative of x cubed" )
+        agent.user_id    = "test_user"
+        agent.session_id = "test_session"
+
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = "I think the answer is 3 x squared."
+        mock_factory_cls.return_value.get_client.return_value = mock_llm
+
+        mock_math_instance                       = MagicMock()
+        mock_math_instance.answer_conversational = "The derivative is 3 x squared."
+        mock_math_instance.answer                = "3x^2"
+        mock_math_instance.code_response_dict    = { "return_code": 0, "output": "3x^2" }
+        mock_math_instance.prompt_response_dict  = { "code": [ "print( 1 )" ] }
+        mock_math_cls.return_value               = mock_math_instance
+
+        agent.run_prompt_with_fallback()
+        assert agent._fallback_to_math is True
+        agent.run_code()
+
+        mock_math_instance.do_all.assert_called_once()
+        assert agent._delegated_to_math is True
 
 
 def quick_smoke_test():

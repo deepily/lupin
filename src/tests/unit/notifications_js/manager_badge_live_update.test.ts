@@ -105,10 +105,7 @@ test( "icon created by a prior event first, THEN live persona event patches the 
   // Simulate a plain notification creating the icon BEFORE the persona event
   // (managerPersonaMap empty → no badge at first paint).
   ui._addStripIcon( NEWBIE, "LUPIN", PERSONA, "newbie01" );
-  assert.equal(
-    document.getElementById( ui._stripIconIdFor( NEWBIE ) )!.querySelector( ".cc-strip-manager-badge" ),
-    null, "no badge before the persona event"
-  );
+  assert.ok( document.getElementById( ui._stripIconIdFor( NEWBIE ) )!.querySelector( ".cc-strip-manager-badge" ) === null, "no badge before the persona event" );
   await ui.handleNotificationUpdate( {
     notification: {
       type: "voice_persona_assigned",
@@ -135,7 +132,7 @@ test( "live event with manager_persona=null leaves the worker badge-less (root /
   } );
   const icon = document.getElementById( ui._stripIconIdFor( NEWBIE ) ) as HTMLElement;
   assert.ok( icon, "icon still painted" );
-  assert.equal( icon.querySelector( ".cc-strip-manager-badge" ), null,
+  assert.ok( icon.querySelector( ".cc-strip-manager-badge" ) === null,
     "no badge when the server could not resolve the manager at emit time — this is the race surface" );
 } );
 
@@ -157,9 +154,7 @@ test( "FIX: raced-null persona event leaves no badge, then a later plain notific
       payload: { session_id: "newbie01", manager_persona: null },
     },
   } );
-  assert.equal(
-    document.getElementById( ui._stripIconIdFor( NEWBIE ) )!.querySelector( ".cc-strip-manager-badge" ),
-    null, "reproduces the bug: no badge after the raced-null persona event" );
+  assert.ok( document.getElementById( ui._stripIconIdFor( NEWBIE ) )!.querySelector( ".cc-strip-manager-badge" ) === null, "reproduces the bug: no badge after the raced-null persona event" );
 
   // 2) The worker's NEXT plain notification now carries top-level manager_persona
   //    (server self-heal stamp; bridge settled → resolver succeeds) → badge live-patches.

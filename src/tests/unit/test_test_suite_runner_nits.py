@@ -78,19 +78,27 @@ class TestSuiteTimeoutHeadroom:
 class TestSmokeLegExcludesDestructiveProxyTest:
 
     def test_run_smoke_tests_sh_ignores_proxy_integration( self ):
-        """Nit (b): the smoke leg's exec line must deselect the destructive
+        """Nit (b): the smoke leg's pytest invocation must deselect the destructive
         :8000-venue proxy suite BEFORE caller args (folder is not a venue
-        marker — CLAUDE.md § TESTING VENUES)."""
-        script    = _read( "src/tests/run-smoke-tests.sh" )
-        exec_line = re.search(
-            r"^exec .*src/tests/smoke/ "
+        marker — CLAUDE.md § TESTING VENUES).
+
+        ⚠️ The pattern used to be anchored on `^exec `, which pinned it to HOW the script
+        launches pytest rather than to the deselection it is guarding. Row 73c6819d had to
+        drop the exec — an exec'd shell cannot read pytest's exit code, and on a conftest
+        collection error that code is the only signal that exists. The ordering assertion
+        (`--ignore` ahead of `"$@"`, so a caller cannot re-select the destructive suite by
+        accident) is unchanged, which is the part that was ever load-bearing.
+        """
+        script     = _read( "src/tests/run-smoke-tests.sh" )
+        invocation = re.search(
+            r"^(?!#).*src/tests/smoke/ "
             r"--ignore=src/tests/smoke/test_proxy_integration\.py "
             r'"\$@"',
             script,
             flags=re.MULTILINE
         )
-        assert exec_line is not None, (
-            "run-smoke-tests.sh must exec pytest with "
+        assert invocation is not None, (
+            "run-smoke-tests.sh must invoke pytest with "
             "--ignore=src/tests/smoke/test_proxy_integration.py ahead of \"$@\""
         )
 

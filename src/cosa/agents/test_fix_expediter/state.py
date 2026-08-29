@@ -256,9 +256,16 @@ class VoiceGateTimeoutError( Exception ):
 
     Ensures:
         - Carries the phase where timeout occurred
+        - Carries `delivered`: True when the ask REACHED a human and no answer
+          came back (a real silence-timeout); False when it is unknown whether
+          the ask was delivered (default, and the conservative choice for a
+          mechanism/transport failure). Row 38a0b373: a log reader must be able
+          to tell a delivered-but-unanswered gate from one that never reached
+          anyone — both fail open to the default, but for opposite reasons.
     """
-    def __init__( self, phase: str, message: str = "" ):
-        self.phase = phase
+    def __init__( self, phase: str, message: str = "", delivered: bool = False ):
+        self.phase     = phase
+        self.delivered = delivered
         super().__init__( message or f"Voice gate timeout at {phase}" )
 
 

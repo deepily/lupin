@@ -64,7 +64,12 @@ class MockJob:
 
 
 class MockTodoQueue:
-    """Mock todo queue that captures push calls."""
+    """Mock todo queue that captures push calls.
+
+    Kept as the watchdog's queue argument — it still holds one — but as of step 12
+    nothing here should be called: both submit paths go through the ask flow. A test
+    that finds jobs in `pushed_jobs` has found a private door back onto the queue.
+    """
     def __init__( self ):
         self.pushed_jobs = []
 
@@ -79,6 +84,29 @@ class MockTodoQueue:
             "user_email" : user_email,
         } )
         return { "message": "queued", "job_id": "retry-mock-id" }
+
+
+class MockAskFlow:
+    """The v2 AskFlow seam (step 12) — the watchdog's two submit paths, by shape.
+
+    A prebuilt BFE job goes to `submit`; a bare recovered question goes to `ask`.
+    Both are recorded separately so a test can assert WHICH door was used, since
+    sending a question to `submit` still produces an answer and is silently wrong.
+    """
+    def __init__( self ):
+        self.submitted = []
+        self.asked     = []
+
+    def submit( self, job=None, **kwargs ):
+        self.submitted.append( ( job, kwargs ) )
+        # The real flow answers with the SCOPED id its queued executor minted; the
+        # caller reads that rather than the id it handed in.
+        base = getattr( job, "id_hash", None )
+        return { "status": "waiting", "job_id": base }
+
+    def ask( self, question=None, **kwargs ):
+        self.asked.append( ( question, kwargs ) )
+        return { "status": "waiting", "job_id": "retry-mock-id" }
 
 
 # =============================================================================
@@ -224,22 +252,23 @@ class TestWatchdogCooldown:
     """Tests for cooldown enforcement."""
 
     def test_cooldown_elapsed_first_time( self ):
-        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue() )
+        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue(), ask_flow=MockAskFlow() )
         assert watchdog._cooldown_elapsed( "new-job" ) is True
 
     def test_cooldown_not_elapsed( self ):
-        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue() )
+        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue(), ask_flow=MockAskFlow() )
         watchdog._record_attempt_time( "job-1" )
         assert watchdog._cooldown_elapsed( "job-1" ) is False
 
     def test_cooldown_elapsed_after_wait( self ):
-        watchdog = DeadQueueWatchdog( MockConfigMgr( { "auto fix cooldown seconds": 0 } ), MockTodoQueue() )
+        watchdog = DeadQueueWatchdog( MockConfigMgr( { "auto fix cooldown seconds": 0 } ), MockTodoQueue(),
+                                       ask_flow=MockAskFlow() )
         watchdog._record_attempt_time( "job-1" )
         # With 0-second cooldown, it should immediately be elapsed
         assert watchdog._cooldown_elapsed( "job-1" ) is True
 
     def test_attempt_counting( self ):
-        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue() )
+        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue(), ask_flow=MockAskFlow() )
         assert watchdog.get_attempt_count( "job-1" ) == 0
         watchdog.increment_attempt( "job-1" )
         assert watchdog.get_attempt_count( "job-1" ) == 1
@@ -256,7 +285,7 @@ class TestWatchdogEvaluate:
 
     def test_disabled_returns_none( self ):
         watchdog = DeadQueueWatchdog(
-            MockConfigMgr( { "auto fix enabled": False } ), MockTodoQueue()
+            MockConfigMgr( { "auto fix enabled": False } ), MockTodoQueue(), ask_flow=MockAskFlow()
         )
         job = MockJob()
         assert watchdog.evaluate( job ) is None
@@ -264,7 +293,7 @@ class TestWatchdogEvaluate:
     def test_ineligible_type_returns_none( self ):
         watchdog = DeadQueueWatchdog(
             MockConfigMgr( { "auto fix eligible job types": "deep_research" } ),
-            MockTodoQueue()
+            MockTodoQueue(), ask_flow=MockAskFlow()
         )
         job = MockJob( "presentation" )
         assert watchdog.evaluate( job ) is None
@@ -272,7 +301,7 @@ class TestWatchdogEvaluate:
     @patch( "cosa.rest.dead_queue_watchdog.DeadQueueWatchdog._submit_bfe" )
     def test_eligible_triggers_bfe( self, mock_submit ):
         mock_submit.return_value = "bfe-test-123"
-        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue() )
+        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue(), ask_flow=MockAskFlow() )
         job = MockJob( "presentation", error="KeyError: 'oops'" )
         result = watchdog.evaluate( job )
         assert result == "bfe-test-123"
@@ -281,7 +310,7 @@ class TestWatchdogEvaluate:
     @patch( "cosa.rest.dead_queue_watchdog.DeadQueueWatchdog._direct_retry" )
     def test_timeout_triggers_direct_retry( self, mock_retry ):
         mock_retry.return_value = "retry-123"
-        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue() )
+        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue(), ask_flow=MockAskFlow() )
         job = MockJob( "presentation", error="TimeoutError: timed out" )
         result = watchdog.evaluate( job )
         mock_retry.assert_called_once()
@@ -289,7 +318,7 @@ class TestWatchdogEvaluate:
     @patch( "cosa.rest.dead_queue_watchdog.DeadQueueWatchdog._direct_retry" )
     def test_rate_limit_triggers_direct_retry( self, mock_retry ):
         mock_retry.return_value = "retry-456"
-        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue() )
+        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue(), ask_flow=MockAskFlow() )
         job = MockJob( "presentation", error="RateLimitError: 429 Too Many Requests" )
         result = watchdog.evaluate( job )
         mock_retry.assert_called_once()
@@ -319,6 +348,52 @@ class TestPhase6StateModel:
             resubmitted_job_id="pr-new-123::user1"
         )
         assert result.resubmitted_job_id == "pr-new-123::user1"
+
+    # ── step 12: the watchdog's two doors, asserted by BEHAVIOUR not by source text ──
+
+    @patch( "cosa.rest.agentic_job_factory.create_agentic_job" )
+    def test_bfe_job_goes_to_submit_and_never_touches_the_queue( self, mock_create ):
+        """A PREBUILT job takes `submit`. It also must not reach the queue directly.
+
+        The second half is the one worth having: a watchdog that submitted AND pushed
+        would double-queue the repair, and every assertion about the submit would
+        still pass.
+        """
+        mock_bfe_job = MagicMock()
+        mock_bfe_job.id_hash = "bfx-shape-test::user1"
+        mock_create.return_value = mock_bfe_job
+
+        queue, flow = MockTodoQueue(), MockAskFlow()
+        watchdog = DeadQueueWatchdog( MockConfigMgr(), queue, ask_flow=flow )
+        watchdog._submit_bfe( MockJob( "presentation", error="KeyError: 'oops'" ), attempt_count=0 )
+
+        assert len( flow.submitted ) == 1
+        assert flow.submitted[ 0 ][ 0 ] is mock_bfe_job
+        assert flow.asked == [], "a prebuilt job must not be re-routed through ask"
+        assert queue.pushed_jobs == [], "the watchdog kept a private door onto the queue"
+
+    @patch( "cosa.rest.job_persistence.get_job_by_id_hash" )
+    def test_direct_retry_goes_to_ask_because_it_is_a_bare_question( self, mock_get ):
+        """A BARE QUESTION takes `ask`, and it must not park.
+
+        All the retry recovers from the DB is the text the user originally said —
+        nothing is decided, so it still needs routing and argument extraction. Sending
+        it to `submit` would try to run a command nobody named, and would still return
+        an answer, which is why this is asserted rather than assumed. interactive=False
+        because there is no human behind a watchdog retry to answer a follow-up.
+        """
+        mock_get.return_value = { "question_text": "what is the weather" }
+
+        queue, flow = MockTodoQueue(), MockAskFlow()
+        watchdog = DeadQueueWatchdog( MockConfigMgr(), queue, ask_flow=flow )
+        out = watchdog._direct_retry( MockJob( "presentation" ), attempt_count=0, category="transient" )
+
+        assert out == "retry-mock-id"
+        assert len( flow.asked ) == 1
+        assert flow.asked[ 0 ][ 0 ] == "what is the weather"
+        assert flow.asked[ 0 ][ 1 ][ "interactive" ] is False
+        assert flow.submitted == [], "a bare question must not skip routing via submit"
+        assert queue.pushed_jobs == [], "the watchdog kept a private door onto the queue"
 
     def test_dead_job_context_has_routing_command( self ):
         ctx = DeadJobContext(
@@ -359,7 +434,7 @@ class TestDryRunRepairLoopHooks:
         mock_create.return_value = mock_bfe_job
         mock_register.return_value = "bfx-dryrun-test::user1"
 
-        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue() )
+        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue(), ask_flow=MockAskFlow() )
         job = MockJob( "presentation", error="KeyError: 'oops'" )
         job.dry_run = True
 
@@ -381,7 +456,7 @@ class TestDryRunRepairLoopHooks:
         mock_create.return_value = mock_bfe_job
         mock_register.return_value = "bfx-live-test::user1"
 
-        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue() )
+        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue(), ask_flow=MockAskFlow() )
         job = MockJob( "presentation", error="KeyError: 'oops'" )
         # no dry_run attribute set → defaults to False via getattr
 

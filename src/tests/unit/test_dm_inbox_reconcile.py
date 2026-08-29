@@ -101,7 +101,7 @@ class TestReconcileContext:
         rows = [ _row( "m1", created="2026-07-02T11:05:00+00:00" ) ]
         ctx, state = dr.reconcile_context( HASH8, rows, self._empty() )
         assert "PEER DM from mr radio 🦉" in ctx
-        assert "message_id m1" in ctx
+        assert 'reply_to="m1"' in ctx                     # id rides the reply affordance
         assert state[ "cursor_ts" ] == "2026-07-02T11:05:00+00:00"
         assert state[ "surfaced_ids" ] == [ "m1" ]
 
@@ -237,7 +237,7 @@ class TestSurfaceDmInbox:
         def fetch( since=None, limit=None ):
             return True, rows, False
         ctx = dr.surface_dm_inbox( SESSION, fetch_fn=fetch, base_dir=tmp_path )
-        assert "message_id m1" in ctx                    # seeded → new DM IS surfaced
+        assert 'reply_to="m1"' in ctx                    # seeded → new DM IS surfaced
         persisted = dr.read_hwm( SESSION, base_dir=tmp_path )
         assert persisted[ "surfaced_ids" ] == [ "m1" ]
         assert persisted[ "cursor_ts" ] == "2026-07-02T11:05:00+00:00"

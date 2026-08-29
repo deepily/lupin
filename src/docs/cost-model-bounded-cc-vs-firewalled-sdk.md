@@ -17,7 +17,7 @@ Lupin runs LLM-driven work on one of two paths. The choice is a design-time deci
 |---|---|
 | Code | `src/cosa/agents/claude_code/job.py` (`AgenticJobBase` subclass) |
 | Routing | CJ Flow `RunningFifoQueue._process_job` → `_submit_agentic_job` → agentic pool |
-| Submission endpoint | `POST /api/claude-code/submit` with `task_type=BOUNDED` |
+| Submission endpoint | `POST /api/v2/submit`, command `agent router go to claude code`, `args.task_type=BOUNDED` |
 | Underlying invocation | Claude Code CLI / Claude Agent SDK subprocess |
 | Auth | OAuth token tied to the Max 200 subscription |
 | **Billing** | **Covered by Max plan — zero per-token cost** |
@@ -48,7 +48,7 @@ Per the load-bearing docstring at `src/cosa/agents/deep_research/__init__.py:27`
 
 ## How we know — the empirical confirmation
 
-On 2026-05-12, a throwaway 10-job probe (5 in-repo prompts + 5 web-search prompts) was submitted via `/api/claude-code/submit` with `task_type=BOUNDED`. The probe ran sequentially with 60s spacing so the Anthropic console UI had time to settle between each.
+On 2026-05-12, a throwaway 10-job probe (5 in-repo prompts + 5 web-search prompts) was submitted via `/api/claude-code/submit` with `task_type=BOUNDED` (that door was retired on 2026-08-21; the same probe now posts to `/api/v2/submit`). The probe ran sequentially with 60s spacing so the Anthropic console UI had time to settle between each.
 
 **Result**:
 
@@ -128,26 +128,36 @@ If you land on **Path B**, the design doc must justify which guardrail forced it
 
 Even though Path A is "free" in marginal-cost terms, the Max plan is NOT infinite throughput — it has rolling-window usage limits. Bounded jobs that run during Rick's interactive Claude Code peak (9 PM – 12 AM EDT) **compete** with his real work and can cause it to throttle.
 
-### Rick's daily usage profile
+### Rick's daily usage profile — AND the box's
 
-| Window | State | Bounded-job-friendliness |
+⚠️ **Corrected 2026-08-17 (Rick's ruling, row `f0b3f630`).** This table used to say `12 AM – 9 AM EDT` was ideal because Rick is asleep. That was true about Rick and false about the machine: measured boot history, unbroken since Aug 5, shows the host is **powered off ~10:53 PM – 7:17 AM**. Jobs scheduled there did not run early, quietly, or at all — they sat until the next boot and drained hours late.
+
+⚠️ **Corrected AGAIN 2026-08-20 (Rick's ruling), and this doc had not caught up.** The `7:17 AM` above came from a single boot on Aug 6. Across the 12 morning boots since Aug 4 the **median is 09:24 and eleven of twelve are after 08:52**, so a job at 7:30 still sits dead 1.5-2.5h on almost every day. **10 AM - 1 PM EDT is the only window reliably both up and quiet.** CLAUDE.md § Off-peak scheduling rule is the source of truth; re-derive with `last -x reboot | head -20` rather than trusting this table.
+
+| Window (EDT) | State | Bounded-job-friendliness |
 |---|---|---|
-| 9 PM – 12 AM EDT | Peak interactive Claude Code work | ❌ Avoid scheduled batch here |
-| 9 AM – 9 PM EDT | Light-to-moderate interactive use | 🟡 OK for short jobs; avoid heavy batch |
-| 12 AM – 9 AM EDT | Rick asleep, zero interactive use | 🟢 **Ideal for batch / long-running** |
+| ~11 PM – 9 AM | **Host powered OFF, and usually still down past 8:52 AM** | ☠️ **Never schedule here** — the job does not run until boot |
+| 9 PM – 10:53 PM | Peak interactive Claude Code work | ❌ Avoid scheduled batch here |
+| **7:30 AM – 10 AM** | Box up, Rick barely on | 🟢 **Ideal for batch / long-running** |
+| 10 AM – 9 PM | Light-to-moderate interactive use | 🟡 OK for short jobs; avoid heavy batch |
 
 ### Rule
 
-For any bounded CC job that does NOT need to complete synchronously (batch generation, scheduled regression sweeps, podcast/presentation/deep-research work), **set `scheduled_at` to a post-midnight time** via the existing field on `ClaudeCodeQueueRequest` (`src/cosa/rest/routers/claude_code_queue.py:49`).
+For any bounded CC job that does NOT need to complete synchronously (batch generation, scheduled regression sweeps, podcast/presentation/deep-research work), **set `scheduled_at` inside a window the box is awake for — prefer 10 AM – 1 PM EDT** — via the `scheduled_at` field on `SubmitRequest` (`src/cosa/rest/routers/v2_ask.py`).
+
+`scheduled_at` stays TOP-LEVEL rather than going inside `args`: it tells the queue *when* to run the work, and `args` is checked against the command's own argument contract, which no scheduling instruction is in.
 
 ```json
-POST /api/claude-code/submit
+POST /api/v2/submit
 {
-  "prompt"       : "…",
-  "project"      : "lupin",
-  "task_type"    : "BOUNDED",
-  "scheduled_at" : "2026-05-13T02:30:00-04:00",
-  "max_turns"    : 15
+  "command"      : "agent router go to claude code",
+  "args"         : {
+    "prompt"    : "…",
+    "project"   : "lupin",
+    "task_type" : "BOUNDED",
+    "max_turns" : 15
+  },
+  "scheduled_at" : "2026-08-22T11:00:00-04:00"
 }
 ```
 
@@ -163,7 +173,7 @@ When migrating an existing direct-SDK agent to bounded CC, follow this order:
 2. **Identify the migration boundary**: Often only part of an agent is LLM-driven. E.g., podcast generation has a script-generation phase (LLM) and an audio-synthesis phase (TTS). Migrate the LLM phase only; leave non-LLM parts alone.
 3. **Refactor invocation**: Replace `AsyncAnthropic( api_key=… ).messages.create(...)` with a `ClaudeCodeJob` submission. The prompt becomes the bounded job prompt; the parsed response becomes the job's terminal output.
 4. **Drop the firewalled key dependency** for the migrated phase. If the agent's other phases still need it, leave the import alone; just remove unused references.
-5. **Add `scheduled_at` defaulting**: For batch / non-interactive callers of the migrated phase, default `scheduled_at` to the next post-midnight slot. Synchronous callers omit it.
+5. **Add `scheduled_at` defaulting**: For batch / non-interactive callers of the migrated phase, default `scheduled_at` to the next morning slot the box is awake for (7:30–10 AM EDT) — **not** post-midnight, which is dead time. Synchronous callers omit it.
 6. **Update or write the agent's user-facing doc** under `src/docs/agents/` if applicable.
 7. **Update the agent's `__init__.py` banner** (the "API Key Configuration" pattern paragraph if present): note the migration date and link this doc + the R&D doc.
 8. **Verify the migration**: Submit a representative payload through the new path, confirm the job lands in CJ Flow's agentic pool, confirm the result is functionally equivalent to the old SDK output, confirm Anthropic console balance does not move.
@@ -221,4 +231,5 @@ No. Walk the Q1–Q5 framework, document the answers, get the migration plan rev
 - `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` — full experiment record.
 - `src/cosa/agents/bug_fix_expediter/` + `src/cosa/agents/test_fix_expediter/` — already-migrated reference implementations.
 - `src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md` — how to package a bounded job (CJ Flow integration).
-- `src/cosa/rest/routers/claude_code_queue.py` — `/api/claude-code/submit` route definition (including `scheduled_at` field).
+- `src/cosa/rest/routers/v2_ask.py` — `/api/v2/submit` route definition (including the `scheduled_at` field).
+- `src/cosa/rest/routers/claude_code_queue.py` — the two retired `/api/claude-code/*` tombstones.

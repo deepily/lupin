@@ -174,7 +174,7 @@ test("unmount clears the DOM and allows a re-mount", () => {
   r.mount(root);
   assert.ok(root.querySelector(".tts-preview-slider"));
   r.unmount();
-  assert.equal(root.querySelector(".tts-preview-slider"), null);
+  assert.ok( root.querySelector(".tts-preview-slider") === null );
   assert.doesNotThrow(() => r.mount(root));
 });
 

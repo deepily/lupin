@@ -93,6 +93,10 @@ type TaskUI = Record<string, unknown> & {
   TASK_LIST_UNASSIGNED_KEY: string;
   _taskListAccordionWired: boolean;
   renderTaskList: ( composite: unknown, stampUpdated?: boolean ) => void;
+  // Live/parked header split (2026-08-28)
+  _taskIsParked: ( task: unknown, now?: number ) => boolean;
+  _formatTaskListCount: ( live: number, parked: number ) => string;
+  _taskListCountText: ( openTasks: unknown, now?: number ) => string;
   _renderTaskListUnreachable: ( container: HTMLElement, countEl: HTMLElement | null ) => void;
   _stampTaskListUpdated: () => void;
   refreshTaskList: () => Promise<void>;
@@ -502,7 +506,7 @@ test( "_handleTaskListClick: a target lacking .closest is safely ignored (defens
   const ui = newUI();
   buildPanelDOM();
   ui._handleTaskListClick( {} );            // no .closest → emoji null → accordion toggle no-ops
-  assert.equal( document.getElementById( "task-body-overlay" ), null );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null );
 } );
 
 test( "_handleTaskListClick: a LIVE 📄 with NO dataset opens overlay with empty body/id (|| '' fallback)", () => {
@@ -543,7 +547,7 @@ test( "_handleTaskListClick: a DIMMED 📄 is inert — no overlay, no accordion
   container.appendChild( dimmed );
   const before = container.innerHTML;
   ui._handleTaskListClick( dimmed );
-  assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay for dimmed emoji" );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null, "no overlay for dimmed emoji" );
   assert.equal( container.innerHTML, before, "no accordion toggle for dimmed emoji" );
 } );
 
@@ -566,7 +570,7 @@ test( "openTaskBodyOverlay: backdrop click dismisses; inner panel click does NOT
   panel.dispatchEvent( new Event( "click", { bubbles: true } ) );   // inner click bubbles to overlay but is stopped
   assert.ok( document.getElementById( "task-body-overlay" ), "inner-panel click keeps overlay open" );
   overlay.dispatchEvent( new Event( "click", { bubbles: true } ) ); // backdrop click
-  assert.equal( document.getElementById( "task-body-overlay" ), null, "backdrop click dismissed" );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null, "backdrop click dismissed" );
 } );
 
 test( "openTaskBodyOverlay: Escape dismisses + detaches its keydown listener", () => {
@@ -575,7 +579,7 @@ test( "openTaskBodyOverlay: Escape dismisses + detaches its keydown listener", (
   ui.openTaskBodyOverlay( "body", "id8" );
   assert.ok( ui._taskBodyOverlayKeyListener, "Esc listener stored while open" );
   document.dispatchEvent( new KeyboardEvent( "keydown", { key: "Escape" } ) );
-  assert.equal( document.getElementById( "task-body-overlay" ), null, "Esc dismissed" );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null, "Esc dismissed" );
   assert.equal( ui._taskBodyOverlayKeyListener, null, "Esc listener detached on dismiss" );
 } );
 
@@ -611,17 +615,17 @@ test( "openTaskBodyOverlay: no document.body → no-op (degrade-safe, no throw)"
   buildPanelDOM();
   const body = document.body;
   body.remove();                                        // document.body becomes null
-  assert.equal( document.body, null );
+  assert.ok( document.body === null );
   ui.openTaskBodyOverlay( "body", "id" );               // must not throw, must not create
   document.documentElement.appendChild( body );         // restore for subsequent tests
-  assert.equal( document.getElementById( "task-body-overlay" ), null );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null );
 } );
 
 test( "_dismissTaskBodyOverlay: idempotent when no overlay is open (no throw)", () => {
   const ui = newUI();
   buildPanelDOM();
   ui._dismissTaskBodyOverlay();                         // nothing open
-  assert.equal( document.getElementById( "task-body-overlay" ), null );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null );
 } );
 
 test( "_wireTaskListAccordion: a delegated 📄 click through the wired listener opens the overlay", () => {
@@ -655,7 +659,7 @@ test( "_wireTaskListAccordion: a keydown that is neither emoji nor header is ign
   const container = document.getElementById( "task-list-container" )!;
   // Enter on the container itself (not on an emoji or header) → early return, no overlay/toggle.
   container.dispatchEvent( new KeyboardEvent( "keydown", { key: "Enter", bubbles: true } ) );
-  assert.equal( document.getElementById( "task-body-overlay" ), null );
+  assert.ok( document.getElementById( "task-body-overlay" ) === null );
 } );
 
 // ─────────────────────────── renderTaskList (DOM dispatch) ───────────────────────────
@@ -1369,8 +1373,109 @@ test( "parked rows are NON-terminal and survive the open-status filter", () => {
   withFrozenNow( NOW_MS, () => {
     ui.renderTaskList( { tasks: [ PARKED() ], count: 1, total: 1, has_more: false } );
   } );
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "1", "parked row is counted" );
+  // ⚠️ THIS ASSERTION CHANGED MEANING ON 2026-08-28, deliberately. It used to
+  // read "1" — one open row, parked or not. The header now DISCLOSES the split,
+  // so a board of one park-active row reads as zero live work with one deferred
+  // row behind it. The edit is the visible record that the number's meaning moved.
+  assert.equal( document.getElementById( "task-list-count" )!.textContent,
+    "Live: 0 · Parked: 1 · Total: 1", "parked row is counted on the PARKED side" );
   assert.ok( document.querySelector( "tr.task-row-parked" ), "parked row is rendered, dimmed" );
+} );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HEADER COUNT — LIVE vs PARKED. The old header printed one number over a board
+// that was 5/8 deliberately-deferred, so every "drive the board to zero" talk
+// started from a figure that was mostly rows nobody intended to touch.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test( "_formatTaskListCount: parked present → the three-part disclosure", () => {
+  assert.equal( newUI()._formatTaskListCount( 3, 5 ), "Live: 3 · Parked: 5 · Total: 8" );
+} );
+
+test( "_formatTaskListCount: zero parked → the BARE number, no noise", () => {
+  // A clean board says "3". Printing "Live: 3 · Parked: 0 · Total: 3" spends the
+  // header on a disclosure with nothing to disclose.
+  assert.equal( newUI()._formatTaskListCount( 3, 0 ), "3" );
+  assert.equal( newUI()._formatTaskListCount( 0, 0 ), "0" );
+} );
+
+test( "_formatTaskListCount: all-parked board still shows the live zero", () => {
+  assert.equal( newUI()._formatTaskListCount( 0, 5 ), "Live: 0 · Parked: 5 · Total: 5" );
+} );
+
+test( "_formatTaskListCount: non-numeric counts degrade to 0, never NaN", () => {
+  const ui = newUI();
+  assert.equal( ui._formatTaskListCount( undefined as unknown as number, 2 ), "Live: 0 · Parked: 2 · Total: 2" );
+  assert.equal( ui._formatTaskListCount( 2, undefined as unknown as number ), "2" );
+} );
+
+test( "_taskListCountText: splits a mixed board on the park-ACTIVE predicate", () => {
+  const ui   = newUI();
+  const rows = [ T_BLOCKED, T_ACTIVE, PARKED(), PARKED( { id: "p2" } ) ];
+  assert.equal( ui._taskListCountText( rows, NOW_MS ), "Live: 2 · Parked: 2 · Total: 4" );
+} );
+
+test( "🔴 _taskListCountText: an EXPIRED park counts LIVE, not parked", () => {
+  // THE FALSIFYING CASE, and the one the whole feature turns on. Parked is a
+  // status PLUS a live clock: once next_chase_ts passes, the store counts the row
+  // as owed again with nothing sweeping it. A header that kept calling it parked
+  // would under-report live work — the same fiction this change removes, pointed
+  // the other way.
+  //
+  // Chosen so the two rows differ ONLY in their chase time: any implementation
+  // that keys on `status` or on `park_reason` instead of the clock reports
+  // "Live: 0 · Parked: 2" here and goes red.
+  const ui   = newUI();
+  const rows = [ PARKED(), PARKED( { id: "p2", next_chase_ts: PAST } ) ];
+  assert.equal( ui._taskListCountText( rows, NOW_MS ), "Live: 1 · Parked: 1 · Total: 2" );
+} );
+
+test( "_taskListCountText: a null chase counts LIVE (fail-loud-toward-owed)", () => {
+  // A malformed park is visible work — is_owed( "parked", None, now ) is True.
+  const ui = newUI();
+  assert.equal( ui._taskListCountText( [ PARKED( { next_chase_ts: null } ) ], NOW_MS ), "1" );
+} );
+
+test( "_taskListCountText: junk argument counts 0 rather than throwing", () => {
+  const ui = newUI();
+  for ( const junk of [ null, undefined, {}, "nope" ] ) {
+    assert.equal( ui._taskListCountText( junk, NOW_MS ), "0" );
+  }
+} );
+
+test( "renderTaskList: header shows the split on a mixed board", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  withFrozenNow( NOW_MS, () => {
+    ui.renderTaskList( { tasks: [ T_BLOCKED, T_ACTIVE, PARKED() ], count: 3, total: 3, has_more: false } );
+  } );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent,
+    "Live: 2 · Parked: 1 · Total: 3" );
+} );
+
+test( "renderTaskList: an unparked board keeps the plain single number", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  withFrozenNow( NOW_MS, () => {
+    ui.renderTaskList( { tasks: [ T_BLOCKED, T_ACTIVE ], count: 2, total: 2, has_more: false } );
+  } );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "2" );
+} );
+
+test( "the outage replay uses the SAME split, so the two states can't disagree", () => {
+  // Last-known rows survive a store outage. If that branch kept printing a raw
+  // length, the header would silently change MEANING the moment the store blinked.
+  const ui = newUI();
+  buildPanelDOM();
+  withFrozenNow( NOW_MS, () => {
+    ui.renderTaskList( { tasks: [ T_ACTIVE, PARKED() ], count: 2, total: 2, has_more: false } );
+    assert.equal( document.getElementById( "task-list-count" )!.textContent,
+      "Live: 1 · Parked: 1 · Total: 2", "fresh fetch" );
+
+    ui.renderTaskList( { status: "unreachable" } );
+    assert.equal( document.getElementById( "task-list-count" )!.textContent,
+      "Live: 1 · Parked: 1 · Total: 2", "outage replay of the same rows reads identically" );
+  } );
 } );
 
 // ═══════════════════════════════════════════════════════════════════════════

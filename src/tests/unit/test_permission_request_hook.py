@@ -227,73 +227,158 @@ class TestAcknowledgeBufferedMessages:
 # ═════════════════════════════════════════════════════════════════════════════
 
 class TestForwardToUser:
-    """Tests for _forward_to_user() with mocked notification infrastructure."""
+    """Tests for _forward_to_user() with mocked notification infrastructure.
+
+    EVERY DENY CASE PINS ITS REASON, not just the fact that it denied. The previous
+    version of this class asserted only `result == "deny"` for the user-said-no, the
+    timeout and the exception cases — three different outcomes, one assertion each,
+    all of which passed against an implementation that could not tell them apart.
+    That is what let the collapse survive: a test that checks the safe half of the
+    contract and never the informative half is green against the bug it is aimed at.
+    """
+
+    @staticmethod
+    def _response( value=None, *, is_timeout=False, default_used=False, status="responded", exit_code=0 ):
+        """Build a response stub with the discriminating fields set EXPLICITLY.
+
+        MagicMock's auto-attributes are truthy, so an unset is_timeout/default_used
+        would silently route every case into the no-answer branches and make these
+        tests agree with each other for the wrong reason.
+        """
+        r = MagicMock()
+        r.response_value = value
+        r.is_timeout     = is_timeout
+        r.default_used   = default_used
+        r.status         = status
+        r.exit_code      = exit_code
+        return r
 
     @patch( "lupin_cli.claude_code.hooks.permission_request.notify_user_sync" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.build_sender_id_for_cc" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationRequest" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.ResponseType" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationPriority" )
-    def test_user_yes_returns_allow( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
-        """User responding 'yes' returns 'allow'."""
-        mock_response = MagicMock()
-        mock_response.response_value = "yes"
-        mock_sync.return_value = mock_response
+    def test_user_yes_returns_allow_with_no_reason( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
+        """User responding 'yes' allows, and carries no denial reason."""
+        mock_sync.return_value = self._response( "yes" )
 
-        result = _forward_to_user( "Bash: npm test", "abc12345" )
-        assert result == "allow"
-
-    @patch( "lupin_cli.claude_code.hooks.permission_request.notify_user_sync" )
-    @patch( "lupin_cli.claude_code.hooks.permission_request.build_sender_id_for_cc" )
-    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationRequest" )
-    @patch( "lupin_cli.claude_code.hooks.permission_request.ResponseType" )
-    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationPriority" )
-    def test_user_no_returns_deny( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
-        """User responding 'no' returns 'deny'."""
-        mock_response = MagicMock()
-        mock_response.response_value = "no"
-        mock_sync.return_value = mock_response
-
-        result = _forward_to_user( "Write: config.py", "abc12345" )
-        assert result == "deny"
+        decision, reason = _forward_to_user( "Bash: npm test", "abc12345" )
+        assert decision == "allow"
+        assert reason is None
 
     @patch( "lupin_cli.claude_code.hooks.permission_request.notify_user_sync" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.build_sender_id_for_cc" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationRequest" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.ResponseType" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationPriority" )
-    def test_timeout_returns_deny( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
-        """Timeout (None response) returns 'deny'."""
-        mock_response = MagicMock()
-        mock_response.response_value = None
-        mock_sync.return_value = mock_response
+    def test_user_no_denies_and_says_the_user_answered( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
+        """A real refusal denies AND is attributed to the user."""
+        mock_sync.return_value = self._response( "no" )
 
-        result = _forward_to_user( "Edit: main.py", "abc12345" )
-        assert result == "deny"
+        decision, reason = _forward_to_user( "Write: config.py", "abc12345" )
+        assert decision == "deny"
+        assert "answered NO" in reason
+        assert "Write: config.py" in reason
 
     @patch( "lupin_cli.claude_code.hooks.permission_request.notify_user_sync" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.build_sender_id_for_cc" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationRequest" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.ResponseType" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationPriority" )
-    def test_exception_returns_deny( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
-        """Exception during notification returns 'deny'."""
+    def test_timeout_denies_and_is_not_attributed_to_the_user( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
+        """Reached the user, ran out of time: denies, but says the user did NOT refuse.
+
+        The response still carries the "deny" default in response_value — the exact
+        shape that made the old value-first check read a default back as an answer.
+        """
+        mock_sync.return_value = self._response( "deny", is_timeout=True, default_used=True, status="expired" )
+
+        decision, reason = _forward_to_user( "Edit: main.py", "abc12345" )
+        assert decision == "deny"
+        assert "TIMEOUT" in reason
+        assert "NOT refused" in reason
+
+    @patch( "lupin_cli.claude_code.hooks.permission_request.notify_user_sync" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.build_sender_id_for_cc" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationRequest" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.ResponseType" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationPriority" )
+    def test_never_reached_the_user_is_distinct_from_timeout( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
+        """Offline/undeliverable is its OWN outcome, not a timeout (María's fourth case).
+
+        Re-asking helps after a timeout and does not help here, so the two must not
+        produce the same text.
+        """
+        mock_sync.return_value = self._response( "deny", is_timeout=False, default_used=True, status="offline" )
+
+        decision, reason = _forward_to_user( "Bash: deploy.sh", "abc12345" )
+        assert decision == "deny"
+        assert "WITHOUT REACHING THE USER" in reason
+        assert "TIMEOUT" not in reason
+
+    @patch( "lupin_cli.claude_code.hooks.permission_request.notify_user_sync" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.build_sender_id_for_cc" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationRequest" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.ResponseType" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationPriority" )
+    def test_unusable_answer_denies_without_blaming_the_user( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
+        """An answered-but-unparseable value denies and is not reported as a decision."""
+        mock_sync.return_value = self._response( "maybe?", status="responded" )
+
+        decision, reason = _forward_to_user( "Bash: ls", "abc12345" )
+        assert decision == "deny"
+        assert "WITHOUT A USABLE ANSWER" in reason
+        assert "Not a decision by the user" in reason
+
+    @patch( "lupin_cli.claude_code.hooks.permission_request.notify_user_sync" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.build_sender_id_for_cc" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationRequest" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.ResponseType" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationPriority" )
+    def test_exception_denies_as_a_delivery_failure( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
+        """Delivery failure denies (security-safe) and is named as infrastructure."""
         mock_sync.side_effect = Exception( "Connection refused" )
 
-        result = _forward_to_user( "Bash: rm -rf /", "abc12345" )
-        assert result == "deny"
+        decision, reason = _forward_to_user( "Bash: rm -rf /", "abc12345" )
+        assert decision == "deny"
+        assert "COULD NOT BE DELIVERED" in reason
+        assert "Connection refused" in reason
+        assert "not a refusal" in reason
 
     def test_import_failure_returns_deny( self ):
-        """Import failure returns 'deny' (no notification infrastructure)."""
+        """Import failure denies (no notification infrastructure)."""
         with patch.dict( "sys.modules", { "lupin_cli.notifications.notification_models": None } ):
-            # The function catches all exceptions including ImportError
-            # We'll test by patching the imports inside the function to fail
             with patch(
                 "lupin_cli.claude_code.hooks.permission_request.NotificationRequest",
                 side_effect=ImportError( "No module" )
             ):
-                result = _forward_to_user( "Read: file.py", "abc12345" )
-                assert result == "deny"
+                decision, reason = _forward_to_user( "Read: file.py", "abc12345" )
+                assert decision == "deny"
+                assert "COULD NOT BE DELIVERED" in reason
+
+    def test_every_non_yes_outcome_still_denies( self ):
+        """THE SECURITY CONTRACT IS UNCHANGED — the reason must not move the decision.
+
+        Rick's ruling was to weaken no refusal, so this pins the property directly
+        rather than leaving it implied by the cases above.
+        """
+        cases = [
+            self._response( "no" ),
+            self._response( "deny", is_timeout=True, default_used=True, status="expired" ),
+            self._response( "deny", default_used=True, status="offline" ),
+            self._response( "maybe?" ),
+            self._response( None ),
+            self._response( "" ),
+        ]
+        for resp in cases:
+            with patch( "lupin_cli.claude_code.hooks.permission_request.notify_user_sync", return_value=resp ), \
+                 patch( "lupin_cli.claude_code.hooks.permission_request.build_sender_id_for_cc" ), \
+                 patch( "lupin_cli.claude_code.hooks.permission_request.NotificationRequest" ), \
+                 patch( "lupin_cli.claude_code.hooks.permission_request.ResponseType" ), \
+                 patch( "lupin_cli.claude_code.hooks.permission_request.NotificationPriority" ):
+                decision, reason = _forward_to_user( "Bash: anything", "abc12345" )
+                assert decision == "deny", f"non-yes outcome must deny: {resp.response_value!r}"
+                assert reason, "every denial must carry a reason"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -305,7 +390,7 @@ class TestMainFlow:
 
     @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
-    @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value="allow" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value=( "allow", None ) )
     @patch( "lupin_cli.claude_code.hooks.permission_request.drain_voice_buffer", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.permission_request.get_claude_session_id", return_value="abc12345" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.log_payload" )
@@ -334,7 +419,7 @@ class TestMainFlow:
     @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
-    @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value="deny" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value=( "deny", "The user was asked and answered NO to: Bash: test" ) )
     @patch( "lupin_cli.claude_code.hooks.permission_request._acknowledge_buffered_messages" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.drain_voice_buffer" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.get_claude_session_id", return_value="abc12345" )
@@ -382,7 +467,7 @@ class TestMainFlow:
 
     @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
-    @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value="allow" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value=( "allow", None ) )
     @patch( "lupin_cli.claude_code.hooks.permission_request.drain_voice_buffer", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.permission_request.get_claude_session_id", return_value="fallback1" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.log_payload" )
@@ -493,7 +578,7 @@ class TestAutoAllow:
     @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
-    @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value="allow" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value=( "allow", None ) )
     @patch( "lupin_cli.claude_code.hooks.permission_request.drain_voice_buffer", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.permission_request.get_claude_session_id", return_value="abc12345" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.log_payload" )
@@ -604,7 +689,7 @@ class TestBufferRedirect:
     @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
-    @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value="allow" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value=( "allow", None ) )
     @patch( "lupin_cli.claude_code.hooks.permission_request.drain_voice_buffer", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.permission_request.get_claude_session_id", return_value="abc12345" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.log_payload" )

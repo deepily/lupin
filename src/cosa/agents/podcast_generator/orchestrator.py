@@ -58,6 +58,66 @@ logger = logging.getLogger( __name__ )
 ELEVENLABS_COST_PER_1K_CHARS = 0.30  # $0.30 per 1000 characters
 
 
+def build_auto_continue_disclosure( timeout_seconds: int ) -> str:
+    """
+    Build the "silence means keep going" sentence appended to a podcast
+    script-review question.
+
+    The podcast approval gate FAILS OPEN: if the user does not answer within
+    the review timeout, generation continues on its own (via response_default
+    at the gate). The user must be able to hear/read that this is what silence
+    does, so this sentence rides in the QUESTION text — format_questions_for_tts
+    speaks the question (not the options), so this is the part the user hears.
+
+    Requires:
+        - timeout_seconds is a positive int
+
+    Ensures:
+        - returns one natural-language sentence naming the wait in whole minutes
+          (floored, minimum 1) and stating that silence continues generation
+        - the stated minutes track the timeout, so the spoken promise cannot
+          drift from the actual wait
+
+    Raises:
+        - ValueError if timeout_seconds is not a positive int
+    """
+    if not isinstance( timeout_seconds, int ) or isinstance( timeout_seconds, bool ) or timeout_seconds <= 0:
+        raise ValueError( f"timeout_seconds must be a positive int, got {timeout_seconds!r}" )
+
+    minutes = max( 1, timeout_seconds // 60 )
+    unit    = "minute" if minutes == 1 else "minutes"
+    return (
+        f"If you don't respond within about {minutes} {unit}, "
+        f"I'll keep going and finish the podcast automatically."
+    )
+
+
+def auto_approval_notice( auto_approved: bool ) -> str:
+    """
+    One-line completion note stating whether the script reached audio WITHOUT a
+    human reading it.
+
+    The approval gate fails open, so "Approve script" in the completion can mean
+    either a real approval or a silent timeout. Clayton's review flagged that the
+    two are otherwise indistinguishable to whoever reads the finished podcast, so
+    when the approval came from the timeout default we say so, plainly.
+
+    Requires:
+        - auto_approved is a bool
+
+    Ensures:
+        - returns a single plain sentence when auto_approved is True
+        - returns "" when auto_approved is False (a human approved — nothing to
+          disclose)
+    """
+    if auto_approved:
+        return (
+            "This script was approved automatically because the review window "
+            "elapsed with no response — nobody read it before it went to audio."
+        )
+    return ""
+
+
 class PodcastGenerationError( Exception ):
     """
     Raised when a core LLM-backed generation step (content analysis or script
@@ -72,6 +132,40 @@ class PodcastGenerationError( Exception ):
           sets state=FAILED, notifies the user, and re-raises
     """
     pass
+
+
+def _require_revision_feedback( feedback, script_label="script" ):
+    """
+    Guard the explicit-"Revise script" path against a silent drop. Row 936c7ef5.
+
+    Requires:
+        - feedback is the value voice_io.get_input returned AFTER the user
+          actively selected "Revise script"
+        - script_label is a short human string naming which script (e.g.
+          "script", "French script")
+
+    Ensures:
+        - returns feedback unchanged when it is non-empty
+        - raises PodcastGenerationError when feedback is falsy (None on
+          timeout/silence, or empty) so the job DEAD-LETTERS with a reason that
+          names THIS silence — revise-then-silence, where a human asked for a
+          change and then went quiet. It is distinct from the review gate's own
+          fail-open silence (nobody there → auto-approve), which resolves before
+          this branch and never reaches here. Honoring the explicit change
+          request as a visible failure beats silently auto-approving the
+          un-revised draft.
+
+    Raises:
+        - PodcastGenerationError if feedback is None or empty
+    """
+    if not feedback:
+        raise PodcastGenerationError(
+            f"Revision requested for the {script_label} but no feedback was provided "
+            "(revise-then-silence). The explicit change request cannot be honored "
+            "unattended, so the job is dead-lettered rather than silently "
+            "auto-approving the un-revised draft."
+        )
+    return feedback
 
 
 class PodcastOrchestratorAgent:
@@ -352,6 +446,18 @@ class PodcastOrchestratorAgent:
             if self.debug:
                 print( f"[PodcastOrchestratorAgent] Script generated: {script.get_segment_count()} segments" )
 
+            # Floor (P0 4317efd1): a zero-segment script must NEVER reach the human
+            # approval gate. The parser now RAISES on unrecoverable output; a
+            # genuinely-empty parse ({"segments": []}) still lands here, so reject it
+            # loudly. This raises into the generate() handler → the user sees
+            # "Podcast generation failed" and the job dead-letters, instead of an
+            # empty "Untitled Podcast" being offered for approval.
+            if script.get_segment_count() == 0:
+                raise PodcastGenerationError(
+                    "Podcast script generation produced zero segments — refusing to "
+                    "present an empty script for approval. Please try again."
+                )
+
             if self._check_stop(): return await self._handle_stop()
 
             # =================================================================
@@ -388,18 +494,18 @@ class PodcastOrchestratorAgent:
 
                 revision_label = f" (Revision {self._podcast_state[ 'revision_count' ]})" if self._podcast_state[ "revision_count" ] > 0 else ""
 
-                choice = await voice_io.present_choices(
+                choice = await self._present_script_review(
                     questions = [ {
                         "question"    : "Podcast script is ready. How would you like to proceed?",
                         "header"      : "Script Review",
                         "multiSelect" : False,
                         "options"     : [
-                            { "label": "Approve script", "description": "Keep script and continue" },
+                            { "label": "Approve script", "description": "Keep script and continue (this happens automatically if you don't respond)" },
                             { "label": "Revise script", "description": "Provide feedback for changes" },
                             { "label": "Cancel", "description": "Discard script and stop" }
                         ]
                     } ],
-                    timeout  = self.config.script_review_timeout_seconds,
+                    header   = "Script Review",
                     abstract = script_preview,
                     title    = f"Script Review{revision_label}",
                 )
@@ -412,10 +518,13 @@ class PodcastOrchestratorAgent:
                     return None
 
                 elif review_choice == "Approve script":
-                    # Explicit approval - save and exit loop
+                    # Approval - save and exit loop. The gate fails open, so this
+                    # branch also fires when the review window elapsed with no
+                    # answer; record WHICH so the completion can disclose it.
                     script.revision_count = self._podcast_state[ "revision_count" ]
                     script_path = await self._save_script_async( script )
                     self._podcast_state[ "draft_script_path" ] = script_path
+                    self._podcast_state[ "script_auto_approved" ] = bool( choice.get( "default_used", False ) )
                     script_approved = True
 
                 else:
@@ -425,6 +534,9 @@ class PodcastOrchestratorAgent:
                             "What changes would you like to the script?",
                             timeout = self.config.feedback_timeout_seconds
                         )
+                        # Row 936c7ef5: an explicit Revise then silence must not
+                        # be silently dropped into an auto-approve of the un-revised draft.
+                        feedback = _require_revision_feedback( feedback, "script" )
                     else:
                         # "Other" - custom text IS the feedback
                         feedback = review_choice
@@ -520,18 +632,18 @@ class PodcastOrchestratorAgent:
                     translated_preview = self._get_script_preview( translated_script )
                     translated_preview += f"\n\n**Full Script**: {translated_link}"
 
-                    choice = await voice_io.present_choices(
+                    choice = await self._present_script_review(
                         questions = [ {
                             "question"    : f"How would you like to proceed with the {lang_name} script?",
                             "header"      : f"{lang_name} Review",
                             "multiSelect" : False,
                             "options"     : [
-                                { "label": "Approve script", "description": f"Keep {lang_name} script and continue" },
+                                { "label": "Approve script", "description": f"Keep {lang_name} script and continue (this happens automatically if you don't respond)" },
                                 { "label": "Revise script", "description": "Provide feedback for changes" },
                                 { "label": "Skip language", "description": f"Skip {lang_name} version entirely" }
                             ]
                         } ],
-                        timeout  = self.config.script_review_timeout_seconds,
+                        header   = f"{lang_name} Review",
                         abstract = translated_preview,
                         title    = f"{lang_name} Script Review",
                     )
@@ -545,6 +657,15 @@ class PodcastOrchestratorAgent:
                         translated_approved = True  # Exit loop
 
                     elif review_choice == "Approve script":
+                        # Fail-open also fires here: a silent per-language gate
+                        # resolves to "Approve script". OR the flag in — ANY
+                        # silent gate (English or a translation) must disclose,
+                        # so a hand-approved English + auto-approved translation
+                        # still says the podcast was approved automatically.
+                        self._podcast_state[ "script_auto_approved" ] = (
+                            self._podcast_state.get( "script_auto_approved", False )
+                            or bool( choice.get( "default_used", False ) )
+                        )
                         translated_approved = True
 
                     else:
@@ -554,6 +675,9 @@ class PodcastOrchestratorAgent:
                                 f"What changes would you like to the {lang_name} script?",
                                 timeout = self.config.feedback_timeout_seconds
                             )
+                            # Row 936c7ef5: explicit Revise then silence → dead-letter,
+                            # not a silent drop back into the fail-open auto-approve.
+                            feedback = _require_revision_feedback( feedback, f"{lang_name} script" )
                         else:
                             feedback = review_choice
 
@@ -741,6 +865,9 @@ class PodcastOrchestratorAgent:
             lang_count = len( scripts_by_language )
             lang_summary = f"{lang_count} language(s)" if lang_count > 1 else "1 language"
 
+            auto_notice   = auto_approval_notice( self._podcast_state.get( "script_auto_approved", False ) )
+            approval_line = f"\n\n**Approval**: {auto_notice}" if auto_notice else ""
+
             await voice_io.notify(
                 f"All podcasts complete! {lang_summary}, ~{audio_duration_mins:.1f} min each",
                 priority = "high",
@@ -752,6 +879,7 @@ class PodcastOrchestratorAgent:
                            f"**Total Cost**: ${total_cost:.4f}\n\n"
                            + "\n".join( output_lines ) + "\n\n"
                            f"**Research**: {research_link}"
+                           + approval_line
             )
 
             return script
@@ -827,18 +955,18 @@ class PodcastOrchestratorAgent:
 
                 revision_label = f" (Revision {self._podcast_state[ 'revision_count' ]})" if self._podcast_state[ "revision_count" ] > 0 else ""
 
-                choice = await voice_io.present_choices(
+                choice = await self._present_script_review(
                     questions = [ {
                         "question"    : "How would you like to proceed with this script?",
                         "header"      : "Script Review",
                         "multiSelect" : False,
                         "options"     : [
-                            { "label": "Approve script", "description": "Keep script and finish" },
+                            { "label": "Approve script", "description": "Keep script and finish (this happens automatically if you don't respond)" },
                             { "label": "Revise script", "description": "Provide feedback for changes" },
                             { "label": "Cancel", "description": "Discard changes and stop" }
                         ]
                     } ],
-                    timeout  = self.config.script_review_timeout_seconds,
+                    header   = "Script Review",
                     abstract = script_preview,
                     title    = f"Script Review{revision_label}",
                 )
@@ -851,10 +979,13 @@ class PodcastOrchestratorAgent:
                     return None
 
                 elif review_choice == "Approve script":
-                    # Explicit approval - save and exit loop
+                    # Approval - save and exit loop. The gate fails open, so this
+                    # branch also fires when the review window elapsed with no
+                    # answer; record WHICH so the completion can disclose it.
                     script.revision_count = self._podcast_state[ "revision_count" ]
                     script_path = await self._save_script_async( script )
                     self._podcast_state[ "draft_script_path" ] = script_path
+                    self._podcast_state[ "script_auto_approved" ] = bool( choice.get( "default_used", False ) )
                     script_approved = True
 
                 else:
@@ -864,6 +995,9 @@ class PodcastOrchestratorAgent:
                             "What changes would you like to the script?",
                             timeout = self.config.feedback_timeout_seconds
                         )
+                        # Row 936c7ef5: an explicit Revise then silence must not
+                        # be silently dropped into an auto-approve of the un-revised draft.
+                        feedback = _require_revision_feedback( feedback, "script" )
                     else:
                         # "Other" - custom text IS the feedback
                         feedback = review_choice
@@ -1068,6 +1202,10 @@ class PodcastOrchestratorAgent:
             if research_link:
                 abstract_lines.append( f"**Research**: {research_link}" )
 
+            auto_notice = auto_approval_notice( self._podcast_state.get( "script_auto_approved", False ) )
+            if auto_notice:
+                abstract_lines.append( f"**Approval**: {auto_notice}" )
+
             await voice_io.notify(
                 f"Podcast audio complete! Duration: {audio_duration_mins:.1f} minutes",
                 priority = "high",
@@ -1204,11 +1342,13 @@ class PodcastOrchestratorAgent:
             ContentAnalysis: Structured analysis of the content
         """
         try:
+            response = None   # bound before the API call so the except can read stop_reason safely (bug e0bb5a94 B)
             prompt = get_content_analysis_prompt(
                 research_content = research_content,
                 max_topics       = self.config.key_topics_to_extract,
                 audience         = self.config.audience,
                 audience_context = self.config.audience_context,
+                max_source_chars = self.config.max_source_chars,
             )
 
             response = await self.api_client.call_for_analysis(
@@ -1236,11 +1376,16 @@ class PodcastOrchestratorAgent:
             if self.debug:
                 print( f"[PodcastOrchestratorAgent] Analysis error: {e}" )
 
-            # Fail LOUDLY. A silent placeholder analysis would flow downstream into a
-            # fake 0-segment script that reaches the review gate looking review-ready.
+            # Fail LOUDLY, and with the REAL cause (bug e0bb5a94 B). Raising is right —
+            # a silent placeholder analysis flows downstream into a fake 0-segment
+            # script that reaches the review gate looking review-ready. The defect was
+            # the MESSAGE: "try again in a few minutes" asserts a transience this
+            # catch-all cannot verify. Surface `e`, plus the SDK stop_reason when we
+            # have it (captured at api_client.py:435, read by nobody). `from e` keeps
+            # the traceback chain.
+            stop = f" [stop_reason={response.stop_reason}]" if response is not None else ""
             raise PodcastGenerationError(
-                "Podcast generation failed: the AI service returned an error while "
-                "analyzing the research document. Please try again in a few minutes."
+                f"Podcast generation failed while analyzing the research document: {e}{stop}"
             ) from e
 
     async def _generate_script_async(
@@ -1259,6 +1404,7 @@ class PodcastOrchestratorAgent:
             PodcastScript: Generated script with dialogue segments
         """
         try:
+            response = None   # bound before the API call so the except can read stop_reason safely (bug e0bb5a94 B)
             # Build system prompt with host personalities
             duo_description = get_dynamic_duo_description(
                 host_a = self.config.host_a_personality,
@@ -1277,6 +1423,7 @@ class PodcastOrchestratorAgent:
                 max_exchanges          = self.config.max_exchanges,
                 audience               = self.config.audience,
                 audience_context       = self.config.audience_context,
+                max_source_chars       = self.config.max_source_chars,
             )
 
             response = await self.api_client.call_for_script(
@@ -1314,11 +1461,18 @@ class PodcastOrchestratorAgent:
             if self.debug:
                 print( f"[PodcastOrchestratorAgent] Script generation error: {e}" )
 
-            # Fail LOUDLY. A silent 0-segment placeholder script would reach the
-            # review gate looking like a normal (if empty) review-ready result.
+            # Fail LOUDLY, and with the REAL cause (bug e0bb5a94 B). Raising (not a
+            # silent 0-segment placeholder) is right — an empty script would reach the
+            # review gate looking review-ready. The defect was the MESSAGE: a hardcoded
+            # "try again in a few minutes" asserts a transience this catch-all cannot
+            # verify, and it made a reproducible parse failure read as a rate limit to
+            # three readers. Surface `e`, plus the SDK stop_reason when we have it — it
+            # distinguishes "the model wrote un-parseable output" from "the SDK cut the
+            # model off" (api_client captured stop_reason at :435 and nobody read it).
+            # `from e` keeps the traceback chain for a log reader.
+            stop = f" [stop_reason={response.stop_reason}]" if response is not None else ""
             raise PodcastGenerationError(
-                "Podcast generation failed: the AI service returned an error while "
-                "writing the podcast script. Please try again in a few minutes."
+                f"Podcast generation failed while writing the podcast script: {e}{stop}"
             ) from e
 
     async def _revise_script_async(
@@ -1363,12 +1517,24 @@ class PodcastOrchestratorAgent:
                 for seg in result.get( "segments", [] )
             ]
 
+            # Regression 0913bb90 (twin of the translation mask): a revision that
+            # parsed to ZERO segments must NOT silently hand back the previous script
+            # as if it were revised. Raise so the except branch below notifies the
+            # user and returns the current script unchanged. The old `segments if
+            # segments else current_script.segments` substitution is the same silent
+            # pass-through one branch over from the translation bug.
+            if not segments:
+                raise ValueError(
+                    "Script revision parsed to zero segments — the model output "
+                    "could not be turned into a revised script."
+                )
+
             revised = PodcastScript(
                 title                      = result.get( "title", current_script.title ),
                 research_source            = current_script.research_source,
                 host_a_name                = current_script.host_a_name,
                 host_b_name                = current_script.host_b_name,
-                segments                   = segments if segments else current_script.segments,
+                segments                   = segments,
                 estimated_duration_minutes = result.get( "estimated_duration_minutes",
                                                           current_script.estimated_duration_minutes ),
                 key_topics                 = result.get( "key_topics", current_script.key_topics ),
@@ -1379,6 +1545,12 @@ class PodcastOrchestratorAgent:
 
         except Exception as e:
             logger.error( f"Script revision failed: {e}" )
+            # P0 4317efd1: tell the user the revision failed instead of silently
+            # handing back the previous script with no explanation.
+            await voice_io.notify(
+                f"Script revision failed — keeping the previous script. ({str( e )[ :100 ]})",
+                priority = "high",
+            )
             # Return original script unchanged
             return current_script
 
@@ -1492,6 +1664,62 @@ class PodcastOrchestratorAgent:
         except Exception as e:
             logger.warning( f"Failed to delete draft script: {e}" )
             # Non-fatal - continue anyway
+
+    async def _present_script_review(
+        self,
+        questions: list,
+        header: str,
+        abstract: Optional[ str ] = None,
+        title: Optional[ str ] = None,
+        continue_label: str = "Approve script",
+    ) -> dict:
+        """
+        Present a podcast script-review choice that FAILS OPEN.
+
+        Rick's requirement: the demo must not stall if he misses a prompt. So
+        this gate CONTINUES generation when the user is silent, instead of
+        dead-lettering. Two things make that happen, both centralized here:
+
+        1. The auto-continue disclosure (synced to the review timeout) is
+           appended to the question text, so the user hears/reads that silence
+           keeps generation going — format_questions_for_tts speaks the
+           question, not the options, so the sentence must ride in the question.
+        2. A response_default is declared for `header`, so voice_io returns
+           `continue_label` when no human answers within the timeout (rather
+           than raising VoiceGateNoDefaultError, which is what dead-letters the
+           job today). This is the DESIGNED unattended-gate seam, not a change
+           to the shared voice dispatcher.
+
+        Requires:
+            - questions is a one-item list whose dict is keyed under `header`,
+              carries a non-empty `question` string, and lists an option whose
+              label is `continue_label`
+            - self.config.script_review_timeout_seconds is a positive int
+
+        Ensures:
+            - the disclosure sentence is appended to questions[0]["question"]
+            - returns voice_io.present_choices(...) with response_default set so
+              a silent gate resolves to {header: continue_label}
+
+        Raises:
+            - ValueError if the review timeout is not a positive int
+        """
+        timeout = self.config.script_review_timeout_seconds
+        questions[ 0 ][ "question" ] = (
+            questions[ 0 ][ "question" ] + " " + build_auto_continue_disclosure( timeout )
+        )
+
+        return await voice_io.present_choices(
+            questions        = questions,
+            timeout          = timeout,
+            abstract         = abstract,
+            title            = title,
+            response_default = { header: continue_label },
+            # Blocking approval gate — MUST alert at HIGH so the TTS reaches Rick
+            # driving by voice from across the room. Default was "medium" (the
+            # dispatcher's default_priority), which may not fire the alert at all.
+            priority         = "high",
+        )
 
     def _get_script_preview( self, script: PodcastScript ) -> str:
         """
@@ -1613,12 +1841,25 @@ Generate the {language_name} script in JSON format with the same structure:
                 for seg in result.get( "segments", [] )
             ]
 
+            # Regression 0913bb90: a translation that parsed to ZERO segments is a
+            # FAILED translation, not a reason to silently ship the English text.
+            # Raise so the except branch below notifies the user and titles the file
+            # "Translation Failed" — mirroring the initial-generation zero-segment
+            # floor. The old `segments if segments else english_script.segments`
+            # substitution is what let the English body reach Rick's approval gate
+            # looking like a Spanish script.
+            if not segments:
+                raise ValueError(
+                    f"{language_name} translation parsed to zero segments — the model "
+                    "output could not be turned into a translated script."
+                )
+
             translated_script = PodcastScript(
                 title                      = result.get( "title", f"{english_script.title} ({language_name})" ),
                 research_source            = english_script.research_source,
                 host_a_name                = english_script.host_a_name,
                 host_b_name                = english_script.host_b_name,
-                segments                   = segments if segments else english_script.segments,
+                segments                   = segments,
                 estimated_duration_minutes = result.get( "estimated_duration_minutes",
                                                           english_script.estimated_duration_minutes ),
                 key_topics                 = result.get( "key_topics", english_script.key_topics ),
@@ -1644,6 +1885,13 @@ Generate the {language_name} script in JSON format with the same structure:
             logger.error( f"Script translation to {target_language} failed: {e}" )
             if self.debug:
                 print( f"[PodcastOrchestratorAgent] Translation error: {e}" )
+
+            # P0 4317efd1: tell the user the translation failed instead of silently
+            # substituting the English script.
+            await voice_io.notify(
+                f"{language_name} translation failed — using the English script. ({str( e )[ :100 ]})",
+                priority = "high",
+            )
 
             # Return a copy of English script with updated title as fallback
             return PodcastScript(

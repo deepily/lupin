@@ -1,0 +1,122 @@
+{
+  "row": "19328449-17eb-407c-95b6-4b9bcecca714",
+  "run_start": "2026-08-04T02:10:21.848464+00:00",
+  "run_end": "2026-08-04T02:16:59.880088+00:00",
+  "base": "http://localhost:8000",
+  "submitter": "arnold.gate.proof+784fd4cd@lupin.deepily.ai",
+  "target_user": "arnold.gate.proof+784fd4cd@lupin.deepily.ai",
+  "user_id": "cc4d825d-72eb-4506-9d14-2ece3c5fcf1a",
+  "job_id": "pr-d5431e32::cc4d825d-72eb-4506-9d14-2ece3c5fcf1a",
+  "source_path": "/src/rnd/v0.1.6/2026.03.14-presentation-generator/01-strategy-and-design.md",
+  "thresholds": {
+    "gate_timeout": 600,
+    "min_silence_secs": 480,
+    "max_liveness_gap": 60
+  },
+  "verdict": {
+    "PASS": true,
+    "direction": "A (human-answered)",
+    "checks": {
+      "delivered": true,
+      "connected_through_wait": true,
+      "every_gate_answered": true,
+      "every_gate_human_resolved": true,
+      "job_reached_done": true
+    },
+    "gates_delivered": 4,
+    "gates_answered": 4,
+    "per_gate": [
+      {
+        "notification_id": "b190f16b-c301-4011-87ab-b232ae59c060",
+        "title": "Gate 1: Narrative Arc Review",
+        "delivered_ts": "2026-08-04T02:11:39.521148+00:00",
+        "answered": true,
+        "state": "responded",
+        "response_value": {
+          "answers": {
+            "Narrative Arc": "Approve"
+          }
+        }
+      },
+      {
+        "notification_id": "888e60a7-a6af-4d40-80ee-f45394f8da18",
+        "title": "Gate 2: Slide Outline Review",
+        "delivered_ts": "2026-08-04T02:12:11.370812+00:00",
+        "answered": true,
+        "state": "responded",
+        "response_value": {
+          "answers": {
+            "Slide Outline": "Approve"
+          }
+        }
+      },
+      {
+        "notification_id": "9ad2d5f5-b044-4730-8ad3-584b17ade4a0",
+        "title": "Gate 3: Content Review",
+        "delivered_ts": "2026-08-04T02:14:35.467218+00:00",
+        "answered": true,
+        "state": "responded",
+        "response_value": {
+          "answers": {
+            "Content Review": "Approve"
+          }
+        }
+      },
+      {
+        "notification_id": "f7855703-dc73-41d5-bbe0-c8184a8c7f59",
+        "title": "Gate 4: Visual Review",
+        "delivered_ts": "2026-08-04T02:16:49.343784+00:00",
+        "answered": true,
+        "state": "responded",
+        "response_value": {
+          "answers": {
+            "Visual Review": "Approve"
+          }
+        }
+      }
+    ],
+    "answers_posted": [
+      {
+        "ts": "2026-08-04T02:11:39.769142+00:00",
+        "notification_id": "b190f16b-c301-4011-87ab-b232ae59c060",
+        "answers": {
+          "Narrative Arc": "Approve"
+        },
+        "status": 200
+      },
+      {
+        "ts": "2026-08-04T02:12:11.610529+00:00",
+        "notification_id": "888e60a7-a6af-4d40-80ee-f45394f8da18",
+        "answers": {
+          "Slide Outline": "Approve"
+        },
+        "status": 200
+      },
+      {
+        "ts": "2026-08-04T02:14:35.707113+00:00",
+        "notification_id": "9ad2d5f5-b044-4730-8ad3-584b17ade4a0",
+        "answers": {
+          "Content Review": "Approve"
+        },
+        "status": 200
+      },
+      {
+        "ts": "2026-08-04T02:16:49.581557+00:00",
+        "notification_id": "f7855703-dc73-41d5-bbe0-c8184a8c7f59",
+        "answers": {
+          "Visual Review": "Approve"
+        },
+        "status": 200
+      }
+    ],
+    "job_completed_at": "2026-08-03T22:16:55.588920-04:00",
+    "liveness": {
+      "samples": 98,
+      "max_gap_seconds": 15.0,
+      "dropped_at": null,
+      "first_ts": "2026-08-04T02:10:22.098675+00:00",
+      "last_ts": "2026-08-04T02:16:55.814077+00:00"
+    },
+    "job_state": "done"
+  }
+}

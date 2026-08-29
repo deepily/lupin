@@ -231,3 +231,34 @@ def isolated_unit_test():
 
 if __name__ == "__main__":
     unittest.main( verbosity=2 )
+
+
+class TestHumanOnlyRidesToDict( unittest.TestCase ):
+    """
+    human_only must survive push_notification → NotificationItem → to_dict, so it
+    reaches the WS event the auto-answer Responder reads (row 804afce6). A silent
+    drop here is the false-security failure: flag set at the MCP surface, never
+    delivered to the proxy.
+    """
+
+    def setUp( self ):
+        # Patch InputAndOutputTable so construction never touches the DB/io layer.
+        self._io_tbl_patch = patch( "cosa.rest.notification_fifo_queue.InputAndOutputTable" )
+        self._io_tbl_patch.start()
+        from cosa.rest.notification_fifo_queue import NotificationFifoQueue
+        self.NotificationFifoQueue = NotificationFifoQueue
+
+    def tearDown( self ):
+        self._io_tbl_patch.stop()
+
+    def test_push_notification_threads_human_only_into_to_dict( self ):
+        queue = self.NotificationFifoQueue( websocket_mgr=None, emit_enabled=False )
+        item  = queue.push_notification( message="Self-re-spin now?", response_type="yes_no",
+                                         response_requested=True, human_only=True )
+        self.assertTrue( item.human_only )
+        self.assertTrue( item.to_dict()[ "human_only" ] )
+
+    def test_human_only_defaults_false_in_to_dict( self ):
+        queue = self.NotificationFifoQueue( websocket_mgr=None, emit_enabled=False )
+        item  = queue.push_notification( message="ordinary" )
+        self.assertFalse( item.to_dict()[ "human_only" ] )

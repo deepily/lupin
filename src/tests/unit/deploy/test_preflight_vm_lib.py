@@ -466,3 +466,361 @@ def test_harness_would_catch_a_missing_function():
     """The negative control for 'the lib sourced at all'."""
     r = _run( "pfv_this_function_does_not_exist" )
     assert r.returncode != 0
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# pfv_pyc_expected_source / pfv_pyc_orphan_class / pfv_scan_orphan_pyc
+#
+# Row 70364793 (2026-08-18): the LanceDB sweep deleted two .py files, the VM
+# deploys by git checkout, and __pycache__ is gitignored — so git removed the
+# sources and left the bytecode. Nothing in the deploy path removed it and
+# nothing looked for it. These are the tests for the thing that now looks.
+# ══════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.parametrize( "pyc, expected", [
+    # PEP 3147 layout — the tag is stripped, the directory steps up one level.
+    ( "pkg/__pycache__/mod.cpython-313.pyc",              "pkg/mod.py"  ),
+    ( "pkg/__pycache__/mod.cpython-313.opt-2.pyc",        "pkg/mod.py"  ),
+    # THE FALSE-POSITIVE GENERATOR. pytest's assertion rewriter writes a DOTTED
+    # tag, so stripping one trailing component leaves "mod.cpython-313-pytest-8.4",
+    # whose .py never existed — and every rewritten test file in the repo reports
+    # as an orphan. Measured on this tree the first time it ran: 1375 findings,
+    # essentially all of them this. A detector that cries wolf 1375 times is a
+    # detector nobody reads, which is worse than no detector at all.
+    ( "pkg/__pycache__/mod.cpython-313-pytest-8.4.2.pyc", "pkg/mod.py"  ),
+    ( "pkg/__pycache__/mod.cpython-311.pyc",              "pkg/mod.py"  ),
+    # Legacy sibling layout — no tag to strip, the whole stem is the module name.
+    ( "pkg/mod.pyc",                                      "pkg/mod.py"  ),
+    # A bare name has no directory component; the parent is the working directory.
+    ( "mod.pyc",                                          "./mod.py"    ),
+    ( "__pycache__/mod.cpython-313.pyc",                  "./mod.py"    ),
+    # Stepping out of a root-level __pycache__ leaves an empty parent, which the
+    # format string turns back into a leading slash.
+    ( "/__pycache__/mod.cpython-313.pyc",                 "/mod.py"     ),
+    # The real one, from the incident.
+    ( "src/cosa/memory/__pycache__/lancedb_solution_manager.cpython-313.pyc",
+      "src/cosa/memory/lancedb_solution_manager.py" ),
+] )
+def test_pyc_expected_source_maps_bytecode_back_to_its_source( pyc, expected ):
+    r = _run( f"pfv_pyc_expected_source '{pyc}'" )
+    assert r.returncode == 0
+    assert r.stdout == expected
+
+
+@pytest.mark.parametrize( "not_a_pyc", [ "pkg/mod.py", "pkg/mod", "", "mod.pyc.bak" ] )
+def test_pyc_expected_source_refuses_a_non_pyc( not_a_pyc ):
+    """
+    Answering this for a .py would FABRICATE a source path. Returning 2 with no
+    output keeps "wrong question" distinguishable from "no answer".
+    """
+    r = _run( f"pfv_pyc_expected_source '{not_a_pyc}'" )
+    assert r.returncode == 2
+    assert r.stdout == ""
+
+
+@pytest.mark.parametrize( "pyc, expected", [
+    ( "pkg/__pycache__/mod.cpython-313.pyc", "DEAD"       ),
+    ( "__pycache__/mod.cpython-313.pyc",     "DEAD"       ),
+    ( "pkg/mod.pyc",                         "SOURCELESS" ),
+    ( "mod.pyc",                             "SOURCELESS" ),
+] )
+def test_pyc_orphan_class_separates_what_runs_from_what_cannot( pyc, expected ):
+    r = _run( f"pfv_pyc_orphan_class '{pyc}'" )
+    assert r.returncode == 0
+    assert r.stdout == expected
+
+
+def test_pyc_orphan_class_refuses_a_non_pyc():
+    r = _run( "pfv_pyc_orphan_class 'pkg/mod.py'" )
+    assert r.returncode == 2
+    assert r.stdout == ""
+
+
+def test_the_class_split_matches_what_cpython_ACTUALLY_does( tmp_path ):
+    """
+    THE MEASUREMENT THE TIERING RESTS ON — run against the live interpreter, not
+    asserted from the PEP.
+
+    A __pycache__ orphan is INERT: Python refuses to import it once the .py is
+    gone. A sibling .pyc is LIVE: sourceless import still works. If that ever
+    stops being true, this test fails and the BLOCK/WARN split in preflight-vm.sh
+    B5 is wrong — which is the only reason the split is defensible at all. Tiering
+    a deploy-blocker on bytecode that provably cannot execute would be an alarm on
+    something that cannot hurt anyone, and readers learn to skip such tiers.
+    """
+    pkg = tmp_path / "impl"
+    pkg.mkdir()
+    ( pkg / "ghost.py" ).write_text( "VALUE = 'orphan'\n" )
+    compiled = subprocess.run(
+        [ "python3", "-c", "import ghost" ], cwd=pkg, capture_output=True, text=True
+    )
+    assert compiled.returncode == 0, compiled.stderr
+
+    ( pkg / "ghost.py" ).unlink()
+    cached = list( ( pkg / "__pycache__" ).glob( "ghost.*.pyc" ) )
+    assert len( cached ) == 1
+
+    inert = subprocess.run(
+        [ "python3", "-c", "import ghost" ], cwd=pkg, capture_output=True, text=True
+    )
+    assert inert.returncode != 0
+    assert "ModuleNotFoundError" in inert.stderr
+    assert _run( f"pfv_pyc_orphan_class '{cached[ 0 ]}'" ).stdout == "DEAD"
+
+    sibling = pkg / "ghost.pyc"
+    sibling.write_bytes( cached[ 0 ].read_bytes() )
+    live = subprocess.run(
+        [ "python3", "-c", "import ghost; print( ghost.VALUE )" ],
+        cwd=pkg, capture_output=True, text=True
+    )
+    assert live.returncode == 0, live.stderr
+    assert "orphan" in live.stdout
+    assert _run( f"pfv_pyc_orphan_class '{sibling}'" ).stdout == "SOURCELESS"
+
+
+def _plant( root, rel, body="" ):
+    p = root / rel
+    p.parent.mkdir( parents=True, exist_ok=True )
+    p.write_text( body )
+    return p
+
+
+def test_scan_orphan_pyc_is_SILENT_and_zero_on_a_clean_tree( tmp_path ):
+    _plant( tmp_path, "pkg/live.py", "x = 1\n" )
+    _plant( tmp_path, "pkg/__pycache__/live.cpython-313.pyc" )
+    _plant( tmp_path, "pkg/__pycache__/live.cpython-313-pytest-8.4.2.pyc" )
+    r = _run( f"pfv_scan_orphan_pyc '{tmp_path}'" )
+    assert r.returncode == 0
+    assert r.stdout == ""
+
+
+def test_scan_orphan_pyc_reports_a_dead_orphan( tmp_path ):
+    _plant( tmp_path, "pkg/live.py", "x = 1\n" )
+    orphan = _plant( tmp_path, "pkg/__pycache__/lancedb_solution_manager.cpython-313.pyc" )
+    r = _run( f"pfv_scan_orphan_pyc '{tmp_path}'" )
+    assert r.returncode == 1
+    assert r.stdout.strip().split( "\n" ) == [ f"DEAD\t{orphan}" ]
+
+
+def test_scan_orphan_pyc_reports_a_sourceless_orphan( tmp_path ):
+    orphan = _plant( tmp_path, "pkg/ghost.pyc" )
+    r = _run( f"pfv_scan_orphan_pyc '{tmp_path}'" )
+    assert r.returncode == 1
+    assert r.stdout.strip().split( "\n" ) == [ f"SOURCELESS\t{orphan}" ]
+
+
+def test_scan_orphan_pyc_classifies_a_mixed_tree( tmp_path ):
+    _plant( tmp_path, "pkg/live.py", "x = 1\n" )
+    _plant( tmp_path, "pkg/__pycache__/live.cpython-313.pyc" )
+    dead = _plant( tmp_path, "pkg/__pycache__/gone.cpython-313.pyc" )
+    live = _plant( tmp_path, "pkg/ghost.pyc" )
+    r = _run( f"pfv_scan_orphan_pyc '{tmp_path}'" )
+    assert r.returncode == 1
+    assert sorted( r.stdout.strip().split( "\n" ) ) == sorted(
+        [ f"DEAD\t{dead}", f"SOURCELESS\t{live}" ]
+    )
+
+
+@pytest.mark.parametrize( "pruned", [
+    ".venv/lib/site-packages",
+    "venv/lib",
+    "node_modules/thing",
+    ".git/hooks",
+    "site-packages/wheelpkg",
+    ".claude/worktrees/other-checkout/src/cosa",
+] )
+def test_scan_orphan_pyc_prunes_trees_that_are_not_ours( tmp_path, pruned ):
+    """
+    A wheel may legitimately ship .pyc without .py, and a worktree is a second
+    checkout whose bytecode no deploy serves. Reporting either buries the real
+    finding — the same noise problem as the pytest tag, from a different direction.
+    """
+    _plant( tmp_path, f"{pruned}/__pycache__/thirdparty.cpython-313.pyc" )
+    r = _run( f"pfv_scan_orphan_pyc '{tmp_path}'" )
+    assert r.returncode == 0
+    assert r.stdout == ""
+
+
+def test_scan_orphan_pyc_still_sees_a_real_orphan_beside_a_pruned_tree( tmp_path ):
+    """
+    The negative control for the pruning test above: prove the prune skips the
+    vendored tree and not simply everything. Without this, all six parametrised
+    cases could pass on a scanner that found nothing anywhere.
+    """
+    _plant( tmp_path, ".venv/lib/__pycache__/thirdparty.cpython-313.pyc" )
+    orphan = _plant( tmp_path, "pkg/__pycache__/ours.cpython-313.pyc" )
+    r = _run( f"pfv_scan_orphan_pyc '{tmp_path}'" )
+    assert r.returncode == 1
+    assert r.stdout.strip().split( "\n" ) == [ f"DEAD\t{orphan}" ]
+
+
+def test_scan_orphan_pyc_returns_2_when_it_could_not_look( tmp_path ):
+    """
+    NOT 0. A scan that could not look must never report what a clean scan reports.
+    The runner routes this through report/unknown at BLOCK tier, so an unreadable
+    root stops a deploy instead of reading as coverage.
+    """
+    r = _run( f"pfv_scan_orphan_pyc '{tmp_path}/nowhere'" )
+    assert r.returncode == 2
+    assert r.stdout == ""
+
+
+def test_scan_orphan_pyc_returns_2_when_handed_a_file_not_a_directory( tmp_path ):
+    f = _plant( tmp_path, "notadir.txt", "x" )
+    r = _run( f"pfv_scan_orphan_pyc '{f}'" )
+    assert r.returncode == 2
+    assert r.stdout == ""
+
+
+def test_scan_orphan_pyc_runs_against_the_real_repo_tree():
+    """
+    The instrument is exercised against the tree it exists to police. A scanner
+    proven only on fixtures can pass while being unable to walk production layout
+    — which is exactly how the pytest-tag defect survived the fixtures and only
+    surfaced on first contact with this repo.
+    """
+    src = os.path.join( PROJECT_ROOT, "src" )
+    r = _run( f"pfv_scan_orphan_pyc '{src}'" )
+    assert r.returncode in ( 0, 1 )
+    for line in [ l for l in r.stdout.split( "\n" ) if l ]:
+        cls, _, path = line.partition( "\t" )
+        assert cls in ( "DEAD", "SOURCELESS" )
+        assert path.endswith( ".pyc" )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# pfv_environ_lookup  (row e7048496 — the /proc/1/environ witness)
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_environ_lookup_finds_a_set_variable():
+    r = _run( "printf 'A=1\\nJWT_SECRET_KEY=deadbeef\\nB=2\\n' | pfv_environ_lookup JWT_SECRET_KEY" )
+    assert r.returncode == 0
+    assert r.stdout == "deadbeef"
+
+
+def test_environ_lookup_returns_nonzero_for_an_absent_variable():
+    """The failing arm. Without it the function could `return 0` always and every
+    caller would read UNSET as SET."""
+    r = _run( "printf 'A=1\\nB=2\\n' | pfv_environ_lookup JWT_SECRET_KEY" )
+    assert r.returncode == 1
+    assert r.stdout == ""
+
+
+def test_environ_lookup_reports_set_but_EMPTY_as_set():
+    """Set-but-empty and unset are DIFFERENT failures with different remedies; C6
+    reports them differently, so the witness must not collapse them."""
+    r = _run( "printf 'JWT_SECRET_KEY=\\nB=2\\n' | pfv_environ_lookup JWT_SECRET_KEY" )
+    assert r.returncode == 0
+    assert r.stdout == ""
+
+
+def test_environ_lookup_keeps_equals_signs_inside_the_value():
+    r = _run( "printf 'DSN=host=db;port=5432\\n' | pfv_environ_lookup DSN" )
+    assert r.returncode == 0
+    assert r.stdout == "host=db;port=5432"
+
+
+def test_environ_lookup_does_not_match_a_name_that_is_merely_a_suffix():
+    """`GH_TOKEN` must not be answered by a line for `MY_GH_TOKEN` — a sloppy match
+    would pass a deploy on the strength of the wrong variable."""
+    r = _run( "printf 'MY_GH_TOKEN=x\\n' | pfv_environ_lookup GH_TOKEN" )
+    assert r.returncode == 1
+
+
+def test_environ_lookup_takes_the_FIRST_match():
+    """getenv() in the container returns the first entry; the witness must agree with
+    what the process itself would see."""
+    r = _run( "printf 'X=first\\nX=second\\n' | pfv_environ_lookup X" )
+    assert r.returncode == 0
+    assert r.stdout == "first"
+
+
+def test_environ_lookup_reads_a_final_line_with_no_trailing_newline():
+    r = _run( "printf 'A=1\\nX=last' | pfv_environ_lookup X" )
+    assert r.returncode == 0
+    assert r.stdout == "last"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# pfv_env_file_supplies  (row e7048496 — the bootstrap exemption's evidence)
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_env_file_supplies_returns_0_for_a_nonempty_value( tmp_path ):
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "OTHER=1\nJWT_SECRET_KEY=0123456789abcdef\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 0
+
+
+def test_env_file_supplies_returns_1_for_an_EMPTY_value( tmp_path ):
+    """An empty entry must NOT read as supply: `${VAR:?}` aborts on empty exactly as
+    it aborts on unset, so the recreate would fail and the exemption would have been
+    a false promise."""
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "JWT_SECRET_KEY=\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 1
+
+
+def test_env_file_supplies_returns_2_when_the_name_is_absent( tmp_path ):
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "OTHER=1\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 2
+
+
+def test_env_file_supplies_returns_3_when_the_file_is_unreadable( tmp_path ):
+    """Cannot-tell is its own answer and is never a pass — the rule pfv_classify_probe
+    exists to enforce."""
+    missing = tmp_path / "nope.env"
+    assert _run( f"pfv_env_file_supplies '{missing}' JWT_SECRET_KEY" ).returncode == 3
+    assert _run( "pfv_env_file_supplies '' JWT_SECRET_KEY" ).returncode == 3
+
+
+def test_env_file_supplies_ignores_a_COMMENTED_OUT_assignment( tmp_path ):
+    """cloud-gpu.env:31 carries exactly this shape for CLAUDE_CODE_OAUTH_TOKEN, so a
+    scanner counting `#NAME=...` as supply would manufacture a false exemption on a
+    real file in this repo."""
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "# CLAUDE_CODE_OAUTH_TOKEN=sk-live-xxxx\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' CLAUDE_CODE_OAUTH_TOKEN" ).returncode == 2
+    f.write_text( "   #CLAUDE_CODE_OAUTH_TOKEN=sk-live-xxxx\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' CLAUDE_CODE_OAUTH_TOKEN" ).returncode == 2
+
+
+def test_env_file_supplies_lets_the_LAST_assignment_win( tmp_path ):
+    """Both compose's env-file reader and a shell resolve a repeated name to the last
+    one, so a later blank-out must be seen as the blank-out it is."""
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "JWT_SECRET_KEY=good\nJWT_SECRET_KEY=\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 1
+    f.write_text( "JWT_SECRET_KEY=\nJWT_SECRET_KEY=good\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 0
+
+
+def test_env_file_supplies_accepts_an_export_prefixed_shell_style_file( tmp_path ):
+    f = tmp_path / "host.env"
+    f.write_text( "  export JWT_SECRET_KEY=abc\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 0
+
+
+def test_env_file_supplies_strips_one_layer_of_matching_quotes( tmp_path ):
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( 'JWT_SECRET_KEY=""\n' )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 1, \
+        "a quoted-empty value is still empty"
+    f.write_text( "JWT_SECRET_KEY='abc'\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" ).returncode == 0
+
+
+def test_env_file_supplies_does_not_match_a_name_that_is_merely_a_suffix( tmp_path ):
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "MY_GH_TOKEN=x\n" )
+    assert _run( f"pfv_env_file_supplies '{f}' GH_TOKEN" ).returncode == 2
+
+
+def test_env_file_supplies_never_prints_the_secret( tmp_path ):
+    """These rows are SECRET-shaped and a preflight is run precisely when someone is
+    confused — i.e. when they are most likely to paste its output somewhere."""
+    f = tmp_path / "cloud-gpu.env"
+    f.write_text( "JWT_SECRET_KEY=super-secret-value\n" )
+    r = _run( f"pfv_env_file_supplies '{f}' JWT_SECRET_KEY" )
+    assert "super-secret-value" not in r.stdout
+    assert "super-secret-value" not in r.stderr

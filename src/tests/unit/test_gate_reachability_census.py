@@ -14,9 +14,10 @@ to look.
 
 THE LEDGER: `gate-reachability-allowlist.json` beside this file. Every entry is
 a file someone chose not to gate, with a dated reason. The point is not that
-the list is short — today it is 477 entries long. The point is that the gap is
-ENUMERATED instead of silent, and that adding the 478th requires editing a
-checked-in file rather than nobody noticing.
+the list is short — after the src/cosa/tests/** wire-in (row c9d3ddcb) it is 88
+entries long, down from 486 once those ~398 files became gate-reachable. The
+point is that the gap is ENUMERATED instead of silent, and that adding the next
+entry requires editing a checked-in file rather than nobody noticing.
 
 THE RED ARM: `test_detector_reports_the_witness_when_not_allowlisted` runs the
 detector against the original witness with the allowlist withdrawn and asserts
@@ -25,6 +26,7 @@ cannot, so that proof runs on every unit-suite pass — not once, at authoring t
 """
 
 import json
+import subprocess
 
 from pathlib import Path
 
@@ -106,6 +108,43 @@ def test_every_allowlist_entry_carries_a_reason( allowlist ):
     reasonless = sorted( key for key, reason in allowlist.items() if not reason.strip() )
 
     assert reasonless == [], f"ledger entries with an empty reason: {reasonless}"
+
+
+def test_every_allowlist_key_names_a_file_git_tracks( project_root, allowlist ):
+    """
+    The question the reason audit never asked: are the KEYS real?
+
+    A reason can be audited by reading the file it points at. That check assumes
+    the file is part of the project. An entry naming a path git has never tracked
+    is an exemption for something that exists on ONE developer's disk and in no
+    clone, worktree or CI checkout — so the ledger answers differently depending
+    on which checkout you ask it from. Row c4dd7768: 14 `src/tmp/` entries were
+    exactly that, and `test_allowlist_has_no_stale_entries` was green in the main
+    checkout and red in every worktree because of them.
+
+    Deliberately NOT skipped when git is unavailable — a guard that stands down
+    when it cannot measure is the silence it was written to end. The ledger file
+    itself is the proof that git answered: if it is absent from `git ls-files`,
+    the command failed rather than the ledger being clean.
+    """
+    listing = subprocess.run(
+        [ "git", "-C", str( project_root ), "ls-files" ],
+        capture_output=True, text=True, check=True,
+    )
+    tracked = set( listing.stdout.split( "\n" ) )
+    ledger  = f"src/tests/unit/{ALLOWLIST_NAME}"
+
+    assert ledger in tracked, (
+        f"git listed no tracked files at {project_root} — the listing failed, so this guard "
+        "cannot conclude anything about the ledger's keys"
+    )
+
+    untracked = sorted( key for key in allowlist if key not in tracked )
+
+    assert untracked == [], (
+        f"{len( untracked )} ledger entry(ies) name a path git does not track, so they exempt "
+        "files that exist in this checkout and in no other:\n  " + "\n  ".join( untracked )
+    )
 
 
 # ---------------------------------------------------------------------------

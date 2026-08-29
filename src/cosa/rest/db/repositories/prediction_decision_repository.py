@@ -1,13 +1,12 @@
 """
 PredictionDecisionRepository — Postgres+pgvector storage for the
-``prediction_decisions`` decision-proxy VECTOR store (LanceDB source:
-ProxyDecisionEmbeddings).
+``prediction_decisions`` decision-proxy VECTOR store.
 
 DISTINCT from the relational ``proxy_decisions`` log served by
 ProxyDecisionRepository — this is the 1:1 vector mirror whose
 ``question_embedding`` IS ANN-searched (HNSW dot). Storage-only: embeddings are
-supplied by the caller. ``find_similar`` mirrors the LanceDB semantics: dot
-nearest-k, similarity clamped to [0,100], threshold applied as a percentage.
+supplied by the caller. ``find_similar`` does dot nearest-k, similarity clamped
+to [0,100], threshold applied as a percentage.
 
 Created: 2026-07-01 (Lane B · Tiffany 💍) · v0.2.0
 """
@@ -112,8 +111,8 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
 
     def delete_all( self ) -> int:
         """
-        Delete every row in prediction_decisions (test-reset parity with the
-        LanceDB drop_table path; the table itself is alembic-managed and kept).
+        Delete every row in prediction_decisions (test reset; the table itself
+        is alembic-managed and kept).
 
         Ensures:
             - removes all rows; returns the count deleted (caller commits)

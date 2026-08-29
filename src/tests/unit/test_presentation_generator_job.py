@@ -14,8 +14,12 @@ Tests cover:
 import os
 import pytest
 
+import cosa.utils.util as cu
+
 from cosa.rest.job_state import JobState
 from cosa.agents.presentation_generator.job import PresentationGeneratorJob
+from cosa.agents.presentation_generator.job import source_path_is_inside_the_project
+from cosa.agents.presentation_generator.job import resolve_source_path
 from cosa.agents.presentation_generator.config import PresentationConfig
 from cosa.agents.presentation_generator.orchestrator import PresentationOrchestratorAgent
 from cosa.agents.presentation_generator.state import (
@@ -81,6 +85,114 @@ def sample_slide():
 # Job Tests
 # =============================================================================
 
+class TestTheSourcePathGuardSurvivesTheDoor:
+    """
+    THE REGRESSION THIS PREVENTS. `/api/presentation-generator/submit` refused a source
+    path that escaped the project root with a 403, and nothing downstream re-checked —
+    the job simply opened whatever path it was handed. As that door retires into
+    `/api/v2/submit`, which takes a command and an args dict and knows nothing about
+    which of an agent's arguments happen to be file paths, the guard would have gone with
+    the handler and the retirement would have quietly become a path-traversal hole.
+
+    So the guard moved to where the file is actually opened. A guard on ONE entry point
+    protects that entry point; a guard on the job protects every caller — the voice path,
+    the v2 door, and whatever door is added next.
+    """
+
+    def _job( self, source_path ):
+        return PresentationGeneratorJob(
+            source_path = source_path,
+            user_id     = "user123",
+            user_email  = "test@test.com",
+            session_id  = "wise-penguin",
+            dry_run     = True,
+        )
+
+    def test_a_path_that_escapes_the_project_root_refuses_to_build( self ):
+        """
+        RED ON REVERT: drop the check from __init__ and the job builds happily around a
+        path pointing outside the project.
+        """
+        with pytest.raises( ValueError, match="escapes the project root" ):
+            self._job( "../../etc/passwd" )
+
+    def test_a_dotdot_path_wearing_a_leading_slash_is_refused_too( self ):
+        """`realpath` collapses the `..` segments before the comparison, so dressing the
+        escape up as an absolute path does not get past it."""
+        with pytest.raises( ValueError, match="escapes the project root" ):
+            self._job( "/../../etc/passwd" )
+
+    def test_an_ordinary_project_path_still_builds( self ):
+        """The negative control. Without it, a guard that refused EVERYTHING would pass
+        both tests above while breaking every real submission."""
+        job = self._job( "/io/deep-research/test@test.com/test-article.md" )
+        assert job.source_path == "/io/deep-research/test@test.com/test-article.md"
+
+    def test_a_relative_project_path_still_builds( self ):
+        job = self._job( "io/deep-research/test@test.com/test-article.md" )
+        assert job.source_path == "io/deep-research/test@test.com/test-article.md"
+
+    def test_a_leading_slash_means_project_relative_not_filesystem_absolute( self ):
+        """
+        This convention is the retiring door's, kept verbatim, and it is stated as a test
+        because the alternative reading is alarming: `/etc/passwd` is accepted HERE. It
+        resolves to `<project>/etc/passwd`, which does not exist, and the job's own
+        existence check refuses it a moment later. Changing the convention would silently
+        break every caller that writes `/io/deck.md` while looking like a hardening.
+        """
+        assert source_path_is_inside_the_project( "/etc/passwd" ) is True
+        assert source_path_is_inside_the_project( "/io/deck.md" ) is True
+        assert source_path_is_inside_the_project( "../outside.md" ) is False
+
+
+class TestOneResolutionRuleForTheSourcePath:
+    """
+    THE DEFECT THIS CLOSES, found while retiring the door rather than by reading it.
+    Two places resolved a source path by two DIFFERENT rules: the guard treated a leading
+    slash as PROJECT-relative, and the job's own existence check treated the same leading
+    slash as FILESYSTEM-absolute. Nothing noticed, because the retiring door always handed
+    the job an already-absolute path — the job's rule never ran on a project-relative one.
+
+    The browser cannot know the project root, so it sends `/io/deck.md`. Retire the door
+    without settling this and the Re-render button starts reporting "Source document not
+    found" for a file that is sitting right there. One rule now, read by both.
+    """
+
+    def test_a_project_relative_path_with_a_leading_slash_resolves_under_the_root( self ):
+        """RED ON REVERT: put back `full_path = self.source_path` for a leading slash and
+        `/io/deck.md` resolves to the filesystem root instead of the project."""
+        root = cu.get_project_root()
+        assert resolve_source_path( "/io/deck.md" ) == root + "/io/deck.md"
+
+    def test_a_bare_relative_path_resolves_under_the_root_too( self ):
+        root = cu.get_project_root()
+        assert resolve_source_path( "io/deck.md" ) == root + "/io/deck.md"
+
+    def test_a_path_already_under_the_root_is_left_alone( self ):
+        """The negative control, and the one the naive rule got wrong: prepending the root
+        to a path that already carries it double-roots into a misleading not-found. The
+        retiring door refused this spelling with a 400 for exactly that reason; there is
+        nothing left to refuse."""
+        root = cu.get_project_root()
+        assert resolve_source_path( root + "/io/deck.md" ) == root + "/io/deck.md"
+
+    def test_the_root_itself_is_left_alone( self ):
+        root = cu.get_project_root()
+        assert resolve_source_path( root ) == root
+
+    def test_resolving_twice_changes_nothing( self ):
+        """Idempotence is the property that lets a caller resolve early without fear —
+        without it, every layer that helpfully normalises would push the path deeper."""
+        once = resolve_source_path( "/io/deck.md" )
+        assert resolve_source_path( once ) == once
+
+    def test_the_guard_reads_the_same_rule( self ):
+        """The two must not drift apart again: whatever the resolver returns is what the
+        guard judges."""
+        assert source_path_is_inside_the_project( resolve_source_path( "/io/deck.md" ) ) is True
+        assert source_path_is_inside_the_project( "../../etc/passwd" ) is False
+
+
 class TestPresentationGeneratorJob:
     """Tests for PresentationGeneratorJob class."""
 
@@ -133,6 +245,7 @@ class TestPresentationGeneratorJob:
             session_id  = "s1"
         )
         assert job.target_duration_minutes is None
+        assert job.target_slide_count is None
         assert job.audience is None
         assert job.theme is None
         assert job.dry_run is False
@@ -154,6 +267,9 @@ class TestPresentationConfig:
         assert default_config.max_revisions == 3
         assert default_config.default_theme == "default"
         assert default_config.audience == "general"
+        assert default_config.audience_context is None       # new field, no INI default
+        assert default_config.target_slide_count is None     # unset -> derive from duration
+        assert default_config.max_source_chars == 200000     # shared source ceiling default
 
     def test_get_output_path_yaml( self, default_config ):
         """get_output_path generates correct YAML path."""
@@ -188,6 +304,80 @@ class TestPresentationConfig:
         assert config.title_style == "assertion"
         assert config.max_revisions == 3
         assert config.audience == "general"
+        # Shared `agent source content max chars` base key (also read by podcast).
+        assert config.max_source_chars == 200000
+        # Empty INI key `presentation generator target slide count` -> None (a None
+        # default with return_type="int" would crash on int(None); the raw read + coerce
+        # in from_config guards that). Unset -> the duration formula still governs.
+        assert config.target_slide_count is None
+
+    def test_from_config_coerces_explicit_slide_count( self ):
+        """A non-empty INI slide-count value is coerced to int (the override path)."""
+        class _FakeMgr:
+            """Returns '40' for the slide-count key, the passed default for all else."""
+            def get( self, key, default=None, return_type="string" ):
+                if key == "presentation generator target slide count":
+                    return "40"
+                return default
+        config = PresentationConfig.from_config( _FakeMgr() )
+        assert config.target_slide_count == 40
+
+
+class TestApplyJobOverrides:
+    """_apply_job_overrides overlays per-job args onto config; audience_context sentinel-guarded."""
+
+    def _job( self, **overrides ):
+        base = dict(
+            source_path = "/io/x.md", user_id = "u", user_email = "e@e.com",
+            session_id  = "s", dry_run = True,
+        )
+        base.update( overrides )
+        return PresentationGeneratorJob( **base )
+
+    def test_all_none_leaves_config_untouched( self ):
+        cfg    = PresentationConfig()
+        before = ( cfg.target_duration_minutes, cfg.audience, cfg.default_theme,
+                   cfg.content_model, cfg.audience_context )
+        self._job()._apply_job_overrides( cfg )
+        after  = ( cfg.target_duration_minutes, cfg.audience, cfg.default_theme,
+                   cfg.content_model, cfg.audience_context )
+        assert after == before
+
+    def test_all_set_overrides_config( self ):
+        cfg = PresentationConfig()
+        self._job(
+            target_duration_minutes = 60, audience = "expert", theme = "dark",
+            content_model = "claude-opus-5", audience_context = "PhD physicists",
+        )._apply_job_overrides( cfg )
+        assert cfg.target_duration_minutes == 60
+        assert cfg.audience              == "expert"
+        assert cfg.default_theme         == "dark"
+        assert cfg.content_model         == "claude-opus-5"
+        assert cfg.audience_context      == "PhD physicists"
+
+    @pytest.mark.parametrize( "sentinel", [ "none", "None", "  NONE  ", "", "   " ] )
+    def test_audience_context_sentinel_not_copied( self, sentinel ):
+        cfg = PresentationConfig()
+        self._job( audience_context = sentinel )._apply_job_overrides( cfg )
+        assert cfg.audience_context is None   # sentinel/empty treated as "not provided"
+
+    def test_audience_context_real_value_copied( self ):
+        cfg = PresentationConfig()
+        self._job( audience_context = "startup founders" )._apply_job_overrides( cfg )
+        assert cfg.audience_context == "startup founders"
+
+    def test_target_slide_count_copied_when_set( self ):
+        """An explicit per-job slide count overlays onto config (T1)."""
+        cfg = PresentationConfig()
+        self._job( target_slide_count = 40 )._apply_job_overrides( cfg )
+        assert cfg.target_slide_count == 40
+
+    def test_target_slide_count_none_leaves_config_default( self ):
+        """No per-job slide count -> config keeps its INI/default value (None)."""
+        cfg = PresentationConfig()
+        assert cfg.target_slide_count is None
+        self._job()._apply_job_overrides( cfg )
+        assert cfg.target_slide_count is None
 
 
 # =============================================================================
@@ -519,22 +709,22 @@ class TestExpeditorIntegration:
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         args_list = json.loads( result.stdout.strip() )
-        assert args_list == [ "source", "target_duration_minutes", "audience", "audience_context", "theme" ]
+        assert args_list == [ "source", "target_duration_minutes", "target_slide_count", "audience", "audience_context", "theme" ]
 
     def test_registry_entry_exists( self ):
-        """Presentation generator is registered in AGENTIC_AGENTS."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        """Presentation generator is registered in JOB_ARG_CONTRACTS."""
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        entry = AGENTIC_AGENTS.get( "agent router go to presentation generator" )
+        entry = JOB_ARG_CONTRACTS.get( "agent router go to presentation generator" )
         assert entry is not None
         assert entry[ "job_prefix" ] == "pr"
         assert entry[ "display_name" ] == "Presentation Generator"
 
     def test_registry_entry_required_keys( self ):
         """Registry entry has all required keys."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        entry = AGENTIC_AGENTS[ "agent router go to presentation generator" ]
+        entry = JOB_ARG_CONTRACTS[ "agent router go to presentation generator" ]
         required_keys = {
             "job_prefix", "cli_module", "job_class_path", "display_name",
             "required_user_args", "system_provided", "arg_mapping",
@@ -544,24 +734,24 @@ class TestExpeditorIntegration:
 
     def test_registry_required_user_args( self ):
         """Only 'source' is a required user arg."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        entry = AGENTIC_AGENTS[ "agent router go to presentation generator" ]
+        entry = JOB_ARG_CONTRACTS[ "agent router go to presentation generator" ]
         assert entry[ "required_user_args" ] == [ "source" ]
 
     def test_registry_special_handlers( self ):
         """Source arg uses fuzzy_file_match handler."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        entry = AGENTIC_AGENTS[ "agent router go to presentation generator" ]
+        entry = JOB_ARG_CONTRACTS[ "agent router go to presentation generator" ]
         assert "special_handlers" in entry
         assert entry[ "special_handlers" ][ "source" ] == "fuzzy_file_match"
 
     def test_registry_arg_mapping_aliases( self ):
         """Arg mapping includes common voice aliases for source."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        mapping = AGENTIC_AGENTS[ "agent router go to presentation generator" ][ "arg_mapping" ]
+        mapping = JOB_ARG_CONTRACTS[ "agent router go to presentation generator" ][ "arg_mapping" ]
         # All these voice aliases should map to "source"
         for alias in [ "source", "source_path", "document", "file", "doc" ]:
             assert mapping[ alias ] == "source", f"Alias '{alias}' should map to 'source'"

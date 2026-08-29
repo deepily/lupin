@@ -2,6 +2,28 @@
 """
 Presentation Generator LIVE-RUN endpoint smoke test — Phase D verification.
 
+⚠️ VENUE: :8000 (test), NOT :7999 — AND THIS FILE IS STILL RUN BY THE :7999 SMOKE TIER,
+   SO IT IS EXPECTED RED THERE. Recorded 2026-08-26 (row 554e5d3e); NOT MOVED, deliberately.
+
+   Criterion tripped (CLAUDE.md § TESTING VENUES — a file is :8000 if ANY apply):
+     - real LLM spend (a live content-generation run, billed per token)
+     - runtime > 2 minutes
+   Evidence, from this file:
+     - usage lines pass `--cost-cap-usd 2.00` and `--cost-cap-usd 5.00`
+     - a documented variant runs `--timeout 1200` (20 min)
+     - the header block already names `POST /api/test-suite/submit` as the door
+   WHY IT WAS NOT MOVED. `run-smoke-tests.sh` runs the whole `src/tests/smoke/` directory,
+   so this file is executed on :7999 by the smoke merge gate regardless of what its
+   docstring says. Relocating it, or excluding it from the runner the way
+   test_proxy_integration.py is excluded, would deselect it from that gate — a change to
+   what the gate covers, which is an owner's decision and not a drive-by while clearing a
+   red list. So it stays, it stays red on :7999, and the reason is written here instead of
+   being re-derived by the next reader.
+
+   HOW TO RUN IT PROPERLY: submit via `POST /api/test-suite/submit` against :8000 on a
+   verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`,
+   exit 0 = IDLE). Never side-door it via curl or a direct queue push.
+
 Validates the full HTTP submit-and-poll lifecycle against a running server
 with REAL Claude API calls, the 4 orchestrator voice gates, and the full
 visual rendering pipeline. Uses the scripted notification proxy (profile:
@@ -73,7 +95,14 @@ from tests.smoke.utilities.interactive_smoke_test import InteractiveSmokeTest
 # Constants
 # ═══════════════════════════════════════════════════════════════════════════════
 
-SOURCE_DOC = "/src/rnd/v0.1.6/2026.03.14-presentation-generator/01-strategy-and-design.md"
+# Source research doc the presentation is built FROM. Overridable via env so a
+# scheduled test-suite run can target a specific doc (e.g. a user's own research
+# report) without editing this file. The env key uses the LUPIN_TEST_ prefix so
+# it survives TestSuiteJob's env_vars allowlist (_ENV_VAR_ALLOWED_PREFIXES).
+SOURCE_DOC = os.environ.get(
+    "LUPIN_TEST_PRESENTATION_SOURCE_DOC",
+    "/src/rnd/v0.1.6/2026.03.14-presentation-generator/01-strategy-and-design.md"
+)
 
 DEFAULT_COST_CAP_USD = 5.00
 
@@ -192,8 +221,16 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
     """
 
     TEST_NAME       = "Presentation Generator Live E2E"
-    SUBMIT_ENDPOINT = "/api/presentation-generator/submit"
-    DEFAULT_TIMEOUT = 900  # 15 min — includes ~400s test-suite scheduling overhead
+    # The dedicated door /api/presentation-generator/submit is retired (410); one front door now.
+    SUBMIT_ENDPOINT = "/api/v2/submit"
+    ROUTING_COMMAND = "agent router go to presentation generator"
+    # 900s equalled the real ~15-min build time with ZERO margin, so a normal build
+    # crossed the boundary and reported a false FAIL (bug e5473a72). Raised to 1800s
+    # (2x margin). This number is a FLOOR, not an estimate: only ONE real completed
+    # sample exists (job pr-bf7ac6f5, ~15 min, 15-slide deck). The real false-fail fix
+    # is _resolve_job_state in live_pipeline_base — on timeout the harness now reports
+    # the job's actual state (done/dead/run) instead of a bare "timeout".
+    DEFAULT_TIMEOUT = 1800
     POLL_INTERVAL   = 3
     REQUEST_TIMEOUT = 600
     SCENARIOS       = PRESENTATION_LIVE_SCENARIOS
@@ -237,19 +274,47 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
         Ensures:
             - Returns payload with dry_run=False and scenario's audience/duration
         """
-        payload = {
-            "source_path"             : scenario[ "source_path" ],
+        args = {
+            "source"                  : scenario[ "source_path" ],
             "target_duration_minutes" : scenario.get( "target_duration_minutes", 15 ),
             "audience"                : scenario.get( "audience", "general" ),
             "dry_run"                 : False,
         }
         if self._content_model:
-            payload[ "content_model" ] = self._content_model
+            args[ "content_model" ] = self._content_model
+
+        # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and
+        # answers 410 naming /api/v2/submit, which takes the routing command as a string
+        # and the agent's own arguments in `args`. The path arrives as `source` — the name
+        # the job factory already reads — and `parent_id_hash` stays TOP-LEVEL because it
+        # is a queue directive (Gate B lineage), not an argument to the agent, and `args`
+        # is checked against the command's own argument contract.
+        payload = {
+            "command"  : self.ROUTING_COMMAND,
+            "args"     : args,
+            "question" : scenario[ "source_path" ],
+        }
+        # Lineage tag (bug 5ed4f187): when this smoke runs as a child pytest inside a
+        # monopolizing test-suite job, the runner exports LUPIN_TEST_MONOPOLIZE_PARENT_ID
+        # (test_suite/job.py). Threading it as parent_id_hash lets the consumer's Gate B
+        # admit this child through the monopoly hold instead of starving it 900s.
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+        if parent_id:
+            payload[ "parent_id_hash" ] = parent_id
+        # Lineage probe (bug 0c4e8cfa diagnosis): when LUPIN_TEST_LINEAGE_PROBE_FILE
+        # is set, record — AT SUBMIT TIME, restart-proof — the env token this
+        # subprocess actually SAW and the parent_id_hash it actually STAMPED. Three
+        # readable states: env null → token never reached the subprocess; env set +
+        # stamp applied → harness OK; env set + stamp absent → get_submit_payload bug.
+        _probe = os.environ.get( "LUPIN_TEST_LINEAGE_PROBE_FILE" )
+        if _probe:
+            with open( _probe, "a" ) as _fh:
+                _fh.write( f"live_sonnet\t{parent_id}\t{payload.get( 'parent_id_hash' )}\n" )
         return payload
 
     def get_mode_for_scenario( self, scenario ):
         """
-        Presentation Generator uses its own endpoint — no mode switching.
+        Presentation Generator enters through /api/v2/submit — no mode switching.
 
         Ensures:
             - Always returns None
@@ -395,6 +460,7 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
             ( "cost_envelope",   self._check_cost_envelope( job_data ) ),
             ( "nonzero_cost",    self._check_nonzero_cost( job_data ) ),
             ( "slide_count",     self._check_slide_count( job_data ) ),
+            ( "deck_file",       self._check_deck_file( job_data ) ),
             ( "timestamps",      self._check_timestamps( job_data ) ),
             ( "no_stack_trace",  self._check_no_stack_trace( job_data ) ),
             ( "response_text",   self._check_response_text( job_data ) ),
@@ -480,6 +546,39 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
 
         # No slide count found anywhere — warn but don't fail (might be dry-run)
         return { "ok": False, "detail": "slide_count not found in artifacts or response_text" }
+
+    def _check_deck_file( self, job_data ):
+        """
+        Verify the FINISHED .pptx on disk via the authoritative recorded path
+        (job artifacts / done-queue metadata `pptx_path`) — NOT a basename
+        reconstructed from the .yaml stem, and NOT the intermediate slide-count
+        metadata `_check_slide_count` reads.
+
+        Row 63f4d4a6: the prior harness printed PASS off the yaml and never
+        opened the deck. This sub-check is the real-artifact gate — a deck that
+        never serialized (pptx_path absent/null) or is malformed is a HARD
+        failure, so `validate_result`'s aggregate cannot be PASS without a real
+        multi-slide deck on disk. The verdict is the gated
+        `verify_presentation_deck` (unit-proven in tests/unit).
+        """
+        from cosa.agents.presentation_generator.deck_verdict import verify_presentation_deck
+
+        artifacts = job_data.get( "artifacts" ) or {}
+        recorded  = job_data.get( "pptx_path" ) or artifacts.get( "pptx_path" )
+        if not recorded:
+            return { "ok": False, "detail": "no pptx_path recorded — deck never exported (yaml-only completion)" }
+
+        # The recorded path may be io-relative (job.artifacts) or absolute
+        # (job.pptx_path). Resolve to absolute against the project root.
+        abs_path = recorded
+        if not os.path.isabs( abs_path ):
+            import cosa.utils.util as cu
+            abs_path = os.path.join( cu.get_project_root(), recorded.lstrip( "/" ) )
+
+        verdict = verify_presentation_deck( abs_path )
+        if verdict:
+            return { "ok": True, "detail": f"real deck verified: {verdict.slide_count} slides, {verdict.size_bytes} bytes" }
+        return { "ok": False, "detail": f"deck check failed ({recorded}): {verdict.reason}" }
 
     def _check_timestamps( self, job_data ):
         """Verify started_at and completed_at are set."""

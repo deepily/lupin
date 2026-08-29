@@ -261,8 +261,9 @@ class TestNotifyUser( unittest.TestCase ):
             - Provides troubleshooting guidance
         """
         with patch( 'lupin_cli.notifications.notify_user.requests.post' ) as mock_post, \
-             patch( 'builtins.print' ) as mock_print:
-            
+             patch( 'builtins.print' ) as mock_print, \
+             patch( 'lupin_cli.notifications.notification_models.resolve_target_user', return_value="resolved@example.com" ):
+
             import requests
             mock_post.side_effect = requests.exceptions.ConnectionError()
             

@@ -33,6 +33,7 @@ from zoneinfo import ZoneInfo
 
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
+from cosa.rest.pytest_args_policy import validate_pytest_args, validate_timeout_against_suite_budget
 import cosa.utils.util as cu
 
 
@@ -48,6 +49,8 @@ SUITE_SCRIPTS = {
     "e2e"          : "src/scripts/run-e2e-ui-tests.sh",
     "all"            : "src/tests/run-all-tests.sh",
     "presentation"   : "src/tests/run-presentation-regression.sh",
+    "cosa"           : "src/tests/run-cosa-tests.sh",   # in-tree CoSA test tree (row c9d3ddcb); joined the merge pyramid 2026-08-13 (row d83d025b)
+    "v2_eval"        : "src/tests/run-v2-eval.sh",     # CJ Flow v2 paired eval (row 7e2125a7 D6). NOT in ALL_SUITE_COMPONENTS — ~105 min on the metered LLM path; see the runner's header
 }
 
 # Test types that accept a file path as the first positional pytest arg
@@ -62,22 +65,46 @@ FILE_DRIVEN_TEST_TYPES = frozenset( { "smoke_direct", "pytest_direct" } )
 # non-pytest suites can be added here as the project grows.
 SUITES_SUPPORTING_JUNIT_XML = frozenset( {
     "unit", "smoke", "smoke_direct", "pytest_direct",
-    "integration", "e2e", "all", "presentation",
+    "integration", "e2e", "all", "cosa",
 } )
+# NOTE (row 7e2125a7 D6): "v2_eval" is deliberately NOT here either. run-v2-eval.sh
+# wraps a plain python script, not pytest — an injected --junit-xml would reach
+# v2_eval.py's argparse as an unknown flag and kill the run at second one. It reports
+# through _parse_non_pytest_stdout, the same treatment as websocket and presentation.
+# NOTE (bug 89bfcc8f): "presentation" is deliberately NOT here. Its backing
+# script (run-presentation-regression.sh) is a MULTI-TIER orchestrator, not a
+# single pytest run — it ignores an injected --junit-xml, so the file is never
+# produced and _parse_junit_xml raised FileNotFoundError, mis-reporting a run as
+# 0/0/0/0. Presentation is parsed from its stdout tier summary instead (see
+# _parse_non_pytest_stdout), the same treatment as the websocket runner.
 
 # Per-suite max execution timeout (seconds). Process is killed if exceeded.
 # Values based on observed worst-case runtimes + 2x buffer. Tunable.
 SUITE_TIMEOUTS_SECONDS = {
-    "typescript"   : 1500,   # 25 min (observed 8m19s for 2,245 tests on 2026-07-21 WITHOUT c8; c8 instrumentation adds overhead, so ~2.5x margin over the uninstrumented run)
+    "typescript"   : 1500,   # 25 min. ⚠️ CORRECTED 2026-08-24: this used to read "8m19s ... WITHOUT c8;
+                             # c8 adds overhead, so ~2.5x margin over the uninstrumented run". That run WAS under
+                             # c8 — run-typescript-tests.sh:62 reports its coverage percentages, which only a c8
+                             # run produces. The two files described the same 07-21 run in contradictory terms and
+                             # the margin arithmetic here rested on the wrong half.
+                             # MEASURED 2026-08-24 (row 92e94cb7): c8 costs ~60% wall clock — 117 files ran 18s
+                             # bare vs 29s under c8. The budget still holds comfortably, but note WHY it is not
+                             # 29s for the suite: ONE file, audio_transport.test.ts, PASSES in 452s and owns
+                             # essentially the entire wall clock. Fix that file and this budget could drop by an
+                             # order of magnitude. Provenance: src/rnd/v0.2.0/2026.08.24-typescript-suite-memory-measured.md
     "unit"         : 300,    #  5 min (bumped from 180s on 2026-06-12: observed ~185s on ts-b51e63c9 — suite grew to ~6745 tests and the 180s budget killed it mid-run; ~1.6x margin over observed)
     "smoke"        : 3600,   # 60 min (bumped from 1800s on 2026-04-21: observed 2456s on ts-f55d172d — 160 tests + container_preflight adds overhead; ~1.46x margin over observed)
     "smoke_direct" : 1200,   # 20 min (longest: Phase D live ~10 min)
     "pytest_direct": 1200,   # 20 min (arbitrary pytest file — match smoke_direct budget)
     "websocket"    : 300,    #  5 min (~50 tests, server + WS)
-    "integration"  : 2000,   # 33 min (bumped from 1200s on 2026-04-21: observed 1392s when SWE-team dry-run tests ran — ~1.44x margin)
+    "integration"  : 30000,  # TEMP 2026-08-17 (row d8d019f6): 2000→30000 (~8.3h) for the full n=60 v2 paired CLOSING run — measured n=60 ≈ 4.8h (v1 ~6.7s/push + v2 ~22s/call), margin for the poweroff window. REVERT to 2000 at close. Prior: 33 min (bumped from 1200s on 2026-04-21: observed 1392s SWE-team dry-run — ~1.44x margin)
     "e2e"          : 3000,   # 50 min (bumped from 2400s on 2026-06-12: observed 2020.6s on ts-b51e63c9 — suite grew to ~593 tests, 2400s was only 1.19x margin; ~1.48x over observed)
     "all"            : 3600,   # 60 min (sequential pyramid, ~25-35 min observed)
     "presentation"   : 1800,   # 30 min (render-only + Sonnet; +Opus/R2P with flags)
+    "cosa"           : 900,    # 15 min (~8,800 tests; both-roots hand run was ~11 min for 21,721 on 2026-08-06 — ~1.5x margin)
+    "v2_eval"        : 9000,   # 150 min. MEASURED from io/v2-flow/eval-2026-08-21-11-37-48: cold ~93 min + warm ~11 min = ~105 min serial,
+                               # and that warm figure is the INLINE one — under `v2 executor = queued` with terminal waits the warm pass gets LONGER,
+                               # not shorter, because it waits for work the inline run did synchronously. ~1.4x margin over the measured inline total,
+                               # deliberately generous on that account. Provenance: src/rnd/v0.2.0/2026.08.26-v2-warm-replay-relabels-the-route.md §7.4
 }
 SUITE_TIMEOUT_DEFAULT_SECONDS = 600  # 10 min fallback for unknown types
 
@@ -109,7 +136,20 @@ STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 # types.ts / index.ts, each with a dated reason) live in
 # src/tests/run-typescript-tests.sh; that file is where the denominator is
 # defined and audited, not here.
-ALL_SUITE_COMPONENTS = [ "unit", "typescript", "smoke", "websocket", "integration", "e2e" ]
+# "cosa" joined the pyramid 2026-08-13 (row d83d025b) once its 4 stale-twin reds
+# were fixed. Before that the whole src/cosa/tests/** tree (~8,800 tests) had a
+# runner (row c9d3ddcb) but no gate RAN it — a green merge did not exercise it,
+# so its rot emitted nothing (the exact gap the gate-reachability census exists
+# to catch). Placed right after "unit": both are fast, server-free pytest, so
+# they fail early together. Keep this list identical (order included) to
+# run-all-tests.sh's SUITES array — test_typescript_suite_gate.py asserts it.
+# 🔴 "v2_eval" is registered in SUITE_SCRIPTS but is deliberately ABSENT from this list
+# (row 7e2125a7 D6). It is individually submittable, never part of "all": it runs ~105
+# minutes and spends real money on the metered firewalled LLM path, so putting it in the
+# merge pyramid would attach an hour and a half of billed work to every merge. Same
+# treatment as "presentation". Registration and gate-membership are separate decisions,
+# and conflating them is how a suite ends up either unreachable or unaffordable.
+ALL_SUITE_COMPONENTS = [ "unit", "cosa", "typescript", "smoke", "websocket", "integration", "e2e" ]
 
 
 def _expand_all( test_types: List[ str ] ) -> List[ str ]:
@@ -229,6 +269,34 @@ class TestSuiteJob( AgenticJobBase ):
 
         # Test parameters
         self.test_types          = test_types or [ "integration", "e2e" ]
+
+        # THE AUTHORITATIVE ALLOWLIST GATE (row 60f04102). It sits HERE, in the
+        # constructor, rather than only in the submit router, because EVERY path
+        # into execution runs through this constructor — HTTP submits, jobs
+        # rehydrated from persistence (job_persistence.py:765), and side channels
+        # such as capture-bounce-resubmit.py. A router-only check would leave all
+        # of those unguarded. The router calls the same function so a bad request
+        # is refused at the door with a clear 400, but that is usability; this is
+        # the control.
+        #
+        # WHY IT MATTERS: pytest_args reach subprocess.Popen at :1184 with only
+        # "--bg" stripped. There is no shell=True, so shell metacharacters are
+        # not the vector — pytest IMPORTS whatever path it is asked to collect,
+        # so an unconfined path is arbitrary code execution as the server's user.
+        #
+        # PytestArgsRejected subclasses ValueError, so the submit router's
+        # existing `except ValueError` already renders this as a 400.
+        validate_pytest_args( pytest_args or [], cu.get_project_root() )
+
+        # THE BUDGET-CONTRADICTION GATE (row 64677f38). Also here rather than only
+        # in the router, and for the same reason as the allowlist above: every path
+        # into execution runs through this constructor. Attempt 11 of the paired eval
+        # died because a --timeout typed into a submit request capped a single test at
+        # 90 minutes while the suite budget granted it 8.3 hours — a contradiction no
+        # file-reading test could see, because one of the two numbers was never in a file.
+        validate_timeout_against_suite_budget(
+            pytest_args or [], self.test_types, SUITE_TIMEOUTS_SECONDS, SUITE_TIMEOUT_DEFAULT_SECONDS )
+
         self.pytest_args         = pytest_args or []
         self.dry_run             = dry_run
         self.auto_fix_on_failure = auto_fix_on_failure
@@ -237,6 +305,11 @@ class TestSuiteJob( AgenticJobBase ):
         # Results (populated after execution)
         self.suite_results = {}
         self.cost_summary  = None  # Required by queues.py for unified job interface
+        # The 4-way verdict from _classify_outcome, published by the REAL run path only
+        # (row a9d19d18). Stays None on the dry-run path and on any early return, which
+        # is exactly what do_all uses to tell "a real run executed nothing" apart from
+        # "no real run happened" — a dry run also carries all-zero counts.
+        self.overall_status = None
 
     # Env vars exposed to the pytest subprocess are prefix-filtered so arbitrary
     # client-supplied vars can't leak into the runner. Extend the allowlist here
@@ -337,6 +410,46 @@ class TestSuiteJob( AgenticJobBase ):
                 if self.debug: print( "[TestSuiteJob] Cancelled by user request" )
                 return self.answer_conversational
 
+            # A run that executed ZERO tests did not complete its mandate — it is
+            # FAILED, not COMPLETED (row a9d19d18). Measured on ts-76be90f0: the
+            # subprocess exited 70 at startup, nothing ran, and the job still landed
+            # in the `done` queue reading "completed". `_classify_outcome` had
+            # already called it NOT EXECUTED; the state machine simply never asked.
+            #
+            # THE PREDICATE IS DELIBERATELY THE NARROW ONE — nothing executed at all,
+            # which is exactly `_classify_outcome`'s own first branch. A PARTIAL run
+            # (some tier ran, another did not) also classifies as NOT EXECUTED, and it
+            # deliberately KEEPS JobState.COMPLETED here: its counts and `all_passed`
+            # already tell the truth, and routing partials to the dead queue would be
+            # a behaviour change well outside this defect. Widen this only with a
+            # reason, not by tidying the condition.
+            #
+            # Genuine reds (tests ran, some failed) also stay COMPLETED: the JOB did
+            # its work and is reporting a red. The TestSuiteCompletionWatchdog expects
+            # exactly that — it reads the done queue and gates on all_passed.
+            # ⚠️ `overall_status is not None` is what distinguishes a REAL run from a
+            # DRY RUN, and it is load-bearing: the dry-run path also builds
+            # suite_results with all-zero counts, so a predicate keyed on the counts
+            # alone would mark every dry run FAILED. Only the real path publishes the
+            # verdict.
+            summary  = self.cost_summary or {}
+            executed = (
+                summary[ "total_passed" ] + summary[ "total_failed" ] +
+                summary[ "total_errors" ] + summary[ "total_skipped" ]
+            ) if self.overall_status is not None else -1
+
+            if executed == 0:
+                self.state        = JobState.FAILED
+                self.completed_at = cu.get_current_datetime_iso()
+                self.result       = result
+                self.error        = (
+                    f"Suite executed ZERO tests (verdict: {self.overall_status}). "
+                    f"A run that never executed has not passed — see the report for the startup output."
+                )
+                self.answer_conversational = result
+                if self.debug: print( f"[TestSuiteJob] NOTHING RAN — state=FAILED ({self.error})" )
+                return result
+
             self.state        = JobState.COMPLETED
             self.completed_at = cu.get_current_datetime_iso()
             self.result       = result
@@ -366,6 +479,119 @@ class TestSuiteJob( AgenticJobBase ):
             # Re-raise so the agentic-pool Future captures the exception.
             # Backlog item 5 (2026-04-29): canonical Future contract.
             raise
+
+    # Compact per-suite icons for the report table + abstract, keyed by the
+    # 3-way outcome so a non-executed suite never renders as a red "FAIL".
+    _OUTCOME_ICON = {
+        "PASSED"           : "PASS",
+        "FAILED"           : "FAIL",
+        "NOT EXECUTED"     : "NOT RUN",
+        "COLLECTION ERROR" : "COLLECT ERR",
+    }
+
+    @staticmethod
+    def _classify_outcome( passed: int, failed: int, errors: int, skipped: int,
+                           not_executed: int = 0, collection_error: bool = False ) -> str:
+        """
+        Classify a run outcome from its parsed counts.
+
+        Requires:
+            - passed, failed, errors, skipped, not_executed are non-negative ints
+            - collection_error is True only when pytest failed during COLLECTION
+
+        Ensures:
+            - returns "COLLECTION ERROR" when collection_error is set, BEFORE any count
+              is consulted (row bc83f2df). A collection error in a TEST module writes a
+              junit carrying errors=1, which this method used to read as "FAILED" — a
+              string byte-identical to a genuine red. It is not a red: nothing ran. The
+              measured case held 3 tests across 2 files and the junit accounted for 1,
+              so the report also understated its own blast radius while sounding precise.
+              Counts cannot distinguish these cases, which is why the caller passes the
+              exit-code-derived fact instead of it being re-derived here.
+            - returns "NOT EXECUTED" when nothing was collected (all counts zero)
+              — a zero-count run is NON-EXECUTION, not a failure (bug 89bfcc8f: a
+              harness reporting "FAILED — 0/0/0/0" is trusted as a real red by the
+              next reader; the JUnit XML was never produced or no tests were
+              collected, which is an ERROR condition, not a test failure)
+            - returns "FAILED"  when at least one test failed or errored (a genuine
+              failure dominates — even if some tiers also did not run)
+            - returns "NOT EXECUTED" when nothing failed but at least one tier did
+              not run (multi-tier runner: a tier that never ran is not a pass and
+              not a failure — it must not read as green)
+            - returns "PASSED"  when tests ran, none failed or errored, and every
+              tier ran
+        """
+        if collection_error:
+            return "COLLECTION ERROR"
+        if ( passed + failed + errors + skipped + not_executed ) == 0:
+            return "NOT EXECUTED"
+        if ( failed + errors ) > 0:
+            return "FAILED"
+        if not_executed > 0:
+            return "NOT EXECUTED"
+        return "PASSED"
+
+
+    def _suite_abstract_line( self, suite_type: str, result: dict ) -> str:
+        """
+        One suite's line in the completion card the user actually reads.
+
+        Extracted from do_all so it can be tested directly (row 24a85385): the card
+        is the only place most readers ever learn what a run did, and nothing was
+        covering what it says.
+
+        Requires:
+            - result carries passed / failed / errors / skipped counts.
+
+        Ensures:
+            - always opens with the outcome icon and the counts.
+            - appends the startup-crash line when startup_crash_output is present.
+            - appends the FIRST failure's message when failure_details is non-empty,
+              plus an "and N more" tail — the message is the notice, the junit XML
+              stays the receipt.
+            - never raises on a missing or malformed failure_details entry; a card
+              that cannot be built is worse than a card missing one detail.
+
+        Raises:
+            - nothing
+        """
+        icon = self._OUTCOME_ICON[ self._classify_outcome(
+            result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
+            result.get( "not_executed", 0 ),
+            collection_error = result.get( "collection_diagnosis" ) is not None
+        ) ]
+        ne  = result.get( "not_executed", 0 )
+        des = result.get( "deselected", 0 )
+        line = ( f"- **{suite_type}**: {icon} — "
+                 f"{result[ 'passed' ]} passed, {result[ 'failed' ]} failed, "
+                 f"{result[ 'errors' ]} errors, {result[ 'skipped' ]} skipped"
+                 + ( f", {ne} not executed" if ne else "" )
+                 + ( f", {des} deselected" if des else "" ) )
+
+        crash_output = result.get( "startup_crash_output" )
+        if crash_output:
+            line += f"\n  **STARTUP CRASH** (exit={result[ 'exit_code' ]}): `{crash_output[ :500 ]}`"
+
+        # WHY THE COUNTS ALONE ARE NOT ENOUGH (row 24a85385). The junit XML has carried
+        # the failure message all along — _parse_junit_xml puts it in failure_details —
+        # but THIS CARD is what a human reads, and it said only "1 failed". On
+        # 2026-08-21 an eval run died on an integrity guard and the reader had to open
+        # the XML to learn it was not a broken assertion. The XML is the receipt; this
+        # is the notice.
+        #
+        # FIRST failure only, plus a count of the rest: this string is spoken aloud and
+        # rendered on a card, so a full list would bury the one line that says what
+        # happened. Same truncation discipline as the crash line above.
+        details = result.get( "failure_details" ) or []
+        if details:
+            first    = details[ 0 ] if isinstance( details[ 0 ], dict ) else {}
+            message  = ( first.get( "message" ) or "" ).strip()
+            headline = message.splitlines()[ 0 ] if message else "(no message on the failure element)"
+            line    += ( f"\n  **{first.get( 'type', 'FAILED' )}** "
+                         f"{first.get( 'name', '?' )}: `{headline[ :300 ]}`" )
+            if len( details ) > 1:
+                line += f"\n  …and {len( details ) - 1} more"
+        return line
 
     async def _execute( self ) -> str:
         """
@@ -486,35 +712,80 @@ class TestSuiteJob( AgenticJobBase ):
                 finally:
                     self._attest_tier_run( suite_type, result, started_at )
 
-                # Report per-suite results
-                suite_found  = result[ "passed" ] + result[ "failed" ] + result[ "skipped" ] + result[ "errors" ]
-                status       = "PASSED" if suite_found > 0 and ( result[ "failed" ] + result[ "errors" ] ) == 0 else "FAILED"
+                # Report per-suite results. A zero-count outcome is NON-EXECUTION
+                # (no JUnit XML / nothing collected), reported as "NOT EXECUTED"
+                # rather than the false-red "FAILED" (bug 89bfcc8f).
+                status       = self._classify_outcome(
+                    result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
+                    result.get( "not_executed", 0 ),
+                    collection_error = result.get( "collection_diagnosis" ) is not None
+                )
                 await voice_io.notify(
                     f"{suite_type}: {status} — {result[ 'passed' ]} passed, "
                     f"{result[ 'failed' ]} failed, {result[ 'errors' ]} errors, "
-                    f"{result[ 'skipped' ]} skipped",
+                    f"{result[ 'skipped' ]} skipped, "
+                    f"{result.get( 'not_executed', 0 )} not executed",
                     priority="low",
                     queue_name="run"
                 )
 
             # Build summary
-            total_passed  = sum( r[ "passed" ] for r in self.suite_results.values() )
-            total_failed  = sum( r[ "failed" ] for r in self.suite_results.values() )
-            total_skipped = sum( r[ "skipped" ] for r in self.suite_results.values() )
-            total_errors  = sum( r[ "errors" ] for r in self.suite_results.values() )
-            total_found   = total_passed + total_failed + total_skipped + total_errors
+            total_passed       = sum( r[ "passed" ]                     for r in self.suite_results.values() )
+            total_failed       = sum( r[ "failed" ]                     for r in self.suite_results.values() )
+            total_skipped      = sum( r[ "skipped" ]                    for r in self.suite_results.values() )
+            total_errors       = sum( r[ "errors" ]                     for r in self.suite_results.values() )
+            total_not_executed = sum( r.get( "not_executed", 0 )        for r in self.suite_results.values() )
+            total_deselected   = sum( r.get( "deselected", 0 )          for r in self.suite_results.values() )
+            # A filtered run (any deselected test) is a SLICE, not a full-suite
+            # gate (row f3beb6d5). This does NOT touch _classify_outcome —
+            # `all_passed` still reflects what actually ran; `filtered` tells the
+            # dashboard + watchdog the run was scoped so a slice can't masquerade
+            # as a full green.
+            filtered = ( total_deselected > 0 )
             # Determine pass/fail from parsed results, not exit code — exit code can be
-            # non-zero for warnings or cleanup even when all tests pass (335/0/0 false positive)
-            all_passed    = total_found > 0 and ( total_failed + total_errors ) == 0
+            # non-zero for warnings or cleanup even when all tests pass (335/0/0 false positive).
+            # A not-executed tier is neither a pass nor a failure: it blocks "all passed"
+            # without inflating the failure count (bug 89bfcc8f).
+            # A genuine failure anywhere still dominates the overall verdict — a suite
+            # that collected fine and went red is a red, and must not be softened into
+            # "collection error" because a DIFFERENT tier failed to collect. The
+            # collection state applies only when nothing actually failed.
+            any_collection_error = any(
+                r.get( "collection_diagnosis" ) is not None for r in self.suite_results.values()
+            )
+            overall_status = self._classify_outcome(
+                total_passed, total_failed, total_errors, total_skipped, total_not_executed,
+                collection_error = any_collection_error and ( total_failed + total_errors ) == 0
+            )
+            all_passed = ( overall_status == "PASSED" )
+
+            # Hand the 4-way verdict up to do_all so the JOB STATE can reflect it
+            # (row a9d19d18). do_all used to set JobState.COMPLETED for anything that
+            # returned without raising, so a run whose subprocess crashed at startup
+            # having executed ZERO tests landed in the `done` queue reading
+            # "completed" — measured, ts-76be90f0. The correct verdict already exists
+            # right here; it simply was not carried anywhere the state machine reads.
+            #
+            # ⚠️ NOT a false green today, and the scope is deliberately narrow because
+            # of that: every machine consumer reads cost_summary["all_passed"], which
+            # is already correct (test_suite_completion_watchdog.py:150,
+            # test_fix_expediter/snapshot_loader.py:161). Grepped for a caller gating
+            # on JobState.COMPLETED / status == "completed" — every hit is queue
+            # plumbing, none is a pass/fail gate. This closes the gap before some
+            # future caller reaches for the more obvious field.
+            self.overall_status = overall_status
 
             # Store artifacts + cost_summary (required by queues.py unified interface)
             self.cost_summary = {
-                "suites_run"    : len( self.suite_results ),
-                "total_passed"  : total_passed,
-                "total_failed"  : total_failed,
-                "total_errors"  : total_errors,
-                "total_skipped" : total_skipped,
-                "all_passed"    : all_passed,
+                "suites_run"         : len( self.suite_results ),
+                "total_passed"       : total_passed,
+                "total_failed"       : total_failed,
+                "total_errors"       : total_errors,
+                "total_skipped"      : total_skipped,
+                "total_not_executed" : total_not_executed,
+                "total_deselected"   : total_deselected,
+                "filtered"           : filtered,
+                "all_passed"         : all_passed,
             }
             self.artifacts[ "suite_results" ] = self.suite_results
             self.artifacts[ "cost_summary" ]  = self.cost_summary
@@ -522,7 +793,16 @@ class TestSuiteJob( AgenticJobBase ):
                 if result.get( "log_path" ):
                     self.artifacts[ f"{suite_type}_log" ] = result[ "log_path" ]
 
-            overall = "ALL PASSED" if all_passed else "FAILURES DETECTED"
+            # Non-execution (nothing collected, or tiers that never ran with no
+            # genuine failure) is reported as "NOT EXECUTED", never the false-red
+            # "FAILURES DETECTED" (bug 89bfcc8f). overall_status already encodes the
+            # 3-way rule (FAILED dominates; not-executed blocks a clean pass).
+            overall = {
+                "PASSED"           : "ALL PASSED",
+                "FAILED"           : "FAILURES DETECTED",
+                "NOT EXECUTED"     : "NOT EXECUTED",
+                "COLLECTION ERROR" : "COLLECTION ERROR — THE SUITE DID NOT RUN",
+            }[ overall_status ]
 
             # ─── Write full report to io/ for the document viewer ───
             import urllib.parse
@@ -541,21 +821,32 @@ class TestSuiteJob( AgenticJobBase ):
             report_rel = f"test-suite/{timestamp}-{suites_str}-results.md"
             report_abs = f"{io_base}/{report_rel}"
 
+            # Name the scope in the header when the run was FILTERED (row f3beb6d5):
+            # a -k/-m slice must never read as a full-suite gate. selected =
+            # what actually ran; collected = selected + deselected.
+            selected_total  = total_passed + total_failed + total_errors + total_skipped
+            collected_total = selected_total + total_deselected
+            header_scope    = f" — FILTERED — {selected_total} of {collected_total} selected" if filtered else ""
+
             # Build markdown report with full stdout for each suite
             report_lines = [
-                f"# Test Suite Report — {overall}",
+                f"# Test Suite Report — {overall}{header_scope}",
                 f"",
                 f"**Date**: {now_local.strftime( '%Y-%m-%d %H:%M:%S %Z' )}  ",
                 f"**Suites**: {', '.join( self.test_types )}  ",
-                f"**Total**: {total_passed} passed, {total_failed} failed, {total_errors} errors, {total_skipped} skipped",
+                f"**Total**: {total_passed} passed, {total_failed} failed, {total_errors} errors, {total_skipped} skipped"
+                + ( f", {total_deselected} deselected" if filtered else "" ),
                 f"",
                 f"---",
                 f"",
             ]
 
             for suite_type, result in self.suite_results.items():
-                sf   = result[ "passed" ] + result[ "failed" ] + result[ "skipped" ] + result[ "errors" ]
-                icon = "PASS" if sf > 0 and ( result[ "failed" ] + result[ "errors" ] ) == 0 else "FAIL"
+                icon = self._OUTCOME_ICON[ self._classify_outcome(
+                    result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
+                    result.get( "not_executed", 0 ),
+                    collection_error = result.get( "collection_diagnosis" ) is not None
+                ) ]
                 report_lines.append( f"## {suite_type} — {icon}" )
                 report_lines.append( f"" )
                 report_lines.append( f"| Metric | Count |" )
@@ -564,6 +855,8 @@ class TestSuiteJob( AgenticJobBase ):
                 report_lines.append( f"| Failed | {result[ 'failed' ]} |" )
                 report_lines.append( f"| Skipped | {result[ 'skipped' ]} |" )
                 report_lines.append( f"| Errors | {result[ 'errors' ]} |" )
+                report_lines.append( f"| Not executed | {result.get( 'not_executed', 0 )} |" )
+                report_lines.append( f"| Deselected | {result.get( 'deselected', 0 )} |" )
                 report_lines.append( f"| Duration | {result[ 'duration' ]:.1f}s |" )
                 report_lines.append( f"" )
 
@@ -626,21 +919,13 @@ class TestSuiteJob( AgenticJobBase ):
                 self.artifacts[ "remediation_snapshot" ]      = snapshot
 
             # ─── Build abstract with summary ───
-            suite_lines = []
-            for suite_type, result in self.suite_results.items():
-                sf   = result[ "passed" ] + result[ "failed" ] + result[ "skipped" ] + result[ "errors" ]
-                icon = "PASS" if sf > 0 and ( result[ "failed" ] + result[ "errors" ] ) == 0 else "FAIL"
-                line = ( f"- **{suite_type}**: {icon} — "
-                         f"{result[ 'passed' ]} passed, {result[ 'failed' ]} failed, "
-                         f"{result[ 'errors' ]} errors, {result[ 'skipped' ]} skipped" )
-                crash_output = result.get( "startup_crash_output" )
-                if crash_output:
-                    line += f"\n  **STARTUP CRASH** (exit={result[ 'exit_code' ]}): `{crash_output[ :500 ]}`"
-                suite_lines.append( line )
+            suite_lines = [ self._suite_abstract_line( suite_type, result )
+                            for suite_type, result in self.suite_results.items() ]
 
-            abstract = ( f"**Test Suite Results: {overall}**\n\n"
+            abstract = ( f"**Test Suite Results: {overall}{header_scope}**\n\n"
                          + "\n".join( suite_lines )
-                         + f"\n\n**Total**: {total_passed} passed, {total_failed} failed, {total_errors} errors, {total_skipped} skipped" )
+                         + f"\n\n**Total**: {total_passed} passed, {total_failed} failed, {total_errors} errors, {total_skipped} skipped"
+                         + ( f", {total_deselected} deselected" if filtered else "" ) )
             self.artifacts[ "abstract" ] = abstract
 
             await voice_io.notify(
@@ -1083,7 +1368,7 @@ class TestSuiteJob( AgenticJobBase ):
                     "LUPIN_TEST_BASE_URL" : os.environ.get( "LUPIN_TEST_BASE_URL", f"http://localhost:{os.environ.get( 'PORT', '7999' )}" ),
                     # Lineage token (bug 3a14292b): this sweep's own id_hash, exposed to
                     # the pytest subprocess so any child job it spawns (e.g. a swe_team
-                    # dry-run via POST /api/swe-team/submit) can echo it back as
+                    # dry-run via POST /api/v2/submit) can echo it back as
                     # parent_id_hash. The consumer's Gate B then admits those children
                     # THROUGH the monopoly intake hold instead of starving them. Always
                     # injected — harmless when this sweep is not monopolize (Gate B never
@@ -1092,6 +1377,23 @@ class TestSuiteJob( AgenticJobBase ):
                     "LUPIN_TEST_MONOPOLIZE_PARENT_ID" : self.id_hash,
                     # Caller-supplied env (allowlist-filtered in __init__) overrides defaults.
                     **self.env_vars,
+                    # 🔴 PROVENANCE — DELIBERATELY AFTER **self.env_vars, so a caller cannot
+                    # overwrite it (row 224fbb68). Everything above is a default a caller may
+                    # override; this is a FACT about who ran the suite, and a run that can
+                    # relabel itself provides no provenance at all.
+                    #
+                    # WHY IT EXISTS: test_v2_paired_live.py:359 reads
+                    #     written_by = os.environ.get( "LUPIN_TEST_SUITE_JOB_ID" ) or "unknown-caller"
+                    # and stamps it into the paired-run artifact. Krishna measured that NOTHING
+                    # in the tree ever set that variable — no runner, no script, no compose file
+                    # — so `written_by` had been "unknown-caller" on every artifact ever written.
+                    # The dump function's own docstring calls that value the tell that nothing
+                    # identified itself as a real run; the tell could never fire, and a previous
+                    # session nearly read a scaffold artifact as a real result.
+                    #
+                    # The LUPIN_TEST_ prefix is already inside _ENV_VAR_ALLOWED_PREFIXES, so the
+                    # plumbing to carry it existed and was simply unused.
+                    "LUPIN_TEST_SUITE_JOB_ID" : self.id_hash,
                 }
             )
 
@@ -1308,9 +1610,28 @@ class TestSuiteJob( AgenticJobBase ):
                 if fallback is not None:
                     parsed.update( fallback )
 
+            # Deselect count is stdout-only (junit-xml counts selected tests
+            # only), so a -k/-m slice would otherwise read as a full pass
+            # (row f3beb6d5). Kept SEPARATE from not_executed — deselection is
+            # intentional scoping, not a tier that failed to run.
+            parsed[ "deselected" ] = self._parse_deselected( stdout )
+
             parsed[ "exit_code" ] = exit_code
             parsed[ "log_path" ]  = log_path
             parsed[ "duration" ]  = duration
+
+            # A collection error is SILENCE, not a red (row bc83f2df). Detect it from
+            # the exit code, which is the only signal that survives BOTH shapes: an error
+            # in a test module writes a junit (and used to read as FAILED), while an error
+            # in a conftest writes no junit and fires no pytest hook at all, so nothing
+            # in-process can see it. Failing soft on purpose — a diagnostic must never be
+            # able to change a suite's outcome by raising.
+            try:
+                from cosa.utils.pytest_collection_diagnosis import diagnose
+                parsed[ "collection_diagnosis" ] = diagnose( exit_code, stdout )
+            except Exception as e:
+                parsed[ "collection_diagnosis" ] = None
+                if self.debug: print( f"[TestSuiteJob] collection diagnosis unavailable: {e!r}" )
 
             # Capture stdout tail when subprocess crashed with no test output
             total_found = parsed[ "passed" ] + parsed[ "failed" ] + parsed[ "skipped" ] + parsed[ "errors" ]
@@ -1391,7 +1712,27 @@ class TestSuiteJob( AgenticJobBase ):
         "integration"  : "integration-latest.log",
         "e2e"          : "e2e-ui-latest.log",
         "all"          : "all-tests-latest.log",
+        # ⚠️ ADDED 2026-08-28. These three are registered in SUITE_SCRIPTS and were
+        # MISSING here, and a suite absent from this map has its stdout silently thrown
+        # away: `_write_stdout_log` no-ops on a falsy basename, so the run's only
+        # explanation of itself never reaches disk.
+        #
+        # Measured the same day: a v2_eval run failed in 2.5 seconds. The report said
+        # "0 passed, 1 failed" with no reason, the remediation snapshot carried
+        # `failures: []`, and the container log held only the notify traffic. There was
+        # no artifact anywhere naming what went wrong — the run had an explanation and
+        # this dict discarded it.
+        #
+        # It bites the NON-pytest suites hardest, which is the reverse of harmless: they
+        # have no junit-xml to fall back on, so stdout is the ONLY record they produce.
+        "presentation" : "presentation-latest.log",
+        "cosa"         : "cosa-latest.log",
+        "v2_eval"      : "v2_eval-latest.log",
     }
+
+    # Every suite that can be RUN must be able to explain itself. Kept next to the map
+    # so the next suite registration trips the test rather than the operator.
+    _SUITES_EXEMPT_FROM_STDOUT_LOG = frozenset()
 
     @classmethod
     def _log_symlink_path( cls, suite_type: str ) -> Optional[ str ]:
@@ -1508,13 +1849,15 @@ class TestSuiteJob( AgenticJobBase ):
             xml_path: Path to the junit-xml report file
 
         Returns:
-            dict: Parsed counts with keys: passed, failed, skipped, errors
+            dict: Parsed counts with keys: passed, failed, skipped, errors, not_executed
         """
         result = {
-            "passed"  : 0,
-            "failed"  : 0,
-            "skipped" : 0,
-            "errors"  : 0,
+            "passed"       : 0,
+            "failed"       : 0,
+            "skipped"      : 0,
+            "errors"       : 0,
+            "not_executed" : 0,   # tiers that never ran (multi-tier runners); 0 for pytest suites
+            "deselected"   : 0,   # -k/-m slice size (row f3beb6d5); parsed from stdout, NOT this XML
         }
 
         # None path = suite is not pytest-backed (e.g. websocket). Skip parse,
@@ -1662,6 +2005,43 @@ class TestSuiteJob( AgenticJobBase ):
                 pass
 
     @staticmethod
+    def _parse_deselected( stdout: str ) -> int:
+        """
+        Parse pytest's deselect count from captured stdout (row f3beb6d5).
+
+        The junit-xml carries NO deselect information — its `tests` attribute
+        counts only what was selected — so a `-k`/`-m` slice is invisible to
+        _parse_junit_xml, and a 5-of-692 run looks byte-identical to a full
+        green. This recovers the slice size so cost_summary can flag the run
+        as `filtered` and the report header can name the scope.
+
+        ⚠️ Deselection is INTENTIONAL SCOPING, not non-execution (bug 89bfcc8f).
+        The count returned here must NEVER be routed into `not_executed` — that
+        would red every filtered run, including the TFE landing/confirm runs
+        which are filtered BY DESIGN.
+
+        Two pytest forms carry the count; either one suffices:
+            collected 692 items / 687 deselected / 5 selected
+            ============== 5 passed, 687 deselected in 23.08s ==============
+
+        Requires:
+            - stdout is the captured runner stdout (may be empty)
+
+        Ensures:
+            - returns the deselected count when either form is present
+            - returns 0 when neither is present (an unfiltered run)
+            - prefers the collection form (the authoritative "/ M deselected /")
+              when both are present; the two forms agree in practice
+        """
+        collected = re.search( r"collected\s+\d+\s+items?\s*/\s*(\d+)\s+deselected", stdout )
+        if collected:
+            return int( collected.group( 1 ) )
+        trailer = re.search( r"(\d+)\s+deselected", stdout )
+        if trailer:
+            return int( trailer.group( 1 ) )
+        return 0
+
+    @staticmethod
     def _parse_pytest_progress_stdout( stdout: str ) -> Optional[ Dict ]:
         """
         Recover per-file result counts from pytest's COMPACT progress output.
@@ -1767,7 +2147,7 @@ class TestSuiteJob( AgenticJobBase ):
         Returns:
             dict | None: Parsed counts or None if format unrecognized.
         """
-        if suite_type not in ( "websocket", "typescript" ):
+        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval" ):
             return None
         if not stdout:
             return None
@@ -1777,16 +2157,29 @@ class TestSuiteJob( AgenticJobBase ):
         if suite_type == "typescript":
             return TestSuiteJob._parse_node_tap_summary( stdout )
 
-        total_match  = re.search( r"Total Tests:\s*(\d+)", stdout )
-        passed_match = re.search( r"\bPassed:\s*(\d+)",   stdout )
-        failed_match = re.search( r"\bFailed:\s*(\d+)",   stdout )
+        # presentation (run-presentation-regression.sh) prints a tier summary:
+        #   Total:  N tiers
+        #   Passed: N
+        #   Failed: N
+        # Its "Passed:/Failed:" lines are counts of TIERS, which we surface as
+        # passed/failed the same way websocket's runner summary is parsed. The
+        # shared Passed/Failed regexes below already match it (bug 89bfcc8f).
 
-        if not ( total_match or passed_match or failed_match ):
+        total_match         = re.search( r"Total Tests:\s*(\d+)",   stdout )
+        passed_match        = re.search( r"\bPassed:\s*(\d+)",      stdout )
+        failed_match        = re.search( r"\bFailed:\s*(\d+)",      stdout )
+        # "Not executed: N" — tiers that never ran (multi-tier runners like
+        # run-presentation-regression.sh). Surfaced distinctly so a tier that
+        # did not run reads NOT EXECUTED, not FAILED (bug 89bfcc8f).
+        not_executed_match  = re.search( r"Not executed:\s*(\d+)",  stdout )
+
+        if not ( total_match or passed_match or failed_match or not_executed_match ):
             return None
 
-        total  = int( total_match.group( 1 ) )  if total_match  else 0
-        passed = int( passed_match.group( 1 ) ) if passed_match else 0
-        failed = int( failed_match.group( 1 ) ) if failed_match else 0
+        total        = int( total_match.group( 1 ) )        if total_match        else 0
+        passed       = int( passed_match.group( 1 ) )       if passed_match       else 0
+        failed       = int( failed_match.group( 1 ) )       if failed_match       else 0
+        not_executed = int( not_executed_match.group( 1 ) ) if not_executed_match else 0
 
         # Sanity: prefer Passed/Failed over Total subtraction; reconcile if both available.
         if passed_match and failed_match and not total_match:
@@ -1801,10 +2194,11 @@ class TestSuiteJob( AgenticJobBase ):
                 return None
 
         return {
-            "passed"  : passed,
-            "failed"  : failed,
-            "skipped" : 0,
-            "errors"  : 0,
+            "passed"       : passed,
+            "failed"       : failed,
+            "skipped"      : 0,
+            "errors"       : 0,
+            "not_executed" : not_executed,
         }
 
 

@@ -253,20 +253,79 @@ def test_both_repository_write_paths_route_through_this_one_normalizer():
     """
     The create path and the transition path must not re-implement the invariant.
 
-    This asserts the SOURCE calls it — a behavioral parity test can pass while
-    two implementations agree TODAY and drift tomorrow, which is exactly the
-    failure mode ("silent, and green") this file exists to prevent.
+    HOW THIS IS CHECKED, AND WHY IT CHANGED (row 122f07a1). This used to read both
+    methods' source and assert the normalizer's NAME appeared in each. Its own
+    docstring defended that choice on the grounds that a behavioural parity test
+    "can pass while two implementations agree today and drift tomorrow" — which is
+    true of a test that compares two OUTPUTS, and not true of the test below. This
+    one does not compare the paths to each other. It replaces the shared normalizer
+    with a sentinel that returns a value neither path could produce on its own, and
+    requires that value to come out the far end. A path that re-implements the rule
+    ignores the sentinel and fails.
+
+    ⇒ Strictly stronger than the grep on both axes: the grep passed on a build that
+    CALLS the normalizer and throws its result away, and died on a rename that broke
+    nothing.
     """
-    import inspect
+    from unittest.mock import MagicMock, patch
     from cosa.rest.db.repositories import task_repository
+    from cosa.rest.db.repositories.task_repository import TaskRepository
+    from cosa.rest.postgres_models import TaskItem
 
-    create_src     = inspect.getsource( task_repository.TaskRepository.create_item )
-    transition_src = inspect.getsource( task_repository.TaskRepository.apply_transition )
+    # A value no caller supplies and no per-status rule produces, so seeing it on
+    # the written row is proof the row came from the normalizer and nowhere else.
+    SENTINEL_CHASE = "2099-01-01T00:00:00+00:00"
+    SENTINEL_REFS  = [ { "kind": "item", "id": "sentinel-from-the-normalizer" } ]
 
-    assert "normalize_status_fields" in create_src, \
-        "create_item must route per-status field consistency through the shared normalizer"
-    assert "normalize_status_fields" in transition_src, \
-        "apply_transition must route per-status field consistency through the shared normalizer"
+    def _sentinel_normalizer( status, blocked_by, next_chase_ts ):
+        return { "blocked_by": SENTINEL_REFS, "next_chase_ts": SENTINEL_CHASE }, []
+
+    # --- create path -------------------------------------------------------
+    session = MagicMock()
+    with patch.object( task_repository, "normalize_status_fields", _sentinel_normalizer ):
+        TaskRepository( session ).create_item(
+            item_class = "task",
+            title      = "does create honour the shared normalizer",
+            project    = "lupin",
+            created_by = "john 86101fa6",
+            authority  = "standing",
+            status     = "queued",
+            blocked_by = None,
+        )
+
+    created = [ c.args[ 0 ] for c in session.add.call_args_list
+                if isinstance( c.args[ 0 ], TaskItem ) ]
+    assert len( created ) == 1, f"expected one item written, got {created}"
+    assert created[ 0 ].blocked_by    == SENTINEL_REFS, (
+        "create_item did not take blocked_by from the shared normalizer — it is "
+        f"re-implementing the rule; got {created[ 0 ].blocked_by}"
+    )
+    assert created[ 0 ].next_chase_ts == SENTINEL_CHASE, (
+        "create_item did not take next_chase_ts from the shared normalizer; "
+        f"got {created[ 0 ].next_chase_ts}"
+    )
+
+    # --- transition path ---------------------------------------------------
+    item = TaskItem( item_class="task", title="t", project="lupin",
+                     created_by="john 86101fa6", status="queued",
+                     blocked_by=[ ], next_chase_ts=None )
+    with patch.object( task_repository, "normalize_status_fields", _sentinel_normalizer ):
+        TaskRepository( MagicMock() ).apply_transition(
+            item       = item,
+            to_status  = "in_progress",
+            actor      = "john 86101fa6",
+            authority  = "standing",
+            blocked_by = None,
+        )
+
+    assert item.blocked_by    == SENTINEL_REFS, (
+        "apply_transition did not take blocked_by from the shared normalizer — it is "
+        f"re-implementing the rule; got {item.blocked_by}"
+    )
+    assert item.next_chase_ts == SENTINEL_CHASE, (
+        "apply_transition did not take next_chase_ts from the shared normalizer; "
+        f"got {item.next_chase_ts}"
+    )
 
 
 # ---------------------------------------------------------------------------

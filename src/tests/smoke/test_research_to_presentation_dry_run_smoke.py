@@ -108,7 +108,9 @@ class ResearchToPresentationDryRunSmokeTest( LivePipelineTestBase ):
     """
 
     TEST_NAME       = "Research to Presentation Dry Run"
-    SUBMIT_ENDPOINT = "/api/deep-research-to-presentation/submit"
+    # The dedicated door /api/deep-research-to-presentation/submit is retired (410); one front door now.
+    SUBMIT_ENDPOINT = "/api/v2/submit"
+    ROUTING_COMMAND = "agent router go to research to presentation"
     DEFAULT_TIMEOUT = 240   # Chained workflow needs more time even in dry-run
     POLL_INTERVAL   = 3
     SCENARIOS       = RESEARCH_TO_PRESENTATION_DRY_RUN_SCENARIOS
@@ -133,12 +135,31 @@ class ResearchToPresentationDryRunSmokeTest( LivePipelineTestBase ):
         if "payload" in scenario:
             return scenario[ "payload" ]
 
-        return {
+        payload = {
             "query"                   : scenario[ "query" ],
             "budget"                  : 0.01,
             "target_duration_minutes" : 15,
             "dry_run"                 : scenario.get( "dry_run", True ),
         }
+        # Lineage tag (row 7451bebe / bug 5ed4f187): a child pytest inside a monopolizing
+        # test-suite job must thread LUPIN_TEST_MONOPOLIZE_PARENT_ID or the consumer's Gate B
+        # defers it as a foreign writer and it starves 900s.
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+
+        # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and
+        # answers 410 naming /api/v2/submit, which takes the routing command as a string
+        # and the agent's own arguments in `args`. What used to be a flat body is a command
+        # plus its args; `parent_id_hash` stays TOP-LEVEL because it is a queue directive
+        # (Gate B lineage), not an argument to the agent, and `args` is checked against the
+        # command's own argument contract.
+        body = {
+            "command"  : self.ROUTING_COMMAND,
+            "args"     : payload,
+            "question" : payload.get( "query", "" ),
+        }
+        if parent_id:
+            body[ "parent_id_hash" ] = parent_id
+        return body
 
     # ═══════════════════════════════════════════════════════════════════════
     # Mode Management

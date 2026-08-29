@@ -38,28 +38,37 @@ class ChatClient( LlmClientInterface ):
         api_key: Optional[ str ] = None,
         base_url: Optional[ str ] = None,
         model_tokenizer_map: Optional[dict[str, str]] = None,
+        set_openai_env: bool = False,
         debug: bool = False,
         verbose: bool = False,
         **generation_args: Any
     ) -> None:
         """
         Initialize a chat-based LLM client.
-        
+
         Requires:
             - model_name: A valid model identifier for pydantic-ai
             - api_key: If required, a valid API key for the service
-            
+            - set_openai_env: True only for OpenAI-protocol vendors (openai, groq,
+              mistralai, local vLLM) whose credentials genuinely belong in
+              OPENAI_API_KEY / OPENAI_BASE_URL
+
         Ensures:
-            - Sets up environment variables for API access if needed
+            - Sets the OpenAI-compat env vars ONLY when set_openai_env is True
             - Initializes Agent with the specified model
             - Creates TokenCounter for usage tracking
             - Stores generation parameters for use with LLM calls
         """
-        # Set environment variables if provided
-        if api_key:
-            os.environ[ "OPENAI_API_KEY" ] = api_key
-        if base_url:
-            os.environ[ "OPENAI_BASE_URL" ] = base_url
+        # Mirror credentials into the OpenAI-compat env vars ONLY for OpenAI-protocol
+        # vendors. Doing this unconditionally (bug e515a5c5) clobbered
+        # OPENAI_API_KEY/OPENAI_BASE_URL process-global for EVERY vendor — e.g. a
+        # google-gla client would leave the Gemini key + Google endpoint sitting in
+        # OPENAI_API_KEY, poisoning any OpenAI-vendor client built later in the process.
+        if set_openai_env:
+            if api_key:
+                os.environ[ "OPENAI_API_KEY" ] = api_key
+            if base_url:
+                os.environ[ "OPENAI_BASE_URL" ] = base_url
         
         self.model_name      = model_name
         self.token_counter   = TokenCounter( model_tokenizer_map )

@@ -10,6 +10,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Optional
 
 import cosa.utils.util as cu
 
@@ -42,6 +43,11 @@ class PresentationConfig:
     # Presentation parameters
     target_duration_minutes  : int   = 15
     slides_per_minute        : float = 1.0
+    # Explicit slide count that OVERRIDES the target_duration_minutes ×
+    # slides_per_minute formula. None = derive the budget from duration
+    # (today's behavior). Loaded from the INI key
+    # `presentation generator target slide count` (empty/absent = None).
+    target_slide_count       : Optional[ int ] = None
     title_style              : str   = "assertion"
     max_revisions            : int   = 3
 
@@ -54,12 +60,26 @@ class PresentationConfig:
 
     # Target audience
     audience                 : str   = "general"
+    # Custom free-text audience description (per-job; None = not provided). Copied
+    # from the job's audience_context when the caller supplies one; no INI default.
+    audience_context         : Optional[ str ] = None
+
+    # Max characters of source content fed to the narrative-analysis and
+    # elaboration prompts before clipping. Loaded from the SHARED base INI key
+    # `agent source content max chars` (also read by the podcast generator).
+    max_source_chars         : int   = 200000
 
     # Video generation (Veo)
     veo_model                : str   = "veo-2.0-generate-001"
 
     # PPTX export (requires Marp CLI binary in PATH)
     pptx_export_enabled      : bool  = True
+
+    # Fail-open review window: on timeout OR an undeliverable ask (503), each of
+    # the 4 gates continues on its own via response_default rather than
+    # dead-lettering the job. Mirror of the podcast script-review timeout
+    # (600s = 10 min, Rick's requirement).
+    review_timeout_seconds   : int   = 600
 
     @classmethod
     def from_config( cls, config_mgr, debug=False ):
@@ -81,12 +101,19 @@ class PresentationConfig:
             if debug: print( f"  Config: presentation generator {key} = {val}" )
             return val
 
+        # Optional explicit slide count. Read RAW (return_type="str") then coerce:
+        # a None default with return_type="int" crashes on int(None) when the key
+        # is absent/empty. Empty or absent → None → duration formula (default path).
+        _raw_slide_count   = _get( "target slide count", default=None )
+        target_slide_count = int( _raw_slide_count ) if _raw_slide_count not in ( None, "" ) else None
+
         return cls(
             content_model           = _get( "content model",           default="claude-opus-4-6" ),
             automated_content_model = _get( "automated content model", default="claude-sonnet-4-6" ),
             content_max_turns       = _get( "content max turns",        default=5,     return_type="int" ),
             target_duration_minutes = _get( "target duration minutes", default=15,    return_type="int" ),
             slides_per_minute       = _get( "slides per minute",       default=1.0,   return_type="float" ),
+            target_slide_count      = target_slide_count,
             title_style             = _get( "title style",             default="assertion" ),
             max_revisions           = _get( "max revisions",           default=3,     return_type="int" ),
             default_theme           = _get( "default theme",           default="default" ),
@@ -95,6 +122,10 @@ class PresentationConfig:
             audience                = _get( "audience",                default="general" ),
             veo_model               = _get( "veo model",              default="veo-2.0-generate-001" ),
             pptx_export_enabled     = _get( "pptx export enabled",    default=True, return_type="boolean" ),
+            review_timeout_seconds  = _get( "review timeout seconds", default=600,  return_type="int" ),
+            # SHARED base key (NOT presentation-prefixed) — read directly so podcast
+            # config reads the identical key. Single source of truth for the ceiling.
+            max_source_chars        = config_mgr.get( "agent source content max chars", default=200000, return_type="int" ),
         )
 
     def get_output_path( self, user_id, topic, file_type="yaml" ):

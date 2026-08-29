@@ -21,6 +21,7 @@ from cosa.agents.calculator.conversion_tables import (
     resolve_alias, find_category, LENGTH, MASS, VOLUME, TEMPERATURE, ALIASES
 )
 from cosa.agents.calculator.calc_operations import (
+    arithmetic, ARITHMETIC_OPERATORS,
     convert, compare_prices, mortgage, _convert_temperature
 )
 from cosa.agents.calculator.xml_models import CalcIntent
@@ -493,6 +494,238 @@ class TestCalcIntentModel:
         assert intent.value == ""
         assert intent.from_unit == ""
         assert intent.to_unit == ""
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Test Class: Arithmetic
+# ═════════════════════════════════════════════════════════════════════════
+
+class TestArithmetic:
+    """Tests for arithmetic() — the calculator's own plain-math operation."""
+
+    # ── happy paths, drawn from the calculator-routed eval corpus ──
+
+    def test_subtract_two( self ):
+        result = arithmetic( [ 789, 456 ], "subtract" )
+        assert result[ "status" ] == "ok"
+        assert result[ "result" ] == 333
+        assert result[ "expression" ] == "789 minus 456"
+
+    def test_add_nary( self ):
+        result = arithmetic( [ 98, 134, 201 ], "add" )
+        assert result[ "result" ] == 433
+        assert result[ "expression" ] == "98 plus 134 plus 201"
+
+    def test_multiply( self ):
+        result = arithmetic( [ 64, 23 ], "multiply" )
+        assert result[ "result" ] == 1472
+
+    def test_multiply_nary( self ):
+        result = arithmetic( [ 2, 3, 4 ], "multiply" )
+        assert result[ "result" ] == 24
+
+    def test_divide( self ):
+        result = arithmetic( [ 45, 9 ], "divide" )
+        assert result[ "result" ] == 5
+
+    def test_divide_non_integral( self ):
+        result = arithmetic( [ 1000, 40 ], "divide" )
+        assert result[ "result" ] == 25
+
+    def test_divide_fractional_result( self ):
+        result = arithmetic( [ 10, 4 ], "divide" )
+        assert result[ "result" ] == 2.5
+
+    def test_modulo_non_zero_remainder( self ):
+        result = arithmetic( [ 345, 22 ], "modulo" )
+        assert result[ "result" ] == 15
+
+    def test_modulo_exact_division( self ):
+        result = arithmetic( [ 345, 23 ], "modulo" )
+        assert result[ "result" ] == 0
+
+    def test_power( self ):
+        result = arithmetic( [ 2, 10 ], "power" )
+        assert result[ "result" ] == 1024
+
+    def test_left_fold_order_is_left_to_right( self ):
+        # ( 100 - 20 ) - 5, not 100 - ( 20 - 5 )
+        result = arithmetic( [ 100, 20, 5 ], "subtract" )
+        assert result[ "result" ] == 75
+
+    def test_operator_is_case_and_space_tolerant( self ):
+        result = arithmetic( [ 3, 4 ], "  ADD  " )
+        assert result[ "status" ] == "ok"
+        assert result[ "result" ] == 7
+        assert result[ "operator" ] == "add"
+
+    def test_string_operands_are_coerced( self ):
+        result = arithmetic( [ "789", "456" ], "subtract" )
+        assert result[ "result" ] == 333
+
+    def test_operands_echoed_as_floats( self ):
+        result = arithmetic( [ 3, 4 ], "add" )
+        assert result[ "operands" ] == [ 3.0, 4.0 ]
+
+    def test_fractional_operands_in_expression( self ):
+        result = arithmetic( [ 1.5, 2.25 ], "add" )
+        assert result[ "result" ] == 3.75
+        assert result[ "expression" ] == "1.5 plus 2.25"
+
+    def test_thousands_separator_in_expression( self ):
+        result = arithmetic( [ 1000000, 1 ], "add" )
+        assert result[ "expression" ] == "1,000,000 plus 1"
+
+    def test_result_rounded_to_six_places( self ):
+        result = arithmetic( [ 1, 3 ], "divide" )
+        assert result[ "result" ] == 0.333333
+
+    # ── error paths ──
+
+    def test_none_operator( self ):
+        result = arithmetic( [ 1, 2 ], None )
+        assert result[ "status" ] == "error"
+        assert "No arithmetic operator" in result[ "message" ]
+
+    def test_unknown_operator( self ):
+        result = arithmetic( [ 1, 2 ], "frobnicate" )
+        assert result[ "status" ] == "error"
+        assert "Unknown arithmetic operator" in result[ "message" ]
+
+    def test_empty_operands( self ):
+        result = arithmetic( [], "add" )
+        assert result[ "status" ] == "error"
+        assert "at least two numbers" in result[ "message" ]
+
+    def test_none_operands( self ):
+        result = arithmetic( None, "add" )
+        assert result[ "status" ] == "error"
+
+    def test_single_operand( self ):
+        result = arithmetic( [ 5 ], "add" )
+        assert result[ "status" ] == "error"
+        assert "at least two numbers" in result[ "message" ]
+
+    def test_non_numeric_operand( self ):
+        result = arithmetic( [ 1, "banana" ], "add" )
+        assert result[ "status" ] == "error"
+        assert "must be numbers" in result[ "message" ]
+
+    def test_divide_by_zero( self ):
+        result = arithmetic( [ 45, 0 ], "divide" )
+        assert result[ "status" ] == "error"
+        assert "divide by zero" in result[ "message" ]
+
+    def test_modulo_by_zero( self ):
+        result = arithmetic( [ 45, 0 ], "modulo" )
+        assert result[ "status" ] == "error"
+        assert "modulo zero" in result[ "message" ]
+
+    def test_zero_to_negative_power_is_out_of_range( self ):
+        result = arithmetic( [ 0, -1 ], "power" )
+        assert result[ "status" ] == "error"
+        assert "out of range" in result[ "message" ]
+
+    def test_overflowing_power_is_out_of_range( self ):
+        result = arithmetic( [ 10, 1000000 ], "power" )
+        assert result[ "status" ] == "error"
+        assert "out of range" in result[ "message" ]
+
+    def test_negative_base_fractional_power_has_no_real_answer( self ):
+        result = arithmetic( [ -8, 0.5 ], "power" )
+        assert result[ "status" ] == "error"
+        assert "no real-number answer" in result[ "message" ]
+
+    def test_operator_table_matches_intent_model( self ):
+        # The prompt, the model and the operations must agree on the operator set
+        assert sorted( ARITHMETIC_OPERATORS.keys() ) == sorted( CalcIntent.VALID_OPERATORS )
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Test Class: Arithmetic Intent + Dispatch
+# ═════════════════════════════════════════════════════════════════════════
+
+class TestArithmeticIntent:
+    """Tests for the operands/operator fields on CalcIntent and their dispatch."""
+
+    def test_arithmetic_is_a_valid_operation( self ):
+        assert "arithmetic" in CalcIntent.VALID_OPERATIONS
+
+    def test_get_operands_list( self ):
+        intent = CalcIntent( operation="arithmetic", operator="add", operands="[34, 67, 129]" )
+        assert intent.get_operands_list() == [ 34.0, 67.0, 129.0 ]
+
+    def test_get_operands_list_floats( self ):
+        intent = CalcIntent( operation="arithmetic", operator="add", operands="[1.5, 2.25]" )
+        assert intent.get_operands_list() == [ 1.5, 2.25 ]
+
+    def test_get_operands_list_numeric_strings( self ):
+        intent = CalcIntent( operation="arithmetic", operator="add", operands='["3", "4"]' )
+        assert intent.get_operands_list() == [ 3.0, 4.0 ]
+
+    def test_get_operands_list_empty_field( self ):
+        assert CalcIntent( operation="arithmetic" ).get_operands_list() == []
+
+    def test_get_operands_list_whitespace_only( self ):
+        assert CalcIntent( operation="arithmetic", operands="   " ).get_operands_list() == []
+
+    def test_get_operands_list_empty_array( self ):
+        assert CalcIntent( operation="arithmetic", operands="[]" ).get_operands_list() == []
+
+    def test_get_operands_list_bad_json( self ):
+        assert CalcIntent( operation="arithmetic", operands="not json" ).get_operands_list() == []
+
+    def test_get_operands_list_not_a_list( self ):
+        assert CalcIntent( operation="arithmetic", operands='{"a": 1}' ).get_operands_list() == []
+
+    def test_get_operands_list_non_numeric_member( self ):
+        assert CalcIntent( operation="arithmetic", operands='["banana"]' ).get_operands_list() == []
+
+    def test_get_operands_list_null_member( self ):
+        assert CalcIntent( operation="arithmetic", operands='[1, null]' ).get_operands_list() == []
+
+    def test_operator_defaults_empty( self ):
+        assert CalcIntent( operation="convert" ).operator == ""
+
+    def test_arithmetic_xml_round_trip( self ):
+        intent = CalcIntent( operation="arithmetic", operator="subtract", operands="[789, 456]" )
+        xml    = intent.to_xml()
+        assert "<operation>arithmetic</operation>" in xml
+        assert "<operator>subtract</operator>" in xml
+        parsed = CalcIntent.from_xml( xml, root_tag="calc_intent" )
+        assert parsed.operator == "subtract"
+        assert parsed.get_operands_list() == [ 789.0, 456.0 ]
+
+    def test_dispatch_arithmetic( self ):
+        intent = CalcIntent( operation="arithmetic", operator="subtract", operands="[789, 456]" )
+        result = dispatch( intent )
+        assert result[ "status" ] == "ok"
+        assert result[ "result" ] == 333
+
+    def test_dispatch_arithmetic_missing_operands_errors( self ):
+        intent = CalcIntent( operation="arithmetic", operator="add" )
+        result = dispatch( intent )
+        assert result[ "status" ] == "error"
+
+    def test_format_arithmetic_voice_integral( self ):
+        result = arithmetic( [ 789, 456 ], "subtract" )
+        voice  = format_result_for_voice( result, "arithmetic" )
+        assert voice == "789 minus 456 is 333."
+
+    def test_format_arithmetic_voice_fractional( self ):
+        result = arithmetic( [ 10, 4 ], "divide" )
+        voice  = format_result_for_voice( result, "arithmetic" )
+        assert voice == "10 divided by 4 is 2.5."
+
+    def test_format_arithmetic_voice_large_number_grouped( self ):
+        result = arithmetic( [ 1000, 1000 ], "multiply" )
+        voice  = format_result_for_voice( result, "arithmetic" )
+        assert "1,000,000" in voice
+
+    def test_format_arithmetic_voice_error( self ):
+        result = arithmetic( [ 45, 0 ], "divide" )
+        voice  = format_result_for_voice( result, "arithmetic" )
+        assert voice.startswith( "Sorry" )
 
 
 # ═════════════════════════════════════════════════════════════════════════

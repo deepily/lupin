@@ -60,6 +60,14 @@ from lupin_cli.notifications.notification_models import (
 )
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
 from lupin_cli.notifications.notify_user_async import notify_user_async
+
+# The priorities speakerphone mode may LIFT to "high" — the RECOGNISED ones that are not
+# already at or above it. Derived from the enum rather than written out, so a new member
+# cannot silently fall outside the set. Anything NOT in here (including a typo) is left
+# untouched so it reaches NotificationPriority(...) validation and gets reported.
+_SPEAKERPHONE_LIFTABLE_PRIORITIES = frozenset(
+    p.value for p in NotificationPriority if p.value not in ( "high", "urgent" )
+)
 from cosa.utils.notification_utils import (
     format_questions_for_tts,
     convert_questions_for_api,
@@ -406,6 +414,31 @@ _SERVER_TRANSPORT_TIMEOUT_SECONDS = 30
 _session_ready    = threading.Event()   # Gate: blocks tool calls until session ID resolved
 _session_failed   = False               # True if real ID never arrived (fallback only)
 
+# POSITIVE SERVER DISCRIMINATOR — row 87ae7234.
+# `_die_no_session_id` calls os._exit(1), which is correct for the MCP server and
+# catastrophic for anything that merely IMPORTS this module: os._exit skips every
+# flush, atexit hook and exception path, so an importing process dies with no
+# traceback and no summary. Four call sites in this module can reach it.
+#
+# This flag decides which process we are, and it is set POSITIVELY at the single
+# entry point (the `if __name__ == "__main__":` block at the bottom of this file)
+# rather than inferred from an environment variable, from PYTEST_CURRENT_TEST, or
+# from the ABSENCE of something. An inference stops matching silently when the
+# world changes; a positive assignment at the entry point does not.
+#
+# It lives in that block because that is where this codebase ALREADY means "I am
+# the server" — `_maybe_start_commons_archival_daemon()` is there for the same
+# reason — so server-only state stays in one known place instead of inventing a
+# second convention.
+#
+# WARNING: IF YOU ADD A NEW ENTRY POINT — a console_scripts / [project.scripts]
+# shim that IMPORTS this module and calls into it rather than running the file —
+# YOU MUST SET THIS FLAG THERE TOO. Otherwise a real server reads False and a
+# genuine session-id failure raises instead of exiting, leaving a server up that
+# cannot serve. There are none today: zero entry-points are declared, and every
+# registered launch runs `python .../cosa_voice_mcp.py` in script mode.
+_IS_MCP_SERVER    = False
+
 # Validate repo service account (non-blocking — logs + notifies on failure)
 _validate_repo_account( PROJECT )
 
@@ -429,22 +462,105 @@ for _line in _banner_lines:
     logger.info( _line )
 
 
+def _watch_bridge_for_changes( stop_event=None, poll_interval=2.0, max_iterations=None ):
+    """
+    Watch the resolved bridge file and update SESSION_ID / SENDER_ID when it changes.
+
+    PHASE 2 of the session watcher, split out of `_session_watcher_thread` so a test
+    can start it DELIBERATELY and assert on what it did — row `87ae7234`. Phase 1
+    (the one-shot resolve that sets `_session_ready`) stays where it was and still
+    runs at import: it is load-bearing, nothing here is.
+
+    Requires:
+        - phase 1 has run, so SESSION_ID / SENDER_ID hold their resolved values
+        - poll_interval is a positive number of seconds
+
+    Ensures:
+        - returns when stop_event is set, or after max_iterations polls, or never
+          (the server's case: both arguments omitted)
+        - updates the SESSION_ID / SENDER_ID globals when the bridge file's session
+          id changes, and logs the transition
+        - a per-iteration exception is logged and the loop CONTINUES — one bad poll
+          must never end the watch
+        - does not raise
+    """
+    global SESSION_ID, SENDER_ID
+
+    last_mtime      = 0.0
+    last_session_id = SESSION_ID
+    iterations      = 0
+
+    logger.info( "Session watcher: entering persistent monitoring loop" )
+
+    while stop_event is None or not stop_event.is_set():
+        if max_iterations is not None and iterations >= max_iterations: return
+        iterations += 1
+        try:
+            # A stop_event waits INTERRUPTIBLY so a test does not pay the poll
+            # interval to shut the loop down; without one this is the original sleep.
+            if stop_event is not None:
+                if stop_event.wait( timeout=poll_interval ): return
+            else:
+                time.sleep( poll_interval )
+
+            # Clear cache so _find_session_file() does a fresh lookup
+            clear_cached_session_id()
+
+            result = _find_session_file()
+            if result is None:
+                continue
+
+            bridge_path, _source = result
+
+            # Check if file was modified
+            try:
+                current_mtime = bridge_path.stat().st_mtime
+            except OSError:
+                continue
+
+            if current_mtime <= last_mtime:
+                continue
+
+            last_mtime = current_mtime
+
+            # Re-read the session ID
+            file_id = _read_session_file( bridge_path )
+            if not file_id:
+                continue
+
+            new_suffix = file_id[:8]
+            if new_suffix != last_session_id:
+                old_sender      = SENDER_ID
+                SESSION_ID      = new_suffix
+                SENDER_ID       = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
+                last_session_id = new_suffix
+                logger.info(
+                    f"Session ID changed: {old_sender} -> {SENDER_ID} "
+                    f"(context clear detected)"
+                )
+
+        except Exception as e:
+            logger.error( f"Session watcher error: {e}" )
+
+
 def _session_watcher_thread():
     """
-    Persistent daemon thread that resolves and monitors the CC session_id.
+    Resolve the CC session_id once, then signal `_session_ready`. PHASE 1 ONLY.
 
-    Phase 1 (Initial resolution):
-        Polls for the real CC session_id via wait_for_session_id(). Signals
-        _session_ready so gated tool calls can proceed.
+    ⚠️ CHANGED 2026-08-26 (row `87ae7234`). This used to fall straight into phase 2's
+    forever-poll, so IMPORTING this module started a loop that ran for the life of the
+    process — including a test process, where it executed 31 lines of session_bridge.py
+    that no test reached and coverage.py credited anyway. Phase 2 is now started
+    SEPARATELY and only by the server; see `_start_bridge_watch`.
 
-    Phase 2 (Continuous monitoring):
-        Watches the resolved bridge file for changes (mtime check every 2s).
-        If the session ID changes (context clear), updates SESSION_ID and
-        SENDER_ID atomically. Clears the session bridge cache before each
-        poll to ensure fresh resolution.
+    Phase 1 STAYS at import and is load-bearing: `_wait_for_sender_id` blocks on
+    `_session_ready`, which this sets in a `finally`. Suppressing phase 1 takes a suite
+    from `333 passed` to a silent `EXIT=1` — measured, not assumed.
 
-    This replaces the one-shot _upgrade_session_id_background() to handle
-    context clears that overwrite the bridge file mid-session.
+    Ensures:
+        - sets `_session_ready` on every path, success or failure
+        - sets `_session_failed` when resolution raised
+        - RETURNS once resolution is done — it no longer watches
     """
     global SESSION_ID, SENDER_ID, _session_failed
 
@@ -474,77 +590,88 @@ def _session_watcher_thread():
     finally:
         _session_ready.set()
 
-    # ── Phase 2: Persistent bridge file watcher ─────────────────────────
-    # Track the last-seen mtime and session ID for change detection
-    last_mtime      = 0.0
-    last_session_id = SESSION_ID
-    poll_interval   = 2.0  # seconds
 
-    logger.info( "Session watcher: entering persistent monitoring loop" )
+def _start_bridge_watch( ready_timeout=15.0 ):
+    """
+    Start phase 2 — THE SERVER ONLY, and only by explicit call.
 
-    while True:
-        try:
-            time.sleep( poll_interval )
+    Row `87ae7234`. Phase 2 watches the bridge file so a context clear updates
+    SESSION_ID mid-session. Only a long-lived MCP server needs that; an importing
+    process does not, and a test process actively must not — a loop nobody drives
+    still executes product lines, and coverage.py credits them to no test at all.
 
-            # Clear cache so _find_session_file() does a fresh lookup
-            clear_cached_session_id()
+    THE GATE IS THE CALL ITSELF. There is no environment sniff and no
+    PYTEST_CURRENT_TEST check: phase 2 runs because the entry point ASKED for it,
+    beside `_IS_MCP_SERVER = True`, in the one block that already means "I am the
+    server". A flag read from the environment would have to be set correctly in five
+    separate launch configs, and a missed one would silently disable context-clear
+    detection in a real server; a call in the main block cannot be missed.
 
-            result = _find_session_file()
-            if result is None:
-                continue
+    Requires:
+        - phase 1 has been started (this waits for `_session_ready` before polling,
+          because phase 2 reads the resolved SESSION_ID as its baseline)
 
-            bridge_path, _source = result
+    Ensures:
+        - returns the started daemon Thread, or None if phase 1 never resolved
+        - never raises
+    """
+    def _run():
+        # Phase 2's baseline is the resolved id, so it must not start before phase 1.
+        if not _session_ready.wait( timeout=ready_timeout ):
+            logger.warning( "Bridge watch not started: session never resolved" )
+            return
+        _watch_bridge_for_changes()
 
-            # Check if file was modified
-            try:
-                current_mtime = bridge_path.stat().st_mtime
-            except OSError:
-                continue
-
-            if current_mtime <= last_mtime:
-                continue
-
-            last_mtime = current_mtime
-
-            # Re-read the session ID
-            file_id = _read_session_file( bridge_path )
-            if not file_id:
-                continue
-
-            new_suffix = file_id[:8]
-            if new_suffix != last_session_id:
-                old_sender     = SENDER_ID
-                SESSION_ID     = new_suffix
-                SENDER_ID      = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
-                last_session_id = new_suffix
-                logger.info(
-                    f"Session ID changed: {old_sender} -> {SENDER_ID} "
-                    f"(context clear detected)"
-                )
-
-        except Exception as e:
-            logger.error( f"Session watcher error: {e}" )
+    thread = threading.Thread( target=_run, name="session-id-watcher", daemon=True )
+    thread.start()
+    return thread
 
 
 _watcher_thread = threading.Thread(
     target=_session_watcher_thread,
-    name="session-id-watcher",
+    name="session-id-resolver",
     daemon=True
 )
 _watcher_thread.start()
 
 
+class SessionIdUnavailable( RuntimeError ):
+    """
+    Raised instead of hard-exiting when the session ID never resolved and this
+    process is NOT the MCP server.
+
+    The MCP server must die on this condition — it cannot serve tools without a
+    session id. An importing process must NOT: a library that calls os._exit takes
+    its host down with no traceback, which is how a test suite came to report a
+    truncated run with nothing anywhere naming the cause.
+    """
+
+
 def _die_no_session_id():
     """
-    Send error notification and hard-exit — real session ID never arrived.
+    Send error notification, then hard-exit ON THE SERVER or raise off it.
+
+    ⚠️ THE CONTRACT CHANGED 2026-08-26 (row `87ae7234`). This used to promise
+    "never returns" unconditionally. It now branches on `_IS_MCP_SERVER`, because a
+    library that calls `os._exit` takes its HOST process down with no traceback and
+    no summary — which is how a test suite came to report a truncated run with
+    nothing anywhere naming the cause.
 
     Requires:
         - Lupin FastAPI server is running (for notification delivery)
+        - `_IS_MCP_SERVER` is True only in the MCP server process, set positively at
+          the `if __name__ == "__main__":` entry point
 
     Ensures:
         - Sends high-priority alert from sender_id claude.code@{PROJECT}.deepily.ai#mcp-error
-        - Terminates MCP server process via os._exit( 1 )
-        - Never returns
+          on BOTH paths — the alert is not the server's privilege
+        - ON THE SERVER: writes a named reason to flushed stderr, then terminates via
+          os._exit( 1 ) and never returns
+        - OFF THE SERVER: never returns either, but by RAISING — the host process
+          survives and the caller gets something it can catch
+
+    Raises:
+        - SessionIdUnavailable when this process is not the MCP server
     """
     error_sender = f"claude.code@{PROJECT}.deepily.ai#mcp-error"
     logger.critical( "Sending error notification and terminating MCP server" )
@@ -561,6 +688,30 @@ def _die_no_session_id():
     except Exception as e:
         logger.error( f"Failed to send error notification: {e}" )
 
+    # SAY WHY ON THE WAY OUT. os._exit skips every flush, atexit hook and
+    # exception path, so a caller that imports this module — a test process
+    # above all — dies with no traceback, no summary and no logging record:
+    # pytest reports a truncated run and nothing anywhere names the cause.
+    # logger.critical above is captured by pytest and lost with it; an
+    # explicitly-flushed stderr write is not. Two lines, no behaviour change
+    # for the server, and the difference between a silent kill and a named one.
+    if not _IS_MCP_SERVER:
+        # NOT the server — raise, do not kill the host. The caller gets a named
+        # exception it can catch and a traceback naming this function.
+        raise SessionIdUnavailable(
+            "Claude Code session ID never resolved and this process is not the MCP "
+            "server, so _die_no_session_id() raised instead of calling os._exit(1). "
+            "No session bridge file was detected."
+        )
+
+    sys.stderr.write(
+        "[cosa-voice] FATAL: Claude Code session ID never resolved; "
+        "os._exit(1) from _die_no_session_id(). No session bridge file was "
+        "detected. If you are seeing this from a test run, the process was "
+        "terminated here — the suite did not finish.\n"
+    )
+    sys.stderr.flush()
+
     os._exit( 1 )
 
 
@@ -576,8 +727,14 @@ def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
 
     Ensures:
         - Returns SENDER_ID with real session ID on success
-        - Calls _die_no_session_id() and never returns on failure
+        - Calls _die_no_session_id() on failure, which exits the MCP server process
+          and RAISES SessionIdUnavailable in any other process (row `87ae7234`) —
+          either way this function does not return a value on that path
         - Zero overhead after first resolution (Event.wait on set event returns instantly)
+
+    Raises:
+        - SessionIdUnavailable (via _die_no_session_id) when resolution failed and
+          this process is not the MCP server
     """
     if not _session_ready.wait( timeout=timeout ):
         _die_no_session_id()
@@ -627,8 +784,18 @@ _DM_STYLE_CONTRACT_SECTION = (
     "sentences — write it as a human colleague would read it, no invented "
     "vocabulary. Report only decisions, evidence, risks, and required "
     "actions; do not narrate routine reasoning or verification; no "
-    "metaphors, aphorisms, slogans, or redundant summaries. 3 lines / "
-    f"~60 words; longer ONLY WHEN ASKED. {DM_STYLE_TAG}\n\n"
+    "metaphors, aphorisms, slogans, or redundant summaries. "
+    # Rick, 2026-08-13: "3 sentences and a path with no word counts to be found
+    # anywhere." The word budget that used to sit here ("3 lines / ~60 words") is
+    # gone deliberately — a count in the composition contract is the same leak the
+    # tutor's trigger number is kept out of: it teaches the fleet to write TO a
+    # number rather than to the shape. The path clause is load-bearing, because
+    # without it the pointer reads as a fourth sentence and the compliant house
+    # style looks non-compliant (María, 2026-08-13).
+    "Say it in three sentences — a headline and two supporting statements. "
+    "When the detail lives somewhere, send the path instead of the detail. The "
+    "path is a pointer, not a fourth sentence, and does not count against the "
+    f"three. Longer ONLY WHEN ASKED. {DM_STYLE_TAG}\n\n"
 )
 
 
@@ -1354,7 +1521,15 @@ def _notify_impl(
         if active:
             # Speakerphone ON — enforce speakerphone-render params
             suppress_ding = True
-            if priority not in ( "high", "urgent" ):
+            # 🔴 LIFT ONLY A *VALID* PRIORITY (row e2099400, 2026-08-26).
+            # This used to read `if priority not in ( "high", "urgent" )`, which swallowed
+            # an INVALID value too: a typo'd `priority="urgnet"` was rewritten to "high",
+            # sailed through the NotificationPriority(...) validation below because the bad
+            # value no longer existed, and the call reported "Notification sent (delivered)".
+            # Measured: caller asks "not-a-priority" → request ships NotificationPriority.HIGH.
+            # A priority nobody chose is worse than a rejected call, so an unrecognised value
+            # now falls through to the validation below and is REPORTED.
+            if priority in _SPEAKERPHONE_LIFTABLE_PRIORITIES:
                 priority = "high"
             message = strip_fenced_code_blocks( message )
             logger.debug( "_notify_impl speakerphone ON: forced priority=high, suppress_ding=True, stripped fenced code" )
@@ -1475,6 +1650,31 @@ def notify(
     )
 
 
+def _error_dict( response ) -> dict:
+    """
+    Build the caller-facing error dict for a genuine failure.
+
+    Requires:
+        - response is a NotificationResponse from notify_user_sync
+
+    Ensures:
+        - `error` keeps the exact `error: <status>` string callers already match on
+        - `detail` carries the server's OWN sentence when it sent one, so the seat
+          reading this can act on it instead of guessing from a status code
+        - `detail` is omitted entirely when the server said nothing
+
+    Raises:
+        - None
+
+    Row cd283a77: `error: http_error_503` sent a manager hunting a broken verb for
+    six attempts across two boots while the body read "User is offline and no
+    default response provided" — the sentence that names both the cause and the fix.
+    """
+    out = { "error": f"error: {response.status}" }
+    if response.error_detail: out[ "detail" ] = response.error_detail
+    return out
+
+
 @mcp.tool
 def ask_yes_no(
     question: str,
@@ -1483,7 +1683,8 @@ def ask_yes_no(
     priority: str = "medium",
     abstract: Optional[ str ] = None,
     job_id: Optional[ str ] = None,
-    override_size_limitation: bool = False
+    override_size_limitation: bool = False,
+    human_only: bool = False
 ) -> str:
     """
     Ask a yes/no question and get the user's response as a string.
@@ -1551,6 +1752,7 @@ def ask_yes_no(
             priority=NotificationPriority( priority ),
             timeout_seconds=timeout_seconds,
             response_default=default,
+            human_only=human_only,
             sender_id=_wait_for_sender_id(),
             abstract=_normalize_abstract( abstract ),
             job_id=job_id
@@ -1706,10 +1908,14 @@ def ask_multiple_choice(
         )
         # On timeout returns: {"answers": {"Database": "PostgreSQL"}}
     """
-    logger.debug( f"ask_multiple_choice() called with {len( questions )} questions" )
-
+    # Validate BEFORE logging. `len( questions )` on the line above this guard
+    # raised TypeError for a null/unsized argument, so the guard right below it
+    # was unreachable for exactly the input it was written to reject — the tool
+    # crashed instead of returning its error dict.
     if not questions or not isinstance( questions, list ):
         return { "error": "questions must be a non-empty list" }
+
+    logger.debug( f"ask_multiple_choice() called with {len( questions )} questions" )
 
     _enforce_spoken_brevity( questions, override_size_limitation, field="questions" )
 
@@ -1807,8 +2013,9 @@ def ask_multiple_choice(
         return { "error": "timeout - no response received", "timeout": True }
 
     # Genuine error (connection, HTTP, stream, unexpected) — surface the status
-    # so real failures stay visible rather than being masked by the default.
-    return { "error": f"error: {response.status}" }
+    # so real failures stay visible rather than being masked by the default,
+    # AND the server's reason with it (row cd283a77).
+    return _error_dict( response )
 
 
 def _stamp_answer_provenance( payload: dict, default_used: bool ) -> dict:
@@ -1996,10 +2203,14 @@ def ask_open_ended_batch(
         ])
         # Returns: {"answers": {"Topic": "quantum computing", "Budget": "10"}}
     """
-    logger.debug( f"ask_open_ended_batch() called with {len( questions )} questions" )
-
+    # Validate BEFORE logging. `len( questions )` on the line above this guard
+    # raised TypeError for a null/unsized argument, so the guard right below it
+    # was unreachable for exactly the input it was written to reject — the tool
+    # crashed instead of returning its error dict.
     if not questions or not isinstance( questions, list ):
         return { "error": "questions must be a non-empty list" }
+
+    logger.debug( f"ask_open_ended_batch() called with {len( questions )} questions" )
 
     _enforce_spoken_brevity( questions, override_size_limitation, field="questions" )
 
@@ -2036,7 +2247,7 @@ def ask_open_ended_batch(
     elif response.exit_code == 2:
         return { "error": "timeout - no response received", "timeout": True }
     else:
-        return { "error": f"error: {response.status}" }
+        return _error_dict( response )
 
 
 def _parse_open_ended_batch_response( response_value: Optional[ str ] ) -> dict:
@@ -2179,6 +2390,63 @@ def get_session_info() -> dict:
         pass
 
     return info
+
+
+@mcp.tool
+def self_respin( memento_path: str, memento_nonce: str, delay_seconds: int = 20, cycle_window_seconds: int = 300 ) -> dict:  # pragma: no cover - live MCP boundary; all logic + branches are covered in self_respin_core
+    """
+    Self-re-spin: schedule a `/clear` into THIS session's OWN pane so it rehydrates
+    as the same seat (same session id, tmux, persona, board, lineage) at low
+    context — for the price of one memento write instead of a whole successor's
+    context. IRREVERSIBLE; every guard lives INSIDE this verb.
+
+    BEFORE CALLING: write your memento to disk THIS cycle, then stamp this cycle's
+    nonce into it by CALLING self_respin_core.stamp_nonce_into( path, nonce_uuid, ts ) —
+    do NOT hand-roll the read-append-write. That one call reads the file whole and
+    lands the new text through a temp file + atomic rename, so the memento is never
+    momentarily truncated; the hand-rolled version is what emptied a 105-line memento
+    down to its nonce line on 2026-08-25 (row 4cf9f9fd). Pass that same nonce_uuid as
+    `memento_nonce`. The verb confirms that exact nonce, a fresh timestamp, AND a body
+    that still has substance once the nonce line is removed — a stale, partial, or
+    nonce-only memento aborts the clear, so you never clear into nothing.
+
+    The verb then: (a) verifies the memento is complete + fresh this cycle;
+    (b) asks you a yes/no confirmation on the human surface, DEFAULTING TO YES so an
+    absent user does not cost the fleet a manager (offline / timeout → proceed; a
+    real "no" schedules nothing); (c) writes the observer's liveness marker plus a
+    one-shot fire token; (d) schedules a detached `/clear` that consumes the token
+    at the fire point, so a second fire after rehydrate no-ops.
+
+    The session id is resolved from the local bridge — NEVER taken from a caller
+    argument — so this can only ever aim at your own pane. There is deliberately no
+    parameter to pre-supply the confirmation, substitute the ask, or target another
+    session: the irreversible guard is not skippable.
+
+    Requires:
+        - you have written your memento this cycle with the stamped nonce line
+        - memento_path points at that memento; memento_nonce is its nonce uuid
+        - delay_seconds is the detached sleep before the clear fires
+        - cycle_window_seconds bounds how old the memento nonce may be
+
+    Ensures:
+        - returns { status: scheduled|declined|aborted, reason, marker_path,
+          fire_token_path, expected_return_by }
+        - schedules NOTHING unless the memento verified AND the ask resolved yes/
+          default-yes AND the observer marker is durable on disk
+        - makes NO task-store calls (the observer owns done-state; this seat is
+          cleared before it could mark its own row)
+    """
+    from dataclasses import asdict
+    from lupin_mcp.self_respin_core import self_respin_from_bridge, _live_own_pressure, resolve_own_identity
+
+    result = self_respin_from_bridge(
+        memento_path, memento_nonce,
+        delay_seconds        = delay_seconds,
+        cycle_window_seconds = cycle_window_seconds,
+        identity_fn          = lambda: resolve_own_identity( _get_cc_metadata, SESSION_ID ),
+        pressure_fn          = _live_own_pressure,
+    )
+    return asdict( result )
 
 
 def _flip_speakerphone( active: bool ) -> dict:
@@ -2600,14 +2868,14 @@ def spawn_sessions(
             walk the same chain and take successive unclaimed elements.
         seed_memento: path/ref to a prior memento; restores author continuity
         dry_run: build + print the spawn commands without launching
-        model: explicit model id to pin each child to (e.g. "claude-opus-4-8").
+        model: explicit model id to pin each child to (e.g. "claude-opus-5").
             Resolution: this explicit param → the INI role key
             `cc session spawn model <role>` → the INI `cc session spawn model
             default` key (covers unknown/new roles) → None. None resolves to NO
             `--model` flag, so the child inherits the user default (fail-open;
             today's behavior, zero-risk rollout). The cost-split default posture
-            (2026-07-02) is Fable-5-managers (via Rick's user default, zero code)
-            / Opus-4.8-workers (the `claude-opus-4-8` INI keys). The resolved
+            (2026-08-17) is Fable-5-managers (via Rick's user default, zero code)
+            / Opus-5-workers (the `claude-opus-5` INI keys). The resolved
             model is echoed on every roster entry + at the top level (spawn-ack
             verification).
 
@@ -2626,8 +2894,17 @@ def spawn_sessions(
     # the cost goal is met entirely by the worker-side flag.
     spawn_models   = cfg[ "spawn_models" ]
     resolved_model = model or spawn_models.get( role ) or spawn_models.get( "default" )
+    # Stamp the re-spin's fire time BEFORE the launch, not after it. The wake
+    # check ignores any receipt older than `fired_at` — that guard is what stops
+    # a self_respin's own pre-clear receipt from greening its successor. Taken
+    # after the launch, it also swallows a HEALTHY successor: a seat that reaches
+    # its SessionStart while later seats are still being launched leaves a receipt
+    # the check then reads as too old, and the manager gets a false "it never
+    # woke". Earlier is always safe; later is not.
+    import datetime as _dt
+    respin_fired_at = _dt.datetime.now().astimezone()
     try:
-        return session_spawner.spawn_sessions(
+        result = session_spawner.spawn_sessions(
             count, task_prompt, sid,
             script_path        = _spawn_script_path(),
             manager_persona    = persona,
@@ -2642,6 +2919,33 @@ def spawn_sessions(
     except ValueError as e:
         return { "status": "error", "reason": str( e ) }
 
+    # Arm the wake check on a RE-SPIN (row b0570b67). A spawn carrying a
+    # seed_memento is a seat being brought back, and that is the path where a
+    # lost wake or a stale memento produces a successor that looks idle rather
+    # than broken. A fresh spawn with no seed has no prior state to lose, so it
+    # is left alone. Best-effort: the watch is a diagnostic and must never turn
+    # a successful spawn into a failed call.
+    if seed_memento and not dry_run:
+        _arm_respin_wake_watch( result, persona, respin_fired_at )
+    return result
+
+
+def _arm_respin_wake_watch( spawn_result, manager_persona, fired_at ):   # pragma: no cover - thin live-boundary glue; arm_watches_for_spawn is covered directly
+    """Start the post-re-spin wake watches, shouting at the firing manager by DM.
+
+    `fired_at` is passed in rather than read here: it must be stamped BEFORE the
+    launch, or a successor that boots quickly leaves a receipt the check dismisses
+    as predating the re-spin."""
+    try:
+        from cosa.agents.heartbeat_arbiter.respin_wake_check import arm_watches_for_spawn
+        arm_watches_for_spawn(
+            spawn_result,
+            alert_fn  = lambda message: _dm_send_fn( recipient=manager_persona, body=message ),
+            fired_at  = fired_at,
+        )
+    except Exception as e:
+        logger.warning( f"[spawn] re-spin wake watch not armed: {e}" )
+
 
 @mcp.tool
 def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str = "", write_memento: Optional[ bool ] = None, respin_personas: Optional[ List[ str ] ] = None ) -> dict:
@@ -2653,9 +2957,29 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     reaps ALL sessions this manager spawned.
 
     `write_memento` (defaults to the INI `cc session spawn write memento default`)
-    signals that each child should be given a chance to write a memento (to
-    `io/mementos/<persona>-<timestamp>.md`) before kill, so its specialization
-    survives a future re-spawn (pass that path back as `seed_memento`).
+    makes the reap PROVE each seat has a fresh+complete memento on disk BEFORE kill,
+    at the derivable slot `io/mementos/<persona-slug>.md` — and, when one is absent,
+    DM the still-alive child to write it and WAIT (bounded) for it to appear, so its
+    specialization survives a future re-spawn (pass that path back as `seed_memento`).
+    The result's `memento_outcomes` carries an EXPLICIT per-seat verdict (verified /
+    written / prior_holder_present / unparseable_present / timeout_no_memento / skipped)
+    — a seat that produced no PROVABLE memento fails VISIBLY, never as a silent success
+    (row 0a36d83d — the flag used to be a no-op). The verdict splits three recovery
+    actions apart: `unparseable_present` (a file IS on disk and it may well be this
+    seat's — OPEN AND READ it, RECOVERABLE), `prior_holder_present` (the file at the
+    slot parsed fine and names ANOTHER session — this seat's memento is NOT there, so
+    do not read it expecting their context; hunt for one written to the wrong place,
+    usually the repo root, or accept it was never written), and `timeout_no_memento`
+    (nothing readable on disk at all — ABSENT, unrecoverable). Before the middle one
+    existed, a race and a lost memento returned the SAME verdict ten minutes apart
+    (row 3b0c5f90), which forced a manual check on every reap.
+
+    ⚠️ **Read `memento_alarm` FIRST.** It is a single top-level line naming every seat
+    about to be killed without a proven memento, and it is `None` when there is nothing
+    to say. The per-seat verdicts were already honest and still got missed, because they
+    sit in a nested dict while the reap reports success around them (row 3b0c5f90).
+    A seat already carrying a fresh memento (a manual "prepare for re-spin" the
+    manager already did) is NOT asked again — the guard suppresses the duplicate.
 
     ⚠️ **A REAP UN-ASSIGNS THE WORKER'S STORE ROWS. A RE-SPIN MUST SAY SO.**
     By default every reaped worker's non-terminal rows are reconciled away from
@@ -2689,14 +3013,46 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
         respin_personas: personas coming straight back — keep their row ownership
 
     Returns:
-        dict: { dismissed:[{session_name, status}], remaining,
-                retained_owner_personas, retained_unmatched, ... }
+        dict: { dismissed:[{session_name, status}], remaining, memento_alarm,
+                memento_outcomes, retained_owner_personas, retained_unmatched, ... }
     """
+    import functools
+    import cosa.utils.util as cu
+    from lupin_mcp import session_spawner, reap_memento
     _wait_for_sender_id()
-    from lupin_mcp import session_spawner
     sid, _ = session_spawner.resolve_manager_identity( _get_cc_metadata(), fallback_session_id=SESSION_ID )
     cfg    = session_spawner.resolve_spawn_config( _spawn_config_mgr() )
     wm     = cfg[ "write_memento_default" ] if write_memento is None else write_memento
+    # MEMENTO COORDINATION (row 0a36d83d) → wire the LIVE coordinator so each reaped
+    # seat is proven to have (or is asked to write, then polled for) a fresh+complete
+    # memento on disk BEFORE kill — the flag was a no-op for 3 production failures.
+    # partial (not a closure) so the wrapper stays fully covered even when the inner
+    # dismiss_sessions is stubbed; coordinate_mementos has its own direct unit tests.
+    # NO project_root is passed (row 80b930e6). It used to be cu.get_project_root() —
+    # LUPIN_ROOT, which describes THIS HOST, not the seat being reaped — and the
+    # coordinator applied that single root to every seat in the batch, verifying each
+    # non-lupin seat against lupin's io/mementos/ and so against a DIFFERENT persona's
+    # live memento. Each seat's root now comes from its own bridge cwd; a seat whose
+    # repo cannot be determined is refused, never guessed at. The parameter was
+    # deleted rather than left unused, so there is no root here to fall back to.
+    memento_coord = functools.partial(
+        reap_memento.coordinate_mementos,
+        write_memento     = wm,
+        window_seconds    = cfg[ "reap_memento_window_seconds" ],
+        min_bytes         = cfg[ "reap_memento_min_bytes" ],
+        ask_timeout_sec   = cfg[ "reap_memento_ask_timeout_sec" ],
+        poll_interval_sec = cfg[ "reap_memento_poll_interval_sec" ] )
+    # POST-KILL RE-CHECK (row f94ab580) → the coordinator above judges at ASK TIME,
+    # and the kill is what ends a seat's chance to write. A seat still mid-write when
+    # the ask window expired was GUARANTEED to be reported as having failed to write
+    # one — measured on a four-seat reap, two of four alarms were that race. Same
+    # verify predicate, same INI window/floor, so this look and the first can never
+    # disagree about what counts as proven; it can only upgrade a seat that re-proves
+    # itself, never quiet an absent memento or another session's file.
+    memento_recheck = functools.partial(
+        reap_memento.recheck_losing_seats,
+        window_seconds    = cfg[ "reap_memento_window_seconds" ],
+        min_bytes         = cfg[ "reap_memento_min_bytes" ] )
     # LIVE reap path → wire the real reap-RECONCILE producer (d647b531) so a reaped
     # worker's non-terminal store items are auto-reconciled (close-if-receipt /
     # reassign-to-live-manager / surface) instead of orphaning. session_spawner
@@ -2705,7 +3061,8 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     return session_spawner.dismiss_sessions(
         sid, session_names=session_names, reason=reason, write_memento=wm,
         reconcile_items_fn=session_spawner._default_reconcile_store_items,
-        respin_personas=respin_personas )
+        respin_personas=respin_personas, memento_coord_fn=memento_coord,
+        memento_recheck_fn=memento_recheck )
 
 
 @mcp.tool
@@ -2885,8 +3242,8 @@ def _commons_storage_root() -> str:
     Resolve the CommonsStore root path.
 
     `commons storage path` is interpreted as relative to LUPIN_ROOT (matches the
-    project's existing config convention — see `solution snapshots lancedb path`
-    pattern in lupin-app.ini). CommonsStore appends `io/commons` internally, so
+    project's existing config convention — see the `path to ... wo root` keys
+    in lupin-app.ini). CommonsStore appends `io/commons` internally, so
     we strip a leading `/io/commons` segment when the user has left the default
     in place; otherwise we pass through.
     """
@@ -3330,6 +3687,7 @@ def _dm_send_impl(
         - missing api_key short-circuits to {"status":"error","reason":"missing_auth_header"}
         - 201 → {"status":"sent", **body_json}
         - 422 → {"status":"error","reason":"recipient_unresolved","detail":...}
+        - 413 → {"status":"error","reason":"dm_too_long","detail":...} (rejecting arm)
         - other status → {"status":"error","reason":"http_<code>","detail":...}
         - transport exception → {"status":"error","reason":"request_failed","detail":str(e)}
     """
@@ -3371,6 +3729,16 @@ def _dm_send_impl(
         except Exception:
             detail = resp.text[ :200 ]
         return { "status": "error", "reason": "recipient_unresolved", "detail": detail }
+    if resp.status_code == 413:
+        # DM-verbosity pilot: the server refuses an over-long DM under the rejecting
+        # arm with 413. Distinct from 422 (recipient_unresolved) — reusing it would
+        # make a too-long DM report as a bad recipient. The server is authoritative;
+        # forward its detail verbatim and never compute the arm client-side.
+        try:
+            detail = resp.json().get( "detail" )
+        except Exception:
+            detail = resp.text[ :200 ]
+        return { "status": "error", "reason": "dm_too_long", "detail": detail }
     return { "status": "error", "reason": f"http_{resp.status_code}", "detail": resp.text[ :200 ] }
 
 
@@ -3505,6 +3873,7 @@ def _dm_respond_impl(
         - missing api_key short-circuits to {"status":"error","reason":"missing_auth_header"}
         - 201 → {"status":"sent", **body_json}
         - 422 → {"status":"error","reason":"recipient_unresolved","detail":...}
+        - 413 → {"status":"error","reason":"dm_too_long","detail":...} (rejecting arm)
         - other status → {"status":"error","reason":"http_<code>","detail":...}
         - transport exception → {"status":"error","reason":"request_failed","detail":str(e)}
     """
@@ -3546,6 +3915,15 @@ def _dm_respond_impl(
         except Exception:
             detail = resp.text[ :200 ]
         return { "status": "error", "reason": "recipient_unresolved", "detail": detail }
+    if resp.status_code == 413:
+        # A too-long reply is refused with 413 the same way a send is (rejecting
+        # arm). Map it to dm_too_long here too so the reply path reports the refusal
+        # cleanly rather than falling through to a bare http_413.
+        try:
+            detail = resp.json().get( "detail" )
+        except Exception:
+            detail = resp.text[ :200 ]
+        return { "status": "error", "reason": "dm_too_long", "detail": detail }
     return { "status": "error", "reason": f"http_{resp.status_code}", "detail": resp.text[ :200 ] }
 
 
@@ -4512,5 +4890,13 @@ def task_edit(
 
 
 if __name__ == "__main__":
+    # THE POSITIVE ASSIGNMENT — the only place this is set. It must come BEFORE
+    # mcp.run() so a resolution failure during startup still hard-exits the server
+    # exactly as it always has. See the flag's definition for why this is not an
+    # environment check, and for what a future console_scripts entry point owes.
+    _IS_MCP_SERVER = True
+    # PHASE 2 STARTS HERE AND NOWHERE ELSE (row `87ae7234`). Importing this module
+    # must not start a poll loop that credits coverage to no test.
+    _start_bridge_watch()
     _maybe_start_commons_archival_daemon()
     mcp.run()

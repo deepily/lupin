@@ -111,7 +111,7 @@ class IterativeDebuggingAgent( AgentBase ):
         
         if self.debug: print( f"IterativeDebuggingAgent._get_prompt() minimalist: {self.minimalist}", end="\n" )
         if self.minimalist:
-            self.prompt_template  = du.get_file_as_string( du.get_project_root() + self.config_mgr.get( "agent prompt for debugger minimalist" ) )
+            self.prompt_template  = du.get_file_as_string( du.get_project_root() + self.config_mgr.get_required( "agent prompt for debugger minimalist" ) )
             prompt                = self.prompt_template.format( error_message=self.error_message, formatted_code=self.formatted_code )
             if self.debug and self.verbose: print( f"Prompt: {prompt}" )
             return prompt

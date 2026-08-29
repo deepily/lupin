@@ -49,7 +49,11 @@ class XmlPromptGenerator:
         self.agent_router_simple_commands             = self._get_simple_agent_router_commands()
         self.agent_router_agentic_commands            = self._get_agentic_job_commands()
         self.agent_function_mapping_compound_commands = self._get_compound_agent_function_mapping_commands()
-        
+
+        # The JSONs supply PHRASINGS; the registry says what EXISTS. Checked here, before
+        # a single row is built, because a row is where the two would silently disagree.
+        self._assert_agent_router_json_commands_match_speakable()
+
         # Compile commands after loading dictionaries
         self.vox_cmd_commands                   = self._compile_vox_cmd_commands()
         self.agent_router_commands              = self._compile_agent_router_commands()
@@ -224,24 +228,110 @@ class XmlPromptGenerator:
         
         return ( compound_categories + simple_categories ).strip()
     
-    def _compile_agent_router_commands( self ) -> str:
+    def _assert_agent_router_json_commands_match_speakable( self ) -> None:
         """
-        Compiles compound, simple, and agentic agent router commands into XML format.
+        Refuse to build a corpus whose command set is not exactly the served menu.
+
+        WHAT THIS CLOSES (row 95924f2d, step 4). The MENU is already single-sourced —
+        `_compile_agent_router_commands` reads `speakable_commands()`, and no JSON can
+        move it. This guard makes the ROW SET obey the same source, in both directions:
+
+          · a JSON key that is NOT speakable would build rows whose answer is a command
+            the menu inside those very rows never offers. The earlier subset-of-REGISTRY
+            check let that through: the two expediters are registered on purpose and
+            non-speakable on purpose, so naming one in a JSON passed the guard and still
+            trained a label the menu omits.
+          · a speakable command with NO JSON key gets zero rows — a command the served
+            prompt offers and the model has never been trained to emit. That is the
+            starvation half, and it is silent: nothing counts the rows per command.
+
+        WHY THE ORACLE MOVED FROM `REGISTRY` TO `speakable_commands()`. Checking against
+        the whole registry was chosen to let the documented system-triggered exemptions
+        through. But those commands are exactly the ones that must NOT appear in the
+        corpus, because the training instruction interpolates the speakable menu. The
+        exemption belongs in the registry (`speakable=False`) and therefore belongs OUT
+        of the JSONs — which is where it already is, by care. This makes it construction.
 
         Requires:
-            - agent_router_compound_commands initialized
-            - agent_router_simple_commands initialized
-            - agent_router_agentic_commands initialized
+            - the three agent_router_*_commands dicts are loaded
 
         Ensures:
-            - Returns XML formatted commands
-            - Combines compound, simple, and agentic commands
-        """
-        compound_categories = "".join( [ "        <command>" + command + "</command>\n" for command in self.agent_router_compound_commands.keys() ] )
-        simple_categories   = "".join( [ "        <command>" + command + "</command>\n" for command in self.agent_router_simple_commands.keys() ] )
-        agentic_categories  = "".join( [ "        <command>" + command + "</command>\n" for command in self.agent_router_agentic_commands.keys() ] )
+            - returns None when the JSON key union equals the speakable command set
+            - raises ValueError naming BOTH directions of the difference otherwise,
+              before any row is built
 
-        return ( compound_categories + simple_categories + agentic_categories ).strip()
+        Raises:
+            - ValueError if the JSON key union and speakable_commands() differ
+        """
+        from cosa.rest.v2.router_prompt_generator import speakable_commands
+
+        json_commands = (
+            set( self.agent_router_compound_commands )
+            | set( self.agent_router_simple_commands )
+            | set( self.agent_router_agentic_commands )
+        )
+        speakable  = set( speakable_commands() )
+        only_json  = sorted( json_commands - speakable )
+        only_menu  = sorted( speakable - json_commands )
+        if only_json or only_menu:
+            raise ValueError(
+                "the agent-router training JSONs and the served command menu disagree "
+                f"(row 95924f2d): in a JSON but not in the menu={only_json}, in the menu "
+                f"but in no JSON={only_menu}. The JSONs supply PHRASINGS; the registry "
+                "says what EXISTS and what is speakable. A JSON-only command trains a "
+                "label the menu in those same rows never offers; a menu-only command "
+                "ships in the prompt with no training rows behind it. Either set "
+                "speakable on the spec in cosa/rest/v2/registry.py, or remove the key "
+                "from the JSON."
+            )
+
+    def registry_ordered_training_commands( self, command_index: dict ) -> list:
+        """
+        Order one JSON index's commands by the REGISTRY, so the registry decides which
+        commands get training rows and the JSON only says where their phrasings live.
+
+        The three row loops used to iterate a JSON's own `.keys()`, which made the JSON
+        the definition of what exists AND the source of each row's label. Iterating the
+        registry's speakable order instead means the loop variable — the string that
+        becomes the row's answer — comes from the registry itself.
+
+        Membership is already pinned by `_assert_agent_router_json_commands_match_speakable`,
+        which runs at construction, so this returns every key of `command_index` and drops
+        nothing; the filter is a belt, not the policy.
+
+        Requires:
+            - command_index maps a full routing string to its phrasing-file path or config
+
+        Ensures:
+            - Returns the speakable commands present in command_index, in served order
+        """
+        from cosa.rest.v2.router_prompt_generator import speakable_commands
+
+        return [ command for command in speakable_commands() if command in command_index ]
+
+    def _compile_agent_router_commands( self ) -> str:
+        """
+        Compile the router command MENU that every training instruction interpolates.
+
+        Single-sourced from the v2 registry (2026.08.16 single-source design §2.4):
+        the menu is exactly the speakable commands the served router prompt lists, so
+        the training menu and the served prompt cannot disagree by construction — the
+        18-vs-19 drift this row exists to end. The three agent-router JSONs REMAIN the
+        source of the example phrasings (row generation, §5.3); they no longer define
+        WHICH commands exist. `speakable_commands()` fails loud if its order tuple and
+        the registry ever disagree, so a stale menu cannot pass silently.
+
+        Requires:
+            - cosa.rest.v2.router_prompt_generator.speakable_commands is importable
+
+        Ensures:
+            - Returns the 8-space-indented <command> lines for speakable_commands(),
+              in served order, matching the sibling builders' interpolation format
+        """
+        from cosa.rest.v2.router_prompt_generator import speakable_commands
+        return "".join(
+            [ "        <command>" + command + "</command>\n" for command in speakable_commands() ]
+        ).strip()
     
     def _init_common_templates( self ) -> None:
         """
@@ -688,6 +778,37 @@ class XmlPromptGenerator:
             - Length matches requested_length if specified
         """
         return self._get_placeholder_values( "/src/ephemera/prompts/data/placeholders-swe-team-tasks.txt", requested_length=requested_length )
+
+    def get_test_types( self, requested_length: Optional[int]=None ) -> list:
+        """
+        Gets placeholder test-suite type names for test suite job training.
+
+        Requires:
+            - requested_length is None or positive integer
+
+        Ensures:
+            - Returns list of test type names
+            - Length matches requested_length if specified
+        """
+        return self._get_placeholder_values( "/src/ephemera/prompts/data/placeholders-test-types.txt", requested_length=requested_length )
+
+    def get_tfe_plan_paths( self, requested_length: Optional[int]=None ) -> list:
+        """
+        Gets placeholder TFE resume targets for test-fix-expediter resume training.
+
+        Values are limited to the two forms resume_resolver.resolve_resume_target
+        actually implements — a tfe-* job ID, or a plan doc path ending in
+        "-plan.md" / containing "/plans/". Its natural-language branch is a
+        Phase 2 stub, so free-text targets are deliberately excluded.
+
+        Requires:
+            - requested_length is None or positive integer
+
+        Ensures:
+            - Returns list of resolvable TFE resume targets
+            - Length matches requested_length if specified
+        """
+        return self._get_placeholder_values( "/src/ephemera/prompts/data/placeholders-tfe-plan-paths.txt", requested_length=requested_length )
 
     def get_audience_levels( self, requested_length: Optional[int]=None ) -> list:
         """

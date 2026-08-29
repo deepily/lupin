@@ -1,8 +1,13 @@
 """
 E2E UI tests for agentic job dispatch cards on the notifications page.
 
-Phase 6: Notifications & Q&A Tests — validates Claude Code, Research,
-Podcast, and SWE Team submission card elements and interactions.
+Phase 6: Notifications & Q&A Tests — validates Claude Code, Research and
+Test Suite submission card elements and interactions.
+
+The Podcast and SWE Team card classes were DELETED, not disabled, when their doors
+retired: Rick ruled 2026-08-21 that the Submit Agentic Jobs accordion is going away and
+Q&A is the entrance, so each door commit deletes its own card, and a UI test for a card
+that no longer exists is not a gap in coverage — it is coverage of nothing.
 
 Requires:
     - Dev server running on port 7999 with Testing config
@@ -280,159 +285,63 @@ class TestResearchCard:
 
     def test_mode_selector_has_research_to_presentation( self, logged_in_page ):
         """
-        Mode selector dropdown includes research_to_presentation option.
+        Agent selector includes the research-to-presentation command.
+
+        ⚠️ VALUE CHANGED 2026-08-22 (Q&A card phase 3). The option values used to be
+        short mode keys — this test looked for `value='research_to_presentation'` —
+        and are now full routing commands rendered from GET /api/v2/agents, so it
+        looks for `agent router go to research to presentation`. The dropdown is no
+        longer hand-written in notifications.html at all; see
+        src/rnd/v0.2.0/2026.08.22-qa-card-registry-driven-submit-panel-retirement.md.
+
+        The wait matters: options arrive from a fetch after auth, so a bare
+        networkidle can land before the render. Locating the option itself with a
+        timeout is the wait — a count() on an unrendered select returns 0 happily.
 
         Requires:
             - Authenticated session
 
         Ensures:
-            - research_to_presentation option exists in mode dropdown
+            - the research-to-presentation command is offered, under its command value
         """
         logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
-        mode_select = logged_in_page.locator( "#agent-mode" )
-        options = mode_select.locator( "option[value='research_to_presentation']" )
-        assert options.count() > 0
+        option = logged_in_page.locator(
+            "#agent-mode option[value='agent router go to research to presentation']"
+        )
+        option.wait_for( state="attached", timeout=10_000 )
+        assert option.count() > 0
 
-
-# ---------------------------------------------------------------------------
-# Podcast Card
-# ---------------------------------------------------------------------------
-
-class TestPodcastCard:
-    """Tests for Podcast Generator job dispatch card."""
-
-    def test_podcast_card_has_source_input( self, logged_in_page ):
+    def test_mode_selector_is_rendered_from_the_registry( self, logged_in_page ):
         """
-        Podcast card has source input field.
+        The live dropdown carries routing commands, not the retired short mode keys.
+
+        The end-to-end confirmation of gate 3. The two unit halves already prove
+        registry→endpoint and endpoint→DOM; this one proves the real page, served by
+        the real server, ends up with the same values — which no unit test can see.
 
         Requires:
             - Authenticated session
 
         Ensures:
-            - Source input element exists
+            - every option value except the Auto-Route sentinel is a routing command
+            - a short mode key ('math') appears nowhere, so the hand-written list is
+              genuinely gone rather than rendered alongside
         """
         logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
-        assert logged_in_page.get_by_test_id( "notifications-podcast-source-input" ).count() > 0
+        logged_in_page.locator(
+            "#agent-mode option[value='agent router go to math']"
+        ).wait_for( state="attached", timeout=10_000 )
 
-    def test_podcast_card_has_dry_run_and_submit( self, logged_in_page ):
-        """
-        Podcast card has dry-run checkbox and submit button.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - Dry-run checkbox and submit button exist
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-podcast-dry-run-checkbox" ).count() > 0
-        assert logged_in_page.get_by_test_id( "notifications-podcast-submit-btn" ).count() > 0
-
-    def test_podcast_card_has_stt_button( self, logged_in_page ):
-        """
-        Podcast card has speech-to-text button.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - STT button element exists
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-podcast-stt-btn" ).count() > 0
-
-
-# ---------------------------------------------------------------------------
-# SWE Team Card
-# ---------------------------------------------------------------------------
-
-class TestSWETeamCard:
-    """Tests for SWE Team job dispatch card."""
-
-    def test_swe_card_has_task_textarea( self, logged_in_page ):
-        """
-        SWE Team card has task description textarea.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - Task textarea element exists
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-swe-task-textarea" ).count() > 0
-
-    def test_swe_card_has_budget_and_timeout( self, logged_in_page ):
-        """
-        SWE Team card has budget and timeout inputs.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - Budget and timeout input elements exist
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-swe-budget-input" ).count() > 0
-        assert logged_in_page.get_by_test_id( "notifications-swe-timeout-input" ).count() > 0
-
-    def test_swe_card_has_trust_mode_select( self, logged_in_page ):
-        """
-        SWE Team card has trust mode selector.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - Trust mode select element exists
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-swe-trust-mode-select" ).count() > 0
-
-    def test_swe_card_has_dry_run_and_submit( self, logged_in_page ):
-        """
-        SWE Team card has dry-run checkbox and submit button.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - Dry-run checkbox and submit button exist
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-swe-dry-run-checkbox" ).count() > 0
-        assert logged_in_page.get_by_test_id( "notifications-swe-submit-btn" ).count() > 0
-
-    def test_swe_card_has_stt_button( self, logged_in_page ):
-        """
-        SWE Team card has speech-to-text button.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - STT button element exists
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-swe-stt-btn" ).count() > 0
+        values = logged_in_page.locator( "#agent-mode option" ).evaluate_all(
+            "options => options.map( o => o.value )"
+        )
+        assert "math" not in values, f"a short mode key survives in the dropdown: {values}"
+        for value in values:
+            assert value == "__auto_route__" or value.startswith( "agent router go to " ), value
 
 
 # ---------------------------------------------------------------------------
@@ -520,17 +429,32 @@ class TestTestSuiteCard:
 
     def test_mode_selector_has_test_suite( self, logged_in_page ):
         """
-        Mode selector dropdown includes test_suite option.
+        Agent selector includes the test-suite command.
+
+        ⚠️ VALUE CHANGED 2026-08-22 (Q&A card phase 3), rebaselined 2026-08-23. The
+        option values used to be short mode keys — this test looked for
+        `value='test_suite'` — and are now full routing commands rendered from
+        GET /api/v2/agents, so it looks for `agent router go to test suite`. Its
+        sibling `test_mode_selector_has_research_to_presentation` was rebaselined
+        with phase 3; this one was missed and would have gone red on the next
+        :8000 run. Same change, same reason.
+
+        The wait matters: options arrive from a fetch after auth, so a bare
+        networkidle can land before the render. Locating the option itself with a
+        timeout is the wait — a count() on an unrendered select returns 0 happily,
+        which is why the bare count() this replaced was not enough on its own.
 
         Requires:
             - Authenticated session
 
         Ensures:
-            - test_suite option exists in mode dropdown
+            - the test-suite command is offered, under its command value
         """
         logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
-        mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )
-        options     = mode_select.locator( "option[value='test_suite']" )
-        assert options.count() > 0
+        option = logged_in_page.locator(
+            "#agent-mode option[value='agent router go to test suite']"
+        )
+        option.wait_for( state="attached", timeout=10_000 )
+        assert option.count() > 0

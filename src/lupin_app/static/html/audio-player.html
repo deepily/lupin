@@ -14,6 +14,11 @@
             padding: 0 24px 48px;
         }
 
+        /* embed=1 — strip nav + page chrome so the player fits a narrow container */
+        body.embed #lupin-nav { display: none !important; }
+        body.embed .audio-player-container { margin: 8px auto; padding: 0 12px 12px; }
+        body.embed .audio-player-content h1.audio-player-title { margin-top: 12px; font-size: 20px; }
+
         .audio-player-loading {
             text-align: center;
             padding: 64px 0;
@@ -105,9 +110,15 @@
     <script src="/static/js/lupin-nav.js" defer></script>
     <script>
         ( async function() {
-            const target = document.getElementById( 'audio-player-target' );
-            const params = new URLSearchParams( window.location.search );
-            const path   = params.get( 'path' );
+            const target   = document.getElementById( 'audio-player-target' );
+            const params   = new URLSearchParams( window.location.search );
+            const path     = params.get( 'path' );
+            const embed    = params.get( 'embed' ) === '1';
+            const autoplay = params.get( 'autoplay' ) === '1';
+            const probe    = params.get( 'probe' ) === '1';
+
+            // embed=1 — hide nav + tighten chrome (set synchronously, before deferred nav renders)
+            if ( embed ) document.body.classList.add( 'embed' );
 
             if ( !path ) {
                 target.className = 'audio-player-error';
@@ -125,24 +136,91 @@
                 .replace( /[-_]/g, ' ' )
                 .replace( /\b\w/g, c => c.toUpperCase() );
 
-            const audioSrc = '/api/io/file?path=' + encodeURIComponent( path );
+            const audioApiUrl = '/api/io/file?path=' + encodeURIComponent( path );
 
-            // Try HEAD request for file size
+            // /api/io/file requires an `Authorization: Bearer` header (HTTPBearer —
+            // no cookie, no ?token param). A native <audio src> tag cannot attach a
+            // header, so the mp3 401'd and the player has never produced sound
+            // (bug 4cfabc0f). Fix: BLOB-FETCH — GET the file WITH the header, wrap
+            // the bytes in an object URL, and hand THAT to <audio>. The player is
+            // same-origin with the app (also inside the notifications overlay
+            // iframe), so the JWT in localStorage is readable here.
+            const token    = localStorage.getItem( 'lupin_access_token' );
+            const authInit = token ? { headers: { Authorization: 'Bearer ' + token } } : {};
+
+            // ── REFRESH-AND-RETRY (bug 38943485, defect 2) ───────────────────────
+            // This page is STANDALONE — it is not the notifications app and has no
+            // access to its authedFetch/ensureValidToken wrapper, so every fetch below
+            // used to fire with whatever localStorage happened to hold and turn a 401
+            // into "Could not load audio" with no retry and no way forward but a
+            // manual reload.
+            //
+            // The window is small but real: the app's proactive refresh rides the
+            // WebSocket heartbeat, so when that socket is down or the tab is
+            // backgrounded (where browsers throttle timers) the token can age past
+            // expiry before anything renews it — and clicking Play is exactly what a
+            // user does in a backgrounded tab.
+            //
+            // `authedFetch` below refreshes ONCE on a 401 and retries. It deliberately
+            // does NOT pre-check expiry: this page cannot know what the app already
+            // refreshed a second ago, and a 401 is the only authority on whether the
+            // token this page holds still works. Reacting to the real answer beats
+            // predicting it from a clock this page does not own.
+            let bearer = token;
+
+            async function refreshAccessToken() {
+                const refreshToken = localStorage.getItem( 'lupin_refresh_token' );
+                if ( !refreshToken ) return false;
+                try {
+                    const resp = await fetch( '/auth/refresh', {
+                        method  : 'POST',
+                        headers : { 'Content-Type': 'application/json' },
+                        body    : JSON.stringify( { refresh_token: refreshToken } )
+                    } );
+                    if ( !resp.ok ) return false;
+                    const data = await resp.json();
+                    // Same storage keys the app uses — the two must never diverge, or a
+                    // refresh here would be invisible to the app and vice versa.
+                    localStorage.setItem( 'lupin_access_token',  data.tokens.access_token  );
+                    localStorage.setItem( 'lupin_refresh_token', data.tokens.refresh_token );
+                    bearer = data.tokens.access_token;
+                    return true;
+                } catch ( e ) {
+                    return false;
+                }
+            }
+
+            async function authedFetch( url, init ) {
+                const withAuth = ( t ) => {
+                    const merged = Object.assign( {}, init || {} );
+                    merged.headers = Object.assign( {}, ( init && init.headers ) || {} );
+                    if ( t ) merged.headers.Authorization = 'Bearer ' + t;
+                    return merged;
+                };
+                let resp = await fetch( url, withAuth( bearer ) );
+                if ( resp.status !== 401 ) return resp;
+                // ONE retry. A second 401 after a successful refresh is a real auth
+                // failure, not a stale token, and looping would only delay saying so.
+                if ( !( await refreshAccessToken() ) ) return resp;
+                return await fetch( url, withAuth( bearer ) );
+            }
+
+            // File size via HEAD (auth'd; best-effort).
             let fileSizeStr = 'Unknown';
             try {
-                const head = await fetch( audioSrc, { method: 'HEAD' } );
+                const head = await authedFetch( audioApiUrl, { method: 'HEAD' } );
                 if ( head.ok ) {
                     const bytes = parseInt( head.headers.get( 'content-length' ) || '0' );
                     if ( bytes > 0 ) fileSizeStr = ( bytes / ( 1024 * 1024 ) ).toFixed( 1 ) + ' MB';
                 }
             } catch ( e ) { /* ignore */ }
 
-            // Try to load companion script file for richer metadata
+            // Companion script file for a richer subtitle (auth'd; best-effort).
             let subtitle = '';
             try {
                 const scriptPath = path.replace( /\.mp3$/i, '-script.md' );
                 const scriptSrc  = '/api/io/file?path=' + encodeURIComponent( scriptPath );
-                const scriptResp = await fetch( scriptSrc );
+                const scriptResp = await authedFetch( scriptSrc, {} );
                 if ( scriptResp.ok ) {
                     const scriptText = await scriptResp.text();
                     // Try frontmatter title first
@@ -161,16 +239,17 @@
                 ? `<p class="audio-player-subtitle">${subtitle.replace( /</g, '&lt;' ).replace( />/g, '&gt;' )}</p>`
                 : '';
 
+            // Render WITHOUT an <audio src> / download href — those are set to the
+            // blob object URL below, once the auth'd bytes are in hand.
             target.className = 'audio-player-content';
             target.innerHTML = `
                 <h1 class="audio-player-title">&#127911; ${displayTitle}</h1>
                 ${subtitleHtml}
-                <audio class="audio-player-element" controls preload="metadata"
-                       src="${audioSrc}">
+                <audio class="audio-player-element" controls preload="metadata">
                     Your browser does not support the audio element.
                 </audio>
                 <div class="audio-player-actions">
-                    <a href="${audioSrc}" download="${filename}" class="audio-player-download">
+                    <a download="${filename}" class="audio-player-download">
                         &#128229; Download MP3
                     </a>
                 </div>
@@ -180,8 +259,78 @@
                         <dt>Filename</dt><dd>${filename}</dd>
                         <dt>Path</dt><dd>${path}</dd>
                         <dt>Size</dt><dd>${fileSizeStr}</dd>
+                        <dt id="buffer-timing-dt" hidden>Buffer</dt><dd id="buffer-timing-dd" hidden></dd>
                     </dl>
                 </details>`;
+
+            const audioEl    = target.querySelector( 'audio.audio-player-element' );
+            const downloadEl = target.querySelector( 'a.audio-player-download' );
+
+            // Blob-fetch the mp3 WITH the header. This buffers the WHOLE file before
+            // playback can start; the elapsed fetch→blob time is the delay Mr Radio
+            // wants measured — logged as "[PLAYER-BLOB] ..." and shown in File Details.
+            try {
+                const t0   = performance.now();
+                const resp = await authedFetch( audioApiUrl, {} );
+                if ( !resp.ok ) {
+                    throw new Error( 'HTTP ' + resp.status + ( resp.status === 401 ? ' (auth — missing/expired token)' : '' ) );
+                }
+                const blob      = await resp.blob();
+                const bufferMs  = performance.now() - t0;
+                const objectUrl = URL.createObjectURL( blob );
+                audioEl.src     = objectUrl;
+                downloadEl.href = objectUrl;
+                // Release the blob when the page / overlay iframe is torn down.
+                window.addEventListener( 'pagehide', () => URL.revokeObjectURL( objectUrl ), { once: true } );
+
+                const secs = ( bufferMs / 1000 ).toFixed( 2 );
+                const mb   = ( blob.size / ( 1024 * 1024 ) ).toFixed( 1 );
+                console.log( `[PLAYER-BLOB] buffered ${blob.size} bytes (${mb} MB) in ${bufferMs.toFixed( 0 )} ms (${secs}s) before playback` );
+                const dtEl = document.getElementById( 'buffer-timing-dt' );
+                const ddEl = document.getElementById( 'buffer-timing-dd' );
+                if ( dtEl && ddEl ) { dtEl.hidden = false; ddEl.hidden = false; ddEl.textContent = `${secs}s to buffer ${mb} MB`; }
+            } catch ( err ) {
+                target.className = 'audio-player-error';
+                target.textContent = 'Could not load audio: ' + err.message;
+                console.log( '[PLAYER-BLOB] ERROR ' + err.message );
+                return;
+            }
+
+            // autoplay=1 — REAL auto-start on open: a user click (the "Play Here"
+            //   link) opened this frame, so the browser permits play() — the safe
+            //   half of the autoplay policy. No UI; controls stay for pause/dismiss.
+            // probe=1 — same play() PLUS a visible fired/blocked diagnostic div +
+            //   console line ("[AUTOPLAY-PROBE] ..."). DEBUG-ONLY, must NEVER ship:
+            //   a red AUTOPLAY_BLOCKED box on stage is its own demo failure
+            //   (Mr Radio ruling 2026-08-03). Gate the probe UI behind ?probe=1 so
+            //   ?autoplay=1 is safe to wire onto the overlay src.
+            if ( autoplay || probe ) {
+                let mark = () => {};
+                if ( probe ) {
+                    const resultEl = document.createElement( 'div' );
+                    resultEl.id = 'autoplay-result';
+                    resultEl.style.cssText = 'margin:16px 0;padding:12px;border-radius:6px;font-size:14px;font-family:monospace;';
+                    target.appendChild( resultEl );
+                    mark = ( ok, detail ) => {
+                        const tag = ok ? 'AUTOPLAY_FIRED' : 'AUTOPLAY_BLOCKED';
+                        resultEl.textContent = tag + ': ' + detail;
+                        resultEl.style.background = ok ? '#dcfce7' : '#fee2e2';
+                        resultEl.style.color      = ok ? '#166534' : '#991b1b';
+                        console.log( '[AUTOPLAY-PROBE] ' + tag + ' ' + detail );
+                    };
+                }
+                try {
+                    const p = audioEl.play();
+                    if ( p !== undefined ) {
+                        p.then( () => mark( true, 'play() resolved; paused=' + audioEl.paused ) )
+                         .catch( ( err ) => mark( false, err.name + ': ' + err.message ) );
+                    } else {
+                        mark( true, 'play() returned undefined (legacy); paused=' + audioEl.paused );
+                    }
+                } catch ( err ) {
+                    mark( false, 'sync throw: ' + err.name + ': ' + err.message );
+                }
+            }
         } )();
     </script>
 </body>

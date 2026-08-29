@@ -94,7 +94,9 @@ class TestBuildCommand:
             since="2026-05-01", until="2026-05-31",
             author="rick@example.com", rev_range="main..HEAD",
         )._build_command()
-        assert "--since=2026-05-01" in cmd
+        # since is day-boundary-normalized (normalize_since pins bare ISO dates —
+        # bug d0b3cd84/37a8beeb); until keeps its bare form.
+        assert "--since=2026-05-01 00:00:00" in cmd
         assert "--until=2026-05-31" in cmd
         assert "--author=rick@example.com" in cmd
         assert cmd[ -1 ] == "main..HEAD"

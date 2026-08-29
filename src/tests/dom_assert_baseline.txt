@@ -1,0 +1,16 @@
+# Row f5768ee4 — KNOWN violations of "never assert a DOM node as the ACTUAL value".
+#
+# 🔴 EMPTY. The list is zero as of 2026-08-24 (Pocholo, 7991a2cd), down from 276
+# across 35 files. KEEP IT EMPTY — with no entries the ratchet is a plain gate:
+# any new violation anywhere goes red immediately, with nothing to hide behind.
+#
+# A RATCHET, not an allowlist. The test fails when any file's count RISES or a
+# new file appears; counts may only fall, and lowering one requires editing this
+# file, which is the point — a fix is recorded rather than absorbed silently.
+#
+# KEYED BY FILE AND COUNT, DELIBERATELY NOT BY LINE NUMBER. A path:line baseline
+# looks more precise and is worse: inserting one line above a violation shifts
+# every number below it and reports a flood of violations that are not new.
+#
+# If you must add an entry here, you are recording a DEFECT you chose not to fix.
+# Say why in the commit, not here.

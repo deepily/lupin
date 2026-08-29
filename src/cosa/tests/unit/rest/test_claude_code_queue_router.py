@@ -1,194 +1,136 @@
 """
-Unit tests for the Claude Code queue submission router
-(`cosa.rest.routers.claude_code_queue`).
+Unit tests for the retired Claude Code queue router (`cosa.rest.routers.claude_code_queue`).
 
-Covers:
-- Pydantic models `ClaudeCodeQueueRequest` / `ClaudeCodeQueueResponse`
-  (defaults + explicit values).
-- DI accessors `get_todo_queue` (dual-key `lupin_app.main` patch) and
-  `get_user_job_tracker`.
-- `submit_claude_code_to_queue` endpoint — canonical + deprecated-alias paths,
-  missing-uid / missing-email / invalid-task_type 400s, websocket_id default
-  fallback, scheduled_at + monopolize pass-through arcs, success response, and
-  the factory-failure 500.
+WHAT USED TO BE HERE. The dependency reads, the identity 400s, the task_type validation,
+the session-id fallback, every optional-field arm, the scheduling pass-through, and the
+push-failure 500 — all tests of a handler that submitted Claude Code jobs to CJ Flow. That
+handler is gone: both `/api/claude-code/submit` and its `/api/claude-code/queue/submit`
+alias are tombstones naming `/api/v2/submit`. There is nothing to rewrite those tests
+INTO; the behaviour did not move within this module, it moved to a door with its own suite
+(`src/tests/unit/test_v2_submit_claude_code_through_path.py`).
 
-Boundary-mocked — `create_agentic_job`, the todo queue, and the user-job tracker
-are all faked. No real queue push, no real Claude Code / SDK invocation, ZERO
-LLM/API spend. Auth bypassed by passing `current_user` directly.
+ONE OF THEM DID NOT SIMPLY MOVE, and that is worth stating rather than leaving as a gap in
+a diff. The old handler validated `task_type` and answered 400 for anything but
+BOUNDED/INTERACTIVE. `/api/v2/submit` is generic: it checks that a command's required
+ARGUMENTS are present, not which values they may take. That guard now lives in
+`ClaudeCodeJob.__init__` and is tested at
+`src/cosa/tests/unit/agents/claude_code/test_job.py::test_an_unknown_task_type_is_refused_at_construction`.
 
-Run via `run-sdk-cov.sh` (the module imports `agentic_job_factory` which
-transitively pulls in `claude_agent_sdk`).
+Rick's ruling, 2026-08-21: the Claude Code job is *upgraded* to the v2 front door rather
+than left to die on the vine. The tombstone is the second half of that upgrade — the door
+that used to build the job now says where it is built instead.
 """
 
-import sys
+import asyncio
 import unittest
-from unittest.mock import MagicMock, patch
 
-import cosa.rest.routers.claude_code_queue as ccq
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+
+import cosa.rest.routers.claude_code_queue as mod
 from cosa.rest.routers.claude_code_queue import (
-    ClaudeCodeQueueRequest,
-    ClaudeCodeQueueResponse,
-    get_todo_queue,
-    get_user_job_tracker,
     submit_claude_code_to_queue,
+    submit_claude_code_to_queue_alias,
 )
+from cosa.rest.routers._retired_doors import REMOVE_BY, RETIRED_DOORS, V2_SUBMIT
 
-from fastapi import HTTPException
-
-P = "cosa.rest.routers.claude_code_queue"
-
-
-def _patch_fastapi_main( mock_main ):
-    pkg = MagicMock()
-    pkg.main = mock_main
-    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
+CANONICAL = "/api/claude-code/submit"
+ALIAS     = "/api/claude-code/queue/submit"
 
 
-# ── Pydantic models ─────────────────────────────────────────────────────────────
+class TestBothClaudeCodeDoorsAreRetired( unittest.TestCase ):
+    """
+    Both paths, one assertion set each — not a loop. The inventory that listed only the
+    alias is exactly how the canonical path nearly survived this change, and a loop that
+    covers whatever the table happens to hold would not have said which one was missing.
+    """
 
+    def _client( self ):
+        app = FastAPI()
+        app.include_router( mod.router )
+        return TestClient( app, raise_server_exceptions=False )
 
-class TestModels( unittest.TestCase ):
+    # ── the canonical door ──
 
-    def test_request_defaults( self ):
-        req = ClaudeCodeQueueRequest( prompt="do it" )
-        self.assertEqual( req.project, "lupin" )
-        self.assertEqual( req.task_type, "BOUNDED" )
-        self.assertEqual( req.max_turns, 50 )
-        self.assertFalse( req.dry_run )
-        self.assertIsNone( req.websocket_id )
-        self.assertIsNone( req.scheduled_at )
-        self.assertFalse( req.monopolize )
+    def test_the_canonical_door_answers_410_and_names_the_submit_door( self ):
+        response = self._client().post( CANONICAL, json={ "prompt": "run the tests" } )
+        self.assertEqual( response.status_code, 410 )
+        self.assertIn( V2_SUBMIT, response.json()[ "detail" ] )
 
-    def test_request_explicit( self ):
-        req = ClaudeCodeQueueRequest(
-            prompt="x", project="cosa", task_type="INTERACTIVE", max_turns=200,
-            websocket_id="ws1", dry_run=True, scheduled_at="2026-03-31T02:00:00",
-            monopolize=True,
-        )
-        self.assertEqual( req.project, "cosa" )
-        self.assertEqual( req.task_type, "INTERACTIVE" )
-        self.assertTrue( req.monopolize )
+    def test_the_canonical_refusal_says_the_removal_date_out_loud( self ):
+        detail = self._client().post( CANONICAL, json={ } ).json()[ "detail" ]
+        self.assertIn( "2026-12-31", detail )
+        self.assertIn( "REMOVE BY", detail )
 
-    def test_response( self ):
-        resp = ClaudeCodeQueueResponse( status="queued", job_id="cc-a1b2c3d4", queue_position=3, message="ok" )
-        self.assertEqual( resp.job_id, "cc-a1b2c3d4" )
-        self.assertEqual( resp.queue_position, 3 )
+    # ── the alias ──
 
+    def test_the_alias_answers_410_and_names_the_submit_door( self ):
+        response = self._client().post( ALIAS, json={ "prompt": "run the tests" } )
+        self.assertEqual( response.status_code, 410 )
+        self.assertIn( V2_SUBMIT, response.json()[ "detail" ] )
 
-# ── DI accessors ────────────────────────────────────────────────────────────────
+    def test_the_alias_refusal_names_ITS_OWN_path_not_the_canonical_one( self ):
+        """
+        The live handler carried both routes on ONE function and told them apart by reading
+        `request.url.path`. Two stubs replace it so each refusal names the path the caller
+        actually called — a refusal that names a different door than the one you knocked on
+        sends the reader looking for a caller they do not have.
+        """
+        detail = self._client().post( ALIAS, json={ } ).json()[ "detail" ]
+        self.assertIn( ALIAS, detail )
+        self.assertNotIn( f"{CANONICAL} is GONE", detail )
 
+    # ── both ──
 
-class TestDependencyAccessors( unittest.TestCase ):
+    def test_neither_door_asks_for_credentials( self ):
+        """
+        No auth on a tombstone: an unauthenticated caller must learn the same thing an
+        authenticated one does. A 401 reads like a credentials problem, not a retired door.
+        """
+        client = self._client()
+        for path in ( CANONICAL, ALIAS ):
+            with self.subTest( path=path ):
+                self.assertEqual( client.post( path, json={ } ).status_code, 410 )
 
-    def test_get_todo_queue( self ):
-        m = MagicMock(); m.jobs_todo_queue = "TODOQ"
-        with _patch_fastapi_main( m ):
-            self.assertEqual( get_todo_queue(), "TODOQ" )
+    def test_the_table_says_both_doors_retire_into_submit_not_ask( self ):
+        """
+        `submit` and not `ask`, because a Claude Code caller has already decided what it
+        wants run. Sending it to `ask` would teach it the wrong one of two doors that both
+        exist and both answer.
+        """
+        for path in ( CANONICAL, ALIAS ):
+            with self.subTest( path=path ):
+                self.assertEqual( RETIRED_DOORS[ path ], V2_SUBMIT )
 
-    def test_get_user_job_tracker( self ):
-        sentinel = object()
-        with patch( "cosa.rest.queue_extensions.user_job_tracker", sentinel ):
-            self.assertIs( get_user_job_tracker(), sentinel )
+    def test_both_handlers_only_refuse( self ):
+        """RED ON REVERT: give either handler a body again and it stops raising."""
+        for handler in ( submit_claude_code_to_queue, submit_claude_code_to_queue_alias ):
+            with self.subTest( handler=handler.__name__ ):
+                with self.assertRaises( HTTPException ) as caught:
+                    asyncio.run( handler() )
+                self.assertEqual( caught.exception.status_code, 410 )
+                self.assertIn( REMOVE_BY, caught.exception.detail )
 
+    def test_the_job_building_machinery_is_gone_from_this_module( self ):
+        """
+        A Pydantic model no route reads is a shape a caller can still find and reasonably
+        believe in, and a dependency nothing calls is a live wire in a dead module.
+        """
+        for name in ( "create_agentic_job", "get_todo_queue", "get_user_job_tracker",
+                      "ClaudeCodeQueueRequest", "ClaudeCodeQueueResponse", "get_current_user" ):
+            with self.subTest( name=name ):
+                self.assertFalse( hasattr( mod, name ),
+                                  f"{name} survives in a module whose only POSTs are tombstones" )
 
-# ── submit_claude_code_to_queue ─────────────────────────────────────────────────
-
-
-class TestSubmitClaudeCodeToQueue( unittest.IsolatedAsyncioTestCase ):
-
-    def _request( self, path="/api/claude-code/submit" ):
-        req = MagicMock()
-        req.url.path = path
-        return req
-
-    def _job( self ):
-        job = MagicMock()
-        job.id_hash = "cc-deadbeef"
-        job.last_question_asked = "Run the tests"
-        return job
-
-    def _deps( self, *, job=None ):
-        todo_queue = MagicMock()
-        todo_queue.size.return_value = 2
-        tracker = MagicMock()
-        tracker.register_scoped_job.return_value = "cc-scoped01"
-        factory = MagicMock( return_value=job or self._job() )
-        return todo_queue, tracker, factory
-
-    async def _call( self, body, *, path="/api/claude-code/submit",
-                     current_user=None, todo_queue=None, tracker=None, factory=None ):
-        current_user = current_user if current_user is not None else { "uid": "user-12345678", "email": "a@b.com" }
-        tq, trk, fac = self._deps()
-        todo_queue = todo_queue or tq
-        tracker    = tracker or trk
-        factory    = factory or fac
-        with patch( f"{P}.create_agentic_job", factory ):
-            return await submit_claude_code_to_queue(
-                request_body=body, request=self._request( path ),
-                current_user=current_user, todo_queue=todo_queue, user_job_tracker=tracker,
-            ), factory, todo_queue, tracker
-
-    async def test_success_canonical_with_schedule_and_monopolize( self ):
-        body = ClaudeCodeQueueRequest(
-            prompt="p", websocket_id="ws-1", scheduled_at="2026-03-31T02:00:00", monopolize=True,
-        )
-        job = self._job()
-        resp, factory, tq, trk = await self._call( body, factory=MagicMock( return_value=job ) )
-        self.assertEqual( resp.status, "queued" )
-        self.assertEqual( resp.job_id, "cc-scoped01" )
-        self.assertEqual( resp.queue_position, 2 )
-        # scheduled_at + monopolize were passed through onto the job.
-        self.assertEqual( job.scheduled_at, "2026-03-31T02:00:00" )
-        self.assertTrue( job.monopolize )
-        # factory got the canonical session_id from websocket_id.
-        _, kwargs = factory.call_args
-        self.assertEqual( kwargs[ "session_id" ], "ws-1" )
-        tq.push.assert_called_once_with( job )
-
-    async def test_success_alias_path_defaults_session_id( self ):
-        # Deprecated alias path (prints deprecation), no websocket_id → default
-        # session id derived from uid, no scheduled_at / monopolize.
-        body = ClaudeCodeQueueRequest( prompt="p" )
-        job  = self._job()
-        resp, factory, tq, trk = await self._call(
-            body, path="/api/claude-code/queue/submit", factory=MagicMock( return_value=job ),
-        )
-        self.assertEqual( resp.status, "queued" )
-        _, kwargs = factory.call_args
-        self.assertEqual( kwargs[ "session_id" ], "api-user-123" )  # api-{uid[:8]}
-
-    async def test_missing_uid_400( self ):
-        with self.assertRaises( HTTPException ) as c:
-            await self._call( ClaudeCodeQueueRequest( prompt="p" ), current_user={ "email": "a@b.com" } )
-        self.assertEqual( c.exception.status_code, 400 )
-
-    async def test_missing_email_400( self ):
-        with self.assertRaises( HTTPException ) as c:
-            await self._call( ClaudeCodeQueueRequest( prompt="p" ), current_user={ "uid": "u-1" } )
-        self.assertEqual( c.exception.status_code, 400 )
-
-    async def test_invalid_task_type_400( self ):
-        body = ClaudeCodeQueueRequest( prompt="p", task_type="bogus" )
-        with self.assertRaises( HTTPException ) as c:
-            await self._call( body )
-        self.assertEqual( c.exception.status_code, 400 )
-        self.assertIn( "Invalid task_type", c.exception.detail )
-
-    async def test_task_type_lowercased_accepted( self ):
-        # "interactive" → upper() → INTERACTIVE (valid).
-        body = ClaudeCodeQueueRequest( prompt="p", task_type="interactive" )
-        resp, factory, tq, trk = await self._call( body )
-        self.assertEqual( resp.status, "queued" )
-        _, kwargs = factory.call_args
-        self.assertEqual( kwargs[ "args_dict" ][ "task_type" ], "INTERACTIVE" )
-
-    async def test_factory_failure_500( self ):
-        body = ClaudeCodeQueueRequest( prompt="p" )
-        factory = MagicMock( side_effect=RuntimeError( "factory boom" ) )
-        with self.assertRaises( HTTPException ) as c:
-            await self._call( body, factory=factory )
-        self.assertEqual( c.exception.status_code, 500 )
-        self.assertIn( "Failed to submit", c.exception.detail )
+    def test_the_router_still_mounts_both_paths( self ):
+        """
+        A tombstone nobody mounts is a 404, which teaches a stale caller nothing. This is
+        the check that would go red if someone "cleaned up" by deleting the routes instead
+        of retiring them.
+        """
+        paths = { route.path for route in mod.router.routes }
+        self.assertIn( CANONICAL, paths )
+        self.assertIn( ALIAS,     paths )
 
 
 if __name__ == "__main__":

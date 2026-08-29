@@ -1,0 +1,15 @@
+ORIGINAL (149 words)
+======================================================================
+APPROVE — clean fix, unfreeze. Verified: shared helper 100% L+B (14 tests); the exact fenced+trailing-prose input now recovers 1 segment (was 0), pinned by test_fence_preference_drops_trailing_prose; unrecoverable RAISES + logs the raw body; presentation 426 green so the de-dup preserved its behaviour; floor at line 361 sits before the approval loop at 372. deep_research scope-out is sound + documented.
+
+Two asks: (1) the owed floor test — make it assert BOTH the PodcastGenerationError on a parsed-zero-segment script AND that the approval surface is never invoked (no preview/ask emitted). A bare raise covers line 362 but doesn't prove "floored BEFORE the gate," which is the whole point. (2) Not a blocker: the revision path (1364) catches the raise and returns the prior script with only a log line — safe (can't emit zero segments) but the user isn't told the revision failed. Worth a follow-up notify. Verdict's with Mr Radio too.
+
+PLACEHOLDER MAP
+======================================================================
+[[L00]]    IDENT     'test_fence_preference_drops_trailing_prose'
+[[L01]]    IDENT     'deep_research'
+[[L02]]    QUOTE     '"floored BEFORE the gate,"'
+
+VERIFY-TIER (must survive unchanged, not substituted)
+======================================================================
+{'0': 1, '1': 2, '100': 1, '100%': 1, '1364': 1, '14': 1, '2': 1, '361': 1, '362': 1, '426': 1}

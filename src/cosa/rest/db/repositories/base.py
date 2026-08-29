@@ -133,7 +133,7 @@ class BaseRepository(Generic[ModelType]):
         Example:
             with get_db() as session:
                 repo = BaseRepository( User, session )
-                user = repo.update( user_id, last_login = datetime.utcnow() )
+                user = repo.update( user_id, last_login = datetime.now( timezone.utc ) )
         """
         entity = self.get_by_id( id )
         if entity:

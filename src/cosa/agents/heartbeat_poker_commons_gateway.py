@@ -9,9 +9,20 @@ legacy cascade scheduler's `fire_heartbeat()`, retired 2026-06-29 (I8 / ddaa2882
 
 ARCHITECTURE — every external dependency (the `CommonsStore`, the HTTP-post
 callable, the API key, the base URL, the sender persona) is constructor-
-injected. This module is therefore PURE ADAPTER LOGIC: no disk reads, no
-network, no `lupin_mcp` import at module scope — and so it is 100%-unit-
-testable with fakes, with zero `pragma: no cover`.
+injected, so the protocol methods are PURE ADAPTER LOGIC: no disk reads and no
+network. The module is 100%-unit-testable with fakes and carries zero
+`pragma: no cover`.
+
+Two corrections to what this paragraph used to claim, both found by reading the
+code under it (row 1a465fc3). It said "no `lupin_mcp` import at module scope"
+while importing `lupin_mcp.persona_normalization` twelve lines below. And it
+said "zero `pragma: no cover`" while `from_environment` carried one — a reader
+who trusted the header never looked. The import claim is dropped; the pragma
+claim is now true because the pragma was removed and the method tested.
+
+`from_environment` is the one IO boundary here: it reads the API key from disk
+and constructs the real `CommonsStore`. Its dependencies are imported inside the
+function body, so unit tests monkeypatch them rather than exempting the method.
 
 The production-wiring step that constructs the real `CommonsStore`, loads the
 API key, and passes `requests.post` lives at the poker's call-site / the
@@ -22,6 +33,7 @@ Design: `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md` §2.3, §
 
 from __future__ import annotations
 
+import sys
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
@@ -69,15 +81,38 @@ class LupinCommonsGateway:
     @classmethod
     def from_environment( cls, sender_session_id: str, persona_name: str = "heartbeat-poker",
                           persona_icon: Optional[ str ] = None,
-                          persona_color: Optional[ str ] = None ) -> "LupinCommonsGateway":  # pragma: no cover - production IO wiring (real CommonsStore + API-key file + requests); exercised by the :8000 integration tier, not unit-mockable in isolation
+                          persona_color: Optional[ str ] = None ) -> "LupinCommonsGateway":
         """
         Build a production gateway wired to the real `CommonsStore` + `requests`.
 
         The IO-boundary constructor: builds the server-side `CommonsStore`, loads
         the notification API key from disk, and reads `LUPIN_API_URL` from the
-        environment. The agentic-job factory calls this; unit tests construct
-        `LupinCommonsGateway` directly with injected fakes instead — which is why
-        this method (and only this method) is excluded from the coverage gate.
+        environment. The agentic-job factory calls this; the other unit tests
+        construct `LupinCommonsGateway` directly with injected fakes instead,
+        which is the cheaper path for testing the protocol methods.
+
+        This method USED TO carry a `no cover` pragma reading "exercised by the
+        :8000 integration tier, not unit-mockable in isolation". Both halves were
+        false (row 1a465fc3): the integration file it named was three
+        `raise NotImplementedError` stubs behind a module-level skip, so the
+        exemption was bought with tests that did not exist; and every dependency
+        below is imported INSIDE this body, so it resolves at call time and a
+        monkeypatch can replace all of it. The pragma is gone and
+        `src/tests/unit/test_heartbeat_poker_commons_gateway.py` covers this
+        method directly.
+
+        Requires:
+            - <project_root>/src/conf/keys/notification-api-claude-code-dev exists
+
+        Ensures:
+            - returns a gateway whose api_key is that file's contents, stripped
+            - api_base_url is $LUPIN_API_URL, defaulting to http://localhost:7999
+            - store is a CommonsStore rooted at the resolved project root
+            - http_post is requests.post
+
+        Raises:
+            - FileNotFoundError if the API key file is absent — a gateway that
+              cannot authenticate must not be constructed silently
         """
         import os
         from pathlib import Path
@@ -125,8 +160,12 @@ class LupinCommonsGateway:
         'ai_to_ai' DM the listener delivers directly).
 
         The disk post is authoritative; the push is best-effort — a recipient
-        that misses the push still sees the poke on its next commons poll, so
-        a push failure is swallowed (the disk post has already succeeded).
+        that misses the push still sees the poke on its next commons poll, so a
+        push failure never loses the poke. It is LOGGED, not swallowed: the
+        DM-verbosity pilot's "any arbiter poke fails to send" stopping rule reads
+        this evidence, and a non-2xx RESPONSE (a 413 refusal under the rejecting
+        arm) does NOT raise through requests.post — it must be inspected
+        explicitly or it vanishes exactly as the swallowed exception once let it.
 
         Migrated off the now-deleted `/api/commons/register-question` route
         (cosa-voice token-reduction Phase 4, 2026-06-15) onto `/api/dm/send`,
@@ -154,7 +193,7 @@ class LupinCommonsGateway:
         )
 
         try:
-            self._http_post(
+            response = self._http_post(
                 f"{self._api_base_url}/api/dm/send",
                 json    = {
                     "sender_session_id" : self._sender_session_id,
@@ -171,9 +210,36 @@ class LupinCommonsGateway:
                 headers = { "X-API-Key": self._api_key },
                 timeout = 5,
             )
-        except Exception:
-            # Disk post already succeeded — the notification-native push is best-effort.
-            pass
+        except Exception as exception:
+            # Transport-level failure (timeout, refused connection). The disk post
+            # already succeeded, so the poke survives — but LOG the failure, never
+            # swallow it: the stopping rule needs this evidence.
+            self._log_push_failure( recipient, None, repr( exception ) )
+            return
+
+        # requests.post returns a Response on a 413 rather than raising, so the
+        # refusal only surfaces if the status code is inspected here.
+        if response.status_code >= 400:
+            self._log_push_failure( recipient, response.status_code, response.text )
+
+    def _log_push_failure( self, recipient: RecipientSpec, status_code: Optional[ int ], detail: str ) -> None:
+        """
+        Emit one greppable line recording a poke-push failure.
+
+        Requires:
+            - recipient is a RecipientSpec
+            - status_code is the HTTP status int, or None for a transport-level failure
+            - detail is a short string (exception repr or response body)
+
+        Ensures:
+            - writes one HEARTBEAT_POKE_SEND_FAILED line to stderr naming the
+              recipient and status code — the evidence the stopping rule reads
+        """
+        print(
+            f"[HEARTBEAT_POKE_SEND_FAILED] recipient={recipient.identifier} "
+            f"status={status_code} detail={detail}",
+            file = sys.stderr,
+        )
 
     def last_post_ts( self, recipient: RecipientSpec ) -> Optional[ str ]:
         """

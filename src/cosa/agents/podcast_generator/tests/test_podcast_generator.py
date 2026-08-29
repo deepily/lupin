@@ -49,6 +49,15 @@ class TestPodcastConfig:
         assert config.target_duration_minutes == 10
         assert config.min_exchanges == 8
         assert config.max_exchanges == 20
+        # Shared `agent source content max chars` base key (also read by presentation).
+        assert config.max_source_chars == 200000
+
+    def test_from_config_loads_shared_source_ceiling( self ):
+        """from_config reads the shared `agent source content max chars` base key."""
+        from cosa.config.configuration_manager import ConfigurationManager
+        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        config = PodcastConfig.from_config( config_mgr )
+        assert config.max_source_chars == 200000
 
     def test_default_host_personalities( self ):
         """Test default host configurations."""
@@ -261,6 +270,33 @@ class TestPromptGeneration:
         assert "Mr. Radio" in prompt
         assert "10 minutes" in prompt
 
+    def test_content_analysis_clips_at_configured_ceiling( self ):
+        """Research over the passed ceiling is clipped; None passes it through whole."""
+        research = "A" * 100 + "B" * 50
+        clipped  = get_content_analysis_prompt( research_content=research, max_source_chars=100 )
+        assert "A" * 100 in clipped and "B" * 50 not in clipped
+        whole    = get_content_analysis_prompt( research_content=research )   # None → no clip
+        assert "B" * 50 in whole
+
+    def test_script_generation_clips_at_configured_ceiling( self ):
+        """Same shared ceiling governs the script-generation prompt (was 30000, now configured)."""
+        research = "A" * 100 + "B" * 50
+        clipped  = get_script_generation_prompt(
+            content_analysis        = { "main_topic": "AI" },
+            research_content        = research,
+            host_a_personality      = DEFAULT_CURIOUS_HOST,
+            host_b_personality      = DEFAULT_EXPERT_HOST,
+            max_source_chars        = 100,
+        )
+        assert "A" * 100 in clipped and "B" * 50 not in clipped
+        whole = get_script_generation_prompt(
+            content_analysis        = { "main_topic": "AI" },
+            research_content        = research,
+            host_a_personality      = DEFAULT_CURIOUS_HOST,
+            host_b_personality      = DEFAULT_EXPERT_HOST,
+        )   # None → no clip
+        assert "B" * 50 in whole
+
 
 class TestResponseParsing:
     """Tests for response parsing functions."""
@@ -404,6 +440,304 @@ class TestLoudFailureOnLLMError:
 
         assert "Podcast generation failed" in str( exc_info.value )
         assert isinstance( exc_info.value.__cause__, Exception )
+
+
+class TestAutoContinueDisclosure:
+    """
+    build_auto_continue_disclosure(): the 'silence means keep going' sentence
+    that rides in the podcast script-review question. It must name the wait in
+    whole minutes, track the timeout, and refuse a nonsense timeout.
+    """
+
+    def test_ten_minutes_plural( self ):
+        from cosa.agents.podcast_generator.orchestrator import build_auto_continue_disclosure
+        sentence = build_auto_continue_disclosure( 600 )
+        assert "10 minutes" in sentence
+        assert "keep going" in sentence
+        assert "automatically" in sentence
+
+    def test_one_minute_singular( self ):
+        from cosa.agents.podcast_generator.orchestrator import build_auto_continue_disclosure
+        sentence = build_auto_continue_disclosure( 60 )
+        assert "1 minute" in sentence
+        assert "minutes" not in sentence  # singular, not "minutes"
+
+    def test_sub_minute_floors_to_one( self ):
+        from cosa.agents.podcast_generator.orchestrator import build_auto_continue_disclosure
+        # 30s is less than a minute but the human-facing promise floors at 1.
+        assert "1 minute" in build_auto_continue_disclosure( 30 )
+
+    @pytest.mark.parametrize( "bad", [ 0, -5, 240.0, "600", None ] )
+    def test_invalid_timeout_raises( self, bad ):
+        from cosa.agents.podcast_generator.orchestrator import build_auto_continue_disclosure
+        with pytest.raises( ValueError ):
+            build_auto_continue_disclosure( bad )
+
+    def test_bool_is_rejected( self ):
+        from cosa.agents.podcast_generator.orchestrator import build_auto_continue_disclosure
+        # bool is a subclass of int; a True/False timeout is a bug, not a value.
+        with pytest.raises( ValueError ):
+            build_auto_continue_disclosure( True )
+
+
+class TestPresentScriptReviewFailsOpen:
+    """
+    _present_script_review(): the podcast approval gate is wired to FAIL OPEN.
+
+    The gate must (1) append the auto-continue disclosure to the question the
+    user hears, and (2) declare a response_default so a silent gate resolves to
+    the continue label instead of raising (which is what dead-letters the job
+    today). The core-voice_io behaviour that response_default actually produces
+    the continue answer on a dispatch failure is proven in
+    test_voice_io_gate_failure_fallback.py; here we prove the podcast gate is
+    plugged into that seam.
+    """
+
+    def _make_orchestrator( self ):
+        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
+        return PodcastOrchestratorAgent(
+            research_doc_path = "/tmp/does-not-matter.md",
+            user_id           = "test-user",
+        )
+
+    @pytest.mark.asyncio
+    async def test_declares_default_and_appends_disclosure( self ):
+        from cosa.agents.podcast_generator import orchestrator as orch_mod
+
+        orch = self._make_orchestrator()
+        orch.config.script_review_timeout_seconds = 600
+
+        mock_pc = AsyncMock( return_value={
+            "answers"      : { "Script Review": "Approve script" },
+            "default_used" : True,
+            "answered"     : False,
+        } )
+        with patch.object( orch_mod.voice_io, "present_choices", mock_pc ):
+            result = await orch._present_script_review(
+                questions = [ {
+                    "question"    : "Podcast script is ready. How would you like to proceed?",
+                    "header"      : "Script Review",
+                    "multiSelect" : False,
+                    "options"     : [
+                        { "label": "Approve script" },
+                        { "label": "Revise script" },
+                        { "label": "Cancel" },
+                    ],
+                } ],
+                header   = "Script Review",
+                abstract = "preview",
+                title    = "Script Review",
+            )
+
+        kwargs = mock_pc.call_args.kwargs
+        # (2) fail-open default names the continue label under the gate header
+        assert kwargs[ "response_default" ] == { "Script Review": "Approve script" }
+        # timeout flows from config, unchanged
+        assert kwargs[ "timeout" ] == 600
+        # (1) disclosure is appended to the SAME question text, in sync with 600s
+        question = kwargs[ "questions" ][ 0 ][ "question" ]
+        assert question.startswith( "Podcast script is ready. How would you like to proceed?" )
+        assert "10 minutes" in question
+        assert "keep going" in question
+        # a real/defaulted answer is returned to the caller untouched
+        assert result[ "answers" ][ "Script Review" ] == "Approve script"
+
+    @pytest.mark.asyncio
+    async def test_continue_label_override_flows_into_default( self ):
+        from cosa.agents.podcast_generator import orchestrator as orch_mod
+
+        orch = self._make_orchestrator()
+        orch.config.script_review_timeout_seconds = 600
+
+        mock_pc = AsyncMock( return_value={ "answers": { "French Review": "Keep it" } } )
+        with patch.object( orch_mod.voice_io, "present_choices", mock_pc ):
+            await orch._present_script_review(
+                questions = [ {
+                    "question"    : "How would you like to proceed with the French script?",
+                    "header"      : "French Review",
+                    "multiSelect" : False,
+                    "options"     : [ { "label": "Keep it" }, { "label": "Skip language" } ],
+                } ],
+                header         = "French Review",
+                abstract       = None,
+                title          = "French Script Review",
+                continue_label = "Keep it",
+            )
+
+        assert mock_pc.call_args.kwargs[ "response_default" ] == { "French Review": "Keep it" }
+
+    @pytest.mark.asyncio
+    async def test_real_answer_is_passed_through( self ):
+        from cosa.agents.podcast_generator import orchestrator as orch_mod
+
+        orch = self._make_orchestrator()
+
+        mock_pc = AsyncMock( return_value={
+            "answers"      : { "Script Review": "Revise script" },
+            "default_used" : False,
+            "answered"     : True,
+        } )
+        with patch.object( orch_mod.voice_io, "present_choices", mock_pc ):
+            result = await orch._present_script_review(
+                questions = [ {
+                    "question"    : "How would you like to proceed with this script?",
+                    "header"      : "Script Review",
+                    "multiSelect" : False,
+                    "options"     : [ { "label": "Approve script" }, { "label": "Revise script" } ],
+                } ],
+                header   = "Script Review",
+                abstract = "preview",
+                title    = "Script Review",
+            )
+
+        # When the user genuinely answers, the gate returns that choice verbatim.
+        assert result[ "answers" ][ "Script Review" ] == "Revise script"
+        assert result[ "answered" ] is True
+
+
+class TestAutoApprovalNotice:
+    """
+    auto_approval_notice(): the completion must say when the script went to
+    audio without a human reading it (Clayton's default_used finding). A human
+    approval discloses nothing.
+    """
+
+    def test_auto_approved_discloses_plainly( self ):
+        from cosa.agents.podcast_generator.orchestrator import auto_approval_notice
+        notice = auto_approval_notice( True )
+        assert notice != ""
+        assert "automatically" in notice
+        assert "nobody read it" in notice
+
+    def test_human_approval_says_nothing( self ):
+        from cosa.agents.podcast_generator.orchestrator import auto_approval_notice
+        # A real approval has nothing to disclose — empty string, no line added.
+        assert auto_approval_notice( False ) == ""
+
+
+class TestDoAllAsyncFailsOpenPastGate:
+    """
+    do_all_async(): when the approval gate goes unanswered, generation must
+    CONTINUE past it (Rick's requirement), and the run must record that the
+    approval was automatic. This drives the real orchestrator path with mocked
+    collaborators — no live LLM, no 10-minute wait — and stops it with a
+    sentinel just after the gate so the assertion is about the gate, not audio.
+    """
+
+    @pytest.mark.asyncio
+    async def test_gate_timeout_continues_and_records_auto_approval( self ):
+        from cosa.agents.podcast_generator import orchestrator as orch_mod
+        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
+
+        orch = PodcastOrchestratorAgent(
+            research_doc_path = "/tmp/does-not-matter.md",
+            user_id           = "test-user",
+        )
+        orch.target_languages = [ "en" ]
+
+        script = PodcastScript(
+            title           = "T",
+            research_source = "/tmp/does-not-matter.md",
+            host_a_name     = "A",
+            host_b_name     = "B",
+            segments        = [
+                ScriptSegment( speaker="A", role="curious", text="hi" ),
+                ScriptSegment( speaker="B", role="expert",  text="yo" ),
+            ],
+        )
+
+        class _StopAfterGate( Exception ):
+            pass
+
+        orch._load_research_async   = AsyncMock( return_value="research content" )
+        orch._analyze_content_async = AsyncMock( return_value=ContentAnalysis( main_topic="T" ) )
+        orch._generate_script_async = AsyncMock( return_value=script )
+        orch._save_script_async     = AsyncMock( return_value="/tmp/s.md" )
+        # Stop the run right after the gate so this test is about the gate.
+        orch._generate_audio_async  = AsyncMock( side_effect=_StopAfterGate( "stop after gate" ) )
+
+        # The user is silent: voice_io returns the DECLARED default (default_used=True).
+        fail_open = {
+            "answers"        : { "Script Review": "Approve script" },
+            "default_used"   : True,
+            "answered"       : False,
+            "default_source" : "dispatch_failed",
+        }
+        mock_pc = AsyncMock( return_value=fail_open )
+
+        with patch.object( orch_mod.voice_io, "present_choices", mock_pc ), \
+             patch.object( orch_mod.voice_io, "notify", AsyncMock() ):
+            with pytest.raises( _StopAfterGate ):
+                await orch.do_all_async()
+
+        # The gate was asked with the fail-open default declared under its header.
+        assert mock_pc.call_args.kwargs[ "response_default" ] == { "Script Review": "Approve script" }
+        # A silent gate CONTINUED past approval (it reached audio, where the
+        # sentinel fired) and the run recorded that approval was automatic.
+        assert orch._podcast_state[ "script_approved" ] is True
+        assert orch._podcast_state[ "script_auto_approved" ] is True
+
+
+    @pytest.mark.asyncio
+    async def test_mixed_human_english_silent_translation_still_discloses( self ):
+        """
+        Clayton's gap: English approved by hand, a translation then auto-approves
+        on silence. The run must STILL disclose (script_auto_approved=True) — the
+        per-language gate ORs the flag in, so a silent translation is not hidden
+        behind a hand-approved English.
+        """
+        from cosa.agents.podcast_generator import orchestrator as orch_mod
+        from cosa.agents.podcast_generator.orchestrator import PodcastOrchestratorAgent
+
+        orch = PodcastOrchestratorAgent(
+            research_doc_path = "/tmp/does-not-matter.md",
+            user_id           = "test-user",
+        )
+        orch.target_languages = [ "en", "es" ]
+
+        def _script():
+            return PodcastScript(
+                title           = "T",
+                research_source = "/tmp/does-not-matter.md",
+                host_a_name     = "A",
+                host_b_name     = "B",
+                segments        = [
+                    ScriptSegment( speaker="A", role="curious", text="hi" ),
+                    ScriptSegment( speaker="B", role="expert",  text="yo" ),
+                ],
+            )
+
+        class _StopAfterGate( Exception ):
+            pass
+
+        orch._load_research_async            = AsyncMock( return_value="research content" )
+        orch._analyze_content_async          = AsyncMock( return_value=ContentAnalysis( main_topic="T" ) )
+        orch._generate_script_async          = AsyncMock( return_value=_script() )
+        orch._generate_translated_script_async = AsyncMock( return_value=_script() )
+        orch._save_script_async              = AsyncMock( return_value="/tmp/s.md" )
+        orch._generate_audio_async           = AsyncMock( side_effect=_StopAfterGate( "stop after gates" ) )
+
+        english_human = {
+            "answers"      : { "Script Review": "Approve script" },
+            "default_used" : False,   # a real human choice
+            "answered"     : True,
+        }
+        spanish_silent = {
+            "answers"      : { "Spanish Review": "Approve script" },
+            "default_used" : True,    # nobody answered — fail-open default
+            "answered"     : False,
+        }
+        mock_pc = AsyncMock( side_effect=[ english_human, spanish_silent ] )
+
+        with patch.object( orch_mod.voice_io, "present_choices", mock_pc ), \
+             patch.object( orch_mod.voice_io, "notify", AsyncMock() ):
+            with pytest.raises( _StopAfterGate ):
+                await orch.do_all_async()
+
+        # English was human (would set the flag False on its own); the silent
+        # Spanish gate ORs it to True. If the per-language gate ignored
+        # default_used, this would be False and the disclosure would lie.
+        assert orch._podcast_state[ "script_auto_approved" ] is True
 
 
 def quick_smoke_test():

@@ -11,6 +11,7 @@ Comprehensive smoke tests for the Lupin notification system including:
 """
 
 import sys
+import pytest
 import os
 
 # Bootstrap using LUPIN_ROOT for standalone script execution
@@ -110,19 +111,34 @@ class NotificationSmokeTests:
     
     async def test_notify_endpoint_validation(self):
         """Test /api/notify endpoint input validation."""
-        # Test missing API key
-        try:
-            params = {
-                "message"     : "Test message",
-                "type"        : "custom",
-                "priority"    : "medium",
-                "target_user" : self.test_email
-                # Missing api_key
-            }
-            response = await self.client.http_request("POST", "/api/notify", params=params)
-            assert response.status_code == 422, "Should require api_key parameter"
-        except Exception:
-            pass  # Expected to fail
+        # Test that the endpoint refuses an unauthenticated caller.
+        #
+        # This check used to sit inside a try whose `except Exception: pass` was
+        # justified as "Expected to fail". Nothing here ever raised — a rejected
+        # request comes back as an ordinary response — so the handler only ever
+        # caught the assertion itself, and the check could not fail.
+        #
+        # Un-swallowing it exposed a second, older problem: it asserted 422 for a
+        # missing `api_key` QUERY parameter, and /api/notify has not worked that
+        # way for some time. Auth is now a dependency (require_api_key_or_jwt) that
+        # takes an X-API-Key header or a Bearer JWT, so a logged-in client passing
+        # no api_key is answered 200, correctly. The assertion had been wrong since
+        # auth moved into the middleware, and the swallow is why nobody found out.
+        #
+        # The intent worth keeping is "an unauthenticated caller is refused", so
+        # that is what is checked, with authenticate=False to actually send no
+        # token — `headers={}` does not, see LupinTestClient.http_request.
+        params = {
+            "message"     : "Test message",
+            "type"        : "custom",
+            "priority"    : "medium",
+            "target_user" : self.test_email
+        }
+        response = await self.client.http_request(
+            "POST", "/api/notify", params=params, authenticate=False
+        )
+        assert response.status_code == 401, \
+            f"Unauthenticated /api/notify should be rejected with 401, got {response.status_code}"
         
         # Test invalid priority
         response = await self.notification_helper.send_notification(
@@ -180,51 +196,88 @@ class NotificationSmokeTests:
             raise
     
     async def test_notification_queue_operations( self ):
-        """Test notification queue CRUD operations."""
-        test_email = self.test_email
+        """Test notification queue CRUD operations.
 
-        # Send a notification first — capture the UUID from response
-        send_response = await self.notification_helper.send_notification(
-            message="Queue operation test notification",
-            target_user=test_email,
-            priority="high"
+        ⚠️ THE WEBSOCKET CONNECTION BELOW IS LOAD-BEARING, NOT SETUP NOISE.
+        GET /api/notifications/{user_id} reads the IN-MEMORY FIFO queue, and
+        /api/notify only pushes to that queue when the target user is connected —
+        an offline target returns "user_not_available" one line before the push
+        (see the fire-and-forget branch of routers/notifications.py). Without a
+        live connection the notification is durably recorded in the database and
+        never appears in the queue this test reads, so the test asks for something
+        the send cannot deliver. Measured both ways against the dev server:
+
+            ws connected = False → status "user_not_available", queue 23, not found
+            ws connected = True  → status "queued",             queue 24, found
+
+        This test was a standing red for exactly that reason (row 0dbc1e91).
+        """
+        test_email   = self.test_email
+        test_message = "Queue operation test notification"
+
+        # Connect first so the target user is genuinely online for the send.
+        websocket = await self.client.websocket_connect(
+            "/ws/queue/{session_id}",
+            subscribed_events=[ "notification_queue_update", "auth_success", "sys_ping" ]
         )
 
-        self.validator.assert_response_ok( send_response, 200 )
+        try:
+            # Send a notification — capture the UUID from response
+            send_response = await self.notification_helper.send_notification(
+                message=test_message,
+                target_user=test_email,
+                priority="high"
+            )
 
-        send_data = send_response.json()
-        # Use the server-returned UUID as user_id for queue lookup
-        user_id = send_data.get( "target_system_id", email_to_system_id( test_email ) )
+            self.validator.assert_response_ok( send_response, 200 )
 
-        if self.debug:
-            print( f"[DEBUG] Sent notification, user_id for lookup: {user_id}" )
+            send_data = send_response.json()
 
-        # Wait a moment for notification to be processed
-        await asyncio.sleep( 0.5 )
+            # ⚠️ A 200 IS NOT A DELIVERY. The server answers 200 whether it queued
+            # the notification or refused it as undeliverable, and says which in its
+            # status field. Checking only the envelope is how this test read a
+            # refusal as a successful send for as long as it has been failing.
+            assert send_data[ "status" ] == "queued", (
+                f"Send was accepted with HTTP 200 but not queued: status="
+                f"{send_data.get( 'status' )!r}. A 200 carrying 'user_not_available' "
+                f"means the target was offline and nothing entered the queue."
+            )
 
-        # Get user notifications
-        get_response = await self.notification_helper.get_user_notifications( user_id )
-        self.validator.assert_response_ok( get_response, 200 )
+            # Use the server-returned UUID as user_id for queue lookup
+            user_id = send_data.get( "target_system_id", email_to_system_id( test_email ) )
 
-        get_data = get_response.json()
-        self.validator.assert_json_contains( get_data, [ "status", "notifications", "notification_count" ] )
+            if self.debug:
+                print( f"[DEBUG] Sent notification, user_id for lookup: {user_id}" )
 
-        # Should have at least our test notification
-        notifications = get_data[ "notifications" ]
-        if self.debug:
-            print( f"[DEBUG] Found {len( notifications )} notifications for user {user_id}" )
-            print( f"[DEBUG] Notification response: {get_data}" )
-        assert len( notifications ) > 0, f"Should have notifications in queue for user {user_id}. Found: {len( notifications )}"
+            # Wait a moment for notification to be processed
+            await asyncio.sleep( 0.5 )
 
-        # Find our test notification
-        test_notification = None
-        for notification in notifications:
-            if notification[ "message" ] == "Queue operation test notification":
-                test_notification = notification
-                break
+            # Get user notifications
+            get_response = await self.notification_helper.get_user_notifications( user_id )
+            self.validator.assert_response_ok( get_response, 200 )
 
-        assert test_notification is not None, "Test notification not found in queue"
-        assert test_notification[ "priority" ] == "high"
+            get_data = get_response.json()
+            self.validator.assert_json_contains( get_data, [ "status", "notifications", "notification_count" ] )
+
+            # Should have at least our test notification
+            notifications = get_data[ "notifications" ]
+            if self.debug:
+                print( f"[DEBUG] Found {len( notifications )} notifications for user {user_id}" )
+                print( f"[DEBUG] Notification response: {get_data}" )
+            assert len( notifications ) > 0, f"Should have notifications in queue for user {user_id}. Found: {len( notifications )}"
+
+            # Find our test notification
+            test_notification = None
+            for notification in notifications:
+                if notification[ "message" ] == test_message:
+                    test_notification = notification
+                    break
+
+            assert test_notification is not None, "Test notification not found in queue"
+            assert test_notification[ "priority" ] == "high"
+
+        finally:
+            await self.client.close_websocket( websocket )
 
         # Test marking as played (if notification has ID)
         # Server bug: NotificationFifoQueue._emit_queue_update missing — causes hang/500
@@ -312,43 +365,49 @@ class NotificationSmokeTests:
                 message=test_message,
                 priority="urgent"
             )
-            
+
             self.validator.assert_response_ok(send_response, 200)
-            
-            # Wait for WebSocket notification event
-            try:
-                notification_event = await self.client.wait_for_websocket_event(
-                    websocket, "notification_queue_update", timeout=10.0
-                )
 
-                # Validate event structure — server sends notification at top level
-                self.validator.assert_websocket_event(
-                    notification_event,
-                    "notification_queue_update"
-                )
+            # A 200 is not a delivery — the server answers 200 whether it queued the
+            # notification or refused it as undeliverable, and names which in `status`.
+            send_data = send_response.json()
+            assert send_data[ "status" ] == "queued", (
+                f"Send was accepted with HTTP 200 but not queued: status="
+                f"{send_data.get( 'status' )!r}. Nothing will arrive over the socket."
+            )
 
-                # Notification may be under "data" or "notification" key
-                if "data" in notification_event:
-                    notification = notification_event[ "data" ].get( "notification", notification_event[ "data" ] )
-                elif "notification" in notification_event:
-                    notification = notification_event[ "notification" ]
-                else:
-                    raise AssertionError( f"No notification data in event: {notification_event}" )
+            # ⚠️ THE TIMEOUT IS NOT TOLERATED. This block used to end in
+            # `except TimeoutError: pass`, excused as "may be expected in test
+            # environment" — which made the test report green whether the event
+            # arrived or not, i.e. green precisely when the delivery it exists to
+            # prove had failed. The send above is now asserted to have been queued,
+            # so a socket that stays silent is a real failure and must say so.
+            notification_event = await self.client.wait_for_websocket_event(
+                websocket, "notification_queue_update", timeout=10.0
+            )
 
-                self.validator.assert_json_contains(
-                    notification,
-                    [ "message", "type", "priority", "timestamp" ]
-                )
+            # Validate event structure — server sends notification at top level
+            self.validator.assert_websocket_event(
+                notification_event,
+                "notification_queue_update"
+            )
 
-                assert notification[ "message" ] == test_message
-                assert notification[ "priority" ] == "urgent"
-                
-            except TimeoutError:
-                # This might be expected if user isn't connected to the specific session
-                if self.debug:
-                    print("[DEBUG] WebSocket notification timeout - may be expected in test environment")
-                pass
-                
+            # Notification may be under "data" or "notification" key
+            if "data" in notification_event:
+                notification = notification_event[ "data" ].get( "notification", notification_event[ "data" ] )
+            elif "notification" in notification_event:
+                notification = notification_event[ "notification" ]
+            else:
+                raise AssertionError( f"No notification data in event: {notification_event}" )
+
+            self.validator.assert_json_contains(
+                notification,
+                [ "message", "type", "priority", "timestamp" ]
+            )
+
+            assert notification[ "message" ] == test_message
+            assert notification[ "priority" ] == "urgent"
+
         finally:
             await self.client.close_websocket(websocket)
     
@@ -403,6 +462,51 @@ class NotificationSmokeTests:
         print(f"{'='*60}")
         
         return passed == total
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# pytest collection bridge (row e5e964f4)
+#
+# WHY THIS EXISTS. The methods above hang off a plain class that takes an
+# __init__, and pytest refuses to collect a test class with a constructor. So
+# `pytest src/tests/lupin_smoke/` used to collect ZERO tests from this file,
+# report success, and EXIT 0 — with nothing in its output saying the file had
+# been skipped. Three of the directory's four files behaved that way, which is
+# how a deliberately-red test here stayed invisible to anyone verifying with
+# pytest instead of the shell runner.
+#
+# This bridge does not replace `run-lupin-smoke-tests.sh`, which still invokes
+# this module as a script. It makes the same methods reachable from pytest as
+# well, so both runners see the same result instead of disagreeing silently.
+#
+# The suite instance is module-scoped ON PURPOSE: the shell runner builds ONE
+# instance and walks every method on it, and each construction performs a real
+# login. A fresh instance per test would log in 9 times per file and diverge
+# from the behaviour the runner exercises.
+
+_SMOKE_METHODS = [
+    "test_notify_endpoint_basic",
+    "test_notify_endpoint_all_priorities",
+    "test_notify_endpoint_all_types",
+    "test_notify_endpoint_validation",
+    "test_user_notification_routing",
+    "test_notification_queue_operations",
+    "test_notification_user_id_format_regression",
+    "test_websocket_notification_delivery",
+    "test_api_authentication",
+]
+
+
+@pytest.fixture( scope="module" )
+def smoke_suite():
+    """One suite instance per module, matching how the shell runner drives it."""
+    return NotificationSmokeTests( debug=False )
+
+
+@pytest.mark.parametrize( "method_name", _SMOKE_METHODS )
+def test_lupin_smoke( smoke_suite, method_name ):
+    """Run one smoke method under pytest. Named per method so a failure points at it."""
+    asyncio.run( getattr( smoke_suite, method_name )() )
 
 
 async def main():

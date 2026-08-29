@@ -15,7 +15,8 @@ auth-test / websocket-sessions). This file closes the remaining gap:
     - `cleanup_stale_sessions`,
     - `get_websocket_state` (incl. orphaned-user + unmapped-session diagnostics),
     - `get_client_config` (TEST + DEVELOPMENT env labels),
-    - `get_similarity_confirmation` / `set_similarity_confirmation`.
+    - `get_similarity_confirmation` / `set_similarity_confirmation`,
+    - `code_identity` (the last uncovered line in the module).
 
 Boundary-mock discipline: `lupin_app.main` is patched DUAL-KEY (G1);
 ConfigurationManager / PredictionEngine / lancedb / db engine / get_config_manager
@@ -43,6 +44,7 @@ from cosa.rest.routers.system import (
     get_client_config,
     get_similarity_confirmation,
     set_similarity_confirmation,
+    code_identity,
     SimilarityConfirmationRequest,
 )
 
@@ -158,85 +160,29 @@ class TestInitWithBlockId( unittest.IsolatedAsyncioTestCase ):
 
 class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
     """
-    Exercises `reset_prediction_engine` across its drop/skip/error matrix.
+    Exercises `reset_prediction_engine` across its clear/skip/error matrix.
 
-    Boundary-mock: ConfigurationManager, PredictionEngine, get_prediction_engine,
-    lancedb, and project-root are all patched — no real LanceDB index is opened.
+    Boundary-mock: ConfigurationManager, PredictionEngine, get_prediction_engine
+    and the DB session are patched — nothing real is opened.
 
     Ensures:
-        - drop_table=True drops an existing table; skips a missing one
-        - a lancedb connect error is caught (drop note) without failing the reset
-        - drop_table=False skips the drop block entirely
+        - drop_table=True clears the pgvector rows
+        - a DB error is caught (clear note) without failing the reset
+        - drop_table=False skips the clear block entirely
         - an outer exception returns the error response shape
     """
 
-    def _common_patches( self, lancedb_mock, table_present=True, pe_side_effect=None ):
+    def _common_patches( self, pe_side_effect=None ):
         cfg = Mock()
-        # Flag-aware (v0.2.0 §6): the backend flag resolves to lancedb; every other
-        # key (e.g. the table name) returns "prediction_decisions" as before.
-        cfg.get.side_effect = lambda key, default=None, **kw: (
-            "lancedb" if key == "vector store backend" else "prediction_decisions"
-        )
+        cfg.get.side_effect = lambda key, default=None, **kw: "prediction_decisions"
         engine = Mock()
         engine.lancedb_table = "prediction_decisions"
         pe_cls = Mock()
         get_pe = Mock( return_value=engine, side_effect=pe_side_effect )
         return cfg, pe_cls, get_pe
 
-    async def test_drop_existing_table( self ):
-        db = Mock()
-        db.table_names.return_value = [ "prediction_decisions" ]
-        lancedb_mod = Mock()
-        lancedb_mod.connect.return_value = db
-        cfg, pe_cls, get_pe = self._common_patches( lancedb_mod )
-        with patch( "cosa.rest.routers.system.ConfigurationManager", return_value=cfg ), \
-             patch( "cosa.agents.prediction_engine.prediction_engine.PredictionEngine", pe_cls ), \
-             patch( "cosa.agents.prediction_engine.prediction_engine.get_prediction_engine", get_pe ), \
-             patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
-             patch.dict( "sys.modules", { "lancedb": lancedb_mod } ), \
-             patch( "cosa.utils.util.get_current_datetime_iso", return_value=_TS ):
-            result = await reset_prediction_engine( drop_table=True )
-        db.drop_table.assert_called_once_with( "prediction_decisions" )
-        pe_cls.reset.assert_called_once()
-        self.assertEqual( result[ "status" ], "success" )
-        self.assertTrue( result[ "table_dropped" ] )
-        # v0.2.0 teardown-prep: response key renamed lancedb_table -> prediction_table (backend-neutral)
-        self.assertEqual( result[ "prediction_table" ], "prediction_decisions" )
-        self.assertNotIn( "lancedb_table", result )
-
-    async def test_table_absent_no_drop( self ):
-        db = Mock()
-        db.table_names.return_value = [ "something_else" ]
-        lancedb_mod = Mock()
-        lancedb_mod.connect.return_value = db
-        cfg, pe_cls, get_pe = self._common_patches( lancedb_mod )
-        with patch( "cosa.rest.routers.system.ConfigurationManager", return_value=cfg ), \
-             patch( "cosa.agents.prediction_engine.prediction_engine.PredictionEngine", pe_cls ), \
-             patch( "cosa.agents.prediction_engine.prediction_engine.get_prediction_engine", get_pe ), \
-             patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
-             patch.dict( "sys.modules", { "lancedb": lancedb_mod } ), \
-             patch( "cosa.utils.util.get_current_datetime_iso", return_value=_TS ):
-            result = await reset_prediction_engine( drop_table=True )
-        db.drop_table.assert_not_called()
-        self.assertFalse( result[ "table_dropped" ] )
-
-    async def test_drop_connect_error_swallowed( self ):
-        lancedb_mod = Mock()
-        lancedb_mod.connect.side_effect = Exception( "connect fail" )
-        cfg, pe_cls, get_pe = self._common_patches( lancedb_mod )
-        with patch( "cosa.rest.routers.system.ConfigurationManager", return_value=cfg ), \
-             patch( "cosa.agents.prediction_engine.prediction_engine.PredictionEngine", pe_cls ), \
-             patch( "cosa.agents.prediction_engine.prediction_engine.get_prediction_engine", get_pe ), \
-             patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
-             patch.dict( "sys.modules", { "lancedb": lancedb_mod } ), \
-             patch( "cosa.utils.util.get_current_datetime_iso", return_value=_TS ), \
-             patch( "builtins.print" ):
-            result = await reset_prediction_engine( drop_table=True )
-        self.assertEqual( result[ "status" ], "success" )   # drop error didn't fail reset
-        self.assertFalse( result[ "table_dropped" ] )
-
     async def test_drop_table_false_skips_block( self ):
-        cfg, pe_cls, get_pe = self._common_patches( Mock() )
+        cfg, pe_cls, get_pe = self._common_patches()
         with patch( "cosa.rest.routers.system.ConfigurationManager", return_value=cfg ), \
              patch( "cosa.agents.prediction_engine.prediction_engine.PredictionEngine", pe_cls ), \
              patch( "cosa.agents.prediction_engine.prediction_engine.get_prediction_engine", get_pe ), \
@@ -252,21 +198,10 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( result[ "status" ], "error" )
         self.assertIn( "PredictionEngine reset failed", result[ "message" ] )
 
-    # --- v0.2.0 §6 postgres backend: clear pgvector rows instead of LanceDB drop ---
-    def _pg_patches( self ):
-        cfg = Mock()
-        cfg.get.side_effect = lambda key, default=None, **kw: (
-            "postgres" if key == "vector store backend" else "prediction_decisions"
-        )
-        engine = Mock()
-        engine.lancedb_table = "prediction_decisions"
-        pe_cls = Mock()
-        get_pe = Mock( return_value=engine )
-        return cfg, pe_cls, get_pe
 
     async def test_postgres_backend_clears_rows( self ):
         import contextlib
-        cfg, pe_cls, get_pe = self._pg_patches()
+        cfg, pe_cls, get_pe = self._common_patches()
         session   = Mock()
         repo_inst = Mock()
 
@@ -287,7 +222,7 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
         self.assertTrue( result[ "table_dropped" ] )
 
     async def test_postgres_backend_clear_error_swallowed( self ):
-        cfg, pe_cls, get_pe = self._pg_patches()
+        cfg, pe_cls, get_pe = self._common_patches()
 
         def boom_get_db():
             raise RuntimeError( "pg down" )
@@ -434,6 +369,47 @@ class TestSimilarityConfirmation( unittest.IsolatedAsyncioTestCase ):
         result = await set_similarity_confirmation( body=body, current_user={ "u": 1 }, todo_queue=tq )
         tq.config_mgr.set_config.assert_called_once_with( "similarity confirmation enabled", "true" )
         self.assertEqual( result, { "enabled": True, "previous": False } )
+
+
+class TestCodeIdentity( unittest.IsolatedAsyncioTestCase ):
+    """
+    Ensures:
+        - `code_identity` hands back the record captured at MODULE IMPORT and does
+          not re-read the repository per request.
+
+    This was the module's last uncovered line. It is worth a real test rather than
+    a pragma: the endpoint exists to answer "which code is this process running?",
+    and a per-request re-read would reproduce exactly the lie it was built to
+    remove. A test that only checked the response shape would pass either way, so
+    this one pins the delegation instead.
+    """
+
+    async def test_it_returns_the_captured_record( self ):
+        """
+        Ensures:
+            - the endpoint returns get_code_identity()'s value unchanged.
+
+        RED ON REVERT: have the endpoint build its own dict, or re-read git, and
+        the returned object stops being the one the module captured.
+        """
+        record = { "git_sha": "deadbeef", "git_branch": "wt-brain-lane-a",
+                   "git_sha_source": "test", "imported_at": _TS, "pid": 1234 }
+        with patch( "cosa.rest.routers.system.get_code_identity", return_value=record ) as spy:
+            result = await code_identity()
+        spy.assert_called_once_with()
+        self.assertIs( result, record )
+
+    async def test_it_does_not_re_read_per_request( self ):
+        """
+        Ensures:
+            - two calls return the SAME object, so the endpoint cannot be quietly
+              turned into a per-request repository read without this failing.
+        """
+        record = { "git_sha": "deadbeef", "imported_at": _TS, "pid": 1234 }
+        with patch( "cosa.rest.routers.system.get_code_identity", return_value=record ):
+            first  = await code_identity()
+            second = await code_identity()
+        self.assertIs( first, second )
 
 
 def isolated_unit_test():

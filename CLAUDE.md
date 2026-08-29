@@ -2,7 +2,6 @@
 
 ## COMMANDS
 - Run FastAPI server: `src/scripts/run-fastapi-lupin.sh` (Runs on port 7999)
-- Run GUI client: `src/scripts/run-lupin-gui.sh`
 - Docker build: `docker build -f docker/lupin/Dockerfile .`
 - Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
 - Install cosa-voice MCP (global): `src/scripts/install-cosa-voice.sh` (user scope, all repos)
@@ -40,7 +39,7 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 
 **Rate-limit / API contention (v0.1.7 Phase 3)**: `ApiResourceManager` singleton at `src/cosa/utils/api_resource_manager.py` centralizes per-provider waits + call recording. Deep Research migrated (`await get_arm().acquire("anthropic_web_search")` + `get_arm().record_call(...)`). Podcast/Presentation/BFE/TFE/ClaudeCode stay on legacy per-agent `_call_with_retry` patterns; two-path invariant documented in `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/01-design-review.md §3a`.
 
-**Observability (v0.1.7 Phase 3)**: `GET /api/queue/pool-status` (JWT) returns `{inflight_agentic_jobs, max_agentic_workers, pending_in_pool, monopolize_inflight, monopolize_id, api_resource_manager: {...}}`. **Shape-B (bug fe375cf6)**: a monopolize job runs on a DEDICATED single-worker executor (`_monopolize_pool`), NOT the shared pool, so it is EXCLUDED from `inflight_agentic_jobs`/`pending_in_pool` (those keep their exact prior meaning = shared-pool occupancy) and surfaced instead via `monopolize_inflight` (bool) + `monopolize_id` (id or null). At most one monopolizer exists at a time (Gate B defers a 2nd at intake).
+**Observability (v0.1.7 Phase 3)**: ⚠️ **These fields describe the POOL, not the venue — do not derive idleness from them (row `e6b8fe56`); use `cosa.rest.venue_idle` / `GET /api/busy`, see §TESTING VENUES.** `GET /api/queue/pool-status` (JWT) returns `{inflight_agentic_jobs, max_agentic_workers, pending_in_pool, monopolize_inflight, monopolize_id, api_resource_manager: {...}}`. **Shape-B (bug fe375cf6)**: a monopolize job runs on a DEDICATED single-worker executor (`_monopolize_pool`), NOT the shared pool, so it is EXCLUDED from `inflight_agentic_jobs`/`pending_in_pool` (those keep their exact prior meaning = shared-pool occupancy) and surfaced instead via `monopolize_inflight` (bool) + `monopolize_id` (id or null). At most one monopolizer exists at a time (Gate B defers a 2nd at intake).
 
 **Job Types Handled**:
 - **AgentBase** — Traditional sync agents (MathAgent, CalendarAgent, DateAndTimeAgent, etc.) — run inline on consumer
@@ -100,20 +99,44 @@ Migration candidates (tracked in TODO.md): the three ratified bounded-CC migrati
 
 Max-plan usage has rolling-window limits. Batch bounded jobs running during Rick's interactive peak window can throttle his real Claude Code work.
 
-- **Peak (avoid scheduling here)**: 9 PM – 12 AM EDT
-- **Optimal (schedule batch work here)**: 12 AM – 9 AM EDT (Rick asleep, zero interactive use)
-- **Acceptable**: 9 AM – 9 PM EDT (some interactive use but well below peak)
+⚠️ **CORRECTED 2026-08-17 (Rick's ruling, row `f0b3f630`). The old window pointed at hours the box is powered OFF.** It read "Optimal: 12 AM – 9 AM EDT (Rick asleep, zero interactive use)" — true about Rick, false about the machine. Measured boot history, unbroken since Aug 5: the host is **DOWN ~10:53 PM – 7:17 AM**. Every seat that followed the rule correctly still had its job sit dead until the next boot and drain hours late — two jobs scheduled for 00:30 and 01:15 ran at ~10:07 the next morning.
 
-**Rule**: any non-interactive bounded job (batch generation, scheduled regression sweeps, podcast/presentation/research) MUST set `scheduled_at` to the post-midnight window via `/api/claude-code/submit` (field defined at `src/cosa/rest/routers/claude_code_queue.py:49`). User-clicked synchronous bounded jobs are exempt.
+⚠️ **CORRECTED AGAIN 2026-08-20 (Rick's ruling). The 08-17 correction replaced hours the box was OFF with hours it is usually NOT UP YET — same failure, one step smaller.** It named **7:30 AM** as the start, derived from a single boot at 07:17 on Aug 6. **Measured across the 12 morning boots since Aug 4** — `08:52 · 09:27 · 07:17 · 09:14 · 09:52 · 09:56 · 09:20 · 10:52 · 09:48 · 09:03 · 09:17 · 09:43` — the **median is 09:24 and eleven of twelve are after 08:52**. A job placed at 7:30 sits dead ~1.5–2.5h on almost every day.
+
+🔴 **DO NOT TRUST THIS TABLE EITHER — RE-DERIVE IT.** This rule has now been wrong twice, both times because someone generalised from too few boots. **Measure before you schedule:**
+
+```bash
+last -x reboot | head -20      # read the morning boot times yourself
+```
+
+**The constraint is the box, not just Rick's sleep:**
+
+| Window (EDT) | Verdict | Why |
+|---|---|---|
+| ~11 PM – 9 AM | ☠️ **DEAD — never schedule here** | Host is usually powered off, and on most days is still down well past 8:52 AM. A job here does not run late — it does not run at all until boot. |
+| 9 PM – 11 PM | ❌ Peak — avoid | Rick's interactive window; competes with his real work. |
+| **10 AM – 1 PM** | ✅ **OPTIMAL — schedule batch work here** | Comfortably after the 09:24 median boot, and Rick is barely on. The only window that is reliably both up and quiet. |
+| 1 PM – 9 PM | 🟡 Acceptable | Box up, some interactive use, well below peak. |
+
+**Rule**: any non-interactive bounded job (batch generation, scheduled regression sweeps, podcast/presentation/research) MUST set `scheduled_at` inside a window the box is UP for — **prefer 10 AM – 1 PM EDT** — via `/api/v2/submit` (field defined on `SubmitRequest` at `src/cosa/rest/routers/v2_ask.py`). User-clicked synchronous bounded jobs are exempt.
+
+⚠️ **CHANGED 2026-08-21.** This line used to name `/api/claude-code/submit`. That door and its `/api/claude-code/queue/submit` alias are now tombstones answering **410 Gone** (Rick's ruling: the Claude Code job is *upgraded* to the v2 front door, not left to die on the vine). The work enters through `/api/v2/submit` naming the command `agent router go to claude code`; `scheduled_at` stays TOP-LEVEL because it tells the queue *when* to run, and `args` is checked against the command's own argument contract, which no scheduling instruction is in.
+
+⚠️ **And the box goes down mid-day too.** On 2026-08-20 it was down **14:34–18:07**. "Optimal" means *most likely up*, never *guaranteed up* — a long job should still tolerate a restart.
+
+**If a job does land in the dead window**, the catch-up is no longer silent: `job_persistence.py` emits a `[CJ-CATCHUP-LATE]` line naming `scheduled_at` vs actual and hours-late (`fef78ce3`, with a negative control at `f0b7c589` proving it stays quiet on every non-catch-up path). A late drain is now visible rather than reported as a normal run — but visible-and-late is still late.
 
 Example:
 ```json
+POST /api/v2/submit
 {
-  "prompt"       : "…",
-  "task_type"    : "BOUNDED",
-  "scheduled_at" : "2026-05-13T02:30:00-04:00"
+  "command"      : "agent router go to claude code",
+  "args"         : { "prompt": "…", "task_type": "BOUNDED" },
+  "scheduled_at" : "2026-08-22T11:00:00-04:00"
 }
 ```
+
+(This example used to read `02:30` — inside the dead window. A copied example is how a bad window propagates faster than the prose that describes it.)
 
 **Mandate for new design**: any proposal for a new LLM-driven feature MUST first answer "can this be a bounded CC job?" and document the answer. If "no", document which guardrail it hits.
 
@@ -160,7 +183,13 @@ Example:
 - `/src/cosa/io/`: Input/output helpers
 - `/src/cosa/utils/`: Shared utility functions
 - `/src/cosa/docs/`, `/src/cosa/history/`, `/src/cosa/rnd/`, `/src/cosa/tests/`: documentation, history, R&D, and tests
-- `/src/lib/clients/`: Client interface implementations
+
+> **`/src/lib/` was DELETED 2026-08-26** (Rick's ruling, row `e2099400` §3b). It held the desktop
+> client — `lupin_client.py`, `lupin_client_cmd.py`, `lupin_client_gui.py`, 1,454 lines — which had
+> been unimportable since `pyaudio` left the environment, was last touched 2026-01-28, and carried
+> 524 statements at 0% inside a 100% coverage mandate. Its only live caller,
+> `src/scripts/run-lupin-gui.sh`, went with it: a Mac-only launcher invoking `python3.10` over SSHFS
+> in a 3.13 repo. **Recover either with `git checkout 71d5efaa -- src/lib src/scripts/run-lupin-gui.sh`.**
 
 ## DEBUGGING
 - Set `debug=True` and `verbose=True` parameters in class instantiations
@@ -296,6 +325,12 @@ find . -name ".git" -type d | grep -v "^./.git$"
 
 **MANDATE**: Every automated test runs on exactly one of two servers. Pick by rubric, never by habit.
 
+> 🔴 **THE TWO VENUES ALSO HAVE TWO DATABASES, and a host shell silently reads the wrong one.** Neither container sets `DB_NAME`, so each falls through to its own config block: `lupin-rest-dev` → **`lupin_db_dev`**, `lupin-rest-test` → **`lupin_db_test`**. A host shell inherits the *Development* block, so `PYTHONPATH=src python3` on the host queries **dev** even when the job you are chasing ran on `:8000`.
+>
+> **Measured 2026-08-28**, both directions inside a minute: host/dev returned **205 rows, zero `ts-` rows, nothing newer than the previous day**; the same query inside `lupin-rest-test` returned **4 rows, all same-day**, including the one at issue. The host answer reads exactly like *"test_suite jobs are never persisted"* — which is false, and a correct fix was one message from being retracted on it. **An empty result from the wrong box is not evidence; it is a confident answer to a question you did not ask.**
+>
+> ⇒ **Go at the database container and NAME the database** — `docker exec lupin-postgres psql -U lupin_dev -d lupin_db_test -c "..."`. Better than "run it inside `lupin-rest-test`", which still depends on standing in the right place — the thing that failed. **There is no default to fall through to**, verified both ways: a wrong name gives `FATAL: database "lupin_db_typo" does not exist`, and *omitting* `-d` errors too (psql tries the username as the database). You either name the box you meant or you are told. The in-container route lacks that property — it reads *a* database successfully either way.
+
 ### :7999 (dev) — AI-discretionary
 
 The AI may run these at any time without asking the user.
@@ -314,7 +349,17 @@ Suites that qualify:
 
 ### :8000 (test) — monopolize mode, scheduled only
 
-Submit via `POST /api/test-suite/submit`. **Self-authorization rule (2026-06-06): a verified-IDLE `:8000` — nothing running, nothing scheduled — is bounce-then-schedule SELF-AUTHORIZED; the user is NOT a gate.** `list-pending` FIRST to decide placement: empty queue → bounce (to clear static-snapshot drift, see §reference) + schedule + run now; something already SCHEDULED (queued, not yet running) → still self-authorized, but set `scheduled_at` AFTER the queued job (never jump an expected-next run); something RUNNING → queue behind it, no bounce. Only **killing a LIVE in-flight job** needs the user's word. **Never** inject via ad-hoc curl, direct queue push, or in-process server instantiation — side-door injection collides with in-flight scheduled runs and poisons both.
+Submit via `POST /api/test-suite/submit`. **Self-authorization rule (2026-06-06): a verified-IDLE `:8000` — nothing running, nothing scheduled — is bounce-then-schedule SELF-AUTHORIZED; the user is NOT a gate.** Only **killing a LIVE in-flight job** needs the user's word. **Never** inject via ad-hoc curl, direct queue push, or in-process server instantiation — side-door injection collides with in-flight scheduled runs and poisons both.
+
+🔴 **HOW YOU VERIFY IDLE — one command, and its exit code (row `e6b8fe56`, 2026-08-25).** This rule already said to read the queue, and a seat that followed it was never reading `monopolize_id` — **the rule itself was not the defect** (Tiberius's caller audit, `7f935140`, `src/rnd/v0.2.0/2026.08.24-monopolize-as-idleness-caller-audit.md`). What was missing is a single reliable way to do what it asks. `pool-status` cannot be that way: **measured** against real queues, `monopolize_id` moves for exactly ONE condition — a monopolize-flagged job that has already **started** — so it answers *which job holds the slot*, an identity question, and says nothing about work that is QUEUED, running INLINE on the consumer thread (row `99b09840`), or in the shared pool. **And the queue listings cannot do it alone either**: `/api/get-queue/{q}` is **user-filtered** and the gate account is not an admin — `?user_filter=*` answers **403**, so a peer's queued job is not in your listing at all.
+
+```bash
+PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000 ; echo "exit=$?"
+```
+
+**The exit code is the answer: `0` IDLE · `1` BUSY · `2` UNKNOWN.** It reads the unfiltered, unauthenticated `GET /api/busy` — run depth, **todo depth**, shared-pool inflight, monopolize slot — and every lane must be empty. 🔴 **UNKNOWN IS NOT IDLE.** UNKNOWN with only `todo_queue_size` missing means that container predates this row and cannot see waiting work; the remedy is a **bounce** (a code pickup), not a `--force-recreate`. Treating a signal's absence as proof of absence is the defect itself.
+
+**Placement, once you have a `0`:** empty queue → bounce (to clear static-snapshot drift, see §reference) + schedule + run now; something already SCHEDULED (queued, not yet running) → still self-authorized, but set `scheduled_at` AFTER the queued job (never jump an expected-next run); something RUNNING → queue behind it, no bounce.
 
 Eligible if **any**:
 - Mutates persistent state (DB rows, shared files, LLM API spend, enqueues jobs).
@@ -355,6 +400,7 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 | Suite | Venue | Command | Notes |
 |---|---|---|---|
 | Unit | :7999 | `pytest src/tests/unit/` | Fast isolated tests, mocked deps |
+| TypeScript | :8000 (scheduled) | `./src/tests/run-typescript-tests.sh` | 119 `*.test.ts` under c8 at 100%; ~8-25 min, no server. Runs inside the capped `jstest.slice` cgroup (RSS watchdog 2048 MB fires before the 8 G `MemoryMax`). **Tier ban LIFTED 2026-08-25** (row 92e94cb7) — all four doors are capped, so `test_types: ["all"]` is safe again. ⚠️ A full run may still HANG on leaked transports (row f8055be3) — an RC=124 is that defect, not memory |
 | Smoke (inline) | :7999 | `python -m cosa.rest.<module>` | `quick_smoke_test()` blocks; non-destructive. `src/tests/smoke/` files are heterogeneous — route each by the §TESTING VENUES rubric, not the folder |
 | WebSocket smoke | :7999 | `src/scripts/run-websocket-smoke-tests.sh` | 50 tests; connection/auth/events |
 | Integration | :8000 (scheduled) | `./src/tests/run-integration-tests.sh --bg -v` | 43 tests; **FINAL merge gate**; always `--bg` |
@@ -370,9 +416,36 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 ## PR MERGE REQUIREMENTS
 
-**All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh`, on a quiescent box)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
+<!-- merge-pyramid-suites: unit cosa typescript smoke websocket e2e integration -->
+**All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **cosa (:7999 — in-tree `src/cosa/tests/**`, `src/tests/run-cosa-tests.sh`; joined the pyramid 2026-08-13, row d83d025b)** → **typescript (:8000 scheduled — `src/tests/run-typescript-tests.sh`, c8 at 100%, ~8-25 min so it fails the :7999 two-minute rubric; runs inside the capped `jstest.slice` cgroup — ban lifted 2026-08-25, row 92e94cb7)** → smoke (:7999) → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh` — read the note below before reading its verdict)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
 
-The **serial bridge guard** step is the tier-2 whole-directory contact check (row e2ae4102) that the concurrent unit run deselects (`-m "not serial_bridge_guard"`) because a live peer's bridge write would false-accuse it. Run it when you are the only session writing bridges; if it reports contact, a hook is resolving its directory from a hardcoded real path instead of the seam. Dropping this line silently removes the guard — the concurrent scoped canary does not see a merge into a live seat.
+The **cosa tier's count was being asserted without ever being run.** Now measured **three times across two different trees**:
+
+```
+@3a8ce109  8668 passed, 26 skipped  in 280.72s   EXIT=0   (Tiberius, 21:16)
+@17e78c98  8668 passed, 26 skipped  in 274.45s   EXIT=0   (Rio)
+@17e78c98  8668 passed, 26 skipped  in 274.53s   EXIT=0   (Rio)
+@b3c76d55  8671 passed, 26 skipped  in 275.56s   EXIT=0   (Tiberius, tier-wide thread probe)
+@b3c76d55  8671 passed, 26 skipped  in 276.67s   EXIT=0   (Rio, independent)
+```
+
+**FIVE runs, two seats, three shas — and the two different counts RECONCILE rather than conflict.** `git diff 17e78c98..b3c76d55 -- src/cosa/tests` is **+4 `def test_`, −1 removed = +3**, which is exactly `8668 → 8671`. Verified independently by both of us. A count that moves *and* whose movement is fully explained by the diff is stronger evidence than a count that merely repeats.
+
+The figure in circulation was **8,622/0**, which is simply the count as of **08-22**. Nothing regressed — **zero failures** in both runs — and 7 commits touched `src/cosa/tests` in between, adding a net **+44** `def test_` (`402e528c` `f2be1f6d` `8cb320bb` `0dd919d2` `927076a4` `566cb971` `e38abe43`) against a measured +46; the remainder is parametrization. **Stale expectation, not regression**, proven both ways rather than inferred from the unit tier's similar drift.
+
+**Three samples across two shas, by two seats**, so 8,668 is neither a one-tree artifact nor a one-runner one; wall time is tight too — 274.45 / 274.53 / 280.72s. ⚠️ **What these samples are NOT independent of: the HARNESS** — wider than box-and-interpreter (Rio's correction to my wording). All three share the same `.venv` package set, the same `conftest`, the same runner script, the same env (`LUPIN_UNIT_NETWORK=block`, `LUPIN_ROOT`, `PYTHONPATH`), and the same OS and clock; **Rio's two additionally shared the same uncommitted working tree**, so they are not even tree-independent of each other in the untracked sense. Any one of those could agree wrongly: a defect living in the harness rather than the tree reproduces identically across all three and reads as agreement. ⚠️ **It moved within the same evening** — **8,671**, three more than 8,668, with no failure anywhere. The cause is named rather than guessed: three commits landed cosa tests in that window (`6874aec8`, `b92f663c`, `402e528c`), and the commit carrying this note touches `CLAUDE.md` only. Re-derive rather than quote on sight; that habit is what let `8,622` stand since 08-22, and the number is demonstrably a moving target even across one night — but the number itself now rests on more than one run.
+
+**The stdout-watcher hazard cannot reach this tier, and the durable reason is the ABSENT THREAD, not a count.** Nothing in the cosa tier imports `lupin_mcp.cosa_voice_mcp`, so the daemon watcher never starts in that process and there is no polluting writer at all. Measured, not grepped, and over the WHOLE tier rather than a subdirectory (Rio's correction — my first probe covered only `unit/rest/`, 2,673 tests, which cannot speak for a tier-wide claim): a thread probe at `pytest_sessionfinish` across all of `src/cosa/tests/` — **8,671 passed** — reports `WATCHER_PRESENT: False` — **and Rio's independent run at the same sha reports the same**, so the absence is not one seat's artifact. ⚠️ **The absence is SPECIFIC to the watcher, not a claim that the tier starts no threads**: the same probe reports `['GhostJobSweeper', 'GhostJobSweeper', 'MainThread', 'io-embed_0', 'io-embed_1']`. Cosa runs daemon threads; none of them is the one that writes session events to stdout. (Every textual `cosa_voice_mcp` hit in `src/cosa/` is a path string, a path-suffix assertion, or a comment — no import.) **Corroboration, NOT the proof**: Rio's census finds 379 stdout-capturing test functions across 89 files with **zero** parsing the capture as JSON. That number is a census of today's tree and one new test moves it (Rio's correction); the missing importer is what holds. The unit tier is the exposed one — 15 files parse stdout as JSON there; see `src/rnd/v0.2.0/2026.08.24-import-time-watcher-thread-poisons-stdout-tests.md`.
+
+The **serial bridge guard** step is the tier-2 whole-directory contact check (row e2ae4102) that the concurrent unit run deselects (`-m "not serial_bridge_guard"`) because a live peer's bridge write would false-accuse it. If it reports contact, a hook may be resolving its directory from a hardcoded real path instead of the seam. Dropping this line silently removes the guard — the concurrent scoped canary does not see a merge into a live seat.
+
+> 🔴 **DO NOT WAIT FOR A "QUIESCENT BOX" — THERE IS NO SUCH STATE** (row `5a68c92c`). This line used to say "on a quiescent box", and the row-level guidance said "run it when you are the only session writing bridges." **That condition cannot be satisfied and asking peers to pause will not create it.** Measured 2026-08-24 with no suite running anywhere: **13 entries under `~/.claude/sessions` changed in 60 seconds**, and four live seats wrote bridges inside ten minutes — **including the seat running the guard**, which writes its own bridge and its own listener files while the guard executes. The precondition named a state that never exists, so a red told the reader nothing and the sanctioned response ("re-run") was indistinguishable from weakening a gate.
+>
+> **How to read a red instead — real contact is DETERMINISTIC, peer noise is NOT:**
+> 1. **Re-run and compare the NAMED file.** The same filename every run = contact. A different file each run, or none, = peer noise. ⚠️ **This cuts both ways: one GREEN is also one sample.** The discriminator is determinism, not the colour of the result — on a check whose failure mode is nondeterministic, a single pass is as weak as a single fail. Run it more than once before reporting either.
+> 2. **Identify the writer.** Read the named file's `session_id` / `cc_pid` and check whether it belongs to a live seat that is not the test: `ls /proc/<cc_pid>` — if that seat is alive and is not you, it is noise, not contact.
+>
+> ⚠️ **Scope note, pending a decision (do NOT "fix" this by narrowing the glob).** `fingerprint_dir` globs `*` rather than `cc-*.json` **deliberately** — row `877794ed` widened it because the narrow form MISSED real `cc-listener-*.stderr` and `.spawn-lock` writes. The cost of that correct decision, measured: the guard sha256s **6,498 entries / 154 MB twice per test**, of which **5 are Lupin bridges**; the exclusion list carries **2 names against ~4,676 `.log`/`.stderr` files**. Narrowing the glob re-opens the hazard `877794ed` found, so the scoping question is Rick's, not a drive-by. Analysis: `src/rnd/v0.2.0/2026.08.24-serial-bridge-guard-unsatisfiable-precondition.md`.
 
 Integration is the final gate because it exercises complete user workflows across API + DB + auth on a real server — catching regressions unit tests miss.
 
@@ -442,6 +515,8 @@ When modifying code in these areas, update the corresponding documentation:
 | `src/cosa/agents/shared/` (PlanWriter, GitStrategist, FixExecutor) | `src/docs/agents/shared-fix-primitives-reference.md` |
 | `src/cosa/agents/test_suite/` | `src/docs/agents/test-suite-scheduling-guide.md` |
 | `src/cosa/rest/test_suite_completion_watchdog.py` | `src/docs/agents/test-fix-expediter-guide.md` |
+| `src/lupin_arbiter_app/*` import graph (any NEW third-party import) | **Run `src/scripts/check-arbiter-venv.py` in the arbiter venv and add the package to `src/scripts/requirements-arbiter.txt`.** The standalone `:8001` arbiter runs on a deliberately LIGHT host venv, so an import the venv lacks kills a worker THREAD while the process stays `active (running)` and `/health` returns 200 — invisible for two days on 2026-08-08. Also update `src/rnd/v0.1.9/2026.07.22-arbiter-bringup-on-lupin-host-test.md` §7 and `src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md` |
+| A feature gated by an INI flag that imports a heavy/optional module | Read the flag **before** the import (pattern: `fleet_arbiter_loop.make_follow_through_watcher_factory`). A disabled feature must not impose its dependencies — that is what took the fleet loop down while `follow through escalation enabled = false` |
 | `lupin-app.ini` `bug fix expediter *` keys | `src/docs/agents/bug-fix-expediter-guide.md` INI Reference |
 | `lupin-app.ini` `test fix expediter *` keys | `src/docs/agents/test-fix-expediter-guide.md` INI Reference |
 | BFE/TFE endpoint rows | `src/docs/rest-api-reference.md` sections 17/17a/17b |
@@ -454,6 +529,20 @@ When modifying code in these areas, update the corresponding documentation:
 **Documentation index**: `src/docs/README.md` — lists all docs with verification dates.
 
 **Fleet liveness + unified task-store architecture (top-to-bottom)**: `src/docs/fleet-liveness-and-task-store-architecture.md` — the canonical reference for the one-store/three-readers design (Stop-hook self-poke · `:8001` arbiter · human UI card), the heartbeat seam + `heartbeat.owed_source_from_store` cutover flag + fail-safe, the arbiter detectors (staleness 2700s / tap-ACK 600s / whole-fleet-stall 1800s) + how to bounce it (`systemctl --user restart lupin-arbiter-app.service`), the manager/worker spawn→worktree→review→merge-held→push lifecycle, and the migration drain. Read this before touching the liveness path, the task store, or the arbiter.
+
+**Declaring a hold (parking a session) — use the VERB, never hand-write the JSON**: to park a session with a hold, run the `heartbeat_hold_io.py` **write** verb — it records the hold AND verify-reads it back so the hook will actually honor it. **Never hand-write a `.heartbeat-hold-*.json` file** (Write tool or `>`): a hand-written hold lands in the **repo root**, where no reader looks — the arbiter and the Stop hook both resolve holds under `fleet_data_root()` — so the session parks **invisibly** and the poke keeps coming (row `011f1f90`). One example beats a paragraph:
+
+```bash
+python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write \
+  --session-id <id> --persona "You 😎" --reason "<why holding>" \
+  --ttl-seconds 14400 --awaiting "user:<name>"
+```
+
+> **History — the instruction was already correct, and was ignored anyway.** `planning-is-prompting → workflow/fleet-pause-resume.md` did once prescribe hand-writing the JSON, and that was corrected on **2026-07-21** (commit `0f39b03`). Since then line 77 has read *"Write the hold with the VERB, not by hand"*, line 87 *"Do not hand-write `.heartbeat-hold-<id>.json`"*, and the schema block is explicitly fenced *"Schema reference only — NOT the instruction, do not hand-author it."*
+>
+> **All 14 lupin repo-root holds are dated 2026-07-31 to 08-04 — every one written AFTER that fix.** Fleet-wide the split is about half: of 33 misplaced files, 16 predate the fix and 16 postdate it. So a correct doc changed nothing for half the population, and nothing at all for lupin.
+>
+> That is why this note is not the remedy. **The remedy is the detector** (`hold_is_misplaced` + the `misplaced` field in the arbiter's sweep, row `011f1f90`), which catches the file regardless of what anyone read. A rule that is written down but not enforced is a rule that half the fleet will break — treat the doc as a courtesy and the detector as the control.
 
 **Principle**: FastAPI `/docs` and `/redoc` are the authoritative API reference. Hand-written docs cover architecture, concepts, and operations only.
 

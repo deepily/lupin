@@ -68,6 +68,44 @@ class LlmCompletion:
         self.verbose = verbose
         self.generation_args = generation_args
 
+    def _clamped_max_tokens( self, prompt: str, requested: int ) -> int:
+        """
+        Shrink the completion budget so prompt + completion fits the model's window.
+
+        Row a203d91d: `max_tokens` came from config as a constant while the prompt is
+        a variable, and the server checks their SUM. A 4096 budget against an 8192
+        window meant any prompt over ~4096 tokens was a hard 400 before a single token
+        was generated. The window is read from the server, never from config, because
+        a configured copy is a second source of truth that drifts.
+
+        Requires:
+            - prompt is the exact string being sent
+            - requested is the caller's desired max_tokens
+
+        Ensures:
+            - returns `requested` when it already fits
+            - returns a smaller budget that fits when it does not
+            - returns `requested` UNCHANGED if the token count cannot be obtained,
+              which is exactly today's behaviour — this is a hot path, and refusing
+              to answer at all would turn a working call into a hard failure over a
+              measurement that is only an optimisation when the prompt is small
+
+        Raises:
+            - None
+        """
+        from cosa.agents.model_window import count_tokens, clamp_max_tokens
+
+        try:
+            prompt_tokens, window = count_tokens( self.base_url, self.model_name, prompt )
+        except RuntimeError as e:
+            if self.debug: print( f"[CLAMP] could not size the prompt, sending unclamped: {e}" )
+            return requested
+
+        clamped = clamp_max_tokens( requested, prompt_tokens, window )
+        if clamped != requested and self.debug:
+            print( f"[CLAMP] prompt={prompt_tokens} window={window} max_tokens {requested} -> {clamped}" )
+        return clamped
+
     def run( self, prompt: str, stream: bool=False, **kwargs: Any ) -> str:
         """
         Send a prompt to the LLM and get a completion response.
@@ -108,7 +146,7 @@ class LlmCompletion:
             "model"      : self.model_name,
             "prompt"     : prompt,
             # override the object's generation arguments if they're present in this method's kwargs
-            "max_tokens" : kwargs.get( "max_tokens", self.generation_args.get( "max_tokens", 64 ) ),
+            "max_tokens" : self._clamped_max_tokens( prompt, kwargs.get( "max_tokens", self.generation_args.get( "max_tokens", 64 ) ) ),
             "temperature": kwargs.get( "temperature", self.generation_args.get( "temperature", 0.25 ) ),
             "top_p"      : kwargs.get( "top_p", self.generation_args.get( "top_p", 1.0 ) ),
             "stop"       : kwargs.get( "stop", self.generation_args.get( "stop", None ) ),
@@ -187,7 +225,7 @@ class LlmCompletion:
         data = {
             "model"      : self.model_name,
             "prompt"     : prompt,
-            "max_tokens" : generation_args.get("max_tokens", self.generation_args.get("max_tokens", 64)),
+            "max_tokens" : self._clamped_max_tokens( prompt, generation_args.get("max_tokens", self.generation_args.get("max_tokens", 64)) ),
             "temperature": generation_args.get("temperature", self.generation_args.get("temperature", 0.25)),
             "top_p"      : generation_args.get("top_p", self.generation_args.get("top_p", 1.0)),
             "stop"       : generation_args.get("stop", self.generation_args.get("stop", None)),

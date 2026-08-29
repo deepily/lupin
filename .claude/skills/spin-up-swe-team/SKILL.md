@@ -28,6 +28,39 @@ Instantiate the **spin-up crew** (Implementer · Reviewer · Tester) against a t
 
 6. **Run the gate.** implement → adversarial review → integration/e2e green → **verify BOTH green AND reviewed** → commit only on the user's word (re-loop on fail). Steward runs the scaled post-game every cycle. Teardown on *"stand down the SWE team"* reaps the crew with mementos; the standing pair persists.
 
+## If the task is "build an agent that runs by voice"
+
+This is the shape Rick asks for most, so it gets named here rather than left for the
+crew to discover. **The answer is one contract entry plus two ratified one-line
+opt-ins — not four hand-edited files, and never a new `if`/`elif`.**
+
+- **Load `agentic-voice-workflow` into the Implementer's brief** (skill, or
+  `src/workflow/agentic-voice-workflow.md` for the long form). Its compliance
+  checklist IS the registration process; do not re-derive it in the brief.
+- **The four things a crew gets wrong**, each covered there with its measurement:
+  1. **Routing goes through the brain** (`AskFlow`, `src/cosa/rest/v2/flow.py`).
+     Adding a *routing* branch is the defect that was removed — a reviewer should
+     reject a new routing `if command == ...` on sight. ⚠️ **Job *construction* is
+     the exception**: `create_agentic_job()` still dispatches by branch until phase 5
+     wires registry lookup, so a new agent DOES add one there. Telling a crew "no
+     branches anywhere" leaves their agent unbuildable.
+  2. **Reachable ≠ dependable.** A prompt line makes the command reachable today;
+     the retrain makes it dependable. Measured 0/5 unlisted vs 5/5 listed on the
+     same adapter and training set.
+  3. **`scheduled_at` and `monopolize` are queue directives, not agent arguments** —
+     they arrive in the same dict as real arguments, and left in place they are
+     dropped in silence while the caller believes the job is scheduled.
+  4. **New commands start in `shadow`**, not live.
+- **Tester's bar**: a green pipeline test does NOT mean voice-reachable. Those are
+  different claims and the pipeline test cannot make the second one. Route it
+  end-to-end, or say plainly that it is unverified.
+- **Reviewer's bar**: registration is not done until the command resolves through
+  the registry AND the drift guard (`src/tests/unit/test_v2_registry_drift_guard.py`)
+  is green.
+
+Whole picture, written for someone who was in none of these sessions:
+`src/rnd/v0.2.0/2026.08.25-agentic-voice-workflow-pass-1-and-2.md`.
+
 ## Hard rules
 
 - **Standing pair is never spawned** — only the crew is. Teardown reaps only the crew.

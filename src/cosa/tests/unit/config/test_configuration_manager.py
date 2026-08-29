@@ -63,6 +63,8 @@ my_dict = {'k': 2}
 dupe = childval
 @_secret = remove_me
 expand_me = ${HOME}/sub
+blank_key =
+expand_blank = ${LUPIN_TEST_BLANK_VAR}
 
 [filechild]
 inherits = __BASE_PATH__
@@ -359,6 +361,116 @@ class TestOverrideAndSplainAndPrint( _CfgBase ):
         # No key starts with this prefix -> "No configuration keys to print" + return.
         out = _capture( self.mgr.print_configuration, prefixes=[ "zzz_no_match_" ] )
         self.assertIn( "No configuration keys to print", out )
+
+
+class TestGetRequired( _CfgBase ):
+    """get_required() — the loud sibling of get(), for values a caller cannot survive without.
+
+    Row 3e4a4a4a: get() returning None into a caller that concatenates it produced
+    'can only concatenate str (not NoneType) to str' with nothing naming the key.
+    These tests pin the two things that fix: it RAISES, and the message says which
+    key, which block, and which file.
+    """
+
+    def setUp( self ):
+        super().setUp()
+        self.mgr = self._build( block_id="child" )
+
+    def test_present_key_returns_typed_value( self ):
+        self.assertEqual( self.mgr.get_required( "my_str" ), "hello" )
+        self.assertEqual( self.mgr.get_required( "my_int", return_type="int" ), 42 )
+        self.assertTrue( self.mgr.get_required( "my_bool", return_type="boolean" ) )
+        self.assertEqual( self.mgr.get_required( "my_list", return_type="list-string" ), [ "a", "b", "c" ] )
+
+    def test_inherited_key_is_resolved_not_raised( self ):
+        # Inheritance is why get() cannot simply be made to raise; get_required
+        # must see through it the same way get() does.
+        self.assertEqual( self.mgr.get_required( "shared" ), "from_parent" )
+        self.assertEqual( self.mgr.get_required( "gp_key" ), "gp_val" )
+
+    def test_expands_env_vars_like_get( self ):
+        with patch.dict( os.environ, { "HOME": "/home/test" } ):
+            self.assertEqual( self.mgr.get_required( "expand_me" ), "/home/test/sub" )
+
+    def test_missing_key_raises_naming_key_block_and_path( self ):
+        with self.assertRaises( cm_mod.MissingConfigKeyError ) as ctx:
+            _capture( self.mgr.get_required, "absent_key" )
+        msg = str( ctx.exception )
+        self.assertIn( "absent_key", msg )
+        self.assertIn( "child", msg )                    # the resolved block
+        self.assertIn( self.config_path, msg )           # where to go fix it
+        self.assertIn( "not found", msg )
+        self.assertEqual( ctx.exception.key, "absent_key" )
+        self.assertEqual( ctx.exception.block_id, "child" )
+        self.assertFalse( ctx.exception.blank )
+
+    def test_missing_key_splains_before_raising( self ):
+        buf = io.StringIO()
+        with redirect_stdout( buf ):
+            with self.assertRaises( cm_mod.MissingConfigKeyError ):
+                self.mgr.get_required( "absent_key" )
+        out = buf.getvalue()
+        self.assertIn( "Required key", out )
+        self.assertIn( "absent_key", out )
+
+    def test_missing_key_silent_skips_the_banner( self ):
+        buf = io.StringIO()
+        with redirect_stdout( buf ):
+            with self.assertRaises( cm_mod.MissingConfigKeyError ):
+                self.mgr.get_required( "absent_key", silent=True )
+        self.assertNotIn( "Required key", buf.getvalue() )
+
+    def test_missing_key_mute_splainer_skips_the_banner( self ):
+        self.mgr.mute_splainer = True
+        buf = io.StringIO()
+        with redirect_stdout( buf ):
+            with self.assertRaises( cm_mod.MissingConfigKeyError ):
+                self.mgr.get_required( "absent_key" )
+        self.assertNotIn( "Required key", buf.getvalue() )
+
+    def test_blank_value_raises_as_blank_not_missing( self ):
+        # A required key set to nothing is a configuration error. get() hands
+        # back "" here, which concatenates without complaint and silently
+        # produces a wrong path — the quiet cousin of the None crash.
+        self.assertEqual( self.mgr.get( "blank_key" ), "" )
+        with self.assertRaises( cm_mod.MissingConfigKeyError ) as ctx:
+            _capture( self.mgr.get_required, "blank_key" )
+        self.assertTrue( ctx.exception.blank )
+        self.assertIn( "empty value", str( ctx.exception ) )
+
+    def test_env_var_expanding_to_whitespace_counts_as_blank( self ):
+        with patch.dict( os.environ, { "LUPIN_TEST_BLANK_VAR": "   " } ):
+            with self.assertRaises( cm_mod.MissingConfigKeyError ) as ctx:
+                _capture( self.mgr.get_required, "expand_blank" )
+        self.assertTrue( ctx.exception.blank )
+
+    def test_blank_value_silent_skips_the_banner( self ):
+        buf = io.StringIO()
+        with redirect_stdout( buf ):
+            with self.assertRaises( cm_mod.MissingConfigKeyError ):
+                self.mgr.get_required( "blank_key", silent=True )
+        self.assertNotIn( "Required key", buf.getvalue() )
+
+    def test_blank_value_mute_splainer_skips_the_banner( self ):
+        self.mgr.mute_splainer = True
+        buf = io.StringIO()
+        with redirect_stdout( buf ):
+            with self.assertRaises( cm_mod.MissingConfigKeyError ):
+                self.mgr.get_required( "blank_key" )
+        self.assertNotIn( "Required key", buf.getvalue() )
+
+    def test_invalid_return_type_still_raises_value_error( self ):
+        with self.assertRaises( ValueError ):
+            self.mgr.get_required( "my_str", return_type="bogus" )
+
+    def test_get_behaviour_is_unchanged_by_this_row( self ):
+        # The whole point of the split: get() keeps returning None, so the call
+        # sites that pass a default and the callers that tolerate absence are
+        # untouched. Making get() itself raise would turn a key present in
+        # Development and absent in Testing-GCS into a hard startup failure.
+        self.mgr.mute_splainer = True
+        self.assertIsNone( self.mgr.get( "absent_key" ) )
+        self.assertEqual( self.mgr.get( "absent_key", default="fallback" ), "fallback" )
 
 
 if __name__ == "__main__":

@@ -8,13 +8,13 @@
 #   3. app service control   (svc up|down|restart|status|logs)  — docker compose on the VM
 #   4. local tunnel          (tunnel [PORT] [VM_PORT])          — bind localhost:PORT -> VM :VM_PORT
 #
-# Access is IAP-only (no public IP), identical to deploy-cloud-test.sh for SSH. NOTE: the `tunnel`
+# Access is IAP-only (no public IP). NOTE: the `tunnel`
 # subcommand forwards IAP TCP to VM_PORT (default 7999), which needs a VPC firewall rule allowing
 # the IAP range 35.235.240.0/20 -> tcp:VM_PORT (SSH works because tcp:22 already has one; 7999 and
 # any other VM-side port may not — one rule PER port). See runbook §"Tunnel firewall" for the
 # one-time `gcloud compute firewall-rules create`, or run `lupin-vm.sh firewall open VM_PORT`.
 #
-# Runbook: src/rnd/2026.07.22-lupin-host-test-ssh-tunnel-automation.md
+# Runbook: src/rnd/v0.1.9/2026.07.22-lupin-host-test-ssh-tunnel-automation.md
 #
 # Usage:
 #   src/scripts/lupin-vm.sh <subcommand> [args]
@@ -30,13 +30,17 @@ set -euo pipefail
 # ---- config (overridable via env) ----------------------------------------
 VM_NAME="${LUPIN_VM_NAME:-lupin-host-test}"
 VM_ZONE="${LUPIN_VM_ZONE:-us-central1-a}"
-VM_ROOT="/mnt/lupin-data/lupin"                 # UID-1001-owned on-VM checkout (deploy-cloud-test.sh:31)
+VM_ROOT="/mnt/lupin-data/lupin"                 # UID-1001-owned on-VM checkout
 VM_PIP_ROOT="/mnt/lupin-data/planning-is-prompting"  # sibling PIP checkout on the VM (push-env exports PLANNING_IS_PROMPTING_ROOT)
 VM_DEEPILY_PROJECTS_DIR="/mnt/lupin-data"       # parent of the on-VM checkouts; push-env exports DEEPILY_PROJECTS_DIR (referenced by the shipped alias library)
+# Per-machine state deliberately kept OUT of every repo (Rick 2026-08-04). On dev this is a
+# SIBLING of the projects dir (…/projects-data); the VM has no such sibling — /mnt/lupin-data IS
+# the projects dir — so it nests under the data disk instead. Holds claude-permissions.json.
+VM_DEEPILY_DATA_DIR="/mnt/lupin-data/projects-data"
 # The CPU VM (post GPU→CPU downgrade) runs the cloud-GPU topology: model-server on Cloud Run,
 # NO local nvidia container. Using cloud-test.yml here recreates a local GPU model-server that
 # cannot start on the CPU VM ("could not select device driver nvidia"). Source of truth:
-# docker-compose.cloud-gpu.yml + src/rnd/2026.07.08-cpu-vm-app-restore-runbook.md §3.
+# docker-compose.cloud-gpu.yml + src/rnd/v0.1.9/2026.07.08-cpu-vm-app-restore-runbook.md §3.
 COMPOSE_FILE="docker-compose.cloud-gpu.yml"     # CPU VM: Cloud Run model-server, no nvidia
 ENV_FILE="cloud-gpu.env"                         # requires LUPIN_MODEL_SERVER_URL (on the VM, git-ignored)
 # `docker compose logs/up <name>` take the SERVICE name, NOT the container_name. The service is
@@ -168,8 +172,9 @@ SUBCMD="${1:-}"
 shift || true
 
 # ---- project id (fail loud — a silent default can act on the wrong project) ----
-# Mirrors deploy-cloud-test.sh:115. VM lifecycle + IAP both take an explicit --project so nothing
-# rides on the ambient `gcloud config` project, which may point elsewhere.
+# VM lifecycle + IAP both take an explicit --project so nothing rides on the ambient
+# `gcloud config` project, which may point elsewhere. (This mirrored the same guard in
+# deploy-cloud-test.sh, retired 2026-08-26 — row 0d175dac.)
 require_project() {
     : "${LUPIN_GCP_PROJECT_ID:?Set LUPIN_GCP_PROJECT_ID (e.g. export LUPIN_GCP_PROJECT_ID=hello-world-foo-423219)}"
 }
@@ -218,6 +223,10 @@ remote_compose() {
 #                    overwriting colliding untracked files. Does NOT `git clean`, so untracked
 #                    non-colliding files (data store, cloud-gpu.env, keys) are PRESERVED. This is
 #                    the deploy semantic — a deploy target must mirror the branch. (deploy)
+#
+# BOTH MOVING MODES STAMP `$VM_ROOT/.deployed-ref` (row c41ec7e6) with the VM's post-move HEAD,
+# a UTC timestamp, and `push-bundle-<mode>`. Fetch-only does NOT stamp — no code moved, so there
+# is nothing new to record and a fresh timestamp would falsely imply there was.
 do_push_bundle() {
     local branch="$1" mode="$2"
     require_project
@@ -230,8 +239,8 @@ do_push_bundle() {
     log "bundling branch '$branch' from $repo_root"
     local move_desc=""
     case "$mode" in
-        checkout) move_desc="; sudo git checkout -B $branch FETCH_HEAD; chown 1001 tree" ;;
-        reset)    move_desc="; sudo git reset --hard FETCH_HEAD; sudo git checkout -B $branch FETCH_HEAD; chown 1001 tree" ;;
+        checkout) move_desc="; sudo git checkout -B $branch FETCH_HEAD; purge __pycache__ + *.pyc; chown 1001 tree; stamp $VM_ROOT/.deployed-ref = '<vm HEAD sha> <utc ts> push-bundle-checkout'" ;;
+        reset)    move_desc="; sudo git reset --hard FETCH_HEAD; sudo git checkout -B $branch FETCH_HEAD; purge __pycache__ + *.pyc; chown 1001 tree; stamp $VM_ROOT/.deployed-ref = '<vm HEAD sha> <utc ts> push-bundle-reset'" ;;
     esac
     if [ "$DRY_RUN" -eq 1 ]; then
         log "(dry-run) git bundle create <tmp> $branch; scp -> VM:/tmp; cp -> $vm_bundle; sudo git fetch origin $branch; chown 1001 .git$move_desc"
@@ -246,16 +255,51 @@ do_push_bundle() {
     rm -f "$bundle_tmp"
     # Overwrite the bundle in place (admin owns the file), fetch as root with an inline
     # safe.directory, restore .git ownership to 1001. Optional working-tree checkout.
+    # PURGE STALE BYTECODE whenever the working tree MOVES (row 70364793, 2026-08-18).
+    # git deletes a .py but __pycache__ is gitignored, so the .pyc SURVIVES the checkout.
+    # A sibling .pyc (no __pycache__ dir) is then imported sourceless and runs code that
+    # exists in no commit and no grep; a __pycache__ orphan is inert but still hides code
+    # from every diff and review. Both are removed here, at the one moment we know the
+    # tree just changed. Defined ONCE so `checkout` and `reset` cannot drift apart —
+    # the same single-source-of-truth reason do_push_bundle exists at all.
+    # Detected independently by preflight-vm.sh check B5; this is the prevention, that
+    # is the control. Neither replaces the other: prevention that is never verified is
+    # how "lupin-vm.sh deploy runs up -d WITHOUT --no-deps" sat in a runbook for a day
+    # and then took :7999 down.
+    local purge_pyc="sudo find $VM_ROOT/src -name '__pycache__' -type d -prune -exec rm -rf {} + && sudo find $VM_ROOT/src -name '*.pyc' -delete && echo PYCACHE_PURGED"
+    # STAMP THE PROVENANCE REF whenever the working tree MOVES (row c41ec7e6, 2026-08-24).
+    # `.deployed-ref` is the file the code-sync design (src/rnd/v0.1.9/2026.06.23-gcp-code-sync-to-runtime-design.md
+    # §3) promised so that "what is running on the VM?" is one `cat`, not a code-grep. Only
+    # deploy-cloud-test.sh ever wrote it (retired 2026-08-26, row 0d175dac), and that was not
+    # the script this VM is deployed with — so on 2026-08-24 the stamp read df611aa7 /
+    # 2026-07-13 while the VM's tree was at 24f8d88f /
+    # 2026-08-17. A stamp that is five weeks behind is worse than no stamp at all: an absent file
+    # sends the reader to measure, a stale one sends them to a wrong answer they have no reason
+    # to doubt.
+    #
+    # DERIVED FROM THE VM, NOT FROM INTENT: the SHA is `git rev-parse HEAD` read on the VM AFTER
+    # the tree has moved, not the SHA we meant to ship. If any step of the &&-chain above failed,
+    # this never runs and the old stamp stays — a stamp is only ever written by a move that
+    # actually completed.
+    #
+    # AXIS FIELD says `push-bundle-<mode>`, deliberately NOT `code`/`deps`. deploy-cloud-test.sh's
+    # third field recorded which axis its detector ROUTED to; that script was retired
+    # 2026-08-26 (row 0d175dac) and push-bundle runs no such detector —
+    # it moves source and never touches deps or the image. Writing `code` here would claim a
+    # routing decision that was never made, which is exactly the kind of confident-but-unearned
+    # answer this row exists to remove. Readers that want the SHA are unaffected: every one of
+    # them takes field 1 — today that is preflight check B6 (pfv_deployed_ref_status).
+    local stamp_ref="echo \$( git $safe rev-parse HEAD ) \$( date -u +%FT%TZ ) push-bundle-$mode | sudo tee $VM_ROOT/.deployed-ref >/dev/null && sudo chown 1001:1001 $VM_ROOT/.deployed-ref && echo REF_STAMPED && cat $VM_ROOT/.deployed-ref"
     local rcmd="cp /tmp/lupin-wip.bundle $vm_bundle && rm -f /tmp/lupin-wip.bundle && cd $VM_ROOT && sudo git $safe fetch origin $branch && sudo chown -R 1001:1001 .git && echo FETCHED && git $safe log --oneline -1 FETCH_HEAD"
     case "$mode" in
         checkout)
-            rcmd="$rcmd && sudo git $safe checkout -B $branch FETCH_HEAD && sudo chown -R 1001:1001 . && echo CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
+            rcmd="$rcmd && sudo git $safe checkout -B $branch FETCH_HEAD && $purge_pyc && sudo chown -R 1001:1001 . && $stamp_ref && echo CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
         reset)
             # DRIFT-PROOF: reset --hard forces the tracked tree to FETCH_HEAD (discards local
             # tracked edits, overwrites colliding untracked), then checkout -B relabels HEAD onto
             # the branch (now clean, so it can't abort). No `git clean` — untracked non-colliding
             # files (data/env/keys) survive.
-            rcmd="$rcmd && sudo git $safe reset --hard FETCH_HEAD && sudo git $safe checkout -B $branch FETCH_HEAD && sudo chown -R 1001:1001 . && echo RESET_CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
+            rcmd="$rcmd && sudo git $safe reset --hard FETCH_HEAD && sudo git $safe checkout -B $branch FETCH_HEAD && $purge_pyc && sudo chown -R 1001:1001 . && $stamp_ref && echo RESET_CHECKED_OUT && git $safe rev-parse --abbrev-ref HEAD" ;;
     esac
     log "refreshing bundle + fetch on VM$( [ -n "$mode" ] && echo " (+$mode)" )"
     gcloud compute ssh "$VM_NAME" \
@@ -336,11 +380,23 @@ case "$SUBCMD" in
         # on every browser connection. Pinning 127.0.0.1 avoids the IPv6 path. Browse http://127.0.0.1:PORT.
         # Even pinned, macOS gcloud still emits benign per-connection "[Errno 9] Bad file descriptor"
         # tracebacks + "Failed to send all data" WARNINGs as the browser opens/closes sockets — the
-        # tunnel is fully working. --verbosity=critical suppresses that log spam. Override for debugging:
+        # tunnel is fully working. --verbosity=error suppresses that log spam (it is all
+        # WARNING-level). Override for debugging:
         #   TUNNEL_VERBOSITY=info src/scripts/lupin-vm.sh tunnel 6999
-        # NOTE: a real startup failure still shows as the command exiting WITHOUT a "Listening on port"
-        # line (the browser then won't load), so quieting the logger does not hide a dead tunnel.
-        local_verbosity="${TUNNEL_VERBOSITY:-critical}"
+        # NOTE: a real startup failure ALSO shows as the command exiting WITHOUT a "Listening on port"
+        # line (the browser then won't load) — but that absence is not a diagnosis. At `error` the
+        # cause is now printed too; see the verbosity note below.
+        # `error`, NOT `critical`. The macOS spam this quieting exists for is all
+        # WARNING-level, so `error` still suppresses every line of it — but `critical`
+        # sits ABOVE error and also swallowed the one message that explains a REFUSED
+        # tunnel:
+        #   ERROR: ... [4003: 'failed to connect to backend']. (Failed to connect to port N)
+        # start-iap-tunnel PRE-TESTS the connection before binding locally ("Testing if
+        # tunnel connection works.") and aborts when the VM-side port has no listener.
+        # Under `critical` that printed the test line and then returned to the prompt
+        # with no reason given — indistinguishable from a silent no-op (2026-08-04,
+        # `tunnel 8889 8889` against a port nothing was serving yet).
+        local_verbosity="${TUNNEL_VERBOSITY:-error}"
         log "tunnel: 127.0.0.1:$local_port -> $VM_NAME:$remote_port  (browse http://127.0.0.1:$local_port ; Ctrl-C to end; TUNNEL_VERBOSITY=info for full logs)"
         runit gcloud compute start-iap-tunnel "$VM_NAME" "$remote_port" \
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" \
@@ -484,7 +540,18 @@ case "$SUBCMD" in
             case "$a" in
                 --checkout) DO_CHECKOUT="checkout" ;;
                 --*)        die "push-bundle: unknown flag $a" ;;
-                *)          [ -z "$BRANCH" ] && BRANCH="$a" ;;
+                *)          # REFUSE a second positional rather than dropping it (2026-08-24).
+                            # The mode is a FLAG. `push-bundle <branch> checkout` used to send
+                            # `checkout` through here, find BRANCH already set, and discard it —
+                            # exit 0, tree never moved. A mistyped `--flag` died loudly one line
+                            # above while a plausible bare word ran and did nothing, and the only
+                            # tell was a missing tail on the dry-run plan, i.e. invisible on the
+                            # live run where it costs something.
+                            if [ -z "$BRANCH" ]; then
+                                BRANCH="$a"
+                            else
+                                die "push-bundle: unexpected argument '$a' — the mode is a FLAG, not a positional. Did you mean: push-bundle $BRANCH --checkout"
+                            fi ;;
             esac
         done
         do_push_bundle "$BRANCH" "$DO_CHECKOUT"
@@ -507,7 +574,21 @@ case "$SUBCMD" in
         # aborting would leave the operator with a moved tree and a non-zero exit and no
         # more information than the report already gave them. `deploy`'s PRE arm aborts
         # because nothing has been touched yet; this one reports.
-        if [ -n "$DO_CHECKOUT" ] && [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
+        if [ -n "$DO_CHECKOUT" ] && [ "$DRY_RUN" -eq 1 ]; then
+            # A DRY RUN MUST NOT CONTACT THE VM (2026-08-24). do_push_bundle honours
+            # DRY_RUN and returns before opening a connection, but this arm sits OUTSIDE
+            # it at subcommand level and was guarded only on DO_CHECKOUT — so
+            # `--dry-run … --checkout` opened an IAP tunnel and ran 59 assertions against
+            # the live VM, under a log line claiming the tree had moved when nothing had.
+            # Sibling `deploy` already guards its structurally identical remote call.
+            # Read-only, so nothing was damaged; a dry run that misstates its own contract
+            # is still worth closing, because it is what you reach for when unsure.
+            #
+            # It SAYS what it would do rather than going silent: skipping the arm without
+            # a word would leave the operator unaware the real run preflights at all,
+            # trading a dishonest dry run for an incomplete one.
+            log "(dry-run) POST-checkout preflight on VM: bash src/scripts/preflight-vm.sh --phase post"
+        elif [ -n "$DO_CHECKOUT" ] && [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
             log "POST-checkout preflight (--phase post) — the tree moved without a restart"
             gcloud compute ssh "$VM_NAME" \
                 --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
@@ -647,6 +728,25 @@ bash src/scripts/preflight-vm.sh --phase post || echo 'POST-deploy preflight rep
             shipped=$(( shipped + 1 ))
         done < <( grep -v '^[[:space:]]*#' "$MANIFEST_FILE" | grep -v '^[[:space:]]*$' )
         log "push-unversioned done: $shipped shipped, $skipped_rows VM-local (assert-only)"
+
+        # ── APPLY the Claude permission stanza we just shipped ──────────────────────
+        # Shipping claude-permissions.json is only half the job: it is a SOURCE file, not a
+        # live settings file. Nothing reads it until the merge runs, so a ship-without-apply
+        # looks green in the manifest and changes nothing in behaviour. Merging here keeps
+        # the two halves in one verb rather than in an operator's memory.
+        # The merge is idempotent and touches ONLY the permissions block — the VM's own
+        # hooks / env / model keys survive, which a whole-file copy would not.
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would apply the Claude permission stanza on $VM_NAME"
+        else
+            log "applying the Claude permission stanza on $VM_NAME"
+            gcloud compute ssh "$VM_NAME" --zone="$VM_ZONE" \
+                --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap $SSH_KEEPALIVE \
+                --command "python3 $VM_ROOT/src/scripts/apply_claude_permissions.py --source $VM_DEEPILY_DATA_DIR/claude-permissions.json" \
+                || log "WARN: permission merge did not complete — the VM may still prompt. Re-run: lupin-vm.sh run \"python3 $VM_ROOT/src/scripts/apply_claude_permissions.py\""
+            log "NOTE: Claude Code loads settings at STARTUP — restart any live VM session to pick this up."
+        fi
+
         log "verify with: lupin-vm.sh run \"cd $VM_ROOT && bash src/scripts/preflight-vm.sh --phase pre\""
         ;;
 
@@ -900,6 +1000,7 @@ echo 'NEXT (manual, interactive): open a fresh shell, run  claude  once, complet
             [LUPIN_ROOT]="$VM_ROOT"
             [PLANNING_IS_PROMPTING_ROOT]="$VM_PIP_ROOT"
             [DEEPILY_PROJECTS_DIR]="$VM_DEEPILY_PROJECTS_DIR"
+            [DEEPILY_DATA_DIR]="$VM_DEEPILY_DATA_DIR"
             [LUPIN_CC_VENV]='$HOME/.venv-lupin-mcp'
             [LUPIN_DEV_EMAIL]='ricardo.felipe.ruiz@gmail.com'
         )

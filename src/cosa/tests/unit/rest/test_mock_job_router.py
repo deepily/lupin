@@ -193,7 +193,7 @@ class TestHandleExpeditorTest( unittest.TestCase ):
     Unit tests for `_handle_expeditor_test`.
 
     Requires:
-        - AGENTIC_AGENTS, RuntimeArgumentExpeditor, create_agentic_job,
+        - JOB_ARG_CONTRACTS, RuntimeArgumentExpeditor, create_agentic_job,
           ConfigurationManager, user_job_tracker, asyncio.to_thread, uuid mocked
 
     Ensures:
@@ -209,19 +209,23 @@ class TestHandleExpeditorTest( unittest.TestCase ):
     def _run( self, voice_command, agents, to_thread_return, job=None, force_failure_mode=None ):
         """Run _handle_expeditor_test with a controlled environment, return response."""
         expeditor = MagicMock()
-        expeditor._last_notification_status = "no_response"
+
+        async def _to_thread( _fn, **kwargs ):
+            # The endpoint hands its own ExpediteContext down; the notification status
+            # comes back on it, not off the shared expeditor (row 10c60712).
+            kwargs[ "context" ].notification_status = "no_response"
+            return to_thread_return
         tracker = MagicMock()
         tracker.register_scoped_job.side_effect = lambda h, u, s: f"scoped-{h}"
         self.queue.size.return_value = 4
 
-        with patch( "cosa.agents.runtime_argument_expeditor.agent_registry.AGENTIC_AGENTS", agents ), \
+        with patch( "cosa.agents.runtime_argument_expeditor.agent_registry.JOB_ARG_CONTRACTS", agents ), \
              patch( "cosa.agents.runtime_argument_expeditor.expeditor.RuntimeArgumentExpeditor",
                     return_value=expeditor ), \
              patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=MagicMock() ), \
              patch( "cosa.rest.agentic_job_factory.create_agentic_job", return_value=job ), \
              patch( "cosa.rest.routers.mock_job.user_job_tracker", tracker ), \
-             patch( "cosa.rest.routers.mock_job.asyncio.to_thread",
-                    new=AsyncMock( return_value=to_thread_return ) ), \
+             patch( "cosa.rest.routers.mock_job.asyncio.to_thread", new=_to_thread ), \
              patch( "cosa.rest.routers.mock_job.uuid.uuid4",
                     return_value=MagicMock( hex="abcd1234ef99" ) ):
             return asyncio.run( _handle_expeditor_test(
@@ -235,7 +239,7 @@ class TestHandleExpeditorTest( unittest.TestCase ):
     def test_keyword_match_dry_run_success( self ):
         """
         Ensures:
-            - An AGENTIC_AGENTS keyword match resolves + queues a dry-run job.
+            - An JOB_ARG_CONTRACTS keyword match resolves + queues a dry-run job.
             - A non-matching key listed FIRST exercises the loop-continue arm
               (all(...) False → next iteration) before the match.
         """

@@ -26,6 +26,7 @@ def init_watchdogs(
     todo_queue,
     debug: bool = False,
     verbose: bool = False,
+    ask_flow = None,
 ) -> Tuple[ Optional[ DeadQueueWatchdog ], Optional[ TestSuiteCompletionWatchdog ] ]:
     """
     Initialize both queue watchdog singletons in one call.
@@ -47,6 +48,8 @@ def init_watchdogs(
         todo_queue: TodoFifoQueue
         debug: Enable debug output for both watchdogs
         verbose: Enable verbose output (TFE only — BFE has no verbose flag)
+        ask_flow: the v2 AskFlow both watchdogs submit spawned jobs through (step 12).
+            They no longer push onto todo_queue directly; they still read it.
 
     Returns:
         Tuple of (bfe_watchdog, tfe_watchdog). Either element may be None if
@@ -57,7 +60,7 @@ def init_watchdogs(
 
     # BFE watchdog
     try:
-        bfe_watchdog = init_bfe_watchdog( config_mgr, todo_queue, debug=debug )
+        bfe_watchdog = init_bfe_watchdog( config_mgr, todo_queue, debug=debug, ask_flow=ask_flow )
     except Exception as e:
         print( f"[Watchdogs] BFE init FAILED: {e}" )
 
@@ -69,6 +72,7 @@ def init_watchdogs(
             repair_tracker=None,
             debug=debug,
             verbose=verbose,
+            ask_flow=ask_flow,
         )
     except Exception as e:
         print( f"[Watchdogs] TFE init FAILED: {e}" )

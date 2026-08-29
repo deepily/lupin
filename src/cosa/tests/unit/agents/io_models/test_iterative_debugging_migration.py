@@ -15,10 +15,13 @@ Tests cover:
 """
 
 from typing import Dict, Any
+import pytest
 import os
 import tempfile
+from unittest.mock import patch
 
 from cosa.agents.io_models.xml_models import IterativeDebuggingMinimalistResponse, IterativeDebuggingFullResponse
+from cosa.agents.io_models.utils.util_xml_pydantic import XMLParsingError
 from cosa.agents.io_models.utils.xml_parser_factory import XmlParserFactory
 from cosa.agents.iterative_debugging_agent import IterativeDebuggingAgent
 from cosa.config.configuration_manager import ConfigurationManager
@@ -280,15 +283,26 @@ class TestIterativeDebuggingFactoryIntegration:
         </response>'''
         
         # Should raise validation error for invalid line number
-        try:
+        # ROW beffcddd — this used to read:
+        #     try:
+        #         self.factory.parse_agent_response( ... )
+        #         assert False, "Should have raised validation error for invalid line number"
+        #     except Exception:
+        #         pass  # Expected validation error
+        # AssertionError IS an Exception, so when the parser did NOT raise, the
+        # `assert False` was caught by the very handler below it and the test went
+        # green. It could not fail for the reason it names. pytest.raises does what
+        # the old shape was trying to say, and fails loudly when nothing is raised.
+        #
+        # NARROWED to XMLParsingError deliberately: `pytest.raises( Exception )` would
+        # pass on a TypeError from a bad call signature or an ImportError from a moved
+        # module — i.e. it would go green while proving the parser was never reached.
+        with pytest.raises( XMLParsingError ):
             self.factory.parse_agent_response(
                 xml_invalid,
                 "agent router go to debugger",
                 [ "thoughts", "line-number", "one-line-of-code", "success" ]
             )
-            assert False, "Should have raised validation error for invalid line number"
-        except Exception:
-            pass  # Expected validation error
 
 
 class TestIterativeDebuggingAgentMigration:
@@ -347,32 +361,70 @@ print(result)
         assert agent.minimalist == False
         assert agent.xml_response_tag_names == [ "thoughts", "code", "example", "returns", "explanation" ]
     
-    def test_debugging_agent_patch_code_compatibility( self ):
-        """Test IterativeDebuggingAgent _patch_code_in_response_dict field compatibility."""
-        
+    def test_patch_code_accepts_both_field_naming_conventions( self ):
+        """
+        _patch_code_in_response_dict must handle Pydantic field names AND the
+        baseline hyphenated ones, and patch the SAME line either way.
+
+        ROW beffcddd — WHAT THIS REPLACED AND WHY. The old test read:
+
+            try:
+                agent.prompt_response_dict = { "code": [ "line1", "line2", "line3" ] }
+                # We can't easily test this without mocking, but the integration
+                # test validates it works
+                assert True
+            except Exception as e:
+                assert False, f"Field compatibility test failed: {e}"
+
+        It asserted NOTHING. `assert True` is a no-op, and the method it names was
+        never called — the test only assigned a dict and declared victory. The
+        handler was dead twice over: nothing inside could raise, and had it raised,
+        `assert False` was itself an Exception the same handler would have caught.
+
+        ⇒ AND THE STATED REASON DID NOT SURVIVE CHECKING. "We can't easily test this
+        without mocking" — the method reads exactly two file helpers and then indexes
+        a list. Two patches and it drives. Same pattern as the TFE dead-queue pair in
+        row 122f07a1: a weak test sitting next to a justification nobody re-checked.
+        """
         agent = IterativeDebuggingAgent(
-            error_message="Test error",
-            path_to_code="/test_debug_integration.py",
-            minimalist=True,
-            debug=False
+            error_message = "Test error",
+            path_to_code  = "/test_debug_integration.py",
+            minimalist    = True,
+            debug         = False
         )
-        
-        # Test Pydantic field mapping (line-number → line_number)
-        pydantic_dict = {
-            "line_number": 2,
-            "one_line_of_code": "    return x + y  # Fixed: use y instead of z"
-        }
-        
-        # This should work without error (testing field compatibility)
-        try:
-            # Mock the response dict to test field access patterns
-            agent.prompt_response_dict = { "code": ["line1", "line2", "line3"] }
-            
-            # The method should handle both field naming conventions
-            # We can't easily test this without mocking, but the integration test validates it works
-            assert True  # If we get here, the integration is working
-        except Exception as e:
-            assert False, f"Field compatibility test failed: {e}"
+
+        original = [ "def f( x, y ):", "    return x + z", "" ]
+        patched  = "    return x + y  # Fixed: use y instead of z"
+
+        import cosa.agents.iterative_debugging_agent as ida
+
+        def _run( response_dict ):
+            """Drive the method over a stubbed file and return the resulting code list."""
+            with patch.object( ida.du, "get_file_as_list", return_value=list( original ) ), \
+                 patch.object( ida.du, "get_file_as_source_code_with_line_numbers", return_value="" ):
+                agent.prompt_response_dict = { }
+                agent._patch_code_in_response_dict( response_dict )
+            return agent.prompt_response_dict[ "code" ]
+
+        # Pydantic spelling: line_number / one_line_of_code
+        pydantic_result = _run( { "line_number": 2, "one_line_of_code": patched } )
+
+        # Baseline spelling: line-number / one-line-of-code, as a STRING line number
+        baseline_result = _run( { "line-number": "2", "one-line-of-code": patched } )
+
+        assert pydantic_result[ 1 ] == patched, (
+            f"the Pydantic field names did not reach the patch; line 2 is "
+            f"{pydantic_result[ 1 ]!r}"
+        )
+        assert baseline_result == pydantic_result, (
+            f"the two naming conventions patched different things — that is the "
+            f"compatibility this test exists to pin.\n  pydantic={pydantic_result}\n"
+            f"  baseline={baseline_result}"
+        )
+        # The line-number is 1-BASED on the wire and 0-based in the list; a silent
+        # off-by-one would leave line 1 or line 3 rewritten instead.
+        assert pydantic_result[ 0 ] == original[ 0 ], "line 1 was rewritten — off-by-one"
+        assert pydantic_result[ 2 ] == original[ 2 ], "line 3 was rewritten — off-by-one"
 
 
 def run_iterative_debugging_migration_tests():

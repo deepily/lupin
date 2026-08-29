@@ -430,7 +430,7 @@ test("drop button with a non-blank reason → dropTask(id, reason)", () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
   clickDrop(root, "superseded");
   assert.deepEqual(store.dropArgs, [{ id: "t1", reason: "superseded" }]);
-  assert.equal(root.querySelector(".task-row-error-stripe"), null, "no error on a valid drop");
+  assert.ok( root.querySelector(".task-row-error-stripe") === null, "no error on a valid drop" );
 });
 
 test("drop button with a blank reason → NO dropTask + inline error stripe", () => {
@@ -482,7 +482,7 @@ test("mutation success (2xx) → no rollback, no error stripe", async () => {
   store.settleLast(true);
   await tick();
   assert.equal(store.lastRestoreCalled(), false);
-  assert.equal(root.querySelector(".task-row-error-stripe"), null);
+  assert.ok( root.querySelector(".task-row-error-stripe") === null );
 });
 
 test("mutation ApiError 404 → treated as success (no rollback, no stripe)", async () => {
@@ -491,7 +491,7 @@ test("mutation ApiError 404 → treated as success (no rollback, no stripe)", as
   store.settleLast(false, new ApiError(404, "/api/tasks/t1", "gone"));
   await tick();
   assert.equal(store.lastRestoreCalled(), false);
-  assert.equal(root.querySelector(".task-row-error-stripe"), null);
+  assert.ok( root.querySelector(".task-row-error-stripe") === null );
 });
 
 test("mutation ApiError (non-404) → rollback + error stripe with HTTP code", async () => {
@@ -534,7 +534,7 @@ test("detail 📄: clicking a live emoji opens the body overlay (D2 body); Escap
   assert.equal(overlay!.querySelector(".task-body-overlay-body")?.textContent, "the full body");
   assert.match(overlay!.querySelector(".task-body-overlay-header")?.textContent ?? "", /abcd1234/);
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-  assert.equal(document.getElementById("task-body-overlay"), null, "Escape dismissed");
+  assert.ok( document.getElementById("task-body-overlay") === null, "Escape dismissed" );
 });
 
 test("detail 📄: a non-Escape key does NOT dismiss the overlay", () => {
@@ -557,7 +557,7 @@ test("detail 📄: backdrop click dismisses; inner panel click does NOT", () => 
     .dispatchEvent(new Event("click", { bubbles: true }));   // inner — stopPropagation
   assert.ok(document.getElementById("task-body-overlay"), "inner-panel click keeps it open");
   overlay.dispatchEvent(new Event("click", { bubbles: true }));   // backdrop
-  assert.equal(document.getElementById("task-body-overlay"), null, "backdrop click dismissed");
+  assert.ok( document.getElementById("task-body-overlay") === null, "backdrop click dismissed" );
 });
 
 test("detail 📄: Enter on a focused live emoji opens the overlay (keyboard a11y)", () => {
@@ -576,7 +576,7 @@ test("detail 📄: a DIMMED (empty-body) emoji click is inert — no overlay", (
   const dimmed = root.querySelector<HTMLElement>(".task-detail-emoji.task-detail-empty");
   assert.ok(dimmed, "dimmed emoji rendered for the body-less row");
   dimmed!.dispatchEvent(new Event("click", { bubbles: true }));
-  assert.equal(document.getElementById("task-body-overlay"), null, "dimmed emoji opens nothing");
+  assert.ok( document.getElementById("task-body-overlay") === null, "dimmed emoji opens nothing" );
 });
 
 test("detail 📄: a live emoji with NO dataset opens overlay with empty body/id (?? '' fallback)", () => {
@@ -603,7 +603,7 @@ test("detail 📄: unmount dismisses an open overlay + detaches its Esc listener
   liveEmoji(root).dispatchEvent(new Event("click", { bubbles: true }));
   assert.ok(document.getElementById("task-body-overlay"), "overlay open before unmount");
   r.unmount();
-  assert.equal(document.getElementById("task-body-overlay"), null, "unmount tore the overlay down");
+  assert.ok( document.getElementById("task-body-overlay") === null, "unmount tore the overlay down" );
 });
 
 // ---------------------------------------------------------------------------

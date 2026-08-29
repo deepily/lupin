@@ -2,6 +2,27 @@
 """
 Smoke test for Research→Podcast (chained workflow) dry-run mode.
 
+⚠️ VENUE: :8000 (test), NOT :7999 — AND THIS FILE IS STILL RUN BY THE :7999 SMOKE TIER,
+   SO IT IS EXPECTED RED THERE. Recorded 2026-08-26 (row 554e5d3e); NOT MOVED, deliberately.
+
+   Criterion tripped (CLAUDE.md § TESTING VENUES — a file is :8000 if ANY apply):
+     - mutates persistent state (submits a real chained job that outlives the test)
+   Evidence, from this file:
+     - posts to `/api/v2/submit`, then polls `/api/get-queue/done` for the job
+     - "dry run" bounds the COST, not the SIDE EFFECTS — see the note in
+       test_podcast_generator_dry_run_smoke.py; $0.00 is not zero-side-effect
+   WHY IT WAS NOT MOVED. `run-smoke-tests.sh` runs the whole `src/tests/smoke/` directory,
+   so this file is executed on :7999 by the smoke merge gate regardless of what its
+   docstring says. Relocating it, or excluding it from the runner the way
+   test_proxy_integration.py is excluded, would deselect it from that gate — a change to
+   what the gate covers, which is an owner's decision and not a drive-by while clearing a
+   red list. So it stays, it stays red on :7999, and the reason is written here instead of
+   being re-derived by the next reader.
+
+   HOW TO RUN IT PROPERLY: submit via `POST /api/test-suite/submit` against :8000 on a
+   verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`,
+   exit 0 = IDLE). Never side-door it via curl or a direct queue push.
+
 Verifies that:
 1. Dry-run jobs are accepted by the API
 2. Jobs flow through the queue system
@@ -85,14 +106,34 @@ def quick_smoke_test():
         # ═══════════════════════════════════════════════════════════════════════
         print( "\nTest 2: Submitting Research→Podcast job with dry_run=true..." )
         headers = { "Authorization": f"Bearer {token}" }
+        payload = {
+            "query"            : "[Research→Podcast] dry-run smoke test - safe to ignore",
+            "budget"           : 0.01,
+            "target_languages" : [ "en" ],
+            "dry_run"          : True
+        }
+        # Lineage tag (row 7451bebe / bug 5ed4f187): a child pytest inside a monopolizing
+        # test-suite job must thread LUPIN_TEST_MONOPOLIZE_PARENT_ID or the consumer's Gate B
+        # defers it as a foreign writer and it starves 900s.
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+
+        # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and
+        # answers 410 naming /api/v2/submit, which takes the routing command as a string
+        # and the agent's own arguments in `args`. `websocket_id` and `parent_id_hash` stay
+        # TOP-LEVEL: they are instructions about the request and the queue, not arguments
+        # to the agent, and `args` is checked against the command's own argument contract.
+        ws_id = payload.pop( "websocket_id", None )
+        body  = {
+            "command"  : "agent router go to research to podcast",
+            "args"     : payload,
+            "question" : payload.get( "query", "" ),
+        }
+        if ws_id:     body[ "websocket_id" ]   = ws_id
+        if parent_id: body[ "parent_id_hash" ] = parent_id
+
         submit_resp = requests.post(
-            f"{BASE_URL}/api/deep-research-to-podcast/submit",
-            json={
-                "query"            : "[Research→Podcast] dry-run smoke test - safe to ignore",
-                "budget"           : 0.01,
-                "target_languages" : [ "en" ],
-                "dry_run"          : True
-            },
+            f"{BASE_URL}/api/v2/submit",
+            json=body,
             headers=headers
         )
 

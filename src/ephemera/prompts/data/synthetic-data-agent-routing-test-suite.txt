@@ -152,3 +152,26 @@ run unit and smoke and websocket
 run integration and e2e together
 run unit tests followed by smoke tests
 run smoke and websocket tests
+run the TEST_TYPE tests
+kick off TEST_TYPE testing
+start the TEST_TYPE suite
+run the TEST_TYPE test suite
+execute the TEST_TYPE tests
+launch the TEST_TYPE tests
+trigger the TEST_TYPE suite
+run my TEST_TYPE tests
+start running TEST_TYPE tests
+please run the TEST_TYPE tests
+can you run the TEST_TYPE suite
+go run the TEST_TYPE tests
+fire off the TEST_TYPE tests
+begin the TEST_TYPE test run
+schedule the TEST_TYPE tests
+run a TEST_TYPE test pass
+do a TEST_TYPE test run
+kick off the TEST_TYPE test suite
+run all the TEST_TYPE tests
+start a TEST_TYPE test run
+execute a TEST_TYPE test pass
+launch a TEST_TYPE test run
+run TEST_TYPE tests for me

@@ -17,12 +17,94 @@ Example:
 """
 
 import asyncio
+import os
 from datetime import datetime
 from typing import Optional
 
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
+
+
+def resolve_source_path( path: str ) -> str:
+    """
+    Turn whatever a caller wrote into the one absolute path this job will open.
+
+    WHY THIS EXISTS AT ALL. The retiring door did this and the job did it again, by two
+    DIFFERENT rules: the door treated a leading slash as PROJECT-relative and built the
+    absolute path itself, while the job's own existence check treated a leading slash as
+    FILESYSTEM-absolute and used it verbatim. Nothing noticed, because the door always
+    handed the job a path that was already absolute, so the job's rule never ran on a
+    project-relative path. Retire the door without settling this and the browser — which
+    sends `/io/deck.md` and cannot know the project root — would start failing with
+    "Source document not found" for a file that is there.
+
+    One rule now, and both the guard and the existence check read it:
+
+        - a path already at or under the project root is returned unchanged
+        - anything else is project-relative, leading slash or not
+
+    So `/io/deck.md`, `io/deck.md` and `<root>/io/deck.md` all name the same file, which
+    is what every caller already believed.
+
+    ⚠️ THE CONSEQUENCE, STATED RATHER THAN BURIED. A caller who genuinely means the
+    filesystem-absolute `/etc/passwd` gets `<root>/etc/passwd` instead — silently
+    reinterpreted, not refused. That is the retiring door's contract kept verbatim
+    (Pocholo, 2026-08-21), and it is why the guard below can be honest about `/etc/passwd`
+    coming back True: the path it checked is not the path that name suggests.
+
+    Requires:
+        - path is a string
+
+    Ensures:
+        - returns an absolute path string
+        - is idempotent: resolve( resolve( p ) ) == resolve( p )
+    """
+    project_root = cu.get_project_root()
+    if path == project_root or path.startswith( project_root + "/" ):
+        return path
+    if path.startswith( "/" ):
+        return project_root + path
+    return project_root + "/" + path
+
+
+def source_path_is_inside_the_project( path: str ) -> bool:
+    """
+    Whether a source path resolves to somewhere inside the project root.
+
+    WHY THIS LIVES ON THE JOB AND NOT ON A ROUTE. It used to be
+    `routers/presentation_generator.py::validate_source_path`, checked by the one door
+    that built this job. That door is retired: presentation work now enters through
+    `/api/v2/submit`, which takes a command and an args dict and — correctly — knows
+    nothing about which of an agent's arguments happen to be file paths. A guard that
+    lives on ONE entry point protects that entry point; a guard that lives on the thing
+    which opens the file protects every caller, including the voice path and any door
+    added later.
+
+    Requires:
+        - path is a non-empty string, absolute or project-relative
+
+    ⚠️ A LEADING SLASH MEANS PROJECT-RELATIVE HERE, NOT FILESYSTEM-ABSOLUTE — see
+    `resolve_source_path`, which both this guard and the job's existence check now read.
+    `/etc/passwd` resolves to `<project>/etc/passwd` and comes back True, which looks
+    alarming and is not a hole: that file does not exist, and the existence check refuses
+    it a moment later.
+
+    ⚠️ THIS CHECKS A PATH, NOT AN OPEN FILE, so it promises less than it looks like it
+    promises (Pocholo, 2026-08-21). The check runs when the job is built and the file is
+    opened phases later; a symlink swapped into the path between those two moments still
+    wins. That gap is inherent to checking a name rather than a handle, it is no worse
+    than the door this replaced, and it is written down here so the next reader does not
+    assume more.
+
+    Ensures:
+        - returns True when the resolved path is the project root or inside it
+        - returns False when it escapes, including via `..` segments and symlinks
+          (os.path.realpath resolves both before the comparison)
+    """
+    project_root = os.path.realpath( cu.get_project_root() )
+    resolved     = os.path.realpath( resolve_source_path( path ) )
+    return resolved.startswith( project_root + "/" ) or resolved == project_root
 
 
 class PresentationGeneratorJob( AgenticJobBase ):
@@ -56,6 +138,7 @@ class PresentationGeneratorJob( AgenticJobBase ):
         user_email: str,
         session_id: str,
         target_duration_minutes: Optional[ int ] = None,
+        target_slide_count: Optional[ int ] = None,
         audience: Optional[ str ] = None,
         audience_context: Optional[ str ] = None,
         theme: Optional[ str ] = None,
@@ -85,6 +168,7 @@ class PresentationGeneratorJob( AgenticJobBase ):
             user_email: Email address for output storage
             session_id: WebSocket session for notifications
             target_duration_minutes: Override target duration (None = use INI default)
+            target_slide_count: Explicit slide count overriding the duration formula (None = use INI default / derive from duration)
             audience: Override audience level (None = use INI default)
             audience_context: Custom audience description (None = use INI default)
             theme: Override theme name (None = use INI default)
@@ -101,9 +185,20 @@ class PresentationGeneratorJob( AgenticJobBase ):
             verbose    = verbose
         )
 
+        # THE PATH GUARD, ENFORCED WHERE THE FILE IS ACTUALLY OPENED. The retiring door
+        # checked this and refused with a 403; nothing downstream re-checked, so moving
+        # the guard here is what keeps a retirement from quietly becoming a path-traversal
+        # hole. Raising rather than returning False: a job that cannot be built safely
+        # must not be built at all, and the factory's caller degrades on the exception.
+        if not source_path_is_inside_the_project( source_path ):
+            raise ValueError(
+                f"Source path escapes the project root, refusing to build the job: {source_path!r}"
+            )
+
         # Presentation parameters
         self.source_path             = source_path
         self.target_duration_minutes = target_duration_minutes
+        self.target_slide_count      = target_slide_count
         self.audience                = audience
         self.audience_context        = audience_context
         self.theme                   = theme
@@ -187,6 +282,32 @@ class PresentationGeneratorJob( AgenticJobBase ):
             # Backlog item 5 (2026-04-29): canonical Future contract.
             raise
 
+    def _apply_job_overrides( self, config ) -> None:
+        """
+        Overlay this job's per-request args onto the INI-loaded config, in place.
+
+        Requires:
+            - config is a PresentationConfig instance
+
+        Ensures:
+            - Each job arg that is not None replaces the matching config field
+            - audience_context treats the expeditor "none" sentinel (and the empty
+              string) as "not provided" and is NOT copied — otherwise the prompt
+              builders would inject a bogus "Additional audience context: none" line
+        """
+        if self.target_duration_minutes is not None:
+            config.target_duration_minutes = self.target_duration_minutes
+        if self.target_slide_count is not None:
+            config.target_slide_count = self.target_slide_count
+        if self.audience is not None:
+            config.audience = self.audience
+        if self.theme is not None:
+            config.default_theme = self.theme
+        if self.content_model is not None:
+            config.content_model = self.content_model
+        if self.audience_context is not None and self.audience_context.strip().lower() not in ( "", "none" ):
+            config.audience_context = self.audience_context
+
     async def _execute( self ) -> str:
         """
         Internal async presentation generation execution.
@@ -221,11 +342,11 @@ class PresentationGeneratorJob( AgenticJobBase ):
 
         try:
             # Validate source document exists
-            import cosa.utils.util as cu
-            if not self.source_path.startswith( "/" ):
-                full_path = cu.get_project_root() + "/" + self.source_path
-            else:
-                full_path = self.source_path
+            # ONE RESOLUTION RULE, shared with the guard above. This used to read a
+            # leading slash as filesystem-absolute while the guard read it as
+            # project-relative — harmless only for as long as the door handed this job an
+            # already-absolute path. It no longer does.
+            full_path = resolve_source_path( self.source_path )
 
             if not os.path.exists( full_path ):
                 raise FileNotFoundError( f"Source document not found: {self.source_path}" )
@@ -245,24 +366,19 @@ class PresentationGeneratorJob( AgenticJobBase ):
             config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
             config = PresentationConfig.from_config( config_mgr, debug=self.debug )
 
-            # Job args override INI values
-            if self.target_duration_minutes is not None:
-                config.target_duration_minutes = self.target_duration_minutes
-            if self.audience is not None:
-                config.audience = self.audience
-            if self.theme is not None:
-                config.default_theme = self.theme
-            if self.content_model is not None:
-                config.content_model = self.content_model
+            # Apply this job's per-request args onto the INI-loaded config.
+            # Extracted to _apply_job_overrides for unit-testability (the copy
+            # otherwise runs only inside the full async pipeline).
+            self._apply_job_overrides( config )
 
             # Create orchestrator
             agent = PresentationOrchestratorAgent(
-                source_path = full_path,
-                user_id     = self.user_email,
-                config      = config,
-                dry_run     = self.dry_run,
-                debug       = self.debug,
-                verbose     = self.verbose,
+                source_path  = full_path,
+                user_id      = self.user_email,
+                config       = config,
+                offline_mode = self.dry_run,   # JOB dry_run early-returns before here; this only ever passes False. Renamed keyword (row ec8ca1ce); RHS is the JOB flag and stays.
+                debug        = self.debug,
+                verbose      = self.verbose,
             )
             self._orchestrator = agent  # Store ref for cancellation from API thread
 
@@ -442,7 +558,7 @@ class PresentationGeneratorJob( AgenticJobBase ):
 
 **Marp**: {self.marp_path} (mock - not actually created)
 
-**Stats**: $0.00 | 15 slides | 3.0s (simulated)"""
+**Stats**: $0.00 | slide_count={self.artifacts[ "slide_count" ]} (no deck built) | simulated (no real work)"""
 
             # Notify completion
             await voice_io.notify(

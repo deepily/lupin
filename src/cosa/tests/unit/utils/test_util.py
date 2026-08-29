@@ -415,3 +415,236 @@ class TestSmallHelpers( unittest.TestCase ):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── The wrong-tree detector (row ef22c328) ───────────────────────────────────
+# A standalone script run by hand from a WORKTREE, using the documented bootstrap
+# that joins $LUPIN_ROOT/src onto sys.path, imports its code from the MAIN checkout.
+# Rio's worktree_tree_guard covers pytest; it arms on TEST COLLECTION, so a plain
+# `python3 script.py` never trips it.
+
+def _clear_warn_cache():
+    cu._wrong_tree_warned.clear()
+
+
+def test_a_caller_inside_the_root_is_silent( tmp_path, monkeypatch, capsys ):
+    """The ordinary case — every normal run, the container included."""
+    _clear_warn_cache()
+    monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""
+
+
+def test_a_sibling_tree_whose_NAME_starts_with_the_root_is_NOT_inside_it( tmp_path, monkeypatch, capsys ):
+    """
+    🔴 The bug this test exists for, measured while building the detector. Root is
+    `…/lupin`; the worktrees on this box are `…/lupin-wt-clayton-unit`. A bare
+    `caller.startswith( root )` is TRUE for those, so the fast path swallowed exactly
+    the population the detector was built to catch — and it failed silently, which is
+    the one failure mode a detector must not have.
+    """
+    _clear_warn_cache()
+    root    = tmp_path / "lupin"
+    sibling = tmp_path / "lupin-wt-someseat"
+    for d in ( root, sibling ):
+        ( d / ".git" ).mkdir( parents=True )
+
+    monkeypatch.setenv( "LUPIN_ROOT", str( root ) )
+    monkeypatch.setattr(
+        cu.sys, "_getframe",
+        lambda depth: _FakeFrame( str( sibling / "script.py" ) ) if depth == 1 else _FakeFrame( cu.__file__ ),
+    )
+    cu.get_project_root()
+
+    err = capsys.readouterr().err
+    assert "WRONG-TREE WARNING" in err
+    assert str( sibling ) in err
+
+
+def test_it_warns_once_per_file_not_once_per_call( tmp_path, monkeypatch, capsys ):
+    """get_project_root() is on the hot path; a per-call warning would be noise."""
+    _clear_warn_cache()
+    root    = tmp_path / "lupin"
+    sibling = tmp_path / "lupin-wt-someseat"
+    for d in ( root, sibling ):
+        ( d / ".git" ).mkdir( parents=True )
+
+    monkeypatch.setenv( "LUPIN_ROOT", str( root ) )
+    monkeypatch.setattr(
+        cu.sys, "_getframe",
+        lambda depth: _FakeFrame( str( sibling / "script.py" ) ) if depth == 1 else _FakeFrame( cu.__file__ ),
+    )
+    cu.get_project_root()
+    capsys.readouterr()                      # drain the first, legitimate warning
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""
+
+
+def test_a_non_git_layout_says_nothing( tmp_path, monkeypatch, capsys ):
+    """Nothing to compare — decide nothing rather than guess."""
+    _clear_warn_cache()
+    root    = tmp_path / "lupin"             # deliberately NO .git anywhere
+    sibling = tmp_path / "lupin-wt-someseat"
+    for d in ( root, sibling ): d.mkdir( parents=True )
+
+    monkeypatch.setenv( "LUPIN_ROOT", str( root ) )
+    monkeypatch.setattr(
+        cu.sys, "_getframe",
+        lambda depth: _FakeFrame( str( sibling / "script.py" ) ) if depth == 1 else _FakeFrame( cu.__file__ ),
+    )
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""
+
+
+def test_the_detector_never_raises( tmp_path, monkeypatch ):
+    """A detector that breaks the thing it watches is worse than no detector."""
+    _clear_warn_cache()
+    monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
+    monkeypatch.setattr( cu.sys, "_getframe", lambda depth: ( _ for _ in () ).throw( RuntimeError( "boom" ) ) )
+
+    assert cu.get_project_root() == str( tmp_path )      # returns normally despite the blow-up
+
+
+def test_git_tree_of_finds_a_worktree_dot_git_FILE( tmp_path ):
+    """A linked worktree's `.git` is a FILE, not a directory — both must count."""
+    tree = tmp_path / "wt"
+    tree.mkdir()
+    ( tree / ".git" ).write_text( "gitdir: /elsewhere/.git/worktrees/wt\n" )
+    nested = tree / "a" / "b"
+    nested.mkdir( parents=True )
+
+    assert cu._git_tree_of( str( nested ) ) == str( tree )
+
+
+def test_git_tree_of_returns_none_above_every_repo( tmp_path ):
+    assert cu._git_tree_of( str( tmp_path ) ) is None
+
+
+class _FakeFrame:
+    def __init__( self, filename ):
+        self.f_code = type( "C", (), { "co_filename": filename } )()
+
+
+def test_git_tree_of_swallows_an_unreadable_path( monkeypatch ):
+    """The walk must never raise into a caller that only asked for the project root."""
+    monkeypatch.setattr( cu.os.path, "abspath", lambda p: ( _ for _ in () ).throw( OSError( "nope" ) ) )
+
+    assert cu._git_tree_of( "/anything" ) is None
+
+
+def test_the_frame_walk_gives_up_when_it_runs_out_of_frames( tmp_path, monkeypatch, capsys ):
+    """
+    A direct caller at module level has no deeper frame. `sys._getframe` raises
+    ValueError there, and the walk must stop rather than let the outer except
+    swallow it — which is how the first version failed silently.
+    """
+    _clear_warn_cache()
+    monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
+
+    def _only_this_module( depth ):
+        if depth < 3: return _FakeFrame( cu.__file__ )      # every frame is util.py …
+        raise ValueError( "call stack is not deep enough" ) # … then the stack ends
+    monkeypatch.setattr( cu.sys, "_getframe", _only_this_module )
+
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""                    # no caller found → say nothing
+
+
+def test_a_caller_equal_to_the_root_itself_is_inside_it( tmp_path, monkeypatch, capsys ):
+    """The `caller == root_abs` arm — an exact match is not 'outside'."""
+    _clear_warn_cache()
+    root = tmp_path / "lupin"
+    ( root / ".git" ).mkdir( parents=True )
+    monkeypatch.setenv( "LUPIN_ROOT", str( root ) )
+    monkeypatch.setattr(
+        cu.sys, "_getframe",
+        lambda depth: _FakeFrame( str( root ) ) if depth == 1 else _FakeFrame( cu.__file__ ),
+    )
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""
+
+
+def test_two_paths_to_the_SAME_tree_do_not_warn( tmp_path, monkeypatch, capsys ):
+    """
+    A symlinked or otherwise aliased path into the same tree is not a wrong tree.
+    The comparison is on realpath for exactly this reason.
+    """
+    _clear_warn_cache()
+    root = tmp_path / "lupin"
+    ( root / ".git" ).mkdir( parents=True )
+    alias = tmp_path / "alias"
+    alias.symlink_to( root )
+
+    monkeypatch.setenv( "LUPIN_ROOT", str( root ) )
+    monkeypatch.setattr(
+        cu.sys, "_getframe",
+        lambda depth: _FakeFrame( str( alias / "script.py" ) ) if depth == 1 else _FakeFrame( cu.__file__ ),
+    )
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""
+
+
+def test_the_frame_walk_is_bounded( tmp_path, monkeypatch, capsys ):
+    """
+    Deep recursion inside this module must not turn the walk into an unbounded
+    climb on a hot-path function. It stops at 12 and says nothing.
+    """
+    _clear_warn_cache()
+    monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path ) )
+    monkeypatch.setattr( cu.sys, "_getframe", lambda depth: _FakeFrame( cu.__file__ ) )   # always this module
+
+    cu.get_project_root()
+
+    assert capsys.readouterr().err == ""
+
+
+# ── get_spoken_char_cap — the six statements the file was short of 100% ──────
+# Pre-existing and unrelated to the wrong-tree detector, but the gate is the FILE,
+# not the diff, so they are covered here rather than rounded up to "99%".
+
+def test_spoken_char_cap_reads_the_configured_value( monkeypatch ):
+    """The runtime-tunable path: whatever the ini says, at call time."""
+    import cosa.config.configuration_manager as cm
+
+    class _Mgr:
+        def __init__( self, **kwargs ): pass
+        def get( self, key, default=None, return_type=None ):
+            assert key == cu.SPOKEN_CHAR_CAP_INI_KEY
+            assert return_type == "int"
+            return 640
+    monkeypatch.setattr( cm, "ConfigurationManager", _Mgr )
+
+    assert cu.get_spoken_char_cap() == 640
+
+
+def test_spoken_char_cap_falls_back_when_the_key_is_absent( monkeypatch ):
+    """An absent key yields the default the caller passed in, not None."""
+    import cosa.config.configuration_manager as cm
+
+    class _Mgr:
+        def __init__( self, **kwargs ): pass
+        def get( self, key, default=None, return_type=None ): return default
+    monkeypatch.setattr( cm, "ConfigurationManager", _Mgr )
+
+    assert cu.get_spoken_char_cap() == cu.SPOKEN_CHAR_CAP_DEFAULT
+
+
+def test_spoken_char_cap_never_raises_out_of_a_config_failure( monkeypatch ):
+    """
+    This cap is read on the TTS path. A config blow-up must degrade to the default
+    rather than take the spoken channel down — the docstring promises 'never raises'
+    and nothing was holding it to that.
+    """
+    import cosa.config.configuration_manager as cm
+
+    class _Boom:
+        def __init__( self, **kwargs ): raise RuntimeError( "ini unreadable" )
+    monkeypatch.setattr( cm, "ConfigurationManager", _Boom )
+
+    assert cu.get_spoken_char_cap() == cu.SPOKEN_CHAR_CAP_DEFAULT

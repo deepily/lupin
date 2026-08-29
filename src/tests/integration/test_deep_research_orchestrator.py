@@ -36,6 +36,7 @@ Created: 2026-01-17
 
 import argparse
 import asyncio
+import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -647,9 +648,29 @@ def print_results_table( results: list[ TestResult ] ):
 # Pytest Integration
 # =============================================================================
 
-@pytest.mark.skip( reason="Requires Anthropic API access — rate-limited in CI" )
+# Opt-in gate for the phases that make real, billed Anthropic calls. Same shape
+# as RUN_VERTEX_LIVE in src/tests/unit/test_flash_lite_arm_vertex_markers.py:
+# off by default so no gate run spends money, but a real condition rather than
+# an unconditional blanket — set it and these tests run and can go red.
+_LIVE_LLM = pytest.mark.skipif(
+    os.environ.get( "RUN_DEEP_RESEARCH_LIVE" ) != "1",
+    reason="billed Anthropic inference — opt in with RUN_DEEP_RESEARCH_LIVE=1"
+)
+
+
 class TestDeepResearchOrchestratorIntegration:
-    """Pytest test class for integration testing."""
+    """
+    Pytest test class for integration testing.
+
+    This class previously carried a blanket skip reading "requires Anthropic API
+    access". That reason is true of five of these six tests and false of the
+    sixth: phase_instantiation makes no API call, as its own contract says, so
+    test_instantiation was dark for a cost it never incurred. It now runs.
+
+    The five that do spend carry the opt-in mark individually, so each states a
+    condition that is true of it, and the day someone sets the variable they get
+    a real pass or a real failure instead of a green light wired to nothing.
+    """
 
     @pytest.fixture( scope="class" )
     def mock_cosa_interface( self ):
@@ -666,6 +687,7 @@ class TestDeepResearchOrchestratorIntegration:
         ) )
         assert result.passed, f"Instantiation failed: {result.error}"
 
+    @_LIVE_LLM
     @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_clarification( self, mock_cosa_interface ):
@@ -684,6 +706,7 @@ class TestDeepResearchOrchestratorIntegration:
 
             assert result.passed, f"Clarification failed: {result.error}"
 
+    @_LIVE_LLM
     @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_planning( self, mock_cosa_interface ):
@@ -701,6 +724,7 @@ class TestDeepResearchOrchestratorIntegration:
 
             assert result.passed, f"Planning failed: {result.error}"
 
+    @_LIVE_LLM
     @pytest.mark.integration
     @pytest.mark.slow
     @pytest.mark.asyncio
@@ -719,6 +743,7 @@ class TestDeepResearchOrchestratorIntegration:
 
             assert result.passed, f"Research failed: {result.error}"
 
+    @_LIVE_LLM
     @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_synthesis( self, mock_cosa_interface ):
@@ -738,6 +763,7 @@ class TestDeepResearchOrchestratorIntegration:
 
             assert result.passed, f"Synthesis failed: {result.error}"
 
+    @_LIVE_LLM
     @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_revision( self, mock_cosa_interface ):

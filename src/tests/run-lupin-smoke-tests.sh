@@ -8,7 +8,7 @@
 #   ./run-lupin-smoke-tests.sh [options]
 #
 # Options:
-#   --category CATEGORY  Run only specific category (websockets, basic, notifications, audio, queues, all)
+#   --category CATEGORY  Run only specific category (websockets, basic, notifications, audio, queues, filtering, all)
 #   --quick              Run quick subset of critical tests (under 2 minutes)
 #   --pre-polish         Run as pre-polish baseline test
 #   --post-polish        Run as post-polish validation test
@@ -19,6 +19,10 @@ set -e  # Exit on any error
 # Script configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Shared venv-pytest resolution — never a bare `python3 -m pytest` (rows c98bce3f,
+# fc74c1d4). Sourced here so run_filtering_tests can call resolve_venv_pytest.
+source "$PROJECT_ROOT/src/scripts/lib/resolve-venv-pytest.sh"
 TESTS_DIR="$SCRIPT_DIR"
 
 # Existing test script paths
@@ -30,6 +34,10 @@ LUPIN_SMOKE_DIR="$TESTS_DIR/lupin_smoke"
 NOTIFICATIONS_TESTS="$LUPIN_SMOKE_DIR/test_notifications.py"
 AUDIO_TESTS="$LUPIN_SMOKE_DIR/test_audio_tts.py"
 QUEUE_TESTS="$LUPIN_SMOKE_DIR/test_queue_workflow.py"
+# The one pytest-SHAPED file in this directory. It is driven by pytest rather
+# than as a script, and until row e5e964f4 this runner named the other three
+# and never touched it — so its tests ran nowhere routinely.
+FILTERING_TESTS="$LUPIN_SMOKE_DIR/test_queue_filtering_smoke.py"
 
 # Color codes for output
 RED='\033[0;31m'
@@ -176,46 +184,8 @@ run_notification_tests() {
     log_category "Running Notification System Tests"
     
     if [ ! -f "$NOTIFICATIONS_TESTS" ]; then
-        log_warning "Notification tests not yet implemented: $NOTIFICATIONS_TESTS"
-        log_info "Creating placeholder for notification tests..."
-        
-        # Create directory if it doesn't exist
-        mkdir -p "$LUPIN_SMOKE_DIR"
-        
-        # Create placeholder test file
-        cat > "$NOTIFICATIONS_TESTS" << 'EOF'
-#!/usr/bin/env python3
-"""
-Placeholder for Notification System Smoke Tests
-
-This file will contain tests for:
-- /api/notify endpoint validation
-- Notification queue operations
-- WebSocket notification delivery
-- User-specific notification routing
-- Priority handling validation
-"""
-
-import asyncio
-import sys
-
-async def main():
-    print("🚧 Notification tests not yet implemented")
-    print("📋 Planned test coverage:")
-    print("   • /api/notify endpoint validation")
-    print("   • Notification queue operations") 
-    print("   • WebSocket notification delivery")
-    print("   • User-specific notification routing")
-    print("   • Priority handling validation")
-    print("")
-    print("✅ Placeholder test completed")
-    return True
-
-if __name__ == "__main__":
-    result = asyncio.run(main())
-    sys.exit(0 if result else 1)
-EOF
-        chmod +x "$NOTIFICATIONS_TESTS"
+        log_error "Notification tests missing: $NOTIFICATIONS_TESTS"
+        return 1
     fi
     
     # Run the test
@@ -233,46 +203,8 @@ run_audio_tests() {
     log_category "Running Audio/TTS System Tests"
     
     if [ ! -f "$AUDIO_TESTS" ]; then
-        log_warning "Audio tests not yet implemented: $AUDIO_TESTS"
-        log_info "Creating placeholder for audio tests..."
-        
-        # Create directory if it doesn't exist
-        mkdir -p "$LUPIN_SMOKE_DIR"
-        
-        # Create placeholder test file
-        cat > "$AUDIO_TESTS" << 'EOF'
-#!/usr/bin/env python3
-"""
-Placeholder for Audio/TTS System Smoke Tests
-
-This file will contain tests for:
-- /api/get-speech TTS endpoint validation
-- Audio WebSocket streaming events
-- Instant vs reliable playback modes
-- TTS caching mechanism validation
-- Binary audio chunk handling
-"""
-
-import asyncio
-import sys
-
-async def main():
-    print("🚧 Audio/TTS tests not yet implemented")
-    print("📋 Planned test coverage:")
-    print("   • /api/get-speech TTS endpoint validation")
-    print("   • Audio WebSocket streaming events")
-    print("   • Instant vs reliable playback modes")
-    print("   • TTS caching mechanism validation")
-    print("   • Binary audio chunk handling")
-    print("")
-    print("✅ Placeholder test completed")
-    return True
-
-if __name__ == "__main__":
-    result = asyncio.run(main())
-    sys.exit(0 if result else 1)
-EOF
-        chmod +x "$AUDIO_TESTS"
+        log_error "Audio tests missing: $AUDIO_TESTS"
+        return 1
     fi
     
     # Run the test
@@ -290,46 +222,8 @@ run_queue_tests() {
     log_category "Running Job Queue Workflow Tests"
     
     if [ ! -f "$QUEUE_TESTS" ]; then
-        log_warning "Queue tests not yet implemented: $QUEUE_TESTS"
-        log_info "Creating placeholder for queue tests..."
-        
-        # Create directory if it doesn't exist
-        mkdir -p "$LUPIN_SMOKE_DIR"
-        
-        # Create placeholder test file
-        cat > "$QUEUE_TESTS" << 'EOF'
-#!/usr/bin/env python3
-"""
-Placeholder for Job Queue Workflow Smoke Tests
-
-This file will contain tests for:
-- Job submission via /api/push
-- Queue state transitions (TODO → RUNNING → DONE)
-- Job completion notifications
-- Queue count updates via WebSocket
-- Job lifecycle validation
-"""
-
-import asyncio
-import sys
-
-async def main():
-    print("🚧 Job queue workflow tests not yet implemented")
-    print("📋 Planned test coverage:")
-    print("   • Job submission via /api/push")
-    print("   • Queue state transitions (TODO → RUNNING → DONE)")
-    print("   • Job completion notifications")
-    print("   • Queue count updates via WebSocket")
-    print("   • Job lifecycle validation")
-    print("")
-    print("✅ Placeholder test completed")
-    return True
-
-if __name__ == "__main__":
-    result = asyncio.run(main())
-    sys.exit(0 if result else 1)
-EOF
-        chmod +x "$QUEUE_TESTS"
+        log_error "Queue tests missing: $QUEUE_TESTS"
+        return 1
     fi
     
     # Run the test
@@ -338,6 +232,34 @@ EOF
         return 0
     else
         log_error "Queue tests failed"
+        return 1
+    fi
+}
+
+# Function to run queue-filtering tests (pytest-shaped, not a script)
+run_filtering_tests() {
+    log_category "Running Queue Filtering Tests"
+
+    if [ ! -f "$FILTERING_TESTS" ]; then
+        log_error "Queue filtering tests missing: $FILTERING_TESTS"
+        return 1
+    fi
+
+    # This file declares ordinary pytest functions, so it is RUN BY PYTEST —
+    # invoking it as a script would execute nothing and exit 0, which is the
+    # same silent-pass shape row e5e964f4 exists to close.
+    #
+    # And it must be the VENV pytest, not a bare python3: an under-provisioned
+    # interpreter under-collects and the reduced count gets reported as the whole
+    # suite (rows c98bce3f, fc74c1d4). This script was the sixth runner carrying the
+    # fallback and was found by the property test, not by grep — see
+    # src/tests/unit/test_runner_venv_pytest_guard.py.
+    resolve_venv_pytest || return $?
+    if "$PYTEST" "$FILTERING_TESTS" -q --no-header; then
+        log_success "Queue filtering tests completed successfully"
+        return 0
+    else
+        log_error "Queue filtering tests failed"
         return 1
     fi
 }
@@ -352,7 +274,7 @@ run_all_tests() {
     echo ""
     
     # Run each category and track results
-    categories=("websockets" "basic" "notifications" "audio" "queues")
+    categories=("websockets" "basic" "notifications" "audio" "queues" "filtering")
     
     for category in "${categories[@]}"; do
         total_categories=$((total_categories + 1))
@@ -392,6 +314,13 @@ run_all_tests() {
                     passed_categories=$((passed_categories + 1))
                 else
                     failed_categories+=("queues")
+                fi
+                ;;
+            "filtering")
+                if run_filtering_tests "$@"; then
+                    passed_categories=$((passed_categories + 1))
+                else
+                    failed_categories+=("filtering")
                 fi
                 ;;
         esac
@@ -583,6 +512,11 @@ main() {
                     success=true
                 fi
                 ;;
+            "filtering")
+                if run_filtering_tests "${additional_args[@]}"; then
+                    success=true
+                fi
+                ;;
             "all")
                 if run_all_tests "${additional_args[@]}"; then
                     success=true
@@ -590,7 +524,7 @@ main() {
                 ;;
             *)
                 log_error "Unknown category: $category"
-                log_info "Valid categories: websockets, basic, notifications, audio, queues, all"
+                log_info "Valid categories: websockets, basic, notifications, audio, queues, filtering, all"
                 exit 1
                 ;;
         esac

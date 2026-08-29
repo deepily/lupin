@@ -936,7 +936,7 @@ async def delete_snapshot(
     snapshot_mgr = Depends( get_snapshot_manager )
 ) -> MessageResponse:
     """
-    Delete snapshot with physical removal from LanceDB.
+    Delete snapshot with physical removal from the store.
 
     Requires:
         - Admin role authorization
@@ -971,7 +971,7 @@ async def delete_snapshot(
         print( f"[ADMIN-SNAPSHOTS] Question length: {len(snapshot.question)} chars" )
         print( f"[ADMIN-SNAPSHOTS] Attempting physical deletion..." )
 
-        # Delete snapshot using question (LanceDB delete requires question)
+        # Delete snapshot using question (the delete API keys on question)
         success = snapshot_mgr.delete_snapshot(
             question        = snapshot.question,
             delete_physical = True

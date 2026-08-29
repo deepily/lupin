@@ -229,11 +229,11 @@ class TestFullPipelineMocked:
 
 
 # ============================================================================
-# TestCacheBypassPipeline — CRUD agents skip the LanceDB snapshot cache
+# TestCacheBypassPipeline — CRUD agents skip the snapshot cache
 # ============================================================================
 
 class TestCacheBypassPipeline:
-    """CRUD agents bypass the LanceDB snapshot cache."""
+    """CRUD agents bypass the snapshot cache."""
 
     def test_crud_agent_triggers_cache_skip( self ):
         """isinstance(agent, CrudForDataFramesAgent) is True -> cache skipped."""

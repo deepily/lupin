@@ -59,10 +59,10 @@ test("queueEmpty: renders the 🔇 empty panel (no controls, no state-class); da
   assert.notEqual(empty, null, "queueEmpty renders .tts-queue-empty-state");
   assert.match(empty!.textContent ?? "", /Nothing in the queue/);
   // No controls in the empty panel.
-  assert.equal(el.querySelector(".tts-btn-toggle"), null);
-  assert.equal(el.querySelector(".tts-btn-stop"),   null);
-  assert.equal(el.querySelector(".tts-btn-skip"),   null);
-  assert.equal(el.querySelector(".tts-playing-header"), null, "no playing-header when empty");
+  assert.ok( el.querySelector(".tts-btn-toggle") === null );
+  assert.ok( el.querySelector(".tts-btn-stop") === null );
+  assert.ok( el.querySelector(".tts-btn-skip") === null );
+  assert.ok( el.querySelector(".tts-playing-header") === null, "no playing-header when empty" );
   assert.ok(el.classList.contains("tts-chrome-empty"), "empty root carries .tts-chrome-empty");
   assert.equal(el.classList.contains("is-playing-current"), false);
   assert.equal(el.classList.contains("is-paused-current"),  false);
@@ -75,7 +75,7 @@ test("idle + non-empty queue: renders the control row (all disabled) — NOT the
   // queued, nothing speaking yet) → the chrome renders with all three transport
   // controls disabled (matrix row idle = ✗✗✗) and Clear-all enabled.
   const el = renderTtsChrome(makeOpts({ state: "idle", queueLength: 2, queueEmpty: false }), makeHandlers().handlers);
-  assert.equal(el.querySelector(".tts-queue-empty-state"), null, "non-empty queue → NOT the empty panel");
+  assert.ok( el.querySelector(".tts-queue-empty-state") === null, "non-empty queue → NOT the empty panel" );
   assert.equal(el.classList.contains("tts-chrome-empty"), false, "chrome, not the empty panel");
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.disabled, true, "idle toggle disabled");
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-stop")!.disabled,   true, "idle stop disabled");
@@ -180,7 +180,7 @@ test("currentTrackName rendered when present", () => {
 
 test("currentTrackName absent → no .tts-current-track element rendered", () => {
   const el = renderTtsChrome(makeOpts({ state: "playing" }), makeHandlers().handlers);
-  assert.equal(el.querySelector(".tts-current-track"), null);
+  assert.ok( el.querySelector(".tts-current-track") === null );
 });
 
 test("currentTrackName empty string → no .tts-current-track element rendered (covers '' branch)", () => {
@@ -188,7 +188,7 @@ test("currentTrackName empty string → no .tts-current-track element rendered (
     makeOpts({ state: "playing", currentTrackName: "" }),
     makeHandlers().handlers,
   );
-  assert.equal(el.querySelector(".tts-current-track"), null);
+  assert.ok( el.querySelector(".tts-current-track") === null );
 });
 
 test("queueLength rendered with Queued: prefix + dataset attribute", () => {
@@ -262,12 +262,12 @@ test("focus mode: header 'Paused: N waiting' + .focus-mode class + Resume presen
   const header = el.querySelector(".tts-playing-header")!;
   assert.match(header.textContent ?? "", /Paused: 4 waiting/);
   assert.equal(header.className, "tts-playing-header focus-mode");
-  assert.notEqual(el.querySelector(".tts-btn-resume"), null, "Resume present in focus mode");
+  assert.ok( el.querySelector(".tts-btn-resume") !== null, "Resume present in focus mode" );
 });
 
 test("non-focus mode: no Resume button (querySelector null)", () => {
   const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 1 }), makeHandlers().handlers);
-  assert.equal(el.querySelector(".tts-btn-resume"), null);
+  assert.ok( el.querySelector(".tts-btn-resume") === null );
 });
 
 test("70cbff3e — focus Resume click dispatches onFocusResume, NOT onResume (distinct from the transport toggle)", () => {

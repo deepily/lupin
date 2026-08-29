@@ -37,10 +37,10 @@ class NotificationsUI {
         // WebSocket connections
         this.queueChannel = null;
         this.audioChannel = null;
-        // Claude Code submissions route through /api/claude-code/submit (canonical) and
-        // surface in the CJ Flow accordion via agent-agnostic job_state_transition events.
-        // The /api/claude-code/queue/submit alias is preserved for one release cycle per
-        // src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md Q1.
+        // Claude Code submissions route through /api/v2/submit, naming the command
+        // 'agent router go to claude code', and surface in the CJ Flow accordion via
+        // agent-agnostic job_state_transition events. The two /api/claude-code/* doors are
+        // retired (410) per Rick's ruling 2026-08-21.
 
         // Session management
         this.queueSessionId = null;
@@ -402,6 +402,22 @@ class NotificationsUI {
         this.TASK_LIST_COLLAPSED_KEY    = 'lupin.taskList.collapsedOwners'; // localStorage key: JSON array of collapsed owner keys
         this.TASK_LIST_UNASSIGNED_KEY   = '__unassigned__';                 // sentinel owner key for the ownerless bucket
         this._taskListAccordionWired    = false;                            // event-delegation guard (wire the container listener once)
+
+        // Epic Board panel — the MACRO view of the SAME rows the task list shows,
+        // grouped on correlation_key instead of owner_persona. Plan:
+        // src/rnd/v0.2.0/2026.08.24-epic-accordion-mini-plan.md
+        // NOTE the absence of a poll handle and an in-flight guard here: this
+        // panel deliberately has NEITHER. It renders off refreshTaskList()'s
+        // composite, so there is exactly one timer against /api/tasks on this page.
+        this.EPIC_KEY_PREFIX            = 'epic:';                          // a correlation_key counts as an epic ONLY with this prefix
+        this.EPIC_UNASSIGNED_KEY        = 'epic:unassigned';                // the deliberately-epicless epic; sorts LAST among epics
+        this.EPIC_ON_RICK_KEY           = '__on_rick__';                    // sentinel group key: the waiting-on-Rick highlight
+        this.EPIC_DRIFT_KEY             = '__drift__';                      // sentinel group key: rows carrying no epic at all
+        this.EPIC_BLOCKER_OF_INTEREST   = 'rick';                           // the one human the highlight section watches for
+        this.EPIC_BOARD_STATE_KEY       = 'lupin.epicBoard.groupState';     // localStorage key: JSON map of group key -> isExpanded CHOICES
+        this._epicBoardAccordionWired   = false;                            // event-delegation guard (wire the container listener once)
+        this._epicStories               = {};                               // GET /api/epic-stories body, memoized for the page's life
+        this._epicStoriesFetched        = false;                            // one-shot guard: hand-edited file, never polled
         // Task-list row redesign (design 2026.06.29): the client title-truncation
         // backstop length — IDENTICAL to the server-side store-guard cap (60 chars,
         // handoff #5 / D4). Catches LEGACY rows written before the store guard.
@@ -690,7 +706,13 @@ class NotificationsUI {
 
         this.log( `✓ Authentication setup complete for user: ${this.currentUserEmail} (admin: ${this.isAdmin}, config fetched, monitors started)` );
 
-        // Load user's current agent mode from server
+        // Fill the Q&A card's agent dropdown from the registry. BEFORE loadCurrentMode,
+        // which reads the server-side sticky VOICE mode for the badge — that call used
+        // to drive the select's value too, and cannot any more: the values are routing
+        // commands now, not the short mode keys the mode API speaks.
+        await this.loadAgentSelect();
+
+        // Load user's current agent mode from server (the badge only — see above)
         await this.loadCurrentMode();
     }
 
@@ -1816,19 +1838,22 @@ class NotificationsUI {
         const modeStatus = document.getElementById( 'mode-status' );
 
         if ( agentModeSelect ) {
-            agentModeSelect.addEventListener( 'change', async ( e ) => {
-                const mode = e.target.value === 'system' ? null : e.target.value;
-                await this.setAgentMode( mode );
+            // ONE-SHOT, NOT STICKY — Rick's ruling 2, 2026-08-22. Picking an agent
+            // routes THAT submission and nothing else; the select does not write a
+            // server-side mode any more. A submit card was always a one-shot ("run this
+            // one job"), and making its replacement sticky would change the behaviour
+            // people are used to. Sticky VOICE mode is untouched and still lives on the
+            // mode API — a different surface answering a different question.
+            agentModeSelect.addEventListener( 'change', () => {
+                this.updateOneShotRouteStatus();
             });
         }
 
         if ( modeBadge ) {
             modeBadge.addEventListener( 'click', async () => {
-                // Click badge to return to system mode
+                // The badge still reflects the sticky VOICE mode, so clicking it still
+                // clears that mode. It does NOT touch the select, which is per-request.
                 await this.setAgentMode( null );
-                if ( agentModeSelect ) {
-                    agentModeSelect.value = 'system';
-                }
             });
         }
 
@@ -2023,13 +2048,6 @@ class NotificationsUI {
             });
         }
 
-        // Podcast submit button
-        const submitPodcastBtn = document.getElementById( 'submit-podcast-job' );
-        if ( submitPodcastBtn ) {
-            submitPodcastBtn.addEventListener( 'click', () => {
-                this.submitPodcastJob();
-            });
-        }
 
         // Research STT button (voice input)
         const researchSttBtn = document.getElementById( 'research-stt-button' );
@@ -2039,13 +2057,6 @@ class NotificationsUI {
             });
         }
 
-        // Podcast STT button (voice input)
-        const podcastSttBtn = document.getElementById( 'podcast-stt-button' );
-        if ( podcastSttBtn ) {
-            podcastSttBtn.addEventListener( 'click', () => {
-                this.handleSTTButtonClick( 'podcast-source', podcastSttBtn );
-            });
-        }
 
         // Enter key in research topic input
         const researchInput = document.getElementById( 'research-topic' );
@@ -2058,59 +2069,8 @@ class NotificationsUI {
             });
         }
 
-        // Enter key in podcast source input
-        const podcastInput = document.getElementById( 'podcast-source' );
-        if ( podcastInput ) {
-            podcastInput.addEventListener( 'keydown', ( e ) => {
-                if ( e.key === 'Enter' ) {
-                    e.preventDefault();
-                    this.submitPodcastJob();
-                }
-            });
-        }
 
-        // SWE Team submit button
-        const submitSweBtn = document.getElementById( 'submit-swe-job' );
-        if ( submitSweBtn ) {
-            submitSweBtn.addEventListener( 'click', () => {
-                this.submitSweTeamJob();
-            });
-        }
 
-        // SWE Team STT button (voice input)
-        const sweSttBtn = document.getElementById( 'swe-stt-button' );
-        if ( sweSttBtn ) {
-            sweSttBtn.addEventListener( 'click', () => {
-                this.handleSTTButtonClick( 'swe-task', sweSttBtn );
-            });
-        }
-
-        // Ctrl+Enter in SWE Team textarea (Enter alone inserts newline)
-        const sweTaskInput = document.getElementById( 'swe-task' );
-        if ( sweTaskInput ) {
-            sweTaskInput.addEventListener( 'keydown', ( e ) => {
-                if ( e.key === 'Enter' && e.ctrlKey ) {
-                    e.preventDefault();
-                    this.submitSweTeamJob();
-                }
-            });
-        }
-
-        // Presentation Generator submit button
-        const submitPresentationBtn = document.getElementById( 'submit-presentation-job' );
-        if ( submitPresentationBtn ) {
-            submitPresentationBtn.addEventListener( 'click', () => {
-                this.submitPresentationJob();
-            });
-        }
-
-        // Presentation Generator STT button (voice input)
-        const presentationSttBtn = document.getElementById( 'presentation-stt-button' );
-        if ( presentationSttBtn ) {
-            presentationSttBtn.addEventListener( 'click', () => {
-                this.handleSTTButtonClick( 'presentation-source', presentationSttBtn );
-            });
-        }
 
         // Commons Broadcast STT button (voice input) — Phase 2 + Phase 3 voice-first.
         // Transcription targets the multi-line #broadcast-textarea; the broadcast-panel.js
@@ -2124,16 +2084,6 @@ class NotificationsUI {
             });
         }
 
-        // Enter key in Presentation source input
-        const presentationSourceInput = document.getElementById( 'presentation-source' );
-        if ( presentationSourceInput ) {
-            presentationSourceInput.addEventListener( 'keydown', ( e ) => {
-                if ( e.key === 'Enter' ) {
-                    e.preventDefault();
-                    this.submitPresentationJob();
-                }
-            });
-        }
 
         // Test Suite submit button
         const submitTestSuiteBtn = document.getElementById( 'submit-test-suite-job' );
@@ -2965,8 +2915,42 @@ class NotificationsUI {
             // Ensure token is valid before API call (auto-refresh if expired)
             await this.ensureValidToken();
 
-            // Submit to /api/push endpoint (POST request with JSON body)
-            const url = `/api/push`;
+            // TWO DOORS, PICKED BY THE DROPDOWN (2026.08.22 plan §5.2).
+            //
+            // Auto-Route → /api/v2/ask, which is handed prose and works out what it
+            // means. A named agent → /api/v2/submit, which is handed the answer to that
+            // question up front and skips routing entirely. That IS the "dial in a
+            // specific direct route to a specific agent" Rick asked for, and it is
+            // per-request: nothing is persisted, the next question auto-routes again
+            // unless the user picks again (ruling 2).
+            //
+            // /api/push was retired 2026-08-21 and answers 410 naming the ask door. The
+            // response shape is the same on both doors here — the §8 AskResponse — and
+            // is stringified into the response pane as-is. Phase 4 replaces that dump
+            // with an inline answer box that can carry the needs_input interview.
+            const agentSelect = window.LUPIN_AGENT_SELECT;
+            const selectEl    = document.getElementById( 'agent-mode' );
+            const chosen      = selectEl ? selectEl.value : null;
+            // No module or no select ⇒ auto-route. Posting an unrecognised value to
+            // /api/v2/submit as though it were a command is worse than routing normally.
+            const autoRoute   = !agentSelect || !selectEl
+                                || agentSelect.isAutoRoute( chosen, this._agentsPayload );
+
+            const url  = autoRoute ? `/api/v2/ask` : `/api/v2/submit`;
+            const body = autoRoute
+                ? { question: text, websocket_id: this.queueSessionId }
+                : {
+                    command      : chosen,
+                    // One text box feeds the command's one required argument — exactly
+                    // what every submit card being retired already does. A command
+                    // needing none, or needing two, gets {} and comes back needs_input;
+                    // phase 4 turns that into an inline question instead of a JSON dump.
+                    args         : agentSelect.argsForCommand( chosen, text, this._agentsPayload ),
+                    question     : text,
+                    websocket_id : this.queueSessionId
+                };
+
+            this.log( `Q&A door: ${url}${autoRoute ? '' : ` (${chosen})`}` );
             const response = await fetch( url, {
                 method: 'POST',
                 headers: {
@@ -2974,10 +2958,7 @@ class NotificationsUI {
                     'X-Session-ID': this.queueSessionId,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    question: text,
-                    websocket_id: this.queueSessionId
-                })
+                body: JSON.stringify( body )
             });
             
             if ( !response.ok ) {
@@ -2986,10 +2967,13 @@ class NotificationsUI {
             
             const responseData = await response.json();
             this.log( "Q&A submitted successfully:", responseData );
-            
-            // Update response area
-            this.updateElement( "response-text", JSON.stringify( responseData, null, 2 ) );
-            
+
+            // PHASE 4: a response that asks for a missing argument becomes an inline
+            // question instead of a JSON dump. handleQAResult owns both outcomes, and
+            // the resume turn re-enters it, so a two-argument interview loops without
+            // any extra machinery here.
+            this.handleQAResult( responseData );
+
             // Clear input
             inputElement.value = '';
             
@@ -3007,6 +2991,89 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Render one v2 response: an inline question when the flow needs an argument,
+     * the result otherwise.
+     *
+     * Requires:
+     *     - result is an /api/v2/ask, /api/v2/submit or /api/v2/resume response body
+     *
+     * Ensures:
+     *     - an ANSWERABLE needs_input (one carrying a pending_id) renders the inline
+     *       box and wires Enter + the button to submitArgAnswer
+     *     - every other outcome clears any outstanding box first, so a completed
+     *       interview does not leave its last question sitting under the answer
+     *     - a needs_input WITHOUT a pending_id — the submit door's non-parking
+     *       refusal, and an expired park — renders as a result, never as a box whose
+     *       submit cannot succeed
+     *     - falls back to the raw dump when the module did not load, so a missing
+     *       static asset degrades to the old behaviour rather than a blank card
+     */
+    handleQAResult( result ) {
+        const container = document.getElementById( 'qa-arg-interview' );
+        // Read at CALL time, never at load time, so module execution order cannot matter.
+        const interview = window.LUPIN_ARG_INTERVIEW;
+        if ( !interview || !container ) {
+            this.log( "Arg-interview module missing — falling back to the raw response dump" );
+            this.updateElement( "response-text", JSON.stringify( result, null, 2 ) );
+            return;
+        }
+
+        if ( !interview.isAnswerable( result ) ) {
+            interview.clearArgQuestion( container );
+            this.updateElement( "response-text", JSON.stringify( result, null, 2 ) );
+            return;
+        }
+
+        const wired = interview.renderArgQuestion( container, result );
+        this.updateElement( "response-text", result.answer );
+        wired.button.addEventListener( 'click', () => this.submitArgAnswer( result, wired.input.value ) );
+        wired.input.addEventListener( 'keydown', ( e ) => {
+            if ( e.key === 'Enter' ) {
+                e.preventDefault();
+                this.submitArgAnswer( result, wired.input.value );
+            }
+        } );
+        wired.input.focus();
+    }
+
+    /**
+     * Answer one interview question — POST /api/v2/resume — and render what comes back.
+     *
+     * Ensures:
+     *     - a blank answer is ignored rather than posted; resume rejects an empty
+     *       answer with a 422 and the user would see a validation dump instead of the
+     *       question they still have to answer
+     *     - the result re-enters handleQAResult, so a second missing argument renders
+     *       as the next question and the loop closes when the flow terminates
+     *     - a transport failure leaves the box UP with the error beside it: the
+     *       pending entry is still parked server-side, so the answer is still wanted
+     */
+    async submitArgAnswer( result, answer ) {
+        const interview = window.LUPIN_ARG_INTERVIEW;
+        const text      = ( answer || '' ).trim();
+        if ( !text ) return;
+
+        try {
+            await this.ensureValidToken();
+            const response = await fetch( '/api/v2/resume', {
+                method: 'POST',
+                headers: {
+                    'Authorization': this.getAuthHeader(),
+                    'X-Session-ID': this.queueSessionId,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify( interview.resumeBody( result, text, this.queueSessionId ) )
+            } );
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}: ${response.statusText}` );
+            this.handleQAResult( await response.json() );
+        } catch ( error ) {
+            this.error( "Answer submission failed:", error );
+            this.updateElement( "response-text", `Error: ${error.message}` );
+            this.handleServerError( error );
+        }
+    }
+
     handleServerError( error ) {
         /**
          * Detect server errors (500, 503, etc.) and create spoken notifications
@@ -3070,11 +3137,11 @@ class NotificationsUI {
     // ========================================
 
     /**
-     * Submit a Deep Research job (with optional podcast generation).
+     * Submit a Deep Research job (optionally chained to a podcast or a presentation).
      *
-     * If "Also generate podcast" checkbox is checked, submits to
-     * /api/deep-research-to-podcast/submit endpoint.
-     * Otherwise, submits to /api/deep-research/submit endpoint.
+     * Always posts to /api/v2/submit. The two checkboxes pick which routing command goes
+     * in the body — plain research, research→podcast, or research→presentation. The three
+     * endpoints this used to choose between are retired and answer 410.
      */
     async submitResearchJob() {
         const topicInput = document.getElementById( 'research-topic' );
@@ -3108,25 +3175,33 @@ class NotificationsUI {
             // Ensure token is valid before API call
             await this.ensureValidToken();
 
-            // Choose endpoint based on checkboxes (mutually exclusive)
-            let endpoint = '/api/deep-research/submit';
+            // ONE DOOR NOW, AND THE CHECKBOXES CHOOSE A COMMAND RATHER THAN A URL.
+            // The three research endpoints this used to pick between are retired: they
+            // answer 410 naming /api/v2/submit, which takes the command as a string and
+            // the agent's own arguments in `args`. What used to be three routes is one
+            // route and three command strings.
+            let command = 'agent router go to deep research';
             if ( withPresentation ) {
-                endpoint = '/api/deep-research-to-presentation/submit';
+                command = 'agent router go to research to presentation';
             } else if ( withPodcast ) {
-                endpoint = '/api/deep-research-to-podcast/submit';
+                command = 'agent router go to research to podcast';
             }
 
+            // scheduled_at and monopolize stay OUTSIDE args on purpose: they tell the
+            // queue when and how to run the work, and `args` is checked against the
+            // command's own argument contract, which neither of them is in.
             const schedulingParams = this._getSchedulingParams( 'research' );
-            let body = { query: topic, budget: budget, dry_run: dryRun, ...schedulingParams };
+            let args = { query: topic, budget: budget, dry_run: dryRun };
             if ( withPodcast ) {
-                body.target_languages = [ 'en', 'es-MX' ];
+                args.target_languages = [ 'en', 'es-MX' ];
             } else if ( withPresentation ) {
-                body.target_duration_minutes = 15;
+                args.target_duration_minutes = 15;
             }
+            const body = { command: command, args: args, question: topic, ...schedulingParams };
 
-            this.log( `Submitting research job to ${endpoint}: ${topic.substring( 0, 50 )}...` );
+            this.log( `Submitting research job as ${command}: ${topic.substring( 0, 50 )}...` );
 
-            const response = await fetch( endpoint, {
+            const response = await fetch( '/api/v2/submit', {
                 method: 'POST',
                 headers: {
                     'Authorization': this.getAuthHeader(),
@@ -3145,8 +3220,13 @@ class NotificationsUI {
             this.log( "Research job submitted:", result );
 
             // Success feedback
-            const jobType = withPodcast ? 'Research→Podcast' : 'Research';
-            statusDiv.textContent = `✓ ${jobType} job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
+            // NO POSITION ANY MORE, and that is deliberate rather than an omission. The v2
+            // response carries no queue_position and is not being widened for one: a place
+            // in the queue changes as the queue moves, so a number frozen at the instant of
+            // submission was stale the moment it was printed. The job card learns its real
+            // place from the queue websocket events.
+            const jobType = withPresentation ? 'Research→Presentation' : ( withPodcast ? 'Research→Podcast' : 'Research' );
+            statusDiv.textContent = `✓ ${jobType} job submitted! Job ID: ${result.job_id}`;
             statusDiv.style.color = '#28a745';
 
             // Clear input
@@ -3163,265 +3243,10 @@ class NotificationsUI {
     }
 
     /**
-     * Submit a Podcast generation job.
-     *
-     * Uses smart input detection:
-     * - If input looks like a file path → direct job creation
-     * - If input looks like a description → fuzzy match + notification for confirmation
-     */
-    async submitPodcastJob() {
-        const sourceInput = document.getElementById( 'podcast-source' );
-        const dryRunCheckbox = document.getElementById( 'podcast-dry-run' );
-        const submitButton = document.getElementById( 'submit-podcast-job' );
-        const loadingSpinner = document.getElementById( 'podcast-loading' );
-        const statusDiv = document.getElementById( 'podcast-submit-status' );
-
-        const source = sourceInput.value.trim();
-        const dryRun = dryRunCheckbox.checked;
-
-        if ( !source ) {
-            statusDiv.textContent = '⚠️ Please enter a research source (path or description).';
-            statusDiv.style.color = '#dc3545';
-            return;
-        }
-
-        try {
-            // Update UI
-            submitButton.disabled = true;
-            loadingSpinner.style.display = 'inline-block';
-            statusDiv.textContent = 'Processing...';
-            statusDiv.style.color = '#666';
-
-            // Ensure token is valid before API call
-            await this.ensureValidToken();
-
-            this.log( `Submitting podcast job: ${source.substring( 0, 50 )}...` );
-
-            const response = await fetch( '/api/podcast-generator/submit', {
-                method: 'POST',
-                headers: {
-                    'Authorization': this.getAuthHeader(),
-                    'X-Session-ID': this.queueSessionId,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    research_source: source,
-                    target_languages: [ 'en', 'es-MX' ],
-                    dry_run: dryRun,
-                    ...this._getSchedulingParams( 'podcast' )
-                })
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
-                throw new Error( errorData.detail || `HTTP ${response.status}` );
-            }
-
-            const result = await response.json();
-            this.log( "Podcast job response:", result );
-
-            // Handle different response types
-            if ( result.status === 'queued' ) {
-                // Direct path mode - job created immediately
-                statusDiv.textContent = `✓ Podcast job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
-                statusDiv.style.color = '#28a745';
-                sourceInput.value = '';
-            } else if ( result.status === 'matching' ) {
-                // Description mode - fuzzy matching triggered
-                statusDiv.textContent = `🔍 ${result.message}`;
-                statusDiv.style.color = '#6f42c1';
-                // Don't clear input - user may want to modify and retry
-            } else if ( result.status === 'no_matches' ) {
-                statusDiv.textContent = `⚠️ ${result.message}`;
-                statusDiv.style.color = '#ffc107';
-            }
-
-        } catch ( error ) {
-            this.error( "Podcast job submission failed:", error );
-            statusDiv.textContent = `✗ Error: ${error.message}`;
-            statusDiv.style.color = '#dc3545';
-        } finally {
-            submitButton.disabled = false;
-            loadingSpinner.style.display = 'none';
-        }
-    }
-
-    /**
-     * Submit a SWE Team engineering task.
-     *
-     * Sends task to /api/swe-team/submit for asynchronous execution.
-     * Budget and timeout are optional — only included if user sets them.
-     */
-    async submitSweTeamJob() {
-        const taskInput      = document.getElementById( 'swe-task' );
-        const budgetInput    = document.getElementById( 'swe-budget' );
-        const timeoutInput   = document.getElementById( 'swe-timeout' );
-        const dryRunCheckbox = document.getElementById( 'swe-dry-run' );
-        const submitButton   = document.getElementById( 'submit-swe-job' );
-        const loadingSpinner = document.getElementById( 'swe-loading' );
-        const statusDiv      = document.getElementById( 'swe-submit-status' );
-
-        const task   = taskInput.value.trim();
-        const dryRun = dryRunCheckbox.checked;
-
-        if ( !task ) {
-            statusDiv.textContent = '⚠️ Please describe the engineering task.';
-            statusDiv.style.color = '#dc3545';
-            return;
-        }
-
-        try {
-            // Update UI
-            submitButton.disabled = true;
-            loadingSpinner.style.display = 'inline-block';
-            statusDiv.textContent = 'Submitting SWE Team task...';
-            statusDiv.style.color = '#666';
-
-            // Ensure token is valid before API call
-            await this.ensureValidToken();
-
-            this.log( `Submitting SWE Team job: ${task.substring( 0, 50 )}...` );
-
-            // Build request body — budget and timeout are nullable
-            const body = {
-                task         : task,
-                dry_run      : dryRun,
-                websocket_id : this.queueSessionId
-            };
-
-            const budgetVal = parseFloat( budgetInput.value );
-            if ( !isNaN( budgetVal ) && budgetVal > 0 ) {
-                body.budget = budgetVal;
-            }
-
-            const timeoutVal = parseInt( timeoutInput.value );
-            if ( !isNaN( timeoutVal ) && timeoutVal > 0 ) {
-                body.timeout = timeoutVal;
-            }
-
-            const trustModeSelect = document.getElementById( 'swe-trust-mode' );
-            const trustMode = trustModeSelect ? trustModeSelect.value : '';
-            if ( trustMode ) {
-                body.trust_mode = trustMode;
-            }
-
-            Object.assign( body, this._getSchedulingParams( 'swe' ) );
-
-            const response = await fetch( '/api/swe-team/submit', {
-                method  : 'POST',
-                headers : {
-                    'Authorization' : this.getAuthHeader(),
-                    'X-Session-ID'  : this.queueSessionId,
-                    'Content-Type'  : 'application/json'
-                },
-                body: JSON.stringify( body )
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
-                throw new Error( errorData.detail || `HTTP ${response.status}` );
-            }
-
-            const result = await response.json();
-            this.log( "SWE Team job response:", result );
-
-            // Success feedback
-            statusDiv.textContent = `✓ SWE Team job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
-            statusDiv.style.color = '#28a745';
-            taskInput.value = '';
-
-        } catch ( error ) {
-            this.error( "SWE Team job submission failed:", error );
-            statusDiv.textContent = `✗ Error: ${error.message}`;
-            statusDiv.style.color = '#dc3545';
-        } finally {
-            submitButton.disabled = false;
-            loadingSpinner.style.display = 'none';
-        }
-    }
-
-    /**
-     * Submit a Presentation Generator job.
-     *
-     * Sends source document to /api/presentation-generator/submit for
-     * asynchronous slide generation via the CJ Flow queue.
-     */
-    async submitPresentationJob() {
-        const sourceInput      = document.getElementById( 'presentation-source' );
-        const audienceSelect   = document.getElementById( 'presentation-audience' );
-        const durationInput    = document.getElementById( 'presentation-duration' );
-        const dryRunCheckbox   = document.getElementById( 'presentation-dry-run' );
-        const submitButton     = document.getElementById( 'submit-presentation-job' );
-        const loadingSpinner   = document.getElementById( 'presentation-loading' );
-        const statusDiv        = document.getElementById( 'presentation-submit-status' );
-
-        const source   = sourceInput.value.trim();
-        const audience = audienceSelect.value;
-        const duration = parseInt( durationInput.value ) || 15;
-        const dryRun   = dryRunCheckbox.checked;
-
-        if ( !source ) {
-            statusDiv.textContent = '⚠️ Please enter a source document path.';
-            statusDiv.style.color = '#dc3545';
-            return;
-        }
-
-        try {
-            // Update UI
-            submitButton.disabled = true;
-            loadingSpinner.style.display = 'inline-block';
-            statusDiv.textContent = 'Submitting presentation job...';
-            statusDiv.style.color = '#666';
-
-            // Ensure token is valid before API call
-            await this.ensureValidToken();
-
-            this.log( `Submitting presentation job: ${source.substring( 0, 50 )}...` );
-
-            const response = await fetch( '/api/presentation-generator/submit', {
-                method  : 'POST',
-                headers : {
-                    'Authorization' : this.getAuthHeader(),
-                    'X-Session-ID'  : this.queueSessionId,
-                    'Content-Type'  : 'application/json'
-                },
-                body: JSON.stringify({
-                    source_path              : source,
-                    audience                 : audience,
-                    target_duration_minutes  : duration,
-                    dry_run                  : dryRun,
-                    ...this._getSchedulingParams( 'presentation' )
-                })
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
-                throw new Error( errorData.detail || `HTTP ${response.status}` );
-            }
-
-            const result = await response.json();
-            this.log( "Presentation job response:", result );
-
-            // Success feedback
-            statusDiv.textContent = `✓ Presentation job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
-            statusDiv.style.color = '#28a745';
-            sourceInput.value = '';
-
-        } catch ( error ) {
-            this.error( "Presentation job submission failed:", error );
-            statusDiv.textContent = `✗ Error: ${error.message}`;
-            statusDiv.style.color = '#dc3545';
-        } finally {
-            submitButton.disabled = false;
-            loadingSpinner.style.display = 'none';
-        }
-    }
-
-    /**
      * Submit a render-only presentation job from an existing YAML.
      *
      * Called from the "Re-render" button on completed presentation job cards.
-     * Submits to the same endpoint with render_only=true, skipping Phases 1-5.
+     * Submits the same command with render_only=true, skipping Phases 1-5.
      *
      * @param {string} yamlPath - Relative path to the YAML intermediate file
      */
@@ -3435,7 +3260,19 @@ class NotificationsUI {
             await this.ensureValidToken();
             this.log( `Submitting render-only job for: ${yamlPath}` );
 
-            const response = await fetch( '/api/presentation-generator/submit', {
+            // ONE DOOR NOW. /api/presentation-generator/submit is retired and answers 410
+            // naming /api/v2/submit, which takes the routing command as a string and the
+            // agent's own arguments in `args`. The path arrives as `source` — the name the
+            // job factory already reads — and stays repo-relative exactly as before; the job
+            // resolves it against the project root, which a browser cannot do for itself.
+            //
+            // THIS BUTTON SURVIVES WHILE THE ACCORDION CARD DID NOT, and the line between
+            // them is worth stating: the accordion is an ENTRANCE, and Rick retired the
+            // entrances so that questions arrive through Q&A. Re-render is an action ON A
+            // RESULT — it re-renders a deck that already exists, from a job card, and there
+            // is no other way to ask for that. Deleting it would remove a capability rather
+            // than a duplicate door (Cheech, ruled 2026-08-21).
+            const response = await fetch( '/api/v2/submit', {
                 method  : 'POST',
                 headers : {
                     'Authorization' : this.getAuthHeader(),
@@ -3443,8 +3280,12 @@ class NotificationsUI {
                     'Content-Type'  : 'application/json'
                 },
                 body: JSON.stringify({
-                    source_path : yamlPath.startsWith( 'io/' ) || yamlPath.startsWith( '/io/' ) ? yamlPath : 'io/' + yamlPath,
-                    render_only : true
+                    command  : 'agent router go to presentation generator',
+                    args     : {
+                        source      : yamlPath.startsWith( 'io/' ) || yamlPath.startsWith( '/io/' ) ? yamlPath : 'io/' + yamlPath,
+                        render_only : true
+                    },
+                    question : yamlPath
                 })
             });
 
@@ -4092,19 +3933,33 @@ class NotificationsUI {
 
             this.log( `Claude Code queue submit: project=${project}, type=${taskType}, dry_run=${dryRun}` );
 
-            const response = await fetch( '/api/claude-code/submit', {
+            // ONE DOOR, AND THE COMMAND IS NAMED IN THE BODY. /api/claude-code/submit and its
+            // /queue/submit alias are retired: both answer 410 naming /api/v2/submit, which
+            // takes the routing command as a string and the job's own arguments in `args`.
+            //
+            // WHAT MOVED WHERE. prompt / project / task_type / max_turns / dry_run are
+            // arguments to the Claude Code job, so they go in `args`. websocket_id,
+            // scheduled_at and monopolize are directives to the QUEUE — when to run it,
+            // whether it runs alone, where to speak — so they stay top-level. `args` is
+            // checked against the command's own argument contract, and no contract names a
+            // scheduling instruction.
+            const response = await fetch( '/api/v2/submit', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     ...this.getAuthHeaders()
                 },
                 body: JSON.stringify( {
-                    prompt: prompt,
-                    project: project,
-                    task_type: taskType,
-                    max_turns: taskType === 'INTERACTIVE' ? 200 : 50,
+                    command: 'agent router go to claude code',
+                    args: {
+                        prompt: prompt,
+                        project: project,
+                        task_type: taskType,
+                        max_turns: taskType === 'INTERACTIVE' ? 200 : 50,
+                        dry_run: dryRun
+                    },
+                    question: prompt,
                     websocket_id: this.sessionId,
-                    dry_run: dryRun,
                     ...this._getSchedulingParams( 'cc' )
                 } )
             } );
@@ -4115,10 +3970,15 @@ class NotificationsUI {
             }
 
             const data = await response.json();
-            this.log( `Claude Code job queued: ${data.job_id} at position ${data.queue_position}` );
+            this.log( `Claude Code job queued: ${data.job_id}` );
 
             // Success feedback
-            statusDiv.textContent = `✓ Claude Code job submitted! Job ID: ${data.job_id}, Position: ${data.queue_position}`;
+            // NO POSITION ANY MORE — the same call the research card made when it cut over.
+            // The v2 response carries no queue_position and is not being widened for one: a
+            // place in the queue changes as the queue moves, so a number frozen at the
+            // instant of submission was stale the moment it was printed. The job card learns
+            // its real place from the queue websocket events.
+            statusDiv.textContent = `✓ Claude Code job submitted! Job ID: ${data.job_id}`;
             statusDiv.style.color = '#28a745';
 
             // Refresh queues to show new job in the CJ Flow accordion
@@ -4137,10 +3997,11 @@ class NotificationsUI {
     // submitClaudeCode / submitClaudeCodeToQueue normalized 2026-05-11 to mirror the
     // sibling research-handler pattern (statusDiv + spinner + button disable; no
     // response panel; submitted jobs surface in the multiplexer Jobs pane via
-    // agent-agnostic job_state_transition events). URL switched to the canonical
-    // /api/claude-code/submit; the /api/claude-code/queue/submit alias is preserved
-    // server-side for one release cycle. See:
-    //   src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md
+    // agent-agnostic job_state_transition events). The URL moved again on 2026-08-21:
+    // both /api/claude-code/* doors are tombstones answering 410, and the card posts to
+    // /api/v2/submit naming its command. See:
+    //   src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md (the card pattern)
+    //   src/rnd/v0.2.0/2026.08.20-brain-integration-cascade-review-plan.md (the cutover)
     // Inject / interrupt / end-session controls remain retired (since 2026-05-05)
     // and will return when ClaudeCodeJob gains bidirectional control on cj-flow.
 
@@ -6836,16 +6697,22 @@ class NotificationsUI {
          *
          * Ensures:
          *     - Prompts user for confirmation before retrying
-         *     - Sends POST /api/job-history/{jobId}/retry with websocket_id
+         *     - Re-asks the stored question via POST /api/v2/ask with websocket_id
+         *       (the /api/job-history/{jobId}/retry door was retired 2026-08-21)
          *     - Refreshes history and live queues on success
          */
         if ( !confirm( `Retry this job?\n\n"${questionText}"` ) ) return;
 
         try {
-            const response = await this.authedFetch( `/api/job-history/${jobId}/retry`, {
+            // /api/job-history/{id}/retry was retired 2026-08-21 (410, names this door).
+            // It was a queue door wearing a job-history URL: the server read the stored
+            // question off the row and re-asked it. Now the CLIENT re-asks, which it can
+            // do because it already has the text — `questionText` is the same value shown
+            // in the confirm dialog above.
+            const response = await this.authedFetch( `/api/v2/ask`, {
                 method  : 'POST',
                 headers : { 'Content-Type': 'application/json' },
-                body    : JSON.stringify( { websocket_id: this.queueSessionId } )
+                body    : JSON.stringify( { question: questionText, websocket_id: this.queueSessionId } )
             } );
 
             if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
@@ -9613,6 +9480,61 @@ class NotificationsUI {
         return chaseMs > nowMs;
     }
 
+    _formatTaskListCount( live, parked ) {
+        /**
+         * Header text for the task-list count, split LIVE vs PARKED.
+         *
+         * WHY THE HEADER CHANGED. The old header printed one number — every open
+         * row — so a board of 3 workable rows and 5 deliberately-deferred ones
+         * read as "8 tasks". Every conversation about driving the board to zero
+         * then started from a number that was 60% rows nobody intended to touch.
+         * Parked rows are approved-not-now, blocked on nothing, and self-expiring;
+         * counting them alongside live work makes the remaining-work figure fiction.
+         *
+         * ZERO PARKED PRINTS THE BARE NUMBER. A clean board says "3", not
+         * "Live: 3 · Parked: 0 · Total: 3" — the split is a disclosure that only
+         * earns its space when there is something to disclose.
+         *
+         * Requires:
+         *     - live and parked are non-negative counts (non-numeric tolerated)
+         *
+         * Ensures:
+         *     - parked > 0  → "Live: L · Parked: P · Total: L+P"
+         *     - parked <= 0 → String( live )
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        const l = Number.isFinite( live )   ? live   : 0;
+        const p = Number.isFinite( parked ) ? parked : 0;
+        if ( p <= 0 ) return String( l );
+        return `Live: ${l} · Parked: ${p} · Total: ${l + p}`;
+    }
+
+    _taskListCountText( openTasks, now ) {
+        /**
+         * Count a set of OPEN rows into the header's live/parked/total text.
+         *
+         * PARKED IS A STATUS PLUS A LIVE CLOCK, NOT A FLAG. The parked side is
+         * `_taskIsParked()` — park-ACTIVE only — so a parked row whose chase time
+         * has passed counts as LIVE here, exactly as the store counts it as owed
+         * again. That means this number can move with no row changing: a park
+         * expiring at 09:00 shifts one row from the parked side to the live side
+         * on the next 60s poll, and that is correct, not drift.
+         *
+         * Requires:
+         *     - openTasks is an array of rows already filtered to non-terminal
+         *       (this function does NOT re-apply the open filter)
+         *     - now is epoch-millis, or omitted to read the clock at call time
+         *
+         * Ensures:
+         *     - returns _formatTaskListCount( live, park-active )
+         *     - a non-array argument counts as 0 rather than throwing
+         *     - Pure: no DOM, no side effects
+         */
+        const rows   = Array.isArray( openTasks ) ? openTasks : [];
+        const parked = rows.filter( t => this._taskIsParked( t, now ) ).length;
+        return this._formatTaskListCount( rows.length - parked, parked );
+    }
+
     _taskGroupOwnerKey( group ) {
         /**
          * Stable accordion key for an owner group: the persona itself, or the
@@ -9743,7 +9665,8 @@ class NotificationsUI {
          *     - stampUpdated: true on a real fetch; false to skip re-stamping
          *
          * Ensures:
-         *     - count reflects the OPEN rows shown; last-known rows survive an outage
+         *     - count reflects the OPEN rows shown, SPLIT live vs park-active;
+         *       last-known rows survive an outage
          *     - never throws, never renders blank
          */
         const container = document.getElementById( "task-list-container" );
@@ -9780,7 +9703,7 @@ class NotificationsUI {
 
         const openTasks = composite.tasks.filter( t => this.isTaskOpenStatus( ( t || {} ).status ) );
         this._taskListLastGoodTasks = openTasks;
-        if ( countEl ) countEl.textContent = String( openTasks.length );
+        if ( countEl ) countEl.textContent = this._taskListCountText( openTasks );
 
         const truncation = this._renderTaskListTruncationBanner( composite );
 
@@ -9927,7 +9850,7 @@ class NotificationsUI {
         const lastGood  = this._taskListLastGoodTasks;
         if ( lastGood && lastGood.length > 0 ) {
             container.innerHTML = indicator + this.renderTaskListTable( this.groupTasksByOwner( lastGood ), undefined, this.loadCollapsedTaskOwners() );
-            if ( countEl ) countEl.textContent = String( lastGood.length );
+            if ( countEl ) countEl.textContent = this._taskListCountText( lastGood );
         } else {
             container.innerHTML = indicator + `<p class="task-list-message task-list-empty">No tasks loaded yet.</p>`;
             if ( countEl ) countEl.textContent = "0";
@@ -9966,6 +9889,13 @@ class NotificationsUI {
         try {
             const composite = await this.fetchTaskList();
             this.renderTaskList( composite );
+            // The Epic Board renders off THIS composite — no second fetch, no
+            // second timer, so the two panes can never show different clocks.
+            // The story text is a separate, MEMOIZED one-shot against a different
+            // endpoint (hand-edited file, not live state), so this await costs a
+            // request on the first tick only and never again.
+            await this.fetchEpicStories();
+            this.renderEpicBoard( composite );
         } finally {
             this._taskListFetchInFlight = false;
         }
@@ -10285,6 +10215,668 @@ class NotificationsUI {
             .forEach( tbody => this._applyTaskGroupCollapseState( tbody, false ) );
     }
 
+
+    // ========================================
+    // EPIC BOARD PANEL — the MACRO view of the same rows
+    // Plan: src/rnd/v0.2.0/2026.08.24-epic-accordion-mini-plan.md
+    //
+    // The task-list card above answers "who owes what". This one answers "what
+    // are we trying to finish", off the SAME rows, grouped on `correlation_key`
+    // (which holds "epic:<slug>") instead of on `owner_persona`.
+    //
+    // ONE FETCH, ONE CLOCK — deliberately. This panel has NO poll of its own and
+    // NO fetch of its own against /api/tasks: refreshTaskList() hands its already-
+    // fetched composite to renderEpicBoard(). A second timer against the same
+    // endpoint would be waste AND would give the two panes different clocks, which
+    // reads as a bug the first time they disagree.
+    //
+    // Sections mirror the board generator (planning-is-prompting
+    // workflow/scripts/generate_epic_board.py), because those sections were
+    // designed against this data and Rick already reads them:
+    //     ⏳ Waiting on Rick — a HIGHLIGHT, not a move (rows also stay in their epic)
+    //     per-epic groups     — collapsed by default
+    //     🔴 Drift            — rows carrying no epic key, the nudge to stamp one
+    // ========================================
+
+    async fetchEpicStories() {
+        /**
+         * Fetch the hand-maintained epic story text from GET /api/epic-stories
+         * (same auth guard as /api/tasks). ONE-SHOT and cached — this is a
+         * hand-edited file, not live state, so it is NOT polled. The result is
+         * memoized on the instance and reused for the life of the page.
+         *
+         * A missing / unreachable story file is NOT an error condition: the board
+         * renders de-slugged epic names, exactly as the generator does, and the
+         * absence is the visible nudge to write one.
+         *
+         * Requires:
+         *     - this.authedFetch is available (handles JWT refresh)
+         *
+         * Ensures:
+         *     - Returns the stories map ({ "epic:<slug>": { title, story } })
+         *     - Returns {} on ANY failure (401, non-2xx, network throw, bad shape)
+         *     - Fetches at most once per page load (memoized, including the
+         *       failure case — a down endpoint must not be retried every render)
+         *     - Never throws
+         */
+        if ( this._epicStoriesFetched ) return this._epicStories;
+        this._epicStoriesFetched = true;
+        try {
+            const response = await this.authedFetch( "/api/epic-stories" );
+            if ( !response.ok ) {
+                this.log( `Epic stories unavailable (HTTP ${response.status}) — epics render de-slugged` );
+                return this._epicStories;
+            }
+            const body = await response.json();
+            if ( body && body.stories && typeof body.stories === "object" ) {
+                this._epicStories = body.stories;
+            }
+        } catch ( error ) {
+            this.log( `Epic stories fetch failed: ${error} — epics render de-slugged` );
+        }
+        return this._epicStories;
+    }
+
+    _epicKeyOf( task ) {
+        /**
+         * The epic key a row belongs to, or null when it carries none.
+         *
+         * Mirrors the generator's rule VERBATIM: a key counts only when it starts
+         * with "epic:". That catches BOTH a row minted without a correlation_key
+         * AND a row whose key was overwritten by a cc-task: respawn adoption —
+         * the second is the reason a plain truthiness check is not enough.
+         *
+         * Ensures:
+         *     - correlation_key starting "epic:" → that key; anything else → null
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        const key = ( task && task.correlation_key ) ? String( task.correlation_key ) : "";
+        return key.startsWith( this.EPIC_KEY_PREFIX ) ? key : null;
+    }
+
+    _epicTitleLabel( epicKey ) {
+        /**
+         * The human title for an epic: the hand-maintained story title when one
+         * exists, otherwise the DE-SLUGGED key ("epic:board-visibility" →
+         * "board visibility").
+         *
+         * A missing entry is a nudge, never an error — this is the one behavior
+         * the plan calls out explicitly, and it mirrors generate_epic_board.py:385.
+         *
+         * Ensures:
+         *     - a story with a non-empty title → that title
+         *     - no story / blank title → key minus the "epic:" prefix, "-" → " "
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        const story = this._epicStories[ epicKey ];
+        if ( story && story.title ) return String( story.title );
+        return String( epicKey ).replace( this.EPIC_KEY_PREFIX, "" ).replace( /-/g, " " );
+    }
+
+    _epicStoryText( epicKey ) {
+        /**
+         * The one-line story for an epic, or "" when none is written.
+         *
+         * Ensures:
+         *     - a story with a non-empty `story` → that string; else ""
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        const story = this._epicStories[ epicKey ];
+        return ( story && story.story ) ? String( story.story ) : "";
+    }
+
+    _taskWaitsOnRick( task ) {
+        /**
+         * Whether a row is blocked on Rick himself.
+         *
+         * KIND IS IGNORED ON PURPOSE, mirroring the generator's _ref_names_user:
+         * the same human appears as {kind:"user"} when a gate was raised on him and
+         * {kind:"persona"} when a row was simply assigned his name. A selector keyed
+         * to one kind silently drops half the queue — the exact shape of miss this
+         * section exists to stop.
+         *
+         * Ensures:
+         *     - true when ANY blocked_by ref has id === "rick" (case/space-insensitive)
+         *       and kind ∈ { user, persona }
+         *     - a non-array / absent blocked_by → false
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        const refs = ( task && Array.isArray( task.blocked_by ) ) ? task.blocked_by : [];
+        return refs.some( ref => {
+            if ( !ref || typeof ref !== "object" ) return false;
+            const ident = String( ref.id == null ? "" : ref.id ).trim().toLowerCase();
+            return ident === this.EPIC_BLOCKER_OF_INTEREST
+                && ( ref.kind === "user" || ref.kind === "persona" );
+        } );
+    }
+
+    groupTasksByEpic( tasks ) {
+        /**
+         * Build the epic-grouped model from a flat task array — the MACRO twin of
+         * groupTasksByOwner.
+         *
+         * Group ordering mirrors the generator's sort_key: the "epic:unassigned"
+         * bucket sinks LAST among the epics, everything else is biggest-first, ties
+         * broken by key so the order is stable across renders.
+         *
+         * Requires:
+         *     - tasks is an array of task rows (or non-array → treated as empty)
+         *
+         * Ensures:
+         *     - Returns { totalCount, onRick, groups, drift }
+         *     - totalCount counts ALL input rows
+         *     - onRick holds every row blocked on Rick, P0 first then id — a
+         *       HIGHLIGHT, not a move: those rows ALSO stay under their epic
+         *     - groups holds one entry per distinct "epic:" key, biggest first,
+         *       "epic:unassigned" last; each { epicKey, tasks: [...] }
+         *     - drift holds every row whose correlation_key is absent or does not
+         *       start with "epic:" — never silently dropped
+         *     - a row is in exactly one of groups / drift
+         *     - within a group, rows sort by status-rank then priority then title
+         *       (the same urgency order the task list uses)
+         *     - Pure + degrade-safe (falsy rows collapse to {}, never throw)
+         */
+        const rows = Array.isArray( tasks ) ? tasks : [];
+
+        const byEpic = new Map();   // "epic:<slug>" → tasks[]
+        const drift  = [];
+        const onRick = [];
+
+        rows.forEach( raw => {
+            const task    = raw || {};
+            const epicKey = this._epicKeyOf( task );
+            if ( epicKey ) {
+                if ( byEpic.has( epicKey ) ) byEpic.get( epicKey ).push( task );
+                else byEpic.set( epicKey, [ task ] );
+            } else {
+                drift.push( task );
+            }
+            if ( this._taskWaitsOnRick( task ) ) onRick.push( task );
+        } );
+
+        const byUrgency = ( a, b ) => {
+            const sr = this._taskStatusRank( a.status ) - this._taskStatusRank( b.status );
+            if ( sr !== 0 ) return sr;
+            const pr = this._taskPriorityRank( a.priority ) - this._taskPriorityRank( b.priority );
+            if ( pr !== 0 ) return pr;
+            return this._taskTitleLabel( a ).localeCompare( this._taskTitleLabel( b ) );
+        };
+
+        // Generator parity (sort_key): unassigned last, then biggest bucket first,
+        // then key — so a render never reshuffles two equal-sized epics.
+        const groups = Array.from( byEpic.keys() )
+            .sort( ( a, b ) => {
+                const au = a === this.EPIC_UNASSIGNED_KEY ? 1 : 0;
+                const bu = b === this.EPIC_UNASSIGNED_KEY ? 1 : 0;
+                if ( au !== bu ) return au - bu;
+                const size = byEpic.get( b ).length - byEpic.get( a ).length;
+                if ( size !== 0 ) return size;
+                return a.localeCompare( b );
+            } )
+            .map( epicKey => ( {
+                epicKey,
+                tasks : byEpic.get( epicKey ).slice().sort( byUrgency )
+            } ) );
+
+        onRick.sort( ( a, b ) => {
+            const pr = this._taskPriorityRank( a.priority ) - this._taskPriorityRank( b.priority );
+            if ( pr !== 0 ) return pr;
+            return String( a.id || "" ).localeCompare( String( b.id || "" ) );
+        } );
+
+        return { totalCount: rows.length, onRick, groups, drift: drift.slice().sort( byUrgency ) };
+    }
+
+    _epicGroupIdSlug( epicKey ) {
+        /**
+         * Map an epic key to a DOM-id-safe slug for the group's <tbody> id / the
+         * header's aria-controls target.
+         *
+         * Ensures:
+         *     - "epic-group-" + key with non [A-Za-z0-9_-] chars → "-"
+         *     - Pure: no DOM, no side effects
+         */
+        return "epic-group-" + String( epicKey ).replace( /[^a-zA-Z0-9_-]/g, "-" );
+    }
+
+    _epicDefaultExpanded( epicKey ) {
+        /**
+         * The FIRST-LOAD open/closed default for one group, before the viewer has
+         * expressed any preference.
+         *
+         * Plan §6: "Default state: all epics collapsed. The macro view's value is
+         * the list of epics and their counts; opening one is a deliberate act."
+         * The ⏳ Waiting-on-Rick section is the documented exception — the plan
+         * calls it a HIGHLIGHT, and a collapsed highlight highlights nothing.
+         *
+         * Ensures:
+         *     - the on-Rick sentinel → true; every other key (epics, drift) → false
+         *     - Pure: no DOM, no side effects
+         */
+        return epicKey === this.EPIC_ON_RICK_KEY;
+    }
+
+    loadEpicGroupState() {
+        /**
+         * Read the persisted per-group open/closed CHOICES from localStorage.
+         *
+         * Stores CHOICES, not state — a plain map of group key → isExpanded, holding
+         * only groups the viewer has actually toggled. A key that is ABSENT falls
+         * through to _epicDefaultExpanded, which is what makes "collapsed by
+         * default" survive an epic being minted later: a brand-new epic the viewer
+         * has never seen is absent from the map, so it takes the default rather
+         * than inheriting some stale set's membership.
+         *
+         * Ensures:
+         *     - Returns a plain object of key → boolean (empty on absent/invalid/
+         *       parse-error); non-boolean values are dropped defensively
+         *     - Never throws
+         */
+        try {
+            const raw    = localStorage.getItem( this.EPIC_BOARD_STATE_KEY );
+            const parsed = raw ? JSON.parse( raw ) : {};
+            if ( !parsed || typeof parsed !== "object" || Array.isArray( parsed ) ) return {};
+            const clean = {};
+            Object.keys( parsed ).forEach( key => {
+                if ( typeof parsed[ key ] === "boolean" ) clean[ key ] = parsed[ key ];
+            } );
+            return clean;
+        } catch ( e ) {
+            this.error( "Error loading epic group state:", e );
+            return {};
+        }
+    }
+
+    saveEpicGroupState( state ) {
+        /**
+         * Persist the per-group open/closed choice map to localStorage.
+         *
+         * Requires:
+         *     - state is a plain object of group key → boolean
+         *
+         * Ensures:
+         *     - The EPIC_BOARD_STATE_KEY entry is written; errors are swallowed
+         *       (a private-mode / quota failure must never break rendering)
+         */
+        try {
+            localStorage.setItem( this.EPIC_BOARD_STATE_KEY, JSON.stringify( state ) );
+        } catch ( e ) {
+            this.error( "Error saving epic group state:", e );
+        }
+    }
+
+    _epicGroupIsExpanded( epicKey, state ) {
+        /**
+         * Resolve one group's open/closed state: the viewer's recorded choice when
+         * there is one, the per-key default otherwise.
+         *
+         * Requires:
+         *     - state is the choice map from loadEpicGroupState (or any object)
+         *
+         * Ensures:
+         *     - a recorded boolean for epicKey → that boolean
+         *     - no record → _epicDefaultExpanded( epicKey )
+         *     - Pure: no DOM, no side effects
+         */
+        const recorded = state ? state[ epicKey ] : undefined;
+        return typeof recorded === "boolean" ? recorded : this._epicDefaultExpanded( epicKey );
+    }
+
+    toggleEpicCollapsed( epicKey ) {
+        /**
+         * Flip one group's open/closed state and persist the choice.
+         *
+         * Requires:
+         *     - epicKey is a rendered group key (an epic, the drift sentinel, or
+         *       the on-Rick sentinel)
+         *
+         * Ensures:
+         *     - the flipped choice is recorded and persisted
+         *     - returns the NEW collapsed boolean for epicKey
+         */
+        const state       = this.loadEpicGroupState();
+        const isExpanded  = !this._epicGroupIsExpanded( epicKey, state );
+        state[ epicKey ]  = isExpanded;
+        this.saveEpicGroupState( state );
+        return !isExpanded;
+    }
+
+    _renderEpicRow( task ) {
+        /**
+         * Render one epic-board row (a <tr>) with FOUR columns: ID · Priority ·
+         * Status · Title.
+         *
+         * DELIBERATELY narrower than the task-list row. Owner is omitted because
+         * that is precisely what the pane above is for — repeating it here would
+         * make the macro view a worse copy of the micro one (plan §6).
+         *
+         * EVERY store-sourced value is escapeHtml'd (this card writes via
+         * innerHTML, so it must escape explicitly).
+         *
+         * Requires:
+         *     - task is a row object (fields rendered defensively — falsy → "—")
+         *
+         * Ensures:
+         *     - the <tr> carries a `task-status-*` class; the Priority cell carries
+         *       a `task-prio-*` heat class when recognized
+         *     - Title is truncated with the FULL title on a hover-tooltip
+         *     - Pure: no DOM access, no side effects (object in → string out)
+         */
+        const statusWord  = this.escapeHtml( task.status || "unknown" );
+        const statusClass = this._taskStatusClass( task.status );
+        const prioClass   = this._taskPriorityClass( task.priority );
+        const idLabel     = this.escapeHtml( this._taskIdLabel( task ) );
+        const fullTitle   = this._taskTitleLabel( task );
+        const titleText   = this.escapeHtml( this._truncateTaskTitle( fullTitle ) );
+        const titleAttr   = this._escapeTaskAttr( fullTitle );
+        const priority    = this.escapeHtml( this._taskCellOrDash( task.priority ) );
+
+        return `
+            <tr class="epic-row ${statusClass}">
+                <td class="epic-col-id">${idLabel}</td>
+                <td class="epic-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
+                <td class="epic-col-status"><span class="task-status-dot"></span>${statusWord}</td>
+                <td class="epic-col-title" title="${titleAttr}">${titleText}</td>
+            </tr>`;
+    }
+
+    _renderEpicGroup( epicKey, headerLabel, tasks, state, extraClass, storyText ) {
+        /**
+         * Render ONE accordion group as a <tbody>: a clickable header bar (chevron
+         * + label + count) followed by that group's rows, plus the epic's one-line
+         * story when there is one.
+         *
+         * Requires:
+         *     - epicKey is the stable accordion key (data-epic + persisted choice key)
+         *     - headerLabel is the ALREADY-ESCAPED header text
+         *     - tasks is the group's row array
+         *     - state is the choice map from loadEpicGroupState
+         *     - extraClass is an extra <tbody> class or "" (drift / on-Rick accents)
+         *     - storyText is the one-line story, or "" for none
+         *
+         * Ensures:
+         *     - collapsed groups render the `collapsed` class (CSS hides the rows),
+         *       chevron ▸ and aria-expanded="false"; expanded ones ▾ / "true"
+         *     - the header carries role/tabindex/aria-controls for keyboard a11y
+         *     - Pure: no DOM access, no side effects
+         */
+        const isCollapsed = !this._epicGroupIsExpanded( epicKey, state );
+        const idSlug      = this._epicGroupIdSlug( epicKey );
+        const epicAttr    = this._escapeTaskAttr( epicKey );
+        const chevron     = `<span class="epic-group-chevron" aria-hidden="true">${isCollapsed ? "▸" : "▾"}</span>`;
+
+        const groupHeaderHtml = `
+            <tr class="epic-group-header${extraClass ? " " + extraClass + "-header" : ""}" role="button" tabindex="0" aria-expanded="${isCollapsed ? "false" : "true"}" aria-controls="${idSlug}">
+                <td colspan="4">${chevron}<span class="epic-group-label">${headerLabel}</span><span class="epic-group-count">${tasks.length}</span></td>
+            </tr>`;
+
+        // The story rides INSIDE the group, so opening an epic answers "what is
+        // this?" in the same gesture that reveals its rows.
+        const storyHtml = storyText
+            ? `<tr class="epic-story-row"><td colspan="4">${this.escapeHtml( storyText )}</td></tr>`
+            : "";
+
+        const rows = tasks.map( t => this._renderEpicRow( t ) ).join( "" );
+        return `<tbody class="epic-group${extraClass ? " " + extraClass : ""}${isCollapsed ? " collapsed" : ""}" id="${idSlug}" data-epic="${epicAttr}">${groupHeaderHtml}${storyHtml}${rows}</tbody>`;
+    }
+
+    renderEpicBoardTable( model, state ) {
+        /**
+         * Render the epic-grouped model as a read-only table.
+         *
+         * Section order mirrors the board generator: ⏳ Waiting on Rick FIRST (a
+         * highlight — those rows ALSO appear under their own epic, deliberately),
+         * then the per-epic groups, then 🔴 Drift last.
+         *
+         * The Drift group renders even when EMPTY, as a green all-clear. A section
+         * that vanishes when it is satisfied cannot be distinguished from a section
+         * that failed to render, and drift is exactly the thing a reader needs to
+         * be able to confirm is zero.
+         *
+         * Requires:
+         *     - model is the { totalCount, onRick, groups, drift } shape from
+         *       groupTasksByEpic
+         *     - state is the choice map from loadEpicGroupState (or undefined)
+         *
+         * Ensures:
+         *     - Returns an HTML string (caller assigns to innerHTML)
+         *     - Read-only: no action column, no mutating controls
+         *     - Pure: no DOM access, no side effects
+         */
+        const choices = ( state && typeof state === "object" ) ? state : {};
+
+        const headerRow = `
+            <thead>
+                <tr>
+                    <th class="epic-col-id">ID</th>
+                    <th class="epic-col-priority">P</th>
+                    <th class="epic-col-status">Status</th>
+                    <th class="epic-col-title">Title</th>
+                </tr>
+            </thead>`;
+
+        const sections = [];
+
+        if ( model.onRick.length > 0 ) {
+            sections.push( this._renderEpicGroup(
+                this.EPIC_ON_RICK_KEY,
+                "⏳ Waiting on Rick",
+                model.onRick,
+                choices,
+                "epic-group-on-rick",
+                "Highlighted, not moved — each of these also appears under its own epic below."
+            ) );
+        }
+
+        model.groups.forEach( group => {
+            sections.push( this._renderEpicGroup(
+                group.epicKey,
+                this.escapeHtml( this._epicTitleLabel( group.epicKey ) ),
+                group.tasks,
+                choices,
+                "",
+                this._epicStoryText( group.epicKey )
+            ) );
+        } );
+
+        sections.push( this._renderEpicGroup(
+            this.EPIC_DRIFT_KEY,
+            model.drift.length > 0 ? "🔴 Drift — rows carrying no epic" : "✅ No drift",
+            model.drift,
+            choices,
+            "epic-group-drift",
+            model.drift.length > 0
+                ? "Each was either minted without a correlation_key, or had its epic key overwritten. Stamp one."
+                : ""
+        ) );
+
+        return `<table class="epic-board-table">${headerRow}${sections.join( "" )}</table>`;
+    }
+
+    renderEpicBoard( composite, stampUpdated = true ) {
+        /**
+         * Dispatch the SHARED task-list composite to the epic view.
+         *
+         * Takes the composite as an ARGUMENT rather than fetching — this is the
+         * mechanism by which the two panes share one fetch and one clock. Called
+         * from refreshTaskList() immediately after renderTaskList().
+         *
+         * Mirrors the task-list card's four states so the two panes degrade
+         * identically; the truncation banner is deliberately NOT repeated here
+         * (the pane above already carries it for the same rows).
+         *
+         * Requires:
+         *     - composite is the object returned by fetchTaskList()
+         *     - #epic-board-container / #epic-board-count exist (no-op if absent)
+         *     - stampUpdated: true on a real fetch; false to skip re-stamping
+         *
+         * Ensures:
+         *     - count reflects the number of EPICS shown (the macro unit), not rows
+         *     - never throws, never renders blank
+         */
+        const container = document.getElementById( "epic-board-container" );
+        const countEl   = document.getElementById( "epic-board-count" );
+        if ( !container ) return;
+
+        this._wireEpicBoardAccordion();
+
+        if ( composite && composite.status === "auth_required" ) {
+            container.innerHTML = `<p class="task-list-message task-list-signin">🔒 Sign-in required.</p>`;
+            if ( countEl ) countEl.textContent = "0";
+            return;
+        }
+
+        if ( composite && composite.status === "query_unavailable" ) {
+            container.innerHTML =
+                `<p class="task-list-message task-list-query-unavailable">🧩 Task-list query did not load` +
+                ` — /static/js/shared/task-list-query.js is missing or failed to parse.` +
+                ` This is a deploy problem, not a store outage.</p>`;
+            if ( countEl ) countEl.textContent = "0";
+            return;
+        }
+
+        if ( !composite || composite.status === "unreachable" || !Array.isArray( composite.tasks ) ) {
+            container.innerHTML = `<p class="task-list-message task-list-unreachable">⚠️ Store unreachable — showing nothing rather than something stale.</p>`;
+            return;
+        }
+
+        // The SAME open-row filter the task list applies, so the two panes can
+        // never disagree about which rows exist.
+        const openTasks = composite.tasks.filter( t => this.isTaskOpenStatus( ( t || {} ).status ) );
+        const model     = this.groupTasksByEpic( openTasks );
+        if ( countEl ) countEl.textContent = String( model.groups.length );
+
+        container.innerHTML = this.renderEpicBoardTable( model, this.loadEpicGroupState() );
+
+        if ( stampUpdated ) this._stampEpicBoardUpdated();
+    }
+
+    _stampEpicBoardUpdated() {
+        /**
+         * Stamp the #epic-board-updated span with the current time, in the
+         * browser's own zone (DST-aware) via the shared fleet formatter.
+         *
+         * Ensures:
+         *     - Span text set to "updated HH:MM:SS TZ" on success; no-op if absent
+         */
+        const el = document.getElementById( "epic-board-updated" );
+        if ( !el ) return;
+        el.textContent = `updated ${this._formatFleetTimestamp( new Date(), undefined )}`;
+    }
+
+    _applyEpicGroupCollapseState( tbody, isCollapsed ) {
+        /**
+         * Reflect a group's collapsed state into its already-rendered DOM (class +
+         * header aria-expanded + chevron glyph) WITHOUT a full re-render.
+         *
+         * Requires:
+         *     - tbody is a <tbody.epic-group> element
+         *     - isCollapsed is the desired collapsed boolean
+         *
+         * Ensures:
+         *     - tbody.collapsed toggled; CSS hides/shows its rows
+         *     - the header's aria-expanded + chevron reflect the new state
+         */
+        tbody.classList.toggle( "collapsed", isCollapsed );
+        const header = tbody.querySelector( ".epic-group-header" );
+        if ( header ) {
+            header.setAttribute( "aria-expanded", String( !isCollapsed ) );
+            const chevron = header.querySelector( ".epic-group-chevron" );
+            if ( chevron ) chevron.textContent = isCollapsed ? "▸" : "▾";
+        }
+    }
+
+    _handleEpicAccordionToggle( target ) {
+        /**
+         * Toggle the epic group whose header was activated (click or Enter/Space).
+         *
+         * Requires:
+         *     - target is the activated DOM node (or a descendant of a header)
+         *
+         * Ensures:
+         *     - no-op if the activation was not within an .epic-group-header
+         *     - otherwise flips + persists that group's choice and updates its
+         *       group DOM in place
+         */
+        const header = target && target.closest ? target.closest( ".epic-group-header" ) : null;
+        if ( !header ) return;
+        const tbody = header.closest( "tbody.epic-group" );
+        if ( !tbody ) return;
+        const isCollapsed = this.toggleEpicCollapsed( tbody.dataset.epic );
+        this._applyEpicGroupCollapseState( tbody, isCollapsed );
+    }
+
+    _wireEpicBoardAccordion() {
+        /**
+         * Install the single delegated click+keyboard listener for the epic
+         * accordion, on the persistent #epic-board-container element (its innerHTML
+         * is replaced each render, the element itself is not).
+         *
+         * Ensures:
+         *     - listeners attached at most once (guarded by _epicBoardAccordionWired)
+         *     - no-op if the container is absent (degrade-safe)
+         */
+        if ( this._epicBoardAccordionWired ) return;
+        const container = document.getElementById( "epic-board-container" );
+        if ( !container ) return;
+
+        container.addEventListener( "click", ( e ) => this._handleEpicAccordionToggle( e.target ) );
+        container.addEventListener( "keydown", ( e ) => {
+            // " " is the modern key value; "Spacebar" the legacy spelling.
+            if ( e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar" ) return;
+            if ( !e.target.closest || !e.target.closest( ".epic-group-header" ) ) return;
+            e.preventDefault();   // Space must act, not scroll the page
+            this._handleEpicAccordionToggle( e.target );
+        } );
+
+        this._epicBoardAccordionWired = true;
+        this.log( "Epic board accordion delegation wired" );
+    }
+
+    _epicKeysInDom() {
+        /**
+         * Collect the group keys of every currently-rendered epic group.
+         *
+         * Ensures:
+         *     - Returns an array of data-epic values from the rendered <tbody>s
+         *       (empty array if the container/table is absent)
+         */
+        return Array.from(
+            document.querySelectorAll( "#epic-board-container tbody.epic-group[data-epic]" )
+        ).map( el => el.dataset.epic );
+    }
+
+    collapseAllEpics() {
+        /**
+         * Collapse every currently-rendered epic group and persist the choice.
+         *
+         * Ensures:
+         *     - every rendered key is recorded as NOT expanded (an explicit choice,
+         *       so it survives even for groups whose default is open)
+         *     - each rendered group's DOM reflects the collapsed state in place
+         */
+        const state = this.loadEpicGroupState();
+        this._epicKeysInDom().forEach( key => { state[ key ] = false; } );
+        this.saveEpicGroupState( state );
+        document.querySelectorAll( "#epic-board-container tbody.epic-group[data-epic]" )
+            .forEach( tbody => this._applyEpicGroupCollapseState( tbody, true ) );
+    }
+
+    expandAllEpics() {
+        /**
+         * Expand every currently-rendered epic group and persist the choice.
+         *
+         * Ensures:
+         *     - every rendered key is recorded as expanded
+         *     - each rendered group's DOM reflects the expanded state in place
+         */
+        const state = this.loadEpicGroupState();
+        this._epicKeysInDom().forEach( key => { state[ key ] = true; } );
+        this.saveEpicGroupState( state );
+        document.querySelectorAll( "#epic-board-container tbody.epic-group[data-epic]" )
+            .forEach( tbody => this._applyEpicGroupCollapseState( tbody, false ) );
+    }
+
     // ========================================
     // ABSTRACT TOOLTIP FOR NOTIFICATIONS HISTORY
     // ========================================
@@ -10336,10 +10928,21 @@ class NotificationsUI {
                 e.stopPropagation();
                 const abstract = decodeURIComponent( indicator.dataset.abstract );
 
+                // Self-exception (bug 11c01fbc): when an action-required card is
+                // lifted into the Reading Pane (horizontal mode), its OWN 📋 indicator
+                // lives inside #action-required-content, which SHARES the pane with the
+                // live response buttons. Routing it through _openContentPane would wipe
+                // the pane body (_renderContentPaneEntry's innerHTML="") and destroy
+                // those buttons — the exact case the _openContentPane guard blocks. So
+                // the card's own abstract falls through to the in-tab tooltip below
+                // (vertical parity — a surface Rick already knows). Foreign indicators
+                // (center-column cards) still route to the pane, where the guard holds.
+                const isOwnActionRequired = !!indicator.closest( "#action-required-content" );
+
                 // Horizontal layout mode: route to Reading Pane instead of the
                 // legacy fixed-position tooltip. Design:
                 // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md
-                if ( this._layoutMode === "horizontal" ) {
+                if ( this._layoutMode === "horizontal" && !isOwnActionRequired ) {
                     // Toggle (Rick, 2026-06-08): a second click on the indicator whose
                     // abstract is ALREADY showing in the Reading Pane clears the pane
                     // instead of re-opening it. Clicking a DIFFERENT indicator — or when
@@ -10628,21 +11231,22 @@ class NotificationsUI {
          * Handle done queue update with enhanced structured job metadata.
          * 
          * Requires:
-         *     - data contains done_jobs (HTML list) and done_jobs_metadata (structured data)
+         *     - data contains done_jobs_metadata (the structured rows the API serves)
          *     - JobCompletionCache and audio cache are initialized
          *     
          * Ensures:
          *     - Job metadata stored for replay functionality
          *     - Audio cache availability checked and indicated
-         *     - Enhanced HTML generated with proper replay button states
-         *     - Backward compatibility maintained with original HTML format
+         *     - Enhanced HTML generated for any row that still carries an html field
          */
         try {
-            this.log( `Processing ${data.done_jobs?.length || 0} done jobs with metadata enhancement` );
-            
-            // Use structured metadata if available, fallback to HTML parsing
+            // GET /api/get-queue/done serves ONLY done_jobs_metadata (queues.py:480).
+            // This loop used to be driven by data.done_jobs, an HTML list the API no
+            // longer returns — so it never ran, doneJobsMetadata stayed empty, and
+            // replayJobAudio could not find any job to replay.
             const jobsMetadata = data.done_jobs_metadata || [];
-            const jobsHtml = data.done_jobs || [];
+            
+            this.log( `Processing ${jobsMetadata.length} done jobs with metadata enhancement` );
             
             // Store job metadata for replay functionality
             this.doneJobsMetadata = new Map();
@@ -10650,9 +11254,8 @@ class NotificationsUI {
             // Process each job and check audio cache availability
             const enhancedJobs = [];
             
-            for ( let i = 0; i < jobsHtml.length; i++ ) {
-                const jobHtml = jobsHtml[i];
-                const jobMetadata = jobsMetadata[i] || this.parseJobMetadataFromHtml( jobHtml, i );
+            for ( let i = 0; i < jobsMetadata.length; i++ ) {
+                const jobMetadata = jobsMetadata[i];
                 
                 // Check if audio is available in cache
                 jobMetadata.has_audio_cache = await this.checkJobAudioCacheAvailability( jobMetadata );
@@ -10660,9 +11263,13 @@ class NotificationsUI {
                 // Store metadata for replay access
                 this.doneJobsMetadata.set( jobMetadata.job_id, jobMetadata );
                 
-                // Generate enhanced HTML with proper replay button state
-                const enhancedJobHtml = this.generateEnhancedJobHtml( jobMetadata );
-                enhancedJobs.push( enhancedJobHtml );
+                // Generate enhanced HTML with proper replay button state. The metadata
+                // rows carry no html field today, so this is skipped and the cards are
+                // rendered from queueCategoryState.done.jobs instead; it stays here so
+                // the enhancement survives if the field ever comes back.
+                if ( jobMetadata.html ) {
+                    enhancedJobs.push( this.generateEnhancedJobHtml( jobMetadata ) );
+                }
                 
                 this.log( `Job ${jobMetadata.job_id}: cache=${jobMetadata.has_audio_cache ? '✓' : '✗'}` );
             }
@@ -10670,38 +11277,14 @@ class NotificationsUI {
             // Store enhanced HTML for rendering
             this.enhancedDoneListHtml = enhancedJobs.join( "" );
             
-            this.log( `✅ Processed ${enhancedJobs.length} done jobs with replay metadata` );
+            this.log( `✅ Processed ${jobsMetadata.length} done jobs with replay metadata` );
             
         } catch ( error ) {
             this.error( "Error processing done queue metadata:", error );
             
-            // Fallback to basic HTML rendering
-            this.enhancedDoneListHtml = data.done_jobs?.join( "" ) || "";
+            this.enhancedDoneListHtml = "";
             this.doneJobsMetadata = new Map();
         }
-    }
-    
-    parseJobMetadataFromHtml( jobHtml, index ) {
-        /**
-         * Parse job metadata from HTML for backward compatibility.
-         * Fallback when structured metadata not available from API.
-         */
-        const jobIdMatch = jobHtml.match( /id=['"]([^'"]+)['"]/ );
-        const jobId = jobIdMatch ? jobIdMatch[1] : `done-job-${index}`;
-        
-        // Extract text content (basic parsing)
-        const textMatch = jobHtml.match( />([^<]+)</);
-        const text = textMatch ? textMatch[1].trim() : "Job completed";
-        
-        return {
-            job_id: jobId,
-            html: jobHtml,
-            question_text: "Q&A submission",
-            response_text: text,
-            timestamp: new Date().toISOString(),
-            user_id: this.currentUserEmail,
-            has_audio_cache: false
-        };
     }
     
     async checkJobAudioCacheAvailability( jobMetadata ) {
@@ -12368,6 +12951,20 @@ class NotificationsUI {
             if ( this._layoutMode !== "horizontal" ) return;
             const anchor = ev.target.closest( "a[href]" );
             if ( !anchor ) return;
+            // Self-exception (bug 11c01fbc): a doc-link inside the action-required
+            // card that's lifted into the Reading Pane must NOT route to
+            // _openContentPane — the pane is SHARED with the live response buttons and
+            // _renderContentPaneEntry's innerHTML="" would destroy them. Bail without
+            // preventDefault so the anchor's baked-in target=_blank opens a new tab
+            // (vertical parity). Foreign doc-links (center column) still route to the
+            // pane. (Embedded-audio self-links are handled by a separate listener and
+            // stay in-tab, so this bail does not disturb them.)
+            // `.abstract-tooltip` is a self surface too (bug 17ce50a5): the tooltip
+            // is fixed-position and appended to <body>, so it is NOT a descendant of
+            // #action-required-content — an ancestry-only test misses it. It only ever
+            // shows the abstract just clicked, so a doc-link in it is self-content by
+            // construction and must fall through to its baked-in target=_blank.
+            if ( anchor.closest( "#action-required-content, .abstract-tooltip" ) ) return;
             // Iframe-internal clicks don't fire on the parent document anyway,
             // but defense-in-depth bail if the target somehow resolves inside.
             if ( ev.target.closest( "#content-pane-body iframe" ) ) return;
@@ -12378,6 +12975,128 @@ class NotificationsUI {
             const title = anchor.textContent || "Doc";
             this._openContentPane( "doc", normalized, title );
         } );
+
+        // Embedded-podcast link interception — BOTH layout modes (unlike the
+        // horizontal-only doc-pane above). In presentation mode Rick can only
+        // present audio from ONE tab and cannot switch mid-demo, so a podcast
+        // player must live INSIDE the client tab as a floating overlay, not a
+        // new tab. We intercept ONLY the `&embed=1` form; a plain
+        // /app/audio?path= link is deliberately left alone and still opens a
+        // new tab (Rick wants both paths).
+        document.addEventListener( "click", ( ev ) => this._handleEmbeddedAudioClick( ev ) );
+
+        // Authenticated-download interception. /api/io/file is guarded by a
+        // Bearer-token dependency that reads the Authorization HEADER only, and
+        // a plain browser navigation cannot send one — so every raw
+        // <a href="/api/io/file?..."> click 401s. Intercept and re-issue the
+        // request as an authenticated fetch, then save the response blob.
+        document.addEventListener( "click", ( ev ) => this._handleIoFileDownloadClick( ev ) );
+    }
+
+    /**
+     * Document-level click handler for /api/io/file links (the PPTX download
+     * button and any markdown abstract link that points at the same endpoint).
+     * Every other click is left untouched. Split out from the listener so the
+     * branching is testable without wiring the whole document.
+     */
+    _handleIoFileDownloadClick( ev ) {
+        const anchor = ev.target.closest( "a[href]" );
+        if ( !anchor ) return;
+        const normalized = this._normalizeDocLinkHref( anchor.getAttribute( "href" ) );
+        if ( !this._isIoFileHref( normalized ) ) return;
+        ev.preventDefault();
+        this._downloadIoFileWithAuth( normalized );
+    }
+
+    /**
+     * True for a same-origin /api/io/file request — the token-guarded file
+     * endpoint. Matches with or without the &download=true flag, since both
+     * forms are equally unreachable by an unauthenticated navigation.
+     */
+    _isIoFileHref( href ) {
+        if ( !href ) return false;
+        return href.startsWith( "/api/io/file?" );
+    }
+
+    /**
+     * Fetch a token-guarded io/ file and hand it to the browser as a download.
+     *
+     * Requires:
+     *     - url is a same-origin /api/io/file request path
+     *     - a JWT is present in localStorage or on this.authToken
+     *
+     * Ensures:
+     *     - on success, the response blob is saved under the filename from the
+     *       Content-Disposition header, falling back to the path's basename
+     *     - on failure, surfaces the server's status rather than failing silently
+     */
+    async _downloadIoFileWithAuth( url ) {
+        const token = localStorage.getItem( "lupin_access_token" ) || this.authToken;
+        if ( !token ) {
+            alert( "Please log in to download files" );
+            return;
+        }
+
+        let blobUrl = null;
+        try {
+            const response = await fetch( url, { headers: { "Authorization": `Bearer ${token}` } } );
+            if ( !response.ok ) {
+                alert( `Download failed: ${response.status} ${response.statusText}` );
+                return;
+            }
+
+            const blob   = await response.blob();
+            blobUrl      = URL.createObjectURL( blob );
+            const anchor = document.createElement( "a" );
+            anchor.href     = blobUrl;
+            anchor.download = this._filenameForIoDownload( url, response.headers.get( "Content-Disposition" ) );
+            anchor.rel      = "noopener";
+            anchor.style.display = "none";
+            document.body.appendChild( anchor );
+            anchor.click();
+            // Removing the anchor in the same tick as the click can cancel the
+            // download before the browser has serviced it — defer the cleanup.
+            setTimeout( () => anchor.remove(), 5000 );
+        } catch ( error ) {
+            alert( `Download failed: ${error.message}` );
+        } finally {
+            // Revoke on a delay — revoking synchronously can cancel the save in
+            // some browsers before the click has been serviced.
+            if ( blobUrl ) setTimeout( () => URL.revokeObjectURL( blobUrl ), 60000 );
+        }
+    }
+
+    /**
+     * Resolve the filename to save under: the server's Content-Disposition
+     * filename when it supplies one, otherwise the basename of the `path`
+     * query parameter, otherwise a generic fallback.
+     */
+    _filenameForIoDownload( url, contentDisposition ) {
+        if ( contentDisposition ) {
+            const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec( contentDisposition );
+            if ( match ) return decodeURIComponent( match[ 1 ] );
+        }
+        const path = new URLSearchParams( url.split( "?" )[ 1 ] || "" ).get( "path" );
+        if ( path ) return path.split( "/" ).pop();
+        return "download";
+    }
+
+    /**
+     * Document-level click handler for embedded-podcast links. Intercepts ONLY
+     * an `/app/audio?path=...&embed=1` anchor and shows the floating in-tab
+     * player; every other click (no anchor, an iframe-internal click, a plain
+     * audio link, a non-audio link) is left untouched. Works in both layout
+     * modes. Split out from the listener so the branching is unit-testable
+     * without wiring the whole document.
+     */
+    _handleEmbeddedAudioClick( ev ) {
+        const anchor = ev.target.closest( "a[href]" );
+        if ( !anchor ) return;
+        if ( ev.target.closest( "#content-pane-body iframe" ) ) return;
+        const normalized = this._normalizeDocLinkHref( anchor.getAttribute( "href" ) );
+        if ( !this._isEmbeddedAudioHref( normalized ) ) return;
+        ev.preventDefault();
+        this._showPodcastOverlay( normalized, anchor.textContent || "Podcast" );
     }
 
     /**
@@ -12390,6 +13109,91 @@ class NotificationsUI {
     _normalizeDocLinkHref( href ) {
         if ( !href ) return href;
         return href.replace( /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/, "" );
+    }
+
+    /**
+     * True only for an audio link that carries the `embed=1` flag, i.e.
+     * `/app/audio?path=<rel>&embed=1`. The plain `/app/audio?path=` form
+     * (no embed flag) returns false so it keeps opening in a new tab. The
+     * `embed=1` token is matched query-order-agnostically.
+     */
+    _isEmbeddedAudioHref( href ) {
+        if ( !href ) return false;
+        if ( !href.startsWith( "/app/audio?path=" ) ) return false;
+        return /[?&]embed=1(?:&|$)/.test( href );
+    }
+
+    /**
+     * Show a floating, in-tab podcast player overlay. Modeled on
+     * showTTSErrorModal (works in both layout modes), but WITHOUT any
+     * auto-dismiss: the player is silenced only by the user, via the
+     * `<audio controls>` inside the iframe (start/stop) or the ✕ dismiss
+     * button (which removes the iframe and thereby stops playback). There is
+     * NO automated silencing when a notification lands mid-playback — Rick
+     * ruled that out. Single-instance: a second call replaces the first.
+     *
+     * @param {string} audioUrl - the embed URL (/app/audio?path=<rel>&embed=1)
+     * @param {string} title    - label shown in the overlay header
+     * @returns {HTMLElement} the overlay element (for tests / callers)
+     */
+    _showPodcastOverlay( audioUrl, title ) {
+        // Single instance — replace any existing overlay.
+        const existing = document.getElementById( "podcast-overlay" );
+        if ( existing ) existing.remove();
+
+        const overlay = document.createElement( "div" );
+        overlay.id = "podcast-overlay";
+        overlay.className = "podcast-overlay";
+        overlay.setAttribute( "data-testid", "podcast-overlay" );
+
+        const header = document.createElement( "div" );
+        header.className = "podcast-overlay-header";
+
+        const titleEl = document.createElement( "div" );
+        titleEl.className = "podcast-overlay-title";
+        titleEl.textContent = title || "Podcast";
+
+        const dismiss = document.createElement( "button" );
+        dismiss.type = "button";
+        dismiss.className = "podcast-overlay-dismiss";
+        dismiss.setAttribute( "data-testid", "podcast-overlay-dismiss" );
+        dismiss.setAttribute( "aria-label", "Dismiss podcast player" );
+        dismiss.textContent = "✕";
+        // Manual dismiss ONLY: removing the overlay removes the iframe, which
+        // stops playback. No auto-close timer, no notification-driven silencing.
+        dismiss.addEventListener( "click", () => this._dismissPodcastOverlay() );
+
+        header.appendChild( titleEl );
+        header.appendChild( dismiss );
+
+        const frame = document.createElement( "iframe" );
+        frame.className = "podcast-overlay-frame";
+        frame.setAttribute( "data-testid", "podcast-overlay-frame" );
+        // Auto-start on open: Rick's "Play Here" click is a user gesture, so the
+        // player's play() is always permitted (Mr Radio ruling 2026-08-03). The
+        // <audio controls> still supply start/stop and the ✕ still dismisses;
+        // auto-start is only the initial state. autoplay=1 is REAL auto-start with
+        // no debug UI as of Krishna's edf0d7c6 (the fired/blocked probe div is
+        // gated behind ?probe=1, never shipped). Guard against a doubled flag.
+        frame.src = /[?&]autoplay=1(?:&|$)/.test( audioUrl ) ? audioUrl : audioUrl + "&autoplay=1";
+        frame.setAttribute( "title", title || "Podcast player" );
+        frame.setAttribute( "allow", "autoplay" );
+
+        overlay.appendChild( header );
+        overlay.appendChild( frame );
+        document.body.appendChild( overlay );
+
+        this.log( `Showing podcast overlay: ${audioUrl}` );
+        return overlay;
+    }
+
+    /**
+     * Remove the podcast overlay if present. Removing the iframe stops any
+     * audio it was playing. No-op when no overlay is open.
+     */
+    _dismissPodcastOverlay() {
+        const overlay = document.getElementById( "podcast-overlay" );
+        if ( overlay ) overlay.remove();
     }
 
     /**
@@ -18216,6 +19020,53 @@ class NotificationsUI {
      *   - Each question has a numbered label, text, mic button, and text input
      *   - Single "Submit All" button at bottom
      */
+    /**
+     * Option D/C gate (row bd0ce120): the predicted per-question answers to use
+     * for an open_ended_batch, ONLY when the server-stamped auto-submit gate opens.
+     *
+     * The gate opens iff: the notification is an open_ended_batch, a prediction hint
+     * exists, `auto_submit_enabled` is true, the hint's confidence is at/above the
+     * server-stamped floor `auto_submit_min_confidence_threshold`, and the predicted
+     * value carries an `answers` map. All three gate fields are stamped by the server
+     * (notifications.py) so this client cannot drift from INI config.
+     *
+     * Requires:
+     *   - notification is a notification object (may lack prediction_hint)
+     *
+     * Ensures:
+     *   - Returns the { header: value } answers map when the gate opens
+     *   - Returns null otherwise (cold start, low confidence, disabled, wrong type)
+     */
+    _batchPredictedAnswers( notification ) {
+        if ( !notification || notification.response_type !== 'open_ended_batch' ) return null;
+        const hint = notification.prediction_hint;
+        if ( !hint || hint.auto_submit_enabled !== true ) return null;
+        const floor = hint.auto_submit_min_confidence_threshold;
+        if ( typeof floor !== 'number' ) return null;
+        if ( typeof hint.confidence !== 'number' || hint.confidence < floor ) return null;
+        const answers = hint.predicted_value?.answers;
+        if ( !answers || typeof answers !== 'object' ) return null;
+        // Refuse (never coerce) a payload where ANY answer is non-scalar (row 922b2db9).
+        // String()-coercing an object would launder "[object Object]" into a >=floor-
+        // confidence answer AND keep auto-submit armed. Refusing at the gate means no
+        // prefill, no auto-submit eligibility, and the expeditor default stands. Upstream
+        // drops these too (commit 3882f55c); this is the downstream catch-all for any
+        // producer not enumerated there.
+        for ( const val of Object.values( answers ) ) {
+            if ( !this._isScalarAnswer( val ) ) return null;
+        }
+        return answers;
+    }
+
+    /**
+     * True iff a predicted answer value is a scalar safe to render/submit
+     * (string, number, or boolean). Objects, arrays and null are non-scalar.
+     */
+    _isScalarAnswer( val ) {
+        const t = typeof val;
+        return t === 'string' || t === 'number' || t === 'boolean';
+    }
+
     renderOpenEndedBatchUI( notification ) {
         const questions = notification.response_options?.questions || [];
         const total     = questions.length;
@@ -18224,11 +19075,19 @@ class NotificationsUI {
             return '<div class="response-open-ended-batch"><p>No questions provided.</p></div>';
         }
 
+        // Option D (row bd0ce120): when a prediction at/above the auto-submit floor
+        // already holds the answers, prefill each input from the PREDICTION rather
+        // than the expeditor's weaker default (whose "query" default is the vague
+        // sentence itself). Returns null when the gate does not pass — then the
+        // legacy q.default_value stands.
+        const predicted = this._batchPredictedAnswers( notification );
+
         let questionsHTML = '';
         for ( let i = 0; i < total; i++ ) {
             const q = questions[ i ];
             const header       = q.header || `Question ${i + 1}`;
-            const defaultValue = q.default_value || '';
+            const predictedVal = predicted && predicted[ header ] != null ? String( predicted[ header ] ) : null;
+            const defaultValue = predictedVal != null ? predictedVal : ( q.default_value || '' );
 
             questionsHTML += `
                 <div class="batch-question" data-question-index="${i}" data-header="${this.escapeHtml( header )}">
@@ -18310,9 +19169,11 @@ class NotificationsUI {
         } else if ( responseType === 'open_ended_batch' ) {
             const answers = hint.predicted_value?.answers;
             if ( answers ) {
-                const parts = Object.entries( answers ).map( ( [ header, val ] ) =>
-                    `${header}: "${val}"`
-                );
+                // Label non-scalar values rather than print "[object Object]" (row 922b2db9).
+                const parts = Object.entries( answers ).map( ( [ header, val ] ) => {
+                    const shown = this._isScalarAnswer( val ) ? val : '[unavailable]';
+                    return `${header}: "${shown}"`;
+                } );
                 predictedText = `Predicted: ${parts.join( '; ' )} (${confidence}%)`;
             }
         }
@@ -20695,6 +21556,94 @@ class NotificationsUI {
      * Returns:
      *     Boolean indicating success
      */
+    /**
+     * Fill the Q&A card's agent dropdown from GET /api/v2/agents.
+     *
+     * Requires:
+     *     - the user is authenticated (an access token is available)
+     *     - shared/agent-select.js has loaded and published window.LUPIN_AGENT_SELECT
+     *
+     * Ensures:
+     *     - Caches the payload on this._agentsPayload, which submitQA reads to decide
+     *       which door a submission goes through and what args ride with it
+     *     - Renders the select from that payload, Auto-Route selected
+     *     - On ANY failure leaves the select EMPTY and says so in the status line.
+     *       A shortened list looks exactly like a working one, and the failure that
+     *       matters here is a MISSING agent — so this fails visibly rather than
+     *       falling back to a hardcoded list, which is the duplication being removed
+     */
+    async loadAgentSelect() {
+        const select = document.getElementById( 'agent-mode' );
+        if ( !select ) return;
+
+        // Read at CALL time, never at load time, so module execution order cannot
+        // matter — the same contract shared/task-list-query.js uses.
+        const agentSelect = window.LUPIN_AGENT_SELECT;
+        if ( !agentSelect ) {
+            this.log( "Agent select module missing — /static/js/shared/agent-select.js did not load" );
+            this.setModeStatus( "Agent list unavailable — agent-select.js did not load", "#dc3545" );
+            return;
+        }
+
+        try {
+            await this.ensureValidToken();
+            const response = await fetch( agentSelect.AGENTS_ENDPOINT, {
+                method  : 'GET',
+                headers : { 'Authorization': this.getAuthHeader() }
+            } );
+            if ( !response.ok ) {
+                // 503 is the v2 feature gate, and it is coherent: with `v2 flow
+                // enabled` off, /api/v2/submit is off too and a dropdown driving it
+                // has nothing to drive. Named separately because the remedy differs.
+                const why = response.status === 503
+                    ? "CJ Flow v2 is disabled"
+                    : `HTTP ${response.status}`;
+                this.error( `Failed to load agent list: ${why}` );
+                this.setModeStatus( `Agent list unavailable — ${why}`, "#dc3545" );
+                return;
+            }
+            this._agentsPayload = await response.json();
+            agentSelect.renderAgentSelect( select, this._agentsPayload );
+            this.updateOneShotRouteStatus();
+            this.log( `Agent select rendered: ${this._agentsPayload.agents.length} commands, ` +
+                      `${this._agentsPayload.agents.filter( ( a ) => a.user_initiable ).length} offered` );
+        } catch ( e ) {
+            this.error( `Error loading agent list: ${e.message}` );
+            this.setModeStatus( "Agent list unavailable — see console", "#dc3545" );
+        }
+    }
+
+    /**
+     * Write the mode-status line for the CURRENT one-shot selection.
+     *
+     * Ensures:
+     *     - Says "Auto-routing enabled" for the sentinel
+     *     - Otherwise names where the NEXT question goes, in one-shot language, so the
+     *       line does not read as a mode that will persist
+     */
+    updateOneShotRouteStatus() {
+        const select      = document.getElementById( 'agent-mode' );
+        const agentSelect = window.LUPIN_AGENT_SELECT;
+        if ( !select || !agentSelect ) return;
+
+        if ( agentSelect.isAutoRoute( select.value, this._agentsPayload ) ) {
+            this.setModeStatus( "Auto-routing enabled", "#6c757d" );
+            return;
+        }
+        const chosen = select.options[ select.selectedIndex ];
+        this.setModeStatus( `Next question goes to ${chosen ? chosen.textContent : select.value}`, "#0d6efd" );
+    }
+
+    /**
+     * Set the mode-status line's text and colour, or do nothing if it is absent.
+     */
+    setModeStatus( text, color ) {
+        const modeStatus = document.getElementById( 'mode-status' );
+        if ( !modeStatus ) return;
+        modeStatus.textContent = text;
+        modeStatus.style.color = color;
+    }
+
     async setAgentMode( mode ) {
         if ( !this.currentUserEmail ) {
             this.error( "Cannot set mode: No user logged in" );
@@ -20779,14 +21728,14 @@ class NotificationsUI {
      *     displayName: Human-readable mode name
      */
     updateModeUI( mode, displayName ) {
-        const agentModeSelect = document.getElementById( 'agent-mode' );
         const modeBadge = document.getElementById( 'mode-badge' );
-        const modeStatus = document.getElementById( 'mode-status' );
 
-        // Update dropdown selection
-        if ( agentModeSelect ) {
-            agentModeSelect.value = mode || 'system';
-        }
+        // THE SELECT IS NO LONGER DRIVEN FROM HERE. It used to be set to the server's
+        // sticky mode on every load, which worked while its values were short mode
+        // keys ("math"). They are full routing commands now, so a mode key would match
+        // no option and silently blank the dropdown — and per ruling 2 the select is a
+        // ONE-SHOT per-request route anyway, not a view of a persisted mode. The badge
+        // below still shows the sticky VOICE mode, which is a different thing.
 
         // Update badge visibility and content
         if ( modeBadge ) {
@@ -20798,16 +21747,10 @@ class NotificationsUI {
             }
         }
 
-        // Update status text
-        if ( modeStatus ) {
-            if ( mode && mode !== 'system' ) {
-                modeStatus.textContent = `Direct routing to ${displayName}`;
-                modeStatus.style.color = '#0d6efd';
-            } else {
-                modeStatus.textContent = 'Auto-routing enabled';
-                modeStatus.style.color = '#6c757d';
-            }
-        }
+        // The status line belongs to the ONE-SHOT selection now, not to the sticky
+        // voice mode — two writers on one element would race, and the select's own
+        // change handler is the one a user is looking at when they read it.
+        this.updateOneShotRouteStatus();
     }
 
     /**

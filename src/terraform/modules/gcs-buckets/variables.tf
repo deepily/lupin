@@ -1,7 +1,7 @@
 # gcs-buckets module — inputs
-# Two buckets per environment (LanceDB + Deep-Research). Names compose to match
-# the gs:// URIs hardcoded in lupin-app.ini so flipping storage_backend=gcs needs
-# zero code change.
+# One bucket per environment (Deep-Research). The name composes to match the gs://
+# URI hardcoded in lupin-app.ini so flipping storage_backend=gcs needs zero code
+# change. The LanceDB bucket was removed with the teardown on 2026-08-17.
 
 variable "project_id" {
   type        = string
@@ -16,19 +16,13 @@ variable "region" {
 
 variable "environment" {
   type        = string
-  description = "Environment suffix used to compose bucket names: lupin-lancedb-<env>, lupin-deep-research-<env>."
+  description = "Environment suffix used to compose the bucket name: lupin-deep-research-<env>."
 }
 
 variable "create_buckets" {
   type        = bool
-  description = "True provisions the buckets; false reuses pre-existing ones (Phase-0 V4 confirmed the -test buckets already exist in us-central1). The composed names are output either way."
+  description = "True provisions the bucket; false reuses a pre-existing one (Phase-0 V4 confirmed the -test bucket already exists in us-central1). The composed name is output either way."
   default     = true
-}
-
-variable "lancedb_keep_noncurrent_versions" {
-  type        = number
-  description = "Noncurrent object versions to retain on the LanceDB bucket (append-only store; versioning gives point-in-time recovery)."
-  default     = 3
 }
 
 variable "deep_research_nearline_age_days" {

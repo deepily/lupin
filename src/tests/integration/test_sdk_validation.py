@@ -256,14 +256,32 @@ class TestSDKOptions:
 # Phase 1.3: SDK Client Tests (require Claude CLI)
 # ============================================================================
 
-@pytest.mark.skip( reason="Requires active Claude SDK daemon connection — environment-dependent" )
 class TestSDKClient:
-    """Validate ClaudeSDKClient functionality."""
+    """
+    Validate ClaudeSDKClient functionality.
 
-    @pytest.mark.e2e
+    This class previously carried a blanket skip reading "requires active Claude
+    SDK daemon connection". That reason was true of two of the three tests and
+    false of the third — constructing a client opens no connection — and it sat
+    on top of two guards that already handle the environment: the
+    verify_claude_cli fixture skips when the CLI is absent, and each test skips
+    when the SDK package is not installed. The blanket added nothing except
+    making all three read as "skipped" rather than as never-verified.
+
+    The two tests that genuinely open a session keep the e2e mark, which
+    deselects them from the ordinary gate run. Construction is now unmarked and
+    runs like any other test.
+    """
+
     @pytest.mark.asyncio
     async def test_client_instantiation( self, verify_claude_cli, project_root ):
-        """ClaudeSDKClient should instantiate without error."""
+        """
+        ClaudeSDKClient should construct without error.
+
+        Construction alone — no e2e mark: this opens no daemon connection, so
+        there is nothing environment-dependent about it beyond the CLI and SDK
+        checks the fixture and the guard below already make.
+        """
         from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:

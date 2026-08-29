@@ -2165,17 +2165,27 @@ class TFEOrchestrator:
         )
         validation_job.metadata[ "tfe_fix_count" ] = len( successful )
 
-        # Push to the todo queue (same pattern as BFE Phase 6 _resubmit_original_job)
+        # Step 12: submit through the v2 flow (same pattern as BFE Phase 6
+        # _resubmit_original_job, which reads the flow off the app module the same way
+        # both used to read jobs_todo_queue). A PREBUILT JOB goes to `submit`: the
+        # factory above named the command, so there is nothing to route. The flow's
+        # queued executor scopes the id and pushes, which is what this used to do.
         try:
             import lupin_app.main as main_module
-            todo_queue = main_module.jobs_todo_queue
-            if todo_queue is None:
-                raise RuntimeError( "jobs_todo_queue is None — app not initialized" )
-            todo_queue.push( validation_job )
+            ask_flow = main_module.ask_flow
+            if ask_flow is None:
+                raise RuntimeError( "ask_flow is None — app not initialized" )
+            ask_flow.submit(
+                job          = validation_job,
+                user_id      = getattr( validation_job, "user_id", "" ),
+                user_email   = getattr( validation_job, "user_email", "" ),
+                session_id   = getattr( validation_job, "session_id", "" ),
+                websocket_id = getattr( validation_job, "session_id", "" ),
+            )
         except Exception as e:
-            logger.error( f"[TFE] Phase 6 queue push error: {e}" )
+            logger.error( f"[TFE] Phase 6 queue submit error: {e}" )
             await self._notify(
-                f"Phase 6 failed: could not push validation job to queue ({e})",
+                f"Phase 6 failed: could not submit validation job to the queue ({e})",
                 priority="high",
             )
             self.validation_run_job_id = None

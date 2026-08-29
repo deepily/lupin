@@ -277,6 +277,56 @@
             const token   = localStorage.getItem( 'lupin_access_token' );
             const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
 
+            // ── REFRESH-AND-RETRY (bug 38943485, defect 2 — same shape as the audio
+            // player, found here by the guard written for that fix on its first run).
+            //
+            // This page is STANDALONE: it is not the notifications app and has no access
+            // to that app's authedFetch/ensureValidToken. It read the JWT from
+            // localStorage and fired bare — so an expired token turned every doc link in
+            // the fleet into a dead end with no retry.
+            //
+            // That matters more here than on the audio player: doc-viewer links are what
+            // every session emits in abstracts, and they are clicked long after they are
+            // sent, which is exactly when a token has had time to age out.
+            //
+            // Refreshes ONCE on a 401 and retries. No expiry pre-check — a 401 is the only
+            // authority on whether the token this page holds still works.
+            let bearer = token;
+
+            async function refreshAccessToken() {
+                const refreshToken = localStorage.getItem( 'lupin_refresh_token' );
+                if ( !refreshToken ) return false;
+                try {
+                    const resp = await fetch( '/auth/refresh', {
+                        method  : 'POST',
+                        headers : { 'Content-Type': 'application/json' },
+                        body    : JSON.stringify( { refresh_token: refreshToken } )
+                    } );
+                    if ( !resp.ok ) return false;
+                    const data = await resp.json();
+                    // Same storage keys the app uses — the two must never diverge.
+                    localStorage.setItem( 'lupin_access_token',  data.tokens.access_token  );
+                    localStorage.setItem( 'lupin_refresh_token', data.tokens.refresh_token );
+                    bearer = data.tokens.access_token;
+                    return true;
+                } catch ( e ) {
+                    return false;
+                }
+            }
+
+            async function authedFetch( url, init ) {
+                const withAuth = ( t ) => {
+                    const merged = Object.assign( {}, init || {} );
+                    merged.headers = Object.assign( {}, ( init && init.headers ) || {} );
+                    if ( t ) merged.headers[ 'Authorization' ] = 'Bearer ' + t;
+                    return merged;
+                };
+                let resp = await fetch( url, withAuth( bearer ) );
+                if ( resp.status !== 401 ) return resp;
+                if ( !( await refreshAccessToken() ) ) return resp;
+                return await fetch( url, withAuth( bearer ) );
+            }
+
             // First-segment routing per 2026-05-15 unification. See _scope_registry.py.
             //
             // Bug 3d41fcba (2026-07-13): this was a HARDCODED literal set. Every repo
@@ -290,7 +340,7 @@
             // repo is sufficient to make it viewable. No literal to forget.
             let knownProjects = new Set();
             try {
-                const scopesResp = await fetch( '/api/docs/scopes', { headers } );
+                const scopesResp = await authedFetch( '/api/docs/scopes', {} );
                 if ( scopesResp.ok ) {
                     const scopesData = await scopesResp.json();
                     knownProjects = new Set( ( scopesData.scopes ?? [] ).map( s => s.name ) );
@@ -326,7 +376,7 @@
             const fetchUrl = apiPath + '?path=' + encodeURIComponent( fetchPath );
 
             try {
-                const response = await fetch( fetchUrl, { headers } );
+                const response = await authedFetch( fetchUrl, {} );
 
                 // 401 → redirect to login, preserving the current URL as the
                 // post-login return target. Skip the redirect when there's no
@@ -373,7 +423,21 @@
                     return;
                 }
 
-                const markdown = await response.text();
+                const rawMarkdown = await response.text();
+
+                // Honor a self-refresh directive if the document carries one.
+                // Deliberately BEFORE rendering: a live dashboard that fails to
+                // render should still retry on its own schedule rather than sit
+                // stale until somebody notices it stopped moving.
+                scheduleAutoRefresh( rawMarkdown );
+
+                // Strip the directive before rendering rather than relying on
+                // the sanitizer to drop the comment node. The timer is already
+                // scheduled from the raw text above, so removing it here cannot
+                // affect behavior — it only guarantees the marker can never
+                // surface as visible text, whatever DOMPurify does with
+                // comments.
+                const markdown = rawMarkdown.replace( AUTOREFRESH_DIRECTIVE, '' );
 
                 // Configure marked (mirrors notifications.js renderMarkdown config)
                 marked.setOptions( {
@@ -551,6 +615,74 @@
             pre.className   = 'doc-code-content';
             pre.textContent = code;
             target.appendChild( pre );
+        }
+
+        // Minimum lead time before a scheduled reload. Guards the case where
+        // the page loads a few milliseconds BEFORE its own boundary: without
+        // it, the computed delay is ~0 (or negative) and the page reloads
+        // immediately, then again, in a tight loop.
+        const AUTOREFRESH_MIN_LEAD_MS = 5000;
+
+        // The opt-in marker. Defined once and used twice — to read the cadence,
+        // and to strip the marker before render — so the two can never drift
+        // into disagreeing about what a directive looks like.
+        const AUTOREFRESH_DIRECTIVE = /<!--\s*doc-viewer:autorefresh\s+period=(\d+)\s+offset=(\d+)\s*-->/;
+
+        // Self-refreshing documents — added 2026-08-19 for the Epic Board,
+        // which cron regenerates every 10 minutes and which is meant to be left
+        // open on a second screen.
+        //
+        // A document opts in by carrying an HTML comment naming its cadence:
+        //     <!-- doc-viewer:autorefresh period=10 offset=1 -->
+        // The comment is invisible in the rendered page and inert in any reader
+        // that does not look for it, so an opted-in document is still just a
+        // document.
+        //
+        // The reload is pinned to WALL-CLOCK boundaries, not to "now + period".
+        // Anchoring to load time would drift a little further behind the
+        // generator on every cycle and would eventually land mid-write; pinning
+        // to the boundary keeps every viewer, however long it has been open, in
+        // the same one-minute-behind-the-generator slot. With period=10 and
+        // offset=1 that is :01, :11, :21, ...
+        //
+        // Requires:
+        //     - markdown is a string (the raw document text, pre-render)
+        // Ensures:
+        //     - returns the scheduled delay in ms, or null when the document
+        //       carries no directive or the directive is unusable
+        //     - schedules at most one reload per call
+        //     - never schedules sooner than AUTOREFRESH_MIN_LEAD_MS from now
+        function scheduleAutoRefresh( markdown ) {
+
+            const directive = markdown.match( AUTOREFRESH_DIRECTIVE );
+            if ( !directive ) return null;
+
+            const periodMin = parseInt( directive[ 1 ], 10 );
+            const offsetMin = parseInt( directive[ 2 ], 10 );
+
+            // A zero/absent period would mean "reload continuously". Refuse it
+            // rather than honoring a directive that would pin the CPU.
+            if ( !Number.isFinite( periodMin ) || periodMin <= 0 ) return null;
+            if ( !Number.isFinite( offsetMin ) || offsetMin <  0 ) return null;
+
+            const now  = new Date();
+            const next = new Date( now );
+            next.setSeconds( 0, 0 );
+
+            // Minutes forward to the next instant where ( minute - offset ) is
+            // an exact multiple of period. The doubled modulo is what keeps the
+            // result non-negative — JavaScript's % returns the sign of the
+            // dividend, so a bare ( offset - minute ) % period goes negative for
+            // most of every hour.
+            const minutes = next.getMinutes();
+            const forward = ( ( ( offsetMin - minutes ) % periodMin ) + periodMin ) % periodMin;
+            next.setMinutes( minutes + forward );
+
+            let delayMs = next.getTime() - now.getTime();
+            if ( delayMs < AUTOREFRESH_MIN_LEAD_MS ) delayMs += periodMin * 60 * 1000;
+
+            setTimeout( () => window.location.reload(), delayMs );
+            return delayMs;
         }
     </script>
 </body>

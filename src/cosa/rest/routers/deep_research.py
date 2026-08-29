@@ -18,9 +18,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 import cosa.utils.util as cu
-from cosa.rest.auth import get_current_user
-from cosa.rest.queue_extensions import user_job_tracker
-from cosa.rest.agentic_job_factory import create_agentic_job
+from cosa.rest.routers._retired_doors import gone, tombstone_description
 
 # Import GCS utilities
 try:
@@ -33,166 +31,61 @@ router = APIRouter( tags=[ "deep-research" ] )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Pydantic Models
+# Job Submission Endpoint — retired
+#
+# The request and response models went with the handler, and so did the todo-queue
+# dependency. A Pydantic model no route reads is a shape a caller can still find and
+# reasonably believe in, and a queue handle in a module whose only POST is a tombstone
+# reads as a door that was disabled rather than retired.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class DeepResearchSubmitRequest( BaseModel ):
-    """Request body for submitting a deep research job."""
-    query: str = Field( ..., min_length=1, description="The research query to investigate" )
-    budget: Optional[ float ] = Field( None, ge=0, description="Maximum budget in USD (None = unlimited)" )
-    websocket_id: Optional[ str ] = Field( None, description="WebSocket session ID for notifications" )
-    lead_model: Optional[ str ] = Field( None, description="Model for lead agent (None = use default)" )
-    dry_run: bool = Field( False, description="Simulate execution without API calls" )
-    force_failure_mode: Optional[ str ] = Field( None, description="Phase 6 dry-run repair loop: 'code_bug' | 'infra_timeout' | 'rate_limit' to inject a failure at the end of dry-run" )
-    audience: Optional[ str ] = Field( None, description="Target audience level: beginner, general, expert, academic" )
-    audience_context: Optional[ str ] = Field( None, description="Custom audience description" )
-    scheduled_at: Optional[ str ] = Field( None, description="ISO datetime for deferred execution (None = immediate)" )
-    monopolize: bool = Field( False, description="Run exclusively, block all other jobs until complete" )
-
-
-class DeepResearchSubmitResponse( BaseModel ):
-    """Response body for deep research job submission."""
-    status: str = Field( ..., description="Job status (queued)" )
-    job_id: str = Field( ..., description="Unique job identifier (dr-{uuid8})" )
-    queue_position: int = Field( ..., description="Position in the todo queue" )
-    message: str = Field( ..., description="Human-readable confirmation message" )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Dependencies
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def get_todo_queue():
-    """
-    Dependency to get todo queue from main module.
-
-    Returns:
-        TodoFifoQueue: The todo queue instance
-    """
-    import lupin_app.main as main_module
-    return main_module.jobs_todo_queue
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Job Submission Endpoint
-# ═══════════════════════════════════════════════════════════════════════════════
-
+# ── TOMBSTONE — /api/deep-research/submit ──
+#
+# THE REPORT AND HEALTH ROUTES BELOW SURVIVE. They read a finished report and answer a
+# health check; neither puts work on the queue, so neither is a door in the sense this
+# retirement is about.
+#
+# WHAT THE CALLER DOES INSTEAD. This door named its own command and put the caller's
+# scheduling and lineage fields on the job by hand. `/api/v2/submit` takes the command as
+# a string and the same arguments as `args`, and carries `scheduled_at`, `monopolize` and
+# `parent_id_hash` as its own top-level fields:
+#
+#     POST /api/v2/submit
+#     { "command": "agent router go to deep research",
+#       "args"   : { "query": "...", "budget": 3.0, "dry_run": false },
+#       "scheduled_at": "...", "monopolize": false, "parent_id_hash": null }
+#
+# NOTHING THIS DOOR DID IS LOST, and each piece is worth naming because "the new door does
+# it too" is the claim a tombstone rests on: the job is built by the same
+# `create_agentic_job` this handler called; the id is scoped through the same
+# `user_job_tracker.register_scoped_job`, in the queued executor (executor.py:197) rather
+# than here; the scheduling fields and the lineage stamp land on the job in the factory;
+# and the 400s for a token with no uid or email are the 401s `submit` already raises.
+#
+# The one thing that genuinely does not come back is `queue_position`. `AskResponse` has no
+# such field and is not being widened for it — a job card learns its place from the queue
+# websocket events, which is where a position that changes as the queue moves belongs
+# anyway, rather than from a number frozen at the instant of submission.
+#
+# The body is DELETED rather than left unreachable under a raise: unreachable code is code
+# nobody can test and everybody must still read. Recover it from git if any of its handling
+# turns out to be worth carrying into the flow.
 @router.post(
     "/api/deep-research/submit",
-    response_model = DeepResearchSubmitResponse,
-    summary        = "Submit deep research job",
-    description    = "Create a deep research job and push to the CJ Flow todo queue."
+    deprecated  = True,
+    status_code = 410,
+    summary     = "GONE — use /api/v2/submit",
+    description = tombstone_description( "/api/deep-research/submit" )
 )
-async def submit_research(
-    request_body: DeepResearchSubmitRequest,
-    current_user: dict = Depends( get_current_user ),
-    todo_queue = Depends( get_todo_queue )
-):
+async def submit_research():
     """
-    Submit a deep research job to run in the background.
-
-    Creates a DeepResearchJob and pushes it to the todo queue for
-    asynchronous execution. The job will run through the queue system
-    and send progress notifications via WebSocket.
-
-    Requires:
-        - Authenticated user (current_user from token)
-        - Valid research query
-        - Valid user email for report storage
+    Refuse this retired door with 410 Gone.
 
     Ensures:
-        - DeepResearchJob created with unique ID
-        - Job pushed to todo queue
-        - Returns job_id for tracking
-
-    Args:
-        request_body: Research job parameters
-        current_user: Authenticated user from token
-        todo_queue: Todo queue instance
-
-    Returns:
-        DeepResearchSubmitResponse: Job submission confirmation
-
-    Raises:
-        HTTPException 400: Invalid request parameters
-        HTTPException 500: Queue push failed
+        - never returns; raises HTTPException( 410 ) naming /api/v2/submit and the
+          REMOVE BY 2026-12-31 date
     """
-    from cosa.agents.deep_research.job import DeepResearchJob
-
-    # Get user ID and email from token (canonical source - don't trust client)
-    user_id    = current_user.get( "uid" )
-    user_email = current_user.get( "email" )
-
-    if not user_id:
-        raise HTTPException(
-            status_code=400,
-            detail="User ID not found in authentication token"
-        )
-
-    if not user_email:
-        raise HTTPException(
-            status_code=400,
-            detail="User email not found in authentication token"
-        )
-
-    # Use provided websocket_id or fall back to a default
-    session_id = request_body.websocket_id or f"api-{user_id[ :8 ]}"
-
-    try:
-        # Create the DeepResearchJob using shared factory
-        args_dict = { "query": request_body.query }
-        if request_body.budget is not None:
-            args_dict[ "budget" ] = str( request_body.budget )
-        if request_body.dry_run:
-            args_dict[ "dry_run" ] = True
-        if request_body.force_failure_mode:
-            args_dict[ "force_failure_mode" ] = request_body.force_failure_mode
-        if request_body.audience:
-            args_dict[ "audience" ] = request_body.audience
-        if request_body.audience_context:
-            args_dict[ "audience_context" ] = request_body.audience_context
-
-        job = create_agentic_job(
-            command    = "agent router go to deep research",
-            args_dict  = args_dict,
-            user_id    = user_id,
-            user_email = user_email,
-            session_id = session_id
-        )
-
-        if job is None:
-            raise HTTPException( status_code=500, detail="Failed to create research job" )
-
-        # Apply lead_model if specified (factory doesn't handle this)
-        if request_body.lead_model:
-            job.lead_model = request_body.lead_model
-
-        # Scheduling attributes pass-through (CJ Flow timed execution + monopolize)
-        if request_body.scheduled_at: job.scheduled_at = request_body.scheduled_at
-        if request_body.monopolize:   job.monopolize   = request_body.monopolize
-
-        # Atomic: scope ID + index for user filtering BEFORE push (race condition prevention)
-        job.id_hash = user_job_tracker.register_scoped_job( job.id_hash, user_id, session_id )
-
-        # Push to todo queue
-        # The todo queue's push method handles WebSocket notifications
-        todo_queue.push( job )
-
-        # Get queue position (approximate - queue length after push)
-        queue_position = todo_queue.size()
-
-        return DeepResearchSubmitResponse(
-            status         = "queued",
-            job_id         = job.id_hash,
-            queue_position = queue_position,
-            message        = f"Deep research job queued: {job.last_question_asked}"
-        )
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to submit research job: {str( e )}"
-        )
+    gone( "/api/deep-research/submit" )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

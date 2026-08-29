@@ -23,12 +23,37 @@ if [[ -z "${LUPIN_ROOT:-}" ]]; then
   exit 1
 fi
 
-# Explicit project-venv interpreter (NOT bare `python` — systemd --user PATH is minimal).
-PYBIN="${LUPIN_ROOT}/.venv/bin/python"
+# Explicit venv interpreter (NOT bare `python` — systemd --user PATH is minimal).
+#
+# RESOLUTION ORDER (2026-08-10) — first match wins:
+#   1. $LUPIN_ARBITER_VENV        explicit override (deploys, tests, odd hosts)
+#   2. $HOME/.venvs/lupin-arbiter the standalone host venv's HOME
+#   3. $LUPIN_ROOT/.venv          legacy / dev box, where a full project venv lives
+#
+# WHY 2 EXISTS AND WHY IT COMES BEFORE 3: the arbiter's host venv used to live at
+# $LUPIN_ROOT/.venv-arbiter, INSIDE the deploy tree. Every code push runs
+# `sudo chown -R 1001:1001` over that tree (lupin-vm.sh; deploy-cloud-test.sh did the
+# same until it was retired 2026-08-26, row 0d175dac),
+# and uid 1001 does not exist on lupin-host-test — so the venv ended up owned by a
+# nonexistent user, unwritable by the service account that runs it. Provisioning it
+# in place failed with `PermissionError: RECORD`, and a hand-chown was silently
+# reverted by the next deploy. A runtime dependency has no business living in a tree
+# that git and the deploy chown out from under it.
+# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+if [[ -n "${LUPIN_ARBITER_VENV:-}" ]]; then
+  PYBIN="${LUPIN_ARBITER_VENV}/bin/python"
+elif [[ -x "${HOME}/.venvs/lupin-arbiter/bin/python" ]]; then
+  PYBIN="${HOME}/.venvs/lupin-arbiter/bin/python"
+else
+  PYBIN="${LUPIN_ROOT}/.venv/bin/python"
+fi
 if [[ ! -x "${PYBIN}" ]]; then
-  echo "venv python not found/executable at ${PYBIN} — create .venv and install requirements" >&2
+  echo "venv python not found/executable at ${PYBIN}" >&2
+  echo "  provision it:  src/scripts/provision-arbiter-on-vm.sh" >&2
+  echo "  or point at one explicitly:  export LUPIN_ARBITER_VENV=/path/to/venv" >&2
   exit 1
 fi
+echo "run-lupin-arbiter-app: interpreter ${PYBIN}" >&2
 
 export PYTHONPATH="${LUPIN_ROOT}/src:${PYTHONPATH:-}"
 

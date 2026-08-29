@@ -68,8 +68,8 @@ test( "template: builds #section-toolbar with collapse/expand + one toolbar-btn 
   assert.equal( el.id, "section-toolbar" );
   assert.equal( el.className, "section-toolbar" );
   assert.equal( el.getAttribute( "role" ), "toolbar" );
-  assert.notEqual( el.querySelector( `#${COLLAPSE_ALL_ID}` ), null );
-  assert.notEqual( el.querySelector( `#${EXPAND_ALL_ID}` ), null );
+  assert.ok( el.querySelector( `#${COLLAPSE_ALL_ID}` ) !== null );
+  assert.ok( el.querySelector( `#${EXPAND_ALL_ID}` ) !== null );
   const btns = el.querySelectorAll( ".toolbar-btn" );
   assert.equal( btns.length, SECTION_TOGGLES.length );
   // Lane 0c: a cold-default-VISIBLE section renders `.active`; a
@@ -89,7 +89,7 @@ test( "template: builds #section-toolbar with collapse/expand + one toolbar-btn 
 test( "template: a custom toggles list renders exactly those buttons", () => {
   const el = renderSectionToolbar( [ { sectionId: "x-pane", icon: "🧪", title: "X", testid: "x" } ] );
   assert.equal( el.querySelectorAll( ".toolbar-btn" ).length, 1 );
-  assert.notEqual( el.querySelector( `.toolbar-btn[data-section="x-pane"]` ), null );
+  assert.ok( el.querySelector( `.toolbar-btn[data-section="x-pane"]` ) !== null );
 } );
 
 // ===========================================================================
@@ -101,10 +101,10 @@ test( "mount: builds toolbar into root; double mount throws; unmount idempotent"
   const mount = makeMount();
   const r = createSectionToolbarRenderer( { stores: { viewState: makeFakeViewState() }, doc: document } );
   r.mount( mount );
-  assert.notEqual( mount.querySelector( "#section-toolbar" ), null );
+  assert.ok( mount.querySelector( "#section-toolbar" ) !== null );
   assert.throws( () => r.mount( mount ), /already mounted/ );
   r.unmount();
-  assert.equal( mount.querySelector( "#section-toolbar" ), null );
+  assert.ok( mount.querySelector( "#section-toolbar" ) === null );
   r.unmount();   // idempotent — no throw, toolbar already null
 } );
 

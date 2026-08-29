@@ -27,7 +27,12 @@ class DateAndTimeAgent( AgentBase ):
         
         super().__init__( df_path_key=None, question=question, question_gist=question_gist, last_question_asked=last_question_asked, routing_command=routing_command, push_counter=push_counter, user_id=user_id, user_email=user_email, session_id=session_id, debug=debug, verbose=verbose, auto_debug=auto_debug, inject_bugs=inject_bugs )
         
-        self.prompt = self.prompt_template.format( question=self.question )
+        # The container clock is UTC; the user is not. Name the zone in the prompt so the
+        # generated code reads the RIGHT clock — same `app timezone` key the notification
+        # queue and the arbiter journal already read. A named zone, never a fixed offset:
+        # an offset is wrong for half the year, which is exactly the bug this closes.
+        self.timezone = self.config_mgr.get( "app timezone", default="America/New_York" )
+        self.prompt   = self.prompt_template.format( question=self.question, timezone=self.timezone )
         self.xml_response_tag_names   = [ "thoughts", "brainstorm", "evaluation", "code", "example", "returns", "explanation" ]
     
         # self.serialize_prompt_to_json = self.config_mgr.get( "agent todo list serialize prompt to json", default=False, return_type="boolean" )

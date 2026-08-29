@@ -358,6 +358,38 @@ detected, all entries (universal + agent-scoped) are considered.
 | `open_ended_batch` | Multiple questions on one screen | "Topic? Budget? Audience?" (all at once) |
 | `multiple_choice` | Select from predefined options | "Who is the target audience? [academic/general/technical]" |
 
+#### ⚠️ The document choice card: its options do not exist until run time
+
+Most `multiple_choice` questions have a fixed option set you can write an answer
+against. The expeditor's **document choice card** — "Which document should I use for
+the …?", shown when the file matcher finds 2-to-cap candidates — does not: its option
+labels are the basenames of whatever documents the user happens to have, discovered
+during the run. **An `answer` naming a file can therefore never match a label.** The
+script matcher is told to *"pick the option label that best aligns with the Q&A
+script's answer"*, so the entry carries a **directive** instead:
+
+```json
+{
+  "question_pattern" : "Which document should I use for the presentation?",
+  "answer"           : "Pick the first document option in the list — never 'Let me describe it' and never 'Cancel'.",
+  "arg_name"         : "source",
+  "response_types"   : [ "multiple_choice" ]
+}
+```
+
+**A missing entry does not error — the run CANCELS at the card**, which is
+indistinguishable from a user declining. That is exactly what happened to a live
+presentation job on 2026-08-21 (`[Expeditor] User cancelled at arg 'source'`, row
+`9046ef58`); podcast had been able to show the same card since row `bd0ce120` with no
+entry either, and simply never landed on 2+ matches in an automated run.
+
+**The `question_pattern` is a KEY into the code.** It must stay byte-identical to what
+`RuntimeArgumentExpeditor._document_choice_question()` returns for that agent;
+`src/tests/unit/test_proxy_scripts_answer_the_choice_card.py` derives the question from
+the code and fails if the file disagrees, so the two cannot drift apart in silence.
+Any new agent whose args use the `fuzzy_file_match` handler needs an entry here, and
+that test is where you add it.
+
 ### How Each Type Maps Through Each Strategy Tier
 
 | Response Type | Tier 1 (Script Matcher) | Tier 2 (Rules) | Tier 3 (Cloud LLM) |

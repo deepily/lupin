@@ -41,6 +41,17 @@ class _Queue:
         self.queue_list.append( job )
 
 
+class _Flow:
+    """The v2 AskFlow seam (step 12). The arbiter no longer pushes onto the queue
+    itself; it submits, and the flow's queued executor does the pushing. Recording
+    the submit is the same assertion the old `todo.queue_list[-1] is job` made."""
+    def __init__( self ):
+        self.submitted = [ ]
+    def submit( self, job=None, **kwargs ):
+        self.submitted.append( ( job, kwargs ) )
+        return { "status": "waiting", "job_id": getattr( job, "id_hash", "fake" ) }
+
+
 # ── arbiter_already_present ────────────────────────────────────────────────────
 
 class TestGuard:
@@ -69,34 +80,51 @@ class TestGuard:
 
 class TestSubmit:
     def test_submits_when_absent( self ):
-        todo, run, logs = _Queue(), _Queue(), [ ]
+        todo, run, logs, flow = _Queue(), _Queue(), [ ], _Flow()
         job = submit_arbiter_if_absent( todo, run, object(),
-                                        job_builder=lambda cfg: _ArbiterJob(), log=logs.append )
+                                        job_builder=lambda cfg: _ArbiterJob(), log=logs.append,
+                                        ask_flow=flow )
         assert job is not None
-        assert todo.queue_list[ -1 ] is job        # pushed to TODO
+        assert flow.submitted[ -1 ][ 0 ] is job     # submitted through the flow, not pushed
+        assert todo.queue_list == [ ]               # and NOT pushed onto the queue directly
         assert any( "submitted" in m for m in logs )
 
     def test_noop_when_present( self ):
-        todo, run, logs = _Queue( [ _ArbiterJob() ] ), _Queue(), [ ]
+        todo, run, logs, flow = _Queue( [ _ArbiterJob() ] ), _Queue(), [ ], _Flow()
         job = submit_arbiter_if_absent( todo, run, object(),
-                                        job_builder=lambda cfg: _ArbiterJob(), log=logs.append )
+                                        job_builder=lambda cfg: _ArbiterJob(), log=logs.append,
+                                        ask_flow=flow )
         assert job is None
-        assert len( todo.queue_list ) == 1          # nothing new pushed
+        assert flow.submitted == [ ]                # nothing new submitted
         assert any( "already present" in m for m in logs )
 
     def test_builder_failure_swallowed_degrade_safe( self ):
-        todo, run, logs = _Queue(), _Queue(), [ ]
+        todo, run, logs, flow = _Queue(), _Queue(), [ ], _Flow()
         def _boom( cfg ):
             raise RuntimeError( "config unavailable" )
-        job = submit_arbiter_if_absent( todo, run, object(), job_builder=_boom, log=logs.append )
+        job = submit_arbiter_if_absent( todo, run, object(), job_builder=_boom, log=logs.append,
+                                        ask_flow=flow )
         assert job is None
-        assert todo.queue_list == [ ]               # nothing pushed
+        assert flow.submitted == [ ]                # nothing submitted
         assert any( "degrade-safe" in m for m in logs )   # logged, not raised
+
+    def test_missing_flow_is_degrade_safe_and_says_so( self ):
+        """No flow is a wiring bug, but the arbiter is an ADDITIVE OBSERVER — it must
+        log and return, never take startup down. The raise inside is caught by the
+        same degrade-safe guard that catches a builder failure."""
+        todo, run, logs = _Queue(), _Queue(), [ ]
+        job = submit_arbiter_if_absent( todo, run, object(),
+                                        job_builder=lambda cfg: _ArbiterJob(), log=logs.append )
+        assert job is None
+        assert todo.queue_list == [ ]
+        assert any( "no ask_flow" in m for m in logs )
+        assert any( "degrade-safe" in m for m in logs )
 
     def test_default_log_is_print( self ):
         # exercise the default log= (print) path without asserting stdout
         todo, run = _Queue(), _Queue()
-        job = submit_arbiter_if_absent( todo, run, object(), job_builder=lambda cfg: _ArbiterJob() )
+        job = submit_arbiter_if_absent( todo, run, object(), job_builder=lambda cfg: _ArbiterJob(),
+                                        ask_flow=_Flow() )
         assert job is not None
 
 
@@ -115,8 +143,8 @@ class _FlagCfg:
 
 def _recording_submit():
     calls = [ ]
-    def submit( todo, run, cfg, log=print ):
-        calls.append( ( todo, run, cfg ) )
+    def submit( todo, run, cfg, log=print, ask_flow=None ):
+        calls.append( ( todo, run, cfg, ask_flow ) )
         return "JOB"
     return submit, calls
 
@@ -151,6 +179,16 @@ class TestR0Gate:
         assert any( "WARNING" in m for m in logs )       # loud-warn on typo (ruling D)
         assert any( "DISABLED" in m for m in logs )
 
+    def test_the_flow_reaches_the_inner_submit( self ):
+        """The gate is a pass-through for ask_flow. A gate that read the flag correctly
+        and dropped the flow would leave the arbiter unable to reach the queue, and
+        every other test here would still pass."""
+        submit, calls = _recording_submit()
+        flow = _Flow()
+        submit_arbiter_if_enabled( _Queue(), _Queue(), _FlagCfg( "true" ),
+                                   submit_fn=submit, log=lambda *a: None, ask_flow=flow )
+        assert calls[ 0 ][ 3 ] is flow
+
     def test_t5_flag_read_once( self ):
         cfg = _FlagCfg( "true" )
         submit, _ = _recording_submit()
@@ -182,7 +220,7 @@ class _DefaultsCfg:
 def test_build_arbiter_job_wires_real_hold_reader( monkeypatch ):
     from cosa.rest import arbiter_bootstrap as ab
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
-    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold_via_bridge
 
     class _FakeGW:
         def who( self, retention_hours=24 ): return [ ]
@@ -193,5 +231,8 @@ def test_build_arbiter_job_wires_real_hold_reader( monkeypatch ):
     monkeypatch.setattr( LupinArbiterGateway, "from_environment",
                          classmethod( lambda cls, **kw: _FakeGW() ) )
     job = ab.build_arbiter_job( _DefaultsCfg() )
-    assert job._hold_reader_fn is read_hold                   # non-None AND resolves to read_hold
+    # row 011f1f90: this gated-OFF in-process path wires the resilient per-session reader
+    # DIRECTLY (no log_fn wrapper — no journal on the dead path), so identity still holds.
+    # The live :8001 factory wraps it in a lambda to thread log_fn; that one is behavioral.
+    assert job._hold_reader_fn is read_hold_via_bridge       # non-None AND resolves to the bridge reader
     assert job.user_gate_resurface_seconds == 1800           # default ceiling threaded

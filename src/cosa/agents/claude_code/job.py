@@ -114,12 +114,16 @@ class ClaudeCodeJob( AgenticJobBase ):
             - user_id is a valid system ID
             - user_email is a valid email address
             - session_id is a WebSocket session ID
-            - task_type is "BOUNDED" or "INTERACTIVE"
+            - task_type is "BOUNDED" or "INTERACTIVE" (case-insensitive)
 
         Ensures:
             - Job ID generated with "cc-" prefix
             - All parameters stored for execution
             - Defaults loaded from ConfigurationManager when params are None
+            - task_type is stored upper-cased, and is one of the two legal values
+
+        Raises:
+            - ValueError if task_type is neither BOUNDED nor INTERACTIVE
 
         Args:
             prompt: The task prompt for Claude Code
@@ -150,7 +154,21 @@ class ClaudeCodeJob( AgenticJobBase ):
         # Claude Code task parameters (use config defaults when not explicitly provided)
         self.prompt          = prompt
         self.project         = project
+        # THE TWO LEGAL VALUES, CHECKED HERE RATHER THAN AT A DOOR. The Requires above has
+        # always said BOUNDED or INTERACTIVE, and nothing enforced it: an unknown value was
+        # stored and then tested with `== "BOUNDED"` at every branch below (dispatch, the
+        # notification prefix, the run fork), so a typo did not fail — it silently ran the
+        # task INTERACTIVE, waiting for a human who is not there.
+        #
+        # `/api/claude-code/submit` held this guard as a 400 and is now a tombstone;
+        # `/api/v2/submit` is generic and validates `args` against the command's argument
+        # contract, which says nothing about which VALUES an argument may take. So the check
+        # moves to the job, where it also covers the voice path and the in-process callers.
         self.task_type       = task_type.upper()
+        if self.task_type not in ( "BOUNDED", "INTERACTIVE" ):
+            raise ValueError(
+                f"Invalid task_type [{task_type}] — must be BOUNDED or INTERACTIVE."
+            )
         self.max_turns       = max_turns if max_turns is not None else self._default_max_turns
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else self._default_timeout
         self.dry_run         = dry_run
@@ -308,6 +326,9 @@ class ClaudeCodeJob( AgenticJobBase ):
 
 **Output**: {self.output_text[ :200 ] if self.output_text else "No output"}..."""
 
+            # Store the abstract in artifacts so it rides the running→done transition (bug 9b481811 sweep)
+            self.artifacts[ "abstract" ] = completion_abstract
+
             # Notify completion
             await cosa_interface.notify_progress(
                 f"Claude Code task complete. Cost: {cost_str}",
@@ -424,6 +445,9 @@ class ClaudeCodeJob( AgenticJobBase ):
 - **Duration**: ~{total_duration:.0f}s (simulated)
 
 This was a dry-run simulation. No actual Claude Code execution occurred."""
+
+        # Store the abstract in artifacts so it rides the running→done transition (bug 9b481811 sweep)
+        self.artifacts[ "abstract" ] = completion_abstract
 
         await cosa_interface.notify_progress(
             f"Dry run complete: {self.id_hash}",
@@ -629,6 +653,9 @@ This was a dry-run simulation. No actual Claude Code execution occurred."""
 - **Context prompt**: {context_prompt_len} chars
 
 This was a dry-run simulation exercising MessageHistory and multi-turn context."""
+
+        # Store the abstract in artifacts so it rides the running→done transition (bug 9b481811 sweep)
+        self.artifacts[ "abstract" ] = completion_abstract
 
         await cosa_interface.notify_progress(
             f"Dry run complete: {self.id_hash}",

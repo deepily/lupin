@@ -38,9 +38,19 @@ T0  = datetime.datetime( 2026, 6, 7, 12, 0, 0, tzinfo=UTC )
 
 def _report( files_found=0, roots_swept=( "/projects/lupin", ), prunable=0, keep=0,
              cargo_bearing=0, ttl_unusable=0, anchor_disagreement=0, kept_reasons=None,
-             roots_unreachable=(), skipped=(), roots_requested=None ):
+             roots_unreachable=(), skipped=(), roots_requested=None, misplaced_paths=(),
+             location_zone="/mnt/DATA01/include/www.deepily.ai/projects-data" ):
     """A report_hold_files-shaped result. The supervisor consumes the REPORT contract
-    (classify + count), never a prune list — it cannot delete a hold file."""
+    (classify + count), never a prune list — it cannot delete a hold file.
+
+    Row 011f1f90 added two location fields this fake MUST mirror or _sweep_hold_files
+    KeyErrors and the report event never fires:
+      - `misplaced_paths` (+ `counts["misplaced"] = len(...)`) — the leak signal.
+      - `location_zone` — str of the correct zone, or None when the zone was UNJUDGEABLE
+        (unresolved / fail-closed shallow). Defaults to a DEEP zone here so the
+        `fleet_arbiter_hold_location_unjudged` event stays quiet unless a test asks for
+        it by passing location_zone=None."""
+    misplaced_paths = list( misplaced_paths )
     return {
         "roots_requested"         : list( roots_requested if roots_requested is not None else roots_swept ),
         "roots_swept"             : list( roots_swept ),
@@ -48,10 +58,13 @@ def _report( files_found=0, roots_swept=( "/projects/lupin", ), prunable=0, keep
         "skipped_dirs_with_holds" : list( skipped ),
         "files_found"             : files_found,
         "files"                   : [ ],
+        "location_zone"           : location_zone,
+        "misplaced_paths"         : misplaced_paths,
         "counts"                  : { "prunable": prunable, "keep": keep,
                                       "cargo_bearing": cargo_bearing,
                                       "ttl_unusable": ttl_unusable,
                                       "anchor_disagreement": anchor_disagreement,
+                                      "misplaced": len( misplaced_paths ),
                                       "reachable_but_kept_reasons": kept_reasons or { } },
         "deleted"                 : 0,
     }
@@ -203,7 +216,16 @@ def test_runner_recycles_until_stop():
         n[ "c" ] += 1
         if n[ "c" ] >= 2: runner._stop.set()       # stop AT the 2nd job (after its do_all)
         return FakeJob( result="hard-cap" )
-    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=_noop_report )
+    # SWEEP SEAMS STUBBED (row ece4d86a). Unstubbed, `hold_roots_fn` and
+    # `live_session_ids_fn` default to the REAL ones, and all three sweeps at the top
+    # of run() call them BEFORE the first job is built: a project-root resolve that
+    # builds a live ConfigurationManager and scans the sibling tree for repo roots,
+    # plus a PID-checked scan of the operator's real session bridges. Both read state
+    # that peer SESSIONS write concurrently, which is what made this test pass alone
+    # and fail in a full run. Empty roots ⇒ every sweep reaches nothing. Same reason
+    # test_runner_start_stop_thread below already does this.
+    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=_noop_report,
+                               hold_roots_fn=lambda: [ ], live_session_ids_fn=lambda: set() )
     runner.run()
     assert runner.cycles == 2
     assert len( [ e for e, _ in rec.logs if e == "fleet_arbiter_recycle" ] ) == 1     # one relaunch
@@ -216,7 +238,16 @@ def test_runner_swallows_job_error():
     def factory():
         runner._stop.set()                          # stop after this one job
         return FakeJob( raises=True )
-    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=_noop_report )
+    # SWEEP SEAMS STUBBED (row ece4d86a). Unstubbed, `hold_roots_fn` and
+    # `live_session_ids_fn` default to the REAL ones, and all three sweeps at the top
+    # of run() call them BEFORE the first job is built: a project-root resolve that
+    # builds a live ConfigurationManager and scans the sibling tree for repo roots,
+    # plus a PID-checked scan of the operator's real session bridges. Both read state
+    # that peer SESSIONS write concurrently, which is what made this test pass alone
+    # and fail in a full run. Empty roots ⇒ every sweep reaches nothing. Same reason
+    # test_runner_start_stop_thread below already does this.
+    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=_noop_report,
+                               hold_roots_fn=lambda: [ ], live_session_ids_fn=lambda: set() )
     runner.run()
     assert runner.cycles == 1
     assert any( e == "fleet_arbiter_job_error" for e, _ in rec.logs )
@@ -241,7 +272,16 @@ def test_runner_start_stop_thread():
 
 
 def _one_cycle( rec, **loop_kwargs ):
-    """Run the supervisor for exactly one cycle and return it."""
+    """Run the supervisor for exactly one cycle and return it.
+
+    The two sweep seams DEFAULT TO STUBS here (row ece4d86a) for the same reason as
+    the runner tests above: unstubbed they resolve the real project root and scan the
+    operator's real session bridges on every cycle, which peer sessions write
+    concurrently. `setdefault`, not a hard-wire — the callers that are ABOUT those
+    seams (roots_fn returning None, roots_fn raising, the roots+live-set spy) still
+    pass their own and win."""
+    loop_kwargs.setdefault( "hold_roots_fn",       lambda: [ ] )
+    loop_kwargs.setdefault( "live_session_ids_fn", lambda: set() )
     runner = None
     def factory():
         runner._stop.set()
@@ -316,6 +356,7 @@ def test_sweep_report_carries_the_cargo_and_classification_tallies():
     _one_cycle( rec, hold_janitor_fn=lambda **kw: _report(
         files_found=45, prunable=20, keep=25, cargo_bearing=33, ttl_unusable=22,
         anchor_disagreement=1, kept_reasons={ "no_provable_age": 22 },
+        misplaced_paths=[ "/projects/lupin/.heartbeat-hold-leaked.json" ],
         skipped=[ { "dir": "/projects/lupin/.claude/worktrees", "hold_count": 1 } ] ) )
     r = [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_report" ][ 0 ]
     assert r[ "cargo_bearing" ]           == 33      # the population deletion must not touch
@@ -324,6 +365,50 @@ def test_sweep_report_carries_the_cargo_and_classification_tallies():
     assert r[ "kept_reasons" ]            == { "no_provable_age": 22 }
     assert r[ "skipped_dirs_with_holds" ] == [ { "dir": "/projects/lupin/.claude/worktrees",
                                                  "hold_count": 1 } ]
+    # row 011f1f90: LOCATION is a first-class field on the report line, carried as its own
+    # count + path list — NOT folded into cargo_bearing. The resilient veto now makes a
+    # misplaced hold FUNCTION, so this is the surviving signal that it is in the wrong place.
+    assert r[ "misplaced" ]               == 1
+    assert r[ "misplaced_paths" ]         == [ "/projects/lupin/.heartbeat-hold-leaked.json" ]
+    assert r[ "location_zone" ]           == "/mnt/DATA01/include/www.deepily.ai/projects-data"
+
+
+def test_sweep_UNJUDGEABLE_zone_fires_a_DISTINCT_event_from_zero_misplaced():
+    """Control C (Rachel's must-fix): when the correct zone is UNJUDGEABLE — a resolution
+    failure or a fail-closed shallow zone — report returns location_zone=None. That is NOT
+    the same fact as 'judged the zone and found 0 misplaced': a shallow zone would call
+    EVERY hold correctly-placed and go permanently silent while looking healthy. So the
+    supervisor fires its own event, exactly like the no-roots alarm, and the main report
+    still lands too (the loud event ADDS, never replaces)."""
+    rec = Recorder()
+    _one_cycle( rec, hold_janitor_fn=lambda **kw: _report( files_found=7, location_zone=None ) )
+    unjudged = [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_location_unjudged" ]
+    assert len( unjudged ) == 1
+    assert unjudged[ 0 ][ "files_seen" ] == 7
+    r = [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_report" ][ 0 ]
+    assert r[ "location_zone" ] is None              # carried on the main line too, distinctly
+    assert len( [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_report" ] ) == 1
+
+
+def test_sweep_JUDGED_zone_stays_quiet_on_the_unjudged_event():
+    """PRESENCE-control on Control C: the unjudged alarm must be capable of staying quiet,
+    or its firing proves nothing. A real (deep) location_zone → no unjudged event."""
+    rec = Recorder()
+    _one_cycle( rec, hold_janitor_fn=lambda **kw: _report( location_zone="/mnt/DATA01/projects-data" ) )
+    assert not [ e for e, _ in rec.logs if e == "fleet_arbiter_hold_location_unjudged" ]
+
+
+def test_sweep_STRUCTURAL_too_broad_zone_fires_the_unjudged_event_end_to_end():
+    """Control C, STRUCTURAL variant (Mr Radio's ruling): a zone that is deep but TOO BROAD
+    — a swept repo root sits under it (the /mnt-class case the parts-count floor can't catch)
+    — resolves to location_zone=None, same as the shallow case. The supervisor treats None
+    identically: it fires the distinct unjudged event so a too-broad zone can never
+    masquerade as '0 misplaced'. This drives the loop through the real report contract with
+    location_zone=None; hold_correct_zone's own structural branch is unit-tested in
+    test_heartbeat_hold_location_and_bridge.py."""
+    rec = Recorder()
+    _one_cycle( rec, hold_janitor_fn=lambda **kw: _report( files_found=3, location_zone=None ) )
+    assert len( [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_location_unjudged" ] ) == 1
 
 
 def test_sweep_roots_fn_returning_none_is_tolerated():
@@ -470,13 +555,30 @@ def test_build_factory_default_no_declared_managers():
 # are DECORATIVE on the actual :8001 deploy. This factory is the real deploy path
 # (NOT arbiter_bootstrap, which is the default-OFF in-process path).
 
-def test_build_factory_wires_real_hold_reader_by_default():
-    """The :8001 factory defaults hold_reader_fn to the real read_hold so the
-    outward-twin backstop is LIVE on deploy (regression guard against silent inertness)."""
+def test_build_factory_wires_real_hold_reader_by_default( monkeypatch ):
+    """The :8001 factory defaults hold_reader_fn to the bridge-aware reader (row 011f1f90):
+    the default is now a lambda wrapping read_hold_via_bridge, NOT bare read_hold, so the
+    honored-hold veto finds a repo-root hold in ANY project. Identity is gone — this asserts
+    the BEHAVIOR: the wired default delegates to read_hold_via_bridge and threads the
+    factory's own log_fn, so the fallback journal line stays visible on the real deploy."""
+    import lupin_arbiter_app.fleet_arbiter_loop as loop
     from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold
+    seen = { }
+    def _spy( session_id, log_fn=None ):
+        seen[ "session_id" ] = session_id
+        seen[ "log_fn" ]     = log_fn
+        return None
+    monkeypatch.setattr( loop, "read_hold_via_bridge", _spy )   # loop-global, picked up at lambda call
+
+    logs   = [ ]
+    log_fn = lambda *a, **k: logs.append( ( a, k ) )
     gw, store = FakeGateway(), LocalSnapshotStore()
-    job = build_fleet_arbiter_job_factory( gw, store, log_fn=lambda *a, **k: None )()
-    assert job._hold_reader_fn is read_hold                       # non-None AND resolves to read_hold
+    job = build_fleet_arbiter_job_factory( gw, store, log_fn=log_fn )()
+    assert job._hold_reader_fn is not None                        # wired, not inert
+    assert job._hold_reader_fn is not read_hold                   # NOT the blind fleet-only reader
+    job._hold_reader_fn( "sess-xyz" )                             # drive the default
+    assert seen[ "session_id" ] == "sess-xyz"                     # delegates to read_hold_via_bridge
+    assert seen[ "log_fn" ] is log_fn                            # the factory's journal fn is threaded
     assert job.user_gate_resurface_seconds == 1800               # default ceiling threaded
 
 
@@ -532,13 +634,21 @@ class _FakeCfg:
     def get( self, key, default=None, return_type=None ): return self._v.get( key, default )
 
 
+# The watcher factory GATES ON `follow through escalation enabled` BEFORE importing
+# the watcher module (2026-08-10 — the import reaches sqlalchemy, which the light
+# :8001 host venv does not carry). Tests that want a REAL watcher must therefore
+# turn the flag ON explicitly; a bare _FakeCfg() now yields the inert None path.
+def _EnabledCfg():
+    return _FakeCfg( { "follow through escalation enabled": True } )
+
+
 def _item( id="i-1", title="Verify lane 4" ):
     return types.SimpleNamespace( id=id, title=title )
 
 
 def test_follow_through_factory_builds_watcher_with_bound_hold_check():
     from cosa.rest.follow_through_escalation_watcher import FollowThroughEscalationWatcher
-    cfg, gw, job = _FakeCfg(), FakeGateway(), _StubJob()
+    cfg, gw, job = _EnabledCfg(), FakeGateway(), _StubJob()
     factory = make_follow_through_watcher_factory( cfg, gw, log_fn=lambda *a, **k: None )
     watcher = factory( job )
     assert isinstance( watcher, FollowThroughEscalationWatcher )
@@ -549,7 +659,7 @@ def test_follow_through_factory_builds_watcher_with_bound_hold_check():
 
 def test_follow_through_escalate_fn_pokes_accountable_manager():
     gw, rec = FakeGateway(), Recorder()
-    watcher = make_follow_through_watcher_factory( _FakeCfg(), gw, log_fn=rec.log )( _StubJob() )
+    watcher = make_follow_through_watcher_factory( _EnabledCfg(), gw, log_fn=rec.log )( _StubJob() )
     awaited = T0
     watcher._escalate_fn( _item( id="i-9", title="Aged item" ), "Mr. Radio", "Rachel", awaited )
     assert len( gw.sends ) == 1
@@ -564,14 +674,14 @@ def test_follow_through_escalate_fn_error_swallowed():
     rec = Recorder()
     class BadGW( FakeGateway ):
         def send_to( self, recipient, body, metadata=None ): raise RuntimeError( "commons down" )
-    watcher = make_follow_through_watcher_factory( _FakeCfg(), BadGW(), log_fn=rec.log )( _StubJob() )
+    watcher = make_follow_through_watcher_factory( _EnabledCfg(), BadGW(), log_fn=rec.log )( _StubJob() )
     watcher._escalate_fn( _item(), "Mr. Radio", "Rachel", T0 )   # must NOT raise
     assert any( e == "follow_through_escalation_error" for e, _ in rec.logs )
 
 
 def test_follow_through_factory_default_log_fn( capsys ):
     # No log_fn → the module default (_default_log_fn) is used (else-branch cover).
-    watcher = make_follow_through_watcher_factory( _FakeCfg(), FakeGateway() )( _StubJob() )
+    watcher = make_follow_through_watcher_factory( _EnabledCfg(), FakeGateway() )( _StubJob() )
     watcher._escalate_fn( _item( id="i-d" ), "Mgr", "Wkr", T0 )
     p = json.loads( capsys.readouterr().out.strip() )
     assert p[ "event" ] == "follow_through_escalation" and p[ "item" ] == "i-d"
@@ -1150,3 +1260,335 @@ def test_the_ruled_root_source_still_CANNOT_delete_anything():
     hold_tree = ast.parse( inspect.getsource( hold_mod ) )
     assert [ n for n in ast.walk( hold_tree )
              if isinstance( n, ast.Attribute ) and n.attr == "unlink" ]   # prune_stale_hold_files has one
+
+
+# ── 2026-08-10: the disabled feature must not import the DB, and a ctor blow-up
+#    must not kill the supervisor.
+#    Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+#
+#    Live failure: on lupin-host-test the watcher import chain
+#    (follow_through_escalation_watcher -> cosa.rest.db.database -> sqlalchemy)
+#    raised ModuleNotFoundError inside the ArbiterConsumerJob ctor and killed the
+#    fleet-arbiter thread on tick 1 — with the feature flag OFF. The service stayed
+#    active(running), /health kept returning 200, and the fleet section sat at
+#    session_count 0 for two days.
+#
+#    NOTE ON METHOD: the obvious control — block `sqlalchemy` and evict it from
+#    sys.modules — is FORBIDDEN here by src/conftest.py (row e1da2b5f): re-importing
+#    SQLAlchemy raises "Type <class 'object'> is already registered" and breaks a
+#    LATER test in a different file. So the gate is proven two ways that touch no
+#    imports at all: behaviourally (disabled -> None) and structurally (the flag is
+#    read BEFORE the import statement, asserted over the AST, with a positive
+#    control proving the AST check can fail).
+
+
+def test_watcher_factory_disabled_returns_none_and_logs_inert():
+    """Flag off → the inert None seam, not a watcher."""
+    rec     = Recorder()
+    factory = make_follow_through_watcher_factory( _FakeCfg(), FakeGateway(), log_fn=rec.log )
+    assert factory( _StubJob() ) is None
+    assert any( e == "follow_through_watcher_inert" for e, _ in rec.logs )
+
+
+def _gate_precedes_import( func_source ):
+    """
+    True iff, inside the inner `factory`, the enable-flag read appears BEFORE any
+    import of the watcher module. Returns False when the import comes first (the
+    pre-2026-08-10 shape) or when no gate is present at all.
+    """
+    import ast
+    tree = ast.parse( func_source )
+    for node in ast.walk( tree ):
+        if isinstance( node, ast.FunctionDef ) and node.name == "factory":
+            gate_line = import_line = None
+            for sub in ast.walk( node ):
+                if ( isinstance( sub, ast.Constant ) and isinstance( sub.value, str )
+                     and sub.value == "follow through escalation enabled" and gate_line is None ):
+                    gate_line = sub.lineno
+                if ( isinstance( sub, ast.ImportFrom ) and sub.module
+                     and "follow_through_escalation_watcher" in sub.module and import_line is None ):
+                    import_line = sub.lineno
+            return gate_line is not None and import_line is not None and gate_line < import_line
+    return False
+
+
+def test_gate_is_read_BEFORE_the_watcher_import():
+    """
+    The load-bearing assertion. If someone moves the import above the flag read —
+    or deletes the gate — this fails, and it fails for the production reason: on a
+    light venv that import is what kills the thread.
+    """
+    import inspect
+    import lupin_arbiter_app.fleet_arbiter_loop as mod
+    assert _gate_precedes_import( inspect.getsource( mod.make_follow_through_watcher_factory ) )
+
+
+def test_gate_order_check_is_non_vacuous():
+    """
+    POSITIVE CONTROL — the AST check must REJECT the ungated shape. Predicted
+    failure mode if this check were toothless: it returns True for source whose
+    import precedes any flag read.
+    """
+    ungated = (
+        "def make_x( config_mgr ):\n"
+        "    def factory( job ):\n"
+        "        from cosa.rest.follow_through_escalation_watcher import W\n"
+        "        if not config_mgr.get( 'follow through escalation enabled' ): return None\n"
+        "        return W()\n"
+        "    return factory\n"
+    )
+    no_gate = (
+        "def make_x( config_mgr ):\n"
+        "    def factory( job ):\n"
+        "        from cosa.rest.follow_through_escalation_watcher import W\n"
+        "        return W()\n"
+        "    return factory\n"
+    )
+    assert _gate_precedes_import( ungated ) is False      # import first → rejected
+    assert _gate_precedes_import( no_gate ) is False      # no gate at all → rejected
+
+
+def test_watcher_factory_enabled_still_builds_the_real_watcher():
+    """The gate must not disable the feature when the flag IS on."""
+    from cosa.rest.follow_through_escalation_watcher import FollowThroughEscalationWatcher
+    watcher = make_follow_through_watcher_factory( _EnabledCfg(), FakeGateway(),
+                                                   log_fn=lambda *a, **k: None )( _StubJob() )
+    assert isinstance( watcher, FollowThroughEscalationWatcher )
+
+
+def test_gate_is_re_read_per_call_not_hoisted():
+    """
+    The supervisor rebuilds the job every cycle, so a live config flip must be
+    picked up on the next tick without a service restart.
+    """
+    flag = { "follow through escalation enabled": False }
+    class _MutableCfg:
+        def get( self, key, default=None, return_type=None ): return flag.get( key, default )
+    factory = make_follow_through_watcher_factory( _MutableCfg(), FakeGateway(), log_fn=lambda *a, **k: None )
+    assert factory( _StubJob() ) is None
+    flag[ "follow through escalation enabled" ] = True
+    assert factory( _StubJob() ) is not None
+def test_run_survives_a_job_CONSTRUCTION_blowup_and_retries():
+    """
+    A ctor raise used to propagate out of run() and kill the thread permanently.
+    It must now be logged and retried on the next cycle.
+    """
+    logs  = [ ]
+    calls = { "n": 0 }
+    class _OneShotJob:
+        def do_all( self ): return { "ok": True }
+    def _factory():
+        calls[ "n" ] += 1
+        if calls[ "n" ] == 1:
+            raise ModuleNotFoundError( "No module named 'sqlalchemy'", name="sqlalchemy" )
+        return _OneShotJob()
+    holder = { }
+    def _log( event, **fields ):
+        logs.append( ( event, fields ) )
+        # stop once the post-failure cycle has completed, so run() terminates
+        if event == "fleet_arbiter_recycle": holder[ "loop" ]._stop.set()
+    loop = FleetArbiterLoop( _factory, log_fn=_log,
+                             hold_janitor_fn=lambda **k: [ ], hwm_janitor_fn=lambda **k: [ ],
+                             hold_roots_fn=lambda: [ ], live_session_ids_fn=lambda: set(),
+                             construct_retry_seconds=0.0 )
+    holder[ "loop" ] = loop
+    loop.run()                                                   # must return, not raise
+    events = [ e for e, _ in logs ]
+    assert "fleet_arbiter_job_construct_error" in events         # the failure was reported
+    assert "fleet_arbiter_job_start"           in events         # and the NEXT cycle ran
+    assert calls[ "n" ] >= 2                                     # it actually retried
+
+
+def test_run_exits_promptly_if_stopped_DURING_the_construct_backoff():
+    """
+    Covers the stop-during-backoff branch: a shutdown requested while the loop is
+    waiting out a failed construction must break immediately, not sleep out the
+    full retry interval and start another cycle.
+    """
+    logs  = [ ]
+    calls = { "n": 0 }
+    holder = { }
+    def _factory():
+        calls[ "n" ] += 1
+        holder[ "loop" ]._stop.set()                 # shutdown arrives mid-failure
+        raise ModuleNotFoundError( "No module named 'sqlalchemy'", name="sqlalchemy" )
+    loop = FleetArbiterLoop( _factory, log_fn=lambda e, **f: logs.append( ( e, f ) ),
+                             hold_janitor_fn=lambda **k: [ ], hwm_janitor_fn=lambda **k: [ ],
+                             hold_roots_fn=lambda: [ ], live_session_ids_fn=lambda: set(),
+                             construct_retry_seconds=30.0 )   # long — a real sleep would hang the test
+    holder[ "loop" ] = loop
+    loop.run()                                       # returns at once via the wait() True branch
+    assert calls[ "n" ] == 1                         # did NOT start a second cycle
+    assert any( e == "fleet_arbiter_job_construct_error" for e, _ in logs )
+
+
+# ── row 859829a5: the four pre-existing defensive-except guards ──────────────
+
+def test_compute_hold_roots_fleet_data_root_derivation_failure_is_swallowed( tmp_path, monkeypatch ):
+    """Covers fleet_arbiter_loop.py 396-397: `except Exception: pass` guarding the
+    fleet_data_root append in _compute_hold_roots. A derivation failure must never
+    kill the sweep — host_root still comes back, just without the data-root candidate."""
+    import lupin_cli.claude_code.hooks.lib.heartbeat_hold as hold_mod
+    def _boom( *a, **k ):
+        raise RuntimeError( "data-root derivation exploded" )
+    monkeypatch.setattr( hold_mod, "fleet_data_root", _boom )
+    roots = _compute_hold_roots( FakeConfigMgr(), host_root=str( tmp_path ), scan_fn=lambda: [ ] )
+    assert roots == [ str( tmp_path ) ]                       # host_root survives; data root omitted, no raise
+
+
+def test_hold_reclaim_error_is_swallowed_and_logged():
+    """Covers fleet_arbiter_loop.py 1084-1085: `except Exception as e` around the hold
+    deleter. Reclamation must never kill the supervisor — a deleter blow-up is caught
+    and surfaced as fleet_arbiter_hold_reclaim_error, not raised."""
+    rec = Recorder()
+    def _boom_deleter( **kwargs ):
+        raise RuntimeError( "hold deleter exploded" )
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             hold_janitor_fn=lambda **k: _report(),
+                             hold_deleter_fn=_boom_deleter,
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set(),
+                             enable_hold_deletion=True )
+    loop._sweep_hold_files()                                  # must NOT raise
+    assert any( e == "fleet_arbiter_hold_reclaim_error" for e, _ in rec.logs )
+
+
+def _hwm_report( roots_swept=( "/projects/lupin", ), prunable=0 ):
+    """A _default_hwm_reporter-shaped result: only the fields _sweep_hwm_files reads."""
+    return {
+        "roots_requested"   : list( roots_swept ),
+        "roots_swept"       : list( roots_swept ),
+        "roots_unreachable" : [ ],
+        "files_found"       : 0,
+        "counts"            : { "prunable": prunable, "keep": 0, "reachable_but_kept_reasons": { } },
+    }
+
+
+def test_hwm_reclaim_error_is_swallowed_and_logged():
+    """Covers fleet_arbiter_loop.py 1153-1154: `except Exception as e` around the HWM
+    deleter. Same invariant as the hold path — a deleter blow-up is caught and surfaced
+    as fleet_arbiter_hwm_reclaim_error, not raised."""
+    rec = Recorder()
+    def _boom_deleter( **kwargs ):
+        raise RuntimeError( "hwm deleter exploded" )
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             hwm_janitor_fn=lambda **k: _hwm_report(),
+                             hwm_deleter_fn=_boom_deleter,
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set(),
+                             enable_hwm_deletion=True )
+    loop._sweep_hwm_files()                                   # must NOT raise
+    assert any( e == "fleet_arbiter_hwm_reclaim_error" for e, _ in rec.logs )
+
+
+def test_hwm_reclaim_success_emits_reclaimed_event():
+    """Covers fleet_arbiter_loop.py 1148-1152: the HWM reclaim SUCCESS path (sibling of
+    the guard above). With deletion opted in and a deleter that returns a prune list,
+    the supervisor emits fleet_arbiter_hwm_reclaimed with the deleted/agrees tallies."""
+    rec = Recorder()
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             hwm_janitor_fn=lambda **k: _hwm_report( prunable=1 ),
+                             hwm_deleter_fn=lambda **k: [ "/projects/lupin/.dm-inbox-hwm-dead.json" ],
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set(),
+                             enable_hwm_deletion=True )
+    loop._sweep_hwm_files()
+    reclaimed = [ f for e, f in rec.logs if e == "fleet_arbiter_hwm_reclaimed" ]
+    assert len( reclaimed ) == 1
+    assert reclaimed[ 0 ][ "deleted" ] == 1 and reclaimed[ 0 ][ "agrees" ] is True
+
+
+# ── bookmark sweep (row bd5c27e1) — the three milder families ──────────────
+
+def _bookmark_report( roots_swept=( "/projects/lupin", ), prunable=0, files_found=0 ):
+    """A _default_bookmark_reporter-shaped result: only the fields _sweep_bookmark_files reads."""
+    return {
+        "roots_requested"   : list( roots_swept ),
+        "roots_swept"       : list( roots_swept ),
+        "roots_unreachable" : [ ],
+        "files_found"       : files_found,
+        "counts"            : { "prunable": prunable, "keep": 0,
+                                "reachable_but_kept_reasons": { }, "per_family": { } },
+    }
+
+
+def test_bookmark_report_emitted_every_cycle_report_only_by_default():
+    """Default: enable_bookmark_deletion is False → report emitted, nothing deleted."""
+    rec = Recorder()
+    deleted = { "called": False }
+    def _deleter( **k ):
+        deleted[ "called" ] = True
+        return [ ]
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             bookmark_janitor_fn=lambda **k: _bookmark_report( prunable=2, files_found=5 ),
+                             bookmark_deleter_fn=_deleter,
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set() )
+    loop._sweep_bookmark_files()
+    report = [ f for e, f in rec.logs if e == "fleet_arbiter_bookmark_report" ]
+    assert len( report ) == 1 and report[ 0 ][ "prunable" ] == 2
+    assert report[ 0 ][ "deletion_enabled" ] is False
+    assert deleted[ "called" ] is False, "deletion ran while the switch was off"
+
+
+def test_bookmark_report_no_roots_is_emitted_distinctly():
+    """Zero roots swept → the no_roots event fires (found-nothing ≠ swept-nothing)."""
+    rec = Recorder()
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             bookmark_janitor_fn=lambda **k: _bookmark_report( roots_swept=( ) ),
+                             hold_roots_fn=lambda: [ ],
+                             live_session_ids_fn=lambda: set() )
+    loop._sweep_bookmark_files()
+    assert any( e == "fleet_arbiter_bookmark_report_no_roots" for e, _ in rec.logs )
+
+
+def test_bookmark_janitor_error_is_swallowed_and_logged():
+    """A janitor blow-up is caught and surfaced, never raised — a janitor must not kill the loop."""
+    rec = Recorder()
+    def _boom( **k ):
+        raise RuntimeError( "bookmark janitor exploded" )
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             bookmark_janitor_fn=_boom,
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set() )
+    loop._sweep_bookmark_files()                              # must NOT raise
+    assert any( e == "fleet_arbiter_bookmark_janitor_error" for e, _ in rec.logs )
+
+
+def test_bookmark_reclaim_success_emits_reclaimed_event():
+    """Deletion opted in + a deleter returning a prune list → reclaimed event with tallies."""
+    rec = Recorder()
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             bookmark_janitor_fn=lambda **k: _bookmark_report( prunable=1 ),
+                             bookmark_deleter_fn=lambda **k: [ "/projects/lupin/.ask-answer-hwm-dead.json" ],
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set(),
+                             enable_bookmark_deletion=True )
+    loop._sweep_bookmark_files()
+    reclaimed = [ f for e, f in rec.logs if e == "fleet_arbiter_bookmark_reclaimed" ]
+    assert len( reclaimed ) == 1
+    assert reclaimed[ 0 ][ "deleted" ] == 1 and reclaimed[ 0 ][ "agrees" ] is True
+
+
+def test_bookmark_reclaim_error_is_swallowed_and_logged():
+    """A deleter blow-up under the deletion switch is caught and surfaced, not raised."""
+    rec = Recorder()
+    def _boom_deleter( **k ):
+        raise RuntimeError( "bookmark deleter exploded" )
+    loop = FleetArbiterLoop( lambda: None, log_fn=rec.log,
+                             bookmark_janitor_fn=lambda **k: _bookmark_report( prunable=1 ),
+                             bookmark_deleter_fn=_boom_deleter,
+                             hold_roots_fn=lambda: [ "/projects/lupin" ],
+                             live_session_ids_fn=lambda: set(),
+                             enable_bookmark_deletion=True )
+    loop._sweep_bookmark_files()                             # must NOT raise
+    assert any( e == "fleet_arbiter_bookmark_reclaim_error" for e, _ in rec.logs )
+
+
+def test_bookmark_janitor_fns_default_to_the_real_module():
+    """An omitted janitor/deleter wires to the real bookmark_janitor functions."""
+    import lupin_cli.claude_code.hooks.lib.bookmark_janitor as bj
+    loop = FleetArbiterLoop( lambda: None )
+    assert loop._bookmark_janitor_fn is bj.report_bookmark_files
+    assert loop._bookmark_deleter_fn is bj.sweep_and_reclaim_bookmark_files
+    assert loop._enable_bookmark_deletion is False           # fail-safe default

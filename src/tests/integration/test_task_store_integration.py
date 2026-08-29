@@ -236,7 +236,22 @@ class TestTaskStoreLifecycle:
         assert all( e[ "actor" ] == actor for e in events[ 1: ] )
 
     def test_doc_path_receipt_validates_against_live_scope_registry( self, test_api_key ):
-        """doc_path receipts resolve via the SERVER's scope registry (container mounts)."""
+        """
+        doc_path receipts resolve via the SERVER's scope registry (container mounts).
+
+        The close carries a `test_run` alongside the path because row 9bfb4b73
+        made `->done` require an independently checkable ref, and a doc_path is
+        not one — a path exists whether or not the work landed. That rule landed
+        2026-08-16; this test still sent doc_path alone and went red in
+        ts-780e52cc.
+
+        🔴 THE NEGATIVE ARM IS THE TEST. Once a checkable ref carries the close,
+        a positive arm alone proves nothing about the registry: it would stay
+        green if doc_path validation stopped running entirely. So an
+        UNREGISTERED scope, paired with the same valid test_run, must still be
+        refused — that refusal is the only thing here that can only come from a
+        live registry lookup.
+        """
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
         actor   = "krishna 38d15e3b"
 
@@ -245,9 +260,18 @@ class TestTaskStoreLifecycle:
         for to_status in ( "claimed", "in_progress", "review" ):
             _transition( headers, task_id, to_status=to_status, actor=actor )
 
-        # a file every container mount has — the app INI itself
+        # NEGATIVE: an unregistered scope is refused even though the close is otherwise valid.
+        # A 422 leaves the row in `review`, so the positive arm below still has a row to close.
+        unregistered = _transition( headers, task_id, to_status="done", actor=actor,
+                                    receipt_refs={ "test_run": "ts-780e52cc",
+                                                   "doc_path": "narnia/src/conf/lupin-app.ini" } )
+        assert unregistered.status_code == 422, f"{unregistered.status_code}: {unregistered.text}"
+        assert "narnia" in unregistered.text, unregistered.text
+
+        # POSITIVE: a file every container mount has — the app INI itself.
         good = _transition( headers, task_id, to_status="done", actor=actor,
-                            receipt_refs={ "doc_path": "lupin/src/conf/lupin-app.ini" } )
+                            receipt_refs={ "test_run": "ts-780e52cc",
+                                           "doc_path": "lupin/src/conf/lupin-app.ini" } )
         assert good.status_code == 200, f"{good.status_code}: {good.text}"
 
     def test_create_rejects_bad_enums_and_writes_nothing( self, test_api_key ):

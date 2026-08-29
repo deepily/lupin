@@ -59,8 +59,12 @@ class TestFromConfig:
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         config = TestFixExpediterConfig.from_config( config_mgr, debug=False )
 
-        # Session 1cfcdf73 (2026-04-10): INI default flipped from false to true.
-        assert config.auto_fix_enabled is True
+        # The INI value, not the code default. Rick's ruling 2026-08-03 (commit
+        # 8c2e371d) set this key to false — "disable the Auto Fix feature so that
+        # nothing gets changed behind our backs." The code default is still True
+        # (see TestDefaults.test_default_instantiation); this asserts what the
+        # INI actually configures, which is now false by that ruling.
+        assert config.auto_fix_enabled is False
         assert config.max_clusters == 8
         assert config.max_cluster_seed_failures == 50
         assert config.max_diagnosis_iterations == 4

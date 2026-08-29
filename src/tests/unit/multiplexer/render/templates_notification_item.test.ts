@@ -130,11 +130,11 @@ test("notificationItem: expired-badge + abstract-indicator nest INSIDE .message-
     { appTimezone: "UTC" },
   );
   const text = el.querySelector(".message-text")!;
-  assert.notEqual(text.querySelector(".expired-badge"), null, "badge must be a CHILD of .message-text");
-  assert.notEqual(text.querySelector(".abstract-indicator"), null, "indicator must be a CHILD of .message-text");
+  assert.ok( text.querySelector(".expired-badge") !== null, "badge must be a CHILD of .message-text" );
+  assert.ok( text.querySelector(".abstract-indicator") !== null, "indicator must be a CHILD of .message-text" );
   // And NOT a direct sibling of .message-text under .sender-message.
-  assert.equal(el.querySelector(":scope > .expired-badge"), null, "badge must NOT be a flex sibling of .message-text");
-  assert.equal(el.querySelector(":scope > .abstract-indicator"), null, "indicator must NOT be a flex sibling of .message-text");
+  assert.ok( el.querySelector(":scope > .expired-badge") === null, "badge must NOT be a flex sibling of .message-text" );
+  assert.ok( el.querySelector(":scope > .abstract-indicator") === null, "indicator must NOT be a flex sibling of .message-text" );
 });
 
 test("notificationItem: progress-group head nests badge + indicator INSIDE .message-text (parity)", () => {
@@ -143,8 +143,8 @@ test("notificationItem: progress-group head nests badge + indicator INSIDE .mess
     { appTimezone: "UTC" },
   );
   const text = el.querySelector(".progress-group-head .message-text")!;
-  assert.notEqual(text.querySelector(".expired-badge"), null, "badge nests in .message-text within the head");
-  assert.notEqual(text.querySelector(".abstract-indicator"), null, "indicator nests in .message-text within the head");
+  assert.ok( text.querySelector(".expired-badge") !== null, "badge nests in .message-text within the head" );
+  assert.ok( text.querySelector(".abstract-indicator") !== null, "indicator nests in .message-text within the head" );
 });
 
 // ---------------------------------------------------------------------------
@@ -166,7 +166,7 @@ function makeIntegration(
 
 test("notificationItem: no prediction_hint → no vote controls", () => {
   const el = renderNotificationItem(makeNotification(), { appTimezone: "UTC" });
-  assert.equal(el.querySelector(".prediction-hint-vote"), null);
+  assert.ok( el.querySelector(".prediction-hint-vote") === null );
 });
 
 test("notificationItem: prediction_hint below the gate → no vote controls", () => {
@@ -174,7 +174,7 @@ test("notificationItem: prediction_hint below the gate → no vote controls", ()
     makeNotification({ prediction_hint: { confidence: 0.49, predicted_value: "yes", category: "calendar" } }),
     { appTimezone: "UTC" },
   );
-  assert.equal(el.querySelector(".prediction-hint-vote"), null);
+  assert.ok( el.querySelector(".prediction-hint-vote") === null );
 });
 
 test("notificationItem: prediction_hint at/above the gate mounts the vote controls (pure-data, no integration)", () => {
@@ -184,8 +184,8 @@ test("notificationItem: prediction_hint at/above the gate mounts the vote contro
   );
   const controls = el.querySelector(".prediction-hint-vote");
   assert.notEqual(controls, null);
-  assert.notEqual(el.querySelector(".prediction-vote-up"), null);
-  assert.notEqual(el.querySelector(".prediction-vote-down"), null);
+  assert.ok( el.querySelector(".prediction-vote-up") !== null );
+  assert.ok( el.querySelector(".prediction-vote-down") !== null );
   // No integration → no prior cast highlight.
   assert.equal(controls!.classList.contains("voted"), false);
 });
@@ -229,6 +229,6 @@ test("notificationItem: prediction controls also mount on a progress-group messa
     makeNotification({ progress_group_id: "pg_1", prediction_hint: { confidence: 0.8, predicted_value: "yes", category: "calendar" } }),
     { appTimezone: "UTC" },
   );
-  assert.notEqual(el.querySelector(".progress-group-head"), null);
-  assert.notEqual(el.querySelector(".prediction-hint-vote"), null);
+  assert.ok( el.querySelector(".progress-group-head") !== null );
+  assert.ok( el.querySelector(".prediction-hint-vote") !== null );
 });

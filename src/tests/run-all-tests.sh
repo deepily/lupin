@@ -6,10 +6,14 @@
 #
 # Suite sequence (cheapest → costliest):
 #   1. unit       (~30-60s, no server)
-#   2. smoke      (~2 min, server-dependent)
-#   3. websocket  (~1-2 min, server + WS)
-#   4. integration (~5-10 min, server + DB, hot-swaps config)
-#   5. e2e        (~17 min, Playwright + browser, hot-swaps config)
+#   2. cosa       (~5 min, no server; in-tree src/cosa/tests/** — row d83d025b)
+#   3. typescript (~8-25 min, c8 at 100%; no server)
+#   4. smoke      (~2 min, server-dependent)
+#   5. websocket  (~1-2 min, server + WS)
+#   6. integration (~5-10 min, server + DB, hot-swaps config)
+#   7. e2e        (~17 min, Playwright + browser, hot-swaps config)
+#                 ⚠️ SWEEPS src/tests/e2e_ui/ — NOT src/tests/e2e/. See the
+#                 note on the [e2e] mapping below before assuming coverage.
 #
 # Usage:
 #   run-all-tests.sh                      # continue-on-failure (default)
@@ -58,13 +62,29 @@ done
 # cosa/agents/test_suite/job.py — test_typescript_suite_gate.py asserts they
 # match, because a suite present in one list and absent from the other runs or
 # skips depending on which door you came through.
-SUITES=( "unit" "typescript" "smoke" "websocket" "integration" "e2e" )
+SUITES=( "unit" "cosa" "typescript" "smoke" "websocket" "integration" "e2e" )
 declare -A SCRIPTS=(
     [unit]="src/tests/run-unit-tests.sh"
+    [cosa]="src/tests/run-cosa-tests.sh"
     [typescript]="src/tests/run-typescript-tests.sh"
     [smoke]="src/tests/run-smoke-tests.sh"
     [websocket]="src/scripts/run-websocket-smoke-tests.sh"
     [integration]="src/tests/run-integration-tests.sh"
+    # ⚠️ THE SLOT IS NAMED `e2e`; THE DIRECTORY IT SWEEPS IS `src/tests/e2e_ui/`.
+    # `src/tests/e2e/` — one underscore away — is a DIFFERENT directory and NOTHING
+    # here runs it. That is deliberate, not an oversight: its pytest files are
+    # recorded in src/tests/unit/gate-reachability-allowlist.json with dated
+    # decisions (test_ask_answer_handback.py, UNGATED 2026-08-02, boots its own
+    # uvicorn on a throwaway Postgres and needs ~57s; test_podcast_fail_open_gate_live.py,
+    # UNGATED 2026-08-04, needs a real server AND real LLM spend). Neither belongs in
+    # a suite that has to stay fast and free.
+    #
+    # THE KEY CANNOT BE RENAMED TO MATCH. `e2e` is an API-facing `test_types` value —
+    # ALL_SUITE_COMPONENTS in cosa/agents/test_suite/job.py:128, which callers submit
+    # to /api/test-suite/submit — and test_typescript_suite_gate.py:189 parses the
+    # SUITES=(...) line above and asserts the two lists are identical. So the label
+    # stays and this note is what stops it lying. It cost two sessions an hour on
+    # 2026-08-23 (rows 673f14e8 / 990934d9) before anyone read the allowlist.
     [e2e]="src/scripts/run-e2e-ui-tests.sh"
 )
 

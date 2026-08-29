@@ -2833,6 +2833,23 @@ class FuzzyFileMatchResponse( BaseXMLModel ):
         description="Comma-separated list of matching filenames, or empty string if no matches"
     )
 
+    @field_validator( "*", mode="before" )
+    @classmethod
+    def coerce_none_to_empty_str( cls, v ):
+        """
+        An empty `<matches></matches>` is a REAL answer, not a parse failure (row b2aae1e8).
+
+        Zero matches is the correct response to "make me a podcast", which names no
+        document. xmltodict renders an empty tag as None, and without this a required
+        `str` raises — upstream that exception is caught by a blanket `except Exception`
+        in the expeditor, so a legitimate zero-match is reported as status="error" and
+        is indistinguishable from a genuine parse failure. The docstring above already
+        promised "empty string if no matches"; the model could not represent it.
+        """
+        if v is None:
+            return ""
+        return v
+
     @classmethod
     def get_example_for_template( cls ) -> 'FuzzyFileMatchResponse':
         """

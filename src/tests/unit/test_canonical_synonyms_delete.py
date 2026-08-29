@@ -1,116 +1,36 @@
 """
-Unit Tests for CanonicalSynonymsTable.delete_by_snapshot_id()
+Unit Tests for canonical-synonym cleanup on snapshot deletion.
 
-Tests the ghost snapshot cleanup method added to prevent orphaned synonym
-entries when snapshots are deleted from the solutions table.
+Tests the ghost snapshot cleanup that prevents orphaned synonym entries when
+snapshots are deleted from the solutions table.
+
+TRIMMED 2026-08-17 by Pocholo (LanceDB total-removal sweep, Lane A, rows
+5ff7b8f5 / 8098838f): TestDeleteBySnapshotId drove the LanceDB delete path by
+pinning _use_postgres = False and mocking a LanceDB table. That path no longer
+exists — delete_by_snapshot_id now delegates to CanonicalSynonymRepository, and
+its coverage lives in
+src/cosa/tests/unit/memory/test_canonical_synonyms_table.py. Deleted, not
+skipped. The classes below are mock-only simulations of caller logic and are
+untouched.
 """
 
-import pytest
-import tempfile
-import os
-from unittest.mock import MagicMock, patch, PropertyMock
-import pandas as pd
-
-
-class TestDeleteBySnapshotId:
-    """Unit tests for CanonicalSynonymsTable.delete_by_snapshot_id()."""
-
-    def _make_table_with_mock( self ):
-        """Create a CanonicalSynonymsTable-like object with a mocked LanceDB table."""
-        from unittest.mock import MagicMock
-
-        obj = MagicMock()
-        obj.debug = True
-        obj._use_postgres = False          # exercise the LanceDB delete path (v0.2.0 §6 flag)
-        obj._canonical_synonyms_table = MagicMock()
-
-        # Import the real method and bind it
-        from cosa.memory.canonical_synonyms_table import CanonicalSynonymsTable
-        import types
-        obj.delete_by_snapshot_id = types.MethodType(
-            CanonicalSynonymsTable.delete_by_snapshot_id, obj
-        )
-        return obj
-
-    def test_deletes_matching_rows( self ):
-        """Rows with matching snapshot_id are deleted and count returned."""
-        obj = self._make_table_with_mock()
-
-        # Mock to_pandas returning 2 rows with matching snapshot_id
-        df = pd.DataFrame( {
-            "snapshot_id" : [ "abc123", "abc123", "def456" ],
-            "question_verbatim" : [ "q1", "q2", "q3" ]
-        } )
-        obj._canonical_synonyms_table.to_pandas.return_value = df
-
-        result = obj.delete_by_snapshot_id( "abc123" )
-
-        assert result == 2
-        obj._canonical_synonyms_table.delete.assert_called_once_with( "snapshot_id = 'abc123'" )
-
-    def test_returns_zero_when_no_matches( self ):
-        """Returns 0 when no rows match the snapshot_id."""
-        obj = self._make_table_with_mock()
-
-        df = pd.DataFrame( {
-            "snapshot_id" : [ "def456", "ghi789" ],
-            "question_verbatim" : [ "q1", "q2" ]
-        } )
-        obj._canonical_synonyms_table.to_pandas.return_value = df
-
-        result = obj.delete_by_snapshot_id( "abc123" )
-
-        assert result == 0
-        obj._canonical_synonyms_table.delete.assert_not_called()
-
-    def test_returns_zero_on_empty_table( self ):
-        """Returns 0 on empty table without error."""
-        obj = self._make_table_with_mock()
-
-        df = pd.DataFrame( {
-            "snapshot_id"       : pd.Series( [], dtype="str" ),
-            "question_verbatim" : pd.Series( [], dtype="str" )
-        } )
-        obj._canonical_synonyms_table.to_pandas.return_value = df
-
-        result = obj.delete_by_snapshot_id( "abc123" )
-
-        assert result == 0
-
-    def test_returns_zero_on_exception( self ):
-        """Returns 0 and doesn't propagate when table raises."""
-        obj = self._make_table_with_mock()
-        obj._canonical_synonyms_table.to_pandas.side_effect = RuntimeError( "DB error" )
-
-        result = obj.delete_by_snapshot_id( "abc123" )
-
-        assert result == 0
-
-    def test_single_match_deleted( self ):
-        """Exactly one match is deleted correctly."""
-        obj = self._make_table_with_mock()
-
-        df = pd.DataFrame( {
-            "snapshot_id"       : [ "abc123", "def456" ],
-            "question_verbatim" : [ "q1", "q2" ]
-        } )
-        obj._canonical_synonyms_table.to_pandas.return_value = df
-
-        result = obj.delete_by_snapshot_id( "abc123" )
-
-        assert result == 1
-        obj._canonical_synonyms_table.delete.assert_called_once()
+from unittest.mock import MagicMock
 
 
 class TestDeleteSnapshotSynonymCleanup:
-    """Tests that delete_snapshot() in SolutionSnapshotManager cleans up synonyms."""
+    """Tests that delete_snapshot() on the snapshot manager cleans up synonyms.
+
+    The manager is a MagicMock, so this covers the delete/cleanup contract rather than any
+    one implementation — which is why it survived the 2026-08-21 deletion of the file-based
+    backend (ruling 6791ce47) unchanged apart from this wording.
+    """
 
     def test_synonym_cleanup_called_on_delete( self ):
         """delete_snapshot() calls delete_by_snapshot_id() when synonyms table is initialized."""
         mock_synonyms = MagicMock()
         mock_synonyms.delete_by_snapshot_id.return_value = 3
 
-        # Build a minimal mock of SolutionSnapshotManager
+        # Build a minimal mock of the snapshot manager
         mgr = MagicMock()
         mgr._canonical_synonyms = mock_synonyms
         mgr._question_lookup    = { "What is 4+4?" : "hash_abc" }

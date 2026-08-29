@@ -125,7 +125,7 @@ class TestExpediteFlow( unittest.TestCase ):
              patch.object( o, "_batch_collect_args",
                            return_value=( { "budget": "no limit", "audience": "expert", "audience_context": "none" },
                                           ex_mod.BATCH_ANSWERED ) ), \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( DR, 'query="AI"', "u@x", "s", "uid", "research AI" )
         self.assertEqual( out[ "audience" ], "expert" )
         self.assertNotIn( "budget", out )    # "no limit" skipped
@@ -136,9 +136,10 @@ class TestExpediteFlow( unittest.TestCase ):
                            parsed=_expeditor_resp( present="query=AI" ) ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_batch_collect_args", return_value=( None, ex_mod.BATCH_DECLINED ) ):
-            self.assertIsNone( o.expedite( DR, 'query="AI"', "u@x", "s", "uid", "research AI" ) )
-        # a real "no" is recorded as the user's decision
-        self.assertEqual( o._last_expedite_reason, ex_mod.BATCH_DECLINED )
+            ctx = ex_mod.ExpediteContext()
+            self.assertIsNone( o.expedite( DR, 'query="AI"', "u@x", "s", "uid", "research AI", context=ctx ) )
+        # a real "no" is recorded as the user's decision — on the CALLER's context
+        self.assertEqual( ctx.reason, ex_mod.BATCH_DECLINED )
 
     def test_batch_collect_undeliverable_records_machine_reason( self ):
         # The non-declined batch branch: the reason must survive to the caller, NOT
@@ -148,8 +149,9 @@ class TestExpediteFlow( unittest.TestCase ):
                            parsed=_expeditor_resp( present="query=AI" ) ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_batch_collect_args", return_value=( None, ex_mod.BATCH_UNREACHABLE ) ):
-            self.assertIsNone( o.expedite( DR, 'query="AI"', "u@x", "s", "uid", "research AI" ) )
-        self.assertEqual( o._last_expedite_reason, ex_mod.BATCH_UNREACHABLE )
+            ctx = ex_mod.ExpediteContext()
+            self.assertIsNone( o.expedite( DR, 'query="AI"', "u@x", "s", "uid", "research AI", context=ctx ) )
+        self.assertEqual( ctx.reason, ex_mod.BATCH_UNREACHABLE )
 
     def test_single_missing_arg_from_fallback_question( self ):
         o = _mk_expeditor( debug=True )
@@ -158,7 +160,7 @@ class TestExpediteFlow( unittest.TestCase ):
                            parsed=_expeditor_resp( present="query=AI" ) ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_ask_for_arg", return_value="50" ), \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( DR, 'query="AI"', "u@x", "s", "uid", "research AI" )
         self.assertEqual( out[ "budget" ], "50" )
 
@@ -176,7 +178,7 @@ class TestExpediteFlow( unittest.TestCase ):
                            parsed=_expeditor_resp( present="query=AI" ) ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_ask_for_arg", return_value="no limit" ), \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( DR, 'query="AI"', "u@x", "s", "uid", "research AI" )
         self.assertNotIn( "budget", out )    # "no limit" → optional skipped
 
@@ -187,7 +189,7 @@ class TestExpediteFlow( unittest.TestCase ):
                            parsed=_expeditor_resp( present="query=AI" ) ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_ask_for_arg", return_value="val" ) as ask, \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( DR, 'query="AI"', "u@x", "s", "uid", "research AI" )
         self.assertEqual( out[ "weird_arg" ], "val" )
         self.assertIn( "Please provide", ask.call_args.args[ 1 ] )
@@ -198,7 +200,7 @@ class TestExpediteFlow( unittest.TestCase ):
         with _FlowFixture( o, user_visible=[ "source" ], parsed=_expeditor_resp() ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/deck.yaml" ), \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( PR, "", "u@x", "s", "uid", "make a deck" )
         self.assertEqual( out[ "source" ], "/io/x/deck.yaml" )
         self.assertEqual( out[ "render_only" ], "true" )
@@ -208,17 +210,46 @@ class TestExpediteFlow( unittest.TestCase ):
         with _FlowFixture( o, user_visible=[ "research" ], parsed=_expeditor_resp() ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/report.md" ), \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( PG, "", "u@x", "s", "uid", "make a podcast" )
         self.assertEqual( out[ "research" ], "/io/x/report.md" )
         self.assertNotIn( "render_only", out )
+
+    def test_auto_resolve_scoped_to_podcast_forwards_question( self ):
+        # SCOPE FENCE (row bd0ce120): the podcast command MUST forward
+        # original_question into the fuzzy handler so its auto pre-step can fire.
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "research" ], parsed=_expeditor_resp() ), \
+             patch.object( o, "_build_request_context", return_value="ctx" ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/report.md" ) as fuzzy, \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
+            o.expedite( PG, "", "u@x", "s", "uid", "make a podcast about KISS" )
+        self.assertEqual( fuzzy.call_args.kwargs[ "original_question" ], "make a podcast about KISS" )
+
+    def test_auto_resolve_reaches_presentation_too( self ):
+        # WAS test_auto_resolve_fence_presentation_gets_none, and it asserted the
+        # OPPOSITE: that presentation received original_question=None. That fence was
+        # deliberate and temporary — row bd0ce120 held presentation out while the
+        # behaviour was proven on podcast, and row 5bc22180 (Rick's go, Approach A)
+        # removed it. Keeping the old assertion would have pinned the fence as if it
+        # were the requirement, so it is INVERTED here rather than deleted: the same
+        # call site, the opposite expectation.
+        # Full presentation coverage lives in
+        # test_expeditor_presentation_fences_generalized.py.
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "source" ], parsed=_expeditor_resp() ), \
+             patch.object( o, "_build_request_context", return_value="ctx" ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/deck.md" ) as fuzzy, \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
+            o.expedite( PR, "", "u@x", "s", "uid", "make a deck about KISS" )
+        self.assertEqual( fuzzy.call_args.kwargs[ "original_question" ], "make a deck about KISS" )
 
     def test_special_tfe_checkpoint_match( self ):
         o = _mk_expeditor()
         with _FlowFixture( o, user_visible=[ "resume_from" ], parsed=_expeditor_resp() ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_handle_tfe_checkpoint_match", return_value="tfe-abcd1234" ), \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( TFE, "", "u@x", "s", "uid", "resume the auth job" )
         self.assertEqual( out[ "resume_from" ], "tfe-abcd1234" )
 
@@ -255,11 +286,11 @@ class TestExpediteFlow( unittest.TestCase ):
                 "special_handlers"   : { "thing": "unrecognized_handler" },
             }
         }
-        with patch.object( ex_mod, "AGENTIC_AGENTS", custom ), \
+        with patch.object( ex_mod, "JOB_ARG_CONTRACTS", custom ), \
              _FlowFixture( o, user_visible=[ "thing" ], parsed=_expeditor_resp() ), \
              patch.object( o, "_build_request_context", return_value="ctx" ), \
              patch.object( o, "_ask_for_arg", return_value="a thing" ), \
-             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r: a ):
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
             out = o.expedite( "custom command", "", "u@x", "s", "uid", "do the thing" )
         self.assertEqual( out[ "thing" ], "a thing" )
 
@@ -268,6 +299,127 @@ class TestExpediteFlow( unittest.TestCase ):
         with _FlowFixture( o, user_visible=[ "query" ], parsed=_expeditor_resp( present="query=AI" ) ), \
              patch.object( o, "_confirm_and_iterate", return_value=None ):
             self.assertIsNone( o.expedite( DR, 'query="AI"', "u@x", "s", "uid", "research AI" ) )
+
+
+class TestPresentButUnresolvedFixB( unittest.TestCase ):
+    """
+    Fix B (row bd0ce120): when a fuzzy_file_match arg is PRESENT but its value is
+    not an existing path (a bare topic word "KISS" from a natural utterance), the
+    expeditor must run the SAME fuzzy matcher rather than hand the topic downstream
+    where the podcast job treats it as a file path and dies with FileNotFoundError
+    (job.py:216-223). Originally SCOPED to the podcast command; row 5bc22180 removed
+    that scope, so presentation's `source` gets the same rescue — its own failure was
+    the same bug one step earlier, in the job's path pre-validation.
+
+    Each behaviour test is control-proven: the docstring predicts the exact failure
+    text if the guarded code is mutated away, so a green here is a proof, not a claim.
+
+    Added 2026-08-04 by Clayton 😎 (SWE crew lane B, Fix B — Rick-ruled A+B parallel).
+    """
+
+    def test_helper_value_is_existing_path( self ):
+        # The trigger predicate mirrors job.py:216-223. Bare topic → False (fires
+        # the resolve); a real path → True (leaves it); None/"" → False.
+        o = _mk_expeditor()
+        with patch.object( ex_mod.cu, "get_project_root", return_value="/p" ), \
+             patch.object( ex_mod.os.path, "exists", side_effect=lambda p: p == "/p/io/real.md" ):
+            self.assertFalse( o._value_is_existing_path( "KISS" ) )          # bare topic → not a path
+            self.assertTrue(  o._value_is_existing_path( "io/real.md" ) )    # relative → resolved under root
+            self.assertFalse( o._value_is_existing_path( None ) )
+            self.assertFalse( o._value_is_existing_path( "" ) )
+        with patch.object( ex_mod.os.path, "exists", return_value=True ):
+            self.assertTrue( o._value_is_existing_path( "/abs/existing.md" ) )  # absolute → tested as-is
+
+    def test_present_unresolvable_research_runs_fuzzy_resolve( self ):
+        # CORE. research present="KISS" (not missing) + not an existing path →
+        # my new block runs the fuzzy matcher, seeded with original_question, and
+        # OVERWRITES research with the resolved path.
+        # CONTROL — remove the Fix-B block: research stays "KISS" and this fails
+        #   AssertionError: 'KISS' != '/io/x/kiss-protocol.md'
+        o = _mk_expeditor( debug=True )
+        with _FlowFixture( o, user_visible=[ "research" ],
+                           parsed=_expeditor_resp( present="research=KISS" ) ), \
+             patch.object( ex_mod.os.path, "exists", return_value=False ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/kiss-protocol.md" ) as fuzzy, \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
+            out = o.expedite( PG, "", "u@x", "s", "uid", "make me a podcast on KISS" )
+        self.assertEqual( out[ "research" ], "/io/x/kiss-protocol.md" )   # resolved, NOT the bare topic
+        self.assertEqual( fuzzy.call_args.kwargs[ "original_question" ], "make me a podcast on KISS" )
+
+    def test_present_existing_path_research_left_untouched( self ):
+        # CONTROL (idempotence). research present AND already a real path → my block
+        # must SKIP it; no re-resolve, value unchanged.
+        # If the block fired anyway it would overwrite with the mock — so a mutation
+        # dropping the os.path.exists guard fails: '/io/x/other.md' != 'io/deep-research/u/report.md'
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "research" ],
+                           parsed=_expeditor_resp( present="research=io/deep-research/u/report.md" ) ), \
+             patch.object( ex_mod.os.path, "exists", return_value=True ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/other.md" ) as fuzzy, \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
+            out = o.expedite( PG, "", "u@x", "s", "uid", "make a podcast from io/deep-research/u/report.md" )
+        self.assertEqual( out[ "research" ], "io/deep-research/u/report.md" )
+        fuzzy.assert_not_called()
+
+    def test_present_unresolvable_source_is_rescued_for_presentation_too( self ):
+        # WAS test_present_unresolvable_scoped_to_podcast_presentation_untouched, and
+        # it asserted the OPPOSITE: that `source="KISS"` stayed the bare topic. That
+        # was the fence, not the goal — the bare topic then reached
+        # presentation_generator/job.py, which raised
+        # FileNotFoundError("Source document not found: KISS") and ended the job
+        # FAILED. Row 5bc22180 removed the fence, so the assertion is INVERTED rather
+        # than deleted: the topic now resolves.
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "source" ],
+                           parsed=_expeditor_resp( present="source=KISS" ) ), \
+             patch.object( ex_mod.os.path, "exists", return_value=False ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/deck.md" ) as fuzzy, \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
+            out = o.expedite( PR, "", "u@x", "s", "uid", "make a deck on KISS" )
+        self.assertEqual( out[ "source" ], "/io/x/deck.md" )   # resolved, not the bare topic
+        fuzzy.assert_called_once()
+
+    def test_present_unresolvable_cancel_returns_none( self ):
+        # No-crash contract: when the fuzzy resolve's fall-through prompt is
+        # cancelled (handler returns None), expedite returns None cleanly — never a
+        # crash, never the bare topic passed downstream.
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "research" ],
+                           parsed=_expeditor_resp( present="research=KISS" ) ), \
+             patch.object( ex_mod.os.path, "exists", return_value=False ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value=None ):
+            self.assertIsNone( o.expedite( PG, "", "u@x", "s", "uid", "make me a podcast on KISS" ) )
+
+    def test_missing_research_resolved_by_loop_is_not_double_resolved( self ):
+        # GUARD (regression caught by both-roots): when research was MISSING, the
+        # missing-args loop's special handler already resolves it. Fix B must NOT
+        # re-run the matcher on that just-resolved value — even when the resolved
+        # value isn't a real path on disk (a mock here, or a not-yet-written file).
+        # The missing-loop owns the missing case; Fix B owns only the present case.
+        # CONTROL — drop the `if arg_name in missing` guard: fuzzy is called TWICE
+        #   and this fails: "Expected '_handle_fuzzy_file_match' to be called once. Called 2 times."
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "research" ], parsed=_expeditor_resp() ), \
+             patch.object( ex_mod.os.path, "exists", return_value=False ), \
+             patch.object( o, "_build_request_context", return_value="ctx" ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/resolved.md" ) as fuzzy, \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
+            out = o.expedite( PG, "", "u@x", "s", "uid", "make me a podcast on KISS" )
+        fuzzy.assert_called_once()   # missing-loop resolves it once; Fix B must NOT re-fire
+        self.assertEqual( out[ "research" ], "/io/x/resolved.md" )
+
+    def test_present_unresolvable_yaml_sets_render_only( self ):
+        # A .yaml resolve through the present-but-unresolvable branch sets render_only,
+        # matching the missing-arg branch's YAML handling.
+        o = _mk_expeditor()
+        with _FlowFixture( o, user_visible=[ "research" ],
+                           parsed=_expeditor_resp( present="research=KISS" ) ), \
+             patch.object( ex_mod.os.path, "exists", return_value=False ), \
+             patch.object( o, "_handle_fuzzy_file_match", return_value="/io/x/deck.yaml" ), \
+             patch.object( o, "_confirm_and_iterate", side_effect=lambda a, *r, **k: a ):
+            out = o.expedite( PG, "", "u@x", "s", "uid", "make me a podcast on KISS" )
+        self.assertEqual( out[ "research" ], "/io/x/deck.yaml" )
+        self.assertEqual( out[ "render_only" ], "true" )
 
 
 if __name__ == "__main__":

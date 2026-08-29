@@ -30,12 +30,21 @@ from pathlib import Path
 from typing  import Any, Callable, Dict, List, Optional, Tuple
 
 from lupin_mcp.persona_normalization import persona_slug
+from lupin_mcp import reap_memento
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+from cosa.agents.utils.sender_id import detect_project
 
 
 # Default ceiling on concurrent reviewers a single manager may spawn. Overridden
 # at the call site by the INI key `cc session spawn max reviewers`.
 DEFAULT_SPAWN_CAP = 8
+
+# The default `project`. Named rather than repeated as a literal so the refusal
+# message in spawn_sessions cannot drift from the value it describes — a message
+# telling a caller what omitting the argument actually does has to read the same
+# constant the signature does, or it goes wrong the day someone changes one of
+# them (row 1cf6c918).
+DEFAULT_SPAWN_PROJECT = "lupin"
 
 # Directory holding session bridge + manifest files (mirrors session_bridge.py).
 # Row 8ccc20ab — derived from the one seam (see
@@ -183,14 +192,33 @@ def persona_chain_csv( persona_preference ) -> Optional[ str ]:
         - Never raises
 
     Examples:
-        "Rio"                      → "Rio"
-        "Rio, Krishna ,*"          → "Rio, Krishna ,*"   (server-side parser strips)
-        [ "Rio", "Krishna", "*" ]  → "Rio,Krishna,*"
-        [] / None / "   " / 42     → None
+        "Rio"                       → "Rio"
+        "Rio, Krishna ,*"           → "Rio, Krishna ,*"   (server-side parser strips)
+        [ "Rio", "Krishna", "*" ]   → "Rio,Krishna,*"
+        '["Rio", "Krishna", "*"]'   → "Rio,Krishna,*"     (JSON-array STRING, row e071e834)
+        [] / None / "   " / 42      → None
     """
     if isinstance( persona_preference, str ):
         stripped = persona_preference.strip()
-        return stripped if stripped else None
+        if not stripped:
+            return None
+        # PRODUCER NORMALIZE (row e071e834, fix part 2 — defense in depth). A caller
+        # that passes a STRINGIFIED list (json.dumps(list) → '["Rio","Krishna","*"]')
+        # must NOT be forwarded verbatim: downstream that JSON-array string mangles in
+        # parse_persona_chain and kills the `*` wildcard (→ 409 → nameless seat). Part 1
+        # made the parser tolerate the JSON form; this normalizes it at the SOURCE so
+        # the parser is not the only line of defense. If the string parses as a JSON
+        # list, emit clean CSV exactly like a real list input; a non-JSON string is the
+        # intended bare-CSV form and passes through unchanged.
+        if stripped.startswith( "[" ):
+            try:
+                decoded = json.loads( stripped )
+            except ( ValueError, TypeError ):
+                decoded = None
+            if isinstance( decoded, list ):
+                items = [ item.strip() for item in decoded if isinstance( item, str ) and item.strip() ]
+                return ",".join( items ) if items else None
+        return stripped
     if isinstance( persona_preference, list ):
         items = [ item.strip() for item in persona_preference if isinstance( item, str ) and item.strip() ]
         return ",".join( items ) if items else None
@@ -204,7 +232,8 @@ def build_spawn_argv(
     session_name : str,
     task_prompt  : str,
     dry_run      : bool = False,
-    claude_args  : Optional[ List[ str ] ] = None
+    claude_args  : Optional[ List[ str ] ] = None,
+    work_dir     : Optional[ str ] = None
 ) -> List[ str ]:
     """
     Build the argv for one headless spawn of start-cc-with-tmux.sh.
@@ -216,9 +245,13 @@ def build_spawn_argv(
         - claude_args is a list of pass-through claude args or None
 
     Ensures:
-        - Returns ["bash", script_path, "--headless", (--dry-run?), session_name,
-          *claude_args, "--prompt", task_prompt]
+        - Returns ["bash", script_path, "--headless", (--dry-run?),
+          (--work-dir <dir>?), session_name, *claude_args, "--prompt", task_prompt]
         - --dry-run is included iff dry_run is True
+        - --work-dir is included iff work_dir is truthy. It sets the child's cwd,
+          and therefore its CLAUDE.md and git identity (the WORK axis, row
+          697a85fe). Omitted ⇒ the child inherits the caller's cwd, as before.
+          It never affects the venv or PYTHONPATH, which stay pinned to lupin.
         - Never raises
 
     Args:
@@ -234,6 +267,8 @@ def build_spawn_argv(
     argv = [ "bash", script_path, "--headless" ]
     if dry_run:
         argv.append( "--dry-run" )
+    if work_dir:
+        argv.extend( [ "--work-dir", work_dir ] )
     argv.append( session_name )
     if claude_args:
         argv.extend( claude_args )
@@ -284,6 +319,121 @@ def _write_manifest( path: Path, records: List[ Dict[ str, Any ] ] ) -> bool:
 
 # ── Orchestration ─────────────────────────────────────────────────────────────
 
+def _resolve_project_root( project ):
+    """
+    Resolve a project NAME to its repository root on this host (row 697a85fe).
+
+    THE WORK AXIS ONLY. What this returns becomes the child's cwd — hence its
+    CLAUDE.md and git identity. It is never used to pick a venv, a PYTHONPATH or
+    a hook path; those stay pinned to lupin (the PLATFORM axis), because a child
+    booted on another repo's venv cannot import fastmcp and so cannot DM, set a
+    topic, or be reaped.
+
+    Requires:
+        - project is a project name, or None
+
+    ⚠️ A WORKTREE IS NOT A SIBLING OF ITS PEERS (row 1cf6c918). This used to derive
+    the projects directory as `parent( LUPIN_ROOT )`, which holds only while
+    LUPIN_ROOT is a top-level checkout. In a git worktree LUPIN_ROOT is something
+    like `<repo>/.claude/worktrees/<name>`, so that parent is `.../worktrees` — a
+    directory with no project in it — and EVERY name resolved to None. Since
+    `project` defaults to "lupin", that refused every spawn a worktree manager
+    could make. Measured 2026-08-24 through the live entry point in a real
+    worktree, not inferred from the failing tests: `project` omitted raised, and
+    only an explicit `project=None` got through.
+
+    So ask git where the main checkout is instead of guessing from a path shape.
+    `--git-common-dir` points at the ONE `.git` all worktrees share; its parent is
+    the main checkout and that checkout's parent is the projects directory. The
+    path guess stays as a fallback for when git cannot answer (not a repo, no git
+    binary), so nothing gets worse anywhere this already worked.
+
+    Requires:
+        - project is a project name, or None
+
+    Ensures:
+        - returns None for a falsy project (caller inherits its own cwd, the
+          prior behaviour)
+        - resolves the alias map first, so both "plan" and "planning-is-prompting"
+          reach the same root
+        - the CALLER'S OWN project name resolves to the CALLER'S OWN root — the
+          worktree itself when it is in one. Isolation is the reason a manager is
+          working in a worktree; sending its workers to the main checkout would
+          quietly undo it. In a top-level checkout this returns the same path the
+          sibling search already did, so it changes nothing there
+        - any OTHER project resolves to a sibling of the MAIN CHECKOUT whose name
+          matches and which contains a `.git` entry (a file in a worktree, a
+          directory in a checkout — both count)
+        - returns None when nothing matches — the caller REFUSES rather than
+          falling back to its own cwd, because a silent fallback is the original
+          defect wearing a new hat
+        - never raises: a git failure degrades to the old path guess, never an
+          exception out of a resolver
+
+    Returns:
+        str | None: absolute repo root, or None
+    """
+    if not project: return None
+
+    # "plan" is the alias sender_id.detect_project() reports for this repo, so a
+    # caller echoing that value back must resolve to the same place.
+    reverse_aliases = { "plan" : "planning-is-prompting" }
+    candidates      = [ project, reverse_aliases.get( project, project ) ]
+
+    lupin_root = os.environ.get( "LUPIN_ROOT" )
+    if not lupin_root: return None
+    lupin_root = Path( lupin_root ).resolve()
+
+    main_checkout = _main_checkout_of( lupin_root )
+    projects_dir  = main_checkout.parent
+
+    # The caller's own project, named. Answer with where the caller actually IS,
+    # which is the worktree when it is in one — not with the main checkout that
+    # happens to share its name.
+    if main_checkout.name in candidates:
+        return str( lupin_root )
+
+    for name in candidates:
+        candidate = projects_dir / name
+        if ( candidate / ".git" ).exists():
+            return str( candidate )
+    return None
+
+
+def _main_checkout_of( start ):
+    """
+    The MAIN checkout of the repository `start` belongs to (row 1cf6c918).
+
+    Every worktree of a repo shares one `.git` directory, and `--git-common-dir`
+    is the only thing that names it without knowing the tree's layout. Its parent
+    is the main checkout; from a plain checkout it simply returns that checkout,
+    which is why the caller needs no branch for the two cases.
+
+    Requires:
+        - start is an absolute Path that exists
+
+    Ensures:
+        - returns the main checkout's Path when git can answer
+        - returns `start` unchanged when git cannot — not a repo, no git binary, a
+          timeout. That is exactly the old behaviour, so a git failure costs the
+          worktree fix and nothing else
+        - never raises
+
+    Returns:
+        Path
+    """
+    try:
+        out = subprocess.run(
+            [ "git", "-C", str( start ), "rev-parse", "--path-format=absolute", "--git-common-dir" ],
+            capture_output=True, text=True, timeout=10
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return Path( out.stdout.strip() ).resolve().parent
+    except ( OSError, subprocess.SubprocessError ):
+        pass
+    return start
+
+
 def spawn_sessions(
     count              : int,
     task_prompt        : str,
@@ -292,7 +442,7 @@ def spawn_sessions(
     script_path        : str,
     manager_persona    : Optional[ str ] = None,
     role               : str = "reviewer",
-    project            : str = "lupin",
+    project            : str = DEFAULT_SPAWN_PROJECT,
     persona_preference : Optional[ Any ] = None,
     seed_memento       : Optional[ str ] = None,
     tokens             : Optional[ Dict[ str, Any ] ] = None,
@@ -332,8 +482,8 @@ def spawn_sessions(
           serialize via the server's atomic allocate-or-409.
         - When `model` is a non-empty string, forwards `--model <model>` to every
           child via the build_spawn_argv claude_args seam, so the child boots on
-          that model instead of the user default (Fable-5-managers / Opus-4.8-
-          workers cost split, 2026-07-02). When `model` is None/empty, NO --model
+          that model instead of the user default (Fable-5-managers / Opus-5-
+          workers, 2026-08-17). When `model` is None/empty, NO --model
           flag is passed and the child inherits the user default (today's fail-open
           behavior). The resolved model is echoed on EVERY roster entry and at the
           top level (spawn-ack verification → verify-allocated-MODEL).
@@ -353,7 +503,16 @@ def spawn_sessions(
         manager_session_id: the spawning manager's session id (lineage key)
         script_path: spawn script path
         role: requested role label (templated into the prompt)
-        project: project for the child (sets cwd / CLAUDE.md)
+        project: the child's WORKING DIRECTORY — hence its CLAUDE.md and git
+            identity (row 697a85fe, Rick's ruling 2026-08-19). ⚠️ This text used
+            to say the OPPOSITE ("a LABEL... does NOT set the child's working
+            directory"). That was true before the ruling and has been contradicted
+            by the code twenty lines below ever since; it is corrected here rather
+            than left to mislead the next reader of the very argument being changed.
+            Defaults to DEFAULT_SPAWN_PROJECT. An unresolvable project is REFUSED,
+            never silently swapped for the caller's cwd. To genuinely inherit the
+            caller's cwd, pass project=None EXPLICITLY — omitting the argument
+            applies the default instead.
         persona_preference: str | list — ordered persona chain transported to
             the children via COSA_VOICE_PERSONA_CHAIN (see
             src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md)
@@ -374,6 +533,47 @@ def spawn_sessions(
         raise ValueError( f"count must be ≥ 1 (got {count})" )
     if count > spawn_cap:
         raise ValueError( f"count {count} exceeds spawn cap {spawn_cap}" )
+
+    # `project` NOW GENUINELY SETS THE CHILD'S WORKING DIRECTORY (row 697a85fe,
+    # Rick's ruling 2026-08-19). It used to be a label read nowhere, while the
+    # child inherited the CALLER's cwd — so a manager in one repo asking for a
+    # seat in another got a seat in its OWN repo wearing the other repo's name.
+    #
+    # THE MODEL, and it is what dissolved the earlier objection to fixing this by
+    # setting cwd. Two axes that the old code welded together:
+    #   · PLATFORM — venv, PYTHONPATH, hook binaries, MCP ⇒ ALWAYS lupin.
+    #   · WORK     — cwd, CLAUDE.md, git identity, detect_project() ⇒ the target.
+    # A child carrying lupin's platform while sitting in another repo is not
+    # half-migrated; it is telling the truth about what it is. Lupin IS the
+    # platform a worker communicates and collaborates through.
+    #
+    # WHY THE PLATFORM PIN IS LOAD-BEARING RATHER THAN MERELY TOLERATED —
+    # measured by María 2026-08-19, and the reason per-repo venv resolution was
+    # rejected and should STAY rejected:
+    #     planning-is-prompting/.venv → import fastmcp → ModuleNotFoundError
+    #     lupin/.venv                 → cosa OK, platform stack present
+    # A child booted on the WORK repo's venv could not DM, could not set a
+    # session topic, and could not be reaped through the normal path. A seat
+    # nobody can reach is worse than a mislabelled one.
+    #
+    # An UNRESOLVABLE project is still refused — that half was never the problem.
+    # A spawn that cannot name a real directory would silently fall back to the
+    # caller's cwd, which is the original defect wearing a new hat.
+    work_dir = _resolve_project_root( project )
+    if project and work_dir is None:
+        # ⚠️ THE ADVICE MUST NAME AN ESCAPE THAT EXISTS (row 1cf6c918). This used to
+        # say "omit `project` to inherit the caller's own repo" — but `project`
+        # DEFAULTS to "lupin", so omitting it hands back the very value that just
+        # failed, and a reader following the sentence verbatim loops. Only an
+        # EXPLICIT project=None reaches the inherit-the-caller's-cwd path, and that
+        # is what this now says.
+        raise ValueError(
+            f"cannot spawn into project {project!r}: no repository root resolves for it. "
+            f"Pass a project whose root exists on this host, or pass project=None "
+            f"EXPLICITLY to inherit the caller's own cwd — note that OMITTING the "
+            f"argument does not do that, it applies the default {DEFAULT_SPAWN_PROJECT!r}. "
+            f"The caller's own repo here is {detect_project()!r}."
+        )
 
     # The DM/collection topic and the tmux SESSION name BOTH key on the manager
     # PERSONA, but with DIFFERENT separators — and they MUST stay separate
@@ -429,7 +629,8 @@ def spawn_sessions(
         # user default (fail-open). The resolved model is chosen upstream (the MCP
         # wrapper's explicit-param → INI role key → INI default resolution).
         claude_args = [ "--model", model ] if model else None
-        argv = build_spawn_argv( script_path, session_name, rendered, dry_run=dry_run, claude_args=claude_args )
+        argv = build_spawn_argv( script_path, session_name, rendered, dry_run=dry_run,
+                                 claude_args=claude_args, work_dir=work_dir )
         env  = {
             "COSA_VOICE_SPAWNED_BY" : manager_session_id,
             "COSA_VOICE_HEADLESS"   : "1",
@@ -455,7 +656,7 @@ def spawn_sessions(
         result = runner( argv, env=env )
         ok     = getattr( result, "returncode", 1 ) == 0
 
-        spawned.append( {
+        row = {
             "session_name"   : session_name,
             "requested_role" : role,
             "project"        : project,
@@ -468,7 +669,20 @@ def spawn_sessions(
             # the ambiguity (nothing on disk can), but it is the evidence that
             # lets a caller tell a 3-second race from a 40-minute corpse.
             "spawned_ts"     : now_fn()
-        } )
+        }
+        # Silence fix (row 9c5dccd4): a failed spawn MUST carry WHY. The runner
+        # captures the child's stderr (tmux "command too long" on an oversized
+        # brief, a bad script path, a bootstrap crash); the row previously read
+        # ONLY returncode and discarded the stderr, so a manager saw
+        # status:"failed" with no cause and burned 20 minutes reconstructing it
+        # by hand. Attach the captured stderr as `reason` on failure only — a
+        # spawned row needs none. Empty stderr still names the exit code, never a
+        # bare "failed".
+        if not ok:
+            stderr = ( getattr( result, "stderr", "" ) or "" ).strip()
+            rc     = getattr( result, "returncode", None )
+            row[ "reason" ] = stderr if stderr else f"spawn script exited with code {rc} and no stderr"
+        spawned.append( row )
 
     if not dry_run:
         successful = [ s for s in spawned if s[ "status" ] == "spawned" ]
@@ -523,6 +737,12 @@ def _capture_reap_identity( session_dir: Path, tmux_session: str ) -> Optional[ 
             "persona"     : data.get( "voice_persona" ),
             "sender_id"   : sender_id,
             "session_id"  : session_id,
+            # The seat's OWN repo (row 80b930e6). Carried so the memento coordinator
+            # derives THAT seat's io/mementos/ slot instead of the host's LUPIN_ROOT —
+            # which verified every non-lupin seat against lupin's slot, i.e. against a
+            # different persona's live memento. `data` was already parsed from the
+            # bridge here; the field was simply being dropped on the floor.
+            "cwd"         : data.get( "cwd" ),
         }
     return None
 
@@ -809,7 +1029,9 @@ def dismiss_sessions(
     emit_reaped_fn     : Optional[ Callable ] = None,
     clear_hold_fn      : Optional[ Callable ] = None,
     reconcile_items_fn : Optional[ Callable ] = None,
-    respin_personas    : Optional[ List[ str ] ] = None
+    respin_personas    : Optional[ List[ str ] ] = None,
+    memento_coord_fn   : Optional[ Callable ] = None,
+    memento_recheck_fn : Optional[ Callable ] = None
 ) -> Dict[ str, Any ]:
     """
     Reap reviewer sessions this manager spawned: kill their tmux sessions and
@@ -826,13 +1048,35 @@ def dismiss_sessions(
           (idempotent: already-dead sessions are fine — reported "already_gone")
         - Removes reaped names from the manifest; rewrites it (or deletes it when
           empty)
-        - `reason` and `write_memento` are echoed in the result (write_memento
-          coordination — surfacing a final memento prompt to the child before
-          kill — is handled by the MCP wrapper's pre-kill DM; this function does
-          the teardown)
+        - MEMENTO COORDINATION (row 0a36d83d): when `memento_coord_fn` is provided,
+          it runs BEFORE the kill loop (the kill used to be the first statement, so
+          a memento request without a wait lost the race) and returns a per-seat
+          `memento_outcomes` map — each reaped seat is proven to have (or asked to
+          write, then polled for) a fresh+complete memento on disk. FAIL-SAFE: a
+          raising coordinator NEVER breaks the reap, but the failure is SURFACED in
+          `memento_outcomes["_error"]` — never a silent success (that WAS the bug).
+          DEFAULT is None (skip) so unit reaps + the write_memento=False idle-TTL
+          path stay hermetic; the real coordinator is wired by the MCP wrapper.
+        - POST-KILL RE-CHECK (row f94ab580): when `memento_recheck_fn` is provided, it
+          runs ONCE AFTER the kill loop and BEFORE `memento_alarm` is composed, so a
+          seat that lands its memento during teardown is no longer guaranteed to be
+          misreported. Measured 2026-08-25: two of four alarmed seats had a complete,
+          self-named memento on disk 30s later — the coordinator's verdict is a
+          snapshot at ASK TIME, and the kill is what ends the seat's chance to write.
+          It can only UPGRADE a seat that re-proves itself on the same predicate; an
+          absent memento and another session's file stay loud. FAIL-SAFE and SURFACED
+          the same way as the coordinator: a raising re-check leaves every honest
+          verdict standing and records itself in `memento_outcomes["_recheck_error"]`.
+        - `reason` and `write_memento` are echoed in the result; `write_memento`
+          coordination is NO LONGER a no-op — see MEMENTO COORDINATION above
+        - `memento_alarm` (row 3b0c5f90) is a single TOP-LEVEL line naming every seat
+          being killed without a proven memento, or None when there is none to name.
+          The per-seat verdicts under `memento_outcomes` were already honest and still
+          got missed — they sit in a nested dict while the reap reports success around
+          them, so the losing seats need a place the reader cannot walk past
         - Returns { dismissed: [ {session_name, status} ], manager_session_id,
-                    reason, write_memento, remaining, reconciliation,
-                    retained_owner_personas, retained_unmatched }
+                    reason, write_memento, memento_alarm, memento_outcomes, remaining,
+                    reconciliation, retained_owner_personas, retained_unmatched }
         - RE-SPIN RETENTION (4dfb2f3b): a persona named in `respin_personas` is
           reaped normally (tmux kill, bridge unlink, tombstone, hold-clear) but
           its store rows are NOT reconciled — the reconciler is not called for it
@@ -865,6 +1109,12 @@ def dismiss_sessions(
         respin_personas: persona names coming straight back in a re-spin — their
             rows keep their owner (slug-tolerant matching); None/[] = every reaped
             session is a true reap and reconciles as before
+        memento_coord_fn: pre-kill memento coordinator (identities) -> per-seat
+            outcome map; None = skip (hermetic default). The MCP wrapper wires the
+            live `reap_memento.coordinate_mementos`. See MEMENTO COORDINATION above.
+        memento_recheck_fn: post-kill re-check (outcomes, identities) -> a revised
+            outcome map; None = skip (hermetic default). The MCP wrapper wires the
+            live `reap_memento.recheck_losing_seats`. See POST-KILL RE-CHECK above.
 
     Returns:
         dict: dismissal result
@@ -880,6 +1130,22 @@ def dismiss_sessions(
     # the bridge is unlinked below, and sender_id/persona both derive from it.
     identities = { name: _capture_reap_identity( session_dir, name ) for name in targets }
 
+    # MEMENTO COORDINATION (row 0a36d83d) — BEFORE any kill. Prove each seat the
+    # manager asked to preserve has (or, if not, is asked to write and then polled
+    # for) a fresh+complete memento on disk, recording an EXPLICIT per-seat outcome.
+    # The kill below used to be the FIRST statement in this function — a memento
+    # request without a wait lost the race — so this runs first and blocks on the
+    # verified-on-disk check. FAIL-SAFE: a raising coordinator NEVER breaks the reap,
+    # but the failure is SURFACED, never swallowed into a false success.
+    memento_outcomes: Dict[ str, Any ] = {}
+    if memento_coord_fn is not None:
+        try:
+            memento_outcomes = memento_coord_fn( identities )
+        except Exception as error:
+            memento_outcomes = { "_error": ( f"memento coordination raised "
+                                             f"({error.__class__.__name__}: {error}) — reap proceeded "
+                                             f"WITHOUT verified mementos" ) }
+
     for name in targets:
         result = runner( [ "tmux", "kill-session", "-t", name ] )
         ok     = getattr( result, "returncode", 1 ) == 0
@@ -887,6 +1153,26 @@ def dismiss_sessions(
             "session_name" : name,
             "status"       : "killed" if ok else "already_gone"
         } )
+
+    # POST-KILL RE-CHECK (row f94ab580) — the ONE second look, before the alarm is
+    # composed. The coordinator above judged at ASK TIME; the kill is the moment a
+    # seat's chance to write ends, so a seat mid-write when the ask window expired
+    # was GUARANTEED to be reported as having failed. Measured on a four-seat reap:
+    # two of the four alarmed seats had a complete, self-named memento on disk
+    # seconds later, and one of them DM'd "ready for re-spin" after it was already
+    # killed and logged unproven. This can only UPGRADE a seat that re-proves itself
+    # on the same identity-checking predicate — an absent memento stays absent and a
+    # prior holder's file stays a prior holder's file. FAIL-SAFE: a raising re-check
+    # NEVER breaks the reap and NEVER discards the honest verdicts it was given.
+    if memento_recheck_fn is not None:
+        try:
+            memento_outcomes = memento_recheck_fn( memento_outcomes, identities )
+        except Exception as error:
+            memento_outcomes = dict( memento_outcomes )
+            memento_outcomes[ "_recheck_error" ] = ( f"post-kill memento re-check raised "
+                                                     f"({error.__class__.__name__}: {error}) — the "
+                                                     f"verdicts below are as of ASK TIME and a seat "
+                                                     f"that wrote during teardown may be misreported" )
 
     reaped_names = { d[ "session_name" ] for d in dismissed }
     remaining    = [ r for r in records if r[ "session_name" ] not in reaped_names ]
@@ -1020,6 +1306,12 @@ def dismiss_sessions(
         "manager_session_id" : manager_session_id,
         "reason"             : reason,
         "write_memento"      : write_memento,
+        # TOP-LEVEL AND LOUD (row 3b0c5f90). The per-seat verdicts below were already
+        # honest and already missed — a manager reads the top of a result, not a nested
+        # dict, and the reap reports success around them either way. None when nothing
+        # was lost, so the line only appears when it means something.
+        "memento_alarm"      : reap_memento.memento_alarm( memento_outcomes ),
+        "memento_outcomes"   : memento_outcomes,
         "remaining"          : [ r[ "session_name" ] for r in remaining ],
         "bridges_deleted"    : bridges_deleted,
         "holds_cleared"      : holds_cleared,
@@ -1524,6 +1816,11 @@ def resolve_spawn_config( config_mgr: Any ) -> Dict[ str, Any ]:
     ack    = 120
     wm     = True
     models = { "reviewer": None, "author": None, "observer": None, "default": None }
+    # Reap-memento coordination knobs (row 0a36d83d) — defaults track reap_memento's.
+    mem_window   = reap_memento.DEFAULT_WINDOW_SECONDS
+    mem_bytes    = reap_memento.DEFAULT_MIN_BYTES
+    mem_timeout  = reap_memento.DEFAULT_ASK_TIMEOUT_SEC
+    mem_interval = reap_memento.DEFAULT_POLL_INTERVAL_SEC
     if config_mgr is not None:
         cap = config_mgr.get( "cc session spawn max reviewers",
                               default=DEFAULT_SPAWN_CAP, return_type="int", silent=True )
@@ -1534,8 +1831,20 @@ def resolve_spawn_config( config_mgr: Any ) -> Dict[ str, Any ]:
         for spawn_role in models:
             models[ spawn_role ] = config_mgr.get( f"cc session spawn model {spawn_role}",
                                                    default=None, return_type="string", silent=True )
+        mem_window   = config_mgr.get( "cc session reap memento freshness window seconds",
+                                       default=reap_memento.DEFAULT_WINDOW_SECONDS, return_type="int", silent=True )
+        mem_bytes    = config_mgr.get( "cc session reap memento min bytes",
+                                       default=reap_memento.DEFAULT_MIN_BYTES, return_type="int", silent=True )
+        mem_timeout  = config_mgr.get( "cc session reap memento ask timeout seconds",
+                                       default=reap_memento.DEFAULT_ASK_TIMEOUT_SEC, return_type="int", silent=True )
+        mem_interval = config_mgr.get( "cc session reap memento poll interval seconds",
+                                       default=reap_memento.DEFAULT_POLL_INTERVAL_SEC, return_type="int", silent=True )
     return { "spawn_cap": cap, "ack_timeout_seconds": ack, "write_memento_default": wm,
-             "spawn_models": models }
+             "spawn_models": models,
+             "reap_memento_window_seconds"   : mem_window,
+             "reap_memento_min_bytes"        : mem_bytes,
+             "reap_memento_ask_timeout_sec"  : mem_timeout,
+             "reap_memento_poll_interval_sec": mem_interval }
 
 
 def _slug( text: str ) -> str:
@@ -1650,5 +1959,5 @@ def quick_smoke_test():
     print( "\nAll session_spawner smoke tests: ✓ passed" )
 
 
-if __name__ == "__main__":  # pragma: no cover  # CLI entry point; body exercised by the unit suite
+if __name__ == "__main__":  # pragma: no cover  # __name__ is never "__main__" under an import, so this line cannot execute in any in-process test
     quick_smoke_test()

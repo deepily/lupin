@@ -79,14 +79,18 @@ class TestLengthThresholdReload:
             judge._reload_length_thresholds()
             assert judge.length_bucket( 120 )[ "weight" ] == -1
 
-    # ── the emoji-repetition interval IS the cap, so face count moves with it ─────────
-    def test_reload_moves_face_repetition_interval( self ):
-        # A 300-word DM scores 😞 either way; the face REPEATS word_count // cap times.
-        assert judge.length_bucket( 300 )[ "emoji" ].count( "😞" ) == 2   # 300 // 150
+    # ── the emoji-repetition interval is DECOUPLED from the cap (row 2cb46818) ─────────
+    def test_reload_does_not_move_face_repetition_interval( self ):
+        # PREMISE FLIPPED (row 2cb46818): the face interval is its OWN constant
+        # LENGTH_FACE_INTERVAL (100), NOT the reloadable qualitative cap. A 300-word DM
+        # shows 300//100 == 3 faces, and moving the cap must NOT change that count — that
+        # decoupling is the whole point: counting faces can no longer recover the cap.
+        assert judge.length_bucket( 300 )[ "emoji" ].count( "😞" ) == 3   # 300 // LENGTH_FACE_INTERVAL
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr( judge, "_resolve_threshold", _fake_resolver( 100 ) )
             judge._reload_length_thresholds()
-            assert judge.length_bucket( 300 )[ "emoji" ].count( "😞" ) == 3   # 300 // 100
+            assert judge.QUALITATIVE_WORD_LIMIT == 100                       # the cap DID move
+            assert judge.length_bucket( 300 )[ "emoji" ].count( "😞" ) == 3   # the face count did NOT
 
     # ── the /api/init path: invalidate_all() must trigger the reload end-to-end ───────
     def test_invalidate_all_triggers_the_reload( self ):

@@ -1,151 +1,358 @@
 {
-    "agent router go to deep research" : {
-        "template_file"    : "/src/ephemera/prompts/data/synthetic-data-agent-routing-deep-research.txt",
-        "placeholders"     : {
-            "RESEARCH_TOPIC"   : { "source" : "research_topics",   "args_key" : "topic" },
-            "AUDIENCE"         : { "source" : "audience_levels",   "args_key" : "audience" },
-            "AUDIENCE_CONTEXT" : { "source" : "audience_contexts", "args_key" : "audience_context" }
-        },
-        "args_key"         : "topic",
-        "conditional_args" : {
-            "dry_run" : {
-                "value"    : "True",
-                "triggers" : [ "dry run", "dry-run", "dryrun", "trial run", "trial mode", "test run" ]
-            }
-        }
+  "agent router go to deep research": {
+    "template_file": "/src/ephemera/prompts/data/synthetic-data-agent-routing-deep-research.txt",
+    "placeholders": {
+      "RESEARCH_TOPIC": {
+        "source": "research_topics",
+        "args_key": "topic"
+      },
+      "AUDIENCE": {
+        "source": "audience_levels",
+        "args_key": "audience"
+      },
+      "AUDIENCE_CONTEXT": {
+        "source": "audience_contexts",
+        "args_key": "audience_context"
+      }
     },
-    "agent router go to podcast generator" : {
-        "template_file"    : "/src/ephemera/prompts/data/synthetic-data-agent-routing-podcast-generator.txt",
-        "placeholders"     : {
-            "RESEARCH_TOPIC"   : { "source" : "research_topics",   "args_key" : "topic" },
-            "AUDIENCE"         : { "source" : "audience_levels",   "args_key" : "audience" },
-            "AUDIENCE_CONTEXT" : { "source" : "audience_contexts", "args_key" : "audience_context" }
-        },
-        "args_key"         : "topic",
-        "conditional_args" : {
-            "dry_run" : {
-                "value"    : "True",
-                "triggers" : [ "dry run", "dry-run", "dryrun", "trial run", "trial mode", "test run" ]
-            },
-            "target_languages" : [
-                { "value" : "['es-MX']", "triggers" : [ "mexican spanish", "in mexican", "mexico spanish" ] },
-                { "value" : "['es-ES']", "triggers" : [ "peninsula spanish", "peninsular spanish", "castilian spanish", "castillian spanish", "spanish from spain", "iberian spanish" ] },
-                { "value" : "['es-AR']", "triggers" : [ "argentinian spanish", "argentine spanish", "argentina spanish", "rioplatense" ] },
-                { "value" : "['en']",    "triggers" : [ "in english", "english language", "english audio" ] },
-                { "value" : "['fr']",    "triggers" : [ "in french", "french language", "french audio" ] },
-                { "value" : "['de']",    "triggers" : [ "in german", "german language", "german audio" ] }
-            ]
-        }
-    },
-    "agent router go to research to podcast" : {
-        "template_file"    : "/src/ephemera/prompts/data/synthetic-data-agent-routing-research-to-podcast.txt",
-        "placeholders"     : {
-            "DOCUMENT_PATH"    : { "source" : "document_paths",    "args_key" : "document_path" },
-            "AUDIENCE"         : { "source" : "audience_levels",   "args_key" : "audience" },
-            "AUDIENCE_CONTEXT" : { "source" : "audience_contexts", "args_key" : "audience_context" }
-        },
-        "args_key"         : "document_path",
-        "conditional_args" : {
-            "dry_run" : {
-                "value"    : "True",
-                "triggers" : [ "dry run", "dry-run", "dryrun", "trial run", "trial mode", "test run" ]
-            },
-            "target_languages" : [
-                { "value" : "['es-MX']", "triggers" : [ "mexican spanish", "in mexican", "mexico spanish" ] },
-                { "value" : "['es-ES']", "triggers" : [ "peninsula spanish", "peninsular spanish", "castilian spanish", "castillian spanish", "spanish from spain", "iberian spanish" ] },
-                { "value" : "['es-AR']", "triggers" : [ "argentinian spanish", "argentine spanish", "argentina spanish", "rioplatense" ] },
-                { "value" : "['en']",    "triggers" : [ "in english", "english language", "english audio" ] },
-                { "value" : "['fr']",    "triggers" : [ "in french", "french language", "french audio" ] },
-                { "value" : "['de']",    "triggers" : [ "in german", "german language", "german audio" ] }
-            ]
-        }
-    },
-    "agent router go to claude code" : {
-        "template_file" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-claude-code.txt",
-        "placeholders"  : { "TASK" : "claude_code_tasks" },
-        "args_key"      : "prompt"
-    },
-    "agent router go to presentation generator" : {
-        "template_file"    : "/src/ephemera/prompts/data/synthetic-data-agent-routing-presentation-generator.txt",
-        "placeholders"     : {
-            "DOCUMENT_PATH"    : { "source" : "document_paths",    "args_key" : "source" },
-            "DURATION_MINUTES" : { "source" : "duration_minutes",  "args_key" : "target_duration_minutes" },
-            "RENDERER"         : { "source" : "renderer_names",    "args_key" : "renderer" },
-            "AUDIENCE"         : { "source" : "audience_levels",   "args_key" : "audience" },
-            "AUDIENCE_CONTEXT" : { "source" : "audience_contexts", "args_key" : "audience_context" }
-        },
-        "args_key"         : "source",
-        "conditional_args" : {
-            "dry_run" : {
-                "value"    : "True",
-                "triggers" : [ "dry run", "dry-run", "dryrun", "trial run", "trial mode", "test run" ]
-            }
-        }
-    },
-    "agent router go to research to presentation" : {
-        "template_file"    : "/src/ephemera/prompts/data/synthetic-data-agent-routing-research-to-presentation.txt",
-        "placeholders"     : {
-            "RESEARCH_TOPIC"   : { "source" : "research_topics",   "args_key" : "topic" },
-            "DURATION_MINUTES" : { "source" : "duration_minutes",  "args_key" : "target_duration_minutes" },
-            "AUDIENCE"         : { "source" : "audience_levels",   "args_key" : "audience" },
-            "AUDIENCE_CONTEXT" : { "source" : "audience_contexts", "args_key" : "audience_context" }
-        },
-        "args_key"         : "topic",
-        "conditional_args" : {
-            "dry_run" : {
-                "value"    : "True",
-                "triggers" : [ "dry run", "dry-run", "dryrun", "trial run", "trial mode", "test run" ]
-            }
-        }
-    },
-    "agent router go to swe team" : {
-        "template_file"    : "/src/ephemera/prompts/data/synthetic-data-agent-routing-swe-team.txt",
-        "placeholders"     : { "FEATURE" : "swe_team_tasks" },
-        "args_key"         : "prompt",
-        "conditional_args" : {
-            "dry_run" : {
-                "value"    : "True",
-                "triggers" : [
-                    "dry run", "dry-run", "dryrun",
-                    "trial run", "trial mode",
-                    "dry mode", "test run",
-                    "try run", "drive run", "dry bun",
-                    "dry ron", "dry one", "dry rum",
-                    "dry rub", "dry done", "dry fun"
-                ]
-            }
-        }
-    },
-    "agent router go to test suite" : {
-        "template_file"    : "/src/ephemera/prompts/data/synthetic-data-agent-routing-test-suite.txt",
-        "placeholders"     : {},
-        "args_key"         : "test_types",
-        "conditional_args" : {
-            "monopolize" : {
-                "value"    : "True",
-                "triggers" : [ "monopolize", "exclusive mode", "exclusive access", "overnight", "when idle", "exclusive" ]
-            },
-            "dry_run" : {
-                "value"    : "True",
-                "triggers" : [ "dry run", "dry-run", "dryrun", "trial run", "test run" ]
-            }
-        }
-    },
-    "agent router go to test fix expediter" : {
-        "template_file"    : "/src/ephemera/prompts/data/synthetic-data-agent-routing-test-fix-expediter.txt",
-        "placeholders"     : {},
-        "args_key"         : "source_test_suite_job_id",
-        "conditional_args" : {
-            "dry_run" : {
-                "value"    : "True",
-                "triggers" : [ "dry run", "dry-run", "dryrun", "trial run", "trial mode", "test run", "dry mode" ]
-            }
-        }
-    },
-    "agent router go to test fix expediter resume" : {
-        "template_file"    : "/src/ephemera/prompts/data/synthetic-data-agent-routing-test-fix-expediter-resume.txt",
-        "placeholders"     : {},
-        "args_key"         : "resume_from",
-        "conditional_args" : {}
+    "args_key": "topic",
+    "conditional_args": {
+      "dry_run": {
+        "value": "True",
+        "triggers": [
+          "dry run",
+          "dry-run",
+          "dryrun",
+          "trial run",
+          "trial mode",
+          "test run"
+        ]
+      }
     }
+  },
+  "agent router go to podcast generator": {
+    "template_file": "/src/ephemera/prompts/data/synthetic-data-agent-routing-podcast-generator.txt",
+    "placeholders": {
+      "RESEARCH_TOPIC": {
+        "source": "research_topics",
+        "args_key": "topic"
+      },
+      "AUDIENCE": {
+        "source": "audience_levels",
+        "args_key": "audience"
+      },
+      "AUDIENCE_CONTEXT": {
+        "source": "audience_contexts",
+        "args_key": "audience_context"
+      }
+    },
+    "args_key": "topic",
+    "conditional_args": {
+      "dry_run": {
+        "value": "True",
+        "triggers": [
+          "dry run",
+          "dry-run",
+          "dryrun",
+          "trial run",
+          "trial mode",
+          "test run"
+        ]
+      },
+      "target_languages": [
+        {
+          "value": "['es-MX']",
+          "triggers": [
+            "mexican spanish",
+            "in mexican",
+            "mexico spanish"
+          ]
+        },
+        {
+          "value": "['es-ES']",
+          "triggers": [
+            "peninsula spanish",
+            "peninsular spanish",
+            "castilian spanish",
+            "castillian spanish",
+            "spanish from spain",
+            "iberian spanish"
+          ]
+        },
+        {
+          "value": "['es-AR']",
+          "triggers": [
+            "argentinian spanish",
+            "argentine spanish",
+            "argentina spanish",
+            "rioplatense"
+          ]
+        },
+        {
+          "value": "['en']",
+          "triggers": [
+            "in english",
+            "english language",
+            "english audio"
+          ]
+        },
+        {
+          "value": "['fr']",
+          "triggers": [
+            "in french",
+            "french language",
+            "french audio"
+          ]
+        },
+        {
+          "value": "['de']",
+          "triggers": [
+            "in german",
+            "german language",
+            "german audio"
+          ]
+        }
+      ]
+    }
+  },
+  "agent router go to research to podcast": {
+    "template_file": "/src/ephemera/prompts/data/synthetic-data-agent-routing-research-to-podcast.txt",
+    "placeholders": {
+      "DOCUMENT_PATH": {
+        "source": "document_paths",
+        "args_key": "document_path"
+      },
+      "AUDIENCE": {
+        "source": "audience_levels",
+        "args_key": "audience"
+      },
+      "AUDIENCE_CONTEXT": {
+        "source": "audience_contexts",
+        "args_key": "audience_context"
+      }
+    },
+    "args_key": "document_path",
+    "conditional_args": {
+      "dry_run": {
+        "value": "True",
+        "triggers": [
+          "dry run",
+          "dry-run",
+          "dryrun",
+          "trial run",
+          "trial mode",
+          "test run"
+        ]
+      },
+      "target_languages": [
+        {
+          "value": "['es-MX']",
+          "triggers": [
+            "mexican spanish",
+            "in mexican",
+            "mexico spanish"
+          ]
+        },
+        {
+          "value": "['es-ES']",
+          "triggers": [
+            "peninsula spanish",
+            "peninsular spanish",
+            "castilian spanish",
+            "castillian spanish",
+            "spanish from spain",
+            "iberian spanish"
+          ]
+        },
+        {
+          "value": "['es-AR']",
+          "triggers": [
+            "argentinian spanish",
+            "argentine spanish",
+            "argentina spanish",
+            "rioplatense"
+          ]
+        },
+        {
+          "value": "['en']",
+          "triggers": [
+            "in english",
+            "english language",
+            "english audio"
+          ]
+        },
+        {
+          "value": "['fr']",
+          "triggers": [
+            "in french",
+            "french language",
+            "french audio"
+          ]
+        },
+        {
+          "value": "['de']",
+          "triggers": [
+            "in german",
+            "german language",
+            "german audio"
+          ]
+        }
+      ]
+    }
+  },
+  "agent router go to claude code": {
+    "template_file": "/src/ephemera/prompts/data/synthetic-data-agent-routing-claude-code.txt",
+    "placeholders": {
+      "TASK": "claude_code_tasks"
+    },
+    "args_key": "prompt"
+  },
+  "agent router go to presentation generator": {
+    "template_file": "/src/ephemera/prompts/data/synthetic-data-agent-routing-presentation-generator.txt",
+    "placeholders": {
+      "DOCUMENT_PATH": {
+        "source": "document_paths",
+        "args_key": "source"
+      },
+      "DURATION_MINUTES": {
+        "source": "duration_minutes",
+        "args_key": "target_duration_minutes"
+      },
+      "RENDERER": {
+        "source": "renderer_names",
+        "args_key": "renderer"
+      },
+      "AUDIENCE": {
+        "source": "audience_levels",
+        "args_key": "audience"
+      },
+      "AUDIENCE_CONTEXT": {
+        "source": "audience_contexts",
+        "args_key": "audience_context"
+      }
+    },
+    "args_key": "source",
+    "conditional_args": {
+      "dry_run": {
+        "value": "True",
+        "triggers": [
+          "dry run",
+          "dry-run",
+          "dryrun",
+          "trial run",
+          "trial mode",
+          "test run"
+        ]
+      }
+    }
+  },
+  "agent router go to research to presentation": {
+    "template_file": "/src/ephemera/prompts/data/synthetic-data-agent-routing-research-to-presentation.txt",
+    "placeholders": {
+      "RESEARCH_TOPIC": {
+        "source": "research_topics",
+        "args_key": "topic"
+      },
+      "DURATION_MINUTES": {
+        "source": "duration_minutes",
+        "args_key": "target_duration_minutes"
+      },
+      "AUDIENCE": {
+        "source": "audience_levels",
+        "args_key": "audience"
+      },
+      "AUDIENCE_CONTEXT": {
+        "source": "audience_contexts",
+        "args_key": "audience_context"
+      }
+    },
+    "args_key": "topic",
+    "conditional_args": {
+      "dry_run": {
+        "value": "True",
+        "triggers": [
+          "dry run",
+          "dry-run",
+          "dryrun",
+          "trial run",
+          "trial mode",
+          "test run"
+        ]
+      }
+    }
+  },
+  "agent router go to swe team": {
+    "template_file": "/src/ephemera/prompts/data/synthetic-data-agent-routing-swe-team.txt",
+    "placeholders": {
+      "FEATURE": "swe_team_tasks"
+    },
+    "args_key": "prompt",
+    "conditional_args": {
+      "dry_run": {
+        "value": "True",
+        "triggers": [
+          "dry run",
+          "dry-run",
+          "dryrun",
+          "trial run",
+          "trial mode",
+          "dry mode",
+          "test run",
+          "try run",
+          "drive run",
+          "dry bun",
+          "dry ron",
+          "dry one",
+          "dry rum",
+          "dry rub",
+          "dry done",
+          "dry fun"
+        ]
+      }
+    }
+  },
+  "agent router go to test suite": {
+    "template_file": "/src/ephemera/prompts/data/synthetic-data-agent-routing-test-suite.txt",
+    "placeholders": {
+      "TEST_TYPE": {
+        "source": "test_types",
+        "args_key": "test_types"
+      }
+    },
+    "args_key": "test_types",
+    "conditional_args": {
+      "monopolize": {
+        "value": "True",
+        "triggers": [
+          "monopolize",
+          "exclusive mode",
+          "exclusive access",
+          "overnight",
+          "when idle",
+          "exclusive"
+        ]
+      },
+      "dry_run": {
+        "value": "True",
+        "triggers": [
+          "dry run",
+          "dry-run",
+          "dryrun",
+          "trial run",
+          "test run"
+        ]
+      }
+    }
+  },
+  "agent router go to test fix expediter resume": {
+    "template_file": "/src/ephemera/prompts/data/synthetic-data-agent-routing-test-fix-expediter-resume.txt",
+    "placeholders": {
+      "PLAN_PATH": {
+        "source": "tfe_plan_paths",
+        "args_key": "resume_from"
+      }
+    },
+    "args_key": "resume_from",
+    "conditional_args": {}
+  }
 }

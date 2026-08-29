@@ -102,7 +102,7 @@ test("renderJobBucket: empty bucket renders per-bucket 'No <name> jobs.' div (Q-
   assert.notEqual(empty, null);
   assert.equal(empty?.textContent?.trim(), "No history jobs.");
   // No cards container is rendered for empty buckets.
-  assert.equal(el.querySelector(".jobs-bucket-cards"), null);
+  assert.ok( el.querySelector(".jobs-bucket-cards") === null );
 });
 
 test("renderJobBucket: non-empty bucket populates cards via keyedListMerge keyed by data-id-hash (F12)", () => {
@@ -206,7 +206,7 @@ test("renderJobBucket: empty bucket header click flips aria-expanded but no card
   // toggleBucket() must handle the no-cards-container branch (cards === null).
   const el     = renderJobBucket("history", []);
   const header = el.querySelector(".jobs-bucket-header") as HTMLElement;
-  assert.equal(el.querySelector(".jobs-bucket-cards"), null);
+  assert.ok( el.querySelector(".jobs-bucket-cards") === null );
 
   // Initial: collapsed (history starts collapsed)
   assert.equal(header.getAttribute("aria-expanded"), "false");
@@ -229,7 +229,7 @@ test("renderJobBucket: every bucket header carries exactly one .queue-delete-all
     assert.equal(btn.type, "button");
     assert.equal(btn.textContent, "🗑");
     const toggle = el.querySelector(".jobs-bucket-toggle") as HTMLElement;
-    assert.equal(btn.nextElementSibling, toggle, `${bucket}: 🗑 sits immediately before the chevron`);
+    assert.ok( btn.nextElementSibling === toggle, `${bucket}: 🗑 sits immediately before the chevron` );
   }
 });
 
@@ -286,7 +286,7 @@ test("renderJobBucket: history select reflects the current window (30 → '30'; 
 test("renderJobBucket: non-history buckets render NO time-window select (W3)", () => {
   for (const bucket of ["todo", "running", "done", "dead"] as JobBucket[]) {
     const el = renderJobBucket(bucket, [ makeJob({ id_hash: `j-${bucket}` }) ]);
-    assert.equal(el.querySelector(".history-time-select"), null, `${bucket} must not render a time-window select`);
+    assert.ok( el.querySelector(".history-time-select") === null, `${bucket} must not render a time-window select` );
   }
 });
 
@@ -312,14 +312,14 @@ test("renderJobBucket: clicking the history time-window select does NOT toggle t
 
 test("renderJobBucket: history renders Load-More iff loaded < total; absent when caught up / unset; never on live buckets (W4)", () => {
   const gated = renderJobBucket("history", [ makeJob({ id_hash: "h1" }) ], { historyLoadedCount: 1, historyTotalCount: 5, historyWindowDays: 30 });
-  assert.notEqual(gated.querySelector(".history-load-more"), null, "present when loaded < total");
+  assert.ok( gated.querySelector(".history-load-more") !== null, "present when loaded < total" );
 
   const caught = renderJobBucket("history", [ makeJob({ id_hash: "h1" }) ], { historyLoadedCount: 5, historyTotalCount: 5, historyWindowDays: 30 });
-  assert.equal(caught.querySelector(".history-load-more"), null, "absent when caught up (loaded === total)");
+  assert.ok( caught.querySelector(".history-load-more") === null, "absent when caught up (loaded === total)" );
 
   const bare = renderJobBucket("history", []);   // no counts → 0 < 0 → absent
-  assert.equal(bare.querySelector(".history-load-more"), null, "absent when counts unset");
+  assert.ok( bare.querySelector(".history-load-more") === null, "absent when counts unset" );
 
   const live = renderJobBucket("done", [ makeJob({ id_hash: "d1" }) ], { historyLoadedCount: 1, historyTotalCount: 5 });
-  assert.equal(live.querySelector(".history-load-more"), null, "never on a live bucket");
+  assert.ok( live.querySelector(".history-load-more") === null, "never on a live bucket" );
 });

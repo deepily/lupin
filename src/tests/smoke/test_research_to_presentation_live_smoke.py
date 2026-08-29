@@ -2,6 +2,28 @@
 """
 Research-to-Presentation LIVE chain endpoint smoke test — Tier 5 validation.
 
+⚠️ VENUE: :8000 (test), NOT :7999 — AND THIS FILE IS STILL RUN BY THE :7999 SMOKE TIER,
+   SO IT IS EXPECTED RED THERE. Recorded 2026-08-26 (row 554e5d3e); NOT MOVED, deliberately.
+
+   Criterion tripped (CLAUDE.md § TESTING VENUES — a file is :8000 if ANY apply):
+     - real LLM spend (a live research + presentation chain, billed per token)
+     - runtime > 2 minutes
+   Evidence, from this file:
+     - usage line passes `--cost-cap-usd 10.00`
+     - `DEFAULT_TIMEOUT = 2400` (40 min: "DR ~15min + PR ~8min + overhead")
+     - the header block already names `POST /api/test-suite/submit` as the door
+   WHY IT WAS NOT MOVED. `run-smoke-tests.sh` runs the whole `src/tests/smoke/` directory,
+   so this file is executed on :7999 by the smoke merge gate regardless of what its
+   docstring says. Relocating it, or excluding it from the runner the way
+   test_proxy_integration.py is excluded, would deselect it from that gate — a change to
+   what the gate covers, which is an owner's decision and not a drive-by while clearing a
+   red list. So it stays, it stays red on :7999, and the reason is written here instead of
+   being re-derived by the next reader.
+
+   HOW TO RUN IT PROPERLY: submit via `POST /api/test-suite/submit` against :8000 on a
+   verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`,
+   exit 0 = IDLE). Never side-door it via curl or a direct queue push.
+
 Validates the full chain: Deep Research generates a report, then Presentation
 Generator auto-chains to produce slides from that report. Real Claude API calls,
 real orchestrator gates, real artifact generation.
@@ -153,7 +175,9 @@ class ResearchToPresentationLiveSmokeTest( InteractiveSmokeTest ):
     """
 
     TEST_NAME       = "Research to Presentation Live Chain"
-    SUBMIT_ENDPOINT = "/api/deep-research-to-presentation/submit"
+    # The dedicated door /api/deep-research-to-presentation/submit is retired (410); one front door now.
+    SUBMIT_ENDPOINT = "/api/v2/submit"
+    ROUTING_COMMAND = "agent router go to research to presentation"
     DEFAULT_TIMEOUT = 2400  # 40 min (DR ~15min + PR ~8min + overhead)
     POLL_INTERVAL   = 5
     REQUEST_TIMEOUT = 2400
@@ -188,7 +212,26 @@ class ResearchToPresentationLiveSmokeTest( InteractiveSmokeTest ):
         }
         if self._lead_model:
             payload[ "lead_model" ] = self._lead_model
-        return payload
+        # Lineage tag (bug 5ed4f187): when this smoke runs as a child pytest inside a
+        # monopolizing test-suite job, the runner exports LUPIN_TEST_MONOPOLIZE_PARENT_ID
+        # (test_suite/job.py). Threading it as parent_id_hash lets the consumer's Gate B
+        # admit this child through the monopoly hold instead of starving it 900s.
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+
+        # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and
+        # answers 410 naming /api/v2/submit, which takes the routing command as a string
+        # and the agent's own arguments in `args`. What used to be a flat body is a command
+        # plus its args; `parent_id_hash` stays TOP-LEVEL because it is a queue directive
+        # (Gate B lineage), not an argument to the agent, and `args` is checked against the
+        # command's own argument contract.
+        body = {
+            "command"  : self.ROUTING_COMMAND,
+            "args"     : payload,
+            "question" : payload.get( "query", "" ),
+        }
+        if parent_id:
+            body[ "parent_id_hash" ] = parent_id
+        return body
 
     def get_mode_for_scenario( self, scenario ):
         return None

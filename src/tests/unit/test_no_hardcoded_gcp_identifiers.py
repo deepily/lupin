@@ -26,6 +26,8 @@ project guard still reports green.
 
 Venue: :7999-eligible — pure `git ls-files` + file reads. No network, no mutation.
 """
+import ast
+import hashlib
 import os
 import re
 import subprocess
@@ -150,6 +152,15 @@ def supplying_occurrences( text ):
         - `${VAR:-...}` / `${VAR:=...}` DO match: they are silent defaults
         - anything else containing the literal is treated as supplying, so a new
           syntax nobody anticipated fails CLOSED rather than sailing through
+
+    KNOWN HOLE — LINE-BASED, SO IT CANNOT SEE A MULTI-LINE STRING. Quote state is
+    tracked WITHIN one line and only `#` is stripped, so the body of a Python
+    triple-quoted block reads as code and its prose lands as a hit. That is why
+    `.py` is routed to `_py_supplying_occurrences` below instead of here. Every
+    other suffix still uses this function and still has the hole; it has simply
+    never bitten, because no `.yml`/`.json`/`.tf` file in this tree writes prose
+    about the project id inside a multi-line scalar. If one ever does, teach the
+    parser for that suffix — do NOT add an exemption.
     """
     hits = []
     for lineno, raw in enumerate( text.splitlines(), start=1 ):
@@ -159,6 +170,237 @@ def supplying_occurrences( text ):
         if _is_inert_error_message( code, idx ): continue
         hits.append( ( lineno, raw.strip() ) )
     return hits
+
+
+# Positions in which a string constant CANNOT hand its value to anything: an
+# `in`/`==` test, an assert's message, and a bare string expression statement (a
+# docstring). Deliberately an INERT list rather than a SUPPLYING list — everything
+# not named here is treated as supplying, so an ast node nobody anticipated fails
+# CLOSED, exactly as the line-based predicate does.
+PY_INERT_PARENTS = ( ast.Compare, ast.Assert, ast.Expr )
+
+
+# PINNED PROSE — the multi-line strings in a SUPPLYING position that are known to
+# be paragraphs about the id rather than uses of it. Keyed on (file, the line the
+# literal sits on) and pinned to a hash of THAT LINE, so editing the prose breaks
+# the pin and somebody has to look again.
+#
+# WHY PIN RATHER THAN SKIP (Mr Radio's ruling, 2026-08-26): "a multi-line string is
+# inert" is a blanket hole, and the two things it would wave through are not exotic
+# — an embedded YAML blob and a `gcloud` command line are how a project id actually
+# gets supplied from Python. Collect them and check them against what we already
+# know instead.
+#
+# THIS IS NOT THE BOUNDED ALLOWLIST THIS GUARD REPLACED. That one was bounded on
+# WHERE IT LOOKED — three remembered filenames, so a new script escaped by existing.
+# This is bounded only on WHAT IT ALREADY KNOWS: every tracked file is still
+# scanned, every new occurrence is still an offender, and the inventory can only
+# shrink the answer for a line whose exact text someone already justified.
+PINNED_PROSE = {
+    ( "src/cosa/agents/presentation_generator/gemini_client.py", 47 ):
+        # "(hello-world-foo-423219). models.get returns 404 NOT_FOUND for both"
+        # The LOUD NOTICE banner printed to stderr — it must NAME the project that
+        # 404s, which is the banner's whole job. Approved standing exception,
+        # 2026-08-16; the notice is `print`ed, never passed to any client.
+        "e2efc259dcd7f1c43f505afc93123ae708fa80d713175c628d68481fa89f11ad",
+}
+
+
+def _line_pin( line ):
+    """The pin for one source line: a hash of its exact text, whitespace included."""
+    return hashlib.sha256( line.encode() ).hexdigest()
+
+
+def _is_pinned_prose( rel_path, lineno, raw_line, value ):
+    """
+    True only for a KNOWN multi-line prose occurrence — all four facts must agree.
+
+    Requires:
+        - rel_path/lineno locate the literal; raw_line is that source line verbatim
+        - value is the full string constant the literal was found in
+
+    Ensures:
+        - a SINGLE-LINE value is never pinned, whatever the inventory says: pinning
+          is a claim about prose, and a one-line string is a value. Without this the
+          inventory would quietly become the exemption mechanism the guard's header
+          rules out
+        - the pin must match on FILE and LINE and the line's EXACT TEXT, so the same
+          prose moved, copied, or reworded is a new occurrence and is caught
+    """
+    if "\n" not in value: return False
+    return PINNED_PROSE.get( ( rel_path, lineno ) ) == _line_pin( raw_line )
+
+
+def _py_literal_lineno( node, idx ):
+    """
+    The line the literal actually sits on, not the line the string STARTS on.
+
+    A triple-quoted constant reports `node.lineno` at its opening quotes, which for
+    a 28-line banner is nowhere near the id. Reading a failure message that names a
+    line the literal is not on is how someone concludes the guard is broken.
+
+    Requires:
+        - node is an ast.Constant holding a str
+        - idx is the index of the literal inside node.value
+
+    Ensures:
+        - returns node.lineno plus the number of newlines preceding idx
+    """
+    return node.lineno + node.value[ :idx ].count( "\n" )
+
+
+def _py_supplying_occurrences( rel_path, text ):
+    """
+    Lines where the literal appears in a Python position that can SUPPLY it.
+
+    The line-based predicate cannot see a multi-line string, so a prose banner
+    assigned to a constant reads as an assignment. POSITION alone does not separate
+    the two either: a banner assigned to `_IMAGE_GEN_NOTICE` is an assignment RHS, the same
+    position as a real `PROJECT_ID = "<id>"`. Two properties are needed.
+
+    Requires:
+        - text is the full contents of a .py file
+
+    Ensures:
+        - a literal in an inert position never matches (see PY_INERT_PARENTS)
+        - a literal in a MULTI-LINE string matches UNLESS its (file, line) is in
+          PINNED_PROSE and the line still hashes to the pinned value — collect and
+          check, never skip wholesale
+        - a literal in a single-line string DOES match and can NEVER be pinned —
+          assignment RHS, keyword argument, call argument, dict value, os.environ
+          subscript, and an f-string fragment, which is how a real id is embedded
+          in a URL
+        - a file that does not parse falls back to the line-based predicate rather
+          than returning [], so a syntax error cannot silently disarm the guard
+
+    Raises:
+        - nothing; SyntaxError is caught and degraded to the line-based path
+    """
+    try:
+        tree = ast.parse( text )
+    except SyntaxError:
+        return supplying_occurrences( text )
+
+    parents = {}
+    for node in ast.walk( tree ):
+        for child in ast.iter_child_nodes( node ): parents[ child ] = node
+
+    lines = text.splitlines()
+    hits  = []
+    for node in ast.walk( tree ):
+        if not ( isinstance( node, ast.Constant ) and isinstance( node.value, str ) ): continue
+        idx = node.value.find( SANDBOX_PROJECT_ID )
+        if idx == -1: continue
+        if isinstance( parents.get( node ), PY_INERT_PARENTS ): continue
+        lineno = _py_literal_lineno( node, idx )
+        raw    = lines[ lineno - 1 ] if lineno - 1 < len( lines ) else ""
+        # A multi-line string is a CANDIDATE, not an exemption: it clears only by
+        # matching prose we already looked at, line and exact text.
+        if _is_pinned_prose( rel_path, lineno, raw, node.value ): continue
+        hits.append( ( lineno, raw.strip() ) )
+    return sorted( hits )
+
+
+def supplying_occurrences_for( rel_path, text ):
+    """
+    Route a file to the predicate that can actually read it.
+
+    Ensures:
+        - `.py` is parsed with ast; every other suffix keeps the line-based path
+        - the return shape is identical either way: [ (lineno, line) ]
+    """
+    if rel_path.endswith( ".py" ): return _py_supplying_occurrences( rel_path, text )
+    return supplying_occurrences( text )
+
+
+def _offender_is_prose_shaped( rel_path, lineno, text ):
+    """
+    True when the literal at `lineno` lives inside a MULTI-LINE string constant.
+
+    Guidance must never reach a line that could not be pinned even if someone tried,
+    and a single-line value can never be pinned. Without this the (file, line) arm
+    fires on POSITION ALONE: replace the pinned prose line with a real single-line
+    assignment at exactly that line and the guard correctly calls it an offender —
+    then tells the author how to pin it.
+
+    Ensures:
+        - non-.py files are never prose-shaped here; pins are a .py mechanism
+        - an unparseable file is never prose-shaped, so a broken file cannot talk
+          its way into guidance
+    """
+    if not rel_path.endswith( ".py" ): return False
+    try:
+        tree = ast.parse( text )
+    except SyntaxError:
+        return False
+    for node in ast.walk( tree ):
+        if not ( isinstance( node, ast.Constant ) and isinstance( node.value, str ) ): continue
+        idx = node.value.find( SANDBOX_PROJECT_ID )
+        if idx == -1: continue
+        if _py_literal_lineno( node, idx ) == lineno: return "\n" in node.value
+    return False
+
+
+def repin_guidance( offenders, texts ):
+    """
+    The half of PINNED_PROSE a person actually meets: what to do when a red is a
+    prose edit rather than a new hardcode.
+
+    A pin is a hash of one line's exact text, so ADDING A SPACE to the banner turns
+    it red — which is the mechanism working, and is indistinguishable from a real
+    hardcode if the message only ever says "hardcodes the sandbox project id". The
+    guidance carries the recomputed pin so re-pinning is a copy, not a puzzle.
+
+    Requires:
+        - offenders maps rel_path -> [ (lineno, line) ]
+        - texts maps rel_path -> THE EXACT TEXT THAT WAS SCANNED
+
+    Ensures:
+        - the recomputed hash comes from `texts`, never from a fresh read: a report
+          rendered against a re-read source is a different measurement than the one
+          that produced the finding, and it can disagree with it
+        - guidance is keyed on the LINE, never on the file. An offender qualifies
+          only if it looks like a BROKEN PIN: either it sits at a line the inventory
+          pins (so the pinned text was edited), or its own text still hashes to a
+          pin recorded for that file (so the pinned prose MOVED)
+        - a brand-new supply in a pinned file therefore gets NO guidance
+        - and neither does a SINGLE-LINE supply that lands at the pinned line: shape
+          is checked before position, so a line that could never be pinned is never
+          told how to pin itself
+
+    A file-level key was the first cut and it was wrong: appending a real multi-line
+    YAML supply to gemini_client.py earned re-pin instructions WITH THE HASH ALREADY
+    COMPUTED, in the one file where somebody is most likely to try it. Guidance that
+    reaches a new hardcode does not merely fail to help — it hands over the way out.
+    """
+    def looks_like_a_broken_pin( f, n ):
+        # SHAPE FIRST. A line that could not be pinned even on purpose must never be
+        # told how to pin itself — otherwise the (file, line) arm fires on position
+        # alone and a real assignment landing at the pinned line gets instructions.
+        if not _offender_is_prose_shaped( f, n, texts[ f ] ): return False
+        if ( f, n ) in PINNED_PROSE: return True                    # pinned line, text edited
+        source = texts[ f ].splitlines()
+        raw    = source[ n - 1 ] if n - 1 < len( source ) else ""
+        return _line_pin( raw ) in [ pin for ( pf, _pn ), pin in PINNED_PROSE.items() if pf == f ]
+
+    known = [ ( f, n ) for f, hits in offenders.items() for n, _ in hits
+                       if looks_like_a_broken_pin( f, n ) ]
+    if not known: return ""
+
+    lines = []
+    for f, n in known:
+        source = texts[ f ].splitlines()
+        raw    = source[ n - 1 ] if n - 1 < len( source ) else ""
+        lines.append( f'    ( "{f}", {n} ): "{_line_pin( raw )}",' )
+    return (
+        "\n\nONE OR MORE OF THESE IS IN A FILE PINNED_PROSE ALREADY KNOWS. If you EDITED "
+        "prose that names the id — even by one space — the pin no longer matches and that "
+        "is the mechanism working, not a new hardcode. Re-read the line, satisfy yourself "
+        "it still supplies nothing, then update PINNED_PROSE to:\n"
+        + "\n".join( lines )
+        + "\nIf the line is a real assignment, do NOT pin it — a single-line value can "
+          "never be pinned, and pinning is not an exemption route."
+    )
 
 
 def test_no_hardcoded_gcp_project_id_on_any_executable_surface():
@@ -176,7 +418,8 @@ def test_no_hardcoded_gcp_project_id_on_any_executable_surface():
     exemption fixes one script and re-arms the guard for the next one, and it
     would have silently exempted a real assignment added to it later.
     """
-    offenders = { f: supplying_occurrences( _read( f ) ) for f in scanned_files() }
+    texts     = { f: _read( f ) for f in scanned_files() }
+    offenders = { f: supplying_occurrences_for( f, text ) for f, text in texts.items() }
     offenders = { f: hits for f, hits in offenders.items() if hits }
     assert not offenders, (
         f"{len( offenders )} tracked executable file(s) hardcode the sandbox project id "
@@ -184,6 +427,7 @@ def test_no_hardcoded_gcp_project_id_on_any_executable_surface():
         f"ANTHROPIC_VERTEX_PROJECT_ID — a literal here can silently bill the wrong "
         f"project while every guard reports green. Offenders (file: line): "
         + "; ".join( f"{f}: {[ n for n, _ in hits ]}" for f, hits in offenders.items() )
+        + repin_guidance( offenders, texts )
     )
 
 
@@ -242,6 +486,465 @@ def test_the_live_offenders_are_exactly_the_two_prose_hits_in_lupin_vm():
     text = _read( "src/scripts/lupin-vm.sh" )
     assert SANDBOX_PROJECT_ID in text, "premise gone — the file no longer names the id at all"
     assert supplying_occurrences( text ) == [], "a supplying occurrence appeared in lupin-vm.sh"
+
+
+# ---------------------------------------------------------------------------
+# CONTROLS for the .py predicate (row e2099400 follow-up, 2026-08-26). The
+# line-based predicate flagged two prose hits in gemini_client.py and its test.
+# POSITION alone does not clear them — the banner is an assignment RHS, the same
+# position as a real assignment — so the .py path tests position AND shape. These
+# controls exist because a predicate that returned [] for every .py file would
+# make THE GUARD pass on any tree, which is the failure this narrowing can cause.
+# ---------------------------------------------------------------------------
+
+_PY_BANNER = (
+    "_IMAGE_GEN_NOTICE = \"\"\"\n"
+    "LOUD NOTICE\n"
+    "Imagen is not reachable on the GCP project\n"
+    f"({SANDBOX_PROJECT_ID}). models.get returns 404.\n"
+    "\"\"\"\n"
+)
+
+
+def test_an_unpinned_prose_banner_is_still_an_offender():
+    """
+    PIN, DON'T SKIP. This banner is prose in an assignment RHS — the same shape as
+    the live one — but it is not in PINNED_PROSE, so it is an offender. A blanket
+    "multi-line is inert" rule would wave it through, and would wave through the
+    two cases below with it.
+    """
+    assert len( _py_supplying_occurrences( "a/b.py", _PY_BANNER ) ) == 1
+
+
+@pytest.mark.parametrize( "source,label", [
+    ( f'CFG = """\nproject_id: {SANDBOX_PROJECT_ID}\nregion: us-central1\n"""\n',
+      "embedded YAML blob" ),
+    ( f'CMD = """\ngcloud run deploy svc \\\n  --project {SANDBOX_PROJECT_ID}\n"""\n',
+      "gcloud command line" ),
+    ( f'URL = f"""\nhttps://x/projects/{SANDBOX_PROJECT_ID}/\nmodels"""\n',
+      "multi-line f-string URL" ),
+] )
+def test_a_multiline_string_that_really_supplies_the_id_is_caught( source, label ):
+    """
+    The cases the blanket skip would have lost. These are not exotic — a YAML blob
+    and a `gcloud` line are how a project id actually gets supplied from Python.
+    """
+    assert len( _py_supplying_occurrences( "a/b.py", source ) ) == 1, f"{label} slipped through"
+
+
+def test_a_python_assertion_about_the_id_is_not_an_offender():
+    """`assert "<id>" in err` tests the id, it does not supply it. Position, not shape."""
+    text = f'def t( err ):\n    assert "{SANDBOX_PROJECT_ID}" in err, "must name it"\n'
+    assert _py_supplying_occurrences( "a/b.py", text ) == []
+
+
+def test_a_python_docstring_naming_the_id_is_not_an_offender():
+    """A bare string expression statement is a record, like a `#` comment."""
+    text = f'def t():\n    """See {SANDBOX_PROJECT_ID} for why."""\n    return 1\n'
+    assert _py_supplying_occurrences( "a/b.py", text ) == []
+
+
+@pytest.mark.parametrize( "source,label", [
+    ( f'PROJECT_ID = "{SANDBOX_PROJECT_ID}"\n',                       "assignment RHS" ),
+    ( f'client( project="{SANDBOX_PROJECT_ID}" )\n',                  "keyword argument" ),
+    ( f'client( "{SANDBOX_PROJECT_ID}" )\n',                          "call argument" ),
+    ( f'CFG = {{ "project": "{SANDBOX_PROJECT_ID}" }}\n',             "dict value" ),
+    ( f'os.environ[ "GOOGLE_CLOUD_PROJECT" ] = "{SANDBOX_PROJECT_ID}"\n', "environ subscript" ),
+    ( f'url = f"https://x/projects/{SANDBOX_PROJECT_ID}/models"\n',   "f-string fragment" ),
+    ( f'PROJECT_ID: str = "{SANDBOX_PROJECT_ID}"\n',                  "annotated assignment" ),
+    ( f'def f( project="{SANDBOX_PROJECT_ID}" ): pass\n',             "default argument" ),
+    ( f'def f(): return "{SANDBOX_PROJECT_ID}"\n',                    "return value" ),
+] )
+def test_a_real_python_supply_is_still_caught( source, label ):
+    """
+    EVERY supplying position, one case each. If the narrowing is over-eager, the
+    arm it broke is named rather than left to a single collapsed assertion.
+    """
+    assert len( _py_supplying_occurrences( "a/b.py", source ) ) == 1, f"{label} slipped through"
+
+
+def test_a_pin_is_keyed_to_the_exact_line_so_editing_the_prose_breaks_it():
+    """
+    The pin's whole value. If the banner's wording changes, the hash stops matching
+    and the line becomes an offender again — somebody has to look at it and re-pin
+    deliberately, rather than inheriting a decision made about different text.
+    """
+    rel  = "src/cosa/agents/presentation_generator/gemini_client.py"
+    text = _read( rel )
+    assert _py_supplying_occurrences( rel, text ) == [], "premise: the live banner is pinned and clear"
+
+    edited = text.replace( "). models.get returns 404 NOT_FOUND for both",
+                           "). models.get returns 404 NOT FOUND for both" )
+    assert edited != text, "premise gone — the pinned line no longer reads as expected"
+    assert len( _py_supplying_occurrences( rel, edited ) ) == 1, (
+        "editing the pinned line must break the pin; a pin that survives an edit is a skip"
+    )
+
+
+def test_a_pin_does_not_travel_to_another_file_or_another_line():
+    """
+    A pin is (file, line, text) — all three. The same prose in a different file, or
+    at a different line, is a NEW occurrence and must be caught.
+    """
+    rel   = "src/cosa/agents/presentation_generator/gemini_client.py"
+    text  = _read( rel )
+    assert _py_supplying_occurrences( "src/cosa/agents/other.py", text ) != [], "pin travelled to another file"
+    assert _py_supplying_occurrences( rel, "\n" + text ) != [],                "pin survived a line shift"
+
+
+def test_a_single_line_supply_can_never_be_pinned():
+    """
+    Pinning is only ever a claim about PROSE. A one-line string is a value, and no
+    inventory entry may clear one — otherwise the pin becomes the exemption
+    mechanism this guard's header rules out.
+
+    This asserts the ARM, not a scenario: it hands `_is_pinned_prose` a file, line
+    and line-text that ALL match a real pin, and requires False purely because the
+    value is single-line. Written this way after the scenario version failed to
+    catch a mutation that dropped the single-line condition — every other fact
+    agreed, so the mutant answered identically on any input the scenario could
+    build.
+    """
+    ( rel, lineno ), pin = next( iter( PINNED_PROSE.items() ) )
+    raw = _read( rel ).splitlines()[ lineno - 1 ]
+    assert _line_pin( raw ) == pin, "premise: this line still matches its pin"
+
+    assert _is_pinned_prose( rel, lineno, raw, "a\n" + raw ) is True, (
+        "premise: with a multi-line value, this exact (file, line, text) IS pinned"
+    )
+    assert _is_pinned_prose( rel, lineno, raw, raw ) is False, (
+        "a single-line value was pinned — the inventory has become an exemption list"
+    )
+
+    # WHITESPACE IS PART OF THE TEXT. Hashing the stripped line would let an
+    # indented copy of the same prose inherit a pin justified about a different
+    # place in the file. Caught as a surviving mutation, then asserted.
+    assert _is_pinned_prose( rel, lineno, "    " + raw, "a\n" + raw ) is False, (
+        "re-indenting the pinned line kept its pin — _line_pin must hash the exact text"
+    )
+
+
+def test_a_broken_pin_tells_the_reader_how_to_re_pin_it():
+    """
+    Mr Radio's probe, made permanent: add ONE SPACE to the banner line and the pin
+    stops matching. That red is correct, and on its own it reads as "you hardcoded
+    the project id" — which is the wrong instruction for someone who just reformatted
+    a paragraph. The message must name the pin and hand over the recomputed hash.
+    """
+    rel  = "src/cosa/agents/presentation_generator/gemini_client.py"
+    ( _pf, lineno ), _pin = next( iter( PINNED_PROSE.items() ) )
+    source = _read( rel ).splitlines()
+    edited = list( source )
+    edited[ lineno - 1 ] = edited[ lineno - 1 ] + " "          # one trailing space
+    text   = "\n".join( edited ) + "\n"
+
+    hits = supplying_occurrences_for( rel, text )
+    assert len( hits ) == 1, "one added space must break the pin — that is the mechanism"
+
+    guidance = repin_guidance( { rel: hits }, { rel: text } )
+    assert "PINNED_PROSE" in guidance,       "the message never names the mechanism that fired"
+    assert _line_pin( edited[ lineno - 1 ] ) in guidance, (
+        "the message must carry the RECOMPUTED hash — otherwise re-pinning is a puzzle"
+    )
+    assert "never be pinned" in guidance,    "the message must refuse to be read as an exemption route"
+
+
+def test_a_new_supply_appended_to_a_PINNED_file_gets_no_guidance():
+    """
+    Mr Radio's second probe, made permanent. Append a real multi-line YAML supply to
+    gemini_client.py — the one file the inventory knows — and it must be an offender
+    with NO re-pin instructions.
+
+    The first cut keyed guidance on the FILE, so this earned a ready-made pin line
+    with the hash already computed, in exactly the file where somebody is most
+    likely to reach for it. Guidance that reaches a new hardcode does not merely
+    fail to help; it hands over the way out.
+    """
+    rel      = "src/cosa/agents/presentation_generator/gemini_client.py"
+    appended = _read( rel ) + (
+        f'\n\nCFG = """\nproject_id: {SANDBOX_PROJECT_ID}\nregion: us-central1\n"""\n'
+    )
+    hits = supplying_occurrences_for( rel, appended )
+    assert len( hits ) == 1, "premise: the appended YAML supply is caught"
+    assert repin_guidance( { rel: hits }, { rel: appended } ) == "", (
+        "a NEW hardcode in a pinned file was offered re-pin instructions — guidance must "
+        "key on the line, not the file"
+    )
+
+
+def test_a_real_assignment_landing_AT_the_pinned_line_gets_no_guidance():
+    """
+    Mr Radio's third probe. Put a genuine single-line assignment at exactly the
+    pinned line number. It is an offender — and it must be told nothing, because a
+    single-line value can never be pinned, so instructions on how to pin it are
+    instructions toward a door that does not open.
+
+    The (file, line) arm matched on POSITION ALONE before this, so the one line most
+    likely to be confused for prose was the one line that got handed the way out.
+    """
+    rel = "src/cosa/agents/presentation_generator/gemini_client.py"
+    ( _pf, lineno ), _pin = next( iter( PINNED_PROSE.items() ) )
+
+    text = "\n".join( [ "# filler" ] * ( lineno - 1 )
+                      + [ f'PROJECT_ID = "{SANDBOX_PROJECT_ID}"' ] ) + "\n"
+    hits = supplying_occurrences_for( rel, text )
+    assert hits == [ ( lineno, f'PROJECT_ID = "{SANDBOX_PROJECT_ID}"' ) ], (
+        "premise: a real assignment now sits at exactly the pinned line and is caught"
+    )
+    assert repin_guidance( { rel: hits }, { rel: text } ) == "", (
+        "a single-line assignment at the pinned line was told how to pin itself"
+    )
+
+
+def test_prose_shape_is_read_from_the_string_not_from_the_line_it_sits_on():
+    """
+    A prose line that READS like an assignment is still prose — it lives inside the
+    multi-line banner and supplies nothing — so editing it still earns guidance. The
+    discriminator is the string the literal lives in, never how the line looks.
+    """
+    rel   = "src/cosa/agents/presentation_generator/gemini_client.py"
+    ( _pf, lineno ), _pin = next( iter( PINNED_PROSE.items() ) )
+    lines = _read( rel ).splitlines()
+    lines[ lineno - 1 ] = f'PROJECT_ID = "{SANDBOX_PROJECT_ID}"'    # inside the banner
+    text  = "\n".join( lines ) + "\n"
+
+    hits = supplying_occurrences_for( rel, text )
+    assert len( hits ) == 1, "premise: editing the pinned line breaks its pin"
+    assert repin_guidance( { rel: hits }, { rel: text } ) != "", (
+        "prose inside the banner was denied guidance because the LINE looked like code"
+    )
+
+
+def test_guidance_follows_pinned_prose_when_it_MOVES():
+    """
+    The other half of keying on the line: insert a line above the banner and the
+    pinned prose is now at a different line number, so (file, line) no longer
+    matches. Its TEXT is unchanged, so it is still the thing we justified, and the
+    reader must be told to re-pin rather than be told they hardcoded an id.
+    """
+    rel     = "src/cosa/agents/presentation_generator/gemini_client.py"
+    shifted = "# a line added at the top\n" + _read( rel )
+    hits    = supplying_occurrences_for( rel, shifted )
+    assert len( hits ) == 1, "premise: shifting the file breaks the pin's line key"
+
+    guidance = repin_guidance( { rel: hits }, { rel: shifted } )
+    assert "PINNED_PROSE" in guidance, "moved prose must still be recognised as a broken pin"
+    ( _pf, lineno ), _pin = next( iter( PINNED_PROSE.items() ) )
+    assert f'", {lineno + 1} )' in guidance, "guidance must name the line the prose moved TO"
+
+
+def test_guidance_names_only_the_broken_pin_when_a_real_supply_sits_beside_it():
+    """
+    Both at once — the prose moved AND a real supply was added. The reader gets a
+    re-pin line for the prose and nothing that would let them pin the supply.
+    """
+    rel  = "src/cosa/agents/presentation_generator/gemini_client.py"
+    both = "# a line added at the top\n" + _read( rel ) + (
+        f'\n\nCFG = """\nproject_id: {SANDBOX_PROJECT_ID}\nregion: us-central1\n"""\n'
+    )
+    hits = supplying_occurrences_for( rel, both )
+    assert len( hits ) == 2, "premise: both the moved prose and the new supply are offenders"
+
+    guidance   = repin_guidance( { rel: hits }, { rel: both } )
+    supply_line = next( n for n, line in hits if "project_id:" in line )
+    assert "PINNED_PROSE" in guidance,          "the moved prose must still be recognised"
+    assert f'", {supply_line} )' not in guidance, (
+        "the real supply was handed a pin line alongside the prose — guidance must name "
+        "only the broken pin"
+    )
+
+
+def test_a_pin_from_ANOTHER_file_never_qualifies_prose_in_this_one( monkeypatch ):
+    """
+    The moved-prose arm looks a line's text up among pins RECORDED FOR THAT FILE.
+    With one entry in the live inventory, "this file's pins" and "all pins" are the
+    same list, so dropping the file scope changes nothing today and a mutation of it
+    survives. It stops being harmless the moment a second pin lands.
+
+    So this asserts the arm against an INJECTED inventory rather than the live one.
+    Both fixtures are REAL multi-line constants, because guidance checks shape first.
+    """
+    import sys
+
+    prose  = f"see ({SANDBOX_PROJECT_ID}) for why this 404s"
+    a_text = 'X = """\nl2\nl3\nl4\n' + prose + '\n"""\n'      # prose on line 5
+    b_text = 'Y = """\n' + prose + '\nmore\n"""\n'              # prose on line 2, alone
+
+    # HALF ONE — a pin at (a/x.py, 5) whose recorded text no longer matches. The
+    # line is an offender, and the (file, line) arm must recognise a broken pin.
+    monkeypatch.setattr( sys.modules[ __name__ ], "PINNED_PROSE",
+                         { ( "a/x.py", 5 ): _line_pin( "text this line no longer has" ) } )
+    hits = supplying_occurrences_for( "a/x.py", a_text )
+    assert hits == [ ( 5, prose ) ], "premise: a stale pin leaves the line an offender"
+    assert repin_guidance( { "a/x.py": hits }, { "a/x.py": a_text } ) != "", (
+        "premise: a broken pin at its own (file, line) earns guidance"
+    )
+
+    # HALF TWO — the SAME prose text is pinned, but for a/x.py. In b/y.py it is a
+    # brand-new occurrence and the pin must not reach across the file boundary.
+    monkeypatch.setattr( sys.modules[ __name__ ], "PINNED_PROSE",
+                         { ( "a/x.py", 99 ): _line_pin( prose ) } )
+    hits = supplying_occurrences_for( "b/y.py", b_text )
+    assert hits == [ ( 2, prose ) ], "premise: the line's text is the prose, verbatim"
+    assert _line_pin( prose ) in PINNED_PROSE.values(), (
+        "premise: that exact text IS pinned — for another file, which is the whole point"
+    )
+    assert repin_guidance( { "b/y.py": hits }, { "b/y.py": b_text } ) == "", (
+        "a pin justified about another file qualified prose here — pins do not travel"
+    )
+
+
+def test_a_non_python_file_is_never_prose_shaped_even_if_someone_pins_it( monkeypatch ):
+    """
+    Pinning is a .py mechanism — the shape question is answered by ast, and there is
+    no ast for a shell script. Every pin in the live inventory is a .py file, so a
+    rule that waved non-.py through would change nothing today and its mutation
+    survives. `PINNED_PROSE` is a plain dict and cannot refuse a `.sh` key, so this
+    asserts the arm against an INJECTED inventory that does exactly that.
+
+    Under a rule that treats non-.py as prose, a real shell assignment at the pinned
+    line is told how to pin itself — the same defect as the .py residual, arriving
+    through the one door the .py check does not cover.
+    """
+    import sys
+
+    line = f'export GOOGLE_CLOUD_PROJECT="{SANDBOX_PROJECT_ID}"'
+    text = "# filler\n" + line + "\n"
+    monkeypatch.setattr( sys.modules[ __name__ ], "PINNED_PROSE",
+                         { ( "src/scripts/x.sh", 2 ): _line_pin( "whatever it used to say" ) } )
+
+    hits = supplying_occurrences_for( "src/scripts/x.sh", text )
+    assert hits == [ ( 2, line ) ], "premise: the shell assignment is caught"
+    assert repin_guidance( { "src/scripts/x.sh": hits }, { "src/scripts/x.sh": text } ) == "", (
+        "a shell assignment was told how to pin itself — prose shape must be a .py question"
+    )
+
+
+def test_an_unparseable_pinned_file_is_never_prose_shaped( monkeypatch ):
+    """
+    A file that does not parse has no ast, so nothing can establish that its literal
+    lives in a multi-line string. Its offenders come from the line-based fallback,
+    and those must never be handed re-pin instructions: the shape claim would be a
+    guess, and the guess would be made about a file already known to be broken.
+
+    Like the two arms above, this is invisible against the live inventory — every
+    pin is a .py file that parses — so it is asserted against an injected one.
+    """
+    import sys
+
+    line = f'PROJECT_ID = "{SANDBOX_PROJECT_ID}"'
+    text = "def broken( :\n" + line + "\n"
+    monkeypatch.setattr( sys.modules[ __name__ ], "PINNED_PROSE",
+                         { ( "a/x.py", 2 ): _line_pin( "text this file no longer has" ) } )
+
+    hits = supplying_occurrences_for( "a/x.py", text )
+    assert hits == [ ( 2, line ) ], "premise: the fallback still catches it"
+    assert repin_guidance( { "a/x.py": hits }, { "a/x.py": text } ) == "", (
+        "an unparseable file's line-based hit was told how to pin itself"
+    )
+
+
+def test_no_guidance_is_offered_for_a_file_the_inventory_has_never_heard_of():
+    """
+    A plain hardcode in an unrelated file must NOT be met with instructions on how
+    to pin it. Guidance that appears everywhere teaches people the pin is the way
+    out of a red.
+    """
+    offenders = { "src/scripts/some_new_script.py": [ ( 3, 'X = "..."' ) ] }
+    assert repin_guidance( offenders, { "src/scripts/some_new_script.py": '\n\nX = "..."' } ) == ""
+
+
+def test_the_pinned_inventory_cannot_grow_silently():
+    """
+    Mirrors the exemption-set control. Every pin is a decision someone made; the
+    count is asserted so a new one arrives with a reviewer rather than in a diff
+    nobody read.
+    """
+    assert len( PINNED_PROSE ) == 1, (
+        f"PINNED_PROSE changed size ({len( PINNED_PROSE )}). Each entry waves through a real "
+        f"multi-line occurrence — add one only with a written reason, the same bar as EXEMPT."
+    )
+    for ( rel, lineno ), pin in PINNED_PROSE.items():
+        line = _read( rel ).splitlines()[ lineno - 1 ]
+        assert SANDBOX_PROJECT_ID in line, f"{rel}:{lineno} no longer contains the id — stale pin"
+        assert _line_pin( line ) == pin,   f"{rel}:{lineno} text changed — re-justify, then re-pin"
+
+
+def test_the_reported_line_is_where_the_literal_sits_not_where_the_string_starts():
+    """
+    ast reports a triple-quoted constant at its OPENING QUOTES. For the live banner
+    that is ten lines above the id. A failure message naming a line the literal is
+    not on is how a reader concludes the guard is broken and stops trusting it.
+
+    The expectation is DERIVED FROM THE SOURCE rather than computed by hand — a
+    hand-computed offset is a second thing that can be wrong, and it was on the
+    first draft of this test.
+    """
+    source = 'X = """a\nb\nc' + SANDBOX_PROJECT_ID + '"""\n'
+    expected = next( n for n, line in enumerate( source.splitlines(), start=1 )
+                       if SANDBOX_PROJECT_ID in line )
+
+    node = ast.parse( source ).body[ 0 ].value
+    assert node.lineno == 1, "premise: the constant opens on line 1"
+    assert expected    == 3, "premise: the id sits two lines below that"
+    assert _py_literal_lineno( node, node.value.find( SANDBOX_PROJECT_ID ) ) == expected
+
+    one = ast.parse( f'X = "{SANDBOX_PROJECT_ID}"\n' ).body[ 0 ].value
+    assert _py_literal_lineno( one, one.value.find( SANDBOX_PROJECT_ID ) ) == 1
+
+
+def test_the_live_banner_would_report_the_line_the_id_is_actually_on():
+    """
+    The real file, not a fixture: gemini_client.py's banner constant opens at 37
+    while the id sits at 47 — the ten-line gap this offset exists to close. It is
+    also the line PINNED_PROSE is keyed on, so the offset being right is what makes
+    the pin land on the right line at all.
+    """
+    src  = _read( "src/cosa/agents/presentation_generator/gemini_client.py" )
+    node = next( n for n in ast.walk( ast.parse( src ) )
+                   if isinstance( n, ast.Constant ) and isinstance( n.value, str )
+                   and SANDBOX_PROJECT_ID in n.value )
+    actual = next( n for n, line in enumerate( src.splitlines(), start=1 )
+                     if SANDBOX_PROJECT_ID in line )
+    assert node.lineno < actual, "premise gone — the constant no longer opens above the id"
+    assert _py_literal_lineno( node, node.value.find( SANDBOX_PROJECT_ID ) ) == actual
+    assert ( "src/cosa/agents/presentation_generator/gemini_client.py", actual ) in PINNED_PROSE
+
+
+def test_an_unparseable_python_file_falls_back_rather_than_disarming():
+    """
+    A SyntaxError must not return [] — that would let a broken file hide a real
+    assignment. It degrades to the line-based predicate, which still catches it.
+    """
+    text = f'def broken( :\nPROJECT_ID = "{SANDBOX_PROJECT_ID}"\n'
+    assert len( _py_supplying_occurrences( "a/b.py", text ) ) == 1
+
+
+def test_the_dispatcher_sends_python_to_ast_and_everything_else_to_the_line_scanner():
+    """The routing itself, asserted — not assumed from the two predicates passing."""
+    rel  = "src/cosa/agents/presentation_generator/gemini_client.py"
+    text = _read( rel )
+    assert supplying_occurrences_for( rel, text ) == [], "the .py path must clear the pinned banner"
+    assert supplying_occurrences( text ) != [], (
+        "the line-based path must still see the banner — that is the hole .py routing exists to close"
+    )
+
+
+def test_the_live_python_files_are_inert_and_still_name_the_id():
+    """
+    Pins WHY the tree is green, the same way the lupin-vm.sh control does. If
+    someone adds a real assignment to either file the guard goes red, and this
+    test documents that neither file was ever literal-free.
+    """
+    for rel in ( "src/cosa/agents/presentation_generator/gemini_client.py",
+                 "src/cosa/tests/unit/agents/presentation_generator/test_gemini_client.py" ):
+        text = _read( rel )
+        assert SANDBOX_PROJECT_ID in text, f"premise gone — {rel} no longer names the id"
+        assert supplying_occurrences_for( rel, text ) == [], f"a supplying occurrence appeared in {rel}"
+        assert supplying_occurrences( text ) != [], (
+            f"premise gone — {rel} no longer trips the LINE-based predicate, so it no "
+            f"longer demonstrates why the .py path is needed"
+        )
 
 
 def test_guard_covers_the_vertex_toggle_script():

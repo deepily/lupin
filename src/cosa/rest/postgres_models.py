@@ -242,7 +242,13 @@ class ApiKey( Base ):
 
     Requires:
         - user_id: Valid user UUID
-        - key_hash: SHA-256 hash of API key
+        - key_hash: BCRYPT hash of the API key (cost 12), NOT a SHA-256 digest.
+          This line said SHA-256 until 2026-08-24 (row 323049bb) and was wrong in
+          a way that reads plausible: the column is String(64) and a SHA-256 hex
+          digest is exactly 64 characters, so the claim looked self-consistent.
+          It is written by src/scripts/create_service_account_postgres.py via
+          bcrypt.hashpw(..., gensalt(rounds=12)) and verified by bcrypt.checkpw
+          in middleware/api_key_auth.py. A bcrypt hash is 60 characters.
 
     Ensures:
         - id is automatically generated UUID

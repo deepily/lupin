@@ -71,8 +71,22 @@ src/conf/memory/**
 src/conf/keys/**
 
 # Per-developer GCP deploy config (copied from cloud-run.env.example)
+# Docker Compose auto-loads this for ${VAR} substitution. It carries JWT_SECRET_KEY
+# (row adce3547) and must never be committable — the whole point of that row is a
+# signing secret sitting in a tracked file on a public repo.
+.env
+
 src/scripts/cloud-run.env
 src/scripts/cloud-run-model-server.env
+
+# VM-local compose env files. Four places in the tree already CALL these
+# git-ignored (docker-compose.cloud-gpu.yml:18, preflight-vm-lib.sh:224,
+# lupin-vm.sh:45, vm-unversioned-manifest.tsv:44) and until this line they
+# were not — `git check-ignore` returned nothing for either. They carry
+# DB_PASSWORD and JWT_SECRET_KEY per src/conf/env-contract.tsv, i.e. exactly
+# what the `.env` rule above exists to keep out of a tracked file.
+cloud-gpu.env
+cloud-test.env
 
 # Terraform — local state, provider cache, and secret-bearing tfvars.
 # (.terraform.lock.hcl IS committed — it pins provider versions.)
@@ -97,6 +111,15 @@ io/**
 !io/test-suite/
 !io/test-suite/visual-baselines/
 !io/test-suite/visual-baselines/**
+
+# EXCEPTION — the pre-rendered dry-run podcast fixture is git-TRACKED so it ships
+# with the repo and never has to be regenerated. It is a REAL mp3 (Maria + Mr.
+# Radio narrating what dry-run mode does) that PodcastGeneratorJob._execute_dry_run
+# serves through the overlay path, making a dry-run submit a zero-cost end-to-end
+# exercise of that path. Same carve pattern as visual-baselines above.
+!io/fixtures/
+!io/fixtures/podcast-dry-run/
+!io/fixtures/podcast-dry-run/**
 
 # Same runtime-artifact class as io/** above, but written UNDER src/ when the
 # codebase-analysis tools (loc-delta / git-delta CSV+PNG) run with cwd=src or
@@ -126,6 +149,16 @@ nohup.out
 # Skip your voice come in training data, it's too big!
 # Why isn't this exclusion working?!?
 **/voice-commands-xml-*.jsonl
+# The rotated previous copy (row 11390b57). Same file, same 196 MB, one suffix later —
+# and the pattern above does NOT match it, because it ends .jsonl.prev not .jsonl.
+**/voice-commands-xml-*.jsonl.prev
+# The corpus fingerprint sidecar. DELIBERATELY NOT TRACKED: it describes the LOCAL
+# artifact, and that artifact is ignored. A tracked stamp would travel to a checkout
+# holding a DIFFERENT local artifact and certify a pairing that never existed — a false
+# PASS, which is the one failure this guard must never have. A fresh checkout has no
+# artifact at all, so it returns "no artifact yet" and generates; it never reaches the
+# stamp check. See src/cosa/training/corpus_fingerprint.py.
+**/voice-commands-xml.fingerprint.json
 #src/ephemera/prompts/data/voice-commands-xml-test.jsonl
 #src/ephemera/prompts/data/voice-commands-xml-train.jsonl
 #src/ephemera/prompts/data/voice-commands-xml-validate.jsonl
@@ -181,4 +214,30 @@ coverage/
 # .clayton-lane2-groundtruth-b980080e.md
 .*-groundtruth-*.md
 io/mementos/
+# A FIFTH memento slot, found 2026-08-15: a worker wrote to .claude/mementos/ rather
+# than io/mementos/. Ignored for consistency — mementos are working state, never source.
+# NOTE for the SessionStart resolver (register_session.py _memento_dirs): it scans four
+# slots and NOT this one, so a record written here is invisible to a rehydrating seat.
+.claude/mementos/
 lupin-worktrees/
+
+# DM traffic corpus — lives OUTSIDE the repo (Rick, 2026-08-13). The corpus is
+# accumulating runtime data, not source: it belongs in <projects-data>/lupin/dm-corpus.
+# These patterns are a BACKSTOP, not the mechanism — the writer resolves its path via
+# $LUPIN_DM_CORPUS_DIR / fleet_data_root() and cannot write here. They exist so a
+# hand-run harness that still writes into the tree cannot re-introduce a tracked corpus.
+src/tmp/dm_traffic.jsonl
+src/rnd/**/live-runs/*.jsonl
+
+# Fleet data written INSIDE the repo by a NESTED-repo session — a BACKSTOP for a
+# real defect, not a place anything is supposed to live. fleet_data_root() takes
+# the sibling of the `projects` directory, which is correct for lupin itself
+# (…/www.deepily.ai/projects-data/lupin) and wrong for a repo nested under it:
+# a lupin-mobile session resolves …/projects/lupin/projects-data/lupin-mobile,
+# i.e. into this working tree. Reproduced 2026-08-29 from both roots; the
+# specimen was a Tiffany re-spin boot receipt. respin_wake_check.py's own header
+# warns against exactly this ("never the repo root … no reader looks there",
+# row 011f1f90) — so a file landing here is invisible to the readers that need
+# it AND dirties this repo. The fix belongs in the resolver; this pattern only
+# stops the debris from reaching a commit in the meantime.
+projects-data/

@@ -15,15 +15,19 @@ Two properties are asserted that an exit code alone cannot carry:
     is not the evidence; `read_hold` + `is_honored` are, read back through exactly
     the path the Stop hook uses.
 """
+import datetime
 import json
+import pathlib
 import sys
 
 import pytest
 
 from lupin_cli.claude_code.hooks.lib import heartbeat_hold_io as hio
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import (
-    DEFAULT_TTL_SECONDS, hold_path, is_honored, read_hold,
+    DEFAULT_TTL_SECONDS, _parse_iso, get_last_looked_in_ts, get_last_spinup_check_ts,
+    get_last_surfaced_questions_ts, hold_path, is_honored, read_hold,
 )
+from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import _iso_age_seconds
 
 
 SID = "cli-0000-1111-2222"
@@ -234,6 +238,10 @@ def test_write_accepts_exactly_these_flags_and_no_others():
         "--session-id", "--base-dir",
         "--persona", "--reason", "--ttl-seconds", "--awaiting",
         "--work-owed", "--no-work-owed",
+        # 1dcaf65c — the three debounce stamps. Widened DELIBERATELY, which is the
+        # diff this test exists to force: they set schema fields `write_hold`
+        # already owns, so none of them is an escape from the cargo guard.
+        "--looked-in", "--spinup-check", "--surfaced-questions",
     }, "a flag was added to `write` — if it is an escape from the cargo guard, it does not belong"
 
 
@@ -811,3 +819,295 @@ def test_a_refresh_of_the_same_id_is_not_a_duplicate( tmp_path, capsys ):
     capsys.readouterr()
     assert hio.main( _write_argv( tmp_path, sid=FULL_SID ) ) == hio.EXIT_OK
     assert "PREFIX" not in capsys.readouterr().err.upper()
+
+
+# ------------------------------------------------- write: the debounce stamps (1dcaf65c)
+#
+# THE GAP THESE CLOSE. The Stop-hook poke tells a manager to stamp
+# `last_looked_in_on_workers_ts`. The field is real, `write_hold` has taken it as a
+# kwarg since A1, and `get_last_looked_in_ts` reads it — but the SANCTIONED CLI had
+# no flag for it. A manager who obeys the poke, runs the verb and finds no flag is
+# pushed toward the hand-written JSON that CLAUDE.md bans and row 011f1f90 counts 33
+# of. So the assertions below are read back through the REAL getters the hook calls,
+# not through the CLI's own banner: the question is whether the debounce can SEE the
+# stamp, and a banner cannot answer that.
+
+STAMP_CASES = [
+    ( "--looked-in",          get_last_looked_in_ts,          "last_looked_in_on_workers_ts" ),
+    ( "--spinup-check",       get_last_spinup_check_ts,       "last_spinup_check_ts" ),
+    ( "--surfaced-questions", get_last_surfaced_questions_ts, "last_surfaced_questions_ts" ),
+]
+
+
+@pytest.mark.parametrize( "flag,getter,field", STAMP_CASES )
+def test_each_stamp_flag_lands_where_the_debounce_reads_it( tmp_path, flag, getter, field ):
+    """RED ON THE OLD CLI: argparse rejects the unknown flag at exit 2."""
+    assert hio.main( _write_argv( tmp_path, **{ flag: "now" } ) ) == hio.EXIT_OK
+
+    hold = read_hold( SID, base_dir=tmp_path )
+    assert getter( hold ) is not None,   f"{flag} must reach the field the hook reads"
+    assert hold[ field ] == getter( hold )
+    assert is_honored( hold ),           "stamping must not cost the hold its honor"
+
+
+@pytest.mark.parametrize( "flag,getter,field", STAMP_CASES )
+def test_an_unpassed_stamp_flag_leaves_its_field_none( tmp_path, flag, getter, field ):
+    """
+    THE CONTROL FOR THE TEST ABOVE. Without it, a write that stamped all three
+    fields unconditionally would pass every positive assertion here — and would
+    silently tell the debounce a manager had run checks it never ran.
+    """
+    assert hio.main( _write_argv( tmp_path ) ) == hio.EXIT_OK
+    assert getter( read_hold( SID, base_dir=tmp_path ) ) is None, \
+        f"{flag} was not passed — its field must stay None (never run)"
+
+
+@pytest.mark.parametrize( "flag,getter,_field", STAMP_CASES )
+def test_a_stamp_flag_touches_only_its_own_field( tmp_path, flag, getter, _field ):
+    """One flag, one field — a table-driven pass-through can cross its own wires."""
+    assert hio.main( _write_argv( tmp_path, **{ flag: "now" } ) ) == hio.EXIT_OK
+
+    hold = read_hold( SID, base_dir=tmp_path )
+    for other_flag, other_getter, _ in STAMP_CASES:
+        if other_flag == flag:
+            continue
+        assert other_getter( hold ) is None, \
+            f"{flag} must not also stamp the field behind {other_flag}"
+
+
+def test_all_three_stamps_can_be_set_in_one_call( tmp_path ):
+    argv = _write_argv( tmp_path, **{ "--looked-in":          "2026-06-22T12:00:00+00:00",
+                                      "--spinup-check":       "2026-06-23T10:00:00+00:00",
+                                      "--surfaced-questions": "2026-06-23T11:00:00+00:00" } )
+    assert hio.main( argv ) == hio.EXIT_OK
+
+    hold = read_hold( SID, base_dir=tmp_path )
+    assert get_last_looked_in_ts( hold )          == "2026-06-22T12:00:00+00:00"
+    assert get_last_spinup_check_ts( hold )       == "2026-06-23T10:00:00+00:00"
+    assert get_last_surfaced_questions_ts( hold ) == "2026-06-23T11:00:00+00:00"
+
+
+def test_now_resolves_to_a_stamp_the_age_arithmetic_reads_as_fresh( tmp_path ):
+    """
+    "now" is only useful if the debounce dates it as ~0 seconds old. Asserting a
+    non-None string would pass on a stamp no reader can subtract.
+    """
+    assert hio.main( _write_argv( tmp_path, **{ "--looked-in": "now" } ) ) == hio.EXIT_OK
+
+    stamp = get_last_looked_in_ts( read_hold( SID, base_dir=tmp_path ) )
+    age   = _iso_age_seconds( stamp, datetime.datetime.now( datetime.timezone.utc ).timestamp() )
+    assert age is not None,   "the age helper must be able to date what `now` wrote"
+    assert -5 < age < 60,     f"`now` must date as roughly now, got {age}s"
+
+
+@pytest.mark.parametrize( "spelling", [ "now", "NOW", "Now", "  now  " ] )
+def test_now_is_case_and_whitespace_tolerant( tmp_path, spelling ):
+    assert hio.main( _write_argv( tmp_path, **{ "--looked-in": spelling } ) ) == hio.EXIT_OK
+    assert get_last_looked_in_ts( read_hold( SID, base_dir=tmp_path ) ) is not None
+
+
+def test_a_zone_less_timestamp_is_REFUSED_rather_than_assumed_to_be_utc( tmp_path, capsys ):
+    """
+    Cheech's call, 2026-08-20: normalizing a naive stamp picks a timezone the caller
+    did not give. When that guess is wrong the stamp is not rejected and not
+    obviously bad — it is off by the host offset, which is the size of error that
+    reads as a plausible timestamp and debounces the wrong way.
+    """
+    argv = _write_argv( tmp_path, **{ "--looked-in": "2026-06-22T12:00:00" } )
+    assert hio.main( argv ) == hio.EXIT_REFUSED
+    assert not hold_path( SID, base_dir=tmp_path ).exists(), "a refused write must leave NOTHING"
+
+    err = capsys.readouterr().err
+    assert "--looked-in" in err and "offset" in err, "the refusal must name the flag and what is missing"
+    assert "2026-06-22T12:00:00+00:00" in err,       "and show the caller the fix, not just the fault"
+
+
+def test_the_two_readers_really_do_disagree_by_the_host_offset( tmp_path ):
+    """
+    THE MEASUREMENT BEHIND THE REFUSAL ABOVE, asserted rather than asserted-about.
+    A guard whose justification is never executed is a comment. On a UTC-4 host the
+    gap is 14400s; this asserts the gap EXISTS and equals the host offset, so the
+    test still holds on a box in another zone (and goes quiet only on a UTC host,
+    where the two readers genuinely agree).
+    """
+    naive    = "2026-06-22T12:00:00"
+    as_utc   = _parse_iso( naive ).timestamp()
+    as_local = datetime.datetime.fromisoformat( naive ).timestamp()
+
+    # The offset AT THE STAMP'S OWN DATE, not today's — a host whose stamp and
+    # "now" straddle a DST boundary has two different offsets, and comparing
+    # against the wrong one would fail here for a reason that is not the defect.
+    offset_then = datetime.datetime.fromisoformat( naive ).astimezone().utcoffset().total_seconds()
+
+    assert as_utc - as_local == offset_then, \
+        "the naive-stamp divergence is exactly the host UTC offset — that is what is refused"
+
+
+@pytest.mark.parametrize( "stamp,expected", [
+    ( "2026-06-22T12:00:00+00:00", "2026-06-22T12:00:00+00:00" ),
+    ( "2026-06-22T12:00:00Z",      "2026-06-22T12:00:00+00:00" ),   # Zulu IS an offset
+    ( "2026-06-22T08:00:00-04:00", "2026-06-22T08:00:00-04:00" ),   # preserved, not re-zoned
+] )
+def test_an_offset_bearing_timestamp_is_accepted_and_its_offset_preserved( tmp_path, stamp, expected ):
+    assert hio.main( _write_argv( tmp_path, **{ "--looked-in": stamp } ) ) == hio.EXIT_OK
+    assert get_last_looked_in_ts( read_hold( SID, base_dir=tmp_path ) ) == expected
+
+
+def test_now_lands_the_same_shape_write_hold_already_stamps_into_held_at( tmp_path ):
+    """
+    The house format, measured rather than assumed: `write_hold` writes `held_at`
+    through `_now()`, so it is offset-bearing UTC. `"now"` must match it, or this
+    verb would be introducing a second timestamp convention into one file.
+    """
+    assert hio.main( _write_argv( tmp_path, **{ "--looked-in": "now" } ) ) == hio.EXIT_OK
+
+    hold = read_hold( SID, base_dir=tmp_path )
+    assert _parse_iso( hold[ "held_at" ] ).utcoffset() == datetime.timedelta( 0 )
+    assert _parse_iso( get_last_looked_in_ts( hold ) ).utcoffset() == datetime.timedelta( 0 )
+
+
+@pytest.mark.parametrize( "flag,_getter,_field", STAMP_CASES )
+@pytest.mark.parametrize( "bad", [ "yesterday", "", "   ", "2026-13-45", "1750000000" ] )
+def test_an_undatable_stamp_is_refused_and_leaves_nothing_behind( tmp_path, flag, _getter, _field, bad, capsys ):
+    """
+    WHY A REFUSAL AND NOT A PASS-THROUGH. Every reader degrades to None on a stamp
+    it cannot date, so an undatable value would land under a SUCCESS banner and
+    still read as "never ran" — the caller believes the poke is cleared and is
+    poked anyway. That is the row's own defect wearing a green exit code.
+    """
+    assert hio.main( _write_argv( tmp_path, **{ flag: bad } ) ) == hio.EXIT_REFUSED
+    assert not hold_path( SID, base_dir=tmp_path ).exists(), "a refused write must leave NOTHING"
+    assert not list( tmp_path.glob( "*.tmp" ) ),             "nor an atomic-write sibling"
+
+    err = capsys.readouterr().err
+    assert flag in err and "ISO-8601" in err, "the refusal must name the flag and what it wanted"
+
+
+def test_an_undatable_stamp_cannot_destroy_a_live_hold( tmp_path ):
+    """
+    The refresh case, which is where a destructive refusal costs the most: a live
+    hold overwritten by a typo'd stamp would strip a running session its defense.
+    """
+    assert hio.main( _write_argv( tmp_path, **{ "--awaiting": "user:rick" } ) ) == hio.EXIT_OK
+    before = hold_path( SID, base_dir=tmp_path ).read_bytes()
+
+    assert hio.main( _write_argv( tmp_path, **{ "--looked-in": "whenever" } ) ) == hio.EXIT_REFUSED
+
+    after = hold_path( SID, base_dir=tmp_path ).read_bytes()
+    assert after == before,                                  "the live hold must be untouched"
+    assert is_honored( read_hold( SID, base_dir=tmp_path ) ), "and still defending its session"
+
+
+def test_a_stamp_is_refused_before_the_cargo_guard_can_be_reached( tmp_path, capsys ):
+    """
+    Ordering, asserted rather than assumed: a bad flag is a usage error and must be
+    refused ahead of any filesystem inspection, so 'the refusal left the disk as it
+    found it' holds by construction on this path instead of by a rollback.
+    """
+    path = hold_path( SID, base_dir=tmp_path )
+    path.write_text( json.dumps( { "session_id": SID, "note_to_my_successor": "irreplaceable" } ) )
+
+    assert hio.main( _write_argv( tmp_path, **{ "--looked-in": "yesterday" } ) ) == hio.EXIT_REFUSED
+
+    err = capsys.readouterr().err
+    assert "--looked-in" in err,   "the flag is the offender the caller must be told about"
+    assert "note_to_my_successor" in json.loads( path.read_text() ), "and the cargo is untouched"
+
+
+def test_the_banner_names_each_stamp_that_landed( tmp_path, capsys ):
+    """The caller passed the flag to clear a poke; "ok" does not say whether it is."""
+    argv = _write_argv( tmp_path, **{ "--looked-in": "2026-06-22T12:00:00+00:00" } )
+    assert hio.main( argv ) == hio.EXIT_OK
+
+    out = capsys.readouterr().out
+    assert "2026-06-22T12:00:00+00:00" in out, "the value that landed is what the debounce reads"
+    assert "--looked-in" in out
+    assert "--spinup-check" not in out, "an unstamped field must not be announced as stamped"
+
+
+def test_the_stamp_table_covers_every_stamp_field_write_hold_takes( tmp_path ):
+    """
+    THE ANTI-RECURRENCE CHECK. This bug WAS a field the writer accepted and the CLI
+    could not reach. A fourth stamp added to `write_hold` and forgotten here would
+    reproduce it exactly — so the table is compared against the writer's own
+    signature rather than against a second hand-maintained list.
+    """
+    import inspect
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import write_hold as _wh
+
+    writer_stamp_kwargs = { name for name in inspect.signature( _wh ).parameters
+                            if name.startswith( "last_" ) }
+    table_fields        = { field for _dest, _flag, field, _label in hio.STAMP_ARGS }
+
+    assert table_fields == writer_stamp_kwargs, \
+        "write_hold takes a stamp kwarg the CLI cannot set — that IS bug 1dcaf65c"
+
+
+@pytest.mark.parametrize( "dest,flag,field,label", list( hio.STAMP_ARGS ) )
+def test_every_table_row_is_wired_end_to_end( dest, flag, field, label ):
+    """dest/flag/field declared together must actually agree with the parser."""
+    write_parser = hio.build_parser()._subparsers._group_actions[ 0 ].choices[ "write" ]
+    matched      = [ a for a in write_parser._actions if flag in a.option_strings ]
+
+    assert matched,                       f"{flag} is in the table but not on the parser"
+    assert matched[ 0 ].dest == dest,     f"{flag} must write to args.{dest}"
+    assert matched[ 0 ].default is None,  "an unpassed stamp flag must default to None"
+    assert label in ( matched[ 0 ].help or "" ), "the help text must say which stamp this is"
+
+
+def test_build_parser_defaults_leave_every_stamp_unset():
+    args = hio.build_parser().parse_args( [ "write", "--session-id", SID,
+                                            "--persona", "p", "--reason", "r" ] )
+    for dest, _flag, _field, _label in hio.STAMP_ARGS:
+        assert getattr( args, dest ) is None, f"args.{dest} must default to None"
+
+
+def test_resolve_stamp_returns_none_for_none():
+    assert hio._resolve_stamp( None, "--looked-in" ) is None
+
+
+def test_a_write_without_stamp_flags_WIPES_a_previously_stamped_field( tmp_path ):
+    """
+    CHARACTERIZATION, NOT ENDORSEMENT — reported to Cheech, not fixed here.
+
+    `write_hold` persists EXACTLY HOLD_SCHEMA_FIELDS, so a refresh that omits the
+    flags rewrites every stamp to None. A manager who stamps a look-in and later
+    refreshes the hold with a new reason silently loses the stamp and is poked
+    again. This predates the flags (the Python API has always behaved this way) and
+    closing it is a decision about carry-forward semantics, not a pass-through fix
+    — so it is pinned here where a change to it shows up as a diff.
+    """
+    assert hio.main( _write_argv( tmp_path, **{ "--looked-in": "now" } ) ) == hio.EXIT_OK
+    assert get_last_looked_in_ts( read_hold( SID, base_dir=tmp_path ) ) is not None
+
+    assert hio.main( _write_argv( tmp_path, **{ "--reason": "a different reason" } ) ) == hio.EXIT_OK
+    assert get_last_looked_in_ts( read_hold( SID, base_dir=tmp_path ) ) is None, \
+        "known gap 1dcaf65c-followup: an omitted flag WIPES the prior stamp"
+
+
+def test_the_hold_lands_in_fleet_data_root_when_no_base_dir_is_given( tmp_path, monkeypatch ):
+    """
+    THE MISPLACED-FILE PROPERTY (row 011f1f90). A hold written anywhere but
+    `fleet_data_root()` — the repo root, most often — parks the session INVISIBLY:
+    neither the arbiter nor the Stop hook looks there, so the poke keeps coming.
+    The whole point of adding these flags is to keep managers on the verb; the verb
+    must therefore still resolve the same directory `write_hold` does when
+    `--base-dir` is omitted.
+    """
+    import lupin_cli.claude_code.hooks.lib.heartbeat_hold as hh
+
+    fleet_root = tmp_path / "projects-data" / "lupin"
+    fleet_root.mkdir( parents=True )
+    monkeypatch.setattr( hh, "fleet_data_root", lambda *a, **k: fleet_root )
+
+    argv = [ "write", "--session-id", SID, "--persona", "Krishna 🦚",
+             "--reason", "clearing a worker-verification poke", "--looked-in", "now" ]
+    assert hio.main( argv ) == hio.EXIT_OK
+
+    landed = fleet_root / f".heartbeat-hold-{SID}.json"
+    assert landed.exists(), "the stamped hold must land in fleet_data_root(), where the readers look"
+    assert get_last_looked_in_ts( json.loads( landed.read_text() ) ) is not None
+
+    repo_root = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    assert not ( repo_root / f".heartbeat-hold-{SID}.json" ).exists(), \
+        "and NOT in the repo root — that is the 011f1f90 corpus"

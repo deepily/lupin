@@ -55,10 +55,21 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         Returns:
             Created ApiKey instance
 
+        ⚠️ THIS EXAMPLE USED TO SHOW hashlib.sha256(...).hexdigest() AND WAS
+        ACTIVELY DANGEROUS (row 323049bb, corrected 2026-08-24). Keys are
+        validated with bcrypt.checkpw (middleware/api_key_auth.py, and the
+        get_active_keys example below), so a key stored as a SHA-256 digest can
+        NEVER authenticate — checkpw would reject it forever, and the failure
+        would look like a bad key rather than a bad write. Copying the old
+        example was enough to mint a dead credential.
+
         Example:
+            import bcrypt
             key = api_key_repo.create_key(
-                user_id = service_account.id,
-                key_hash = hashlib.sha256( api_key.encode() ).hexdigest(),
+                user_id  = service_account.id,
+                key_hash = bcrypt.hashpw(
+                    api_key.encode( "utf-8" ), bcrypt.gensalt( rounds=12 )
+                ).decode( "utf-8" ),
                 description = "Claude Code notification service"
             )
         """

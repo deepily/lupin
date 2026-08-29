@@ -28,6 +28,8 @@ from mock_manager import MockManager
 from unit_test_utilities import UnitTestUtilities
 
 # Import the module under test
+from fastapi import HTTPException
+
 from cosa.rest.routers.queues import router, push, get_queue, reset_queues
 from cosa.rest.routers.queues import get_todo_queue, get_running_queue, get_done_queue, get_dead_queue, get_notification_queue
 
@@ -158,62 +160,28 @@ class TestQueuesRouter( unittest.TestCase ):
         return job
 
 
-    def test_push_endpoint_success( self ):
+    def test_push_endpoint_is_gone( self ):
         """
-        Test queue job push endpoint success case.
-        
-        Ensures:
-            - Question added to todo queue with proper metadata
-            - WebSocket ID and user ID properly associated
-            - Returns status confirmation with routing info
-            - Logs push operation for debugging
+        `POST /api/push` retired 2026-08-21 — Rick: ONE entry point, and it is v2.
+
+        This was the happy-path test: it drove `push( request, current_user, todo_queue )`,
+        asserted `push_job` was called with the four-argument signature, and pinned the
+        `{status: "queued", websocket_id, user_id, job_id, result}` response shape. None
+        of that exists now; the handler takes no arguments and raises 410. The queued
+        response shape is worth naming as it goes, because it is what every caller of
+        this door was written against and `/api/v2/ask` does NOT return it — `ask` answers
+        the question synchronously and returns an `AskResponse`, so a caller cutting over
+        changes how it reads the result, not just where it posts.
         """
         async def run_test():
-            # Live contract: push( request, current_user, todo_queue ). The body
-            # (question + websocket_id) arrives as JSON via request.json(); auth
-            # supplies user_id + user_email; push_job is invoked with 4 args
-            # (question, websocket_id, user_id, user_email) via asyncio.to_thread.
-            mock_todo_queue = self._create_mock_queue()
-            mock_todo_queue.push_job.return_value = { "job_id": "generated_hash", "message": "queued ok" }
-
-            mock_request = Mock()
-            mock_request.json = AsyncMock( return_value={
-                "question"     : self.test_question,
-                "websocket_id" : self.test_websocket_id
-            } )
-
-            with patch( 'builtins.print' ) as mock_print:
-                result = await push(
-                    request=mock_request,
-                    current_user=self.test_user,
-                    todo_queue=mock_todo_queue
-                )
-
-                # Verify queue push called with the live 4-arg signature
-                mock_todo_queue.push_job.assert_called_once_with(
-                    self.test_question,
-                    self.test_websocket_id,
-                    self.test_user["uid"],
-                    self.test_user["email"]
-                )
-
-                # Verify the call log line (now includes user_email)
-                expected_log = (
-                    f"[API] /api/push called - question: '{self.test_question}', "
-                    f"websocket_id: {self.test_websocket_id}, user_id: {self.test_user['uid']}, "
-                    f"user_email: {self.test_user['email']}"
-                )
-                mock_print.assert_any_call( expected_log )
-
-                # Verify response format (live shape: status/websocket_id/user_id/job_id/result)
-                self.assertEqual( result["status"], "queued" )
-                self.assertEqual( result["websocket_id"], self.test_websocket_id )
-                self.assertEqual( result["user_id"], self.test_user["uid"] )
-                self.assertEqual( result["job_id"], "generated_hash" )
-                self.assertEqual( result["result"], "queued ok" )
+            with self.assertRaises( HTTPException ) as ctx:
+                await push()
+            self.assertEqual( ctx.exception.status_code, 410 )
+            self.assertIn( "/api/v2/ask", ctx.exception.detail )
+            self.assertIn( "REMOVE BY",   ctx.exception.detail )
 
         asyncio.run( run_test() )
-    
+
     def test_get_queue_todo_endpoint( self ):
         """
         Test get queue endpoint for todo queue.
@@ -699,18 +667,13 @@ class TestQueuesRouter( unittest.TestCase ):
             mock_queue.get_jobs_for_user.return_value = [ self._make_mock_job() ]
             mock_queue.push_job.return_value = { "job_id": "h", "message": "ok" }
 
-            # Test push endpoint async pattern (live Request-based signature)
-            mock_request = Mock()
-            mock_request.json = AsyncMock( return_value={
-                "question"     : self.test_question,
-                "websocket_id" : self.test_websocket_id
-            } )
-            result = await push(
-                request=mock_request,
-                current_user=self.test_user,
-                todo_queue=mock_queue
-            )
-            self.assertIsInstance( result, dict )
+            # The push endpoint is a 410 tombstone (retired 2026-08-21), so it is
+            # awaited for its refusal rather than its result. It stays in this test
+            # because "is it async" is still a live question about it — a tombstone
+            # defined with `def` instead of `async def` would break the route just as
+            # surely as a live handler would.
+            with self.assertRaises( HTTPException ):
+                await push()
 
             # Test get_queue endpoint async pattern (structured metadata)
             result = await get_queue(

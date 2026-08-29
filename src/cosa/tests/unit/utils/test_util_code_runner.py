@@ -14,6 +14,7 @@ Assertions harvested and strengthened from the module's quick_smoke_test()
 behaviour, branches, and error handling).
 """
 
+import os
 import subprocess
 import unittest
 from unittest.mock import patch, MagicMock
@@ -280,3 +281,278 @@ class TestAssembleAndRunSolution( unittest.TestCase ):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPerInvocationCodeFile( unittest.TestCase ):
+    """
+    Row 7b9094d8 — the shared-path race, and the process-global chdir beside it.
+
+    The defect was NOT a crash. Every agent that generated code wrote ONE configured path
+    (/io/code.py) and then executed it, while `cj flow max concurrent agentic jobs` is 3 in
+    both Development and Production. The interleaving that matters is write(A) -> write(B) ->
+    exec(A): job A executes job B's code and returns it as its own answer, with no job id, no
+    checksum and no lock to notice. A confident wrong answer attributed to the wrong question.
+
+    Ensures:
+        - each invocation writes and executes a DISTINCT path
+        - the parent process's working directory is never mutated
+        - the child still runs with /io as its cwd
+        - the per-invocation file is removed on success, on a swallowed timeout, and on a
+          re-raised one
+    """
+
+    def setUp( self ):
+        self._patchers = []
+
+        def _start( target, **kw ):
+            p = patch( target, **kw )
+            self._patchers.append( p )
+            return p.start()
+
+        self.mock_run     = _start( "cosa.utils.util_code_runner.run" )
+        self.mock_chdir   = _start( "cosa.utils.util_code_runner.os.chdir" )
+        self.mock_remove  = _start( "cosa.utils.util_code_runner.os.remove" )
+        _start( "cosa.utils.util_code_runner.os.makedirs" )
+        _start( "cosa.utils.util_code_runner.os.getcwd", return_value="/orig/wd" )
+
+        _start( "cosa.utils.util_code_runner.du.get_project_root", return_value="/fake/root" )
+        self.mock_write   = _start( "cosa.utils.util_code_runner.du.write_lines_to_file" )
+        _start( "cosa.utils.util_code_runner.du.print_banner" )
+        _start( "cosa.utils.util_code_runner.du.print_list" )
+        _start( "cosa.utils.util_code_runner.du.print_stack_trace" )
+
+        cfg_instance = MagicMock()
+        cfg_instance.get.return_value = "/io/code.py"
+        _start( "cosa.config.configuration_manager.ConfigurationManager", return_value=cfg_instance )
+
+    def tearDown( self ):
+        for p in self._patchers:
+            p.stop()
+
+    def _written_path( self ):
+        """The path handed to write_lines_to_file on the most recent call."""
+        return self.mock_write.call_args[ 0 ][ 0 ]
+
+    def _executed_path( self ):
+        """The script path in the argv handed to run() on the most recent call."""
+        return self.mock_run.call_args[ 0 ][ 0 ][ 1 ]
+
+    def test_two_invocations_write_two_different_paths( self ):
+        """THE RACE. Two runs must not share a filename."""
+        self.mock_run.return_value = _FakeResult( returncode=0, stdout="a" )
+        assemble_and_run_solution( [ "x = 1" ], "solution = 1" )
+        first = self._written_path()
+
+        assemble_and_run_solution( [ "x = 2" ], "solution = 2" )
+        second = self._written_path()
+
+        self.assertNotEqual( first, second, "two invocations shared one code file — the race is back" )
+
+    def test_the_file_written_is_the_file_executed( self ):
+        """Uniqueness is worthless if the run still executes the old shared name."""
+        self.mock_run.return_value = _FakeResult( returncode=0, stdout="a" )
+        assemble_and_run_solution( [ "x = 1" ], "solution = 1" )
+        self.assertEqual( self._written_path(), self._executed_path() )
+
+    def test_the_unique_path_keeps_the_configured_directory_and_stem( self ):
+        """The config key must keep meaning something — dir and stem survive."""
+        self.mock_run.return_value = _FakeResult( returncode=0, stdout="a" )
+        assemble_and_run_solution( [ "x = 1" ], "solution = 1" )
+        written = self._written_path()
+        self.assertTrue( written.startswith( "/fake/root/io/code-" ), written )
+        self.assertTrue( written.endswith( ".py" ), written )
+
+    def test_the_parent_working_directory_is_never_changed( self ):
+        """os.chdir from a worker thread moves every OTHER thread's relative paths."""
+        self.mock_run.return_value = _FakeResult( returncode=0, stdout="a" )
+        assemble_and_run_solution( [ "x = 1" ], "solution = 1" )
+        self.mock_chdir.assert_not_called()
+
+    def test_the_child_still_runs_in_io( self ):
+        """Generated code kept its working directory — it moved to the child, not away."""
+        self.mock_run.return_value = _FakeResult( returncode=0, stdout="a" )
+        assemble_and_run_solution( [ "x = 1" ], "solution = 1" )
+        self.assertEqual( self.mock_run.call_args[ 1 ][ "cwd" ], "/fake/root/io" )
+
+    def test_the_file_is_removed_after_a_successful_run( self ):
+        """Unique names without cleanup turn /io into an unbounded pile."""
+        self.mock_run.return_value = _FakeResult( returncode=0, stdout="a" )
+        assemble_and_run_solution( [ "x = 1" ], "solution = 1" )
+        self.mock_remove.assert_called_once_with( self._written_path() )
+
+    def test_a_swallowed_timeout_still_removes_the_file( self ):
+        self.mock_run.side_effect = subprocess.TimeoutExpired( cmd="python3", timeout=60 )
+        out = assemble_and_run_solution( [ "x = 1" ], "solution = 1", return_none_on_timeout=True )
+        self.assertIsNone( out[ "output" ] )
+        self.mock_remove.assert_called_once_with( self._written_path() )
+
+    def test_a_reraised_timeout_removes_the_file_and_leaves_the_cwd_alone( self ):
+        """The old code's `raise` branch never restored the cwd — the server stayed in /io."""
+        self.mock_run.side_effect = subprocess.TimeoutExpired( cmd="python3", timeout=60 )
+        with self.assertRaises( subprocess.TimeoutExpired ):
+            assemble_and_run_solution( [ "x = 1" ], "solution = 1", return_none_on_timeout=False )
+        self.mock_remove.assert_called_once_with( self._written_path() )
+        self.mock_chdir.assert_not_called()
+
+    def test_cleanup_failure_never_masks_the_answer( self ):
+        """A failed unlink must not replace the result the user is waiting for."""
+        self.mock_run.return_value = _FakeResult( returncode=0, stdout="hello" )
+        self.mock_remove.side_effect = OSError( "permission denied" )
+        out = assemble_and_run_solution( [ "x = 1" ], "solution = 1" )
+        self.assertEqual( out[ "output" ], "hello" )
+
+
+
+class TestConcurrentInvocationsDoNotCrossAnswers( unittest.TestCase ):
+    """
+    Row 7b9094d8 — the race REPRODUCED, then shown closed.
+
+    Everything above this class mocks the execution boundary and calls the runner twice in a
+    row. That proves two calls pick two names; it does NOT reproduce the defect, because the
+    defect needs two calls to be INSIDE the function at the same time. The row was filed on a
+    reading of the code plus the INI ( `cj flow max concurrent agentic jobs` is 3 in both
+    Development and Production ), and a reading is not a measurement.
+
+    So this class runs two invocations CONCURRENTLY, with REAL python3 subprocesses, and asks
+    the only question that matters to a user: did each caller get its own answer back?
+
+    The interleave is FORCED rather than hoped for. Both threads block on a barrier immediately
+    after writing their program and before either executes, which pins the ordering to exactly
+    write(A) -> write(B) -> exec(A) -> exec(B) — the one interleaving that makes the shared-path
+    bug produce a wrong answer instead of a crash. Without the barrier the race is real but
+    rare, and a test that fails one run in fifty is a test nobody believes.
+
+    Against the shared-path implementation this is a genuine RED: thread A executes thread B's
+    program and returns "JOB-B" as its own answer, with return_code 0 and nothing anywhere
+    saying the answer belongs to another question.
+
+    Ensures:
+        - two concurrent invocations each receive the output of their OWN program
+        - the two invocations wrote two distinct files
+        - neither leaves its per-invocation file behind
+
+    Venue: :7999-eligible. Spawns two short-lived python3 subprocesses whose whole program is
+    a print; all filesystem writes land in a TemporaryDirectory that is removed afterward.
+    """
+
+    def _run_two_jobs_concurrently( self ):
+        """
+        Run two invocations at once and return ( answers, written_paths, leftover_files ).
+
+        Requires:
+            - python3 is on PATH and can import datetime and pytz ( the runner's preamble )
+
+        Ensures:
+            - both threads are inside assemble_and_run_solution simultaneously, with both
+              writes completed before either execution starts
+            - returns each thread's answer keyed by job name, every path handed to the
+              writer, and whatever is left in the fake io directory afterwards
+            - the process working directory is restored before the temp tree is removed
+
+        That last clause is not tidiness. The pre-fix implementation chdir'd the WHOLE process
+        into its io directory and did not restore it on every path, so a run under it left the
+        interpreter parked inside a directory this helper is about to delete — and the NEXT
+        test in the file then died in os.getcwd() with a message about a missing directory
+        instead of about a crossed answer. A control whose failure names the wrong defect is a
+        control a reader will misdiagnose, so the restore happens here where it cannot mask
+        anything: the chdir behaviour itself is asserted separately, on the return value.
+        """
+        import tempfile
+        import threading
+
+        answers       = {}
+        written_paths = []
+        paths_lock    = threading.Lock()
+        both_written  = threading.Barrier( 2, timeout=30 )
+        cwd_before    = os.getcwd()
+
+        with tempfile.TemporaryDirectory() as fake_root:
+            io_dir = os.path.join( fake_root, "io" )
+            os.makedirs( io_dir, exist_ok=True )
+
+            real_write = ucr.du.write_lines_to_file
+
+            def write_then_wait_for_the_other_thread( path, lines, *args, **kwargs ):
+                """Write for real, then hold until BOTH threads have written."""
+                result = real_write( path, lines, *args, **kwargs )
+                with paths_lock:
+                    written_paths.append( path )
+                both_written.wait()
+                return result
+
+            cfg_instance = MagicMock()
+            cfg_instance.get.return_value = "/io/code.py"
+
+            def one_job( name ):
+                """Record the answer, or the failure — never leave the key simply absent."""
+                try:
+                    answers[ name ] = assemble_and_run_solution(
+                        [ "def answer():", f"    return '{name}'" ],
+                        "solution = answer()",
+                    )[ "output" ]
+                except BaseException as e:                              # noqa: BLE001 — a thread that
+                    answers[ name ] = f"RAISED {type( e ).__name__}: {e}"  # dies must say so in the
+                                                                        # assertion, not as a KeyError
+
+            with patch( "cosa.utils.util_code_runner.du.get_project_root", return_value=fake_root ), \
+                 patch( "cosa.utils.util_code_runner.du.write_lines_to_file", side_effect=write_then_wait_for_the_other_thread ), \
+                 patch( "cosa.config.configuration_manager.ConfigurationManager", return_value=cfg_instance ):
+
+                threads = [ threading.Thread( target=one_job, args=( name, ) ) for name in ( "JOB-A", "JOB-B" ) ]
+                for t in threads: t.start()
+                for t in threads: t.join( timeout=60 )
+                for t in threads:
+                    self.assertFalse( t.is_alive(), "a job never finished — the barrier or a subprocess hung" )
+
+            leftovers = os.listdir( io_dir )
+            os.chdir( cwd_before )
+
+        return answers, written_paths, leftovers
+
+    def test_each_concurrent_job_gets_its_own_answer( self ):
+        """
+        Ensures:
+            - neither job receives the other job's output
+
+        THE ROW'S ACTUAL HARM. The shared-path version returns "JOB-B" to the caller who asked
+        for "JOB-A" — a confident wrong answer attributed to the wrong question, with a zero
+        return code and no error anywhere.
+        """
+        answers, _, _ = self._run_two_jobs_concurrently()
+
+        self.assertEqual(
+            answers[ "JOB-A" ], "JOB-A",
+            f"JOB-A was handed [{answers[ 'JOB-A' ]}] — another job's answer to another job's question"
+        )
+        self.assertEqual(
+            answers[ "JOB-B" ], "JOB-B",
+            f"JOB-B was handed [{answers[ 'JOB-B' ]}] — another job's answer to another job's question"
+        )
+
+    def test_concurrent_jobs_write_two_distinct_files( self ):
+        """
+        Ensures:
+            - the two simultaneous invocations did not share one filename
+
+        The mechanism behind the assertion above, stated separately so a failure says WHICH of
+        the two broke: the naming, or the answer routing.
+        """
+        _, written_paths, _ = self._run_two_jobs_concurrently()
+
+        self.assertEqual( len( written_paths ), 2, written_paths )
+        self.assertNotEqual(
+            written_paths[ 0 ], written_paths[ 1 ],
+            f"both concurrent jobs wrote [{written_paths[ 0 ]}] — the race is back"
+        )
+
+    def test_concurrent_jobs_leave_no_files_behind( self ):
+        """
+        Ensures:
+            - per-invocation naming does not turn the io directory into an unbounded pile
+
+        Uniqueness without cleanup trades a correctness bug for a disk-fill one, so the cleanup
+        is asserted under the same concurrency as the naming rather than only in isolation.
+        """
+        _, _, leftovers = self._run_two_jobs_concurrently()
+
+        self.assertEqual( leftovers, [], f"per-invocation files were left behind: {leftovers}" )

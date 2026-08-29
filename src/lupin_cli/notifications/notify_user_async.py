@@ -191,7 +191,14 @@ def notify_user_async(
                     print( f"[DEBUG] Environment: {env if 'env' in locals() else 'fallback'}", file=sys.stderr )
                     print( f"[DEBUG] Request model: {request.model_dump_json( indent=2 )}", file=sys.stderr )
                     print( f"[DEBUG] API params: {params}", file=sys.stderr )
-                    print( f"[DEBUG] API key: {api_key[:20]}...{api_key[-10:] if api_key else 'None'}", file=sys.stderr )
+                    # BOTH halves must be guarded. The second one was; the first was not,
+                    # so `api_key[:20]` raised TypeError whenever config loading had fallen
+                    # back (api_key=None) AND debug was on — and because this print sits
+                    # BEFORE requests.post, the notification was never sent at all. It
+                    # surfaced as `Unexpected error: 'NoneType' object is not subscriptable`
+                    # from the catch-all below, i.e. as a transport failure. Row e2099400.
+                    key_preview = f"{api_key[:20]}...{api_key[-10:]}" if api_key else "None"
+                    print( f"[DEBUG] API key: {key_preview}", file=sys.stderr )
 
             # Send notification (fire-and-forget - no SSE streaming)
             response = requests.post(

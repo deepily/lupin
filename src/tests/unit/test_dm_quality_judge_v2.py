@@ -430,9 +430,12 @@ class TestJudgeContract:
         assert result[ "overall" ][ "weight" ]    == result[ "length" ][ "weight" ]
 
     def test_an_over_length_body_skips_the_model_entirely( self ):
+        from cosa.agents.dm_quality_judge.judge import _TOO_LONG_DETAIL, QUALITATIVE_WORD_LIMIT
         judge  = _judge_with_client( [ ] )
         result = judge.judge( "word " * 400 )
-        assert "too long" in result[ "directness" ][ "detail" ]
+        # Row 2cb46818: blunt, number-free refusal — the enforced ceiling is not disclosed.
+        assert result[ "directness" ][ "detail" ] == _TOO_LONG_DETAIL
+        assert str( QUALITATIVE_WORD_LIMIT ) not in result[ "directness" ][ "detail" ]
 
     def test_an_unavailable_client_degrades_without_raising( self ):
         with patch( "cosa.agents.dm_quality_judge.judge_v2.LlmClientFactory",
@@ -533,7 +536,7 @@ class TestANonAnswerNeverWearsAGradesFace:
     @pytest.mark.parametrize( "builder,kind", [
         ( lambda: __import__( "cosa.agents.dm_quality_judge.judge", fromlist=[ "x" ] )._fallback_dimension(), "unavailable" ),
         ( lambda: __import__( "cosa.agents.dm_quality_judge.judge", fromlist=[ "x" ] )._withheld_dimension(), "withheld" ),
-        ( lambda: __import__( "cosa.agents.dm_quality_judge.judge", fromlist=[ "x" ] )._too_long_dimension( 300 ), "too_long" ),
+        ( lambda: __import__( "cosa.agents.dm_quality_judge.judge", fromlist=[ "x" ] )._too_long_dimension(), "too_long" ),
         ( lambda: _extraction_failed_dimension( "why" ), "unverified" ),
     ] )
     def test_every_non_answer_path_returns_none_and_its_own_face( self, builder, kind ):
@@ -691,3 +694,72 @@ class TestSharedV1PathsReachedByV2:
     def test_v1_module_smoke_test_passes( self ):
         from cosa.agents.dm_quality_judge.judge import quick_smoke_test
         assert quick_smoke_test() is True
+
+
+class TestADeadPortDoesNotBuyRetries:
+    """
+    Row ec5cf83a. `available` says the factory returned a client object, not that
+    anything is listening, so a judge built against a dead port still spends the full
+    retry budget on every dimension of every accepted DM — six refused connections and
+    three seconds of sleep per DM, silently, because judge() never raises. The cut is on
+    WHETHER THE CALL CAME BACK: a server that answered badly keeps its retries, a server
+    that never answered at all does not.
+    """
+
+    @staticmethod
+    def _judge_with_raising_client( exc=None ):
+        with patch( "cosa.agents.dm_quality_judge.judge_v2.LlmClientFactory" ) as factory:
+            client     = MagicMock()
+            client.run = MagicMock( side_effect=exc or ConnectionError( "dead vLLM port" ) )
+            factory.return_value.get_client.return_value = client
+            judge = DmQualityJudgeV2( qualitative_enabled=True )
+        return judge, client
+
+    def test_available_is_true_against_a_port_that_was_never_there( self ):
+        # The defect this row is about, stated as a test: construction succeeds, so the
+        # flag reads "available" while every call refuses.
+        judge, _ = self._judge_with_raising_client()
+        assert judge.available                is True
+        assert judge._client_ever_responded   is False
+
+    def test_a_cold_transport_failure_costs_one_call_and_no_sleep( self ):
+        judge, client = self._judge_with_raising_client()
+        with patch( "cosa.agents.dm_quality_judge.judge_v2.time.sleep" ) as slept:
+            d = judge._grade_directness( BODY )
+        assert client.run.call_count == 1
+        assert slept.call_count      == 0
+        assert d[ "detail" ]         == "judge unavailable"
+
+    def test_a_whole_judge_call_costs_one_connection_per_dimension( self ):
+        judge, client = self._judge_with_raising_client()
+        with patch( "cosa.agents.dm_quality_judge.judge_v2.time.sleep" ) as slept:
+            result = judge.judge( BODY )
+        assert client.run.call_count == 2          # was 6 — three per dimension
+        assert slept.call_count      == 0          # was 3.0s of backoff
+        assert result[ "directness" ][ "detail" ] == "judge unavailable"
+        assert result[ "tone" ][ "detail" ]       == "judge unavailable"
+
+    def test_once_the_server_has_answered_a_later_outage_keeps_its_retries( self ):
+        # The control, in-code: a client that HAS spoken is exactly the old behaviour,
+        # because from then on a refused call really might be the blip retries are for.
+        judge, client = self._judge_with_raising_client()
+        judge._client_ever_responded = True
+        with patch( "cosa.agents.dm_quality_judge.judge_v2.time.sleep" ) as slept:
+            judge._grade_directness( BODY )
+        assert client.run.call_count == 3
+        assert slept.call_count      == 2
+
+    def test_an_unparseable_answer_is_still_an_answer_and_keeps_the_full_budget( self ):
+        # The distinction the gate turns on: the server spoke, it just spoke nonsense.
+        judge = _judge_with_client( [ "garbage <<<", "garbage <<<", "garbage <<<" ] )
+        with patch( "cosa.agents.dm_quality_judge.judge_v2.time.sleep" ) as slept:
+            judge._grade_directness( BODY )
+        assert judge._client.run.call_count == 3
+        assert slept.call_count             == 2
+        assert judge._client_ever_responded is True
+
+    def test_the_first_response_of_any_kind_flips_the_flag( self ):
+        judge = _judge_with_client( [ _GOOD_DIRECTNESS ] )
+        assert judge._client_ever_responded is False
+        judge._grade_directness( BODY )
+        assert judge._client_ever_responded is True

@@ -268,7 +268,7 @@ def test_url_resolves_cloud_run_https_and_env_wins_over_ini( monkeypatch ):
     local `model server url` INI value — the entire env-switch from a local
     GPU container to the scale-to-zero Cloud Run service is this one value.
 
-    See: src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
+    See: src/rnd/v0.1.9/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
     """
     from cosa.memory.speech_to_text_provider import SpeechToTextProvider
     cloud_url = "https://lupin-model-server-abcd1234-uc.a.run.app"

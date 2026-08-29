@@ -142,8 +142,9 @@ and should not grow one. But narrow is not the same as blind: refusing loudly is
 what keeps the narrowness from being paid for by the caller's data.
 
 WHERE THE HOLD LANDS, SAID OUT LOUD (María, same day). `--base-dir` defaults to
-`write_hold`'s own default, `cu.get_project_root()` = **LUPIN_ROOT** — correct for
-a lupin session and wrong for every other. Measured from a `plan` session:
+`write_hold`'s own default, which since the 2026-07-26 relocation is
+`fleet_data_root()` = the `projects-data/<repo>` dir (was `cu.get_project_root()` =
+**LUPIN_ROOT** before that). Historically, measured from a `plan` session:
 `read --session-id <mine>` → "no hold found", while the same id with
 `--base-dir <PIP root>` → "honored yes". Same file, same session, opposite
 verdicts. The default is NOT changed here — diverging from the writer's default
@@ -172,6 +173,7 @@ Exit codes (distinct, so a caller never has to parse the message):
        preserve — named, not destroyed (see the CARGO section below)
 """
 import argparse
+import datetime
 import json
 import os
 import sys
@@ -205,9 +207,9 @@ def _bootstrap_sys_path():
 _bootstrap_sys_path()
 
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import (   # noqa: E402 — after bootstrap
-    AWAITING_NONE, DEFAULT_TTL_SECONDS, HOLD_FILENAME_TEMPLATE, _resolve_base_dir,
-    clear_hold, hold_cargo_keys, hold_path, is_honored, read_hold,
-    read_hold_exact, write_hold,
+    AWAITING_NONE, DEFAULT_TTL_SECONDS, HOLD_FILENAME_TEMPLATE, _now,
+    _resolve_base_dir, clear_hold, hold_cargo_keys, hold_path, is_honored,
+    read_hold, read_hold_exact, write_hold,
 )
 
 
@@ -225,6 +227,114 @@ EXIT_CARGO       = 6
 EXIT_STILL_HELD  = 7
 
 
+# THE THREE STAMPS THE POKE NAMES AND THIS CLI COULD NOT SET (bug 1dcaf65c).
+#
+# The Stop-hook poke says "look in on your workers (stamp
+# last_looked_in_on_workers_ts)". The field is real, `write_hold` has taken it as
+# a kwarg since A1, and `get_last_looked_in_ts` reads it to debounce the inward
+# twin — but `write` exposed no flag for it, nor for its two siblings. A manager
+# who reads the poke, runs the sanctioned verb and finds no flag is left with the
+# hand-written JSON that CLAUDE.md bans and row 011f1f90 counts 33 of. The
+# instruction and the tool disagreed, and the tool is the one people obey.
+#
+# ONE TABLE, NOT THREE PARALLEL LISTS. The argparse dest, the flag spelling and
+# the schema field are declared together so a fourth stamp cannot be added to the
+# parser and forgotten in the pass-through — which is the shape of the bug being
+# closed, one layer up.
+STAMP_ARGS = (
+    ( "looked_in",          "--looked-in",          "last_looked_in_on_workers_ts",
+      "manager worker-verification look-in" ),
+    ( "spinup_check",       "--spinup-check",       "last_spinup_check_ts",
+      "manager spin-up check (Face A)" ),
+    ( "surfaced_questions", "--surfaced-questions", "last_surfaced_questions_ts",
+      "surfaced-questions sweep (Face B)" ),
+)
+
+STAMP_NOW = "now"
+
+
+def _resolve_stamp( value, flag ):
+    """
+    Turn one `--looked-in`-family flag value into the ISO string write_hold stores.
+
+    Requires:
+        - value is None, the literal "now", or an ISO-8601 timestamp string
+        - flag is the flag spelling, used only to name the offender in a refusal
+
+    Ensures:
+        - Returns None when value is None — the flag was not passed, and the
+          stamp stays whatever write_hold defaults it to
+        - Returns an aware, seconds-precision ISO string for "now" (any case,
+          surrounding whitespace tolerated) — UTC, matching what `write_hold`
+          stamps into `held_at`
+        - Returns the seconds-precision ISO form of an explicit OFFSET-BEARING
+          timestamp, offset preserved exactly as the caller wrote it
+
+    Raises:
+        - ValueError naming the flag and the value when it cannot be dated
+        - ValueError when the timestamp parses but carries NO offset
+
+    WHY THIS REFUSES INSTEAD OF PASSING THE STRING THROUGH. Every reader of these
+    fields degrades to None on an unparseable stamp — `_iso_age_seconds` returns
+    None, `manager_needs_verification` then reads the manager as never having
+    looked in. So `--looked-in yesterday` would land on disk, print a success
+    banner, and leave the manager poked exactly as before: a stamp that silently
+    means "never ran" is worse than no flag at all, because the caller now
+    believes the poke was cleared. Refuse it at the front door, where the typo is.
+
+    WHY A ZONE-LESS TIMESTAMP IS REFUSED RATHER THAN ASSUMED TO BE UTC (Cheech's
+    call, 2026-08-20). A naive stamp is dated by two readers two different ways:
+    `_parse_iso` assumes UTC, while `_iso_age_seconds` calls `.timestamp()` on the
+    naive datetime, which Python resolves in LOCAL time. Measured on this host
+    (UTC-4): `2026-06-22T12:00:00` dates 14400 seconds apart depending on which
+    reader asks — four hours, which is most of a debounce window.
+
+    The first cut here silently normalized naive input to UTC, and that was wrong
+    for a reason worth writing down: it picks a zone THE CALLER DID NOT GIVE. When
+    the guess is wrong the stamp is not rejected and not obviously bad — it is
+    off by the host offset, which is exactly the size of error that reads as a
+    plausible timestamp and debounces the wrong way. A caller who knows the zone
+    can always say it; this verb should not decide it for them.
+
+    `"now"` is unaffected and stays the ordinary path: it resolves through `_now()`
+    to aware UTC, which is precisely what `write_hold` already writes into
+    `held_at` (measured: `2026-08-21T02:38:08+00:00`). So the house format is
+    offset-bearing, and this refuses only input that does not meet it.
+
+    ONE PARSER, NOT TWO. The datable verdict and the offset verdict come from the
+    SAME `fromisoformat` call, because asking one parser whether it can date a
+    string and a second whether that string had an offset is how two guards end up
+    disagreeing about the same value.
+    """
+    if value is None:
+        return None
+    if str( value ).strip().lower() == STAMP_NOW:
+        return _now().isoformat( timespec="seconds" )
+
+    text = str( value ).strip()
+    if text.endswith( "Z" ):                      # Zulu is an offset; 3.10 cannot read it
+        text = text[ :-1 ] + "+00:00"
+    try:
+        parsed = datetime.datetime.fromisoformat( text )
+    except ValueError:
+        parsed = None
+
+    if parsed is None:
+        raise ValueError(
+            f"{flag} must be \"{STAMP_NOW}\" or an ISO-8601 timestamp, got {value!r} — every "
+            f"reader of this field degrades to None on a stamp it cannot date, so this would "
+            f"land under a success banner and still read as NEVER RUN, leaving you poked."
+        )
+    if parsed.tzinfo is None:
+        raise ValueError(
+            f"{flag} needs a UTC offset, got {value!r} — this verb will not pick a timezone you "
+            f"did not give it. A zone-less stamp is read as UTC by one reader and as LOCAL time "
+            f"by another, so it silently dates wrong by the host offset. Write it as "
+            f"{text}+00:00 (or your real offset), or pass \"{STAMP_NOW}\"."
+        )
+    return parsed.isoformat( timespec="seconds" )
+
+
 def cmd_write( args ):
     """
     Mint (or refresh) this session's hold — the verb doctrine can prescribe.
@@ -232,8 +342,16 @@ def cmd_write( args ):
     Requires:
         - args carries session_id / persona / reason (all required by the parser)
         - args carries ttl_seconds / awaiting / work_owed / base_dir
+        - args carries looked_in / spinup_check / surfaced_questions — each None,
+          the literal "now", or an ISO-8601 timestamp
 
     Ensures:
+        - Passes the three debounce stamps straight through to `write_hold`'s
+          existing kwargs, resolving "now" and normalizing an explicit timestamp
+          to its aware form; an undatable value is refused at EXIT_REFUSED before
+          anything is written (bug 1dcaf65c — see `_resolve_stamp`)
+        - Names each stamp that landed in the banner, because the caller's reason
+          for passing one is to clear a poke and "ok" does not say whether it is
         - Delegates to `write_hold` unchanged — no validation is duplicated here,
           so this front-end can never drift from the writer it fronts
         - Reads the hold BACK through the real reader and returns EXIT_NOT_HONORED
@@ -298,6 +416,14 @@ def cmd_write( args ):
     time the verify runs, `write_hold` has already replaced the original. Read it
     late and every arm of the table above is unimplementable.
     """
+    # STAMPS FIRST, BEFORE THE DISK IS TOUCHED AT ALL (bug 1dcaf65c). A mistyped
+    # `--looked-in` is a usage error, and refusing it here — ahead of the cargo
+    # guard, ahead of the prior-hold capture — makes "every refusal leaves the
+    # disk as it found it" true by construction on this path rather than by a
+    # rollback that has to be maintained.
+    stamps = { field: _resolve_stamp( getattr( args, dest ), flag )
+               for dest, flag, field, _label in STAMP_ARGS }
+
     path        = hold_path( args.session_id, base_dir=args.base_dir )
     prior_bytes = None
     prior_times = None
@@ -339,7 +465,7 @@ def cmd_write( args ):
     hold = write_hold(
         args.session_id, args.persona, args.reason,
         work_owed=args.work_owed, ttl_seconds=args.ttl_seconds,
-        awaiting=args.awaiting, base_dir=args.base_dir,
+        awaiting=args.awaiting, base_dir=args.base_dir, **stamps,
     )
 
     read_back = read_hold( args.session_id, base_dir=args.base_dir )
@@ -359,6 +485,13 @@ def cmd_write( args ):
     print( f"ttl      {hold[ 'ttl_seconds' ]}s   awaiting: {hold[ 'awaiting' ]}   "
            f"work_owed: {hold[ 'work_owed' ]}" )
     print(  "honored  yes (read back through the reader the hook uses)" )
+
+    # NAME THE STAMP THAT LANDED. The caller passed `--looked-in now` to clear a
+    # poke; "ok" does not tell them the poke is cleared, and the value that landed
+    # is the only thing the debounce actually reads.
+    for _dest, flag, field, label in STAMP_ARGS:
+        if hold[ field ] is not None:
+            print( f"stamped  {label}: {hold[ field ]}   ({flag})" )
 
     # 39219cc1 F3 — NAME THE DUPLICATE THIS CALL JUST MINTED. One session declaring
     # under both its id forms (the short bridge id `get_session_info` hands it, and
@@ -583,6 +716,8 @@ def build_parser():
           (exit 2) and never reaches `write_hold` — see the module docstring, item 3
         - `--work-owed` / `--no-work-owed` are an explicit pair defaulting to owed:
           a session that bothered to declare a hold is presumed to owe work
+        - `write` carries one flag per STAMP_ARGS row, each defaulting to None so
+          an unpassed flag leaves the stamp to `write_hold` (bug 1dcaf65c)
     """
     p   = argparse.ArgumentParser(
         prog="heartbeat_hold_io.py",
@@ -595,8 +730,8 @@ def build_parser():
         sp.add_argument( "--session-id", required=True,
                          help="FULL session id (from get_session_info())" )
         sp.add_argument( "--base-dir", default=None,
-                         help="directory holding the artifact (default: the project root, "
-                              "exactly as write_hold resolves it)" )
+                         help="directory holding the artifact (default: fleet_data_root() "
+                              "= the projects-data/<repo> dir, exactly as write_hold resolves it)" )
 
     w = sub.add_parser( "write", help="declare a hold (RECORD + verify-by-read, in ONE call)" )
     common( w )
@@ -609,6 +744,9 @@ def build_parser():
     w.add_argument( "--work-owed",    dest="work_owed", action="store_true",  default=True )
     w.add_argument( "--no-work-owed", dest="work_owed", action="store_false",
                     help="this session owes nothing — done, never poke" )
+    for dest, flag, _field, label in STAMP_ARGS:
+        w.add_argument( flag, dest=dest, default=None,
+                        help=f"stamp the {label} — \"now\" or an ISO-8601 timestamp" )
     w.set_defaults( func=cmd_write )
 
     r = sub.add_parser( "read", help="print the hold + the verdict the hook would reach" )

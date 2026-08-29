@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 import cosa.agents.runtime_argument_expeditor.expeditor as ex_mod
 from cosa.agents.runtime_argument_expeditor.expeditor import (
     RuntimeArgumentExpeditor,
+    ArgSpec,
     BATCH_ANSWERED,
     BATCH_DECLINED,
     BATCH_UNREACHABLE,
@@ -30,13 +31,29 @@ from cosa.agents.runtime_argument_expeditor.expeditor import (
 from cosa.agents.runtime_argument_expeditor.xml_models import ArgConfirmationResponse
 
 
+def _spec( **kw ):
+    """Build an ArgSpec for helper tests; absent fields default to empty/None
+    (mirrors the former partial agent_entry dicts these tests passed)."""
+    base = dict(
+        arg_mapping        = {},
+        system_provided    = [],
+        required_user_args = [],
+        fallback_questions = {},
+        fallback_defaults  = {},
+        special_handlers   = {},
+        display_name       = None,
+        cli_module         = None,
+        file_args          = {},
+    )
+    base.update( kw )
+    return ArgSpec( **base )
+
+
 def _mk_expeditor( debug=False ):
     cfg = MagicMock()
     cfg.get.side_effect = lambda key, default=None, **kw: default
     with patch.object( ex_mod, "LlmClientFactory", MagicMock() ):
         o = RuntimeArgumentExpeditor( cfg, debug=debug )
-    o._job_id       = None   # NotificationRequest.job_id is Optional + pattern-validated
-    o._bearer_token = None
     # config_mgr.get returns None for these keys by default; set valid path strings so
     # the `get_project_root() + path` concatenations don't TypeError.
     o.prompt_template_path     = "/templates/rae.txt"
@@ -64,26 +81,29 @@ class TestInitAndPureHelpers( unittest.TestCase ):
     def test_init_reads_config_keys( self ):
         o = _mk_expeditor()
         self.assertEqual( o.SENDER_ID, "arg.expeditor@lupin.deepily.ai" )
-        self.assertIsNone( o._last_notification_status )
+        # A fresh expeditor holds NO per-call state at all (row 10c60712) — those
+        # four names moved onto the caller's ExpediteContext.
+        for name in ( "_job_id", "_bearer_token", "_last_expedite_reason", "_last_notification_status" ):
+            self.assertNotIn( name, o.__dict__ )
 
     def test_resolve_display_name_explicit( self ):
-        self.assertEqual( RuntimeArgumentExpeditor._resolve_display_name( { "display_name": "Deep Research" } ),
+        self.assertEqual( RuntimeArgumentExpeditor._resolve_display_name( _spec( display_name="Deep Research" ) ),
                           "Deep Research" )
 
     def test_resolve_display_name_derived_from_cli_module( self ):
         self.assertEqual(
-            RuntimeArgumentExpeditor._resolve_display_name( { "cli_module": "cosa.agents.podcast_generator.cli" } ),
+            RuntimeArgumentExpeditor._resolve_display_name( _spec( cli_module="cosa.agents.podcast_generator.cli" ) ),
             "cli",
         )
 
     def test_resolve_display_name_derived_underscores( self ):
         self.assertEqual(
-            RuntimeArgumentExpeditor._resolve_display_name( { "cli_module": "cosa.agents.swe_team" } ),
+            RuntimeArgumentExpeditor._resolve_display_name( _spec( cli_module="cosa.agents.swe_team" ) ),
             "swe team",
         )
 
     def test_resolve_display_name_neither_returns_agent( self ):
-        self.assertEqual( RuntimeArgumentExpeditor._resolve_display_name( { "cli_module": None } ), "agent" )
+        self.assertEqual( RuntimeArgumentExpeditor._resolve_display_name( _spec( cli_module=None ) ), "agent" )
 
     def test_parse_lora_args_empty( self ):
         o = _mk_expeditor()
@@ -110,10 +130,47 @@ class TestInitAndPureHelpers( unittest.TestCase ):
         self.assertEqual( o._resolve_default( "agent router go to deep research", "budget", "registry-def" ),
                           "registry-def" )
 
+    def test_resolve_default_never_asks_config_for_a_required_arg( self ):
+        """
+        Row fb49da08: a REQUIRED user arg must not be looked up in config.
+
+        The "expeditor default value" key family covers optional args only, so the
+        lookup always missed for `query` — and the miss was loud, printing a
+        splainer ¿WUH? line on every run. This asserts the config manager is not
+        consulted AT ALL, not merely that the return value is right: returning the
+        registry default would look correct even if the doomed lookup still fired
+        and still printed.
+        """
+        o = _mk_expeditor()
+        o.config_mgr.get.side_effect = lambda key, default=None, **kw: "should-never-be-reached"
+        # "query" is a required_user_arg for research-to-podcast (agent_registry.py:83).
+        out = o._resolve_default( "agent router go to research to podcast", "query", "registry-def" )
+        self.assertEqual( out, "registry-def" )
+        for call in o.config_mgr.get.call_args_list:
+            self.assertNotIn( "default value for", str( call ),
+                              "config was consulted for a required arg — the ¿WUH? line is back" )
+
+    def test_resolve_default_still_asks_config_for_an_optional_arg_of_the_same_agent( self ):
+        """
+        The other direction, so the fix cannot be 'skip config for everything'.
+        Same agent, an OPTIONAL arg — the config override must still win.
+        """
+        o = _mk_expeditor()
+        o.config_mgr.get.side_effect = lambda key, default=None, **kw: "from-config" if "default value for" in key else default
+        self.assertEqual( o._resolve_default( "agent router go to research to podcast", "audience", "registry-def" ),
+                          "from-config" )
+
+    def test_resolve_default_unknown_command_still_consults_config( self ):
+        """An unrecognised command has no registry entry; behaviour is unchanged."""
+        o = _mk_expeditor()
+        o.config_mgr.get.side_effect = lambda key, default=None, **kw: "from-config" if "default value for" in key else default
+        self.assertEqual( o._resolve_default( "agent router go to nonexistent agent", "whatever", "registry-def" ),
+                          "from-config" )
+
     def test_inject_system_args( self ):
         o = _mk_expeditor()
-        entry = { "system_provided": [ "user_email", "session_id", "user_id", "no_confirm" ] }
-        out = o._inject_system_args( { "query": "x", "user_email": "keep@me" }, entry, "u@x", "s1", "uid1" )
+        spec = _spec( system_provided=[ "user_email", "session_id", "user_id", "no_confirm" ] )
+        out = o._inject_system_args( { "query": "x", "user_email": "keep@me" }, spec, "u@x", "s1", "uid1" )
         self.assertEqual( out[ "user_email" ], "keep@me" )   # not overwritten
         self.assertEqual( out[ "session_id" ], "s1" )
         self.assertEqual( out[ "user_id" ], "uid1" )
@@ -133,9 +190,9 @@ class TestBuildRequestContext( unittest.TestCase ):
 
     def test_with_present_and_missing( self ):
         o = _mk_expeditor()
-        entry = { "display_name": "Deep Research", "system_provided": [ "user_id" ] }
+        spec = _spec( display_name="Deep Research", system_provided=[ "user_id" ] )
         with patch.object( ex_mod, "get_user_visible_args", return_value=[ "query", "budget" ] ):
-            out = o._build_request_context( entry, "research AI", { "query": "AI", "user_id": "x" }, [ "budget" ] )
+            out = o._build_request_context( spec, "cmd", "research AI", { "query": "AI", "user_id": "x" }, [ "budget" ] )
         self.assertIn( "research AI", out )
         self.assertIn( "Already extracted", out )
         self.assertIn( "query: AI", out )
@@ -144,11 +201,23 @@ class TestBuildRequestContext( unittest.TestCase ):
 
     def test_empty_present_and_missing( self ):
         o = _mk_expeditor()
-        entry = { "display_name": "X", "system_provided": [] }
+        spec = _spec( display_name="X", system_provided=[] )
         with patch.object( ex_mod, "get_user_visible_args", return_value=None ):
-            out = o._build_request_context( entry, "q", {}, [] )
+            out = o._build_request_context( spec, "cmd", "q", {}, [] )
         self.assertNotIn( "Already extracted", out )
         self.assertNotIn( "Still needed", out )
+
+    def test_uses_passed_command_not_registry_identity_lookup( self ):
+        # New seam (row 5982e19b): a spec is not identity-matchable against the
+        # registry, so _build_request_context resolves user-visible args via the
+        # command passed in. A hand-built spec (NOT in JOB_ARG_CONTRACTS) must still
+        # forward the real command — the former reverse lookup would pass None.
+        # Proven RED against the reverse-lookup code (receipt in the crew report).
+        o    = _mk_expeditor()
+        spec = _spec( display_name="X", system_provided=[] )
+        with patch.object( ex_mod, "get_user_visible_args", return_value=[ "query" ] ) as guv:
+            o._build_request_context( spec, "agent router go to deep research", "q", { "query": "AI" }, [] )
+        guv.assert_called_once_with( "agent router go to deep research" )
 
 
 # ============================================================================
@@ -192,14 +261,14 @@ class TestParseModification( unittest.TestCase ):
 
     def test_success( self ):
         o = _mk_expeditor( debug=True )
-        entry = { "system_provided": [ "user_id" ], "fallback_questions": { "budget": "?" } }
+        spec = _spec( system_provided=[ "user_id" ], fallback_questions={ "budget": "?" } )
         llm = MagicMock(); llm.run.return_value = "<response><action>modify</action><arg_name>budget</arg_name><new_value>50</new_value></response>"
         o.llm_factory.get_client = MagicMock( return_value=llm )
         with patch.object( ex_mod.cu, "get_file_as_string", return_value="tmpl {user_response} {current_args} {arg_names}" ), \
              patch.object( ex_mod.cu, "get_project_root", return_value="/p" ), \
              patch.object( ex_mod, "PromptTemplateProcessor" ) as PTP:
             PTP.return_value.process_template.side_effect = lambda t, n: t
-            out = o._parse_modification( "change budget to 50", { "budget": "10", "user_id": "x" }, entry )
+            out = o._parse_modification( "change budget to 50", { "budget": "10", "user_id": "x" }, spec )
         self.assertIsInstance( out, ArgConfirmationResponse )
         self.assertTrue( out.is_modify() )
 
@@ -207,20 +276,20 @@ class TestParseModification( unittest.TestCase ):
         # 463->467 (no fallback_questions → empty fallback_keys) + 477 (debug AND verbose print).
         o = _mk_expeditor( debug=True )
         o.verbose = True
-        entry = { "system_provided": [] }   # no fallback_questions key
+        spec = _spec( system_provided=[] )   # fallback_questions defaults to {} → empty fallback_keys
         llm = MagicMock(); llm.run.return_value = "<response><action>approve</action><arg_name></arg_name><new_value></new_value></response>"
         o.llm_factory.get_client = MagicMock( return_value=llm )
         with patch.object( ex_mod.cu, "get_file_as_string", return_value="t {user_response} {current_args} {arg_names}" ), \
              patch.object( ex_mod.cu, "get_project_root", return_value="/p" ), \
              patch.object( ex_mod, "PromptTemplateProcessor" ) as PTP:
             PTP.return_value.process_template.side_effect = lambda t, n: t
-            out = o._parse_modification( "looks good", { "query": "AI" }, entry )
+            out = o._parse_modification( "looks good", { "query": "AI" }, spec )
         self.assertTrue( out.is_approval() )
 
     def test_exception_returns_none( self ):
         o = _mk_expeditor()
         with patch.object( ex_mod.cu, "get_file_as_string", side_effect=RuntimeError( "no file" ) ):
-            self.assertIsNone( o._parse_modification( "x", {}, { "system_provided": [] } ) )
+            self.assertIsNone( o._parse_modification( "x", {}, _spec( system_provided=[] ) ) )
 
 
 # ============================================================================
@@ -322,7 +391,7 @@ class TestBatchCollectArgs( unittest.TestCase ):
 class TestConfirmAndIterate( unittest.TestCase ):
 
     def _entry( self ):
-        return { "display_name": "Deep Research", "fallback_questions": { "query": "?", "budget": "?" } }
+        return _spec( display_name="Deep Research", fallback_questions={ "query": "?", "budget": "?" } )
 
     def test_plain_yes_approves( self ):
         o = _mk_expeditor()

@@ -119,7 +119,7 @@ test("mount: routes to #action-required-section + #sender-cards-container per D-
   renderer.mount(root);
   // Sender card lives in #sender-cards-container, NOT in #action-required-section.
   assert.equal(root.querySelector("#sender-cards-container .sender-card") !== null, true);
-  assert.equal(root.querySelector("#action-required-section .sender-card"), null);
+  assert.ok( root.querySelector("#action-required-section .sender-card") === null );
   renderer.unmount();
 });
 
@@ -138,7 +138,7 @@ test("unmount: removes all event subscriptions (no leaked listeners)", () => {
     ts      : 0,
   });
   // No sender card should appear (renderer was unmounted before the event).
-  assert.equal(root.querySelector(".sender-card"), null);
+  assert.ok( root.querySelector(".sender-card") === null );
 });
 
 // ===========================================================================
@@ -159,8 +159,8 @@ test("empty-state (b): hydrate-with-N → no empty-state element + sender card p
   notifList.push(makeNotification());
   senderList.push(makeSender());
   renderer.mount(root);
-  assert.equal(root.querySelector('[data-testid="multiplexer-empty-state"]'), null);
-  assert.notEqual(root.querySelector(".sender-card"), null);
+  assert.ok( root.querySelector('[data-testid="multiplexer-empty-state"]') === null );
+  assert.ok( root.querySelector(".sender-card") !== null );
   renderer.unmount();
 });
 
@@ -168,7 +168,7 @@ test("empty-state (d): post-added-from-zero → empty-state removed; sender card
   const { renderer, root, bus, notifList, senderList } = setupRenderer();
   renderer.mount(root);
   // Initially empty.
-  assert.notEqual(root.querySelector('[data-testid="multiplexer-empty-state"]'), null);
+  assert.ok( root.querySelector('[data-testid="multiplexer-empty-state"]') !== null );
   notifList.push(makeNotification());
   senderList.push(makeSender());
   bus.emit({
@@ -177,8 +177,8 @@ test("empty-state (d): post-added-from-zero → empty-state removed; sender card
     source  : "test",
     ts      : 0,
   });
-  assert.equal(root.querySelector('[data-testid="multiplexer-empty-state"]'), null);
-  assert.notEqual(root.querySelector(".sender-card"), null);
+  assert.ok( root.querySelector('[data-testid="multiplexer-empty-state"]') === null );
+  assert.ok( root.querySelector(".sender-card") !== null );
   renderer.unmount();
 });
 
@@ -195,8 +195,8 @@ test("empty-state (c): post-expired-to-zero → empty-state re-appears", () => {
     source  : "test",
     ts      : 0,
   });
-  assert.notEqual(root.querySelector('[data-testid="multiplexer-empty-state"]'), null);
-  assert.equal(root.querySelector(".sender-card"), null);
+  assert.ok( root.querySelector('[data-testid="multiplexer-empty-state"]') !== null );
+  assert.ok( root.querySelector(".sender-card") === null );
   renderer.unmount();
 });
 
@@ -389,7 +389,7 @@ test("F13: initial mount paints from notificationStore.list() (no events fired y
   senderList.push(makeSender());
   // No events emitted; mount should still pick up the notification.
   renderer.mount(root);
-  assert.notEqual(root.querySelector(".sender-card"), null);
+  assert.ok( root.querySelector(".sender-card") !== null );
   renderer.unmount();
 });
 
@@ -440,10 +440,10 @@ test("mount 0c-shape: AR section absent from pane → no throw, no wipe; AR stor
 
   // THE regression assertion: the container survives mount + the sender card
   // renders into it (mount never resolves or touches the AR section).
-  assert.notEqual(root.querySelector("#sender-cards-container"), null,
-    "#sender-cards-container must survive mount");
-  assert.notEqual(root.querySelector("#sender-cards-container .sender-card"), null,
-    "sender card renders into the surviving container");
+  assert.ok( root.querySelector("#sender-cards-container") !== null,
+    "#sender-cards-container must survive mount" );
+  assert.ok( root.querySelector("#sender-cards-container .sender-card") !== null,
+    "sender card renders into the surviving container" );
 
   // An AR store event is IGNORED post-rip (no subscription) — no throw, no AR
   // widget painted, container still intact.
@@ -451,10 +451,10 @@ test("mount 0c-shape: AR section absent from pane → no throw, no wipe; AR stor
     type    : "store_action_required_changed",
     payload : { changeKind: "added", id_hash: "ar-x" },
   } as unknown as Parameters<typeof bus.emit>[0]);
-  assert.equal(root.querySelector(".action-required-widget"), null,
-    "no AR widget is painted — the renderer ignores action-required entirely");
-  assert.notEqual(root.querySelector("#sender-cards-container"), null,
-    "#sender-cards-container still intact after an ignored AR event");
+  assert.ok( root.querySelector(".action-required-widget") === null,
+    "no AR widget is painted — the renderer ignores action-required entirely" );
+  assert.ok( root.querySelector("#sender-cards-container") !== null,
+    "#sender-cards-container still intact after an ignored AR event" );
   renderer.unmount();
 });
 
@@ -796,7 +796,7 @@ test("F8: store wired → prediction notification mounts interactive vote contro
   senderList.push(makeSender());
   renderer.mount(root);
 
-  assert.notEqual(root.querySelector(".prediction-hint-vote"), null, "controls mount for a prediction notification");
+  assert.ok( root.querySelector(".prediction-hint-vote") !== null, "controls mount for a prediction notification" );
 
   root.querySelector<HTMLButtonElement>(".prediction-vote-up")!.click();
   // setContext stashed the full hint context (question = message, response_type carried).
@@ -915,7 +915,7 @@ test("B3: sender section renders from visibleEntries(), not the raw list()", () 
   // Only the visible notification's sender card is rendered (1 of 2).
   const cards = root.querySelectorAll(".sender-card");
   assert.equal(cards.length, 1);
-  assert.equal(root.querySelector('[data-testid="multiplexer-empty-state"]'), null);
+  assert.ok( root.querySelector('[data-testid="multiplexer-empty-state"]') === null );
   renderer.unmount();
 });
 

@@ -60,10 +60,7 @@
         "auth_success", 
         "sys_time_update",
         "sys_ping",
-        "queue_todo_update",
-        "queue_running_update",
-        "queue_done_update",
-        "queue_dead_update"
+        "job_state_transition"
       ],
       "audio_websocket_events": [
         "audio_streaming_status",

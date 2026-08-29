@@ -451,16 +451,30 @@ class ApproachDUserMessageSmokeTest( LivePipelineTestBase ):
         # -----------------------------------------------------------------
         print( "\n  Submitting SWE dry-run job..." )
 
-        submit_payload = {
-            "task"         : "Smoke test: Approach D user message injection",
-            "dry_run"      : True,
+        # ONE DOOR NOW. The dedicated endpoint this used to post to is retired and answers
+        # 410 naming /api/v2/submit, which takes the routing command as a string and the
+        # agent's own arguments in `args`. `websocket_id` and `parent_id_hash` stay
+        # TOP-LEVEL: they are instructions about the request and the queue, not arguments
+        # to the agent, and `args` is checked against the command's own argument contract.
+        task = "Smoke test: Approach D user message injection"
+        payload = {
+            "command"      : "agent router go to swe team",
+            "args"         : { "task": task, "dry_run": True },
+            "question"     : task,
             "websocket_id" : ws_id,
         }
-        req_headers = { **headers, "X-Session-ID": ws_id }
+        # Lineage tag (row 7451bebe / bug 5ed4f187): a child pytest inside a monopolizing
+        # test-suite job must thread LUPIN_TEST_MONOPOLIZE_PARENT_ID or the consumer's Gate B
+        # defers it as a foreign writer and it starves 900s.
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+        if parent_id:
+            payload[ "parent_id_hash" ] = parent_id
+        submit_payload = payload
+        req_headers    = { **headers, "X-Session-ID": ws_id }
 
         try:
             resp = requests.post(
-                f"{self.BASE_URL}/api/swe-team/submit",
+                f"{self.BASE_URL}/api/v2/submit",
                 json=submit_payload,
                 headers=req_headers,
                 timeout=self.REQUEST_TIMEOUT

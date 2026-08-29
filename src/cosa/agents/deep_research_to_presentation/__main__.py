@@ -48,7 +48,7 @@ import cosa.utils.util as cu
 
 # User-visible args: the canonical list of args that end users should see
 # and interact with. Engineering params (models, debug, etc.) are excluded.
-USER_VISIBLE_ARGS = [ "query", "budget", "target_duration_minutes", "theme", "audience", "audience_context" ]
+USER_VISIBLE_ARGS = [ "query", "budget", "target_duration_minutes", "target_slide_count", "theme", "audience", "audience_context" ]
 
 
 def parse_args() -> argparse.Namespace:
@@ -157,6 +157,14 @@ Mode Options:
     )
 
     parser.add_argument(
+        "--slide-count",
+        type    = int,
+        default = None,
+        dest    = "target_slide_count",
+        help    = "Explicit slide count overriding the duration formula (default: derive from duration)"
+    )
+
+    parser.add_argument(
         "--theme",
         type    = str,
         default = None,
@@ -212,6 +220,8 @@ def show_dry_run( args: argparse.Namespace ) -> None:
         print( f"  Lead Model: {args.lead_model}" )
     if args.target_duration_minutes:
         print( f"  Duration: {args.target_duration_minutes} minutes" )
+    if args.target_slide_count:
+        print( f"  Slide count: {args.target_slide_count} slides" )
     if args.theme:
         print( f"  Theme: {args.theme}" )
     if args.audience:
@@ -266,6 +276,8 @@ async def run_pipeline( args: argparse.Namespace ) -> int:
         print( f"Budget: ${args.budget:.2f}" )
     if args.target_duration_minutes:
         print( f"Duration: {args.target_duration_minutes} minutes" )
+    if args.target_slide_count:
+        print( f"Slide count: {args.target_slide_count} slides" )
     if args.theme:
         print( f"Theme: {args.theme}" )
     print( "" )
@@ -280,6 +292,7 @@ async def run_pipeline( args: argparse.Namespace ) -> int:
         audience                = args.audience,
         audience_context        = args.audience_context,
         target_duration_minutes = args.target_duration_minutes,
+        target_slide_count      = args.target_slide_count,
         theme                   = args.theme,
         cli_mode                = args.cli_mode,
         debug                   = args.debug,

@@ -57,6 +57,29 @@ def _clean_env( home ):
     return { "PATH": os.environ[ "PATH" ], "LUPIN_ROOT": LUPIN_ROOT, "HOME": str( home ) }
 
 
+def _template_roster_value( project ):
+    """
+    The template's declared roster string for a project, read from the FILE.
+
+    Tests used to pin the VALUE ("Mr. Radio, Tiberius"). When the roster changed
+    hands three of them went red for naming the wrong manager — a test asserting
+    a personnel decision, not a contract. What the transport contract actually
+    owes is that whatever the file says arrives intact, so read it from the file.
+    The one value assertion worth keeping is the HEAD-is-Mr.-Radio test below,
+    which encodes a real rule (roster head = declared fallback manager).
+
+    Requires:
+        - project is a roster key suffix, e.g. "LUPIN"
+
+    Ensures:
+        - returns the verbatim quoted value; raises AssertionError if absent
+    """
+    with open( TEMPLATE_PATH ) as f:
+        match = re.search( rf'^COSA_VOICE_MANAGERS__{project}="([^"]*)"', f.read(), re.MULTILINE )
+    assert match is not None, f"template missing COSA_VOICE_MANAGERS__{project}"
+    return match.group( 1 )
+
+
 def _run_bash( command, env ):
     """
     Run a bash -c command with a controlled environment.
@@ -131,7 +154,7 @@ class TestFleetRosterBashSourceRoundTrip:
             env=_clean_env( "/tmp" )
         )
         assert result.returncode == 0, result.stderr
-        assert result.stdout == "Mr. Radio, Tiberius"
+        assert result.stdout == _template_roster_value( "LUPIN" )
 
     def test_sourced_var_is_exported_to_children( self ):
         # set -a must make the var visible to CHILD processes too (the
@@ -143,7 +166,7 @@ class TestFleetRosterBashSourceRoundTrip:
             env=_clean_env( "/tmp" )
         )
         assert result.returncode == 0, result.stderr
-        assert result.stdout == "Mr. Radio, Tiberius"
+        assert result.stdout == _template_roster_value( "LUPIN" )
 
 
 class TestStartCcWithTmuxForwarding:
@@ -182,13 +205,21 @@ class TestStartCcWithTmuxForwarding:
         # exact value (locale-independent); PLAN ("María") is asserted by key
         # presence only — %q byte-escapes the UTF-8 under the test's C locale
         # ($'…Mar\303\255a'), so pinning the exact value would be locale-fragile.
-        assert "COSA_VOICE_MANAGERS__LUPIN=Mr.\\ Radio\\,\\ Tiberius" in line, line
+        lupin_quoted = _template_roster_value( "LUPIN" ).replace( " ", "\\ " ).replace( ",", "\\," )
+        assert f"COSA_VOICE_MANAGERS__LUPIN={lupin_quoted}" in line, line
         assert "COSA_VOICE_MANAGERS__LOOKML=Sam"           in line, line
         assert "COSA_VOICE_MANAGERS__LUPIN_MOBILE=Tiffany" in line, line
         assert "COSA_VOICE_MANAGERS__PLAN="                in line, line  # accented value byte-escaped under C locale
 
     def test_dry_run_exits_before_tmux( self, tmp_path ):
         # --dry-run must remain side-effect-free: no tmux session appears.
+        # Precondition: the tmux binary must be on PATH for the leaked-session probe
+        # below. It is absent in the file-bind test container; this check runs on any
+        # host/CI venue where tmux is installed. The dry-run-exits-0 coverage is not
+        # lost when skipped here — the sibling test_dry_run_forwards_sourced_roster
+        # asserts it without needing tmux.
+        if shutil.which( "tmux" ) is None:
+            pytest.skip( "requires the tmux binary on PATH to probe for a leaked session — not installed in the file-bind test container" )
         self._seed_home_roster( tmp_path )
         result = self._dry_run( _clean_env( tmp_path ) )
         assert result.returncode == 0, result.stderr
@@ -198,6 +229,45 @@ class TestStartCcWithTmuxForwarding:
             capture_output=True, text=True, timeout=30
         )
         assert probe.returncode != 0, "dry-run leaked a real tmux session"
+
+    def test_persona_chains_are_derived_from_the_roster( self, tmp_path ):
+        """
+        The chain for every roster project is `<roster>,*` — one source, no copy.
+
+        This is the primary fix for row a1a84682. Before it, the four
+        COSA_VOICE_PREFERRED_PERSONA__* lines were hardcoded literals in this
+        script while the roster they mirrored lived in fleet-roster.env; the two
+        drifted and nothing compared them. Now the roster is the only place a
+        manager is named.
+        """
+        self._seed_home_roster( tmp_path )
+        result = self._dry_run( _clean_env( tmp_path ) )
+        assert result.returncode == 0, result.stderr
+        line = [ l for l in result.stdout.splitlines() if l.startswith( "PERSONA-ENV:" ) ][ 0 ]
+        for project in ( "LUPIN", "LOOKML", "LUPIN_MOBILE", "SKILLS_DISTILLATION" ):
+            expected = f"{_template_roster_value( project )},*"
+            quoted   = expected.replace( "\\", "\\\\" ).replace( " ", "\\ " ).replace( ",", "\\," ).replace( "*", "\\*" )
+            assert f"COSA_VOICE_PREFERRED_PERSONA__{project}={quoted}" in line, ( project, line )
+
+    def test_no_hardcoded_persona_chain_literal_remains( self ):
+        """
+        A second source can only come back as a literal — so forbid the literal.
+
+        Asserting the derived OUTPUT is not enough: someone re-adding a
+        hardcoded `-e "COSA_VOICE_PREFERRED_PERSONA__X=…"` alongside the loop
+        would still satisfy the output test for every project the loop covers.
+        """
+        with open( SCRIPT_PATH ) as f:
+            body = f.read()
+        literals = re.findall( r'-e\s+"COSA_VOICE_PREFERRED_PERSONA__[A-Z_]+=', body )
+        assert literals == [ ], f"hardcoded persona-chain literal(s) reintroduced: {literals}"
+
+    def test_project_absent_from_roster_gets_no_chain( self, tmp_path ):
+        """A repo with no roster line gets no chain — random allocation, as before."""
+        self._seed_home_roster( tmp_path )
+        result = self._dry_run( _clean_env( tmp_path ) )
+        line   = [ l for l in result.stdout.splitlines() if l.startswith( "PERSONA-ENV:" ) ][ 0 ]
+        assert "COSA_VOICE_PREFERRED_PERSONA__PAR_PACIFIC" not in line, line
 
     def test_missing_roster_file_degrades_to_no_managers_flag( self, tmp_path ):
         # Tolerate-missing contract: HOME=tmp_path WITHOUT .claude/fleet-roster.env
@@ -209,4 +279,8 @@ class TestStartCcWithTmuxForwarding:
         )
         assert result.returncode == 0, result.stderr
         assert "COSA_VOICE_MANAGERS__" not in result.stdout
+        # Derivation consequence (row a1a84682): no roster → no chain either.
+        # The chains used to be hardcoded, so they survived a missing roster file
+        # and a session got a manager name from a file that was not there.
+        assert "COSA_VOICE_PREFERRED_PERSONA__" not in result.stdout
         assert "DRY-RUN headless=1" in result.stdout

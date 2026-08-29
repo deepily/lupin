@@ -449,6 +449,181 @@ def test_execute_failures_write_snapshot_and_crash_branches( monkeypatch, tmp_pa
     assert "log file not available" in pathlib.Path( job.report_path ).read_text()
 
 
+# =========================================================================== #
+# Filtered runs (row f3beb6d5 — a -k/-m slice must not read as a full pass)
+# =========================================================================== #
+def _filtered_passing_result( deselected, log_path=None, passed=5 ):
+    """A green run that was scoped by -k/-m: `deselected` tests never selected."""
+    return {
+        "passed": passed, "failed": 0, "skipped": 0, "errors": 0,
+        "deselected": deselected,
+        "exit_code": 0, "log_path": log_path, "duration": 1.2,
+    }
+
+
+def test_execute_filtered_run_flags_scope_but_stays_green( monkeypatch, tmp_path, patched_voice ):
+    """A filtered green slice: all_passed stays True (what ran passed), but
+    cost_summary carries `filtered`/`total_deselected` and the report header
+    names the scope so a slice can't masquerade as a full-suite gate."""
+    job = _make_job( test_types=[ "unit" ] )
+    monkeypatch.setattr( job_mod.cu, "get_project_root", lambda: str( tmp_path ) )
+    monkeypatch.setattr( job, "_run_suite", lambda st, pr: _filtered_passing_result( 687 ) )
+
+    summary = asyncio.run( job._execute() )
+
+    # What ran, passed — all_passed keeps its meaning
+    assert job.cost_summary[ "all_passed" ] is True
+    # New cost_summary keys the dashboard + watchdog read
+    assert job.cost_summary[ "filtered" ] is True
+    assert job.cost_summary[ "total_deselected" ] == 687
+
+    # Report header names the scope: 5 selected of 5+687 collected
+    import pathlib
+    report = pathlib.Path( job.report_path ).read_text()
+    assert "FILTERED — 5 of 692 selected" in report
+    assert "| Deselected | 687 |" in report
+    # Abstract + summary surface the deselect count too
+    assert "FILTERED" in job.artifacts[ "abstract" ]
+    assert "687 deselected" in job.artifacts[ "abstract" ]
+
+
+def test_execute_unfiltered_run_is_not_flagged( monkeypatch, tmp_path, patched_voice ):
+    """An unfiltered green run: filtered=False, no deselect count, and the
+    header carries NO FILTERED marker (the False branch of every scope ternary)."""
+    job = _make_job( test_types=[ "unit" ] )
+    monkeypatch.setattr( job_mod.cu, "get_project_root", lambda: str( tmp_path ) )
+    monkeypatch.setattr( job, "_run_suite", lambda st, pr: _filtered_passing_result( 0 ) )
+
+    asyncio.run( job._execute() )
+
+    assert job.cost_summary[ "filtered" ] is False
+    assert job.cost_summary[ "total_deselected" ] == 0
+    import pathlib
+    report = pathlib.Path( job.report_path ).read_text()
+    assert "FILTERED" not in report
+    assert "| Deselected | 0 |" in report                      # row always present
+    assert "FILTERED" not in job.artifacts[ "abstract" ]
+
+
+def test_execute_filtered_run_with_failure_still_reds( monkeypatch, tmp_path, patched_voice ):
+    """A genuine failure inside a filtered run: FAILED dominates (all_passed False),
+    AND the run is still flagged filtered — deselection never masks a real red."""
+    job = _make_job( test_types=[ "unit" ] )
+    monkeypatch.setattr( job_mod.cu, "get_project_root", lambda: str( tmp_path ) )
+    result = {
+        "passed": 3, "failed": 2, "skipped": 0, "errors": 0,
+        "deselected": 100,
+        "exit_code": 1, "log_path": None, "duration": 2.0,
+        "failure_details": [ { "name": "t_x", "type": "FAILED" } ],
+    }
+    monkeypatch.setattr( job, "_run_suite", lambda st, pr: result )
+
+    summary = asyncio.run( job._execute() )
+
+    assert "FAILURES DETECTED" in summary
+    assert job.cost_summary[ "all_passed" ] is False
+    assert job.cost_summary[ "filtered" ] is True
+    assert job.cost_summary[ "total_deselected" ] == 100
+    # Header: 5 selected (3 passed + 2 failed) of 105 collected
+    import pathlib
+    assert "FILTERED — 5 of 105 selected" in pathlib.Path( job.report_path ).read_text()
+
+
+# =========================================================================== #
+# _classify_outcome  (bug 89bfcc8f — non-execution is NOT a failure)
+# =========================================================================== #
+@pytest.mark.parametrize( "counts, expected", [
+    ( ( 0, 0, 0, 0 ), "NOT EXECUTED" ),                       # nothing collected → non-execution
+    ( ( 0, 0, 0, 3 ), "PASSED" ),                             # all skipped, but tests were collected
+    ( ( 5, 0, 0, 1 ), "PASSED" ),                             # ran clean
+    ( ( 4, 1, 0, 0 ), "FAILED" ),                             # a real failure
+    ( ( 0, 0, 1, 0 ), "FAILED" ),                             # a real error (e.g. subprocess crash)
+    # not_executed (5th arg) — a tier that never ran (bug 89bfcc8f):
+    ( ( 0, 0, 0, 0, 0 ), "NOT EXECUTED" ),                    # explicit 5-arg all-zero
+    ( ( 3, 0, 0, 0, 0 ), "PASSED" ),                          # every tier ran, clean
+    ( ( 0, 0, 0, 0, 2 ), "NOT EXECUTED" ),                    # only not-executed tiers
+    ( ( 2, 0, 0, 0, 1 ), "NOT EXECUTED" ),                    # some passed but a tier didn't run → not green
+    ( ( 2, 1, 0, 0, 1 ), "FAILED" ),                          # a genuine failure dominates a not-run tier
+    ( ( 0, 0, 1, 0, 1 ), "FAILED" ),                          # a genuine error dominates a not-run tier
+] )
+def test_classify_outcome( counts, expected ):
+    """Zero-count is NOT EXECUTED; skipped-only counts as collected; failed/errors →
+    FAILED; a not-executed tier blocks a clean pass without inflating failures."""
+    assert TSJob._classify_outcome( *counts ) == expected
+
+
+def _zero_result( log_path=None ):
+    """A suite that collected nothing (no JUnit XML produced) — the false-red case."""
+    return {
+        "passed": 0, "failed": 0, "skipped": 0, "errors": 0,
+        "exit_code": 1, "log_path": log_path, "duration": 0.3,
+    }
+
+
+def test_execute_non_execution_reports_not_run_not_failed( monkeypatch, tmp_path, patched_voice ):
+    """A 0/0/0/0 suite is announced + summarized as NOT EXECUTED, never FAILED, and writes no snapshot."""
+    job = _make_job( test_types=[ "presentation" ] )
+    monkeypatch.setattr( job_mod.cu, "get_project_root", lambda: str( tmp_path ) )
+    monkeypatch.setattr( job, "_run_suite", lambda st, pr: _zero_result() )
+
+    summary = asyncio.run( job._execute() )
+
+    # Overall banner: NOT EXECUTED, not the false-red FAILURES DETECTED
+    assert "NOT EXECUTED" in summary
+    assert "FAILURES DETECTED" not in summary
+
+    # Per-suite spoken line says NOT EXECUTED, never FAILED
+    spoken = [ c.args[ 0 ] for c in patched_voice.call_args_list if c.args ]
+    per_suite = [ m for m in spoken if m.startswith( "presentation:" ) ]
+    assert per_suite and "NOT EXECUTED" in per_suite[ 0 ]
+    assert "FAILED" not in per_suite[ 0 ]
+
+    # Report table + abstract render "NOT RUN", not "FAIL"; no remediation snapshot
+    import pathlib
+    assert "presentation — NOT RUN" in pathlib.Path( job.report_path ).read_text()
+    assert "NOT RUN" in job.artifacts[ "abstract" ]
+    assert "remediation_snapshot_path" not in job.artifacts
+    assert job.cost_summary[ "all_passed" ] is False
+
+
+def _not_executed_tier_result( log_path=None ):
+    """A multi-tier run where a tier PASSED but another NEVER RAN (bug 89bfcc8f):
+    one passed, zero failed/errored, one not-executed. Not green, not a failure."""
+    return {
+        "passed": 1, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 1,
+        "exit_code": 1, "log_path": log_path, "duration": 0.5,
+    }
+
+
+def test_execute_not_executed_tier_reports_not_run_not_failed( monkeypatch, tmp_path, patched_voice ):
+    """A tier that never ran (with another that passed) reports NOT EXECUTED overall
+    — never the false-red FAILURES DETECTED, and never a clean pass (bug 89bfcc8f)."""
+    job = _make_job( test_types=[ "presentation" ] )
+    monkeypatch.setattr( job_mod.cu, "get_project_root", lambda: str( tmp_path ) )
+    monkeypatch.setattr( job, "_run_suite", lambda st, pr: _not_executed_tier_result() )
+
+    summary = asyncio.run( job._execute() )
+
+    # Overall: NOT EXECUTED — not FAILURES DETECTED, not ALL PASSED
+    assert "NOT EXECUTED" in summary
+    assert "FAILURES DETECTED" not in summary
+    assert "ALL PASSED" not in summary
+
+    # Per-suite spoken line names the not-executed count and reads NOT EXECUTED
+    spoken = [ c.args[ 0 ] for c in patched_voice.call_args_list if c.args ]
+    per_suite = [ m for m in spoken if m.startswith( "presentation:" ) ]
+    assert per_suite and "NOT EXECUTED" in per_suite[ 0 ]
+    assert "1 not executed" in per_suite[ 0 ]
+
+    # Report table carries the Not-executed row + NOT RUN icon; not green
+    import pathlib
+    report = pathlib.Path( job.report_path ).read_text()
+    assert "presentation — NOT RUN" in report
+    assert "| Not executed | 1 |" in report
+    assert job.cost_summary[ "all_passed" ] is False
+    assert job.cost_summary[ "total_not_executed" ] == 1
+
+
 def test_execute_expands_all_with_debug( monkeypatch, tmp_path, patched_voice, capsys ):
     """test_types=['all'] + debug logs the expansion and runs each component."""
     job = _make_job( test_types=[ "all" ], debug=True )
@@ -549,7 +724,27 @@ def test_run_suite_normal_completion( monkeypatch, no_real_log ):
     res = job._run_suite( "unit", "/proj" )
     assert res[ "exit_code" ] == 0
     assert res[ "errors" ] == 0
+    assert res[ "deselected" ] == 0                          # unfiltered stdout → 0
     assert "startup_crash_output" not in res                 # exit 0 → no crash tail
+
+
+def test_run_suite_parses_deselected_from_stdout( monkeypatch, no_real_log ):
+    """A -k slice: _run_suite recovers the deselect count from stdout (row f3beb6d5),
+    which the junit-xml cannot carry."""
+    _patch_config_mgr( monkeypatch, extra="" )
+    monkeypatch.setattr( job_mod.os.path, "exists", lambda p: True )
+    fake = _FakeProcess(
+        lines=[
+            "collected 692 items / 687 deselected / 5 selected\n",
+            "===== 5 passed, 687 deselected in 23.08s =====\n",
+        ],
+        returncode=0,
+    )
+    monkeypatch.setattr( job_mod.subprocess, "Popen", lambda *a, **k: fake )
+
+    job = _make_job()
+    res = job._run_suite( "unit", "/proj" )
+    assert res[ "deselected" ] == 687
 
 
 def test_run_suite_appends_ini_extra_args( monkeypatch, no_real_log ):
@@ -842,7 +1037,7 @@ def test_synth_failure_detail_empty_traceback_defaults():
 def test_parse_junit_xml_none_path_returns_zeros():
     """A None/empty path (non-pytest suite) returns zero counts."""
     assert TSJob._parse_junit_xml( None ) == {
-        "passed": 0, "failed": 0, "skipped": 0, "errors": 0 }
+        "passed": 0, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 0, "deselected": 0 }
 
 
 def test_parse_junit_xml_missing_file_returns_zeros():
@@ -860,7 +1055,7 @@ def test_parse_junit_xml_root_is_testsuite( tmp_path ):
     )
     parsed = TSJob._parse_junit_xml( str( p ) )
     assert parsed == { "passed": 195, "failed": 3, "skipped": 32, "errors": 1,
-                       "failure_details": [] }
+                       "not_executed": 0, "deselected": 0, "failure_details": [] }
 
 
 def test_parse_junit_xml_nested_with_failure_details( tmp_path ):
@@ -888,7 +1083,7 @@ def test_parse_junit_xml_no_testsuite_element( tmp_path ):
     p = tmp_path / "j.xml"
     p.write_text( "<other></other>" )
     parsed = TSJob._parse_junit_xml( str( p ) )
-    assert parsed == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0 }
+    assert parsed == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 0, "deselected": 0 }
 
 
 def test_parse_junit_xml_parse_error( tmp_path ):
@@ -900,10 +1095,50 @@ def test_parse_junit_xml_parse_error( tmp_path ):
 
 
 # =========================================================================== #
+# _parse_deselected  (row f3beb6d5 — deselect count is stdout-only)
+# =========================================================================== #
+def test_parse_deselected_collection_form():
+    """The `collected N items / M deselected / K selected` line yields M."""
+    stdout = "collected 692 items / 687 deselected / 5 selected\n...\n"
+    assert TSJob._parse_deselected( stdout ) == 687
+
+
+def test_parse_deselected_singular_item_form():
+    """The singular `1 item` collection line is matched too (item vs items)."""
+    stdout = "collected 1 item / 0 deselected / 1 selected\n"
+    assert TSJob._parse_deselected( stdout ) == 0
+
+
+def test_parse_deselected_trailer_form_only():
+    """When only the summary trailer carries the count, it is recovered."""
+    stdout = "===== 5 passed, 687 deselected in 23.08s =====\n"
+    assert TSJob._parse_deselected( stdout ) == 687
+
+
+def test_parse_deselected_collection_form_wins_when_both_present():
+    """Both forms present and agreeing → the collection form is returned."""
+    stdout = ( "collected 692 items / 687 deselected / 5 selected\n"
+               "===== 5 passed, 687 deselected in 23.08s =====\n" )
+    assert TSJob._parse_deselected( stdout ) == 687
+
+
+def test_parse_deselected_unfiltered_returns_zero():
+    """A full, unfiltered run mentions no deselect → 0."""
+    stdout = "collected 692 items\n===== 692 passed in 40.0s =====\n"
+    assert TSJob._parse_deselected( stdout ) == 0
+
+
+def test_parse_deselected_empty_stdout_returns_zero():
+    """Empty stdout → 0 (neither regex matches)."""
+    assert TSJob._parse_deselected( "" ) == 0
+
+
+# =========================================================================== #
 # _parse_non_pytest_stdout
 # =========================================================================== #
 def test_parse_non_pytest_stdout_non_websocket_is_none():
-    """Only the websocket suite is recognized; others return None."""
+    """Only non-pytest runners (websocket/typescript/presentation) are recognized;
+    a pytest suite like 'unit' returns None (it uses the junit path, not stdout)."""
     assert TSJob._parse_non_pytest_stdout( "unit", "Total Tests: 5" ) is None
 
 
@@ -921,21 +1156,21 @@ def test_parse_non_pytest_stdout_full_counts():
     """Total/Passed/Failed all present → parsed directly."""
     out = TSJob._parse_non_pytest_stdout(
         "websocket", "Total Tests: 50\nPassed: 48\nFailed: 2\n" )
-    assert out == { "passed": 48, "failed": 2, "skipped": 0, "errors": 0 }
+    assert out == { "passed": 48, "failed": 2, "skipped": 0, "errors": 0, "not_executed": 0 }
 
 
 def test_parse_non_pytest_stdout_passed_failed_no_total():
     """Passed+Failed present, no Total → total reconstructed (unused) but counts kept."""
     out = TSJob._parse_non_pytest_stdout(
         "websocket", "Passed: 7\nFailed: 3\n" )
-    assert out == { "passed": 7, "failed": 3, "skipped": 0, "errors": 0 }
+    assert out == { "passed": 7, "failed": 3, "skipped": 0, "errors": 0, "not_executed": 0 }
 
 
 def test_parse_non_pytest_stdout_total_only_all_passed():
     """Only Total + the ALL-PASSED marker → infer all passed."""
     out = TSJob._parse_non_pytest_stdout(
         "websocket", "Total Tests: 12\nALL SMOKE TESTS PASSED\n" )
-    assert out == { "passed": 12, "failed": 0, "skipped": 0, "errors": 0 }
+    assert out == { "passed": 12, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 0 }
 
 
 def test_parse_non_pytest_stdout_total_only_no_marker_is_none():
@@ -943,6 +1178,70 @@ def test_parse_non_pytest_stdout_total_only_no_marker_is_none():
     out = TSJob._parse_non_pytest_stdout(
         "websocket", "Total Tests: 12\n" )
     assert out is None
+
+
+# --- presentation: multi-tier orchestrator parsed from its stdout summary (bug 89bfcc8f) ---
+def test_presentation_not_in_junit_supporting_suites():
+    """presentation must NOT claim junit support — its runner ignores --junit-xml,
+    so the file is never produced and _parse_junit_xml would raise FileNotFoundError
+    (mis-reported as a 0/0/0/0 run). It is parsed from stdout instead."""
+    from cosa.agents.test_suite.job import SUITES_SUPPORTING_JUNIT_XML
+    assert "presentation" not in SUITES_SUPPORTING_JUNIT_XML
+
+
+def test_parse_non_pytest_stdout_presentation_tier_summary():
+    """The presentation tier summary (Total: N tiers / Passed: N / Failed: N) parses to tier counts."""
+    stdout = (
+        "  PRESENTATION REGRESSION RESULTS\n"
+        "  Total:  3 tiers\n"
+        "  Passed: 2\n"
+        "  Failed: 1\n"
+        "  Failed tiers: opus-full\n"
+    )
+    out = TSJob._parse_non_pytest_stdout( "presentation", stdout )
+    assert out == { "passed": 2, "failed": 1, "skipped": 0, "errors": 0, "not_executed": 0 }
+
+
+def test_parse_non_pytest_stdout_presentation_all_tiers_pass():
+    """A clean presentation run (Failed: 0) parses to passed-only."""
+    out = TSJob._parse_non_pytest_stdout(
+        "presentation", "  Total:  2 tiers\n  Passed: 2\n  Failed: 0\n" )
+    assert out == { "passed": 2, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 0 }
+
+
+def test_parse_non_pytest_stdout_presentation_empty_is_none():
+    """Empty presentation stdout returns None (preserve zero-counts → NOT EXECUTED)."""
+    assert TSJob._parse_non_pytest_stdout( "presentation", "" ) is None
+
+
+def test_parse_non_pytest_stdout_presentation_not_executed_tier():
+    """A tier that never ran surfaces as not_executed, NOT folded into failed
+    (bug 89bfcc8f — the mixed real-fail + not-run shape from the 2026-08-13 run)."""
+    stdout = (
+        "  PRESENTATION REGRESSION RESULTS\n"
+        "  Total:  2 tiers\n"
+        "  Passed: 0\n"
+        "  Failed: 1\n"
+        "  Not executed: 1\n"
+        "  Failed tiers: render-only\n"
+        "  Not executed tiers: sonnet-full\n"
+    )
+    out = TSJob._parse_non_pytest_stdout( "presentation", stdout )
+    assert out == { "passed": 0, "failed": 1, "skipped": 0, "errors": 0, "not_executed": 1 }
+
+
+def test_parse_non_pytest_stdout_presentation_only_not_executed():
+    """A run where every tier failed to launch (Not executed only) parses with a
+    zero failed count — so _classify_outcome reads NOT EXECUTED, never FAILED."""
+    stdout = "  Total:  2 tiers\n  Passed: 0\n  Failed: 0\n  Not executed: 2\n"
+    out = TSJob._parse_non_pytest_stdout( "presentation", stdout )
+    assert out == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0, "not_executed": 2 }
+    assert TSJob._classify_outcome( **out ) == "NOT EXECUTED"
+
+
+def test_parse_non_pytest_stdout_presentation_no_markers_is_none():
+    """Presentation stdout without the tier summary returns None."""
+    assert TSJob._parse_non_pytest_stdout( "presentation", "nothing useful here" ) is None
 
 
 # ---------------------------------------------------------------------------

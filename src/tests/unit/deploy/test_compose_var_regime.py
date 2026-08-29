@@ -9,7 +9,11 @@ about the same variable:
 
     docker-compose.cloud-gpu.yml    ${LUPIN_MODEL_SERVER_URL:?…}        REQUIRED
     docker-compose.yml              ${LUPIN_MODEL_SERVER_URL:-http://…} DEFAULTED
-    docker-compose.cloud-test.yml   http://lupin-model-server:7998      LITERAL
+
+(A third shipped venue, docker-compose.cloud-test.yml, carried the LITERAL form
+until it was retired on 2026-08-26 — row 0d175dac. Two venues still disagree, so
+the argument for deriving is unchanged, and the parser's LITERAL arm is still
+exercised — synthetically, by test_LITERAL_and_ABSENT_are_kept_apart.)
 
 The obvious fix is a per-venue requirement column. Mr. Radio ruled against it
 (2026-07-27) and the reason is decision `2b20a6d6`: ONE fact — "which store backs
@@ -52,7 +56,6 @@ LIB_PATH     = os.path.join( PROJECT_ROOT, "src/scripts/lib/preflight-vm-lib.sh"
 
 CLOUD_GPU  = os.path.join( PROJECT_ROOT, "docker-compose.cloud-gpu.yml" )
 LOCAL      = os.path.join( PROJECT_ROOT, "docker-compose.yml" )
-CLOUD_TEST = os.path.join( PROJECT_ROOT, "docker-compose.cloud-test.yml" )
 
 
 def _run( snippet ):
@@ -264,21 +267,25 @@ def test_the_comparator_resolves_OPTIONAL_UNLESS_before_comparing():
 # THE REAL FILES — the venue split this whole design exists for
 # ══════════════════════════════════════════════════════════════════════════
 
-def test_the_three_venues_really_do_disagree_about_one_variable():
+def test_the_shipped_venues_really_do_disagree_about_one_variable():
     """
     ⚠️ THE ROW'S STATED PRECONDITION, pinned against the shipped files rather than
     quoted from the row.
 
-    If these three ever collapse to one answer, the argument for deriving evaporates
-    and this test should be the thing that says so — not a reader re-discovering the
+    If these ever collapse to ONE answer, the argument for deriving evaporates and
+    this test should be the thing that says so — not a reader re-discovering the
     split a year from now.
-    """
-    gpu,  _ = _regime( CLOUD_GPU,  "LUPIN_MODEL_SERVER_URL" )
-    loc,  _ = _regime( LOCAL,      "LUPIN_MODEL_SERVER_URL" )
-    test, _ = _regime( CLOUD_TEST, "LUPIN_MODEL_SERVER_URL" )
 
-    assert ( gpu, loc, test ) == ( "REQUIRED", "DEFAULTED", "LITERAL" )
-    assert len( { gpu, loc, test } ) == 3, "the venue split is the premise of this design"
+    Was three venues until 2026-08-26 (row 0d175dac); docker-compose.cloud-test.yml
+    supplied the LITERAL one and was retired. The premise is that they DISAGREE, not
+    that there are three of them, so it survives at two — and the parser's LITERAL
+    arm is still exercised by test_LITERAL_and_ABSENT_are_kept_apart.
+    """
+    gpu, _ = _regime( CLOUD_GPU, "LUPIN_MODEL_SERVER_URL" )
+    loc, _ = _regime( LOCAL,     "LUPIN_MODEL_SERVER_URL" )
+
+    assert ( gpu, loc ) == ( "REQUIRED", "DEFAULTED" )
+    assert len( { gpu, loc } ) == 2, "the venue split is the premise of this design"
 
 
 def test_no_CONTAINER_contract_row_reads_as_UNKNOWN_on_the_target_venue():

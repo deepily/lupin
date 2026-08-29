@@ -163,19 +163,29 @@ class TestPathPrefixRouting:
         assert status == 400, f"expected 400, got {status}"
         assert b"unknown project" in body.lower()
 
-    def test_legacy_scope_query_param_is_ignored( self, access_token ):
+    def test_legacy_scope_query_param_is_rejected_with_400( self, access_token ):
         """
-        Q-R2: the server IGNORES `?scope=` entirely. A request with both
-        `path=lupin/CLAUDE.md` AND `scope=anything` should succeed exactly
-        as if `scope` were absent.
+        The server REJECTS `?scope=` with an educational 400.
+
+        Refreshed 2026-08-26. This asserted the opposite — Q-R2's original
+        silent-ignore rule, under which a request carrying both `path=` and
+        `scope=` returned 200 as if `scope` were absent. The policy was flipped
+        from silent-ignore to aggressive-400 on 2026-05-21 (amendment to AC4b.7
+        of src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md; shipped in
+        53fef419). Both the endpoint's own OpenAPI description
+        (docs_files.py:125) and CLAUDE.md § Doc Viewer Scope document the flip,
+        and the scope-presence check fires BEFORE path validation — so a valid
+        path does not rescue the request. The test was simply left behind.
         """
         status, ct, body = _fetch(
             "/api/docs/file",
             token = access_token,
             query = { "path": "lupin/CLAUDE.md", "scope": "irrelevant-junk" },
         )
-        assert status == 200, f"scope param was not ignored: {status} body={body[:200]!r}"
-        assert ct.startswith( "text/markdown" )
+        assert status == 400, f"expected 400 for a retired scope param, got {status} body={body[:200]!r}"
+        assert b"retired" in body.lower(), f"400 body should name the retirement; got {body[:200]!r}"
+        # The message must point at the canonical form, not just refuse.
+        assert b"path=" in body.lower(), f"400 body should name the canonical form; got {body[:200]!r}"
 
 
 # ---------------------------------------------------------------------------

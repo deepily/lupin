@@ -116,6 +116,7 @@ class TestPersistFunctions:
         from cosa.rest.job_persistence import persist_job_created_from_metadata
 
         mock_session = MagicMock()
+        mock_session.get.return_value = None   # row absent → idempotent create INSERTs (row 2817b0f5)
         mock_get_db.return_value.__enter__ = MagicMock( return_value=mock_session )
         mock_get_db.return_value.__exit__ = MagicMock( return_value=False )
 

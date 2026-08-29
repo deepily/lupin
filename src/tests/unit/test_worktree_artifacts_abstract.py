@@ -60,7 +60,7 @@ class TestTFERenderWorktreeArtifacts:
 
     def test_single_successful_fix_renders_header_and_bullet( self ):
         orch = _fake_tfe_orch(
-            selected_fixes = [ _fake_proposed( "C2", "Add PRODUCT_NAMES entry" ) ],
+            selected_fixes = [ _fake_proposed( "C2", "Add CARD_LABELS entry" ) ],
             fix_results    = [ _fake_fix_result( success=True ) ],
             files_map      = { "C2": [ "src/x.py" ] },
         )

@@ -218,7 +218,7 @@ async def _ask_reattach_generator( notification_id, timeout_seconds ):
         - budget exhausted with neither yields an `expired` frame with no default
     """
     yield f"data: {json.dumps({'status': 'ack', 'notification_id': notification_id})}\n\n"
-    deadline      = datetime.utcnow() + timedelta( seconds=timeout_seconds )
+    deadline      = datetime.now( timezone.utc ) + timedelta( seconds=timeout_seconds )
     poll_interval = 2.0
     while True:
         row = await asyncio.to_thread( _read_notification_state_sync, notification_id )
@@ -231,10 +231,10 @@ async def _ask_reattach_generator( notification_id, timeout_seconds ):
                 val = _extract_response_value( row[ "response_value" ] )
                 yield f"data: {json.dumps({'status': 'expired', 'response': val, 'default_used': True, 'timeout': True})}\n\n"
                 return
-        if datetime.utcnow() >= deadline:
+        if datetime.now( timezone.utc ) >= deadline:
             yield f"data: {json.dumps({'status': 'expired', 'response': None, 'default_used': False, 'timeout': True})}\n\n"
             return
-        await asyncio.sleep( min( poll_interval, max( 0.0, ( deadline - datetime.utcnow() ).total_seconds() ) ) )
+        await asyncio.sleep( min( poll_interval, max( 0.0, ( deadline - datetime.now( timezone.utc ) ).total_seconds() ) ) )
 
 
 def _sse_headers():
@@ -518,8 +518,14 @@ def _persist_response_required_sync(
     """
     with get_db() as session:
         repo = NotificationRepository( session )
-        # Calculate expiration time
-        expires_at = datetime.utcnow() + timedelta( seconds=timeout_seconds )
+        # Calculate expiration time.
+        # AWARE — this value goes straight into create_notification and lands in
+        # the TIMESTAMPTZ expires_at column (postgres_models.py:618). Naive here
+        # and naive in the sweep used to cancel when both ran under the same
+        # session; across sessions an expired row was never swept at all. Fixed
+        # together with notification_repository.get_expired_notifications
+        # (row 3b4002fe).
+        expires_at = datetime.now( timezone.utc ) + timedelta( seconds=timeout_seconds )
         db_notification = repo.create_notification(
             sender_id          = resolved_sender_id,
             recipient_id       = uuid.UUID( target_system_id ),
@@ -696,6 +702,7 @@ async def notify_user(
     response_type: Optional[str] = Query(None, description="Response type: yes_no or open_ended (Phase 2.1)"),
     timeout_seconds: int = Query(120, description="Timeout in seconds for response-required notifications"),
     response_default: Optional[str] = Query(None, description="Default response value for timeout/offline (Phase 2.1)"),
+    human_only: bool = Query(False, description="Reserve this ask for a HUMAN (or its offline default) only — the auto-answer proxy must NOT answer it. Rides the WS event so the NotificationProxy Responder skips it (row 804afce6)."),
     title: Optional[str] = Query(None, description="Terse technical title for voice-first UX (Phase 2.1)"),
     sender_id: Optional[str] = Query(None, description="Sender ID (e.g., claude.code@lupin.deepily.ai). Auto-extracted from [PREFIX] in message if not provided."),
     response_options: Optional[str] = Query(None, description="JSON string of options for multiple_choice type. Structure: {questions: [{question, header, multi_select, options: [{label, description}]}]}"),
@@ -1041,7 +1048,7 @@ async def notify_user(
                             "sender_id"         : resolved_sender_id,
                             "title"             : title,
                             "abstract"          : abstract,
-                            "timestamp"         : datetime.utcnow().isoformat(),
+                            "timestamp"         : datetime.now( timezone.utc ).isoformat(),
                             "voice_persona"     : listener_voice_persona,
                             "direction"         : direction,
                         },
@@ -1066,6 +1073,7 @@ async def notify_user(
                         "target_user"        : target_user,
                         "target_system_id"   : target_system_id,
                         "connection_count"   : 1,
+                        "delivered"          : True,
                         "delivery_path"      : "cc-listener",
                         "listener_session"   : listener_sid,
                     }
@@ -1090,7 +1098,18 @@ async def notify_user(
                     "message"            : f"User {target_user} is not connected to queue UI",
                     "target_user"        : target_user,
                     "target_system_id"   : target_system_id,
-                    "connection_count"   : 0
+                    "connection_count"   : 0,
+                    # Row fcc74307, Rick's ruling 2026-08-25: "Keep the design,
+                    # make the reply honest." A 200 here means ACCEPTED, never
+                    # delivered — and the DB row written above is a FORENSIC
+                    # record, not a mailbox: GET /notifications/{user_id} reads
+                    # only the in-memory queue and nothing rehydrates it, so
+                    # this notification is durably stored and permanently
+                    # unreachable through the endpoint that serves them. That is
+                    # the documented design and it stays; the defect was that a
+                    # caller had no cheap way to tell. This field is that way.
+                    "delivered"          : False,
+                    "delivery_path"      : None,
                 }
                 # Cache for idempotency (retries will get the same response without re-persisting)
                 if idempotency_key:
@@ -1139,7 +1158,13 @@ async def notify_user(
                 "message"            : f"Notification queued for delivery to {target_user}",
                 "target_user"        : target_user,
                 "target_system_id"   : target_system_id,
-                "connection_count"   : connection_count
+                "connection_count"   : connection_count,
+                # True because the user IS connected and this reached the live
+                # delivery queue — not a claim the socket has already carried it.
+                # `delivered` answers "will this be readable", which is the
+                # question a caller actually has; the offline path returns False.
+                "delivered"          : True,
+                "delivery_path"      : "queue",
             }
             # Cache for idempotency
             if idempotency_key:
@@ -1313,6 +1338,27 @@ async def notify_user(
                     prediction_hint[ "vote_min_confidence_threshold" ] = vote_engine.hint_vote_min_confidence_threshold
             except Exception as gate_error:
                 print( f"[PREDICTION] ⚠️ Vote-gate stamp error (non-fatal): {gate_error}" )
+
+        # Auto-submit gate (row bd0ce120, Option C→D): carry the floor + enabled flag
+        # IN the hint payload — SAME drift-proofing as the vote gate above — so the
+        # client cannot diverge from server config. The client uses these to decide
+        # whether a high-confidence prediction may prefill the batch (Option D) and
+        # auto-submit after a grace window (Option C). Stamped only when a hint exists.
+        if prediction_hint is not None and "auto_submit_min_confidence_threshold" not in prediction_hint:
+            try:
+                import lupin_app.main as main_module
+                cfg = main_module.config_mgr
+                prediction_hint[ "auto_submit_enabled" ] = cfg.get(
+                    "expeditor prediction auto submit enabled", default=False, return_type="boolean"
+                )
+                prediction_hint[ "auto_submit_min_confidence_threshold" ] = cfg.get(
+                    "expeditor prediction auto submit confidence floor", default=0.9, return_type="float"
+                )
+                prediction_hint[ "auto_submit_grace_window_seconds" ] = cfg.get(
+                    "expeditor prediction auto submit grace window seconds", default=5, return_type="int"
+                )
+            except Exception as auto_error:
+                print( f"[PREDICTION] ⚠️ Auto-submit gate stamp error (non-fatal): {auto_error}" )
         # ---- End Prediction Engine Hook ----
 
         # Push notification to WebSocket for UI rendering (Phase 2.2 with full fields).
@@ -1331,6 +1377,7 @@ async def notify_user(
             response_default         = response_default,
             response_options         = parsed_response_options,  # Multiple-choice options
             timeout_seconds          = timeout_seconds,
+            human_only               = human_only,  # Proxy-exemption: auto-answer must skip this ask
             sender_id                = resolved_sender_id,  # Sender-aware notification system
             abstract                 = abstract,  # Supplementary context for action-required cards
             suppress_ding            = suppress_ding,  # Skip notification sound (conversational TTS)
@@ -1397,7 +1444,7 @@ async def notify_user(
                             "notification_id"  : notification_id,
                             "default_used"     : response_default,
                             "timeout"          : True,
-                            "timestamp"        : datetime.utcnow().isoformat()
+                            "timestamp"        : datetime.now( timezone.utc ).isoformat()
                         }
                     )
                     print(f"[NOTIFY] ✓ Broadcast notification_expired event for {notification_id}")
@@ -1590,7 +1637,7 @@ async def submit_notification_response(
                 data    = {
                     "notification_id"  : notification_id,
                     "response_value"   : response_value,
-                    "timestamp"        : datetime.utcnow().isoformat(),
+                    "timestamp"        : datetime.now( timezone.utc ).isoformat(),
                     "time_display"     : get_formatted_time_display(),
                     "date_display"     : get_formatted_date_display()
                 }
@@ -1604,7 +1651,7 @@ async def submit_notification_response(
             "message"          : f"Response recorded for notification {notification_id}",
             "notification_id"  : notification_id,
             "response_value"   : response_value,
-            "timestamp"        : datetime.utcnow().isoformat(),
+            "timestamp"        : datetime.now( timezone.utc ).isoformat(),
             "time_display"     : get_formatted_time_display(),
             "date_display"     : get_formatted_date_display()
         }

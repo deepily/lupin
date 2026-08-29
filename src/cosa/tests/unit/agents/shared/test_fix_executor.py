@@ -15,6 +15,7 @@ registering a unique test key in setUp and deleting it in tearDown.
 Must run via run-sdk-cov.sh (fix_executor imports swe_team.safety_limits → SDK chain).
 """
 
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -211,6 +212,95 @@ class TestExecuteFix( _ExecBase ):
         result, files = await ex.execute_fix( diagnosis=SimpleNamespace(), selected_fix=self.selected_fix() )
         self.assertFalse( result.success )
         self.assertEqual( result.details, "kaboom" )
+
+
+# ===========================================================================
+# Runtime brake — Leg (a): asyncio.wait_for wrapper around the SDK awaits
+# (design src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md)
+# ===========================================================================
+class TestRuntimeBrake( _ExecBase ):
+    """
+    Leg (a) proves a non-returning SDK call raises BFETimeoutError instead of
+    hanging the pool slot, and that the brake is NOT softened into a FixResult
+    (execute_fix re-raises it). Tiny wall_clock budgets keep every case
+    sub-second; the "hung" callbacks await a long sleep that the brake cancels.
+    """
+
+    async def _hang( self, *a, **k ):
+        await asyncio.sleep( 30 )        # never returns within the tiny budget
+        return ( "CODE", [ "a.py" ] )
+
+    async def test_brake_raises_on_hung_initial_delegate( self ):
+        ex = self.make_executor( delegate=self._hang )
+        ex.config.wall_clock_timeout_secs = 0.05
+        with self.assertRaises( fe.BFETimeoutError ):
+            await ex.execute_fix( diagnosis=SimpleNamespace(), selected_fix=self.selected_fix() )
+
+    async def test_brake_raises_on_hung_verify( self ):
+        async def _hang_verify( *a, **k ):
+            await asyncio.sleep( 30 )
+            return ( True, "ok" )
+        ex = self.make_executor( verify=_hang_verify )   # initial delegate returns fast
+        ex.config.wall_clock_timeout_secs = 0.05
+        with self.assertRaises( fe.BFETimeoutError ):
+            await ex.execute_fix( diagnosis=SimpleNamespace(), selected_fix=self.selected_fix() )
+
+    async def test_brake_raises_on_hung_redelegate( self ):
+        # iter1: initial delegate fast → verify fails → re-delegation hangs → brake.
+        async def _delegate( *a, **k ):
+            _delegate.n += 1
+            if _delegate.n == 1:
+                return ( "CODE1", [ "a.py" ] )
+            await asyncio.sleep( 30 )     # 2nd (re-delegation) call hangs
+            return ( "CODE2", [ ] )
+        _delegate.n = 0
+        ex = self.make_executor(
+            max_attempts=2, delegate=_delegate,
+            verify=AsyncMock( return_value=( False, "fail" ) ),
+        )
+        ex.config.wall_clock_timeout_secs = 0.05
+        with self.assertRaises( fe.BFETimeoutError ):
+            await ex.execute_fix( diagnosis=SimpleNamespace(), selected_fix=self.selected_fix() )
+
+    async def test_brake_cancellation_escapes_callback_except_exception( self ):
+        # Load-bearing: mirrors the real _delegate_to_coder — an `except Exception`
+        # wrapping the await. asyncio.wait_for cancels via CancelledError (a
+        # BaseException) which `except Exception` must NOT catch, else the brake is
+        # swallowed. Proves the whole architecture, not just the wrapper.
+        swallowed = { "hit": False }
+        async def _hang_guarded( *a, **k ):
+            try:
+                await asyncio.sleep( 30 )
+                return ( "CODE", [ ] )
+            except Exception:                      # NOT except BaseException
+                swallowed[ "hit" ] = True
+                return ( "", [ ] )
+        ex = self.make_executor( delegate=_hang_guarded )
+        ex.config.wall_clock_timeout_secs = 0.05
+        with self.assertRaises( fe.BFETimeoutError ):
+            await ex.execute_fix( diagnosis=SimpleNamespace(), selected_fix=self.selected_fix() )
+        self.assertFalse(
+            swallowed[ "hit" ],
+            "callback's `except Exception` must not swallow the brake cancellation",
+        )
+
+    async def test_brake_budget_reads_config_key_not_literal( self ):
+        # Case (6): the budget is self.config.wall_clock_timeout_secs, not a
+        # hardcoded literal — the timeout message echoes the CONFIGURED value.
+        ex = self.make_executor( delegate=self._hang )
+        ex.config.wall_clock_timeout_secs = 0.03
+        try:
+            await ex.execute_fix( diagnosis=SimpleNamespace(), selected_fix=self.selected_fix() )
+            self.fail( "expected BFETimeoutError" )
+        except fe.BFETimeoutError as e:
+            self.assertIn( "0.03s", str( e ) )
+
+    async def test_brake_does_not_fire_on_fast_call( self ):
+        # Positive control: a fast call under a normal budget completes cleanly —
+        # the brake must not trip spuriously.
+        ex = self.make_executor()                  # delegate/verify return immediately, budget 60
+        result, files = await ex.execute_fix( diagnosis=SimpleNamespace(), selected_fix=self.selected_fix() )
+        self.assertTrue( result.success )
 
 
 if __name__ == "__main__":

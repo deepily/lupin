@@ -175,6 +175,14 @@ def test_the_merge_checklist_names_the_serial_runner():
     CLAUDE.md § PR MERGE REQUIREMENTS row that names run-serial-bridge-guard.sh
     must break a test — otherwise the whole-dir guard becomes a script nobody runs.
     """
+    # Precondition: repo-root CLAUDE.md must be readable. This doc-guard reads the
+    # PR MERGE REQUIREMENTS section, so it needs the full working tree — a host
+    # checkout, a git worktree, or a CI clone. The file-bind test container does NOT
+    # mount CLAUDE.md (pytest.ini is mounted, CLAUDE.md is not), so the guard runs in
+    # every checkout venue but is skipped here. Mounting CLAUDE.md into the container
+    # would let it run in-container as well (infra change, not a test change).
+    if not CLAUDE_MD.exists():
+        pytest.skip( f"repo-root CLAUDE.md not present at {CLAUDE_MD} — needs a full working-tree checkout (host / git worktree / CI); the file-bind test container does not mount it" )
     md = CLAUDE_MD.read_text()
     marker = "## PR MERGE REQUIREMENTS"
     assert marker in md, "PR MERGE REQUIREMENTS section is gone"
@@ -205,3 +213,113 @@ def test_serial_bridge_guard_is_deselected_by_default():
         "addopts no longer deselects serial_bridge_guard — the whole-dir guard would run in "
         "the concurrent suite and false-accuse on peer writes (row e2ae4102)."
     )
+
+
+# ── the marker and the runner must agree (row ece4d86a) ──────────────────────
+#
+# THE HAZARD THESE TWO TESTS CLOSE: `serial_bridge_guard` is deselected from every
+# default run (pinned just above), so a marked test runs in exactly ONE place —
+# run-serial-bridge-guard.sh. That script does not select `-m serial_bridge_guard`
+# across the tree; it names its files EXPLICITLY. So marking a file and forgetting
+# the script does not protect the test, it RETIRES it, silently and greenly.
+#
+# This was not hypothetical when these tests were written: test_register_session_
+# no_bridge_witness.py carried a module-level `pytestmark = pytest.mark.serial_
+# bridge_guard` and was absent from the script's file list. It ran nowhere.
+
+UNIT_DIR      = Path( __file__ ).resolve().parent
+SERIAL_SCRIPT = REPO_ROOT / "src" / "scripts" / SERIAL_RUNNER
+
+
+def _files_carrying_the_marker():
+    """
+    Unit-test files that APPLY the marker — a module-level `pytestmark` assignment or
+    an `@pytest.mark.serial_bridge_guard` decorator.
+
+    Deliberately NOT a bare substring search: this very file discusses the marker by
+    name in prose and in test names, and counting those would make the check pass for
+    the wrong reason.
+
+    Ensures:
+        - returns a set of file NAMES (not paths), possibly empty
+    """
+    marked = set()
+    for path in sorted( UNIT_DIR.glob( "test_*.py" ) ):
+        for line in path.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.startswith( "@pytest.mark.serial_bridge_guard" ) or (
+                stripped.startswith( "pytestmark" ) and "serial_bridge_guard" in stripped
+            ):
+                marked.add( path.name )
+                break
+    return marked
+
+
+def _files_the_runner_selects():
+    """
+    The unit-test files run-serial-bridge-guard.sh actually passes to pytest.
+
+    COMMENT LINES ARE SKIPPED. The script's own commentary cites test file paths by
+    name (including this file's), and counting those would report files as selected
+    that pytest never receives — the exact false-green the inverse control below
+    exists to catch.
+    """
+    selected = set()
+    for line in SERIAL_SCRIPT.read_text().splitlines():
+        if line.lstrip().startswith( "#" ):
+            continue
+        for token in line.split():
+            if token.startswith( "src/tests/unit/" ) and token.endswith( ".py" ):
+                selected.add( Path( token ).name )
+    return selected
+
+
+def test_every_marked_file_is_actually_run_by_the_serial_runner():
+    """
+    A marked file the runner does not name is a RETIRED test, not a protected one:
+    deselected by addopts everywhere, and selected by nothing.
+    """
+    orphans = _files_carrying_the_marker() - _files_the_runner_selects()
+    assert not orphans, (
+        f"these files carry pytest.mark.serial_bridge_guard but {SERIAL_RUNNER} does not "
+        f"name them, so they run NOWHERE: {sorted( orphans )}. Add them to the script's "
+        "pytest invocation, or drop the marker."
+    )
+
+
+def test_every_file_the_serial_runner_names_actually_carries_the_marker():
+    """
+    The INVERSE control. The runner passes `-m serial_bridge_guard`, so a file it names
+    that applies no marker contributes ZERO tests — the script reports a clean run over
+    an empty selection, which is the same green as a real pass.
+    """
+    unmarked = _files_the_runner_selects() - _files_carrying_the_marker()
+    assert not unmarked, (
+        f"{SERIAL_RUNNER} names these files but they apply no serial_bridge_guard marker, "
+        f"so `-m serial_bridge_guard` selects nothing from them: {sorted( unmarked )}. An "
+        "empty selection passes; the gate would be green over nothing."
+    )
+
+
+def test_the_marker_check_ignores_prose_mentions_of_the_marker_name():
+    """
+    Positive control for `_files_carrying_the_marker`'s parser: THIS file names the
+    marker many times in comments, docstrings and test names, and applies it never. If
+    the parser counted mentions it would report this file as marked, the runner would
+    be told to run it, and the two checks above would be measuring nothing.
+    """
+    assert "serial_bridge_guard" in Path( __file__ ).read_text()      # the mentions are real
+    assert Path( __file__ ).name not in _files_carrying_the_marker()  # and are not counted
+
+
+def test_the_marker_check_does_detect_both_application_forms( tmp_path, monkeypatch ):
+    """
+    Positive control for the other direction — a parser that detected NOTHING would
+    also make both checks above pass vacuously. Drive it over a scratch directory
+    holding one file of each application form plus one prose-only file.
+    """
+    ( tmp_path / "test_module_level.py"  ).write_text( "import pytest\npytestmark = pytest.mark.serial_bridge_guard\n" )
+    ( tmp_path / "test_decorated.py"     ).write_text( "import pytest\n@pytest.mark.serial_bridge_guard\ndef test_x(): pass\n" )
+    ( tmp_path / "test_prose_only.py"    ).write_text( "# mentions serial_bridge_guard and applies it never\n" )
+    monkeypatch.setitem( globals(), "UNIT_DIR", tmp_path )
+    assert _files_carrying_the_marker() == { "test_module_level.py", "test_decorated.py" }

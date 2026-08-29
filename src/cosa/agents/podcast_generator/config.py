@@ -12,6 +12,11 @@ Design decisions:
 from dataclasses import dataclass, field, fields
 from typing import Literal, Optional, List
 
+# Re-exported from the canonical leaf module so this package and the DRP job share
+# ONE label map that cannot drift (row 81040071). Consumers keep importing it as
+# `from cosa.agents.podcast_generator.config import LANGUAGE_NAMES`.
+from cosa.agents.language_names import LANGUAGE_NAMES
+
 
 @dataclass
 class HostPersonality:
@@ -199,14 +204,8 @@ DEFAULT_VOICE_EXPERT = VoiceProfile(
 # =============================================================================
 # Language Configuration
 # =============================================================================
-
-LANGUAGE_NAMES = {
-    "en"    : "English",
-    "es"    : "Spanish",
-    "es-ES" : "Castilian Spanish (Spain)",
-    "es-MX" : "Mexican Spanish",
-    "es-AR" : "Argentinian Spanish",
-}
+# LANGUAGE_NAMES is the single source of truth in cosa.agents.language_names,
+# re-exported at the top of this module (see import above). Do NOT re-inline it.
 
 
 # =============================================================================
@@ -287,11 +286,16 @@ class PodcastConfig:
     max_research_doc_tokens    : int   = 100000
     key_topics_to_extract      : int   = 5
     examples_per_topic         : int   = 2
+    # Max characters of research content fed to the content-analysis and
+    # script-generation prompts before clipping. Loaded from the SHARED base INI
+    # key `agent source content max chars` (also read by the presentation
+    # generator). Replaces two hardcoded literals (50000 analysis, 30000 script).
+    max_source_chars           : int   = 200000
 
     # === Execution Limits ===
     max_script_revisions          : int = 3
     feedback_timeout_seconds      : int = 300
-    script_review_timeout_seconds : int = 240  # Longer timeout for reviewing full scripts
+    script_review_timeout_seconds : int = 600  # Fail-open review window; on timeout the gate continues (10 min)
 
     # === Output Configuration ===
     output_dir_template        : str   = "io/podcasts/{user}"
@@ -447,11 +451,14 @@ class PodcastConfig:
             include_outro             = _get( "podcast include outro",             "True", "boolean" ),
             prosody_annotation_level  = _get( "podcast prosody annotation level",  "moderate" ),
             max_research_doc_tokens   = _get( "podcast max research doc tokens",   "100000", "int" ),
+            # SHARED base key (NOT podcast-prefixed) — identical key read by the
+            # presentation generator. Single source of truth for the char ceiling.
+            max_source_chars          = _get( "agent source content max chars",   "200000", "int" ),
             key_topics_to_extract     = _get( "podcast key topics to extract",     "5",    "int" ),
             examples_per_topic        = _get( "podcast examples per topic",        "2",    "int" ),
             max_script_revisions      = _get( "podcast max script revisions",      "3",    "int" ),
             feedback_timeout_seconds  = _get( "podcast feedback timeout seconds",  "300",  "int" ),
-            script_review_timeout_seconds = _get( "podcast script review timeout seconds", "240", "int" ),
+            script_review_timeout_seconds = _get( "podcast script review timeout seconds", "600", "int" ),
             output_dir_template       = _get( "podcast output dir template",       "io/podcasts/{user}" ),
             script_filename_template  = _get( "podcast script filename template",  "{timestamp}-{topic}-script.md" ),
             audio_filename_template   = _get( "podcast audio filename template",   "{timestamp}-{topic}.mp3" ),

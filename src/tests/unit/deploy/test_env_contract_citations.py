@@ -16,6 +16,11 @@ Nothing checked them. Measured 2026-07-27, two of eleven citations were stale:
     GH_TOKEN                 "(:204, :312)"        -> :312 is a volume mount
     LUPIN_MODEL_SERVER_TAG   "cloud-test.yml:143"  -> :143 is a network alias
 
+(That second example names docker-compose.cloud-test.yml, retired 2026-08-26 —
+row 0d175dac. Kept verbatim because it is the measurement that motivated this
+file; the alias for that basename is gone from the map below, so a citation of it
+is now simply unrecognised rather than checked.)
+
 Both are off by the drift of an edited compose file, and both had been sitting in
 the authority reading as evidence.
 
@@ -53,7 +58,6 @@ CONTRACT   = LUPIN_ROOT / "src/conf/env-contract.tsv"
 # Basenames used in the notes → the repo file they name.
 COMPOSE_ALIASES = {
     "cloud-gpu.yml"          : "docker-compose.cloud-gpu.yml",
-    "cloud-test.yml"         : "docker-compose.cloud-test.yml",
     "docker-compose.yml"     : "docker-compose.yml",
 }
 

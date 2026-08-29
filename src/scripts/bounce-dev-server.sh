@@ -47,14 +47,27 @@ CONTAINER="lupin-rest-dev"
 HEALTH_URL="http://localhost:7999/health"
 TIMEOUT_SECS=60           # sized for the slower (recreate) path, not just restart
 POLL_INTERVAL=0.5
+# A SINGLE health 200 does not mean the new process is up. Two ways it lies: the OLD
+# process can still be answering in the moment after `docker restart` is issued (Tiberius
+# hit exactly this on 2026-08-19 and required three 200s by hand before believing it), and
+# a loaded server answers in bursts, so one call is a coin flip (row 1c36199e measured
+# /health at 0.47s and then timing out 36s later on :8000). Require consecutive successes.
+HEALTH_CONSECUTIVE="${HEALTH_CONSECUTIVE:-3}"     # env-overridable; tests set 1
 QUIET=0
 FORCE=0
 UNWARNED_PAUSE_SECS="${UNWARNED_PAUSE_SECS:-5}"   # env-overridable (tests set 0)
+# --reason="..." says WHY this bounce is happening, and it rides the warning broadcast
+# next to the dirty-file list. Cheech asked for it after three bounces in twenty minutes:
+# the broadcast named the files each one deployed but never why, so a peer holding armed
+# probes could not tell a needed bounce from a casual one. Optional — an omitted reason
+# leaves the message exactly as it was.
+BOUNCE_REASON="${BOUNCE_REASON:-}"
 
 for arg in "$@"; do
     case "$arg" in
         --quiet|-q) QUIET=1 ;;
         --force|-f) FORCE=1 ;;
+        --reason=*) BOUNCE_REASON="${arg#--reason=}" ;;
         -h|--help)
             sed -n '2,27p' "$0"
             exit 0
@@ -179,7 +192,7 @@ esac
 # with --force) to give a human the beat to abort; 1 proceeds directly.
 log "Warning the fleet before the bounce..."
 warn_rc=0
-python3 "${LUPIN_ROOT}/src/scripts/bounce_dev_warn.py" || warn_rc=$?
+BOUNCE_REASON="$BOUNCE_REASON" python3 "${LUPIN_ROOT}/src/scripts/bounce_dev_warn.py" || warn_rc=$?
 case "$warn_rc" in
     0)
         log "Warning confirmed reached the fleet."
@@ -208,26 +221,62 @@ if ! docker restart "$CONTAINER" >/dev/null; then
     exit 1
 fi
 
-# ── Step 3: health poll ───────────────────────────────────────────────────────
-log "Polling $HEALTH_URL (timeout ${TIMEOUT_SECS}s)..."
-deadline=$(( start_ts + TIMEOUT_SECS ))
-while :; do
-    now=$(date +%s)
-    if [ "$now" -ge "$deadline" ]; then
-        echo "ERROR: $CONTAINER did not become healthy within ${TIMEOUT_SECS}s — server may be DOWN." >&2
-        echo "       The startup all-clear will NOT have fired. Investigate before assuming it is up." >&2
-        echo "--- docker logs --tail 50 $CONTAINER ---" >&2
-        docker logs --tail 50 "$CONTAINER" >&2 || true
-        exit 1
+# ── Step 3: prove it is the NEW process, then prove it is healthy ─────────────
+# TWO GUARDS, and they defend against DIFFERENT lies. Neither substitutes for the other
+# (Mr Radio caught that a count alone does not cover the first one):
+#   · TOO EARLY — the OLD process can still answer right after `docker restart` is issued.
+#     Three 200s at 0.5s spacing is a 1.5s window and the dying process can fill it. Only
+#     IDENTITY settles this: the container's own StartedAt must be at or after the moment
+#     we asked. Tiberius hit this on :7999 on 2026-08-19.
+#   · TOO NOISY — a loaded server answers in bursts, so one 200 is a coin flip (measured
+#     on :8000, row 1c36199e: /health at 0.47s, then a timeout 36s later). A streak of
+#     consecutive OKs settles this one, and no identity check would.
+# Both helpers live in src/scripts/lib/ so they can be tested without running this script,
+# which restarts a container and broadcasts to the fleet — see
+# src/tests/unit/test_wait_for_container_restart.py and test_wait_for_health.py.
+
+# Resolve the helpers RELATIVE TO THIS SCRIPT, not via LUPIN_ROOT. They ship alongside
+# it; LUPIN_ROOT is a project pointer that legitimately points elsewhere (the busy-guard
+# test aims it at a temp tree holding only stubs), and resolving through it made both
+# waits unreachable there — which is how the guard test caught this.
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
+
+log "Waiting for $CONTAINER to report a restart (not before ${start_ts})..."
+restart_args=( "$CONTAINER" "$start_ts"
+               --timeout  "$TIMEOUT_SECS"
+               --interval "$POLL_INTERVAL" )
+if [ "$QUIET" -eq 1 ]; then restart_args+=( --quiet ); fi
+
+if ! "${SCRIPT_DIR}/lib/wait-for-container-restart.sh" "${restart_args[@]}"; then
+    echo "ERROR: $CONTAINER never reported a start newer than the restart we issued." >&2
+    echo "       A health check now could be answered by the OLD process. Investigate." >&2
+    echo "--- docker logs --tail 50 $CONTAINER ---" >&2
+    docker logs --tail 50 "$CONTAINER" >&2 || true
+    exit 1
+fi
+
+log "Polling $HEALTH_URL (need ${HEALTH_CONSECUTIVE} consecutive OKs, timeout ${TIMEOUT_SECS}s)..."
+
+health_args=( "$HEALTH_URL"
+              --consecutive "$HEALTH_CONSECUTIVE"
+              --timeout     "$TIMEOUT_SECS"
+              --interval    "$POLL_INTERVAL" )
+# NOT `[ ... ] && health_args+=(...)` — under `set -e` that whole list returns 1 when
+# QUIET is 0 and kills the script right here, one line before the poll.
+if [ "$QUIET" -eq 1 ]; then health_args+=( --quiet ); fi
+
+if "${SCRIPT_DIR}/lib/wait-for-health.sh" "${health_args[@]}"; then
+    elapsed=$(( $( date +%s ) - start_ts ))
+    if [ "$QUIET" -eq 1 ]; then
+        echo "bounced ${CONTAINER} in ${elapsed}s (all-clear emitted by server startup)"
+    else
+        log "OK: $CONTAINER healthy in ${elapsed}s — ${HEALTH_CONSECUTIVE} consecutive health checks. The server's startup hook emits the all-clear."
     fi
-    if curl -fsS --max-time 2 "$HEALTH_URL" >/dev/null 2>&1; then
-        elapsed=$(( now - start_ts ))
-        if [ "$QUIET" -eq 1 ]; then
-            echo "bounced ${CONTAINER} in ${elapsed}s (all-clear emitted by server startup)"
-        else
-            log "OK: $CONTAINER healthy in ${elapsed}s. The server's startup hook emits the all-clear."
-        fi
-        exit 0
-    fi
-    sleep "$POLL_INTERVAL"
-done
+    exit 0
+fi
+
+echo "ERROR: $CONTAINER did not become healthy within ${TIMEOUT_SECS}s — server may be DOWN." >&2
+echo "       The startup all-clear will NOT have fired. Investigate before assuming it is up." >&2
+echo "--- docker logs --tail 50 $CONTAINER ---" >&2
+docker logs --tail 50 "$CONTAINER" >&2 || true
+exit 1

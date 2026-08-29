@@ -117,13 +117,60 @@ def test_prefix_finder_is_bounded_so_an_ambiguous_prefix_cannot_pull_the_table()
     A 1-char prefix is already refused by the classifier, but the finder must
     ALSO cap what it returns: the caller only needs to know 'more than one', and
     an unbounded LIKE on a growing table is the unscoped-query defect again.
+
+    HOW THIS IS CHECKED, AND WHY IT CHANGED (row 122f07a1). This used to assert the
+    word "limit" appeared in the method's source. The word appears in the docstring,
+    in the parameter list, and in a comment saying `# no limit needed here` — so the
+    check passed on every build including a broken one. This drives the query and
+    reads the LIMIT the database is actually asked for.
     """
-    import inspect
+    from unittest.mock import MagicMock
     from cosa.rest.db.repositories.task_repository import TaskRepository
 
-    src = inspect.getsource( TaskRepository.find_by_id_prefix )
+    # A recording stand-in for the query chain: each step returns itself, so the
+    # method builds its query normally and we read back what it asked for.
+    query = MagicMock()
+    query.filter.return_value = query
+    query.limit.return_value  = query
+    query.all.return_value    = [ ]
 
-    assert "limit" in src, "find_by_id_prefix must bound its result set"
+    session       = MagicMock()
+    session.query.return_value = query
+
+    TaskRepository( session ).find_by_id_prefix( "86ce4c43" )
+
+    query.limit.assert_called_once()
+    ( bound, ) = query.limit.call_args.args
+    assert isinstance( bound, int ) and bound > 0, (
+        f"find_by_id_prefix must bound its result set with a positive LIMIT; "
+        f"the database was asked for {bound!r}"
+    )
+    query.all.assert_called_once()
+
+
+def test_the_caller_can_raise_the_bound_but_never_remove_it():
+    """The cap is a parameter, and whatever the caller passes still reaches the DB.
+
+    RED ON REVERT: drop the `.limit( limit )` call and nothing bounds the scan; ignore
+    the parameter and a caller asking for 3 silently gets the default.
+    """
+    from unittest.mock import MagicMock
+    from cosa.rest.db.repositories.task_repository import TaskRepository
+
+    query = MagicMock()
+    query.filter.return_value = query
+    query.limit.return_value  = query
+    query.all.return_value    = [ ]
+
+    session = MagicMock()
+    session.query.return_value = query
+
+    TaskRepository( session ).find_by_id_prefix( "86ce4c43", limit=3 )
+
+    assert query.limit.call_args.args == ( 3, ), (
+        f"the caller's bound must reach the database unchanged; got "
+        f"{query.limit.call_args.args}"
+    )
 
 
 # ---------------------------------------------------------------------------

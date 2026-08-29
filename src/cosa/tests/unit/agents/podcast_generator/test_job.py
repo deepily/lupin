@@ -208,6 +208,13 @@ class _ExecGraph:
             "cosa.agents.podcast_generator.config": _make_module(
                 "cosa.agents.podcast_generator.config",
                 PodcastConfig=podcast_config,
+                LANGUAGE_NAMES={
+                    "en"    : "English",
+                    "es"    : "Spanish",
+                    "es-ES" : "Castilian Spanish (Spain)",
+                    "es-MX" : "Mexican Spanish",
+                    "es-AR" : "Argentinian Spanish",
+                },
             ),
             "cosa.config.configuration_manager": _make_module(
                 "cosa.config.configuration_manager",
@@ -252,6 +259,143 @@ class TestExecute:
         out_txt = capsys.readouterr().out
         assert "Research document:" in out_txt
         assert "Max segments: 5"    in out_txt
+
+    def test_completion_abstract_emits_play_here_and_listen_links( self ):
+        """
+        Ensures: the completion abstract carries BOTH audio links, same path,
+        in the on-stage order Play Here | Listen | Download —
+            - Play Here -> /app/audio?path=<enc>&embed=1 (floating overlay; leads)
+            - Listen    -> /app/audio?path=<enc>         (standalone tab; no &embed)
+            - Download  -> /api/io/file?path=<enc>&download=true
+        Only Play Here carries &embed=1, so the two audio forms are distinct.
+        """
+        job   = _job()
+        graph = _ExecGraph()
+        with graph.patcher(), \
+             patch( "os.path.exists", return_value=True ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+
+        completion = [ c for c in graph.voice_io.notify.await_args_list if c.kwargs.get( "abstract" ) ]
+        assert len( completion ) == 1
+        abstract = completion[ 0 ].kwargs[ "abstract" ]
+
+        enc       = "pod/ep.mp3"                                    # quote( audio_rel ), '/' is safe
+        play_here = f"[▶️ Play Here](/app/audio?path={enc}&embed=1)"
+        listen    = f"[🎧 Listen](/app/audio?path={enc})"
+        download  = f"[⬇️ Download](/api/io/file?path={enc}&download=true)"
+
+        # both audio forms present, plus download
+        assert play_here in abstract
+        assert listen    in abstract
+        assert download  in abstract
+
+        # the two forms differ ONLY by &embed=1 — Listen must not carry it
+        assert abstract.count( "&embed=1" ) == 1
+
+        # on-stage order: overlay first, standalone tab second, download last
+        assert abstract.index( play_here ) < abstract.index( listen ) < abstract.index( download )
+
+    def test_completion_abstract_lists_every_language_labelled( self ):
+        """
+        Bug 00e6aba1: a two-language run wrote English + Mexican Spanish mp3s but
+        the card linked only English. The abstract must now carry ONE labelled
+        block per language, each with its own Play Here / Listen / Download, and
+        the artifacts must expose the full per-language maps.
+        """
+        state = {
+            "final_audio_path"  : "/proj/io/pod/ep-en.mp3",
+            "final_script_path" : "/proj/io/pod/ep-en.md",
+            "audio_paths_by_language"  : {
+                "en"    : "/proj/io/pod/ep-en.mp3",
+                "es-MX" : "/proj/io/pod/ep-es-MX.mp3",
+            },
+            "script_paths_by_language" : {
+                "en"    : "/proj/io/pod/ep-en.md",
+                "es-MX" : "/proj/io/pod/ep-es-MX.md",
+            },
+        }
+        job   = _job( target_languages=[ "en", "es-MX" ] )
+        graph = _ExecGraph( state=state )
+        with graph.patcher(), \
+             patch( "os.path.exists", return_value=True ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+
+        abstract = next(
+            c.kwargs[ "abstract" ] for c in graph.voice_io.notify.await_args_list
+            if c.kwargs.get( "abstract" )
+        )
+
+        # Both languages labelled.
+        assert "**English**:" in abstract
+        assert "**Mexican Spanish**:" in abstract
+
+        # Each language carries its OWN full triplet against its OWN file.
+        for enc in ( "pod/ep-en.mp3", "pod/ep-es-MX.mp3" ):
+            assert f"[▶️ Play Here](/app/audio?path={enc}&embed=1)" in abstract
+            assert f"[🎧 Listen](/app/audio?path={enc})"           in abstract
+            assert f"[⬇️ Download](/api/io/file?path={enc}&download=true)" in abstract
+        # Two languages → two overlay links, two mp3s reachable.
+        assert abstract.count( "&embed=1" ) == 2
+        # Requested order preserved: English block precedes the Spanish block.
+        assert abstract.index( "**English**:" ) < abstract.index( "**Mexican Spanish**:" )
+
+        # Per-language artifact maps exposed (relative paths), primary unchanged.
+        assert job.artifacts[ "audio_path" ] == "pod/ep-en.mp3"
+        assert job.artifacts[ "audio_paths_by_language" ] == {
+            "en" : "pod/ep-en.mp3", "es-MX" : "pod/ep-es-MX.mp3",
+        }
+        assert job.artifacts[ "script_paths_by_language" ] == {
+            "en" : "pod/ep-en.md", "es-MX" : "pod/ep-es-MX.md",
+        }
+
+    def test_completion_abstract_extra_language_not_in_target_still_listed( self ):
+        """A language present in the artifact maps but absent from target_languages
+        (e.g. an appended default) is still surfaced — the ordered-language tail."""
+        state = {
+            "final_audio_path"  : "/proj/io/pod/ep-en.mp3",
+            "final_script_path" : "/proj/io/pod/ep-en.md",
+            "audio_paths_by_language"  : {
+                "en"    : "/proj/io/pod/ep-en.mp3",
+                "es-MX" : "/proj/io/pod/ep-es-MX.mp3",
+            },
+            "script_paths_by_language" : {},
+        }
+        job   = _job( target_languages=[ "en" ] )   # es-MX NOT requested
+        graph = _ExecGraph( state=state )
+        with graph.patcher(), \
+             patch( "os.path.exists", return_value=True ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+        abstract = next(
+            c.kwargs[ "abstract" ] for c in graph.voice_io.notify.await_args_list
+            if c.kwargs.get( "abstract" )
+        )
+        assert "**Mexican Spanish**:" in abstract          # tail-appended
+        assert "pod/ep-es-MX.mp3" in abstract
+
+    def test_completion_abstract_skips_language_with_blank_paths( self ):
+        """A language key whose audio AND script paths are blank produces no block
+        (no broken empty line) — the `if parts` false arc."""
+        state = {
+            "final_audio_path"  : "/proj/io/pod/ep-en.mp3",
+            "final_script_path" : "/proj/io/pod/ep-en.md",
+            "audio_paths_by_language"  : { "en": "/proj/io/pod/ep-en.mp3", "es-MX": "" },
+            "script_paths_by_language" : { "en": "/proj/io/pod/ep-en.md" },
+        }
+        job   = _job( target_languages=[ "en", "es-MX" ] )
+        graph = _ExecGraph( state=state )
+        with graph.patcher(), \
+             patch( "os.path.exists", return_value=True ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+        abstract = next(
+            c.kwargs[ "abstract" ] for c in graph.voice_io.notify.await_args_list
+            if c.kwargs.get( "abstract" )
+        )
+        assert "**English**:" in abstract
+        assert "**Mexican Spanish**:" not in abstract       # blank-path language dropped
 
     def test_dry_run_routes_to_dry_run_helper( self ):
         # dry_run=True must short-circuit to _execute_dry_run after reconfigure,
@@ -394,7 +538,10 @@ class TestExecuteDryRun:
         assert out == "Dry run complete. Podcast simulation finished."
         assert voice_io.notify.await_count == 6                # 5 breadcrumbs + completion
         assert slp.await_count == 5
-        assert job.audio_path.endswith( "/podcast.mp3" )
+        # Audio now points at the committed, pre-rendered dry-run fixture (io-relative).
+        assert job.audio_path == "fixtures/podcast-dry-run/podcast-dry-run.mp3"
+        assert job.artifacts[ "audio_path" ] == "fixtures/podcast-dry-run/podcast-dry-run.mp3"
+        # Script stays a mock — dry-run generates no script.
         assert job.script_path.endswith( "/script.md" )
         assert job.artifacts[ "podcast_id" ].startswith( "dry-run-" )
         assert job.cost_summary == {
@@ -404,12 +551,57 @@ class TestExecuteDryRun:
         }
         assert "DRY RUN MODE" in capsys.readouterr().out
 
+    def test_dry_run_completion_abstract_emits_overlay_links( self ):
+        """Completion abstract carries Play Here / Listen / Download for the fixture,
+        keeps the 🧪 markers + 'not a real podcast' framing, and leaves the script
+        line as an un-created mock."""
+        job = _job( debug=False )
+        voice_io, cosa_interface = self._voice_iface()
+        with patch( "asyncio.sleep", AsyncMock() ):
+            _run( job._execute_dry_run( voice_io, cosa_interface ) )
+
+        # The completion notify is the one carrying the abstract.
+        completion = next(
+            c for c in voice_io.notify.await_args_list
+            if c.kwargs.get( "abstract" )
+        )
+        abstract = completion.kwargs[ "abstract" ]
+        enc = "fixtures/podcast-dry-run/podcast-dry-run.mp3"
+        assert f"/app/audio?path={enc}&embed=1" in abstract          # Play Here → overlay
+        assert f"/app/audio?path={enc}" in abstract                  # Listen → standalone tab
+        assert f"/api/io/file?path={enc}&download=true" in abstract  # Download
+        assert "Play Here" in abstract and "Listen" in abstract and "Download" in abstract
+        # Never mistakable for a real podcast.
+        assert "🧪" in abstract
+        assert "not a real podcast" in abstract.lower()
+        assert "(mock - not actually created)" in abstract          # script line intact
+        # Spoken message keeps the dry-run flag.
+        assert "🧪" in completion.args[ 0 ]
+
     def test_dry_run_debug_false_no_banner( self, capsys ):
         job = _job( debug=False )
         voice_io, cosa_interface = self._voice_iface()
         with patch( "asyncio.sleep", AsyncMock() ):
             _run( job._execute_dry_run( voice_io, cosa_interface ) )
         assert "DRY RUN MODE" not in capsys.readouterr().out
+
+    def test_dry_run_stores_abstract_in_artifacts_for_done_card( self ):
+        """Consume-seam prerequisite (bug 9b481811): the dry-run path must store the
+        completion abstract in artifacts so it rides the running→done promotion and
+        the done card renders WITHOUT a reload. Missing → blank card on stage."""
+        job = _job( debug=False )
+        voice_io, cosa_interface = self._voice_iface()
+        with patch( "asyncio.sleep", AsyncMock() ):
+            _run( job._execute_dry_run( voice_io, cosa_interface ) )
+        stored = job.artifacts.get( "abstract" )
+        assert stored                                    # non-empty
+        assert "▶️ Play Here" in stored
+        assert "&embed=1" in stored
+        # Identical to what the completion notify sent (single source of truth).
+        completion = next(
+            c for c in voice_io.notify.await_args_list if c.kwargs.get( "abstract" )
+        )
+        assert stored == completion.kwargs[ "abstract" ]
 
     def test_force_failure_mode_raises( self ):
         # force_failure_mode hook calls AgenticJobBase._raise_forced_failure
@@ -419,3 +611,21 @@ class TestExecuteDryRun:
         with patch( "asyncio.sleep", AsyncMock() ):
             with pytest.raises( KeyError ):
                 _run( job._execute_dry_run( voice_io, cosa_interface ) )
+
+
+# ----------------------------------------------------------------------------
+# Committed dry-run fixture presence (the link above is a dead end without it)
+# ----------------------------------------------------------------------------
+class TestDryRunFixtureShips:
+    """The audio the dry-run overlay serves is a REAL committed mp3, not a stub."""
+
+    def test_fixture_exists_and_is_mp3( self ):
+        import os
+        import cosa.utils.util as cu
+        path = cu.get_project_root() + "/io/fixtures/podcast-dry-run/podcast-dry-run.mp3"
+        assert os.path.isfile( path ), f"missing dry-run fixture: {path}"
+        assert os.path.getsize( path ) > 10_000            # a real render, not an empty stub
+        with open( path, "rb" ) as f:
+            head = f.read( 4 )
+        # ID3v2 tag ("ID3") or a raw MPEG frame sync (0xFF 0xEx/0xFx).
+        assert head[ :3 ] == b"ID3" or ( head[ 0 ] == 0xFF and ( head[ 1 ] & 0xE0 ) == 0xE0 )

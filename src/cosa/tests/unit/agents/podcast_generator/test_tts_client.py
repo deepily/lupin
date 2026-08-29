@@ -246,6 +246,16 @@ class TestCleanText:
         out = _client()._clean_text_for_tts( "So *[pause]* what    you're *[excited]* saying!" )
         assert out == "So what you're saying!"
 
+    def test_preserves_pause_markers_and_strips_dead_tags( self ):
+        # <break>, ellipsis and CAPS survive; only *[...]* is removed.
+        out = _client()._clean_text_for_tts(
+            'Wait *[excited]* for it... <break time="1.5s"/> HUGE news!'
+        )
+        assert '<break time="1.5s"/>' in out
+        assert "..." in out
+        assert "HUGE" in out
+        assert "*[" not in out
+
 
 # ----------------------------------------------------------------------------
 # _generate_via_websocket
@@ -271,6 +281,19 @@ class TestGenerateViaWebsocket:
         # en -> no language_code in config message
         config_sent = json.loads( ws.sent[ 0 ] )
         assert "language_code" not in config_sent
+
+    def test_url_enables_ssml_parsing( self ):
+        # enable_ssml_parsing=true must reach websockets.connect so <break>
+        # pause tags render on the stream-input endpoint.
+        assert "enable_ssml_parsing=true" in tc.PodcastTTSClient.WS_URL_TEMPLATE
+        ws          = _FakeWS( [ json.dumps( { "isFinal": True } ) ] )
+        connect_mock = MagicMock( return_value=_FakeConnect( ws ) )
+        c  = _client()
+        vc = VoiceConfig( voice_id="v", name="n", language_code="en" )
+        with patch.object( tc.websockets, "connect", connect_mock ):
+            _run( c._generate_via_websocket( "hello", vc ) )
+        built_url = connect_mock.call_args[ 0 ][ 0 ]
+        assert "enable_ssml_parsing=true" in built_url
 
     def test_non_english_adds_language_code( self ):
         ws = _FakeWS( [ json.dumps( { "isFinal": True } ) ] )

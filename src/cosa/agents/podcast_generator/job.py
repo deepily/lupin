@@ -278,10 +278,17 @@ class PodcastGeneratorJob( AgenticJobBase ):
             self.audio_path  = state.get( "final_audio_path" )
             self.script_path = state.get( "final_script_path" )
 
+            # Every run generates one artifact pair PER language (default en,es-MX).
+            # The orchestrator stores them keyed by language; thread ALL of them into
+            # the card, not just the English primary (bug 00e6aba1).
+            audio_by_lang  = dict( state.get( "audio_paths_by_language" )  or {} )
+            script_by_lang = dict( state.get( "script_paths_by_language" ) or {} )
+
             # Build relative paths under io/ for URL generation + UI job-card metadata.
             # Mirrors presentation_generator/job.py:301-341 — match the receiving
             # logic in cosa/rest/routers/io_files.py:88-98 (handles abs / "io/" / "/" prefixes).
             import urllib.parse
+            from cosa.agents.podcast_generator.config import LANGUAGE_NAMES
             io_base = cu.get_project_root() + "/io/"
 
             def _to_rel( p ):
@@ -290,15 +297,36 @@ class PodcastGeneratorJob( AgenticJobBase ):
                 if p.startswith( "io/" ):   return p[ 3: ]
                 return p.lstrip( "/" )
 
+            languages  = getattr( self, "target_languages", [] ) or [ "en" ]
+
+            # Fallback for single-language or older orchestrator state that only set
+            # the primary path: seed the by-language maps from it under the first
+            # requested language so the multi-language code path below stays uniform.
+            if not audio_by_lang and self.audio_path:
+                audio_by_lang = { languages[ 0 ]: self.audio_path }
+            if not script_by_lang and self.script_path:
+                script_by_lang = { languages[ 0 ]: self.script_path }
+
+            # Ordered language list: requested order first, then any extra languages
+            # that actually produced an artifact but were not in target_languages.
+            ordered_langs = [ l for l in languages if l in audio_by_lang or l in script_by_lang ]
+            for l in list( audio_by_lang ) + list( script_by_lang ):
+                if l not in ordered_langs:
+                    ordered_langs.append( l )
+
             audio_rel  = _to_rel( self.audio_path )
             script_rel = _to_rel( self.script_path )
 
             # Store relative paths in artifacts so the UI job-card builds correct URLs
-            # (matches presentation_generator convention at job.py:336-341).
+            # (matches presentation_generator convention at job.py:336-341). Primary
+            # (English) stays under the historical keys; the full per-language maps are
+            # added so any downstream consumer can reach every artifact.
             self.artifacts[ "audio_path" ]  = audio_rel
             self.artifacts[ "script_path" ] = script_rel
             self.artifacts[ "report_path" ] = script_rel
             self.artifacts[ "podcast_id" ]  = agent.podcast_id
+            self.artifacts[ "audio_paths_by_language" ]  = { l: _to_rel( p ) for l, p in audio_by_lang.items() }
+            self.artifacts[ "script_paths_by_language" ] = { l: _to_rel( p ) for l, p in script_by_lang.items() }
 
             # Build cost summary
             api_cost = agent.api_client.cost_estimate.estimated_cost_usd if agent._api_client else 0.0
@@ -314,7 +342,6 @@ class PodcastGeneratorJob( AgenticJobBase ):
             script_minutes = script.estimated_duration_minutes
             elapsed_sec   = round( time.time() - self._start_time, 1 )
             has_audio     = bool( self.audio_path )
-            languages     = getattr( self, "target_languages", [] ) or [ "en" ]
             n_langs       = len( languages )
 
             # Three-variant TTS
@@ -328,34 +355,55 @@ class PodcastGeneratorJob( AgenticJobBase ):
             else:
                 tts_msg = "Podcast generation complete with no segments produced."
 
-            # Build clickable links. Listen routes to the in-app HTML5 audio player
-            # page (cosa/rest/routers/pages.py "/app/audio" → audio-player.html);
-            # Download streams the raw mp3 with attachment disposition.
-            script_link = (
-                f"[📝 View Script](/app/docs?path={urllib.parse.quote( script_rel )})"
-                if script_rel else None
-            )
-            audio_links = None
-            if audio_rel:
-                encoded     = urllib.parse.quote( audio_rel )
-                audio_links = (
-                    f"[🎧 Listen](/app/audio?path={encoded}) | "
-                    f"[⬇️ Download](/api/io/file?path={encoded}&download=true)"
+            # Build clickable links — ONE labelled set PER LANGUAGE (bug 00e6aba1: a
+            # two-language run wrote two mp3s but the card linked only English). All
+            # audio links target the same in-app HTML5 player page (/app/audio); they
+            # differ only by the &embed=1 flag:
+            #   - Play Here → &embed=1: floating in-place overlay (Rick's on-stage default).
+            #   - Listen → no flag: opens the player as a standalone tab.
+            #   - Download streams the raw mp3 with attachment disposition.
+            def _script_link( rel ):
+                return f"[📝 Script](/app/docs?path={urllib.parse.quote( rel )})" if rel else None
+
+            def _audio_triplet( rel ):
+                enc = urllib.parse.quote( rel )
+                return (
+                    f"[▶️ Play Here](/app/audio?path={enc}&embed=1) | "
+                    f"[🎧 Listen](/app/audio?path={enc}) | "
+                    f"[⬇️ Download](/api/io/file?path={enc}&download=true)"
                 )
+
+            # One line per language: "**Mexican Spanish**: 📝 Script | ▶️ Play Here | 🎧 Listen | ⬇️ Download"
+            per_language_lines = []
+            for lang in ordered_langs:
+                label  = LANGUAGE_NAMES.get( lang, lang )
+                a_rel  = _to_rel( audio_by_lang.get( lang ) )
+                s_rel  = _to_rel( script_by_lang.get( lang ) )
+                parts  = []
+                s_link = _script_link( s_rel )
+                if s_link: parts.append( s_link )
+                if a_rel:  parts.append( _audio_triplet( a_rel ) )
+                if parts:
+                    per_language_lines.append( f"**{label}**: " + " | ".join( parts ) )
 
             # Rich markdown abstract
             lines = [ "**Podcast Activity Report**", "" ]
             lines.append( f"**Segments**: {n_segments} (~{script_minutes:.1f} min)" )
             lines.append( f"**Languages**: {', '.join( languages )}" )
-            if script_link:
-                lines.append( f"**Script**: {script_link}" )
-            if audio_links:
-                lines.append( f"**Audio**: {audio_links}" )
+            lines.extend( per_language_lines )
             if self.cost_summary:  # pragma: no branch - cost_summary is set unconditionally (3-key dict) earlier, so it is always truthy here; the False arc is unreachable
                 total_cost = self.cost_summary.get( "total_cost_usd", 0.0 )
                 lines.append( f"**Cost**: ${total_cost:.4f}" )
             lines.append( f"**Duration**: {elapsed_sec}s" )
             completion_abstract = "\n".join( lines )
+
+            # Store the abstract in artifacts so it rides the running→done
+            # job_state_transition (running_fifo_queue.py:567 reads
+            # artifacts.get("abstract")). Without this the promoted done card
+            # renders with no abstract → "loading…" + no Play Here until a page
+            # reload re-fetches from the persisted notification (bug 9b481811).
+            # The dry-run path stores its own abstract separately (see _execute_dry_run).
+            self.artifacts[ "abstract" ] = completion_abstract
 
             try:
                 await voice_io.notify(
@@ -393,6 +441,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
         """
         import asyncio
         import os
+        import urllib.parse
 
         # Set sender_id and target_user for notifications
         cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
@@ -423,14 +472,34 @@ class PodcastGeneratorJob( AgenticJobBase ):
         await voice_io.notify( "🧪 Dry run: skipping audio stitching", priority="low", job_id=self.id_hash, queue_name="run" )
         await asyncio.sleep( 1.0 )
 
-        # Set mock results
-        self.audio_path  = f"/io/podcasts/{self.user_email}/dry-run-{self.id_hash}/podcast.mp3"
+        # Audio: point at the committed, pre-rendered dry-run fixture (io-relative).
+        # This is a REAL mp3 that ships with the repo — Maria + Mr. Radio literally
+        # narrating what dry-run mode does (rendered once from mock_clients.
+        # MOCK_SCRIPT_RESPONSE via the production TTS path; see io/fixtures/
+        # podcast-dry-run/README.md). Serving it exercises the entire overlay path
+        # (Play Here link → &embed=1 interception → iframe render → blob-fetch auth →
+        # auto-start) at zero per-run cost.
+        #
+        # Script stays a mock: dry-run does NOT generate a script, so that path is
+        # deliberately fake and framed "(mock - not actually created)".
+        audio_rel        = "fixtures/podcast-dry-run/podcast-dry-run.mp3"
+        self.audio_path  = audio_rel
         self.script_path = f"/io/podcasts/{self.user_email}/dry-run-{self.id_hash}/script.md"
 
-        # Store mock artifacts
+        # Store artifacts
         self.artifacts[ "audio_path" ]  = self.audio_path
         self.artifacts[ "script_path" ] = self.script_path
         self.artifacts[ "podcast_id" ]  = f"dry-run-{self.id_hash}"
+
+        # Clickable audio links — same shape as the real path (job.py:346-348):
+        #   Play Here → &embed=1 floating overlay (auto-starts) · Listen → standalone
+        #   tab · Download → raw mp3 attachment.
+        encoded     = urllib.parse.quote( audio_rel )
+        audio_links = (
+            f"[▶️ Play Here](/app/audio?path={encoded}&embed=1) | "
+            f"[🎧 Listen](/app/audio?path={encoded}) | "
+            f"[⬇️ Download](/api/io/file?path={encoded}&download=true)"
+        )
 
         # Mock cost summary
         self.cost_summary = {
@@ -449,9 +518,19 @@ class PodcastGeneratorJob( AgenticJobBase ):
 
 **Script**: {self.script_path} (mock - not actually created)
 
-**Audio**: {self.audio_path} (mock - not actually created)
+**🧪 Audio**: {audio_links}
+
+_🧪 Pre-rendered dry-run fixture — Maria & Mr. Radio narrating what dry-run mode does. Not a real podcast; no content was generated for this submission._
 
 **Stats**: $0.00 | 10 segments | 5.0s (simulated)"""
+
+        # Store the abstract so it rides the running→done job_state_transition
+        # (running_fifo_queue.py reads artifacts.get("abstract")). Without this the
+        # promoted done card renders empty ("loading…" + no Play Here) until a page
+        # reload re-fetches from the persisted notification — the SAME consume bug
+        # (9b481811) fixed on the real path. The dry-run path needs it too, or a
+        # dry-run on stage shows a blank card.
+        self.artifacts[ "abstract" ] = completion_abstract
 
         # Notify completion
         await voice_io.notify(

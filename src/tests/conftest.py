@@ -6,6 +6,7 @@ path manipulation. All other test files can then import cosa directly.
 """
 import sys
 import os
+import secrets
 
 import pytest
 
@@ -46,6 +47,24 @@ os.environ.setdefault(
     "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development",
 )
 
+# ── Collection-time JWT secret floor (row adce3547) ───────────────────────────
+# cosa/rest/jwt_service.py has no default signing secret — unset JWT_SECRET_KEY raises at
+# MODULE IMPORT, which for a test file means at COLLECTION time, before any fixture runs.
+# That is the point of the change; it also means a bare pytest run needs a value seeded
+# here, exactly like the LUPIN_CONFIG_MGR_CLI_ARGS floor above.
+#
+# The value is GENERATED PER RUN, never a literal in this file. A fixed test secret checked
+# into the repo would be the same shared-constant defect the application-side change exists
+# to remove, only wearing a test costume. Subprocesses spawned by tests inherit it through
+# os.environ, so a parent and a spawned server still agree on the signature.
+#
+# setdefault (NOT a hard set): an explicit export — CI, the container, or a test that pins
+# its own secret before importing jwt_service — still WINS.
+#
+# DO NOT refactor this into a fixture: fixtures run at execution time, after the
+# collection-time import that needs it.
+os.environ.setdefault( "JWT_SECRET_KEY", "test-only-generated-per-run-" + secrets.token_urlsafe( 32 ) )
+
 # Now cosa is importable - other test files can just: import cosa.utils.util as du
 
 
@@ -71,10 +90,18 @@ from tests.venue_routing import (                # noqa: E402  (needs the sys.pa
     host_is_reachable, partition_by_venue, deselection_report,
 )
 
+# ── Worktree false-green guard — MOVED to the ROOT src/conftest.py (row 71249e0f)
+# It was wired ONLY here, but src/cosa/tests/ never loads this tests-tree conftest,
+# so the cosa tier (a merge-pyramid gate since 2026-08-13) had no protection
+# (finding 2ed1be74). It now lives in src/conftest.py — the root conftest BOTH
+# trees load — as a single call site that cannot drift. Nothing to wire here.
+
 _deselected_by_venue = []
 
 
 def pytest_collection_modifyitems( config, items ):
+    # Worktree false-green guard lives in the ROOT src/conftest.py now (row
+    # 71249e0f) so it also covers src/cosa/tests/. This hook keeps only venue routing.
     kept, deselected = partition_by_venue( items, host_is_reachable() )
     if not deselected: return
     config.hook.pytest_deselected( items=deselected )

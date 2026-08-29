@@ -200,6 +200,30 @@ class TestParseOutlineResponse:
         with pytest.raises( ValueError ):
             parse_outline_response( json.dumps( { "outline": [] } ) )
 
+    # Diagnostic-message regression (twin of bug 957cb7b8): each raise branch
+    # must log the predicate it ACTUALLY failed, never the "not-a-list: <class
+    # 'list'>" self-contradiction the empty path used to print.
+    def test_empty_outline_logs_empty_not_type_contradiction( self, caplog ):
+        with caplog.at_level( "ERROR" ):
+            with pytest.raises( ValueError ):
+                parse_outline_response( json.dumps( { "outline": [] } ) )
+        assert "empty list" in caplog.text
+        assert "not-a-list" not in caplog.text
+        assert "<class 'list'>" not in caplog.text
+
+    def test_missing_outline_key_logs_missing( self, caplog ):
+        with caplog.at_level( "ERROR" ):
+            with pytest.raises( ValueError ):
+                parse_outline_response( json.dumps( { "sections": [] } ) )
+        assert "missing 'outline' key" in caplog.text
+
+    def test_non_list_outline_logs_not_a_list_with_real_type( self, caplog ):
+        with caplog.at_level( "ERROR" ):
+            with pytest.raises( ValueError ):
+                parse_outline_response( json.dumps( { "outline": "not a list" } ) )
+        assert "not a list" in caplog.text
+        assert "str" in caplog.text
+
     def test_invalid_arc_position_defaults_to_body( self ):
         data = json.dumps( { "outline": [ { "arc_position": "bogus", "title": "Test" } ] } )
         outline = parse_outline_response( data )

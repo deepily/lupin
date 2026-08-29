@@ -199,7 +199,7 @@ def start_flusher(
             return False
         _flusher_started = True
 
-    def _loop():  # pragma: no cover - infinite daemon loop; exercised by the integration/live drill, not unit-testable
+    def _loop():  # pragma: no cover - unbounded `while True` around a real time.sleep; any call enters a loop that never returns, so no test can execute this body and reach the next statement
         while True:
             time.sleep( interval_seconds )
             try:

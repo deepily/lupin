@@ -67,14 +67,14 @@ def _run( coro ):
 
 
 def _agent( source_path="/io/src/doc.md", user_id="u@test.com", config=None,
-            dry_run=False, debug=False, verbose=False ):
+            offline_mode=False, debug=False, verbose=False ):
     return PresentationOrchestratorAgent(
-        source_path = source_path,
-        user_id     = user_id,
-        config      = config or PresentationConfig(),
-        dry_run     = dry_run,
-        debug       = debug,
-        verbose     = verbose,
+        source_path  = source_path,
+        user_id      = user_id,
+        config       = config or PresentationConfig(),
+        offline_mode = offline_mode,
+        debug        = debug,
+        verbose      = verbose,
     )
 
 
@@ -457,8 +457,8 @@ _ELAB = "cosa.agents.presentation_generator.prompts.elaboration"
 
 
 class TestAnalyzeAsync:
-    def test_dry_run_with_raw_sections( self, capsys, _silence_voice_io ):
-        agent = _agent( dry_run=True, debug=True )
+    def test_offline_with_raw_sections( self, capsys, _silence_voice_io ):
+        agent = _agent( offline_mode=True, debug=True )
         agent._presentation_state[ "raw_sections" ] = [
             ( "H1", "word " * 250, 1 ), ( "H2", "short body", 2 ),
         ]
@@ -469,8 +469,8 @@ class TestAnalyzeAsync:
         assert sections[ 0 ].proposed_slides >= 1
         assert "DRY RUN" in capsys.readouterr().out
 
-    def test_dry_run_no_raw_sections_uses_default( self, _silence_voice_io ):
-        agent = _agent( dry_run=True )
+    def test_offline_no_raw_sections_uses_default( self, _silence_voice_io ):
+        agent = _agent( offline_mode=True )
         agent._presentation_state[ "raw_sections" ] = []
         sections = _run( agent._analyze_async( "src" ) )
         assert len( sections ) == 1
@@ -529,8 +529,8 @@ class TestAnalyzeAsync:
 # Content-gen — _outline_async (MID)
 # ===========================================================================
 class TestOutlineAsync:
-    def test_dry_run_with_sections( self, capsys, _silence_voice_io ):
-        agent = _agent( dry_run=True, debug=True )
+    def test_offline_with_sections( self, capsys, _silence_voice_io ):
+        agent = _agent( offline_mode=True, debug=True )
         outlines = _run( agent._outline_async( [ _section( "S1" ), _section( "S2" ) ] ) )
         # 2 opening + body + 3 closing; budget 15 → 10 body
         assert len( outlines ) == 15
@@ -538,8 +538,8 @@ class TestOutlineAsync:
         assert outlines[ -1 ].arc_position == "closing"
         assert "DRY RUN" in capsys.readouterr().out
 
-    def test_dry_run_no_sections_body_point_titles( self, _silence_voice_io ):
-        agent = _agent( dry_run=True )
+    def test_offline_no_sections_body_point_titles( self, _silence_voice_io ):
+        agent = _agent( offline_mode=True )
         outlines = _run( agent._outline_async( [] ) )
         body = [ o for o in outlines if o.arc_position == "body" ]
         assert body and body[ 0 ].title.startswith( "[Mock] Body Point" )
@@ -604,8 +604,8 @@ class TestOutlineAsync:
 # Content-gen — _elaborate_async + _elaborate_chunked (MID)
 # ===========================================================================
 class TestElaborateAsync:
-    def test_dry_run_title_and_keypoint_branches( self, capsys, _silence_voice_io ):
-        agent = _agent( dry_run=True, debug=True )
+    def test_offline_title_and_keypoint_branches( self, capsys, _silence_voice_io ):
+        agent = _agent( offline_mode=True, debug=True )
         outline = [
             _outline( number=1, type="title", visual_type="text_only" ),
             _outline( number=2, arc="body", type="key_point", visual_type="diagram" ),
@@ -634,6 +634,103 @@ class TestElaborateAsync:
         assert slides[ 0 ].subtitle == "sub"
         assert slides[ 0 ].presenter_notes.timing_seconds == 90
         assert agent.metrics[ "api_calls" ] == 1
+
+    def test_chunked_emits_one_pinned_progress_update_per_batch( self, _silence_voice_io ):
+        # Sign-of-life: batched elaboration was silent for 10m25s on a 32-slide
+        # deck (measured 2026-08-05), which reads as a hung job. Every batch must
+        # emit a progress line, and they must ALL share ONE progress_group_id so
+        # the UI pins/updates a single bubble instead of appending six.
+        agent  = _agent()
+        client = _mock_api_client()
+        agent._api_client = client
+        outline = [ _outline( number=i + 1 ) for i in range( 32 ) ]
+        parsed  = [ { "number": 1, "arc_position": "opening", "type": "title",
+                      "title": "T", "visual_type": "text_only" } ]
+        with patch( f"{_ELAB}.get_elaboration_prompt", return_value="P" ), \
+             patch( f"{_ELAB}.parse_elaboration_response", return_value=parsed ):
+            _run( agent._elaborate_chunked( outline, "src" ) )
+
+        calls = [ c for c in _silence_voice_io[ "notify" ].await_args_list
+                  if "batch" in str( c.args[ 0 ] if c.args else "" ) ]
+        assert len( calls ) == 6                                    # ceil(32/6)
+        group_ids = { c.kwargs.get( "progress_group_id" ) for c in calls }
+        assert len( group_ids ) == 1                                # ONE pinned bubble
+        gid = group_ids.pop()
+        assert gid and gid.startswith( "pg-" ) and len( gid ) == 11
+        assert "slides 1-6 of 32 (batch 1 of 6)"   in str( calls[  0 ].args[ 0 ] )
+        assert "slides 31-32 of 32 (batch 6 of 6)" in str( calls[ -1 ].args[ 0 ] )
+
+    def test_chunked_progress_notify_failure_does_not_abort_elaboration( self, _silence_voice_io ):
+        # THE RUNTIME RISK: a progress line must never kill a run that is already
+        # many paid API calls deep. Notify raises on EVERY batch; elaboration must
+        # still complete and return every slide.
+        agent  = _agent()
+        client = _mock_api_client()
+        agent._api_client = client
+        _silence_voice_io[ "notify" ].side_effect = RuntimeError( "notify channel down" )
+        outline = [ _outline( number=i + 1 ) for i in range( 32 ) ]
+        parsed  = [ { "number": 1, "arc_position": "opening", "type": "title",
+                      "title": "T", "visual_type": "text_only" } ]
+        with patch( f"{_ELAB}.get_elaboration_prompt", return_value="P" ), \
+             patch( f"{_ELAB}.parse_elaboration_response", return_value=parsed ):
+            dicts = _run( agent._elaborate_chunked( outline, "src" ) )
+
+        # The guard is only proven if the notify ACTUALLY raised — an unfired
+        # side_effect would make this pass vacuously.
+        assert _silence_voice_io[ "notify" ].await_count == 6
+        assert len( dicts ) == 6                       # one parsed dict per batch, nothing lost
+        assert client.call_for_elaboration.await_count == 6
+
+    def test_large_deck_elaborates_in_chunks_without_all_at_once( self, _silence_voice_io ):
+        # A deck ABOVE the threshold goes straight to batched elaboration and
+        # never issues the single all-at-once call. Guards the 2026-08-05
+        # finding: one call at 40/60 slides returns well-formed JSON with ZERO
+        # slides, and reports stop_reason "end_turn" so the truncation fallback
+        # cannot rescue it.
+        agent  = _agent()
+        client = _mock_api_client()
+        agent._api_client = client
+        n       = PresentationOrchestratorAgent.LARGE_DECK_CHUNK_THRESHOLD + 1
+        outline = [ _outline( number=i + 1 ) for i in range( n ) ]
+        chunk_dicts = [ { "number": i + 1, "arc_position": "opening", "type": "title",
+                          "title": f"T{i + 1}", "visual_type": "text_only" } for i in range( n ) ]
+        agent._elaborate_chunked = AsyncMock( return_value=chunk_dicts )
+
+        slides = _run( agent._elaborate_async( outline ) )
+
+        agent._elaborate_chunked.assert_awaited_once()
+        client.call_for_elaboration.assert_not_awaited()   # the failing call is never made
+        assert [ s.number for s in slides ] == list( range( 1, n + 1 ) )
+
+    def test_at_threshold_still_uses_all_at_once( self, _silence_voice_io ):
+        # Boundary: exactly AT the threshold keeps the original single-call path,
+        # so the change cannot silently alter decks that already worked.
+        agent  = _agent()
+        client = _mock_api_client()
+        agent._api_client = client
+        n       = PresentationOrchestratorAgent.LARGE_DECK_CHUNK_THRESHOLD
+        outline = [ _outline( number=i + 1 ) for i in range( n ) ]
+        parsed  = [ { "number": i + 1, "arc_position": "opening", "type": "title",
+                      "title": f"T{i + 1}", "visual_type": "text_only" } for i in range( n ) ]
+        agent._elaborate_chunked = AsyncMock()             # must NOT be called
+        with patch( f"{_ELAB}.get_elaboration_prompt", return_value="P" ), \
+             patch( f"{_ELAB}.parse_elaboration_response", return_value=parsed ):
+            slides = _run( agent._elaborate_async( outline ) )
+
+        agent._elaborate_chunked.assert_not_awaited()
+        client.call_for_elaboration.assert_awaited_once()
+        assert len( slides ) == n
+
+    def test_large_deck_chunked_empty_raises( self, _silence_voice_io ):
+        # Chunked mode yielding nothing fails LOUD — never an empty deck.
+        agent = _agent()
+        agent._api_client = _mock_api_client()
+        n       = PresentationOrchestratorAgent.LARGE_DECK_CHUNK_THRESHOLD + 1
+        outline = [ _outline( number=i + 1 ) for i in range( n ) ]
+        agent._elaborate_chunked = AsyncMock( return_value=[] )
+
+        with pytest.raises( ValueError, match="no slides in chunked mode" ):
+            _run( agent._elaborate_async( outline ) )
 
     def test_real_truncation_triggers_chunked_fallback( self, _silence_voice_io ):
         agent = _agent()
@@ -884,16 +981,16 @@ class TestRenderVisualsAsync:
 
 
 class TestBuildVisualRegistry:
-    def test_dry_run_only_fallback( self ):
-        agent = _agent( dry_run=True )
+    def test_offline_only_fallback( self ):
+        agent = _agent( offline_mode=True )
         with patch( f"{_RENDERERS}.VisualRendererRegistry" ) as VRR, \
              patch( f"{_RENDERERS}.PlaceholderRenderer" ) as PH:
             registry = agent._build_visual_registry()
         assert registry is VRR.return_value
-        registry.register.assert_not_called()  # dry_run → no renderers registered
+        registry.register.assert_not_called()  # offline_mode → no renderers registered
 
     def test_real_registers_all_with_gemini( self ):
-        agent = _agent( dry_run=False )
+        agent = _agent( offline_mode=False )
         with patch( f"{_RENDERERS}.VisualRendererRegistry" ) as VRR, \
              patch( f"{_RENDERERS}.PlaceholderRenderer" ), \
              patch( f"{_RENDERERS}.MermaidRenderer" ), \
@@ -907,7 +1004,7 @@ class TestBuildVisualRegistry:
         assert VRR.return_value.register.call_count == 5
 
     def test_real_gemini_unavailable_warns( self ):
-        agent = _agent( dry_run=False )
+        agent = _agent( offline_mode=False )
         with patch( f"{_RENDERERS}.VisualRendererRegistry" ) as VRR, \
              patch( f"{_RENDERERS}.PlaceholderRenderer" ), \
              patch( f"{_RENDERERS}.MermaidRenderer" ), \
@@ -955,13 +1052,9 @@ class TestDeliverAsync:
 
 
 # ===========================================================================
-# Render/deliver — _export_pptx_async (THORNY — subprocess) (MID)
+# Render/deliver — _export_pptx_async (python-pptx builder, row f507034e) (MID)
 # ===========================================================================
-def _proc( returncode=0, out=b"", err=b"" ):
-    proc = MagicMock()
-    proc.returncode = returncode
-    proc.communicate = AsyncMock( return_value=( out, err ) )
-    return proc
+_BUILD_TARGET = "cosa.agents.presentation_generator.renderers.PptxDeckRenderer.build"
 
 
 class TestExportPptxAsync:
@@ -971,70 +1064,46 @@ class TestExportPptxAsync:
         _run( agent._export_pptx_async( _presentation() ) )
         assert "PPTX export disabled" in capsys.readouterr().out
 
-    def test_dry_run_skips( self, capsys, _silence_voice_io ):
-        agent = _agent( dry_run=True, debug=True )
+    def test_offline_skips( self, capsys, _silence_voice_io ):
+        agent = _agent( offline_mode=True, debug=True )
         agent.config.pptx_export_enabled = True
         _run( agent._export_pptx_async( _presentation() ) )
         assert "PPTX export skipped (dry run)" in capsys.readouterr().out
 
-    def test_no_marp_path_skips( self, _silence_voice_io ):
+    def test_no_presentation_skips( self, _silence_voice_io ):
+        # A None model has no text to build from — skip, do not crash.
         agent = _agent()
         agent.config.pptx_export_enabled = True
-        agent._presentation_state[ "marp_path" ] = None
-        _run( agent._export_pptx_async( _presentation() ) )
+        with patch( _BUILD_TARGET ) as build:
+            _run( agent._export_pptx_async( None ) )
+        build.assert_not_called()
+        assert "pptx_path" not in agent._presentation_state
 
-    def test_marp_path_missing_on_disk_skips( self, _silence_voice_io ):
-        agent = _agent()
-        agent.config.pptx_export_enabled = True
-        agent._presentation_state[ "marp_path" ] = "/p/x.md"
-        with patch( "os.path.exists", return_value=False ):
-            _run( agent._export_pptx_async( _presentation() ) )
-
-    def test_success( self, capsys, _silence_voice_io ):
+    def test_success_builds_and_records_path( self, capsys, _silence_voice_io ):
         agent = _agent( debug=True )
         agent.config.pptx_export_enabled = True
-        agent._presentation_state[ "marp_path" ] = "/p/x.md"
+        agent._load_theme_config = MagicMock( return_value={} )
         with patch( "os.path.exists", return_value=True ), \
              patch( "os.path.getsize", return_value=51200 ), \
              patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
-             patch.object( orch_mod.asyncio, "create_subprocess_exec",
-                           new=AsyncMock( return_value=_proc( returncode=0 ) ) ):
+             patch( _BUILD_TARGET ) as build:
             _run( agent._export_pptx_async( _presentation() ) )
+        build.assert_called_once()
+        # build( presentation, theme_config, visuals_dir, pptx_path )
+        args = build.call_args.args
+        assert args[ 3 ].endswith( ".pptx" )              # output path
+        assert args[ 2 ].endswith( "/visuals" )           # visuals dir
         assert agent._presentation_state[ "pptx_path" ].endswith( ".pptx" )
         assert "PPTX written" in capsys.readouterr().out
 
-    def test_nonzero_returncode_warns( self, _silence_voice_io ):
+    def test_build_exception_is_non_fatal( self, _silence_voice_io ):
         agent = _agent()
         agent.config.pptx_export_enabled = True
-        agent._presentation_state[ "marp_path" ] = "/p/x.md"
-        with patch( "os.path.exists", return_value=True ), \
-             patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
-             patch.object( orch_mod.asyncio, "create_subprocess_exec",
-                           new=AsyncMock( return_value=_proc( returncode=1, err=b"marp broke" ) ) ):
+        agent._load_theme_config = MagicMock( return_value={} )
+        with patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
+             patch( _BUILD_TARGET, side_effect=RuntimeError( "kaboom" ) ):
             _run( agent._export_pptx_async( _presentation() ) )
         assert "pptx_path" not in agent._presentation_state
-
-    def test_marp_cli_not_found( self, _silence_voice_io ):
-        agent = _agent()
-        agent.config.pptx_export_enabled = True
-        agent._presentation_state[ "marp_path" ] = "/p/x.md"
-        with patch( "os.path.exists", return_value=True ), \
-             patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
-             patch.object( orch_mod.asyncio, "create_subprocess_exec",
-                           new=AsyncMock( side_effect=FileNotFoundError() ) ):
-            _run( agent._export_pptx_async( _presentation() ) )
-        msgs = [ c.args[ 0 ] for c in _silence_voice_io[ "notify" ].await_args_list ]
-        assert any( "Marp CLI not installed" in m for m in msgs )
-
-    def test_generic_exception( self, _silence_voice_io ):
-        agent = _agent()
-        agent.config.pptx_export_enabled = True
-        agent._presentation_state[ "marp_path" ] = "/p/x.md"
-        with patch( "os.path.exists", return_value=True ), \
-             patch( "cosa.utils.util.get_project_root", return_value="/proj" ), \
-             patch.object( orch_mod.asyncio, "create_subprocess_exec",
-                           new=AsyncMock( side_effect=RuntimeError( "kaboom" ) ) ):
-            _run( agent._export_pptx_async( _presentation() ) )
         assert any( c.kwargs.get( "priority" ) == "medium"
                     for c in _silence_voice_io[ "notify" ].await_args_list )
 
@@ -1052,8 +1121,8 @@ class TestGate1NarrativeReview:
         agent = _agent( debug=True )
         assert _run( agent._gate_1_narrative_review( [] ) ) is False
 
-    def test_dry_run_auto_approve( self, _silence_voice_io ):
-        agent = _agent( dry_run=True )
+    def test_offline_auto_approve( self, _silence_voice_io ):
+        agent = _agent( offline_mode=True )
         assert _run( agent._gate_1_narrative_review( [ _section() ] ) ) is True
 
     def test_approve( self, _silence_voice_io ):
@@ -1103,8 +1172,8 @@ class TestGate2OutlineReview:
         # D6-STRICT: empty outline → do NOT auto-approve (was return True).
         assert _run( _agent( debug=True )._gate_2_outline_review( [] ) ) is False
 
-    def test_dry_run_auto_approve( self, _silence_voice_io ):
-        assert _run( _agent( dry_run=True )._gate_2_outline_review( [ _outline() ] ) ) is True
+    def test_offline_auto_approve( self, _silence_voice_io ):
+        assert _run( _agent( offline_mode=True )._gate_2_outline_review( [ _outline() ] ) ) is True
 
     def test_approve_clears_feedback( self, _silence_voice_io ):
         agent = _agent()
@@ -1156,8 +1225,8 @@ class TestGate3ContentReview:
         # D6-STRICT: empty slides → do NOT auto-approve (was return True).
         assert _run( _agent( debug=True )._gate_3_content_review( [] ) ) is False
 
-    def test_dry_run_auto_approve( self, _silence_voice_io ):
-        assert _run( _agent( dry_run=True )._gate_3_content_review( self._slides_with_visual() ) ) is True
+    def test_offline_auto_approve( self, _silence_voice_io ):
+        assert _run( _agent( offline_mode=True )._gate_3_content_review( self._slides_with_visual() ) ) is True
 
     def test_approve_clears_feedback( self, _silence_voice_io ):
         agent = _agent()
@@ -1205,8 +1274,8 @@ class TestGate3ContentReview:
 # /title=) + dict parse on header "Visual Review", mirroring Gates 1-3).
 # ===========================================================================
 class TestGate4RenderReview:
-    def test_dry_run_auto_approve( self, _silence_voice_io ):
-        assert _run( _agent( dry_run=True )._gate_4_render_review( _presentation() ) ) is True
+    def test_offline_auto_approve( self, _silence_voice_io ):
+        assert _run( _agent( offline_mode=True )._gate_4_render_review( _presentation() ) ) is True
 
     def test_no_visuals_auto_approve( self, _silence_voice_io ):
         agent = _agent( debug=True )
@@ -1252,13 +1321,15 @@ class TestPostFixContractGuards:
     # ---- BUG A (fixed): Gate 4 uses the real present_choices signature -----
     def test_gate4_uses_correct_present_choices_signature( self, _silence_voice_io ):
         """Gate 4 invokes present_choices with the REAL signature (questions,
-        timeout, title, abstract, job_id) WITHOUT raising — `reached` proves the
-        stub body ran (a wrong-kwarg call would TypeError before it)."""
+        timeout, title, abstract, job_id, response_default, priority) WITHOUT
+        raising — `reached` proves the stub body ran (a wrong-kwarg call would
+        TypeError before it). The fail-open kwargs (response_default/priority)
+        are part of that real signature as of 2026-08-03."""
         agent = _agent()
         agent._presentation_state[ "visuals_rendered" ] = 2
         reached = { "ok": False }
 
-        async def strict_present_choices( questions, timeout=120, title=None, abstract=None, job_id=None ):
+        async def strict_present_choices( questions, timeout=120, title=None, abstract=None, job_id=None, response_default=None, priority="medium" ):
             reached[ "ok" ] = True
             return { "answers": { "Visual Review": "Approve" } }
 
@@ -1274,7 +1345,7 @@ class TestPostFixContractGuards:
         agent = _agent()
         agent._presentation_state[ "visuals_rendered" ] = 2
 
-        async def strict_present_choices( questions, timeout=120, title=None, abstract=None, job_id=None ):
+        async def strict_present_choices( questions, timeout=120, title=None, abstract=None, job_id=None, response_default=None, priority="medium" ):
             return { "answers": { "Visual Review": "Cancel" } }
 
         with patch.object( orch_mod.voice_io, "present_choices", new=strict_present_choices ), \

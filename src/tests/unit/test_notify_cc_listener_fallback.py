@@ -25,6 +25,39 @@ import pytest
 # Test helpers
 # ---------------------------------------------------------------------------
 
+def _source_of( func ):
+    """
+    Return the source text of a module-level function located BY NAME in the
+    freshly-read source file — immune to a stale import-time ``co_firstlineno``.
+
+    Requires:
+        - func is a module-level (top-level) function or async function
+        - func.__name__ is unique among top-level defs in its file
+
+    Ensures:
+        - returns the exact source segment of the matching def (sans decorators)
+        - result reflects the file as it is on disk NOW, not import-time line nums
+
+    Root cause this guards (row a9e5566f): ``inspect.getsource`` indexes the live
+    file by the function's import-time ``co_firstlineno``. When a PARALLEL dev
+    session's uncommitted edit shifts lines above the function between import and
+    the call, ``getsource`` returns a stray fragment (e.g. a lone ``print`` line)
+    instead of the body. Re-finding the def by name in the freshly-parsed file
+    removes the dependency on ``co_firstlineno``, so the structural assertions
+    below no longer red intermittently under concurrent editing.
+    """
+    import ast, inspect, linecache
+    path = inspect.getsourcefile( func )
+    linecache.checkcache( path )
+    with open( path, "r" ) as fh:
+        source = fh.read()
+    tree = ast.parse( source )
+    for node in ast.walk( tree ):
+        if isinstance( node, ( ast.FunctionDef, ast.AsyncFunctionDef ) ) and node.name == func.__name__:
+            return ast.get_source_segment( source, node )
+    raise AssertionError( f"function {func.__name__} not found in {path}" )
+
+
 def _build_mocks( *, listener_active: bool, target_user_connected: bool ):
     """Build the mock dependencies for a notify_user invocation.
 
@@ -305,10 +338,11 @@ class TestLifecycleBroadcastsViaHelper:
         Real invocation will be exercised at integration-test tier when the
         v1.0.0 image rebuild lands.
         """
-        import inspect
         from cosa.rest.routers.notifications import submit_notification_response
 
-        src = inspect.getsource( submit_notification_response )
+        # By-name source lookup — immune to import-time co_firstlineno going stale
+        # under a parallel session's concurrent edit (row a9e5566f). See _source_of.
+        src = _source_of( submit_notification_response )
 
         assert "emit_to_user_or_listener_sync" in src, (
             "submit_notification_response must use the canonical dispatch "
@@ -348,10 +382,11 @@ class TestLifecycleBroadcastsViaHelper:
         tier (out of scope for this unit test layer because it requires
         wiring asyncio.Event + StreamingResponse + actual time advancement).
         """
-        import inspect
         from cosa.rest.routers.notifications import notify_user
 
-        src = inspect.getsource( notify_user )
+        # By-name source lookup — immune to import-time co_firstlineno going stale
+        # under a parallel session's concurrent edit (row a9e5566f). See _source_of.
+        src = _source_of( notify_user )
 
         # Must contain the helper-based notification_expired emission
         assert "emit_to_user_or_listener_sync" in src, (
@@ -379,3 +414,57 @@ class TestLifecycleBroadcastsViaHelper:
             f"notification_expired helper call must pass job_id for cross-user "
             f"listener delivery. Window:\n{window}"
         )
+
+
+class TestSourceLookupSurvivesConcurrentEdit:
+    """
+    Pins row a9e5566f: the structural signature checks above must NOT red
+    intermittently when a parallel dev session's uncommitted edit shifts line
+    numbers above the inspected function between import and the source read.
+
+    Mechanism reproduced firsthand (session c6b34684): inspect.getsource indexes
+    the live file by the function's import-time co_firstlineno; injecting lines
+    above the def via the linecache makes getsource return a stray fragment (the
+    `print(f"[NOTIFY] Cleaned up pending_responses...")` line the row describes).
+    _source_of re-finds the def by name in the freshly-read file, so it holds.
+    """
+
+    def test_getsource_reproduces_the_stray_fragment_under_line_shift( self ):
+        import inspect, linecache
+        from cosa.rest.routers.notifications import submit_notification_response as f
+
+        path = inspect.getsourcefile( f )
+        try:
+            # Simulate a concurrent session inserting lines ABOVE the function
+            # AFTER import — exactly the parallel-editing condition on this repo.
+            orig    = linecache.getlines( path )
+            shifted = [ f"# concurrent-edit inserted line {i}\n" for i in range( 26 ) ] + orig
+            linecache.cache[ path ] = ( len( "".join( shifted ) ), None, shifted, path )
+
+            legacy_head = inspect.getsource( f ).splitlines()[ 0 ].strip()
+            # The legacy getsource path is now corrupted — no longer the real def.
+            assert "async def submit_notification_response" not in legacy_head, (
+                f"expected getsource to be corrupted by the line shift, got: {legacy_head!r}"
+            )
+        finally:
+            linecache.checkcache( path )
+
+    def test_source_of_is_immune_to_line_shift( self ):
+        import inspect, linecache
+        from cosa.rest.routers.notifications import submit_notification_response as f
+
+        path = inspect.getsourcefile( f )
+        try:
+            orig    = linecache.getlines( path )
+            shifted = [ f"# concurrent-edit inserted line {i}\n" for i in range( 26 ) ] + orig
+            linecache.cache[ path ] = ( len( "".join( shifted ) ), None, shifted, path )
+
+            src = _source_of( f )
+            # _source_of re-reads + re-parses the real file, so it recovers the body
+            # regardless of the poisoned linecache / stale co_firstlineno.
+            assert "async def submit_notification_response" in src.splitlines()[ 0 ], (
+                f"_source_of must return the real def under line shift, got: {src.splitlines()[0]!r}"
+            )
+            assert "emit_to_user_or_listener_sync" in src
+        finally:
+            linecache.checkcache( path )

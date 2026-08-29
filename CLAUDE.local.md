@@ -28,7 +28,17 @@ the user to try the software — YOU must:
    - :8000 (test) — monopolize mode, one job at a time. A verified-IDLE
      :8000 (nothing running, nothing scheduled) is bounce-then-schedule
      SELF-AUTHORIZED (2026-06-06) — the user is NO LONGER a gate.
-     list-pending FIRST: empty queue → bounce + schedule + run now;
+     VERIFY IDLE with `PYTHONPATH=src python3 -m cosa.rest.venue_idle
+     --port 8000` and read its EXIT CODE (0 IDLE / 1 BUSY / 2 UNKNOWN) —
+     NOT pool-status, and NOT the queue listings alone. Row e6b8fe56,
+     measured 2026-08-25: monopolize_id only moves for a monopolize job
+     that has already STARTED — it names WHICH job holds the slot, an
+     identity question, and says nothing about queued or inline work.
+     The listings are user-filtered (403 on user_filter=* for this
+     account), so a peer's queued job is invisible in them. This rule
+     already told you to read the queue; the command below is the one
+     reliable way to do that. UNKNOWN IS NOT IDLE.
+     Then place it: empty queue → bounce + schedule + run now;
      something already scheduled → place yours AFTER it (never jump an
      expected-next run); something RUNNING → queue behind, no bounce.
      Only KILLING a live in-flight job needs the user's word. NEVER inject

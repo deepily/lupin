@@ -72,6 +72,64 @@ def main():
         emit_json( build_subagent_deny_response( gov_reason ) )
         sys.exit( 0 )
 
+    # Stash guard (bug 1ebc9be3): `git stash` writes to a SINGLE repo-global
+    # stack shared by every worktree and every live session, so a pop can apply
+    # another session's held work into your tree and — when the changesets do
+    # not overlap — do it silently, leaving you to commit their files under your
+    # name. Read-only `git stash list` / `show` stay allowed. DEFAULT-ON with a
+    # LUPIN_ALLOW_GIT_STASH escape hatch, and FAIL-OPEN by contract (the lib
+    # returns None on any error), so it cannot break a tool call.
+    from lupin_cli.claude_code.hooks.lib.stash_guard import (
+        stash_deny_reason, build_stash_deny_response,
+    )
+    stash_reason = stash_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
+    if stash_reason:
+        emit_json( build_stash_deny_response( stash_reason ) )
+        sys.exit( 0 )
+
+    # Kill guard (row cd332d2b): a seat's argv carries its whole spawn brief, so a
+    # fleet-wide `ps`/`pgrep` sweep grepping for a test path matches LIVE SESSIONS,
+    # not just tests. On 2026-08-21 one such sweep killed three seats in 612 ms —
+    # ten seconds after the CLI's own `pkill` shim had refused the same pattern by
+    # name, which the hand-rolled `ps | grep | kill` form walks straight past.
+    # Own-children sweeps (`pkill -P $$`) and kill-free listings stay allowed.
+    # DEFAULT-ON with a LUPIN_ALLOW_UNSCOPED_KILL escape hatch, and FAIL-OPEN by
+    # contract (the lib returns None on any error), so it cannot break a tool call.
+    from lupin_cli.claude_code.hooks.lib.kill_guard import (
+        kill_deny_reason, build_kill_deny_response,
+    )
+    kill_reason = kill_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
+    if kill_reason:
+        emit_json( build_kill_deny_response( kill_reason ) )
+        sys.exit( 0 )
+
+    # Commit scope guard (2026-08-25): `git commit` writes the WHOLE INDEX, not
+    # the files you staged. `git add <paths>` does not clear what is already
+    # there, so on a shared tree a peer's staged work commits under your name —
+    # measured that day, five files staged by name and four peer files committed.
+    # The check that failed was a PATH-SCOPED `git status`, which structurally
+    # cannot show the contamination it exists to catch. Ownership comes from
+    # `.claude-session.md` — this session's own section plus the sanctioned
+    # auto-includes; anything else staged is named in the refusal along with the
+    # peer session that claims it. Re-run with LUPIN_COMMIT_SCOPE_ACK=1 for the
+    # deliberate case (a manager landing a peer's reviewed work is legitimate).
+    # A CLEAN single-seat index is never refused — the guard fires
+    # only on a staged path this session's `.claude-session.md` section does not
+    # claim, or on an oversized file. FAIL-OPEN by contract (the lib returns None
+    # on any error, on an unreadable index, and on a session with NO manifest
+    # section), so it cannot break a tool call or wedge a seat that never adopted
+    # the manifest discipline.
+    from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
+        evaluate_commit_scope, build_commit_scope_deny_response,
+        build_commit_scope_notice_response,
+    )
+    commit_verdict = evaluate_commit_scope(
+        payload.get( "tool_name", "" ), payload.get( "tool_input", {} ), session_id=session_id
+    )
+    if commit_verdict.deny_reason:
+        emit_json( build_commit_scope_deny_response( commit_verdict.deny_reason ) )
+        sys.exit( 0 )
+
     # Drain voice buffer, acknowledge, and inject as additionalContext
     # No tool TTS — PostToolUse handles announcements
     messages  = drain_and_acknowledge( session_id )
@@ -79,6 +137,11 @@ def main():
 
     if voice_ctx:
         emit_json( build_voice_deny_response( voice_ctx, messages ) )
+    elif commit_verdict.notice:
+        # ALLOW, and say what went unreviewed. Only when nothing else is claiming
+        # additionalContext — a voice deny blocks the commit anyway, and the seat's
+        # retry runs this check again with the buffer drained.
+        emit_json( build_commit_scope_notice_response( commit_verdict.notice ) )
     else:
         emit_json( {} )
 

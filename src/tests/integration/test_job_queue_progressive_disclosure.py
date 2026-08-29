@@ -31,7 +31,38 @@ def unique_email( prefix ):
     return f"{prefix}_{uuid.uuid4().hex[:8]}@test.com"
 
 
-@pytest.mark.xfail( reason="Jobs require server-side queue processing — timing-dependent, may not complete within test window" )
+# UN-SKIPPED 2026-08-21 (store row bc2eab45). Skipped for one shift, between /api/push
+# becoming a 410 tombstone and the queued path existing: every test here submits and
+# then asserts the job is COUNTED IN A QUEUE, and in between nothing could put it there.
+# Submission now goes through /api/v2/ask on the QueuedExecutor, which pushes onto the
+# todo queue and answers `waiting` — so the counts are real again. The expected status
+# is "waiting", not "queued": that is the flow's word for the same hand-off.
+# The four tests below — and ONLY those four — call `_wait_for_jobs_in_done_queue`.
+# That wait cannot return inside a monopolize test-suite run: the suite job is ITSELF
+# the monopolizer, so nothing drains the todo queue until the suite ends. Measured
+# 2026-08-21 during ts-6eaebff8 — `monopolize_id` was the suite job, run depth 1, todo
+# depth 8 and climbing, and the two v2 tests failed in the same run with "still in the
+# 'todo' queue after 180s". It is STRUCTURAL, not slow: a longer timeout cannot fix it.
+#
+# This replaces a single class-level xfail that covered all nine tests. That blanket
+# meant the class could not go red whatever it did — the four failures were absorbed
+# and the other five reported as xpasses — so a gate rule reading "are these still
+# skipped?" was satisfied on its letter while blind to its intent.
+#
+# `strict=True` on purpose: if the structure ever changes so these CAN observe a
+# completion, they XPASS and the run goes RED, which forces the mark to be removed.
+# A mark that cannot expire is the same vacuity in a smaller box.
+NEEDS_A_DRAINED_QUEUE = pytest.mark.xfail(
+    strict = True,
+    reason = "row ce29cd20 — done-queue drain unobservable under monopolize on :8000: "
+             "this test waits for a job to reach the DONE queue, and inside a monopolize "
+             "test-suite run the suite job is itself the monopolizer, so the todo queue "
+             "never drains. Structural, not timing-dependent — a longer timeout cannot "
+             "fix it, and strict=True means an unexpected pass goes RED so the mark "
+             "cannot outlive the mechanism it names."
+)
+
+
 class TestJobQueueProgressiveDisclosure:
     """Integration tests for job queue progressive disclosure UI."""
 
@@ -69,7 +100,11 @@ class TestJobQueueProgressiveDisclosure:
 
     def _submit_job( self, token, question, websocket_id ):
         """
-        Submit a job to the queue.
+        Submit a job to the queue through the one surviving front door.
+
+        `/api/push` was retired 2026-08-21 (410, naming /api/v2/ask). Same body shape,
+        different answer: push said `status: "queued"`, the flow says `status: "waiting"`
+        for the same hand-off to the queue.
 
         Args:
             token: User access token
@@ -80,7 +115,7 @@ class TestJobQueueProgressiveDisclosure:
             Response object
         """
         return requests.post(
-            f"{BASE_URL}/api/push",
+            f"{BASE_URL}/api/v2/ask",
             json={
                 "question": question,
                 "websocket_id": websocket_id
@@ -181,12 +216,13 @@ class TestJobQueueProgressiveDisclosure:
             # Small delay to avoid overwhelming the server
             time.sleep( 0.05 )
 
-        # Verify all submissions were accepted
+        # Verify all submissions were accepted and handed to the queue
         for i, response in enumerate( responses ):
             assert response.status_code == 200, f"Job {i} submission failed: {response.text}"
             data = response.json()
-            assert data[ "status" ] == "queued"
-            print( f"Job {i}: {data[ 'result' ]}" )
+            assert data[ "status" ] == "waiting", \
+                f"Job {i} was not handed to the queue: {data[ 'status' ]} / {data[ 'route_reason' ]}"
+            print( f"Job {i}: {data[ 'job_id' ]}" )
 
         # Query queue counts immediately
         counts = self._get_all_queue_counts( token )
@@ -228,6 +264,7 @@ class TestJobQueueProgressiveDisclosure:
         # Verify we have at least some jobs tracked
         assert counts[ "total" ] >= 1, "Expected at least 1 job tracked"
 
+    @NEEDS_A_DRAINED_QUEUE
     def test_job_transitions_todo_to_done( self, clean_test_db ):
         """
         Submit simple math jobs and verify they complete.
@@ -277,6 +314,7 @@ class TestJobQueueProgressiveDisclosure:
             assert job[ "agent_type" ] == "MathAgent", \
                 f"Expected MathAgent, got {job[ 'agent_type' ]}"
 
+    @NEEDS_A_DRAINED_QUEUE
     def test_job_interactions_endpoint( self, clean_test_db ):
         """
         Verify the /api/get-job-interactions/{job_id} endpoint works.
@@ -424,6 +462,7 @@ class TestJobQueueProgressiveDisclosure:
         print( f"Queue counts after concurrent submissions: {counts}" )
         assert counts[ "total" ] >= 1, "Expected at least 1 job in queues"
 
+    @NEEDS_A_DRAINED_QUEUE
     def test_done_queue_metadata_includes_session_fields( self, clean_test_db ):
         """
         Verify done queue metadata includes new Session 57 fields.
@@ -464,6 +503,7 @@ class TestJobQueueProgressiveDisclosure:
         print( f"  agent_type: {job[ 'agent_type' ]}" )
         print( f"  has_interactions: {job[ 'has_interactions' ]}" )
 
+    @NEEDS_A_DRAINED_QUEUE
     def test_job_interactions_unauthorized_access( self, clean_test_db ):
         """
         Verify users cannot access other users' job interactions.

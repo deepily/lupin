@@ -330,3 +330,144 @@ class TestExecuteDryRun:
         with patch( "asyncio.sleep", AsyncMock() ):
             _run( job._execute_dry_run( voice_io, cosa_interface ) )
         assert "DRY RUN MODE" not in capsys.readouterr().out
+
+
+# ----------------------------------------------------------------------------
+# Real-path completion abstract (bug 2da4095a)
+# ----------------------------------------------------------------------------
+class TestRealPathCompletionAbstract:
+    """
+    bug 2da4095a: the real (non-dry-run) path must BUILD a completion abstract with
+    per-language Play-Here links and store it in artifacts["abstract"] so the promoted
+    running→done card renders links WITHOUT a page reload. Before the fix the real
+    path returned a bare "Pipeline complete!" string and stored no abstract, so
+    running_fifo_queue._transition_to_done emitted abstract=None → blank done card.
+    Sibling of 9b481811 but deeper — a missing BUILD, not just a missing store.
+    """
+
+    def _two_lang_result( self ):
+        return ChainedResult(
+            research_path     = "/proj/io/dr/report.md",
+            research_abstract = "abs",
+            audio_path        = "/proj/io/pod/ep-en.mp3",
+            script_path       = "/proj/io/pod/ep-en.md",
+            dr_cost           = 1.0,
+            pg_cost           = 0.5,
+            total_cost        = 1.5,
+            state             = PipelineState.COMPLETED,
+            pg_artifacts      = {
+                "audio_paths_by_language"  : {
+                    "en"    : "/proj/io/pod/ep-en.mp3",
+                    "es-MX" : "/proj/io/pod/ep-es-MX.mp3",
+                },
+                "script_paths_by_language" : {
+                    "en"    : "/proj/io/pod/ep-en.md",
+                    "es-MX" : "/proj/io/pod/ep-es-MX.md",
+                },
+            },
+        )
+
+    def test_real_path_stores_both_language_abstract( self ):
+        """en + es-MX → abstract carries a Play Here per language, and is stored."""
+        job   = _job( target_languages=[ "en", "es-MX" ] )
+        graph = _ExecGraph( self._two_lang_result() )
+        with graph.patcher(), patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+
+        abstract = job.artifacts.get( "abstract" )
+        assert abstract, "real-path completion did not store artifacts['abstract'] (bug 2da4095a)"
+        assert "ep-en.mp3"    in abstract
+        assert "ep-es-MX.mp3" in abstract
+        assert abstract.count( "▶️ Play Here" ) == 2, (
+            "abstract must carry a Play Here per language — losing half the content "
+            "silently is exactly bug 00e6aba1's failure mode"
+        )
+        assert "report.md" in abstract, "research report link missing from abstract"
+        # the stored abstract is the SAME string the completion notify received
+        completion = [ c for c in graph.voice_io.notify.await_args_list if c.kwargs.get( "abstract" ) ]
+        assert len( completion ) == 1
+        assert completion[ 0 ].kwargs[ "abstract" ] == abstract
+
+    def test_real_path_single_language_fallback( self ):
+        """No per-language maps → fall back to the single primary audio/script path."""
+        result = ChainedResult(
+            research_path = "/proj/io/dr/r.md",
+            audio_path    = "/proj/io/pod/only-en.mp3",
+            script_path   = "/proj/io/pod/only-en.md",
+            total_cost    = 0.9,
+            state         = PipelineState.COMPLETED,
+        )
+        job   = _job( target_languages=[ "en" ] )
+        graph = _ExecGraph( result )
+        with graph.patcher(), patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+
+        abstract = job.artifacts.get( "abstract" )
+        assert abstract
+        assert abstract.count( "▶️ Play Here" ) == 1
+        assert "only-en.mp3" in abstract
+
+    def test_real_path_edge_arcs_and_notify_failure( self, capsys ):
+        """
+        Exercise the abstract-builder edge arcs in one pass:
+          - a relative "io/"-prefixed path,
+          - None-valued language entries (script/research missing),
+          - a language present in the maps but NOT in target_languages (appended),
+          - a language whose links are all empty (line skipped),
+          - research_path absent (no research line),
+          - the completion notify raising (caught + logged, run still completes).
+        """
+        result = ChainedResult(
+            research_path = None,                        # → no research line
+            audio_path    = "/proj/io/pod/primary.mp3",  # unused: per-lang maps present
+            script_path   = None,
+            total_cost    = 0.4,
+            state         = PipelineState.COMPLETED,
+            pg_artifacts  = {
+                "audio_paths_by_language"  : {
+                    "en"    : "io/pod/en.mp3",   # already-relative path
+                    "es-MX" : None,              # extra lang, empty → skipped
+                    "fr"    : None,              # extra lang, empty → skipped
+                },
+                "script_paths_by_language" : { "en": None },
+            },
+        )
+        job = _job( target_languages=[ "en" ] )
+        graph = _ExecGraph( result )
+
+        async def _raise_on_completion( *a, **k ):
+            if k.get( "abstract" ): raise RuntimeError( "notify boom" )
+        graph.voice_io.notify = AsyncMock( side_effect=_raise_on_completion )
+
+        with graph.patcher(), patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            out = _run( job._execute() )
+
+        abstract = job.artifacts.get( "abstract" )
+        assert abstract, "abstract must still be stored even when the notify fails"
+        assert "pod/en.mp3"      in abstract           # "io/" prefix stripped
+        assert abstract.count( "▶️ Play Here" ) == 1   # only en had audio
+        assert "Research Report" not in abstract       # research_path was None
+        assert "Pipeline complete!" in out             # run completed despite notify raise
+        assert "completion notify failed" in capsys.readouterr().out
+
+
+class TestLanguageLabelSingleSource:
+    """
+    Row 81040071: the DRP job once hand-copied podcast_generator's LANGUAGE_NAMES
+    into a module-level _LANGUAGE_NAMES — two label maps that WILL drift and
+    mislabel a language in front of an audience. The fix moved the map to a leaf
+    module both consumers import. These identity assertions BITE the moment anyone
+    re-inlines a copy: a fresh dict literal breaks `is` even if the values match.
+    """
+
+    def test_drp_job_uses_the_canonical_leaf_map( self ):
+        from cosa.agents.language_names import LANGUAGE_NAMES
+        from cosa.agents.deep_research_to_podcast import job as drp_job
+        assert drp_job._LANGUAGE_NAMES is LANGUAGE_NAMES, \
+            "DRP job must import the single-source map, not re-inline it (row 81040071)"
+
+    def test_podcast_config_reexports_the_canonical_leaf_map( self ):
+        from cosa.agents.language_names import LANGUAGE_NAMES
+        from cosa.agents.podcast_generator.config import LANGUAGE_NAMES as cfg_names
+        assert cfg_names is LANGUAGE_NAMES, \
+            "podcast_generator.config must re-export the single-source map (row 81040071)"

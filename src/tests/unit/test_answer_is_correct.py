@@ -2,20 +2,15 @@
 Unit tests for SolutionSnapshot.answer_is_correct tri-state field.
 
 Tests the answer_is_correct field across SolutionSnapshot construction,
-for_current_user preservation, get_copy preservation, and round-trip
-serialization/deserialization through BOTH storage backends.
+for_current_user preservation, get_copy preservation, and the Postgres
+marshal round-trip.
 
-Backend note (2026-07-26): `vector store backend = postgres` is LIVE in
-[Lupin: Baseline] with no per-block override, so EVERY venue — host and
-container alike — routes cosa/memory/* through Postgres. The LanceDB
-round-trip class below therefore PINS the flag; without the pin its
-`db_path=tmpdir` is inert and its four tests upsert into the real shared
-store. Same shape as bug cfcbb703 Family B, which conftest.py remedies for
-two other modules via an allowlist this module was never added to.
+Backend note: there is one storage backend. The round-trip class that pinned
+the flag to exercise the second one went with that backend's manager on
+2026-08-17 (row 8098838f) — it was testing deleted code.
 """
 
 import json
-import tempfile
 import pytest
 from unittest.mock import patch, MagicMock
 from collections import OrderedDict
@@ -101,97 +96,14 @@ class TestAnswerIsCorrectField:
         assert copy.answer_is_correct is None
 
 
-# ─── LanceDB serialization round-trip tests ─────────────────────────────────
-
-class TestAnswerIsCorrectLanceDB:
-    """Test answer_is_correct round-trips through LanceDB serialization."""
-
-    @pytest.fixture
-    def manager( self ):
-        """
-        Create a SolutionSnapshotManager with a temporary database, on a PINNED
-        LanceDB backend.
-
-        Why the pin: SolutionSnapshotManager, CanonicalSynonymsTable and
-        QuestionEmbeddingsTable each call is_postgres_backend() independently and
-        read the AMBIENT flag — the `db_path` handed in here is never consulted for
-        that decision. With the live `postgres` flag, initialize() short-circuits to
-        _pg_initialize(), the tmpdir is discarded, and save_snapshot() upserts into
-        the shared store. Patching get_vector_store_backend at its single definition
-        site covers all three (is_postgres_backend resolves it from that module's
-        globals at call time), so the whole fixture body runs on LanceDB.
-
-        Ensures:
-            - yields an initialized manager whose _use_postgres is False
-            - all storage stays inside the per-test temporary directory
-        """
-        from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
-        from cosa.rest.db.repositories import vector_store_backend
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            config = {
-                "storage backend" : "local",
-                "db_path"         : f"{tmp_dir}/test.lancedb",
-                "table_name"      : "test_snapshots"
-            }
-            with patch.object( vector_store_backend, "get_vector_store_backend",
-                               return_value=vector_store_backend.LANCEDB ):
-                mgr = SolutionSnapshotManager( config, debug=False )
-                # Control: the pin must actually have taken. If this ever fires, the
-                # tests below are silently writing to the shared Postgres store.
-                assert mgr._use_postgres is False, "backend pin failed — fixture would hit shared Postgres"
-                mgr.initialize()
-                yield mgr
-
-    def _round_trip( self, manager, snapshot ):
-        """Save a snapshot and retrieve it by question."""
-        manager.save_snapshot( snapshot )
-        results = manager.get_snapshots_by_question( snapshot.question )
-        assert results and len( results ) > 0, "Expected at least one result from round-trip"
-        _score, loaded = results[ 0 ]
-        return loaded
-
-    def test_round_trip_none( self, manager ):
-        """LanceDB round-trip preserves answer_is_correct=None."""
-        snap = _make_minimal_snapshot( answer_is_correct=None, id_hash="rt_none_001" )
-        loaded = self._round_trip( manager, snap )
-        assert loaded.answer_is_correct is None
-
-    def test_round_trip_true( self, manager ):
-        """LanceDB round-trip preserves answer_is_correct=True."""
-        snap = _make_minimal_snapshot( answer_is_correct=True, id_hash="rt_true_001" )
-        loaded = self._round_trip( manager, snap )
-        assert loaded.answer_is_correct is True
-
-    def test_round_trip_false( self, manager ):
-        """LanceDB round-trip preserves answer_is_correct=False."""
-        snap = _make_minimal_snapshot( answer_is_correct=False, id_hash="rt_false_001" )
-        loaded = self._round_trip( manager, snap )
-        assert loaded.answer_is_correct is False
-
-    def test_update_none_to_true( self, manager ):
-        """Saving a snapshot with updated answer_is_correct persists the change."""
-        snap = _make_minimal_snapshot( answer_is_correct=None, id_hash="update_001" )
-        manager.save_snapshot( snap )
-
-        # Update the field and re-save
-        snap.answer_is_correct = True
-        manager.save_snapshot( snap )
-
-        results = manager.get_snapshots_by_question( snap.question )
-        assert results and len( results ) > 0
-        _score, loaded = results[ 0 ]
-        assert loaded.answer_is_correct is True
-
-
 # ─── Postgres marshal round-trip tests ──────────────────────────────────────
 
 class TestAnswerIsCorrectPostgresMarshal:
     """
     Test answer_is_correct survives the Postgres marshal pair, with NO database.
 
-    Postgres is the live backend, so this — not the LanceDB class above — is the
-    path production actually takes. The pair under test is the whole read side:
+    Postgres is the only backend, so this is the path production takes. The pair
+    under test is the whole read side:
     _pg_record_from_entity (ORM row -> record dict) then _record_to_snapshot
     (record dict -> SolutionSnapshot). _pg_get_snapshots_by_question and
     _pg_get_snapshot_by_id both funnel through exactly this pair, so covering it
@@ -200,15 +112,15 @@ class TestAnswerIsCorrectPostgresMarshal:
 
     def _bare_manager( self ):
         """
-        Build a SolutionSnapshotManager with NO __init__ side effects.
+        Build a PostgresSolutionManager with NO __init__ side effects.
 
         __init__ constructs a QuestionEmbeddingsTable and reads config; none of that
         is needed to exercise the marshal helpers, and all of it would touch storage.
         Only _embedding_dim is consumed by _snapshot_to_record, so supply just that.
         """
-        from cosa.memory.lancedb_solution_manager import SolutionSnapshotManager
+        from cosa.memory.postgres_solution_manager import PostgresSolutionManager
 
-        mgr                 = SolutionSnapshotManager.__new__( SolutionSnapshotManager )
+        mgr                 = PostgresSolutionManager.__new__( PostgresSolutionManager )
         mgr._embedding_dim  = 768
         return mgr
 
@@ -221,7 +133,7 @@ class TestAnswerIsCorrectPostgresMarshal:
         columns the builder does not populate read back as None, as they would.
         """
         from types import SimpleNamespace
-        from cosa.memory.lancedb_solution_manager import _SNAPSHOT_RECORD_COLUMNS
+        from cosa.memory.postgres_solution_manager import _SNAPSHOT_RECORD_COLUMNS
 
         record = manager._snapshot_to_record( snapshot )
         return SimpleNamespace( **{ column: record.get( column ) for column in _SNAPSHOT_RECORD_COLUMNS } )
@@ -235,7 +147,7 @@ class TestAnswerIsCorrectPostgresMarshal:
 
     def test_column_is_marshalled( self ):
         """answer_is_correct is in the column list both marshal helpers iterate."""
-        from cosa.memory.lancedb_solution_manager import _SNAPSHOT_RECORD_COLUMNS
+        from cosa.memory.postgres_solution_manager import _SNAPSHOT_RECORD_COLUMNS
         assert "answer_is_correct" in _SNAPSHOT_RECORD_COLUMNS
 
     def test_column_is_text_not_boolean( self ):

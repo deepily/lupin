@@ -213,10 +213,21 @@ else:
         echo -e "${GREEN}Running fast iteration training (1% sample)...${NC}"
         echo ""
 
-        # Check if training data exists
-        if [ ! -f "$TEST_TRAIN_PATH/voice-commands-xml-train.jsonl" ]; then
+        # Freshness guard (row 11390b57). Asking whether the dataset EXISTS let a
+        # corpus edit train on the previous corpus, silently. This asks whether it
+        # is CURRENT, and REFUSES on mismatch rather than rebuilding — a run that
+        # quietly rebuilds can quietly rebuild from the wrong side.
+        #   0 = corpus matches, proceed   1 = refuse   2 = no artifact yet, generate
+        set +e
+        python -m cosa.training.corpus_fingerprint verify
+        FRESHNESS=$?
+        set -e
+        if [ $FRESHNESS -eq 2 ]; then
             echo -e "${YELLOW}Training data not found. Generating...${NC}"
             $0 generate
+        elif [ $FRESHNESS -ne 0 ]; then
+            echo -e "${RED}Refusing to train. See the mismatch above.${NC}"
+            exit 1
         fi
 
         python -m cosa.training.peft_trainer \
@@ -238,10 +249,21 @@ else:
         echo "Warning: This may take 3-4 hours depending on hardware."
         echo ""
 
-        # Check if training data exists
-        if [ ! -f "$TEST_TRAIN_PATH/voice-commands-xml-train.jsonl" ]; then
+        # Freshness guard (row 11390b57). Asking whether the dataset EXISTS let a
+        # corpus edit train on the previous corpus, silently. This asks whether it
+        # is CURRENT, and REFUSES on mismatch rather than rebuilding — a run that
+        # quietly rebuilds can quietly rebuild from the wrong side.
+        #   0 = corpus matches, proceed   1 = refuse   2 = no artifact yet, generate
+        set +e
+        python -m cosa.training.corpus_fingerprint verify
+        FRESHNESS=$?
+        set -e
+        if [ $FRESHNESS -eq 2 ]; then
             echo -e "${YELLOW}Training data not found. Generating...${NC}"
             $0 generate
+        elif [ $FRESHNESS -ne 0 ]; then
+            echo -e "${RED}Refusing to train. See the mismatch above.${NC}"
+            exit 1
         fi
 
         python -m cosa.training.peft_trainer \

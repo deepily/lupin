@@ -11,8 +11,15 @@ import cosa.utils.util as du
 from cosa.agents.llm_client import LlmClient
 from cosa.agents.chat_client import ChatClient
 from cosa.agents.completion_client import CompletionClient
+from cosa.agents.gemini_vertex_client import GeminiVertexClient
 from cosa.agents.base_llm_client import LlmClientInterface
 from cosa.config.configuration_manager import ConfigurationManager
+
+# Vertex regions known to 404 for the models we run (measured 2026-08-16:
+# us-central1 returns 404 NOT_FOUND for gemini-3.1-flash-lite; "global" serves it).
+# The vertex:// parse arm rejects these before construction so a known-bad descriptor
+# fails loud at get_client() time, not with a 404 at first call (bug 1b79bef5).
+KNOWN_BAD_VERTEX_REGIONS = ( "us-central1", )
 
 class LlmClientFactory:
     """
@@ -90,9 +97,10 @@ class LlmClientFactory:
         self.debug        = debug
         self.verbose      = verbose
 
-        # Load vendor config from INI (with hardcoded fallbacks)
-        self.VENDOR_URLS          = self._load_vendor_urls()
-        self.VENDOR_API_ENV_VARS  = self._load_vendor_env_vars()
+        # Load vendor config from INI (with hardcoded fallbacks). The API-key env-var
+        # NAME is a provider constant (e.g. pydantic-ai hardcodes GEMINI_API_KEY), not a
+        # per-deployment axis like the URL — so it stays in VENDOR_CONFIG, not the INI.
+        self.VENDOR_URLS           = self._load_vendor_urls()
         self.CLIENT_DEFAULT_PARAMS = self._load_client_defaults()
     
     def get_client( self, model_config_key: str, debug: bool=None, verbose: bool=None ) -> LlmClientInterface:
@@ -203,10 +211,53 @@ class LlmClientFactory:
                         api_key="EMPTY",
                         base_url=base_url,
                         model_tokenizer_map=model_tokenizer_map,
+                        set_openai_env=True,   # openai:-prefixed local vLLM genuinely needs OPENAI_BASE_URL/KEY
                         debug=self.debug,
                         verbose=self.verbose,
                         **model_params
                     )
+            elif model_spec.startswith( "vertex://" ):
+                # row 3405f0b2 — a CONFIG-KEY spec whose value is a Vertex descriptor
+                # must build the Vertex genai client, NOT fall through to the ChatClient
+                # else below. Without this arm, get_client( "dm_tutor/flash_lite" ) takes
+                # the exists->config path and silently returns a ChatClient, so the study
+                # would run on the wrong client and never say so. Mirrors the vllm://
+                # prefix scheme — the ONLY route to GeminiVertexClient (the dead
+                # google-genai vendor entry + client_type=="genai" branch were removed,
+                # bug 1b6c0b1f).
+                #
+                # Format (Rachel-ratified): vertex://<location>@<model_id>, e.g.
+                # vertex://global@gemini-3.1-flash-lite. The LOCATION is REQUIRED — the
+                # paired study must record where each arm ran, so a spec that omits it
+                # fails LOUD here rather than defaulting silently. `project` still resolves
+                # fail-loud inside GeminiVertexClient (cosa.utils.gcp_project).
+                body = model_spec[ len( "vertex://" ): ]
+                if "@" not in body:
+                    raise ValueError(
+                        f"vertex:// spec must be 'vertex://<location>@<model_id>' "
+                        f"(location required so the study records where the arm ran); got '{model_spec}'"
+                    )
+                location, model_name = body.split( "@", 1 )
+                # Bug 1b79bef5: the "@" check above proves the shape, not the region.
+                # A known-bad region (us-central1) would build a client that 404s at
+                # first call; reject it here so the failure is loud at construction.
+                if location in KNOWN_BAD_VERTEX_REGIONS:
+                    raise ValueError(
+                        f"vertex:// location '{location}' is known-bad — it returns 404 "
+                        f"for this model (measured 2026-08-16); use 'global'. Spec: '{model_spec}'"
+                    )
+                if self.debug: print( f"Creating GeminiVertexClient for vertex:// spec: location={location}, model={model_name}" )
+                # Forward the spec-key _params (temperature, max_tokens, ...) so the
+                # configured knobs reach generate_content — bug 3067adf6. Without this
+                # the Flash-Lite arm ran at the SDK default while the phi_4 arm ran at
+                # temperature 0.0, confounding the paired comparison.
+                return GeminiVertexClient(
+                    model_name        = model_name,
+                    location          = location,
+                    generation_params = model_params,
+                    debug             = self.debug,
+                    verbose           = self.verbose,
+                )
             else:
                 # Assume chat-based model (OpenAI, Groq, Google, etc.)
                 return ChatClient(
@@ -241,32 +292,6 @@ class LlmClientFactory:
             )
         return result
 
-    def _load_vendor_env_vars( self ) -> dict[ str, Optional[ str ] ]:
-        """
-        Load vendor API key environment variable names from ConfigManager.
-
-        Ensures:
-            - Returns dict mapping vendor name to env var name (or None for local)
-        """
-        defaults = {
-            "openai"    : "OPENAI_API_KEY",
-            "groq"      : "GROQ_API_KEY",
-            "anthropic" : "ANTHROPIC_API_KEY",
-            "google-gla": "GOOGLE_API_KEY",
-            "vllm"      : None,
-            "deepily"   : None,
-            "mistralai" : "MISTRAL_API_KEY",
-        }
-        result = {}
-        for vendor, default_var in defaults.items():
-            if default_var is None:
-                result[ vendor ] = None
-            else:
-                result[ vendor ] = self.config_mgr.get(
-                    f"llm vendor env var {vendor}", default=default_var, silent=True
-                )
-        return result
-
     def _load_client_defaults( self ) -> dict[ str, Any ]:
         """
         Load default client parameters from ConfigManager.
@@ -281,9 +306,13 @@ class LlmClientFactory:
     # Comprehensive vendor configuration
     VENDOR_CONFIG: dict[str, dict[str, Any]] = {
         "openai"    : {
-            "env_var"     : "OPENAI_API_KEY",
-            "key_name"    : "openai",
-            "client_type" : "chat",
+            "env_var"       : "OPENAI_API_KEY",
+            "key_name"      : "openai",
+            "client_type"   : "chat",
+            "set_openai_env": True,   # OpenAI IS the OpenAI protocol — must reclaim OPENAI_BASE_URL
+            # OPENAI_API_KEY doubles as the shared compat target other vendors write, so an
+            # in-process value cannot be trusted as openai's OWN key — always resolve fresh.
+            "env_var_is_shared_compat_target": True,
         },
         "groq"      : {
             "env_var"       : "GROQ_API_KEY",
@@ -312,7 +341,7 @@ class LlmClientFactory:
         },
         "deepily"   : {
             "client_type": "completion",  # Default to completion for local models
-        }
+        },
     }
     
     class AgentWrapper:
@@ -469,19 +498,35 @@ class LlmClientFactory:
         # Get base URL from vendor URLs map
         base_url = self.VENDOR_URLS.get( vendor_key )
         
-        # Handle API keys if needed
+        # Handle API keys if needed. The env-var NAME is a provider constant, so it lives
+        # in VENDOR_CONFIG (authoritative) — not an INI knob that could only ever be set
+        # wrong (bug 7f361ccf, fix b).
         if "env_var" in config:
             env_var  = config[ "env_var" ]
             key_name = config[ "key_name" ]
-            
-            # Get API key from environment or utility function
-            if env_var in os.environ:
+
+            # Get API key from environment or utility function. The env-first shortcut is
+            # safe ONLY for a vendor whose env var nobody else writes. openai's env var
+            # (OPENAI_API_KEY) doubles as the shared compat target that set_openai_env
+            # vendors (groq/mistralai) write process-global, so an in-process value there
+            # may be another vendor's leaked key — always resolve openai's key fresh.
+            trust_env = not config.get( "env_var_is_shared_compat_target", False )
+            if trust_env and env_var in os.environ:
                 if debug: print( f"Using {env_var} from environment" )
                 api_key = os.environ[env_var]
             else:
-                if debug: print( f"{env_var} not found in environment, using du.get_api_key()..." )
+                if debug: print( f"{env_var} not read from environment, using du.get_api_key()..." )
                 api_key = du.get_api_key( key_name )
-                
+
+            # du.get_api_key() returns None when the key file is missing; assigning None to
+            # os.environ raises an opaque TypeError. Fail with a readable auth error instead.
+            if api_key is None:
+                raise ValueError(
+                    f"No API key for vendor '{vendor_key}': environment variable '{env_var}' "
+                    f"is unset and du.get_api_key( '{key_name}' ) returned None "
+                    f"(missing key file src/conf/keys/{key_name})"
+                )
+
             # Set environment variable
             os.environ[env_var] = api_key
             
@@ -493,7 +538,7 @@ class LlmClientFactory:
                 
         # Create client based on vendor configuration
         client_type = config.get( "client_type", "chat" )
-        
+
         if client_type == "completion":
             # For vendors using completion API
             if debug: print( f"Creating CompletionClient with base_url={base_url}, model={model_name}" )
@@ -519,19 +564,32 @@ class LlmClientFactory:
                 verbose=verbose,
                 **self.CLIENT_DEFAULT_PARAMS
             )
-        else:
+        elif client_type == "chat":
             # For vendors using chat API
             full_model_string = f"{vendor}:{model_name}"
-            
+
             if debug: print( f"Creating ChatClient with model string: {full_model_string}" )
-            
+
             return ChatClient(
                 model_name=full_model_string,
                 api_key=api_key,
                 base_url=base_url,
+                set_openai_env=config.get( "set_openai_env", False ),
                 debug=debug,
                 verbose=verbose,
                 **self.CLIENT_DEFAULT_PARAMS
+            )
+        else:
+            # An OMITTED client_type defaulted to "chat" above (config.get default), so
+            # reaching here means the vendor entry set an EXPLICIT unknown value. Fail
+            # loud rather than silently building a ChatClient — a typo'd or future-unwired
+            # client_type must not quietly produce a working-looking wrong client (row
+            # 3405f0b2 adjacent finding).
+            raise ValueError(
+                f"Unknown client_type '{client_type}' for vendor '{vendor_key}' — expected "
+                f"one of 'chat', 'completion'. An omitted client_type defaults to "
+                f"'chat'; an explicit unknown value fails loud instead of silently building "
+                f"a ChatClient."
             )
 
 

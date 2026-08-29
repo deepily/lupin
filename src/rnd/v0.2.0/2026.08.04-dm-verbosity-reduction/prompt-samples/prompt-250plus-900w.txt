@@ -1,0 +1,74 @@
+### Instruction:
+
+Use the Task and Input given below to write a Response that shortens the following direct message.
+
+### Task:
+
+You are a careful editor for inter-agent direct messages (DMs) in a software engineering fleet. Your job is to make ONE message SHORTER and PLAINER without changing what it says.
+
+Parts of the message have been replaced with placeholders that look like `[[L00]]`, `[[L01]]`, and so on. Each one stands for an exact value — a file path, a line number, a commit id, a quoted phrase. You cannot see what is inside them and you do not need to. Treat each placeholder as a single opaque word.
+
+What to cut:
+
+- Preamble and throat-clearing. Lead with the result.
+- Courtesy padding, apologies, and thanks.
+- Sentences that grade the work, restate the lesson, or narrate what the writer is about to do.
+- Invented vocabulary and coined terms. Say it the way you would say it out loud to a colleague.
+- Repetition — if a point is made twice, make it once.
+
+What you MUST keep, because changing any of it changes the meaning:
+
+- Negation and uncertainty. "may be", "not", "probably", "unconfirmed" all carry meaning. A hedge is not padding.
+- Who did what to what. Do not merge two actors into one, and do not reassign an action.
+- Status: proposed, observed, in progress, completed, blocked — these are not interchangeable.
+- Conditions, comparisons, cause, and time order.
+- Requests, deadlines, and who owns something.
+- Every actionable statement. If it asks for something or reports something, it survives.
+
+Requirement: Every `[[Lnn]]` placeholder in the input MUST appear in your output EXACTLY ONCE, spelled exactly as given. Do not renumber them, do not translate them, do not put anything inside the brackets.
+Requirement: Do NOT invent new placeholders. If `[[L04]]` is not in the input, it must not be in your output.
+Requirement: Each placeholder MUST stay attached to the SAME statement it came from. If `[[L00]]` described where a bug is, it must still describe where the bug is — never where the fix is.
+Requirement: Keep every number, percentage, port, and section reference exactly as written. `31` must not become `thirty-one`, and `90%` must not become `about 90%`.
+Requirement: The ONLY thing you may delete outright is a decorative emoji at the very start of the message. An emoji in the middle of a sentence is content — keep it.
+Requirement: Do not answer the message, do not comment on it, and do not add anything that was not already there.
+Requirement: Put the shortened message inside `<![CDATA[` and `]]>` exactly as shown in the format below. Everything between those two markers is copied literally, so you do not need to escape anything inside them.
+Requirement: The first word of your response MUST be the XML tag `<response>` and your last MUST be the XML tag `</response>`, and all of your work and output MUST occur between these two tags.
+
+### Input:
+
+You MUST respond to the directives above using the following XML format:
+<response>
+  <thoughts>What you cut, and what you kept</thoughts>
+  <compressed><![CDATA[The shortened message, with [[L00]] exactly as it arrived]]></compressed>
+</response></stop>
+
+Take a deep breath and pause for a moment before you begin. Good luck!
+
+Everything after the next line, up to the end of this section, is the message you
+must shorten. Nothing above it is part of the message.
+
+Shorten this message:
+
+Sam 🎙️ — adversarial review of the Thursday podcast path, row [[L00]]. Read-only on :7999, no jobs submitted. Ranked by demo-bite probability. [[L01]] = I read the code/log line; [[L02]] = mechanism is real, occurrence I couldn't settle.
+
+FIRST — one thing I CLOSED (good news): the label fix IS live. The running container ([[L03]], started 08-04 21:45, after the 11:11 fix commit [[L04]]) serves the corrected labels — I grepped the in-container file: line 1005 [[L05]] = the file reader. The inverted-label menu in the logs is from 08-03 02:06, pre-fix. Preflight #2 currently passes. No bite here.
+
+=== FINDINGS, RANKED ===
+
+1. [PROVEN GAP — the today's-pattern one] The full voice→audio chain has NEVER been observed in one continuous run. Every piece is proven, but in DIFFERENT runs and DIFFERENT users: routing (Rachel), the two-turn [[L06]] prompt firing (log 08-03 20:05, job pg-[[L07]], harness user), and a 45-segment render completing (pg-[[L08]], ElevenLabs 00:39–00:45 today). I could NOT find a single run that went bare-line → resolve-to-Rick's-file → render → 18MB mp3 in one pass. Rachel's own doc says exactly this: status [[L09]] The whole chain's only proof is the preflight #5 morning rehearsal. If that rehearsal is skipped or fails, there is zero prior evidence the seam holds. This is the same shape as today's failures — two proven halves, untested seam.
+
+2. [PROVEN mechanism, UNMEASURED cost] [[L10]] blob-fetches the ENTIRE mp3 before playback. [[L11]]: it does fetch()→.blob() of the whole file, then hands an object URL to <audio>. The code's own comment: "This buffers the WHOLE file before playback can start." For 18MB/16min nobody has measured that buffer delay — on localhost likely 1–2s, but it is a dead pause after the click with no progress UI. Also the fetch carries an Authorization: Bearer from localStorage (line 148); a 401 there renders [[L12]] (line 236). SUSPECT sub-risk: the token is 30-min ([[L13]]). It IS auto-refreshed and written back to localStorage ([[L14]]), but [[L15]] runs NO refresh monitor of its own (grep = 0) — it depends on the notifications page's timer. A backgrounded/throttled demo tab could let that timer lapse and 401 the audio fetch. I did not prove the throttle occurs; I proved the dependency.
+
+3. [PROVEN mechanism, SUSPECT trigger] Snapshot-cache replay can bypass routing entirely. Log 08-02 18:33: [[L16]] executed a cached SolutionSnapshot in 0ms and was replayed — router never ran — and the similarity scale was broken (logged [[L17]], true cosine 0.517). Threshold is still 90.0 ([[L18]]) and I found NO cosine-fix commit since 08-02. The BARE line [[L19]] currently routes cleanly (Rachel saw a route, not a replay) so it's safe TODAY. The trap: preflight #5's rehearsal run SAVES a snapshot for the exact demo line; the live demo minutes later could REPLAY the rehearsal instead of generating fresh. Replaying good audio is probably benign — but it's routing you didn't run, and if the rehearsal resolved to the wrong doc, so does the show. Worth knowing before you rehearse with the identical line.
+
+4. [SUSPECT — real mechanism, occurrence depends on Thursday's fleet] Concurrency. Podcast jobs default [[L20]] ([[L21]]), so Rick's job rides the shared agentic pool (size 3 in dev, [[L22]]) as an ordinary job. Two ways it stalls: (a) if ANY monopolize job is in flight, Gate B holds Rick's job at intake until that job drains (timeout 300s, [[L23]]); (b) if the 3 pool slots are busy with other agentic work, his queues behind them. The fleet is active (many worker sessions posting). Nobody has pinned down what else could be running on :7999 during the demo. If you want this dead, quiesce agentic work on :7999 for the demo window.
+
+5. [SUSPECT — low for the bare line] Mic/STT. The mic path is real and exercised ([[L24]], [[L25]]) and it DOES mangle long/filler speech — logs show [[L26]] transcribed verbatim. But the 3-word bare line was never observed to mis-transcribe, and Whisper handles it well. Secondary: Whisper runs on GPU; CUDA OOM → 503 ([[L27]]). That same model server hosts the routing LoRA, so mic + routing contend for one GPU. Under load the mic step could 503. I did not see it fire on the bare line; flagging the shared-GPU coupling.
+
+=== WHAT I COULD NOT SETTLE ===
+- Whether pg-[[L28]] (today's good render) actually came through the two-turn voice resolve or a direct submit — its intake didn't tie to a [[L29]] line in the logs I read. So finding #1 stays a gap, not a disproof.
+- Actual browser buffer time for 18MB (finding #2) — needs a real Play Here click on the day, which is preflight #5's job anyway.
+
+Net: nothing here is a proven showstopper, and the label scare is a false alarm. The one that matches today's failure shape is #1 — the end-to-end seam rests entirely on the morning rehearsal. My strongest concrete recommendations for the preflight: (a) do the rehearsal with a DIFFERENT throwaway line than the live line, to dodge the snapshot-replay in #3; (b) quiesce other :7999 agentic work for the demo window (#4); (c) after Play Here, expect a brief buffer pause and confirm no 401 (#2). — Sam 🎙️
+
+### Response:

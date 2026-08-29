@@ -45,8 +45,9 @@ def _fallback():
 
 
 def _too_long():
-    """Body over the word limit: weight 0, its own distinct detail."""
-    return { "emoji": "🤷", "weight": 0, "detail": f"{_TOO_LONG_DETAIL} (200 words > 150)" }
+    """Body over the word limit: its own distinct detail. Number-free since row 2cb46818 —
+    the emitter no longer discloses the enforced ceiling, so neither does this stand-in."""
+    return { "emoji": "🤷", "weight": 0, "detail": _TOO_LONG_DETAIL }
 
 
 def _withheld():

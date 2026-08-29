@@ -47,7 +47,68 @@ def authenticated_user( clean_test_db ):
     return user_id, email, token
 
 
-@pytest.mark.xfail( reason="TestClient(app) + create_user triggers bcrypt 72-byte error — needs investigation" )
+@pytest.fixture( autouse=True )
+def _require_test_db():
+    """
+    Skip when this module is not pointed at the :8000 hot-swapped test database.
+
+    These three classes each used to carry a NON-strict class-level xfail reading
+    "TestClient(app) + create_user triggers bcrypt 72-byte error". That reason is
+    false on both halves, measured 2026-08-22:
+
+      · bcrypt does not break create_user. passlib 1.7.4 logs "(trapped) error
+        reading bcrypt version" against bcrypt 4.3.0 and carries on;
+        hash_password() returns a valid 60-char hash and verify_password()
+        round-trips it.
+      · The real failure was at SETUP, not in any test body, and it was a venue
+        error: clean_test_db asserts the engine points at lupin_db_test, and off
+        :8000 it points at lupin_db_dev. The fixture was refusing to wipe the dev
+        database — working exactly as designed.
+
+    So these tests were never broken; they were marked broken for being run in
+    the wrong place. An xfail is the wrong instrument for that either way: it
+    says "expected to fail", when the truth is "cannot run here". Non-strict, it
+    would have xpassed silently on :8000 and nobody would learn the mark could
+    come off; strict, it would go red on :8000 for passing, which is a false
+    alarm about a test that is simply working.
+
+    A runtime condition says the true thing and expires by itself. Where the test
+    DB is live these run and can genuinely fail; anywhere else they skip with a
+    reason naming what is missing.
+
+    WHY THE ENGINE IS READ AT CALL TIME. Not because of a post-collection
+    hot-swap — there is none in this process, and an earlier version of this
+    docstring said there was. `swap_database` (cosa/rest/db/database.py:187) runs
+    in the SERVER process behind /api/init; pytest's own engine is a module-level
+    singleton built at import from LUPIN_ENV, and this module imports
+    lupin_app.main at line 12, so the engine already holds its final value during
+    collection. A module-level check would have read the same value and would NOT
+    have wrongly skipped on :8000.
+
+    The real reason is a sibling in this same directory:
+    test_answers_owed_authlane_dv1.py:113 rebinds `db_module.engine` to a
+    throwaway database partway through the run and restores it after its yield,
+    without a try/finally. Anything holding a value captured at import time would
+    be reading a stale engine; a call-time read follows the rebind. Measured
+    2026-08-23 on this host: LUPIN_ENV unset -> engine on lupin_db_dev, these
+    skip; LUPIN_ENV=testing (what run-integration-tests.sh:202 exports) -> engine
+    on lupin_db_test, these run.
+
+    THE COST OF THIS CHANGE, stated out loud. A strict xfail went RED the day the
+    tests started passing, which is a loud self-expiry. A skip expires quietly: a
+    bare `pytest src/tests/integration/` without LUPIN_ENV skips all four and the
+    run still reads green. That trade is deliberate, not free.
+    """
+    from cosa.rest.db import database as db_module
+
+    db_url = str( db_module.engine.url )
+    if "lupin_db_test" not in db_url:
+        pytest.skip(
+            f"requires the :8000 hot-swapped lupin_db_test (engine is on {db_url.rsplit( '/', 1 )[ -1 ]}); "
+            f"clean_test_db refuses to run against the dev database"
+        )
+
+
 class TestConfigFetchIntegration:
     """Test integration of config fetch with authentication."""
 
@@ -92,7 +153,6 @@ class TestConfigFetchIntegration:
         assert payload_after["sub"] == user_id
 
 
-@pytest.mark.xfail( reason="TestClient(app) + create_user triggers bcrypt 72-byte error — needs investigation" )
 class TestTokenExpiryThreshold:
     """Test token expiry threshold logic."""
 
@@ -140,7 +200,6 @@ class TestTokenExpiryThreshold:
             f"Expected 5-minute threshold (300s), got {threshold_secs}s"
 
 
-@pytest.mark.xfail( reason="TestClient(app) + create_user triggers bcrypt 72-byte error — needs investigation" )
 class TestDeduplicationLogic:
     """Test deduplication prevents rapid-fire refreshes."""
 

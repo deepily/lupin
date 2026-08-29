@@ -36,6 +36,7 @@ class _ConformingJob:
     error                 = None
     scheduled_at          = None
     monopolize            = False
+    brake_terminal_claimed = False
 
     def do_all( self ): return "done"
     def code_ran_to_completion( self ): return True

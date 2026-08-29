@@ -7,8 +7,11 @@
 #   1. Validates host prerequisites (LUPIN_ROOT, python3, venv module, docker CLI,
 #      and that the running user can read the docker socket — the arbiter shells
 #      out to `docker inspect`).
-#   2. Creates/refreshes a LIGHT host venv at $LUPIN_ROOT/.venv-arbiter from
-#      src/scripts/requirements-arbiter.txt (no torch — see that file's header).
+#   2. Creates/refreshes a LIGHT host venv at $HOME/.venvs/lupin-arbiter from
+#      src/scripts/requirements-arbiter.txt (no torch — see that file's header),
+#      then GATES on it: check-arbiter-venv.py must import the arbiter's whole
+#      runtime graph or the provision aborts (2026-08-10).
+#      ⚠️ The venv deliberately lives OUTSIDE $LUPIN_ROOT — see the VENV_DIR note.
 #   3. Stamps the systemd --user unit from src/lupin_arbiter_app/systemd/ with this
 #      host's LUPIN_ROOT + config_block_id=Lupin:+Testing-GCS, and installs it to
 #      ~/.config/systemd/user/lupin-arbiter-app.service.
@@ -24,8 +27,12 @@
 #     at it (e.g. export LUPIN_ROOT=/mnt/lupin-data/lupin).
 #   - The running user is in the `docker` group (so `docker inspect` works without
 #     sudo). Verify: `id -nG | tr ' ' '\n' | grep -qx docker`.
-#   - The cloud-test compose stack is (or will be) up; the arbiter watches the
-#     containers named in [Lupin: Testing-GCS] `arbiter health watch containers`.
+#   - The cloud-GPU compose stack is (or will be) up; the arbiter watches the
+#     containers named in [Lupin: Testing-GCS] `arbiter health watch containers`
+#     (= lupin-rest-cloud-gpu, lupin-cloudsql-proxy — lupin-app.ini:686).
+#     NOT cloud-test: lupin-host-test runs docker-compose.cloud-gpu.yml. The INI
+#     was corrected cloud-test -> cloud-gpu on 2026-07-22 (lupin-app.ini:37 note);
+#     this script's two operator-facing mentions were not, until row 0d175dac.
 #
 # Design of record:
 #   src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.06.10-m2-arbiter-ride-along-and-vm-cutover.md §2.4
@@ -33,7 +40,13 @@
 set -euo pipefail
 
 CONFIG_BLOCK_ID="${ARBITER_CONFIG_BLOCK_ID:-Lupin:+Testing-GCS}"
-VENV_DIR_NAME=".venv-arbiter"
+# 2026-08-10: the venv moved OUT of $LUPIN_ROOT. It used to be $LUPIN_ROOT/.venv-arbiter,
+# inside the deploy tree that every code push chowns to uid 1001 — a user that does not
+# exist on lupin-host-test. Result: a venv owned by nobody, unwritable by the service
+# account, and a hand-chown reverted by the next deploy. Override with LUPIN_ARBITER_VENV.
+# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+VENV_DIR="${LUPIN_ARBITER_VENV:-${HOME}/.venvs/lupin-arbiter}"
+LEGACY_VENV_DIR_NAME=".venv-arbiter"
 
 log() { printf '[provision-arbiter] %s\n' "$*"; }
 die() { printf '[provision-arbiter] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -58,7 +71,7 @@ REQS="${LUPIN_ROOT}/src/scripts/requirements-arbiter.txt"
 [[ -f "${REQS}"       ]] || die "missing requirements file: ${REQS}"
 
 # --- 2. Light host venv -----------------------------------------------------
-VENV_DIR="${LUPIN_ROOT}/${VENV_DIR_NAME}"
+mkdir -p "$( dirname "${VENV_DIR}" )"
 if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
   log "creating arbiter venv at ${VENV_DIR}"
   python3 -m venv "${VENV_DIR}"
@@ -69,15 +82,46 @@ log "installing/updating arbiter requirements (light — no torch)"
 "${VENV_DIR}/bin/python" -m pip install --quiet --upgrade pip
 "${VENV_DIR}/bin/python" -m pip install --quiet -r "${REQS}"
 
-# The run script hard-codes ${LUPIN_ROOT}/.venv/bin/python. On the VM the arbiter
-# venv is .venv-arbiter (the app stack uses the baked image, so there is no full
-# .venv on the host). Symlink .venv -> .venv-arbiter ONLY if no .venv exists, so a
-# host that genuinely has a full .venv is never clobbered.
-if [[ ! -e "${LUPIN_ROOT}/.venv" ]]; then
-  log "symlinking ${LUPIN_ROOT}/.venv -> ${VENV_DIR_NAME} (run script expects .venv)"
-  ln -s "${VENV_DIR_NAME}" "${LUPIN_ROOT}/.venv"
+# --- 2b. IMPORT GATE — fail the DEPLOY, not a runtime thread (2026-08-10) -----
+# Until today the only verification here was `/health`, which returns 200 even when
+# a worker thread is dead. That is exactly how a missing `sqlalchemy` killed the
+# fleet-arbiter loop on 2026-08-08 and went unnoticed for two days (third instance
+# of the requirements-file-drifts-behind-the-import-graph class; `pyyaml` was the
+# second, on this same VM, 2026-07-22).
+#
+# NOTE the pipe discipline: `cmd | tee` reports TEE's status, not cmd's. This runs
+# the checker unpiped and tests $? directly — the same trap silently reported a
+# FAILED pip install as exit 0 while this fix was being built.
+# Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+CHECKER="${LUPIN_ROOT}/src/scripts/check-arbiter-venv.py"
+if [[ -f "${CHECKER}" ]]; then
+  log "verifying the venv can import everything the arbiter runs"
+  set +e
+  LUPIN_ROOT="${LUPIN_ROOT}" \
+  PYTHONPATH="${LUPIN_ROOT}/src" \
+  LUPIN_CONFIG_MGR_CLI_ARGS="${CONFIG_ARGS_FOR_CHECK:-config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=${CONFIG_BLOCK_ID}}" \
+    "${VENV_DIR}/bin/python" "${CHECKER}"
+  CHECK_RC=$?
+  set -e
+  [[ ${CHECK_RC} -eq 0 ]] || die "arbiter venv import check FAILED (exit ${CHECK_RC}) — see the remedy above. Refusing to provision a venv that cannot run the service."
 else
-  log "NOTE: ${LUPIN_ROOT}/.venv already exists — leaving it; ensure it can import uvicorn + fastapi"
+  log "WARNING: ${CHECKER} not found — skipping the import gate (older checkout?)"
+fi
+
+# The run script resolves its interpreter in this order (2026-08-10):
+#   $LUPIN_ARBITER_VENV -> $HOME/.venvs/lupin-arbiter -> $LUPIN_ROOT/.venv
+# so NO symlink into the deploy tree is created any more. The old
+# $LUPIN_ROOT/.venv -> .venv-arbiter symlink is what put a runtime dependency inside
+# a tree the deploy chowns to uid 1001; leaving it in place would keep the trap armed.
+LEGACY_VENV="${LUPIN_ROOT}/${LEGACY_VENV_DIR_NAME}"
+LEGACY_LINK="${LUPIN_ROOT}/.venv"
+if [[ -e "${LEGACY_VENV}" ]]; then
+  log "NOTE: legacy in-tree venv still present at ${LEGACY_VENV} — no longer used."
+  log "      It is inside the deploy tree (chowned to uid 1001 on every push). Remove it when convenient:"
+  log "        sudo rm -rf ${LEGACY_VENV}"
+fi
+if [[ -L "${LEGACY_LINK}" ]]; then
+  log "NOTE: legacy symlink ${LEGACY_LINK} -> $( readlink "${LEGACY_LINK}" ) still present; harmless (the run script prefers ${VENV_DIR}), remove with: rm ${LEGACY_LINK}"
 fi
 
 # --- 3. Stamp + install the systemd --user unit -----------------------------
@@ -129,7 +173,7 @@ HELD — operator/Rick steps (NOT run by this script; actuates the login session
 
 Bounce-survival check (the out-of-band guarantee): restarting an app container
 must NOT affect :8001 —
-  docker restart lupin-rest-cloud-test && \\
+  docker restart lupin-rest-cloud-gpu && \\
   python3 -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3).read())"
 ================================================================================
 EOF

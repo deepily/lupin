@@ -30,6 +30,35 @@ from lupin_cli.notifications.notification_models import (
     ResponseType
 )
 
+def compute_duration_seconds( started_at: Any, completed_at: Any ) -> Optional[ float ]:
+    """
+    Elapsed seconds between two timestamps, or None when either is absent.
+
+    The single place that knows a timestamp may arrive as an ISO string OR a
+    datetime. Fast-lane jobs and agentic jobs disagree on which they carry
+    (row 4a9ebc4b), so callers must not have to guess — six copies of this
+    logic used to, and two of them forgot to require completed_at.
+
+    Requires:
+        - started_at / completed_at are each an ISO-8601 string, a datetime,
+          None, or "" — nothing else is assumed
+
+    Ensures:
+        - returns None if either value is empty ("" or None)
+        - returns None if either value fails to parse, rather than raising —
+          a card's duration must never take the request down with it
+        - otherwise returns ( completed_at - started_at ).total_seconds()
+    """
+    if not started_at or not completed_at: return None
+
+    try:
+        start = datetime.fromisoformat( started_at )   if isinstance( started_at, str )   else started_at
+        end   = datetime.fromisoformat( completed_at ) if isinstance( completed_at, str ) else completed_at
+        return ( end - start ).total_seconds()
+    except Exception:
+        return None
+
+
 class RunningFifoQueue( FifoQueue ):
     """
     CJ Flow execution engine — processes running jobs with agents and solution snapshots.
@@ -71,7 +100,6 @@ class RunningFifoQueue( FifoQueue ):
         self.inject_bugs             = False if config_mgr is None else config_mgr.get( "debug inject bugs", default=False, return_type="boolean" )
         self.debug                   = False if config_mgr is None else config_mgr.get( "app debug",   default=False, return_type="boolean" )
         self.verbose                 = False if config_mgr is None else config_mgr.get( "app verbose", default=False, return_type="boolean" )
-        self.threshold_confirmation  = 90.0  if config_mgr is None else config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float" )
         self.io_tbl                  = InputAndOutputTable()
         self.gist_normalizer         = GistNormalizer( debug=self.debug, verbose=self.verbose )
 
@@ -281,14 +309,31 @@ class RunningFifoQueue( FifoQueue ):
                             if self.debug: print( f"[CACHE] EXACT HIT: score {score:.1f}% from {cached_snapshot.run_date}" )
                             running_job = self._format_cached_result( cached_snapshot, running_job, truncated_question, run_timer )
 
-                        elif score >= self.threshold_confirmation:
-                            # Above floor — accept (push_job already handled user confirmation)
-                            if self.debug: print( f"[CACHE] THRESHOLD ACCEPT: score {score:.1f}% >= {self.threshold_confirmation}% from {cached_snapshot.run_date}" )
-                            running_job = self._format_cached_result( cached_snapshot, running_job, truncated_question, run_timer )
-
                         else:
-                            # Below threshold — reject, route to agent
-                            print( f"[CACHE] THRESHOLD REJECT: score {score:.1f}% < {self.threshold_confirmation}% floor — routing to agent" )
+                            # ── the ACCEPT-ABOVE-FLOOR branch was DELETED here (step 7b) ──
+                            #
+                            # WHAT IT WAS: `elif score >= self.threshold_confirmation:` —
+                            # anything from 90% up was served from the cache without asking
+                            # anybody. (The `self.threshold_confirmation` attribute itself
+                            # went in step 7c, once nothing but this tombstone read it.) WHY IT WAS BAD: its own comment said why it was
+                            # allowed — "push_job already handled user confirmation". That
+                            # was true while push_job asked. push_job is dead (step 6c: the
+                            # doors were retired, the internal callers moved, and door 8
+                            # hands the transcription to the flow), so the confirmation this
+                            # branch leaned on had already stopped happening — and a
+                            # 90-to-99% match was being replayed with nobody asked. Exactly
+                            # the silent wrong-but-close answer the plan says we would never
+                            # have, arriving as a side effect of a cutover rather than a
+                            # decision.
+                            #
+                            # WHAT CARRIES CONFIRMATION NOW: AskFlow's near-match ask (step
+                            # 6b) — the same question, the same 30 seconds, the same default
+                            # of "no" — which runs BEFORE the job is ever queued. A second,
+                            # silent accept behind it would answer a question the user had
+                            # already been asked about and may have declined.
+                            #
+                            # Below an exact hit, this now routes to the agent.
+                            print( f"[CACHE] BELOW EXACT: score {score:.1f}% — routing to agent (the flow already asked)" )
                             running_job = self._handle_base_agent( running_job, truncated_question, run_timer )
                     else:
                         # CACHE MISS - Continue with normal agent execution
@@ -542,53 +587,62 @@ class RunningFifoQueue( FifoQueue ):
           running_queue → push to done_queue → TFE watchdog evaluate →
           I/O table insert.
         """
-        # TTS Migration (Session 97): notify via notification service
-        self._notify( job.answer_conversational, job=job )
+        # Leg (c) P3 — close the done->dead sweeper race: claim the SAME terminal
+        # marker _transition_to_dead uses, so a racing ghost-sweep that dead-letters
+        # this job (or a late duplicate callback) no-ops instead of double-transitioning
+        # a row already completed. Claimed atomically; rolled back below on any
+        # mid-transition failure so a failed done never wedges the slot (a claim that
+        # stuck through a FAILED done would make the follow-on _transition_to_dead
+        # no-op too — the exact wedge leg (c) exists to prevent).
+        if not self._claim_terminal_reclaim( job ):
+            if self.debug:
+                print( "[AGENTIC-POOL] _transition_to_done no-op — job already terminal (Leg c P3)" )
+            return
 
-        job_id       = job.id_hash
-        user_id      = job.user_id
-        completed_at = du.get_current_datetime_iso()
-        started_at   = job.started_at
+        try:
+            # TTS Migration (Session 97): notify via notification service
+            self._notify( job.answer_conversational, job=job )
 
-        duration_seconds = None
-        if started_at and completed_at:
-            try:
-                start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                end   = datetime.fromisoformat( completed_at )
-                duration_seconds = ( end - start ).total_seconds()
-            except Exception:
-                pass
+            job_id       = job.id_hash
+            user_id      = job.user_id
+            completed_at = du.get_current_datetime_iso()
+            started_at   = job.started_at
 
-        # artifacts-based fields are agentic-specific; fast-lane jobs have empty
-        # artifacts or no artifacts attribute — use getattr for boundary safety
-        artifacts = getattr( job, "artifacts", None ) or { }
-        metadata  = {
-            "response_text"             : job.answer_conversational,
-            "abstract"                  : artifacts.get( "abstract" ),
-            "report_link"               : artifacts.get( "report_path" ),
-            "remediation_snapshot_path" : artifacts.get( "remediation_snapshot_path" ),
-            "yaml_path"                 : artifacts.get( "yaml_path" ),
-            "pptx_path"                 : artifacts.get( "pptx_path" ),
-            "cost_summary"              : artifacts.get( "cost_summary" ),
-            "error"                     : None,
-            "question_text"             : job.last_question_asked,
-            "agent_type"                : job.job_type,
-            "timestamp"                 : job.created_date,
-            "status"                    : JobState.COMPLETED.value,
-            "has_interactions"          : bool( job.session_id ),
-            "is_cache_hit"              : job.is_cache_hit,
-            "user_email"                : job.user_email,
-            "started_at"                : started_at,
-            "completed_at"              : completed_at,
-            "duration_seconds"          : duration_seconds,
-        }
-        emit_job_state_transition(
-            self.websocket_mgr, job_id, JobState.RUNNING, JobState.COMPLETED, user_id, metadata
-        )
+            duration_seconds = compute_duration_seconds( started_at, completed_at )
 
-        # Queue transition (Phase 1 RLock protects both queues under concurrency)
-        self.delete_by_id_hash( job.id_hash )
-        self.jobs_done_queue.push( job )
+            # artifacts-based fields are agentic-specific; fast-lane jobs have empty
+            # artifacts or no artifacts attribute — use getattr for boundary safety
+            artifacts = getattr( job, "artifacts", None ) or { }
+            metadata  = {
+                "response_text"             : job.answer_conversational,
+                "abstract"                  : artifacts.get( "abstract" ),
+                "report_link"               : artifacts.get( "report_path" ),
+                "remediation_snapshot_path" : artifacts.get( "remediation_snapshot_path" ),
+                "yaml_path"                 : artifacts.get( "yaml_path" ),
+                "pptx_path"                 : artifacts.get( "pptx_path" ),
+                "cost_summary"              : artifacts.get( "cost_summary" ),
+                "error"                     : None,
+                "question_text"             : job.last_question_asked,
+                "agent_type"                : job.job_type,
+                "timestamp"                 : job.created_date,
+                "status"                    : JobState.COMPLETED.value,
+                "has_interactions"          : bool( job.session_id ),
+                "is_cache_hit"              : job.is_cache_hit,
+                "user_email"                : job.user_email,
+                "started_at"                : started_at,
+                "completed_at"              : completed_at,
+                "duration_seconds"          : duration_seconds,
+            }
+            emit_job_state_transition(
+                self.websocket_mgr, job_id, JobState.RUNNING, JobState.COMPLETED, user_id, metadata
+            )
+
+            # Queue transition (Phase 1 RLock protects both queues under concurrency)
+            self.delete_by_id_hash( job.id_hash )
+            self.jobs_done_queue.push( job )
+        except BaseException:
+            self._release_terminal_reclaim( job )   # failed done stays retryable
+            raise
 
         # TFE auto-dispatch (non-fatal if watchdog isn't initialized)
         try:
@@ -638,56 +692,64 @@ class RunningFifoQueue( FifoQueue ):
           auto-repair watchdog — the checkpoint IS the repair path; BFE would
           just swallow it on its own DB lookup.
         """
-        # TTS — informational tone (not urgent — this is a normal stall, not a crash)
-        self._notify( job.answer_conversational, job=job )
+        # Leg (c) P3 — claim the SAME terminal marker so a racing ghost-sweep
+        # dead-letter no-ops instead of stalling-then-dead double-transitioning.
+        # Safe for resume: a resumed stalled job is a FRESH object built by
+        # agentic_job_factory (_resume_checkpoint attached to a new construction),
+        # so this per-object marker never carries into the resumed run — verified
+        # 2026-08-13. Rolled back below on any mid-transition failure.
+        if not self._claim_terminal_reclaim( job ):
+            if self.debug:
+                print( "[AGENTIC-POOL] _transition_to_stalled no-op — job already terminal (Leg c P3)" )
+            return
 
-        job_id       = job.id_hash
-        user_id      = job.user_id
-        completed_at = du.get_current_datetime_iso()
-        started_at   = job.started_at
+        try:
+            # TTS — informational tone (not urgent — this is a normal stall, not a crash)
+            self._notify( job.answer_conversational, job=job )
 
-        duration_seconds = None
-        if started_at and completed_at:
-            try:
-                start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                end   = datetime.fromisoformat( completed_at )
-                duration_seconds = ( end - start ).total_seconds()
-            except Exception:
-                pass
+            job_id       = job.id_hash
+            user_id      = job.user_id
+            completed_at = du.get_current_datetime_iso()
+            started_at   = job.started_at
 
-        artifacts = getattr( job, "artifacts", None ) or { }
-        metadata  = {
-            "response_text"             : job.answer_conversational,
-            "abstract"                  : artifacts.get( "abstract" ),
-            "report_link"               : artifacts.get( "report_path" ),
-            "remediation_snapshot_path" : artifacts.get( "remediation_snapshot_path" ),
-            "yaml_path"                 : artifacts.get( "yaml_path" ),
-            "pptx_path"                 : artifacts.get( "pptx_path" ),
-            "cost_summary"              : artifacts.get( "cost_summary" ),
-            # Stall-specific fields (the missing piece pre-fix):
-            "checkpoint"                : artifacts.get( "checkpoint" ),
-            "plan_path"                 : artifacts.get( "plan_path" ),
-            "error"                     : None,
-            "question_text"             : job.last_question_asked,
-            "agent_type"                : job.job_type,
-            "timestamp"                 : job.created_date,
-            "status"                    : JobState.STALLED.value,
-            "has_interactions"          : bool( job.session_id ),
-            "is_cache_hit"              : False,
-            "user_email"                : job.user_email,
-            "started_at"                : started_at,
-            "completed_at"              : completed_at,
-            "duration_seconds"          : duration_seconds,
-        }
-        emit_job_state_transition(
-            self.websocket_mgr, job_id, JobState.RUNNING, JobState.STALLED, user_id, metadata
-        )
+            duration_seconds = compute_duration_seconds( started_at, completed_at )
 
-        # Queue transition — same pattern as _transition_to_done but explicitly
-        # NOT firing the TFE auto-dispatch watchdog (stalled jobs are awaiting
-        # human review, not failed jobs needing repair).
-        self.delete_by_id_hash( job.id_hash )
-        self.jobs_done_queue.push( job )
+            artifacts = getattr( job, "artifacts", None ) or { }
+            metadata  = {
+                "response_text"             : job.answer_conversational,
+                "abstract"                  : artifacts.get( "abstract" ),
+                "report_link"               : artifacts.get( "report_path" ),
+                "remediation_snapshot_path" : artifacts.get( "remediation_snapshot_path" ),
+                "yaml_path"                 : artifacts.get( "yaml_path" ),
+                "pptx_path"                 : artifacts.get( "pptx_path" ),
+                "cost_summary"              : artifacts.get( "cost_summary" ),
+                # Stall-specific fields (the missing piece pre-fix):
+                "checkpoint"                : artifacts.get( "checkpoint" ),
+                "plan_path"                 : artifacts.get( "plan_path" ),
+                "error"                     : None,
+                "question_text"             : job.last_question_asked,
+                "agent_type"                : job.job_type,
+                "timestamp"                 : job.created_date,
+                "status"                    : JobState.STALLED.value,
+                "has_interactions"          : bool( job.session_id ),
+                "is_cache_hit"              : False,
+                "user_email"                : job.user_email,
+                "started_at"                : started_at,
+                "completed_at"              : completed_at,
+                "duration_seconds"          : duration_seconds,
+            }
+            emit_job_state_transition(
+                self.websocket_mgr, job_id, JobState.RUNNING, JobState.STALLED, user_id, metadata
+            )
+
+            # Queue transition — same pattern as _transition_to_done but explicitly
+            # NOT firing the TFE auto-dispatch watchdog (stalled jobs are awaiting
+            # human review, not failed jobs needing repair).
+            self.delete_by_id_hash( job.id_hash )
+            self.jobs_done_queue.push( job )
+        except BaseException:
+            self._release_terminal_reclaim( job )   # failed stall stays retryable
+            raise
 
         # I/O table (non-fatal if unavailable)
         try:
@@ -700,6 +762,56 @@ class RunningFifoQueue( FifoQueue ):
         except Exception as io_e:
             if self.debug: print( f"[AGENTIC-POOL] I/O table write skipped (stalled): {io_e}" )
 
+    def _claim_terminal_reclaim( self, job: Any ) -> bool:
+        """
+        Leg (c) — atomically claim a job's single terminal transition.
+
+        Returns True exactly once per job OBJECT (first caller wins) and False on
+        every subsequent call, so a terminal primitive can no-op a
+        double-transition. The marker is `job.brake_terminal_claimed`, a
+        QueueableJob protocol member every job class carries from construction
+        (default False) and the push gate enforces — read directly, no getattr
+        fallback (row cdfedc41). It lives on the job OBJECT, so a resubmitted
+        repair-chain job (a NEW object) is never falsely blocked.
+        Checked+set under _agentic_futures_lock (an RLock, already re-entrant for
+        the callback-on-same-thread case) so the read and the write are atomic
+        against a racing ghost-sweep / completion callback.
+
+        Requires:
+            - job is a queue job object (attribute-settable)
+
+        Ensures:
+            - First call for a given job object returns True and marks it
+            - Every later call for the same object returns False
+        """
+        with self._agentic_futures_lock:
+            if job.brake_terminal_claimed:
+                return False
+            job.brake_terminal_claimed = True
+            return True
+
+    def _release_terminal_reclaim( self, job: Any ) -> None:
+        """
+        Leg (c) rollback — release a claim taken by _claim_terminal_reclaim when
+        the transition it guarded did NOT complete (raised mid-flight).
+
+        Without this, a claim set at the top of _transition_to_dead would stick
+        True even though emit/delete/push failed, leaving the job in
+        running_queue with every later retry no-op'd — a slot that never frees,
+        the exact runaway this brake exists to prevent (Tiberius P1, 2026-08-13).
+        Releasing lets the ghost-sweeper's next tick re-attempt the transition.
+        Idempotent; taken under _agentic_futures_lock so it is atomic against a
+        concurrent claim.
+
+        Requires:
+            - job is a queue job object (attribute-settable)
+
+        Ensures:
+            - job's terminal claim is cleared (a subsequent claim can succeed)
+        """
+        with self._agentic_futures_lock:
+            job.brake_terminal_claimed = False
+
     def _transition_to_dead( self, job: Any, cause: Any ) -> None:
         """
         Canonical failure transition. Thread-safe. `cause` may be an Exception
@@ -710,118 +822,144 @@ class RunningFifoQueue( FifoQueue ):
         482-532 (status-check fail) + 534-592 (exception). Phase 2 scope:
         shared with the pool callback only; fast-lane paths (_handle_error_case
         et al.) may migrate in Phase 3 cleanup.
-        """
-        # Normalise cause
-        if isinstance( cause, str ):
-            error_msg   = cause
-            stack_trace = cause
-        else:
-            error_msg   = str( cause )
-            try:
-                stack_trace = "".join( traceback.format_exception( type( cause ), cause, cause.__traceback__ ) )
-            except Exception:
-                stack_trace = error_msg
 
-        # Ensure job.error reflects the failure (some paths set this already; some don't)
+        Leg (c) idempotency: no-ops on a second entry for the SAME job object so a
+        late completion callback, or a ghost-sweep that snapshotted
+        _agentic_futures before _on_agentic_complete popped the future, cannot
+        double-transition a row already declared dead.
+        """
+        # Leg (c) — status-guarded idempotent reclaim (design §Leg c). Claim
+        # atomically so a concurrent ghost-sweep / completion callback cannot
+        # double-transition this row.
+        if not self._claim_terminal_reclaim( job ):
+            if self.debug:
+                print( "[AGENTIC-POOL] _transition_to_dead no-op — job already terminal (Leg c)" )
+            return
+
+        # The claim is now HELD. Everything below must either COMPLETE or roll the
+        # claim back — a claim that stuck through a FAILED transition (emit/delete/
+        # push raising) would leave the job in running_queue with every retry
+        # no-op'd forever: a slot that never frees, the exact runaway this brake
+        # exists to prevent (Tiberius P1, 2026-08-13). On any mid-transition
+        # exception, release the claim so the ghost-sweeper's next tick can
+        # re-attempt, then re-raise so the caller's error handling is unchanged.
         try:
-            if not job.error:
-                job.error = error_msg
-            job.state = JobState.FAILED
-        except Exception:
-            pass  # Missing attributes on exotic job types — boundary tolerance
-
-        du.print_banner( f"AgenticJob failed: {error_msg}", prepend_nl=True )
-
-        # TTS notify — urgent priority
-        job_type_label = getattr( job, "JOB_TYPE", job.job_type )
-        self._notify(
-            f"The {job_type_label} job encountered an error: {error_msg[ :100 ]}",
-            job=job,
-            priority="urgent"
-        )
-
-        job_id       = job.id_hash
-        user_id      = job.user_id
-        completed_at = du.get_current_datetime_iso()
-        started_at   = job.started_at
-
-        duration_seconds = None
-        if started_at:
-            try:
-                start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                end   = datetime.fromisoformat( completed_at )
-                duration_seconds = ( end - start ).total_seconds()
-            except Exception:
-                pass
-
-        metadata = {
-            "error"            : error_msg,
-            "stack_trace"      : stack_trace,
-            "question_text"    : job.last_question_asked,
-            "agent_type"       : job.job_type,
-            "timestamp"        : job.created_date,
-            "status"           : JobState.FAILED.value,
-            "has_interactions" : bool( job.session_id ),
-            "is_cache_hit"     : False,
-            "user_email"       : job.user_email,
-            "started_at"       : started_at,
-            "completed_at"     : completed_at,
-            "duration_seconds" : duration_seconds,
-        }
-        emit_job_state_transition(
-            self.websocket_mgr, job_id, JobState.RUNNING, JobState.FAILED, user_id, metadata
-        )
-
-        self.delete_by_id_hash( job.id_hash )
-        self.jobs_dead_queue.push( job )
-
-        # Phase 6A: automated repair evaluation
-        try:
-            self._evaluate_for_auto_fix( job )
-        except Exception as e:
-            if self.debug: print( f"[AGENTIC-POOL] auto-fix eval skipped: {e}" )
-
-    def _process_fast_lane( self, job: Any ) -> Any:
-        """
-        Inline processing for non-agentic jobs (AgentBase, SolutionSnapshot).
-        Preserves today's cache-check + CRUD sub-branch + snapshot dispatch.
-
-        Runs on the consumer thread — not the pool. Fast-lane is UNBLOCKED by
-        the pool: while agentic jobs execute concurrently in pool workers, the
-        consumer thread continues popping todo queue and running fast-lane jobs
-        synchronously.
-        """
-        truncated_question = du.truncate_string( job.last_question_asked, max_len=64 )
-        run_timer          = sw.Stopwatch( "Starting job run timer..." )
-
-        if isinstance( job, AgentBase ):
-            if isinstance( job, CrudForDataFramesAgent ):
-                # CRUD agents: skip cache — data is mutable, snapshots go stale
-                if self.debug: print( "[CACHE] Skipping cache for CRUD agent (mutable data)" )
-                return self._handle_base_agent( job, truncated_question, run_timer )
-
-            # Check cache BEFORE agent execution
-            question        = job.last_question_asked
-            if self.debug: print( f"[CACHE] Checking cache for question: {question}" )
-            cached_snapshots = self.snapshot_mgr.get_snapshots_by_question( question )
-
-            if cached_snapshots and len( cached_snapshots ) > 0:
-                score, cached_snapshot = cached_snapshots[ 0 ]
-                if score >= 100.0:
-                    if self.debug: print( f"[CACHE] EXACT HIT: score {score:.1f}% from {cached_snapshot.run_date}" )
-                    return self._format_cached_result( cached_snapshot, job, truncated_question, run_timer )
-                elif score >= self.threshold_confirmation:
-                    if self.debug: print( f"[CACHE] THRESHOLD ACCEPT: score {score:.1f}% >= {self.threshold_confirmation}% from {cached_snapshot.run_date}" )
-                    return self._format_cached_result( cached_snapshot, job, truncated_question, run_timer )
-                else:
-                    print( f"[CACHE] THRESHOLD REJECT: score {score:.1f}% < {self.threshold_confirmation}% floor — routing to agent" )
-                    return self._handle_base_agent( job, truncated_question, run_timer )
+            # Normalise cause
+            if isinstance( cause, str ):
+                error_msg   = cause
+                stack_trace = cause
             else:
-                if self.debug: print( "[CACHE] MISS: Running agent for new question" )
-                return self._handle_base_agent( job, truncated_question, run_timer )
+                error_msg   = str( cause )
+                try:
+                    stack_trace = "".join( traceback.format_exception( type( cause ), cause, cause.__traceback__ ) )
+                except Exception:
+                    stack_trace = error_msg
 
-        # SolutionSnapshot fast-lane
-        return self._handle_solution_snapshot( job, truncated_question, run_timer )
+            # Ensure job.error reflects the failure (some paths set this already; some don't)
+            try:
+                if not job.error:
+                    job.error = error_msg
+                job.state = JobState.FAILED
+            except Exception:
+                pass  # Missing attributes on exotic job types — boundary tolerance
+
+            du.print_banner( f"AgenticJob failed: {error_msg}", prepend_nl=True )
+
+            # TTS notify — urgent priority
+            job_type_label = getattr( job, "JOB_TYPE", job.job_type )
+            self._notify(
+                f"The {job_type_label} job encountered an error: {error_msg[ :100 ]}",
+                job=job,
+                priority="urgent"
+            )
+
+            job_id       = job.id_hash
+            user_id      = job.user_id
+            completed_at = du.get_current_datetime_iso()
+            started_at   = job.started_at
+
+            duration_seconds = compute_duration_seconds( started_at, completed_at )
+
+            metadata = {
+                "error"            : error_msg,
+                "stack_trace"      : stack_trace,
+                "question_text"    : job.last_question_asked,
+                "agent_type"       : job.job_type,
+                "timestamp"        : job.created_date,
+                "status"           : JobState.FAILED.value,
+                "has_interactions" : bool( job.session_id ),
+                "is_cache_hit"     : False,
+                "user_email"       : job.user_email,
+                "started_at"       : started_at,
+                "completed_at"     : completed_at,
+                "duration_seconds" : duration_seconds,
+            }
+            emit_job_state_transition(
+                self.websocket_mgr, job_id, JobState.RUNNING, JobState.FAILED, user_id, metadata
+            )
+
+            self.delete_by_id_hash( job.id_hash )
+            try:
+                self.jobs_dead_queue.push( job )
+            except BaseException:
+                # Tiberius residual (log-not-guard, María 2026-08-13): delete
+                # succeeded but the dead-queue push raised, so the row is now in
+                # NEITHER queue and the ghost-sweeper's queue_dict check will skip
+                # it. An in-memory push effectively never raises, so this earns a
+                # log line and nothing more — no recovery guard. Re-raise so the
+                # outer handler still rolls the reclaim back.
+                du.print_banner(
+                    f"[AGENTIC-POOL] dead-queue push raised AFTER delete for {job.id_hash} "
+                    f"— row orphaned (in neither queue); ghost-sweeper will skip it",
+                    prepend_nl=True
+                )
+                raise
+        except BaseException:
+            # Transition did NOT complete — release the claim so a retry can
+            # re-attempt (else the slot wedges forever), then re-raise unchanged.
+            self._release_terminal_reclaim( job )
+            raise
+
+        # Phase 6A: automated repair evaluation.
+        # Leg (b3): a runtime-brake timeout death must NOT re-arm the repair chain
+        # — the failure is a non-returning SDK call (a systemic/environmental
+        # hang), so a fresh attempt would just hang again. A brake that trips and
+        # immediately respawns the same runaway is not a brake. Skip the watchdog
+        # for BFETimeoutError deaths only; every other cause re-arms as before.
+        # (Outside the reclaim-rollback try: the transition has COMPLETED and the
+        # row is terminal by the time we get here; a watchdog hiccup must not undo
+        # a finished dead-letter — its own except already swallows failures.)
+        from cosa.agents.shared.fix_executor import BFETimeoutError
+        if isinstance( cause, BFETimeoutError ):
+            if self.debug: print( "[AGENTIC-POOL] auto-fix re-arm SKIPPED — runtime-brake timeout death (Leg b3)" )
+        else:
+            try:
+                self._evaluate_for_auto_fix( job )
+            except Exception as e:
+                if self.debug: print( f"[AGENTIC-POOL] auto-fix eval skipped: {e}" )
+
+    # ── _process_fast_lane was DELETED here (step 7a, 2026-08-21) ──────────────────
+    #
+    # WHAT IT WAS: ~40 lines that ran a non-agentic job inline — cache check, CRUD
+    # sub-branch, snapshot dispatch — with a docstring saying it ran on the consumer
+    # thread. WHY IT WAS BAD: nothing called it. `_process_job` inlines the same logic
+    # itself (the cache branch above), so two copies of one decision sat side by side
+    # and only one of them ever ran. Anyone looking for how a fast-lane job is handled
+    # found this one first, complete with a confident docstring, and could change it all
+    # day without changing what the server does. SIX tests pinned it, which is what
+    # made it look maintained. (The plan and the row both said seven; the seventh grep
+    # hit was the section header comment above them. Six is what was deleted.)
+    #
+    # HOW WE KNEW, because grep alone was not allowed to decide it: a temporary probe
+    # recorded any entry to a file; its positive control proved the probe FIRES when the
+    # method runs — a probe never seen to fire and a probe never reached leave identical
+    # silence; and a live window on :7999 recorded zero trips. That window ran
+    # 2026-08-21 16:30Z to 23:07Z, fragmented by six boots, and carried 65 requests on
+    # /api/upload-and-transcribe-mp3, 2 on /api/v2/ask and 1 on /api/push. Real spoken
+    # traffic went through this queue and none of it entered this method.
+    #
+    # The three helpers it called — _handle_base_agent, _format_cached_result,
+    # _handle_solution_snapshot — are LIVE and stay: _process_job calls all three.
 
     def get_pool_status( self ) -> dict:
         """
@@ -1213,14 +1351,7 @@ class RunningFifoQueue( FifoQueue ):
                 completed_at = du.get_current_datetime_iso()
                 started_at   = running_job.started_at
 
-                duration_seconds = None
-                if started_at:
-                    try:
-                        start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                        end   = datetime.fromisoformat( completed_at )
-                        duration_seconds = ( end - start ).total_seconds()
-                    except Exception:
-                        pass
+                duration_seconds = compute_duration_seconds( started_at, completed_at )
 
                 metadata = {
                     'response_text'   : running_job.answer_conversational,
@@ -1270,14 +1401,7 @@ class RunningFifoQueue( FifoQueue ):
                 started_at   = running_job.started_at
 
                 # Calculate duration_seconds if both timestamps exist
-                duration_seconds = None
-                if started_at and completed_at:
-                    try:
-                        start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                        end   = datetime.fromisoformat( completed_at )
-                        duration_seconds = ( end - start ).total_seconds()
-                    except Exception:
-                        pass
+                duration_seconds = compute_duration_seconds( started_at, completed_at )
 
                 metadata = {
                     'response_text'   : running_job.answer_conversational,
@@ -1405,6 +1529,12 @@ class RunningFifoQueue( FifoQueue ):
         }
         
         formatted_output = "ERROR: Formatted output not yet generated!?!"
+
+        # Stamp the start. Without this the fast lane never records one, so every
+        # duration below reads None and the card shows no elapsed time — the live
+        # half of row 4a9ebc4b. The agentic lane already does this for itself.
+        running_job.started_at = du.get_current_datetime_iso()
+
         try:
             formatted_output    = running_job.do_all()
         
@@ -1480,14 +1610,7 @@ class RunningFifoQueue( FifoQueue ):
             started_at   = running_job.started_at
 
             # Calculate duration_seconds if both timestamps exist
-            duration_seconds = None
-            if started_at and completed_at:
-                try:
-                    start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                    end   = datetime.fromisoformat( completed_at )
-                    duration_seconds = ( end - start ).total_seconds()
-                except Exception:
-                    pass
+            duration_seconds = compute_duration_seconds( started_at, completed_at )
 
             metadata = {
                 'response_text'   : running_job.answer_conversational,
@@ -1563,14 +1686,7 @@ class RunningFifoQueue( FifoQueue ):
         started_at   = running_job.started_at
 
         # Calculate duration_seconds if both timestamps exist
-        duration_seconds = None
-        if started_at and completed_at:
-            try:
-                start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                end   = datetime.fromisoformat( completed_at )
-                duration_seconds = ( end - start ).total_seconds()
-            except Exception:
-                pass
+        duration_seconds = compute_duration_seconds( started_at, completed_at )
 
         metadata = {
             'response_text'   : running_job.answer_conversational,
@@ -1617,7 +1733,7 @@ class RunningFifoQueue( FifoQueue ):
         running_job.update_runtime_stats( run_timer )
         du.print_banner( f"Job [{running_job.question}] complete!", prepend_nl=True, end="\n" )
 
-        # Persist updated runtime stats to LanceDB
+        # Persist updated runtime stats to the snapshot store
         print( f"Saving snapshot with runtime stats for [{truncated_question}]..." )
         self.snapshot_mgr.save_snapshot( running_job )
         print( f"Saving snapshot with runtime stats for [{truncated_question}]... Done!" )
@@ -1639,14 +1755,14 @@ class RunningFifoQueue( FifoQueue ):
         On timeout or error, leaves answer_is_correct as None (unverified).
 
         Requires:
-            - snapshot is a SolutionSnapshot that has been saved to LanceDB
+            - snapshot is a SolutionSnapshot that has been saved to the store
             - truncated_question is a short string for the prompt
             - truncated_answer is a short string for the prompt
 
         Ensures:
             - Does NOT block the pipeline
-            - Thread-safe via SolutionSnapshotManager._save_lock
-            - Updates snapshot in LanceDB on yes/no response
+            - Thread-safe via the snapshot manager's own save lock
+            - Updates the stored snapshot on yes/no response
         """
         def _ask_and_update():
             try:
@@ -1741,7 +1857,7 @@ class RunningFifoQueue( FifoQueue ):
         current_user_id    = original_job.user_id
         current_session_id = original_job.session_id
 
-        # Record replay on canonical snapshot (updates LanceDB record for analytics)
+        # Record replay on canonical snapshot (updates the stored record for analytics)
         cached_snapshot.record_replay(
             user_id=current_user_id,
             session_id=current_session_id,
@@ -1751,7 +1867,7 @@ class RunningFifoQueue( FifoQueue ):
         # Update runtime stats on canonical snapshot
         cached_snapshot.update_runtime_stats( run_timer )
 
-        # Persist updated stats to LanceDB (canonical snapshot with replay history)
+        # Persist updated stats to the store (canonical snapshot with replay history)
         self.snapshot_mgr.save_snapshot( cached_snapshot )
 
         # Create user-contextualized copy for done queue (FIX: use current user, not original creator)
@@ -1778,14 +1894,7 @@ class RunningFifoQueue( FifoQueue ):
         started_at   = original_job.started_at
 
         # Calculate duration_seconds if both timestamps exist (will be very short for cache hits)
-        duration_seconds = None
-        if started_at and completed_at:
-            try:
-                start = datetime.fromisoformat( started_at ) if isinstance( started_at, str ) else started_at
-                end   = datetime.fromisoformat( completed_at )
-                duration_seconds = ( end - start ).total_seconds()
-            except Exception:
-                pass
+        duration_seconds = compute_duration_seconds( started_at, completed_at )
 
         metadata = {
             'response_text'   : cached_snapshot.answer_conversational,

@@ -7,7 +7,7 @@ services:
   # major 16 → the existing postgresql-dev-data volume is compatible (design §11).
   # Applying this needs `docker compose up -d --force-recreate` (NOT restart) —
   # SHARED-INFRA, coordinated with the operator, not applied from a build session.
-  # Cloud-SQL supports pgvector natively → cloud-test/prod compose need no change.
+  # Cloud-SQL supports pgvector natively → the cloud/prod compose needs no change.
   postgres:
     image: pgvector/pgvector:pg16
     container_name: lupin-postgres
@@ -15,7 +15,7 @@ services:
     environment:
       POSTGRES_DB: lupin_db_dev
       POSTGRES_USER: lupin_dev
-      POSTGRES_PASSWORD: dev_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env — see row 856882e4}
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
     ports:
       - "5432:5432"
@@ -141,9 +141,21 @@ services:
 
   # Lupin REST API — Development (port 7999)
   # Always runs [Lupin: Development] config with lupin_db_dev.
-  # uvicorn --reload enabled for live code changes during development.
+  # uvicorn --reload is OFF by default since 2026-08-01 (opt-in via LUPIN_RELOAD, gated by
+  # reload_enabled() in bootstrap_helpers.py) — watching the tree took the server down for the
+  # whole fleet whenever anyone touched a watched file. A saved .py is NOT a served .py: it
+  # needs a bounce (src/scripts/bounce-dev-server.sh).
   lupin-rest-dev:
-    image: lupin:1.1.2-agy-candidate    # 2026-07-11: agy (Antigravity CLI) baked in (Rio, Rick user_direct). Rollback: lupin:1.1.1-pgvector-candidate. Prior: 1.1.1-pgvector-candidate (v0.2.0 pgvector swap, gate d93a1edb).
+    # 2026-08-23 (Mr. Radio, Rick user_direct): dev STANDARDIZED onto the same image as
+    # test. The 07-27 split was never a design decision — 1.1.3's own comment below says
+    # "the image is correct for dev too", and dev stayed behind ONLY because recreating
+    # this container bounces Rick's live :7999. That objection expired 2026-08-01 when the
+    # policy became "anybody may bounce :7999 within reason". Delta over 1.1.2 is three
+    # binaries (tmux, node v22.15.0, terraform v1.12.2); dpkg 523 -> 527, ZERO removed,
+    # ZERO version changes, chromium/pip-freeze/bundled-CC byte-identical.
+    # Rollback: lupin:1.1.2-agy-candidate (2026-07-11, agy baked in — Rio, Rick user_direct).
+    # Prior to that: 1.1.1-pgvector-candidate (v0.2.0 pgvector swap, gate d93a1edb).
+    image: lupin:1.1.3-testtoolchain-candidate
     container_name: lupin-rest-dev
     restart: unless-stopped
     user: "1001:1001"
@@ -156,6 +168,11 @@ services:
     volumes:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
+      # DM traffic corpus — lives OUTSIDE the repo (Rick 2026-08-13) so an
+      # accumulating data file is not sitting in the checkout where `git clean
+      # -xdf` would take it and `git status` keeps offering it. Same host dir
+      # for both servers; rows carry server_port + boot_id to stay separable.
+      - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/dm-corpus:/var/lupin/dm-corpus
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
       # Without these, 19 unit tests fail in-container with FileNotFoundError
@@ -165,14 +182,12 @@ services:
       # rewrite the deploy config it is asserting about.
       - ./docker-compose.yml:/var/lupin/docker-compose.yml:ro
       - ./docker-compose.cloud-gpu.yml:/var/lupin/docker-compose.cloud-gpu.yml:ro
-      - ./docker-compose.cloud-test.yml:/var/lupin/docker-compose.cloud-test.yml:ro
       - ./docker:/var/lupin/docker:ro
       - ./.dockerignore:/var/lupin/.dockerignore:ro
       - ./.docview.yml:/var/lupin/.docview.yml:ro
       - ./.gitleaks.toml:/var/lupin/.gitleaks.toml:ro
       - ./.stylelintrc.json:/var/lupin/.stylelintrc.json:ro
       - ./alembic.ini:/var/lupin/alembic.ini:ro
-      - ./cloud-test.env.example:/var/lupin/cloud-test.env.example:ro
       - ./package.json:/var/lupin/package.json:ro
       - ./package-lock.json:/var/lupin/package-lock.json:ro
       - ./pyproject.toml:/var/lupin/pyproject.toml:ro
@@ -226,7 +241,21 @@ services:
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: development
+      # Row adce3547: the JWT signing secret comes from the ENVIRONMENT and nowhere
+      # else — jwt_service.py has no literal fallback. The value lives in the
+      # UNTRACKED, gitignored .env beside this file, which Compose auto-loads; it is
+      # never committed, because a signing secret in a tracked file on a public repo
+      # is the defect that row exists to close.
+      # ⚠️ Env resolves at container CREATE: changing it needs
+      # `docker compose up -d --force-recreate`, never a plain restart.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in .env — see row adce3547}
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
+      # DM traffic corpus — OUTSIDE the repo (Rick 2026-08-13). Points at the
+      # bind-mount below, which is the host's <projects-data>/lupin/dm-corpus.
+      # ⚠️ Env + mounts resolve at container CREATE: picking this up needs
+      # `docker compose up -d --force-recreate`, never a plain restart.
+      LUPIN_DM_CORPUS_DIR: /var/lupin/dm-corpus
+      LUPIN_SERVER_PORT: "7999"
       DB_HOST: lupin-postgres
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
@@ -323,6 +352,11 @@ services:
     volumes:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
+      # DM traffic corpus — lives OUTSIDE the repo (Rick 2026-08-13) so an
+      # accumulating data file is not sitting in the checkout where `git clean
+      # -xdf` would take it and `git status` keeps offering it. Same host dir
+      # for both servers; rows carry server_port + boot_id to stay separable.
+      - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/dm-corpus:/var/lupin/dm-corpus
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
       # Without these, 19 unit tests fail in-container with FileNotFoundError
@@ -332,14 +366,12 @@ services:
       # rewrite the deploy config it is asserting about.
       - ./docker-compose.yml:/var/lupin/docker-compose.yml:ro
       - ./docker-compose.cloud-gpu.yml:/var/lupin/docker-compose.cloud-gpu.yml:ro
-      - ./docker-compose.cloud-test.yml:/var/lupin/docker-compose.cloud-test.yml:ro
       - ./docker:/var/lupin/docker:ro
       - ./.dockerignore:/var/lupin/.dockerignore:ro
       - ./.docview.yml:/var/lupin/.docview.yml:ro
       - ./.gitleaks.toml:/var/lupin/.gitleaks.toml:ro
       - ./.stylelintrc.json:/var/lupin/.stylelintrc.json:ro
       - ./alembic.ini:/var/lupin/alembic.ini:ro
-      - ./cloud-test.env.example:/var/lupin/cloud-test.env.example:ro
       - ./package.json:/var/lupin/package.json:ro
       - ./package-lock.json:/var/lupin/package-lock.json:ro
       # node_modules — the `typescript` tier's ONLY source of c8/tsx/esbuild.
@@ -392,7 +424,20 @@ services:
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: testing
+      # Row adce3547: the JWT signing secret comes from the ENVIRONMENT and nowhere
+      # else — jwt_service.py has no literal fallback. The value lives in the
+      # UNTRACKED, gitignored .env beside this file, which Compose auto-loads; it is
+      # never committed, because a signing secret in a tracked file on a public repo
+      # is the defect that row exists to close.
+      # ⚠️ Env resolves at container CREATE: changing it needs
+      # `docker compose up -d --force-recreate`, never a plain restart.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in .env — see row adce3547}
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
+      # DM traffic corpus — same host directory as :7999 (see the dev service).
+      # The two servers share ONE corpus; `server_port` + `boot_id` on every row
+      # are what keep their traffic tellable apart.
+      LUPIN_DM_CORPUS_DIR: /var/lupin/dm-corpus
+      LUPIN_SERVER_PORT: "8000"
       DB_HOST: lupin-postgres
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
@@ -441,6 +486,12 @@ services:
       # /tmp because it is container-local (only ./src and ./io are bind-mounted) and always
       # writable by uid 1001; a bytecode cache needs no durability across restarts.
       PYTHONPYCACHEPREFIX: /tmp/pycache
+      # LUPIN_V1_ARM_BASE_URL and LUPIN_PAIRED_N were REMOVED 2026-08-26 with the V1
+      # excision (row e2099400 §2). They fed the v1-vs-v2 paired eval — the pinned :7997
+      # baseline server and its sample size — and nothing reads them now.
+      # ⚠️ ENV RESOLVES AT CONTAINER CREATE: `docker compose up -d --force-recreate
+      #    lupin-rest-test` is what actually drops them; a plain restart keeps the old
+      #    values. Prove with `docker exec lupin-rest-test printenv | grep -c LUPIN_PAIRED_N`.
     deploy:
       resources:
         reservations:
@@ -448,6 +499,37 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+        # 🔴 REQUIRED FOR THE TYPESCRIPT TIER — not a tuning knob (row 92e94cb7, 2026-08-25).
+        # The capped JS-test lane REFUSES to run when it cannot prove a ceiling, and inside a
+        # container it can only defer to the container's own: systemd-run does not exist there
+        # and the process cannot write its own cgroup. Without this the tier exits 70 with
+        # "IN A CONTAINER WITH NO MEMORY CEILING — refusing", and the suite then reports
+        # 0 passed / 0 failed with job status "completed" — which any gate reading the status
+        # rather than the counts sees as a pass. Measured, ts-76be90f0.
+        # Measured 2026-08-25: this container idles at ~630 MB, so 12G is ~19x headroom and
+        # well clear of the e2e tier's chromium. The lane's own RSS watchdog (2048 MB) still
+        # fires first for a runaway — this ceiling is the PRECONDITION, not the protection.
+        # ⚠️ Applies at container CREATE: `docker compose up -d --force-recreate lupin-rest-test`.
+        #    A plain `docker restart` reuses the old limits and this change silently does nothing.
+        limits:
+          memory: 12G
+    # 🔴 SWAP MUST BE ZERO, and `limits.memory` above does NOT do it (mr radio's catch,
+    # 2026-08-25). Measured after the first recreate: memory.swap.max read 12884901888 and
+    # docker's HostConfig.MemorySwap read 25769803776 — the default is 2x memory, so capping
+    # memory alone leaves swap wide open. The host carries a 4G swapfile, so this is real.
+    #
+    # WHY IT MATTERS HERE SPECIFICALLY: inside a container the lane cannot make a sub-scope,
+    # so its enforcer is the RSS WATCHDOG — and a process that swaps has its RSS go DOWN.
+    # A swapping runaway therefore gets QUIETER to the watchdog while it is doing the most
+    # damage, converting a fast local kill into the slow global stall the host-side lane
+    # avoids with MemorySwapMax=0.
+    #
+    # memswap_limit is the TOTAL of memory + swap, so setting it EQUAL to mem_limit yields
+    # zero swap (cgroup v2: memory.swap.max = MemorySwap - Memory = 0). Both legacy keys are
+    # used together because `deploy.resources.limits` has no swap sub-key at all, and
+    # memswap_limit is only honored alongside mem_limit.
+    mem_limit: 12g
+    memswap_limit: 12g
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""]
       interval: 30s
@@ -471,7 +553,7 @@ services:
   #   restart: unless-stopped
   #   environment:
   #     PGADMIN_DEFAULT_EMAIL: dev@lupin.local
-  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #     PGADMIN_DEFAULT_PASSWORD: <supply from .env when re-enabling — row 856882e4>
   #     PGADMIN_CONFIG_SERVER_MODE: 'False'
   #   ports:
   #     - "5050:80"

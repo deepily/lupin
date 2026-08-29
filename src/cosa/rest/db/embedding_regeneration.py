@@ -51,6 +51,7 @@ addressed at all.
 
 Run (from repo root, PYTHONPATH=src):
     python -m cosa.rest.db.embedding_regeneration plan
+    python -m cosa.rest.db.embedding_regeneration ensure-columns --apply
     python -m cosa.rest.db.embedding_regeneration plan --table-prefix=regen_probe.
     python -m cosa.rest.db.embedding_regeneration fill --table-prefix=regen_probe. --limit=500
     python -m cosa.rest.db.embedding_regeneration verify --table-prefix=regen_probe.
@@ -99,6 +100,25 @@ DEFAULT_CHAR_BUDGET = 40_000
 # guard rails around the value the run discovers for itself.
 MIN_CHAR_BUDGET = 5_000
 MAX_CHAR_BUDGET = 2_000_000
+
+# The hour the off-peak window CLOSES (EDT). Midnight is always the open.
+#
+# WAS 9, then 11. Rick, 2026-08-17: "You can update the clock to run for as long as
+# we need it to. I am the human at the console. Nothing else will run or interfere.
+# Let's not be too official on this — update the clock/gate so it's permissive and
+# runs at my discretion."
+#
+# 24 means every hour is inside the window, i.e. the clock no longer refuses anyone.
+# That is deliberate and it costs nothing, because the clock was never the real gate:
+# should_proceed() still asks the live server whether work is in flight and still
+# refuses on a busy box AND on an unknown answer. A clock cannot tell you the box is
+# free; only the box can. What the clock was actually protecting was Rick's own
+# interactive hours — and when Rick is the one at the keyboard asking for the run,
+# there is nobody left for it to protect.
+#
+# The boundary is still a parameter: is_off_peak( hour, end_hour=N ) lets any caller
+# reimpose a tighter window without editing this module.
+OFF_PEAK_END_HOUR = 24
 
 
 class RegenSpec( NamedTuple ):
@@ -220,6 +240,35 @@ def is_excluded( table: str, row_id: Any ) -> bool:
     return str( row_id ) in EXCLUDED_IDS.get( table, frozenset() )
 
 
+def excluded_ids_clause( table: str, pk: str ) -> str:
+    """
+    Build the SQL fragment that removes EXCLUDED_IDS rows from a scope query.
+
+    `fill` skips excluded rows in Python via is_excluded(). `verify` counts scope
+    in SQL, and originally had no matching filter — so an excluded row sat in the
+    denominator forever, unfillable by design and uncountable as filled. The
+    decisions spec could therefore NEVER verify clean, and the swap it gates could
+    never run (found live 2026-08-17: `1 of 909 in-scope row(s) have no
+    regenerated vector`, that one row being clamp-001).
+
+    Keeping the fragment here means the two paths share one definition of scope
+    instead of agreeing by coincidence.
+
+    Requires:
+        - table is a spec table name; pk is its primary-key column name
+
+    Ensures:
+        - returns "" when the table has no excluded ids
+        - otherwise returns a leading-AND fragment excluding exactly those ids
+        - ids are single-quoted, with embedded quotes doubled
+    """
+    excluded = EXCLUDED_IDS.get( table, frozenset() )
+    if not excluded:
+        return ""
+    quoted = ", ".join( "'" + str( row_id ).replace( "'", "''" ) + "'" for row_id in sorted( excluded ) )
+    return f" AND {pk}::text NOT IN ( {quoted} )"
+
+
 def plan_batches( row_ids: Sequence[Any], batch_size: int = DEFAULT_BATCH_SIZE ) -> List[List[Any]]:
     """
     Split row ids into fixed-size batches.
@@ -288,6 +337,36 @@ def plan_batches_by_budget( items: Sequence[Any], size_of, *,
     if current:
         batches.append( current )
     return batches
+
+
+def bulk_update_shadow_sql( table: str, pk: str, shadow_column: str ) -> str:
+    """
+    Build the ONE-statement, many-row shadow UPDATE used by the batched write path.
+
+    Measured 2026-08-16 (row 5e848dd8): the per-statement Python/SQLAlchemy
+    overhead — NOT Postgres — dominates the write side, and collapsing a chunk
+    into a single round trip roughly doubles throughput (~4,575 -> ~8,940 rows/s
+    on a properly-indexed clone). This is the psycopg2 `execute_values` template
+    that does the collapsing while leaving the commit cadence alone.
+
+    The `%s` placeholder is expanded by execute_values into the VALUES rows; each
+    row is `(id, vec_text)`, and `data.vec::vector` casts the pgvector literal
+    back to a vector on the way in. The target is aliased `t` so a
+    schema-qualified table name still yields a legal `t.<pk>` reference.
+
+    Requires:
+        - table, pk, shadow_column are non-empty identifiers (already qualified
+          by the caller via qualify(); this function does no quoting)
+
+    Ensures:
+        - returns a single UPDATE ... FROM (VALUES %s) ... statement string whose
+          only bind point is the execute_values %s marker
+    """
+    return (
+        f"UPDATE {table} AS t SET {shadow_column} = data.vec::vector "
+        f"FROM ( VALUES %s ) AS data( id, vec ) "
+        f"WHERE t.{pk} = data.id"
+    )
 
 
 class AdaptiveBudget:
@@ -388,17 +467,20 @@ def split_batch( batch: Sequence[Any] ) -> List[List[Any]]:
     return [ list( batch[ :middle ] ), list( batch[ middle: ] ) ]
 
 
-def is_off_peak( hour_edt: int ) -> bool:
+def is_off_peak( hour_edt: int, end_hour: int = OFF_PEAK_END_HOUR ) -> bool:
     """
-    True iff an hour falls in the sanctioned batch window (midnight - 9am EDT).
+    True iff an hour falls in the sanctioned batch window (midnight - end_hour EDT).
 
     Requires:
         - hour_edt is an int hour-of-day in 0..23, EDT
+        - end_hour is an int hour-of-day in 1..24
 
     Ensures:
-        - returns True for 0 <= hour_edt < 9, False otherwise
+        - returns True for 0 <= hour_edt < end_hour, False otherwise
+        - the default end_hour is OFF_PEAK_END_HOUR, so callers that do not care
+          about the boundary never have to name it
     """
-    return 0 <= hour_edt < 9
+    return 0 <= hour_edt < end_hour
 
 
 def should_proceed( *, busy: Optional[bool], hour_edt: Optional[int],
@@ -425,7 +507,8 @@ def should_proceed( *, busy: Optional[bool], hour_edt: Optional[int],
     if busy:
         return "server is busy (jobs in flight) — refusing to add embedding load"
     if not force and hour_edt is not None and not is_off_peak( hour_edt ):
-        return f"hour {hour_edt:02d} EDT is outside the off-peak window (00:00-09:00); pass --force to override"
+        return ( f"hour {hour_edt:02d} EDT is outside the off-peak window "
+                 f"(00:00-{OFF_PEAK_END_HOUR:02d}:00); pass --force to override" )
     return None
 
 
@@ -554,7 +637,7 @@ def remaining_ids( all_ids: Sequence[Any], done_ids: Sequence[Any] ) -> List[Any
 
 # =========================================================================== #
 # IO boundary — live DB, live embedder, argv. Excluded from coverage for the
-# same reason vector_store_backfill._run is: it needs a real session, a real
+# same reason a bulk loader's _run is: it needs a real session, a real
 # GPU-backed server, and a command line, none of which a unit test should touch.
 # =========================================================================== #
 # Selection is by SOURCE TEXT, not by vector norm. A norm cannot identify a
@@ -563,7 +646,7 @@ def remaining_ids( all_ids: Sequence[Any], done_ids: Sequence[Any] ) -> List[Any
 # space by construction rather than by inference.
 _TARGET_COUNT_SQL = """
 SELECT count(*) FROM {table}
-WHERE {text} IS NOT NULL AND btrim({text}) <> ''
+WHERE {text} IS NOT NULL AND btrim({text}) <> ''{excluded}
 """
 
 _TARGET_IDS_SQL = """
@@ -609,7 +692,10 @@ def _plan( session, prefix="" ):   # pragma: no cover - live DB boundary
     print( f"{'spec':12} {'table':22} {'to regen':>12} {'missing vec':>12} {'no text':>9}" )
     for spec in REGEN_SPECS:
         table   = qualify( spec.table, prefix )
-        fields  = { "table": table, "text": spec.text_column, "vector": spec.vector_column }
+        # `excluded` keeps plan's headline count honest against what fill will
+        # actually attempt — an excluded row is not an embedding call anyone owes.
+        fields  = { "table": table, "text": spec.text_column, "vector": spec.vector_column,
+                    "excluded": excluded_ids_clause( spec.table, spec.pk ) }
         count   = session.execute( sql_text( _TARGET_COUNT_SQL.format( **fields ) ) ).scalar()
         missing = session.execute( sql_text( _MISSING_VECTOR_SQL.format( **fields ) ) ).scalar()
         orphan  = session.execute( sql_text( _ORPHAN_VECTOR_SQL.format( **fields ) ) ).scalar()
@@ -631,11 +717,24 @@ def _embed_with_split_retry( provider, rows, content_type, depth=0, budget=None 
 
     Returns [ ( row_id, vector_or_None ), ... ]; a None means that single row
     genuinely could not be embedded on its own.
+
+    A TRANSPORT failure is not split. `EmbeddingProviderUnreachable` means the
+    service is not answering at all — the provider already spent every retry it
+    has before raising — so a smaller batch would fail on the same dead socket.
+    Splitting there turns one dead dependency into one doomed retry per row and
+    burns the entire run producing nothing (bug 13b35b37). It propagates instead,
+    which stops the run loudly and immediately.
     """
+    from cosa.memory.embedding_provider import EmbeddingProviderUnreachable
+
     try:
         vectors = provider.generate_embeddings_batch( [ r[ 1 ] for r in rows ], content_type=content_type )
         if budget is not None and depth == 0: budget.record_success()
         return list( zip( [ r[ 0 ] for r in rows ], vectors ) )
+    except EmbeddingProviderUnreachable:
+        # Deliberately NOT recorded as a batch-size failure: the budget's job is to
+        # learn how big a batch the GPU tolerates, and a dead server teaches it nothing.
+        raise
     except Exception as error:
         if budget is not None: budget.record_failure()
         halves = split_batch( rows )
@@ -647,6 +746,28 @@ def _embed_with_split_retry( provider, rows, content_type, depth=0, budget=None 
         for half in halves:
             out.extend( _embed_with_split_retry( provider, half, content_type, depth + 1, budget ) )
         return out
+
+
+def _bulk_write_shadow( session, table, pk, shadow_column, pairs ):   # pragma: no cover - live DB boundary
+    """
+    Write a whole chunk of (id, vec_text) pairs in ONE psycopg2 execute_values
+    call, inside the session's current transaction (caller still commits).
+
+    Reaches through the SQLAlchemy session to the underlying psycopg2 cursor
+    because execute_values is a psycopg2 extension — the write lands in the same
+    transaction the session manages, so the caller's session.commit() covers it.
+    """
+    from psycopg2.extras import execute_values
+
+    raw    = session.connection().connection          # DBAPI (psycopg2) connection
+    cursor = raw.cursor()
+    execute_values(
+        cursor,
+        bulk_update_shadow_sql( table, pk, shadow_column ),
+        pairs,
+        template  = "(%s, %s)",
+        page_size = len( pairs ),
+    )
 
 
 def _fill( session, spec, provider, prefix="", batch_size=DEFAULT_BATCH_SIZE,
@@ -685,6 +806,12 @@ def _fill( session, spec, provider, prefix="", batch_size=DEFAULT_BATCH_SIZE,
             f"SELECT {spec.pk}, {spec.text_column} FROM {table} WHERE {spec.pk} = ANY(:ids)"
         ), { "ids": id_chunk } ).all()
 
+        # Accumulate this chunk's (id, vec_text) pairs, then write them in ONE
+        # execute_values round trip below. Measured 2026-08-16 (row 5e848dd8): the
+        # Python/SQLAlchemy per-statement overhead, not Postgres, was the write-side
+        # bottleneck — batching roughly doubles throughput. The commit stays per
+        # chunk, so the 1024-row cadence is unchanged.
+        pending = []
         for batch in plan_batches_by_budget(
             [ ( row[ 0 ], row[ 1 ] ) for row in fetched ],
             size_of     = lambda pair: len( pair[ 1 ] or "" ),
@@ -697,11 +824,12 @@ def _fill( session, spec, provider, prefix="", batch_size=DEFAULT_BATCH_SIZE,
                     print( f"    REJECTED {spec.pk}={row_id}: {reason}" )
                     rejected += 1
                     continue
-                session.execute( sql_text(
-                    f"UPDATE {table} SET {spec.shadow_column} = :vec WHERE {spec.pk} = :id"
-                ), { "vec": str( list( vector ) ), "id": row_id } )
-                written += 1
+                pending.append( ( row_id, str( list( vector ) ) ) )
                 done.append( row_id )
+
+        if pending:
+            _bulk_write_shadow( session, table, spec.pk, spec.shadow_column, pending )
+            written += len( pending )
 
         session.commit()
         save_checkpoint( path, done )
@@ -715,9 +843,12 @@ def _verify( session, spec, prefix="" ):   # pragma: no cover - live DB boundary
     """Compare shadow coverage against scope, read-only, and return the swap verdict."""
     from sqlalchemy import text as sql_text
 
-    # Denominator is every row with source text — the same predicate `fill` used.
-    # Counting only the norm-1.0 rows here would let a partial run verify clean.
-    table = qualify( spec.table, prefix )
+    # Denominator is every row with source text, MINUS the ids fill deliberately
+    # skips — the same predicate `fill` used. Counting only the norm-1.0 rows here
+    # would let a partial run verify clean; counting the excluded rows makes a
+    # complete run verify dirty forever, which is how clamp-001 blocked the swap.
+    table    = qualify( spec.table, prefix )
+    excluded = excluded_ids_clause( spec.table, spec.pk )
     row = session.execute( sql_text( f"""
         SELECT count(*),
                count(*) FILTER (WHERE {spec.shadow_column} IS NOT NULL),
@@ -726,7 +857,7 @@ def _verify( session, spec, prefix="" ):   # pragma: no cover - live DB boundary
                count(*) FILTER (WHERE {spec.shadow_column} IS NOT NULL
                             AND vector_dims({spec.shadow_column}) <> {EMBEDDING_DIM})
         FROM {table}
-        WHERE {spec.text_column} IS NOT NULL AND btrim({spec.text_column}) <> ''
+        WHERE {spec.text_column} IS NOT NULL AND btrim({spec.text_column}) <> ''{excluded}
     """ ) ).one()
 
     report = summarize_verification( total=row[ 0 ], filled=row[ 1 ], bad_norms=row[ 2 ], dim_mismatches=row[ 3 ] )
@@ -759,6 +890,52 @@ def _swap( session, spec, prefix="", apply=False ):   # pragma: no cover - live 
     return 0
 
 
+def shadow_column_ddl( specs=None, prefix="" ) -> List[str]:
+    """
+    Build the ADD COLUMN statements for every spec's shadow column.
+
+    The `fill` step writes into shadow columns that nothing in this module used to
+    create — the DDL was simply never written, so the first live fill died on
+    `column "input_embedding_regen" does not exist` (2026-08-17). Generating the
+    statements from REGEN_SPECS keeps them from drifting: add a spec and its column
+    is created, with no second list to remember.
+
+    IF NOT EXISTS makes the result safe to apply repeatedly, which matters because
+    a resumed run should not have to know whether an earlier attempt got this far.
+
+    Requires:
+        - specs is a list of RegenSpec, or None for REGEN_SPECS
+        - prefix is a table-name prefix, "" for the live tables
+
+    Ensures:
+        - returns one statement per spec, in spec order
+        - every statement is a nullable ADD COLUMN IF NOT EXISTS at EMBEDDING_DIM
+        - no statement carries a DEFAULT — that is what keeps it metadata-only
+    """
+    return [
+        f"ALTER TABLE {qualify( spec.table, prefix )} "
+        f"ADD COLUMN IF NOT EXISTS {spec.shadow_column} vector({EMBEDDING_DIM})"
+        for spec in ( REGEN_SPECS if specs is None else specs )
+    ]
+
+
+def _ensure_columns( session, specs, prefix="", apply=False ):   # pragma: no cover - live DB boundary
+    """Create the shadow columns the fill writes into. Dry-run unless --apply."""
+    from sqlalchemy import text as sql_text
+
+    statements = shadow_column_ddl( specs, prefix )
+    if not apply:
+        for statement in statements:
+            print( f"  [DRY-RUN] {statement}" )
+        return 0
+
+    for statement in statements:
+        session.execute( sql_text( statement ) )
+        print( f"  applied: {statement}" )
+    session.commit()
+    return 0
+
+
 def _run( command="plan", prefix="", apply=False, force=False, limit=None,
           batch_size=DEFAULT_BATCH_SIZE, char_budget=DEFAULT_CHAR_BUDGET,
           only=None ):   # pragma: no cover - CLI/DB/HTTP boundary
@@ -780,6 +957,9 @@ def _run( command="plan", prefix="", apply=False, force=False, limit=None,
             _plan( session, prefix )
             return 0
 
+        if command == "ensure-columns":
+            return _ensure_columns( session, specs, prefix, apply )
+
         if command == "verify":
             return 0 if all( _verify( session, spec, prefix )[ "ok" ] for spec in specs ) else 1
 
@@ -792,17 +972,27 @@ def _run( command="plan", prefix="", apply=False, force=False, limit=None,
             if refusal:
                 print( f"  REFUSING: {refusal}" )
                 return 1
-            from cosa.memory.embedding_provider import get_embedding_provider
+            from cosa.memory.embedding_provider import ( get_embedding_provider,
+                                                          EmbeddingProviderUnreachable )
             provider = get_embedding_provider()
-            for spec in specs:
-                _fill( session, spec, provider, prefix=prefix, batch_size=batch_size,
-                       char_budget=char_budget, limit=limit, apply=apply )
+            try:
+                for spec in specs:
+                    _fill( session, spec, provider, prefix=prefix, batch_size=batch_size,
+                           char_budget=char_budget, limit=limit, apply=apply )
+            except EmbeddingProviderUnreachable as error:
+                # One loud stop beats 703,471 identical failures. Whatever committed
+                # before this point stays committed — fill is resumable from its
+                # checkpoint, so the remedy is "fix the server, run again".
+                print( f"  ABORTING: the embedding service is not reachable.\n    {error}" )
+                print(  "    Nothing further was attempted. Fix the service, then re-run —"
+                        " completed batches are checkpointed and will not be redone." )
+                return 1
             return 0
 
         if command == "swap":
             return max( _swap( session, spec, prefix, apply ) for spec in specs )
 
-    print( f"unknown command {command!r}; valid: plan / fill / verify / swap" )
+    print( f"unknown command {command!r}; valid: plan / ensure-columns / fill / verify / swap" )
     return 1
 
 

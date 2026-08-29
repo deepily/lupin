@@ -28,6 +28,7 @@ from unittest.mock import MagicMock, patch
 from cosa.rest import running_fifo_queue as rfq
 from cosa.rest.running_fifo_queue import RunningFifoQueue
 from cosa.rest.job_state import JobState
+from cosa.agents.shared.fix_executor import BFETimeoutError
 
 
 # ── Lightweight fake job hierarchy (real instances, so isinstance works) ─────
@@ -43,6 +44,7 @@ class _Job:
             state=None, error=None, artifacts={}, solution_summary_gist="gist",
             solution_summary="summary", thoughts="thoughts", runtime_stats={},
             answer_is_correct=None, question="what time is it?",
+            brake_terminal_claimed=False,   # protocol member (row cdfedc41) — read directly by the brake
             _do_all_return="output", _do_all_exc=None, _code_ok=True, _fmt_ok=True,
             _code_response={ "return_code": 0, "output": "ok" }, _formatted="fmt",
         )
@@ -188,7 +190,6 @@ class TestConstruction( _RFQBase ):
         rq = self.build( config_mgr=None )
         self.assertFalse( rq.auto_debug )
         self.assertFalse( rq.inject_bugs )
-        self.assertEqual( rq.threshold_confirmation, 90.0 )
         self.assertEqual( rq._pool_max_workers, 1 )
         self.assertEqual( rq._consumer_stall_threshold_seconds, 120 )
 
@@ -442,6 +443,195 @@ class TestTransitionToDead( _RFQBase ):
             rq._transition_to_dead( job, "c" )
         # _notify is stubbed; assert it was called (urgent path)
         rq._notify.assert_called_once()
+
+
+# ── Runtime brake legs (b3) + (c) ───────────────────────────────────────────
+# design src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md
+class TestRuntimeBrakeLegBC( _RFQBase ):
+    """
+    Leg (b3): a BFETimeoutError death must NOT re-arm the repair chain
+    (_evaluate_for_auto_fix skipped); any other cause re-arms as before.
+    Leg (c): _transition_to_dead is idempotent per job OBJECT — a second entry
+    no-ops (no double emit / double dead-queue push / double auto-fix eval), so a
+    late completion callback or a ghost-sweep snapshot race cannot
+    double-transition a row already declared dead.
+    """
+
+    # ---- Leg (b3): timeout death does not re-arm ----
+    def test_brake_timeout_death_skips_auto_fix_rearm( self ):
+        rq = self.build()
+        job = _AgenticFake( id_hash="bfe1" ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            rq._transition_to_dead( job, BFETimeoutError( "brake: 600s budget" ) )
+        ev.assert_not_called()
+
+    def test_non_timeout_death_still_rearms_auto_fix( self ):
+        rq = self.build()
+        job = _AgenticFake( id_hash="bfe2" ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            rq._transition_to_dead( job, ValueError( "ordinary crash" ) )
+        ev.assert_called_once_with( job )
+
+    # ---- Leg (c): idempotent terminal claim ----
+    def test_claim_terminal_reclaim_first_true_then_false( self ):
+        rq = self.build()
+        job = _AgenticFake( id_hash="c1" )
+        self.assertTrue( rq._claim_terminal_reclaim( job ) )
+        self.assertFalse( rq._claim_terminal_reclaim( job ) )
+
+    def test_claim_is_per_object_not_shared_by_id( self ):
+        # A resubmitted repair-chain job is a NEW object with the SAME id_hash —
+        # the per-object marker must NOT falsely block its distinct death.
+        rq = self.build()
+        j1 = _AgenticFake( id_hash="c2" )
+        j2 = _AgenticFake( id_hash="c2" )
+        self.assertTrue( rq._claim_terminal_reclaim( j1 ) )
+        self.assertTrue( rq._claim_terminal_reclaim( j2 ) )
+
+    def test_transition_to_dead_idempotent_second_call_noops( self ):
+        rq = self.build()
+        job = _AgenticFake( id_hash="c3" ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            rq._transition_to_dead( job, "first death" )
+            emit_after_first = self.emit.call_count
+            push_after_first = rq.jobs_dead_queue.push.call_count
+            rq._transition_to_dead( job, "second death" )    # already terminal → no-op
+        self.assertEqual( self.emit.call_count, emit_after_first )            # no extra emit
+        self.assertEqual( rq.jobs_dead_queue.push.call_count, push_after_first )  # no extra push
+        ev.assert_called_once()                                              # eval fired only once
+
+    def test_mid_transition_error_rolls_back_claim_and_retry_succeeds( self ):
+        # Tiberius P1: if emit/delete/push raises mid-transition, the early claim
+        # must roll back so a later retry (ghost-sweeper) still completes — else
+        # the marker stays True, the job stays in running_queue, and the slot
+        # wedges forever. Proves the fix: raise mid-transition → claim released →
+        # retry succeeds.
+        rq = self.build()
+        job = _AgenticFake( id_hash="c4" ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            # First attempt: emit raises AFTER the claim is taken.
+            self.emit.side_effect = RuntimeError( "emit boom" )
+            with self.assertRaises( RuntimeError ):
+                rq._transition_to_dead( job, "cause" )
+            # Claim rolled back → a retry is permitted (not wedged).
+            self.assertFalse( job.brake_terminal_claimed )
+            self.assertEqual( rq.jobs_dead_queue.push.call_count, 0 )   # nothing pushed on the failed attempt
+            # Retry: emit now succeeds → transition completes.
+            self.emit.side_effect = None
+            rq._transition_to_dead( job, "cause" )
+        rq.jobs_dead_queue.push.assert_called_once_with( job )          # retry pushed exactly once
+        ev.assert_called_once()                                        # retry re-armed exactly once
+
+    def test_dead_queue_push_raise_after_delete_logs_and_rolls_back( self ):
+        # Tiberius residual (log-not-guard, María 2026-08-13): delete succeeds,
+        # dead-queue push then raises → row orphaned (neither queue); we log and
+        # re-raise, and the outer handler rolls the reclaim back. In-memory push
+        # never raises in practice — this covers the documented edge, not a
+        # recovery path.
+        rq = self.build()
+        job = _AgenticFake( id_hash="c5" ); self._enqueue( rq, job )
+        rq.jobs_dead_queue.push.side_effect = RuntimeError( "push boom" )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            with self.assertRaises( RuntimeError ):
+                rq._transition_to_dead( job, "cause" )
+        self.assertFalse( job.brake_terminal_claimed )   # claim rolled back
+        ev.assert_not_called()                                                # auto-fix never reached
+
+    # ---- Leg (c) P3: _transition_to_done claims the marker → closes done->dead race ----
+    def test_done_claims_marker_blocks_racing_dead( self ):
+        # A job that completed must not be re-dead-lettered by a racing ghost-sweep:
+        # _transition_to_done claims the SAME marker, so a follow-on _transition_to_dead
+        # no-ops (no double transition).
+        rq = self.build()
+        job = _AgenticFake( id_hash="c6" ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            rq._transition_to_done( job, "out" )          # claims the terminal marker
+            rq._transition_to_dead( job, "racing dead" )  # already terminal → no-op
+        rq.jobs_dead_queue.push.assert_not_called()       # dead did NOT double-transition
+        ev.assert_not_called()
+
+    def test_done_rolls_back_claim_on_mid_transition_error( self ):
+        # A failed done must roll the claim back so the follow-on dead-letter still
+        # completes — else claim-in-done would wedge the slot (the regression a
+        # claim-only P3 would introduce).
+        rq = self.build()
+        job = _AgenticFake( id_hash="c7" ); self._enqueue( rq, job )
+        self.emit.side_effect = RuntimeError( "emit boom" )
+        with self.assertRaises( RuntimeError ):
+            rq._transition_to_done( job, "out" )
+        self.assertFalse( job.brake_terminal_claimed )   # rolled back
+        # follow-on dead-letter now succeeds (not wedged)
+        self.emit.side_effect = None
+        with patch.object( rq, "_evaluate_for_auto_fix" ):
+            rq._transition_to_dead( job, "cause" )
+        rq.jobs_dead_queue.push.assert_called_once_with( job )
+
+    # ---- Leg (c) P3: _transition_to_stalled claims too (Tiberius, resume is a fresh object) ----
+    def test_stalled_claims_marker_blocks_racing_dead( self ):
+        rq = self.build()
+        job = _AgenticFake( id_hash="c8", state=JobState.STALLED ); self._enqueue( rq, job )
+        with patch.object( rq, "_evaluate_for_auto_fix" ) as ev:
+            rq._transition_to_stalled( job, "out" )        # claims the terminal marker
+            rq._transition_to_dead( job, "racing dead" )   # already terminal → no-op
+        rq.jobs_dead_queue.push.assert_not_called()
+        ev.assert_not_called()
+
+    def test_stalled_rolls_back_claim_on_mid_transition_error( self ):
+        rq = self.build()
+        job = _AgenticFake( id_hash="c9", state=JobState.STALLED ); self._enqueue( rq, job )
+        self.emit.side_effect = RuntimeError( "emit boom" )
+        with self.assertRaises( RuntimeError ):
+            rq._transition_to_stalled( job, "out" )
+        self.assertFalse( job.brake_terminal_claimed )   # rolled back
+        self.emit.side_effect = None
+        with patch.object( rq, "_evaluate_for_auto_fix" ):
+            rq._transition_to_dead( job, "cause" )
+        rq.jobs_dead_queue.push.assert_called_once_with( job )
+
+
+# ── The brake flag is part of the contract, not a private write ──────────────
+class TestBrakeFlagIsDeclaredOnTheProtocol( unittest.TestCase ):
+    """
+    The runtime brake marks a job terminal by writing `brake_terminal_claimed`
+    on the job object from OUTSIDE its class. For that to be a contract rather
+    than a private write, QueueableJob must DECLARE the attribute, and the
+    protocol gate (is_queueable_job) must REFUSE a job that lacks it — so a new
+    job class cannot enter the queue without carrying the flag the brake depends
+    on. Delete the declaration and BOTH tests go red: the first because the name
+    is gone from the protocol, the second because the gate then admits a job
+    that does not carry the flag.
+    """
+
+    def test_protocol_declares_the_flag_the_brake_writes( self ):
+        from cosa.rest.queue_protocol import QueueableJob
+        self.assertIn( "brake_terminal_claimed", QueueableJob.__annotations__ )
+        self.assertIs( QueueableJob.__annotations__[ "brake_terminal_claimed" ], bool )
+
+    def test_push_gate_refuses_a_job_without_the_flag_and_admits_one_with_it( self ):
+        # Arm 2 of the proof (row cdfedc41): not "the test notices the declaration" but
+        # "the GATE notices a non-conforming job" — driven through the real FifoQueue.push(),
+        # the one door every job passes on its way into a queue (fifo_queue.py).
+        from cosa.rest.fifo_queue import FifoQueue
+        from cosa.rest.queue_protocol import QueueableJob
+        # Every OTHER declared member is taken from the protocol itself, so this test
+        # does not hard-code the member list and rot when the protocol grows.
+        others = [ m for m in QueueableJob.__annotations__ if m != "brake_terminal_claimed" ]
+
+        class _AlmostAJob:
+            def do_all( self ): return ""
+            def code_ran_to_completion( self ): return True
+            def formatter_ran_to_completion( self ): return True
+
+        almost = _AlmostAJob()
+        for m in others: setattr( almost, m, None )
+        almost.id_hash = "almost-1"
+        q = FifoQueue( websocket_mgr=None, queue_name="probe", emit_enabled=False )
+        with self.assertRaises( TypeError ):          # lacks the flag → refused at push
+            q.push( almost )
+        self.assertEqual( q.size(), 0 )
+        almost.brake_terminal_claimed = False
+        q.push( almost )                              # carries it → admitted
+        self.assertEqual( q.size(), 1 )
 
 
 # ── get_pool_status ─────────────────────────────────────────────────────────
@@ -790,11 +980,42 @@ class TestProcessJob( _RFQBase ):
         rq._process_job( _AgentBaseFake() )
         rq._format_cached_result.assert_called_once()
 
-    def test_agent_cache_threshold_accept( self ):
-        rq = self.build(); rq._format_cached_result = MagicMock( return_value="c" )
+    def test_a_near_match_is_no_longer_accepted_without_asking( self ):
+        """
+        INVERTED BY STEP 7b, not deleted. This used to assert that a 95% match was
+        served from the cache — allowed only because push_job had asked the user
+        first. push_job is dead (step 6c), so that confirmation had stopped happening
+        and a 90-to-99% match was being replayed with nobody asked.
+
+        The ask now lives in AskFlow (step 6b) and runs before the job is queued, so
+        below an exact hit this routes to the agent.
+
+        RED ON REVERT: restore the accept-above-floor branch and the cached result is
+        served again, silently.
+        """
+        rq = self.build()
+        rq._format_cached_result = MagicMock( return_value="c" )
+        rq._handle_base_agent    = MagicMock( return_value="a" )
         snap = _SnapFake( run_date="2026" )
         rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 95.0, snap ) ]
+
         rq._process_job( _AgentBaseFake() )
+
+        rq._format_cached_result.assert_not_called()
+        rq._handle_base_agent.assert_called_once()
+
+    def test_an_exact_hit_is_still_served( self ):
+        """
+        NEGATIVE CONTROL for the deletion: 100% is a deterministic exact match, it needs
+        no confirmation, and 7b does not touch it. A change that removed the whole second
+        cache read instead of the unconfirmed branch would go red here.
+        """
+        rq = self.build()
+        rq._format_cached_result = MagicMock( return_value="c" )
+        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 100.0, _SnapFake( run_date="2026" ) ) ]
+
+        rq._process_job( _AgentBaseFake() )
+
         rq._format_cached_result.assert_called_once()
 
     def test_agent_cache_threshold_reject_routes_to_agent( self ):
@@ -1065,42 +1286,18 @@ class TestFormatCachedResult( _RFQBase ):
         rq._format_cached_result( cached, original, "q", rfq.sw.Stopwatch( "t" ) )
 
 
-# ── _process_fast_lane ──────────────────────────────────────────────────────
-class TestProcessFastLane( _RFQBase ):
-
-    def test_crud_skips_cache( self ):
-        rq = self.build( **{ "app debug": True } ); rq._handle_base_agent = MagicMock( return_value="a" )
-        rq._process_fast_lane( _CrudFake() )
-        rq._handle_base_agent.assert_called_once()
-
-    def test_agent_exact_hit( self ):
-        rq = self.build( **{ "app debug": True } ); rq._format_cached_result = MagicMock( return_value="c" )
-        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 100.0, _SnapFake( run_date="d" ) ) ]
-        rq._process_fast_lane( _AgentBaseFake() )
-        rq._format_cached_result.assert_called_once()
-
-    def test_agent_threshold_accept( self ):
-        rq = self.build(); rq._format_cached_result = MagicMock( return_value="c" )
-        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 95.0, _SnapFake( run_date="d" ) ) ]
-        rq._process_fast_lane( _AgentBaseFake() )
-        rq._format_cached_result.assert_called_once()
-
-    def test_agent_threshold_reject( self ):
-        rq = self.build(); rq._handle_base_agent = MagicMock( return_value="a" )
-        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 10.0, _SnapFake( run_date="d" ) ) ]
-        rq._process_fast_lane( _AgentBaseFake() )
-        rq._handle_base_agent.assert_called_once()
-
-    def test_agent_miss( self ):
-        rq = self.build( **{ "app debug": True } ); rq._handle_base_agent = MagicMock( return_value="a" )
-        rq.snapshot_mgr.get_snapshots_by_question.return_value = []
-        rq._process_fast_lane( _AgentBaseFake() )
-        rq._handle_base_agent.assert_called_once()
-
-    def test_snapshot_dispatch( self ):
-        rq = self.build(); rq._handle_solution_snapshot = MagicMock( return_value="s" )
-        rq._process_fast_lane( _SnapFake() )
-        rq._handle_solution_snapshot.assert_called_once()
+# ── _process_fast_lane: METHOD AND TESTS DELETED (step 7a, 2026-08-21) ──────
+#
+# Six tests lived here, pinning a method with no production caller — `_process_job`
+# inlines the same cache / CRUD / snapshot logic itself. They are gone WITH it, on
+# Rick's ruling: keeping tests for code nobody runs is what made the method look
+# maintained, and it is the reason the plan called removing one branch of it
+# "tidying a room nobody enters".
+#
+# The behaviour they described is not lost — it is covered where it actually runs,
+# in the _process_job tests above, and the three helpers they mocked
+# (_handle_base_agent, _format_cached_result, _handle_solution_snapshot) keep their
+# own tests because all three are live.
 
 
 # ── _handle_agentic_job (legacy/dead-code path, still covered) ───────────────

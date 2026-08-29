@@ -166,7 +166,7 @@ class AgentBase( RunnableCode, abc.ABC ):
         
         if self.df_path_key is not None:
 
-            self.df = pd.read_csv( du.get_project_root() + self.config_mgr.get( self.df_path_key ) )
+            self.df = pd.read_csv( du.get_project_root() + self.config_mgr.get_required( self.df_path_key ) )
             self.df = dup.cast_to_datetime( self.df )
 
         # QueueableJob protocol compliance - status tracking attributes
@@ -174,12 +174,17 @@ class AgentBase( RunnableCode, abc.ABC ):
         self.error        = ""  # Must be str, not None (protocol requirement)
         self.state        = JobState.PENDING
         self.is_cache_hit = False
-        self.started_at   = ""
-        self.completed_at = ""
+        # None, not "" — an absent timestamp is absent, not an empty string. The
+        # empty string is what made a datetime field stringly-typed (row 4a9ebc4b).
+        self.started_at   = None
+        self.completed_at = None
 
         # Scheduling attributes (CJ Flow) — sync agents are always immediate, never monopolize
         self.scheduled_at = None
         self.monopolize   = False
+
+        # Runtime brake marker (QueueableJob protocol) — written by RunningFifoQueue, never here
+        self.brake_terminal_claimed = False
 
         self.execution_state = AgentBase.STATE_WAITING_TO_RUN
     

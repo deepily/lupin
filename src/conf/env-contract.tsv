@@ -27,6 +27,16 @@
 #   surface       HOST      — the VM/dev shell (~/.bashrc, push-env)
 #                 CONTAINER — a compose `environment:` block
 #                 BOTH      — must agree on both surfaces
+#                 COMPOSE   — read by compose from the env-file at container CREATE
+#                             and consumed OUTSIDE any `environment:` block (a
+#                             `group_add:` entry, a mount `source:`). The value
+#                             shapes the container; it is never injected INTO it,
+#                             so neither the host shell nor `docker exec printenv`
+#                             can see it and both A1 and C6's env probe would ask
+#                             the wrong question. What proves a COMPOSE row instead
+#                             is compose's OWN `${VAR:?}` regime: unset aborts
+#                             `up`, so a RUNNING container is the evidence the
+#                             value was supplied. See preflight-vm.sh A1 + C6.
 #   writer        what is responsible for setting it.
 #   shape         PATH_VM      — must live under the VM data root on a VM
 #                 PATH_ANY     — a path, machine-specific, not otherwise constrained
@@ -41,6 +51,7 @@
 LUPIN_ROOT	BOTH	push-env + compose	PATH_VM	REQUIRED	36 read sites. Container value is /var/lupin; host value is the checkout. cu.get_project_root() falls back to /var/lupin, which is CORRECT in a container and WRONG on a host — so an unset host value fails silently rather than loudly.
 PLANNING_IS_PROMPTING_ROOT	HOST	push-env	PATH_VM	REQUIRED	The alias library and the hook templates are relative to it. Aliases only REFERENCED it; nothing defined it until 5eb54324.
 DEEPILY_PROJECTS_DIR	HOST	push-env	PATH_VM	REQUIRED	The alias library depends on it (878df337).
+DEEPILY_DATA_DIR	HOST	push-env	PATH_VM	REQUIRED	Per-machine state that is deliberately NOT in any repo. Holds claude-permissions.json, the portable Claude Code permission stanza shipped by push-unversioned and applied by src/scripts/apply_claude_permissions.py. Dev value is a SIBLING of the projects dir (.../projects-data); the VM has no such sibling, so its value nests under the data disk.
 
 # ── Claude Code host integration ─────────────────────────────────────────────
 LUPIN_CC_VENV	HOST	push-env	PATH_ANY	REQUIRED	The interpreter for the MCP server AND the 8 hooks. Defaults to $LUPIN_ROOT/.venv, which on the VM is a SYMLINK to the arbiter's venv (uid 1001, py3.10) — missing deps and unwritable. The dev box masks this completely.
@@ -49,11 +60,11 @@ LUPIN_API_KEY	HOST	minted ON the target	SECRET	REQUIRED	The X-API-Key (ck_live_ 
 
 # ── VM deployment identity ───────────────────────────────────────────────────
 LUPIN_GCP_PROJECT_ID	HOST	operator ~/.bashrc	LITERAL	REQUIRED	Required by lupin-vm.sh for every gcloud call. NB test_no_hardcoded_gcp_identifiers currently reports lupin-vm.sh hardcodes the sandbox value as well — an open pre-existing failure.
-LUPIN_BRIDGE_GID	CONTAINER	cloud-gpu.env	NUMERIC	REQUIRED	group_add for the app container so uid 1001 can read/write host-written CC session bridges. Absent => persona allocation 404s.
-LUPIN_HOST_SESSIONS_DIR	CONTAINER	cloud-gpu.env	PATH_ANY	REQUIRED	Bind source for the CC session bridges. A short ${HOME}-relative bind silently CREATES an empty dir when HOME is wrong — indistinguishable from "mounted but empty".
+LUPIN_BRIDGE_GID	COMPOSE	cloud-gpu.env	NUMERIC	REQUIRED	group_add for the app container so uid 1001 can read/write host-written CC session bridges. Absent => persona allocation 404s. Consumed at compose `group_add:` (cloud-gpu.yml:93), NOT an environment: entry — it shapes the container's supplementary groups at CREATE and is never injected into it. surface=COMPOSE: `${...:?}` means unset aborts `up`, so a running container IS the proof.
+LUPIN_HOST_SESSIONS_DIR	COMPOSE	cloud-gpu.env	PATH_ANY	REQUIRED	Bind source for the CC session bridges. A short ${HOME}-relative bind silently CREATES an empty dir when HOME is wrong — indistinguishable from "mounted but empty". Consumed at the bind mount `source:` (cloud-gpu.yml:115), NOT an environment: entry — it is resolved at container CREATE and never injected into it. surface=COMPOSE: `${...:?}` means unset aborts `up`, so a running container IS the proof.
 
 # ── runtime profile ──────────────────────────────────────────────────────────
-LUPIN_ENV	CONTAINER	compose	ENUM:development|testing|production	REQUIRED	Chooses the DATABASE. Per cloud-test.yml's own comment it is "never inferred". Must AGREE with the INI block below — nothing compares them today (R4).
+LUPIN_ENV	CONTAINER	compose	ENUM:development|testing|production	REQUIRED	Chooses the DATABASE. Never inferred — set explicitly per service. Must AGREE with the INI block below — nothing compares them today (R4).
 LUPIN_CONFIG_MGR_CLI_ARGS	CONTAINER	compose	LITERAL	REQUIRED	Chooses the INI BLOCK (e.g. Lupin:+Testing-GCS). A different knob from LUPIN_ENV with a similar name; they can disagree silently.
 
 # ── Vertex / direct Opus (host CLI) ──────────────────────────────────────────
@@ -64,16 +75,18 @@ CLOUD_ML_REGION	HOST	operator ~/.bashrc	ENUM:global	OPTIONAL_UNLESS:CLAUDE_CODE_
 # ── Cloud SQL / database (VM container) ──────────────────────────────────────
 # Requirement below is COMPOSE'S OWN declaration, not a judgement call: `${VAR:?msg}`
 # aborts `up` when unset (=> REQUIRED); `${VAR:-default}` cannot (=> OPTIONAL).
-CLOUD_SQL_CONNECTION_NAME	CONTAINER	cloud-gpu.env	LITERAL	REQUIRED	project:region:instance for the cloud-sql-proxy sidecar AND the app. `${...:?}` in cloud-gpu.yml:61,181 and cloud-test.yml:60,107 — unset aborts `up` outright. Preflight C also probes the resulting socket at /cloudsql/<this>/.s.PGSQL.5432.
-DB_PASSWORD	CONTAINER	cloud-gpu.env	SECRET	REQUIRED	`${...:?}` (cloud-gpu.yml:184). Sourced from Secret Manager `lupin-db-password`. cloud-gpu.env is mode 600 / uid 1001 — a plain grep by the SSH user reads NOTHING, with no error.
-DB_USER	CONTAINER	cloud-gpu.env	LITERAL	OPTIONAL	Defaults to `lupin_app` in compose (cloud-gpu.yml:182). Absent is compliant; the default is the deployed value.
-DB_NAME	CONTAINER	cloud-gpu.env	LITERAL	OPTIONAL	Defaults to `lupin_db_test` in compose (cloud-gpu.yml:183). NB the host dev engine is lupin_db_dev — code guarded by `if "lupin_db_test" not in db_url` never executes on the host.
-LUPIN_IMAGE	CONTAINER	cloud-gpu.env	LITERAL	OPTIONAL	The app image tag; defaults to `lupin:1.1.0` (cloud-gpu.yml:80). An unset value silently deploys the DEFAULT tag rather than failing, so a stale image looks like a successful deploy.
-LUPIN_MODEL_SERVER_TAG	CONTAINER	cloud-gpu.env	LITERAL	OPTIONAL	Model-server image tag, defaults to `0.1.0` (cloud-test.yml:158). Same silent-default hazard as LUPIN_IMAGE.
-LUPIN_MODEL_SERVER_URL	CONTAINER	cloud-gpu.env	LITERAL	REQUIRED	The Cloud Run service URL. REQUIRED is the VM's regime (`${...:?}` cloud-gpu.yml:193); the LOCAL docker-compose.yml gives it a `:-http://lupin-model-server:7998` default instead, so its requirement is venue-dependent and this contract states the VM's.
+CLOUD_SQL_CONNECTION_NAME	CONTAINER	cloud-gpu.env	LITERAL	REQUIRED	project:region:instance for the cloud-sql-proxy sidecar AND the app. `${...:?}` in cloud-gpu.yml:62,182 — unset aborts `up` outright. Preflight C also probes the resulting socket at /cloudsql/<this>/.s.PGSQL.5432.
+DB_PASSWORD	CONTAINER	cloud-gpu.env	SECRET	REQUIRED	`${...:?}` (cloud-gpu.yml:185). Sourced from Secret Manager `lupin-db-password`. cloud-gpu.env is mode 600 / uid 1001 — a plain grep by the SSH user reads NOTHING, with no error.
+DB_USER	CONTAINER	cloud-gpu.env	LITERAL	OPTIONAL	Defaults to `lupin_app` in compose (cloud-gpu.yml:183). Absent is compliant; the default is the deployed value.
+DB_NAME	CONTAINER	cloud-gpu.env	LITERAL	OPTIONAL	Defaults to `lupin_db_test` in compose (cloud-gpu.yml:184). NB the host dev engine is lupin_db_dev — code guarded by `if "lupin_db_test" not in db_url` never executes on the host.
+LUPIN_IMAGE	CONTAINER	cloud-gpu.env	LITERAL	OPTIONAL	The app image tag; defaults to `lupin:1.1.0` (cloud-gpu.yml:81). An unset value silently deploys the DEFAULT tag rather than failing, so a stale image looks like a successful deploy.
+LUPIN_MODEL_SERVER_TAG	CONTAINER	cloud-gpu.env	LITERAL	OPTIONAL	Model-server image tag, defaults to `0.1.0`. Same silent-default hazard as LUPIN_IMAGE. ⚠️ NO LIVE CONSUMER since 2026-08-26 (row 0d175dac): its only compose interpolation was docker-compose.cloud-test.yml:170, which was retired that day, and no shipped compose file reads it now. Row KEPT rather than deleted so the removal is a ruling, not a side effect of a cleanup — decide whether to drop it or re-point it at a future model-server venue.
+LUPIN_MODEL_SERVER_URL	CONTAINER	cloud-gpu.env	LITERAL	REQUIRED	The Cloud Run service URL. REQUIRED is the VM's regime (`${...:?}` cloud-gpu.yml:205); the LOCAL docker-compose.yml gives it a `:-http://lupin-model-server:7998` default instead, so its requirement is venue-dependent and this contract states the VM's.
 LUPIN_MODEL_SERVER_API_KEY_NAME	CONTAINER	compose	LITERAL	REQUIRED	Names the key FILE under src/conf/keys/ that BOTH the model-server client (embedding_provider, speech_to_text_provider) and the model server itself (main.py:76) use. Default `model-server-api`. ⚠️ ITS KEY IS GLOBAL AND IS SHIPPED TO EVERY CALLER HOST — the exact OPPOSITE of LUPIN_API_KEY above, which is per-database and must NEVER be shipped from dev. Two adjacent rows with opposite rules: read the name, not the neighbour. The model server bcrypt-hashes ONE mounted secret version at BOOT, so its correct value is identical everywhere; sharing it with the notifications key produced a 38h 100% 401 on /embeddings/generate and an unreported one on /transcribe (574fd1dc/6cc52525). Must equal Terraform `api_key_name`.
-CLAUDE_CODE_OAUTH_TOKEN	CONTAINER	cloud-gpu.env	SECRET	OPTIONAL	`${...:-}` (cloud-gpu.yml:215, cloud-test.yml:128) so unset resolves to EMPTY and never blocks `up`. ⚠️ MEASURED 2026-07-26: the line is COMMENTED OUT at cloud-gpu.env:31, so it IS empty on the VM today. What that breaks is NOT established — read the consumer before asserting anything.
-GH_TOKEN	CONTAINER	operator ~/.bashrc	SECRET	OPTIONAL	`${GH_TOKEN:-}` in the LOCAL docker-compose.yml only (:255, :421) — not interpolated by either cloud compose file. Unset resolves to empty; gh CLI calls inside the container then run unauthenticated.
+CLAUDE_CODE_OAUTH_TOKEN	CONTAINER	cloud-gpu.env	SECRET	OPTIONAL	`${...:-}` (cloud-gpu.yml:227) so unset resolves to EMPTY and never blocks `up`. ⚠️ MEASURED 2026-07-26: the line is COMMENTED OUT at cloud-gpu.env:31, so it IS empty on the VM today. What that breaks is NOT established — read the consumer before asserting anything.
+JWT_SECRET_KEY	CONTAINER	.env / host env file	SECRET	REQUIRED	JWT signing secret. `${...:?}` on all three shipped services (docker-compose.yml:251, :434; cloud-gpu.yml:197). REQUIRED is not cosmetic, and it is now enforced in TWO places: jwt_service.py raises on an unset or blank secret in EVERY environment (there is no default — row adce3547), and the `:?` refuses to render the service at all. Until 2026-08-19 the code raised ONLY when ENVIRONMENT=production, which no service sets, so an unset value did not fail — it silently signed with a secret hardcoded in that source file and therefore public. Value lives in the UNTRACKED .env / host env file, never a tracked one. Added 2026-08-18, bug 8df98a96 — the two cloud services had been missing it since they were written. VERIFY IN THE PROCESS: read /proc/1/environ, not `docker exec printenv` — printenv derives a fresh environment from container config and misses an entrypoint that sources an env file over the top.
+POSTGRES_PASSWORD	CONTAINER	.env / host env file	SECRET	REQUIRED	Password the lupin-postgres container initialises `lupin_dev` with, and the one every DB consumer must match. `${...:?}` at docker-compose.yml:18 — local venue only; the cloud venues use Cloud SQL and DB_PASSWORD instead. Was the tracked literal `dev_password` at the tip of a PUBLIC repo until 2026-08-19 (row 856882e4, found by Chloé's rewritten scanner). Rick ruled CONVERT, DO NOT ROTATE — the value is a placeholder on a localhost dev database, so the defect closed here is the secret-shaped literal in the tree, not the string. Value lives in the UNTRACKED .env beside docker-compose.yml, which compose auto-loads regardless of shell interactivity — that is what lets a `:?` form work from a non-interactive tool shell that never sources ~/.bashrc. Env resolves at container CREATE: changing it needs `docker compose up -d --force-recreate postgres`, never a restart.
+GH_TOKEN	CONTAINER	operator ~/.bashrc	SECRET	OPTIONAL	`${GH_TOKEN:-}` in the LOCAL docker-compose.yml only (:284, :466) — not interpolated by the cloud compose file. Unset resolves to empty; gh CLI calls inside the container then run unauthenticated.
 
 # ── test venues (dev box only) ───────────────────────────────────────────────
 LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL	HOST	operator ~/.bashrc	EMAIL	OPTIONAL	Test/proxy auth as the SAME user, so both share a WebSocket channel. Absent => "Operation cancelled" failures.

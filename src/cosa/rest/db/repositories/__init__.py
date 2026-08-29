@@ -58,7 +58,7 @@ def __getattr__( name ):
         - a name in _LAZY_EXPORTS -> the class object, imported from its submodule
           and cached as a package attribute (idempotent)
         - any other name -> AttributeError (so a genuine submodule import, e.g.
-          `from cosa.rest.db.repositories import vector_store_backend`, still falls
+          `from cosa.rest.db.repositories import vector_search`, still falls
           through to the normal submodule-import machinery)
     """
     submodule = _LAZY_EXPORTS.get( name )

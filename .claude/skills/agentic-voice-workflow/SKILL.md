@@ -3,8 +3,8 @@ name: agentic-voice-workflow
 description: Building Claude Agent SDK background jobs with voice I/O. Use when creating new agents, building background jobs, implementing agentic services, adding voice notifications to agents, or integrating with RunningFifoQueue.
 metadata:
   author: lupin-team
-  version: "1.3"
-  last-updated: "2026-03-27"
+  version: "2.0"
+  last-updated: "2026-08-25"
 ---
 
 # Agentic Voice Workflow
@@ -134,10 +134,166 @@ across 6 existing job implementations (see `src/rnd/v0.1.6/2026.03.27-bug-fix-ex
 - [ ] Completion notification includes `abstract` with mock cost summary
 - [ ] Cost summary stored in `self.artifacts[ "cost_summary" ]`
 
-### Registration & Routing
-- [ ] Entry added to `agent_registry.py` with `required_params` and `fallback_questions`
-- [ ] Factory branch added to `agentic_job_factory.py`
-- [ ] Dedicated REST router in `src/cosa/rest/routers/`
+### Registration & Routing — ONE entry, and never an `if`/`elif`
+
+🔴 **This section was rewritten 2026-08-25. If you are reading a copy that tells you
+to add a factory branch to `agentic_job_factory.py`, that copy is stale** — the
+`if`/`elif` it points at is the defect that was removed, and adding a new one
+recreates it.
+
+**Registration is ONE contract entry.** Add your command to `JOB_ARG_CONTRACTS`
+(`src/cosa/agents/runtime_argument_expeditor/agent_registry.py`) and the v2 registry
+builds its `AgentSpec` for you — the agentic set is a comprehension over that table
+(`_AGENTIC = tuple( _agentic_spec( command, entry ) for command, entry in JOB_ARG_CONTRACTS.items() )`
+in `src/cosa/rest/v2/registry.py`), not a second hand-maintained list. Display name,
+CLI module and CLI style are all read off the same entry, so there is nothing to keep
+in sync.
+
+- [ ] **The contract entry** in `JOB_ARG_CONTRACTS` — command → `job_prefix`,
+      `cli_module`, `job_class_path`, `display_name`, `required_user_args`,
+      `system_provided`, `arg_mapping`, `fallback_questions`.
+- [ ] **Two ratified opt-ins**, each one line. These are deliberately NOT derived
+      from the contract, and the registry says so in comments with reasons:
+      - `_SPEAKABLE_AGENTIC` — "belongs in the voice router prompt".
+      - `_USER_INITIABLE_AGENTIC` — "a person may start this by typing into the
+        Q&A card". Held out on purpose for commands whose only argument is a job id
+        produced by a job that already failed — nobody types one of those; you press
+        a button on the failed job's card.
+      They answer different questions. Deriving either from the other works today by
+      coincidence and breaks on the first command that is typeable but not sayable.
+- [ ] **One description line** in `_AGENTIC_DESCRIPTIONS` — the dropdown's help text.
+
+- [ ] **The job-construction branch** in `create_agentic_job()`
+      (`src/cosa/rest/agentic_job_factory.py`) — ⚠️ **still required today, and this
+      is the one place an `elif` is still correct.** The registry carries a
+      `job_factory` field for exactly this, but it is `None` in phase 1 and phase 5
+      (dispatch by lookup) is not wired yet. Verified in the tree 2026-08-25: the
+      chain is live with eleven branches. **Add yours, and expect to delete it when
+      phase 5 lands.**
+
+**What you do NOT add:** a *routing* branch. The v2 registry replaced the three v1
+routing mechanisms that had drifted apart — the LLM-routing `if`/`elif` reached from
+`push_job()` / `get_routing_command()`, the `MODE_TO_AGENT` map, and the command
+`if`/`elif` that used to decide routing. Resolution is `resolve()` / `resolve_agentic()`
+and nothing else; no caller picks a factory out by name.
+`src/tests/unit/test_v2_registry_drift_guard.py` exists to stop them coming back.
+
+🔴 **Know which `elif` is which.** "No `if`/`elif`" is about **ROUTING** — deciding
+*which* command this is. Job **construction** — turning a resolved command plus its
+arguments into a Job object — still dispatches by branch until phase 5. Reading the
+rule as "no branches anywhere" leaves a new agent unbuildable; reading it as "branches
+are fine" recreates the defect.
+
+### Routing and argument resolution go through the BRAIN
+
+The single door is `AskFlow` (`src/cosa/rest/v2/flow.py`), reached from
+`POST /api/v2/ask` and `POST /api/v2/submit`. It resolves the command against the
+registry, runs the Runtime Argument Expeditor to fill arguments, asks the user when
+one is missing, and hands the built job to the queue.
+
+🔴 **Do not add an `if`/`elif` anywhere for routing.** That is the defect being
+removed, and a new one recreates it. If your command needs behaviour the registry
+cannot express, the fix is a new *field* on the entry — the way `crud_factory`,
+`label`, `dings` and `user_initiable` were each added — not a branch that reads the
+command name and decides.
+
+- [ ] Command resolves through `resolve_agentic()`; no caller reaches your factory
+      by picking it out itself.
+- [ ] No new `if command == ...` / `elif` in the routing path.
+
+### Arguments and their questions live in the SAME entry
+
+A command declares what it needs AND what to ask when it is missing, side by side,
+so the two cannot drift:
+
+```python
+"agent router go to deep research" : {
+    "required_user_args" : [ "query" ],
+    "fallback_questions" : {
+        "query"  : "What topic would you like me to research?",
+        "budget" : "Would you like to set a budget limit in dollars? Say a dollar amount, or 'no limit'.",
+    },
+    "fallback_defaults"  : { "budget" : "no limit" },
+}
+```
+
+- [ ] Every name in `required_user_args` has a `fallback_questions` entry.
+- [ ] `arg_mapping` maps what the router actually emits to your CLI's names.
+      ⚠️ Map only what genuinely means the same thing. Aliasing `topic` → `research`
+      once delivered a spoken subject phrase where a file path was expected, and the
+      job failed on a file nobody had named (row 9d89afe2). Leaving it unmapped lets
+      the argument stay MISSING and the question fire, which is the correct outcome.
+
+### Voice Reachability — REQUIRED, or the agent cannot be reached by voice
+🔴 **The three items above register an agent; they do not make it reachable.**
+The router only emits commands it has been *told about*. An agent that satisfies
+every other item in this checklist and skips these two is callable by API and
+**mute by voice** — the exact failure this section was added to stop
+(2026-08-15; see `src/rnd/v0.2.0/2026.08.15-agent-registration-single-source.md` §3).
+
+#### The retrain asymmetry — measured, not asserted
+
+**Listing the command in the prompt makes it reachable immediately. The retrain only
+makes it dependable.** The two are not interchangeable and they land at different
+times.
+
+Live A/B on the production adapter, same model, same training set, only the prompt
+differing (`src/rnd/v0.2.0/2026.08.15-router-emission-probe.md`):
+
+| arm | prompt-listed? | trained? | emitted correctly |
+|---|---|---|---|
+| `test fix expediter resume` | **no** | yes | **0/5** — routed to `swe team` every time |
+| `test fix expediter resume` | **yes** | yes | **5/5** |
+| `bug fix expediter` | no | no | **0/5** — routed to `claude code` every time |
+
+⚠️ **Read the middle column before quoting these.** Both arms of the A/B were
+*trained*, so this shows prompt-listing is sufficient **given** training. It does
+**not** isolate prompt-listing without training — no command in the tree is
+prompt-listed and never trained, so that arm could not be run.
+
+⚠️ **One earlier claim in this skill did NOT reproduce and has been removed.** It
+said an unlisted command "still fires 6/10", i.e. that a missing entry causes
+*intermittent* failure. On this adapter the unlisted arms emitted the target **0/5**
+— the model did not invent, it confidently substituted the nearest listed command.
+A missing prompt line is a clean, total, silent misroute, not a flaky one. Treat the
+old number as retired.
+
+- [ ] `<command>` line added to the router prompt template
+      `src/conf/prompts/agent-router-template-completion.txt`
+      — **this is what makes the command reachable at all**, today, with no retrain
+      and no server bounce.
+- [ ] Command key added to the training corpus, `src/conf/training/agent-router-*.json`
+      — ⚠️ **scope matters**: `agent-router-*.json` only. The same folder holds
+      `vox-cmd-*.json`, a separate browser-command namespace that shares nothing
+      with this registry except the key `none`.
+      — ⏱️ **Consumed at TRAIN time, baked into the LoRA weights.** Adding the key
+      does not make the command live today; it makes it *dependable* after the next
+      retrain.
+      — 🔒 The training artifact now carries a fingerprint of the corpus it was built
+      from, and a training run REFUSES if the two disagree (row 11390b57). Edit the
+      corpus and the next run stops and names which side is stale, instead of quietly
+      training on the previous corpus.
+
+**Verify, don't assume**: after adding both, confirm the command actually routes
+before calling the work done.
+
+### Confirmation Card + Test Coverage — the other two registration surfaces
+🔴 **These are registration lists too**, defended by the single-source drift guard
+(`src/tests/unit/test_v2_registry_drift_guard.py`). Registering and voice-reaching an
+agent (the sections above) is still not the whole story: an agentic command that skips
+these two is card-unreachable and/or turns the auto-proxy suite red.
+
+- [ ] **Confirmation-card entry** — add the command → product-name mapping to
+      `PRODUCT_NAMES` in `todo_fifo_queue.py`. This is what lets `_confirm_agentic_routing()`
+      offer the command as a "Switch to this instead" alternative on the voice
+      confirmation card. Omit it and the command is invisible on the card even when the
+      router emits it. (A command deliberately NEVER card-reachable — e.g. a
+      system-triggered job needing a pasted job hash — instead carries a drift-guard
+      exemption that *waives* the `card` surface, with a stated reason.)
+- [ ] **Auto-proxy test profile** — add each of the agent's `fallback_questions` arg
+      names to the `all_agents` profile in `notification_proxy/config.py`. The proxy
+      coverage test asserts that union profile can auto-answer every agent's interview;
+      a new agent whose args are absent turns that test red.
 
 ### Reference Implementation
 Use `src/cosa/agents/deep_research/job.py` as the gold standard — it satisfies
@@ -176,9 +332,51 @@ Users can modify via the existing `[comment: ...]` pattern:
 - *"yes, but schedule it for tomorrow at 2am"* → sets `scheduled_at`
 - *"yes, but run it in exclusive mode"* → sets `monopolize = True`
 
-**Runtime arg extraction**: In `_handle_agentic_command()`, `scheduled_at` and `monopolize`
-are popped from `args_dict` before the factory creates the job, then set directly on the
-job object. The factory never sees these — they're infrastructure, not agent params.
+**Runtime arg extraction**: `AskFlow._split_queue_directives()` (`src/cosa/rest/v2/flow.py`)
+pops `scheduled_at` and `monopolize` out of the argument dict **before the brain builds
+the job**, then passes them to the factory as queue directives. (`parent_id_hash` rides
+the same path from the request body.)
+
+🔴 **THEY ARE NOT AGENT ARGUMENTS, AND THIS IS EASY TO GET WRONG** — because they
+arrive in the same dictionary as real arguments. The expeditor offers `scheduled_at`
+and `monopolize` for *every* agentic command, so "run the deep research at ten
+tomorrow" comes back as ordinary keys alongside `query`. They say WHEN and HOW the
+queue should run the work, never what the agent should do with it.
+
+The failure mode if you treat them as arguments, or forget to split them out:
+`create_agentic_job` reads its arguments **by name** and does not name these, so a
+left-in `scheduled_at` is **dropped in silence and the job runs immediately** — the
+caller believes it is scheduled and it is not. Equally, they cannot be passed inside
+`args`: `args` is validated against the command's argument contract, and no command's
+contract names them.
+
+- [ ] Do **not** add `scheduled_at` / `monopolize` to your `JOB_ARG_CONTRACTS` entry.
+- [ ] Do **not** read them in `_execute()`.
+- [ ] `"immediately"` / `"now"` / `"none"` normalise to no schedule — a user who says
+      "immediately" must keep meaning it.
+
+### Shadow mode — during the migration window, a new command runs shadowed first
+
+A newly registered command is **not flipped live on its first day**. It goes through
+shadow first: the path is exercised and logged, and what it would have done is
+recorded rather than executed. The INI keys carry it per-agent, e.g.
+`swe team trust mode = shadow`, `bug fix expediter trust mode = shadow` in
+`src/conf/lupin-app.ini`, with the ladder documented in `lupin-app-splainer.ini`:
+
+| mode | what happens |
+|---|---|
+| `disabled` | no proxy at all |
+| **`shadow`** | **observe and log only — compute the decision, do not execute it** |
+| `suggest` | surface the suggestion to the user, who still decides |
+| `active` | act automatically at the trust level the agent has earned |
+
+**Default is `shadow` for a reason**: observability first. You get a real trace of
+what the command would have done, on real traffic, before it can do it.
+
+- [ ] New command's trust mode starts at `shadow` in `lupin-app.ini`.
+- [ ] Flip to `suggest`/`active` only after the shadow trace shows the decisions were
+      the ones you wanted — that trace is the evidence, and without it the flip is a
+      guess.
 
 ### Queue Consumer Behavior
 
@@ -189,8 +387,10 @@ job object. The factory never sees these — they're infrastructure, not agent p
 
 ### What You Do NOT Need to Do
 
-- Add `scheduled_at` / `monopolize` to your agent's registry entry
+- Add `scheduled_at` / `monopolize` to your agent's contract entry (they are in no
+  command's argument contract — see the runtime-arg note above)
 - Handle scheduling in your agent's `_execute()` method
+- Add a routing branch anywhere — the registry resolves it
 - Add UI controls for scheduling (already present on all forms)
 - Modify the confirmation prompt template
 

@@ -5,7 +5,8 @@ Covers every public + private function to genuine 100% line + branch + function:
 is_agentic_job_type, _is_persistence_enabled (true/false/except), _get_history_days
 (value/except), record_server_available (disabled/insert/update/except),
 get_last_available (none/naive-tz/aware/except), _is_within_downtime (no-last/in/
-out/parse-error), _build_metadata_json (empty/extract), the four persist_* writers
+out/parse-error), _downtime_catchup_announcement (slot/naive/floored/unparseable —
+the loud late-drain signal, row f0b3f630), _build_metadata_json (empty/extract), the four persist_* writers
 (disabled-skip / write / except + completed/stalled/failed merge-and-duration arcs),
 mark_interrupted_jobs (running + pending future/catchup/before-window/no-schedule +
 except), _is_future_scheduled (future/past/parse-error/naive-now), get_restorable_jobs
@@ -155,6 +156,38 @@ class TestIsWithinDowntime( unittest.TestCase ):
         self.assertFalse( jp._is_within_downtime( "not-a-date", last, datetime.now( timezone.utc ) ) )
 
 
+class TestDowntimeCatchupAnnouncement( unittest.TestCase ):
+    """The LOUD late-drain signal (row f0b3f630) — scheduled_at vs actual + hours-late."""
+
+    def test_names_slot_actual_and_hours_late( self ):
+        scheduled = "2026-08-16T01:15:00+00:00"
+        now       = datetime( 2026, 8, 16, 10, 7, 0, tzinfo=timezone.utc )   # ~8.9h later
+        msg = jp._downtime_catchup_announcement( "ts-e793257b", scheduled, now )
+        self.assertIn( "[CJ-CATCHUP-LATE]", msg )
+        self.assertIn( "ts-e793257b", msg )
+        self.assertIn( scheduled, msg )
+        self.assertIn( now.isoformat(), msg )
+        self.assertIn( "8.9h", msg )                                         # (10:07 - 01:15) = 8.87h
+
+    def test_naive_scheduled_treated_as_utc( self ):
+        now = datetime( 2026, 1, 1, 3, 0, 0, tzinfo=timezone.utc )
+        msg = jp._downtime_catchup_announcement( "j", "2026-01-01T00:00:00", now )   # naive slot
+        self.assertIn( "3.0h", msg )
+
+    def test_negative_delta_floored_to_zero( self ):
+        # A future slot (should never reach here from the branch, but the helper is
+        # pure): hours-late clamps at 0.0 rather than going negative.
+        now = datetime( 2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc )
+        msg = jp._downtime_catchup_announcement( "j", "2026-01-01T05:00:00+00:00", now )
+        self.assertIn( "0.0h", msg )
+
+    def test_unparseable_scheduled_at_does_not_raise( self ):
+        now = datetime( 2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc )
+        msg = jp._downtime_catchup_announcement( "j", "not-a-date", now )
+        self.assertIn( "[CJ-CATCHUP-LATE]", msg )
+        self.assertIn( "unparseable", msg )
+
+
 class TestBuildMetadataJson( unittest.TestCase ):
     def test_empty( self ):
         self.assertEqual( jp._build_metadata_json( None ), {} )
@@ -185,10 +218,12 @@ class TestPersistCreated( _PersistBase ):
         self.session.add.assert_not_called()
 
     def test_inserts_row( self ):
+        self.session.get.return_value = None   # row absent → idempotent create INSERTs (row 2817b0f5)
         jp.persist_job_created_from_metadata( "j1", "u1", { "agent_type": "deep_research", "user_email": "e" } )
         self.session.add.assert_called_once()
 
     def test_exception_logged( self ):
+        self.session.get.return_value = None   # reach the INSERT so add() raises
         self.session.add.side_effect = RuntimeError( "boom" )
         with patch( "builtins.print" ) as mp:
             jp.persist_job_created_from_metadata( "j1", "u1", {} )
@@ -287,9 +322,27 @@ class TestMarkInterruptedJobs( _PersistBase ):
              patch( "builtins.print" ):
             counts = jp.mark_interrupted_jobs()
         self.assertEqual( counts[ "running" ], 2 )
-        self.assertEqual( counts[ "pending_preserved" ], 1 )
+        self.assertEqual( counts[ "pending_preserved" ], 2 )     # future + no-schedule (row 9f06c28a: no-schedule now PRESERVED)
         self.assertEqual( counts[ "pending_catchup" ], 1 )
-        self.assertEqual( counts[ "pending_interrupted" ], 2 )   # before-window + no-schedule
+        self.assertEqual( counts[ "pending_interrupted" ], 1 )   # before-window only
+
+    def test_catchup_branch_emits_loud_late_signal( self ):
+        # RED without the announcement (row f0b3f630): a downtime catch-up must print a
+        # [CJ-CATCHUP-LATE] line naming scheduled_at + hours-late, not a silent preserve.
+        update_result = MagicMock(); update_result.rowcount = 0
+        catch = SimpleNamespace( id_hash="ts-e793257b",
+                                 metadata_json={ "scheduled_at": "2021-01-01T00:00:00+00:00" } )
+        select_result = MagicMock()
+        select_result.scalars.return_value.all.return_value = [ catch ]
+        self.session.execute.side_effect = [ update_result, select_result ]
+        with patch.object( jp, "get_last_available",
+                           return_value=datetime( 2020, 1, 1, tzinfo=timezone.utc ) ), \
+             patch( "builtins.print" ) as mp:
+            counts = jp.mark_interrupted_jobs()
+        self.assertEqual( counts[ "pending_catchup" ], 1 )
+        printed = " ".join( str( c ) for c in mp.call_args_list )
+        self.assertIn( "[CJ-CATCHUP-LATE]", printed )
+        self.assertIn( "ts-e793257b", printed )
 
     def test_all_zero_counts_skip_summary_prints( self ):
         # nothing running, no pending rows → total/preserved/catchup all 0 → all
@@ -314,6 +367,66 @@ class TestMarkInterruptedJobs( _PersistBase ):
                                     "pending_preserved": 0, "pending_catchup": 0 } )
 
 
+class TestMarkInterruptedJobsSilenceControl( _PersistBase ):
+    """
+    Negative control for the LOUD downtime catch-up marker (row f0b3f630).
+
+    test_catchup_branch_emits_loud_late_signal proves [CJ-CATCHUP-LATE] PRINTS on
+    the catch-up branch. That alone does not prove the marker STAYS SILENT on the
+    other branches — a detector that fired on everything would pass a
+    presence-only test too (Rachel's finding). These three assert the marker is
+    ABSENT on every NON-catch-up path of mark_interrupted_jobs(): a
+    future-scheduled preserve, a before-window interrupt, and a plain running
+    interrupt. Each captures ALL print output and asserts the tag never appears.
+
+    Leak-proof: this control was verified RED by temporarily forcing the
+    future-scheduled elif to emit _downtime_catchup_announcement(...) — the
+    future-scheduled case then printed [CJ-CATCHUP-LATE] and this test failed,
+    confirming the control catches a real leak. The forced leak was removed.
+    """
+    def _run_and_capture( self, pending_rows, update_rowcount, last_available ):
+        update_result = MagicMock(); update_result.rowcount = update_rowcount
+        select_result = MagicMock()
+        select_result.scalars.return_value.all.return_value = pending_rows
+        self.session.execute.side_effect = [ update_result, select_result ]
+        with patch.object( jp, "get_last_available", return_value=last_available ), \
+             patch( "builtins.print" ) as mp:
+            counts = jp.mark_interrupted_jobs()
+        printed = " ".join( str( c ) for c in mp.call_args_list )
+        return counts, printed
+
+    def test_future_scheduled_preserve_is_silent( self ):
+        # Future scheduled_at → preserved (stays PENDING), NOT a catch-up. No marker.
+        future = SimpleNamespace( id_hash="fut-1",
+                                  metadata_json={ "scheduled_at": "2099-01-01T00:00:00+00:00" } )
+        counts, printed = self._run_and_capture(
+            [ future ], 0, datetime( 2020, 1, 1, tzinfo=timezone.utc ) )
+        self.assertEqual( counts[ "pending_preserved" ], 1 )
+        self.assertEqual( counts[ "pending_catchup" ], 0 )
+        self.assertNotIn( "[CJ-CATCHUP-LATE]", printed )
+
+    def test_before_window_interrupt_is_silent( self ):
+        # scheduled_at PAST and BEFORE the downtime window → INTERRUPTED, not a
+        # catch-up. No marker.
+        before = SimpleNamespace( id_hash="bef-1",
+                                  metadata_json={ "scheduled_at": "2019-01-01T00:00:00+00:00" },
+                                  status=None, completed_at=None, updated_at=None )
+        counts, printed = self._run_and_capture(
+            [ before ], 0, datetime( 2020, 1, 1, tzinfo=timezone.utc ) )
+        self.assertEqual( counts[ "pending_interrupted" ], 1 )
+        self.assertEqual( counts[ "pending_catchup" ], 0 )
+        self.assertNotIn( "[CJ-CATCHUP-LATE]", printed )
+
+    def test_plain_running_interrupt_is_silent( self ):
+        # A RUNNING job interrupted at startup, no pending rows → not a catch-up.
+        # No marker.
+        counts, printed = self._run_and_capture(
+            [], 1, datetime( 2020, 1, 1, tzinfo=timezone.utc ) )
+        self.assertEqual( counts[ "running" ], 1 )
+        self.assertEqual( counts[ "pending_catchup" ], 0 )
+        self.assertNotIn( "[CJ-CATCHUP-LATE]", printed )
+
+
 class TestIsFutureScheduled( unittest.TestCase ):
     def test_future( self ):
         self.assertTrue( jp._is_future_scheduled( "2099-01-01T00:00:00+00:00" ) )
@@ -330,17 +443,20 @@ class TestIsFutureScheduled( unittest.TestCase ):
 
 
 class TestGetRestorableJobs( _PersistBase ):
-    def test_returns_only_scheduled( self ):
+    def test_returns_all_pending( self ):
+        # row 9f06c28a: get_restorable_jobs now returns EVERY surviving PENDING row —
+        # future-scheduled AND immediate (no scheduled_at) — because mark_interrupted_jobs
+        # has already flipped the anomalous cases to INTERRUPTED.
         r1 = SimpleNamespace( id_hash="a", job_type="t", user_id="u", user_email=None,
                               session_id=None, routing_command=None, question_text=None,
                               metadata_json={ "scheduled_at": "2099-01-01T00:00:00+00:00", "monopolize": True } )
         r2 = SimpleNamespace( id_hash="b", job_type="t", user_id="u", user_email="e",
                               session_id="s", routing_command="c", question_text="q",
-                              metadata_json={} )   # no scheduled_at → skipped
+                              metadata_json={} )   # no scheduled_at → still restorable (immediate)
         self.session.execute.return_value.scalars.return_value.all.return_value = [ r1, r2 ]
         out = jp.get_restorable_jobs()
-        self.assertEqual( len( out ), 1 )
-        self.assertEqual( out[ 0 ][ "id_hash" ], "a" )
+        self.assertEqual( len( out ), 2 )
+        self.assertEqual( { j[ "id_hash" ] for j in out }, { "a", "b" } )
 
     def test_exception_returns_empty( self ):
         self.session.execute.side_effect = RuntimeError( "boom" )

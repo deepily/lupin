@@ -82,9 +82,9 @@ test("keyedListMerge: re-order existing children preserves DOM identity (no flic
   });
 
   // Same DOM nodes preserved (identity check).
-  assert.strictEqual(parent.children[0], refC);
-  assert.strictEqual(parent.children[1], refA);
-  assert.strictEqual(parent.children[2], refB);
+  assert.ok( parent.children[0] === refC );
+  assert.ok( parent.children[1] === refA );
+  assert.ok( parent.children[2] === refB );
 });
 
 test("keyedListMerge: removes orphans (entries not in new set)", () => {

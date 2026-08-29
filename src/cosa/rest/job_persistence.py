@@ -7,7 +7,7 @@ break the queue pipeline.
 
 Scope: AgenticJobBase subclasses only (deep_research, podcast, presentation,
 claude_code, swe_team, research_to_podcast, research_to_presentation,
-bug_fix_expediter). Sync agents are cached in LanceDB.
+bug_fix_expediter). Sync agents are cached in Postgres.
 
 Usage:
     from cosa.rest.job_persistence import (
@@ -34,6 +34,41 @@ from cosa.rest.postgres_models import JobHistory, ServerLifecycle
 from cosa.rest.job_state import JobState
 from cosa.config.configuration_manager import ConfigurationManager
 
+
+# ---------------------------------------------------------------------------
+# 🔴 READING job_history? THE SERVER YOU ASK DECIDES WHICH DATABASE YOU SEE.
+#
+# Neither container sets DB_NAME, so each falls through to its own config block
+# and lands on a DIFFERENT database:
+#
+#     lupin-rest-dev   Lupin: Development  ->  lupin_db_dev
+#     lupin-rest-test  Lupin: Testing      ->  lupin_db_test
+#
+# A host shell inherits the DEVELOPMENT block, so `PYTHONPATH=src python3` on the
+# host queries lupin_db_dev — even when the job you are chasing ran on :8000.
+#
+# MEASURED 2026-08-28, both directions in one minute:
+#     host / dev   205 rows, ZERO ts- rows, nothing newer than 08-27
+#     in-container   4 rows, all same-day, the row in question sitting at pending
+#
+# That is not an empty result, it is the WRONG QUESTION answered confidently. The
+# host view reads exactly like "test_suite jobs are never persisted", which is
+# false, and a retraction sourced from it is indistinguishable from diligence — a
+# correct fix was one message from being withdrawn on it.
+#
+# ⇒ GO AT THE DATABASE CONTAINER AND NAME THE DATABASE (Mr Radio's route, and
+#   better than "remember to run it inside lupin-rest-test" — that still depends
+#   on standing in the right place, which is the thing that failed):
+#
+#       docker exec lupin-postgres psql -U lupin_dev -d lupin_db_test -c "..."
+#
+#   THERE IS NO DEFAULT TO FALL THROUGH TO, verified both ways 2026-08-28:
+#     · a wrong name errors    -> FATAL: database "lupin_db_typo" does not exist
+#     · OMITTING -d also errors -> psql tries the USERNAME as the database and
+#                                  fails; it does not quietly pick one
+#   So you either name the box you meant or you get told. That property is what
+#   the in-container route lacks: it reads *a* database successfully either way.
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Agentic job type filter
@@ -190,6 +225,48 @@ def _is_within_downtime( scheduled_at_str, last_available, now ):
         return False
 
 
+def _downtime_catchup_announcement( job_id, scheduled_at_str, now ):
+    """
+    Build the LOUD announcement for a job resurrected by the downtime-restore
+    branch — naming scheduled_at vs actual run time and how many hours late its
+    slot fired (row f0b3f630).
+
+    A downtime catch-up run is otherwise SILENT: the job reports as a normal
+    completion with no signal that its requested slot was missed by hours. A
+    seat that submitted into the overnight window and later sees a completed run
+    has no way to know the schedule was ignored. This produces that signal.
+
+    Requires:
+        - job_id is a non-empty string (the id_hash)
+        - scheduled_at_str is the job's requested-slot ISO datetime string
+        - now is a timezone-aware datetime (the actual catch-up run time)
+
+    Ensures:
+        - Returns a single-line string tagged with the [CJ-CATCHUP-LATE] marker,
+          naming job_id, scheduled_at, the actual run time, and hours-late (one
+          decimal)
+        - hours-late is ( now - scheduled_at ) in hours, floored at 0.0
+        - A naive scheduled_at is treated as UTC
+        - On a parse error returns a marked line naming the unparseable value
+          rather than raising — this path must never break startup recovery
+    """
+    try:
+        scheduled_dt = datetime.fromisoformat( scheduled_at_str )
+        if scheduled_dt.tzinfo is None:
+            scheduled_dt = scheduled_dt.replace( tzinfo=timezone.utc )
+        hours_late = ( now - scheduled_dt ).total_seconds() / 3600.0
+        if hours_late < 0:
+            hours_late = 0.0
+        return ( f"[CJ-CATCHUP-LATE] Job {job_id} fired as a downtime catch-up: "
+                 f"scheduled_at={scheduled_at_str}, actual={now.isoformat()}, "
+                 f"{hours_late:.1f}h past its slot — the requested schedule was MISSED "
+                 f"(server was down for that window)." )
+    except ( ValueError, TypeError ):
+        return ( f"[CJ-CATCHUP-LATE] Job {job_id} fired as a downtime catch-up with an "
+                 f"unparseable scheduled_at={scheduled_at_str!r} — the requested schedule "
+                 f"was MISSED (server was down for that window)." )
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -213,6 +290,7 @@ def _build_metadata_json( metadata ):
         "cost_summary", "artifacts", "answer_conversational",
         "push_counter", "agent_type", "stack_trace",
         "scheduled_at", "monopolize",
+        "paused",         # Durable-queue restore (row 2817b0f5): a user-paused job must come back paused, not active
         "original_args",  # CJ Flow persistence: exact args a job was submitted with (for BFE resubmit)
         "checkpoint",     # Checkpoint-resume: serialized state for stalled jobs (Session 9056c113)
         "yaml_path",                  # Presentation re-render from YAML
@@ -252,6 +330,15 @@ def persist_job_created_from_metadata( job_id, user_id, metadata ):
 
     try:
         with get_db() as session:
+            # Idempotent create (row 2817b0f5): on restart the durable-queue restore
+            # re-pushes preserved jobs under their ORIGINAL id_hash, which re-fires the
+            # PENDING->QUEUED transition and reaches here again. id_hash is the PK, so a
+            # blind INSERT would raise IntegrityError; skipping when the row already
+            # exists makes re-enqueue a clean no-op rather than a swallowed error, and
+            # keeps the no-resurrect guarantee off the exception path.
+            if session.get( JobHistory, job_id ) is not None:
+                return
+
             job = JobHistory(
                 id_hash         = job_id,
                 job_type        = metadata.get( "agent_type", "unknown" ),
@@ -267,6 +354,104 @@ def persist_job_created_from_metadata( job_id, user_id, metadata ):
             session.add( job )
     except Exception as e:
         print( f"[WARN] persist_job_created_from_metadata failed for {job_id}: {e}" )
+
+
+def persist_job_paused_state( job_id, paused ):
+    """
+    Patch a job_history row's metadata_json `paused` flag (row 2817b0f5).
+
+    Pause/resume are in-memory-only state changes on the todo queue; job_history
+    stores every pre-execution job as `pending` and never learned whether it was
+    paused. Without this, the durable-queue restore would bring a user-paused job
+    back ACTIVE (silently un-paused). Recording the flag lets restore re-hold it.
+
+    Requires:
+        - job_id is a non-empty string (the id_hash)
+        - paused is a bool
+
+    Ensures:
+        - metadata_json.paused is set to `paused` for the matching row (no-op if the
+          row does not exist — e.g. a non-agentic job absent from job_history)
+        - status is NOT touched — a paused job stays `pending` in the ledger
+        - Never raises — logs a warning on failure
+    """
+    if not _is_persistence_enabled():
+        return
+
+    try:
+        with get_db() as session:
+            row = session.get( JobHistory, job_id )
+            if row is None:
+                return
+            # SQLAlchemy does not track in-place mutation of a JSONB dict, so build a
+            # NEW dict and reassign the attribute to mark the column dirty.
+            metadata             = dict( row.metadata_json or {} )
+            metadata[ "paused" ] = paused
+            row.metadata_json    = metadata
+            row.updated_at       = datetime.now( timezone.utc )
+    except Exception as e:
+        print( f"[WARN] persist_job_paused_state failed for {job_id}: {e}" )
+
+
+# Queues whose rows are still PRE-EXECUTION, so a delete from them is a cancellation
+# the ledger must record. `done` and `dead` rows are ALREADY terminal — writing
+# CANCELLED over a COMPLETED or FAILED row would destroy the outcome, which is worse
+# than the resurrection bug this whole mechanism exists to fix.
+#
+# `run` is excluded for TWO INDEPENDENT reasons, and the second is Mr Radio's:
+#   (1) CORRECTNESS — the running queue calls delete_by_id_hash on its NORMAL
+#       completion paths (running_fifo_queue.py, 8 call sites), so a blanket ledger
+#       write at the deletion point would mark every finished job cancelled.
+#   (2) UNNECESSARY — a running row cannot come back anyway: mark_interrupted_jobs()
+#       stamps it INTERRUPTED at the next startup, which is terminal, so
+#       get_restorable_jobs() never sees it. The resurrection this exists to stop is
+#       a `todo`-only failure.
+# Reason (1) alone justifies the exclusion; reason (2) is why it costs nothing.
+# Recorded separately so a reader who refutes one does not conclude the exclusion falls.
+CANCELLABLE_QUEUES = frozenset( { "todo" } )
+
+
+def persist_job_cancelled( job_id ):
+    """
+    Mark a cancelled job CANCELLED in the ledger so a restart cannot resurrect it.
+
+    🔴 THE DEFECT THIS CLOSES. Cancelling a queued job called only
+    `delete_by_id_hash`, which mutates the in-memory queue_dict and nothing else.
+    The job_history row stayed `pending`, and `get_restorable_jobs()` selects
+    exactly `status == PENDING` — so the next server start handed the cancelled
+    job back to the queue and it ran.
+
+    Measured 2026-08-28: ts-f679f52c was cancelled at 12:34 with the endpoint's own
+    "Job removed from the queue before it started. No work was lost.", the queue read
+    empty at 12:54, :8000 was bounced at 12:58, and the job was back at 13:00. For a
+    metered ~105-minute eval that is real money spent at a time nobody chose — and
+    that one had been cancelled precisely BECAUSE its slot was wrong.
+
+    So the endpoint's success message was true of the process and false of the
+    system, which is the worst of the three available answers.
+
+    Requires:
+        - job_id is a non-empty string (the id_hash)
+
+    Ensures:
+        - status is set to CANCELLED (terminal) for the matching row
+        - no-op when the row does not exist — a non-agentic job is absent from
+          job_history and cancelling it is still legitimate
+        - never raises: a ledger write must not turn a successful cancellation into
+          an error the caller reports as a failed cancel
+    """
+    if not _is_persistence_enabled():
+        return
+
+    try:
+        with get_db() as session:
+            row = session.get( JobHistory, job_id )
+            if row is None:
+                return
+            row.status     = JobState.CANCELLED.value
+            row.updated_at = datetime.now( timezone.utc )
+    except Exception as e:
+        print( f"[WARN] persist_job_cancelled failed for {job_id}: {e}" )
 
 
 def persist_job_started_from_metadata( job_id, metadata ):
@@ -469,7 +654,9 @@ def mark_interrupted_jobs():
     - PENDING jobs with future scheduled_at: preserved for re-enqueue → stays PENDING
     - PENDING jobs whose scheduled_at fell within the measured downtime window
       [last_available, now]: preserved for an immediate catch-up run → stays PENDING
-    - PENDING jobs without scheduled_at, or scheduled BEFORE the downtime window → INTERRUPTED
+    - PENDING jobs with NO scheduled_at (immediate submits that never ran): preserved
+      for re-enqueue → stays PENDING (row 2817b0f5 — a queued job must survive a bounce)
+    - PENDING jobs scheduled BEFORE the downtime window (anomalous scheduler miss) → INTERRUPTED
 
     Called at server startup by main.py. Reads the last-available marker
     (record_server_available) to compute the exact downtime window.
@@ -520,12 +707,24 @@ def mark_interrupted_jobs():
                     # preserve (stays PENDING) so get_restorable_jobs() re-enqueues it; it is
                     # immediately eligible (scheduled_at <= now) and fires as a catch-up run.
                     counts[ "pending_catchup" ] += 1
-                    print( f"[CJ-PERSIST] Catch-up: scheduled job {row.id_hash} missed during "
-                           f"downtime (scheduled_at={scheduled_at}, last_available={last_available}) "
-                           f"— preserving for immediate re-run" )
+                    # LOUD signal (row f0b3f630): this catch-up is otherwise silent — the job
+                    # will report as a normal run with no flag that its slot fired hours late.
+                    # Emit a marked line naming scheduled_at vs actual + hours-late so a seat
+                    # that submitted into the dead window learns the schedule was missed.
+                    print( _downtime_catchup_announcement( row.id_hash, scheduled_at, now ) )
+                elif scheduled_at is None:
+                    # Immediate submit (no scheduled_at) that never got its turn before
+                    # the restart (row 2817b0f5). It never ran, so PRESERVE it (stays
+                    # PENDING) for re-enqueue by get_restorable_jobs() — losing it is the
+                    # exact bug this fix closes. A container bounce must not vaporize a
+                    # job that was simply waiting in line.
+                    counts[ "pending_preserved" ] += 1
+                    print( f"[CJ-PERSIST] Preserving immediate job {row.id_hash} "
+                           f"(no scheduled_at) for re-enqueue" )
                 else:
-                    # No schedule, or scheduled BEFORE the downtime window (anomalous scheduler
-                    # miss while the server was up) — mark interrupted, don't silently resurrect.
+                    # Has a scheduled_at that is PAST and BEFORE the downtime window — an
+                    # anomalous scheduler miss while the server was up. Do NOT silently
+                    # resurrect a schedule the server already passed: mark interrupted.
                     row.status       = JobState.INTERRUPTED.value
                     row.completed_at = now
                     row.updated_at   = now
@@ -582,19 +781,21 @@ def _is_future_scheduled( scheduled_at_str, now=None ):
 
 def get_restorable_jobs():
     """
-    Query pending jobs that have a future scheduled_at for re-enqueue at startup.
+    Query PENDING jobs preserved by mark_interrupted_jobs() for re-enqueue at startup.
 
-    Called after mark_interrupted_jobs() to find jobs that were preserved
-    because they had a future scheduled_at.
+    Called after mark_interrupted_jobs(), which has already marked every non-restorable
+    case INTERRUPTED. Every row still PENDING here is meant to come back: future-scheduled,
+    downtime-catch-up, AND immediate (no scheduled_at — row 2817b0f5).
 
     Ensures:
         - Returns list of dicts with job metadata sufficient for reconstruction
         - Only returns jobs with status='pending' (preserved by mark_interrupted_jobs)
+        - scheduled_at may be None (an immediate job); paused carries the held state
         - Returns empty list on failure
 
     Returns:
         list of dicts with: id_hash, job_type, user_id, user_email, session_id,
-        routing_command, question_text, scheduled_at, metadata_json
+        routing_command, question_text, scheduled_at, monopolize, paused, metadata_json
     """
     try:
         with get_db() as session:
@@ -607,25 +808,156 @@ def get_restorable_jobs():
             for row in rows:
                 metadata     = row.metadata_json or {}
                 scheduled_at = metadata.get( "scheduled_at" )
-                if scheduled_at:
-                    restorable.append( {
-                        "id_hash"         : row.id_hash,
-                        "job_type"        : row.job_type,
-                        "user_id"         : row.user_id,
-                        "user_email"      : row.user_email or "",
-                        "session_id"      : row.session_id or "",
-                        "routing_command" : row.routing_command or "",
-                        "question_text"   : row.question_text or "",
-                        "scheduled_at"    : scheduled_at,
-                        "monopolize"      : metadata.get( "monopolize", False ),
-                        "metadata_json"   : metadata,
-                    } )
+                # Return EVERY surviving PENDING row (row 2817b0f5), not just the
+                # scheduled ones. By the time this runs, mark_interrupted_jobs() has
+                # already marked the anomalous cases INTERRUPTED, so the rows left as
+                # PENDING are exactly the ones we want back: future-scheduled,
+                # downtime-catch-up, AND immediate (scheduled_at is None). A None
+                # scheduled_at rides through as an immediate job that runs on next
+                # consume.
+                restorable.append( {
+                    "id_hash"         : row.id_hash,
+                    "job_type"        : row.job_type,
+                    "user_id"         : row.user_id,
+                    "user_email"      : row.user_email or "",
+                    "session_id"      : row.session_id or "",
+                    "routing_command" : row.routing_command or "",
+                    "question_text"   : row.question_text or "",
+                    "scheduled_at"    : scheduled_at,
+                    "monopolize"      : metadata.get( "monopolize", False ),
+                    "paused"          : metadata.get( "paused", False ),
+                    "metadata_json"   : metadata,
+                } )
 
             return restorable
 
     except Exception as e:
         print( f"[WARN] get_restorable_jobs failed: {e}" )
         return []
+
+
+def restore_pending_jobs( restorable, job_factory, ask_flow, register_scoped_job=None, debug=False ):
+    """
+    Rebuild and re-enqueue the jobs get_restorable_jobs() returned (row 2817b0f5).
+
+    Extracted from the startup lifespan so the no-resurrect + paused-carry WIRING
+    is unit-testable without a live server: inject a fake factory + fake queue.
+
+    Requires:
+        - restorable is a list of dicts from get_restorable_jobs()
+        - job_factory( command, args_dict, user_id, user_email, session_id, debug )
+          returns a job object (or None on failure) — normally create_agentic_job
+        - ask_flow exposes submit( job=..., user_id=..., user_email=...,
+          session_id=..., websocket_id=..., speak=... ) — the v2 AskFlow. This used
+          to be the todo queue and the line below used to be `todo_queue.push( job )`.
+          Rick ruled this caller IN by name (step 12): it is the one least likely to
+          be noticed misbehaving — startup, unattended, re-enqueueing work an
+          interruption left behind — so it must not keep a private door onto the
+          queue while every other caller goes through the guarded one. There is no
+          fallback to a direct push: a fallback is how a caller quietly keeps its
+          old door
+        - register_scoped_job, if given, is user_job_tracker.register_scoped_job
+          (base_hash, user_id, session_id) -> scoped_hash. The user-job tracker is
+          NOT rebuilt at startup, so WITHOUT this a restored job still runs (the
+          consumer reads the queue directly) but is INVISIBLE to /api/get-queue and
+          unresumable (that view filters by the tracker). Registering makes the
+          restored job show up and be resumable; the verb strips + re-appends
+          ::user_id, so passing the already-scoped id returns the same id_hash.
+
+    Ensures:
+        - the job is rebuilt from metadata_json["original_args"] (the exact submit
+          args), so test_types / dry_run / pytest_args survive — NOT from the whole
+          metadata envelope, which loses them to factory defaults
+        - each rebuilt job REUSES its original id_hash, so it re-drives its OWN
+          durable row (pending -> running -> terminal) and cannot resurrect on a
+          later boot (one row, one identity, one restore)
+        - scheduled_at rides through verbatim (None => immediate)
+        - a job that was paused before the bounce is re-held (state = PAUSED) BEFORE
+          push, so it is never eligible and comes back paused, not silently running
+        - a row missing routing_command, or whose factory returns None, is skipped
+          with a logged reason — never a hard failure that strands the rest
+        - returns the count actually pushed
+
+    Raises:
+        - nothing from a single job; the caller wraps the whole restore in a guard
+    """
+    restored = 0
+    for job_data in restorable:
+        routing_cmd = job_data[ "routing_command" ]
+        if not routing_cmd:
+            print( f"[CJ-PERSIST] Cannot restore {job_data[ 'id_hash' ]}: no routing_command" )
+            continue
+
+        # Reconstruct from the ORIGINAL submit args (test_types, dry_run,
+        # pytest_args, ...), which persistence nests under
+        # metadata_json["original_args"]. Passing the whole metadata envelope as
+        # args_dict loses them and the job rebuilds with factory DEFAULTS — proven
+        # live (row 2817b0f5 E2E): a restored dry_run "unit" job came back as a
+        # REAL "integration, e2e" run.
+        original_args = ( job_data.get( "metadata_json" ) or {} ).get( "original_args" ) or {}
+        job = job_factory(
+            command    = routing_cmd,
+            args_dict  = original_args,
+            user_id    = job_data[ "user_id" ],
+            user_email = job_data[ "user_email" ],
+            session_id = job_data[ "session_id" ],
+            debug      = debug,
+        )
+        if job is None:
+            print( f"[CJ-PERSIST] Cannot restore {job_data[ 'id_hash' ]}: factory returned None" )
+            continue
+
+        # Reuse the ORIGINAL id_hash so the job re-drives its OWN durable row —
+        # a fresh id would leave the original PENDING forever and re-restore a NEW
+        # copy on every boot (unbounded resurrection).
+        job.id_hash = job_data[ "id_hash" ]
+
+        # Re-register in the user-job tracker so the restored job is VISIBLE in the
+        # user's queue view and resumable (see the register_scoped_job contract
+        # above). Passing the already-scoped id returns the same value.
+        if register_scoped_job is not None:
+            job.id_hash = register_scoped_job(
+                job_data[ "id_hash" ], job_data[ "user_id" ], job_data[ "session_id" ]
+            )
+
+        job.scheduled_at = job_data[ "scheduled_at" ]   # None => immediate
+        if job_data.get( "monopolize" ):
+            job.monopolize = True
+
+        # Re-hold a paused job BEFORE push, not after. push() notifies the consumer,
+        # so a state set AFTER push races it — the consumer can start the job before
+        # it is marked paused (proven live: a restored paused job RAN). Setting
+        # PAUSED first means the job is never eligible in the first place.
+        if job_data.get( "paused" ):
+            job.state = JobState.PAUSED
+
+        # Step 12: through the flow, like every other caller. `submit` with a prebuilt
+        # job skips routing entirely — the command came off the stored row, so there is
+        # nothing to re-derive — and the queued executor does the scope-and-push this
+        # line used to do inline. The re-registration above still runs: the tracker is
+        # not rebuilt at boot, and the scoper is idempotent, so doing it twice returns
+        # the same id.
+        # speak=False: this is a silent boot-time catch-up. Announcing every restored
+        # job would greet a returning user with a burst of TTS about work they did not
+        # just ask for.
+        ask_flow.submit(
+            job          = job,
+            user_id      = job_data[ "user_id" ],
+            user_email   = job_data[ "user_email" ],
+            session_id   = job_data[ "session_id" ],
+            websocket_id = job_data[ "session_id" ],
+            speak        = False,
+        )
+
+        restored += 1
+        kind = "immediate" if job_data[ "scheduled_at" ] is None else "scheduled"
+        held = " (paused)" if job_data.get( "paused" ) else ""
+        print( f"[CJ-PERSIST] Restored {kind} job{held}: {job_data[ 'id_hash' ]} "
+               f"(type={job_data[ 'job_type' ]}, scheduled_at={job_data[ 'scheduled_at' ]})" )
+
+    if restored:
+        print( f"[CJ-PERSIST] Restored {restored} pre-execution job(s)" )
+    return restored
 
 
 def get_active_job_ids_by_user():

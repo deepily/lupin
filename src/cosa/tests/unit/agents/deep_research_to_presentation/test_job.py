@@ -294,3 +294,88 @@ class TestExecuteDryRun:
         with patch( "asyncio.sleep", AsyncMock() ):
             _run( job._execute_dry_run( voice_io, cosa_interface ) )
         assert "DRY RUN MODE" not in capsys.readouterr().out
+
+
+# ----------------------------------------------------------------------------
+# Real-path completion abstract (bug 2da4095a)
+# ----------------------------------------------------------------------------
+class TestRealPathCompletionAbstract:
+    """
+    bug 2da4095a: the real (non-dry-run) path must BUILD a completion abstract with
+    View-Presentation / View-YAML links and store it in artifacts["abstract"] so the
+    promoted running→done card renders links WITHOUT a page reload. Before the fix
+    the real path returned a bare "Pipeline complete!" string and stored no abstract,
+    so running_fifo_queue._transition_to_done emitted abstract=None → blank done card.
+    """
+
+    def _completed_result( self ):
+        return ChainedResult(
+            research_path     = "/proj/io/dr/report.md",
+            research_abstract = "abs",
+            yaml_path         = "/proj/io/pres/deck.yaml",
+            marp_path         = "/proj/io/pres/deck.md",
+            slide_count       = 9,
+            dr_cost           = 1.0,
+            pg_cost           = 0.5,
+            total_cost        = 1.5,
+            state             = PipelineState.COMPLETED,
+        )
+
+    def test_real_path_stores_abstract_with_links( self ):
+        job   = _job()
+        graph = _ExecGraph( self._completed_result() )
+        with graph.patcher(), patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+
+        abstract = job.artifacts.get( "abstract" )
+        assert abstract, "real-path completion did not store artifacts['abstract'] (bug 2da4095a)"
+        assert "View Presentation" in abstract
+        assert "View YAML"         in abstract
+        assert "deck.md"           in abstract, "marp presentation link missing"
+        assert "report.md"         in abstract, "research report link missing"
+        assert "9 slides"          in abstract
+        # the stored abstract is the SAME string the completion notify received
+        completion = [ c for c in graph.voice_io.notify.await_args_list if c.kwargs.get( "abstract" ) ]
+        assert len( completion ) == 1
+        assert completion[ 0 ].kwargs[ "abstract" ] == abstract
+
+    def test_real_path_paths_outside_io_base_stay_raw( self ):
+        """
+        _doc_link's fallback arc: a path not under io/ (or a missing path) is left
+        as the raw string rather than turned into a /app/docs link — the abstract
+        is still built and stored.
+        """
+        result = ChainedResult(
+            research_path = "/outside/report.md",   # not under io_base → raw
+            yaml_path     = None,                    # missing → raw (None)
+            marp_path     = "/outside/deck.md",      # not under io_base → raw
+            slide_count   = 3,
+            total_cost    = 0.2,
+            state         = PipelineState.COMPLETED,
+        )
+        job   = _job()
+        graph = _ExecGraph( result )
+        with graph.patcher(), patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            _run( job._execute() )
+
+        abstract = job.artifacts.get( "abstract" )
+        assert abstract, "abstract must be stored even when paths are outside io_base"
+        assert "/outside/deck.md" in abstract        # raw path, not a link
+        assert "View Presentation" not in abstract   # link form NOT built
+        assert "3 slides" in abstract
+
+    def test_real_path_notify_failure_is_caught( self, capsys ):
+        """The completion notify raising is caught + logged; the run still completes."""
+        job   = _job()
+        graph = _ExecGraph( self._completed_result() )
+
+        async def _raise_on_completion( *a, **k ):
+            if k.get( "abstract" ): raise RuntimeError( "notify boom" )
+        graph.voice_io.notify = AsyncMock( side_effect=_raise_on_completion )
+
+        with graph.patcher(), patch( "cosa.utils.util.get_project_root", return_value="/proj" ):
+            out = _run( job._execute() )
+
+        assert job.artifacts.get( "abstract" ), "abstract stored even when notify fails"
+        assert "Pipeline complete!" in out
+        assert "completion notify failed" in capsys.readouterr().out

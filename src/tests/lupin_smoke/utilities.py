@@ -29,22 +29,37 @@ class LupinTestClient:
     with proper authentication and error handling.
     """
     
-    def __init__( self, base_url: str = "http://localhost:7999", debug: bool = False ):
+    def __init__( self, base_url: str = None, debug: bool = False ):
         """
         Initialize test client.
 
+        The base URL comes from LUPIN_TEST_BASE_URL when the caller does not pass
+        one, still defaulting to the dev server (row ea45b6fc). This directory
+        used to hardwire :7999 in two places, so by the CLAUDE.md venue rubric
+        these tests belonged on :8000 — they submit real jobs and run well over
+        two minutes — and there was no way to send them there. The rubric and the
+        code disagreed, and the code won by default.
+
+        The shape matches test_queue_filtering_smoke.py in this same directory,
+        which already read LUPIN_TEST_BASE_URL; a working precedent beat
+        inventing a second convention.
+
         Requires:
-            - base_url is a valid HTTP URL
-            - Server is running at base_url for login to succeed
+            - base_url, when given, is a valid HTTP URL
+            - a server is running at the resolved base_url for login to succeed
 
         Ensures:
+            - self.base_url is the explicit argument, else $LUPIN_TEST_BASE_URL,
+              else http://localhost:7999
             - self.auth_token contains a real JWT if credentials are available and login succeeds
             - Falls back to mock token (will fail 401) if credentials missing or login fails
 
         Args:
-            base_url: Base URL for HTTP requests
+            base_url: Base URL for HTTP requests; None resolves from the environment
             debug: Enable debug output
         """
+        if base_url is None:
+            base_url = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:7999" )
         self.base_url   = base_url
         self.debug      = debug
         self.session_id = "test_session_" + str( int( time.time() ) )
@@ -155,23 +170,39 @@ class LupinTestClient:
         except Exception:
             pass  # Endpoint may not exist on older server versions
 
-    async def http_request(self, method: str, endpoint: str, **kwargs) -> httpx.Response:
+    async def http_request(self, method: str, endpoint: str, authenticate: bool = True, **kwargs) -> httpx.Response:
         """
-        Make HTTP request with automatic authentication.
-        
+        Make HTTP request, authenticated by default.
+
+        Requires:
+            - endpoint is a path beginning with "/"
+            - when authenticate is True, self.auth_token has been established
+
+        Ensures:
+            - when authenticate is True and the caller supplied no Authorization
+              header, the client's bearer token is attached
+            - when authenticate is False, NO Authorization header is sent, even
+              though the client holds a token
+
+        Note on `authenticate=False`: passing `headers={}` does NOT produce an
+        unauthenticated request. An empty dict contains no Authorization key, so
+        the auto-attach branch below fires and puts the token back. Three tests
+        that meant to probe unauthenticated access were doing exactly that and
+        had never once reached the server without a token. Ask for it explicitly.
+
         Args:
             method: HTTP method (GET, POST, etc.)
             endpoint: API endpoint path
+            authenticate: attach the bearer token (default True); False sends none
             **kwargs: Additional arguments for httpx
-            
+
         Returns:
             httpx.Response object
         """
         url = f"{self.base_url}{endpoint}"
         
-        # Add authentication header if not provided
         headers = kwargs.get('headers', {})
-        if 'Authorization' not in headers:
+        if authenticate and 'Authorization' not in headers:
             headers['Authorization'] = self.auth_token
         kwargs['headers'] = headers
         
@@ -237,7 +268,12 @@ class LupinTestClient:
             if self.debug:
                 print(f"[WS] Using session ID: {real_session_id} (encoded: {encoded_session_id})")
         
-        ws_url = f"ws://localhost:7999{endpoint}"
+        # DERIVED from base_url, not hardcoded (row ea45b6fc). This line used to
+        # read f"ws://localhost:7999{endpoint}", so overriding base_url moved the
+        # HTTP calls to another server while every WebSocket stayed pointed at the
+        # dev box — a split that would have looked like a flaky test rather than a
+        # misrouted one.
+        ws_url = f"{self.base_url.replace( 'https://', 'wss://', 1 ).replace( 'http://', 'ws://', 1 )}{endpoint}"
         
         if self.debug:
             print(f"[WS] Connecting to {ws_url}")

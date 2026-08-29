@@ -37,6 +37,7 @@ this test must leave alone.
 Paired row: 357c283f-4689-4c08-a952-9bd9b05a9c43.
 """
 
+import os
 import re
 import json
 import urllib.request
@@ -47,6 +48,40 @@ import pytest
 from cosa.config.configuration_manager import ConfigurationManager
 
 _PROBE_TIMEOUT_SECONDS = 5
+
+# The router/qwen LoRA connection strings embed ${LUPIN_ROUTER_LORA_*_PATH}, which
+# ConfigurationManager.get expands via os.path.expandvars against os.environ. At
+# runtime the app process gets those vars because the container sources ~/.lora_env
+# at startup, and peft_trainer.py auto-writes that file after each training run.
+# This test must resolve the spec THE SAME WAY the app does — NOT by trusting the
+# caller to have sourced something. So it loads ~/.lora_env itself. A DEFECT this
+# closes: an earlier version passed only in a shell that had sourced the file and
+# failed everywhere else (host/containers/:8000 gate), because it asserted about the
+# test process's own shell env instead of the config resolution the app performs.
+_LORA_ENV_CANDIDATES = ( os.path.expanduser( "~/.lora_env" ), "/home/rruiz/.lora_env" )
+
+
+def _load_lora_env_if_present():
+    """
+    Load ~/.lora_env into os.environ so ${LUPIN_ROUTER_LORA_*_PATH} resolves the way
+    the running app resolves it. Never clobbers an already-set var (a real
+    environment wins). Returns the file it loaded, or None if none is present.
+    """
+    for path in _LORA_ENV_CANDIDATES:
+        if os.path.isfile( path ):
+            with open( path, encoding="utf-8" ) as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or line.startswith( "#" ) or "=" not in line:
+                        continue
+                    if line.startswith( "export " ):
+                        line = line[ len( "export " ): ]
+                    key, val = line.split( "=", 1 )
+                    os.environ.setdefault(
+                        key.strip(), val.strip().strip( '"' ).strip( "'" )
+                    )
+            return path
+    return None
 
 
 def _config_mgr():
@@ -111,10 +146,11 @@ def _parse_vllm( conn ):
     body = conn[ len( "vllm://" ): ]
     assert "@" in body, f"vllm:// spec missing '@<model>': {conn!r}"
     assert "${" not in body, (
-        f"vllm:// spec has an UNRESOLVED env var: {conn!r}. The referenced "
-        f"environment variable is not set in this test's process, so the app "
-        f"cannot resolve the model path either. Remedy: source the env file that "
-        f"defines it (e.g. ~/.lora_env) before running."
+        f"vllm:// spec has an UNRESOLVED env var: {conn!r}. This test already "
+        f"auto-loads ~/.lora_env, so this means that file is absent AND the var is "
+        f"unset in the environment — the running app could not resolve the model "
+        f"path either. Remedy: ensure ~/.lora_env exists (peft_trainer.py writes it) "
+        f"or the var is set in the app's environment."
     )
     host_port, model_name = body.split( "@", 1 )
     return host_port, model_name
@@ -150,7 +186,8 @@ def _served_models( host_port ):
     return [ m.get( "id" ) for m in payload.get( "data", [] ) ]
 
 
-_CONSUMED = _discover_consumed_vllm_specs( _config_mgr() )
+_LOADED_LORA_ENV = _load_lora_env_if_present()
+_CONSUMED        = _discover_consumed_vllm_specs( _config_mgr() )
 
 
 def test_at_least_one_consumed_vllm_spec_discovered():

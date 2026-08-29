@@ -320,7 +320,9 @@ def test_recommend_all_branches():
 # ---------------------------------------------------------------------------
 def _install_fake_bridge( monkeypatch, sessions ):
     """
-    Patch the REAL session_bridge.find_active_voice_persona_sessions.
+    Patch the REAL session_bridge.find_active_sessions — the all-sessions view the
+    leaf now enumerates (require_persona=False) so nameless seats are included too
+    (row 9c720767).
 
     Patching the function on the imported module (rather than swapping
     sys.modules) is import-order-robust: `from ... import session_bridge`
@@ -331,7 +333,7 @@ def _install_fake_bridge( monkeypatch, sessions ):
     """
     import importlib
     sb = importlib.import_module( "lupin_cli.claude_code.hooks.lib.session_bridge" )
-    monkeypatch.setattr( sb, "find_active_voice_persona_sessions", lambda **k: sessions )
+    monkeypatch.setattr( sb, "find_active_sessions", lambda **k: sessions )
     return sb
 
 
@@ -411,6 +413,43 @@ def test_fleet_active_missing_transcript_key( tmp_path, monkeypatch ):
 
 
 # ---------------------------------------------------------------------------
+# row 9c720767 — a live seat with NO persona must be ENUMERATED, not filtered
+#
+# find_active_voice_persona_sessions (require_persona=True) EXCLUDES a nameless
+# seat, so the pressure feed never sees it — the seat nobody is watching is also
+# the seat the monitor cannot show. The leaf must enumerate the all-sessions
+# view (require_persona=False) and carry the nameless seat with persona=None.
+#
+# The red faithfully reproduces the defect: the persona-required view returns []
+# (as the real one does for a nameless seat) while the all-sessions view has it.
+# Before the fix the leaf reads the persona-required view → the seat is absent.
+# ---------------------------------------------------------------------------
+def test_fleet_enumerates_nameless_live_seat( tmp_path, monkeypatch ):
+    import importlib
+    sb = importlib.import_module( "lupin_cli.claude_code.hooks.lib.session_bridge" )
+    transcript = _write( tmp_path, "tr.jsonl", [ _assistant_line( input=100, cache_read=100 ) ] )
+    bridge = tmp_path / "cc-nameless.json"
+    bridge.write_text( json.dumps( {
+        "transcript_path": transcript, "listener_pid": os.getpid(),
+        "tmux_session": "nameless-pane", "window_size": 1000,
+    } ) )
+    # the persona-required projection hides it (persona is null); the all-sessions
+    # projection carries it with persona projected to {} — exactly the real shapes.
+    monkeypatch.setattr( sb, "find_active_voice_persona_sessions", lambda **k: [] )
+    monkeypatch.setattr( sb, "find_active_sessions",
+                         lambda **k: [ ( bridge, "nameless1", {} ) ] )
+    monkeypatch.setattr( cp, "_pid_alive", lambda pid: True )
+
+    workers = cp.assess_fleet_context_pressure( reserve=0, max_response=0, idle_mtime_seconds=10**9 )
+    assert len( workers ) == 1
+    w = workers[ 0 ]
+    assert w.session_id  == "nameless1"
+    assert w.persona     is None                       # nameless — stated, not "unknown"
+    assert w.liveness    == cp.Liveness.ACTIVE         # it is genuinely alive
+    assert w.last_turn_age is not None                 # its age is carried so it is visible AS a problem
+
+
+# ---------------------------------------------------------------------------
 # render_fleet_table  /  quick_smoke_test
 # ---------------------------------------------------------------------------
 def test_render_table_with_and_without_pressure():
@@ -424,6 +463,14 @@ def test_render_table_with_and_without_pressure():
     out    = cp.render_fleet_table( [ active, dead ] )
     assert "Tiffany" in out and "20.5%" in out
     assert "Ghost" in out and "DEAD" in out
+
+
+def test_render_table_nameless_seat_shows_unnamed_label():
+    """A live seat with persona=None renders an explicit '(unnamed)' row rather
+    than crashing on the None format — the nameless seat stays visible (9c720767)."""
+    nameless = cp.WorkerContextPressure( "n1", None, "nameless-pane", cp.Liveness.ACTIVE, None, 2400.0, "" )
+    out      = cp.render_fleet_table( [ nameless ] )
+    assert "(unnamed)" in out and "ACTIVE" in out
 
 
 def test_quick_smoke_test_empty( monkeypatch, capsys ):

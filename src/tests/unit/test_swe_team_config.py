@@ -442,7 +442,7 @@ class TestTrustProxyConfigFactory:
             "cb_error_rate_threshold", "cb_confidence_collapse_threshold",
             "cb_auto_demotion_levels", "cb_recovery_cooldown_seconds",
             "l4_audit_sample_rate",
-            "similarity_threshold", "proxy_lancedb_table",
+            "similarity_threshold", "proxy_decisions_table",
             "beta_l2_rate_threshold", "beta_l3_rate_threshold",
             "beta_l4_rate_threshold", "beta_l5_rate_threshold",
             "beta_l2_min_samples", "beta_l3_min_samples",

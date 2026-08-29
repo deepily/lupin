@@ -7,6 +7,58 @@ from cosa.agents.agent_base import AgentBase
 from cosa.agents.raw_output_formatter import RawOutputFormatter
 from cosa.memory.input_and_output_table import InputAndOutputTable
 
+
+
+# Stand-in for "do not trim", used only when the model window cannot be read.
+_UNBOUNDED_ENTRIES_BUDGET = 10 ** 9
+
+
+def fit_fragments_to_budget( fragments: list, budget: int, count_tokens ) -> str:
+    """
+    Join as many of the NEWEST fragments as fit `budget` tokens, oldest last dropped.
+
+    Row a203d91d: the memory block was bounded by a ROW COUNT (50), which cannot bound
+    a token budget because rows vary in size — 50 rows measured 3,345 tokens on one
+    night and could be half or double that on another with the same cap. The bound has
+    to be the thing the server actually checks.
+
+    `fragments` arrives newest-first, matching the repository's ORDER BY id DESC. The
+    returned block is chronological, oldest first, because that is how the prompt reads
+    as a conversation.
+
+    Requires:
+        - fragments is a list of strings, newest first
+        - budget is a non-negative token count
+        - count_tokens is a callable taking a string and returning its token count
+
+    Ensures:
+        - the returned block costs at most `budget` tokens
+        - it holds the newest fragments that fit, never an arbitrary subset
+        - returns "" when even the newest single fragment does not fit
+        - uses a binary search, so sizing costs O(log n) calls to count_tokens, not one
+          per fragment
+
+    Raises:
+        - whatever count_tokens raises
+    """
+    if not fragments or budget <= 0: return ""
+
+    def block( n ):
+        return "\n".join( reversed( fragments[ :n ] ) )
+
+    lo, hi, best = 1, len( fragments ), 0
+    while lo <= hi:
+        mid = ( lo + hi ) // 2
+        if count_tokens( block( mid ) ) <= budget:
+            best = mid
+            lo   = mid + 1
+        else:
+            hi = mid - 1
+
+    return block( best )
+
+
+
 class ReceptionistAgent( AgentBase ):
     """
     Agent that handles general conversation and memory retrieval.
@@ -79,16 +131,79 @@ class ReceptionistAgent( AgentBase ):
             - KeyError if expected columns missing from rows
         """
         
-        entries    = []
-        rows       = self.io_tbl.get_all_qnr()
-        for row in rows:
-            entries.append( f"<memory-fragment> <date>{row['date']}</date/> <human-queried>{row['input']}</human-queried> <ai-answered>{row['output_final']}</ai-answered> </memory-fragment>" )
-            
-        entries    = "\n".join( entries )
+        rows      = self.io_tbl.get_all_qnr()
+        fragments = [
+            f"<memory-fragment> <date>{row['date']}</date/> <human-queried>{row['input']}</human-queried> <ai-answered>{row['output_final']}</ai-answered> </memory-fragment>"
+            for row in rows
+        ]
+        budget     = self._entries_token_budget()
+        # An unbounded budget means the window could not be read. Join without sizing
+        # rather than calling a tokenizer we already know is unavailable.
+        entries    = (
+            "\n".join( reversed( fragments ) ) if budget >= _UNBOUNDED_ENTRIES_BUDGET
+            else fit_fragments_to_budget( fragments, budget, self._count_tokens )
+        )
         date_today = du.get_current_date()
-        
+
         return date_today, entries
     
+
+
+    def _count_tokens( self, text: str ) -> int:
+        """
+        Token cost of `text` for the model this agent actually talks to.
+
+        Requires:
+            - the agent's llm client exposes base_url and model_name
+
+        Ensures:
+            - returns the model server's own count, never a character estimate
+
+        Raises:
+            - RuntimeError if the model server cannot be reached
+        """
+        from cosa.agents.model_window import count_tokens, resolve_vllm_spec
+
+        base_url, model = resolve_vllm_spec( self.config_mgr.get( self.model_name ) )
+        count, _        = count_tokens( base_url, model, text )
+        return count
+
+    def _entries_token_budget( self ) -> int:
+        """
+        How many tokens the memory block may spend.
+
+        Half the model's window, less what the prompt template already costs. Half is
+        not a tuned constant — it is the split that leaves the other half for the
+        completion, so this scales with whatever model is loaded instead of encoding
+        one server's numbers. The clamp in llm_completion then sizes the completion
+        against whatever the prompt actually turned out to be.
+
+        Requires:
+            - the agent's llm client exposes base_url and model_name
+
+        Ensures:
+            - returns a non-negative token budget for the entries block alone
+
+        Raises:
+            - RuntimeError if the model server cannot be reached
+        """
+        from cosa.agents.model_window import get_context_window, resolve_vllm_spec
+
+        try:
+            base_url, model = resolve_vllm_spec( self.config_mgr.get( self.model_name ) )
+            window          = get_context_window( base_url, model )
+            template_tokens = self._count_tokens( self.prompt_template )
+        except ( ValueError, RuntimeError, TypeError, AttributeError ) as e:
+            # Best effort by design. This runs during __init__, and a model server that
+            # is briefly unreachable must not stop the agent being constructed. Returning
+            # an effectively unbounded budget reproduces the pre-a203d91d behaviour, and
+            # the clamp in llm_completion is still there to keep the request legal.
+            if self.debug: print( f"[BUDGET] could not size the window, leaving memory untrimmed: {e}" )
+            return _UNBOUNDED_ENTRIES_BUDGET
+
+        return max( 0, window // 2 - template_tokens )
+
+
     def run_prompt( self, **kwargs ) -> dict[str, Any]:
         """
         Execute prompt and extract conversational answer.

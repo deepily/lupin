@@ -6,7 +6,6 @@ from cosa.agents.io_models.utils.util_xml_pydantic import XMLParsingError
 from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
 from cosa.memory.gist_cache_table import GistCacheTable
 from cosa.memory.normalizer import Normalizer
-from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
 
 class Gister:
@@ -63,14 +62,7 @@ class Gister:
         if self.cache_enabled:
             table_name  = self.config_mgr.get( "gister cache table name", default="gist_cache" )
 
-            # Ask the backend BEFORE building a path (decision 2b20a6d6). Under postgres
-            # GistCacheTable routes to GistCacheRepository and honors no path.
-            if is_postgres_backend( self.config_mgr ):
-                db_uri = None
-            else:
-                db_uri = du.get_project_root() + self.config_mgr.get( "solution snapshots lancedb path" )
-
-            self._gist_cache = GistCacheTable( db_uri, table_name=table_name, debug=self.debug, verbose=self.verbose )
+            self._gist_cache = GistCacheTable( table_name=table_name, debug=self.debug, verbose=self.verbose )
 
         if self.debug:
             cache_status = "enabled" if self.cache_enabled else "disabled"

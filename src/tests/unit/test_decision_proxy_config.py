@@ -19,7 +19,6 @@ Test Classes:
     TestCircuitBreaker: Anomaly detection and auto-demotion
 """
 
-import asyncio
 import time
 import pytest
 from datetime import datetime
@@ -354,88 +353,33 @@ class TestDecisionListener:
 
 
 # ============================================================================
-# TestDecisionResponder — Construction and event handling
+# DecisionResponder — tests live in the COSA-side copy, NOT here (row 4b561b1a)
 # ============================================================================
-
-class TestDecisionResponder:
-    """Tests for the DecisionResponder construction and event routing."""
-
-    def test_construction( self ):
-        from cosa.agents.decision_proxy.responder import DecisionResponder
-        responder = DecisionResponder( trust_mode="shadow", debug=True )
-        assert responder.trust_mode == "shadow"
-        assert responder.domain_strategy is None
-        assert "decisions_shadowed" in responder.stats
-
-    def test_set_domain_strategy( self ):
-        from cosa.agents.decision_proxy.responder import DecisionResponder
-        responder = DecisionResponder()
-        mock_strategy = MagicMock()
-        responder.set_domain_strategy( mock_strategy )
-        assert responder.domain_strategy is mock_strategy
-
-    def test_handle_non_response_skipped( self ):
-        from cosa.agents.decision_proxy.responder import DecisionResponder
-        responder = DecisionResponder()
-
-        event_data = {
-            "notification": {
-                "id_hash"            : "uuid-123",
-                "response_requested" : False,
-                "message"            : "FYI update",
-                "sender_id"          : "swe.lead@lupin.deepily.ai",
-            }
-        }
-
-        asyncio.run(
-            responder.handle_event( "notification_queue_update", event_data )
-        )
-        assert responder.stats[ "skipped" ] == 1
-
-    def test_handle_sender_rejected( self ):
-        from cosa.agents.decision_proxy.responder import DecisionResponder
-        responder = DecisionResponder(
-            accepted_senders=[ "swe.lead@lupin.deepily.ai" ]
-        )
-
-        event_data = {
-            "notification": {
-                "id_hash"            : "uuid-123",
-                "response_requested" : True,
-                "message"            : "Approve?",
-                "sender_id"          : "unknown@lupin.deepily.ai",
-            }
-        }
-
-        asyncio.run(
-            responder.handle_event( "notification_queue_update", event_data )
-        )
-        assert responder.stats[ "sender_rejected" ] == 1
-
-    def test_handle_no_strategy_shadows( self ):
-        from cosa.agents.decision_proxy.responder import DecisionResponder
-        responder = DecisionResponder()  # No accepted_senders filter, no strategy
-
-        event_data = {
-            "notification": {
-                "id_hash"            : "uuid-123",
-                "response_requested" : True,
-                "message"            : "Should I deploy?",
-                "sender_id"          : "swe.coder@lupin.deepily.ai",
-            }
-        }
-
-        asyncio.run(
-            responder.handle_event( "notification_queue_update", event_data )
-        )
-        assert responder.stats[ "decisions_shadowed" ] == 1
-
-    def test_stats_extended( self ):
-        from cosa.agents.decision_proxy.responder import DecisionResponder
-        responder = DecisionResponder()
-        assert "decisions_classified" in responder.stats
-        assert "decisions_acted" in responder.stats
-        assert "decisions_deferred" in responder.stats
+#
+# The canonical responder tests are:
+#
+#     src/cosa/tests/unit/agents/decision_proxy/test_responder.py
+#
+# They sit next to the code they test (src/cosa/agents/decision_proxy/responder.py)
+# and that is the copy a93aab3e updated when it made the sender allowlist FAIL
+# CLOSED ("Option C", row 960a4ec9). A duplicate TestDecisionResponder class used
+# to live here and was NOT updated, so it went on asserting the fail-OPEN
+# behaviour that commit removed on purpose — a stale twin claiming the opposite of
+# the maintained one. Deleted rather than patched: two live copies of one test
+# disagreeing IS the defect, and fixing the assertion in the stale copy would only
+# reset the clock until the next divergence.
+#
+# Every case it covered is covered better in the canonical file:
+#     test_construction              -> test_init_defaults, test_init_with_accepted_senders
+#     test_set_domain_strategy       -> test_set_domain_strategy
+#     test_handle_non_response_skipped -> test_decision_event_skips_when_no_response_requested
+#     test_handle_sender_rejected    -> test_decision_event_sender_rejected_quiet / _debug_prints
+#     test_handle_no_strategy_shadows -> test_decision_event_no_strategy_shadows_quiet / _debug
+#                                        AND test_empty_allowlist_rejects_every_sender_fail_closed,
+#                                        which is the guard for the new behaviour
+#     test_stats_extended            -> test_print_stats_outputs_all_counters
+#
+# Nothing was relaxed to make anything green. Add responder tests THERE, not here.
 
 
 # ============================================================================

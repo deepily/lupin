@@ -298,55 +298,135 @@ class TestTfeExecuteStoresPlanPath:
 # =============================================================================
 
 class TestDeadQueueSerializerExposesArtifacts:
-    """Fix 8b — dead queue branch in queues.py exposes plan_path, remediation_snapshot_path,
-    report_path, yaml_path, cost_summary on dead agentic jobs."""
+    """
+    Fix 8b — a dead agentic job's card carries the partial artifacts it managed to
+    write before it died, so a user can still recover the plan and the diagnosis.
 
-    def test_dead_queue_branch_exists_and_extracts_artifacts( self ):
-        """White-box check: the queues.py source contains a dead-queue branch that
-        reads job.artifacts. Grep-level assertion — avoids having to mock the full
-        FastAPI endpoint."""
+    HOW THIS IS CHECKED, AND WHY IT CHANGED (row 122f07a1). Both tests here used to
+    read queues.py's SOURCE — one grepping for the literal `if queue_name == "dead":`
+    plus the five field names, the other walking the AST for the same branch. They
+    called themselves white-box "to avoid mocking the full FastAPI endpoint", but
+    that endpoint takes its four queues as ordinary arguments, so there was nothing
+    to avoid. The cost was real: they went green on any build that kept the branch
+    and the five words while handing back None for every field, which is exactly
+    what a user would see. These drive the endpoint and read the card.
+    """
+
+    _ARTIFACT_FIELDS = ( "plan_path", "remediation_snapshot_path",
+                         "report_path", "yaml_path", "cost_summary" )
+
+    def _dead_agentic_job( self ):
+        """A dead agentic job carrying every artifact a mid-pipeline death can leave."""
+        from cosa.agents.agentic_job_base import AgenticJobBase
+        from cosa.rest.queue_protocol import JobState
+
+        job = MagicMock( spec=AgenticJobBase )
+        job.id_hash               = "tfe_dead_1"
+        job.last_question_asked   = "fix the failing tests"
+        job.run_date              = "2026-04-11T10:00:00"
+        job.created_date          = "2026-04-11T09:00:00"
+        job.user_email            = "u1@x.com"
+        job.session_id            = "sess"
+        job.job_type              = "test_fix_expediter"
+        job.state                 = JobState.FAILED
+        job.error                 = "boom"
+        job.started_at            = "2026-04-11T10:00:00"
+        job.completed_at          = "2026-04-11T10:05:00"
+        job.scheduled_at          = None
+        job.monopolize            = False
+        job.cost_summary          = { "usd": 1.25 }
+        job.artifacts             = {
+            "plan_path"                : "/io/plans/tfe-plan.md",
+            "remediation_snapshot_path": "/io/snapshots/tfe-remediation.json",
+            "report_path"              : "/io/reports/tfe-report.md",
+            "yaml_path"                : "/io/tfe.yaml",
+        }
+        return job
+
+    def _dead_card( self, job ):
+        """Drive the real endpoint over a dead queue holding `job`; return its card."""
         import cosa.rest.routers.queues as queues_mod
-        src = inspect.getsource( queues_mod )
 
-        # The dead queue branch must exist
-        assert 'if queue_name == "dead":' in src or "if queue_name == 'dead':" in src, \
-            "queues.py must have a dedicated dead-queue branch"
+        admin      = { "uid": "admin1", "email": "a@x.com", "roles": [ "admin" ] }
+        dead_queue = MagicMock()
+        dead_queue.get_jobs_for_user.return_value = [ job ]
 
-        # The branch must extract these artifact fields
-        for field in ( "plan_path", "remediation_snapshot_path", "report_path", "yaml_path", "cost_summary" ):
-            assert f'"{field}"' in src, \
-                f"dead-queue branch must expose '{field}' field on dead cards"
+        with patch.object( queues_mod, "_count_interactions_for_jobs", return_value={} ):
+            out = asyncio.run( queues_mod.get_queue(
+                queue_name    = "dead",
+                current_user  = admin,
+                user_filter   = admin[ "uid" ],
+                todo_queue    = MagicMock(),
+                running_queue = MagicMock(),
+                done_queue    = MagicMock(),
+                dead_queue    = dead_queue,
+            ) )
+        cards = out[ "dead_jobs_metadata" ]
+        assert len( cards ) == 1, f"expected exactly one dead card, got {cards}"
+        return cards[ 0 ]
 
-    def test_dead_queue_branch_reads_artifacts_dict( self ):
-        """AST-level check: the dead-queue branch pulls from job.artifacts.get(...)."""
-        import cosa.rest.routers.queues as queues_mod
-        src = inspect.getsource( queues_mod )
-        tree = ast.parse( src )
+    def test_dead_card_carries_every_partial_artifact( self ):
+        """All five artifact fields reach the card with the job's real values.
 
-        # Find the "if queue_name == 'dead':" block
-        found_dead_branch = False
-        dead_branch_reads_artifacts = False
+        RED ON REVERT: drop any field from the dead branch, or let the branch fall
+        through to the generic todo/run arm, and that field is absent or None here.
+        """
+        card = self._dead_card( self._dead_agentic_job() )
 
-        for node in ast.walk( tree ):
-            if isinstance( node, ast.If ):
-                # Check if this is `if queue_name == "dead":`
-                test = node.test
-                if ( isinstance( test, ast.Compare )
-                     and isinstance( test.left, ast.Name )
-                     and test.left.id == "queue_name"
-                     and len( test.comparators ) == 1
-                     and isinstance( test.comparators[ 0 ], ast.Constant )
-                     and test.comparators[ 0 ].value == "dead" ):
-                    found_dead_branch = True
-                    # Walk inside the branch looking for job.artifacts.get(...)
-                    branch_src = ast.unparse( node )
-                    if "artifacts.get" in branch_src and "plan_path" in branch_src:
-                        dead_branch_reads_artifacts = True
-                    break
+        for field in self._ARTIFACT_FIELDS:
+            assert field in card, f"dead card is missing '{field}' entirely"
 
-        assert found_dead_branch, "queues.py must contain `if queue_name == 'dead':` branch"
-        assert dead_branch_reads_artifacts, \
-            "dead-queue branch must call job.artifacts.get('plan_path', ...) to surface partial artifacts"
+        assert card[ "plan_path" ]                 == "/io/plans/tfe-plan.md"
+        assert card[ "remediation_snapshot_path" ] == "/io/snapshots/tfe-remediation.json"
+        assert card[ "report_path" ]               == "/io/reports/tfe-report.md"
+        assert card[ "yaml_path" ]                 == "/io/tfe.yaml"
+        assert card[ "cost_summary" ]              == { "usd": 1.25 }
+
+    def test_the_card_reads_the_job_s_artifacts_rather_than_a_fixed_shape( self ):
+        """Change what the job wrote and the card follows.
+
+        The source-text checks this replaced could not tell a serializer that READS
+        job.artifacts from one emitting the five keys with hardcoded or None values.
+        This moves the data and requires the card to move with it.
+        """
+        job = self._dead_agentic_job()
+        job.artifacts[ "plan_path" ] = "/io/plans/somewhere-else.md"
+        job.artifacts.pop( "yaml_path" )
+        job.cost_summary             = { "usd": 9.99 }
+
+        card = self._dead_card( job )
+
+        assert card[ "plan_path" ]    == "/io/plans/somewhere-else.md"
+        assert card[ "yaml_path" ]    is None, "an artifact the job never wrote must read None"
+        assert card[ "cost_summary" ] == { "usd": 9.99 }
+
+    def test_a_non_agentic_dead_job_reports_no_artifacts( self ):
+        """A plain dead job has no artifacts dict — the card must not invent one.
+
+        RED ON REVERT: drop the is_agentic_job guard and this raises on a job with
+        no artifacts attribute instead of reporting None.
+        """
+        from cosa.rest.queue_protocol import JobState
+
+        plain = MagicMock( spec=[
+            "id_hash", "last_question_asked", "run_date", "created_date", "user_email",
+            "session_id", "job_type", "state", "error", "started_at", "completed_at",
+        ] )
+        plain.id_hash             = "plain_dead"
+        plain.last_question_asked = "what time is it"
+        plain.run_date            = "2026-04-11T10:00:00"
+        plain.created_date        = "2026-04-11T09:00:00"
+        plain.user_email          = "u1@x.com"
+        plain.session_id          = "sess"
+        plain.job_type            = "date-and-time"
+        plain.state               = JobState.FAILED
+        plain.error               = "boom"
+        plain.started_at          = None
+        plain.completed_at        = None
+
+        card = self._dead_card( plain )
+        for field in self._ARTIFACT_FIELDS:
+            assert card[ field ] is None, f"non-agentic dead card invented a '{field}'"
 
 
 # =============================================================================

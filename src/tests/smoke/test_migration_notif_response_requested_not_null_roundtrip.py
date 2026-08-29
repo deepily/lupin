@@ -32,8 +32,18 @@ from cosa.rest.db import database as db_module
 from cosa.rest.db.auto_migrate import build_alembic_config
 
 
-_HEAD_REVISION = "f2a3b4c5d6e7"
-_PRIOR_HEAD    = "e1f2a3b4c5d6"
+# The revision UNDER TEST — the one that tightens notifications.response_requested
+# to NOT NULL — and the revision immediately below it.
+#
+# Renamed from _HEAD_REVISION 2026-08-26. It was named "head" and the test
+# upgraded to the literal "head", which was the same thing on the day it was
+# written and has not been since: migrations landed after it (c1a7f0e2b9d4,
+# d47487369407, ...) and head is now 3da5c0d1eee6, so the test failed with
+# `assert '3da5c0d1eee6' == 'f2a3b4c5d6e7'` — nothing wrong, just a moving
+# target. This test is about ONE migration's up/down behaviour, so it now
+# upgrades to that revision by name and every future migration leaves it alone.
+_TARGET_REVISION = "f2a3b4c5d6e7"
+_PRIOR_REVISION  = "e1f2a3b4c5d6"
 
 # Unique throwaway DB name (pid-scoped so parallel runs never collide).
 _THROWAWAY_DB = f"notif_nn_rt_{os.getpid()}"
@@ -111,26 +121,30 @@ def _response_requested_nullable( url ):
 
 def test_response_requested_not_null_roundtrip( throwaway_db_url ):
     """
-    Empty DB → upgrade head → response_requested is NOT NULL; downgrade -1 →
-    NULLABLE again (prior head); re-upgrade head → re-tightened idempotently.
+    Empty DB → upgrade to the target revision → response_requested is NOT NULL;
+    downgrade -1 → NULLABLE again; re-upgrade → re-tightened idempotently.
+
+    Upgrades to _TARGET_REVISION by name rather than to "head" (changed
+    2026-08-26) — see the comment on that constant. Every migration added after
+    it is irrelevant to this migration's own up/down contract.
     """
     config = build_alembic_config( database_url=throwaway_db_url )
 
-    # ── 1) upgrade head on an empty DB (pure migration path, NO create_all) ────
-    command.upgrade( config, "head" )
-    assert _current_rev( throwaway_db_url ) == _HEAD_REVISION
+    # ── 1) upgrade to the target on an empty DB (pure migration path, NO create_all) ──
+    command.upgrade( config, _TARGET_REVISION )
+    assert _current_rev( throwaway_db_url ) == _TARGET_REVISION
     assert _response_requested_nullable( throwaway_db_url ) is False, (
-        "after upgrade head, notifications.response_requested must be NOT NULL"
+        "after upgrade, notifications.response_requested must be NOT NULL"
     )
 
-    # ── 2) downgrade -1 → prior head, column relaxed back to NULLABLE ──────────
+    # ── 2) downgrade -1 → prior revision, column relaxed back to NULLABLE ──────
     command.downgrade( config, "-1" )
-    assert _current_rev( throwaway_db_url ) == _PRIOR_HEAD
+    assert _current_rev( throwaway_db_url ) == _PRIOR_REVISION
     assert _response_requested_nullable( throwaway_db_url ) is True, (
         "after downgrade, notifications.response_requested must be NULLABLE again"
     )
 
-    # ── 3) re-upgrade head → idempotent re-tighten ─────────────────────────────
-    command.upgrade( config, "head" )
-    assert _current_rev( throwaway_db_url ) == _HEAD_REVISION
+    # ── 3) re-upgrade → idempotent re-tighten ─────────────────────────────────
+    command.upgrade( config, _TARGET_REVISION )
+    assert _current_rev( throwaway_db_url ) == _TARGET_REVISION
     assert _response_requested_nullable( throwaway_db_url ) is False

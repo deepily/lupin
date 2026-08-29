@@ -5,7 +5,8 @@
 # Every function here is VM-uncoupled: no SSH, no docker, no gcloud, no network.
 # The runner (preflight-vm.sh) gathers real state and feeds it to these; that split
 # is what makes the logic unit-testable, following the precedent set by
-# src/scripts/lib/deploy-cloud-test-lib.sh (task d8c699aa).
+# src/scripts/lib/deploy-cloud-test-lib.sh (task d8c699aa; that lib was retired
+# 2026-08-26, row 0d175dac — the precedent it set is what this file still follows).
 #
 # Naming: every function is prefixed `pfv_` so a `source` into the runner cannot
 # collide with the runner's own names.
@@ -236,7 +237,8 @@ pfv_contract_remedy() {
 #   env-contract.tsv has ONE `requirement` column, and the venues disagree:
 #       docker-compose.cloud-gpu.yml:193   ${LUPIN_MODEL_SERVER_URL:?…}       required
 #       docker-compose.yml:193,299         ${LUPIN_MODEL_SERVER_URL:-http://…} defaulted
-#       docker-compose.cloud-test.yml:113  http://lupin-model-server:7998      hardcoded
+#       (a third venue, docker-compose.cloud-test.yml, hardcoded it outright; that file
+#        was retired 2026-08-26, row 0d175dac — the two above still disagree)
 #   The obvious fix is a per-venue requirement column. That would be a SECOND
 #   authority for a fact compose already states — the shape decision 2b20a6d6 found
 #   with FOUR authorities for "which store backs this data" and no comparator
@@ -741,4 +743,271 @@ pfv_phase_includes() {
             esac ;;
         *) return 0 ;;
     esac
+}
+
+# ── pfv_pyc_expected_source ──────────────────────────────────────────────────
+# Map a compiled-bytecode path back to the source file it must have come from.
+#
+# WHY THIS EXISTS (2026-08-18, row 70364793). The LanceDB sweep deleted
+# lancedb_solution_manager.py and vector_store_backend.py. The VM deploys by git
+# checkout and __pycache__ is gitignored, so git removed the .py files and LEFT the
+# .pyc. Python imports a stale .pyc perfectly happily when the .py is gone, so the
+# VM executed three-week-old bytecode for weeks. That dead code read a config key
+# that had since been RENAMED, got None, and every voice transcription returned 500.
+#
+# The pairing rule is the whole detector, so it is the part worth testing:
+#   pkg/__pycache__/mod.cpython-313.pyc                -> pkg/mod.py
+#   pkg/__pycache__/mod.cpython-313.opt-2.pyc          -> pkg/mod.py
+#   pkg/__pycache__/mod.cpython-313-pytest-8.4.2.pyc   -> pkg/mod.py
+#   pkg/mod.pyc  (pre-PEP-3147 sibling layout)         -> pkg/mod.py
+#
+# That third form is why the tag is stripped at the FIRST dot and not the last.
+# pytest's assertion rewriter writes a DOTTED tag (`cpython-313-pytest-8.4.2`), so
+# stripping one trailing component leaves `mod.cpython-313-pytest-8.4`, whose .py
+# never existed — and the detector reports every rewritten test file in the repo as
+# an orphan. Measured on this tree the first time: 1375 findings, ~all of them that.
+# A detector that cries wolf 1375 times is a detector nobody reads. PEP 3147 puts the
+# module name before the first dot and a module name cannot contain one, so the first
+# dot is the correct and only safe cut.
+#
+# Requires:
+#   - $1 is a path ending in .pyc
+# Ensures:
+#   - prints the .py path that .pyc must correspond to, with NO trailing newline,
+#     matching the output contract of every other printf-style helper here
+#   - the cache tag (everything from the first dot: .cpython-313, .opt-N, pytest tags) is stripped
+#     ONLY inside a __pycache__ directory, because only there does PEP 3147 put them.
+#     A sibling foo.pyc keeps its whole stem — guessing a tag off a legacy name would
+#     invent a source path and then report a file that never existed as missing
+#   - returns 2 and prints nothing for a path that is not a .pyc — a caller that
+#     hands this a .py is asking the wrong question, and answering it would fabricate
+#   - never touches the filesystem; existence is the CALLER's question
+pfv_pyc_expected_source() {
+    local pyc="$1"
+    case "$pyc" in *.pyc) ;; *) return 2 ;; esac
+    local dir base stem
+    case "$pyc" in */*) dir="${pyc%/*}" ;; *) dir="." ;; esac
+    base="${pyc##*/}"
+    stem="${base%.pyc}"
+    if [ "${dir##*/}" = "__pycache__" ]; then
+        # Step up out of __pycache__. A leading-slash root ("/__pycache__") collapses
+        # to the empty string, which the format string below turns back into "/foo.py"
+        # — correct, and one branch fewer than special-casing it.
+        case "$dir" in */*) dir="${dir%/*}" ;; *) dir="." ;; esac
+        stem="${stem%%.*}"
+    fi
+    printf '%s/%s.py' "$dir" "$stem"
+}
+
+# ── pfv_pyc_orphan_class ─────────────────────────────────────────────────────
+# Say whether an orphaned .pyc can actually EXECUTE, or is merely dead weight.
+#
+# MEASURED on CPython 3.13, not assumed (2026-08-18). Compile a module, delete the
+# .py, and `import` it:
+#   pkg/__pycache__/mod.cpython-313.pyc    ->  ModuleNotFoundError.  INERT.
+#   pkg/mod.pyc  (sibling, no __pycache__) ->  imports and runs.     LIVE.
+# PEP 3147 is explicit that a __pycache__ entry is only ever consulted ALONGSIDE its
+# source; sourceless import requires the legacy sibling layout. So the two orphan
+# shapes are not the same finding and must not carry the same tier — blocking a
+# deploy on bytecode that provably cannot run is a guard that fires where nothing
+# can hurt you, and a reader who triages one of those learns to skip the tier.
+#
+# The __pycache__ form is still worth reporting, for a different reason: it is code
+# that no grep, no diff and no review can see, so the tree lies about what it holds.
+# That is a WARN-shaped defect, not a BLOCK-shaped one.
+#
+# Requires:
+#   - $1 is a path ending in .pyc
+# Ensures:
+#   - prints SOURCELESS for a sibling .pyc — Python WILL import it
+#   - prints DEAD for a .pyc inside a __pycache__ directory — Python will not
+#   - returns 2 and prints nothing for a path that is not a .pyc
+pfv_pyc_orphan_class() {
+    local pyc="$1"
+    case "$pyc" in *.pyc) ;; *) return 2 ;; esac
+    local dir
+    case "$pyc" in */*) dir="${pyc%/*}" ;; *) dir="." ;; esac
+    if [ "${dir##*/}" = "__pycache__" ]; then printf 'DEAD'; else printf 'SOURCELESS'; fi
+    return 0
+}
+
+# ── pfv_scan_orphan_pyc ──────────────────────────────────────────────────────
+# Find every .pyc under a tree whose source .py is absent, classified by whether
+# it can execute.
+#
+# ORPHANED BYTECODE HIDES FROM EVERY REVIEW. Whether or not it runs, it is a file
+# the source tree does not account for: it appears in no grep, no diff, no code
+# review. The SOURCELESS shape additionally still imports, which makes it the only
+# class of running code that git can neither see nor remove.
+#
+# Requires:
+#   - $1 is a path
+# Ensures:
+#   - prints one orphan per line as: <SOURCELESS|DEAD><TAB><path>, unsorted
+#   - returns 0 and prints NOTHING when the tree is clean
+#   - returns 1 when one or more orphans exist — an exit code, not a count, so the
+#     caller cannot mistake "clean" for "did not look". The CALLER decides tiers by
+#     class; this function does not editorialise
+#   - returns 2 and prints nothing when $1 is not a directory. NOT 0: a scan that
+#     could not look must never report the same thing as a scan that found nothing,
+#     which is the alarm-gated-on-the-healthy-value defect this file keeps naming
+#   - prunes .git, .venv, venv, node_modules, site-packages and .claude worktree
+#     copies. Third-party wheels may legitimately ship .pyc without .py, and a
+#     worktree is a second checkout whose bytecode no deploy serves; reporting
+#     either would bury the real finding in noise
+#   - reads the filesystem but nothing else — no ssh, no docker, no network
+pfv_scan_orphan_pyc() {
+    local root="$1"
+    [ -d "$root" ] || return 2
+    local found=0 pyc src cls
+    while IFS= read -r pyc; do
+        src="$( pfv_pyc_expected_source "$pyc" )"
+        [ -e "$src" ] && continue
+        cls="$( pfv_pyc_orphan_class "$pyc" )"
+        printf '%s\t%s\n' "$cls" "$pyc"
+        found=1
+    done < <( find "$root" \
+                  \( -name .git -o -name .venv -o -name venv -o -name node_modules \
+                     -o -name site-packages -o -name worktrees \) -prune \
+                  -o -name '*.pyc' -print 2>/dev/null )
+    [ "$found" -eq 0 ] || return 1
+    return 0
+}
+
+# ── pfv_deployed_ref_status ──────────────────────────────────────────────────
+# Classify the VM's `.deployed-ref` provenance stamp against the tree's real HEAD.
+#
+# Requires:
+#   - $1 = the stamp file's first line, verbatim ("" when the file is absent or empty).
+#          Its shape is "<40-hex sha> <utc ts> <axis>" — written by lupin-vm.sh
+#          do_push_bundle. (deploy-cloud-test.sh also wrote it until it was retired
+#          2026-08-26, row 0d175dac.)
+#   - $2 = the full 40-hex sha the working tree is actually at (git rev-parse HEAD).
+# Ensures:
+#   - echoes exactly one of: ABSENT · MALFORMED · STALE · MATCH, and returns
+#     0 for MATCH, 1 for STALE, 2 for ABSENT, 3 for MALFORMED
+#   - reads FIELD 1 ONLY, the way every other consumer does (dctl_sanitize_sha, the
+#     e2e helper). The timestamp and axis fields are narration; the sha is the claim.
+#   - MALFORMED is split out from STALE deliberately. "the file says something that
+#     is not a sha" and "the file says a DIFFERENT sha" are different failures with
+#     different causes — a truncated write versus a move that never re-stamped — and
+#     collapsing them sends the reader to the wrong one.
+#   - comparison is full-length exact, never a prefix. A prefix compare would call a
+#     stamp correct on the strength of 7 shared characters.
+#   - pure: no git, no filesystem, no network. Both facts are passed IN so the
+#     classification can be unit-tested without a VM.
+pfv_deployed_ref_status() {
+    local line="$1" head_sha="$2"
+    local stamped
+    stamped="$( printf '%s' "$line" | awk '{print $1}' )"
+    [ -n "$stamped" ] || { echo "ABSENT"; return 2; }
+    # 40 lowercase hex and nothing else. `git rev-parse HEAD` never returns anything
+    # shorter, so a short sha here means the file was written by something other than
+    # the deploy path and its claim cannot be checked.
+    case "$stamped" in
+        *[!0-9a-f]* )                      echo "MALFORMED"; return 3 ;;
+    esac
+    [ "${#stamped}" -eq 40 ] || { echo "MALFORMED"; return 3; }
+    [ "$stamped" = "$head_sha" ] && { echo "MATCH"; return 0; }
+    echo "STALE"; return 1
+}
+
+# ── pfv_environ_lookup ───────────────────────────────────────────────────────
+# Read ONE variable out of a container's real process environment.
+#
+# WHY THIS EXISTS RATHER THAN `docker exec printenv`. env-contract.tsv's own
+# JWT_SECRET_KEY row states the rule: "read /proc/1/environ, not `docker exec
+# printenv` — printenv derives a fresh environment from container config and
+# misses an entrypoint that sources an env file over the top." A value that IS
+# in the running process then reads as UNSET, and C6 blocks a deploy over a
+# variable that is actually present. C6 was using the very call the contract it
+# reads warns against.
+#
+# INPUT IS NEWLINE-SEPARATED, NOT NUL-SEPARATED, ON PURPOSE. /proc/1/environ is
+# NUL-separated, but bash command substitution SILENTLY DROPS NUL bytes — the
+# whole environ would arrive as one run-together line with no separators and
+# nothing would ever match. The caller converts inside the container
+# (`sh -c "tr '\0' '\n' < /proc/1/environ"`) so this function receives lines.
+#
+# Requires:
+#   - $1 = variable name; stdin = newline-separated NAME=value entries
+# Ensures:
+#   - prints the value and returns 0 when the name is present, EVEN IF the value
+#     is empty — set-but-empty and unset are different failures with different
+#     remedies, and collapsing them is what `sh -c 'printf %s "$VAR"'` does wrong
+#   - returns 1, printing nothing, when the name is absent
+#   - FIRST match wins, which is what getenv() in the container would return
+#   - never prints the value of anything it was not asked for: a preflight is run
+#     when someone is confused, i.e. when they are most likely to paste its output
+#   - CAVEAT: a value containing a literal newline splits across lines here and its
+#     tail is lost. printenv had the same shape of limitation; no Lupin contract var
+#     is multi-line.
+pfv_environ_lookup() {
+    local name="$1" line
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            "$name="*) printf '%s' "${line#*=}"; return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# ── pfv_env_file_supplies ────────────────────────────────────────────────────
+# Does the HOST env file supply a usable value for this variable?
+#
+# WHY (row e7048496 — the unpassable bootstrap trap). An environment variable can
+# only enter a container at CREATE. So on a VM whose container predates a newly-
+# REQUIRED var, C6's PRE arm blocks because the running container lacks it, and the
+# only thing that can put it there is the `up -d --force-recreate` that PRE just
+# blocked. Measured live 2026-08-24 on lupin-host-test: appending JWT_SECRET_KEY to
+# cloud-gpu.env did NOT clear it — the running container still predated the value —
+# and only LUPIN_SKIP_PREFLIGHT=1 got through, disabling all 50 other assertions to
+# clear one false blocker. A gate that must always be skipped is not a gate.
+#
+# The distinction that fixes it is already knowable at the point of the check: is
+# the value sitting in the env file the imminent recreate will read? This answers
+# exactly that and nothing more. It does NOT decide the tier — preflight-vm.sh does,
+# because the same answer means different things in PRE and POST.
+#
+# Requires:
+#   - $1 = path to the env file compose is invoked with, $2 = variable name
+# Ensures:
+#   - returns 0 when the file assigns the name a NON-EMPTY value
+#   - returns 1 when it assigns it an EMPTY value. Not a pass: `${VAR:?}` aborts on
+#     empty exactly as it does on unset, so an empty entry will NOT satisfy the
+#     recreate and must not read as one
+#   - returns 2 when the file does not assign it at all
+#   - returns 3 when the file is missing or unreadable — cannot tell, never a pass
+#   - a COMMENTED-OUT assignment does not count. cloud-gpu.env:31 carries exactly
+#     that shape for CLAUDE_CODE_OAUTH_TOKEN, so treating `#NAME=...` as supply
+#     would manufacture a false exemption on a real file in this repo
+#   - LAST assignment wins, which is how both compose's env-file reader and a shell
+#     resolve a repeated name
+#   - accepts an optional `export ` prefix so a shell-style host env file parses too
+#   - strips ONE layer of matching quotes around the value
+#   - NEVER prints the value — several of these rows are SECRET-shaped. The return
+#     code carries the whole answer
+pfv_env_file_supplies() {
+    local file="$1" name="$2" line value="" found=false
+    [ -n "$file" ] && [ -r "$file" ] || return 3
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line#"${line%%[![:space:]]*}"}"          # strip leading whitespace
+        case "$line" in ""|\#*) continue ;; esac
+        line="${line#export }"
+        line="${line#"${line%%[![:space:]]*}"}"
+        case "$line" in "$name="*) ;; *) continue ;; esac
+        value="${line#*=}"
+        found=true
+    done < "$file"
+    [ "$found" = true ] || return 2
+    # `?*` here would require a character BETWEEN the quotes and let `KEY=""` through
+    # as a two-character non-empty value — a quoted-empty entry reading as supply, which
+    # is precisely the false exemption this function exists to prevent. `*` matches the
+    # empty middle; a lone unbalanced quote still cannot match (it has no closing half).
+    case "$value" in
+        \"*\") value="${value#\"}"; value="${value%\"}" ;;
+        \'*\') value="${value#\'}"; value="${value%\'}" ;;
+    esac
+    [ -n "$value" ] || return 1
+    return 0
 }

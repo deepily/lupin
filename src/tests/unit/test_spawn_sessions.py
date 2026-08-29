@@ -10,8 +10,10 @@ import asyncio
 import importlib
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
+from types  import SimpleNamespace
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -37,11 +39,14 @@ from lupin_mcp.session_spawner import (
     _read_manifest,
     _write_manifest,
     _capture_reap_identity,
+    _resolve_project_root,
+    _main_checkout_of,
     _recover_tmux_session,
     _scan_persona_by_tmux_session,
     _build_identity_warning,
     _slug,
     DEFAULT_SPAWN_CAP,
+    DEFAULT_SPAWN_PROJECT,
     PERSONA_STATE_ALLOCATED,
     PERSONA_STATE_NONE,
     PERSONA_STATE_UNKNOWN,
@@ -67,14 +72,15 @@ class _Result:
 
 
 class FakeRunner:
-    """Records (argv, env) calls; returns a configurable returncode."""
-    def __init__( self, returncode=0 ):
+    """Records (argv, env) calls; returns a configurable returncode + stderr."""
+    def __init__( self, returncode=0, stderr="" ):
         self.returncode = returncode
+        self.stderr     = stderr
         self.calls      = []
 
     def __call__( self, argv, env=None ):
         self.calls.append( ( argv, env ) )
-        return _Result( returncode=self.returncode )
+        return _Result( returncode=self.returncode, stderr=self.stderr )
 
 
 # ── render_task_prompt ────────────────────────────────────────────────────────
@@ -132,6 +138,33 @@ class TestPersonaChainCsv:
         assert persona_chain_csv( [ 42 ] )  is None
         assert persona_chain_csv( 42 )      is None
         assert persona_chain_csv( { "x": 1 } ) is None
+
+    # ── JSON-array-string normalization (row e071e834, fix part 2) ────────────
+    # A caller that passed persona_preference as json.dumps(list) sent a STRINGIFIED
+    # list; forwarding it verbatim let the JSON-array string mangle downstream in
+    # parse_persona_chain and kill the `*` wildcard (→ 409 → nameless seat). The
+    # producer now emits clean CSV for that form, so the parser is not the only line.
+    def test_json_array_string_normalized_to_csv( self ):
+        # THE bug shape at the SOURCE: without this it returned the string verbatim.
+        assert persona_chain_csv( '["Rio", "Krishna", "*"]' ) == "Rio,Krishna,*"
+
+    def test_json_array_string_single_element( self ):
+        assert persona_chain_csv( '["Tiberius"]' ) == "Tiberius"
+
+    def test_json_array_string_skips_non_str_and_empty( self ):
+        assert persona_chain_csv( '["Rio", 42, null, "", "*"]' ) == "Rio,*"
+
+    def test_json_array_string_all_invalid_returns_none( self ):
+        assert persona_chain_csv( '[42, null]' ) is None
+
+    def test_malformed_bracket_string_passes_through_verbatim( self ):
+        # Starts with '[' but is NOT valid JSON → the intended verbatim passthrough,
+        # not a crash. (Part 1's parser handles whatever this becomes downstream.)
+        assert persona_chain_csv( "[not-valid-json" ) == "[not-valid-json"
+
+    def test_bare_csv_string_unchanged_after_normalization( self ):
+        # No regression: a non-'[' string is the intended CSV form, verbatim.
+        assert persona_chain_csv( "Rio, Krishna ,*" ) == "Rio, Krishna ,*"
 
 
 # ── build_spawn_argv ──────────────────────────────────────────────────────────
@@ -409,6 +442,47 @@ class TestSpawnSessions:
         assert "msg #4" in last_argv
 
 
+# ── spawn_sessions silent-failure fix (row 9c5dccd4) ──────────────────────────
+
+class TestSpawnFailureReason:
+    """Row 9c5dccd4: a spawn that fails MUST say WHY. The runner captures the
+    child's stderr (tmux 'command too long', a bad script path, …); the row used
+    to read only returncode and drop the stderr, so a manager saw status:'failed'
+    with no cause and lost 20 minutes. A failed row now carries `reason`; a
+    spawned row does not.
+
+    FLIP: delete the `if not ok:` reason block in session_spawner.py and both
+    reason assertions below fail (KeyError) — the test measures the fix, not the
+    row shape."""
+
+    def test_failed_row_surfaces_stderr_as_reason( self, tmp_path ):
+        runner = FakeRunner( returncode=1, stderr="tmux: command too long\n" )
+        res = spawn_sessions( 1, "t", "sid-why", script_path="x",
+                              runner=runner, session_dir=tmp_path )
+        row = res[ "spawned" ][ 0 ]
+        assert row[ "status" ] == "failed"
+        assert row[ "reason" ] == "tmux: command too long"   # stripped, verbatim cause
+
+    def test_failed_row_without_stderr_names_the_exit_code( self, tmp_path ):
+        # A non-zero exit with an empty stderr must STILL say something actionable,
+        # never a bare 'failed'. (Covers the else branch of the reason block.)
+        runner = FakeRunner( returncode=3, stderr="   " )
+        res = spawn_sessions( 1, "t", "sid-rc", script_path="x",
+                              runner=runner, session_dir=tmp_path )
+        row = res[ "spawned" ][ 0 ]
+        assert row[ "status" ] == "failed"
+        assert "code 3" in row[ "reason" ] and "no stderr" in row[ "reason" ]
+
+    def test_spawned_row_has_no_reason( self, tmp_path ):
+        # A success carries no reason — the key exists ONLY to explain a failure.
+        runner = FakeRunner( returncode=0, stderr="ignored on success" )
+        res = spawn_sessions( 1, "t", "sid-ok", script_path="x",
+                              runner=runner, session_dir=tmp_path )
+        row = res[ "spawned" ][ 0 ]
+        assert row[ "status" ] == "spawned"
+        assert "reason" not in row
+
+
 # ── spawn_sessions model-directive (argv threading + roster echo) ─────────────
 
 class TestSpawnSessionsModel:
@@ -421,15 +495,15 @@ class TestSpawnSessionsModel:
     def test_model_threads_into_argv_before_prompt( self, tmp_path ):
         runner = FakeRunner( returncode=0 )
         res = spawn_sessions( 1, "t", "sid-m", script_path="/s.sh", manager_persona="Rio",
-                              model="claude-opus-4-8", runner=runner, session_dir=tmp_path )
+                              model="claude-opus-5", runner=runner, session_dir=tmp_path )
         argv = self._argv_of( runner )
         # --model <id> present, and inserted BEFORE --prompt (the claude_args seam)
         assert "--model" in argv
-        assert argv[ argv.index( "--model" ) + 1 ] == "claude-opus-4-8"
+        assert argv[ argv.index( "--model" ) + 1 ] == "claude-opus-5"
         assert argv.index( "--model" ) < argv.index( "--prompt" )
         # echoed on the roster entry AND the top-level result
-        assert res[ "spawned" ][ 0 ][ "model" ] == "claude-opus-4-8"
-        assert res[ "model" ] == "claude-opus-4-8"
+        assert res[ "spawned" ][ 0 ][ "model" ] == "claude-opus-5"
+        assert res[ "model" ] == "claude-opus-5"
 
     def test_model_none_omits_flag_and_echoes_none( self, tmp_path ):
         runner = FakeRunner( returncode=0 )
@@ -451,15 +525,15 @@ class TestSpawnSessionsModel:
     def test_model_on_every_child_in_a_batch( self, tmp_path ):
         runner = FakeRunner( returncode=0 )
         res = spawn_sessions( 3, "t", "sid-mb", script_path="/s.sh", manager_persona="Rio",
-                              model="claude-opus-4-8", runner=runner, session_dir=tmp_path )
-        assert all( s[ "model" ] == "claude-opus-4-8" for s in res[ "spawned" ] )
+                              model="claude-opus-5", runner=runner, session_dir=tmp_path )
+        assert all( s[ "model" ] == "claude-opus-5" for s in res[ "spawned" ] )
         for i in range( 3 ):
             assert "--model" in self._argv_of( runner, i )
 
     def test_model_coexists_with_dry_run( self, tmp_path ):
         runner = FakeRunner( returncode=0 )
         spawn_sessions( 1, "t", "sid-md", script_path="/s.sh", dry_run=True,
-                        model="claude-opus-4-8", runner=runner, session_dir=tmp_path )
+                        model="claude-opus-5", runner=runner, session_dir=tmp_path )
         argv = self._argv_of( runner )
         # both flags present; --dry-run precedes the session name, --model follows it
         assert "--dry-run" in argv and "--model" in argv
@@ -482,12 +556,12 @@ class TestListSpawnedSessionsModel:
         # two DIFFERENT model ids prove the row echoes the PERSISTED value,
         # not a hardcoded opus default.
         self._seed( tmp_path, [
-            { "session_name": "cc-author-rio",  "requested_role": "author", "model": "claude-opus-4-8" },
+            { "session_name": "cc-author-rio",  "requested_role": "author", "model": "claude-opus-5" },
             { "session_name": "cc-tester-clay", "requested_role": "tester", "model": "claude-sonnet-5"  },
         ] )
         res  = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
         rows = { r[ "session_name" ]: r for r in res[ "sessions" ] }
-        assert rows[ "cc-author-rio"  ][ "model" ] == "claude-opus-4-8"
+        assert rows[ "cc-author-rio"  ][ "model" ] == "claude-opus-5"
         assert rows[ "cc-tester-clay" ][ "model" ] == "claude-sonnet-5"
         # contract: EVERY row carries the key, not just the asserted ones
         assert all( "model" in r for r in res[ "sessions" ] )
@@ -535,10 +609,60 @@ class TestDismissSessions:
         assert res[ "dismissed" ] == [] and res[ "remaining" ] == []
 
     def test_write_memento_and_reason_echoed( self, tmp_path ):
+        # NOTE: this asserts only the ECHO — the false-confidence test María named.
+        # The FILE-level guard (a memento actually proven on disk) is enforced by
+        # test_reap_memento.py + TestDismissMementoCoordination below.
         self._seed( tmp_path, [ "a" ] )
         res = dismiss_sessions( "mgr", reason="cascade complete", write_memento=False,
                                 runner=FakeRunner(), session_dir=tmp_path )
         assert res[ "reason" ] == "cascade complete" and res[ "write_memento" ] is False
+
+
+class TestDismissMementoCoordination:
+    """row 0a36d83d: the reap must RUN the memento coordinator before kill and
+    surface its per-seat verdict — the flag used to be a pure no-op."""
+
+    def _seed( self, tmp_path, names ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ),
+                         [ { "session_name": n, "requested_role": "reviewer" } for n in names ] )
+
+    def test_coord_runs_before_kill_and_outcomes_surface( self, tmp_path ):
+        self._seed( tmp_path, [ "a", "b" ] )
+        runner = FakeRunner( returncode=0 )
+        seen   = {}
+
+        def _coord( identities ):
+            seen[ "identities" ]     = identities
+            seen[ "kills_so_far" ]   = len( runner.calls )     # MUST be 0 — coord precedes kill
+            return { name: { "status": "verified" } for name in identities }
+
+        res = dismiss_sessions( "mgr", runner=runner, session_dir=tmp_path,
+                                memento_coord_fn=_coord )
+        assert seen[ "kills_so_far" ] == 0                     # sequencing: no kill before coordination
+        assert set( seen[ "identities" ] ) == { "a", "b" }     # got the captured identity map
+        assert res[ "memento_outcomes" ][ "a" ][ "status" ] == "verified"
+        assert res[ "memento_outcomes" ][ "b" ][ "status" ] == "verified"
+        assert len( runner.calls ) == 2                        # both still reaped afterward
+
+    def test_coord_raise_is_fail_safe_and_surfaced( self, tmp_path ):
+        self._seed( tmp_path, [ "a" ] )
+        runner = FakeRunner( returncode=0 )
+
+        def _coord( _identities ):
+            raise RuntimeError( "coordinator exploded" )
+
+        res = dismiss_sessions( "mgr", runner=runner, session_dir=tmp_path,
+                                memento_coord_fn=_coord )
+        # reap still completed …
+        assert res[ "dismissed" ][ 0 ][ "status" ] == "killed"
+        # … and the failure is VISIBLE, never a silent success
+        assert "coordinator exploded" in res[ "memento_outcomes" ][ "_error" ]
+        assert "RuntimeError" in res[ "memento_outcomes" ][ "_error" ]
+
+    def test_no_coord_fn_yields_empty_outcomes( self, tmp_path ):
+        self._seed( tmp_path, [ "a" ] )
+        res = dismiss_sessions( "mgr", runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "memento_outcomes" ] == {}
 
 
 # ── _capture_reap_identity + dismiss bridge-unlink edge arcs ──────────────────
@@ -1163,25 +1287,29 @@ class TestResolveManagerIdentity:
 class TestResolveSpawnConfig:
     _NO_MODELS = { "reviewer": None, "author": None, "observer": None, "default": None }
 
+    _MEM_DEFAULTS = { "reap_memento_window_seconds": 1200, "reap_memento_min_bytes": 1000,
+                      "reap_memento_ask_timeout_sec": 45, "reap_memento_poll_interval_sec": 3 }
+
     def test_defaults_when_none( self ):
         cfg = resolve_spawn_config( None )
         assert cfg == { "spawn_cap": 8, "ack_timeout_seconds": 120, "write_memento_default": True,
-                        "spawn_models": self._NO_MODELS }
+                        "spawn_models": self._NO_MODELS, **self._MEM_DEFAULTS }
 
     def test_reads_from_config_mgr( self ):
         mgr = _FakeConfigMgr( {
             "cc session spawn max reviewers"                 : 5,
             "cc session spawn reviewer ack timeout seconds"  : 90,
             "cc session spawn write memento default"         : False,
-            "cc session spawn model reviewer"                : "claude-opus-4-8",
-            "cc session spawn model author"                  : "claude-opus-4-8",
-            "cc session spawn model observer"                : "claude-opus-4-8",
-            "cc session spawn model default"                 : "claude-opus-4-8",
+            "cc session spawn model reviewer"                : "claude-opus-5",
+            "cc session spawn model author"                  : "claude-opus-5",
+            "cc session spawn model observer"                : "claude-opus-5",
+            "cc session spawn model default"                 : "claude-opus-5",
         } )
         cfg = resolve_spawn_config( mgr )
         assert cfg == { "spawn_cap": 5, "ack_timeout_seconds": 90, "write_memento_default": False,
-                        "spawn_models": { "reviewer": "claude-opus-4-8", "author": "claude-opus-4-8",
-                                          "observer": "claude-opus-4-8", "default": "claude-opus-4-8" } }
+                        "spawn_models": { "reviewer": "claude-opus-5", "author": "claude-opus-5",
+                                          "observer": "claude-opus-5", "default": "claude-opus-5" },
+                        **self._MEM_DEFAULTS }
 
     def test_missing_keys_fall_back_to_defaults( self ):
         cfg = resolve_spawn_config( _FakeConfigMgr( {} ) )
@@ -1301,7 +1429,11 @@ class TestDismissSessionsWrapperCoercion:
                              lambda meta, fallback_session_id=None: ( "mgr-sid", "Krishna" ) )
         monkeypatch.setattr( ss, "resolve_spawn_config",
                              lambda mgr: { "spawn_cap": 8, "ack_timeout_seconds": 120,
-                                           "write_memento_default": write_memento_default } )
+                                           "write_memento_default": write_memento_default,
+                                           "reap_memento_window_seconds": 1200,
+                                           "reap_memento_min_bytes": 1000,
+                                           "reap_memento_ask_timeout_sec": 45,
+                                           "reap_memento_poll_interval_sec": 3 } )
         monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
 
     def test_list_arg_arrives_as_list_not_chars( self, cv_mcp, monkeypatch ):
@@ -1352,7 +1484,11 @@ class TestDismissSessionsWrapperCoercion:
                              lambda meta, fallback_session_id=None: ( "mgr-sid", "Krishna" ) )
         monkeypatch.setattr( ss, "resolve_spawn_config",
                              lambda mgr: { "spawn_cap": 8, "ack_timeout_seconds": 120,
-                                           "write_memento_default": True } )
+                                           "write_memento_default": True,
+                                           "reap_memento_window_seconds": 1200,
+                                           "reap_memento_min_bytes": 1000,
+                                           "reap_memento_ask_timeout_sec": 45,
+                                           "reap_memento_poll_interval_sec": 3 } )
         monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
         asyncio.run( cv_mcp.dismiss_sessions.run( {} ) )
         assert captured[ "reconcile_items_fn" ] is ss._default_reconcile_store_items
@@ -1382,6 +1518,25 @@ class TestDismissSessionsWrapperCoercion:
         monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
         asyncio.run( cv_mcp.dismiss_sessions.run( { "respin_personas": [ "cheech", "rio" ] } ) )
         assert captured[ "respin_personas" ] == [ "cheech", "rio" ]   # a real list, not char-iterated
+
+    def test_wrapper_threads_memento_coordinator( self, cv_mcp, monkeypatch ):
+        """row 0a36d83d: the LIVE reap entrypoint MUST wire a memento coordinator —
+        the flag was a pure no-op because nothing was ever passed here. The bound
+        partial carries the INI-resolved knobs and the resolved write_memento."""
+        import functools
+        captured = {}
+        self._patch_wrapper_deps( cv_mcp, monkeypatch, captured )
+        import lupin_mcp.session_spawner as ss
+        def _spy_dismiss( manager_session_id, *, memento_coord_fn=None, **_kw ):
+            captured[ "memento_coord_fn" ] = memento_coord_fn
+            return { "dismissed": [], "remaining": [], "manager_session_id": manager_session_id }
+        monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
+        asyncio.run( cv_mcp.dismiss_sessions.run( { "session_names": [ "x" ] } ) )
+        coord = captured[ "memento_coord_fn" ]
+        assert isinstance( coord, functools.partial )
+        assert coord.func is __import__( "lupin_mcp.reap_memento", fromlist=[ "x" ] ).coordinate_mementos
+        assert coord.keywords[ "window_seconds" ]  == 1200   # from the stubbed cfg
+        assert coord.keywords[ "write_memento" ]   is True   # resolved via the ternary
 
 
 # ── MCP-WRAPPER LAYER: spawn_sessions model-directive (2026-07-02) ────────────
@@ -1430,8 +1585,8 @@ class TestSpawnSessionsWrapperResolution:
         monkeypatch.setattr( ss, "spawn_sessions", _spy_spawn )
         return ss
 
-    _ALL_OPUS = { "reviewer": "claude-opus-4-8", "author": "claude-opus-4-8",
-                  "observer": "claude-opus-4-8", "default": "claude-opus-4-8" }
+    _ALL_OPUS = { "reviewer": "claude-opus-5", "author": "claude-opus-5",
+                  "observer": "claude-opus-5", "default": "claude-opus-5" }
 
     def test_explicit_param_wins_over_ini( self, cv_mcp, monkeypatch ):
         captured = {}
@@ -1442,25 +1597,25 @@ class TestSpawnSessionsWrapperResolution:
     def test_role_key_used_when_no_explicit( self, cv_mcp, monkeypatch ):
         captured = {}
         self._patch( cv_mcp, monkeypatch, captured,
-                     { "reviewer": "claude-opus-4-8", "author": None, "observer": None, "default": None } )
+                     { "reviewer": "claude-opus-5", "author": None, "observer": None, "default": None } )
         cv_mcp.spawn_sessions.fn( 1, "t", role="reviewer" )
-        assert captured[ "model" ] == "claude-opus-4-8"  # from the reviewer role key
+        assert captured[ "model" ] == "claude-opus-5"  # from the reviewer role key
 
     def test_role_specific_beats_default( self, cv_mcp, monkeypatch ):
         captured = {}
         self._patch( cv_mcp, monkeypatch, captured,
-                     { "reviewer": "claude-opus-4-8", "author": None, "observer": None,
+                     { "reviewer": "claude-opus-5", "author": None, "observer": None,
                        "default": "claude-fable-5" } )
         cv_mcp.spawn_sessions.fn( 1, "t", role="reviewer" )
-        assert captured[ "model" ] == "claude-opus-4-8"  # role key beats the default key
+        assert captured[ "model" ] == "claude-opus-5"  # role key beats the default key
 
     def test_falls_to_default_key_for_unkeyed_role( self, cv_mcp, monkeypatch ):
         captured = {}
         self._patch( cv_mcp, monkeypatch, captured,
-                     { "reviewer": None, "author": None, "observer": None, "default": "claude-opus-4-8" } )
+                     { "reviewer": None, "author": None, "observer": None, "default": "claude-opus-5" } )
         # an unknown/new role has no map entry → .get(role) is None → the default key
         cv_mcp.spawn_sessions.fn( 1, "t", role="manager" )
-        assert captured[ "model" ] == "claude-opus-4-8"
+        assert captured[ "model" ] == "claude-opus-5"
 
     def test_all_none_resolves_to_none_no_flag( self, cv_mcp, monkeypatch ):
         captured = {}
@@ -1486,3 +1641,285 @@ class TestSpawnSessionsWrapperResolution:
         monkeypatch.setattr( ss, "spawn_sessions", _raise )
         res = cv_mcp.spawn_sessions.fn( 99, "t" )
         assert res[ "status" ] == "error" and "cap" in res[ "reason" ]
+
+
+# ── shipped-INI worker model pin (row e90129d6) ───────────────────────────────
+
+class TestShippedIniWorkerModelPin:
+    """The four `cc session spawn model` keys that ship in lupin-app.ini decide what
+    model every headless worker boots on. Every other model test in this file feeds
+    its own fixture value, so a silent edit of the shipped file would break nothing —
+    this is the test that reads the real file (Rick's 2026-08-17 call: workers on
+    Opus 5, full id so a release can't upgrade us behind our back)."""
+
+    _EXPECTED_MODEL = "claude-opus-5"
+    _ROLE_KEYS      = [ "cc session spawn model reviewer",
+                        "cc session spawn model author",
+                        "cc session spawn model observer",
+                        "cc session spawn model default" ]
+
+    def _shipped_ini( self ):
+        import configparser
+        ini_path = Path( os.environ.get( "LUPIN_ROOT", os.getcwd() ) ) / "src" / "conf" / "lupin-app.ini"
+        parser   = configparser.ConfigParser( interpolation=None )
+        parser.read( ini_path )
+        return parser
+
+    def test_all_four_worker_keys_pin_opus_5( self ):
+        parser = self._shipped_ini()
+        pinned = { key: parser.get( "Lupin: Baseline", key ) for key in self._ROLE_KEYS }
+        assert pinned == { key: self._EXPECTED_MODEL for key in self._ROLE_KEYS }
+
+    def test_pin_is_a_full_id_not_an_alias( self ):
+        # An alias ("opus") lets a release move the model — and the cost — under us.
+        parser = self._shipped_ini()
+        for key in self._ROLE_KEYS:
+            value = parser.get( "Lupin: Baseline", key )
+            assert value.startswith( "claude-" ), f"{key} = {value} is not a full model id"
+
+    def test_no_manager_key_ships( self ):
+        # Managers boot interactively on Rick's user default — ruling #2, zero code.
+        parser = self._shipped_ini()
+        assert not parser.has_option( "Lupin: Baseline", "cc session spawn model manager" )
+
+
+# ── Cross-repo spawn: the WORK axis moves, the PLATFORM axis does not ─────────
+# ⚠️ THE CROSS-REPO REFUSAL THAT USED TO LIVE HERE IS REPEALED (Rick's ruling
+# 2026-08-19). It was shipped in 222d2560 on the reasoning that a child with cwd
+# in one repo and lupin's venv/PYTHONPATH/hooks was "half-migrated". That reading
+# was wrong: those are two INDEPENDENT axes the old code welded together. Lupin is
+# the PLATFORM a worker communicates through; the target repo is the WORK. A child
+# carrying both is telling the truth about what it is.
+#
+# The tests asserting the refusal are DELETED rather than skipped. A passing test
+# that contradicts a live ruling is worse than no test — the next reader cannot
+# tell which one is current.
+#
+# The platform pin is load-bearing, not tolerated (María's measurement):
+#     planning-is-prompting/.venv → import fastmcp → ModuleNotFoundError
+#     lupin/.venv                 → platform stack present
+# A child on the work repo's venv could not DM, set a topic, or be reaped.
+
+class TestWorkDirIsThreadedToTheChild:
+
+    def test_work_dir_absent_by_default( self ):
+        """Omitting project must leave the child inheriting the caller's cwd."""
+        argv = build_spawn_argv( "/s.sh", "sess", "prompt" )
+        assert "--work-dir" not in argv
+
+    def test_work_dir_is_emitted_when_given( self ):
+        argv = build_spawn_argv( "/s.sh", "sess", "prompt", work_dir="/repos/target" )
+        assert argv[ argv.index( "--work-dir" ) + 1 ] == "/repos/target"
+
+    def test_work_dir_precedes_the_session_name( self ):
+        """
+        The script parses flags before positionals; a --work-dir landing after the
+        session name would be swallowed as a claude arg and silently do nothing.
+        """
+        argv = build_spawn_argv( "/s.sh", "sess", "prompt", work_dir="/repos/target" )
+        assert argv.index( "--work-dir" ) < argv.index( "sess" )
+
+    def test_unresolvable_project_is_refused( self, tmp_path ):
+        """
+        The half of 222d2560 that survives the repeal. A project naming no real
+        root must NOT fall through to the caller's cwd — that silent fallback is
+        the original defect wearing a new hat.
+        """
+        runner = FakeRunner()
+        with patch( "lupin_mcp.session_spawner._resolve_project_root", return_value=None ):
+            with pytest.raises( ValueError ) as caught:
+                spawn_sessions( 1, "t", "mgr", script_path="/s.sh", project="no-such-repo",
+                                runner=runner, session_dir=tmp_path )
+        assert "no repository root resolves" in str( caught.value )
+        assert runner.calls == [], "a refused spawn must not launch anything"
+
+    def test_resolved_project_reaches_the_child_argv( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        with patch( "lupin_mcp.session_spawner._resolve_project_root", return_value="/repos/target" ):
+            spawn_sessions( 1, "t", "mgr", script_path="/s.sh", project="target",
+                            runner=runner, session_dir=tmp_path )
+        argv = runner.calls[ 0 ][ 0 ]
+        assert argv[ argv.index( "--work-dir" ) + 1 ] == "/repos/target"
+
+
+class TestResolveProjectRoot:
+
+    def test_none_project_resolves_to_none( self ):
+        assert _resolve_project_root( None ) is None
+        assert _resolve_project_root( "" )   is None
+
+    def test_sibling_repo_with_git_resolves( self, tmp_path, monkeypatch ):
+        ( tmp_path / "lupin" ).mkdir()
+        ( tmp_path / "other" / ".git" ).mkdir( parents=True )
+        monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path / "lupin" ) )
+        assert _resolve_project_root( "other" ) == str( tmp_path / "other" )
+
+    def test_sibling_without_git_does_not_resolve( self, tmp_path, monkeypatch ):
+        """A plain directory is not a repo; resolving it would give a child no git identity."""
+        ( tmp_path / "lupin" ).mkdir()
+        ( tmp_path / "notarepo" ).mkdir()
+        monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path / "lupin" ) )
+        assert _resolve_project_root( "notarepo" ) is None
+
+    def test_alias_resolves_to_the_same_root( self, tmp_path, monkeypatch ):
+        """detect_project() reports 'plan' for planning-is-prompting; both must land together."""
+        ( tmp_path / "lupin" ).mkdir()
+        ( tmp_path / "planning-is-prompting" / ".git" ).mkdir( parents=True )
+        monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path / "lupin" ) )
+        expected = str( tmp_path / "planning-is-prompting" )
+        assert _resolve_project_root( "plan" )                  == expected
+        assert _resolve_project_root( "planning-is-prompting" ) == expected
+
+
+class TestResolveProjectRootFromAWorktree:
+    """
+    Row 1cf6c918 — a worktree is not a sibling of its peers.
+
+    The resolver derived the projects directory as `parent( LUPIN_ROOT )`, which holds
+    only while LUPIN_ROOT is a top-level checkout. In a git worktree that parent is the
+    worktree's container (`.../.claude/worktrees`), which holds no project, so EVERY name
+    resolved to None — and since `project` defaults to "lupin", a manager working in a
+    worktree could not spawn at all.
+
+    These build REAL git repositories and REAL worktrees rather than faking a path shape,
+    because the whole defect was a path shape that looked plausible and was wrong.
+    """
+
+    @staticmethod
+    def _git( *args, cwd ):
+        subprocess.run( [ "git", *args ], cwd=str( cwd ), check=True,
+                        capture_output=True, text=True )
+
+    @classmethod
+    def _make_repo( cls, path ):
+        """A real git repo with one commit — a worktree cannot be added to an empty one."""
+        path.mkdir( parents=True, exist_ok=True )
+        cls._git( "init", "-q", cwd=path )
+        cls._git( "config", "user.email", "t@example.com", cwd=path )
+        cls._git( "config", "user.name",  "t",             cwd=path )
+        ( path / "seed" ).write_text( "seed\n" )
+        cls._git( "add", "seed", cwd=path )
+        cls._git( "commit", "-qm", "seed", cwd=path )
+        return path
+
+    def test_own_project_from_a_worktree_resolves_to_the_WORKTREE( self, tmp_path, monkeypatch ):
+        """
+        Isolation is the reason a manager is in a worktree; answering with the main
+        checkout would quietly undo it and put the worker back on the shared tree.
+        """
+        repo = self._make_repo( tmp_path / "lupin" )
+        wt   = repo / ".claude" / "worktrees" / "crew"
+        self._git( "worktree", "add", "--detach", "-q", str( wt ), "HEAD", cwd=repo )
+
+        monkeypatch.setenv( "LUPIN_ROOT", str( wt ) )
+        assert _resolve_project_root( "lupin" ) == str( wt.resolve() )
+
+    def test_sibling_project_resolves_from_a_worktree( self, tmp_path, monkeypatch ):
+        """
+        The failing arm before the fix: from a worktree this returned None, because the
+        sibling search ran inside `.claude/worktrees` instead of the projects directory.
+        """
+        repo  = self._make_repo( tmp_path / "lupin" )
+        other = self._make_repo( tmp_path / "other" )
+        wt    = repo / ".claude" / "worktrees" / "crew"
+        self._git( "worktree", "add", "--detach", "-q", str( wt ), "HEAD", cwd=repo )
+
+        monkeypatch.setenv( "LUPIN_ROOT", str( wt ) )
+        assert _resolve_project_root( "other" ) == str( other )
+
+    def test_an_absent_project_STILL_refuses_from_a_worktree( self, tmp_path, monkeypatch ):
+        """
+        The half that must survive the fix. A resolver that answered every name would be
+        a worse defect than the one being closed — the caller refuses precisely so a
+        spawn cannot silently land in the caller's own cwd wearing another repo's name.
+        """
+        repo = self._make_repo( tmp_path / "lupin" )
+        wt   = repo / ".claude" / "worktrees" / "crew"
+        self._git( "worktree", "add", "--detach", "-q", str( wt ), "HEAD", cwd=repo )
+
+        monkeypatch.setenv( "LUPIN_ROOT", str( wt ) )
+        assert _resolve_project_root( "no-such-project" ) is None
+
+    def test_spawn_sessions_is_reachable_from_a_worktree_with_the_DEFAULT_project(
+        self, tmp_path, monkeypatch
+    ):
+        """
+        The capability, asserted end to end. `project` defaults to "lupin", so before the
+        fix this raised and a worktree manager could not spawn a worker at all — which is
+        the difference between 27 red tests and a lost capability.
+        """
+        repo = self._make_repo( tmp_path / "lupin" )
+        wt   = repo / ".claude" / "worktrees" / "crew"
+        self._git( "worktree", "add", "--detach", "-q", str( wt ), "HEAD", cwd=repo )
+
+        monkeypatch.setenv( "LUPIN_ROOT", str( wt ) )
+        result = spawn_sessions(
+            count=1, task_prompt="probe", manager_session_id="mgr",
+            script_path="x", dry_run=True,
+            runner=lambda *a, **k: SimpleNamespace( returncode=0, stdout="", stderr="" ),
+            session_dir=tmp_path / "sessions",
+        )
+        assert result[ "requested" ] == 1
+
+
+class TestMainCheckoutOf:
+    """`_main_checkout_of` — the primitive that replaced the path guess (row 1cf6c918)."""
+
+    def test_a_plain_checkout_is_its_own_main_checkout( self, tmp_path ):
+        repo = TestResolveProjectRootFromAWorktree._make_repo( tmp_path / "repo" )
+        assert _main_checkout_of( repo ) == repo.resolve()
+
+    def test_a_worktree_reports_the_main_checkout( self, tmp_path ):
+        repo = TestResolveProjectRootFromAWorktree._make_repo( tmp_path / "repo" )
+        wt   = tmp_path / "wt"
+        TestResolveProjectRootFromAWorktree._git(
+            "worktree", "add", "--detach", "-q", str( wt ), "HEAD", cwd=repo )
+        assert _main_checkout_of( wt ) == repo.resolve()
+
+    def test_a_non_repo_degrades_to_the_path_it_was_given( self, tmp_path ):
+        """
+        The fallback arm, and it must be exercised: when git cannot answer, the resolver
+        has to behave exactly as it did before the fix rather than raise out of a
+        resolver. A git failure costs the worktree fix and nothing else.
+        """
+        plain = tmp_path / "not-a-repo"
+        plain.mkdir()
+        assert _main_checkout_of( plain ) == plain
+
+    def test_a_missing_git_binary_degrades_instead_of_raising( self, tmp_path ):
+        """OSError from subprocess is the no-git-installed shape."""
+        repo = TestResolveProjectRootFromAWorktree._make_repo( tmp_path / "repo" )
+        with patch( "lupin_mcp.session_spawner.subprocess.run", side_effect=OSError( "no git" ) ):
+            assert _main_checkout_of( repo ) == repo
+
+
+class TestUnresolvableProjectMessageNamesARealEscape:
+    """
+    Row 1cf6c918, third defect. The refusal used to advise "omit `project` to inherit the
+    caller's own repo" — but `project` DEFAULTS to "lupin", so omitting it re-supplies the
+    value that just failed and the reader loops. Only an explicit project=None reaches the
+    inherit path.
+    """
+
+    def test_the_message_does_not_advise_omitting_the_argument( self, tmp_path, monkeypatch ):
+        monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path / "lupin" ) )
+        ( tmp_path / "lupin" ).mkdir()
+        with pytest.raises( ValueError ) as exc:
+            spawn_sessions( count=1, task_prompt="p", manager_session_id="m",
+                            script_path="x", project="no-such-project", dry_run=True )
+        msg = str( exc.value )
+        assert "project=None" in msg, "the message must name the escape that actually works"
+        assert "OMITTING" in msg, "it must say that omitting the argument is NOT that escape"
+        assert DEFAULT_SPAWN_PROJECT in msg, "and it must name the default it would apply"
+
+    def test_project_None_really_is_an_escape( self, tmp_path, monkeypatch ):
+        """The advice has to be true, not merely different from the old advice."""
+        monkeypatch.setenv( "LUPIN_ROOT", str( tmp_path / "lupin" ) )
+        ( tmp_path / "lupin" ).mkdir()
+        result = spawn_sessions(
+            count=1, task_prompt="p", manager_session_id="m", script_path="x",
+            project=None, dry_run=True,
+            runner=lambda *a, **k: SimpleNamespace( returncode=0, stdout="", stderr="" ),
+            session_dir=tmp_path / "sessions",
+        )
+        assert result[ "requested" ] == 1

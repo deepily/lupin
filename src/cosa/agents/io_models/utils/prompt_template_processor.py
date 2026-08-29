@@ -19,6 +19,8 @@ from cosa.agents.io_models.xml_models import (
 )
 from cosa.agents.runtime_argument_expeditor.xml_models import ExpeditorResponse, ArgConfirmationResponse
 from cosa.agents.notification_proxy.xml_models import ScriptMatcherResponse, BatchScriptMatcherResponse, VerificationResponse
+from cosa.agents.dm_compression.xml_models import DmCompressionResponse
+from cosa.agents.dm_tutor.xml_models import DmTutorResponse
 from cosa.agents.dm_quality_judge.xml_models import DmQualityJudgeResponse
 from cosa.agents.dm_quality_judge.xml_models_v2 import DmDirectnessExtraction, DmToneJudgement
 from cosa.crud_for_dataframes.xml_models import CRUDIntent
@@ -60,6 +62,8 @@ class PromptTemplateProcessor:
         'notification proxy batch script matcher'  : BatchScriptMatcherResponse,
         'notification proxy answer verifier'       : VerificationResponse,
         # DM Quality Judge (Phase 2 DM Verbosity Reduction)
+        'dm compression rewrite'                   : DmCompressionResponse,
+        'dm tutor rewrite'                         : DmTutorResponse,
         'dm quality judge'                         : DmQualityJudgeResponse,
         # DM Quality Judge v2 — one routing command per dimension, because v2 splits
         # the single v1 call into two so jargon has no path to the directness answer.

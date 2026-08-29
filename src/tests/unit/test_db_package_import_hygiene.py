@@ -164,7 +164,7 @@ def test_importing_db_packages_imports_no_sqlalchemy():
     assert out.stdout.strip() == "0", f"package import pulled sqlalchemy: {out.stdout!r}"
 
 
-def test_eager_cov_module_form_collects_clean():
+def test_eager_cov_module_form_collects_clean( tmp_path ):
     """
     The end-to-end regression: the exact invocation that reproduced bug 1b8ec2b9 —
     `--cov=<dotted.module>` — must now COLLECT without the SQLAlchemy
@@ -173,6 +173,25 @@ def test_eager_cov_module_form_collects_clean():
     collection); GREEN after.
     """
     root, env = _clean_env()
+
+    # ⚠️ THE CHILD NEEDS ITS OWN COVERAGE_FILE, FOR TWO REASONS THAT ARRIVED SEPARATELY.
+    # (1) It was RED at HEAD (row 109b8c4c, measured 2026-08-26 across the full unit tier).
+    #     This child asks for --cov, and the shared-.coverage guard (row aa41fa66) refuses
+    #     any --cov run with COVERAGE_FILE unset — which is the normal case, because the
+    #     tier is usually run WITHOUT coverage. The child exited 4 and this test asserted 0.
+    # (2) When the tier IS run under coverage, the child would inherit the PARENT's data
+    #     file and write its own measurements into the repo's number (row e2099400 §3a —
+    #     that is precisely how ~610 statements of CPython's json module got into the
+    #     denominator from a different test in this suite).
+    # A private file under tmp_path settles both: the guard is satisfied, and nothing the
+    # child measures can reach the tier's figure.
+    env[ "COVERAGE_FILE" ] = str( tmp_path / ".coverage-child" )
+    # Same reasoning as the data file, one guard over (row e2099400 decision 4): this child
+    # asks for --cov, and the contended-coverage guard refuses such a run while any other
+    # suite is on the box. This child's number is never cited — it is a COLLECTION probe —
+    # so the guard would only make an honest test red for a reason that is not about it.
+    env[ "LUPIN_ALLOW_CONTENDED_COVERAGE" ] = "1"
+
     out = _run_child(
         [ sys.executable, "-m", "pytest",
           "src/tests/unit/test_task_repository.py",

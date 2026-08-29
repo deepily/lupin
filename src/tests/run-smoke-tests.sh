@@ -26,9 +26,13 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="$PROJECT_ROOT/src:${PYTHONPATH}"
 export LUPIN_ROOT="$PROJECT_ROOT"
 
-# Use venv pytest on host, fall back to system pytest in Docker container
-VENV_PYTEST="$PROJECT_ROOT/.venv/bin/pytest"
-if [ -x "$VENV_PYTEST" ] && "$VENV_PYTEST" --version > /dev/null 2>&1; then PYTEST="$VENV_PYTEST"; else PYTEST="python3 -m pytest"; fi
+# Require an EXPLICIT venv pytest — never silently fall back to a bare `python3 -m pytest`.
+# A bare python3 resolves to whatever is on PATH; an under-provisioned interpreter aborts
+# collection of part of the suite and the runner reports the REDUCED count as the whole
+# suite — a false green on a merge gate (row c98bce3f). The resolution is shared rather
+# than inline BECAUSE it was inline once and never reached this script (row fc74c1d4).
+source "$PROJECT_ROOT/src/scripts/lib/resolve-venv-pytest.sh"
+resolve_venv_pytest || exit $?
 
 # test_proxy_integration.py is a DESTRUCTIVE :8000-venue suite (mutates DB state,
 # ~180s/scenario) that only lives in this folder — the folder is not a venue
@@ -36,4 +40,9 @@ if [ -x "$VENV_PYTEST" ] && "$VENV_PYTEST" --version > /dev/null 2>&1; then PYTE
 # (python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy),
 # never as part of the pytest-discoverable smoke leg. Observed riding along on
 # ts-b51e63c9 (2026-06-12), blowing the smoke leg to 3806.9s.
-exec $PYTEST src/tests/smoke/ --ignore=src/tests/smoke/test_proxy_integration.py "$@"
+# A collection error is the suite NEVER RUNNING, and its conftest shape fires no pytest
+# hook at all — so the exit code, read out here, is the only thing that can report it
+# (row 73c6819d). The wrapper re-raises pytest's status verbatim.
+source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
+run_pytest_with_diagnosis $PYTEST src/tests/smoke/ --ignore=src/tests/smoke/test_proxy_integration.py "$@"
+exit $?

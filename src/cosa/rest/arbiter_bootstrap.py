@@ -66,7 +66,7 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
     """
     from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, _default_operator_gates_fn
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
-    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold_via_bridge
 
     poll_seconds      = int( config_mgr.get( "arbiter poll seconds", default=60, return_type="int" ) )
     manager_on_duty   = config_mgr.get( "arbiter manager on duty", default="manager-on-duty" ) or "manager-on-duty"
@@ -137,7 +137,7 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
         tap_min_interval_seconds   = tap_min_interval,
         manager_ack_window_seconds = ack_window,
         fleet_stall_window_seconds = stall_window,
-        hold_reader_fn             = read_hold,               # 6929f4ac: real per-session hold reader (outward-twin backstop)
+        hold_reader_fn             = read_hold_via_bridge,    # 6929f4ac + row 011f1f90: resilient per-session reader (repo-root holds visible). log_fn omitted — this in-process path is the gated-OFF rollback with no journal wiring; the live :8001 factory supplies log_fn for the cwd fallback.
         user_gate_resurface_seconds = gate_resurface,         # 6929f4ac: aged-gate resurface ceiling
         operator_gates_fn          = _default_operator_gates_fn,   # A2/A3: real fleet-wide operator-gate store reader
         operator_digest_cadence_seconds = operator_digest_cadence, # A2/A3: normal-urgency digest cadence
@@ -160,19 +160,26 @@ def submit_arbiter_if_absent(
     *,
     job_builder : Callable = build_arbiter_job,
     log         : Callable = print,
+    ask_flow    = None,
 ) -> Optional[ Any ]:
     """
     Standing-cadence startup submission (B1) — guarded + degrade-safe.
 
     Requires:
-        - todo_queue / run_queue are the CJ Flow queues (expose queue_list + push)
+        - todo_queue / run_queue are the CJ Flow queues — READ here, for the
+          single-instance guard; the submission itself goes through ask_flow
         - config_mgr is the ConfigurationManager
         - job_builder( config_mgr ) -> a job (injected for unit testing)
+        - ask_flow is the v2 AskFlow (step 12). Injected like job_builder and log,
+          for the same reason: this function's whole test suite runs on fakes.
+          Defaults to None, and a None here is caught by the degrade-safe guard
+          below — the arbiter is an additive observer, so a missing flow logs and
+          returns rather than taking startup down.
 
     Ensures:
         - if a heartbeat_arbiter job is already present (todo or run) → no-op,
           returns None (single-instance guard, D-C)
-        - else builds the arbiter job and pushes it to the todo queue, returns it
+        - else builds the arbiter job and submits it through the flow, returns it
         - NEVER raises: any failure is swallowed + logged so server startup and
           every local hook poke continue unaffected (additive-observer redline)
     """
@@ -181,7 +188,21 @@ def submit_arbiter_if_absent(
             log( "[ARBITER] standing instance already present — skip submit" )
             return None
         job = job_builder( config_mgr )
-        todo_queue.push( job )
+        if ask_flow is None:
+            raise RuntimeError(
+                "no ask_flow — the standing arbiter cannot reach the queue. It is built "
+                "in lupin_app.main's lifespan and passed to submit_arbiter_if_enabled()."
+            )
+        # A PREBUILT JOB goes through `submit` (step 12): build_arbiter_job already
+        # decided what this is, so there is nothing for the router to work out.
+        ask_flow.submit(
+            job          = job,
+            user_id      = "system",
+            user_email   = "system@lupin.deepily.ai",
+            session_id   = "heartbeat-arbiter",
+            websocket_id = "heartbeat-arbiter",
+            speak        = False,
+        )
         log( "[ARBITER] standing arbiter submitted to CJ Flow (B1 standing cadence)" )
         return job
     except Exception as e:
@@ -198,6 +219,7 @@ def submit_arbiter_if_enabled(
     *,
     submit_fn : Callable = submit_arbiter_if_absent,
     log       : Callable = print,
+    ask_flow  = None,
 ) -> Optional[ Any ]:
     """
     R0 gate (deploy-arch R0 / `2026.06.07-arbiter-r0-inprocess-decommission-spec.md`):
@@ -235,7 +257,7 @@ def submit_arbiter_if_enabled(
     if not enabled:
         log( "[ARBITER] in-process bootstrap DISABLED by config — standalone :8001 owns the loop" )
         return None
-    return submit_fn( todo_queue, run_queue, config_mgr, log=log )
+    return submit_fn( todo_queue, run_queue, config_mgr, log=log, ask_flow=ask_flow )
 
 
 def quick_smoke_test():
@@ -245,27 +267,35 @@ def quick_smoke_test():
     class _Q:
         def __init__( self, jobs=None ):
             self.queue_list = list( jobs or [ ] )
-        def push( self, job ):
-            self.queue_list.append( job )
+    class _Flow:
+        """Step 12: the arbiter submits through the flow; the queue is only READ now,
+        for the single-instance guard."""
+        def __init__( self ):
+            self.submitted = [ ]
+        def submit( self, job=None, **kwargs ):
+            self.submitted.append( job )
+            return { "status": "waiting", "job_id": "smoke" }
 
     # absent → submits
-    todo, run = _Q(), _Q()
+    todo, run, flow = _Q(), _Q(), _Flow()
     logs = [ ]
     job = submit_arbiter_if_absent( todo, run, object(),
-                                    job_builder=lambda cfg: _Job(), log=logs.append )
-    assert job is not None and len( todo.queue_list ) == 1
+                                    job_builder=lambda cfg: _Job(), log=logs.append, ask_flow=flow )
+    assert job is not None and len( flow.submitted ) == 1
 
-    # present → no-op (guard)
+    # present → no-op (guard). The queue is what the guard reads, so seed it.
+    todo.queue_list.append( _Job() )
     job2 = submit_arbiter_if_absent( todo, run, object(),
-                                     job_builder=lambda cfg: _Job(), log=logs.append )
-    assert job2 is None and len( todo.queue_list ) == 1
+                                     job_builder=lambda cfg: _Job(), log=logs.append, ask_flow=flow )
+    assert job2 is None and len( flow.submitted ) == 1
 
     # builder raises → swallowed (degrade-safe)
     def _boom( cfg ):
         raise RuntimeError( "no config" )
-    fresh = _Q()
-    assert submit_arbiter_if_absent( fresh, _Q(), object(), job_builder=_boom, log=logs.append ) is None
-    assert len( fresh.queue_list ) == 0
+    fresh = _Flow()
+    assert submit_arbiter_if_absent( _Q(), _Q(), object(), job_builder=_boom, log=logs.append,
+                                     ask_flow=fresh ) is None
+    assert len( fresh.submitted ) == 0
     return True
 
 

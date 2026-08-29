@@ -50,7 +50,7 @@ if not SECRET_KEY:
     else:
         print( "[JWT] ⚠️  WARNING: Using default development secret key" )
         print( "[JWT] ⚠️  Set JWT_SECRET_KEY environment variable for production" )
-        SECRET_KEY = "dev-secret-key-DO-NOT-USE-IN-PRODUCTION-8x7mp3"
+        SECRET_KEY = "<REDACTED — row adce3547; JWT_SECRET_KEY is REQUIRED, there is no literal fallback>"
 
 ALGORITHM                     = config_mgr.get( "jwt algorithm", "HS256" )
 ACCESS_TOKEN_EXPIRE_MINUTES   = config_mgr.get( "jwt access token expire minutes", 30 )

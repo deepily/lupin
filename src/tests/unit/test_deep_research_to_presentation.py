@@ -350,16 +350,16 @@ class TestRegistryEntry:
     """Tests for agent registry entry."""
 
     def test_registry_entry_exists( self ):
-        """Entry exists in AGENTIC_AGENTS."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        """Entry exists in JOB_ARG_CONTRACTS."""
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        assert "agent router go to research to presentation" in AGENTIC_AGENTS
+        assert "agent router go to research to presentation" in JOB_ARG_CONTRACTS
 
     def test_registry_required_keys( self ):
         """Entry has all required keys."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        entry = AGENTIC_AGENTS[ "agent router go to research to presentation" ]
+        entry = JOB_ARG_CONTRACTS[ "agent router go to research to presentation" ]
         assert entry[ "job_prefix" ]         == "rx"
         assert entry[ "display_name" ]       == "Research to Presentation"
         assert entry[ "required_user_args" ] == [ "query" ]
@@ -369,9 +369,9 @@ class TestRegistryEntry:
 
     def test_registry_arg_mapping( self ):
         """Arg mapping covers expected aliases."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        mapping = AGENTIC_AGENTS[ "agent router go to research to presentation" ][ "arg_mapping" ]
+        mapping = JOB_ARG_CONTRACTS[ "agent router go to research to presentation" ][ "arg_mapping" ]
         assert mapping[ "topic" ]    == "query"
         assert mapping[ "query" ]    == "query"
         assert mapping[ "question" ] == "query"
@@ -379,17 +379,16 @@ class TestRegistryEntry:
         assert mapping[ "duration" ] == "target_duration_minutes"
         assert mapping[ "theme" ]    == "theme"
 
-    def test_registry_agent_count( self ):
-        """Total agent count is 10 after TFE Resume agent was added."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
-
-        assert len( AGENTIC_AGENTS ) == 10
+    # test_registry_agent_count DELETED 2026-08-15 (María): a bare len()==N count reads
+    # its own source and can only catch stale-count churn, never a real defect. The
+    # content invariant is guarded by the drift guard's set-equality checks
+    # (test_v2_registry_drift_guard: registry vs prompt/training/factory/card).
 
     def test_registry_no_special_handlers( self ):
         """Chained job has no special_handlers (query-driven, not file-driven)."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        entry = AGENTIC_AGENTS[ "agent router go to research to presentation" ]
+        entry = JOB_ARG_CONTRACTS[ "agent router go to research to presentation" ]
         # No special_handlers key, or empty if present
         handlers = entry.get( "special_handlers", {} )
         assert handlers == {}

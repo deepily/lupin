@@ -49,11 +49,14 @@ def _pressure( window=1_000_000, occupancy=205_000, output=400, pending=1_000, s
 
 
 def _worker( persona="Tiberius", session_id="7b76ad86", liveness=Liveness.ACTIVE,
-             pressure=None, last_turn_age=41.0, recommendation="" ):
+             pressure=None, last_turn_age=41.0, recommendation="", tmux="__auto__" ):
+    tmux_session = f"cc-{persona.lower()}" if tmux == "__auto__" and persona else tmux
+    if tmux_session == "__auto__":
+        tmux_session = None                       # persona=None with no explicit tmux
     return WorkerContextPressure(
         session_id    = session_id,
         persona       = persona,
-        tmux_session  = f"cc-{persona.lower()}",
+        tmux_session  = tmux_session,
         liveness      = liveness,
         pressure      = pressure,
         last_turn_age = last_turn_age,
@@ -232,11 +235,13 @@ def test_section_keys_by_persona_with_summary_counts():
     assert section[ "policy" ]       == { "1000000": 0.50, "200000": 0.75, "default": 0.50 }
     assert set( section[ "personas" ].keys() ) == { "Tiberius", "Rachel", "maria", "Krishna" }
     assert section[ "personas" ][ "Tiberius" ][ "session_id" ] == "7b76ad86"
+    assert section[ "unnamed_seats" ] == [ ]      # all four are named
     assert section[ "summary" ] == {
-        "personas"        : 4,
-        "within_budget"   : 1,
-        "over_budget"     : 1,
-        "idle_or_unknown" : 2,    # the IDLE worker + the no-turn-yet unknown
+        "personas"           : 4,
+        "unnamed_live_seats" : 0,
+        "within_budget"      : 1,
+        "over_budget"        : 1,
+        "idle_or_unknown"    : 2,    # the IDLE worker + the no-turn-yet unknown
     }
 
 
@@ -244,8 +249,55 @@ def test_section_empty_fleet():
     section = build_context_pressure_section( [ ], budget_fractions=FRACTIONS,
                                               generated_at=T0.isoformat() )
     assert section[ "personas" ] == { }
-    assert section[ "summary" ]  == { "personas": 0, "within_budget": 0,
-                                      "over_budget": 0, "idle_or_unknown": 0 }
+    assert section[ "unnamed_seats" ] == [ ]
+    assert section[ "summary" ]  == { "personas": 0, "unnamed_live_seats": 0,
+                                      "within_budget": 0, "over_budget": 0, "idle_or_unknown": 0 }
+
+
+# ── row 9c720767: a live seat with NO persona must be REPORTED, not omitted ───
+# The payload is keyed by persona, so a nameless seat has no key and — before
+# this fix — collapses under a single null key or vanishes entirely: silence and
+# absence look identical. A nameless seat is exactly the seat nobody is watching.
+# It must appear EXPLICITLY, with persona null and its age, so it is visible AS a
+# problem rather than missing from the list.
+def test_nameless_live_seat_is_reported_explicitly_not_swallowed():
+    """A persona=None worker must surface in `unnamed_seats` with persona null +
+    its age, and be counted in the summary — never buried under a null key in
+    the persona-keyed map (where a second nameless seat would overwrite it)."""
+    workers = [
+        _worker( persona="Tiberius", session_id="7b76ad86", pressure=_pressure() ),
+        _worker( persona=None, session_id="a1b2c3d4", tmux=None,
+                 liveness=Liveness.ACTIVE, pressure=None, last_turn_age=2400.0 ),
+        _worker( persona=None, session_id="e5f6a7b8", tmux=None,
+                 liveness=Liveness.ACTIVE, pressure=None, last_turn_age=45.0 ),
+    ]
+    section = build_context_pressure_section( workers, budget_fractions=FRACTIONS,
+                                              generated_at=T0.isoformat() )
+    # named seats keep the persona-keyed map to themselves — no null key
+    assert set( section[ "personas" ].keys() ) == { "Tiberius" }
+    assert None not in section[ "personas" ]
+    # BOTH nameless seats survive as explicit rows (a keyed map would keep only one)
+    unnamed = section[ "unnamed_seats" ]
+    assert len( unnamed ) == 2
+    by_sid = { r[ "session_id" ]: r for r in unnamed }
+    assert by_sid[ "a1b2c3d4" ][ "persona" ]         is None       # persona null, stated
+    assert by_sid[ "a1b2c3d4" ][ "last_turn_age_s" ] == 2400.0     # its age — 40 min nameless
+    assert by_sid[ "e5f6a7b8" ][ "last_turn_age_s" ] == 45.0
+    assert section[ "summary" ][ "unnamed_live_seats" ] == 2
+    assert section[ "summary" ][ "personas" ]           == 1
+
+
+def test_nameless_over_budget_seat_still_counts_in_status_summary():
+    """A nameless seat that is over budget must count in the over_budget bucket —
+    the whole point is that its pressure is not lost just because it has no name."""
+    hot = _worker( persona=None, session_id="hot0seat", tmux=None,
+                   pressure=_pressure( window=200_000, occupancy=180_000, output=0,
+                                       pending=0, state=PressureState.CRITICAL ) )
+    section = build_context_pressure_section( [ hot ], budget_fractions=FRACTIONS,
+                                              generated_at=T0.isoformat() )
+    assert section[ "summary" ][ "over_budget" ]        == 1
+    assert section[ "summary" ][ "unnamed_live_seats" ] == 1
+    assert section[ "unnamed_seats" ][ 0 ][ "status" ]  == "over_budget"
 
 
 def test_section_is_json_serialisable():

@@ -306,6 +306,14 @@ def roots( tmp_path, monkeypatch ):
     monkeypatch.setattr( cu, "get_project_root", lambda: str( chain.hold_dir ) )
     # external voice-bridge persona (metadata, not decision logic)
     monkeypatch.setattr( stop, "get_voice_persona", lambda _sid: { "name": "Mr. Radio 🦉" } )
+    # HERMETICITY: the per-USER chase-until is read from the LIVE task store — an
+    # externality this fixture otherwise isolates (it pins file roots + settings). Left
+    # live, fleet rows blocked on the user with a future next_chase_ts defer EVERY test
+    # gate (per-user chase deferral) → due_gates empty → an open, overdue gate reads
+    # not-owed, so h1/h7 pass or fail on wall-clock store state rather than on the gate
+    # under test. Pin it to None (no active per-user chase); tests that need deferral set
+    # the per-GATE next_chase_ts explicitly (h5 future = deferred, h7 past = resumes).
+    monkeypatch.setattr( stop, "_user_chase_until_from_store", lambda *a, **k: None )
     return chain
 
 

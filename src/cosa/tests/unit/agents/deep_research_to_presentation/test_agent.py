@@ -515,6 +515,16 @@ class TestRunPresentationGenerator:
         assert "[PG] Theme: dark"        in out
         assert "[PG] Presentation ID: pp-xyz" in out
 
+    def test_slide_count_override_applied_to_config( self ):
+        # bug 880d2801: target_slide_count must plumb through the dr2p override
+        # path onto the inner PresentationConfig, mirroring target_duration_minutes.
+        # The direct-path tests do NOT cover this dr2p config-override site.
+        graph = _PGGraph()
+        agent = self._agent( target_slide_count=8 )
+        with graph.patcher(), patch( "os.path.exists", return_value=True ):
+            _run( agent._run_presentation_generator( "/io/dr/report.md" ) )
+        assert graph.config_obj.target_slide_count == 8
+
     def test_no_overrides_debug_skips_optional_lines( self, capsys ):
         # debug=True but no duration/theme exercises the 417->422 and 419->422
         # skip arcs AND the override-false arcs (427/429/431 all False).

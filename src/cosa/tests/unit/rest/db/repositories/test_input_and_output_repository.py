@@ -91,3 +91,50 @@ def test_get_all_qnr_filters_router_prefix( db_session ):
     db_session.flush()
     rows = repo.get_all_qnr( max_rows=10 )
     assert len( rows ) == 1 and rows[ 0 ].input == "a"
+
+
+def test_get_all_qnr_returns_the_most_recent_rows_newest_first( db_session ):
+    """
+    CONTROL for row a203d91d: the router-memory read must be deterministic and recent.
+
+    Until a203d91d this was `.limit( max_rows )` with NO `order_by`. Postgres may
+    return any rows it likes for an unordered LIMIT, so the receptionist's memory was
+    an arbitrary sample of the table rather than the recent conversation, and two
+    identical calls could disagree with no data change.
+
+    Ensures:
+        - with more rows than max_rows, the NEWEST max_rows are returned
+        - they arrive newest-first, so callers can rely on the order
+        - the oldest rows are excluded rather than an arbitrary subset
+
+    Reverting the `order_by` turns this red: an unordered LIMIT on Postgres returns
+    the earliest-inserted rows here, so the newest ids are the ones that go missing.
+    """
+    repo = InputAndOutputRepository( db_session )
+    for n in range( 8 ):
+        repo.insert_io_row( input=f"q{n}", input_type="agent router go to math", input_embedding=_vec( 1.0 ) )
+    db_session.flush()
+
+    rows = repo.get_all_qnr( max_rows=3 )
+
+    assert [ r.input for r in rows ] == [ "q7", "q6", "q5" ]
+
+
+def test_get_all_qnr_is_stable_across_identical_calls( db_session ):
+    """
+    Two identical reads return the same rows in the same order.
+
+    Ensures:
+        - repeating the call yields an identical id sequence, which an unordered
+          LIMIT does not guarantee
+    """
+    repo = InputAndOutputRepository( db_session )
+    for n in range( 6 ):
+        repo.insert_io_row( input=f"q{n}", input_type="agent router go to math", input_embedding=_vec( 1.0 ) )
+    db_session.flush()
+
+    first  = [ r.id for r in repo.get_all_qnr( max_rows=4 ) ]
+    second = [ r.id for r in repo.get_all_qnr( max_rows=4 ) ]
+
+    assert first == second
+    assert first == sorted( first, reverse=True )

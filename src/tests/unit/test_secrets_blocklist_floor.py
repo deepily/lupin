@@ -166,9 +166,20 @@ def test_floor_function_returns_false_for_whitespace_segments():
 
 
 def test_floor_pattern_count():
-    """Pin the pattern count so silent regressions surface."""
-    # If you intentionally extend the list, update this number.
-    assert len( SECRETS_BLOCKLIST_PATTERNS ) == 46, (
+    """
+    Pin the pattern count so silent regressions surface.
+
+    If you intentionally extend the list, update this number.
+
+    🔴 THIS PIN WAS ALREADY RED ON THIS BRANCH. It read 46 while the list held 50 —
+    four patterns went in without the pin moving, and this file is not selected by the
+    `-k docview` filter the credential work was being verified with, so nobody saw it.
+    A pin that is red for a legitimate reason teaches the next reader to update the
+    number without reading the diff, which is the one thing a pin exists to prevent.
+    46 -> 54: 50 already on the branch, plus adminsdk / authorized_user / adc.json /
+    provider-prefixed `*key*.json`.
+    """
+    assert len( SECRETS_BLOCKLIST_PATTERNS ) == 54, (
         f"Floor pattern count drifted to {len(SECRETS_BLOCKLIST_PATTERNS)}; "
         "update test if intentional"
     )

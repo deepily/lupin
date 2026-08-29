@@ -24,6 +24,7 @@ log_line shape = "<scope>/<rel-path>:<lineno>" with exists check.
 
 import os
 import re
+import subprocess
 import uuid
 from typing import Optional
 
@@ -103,6 +104,13 @@ LEGAL_TRANSITIONS = {
 
 # Receipt key whitelist + shape rules (design §4.1 AC1)
 RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line" )
+
+# The subset a THIRD PARTY can independently check without taking the closer's word
+# (row 9bfb4b73). A ->done receipt must carry at least one of these. The others are
+# not junk — they are context — but `doc_path` and `log_line` only prove a file
+# exists, which is true whether or not the work landed, and `qid` names a question
+# rather than an outcome. None of the three can carry a close on its own.
+CHECKABLE_RECEIPT_KEYS = ( "commit", "test_run" )
 
 
 # ---------------------------------------------------------------------------
@@ -274,11 +282,90 @@ def _validate_scoped_path( value: str, scope_roots: Optional[dict] ) -> list:
     return [ ]
 
 
+def _validate_commit_reachable( sha: str, scope_roots: Optional[dict] ) -> list:
+    """
+    Check that a receipt commit is REACHABLE FROM SOME BRANCH (row 9bfb4b73).
+
+    Requires:
+        - sha has already passed COMMIT_PATTERN (7-40 lowercase hex)
+        - scope_roots is a { scope: abs_root } dict, or None for the default map
+
+    Ensures:
+        - returns [] when `git branch --all --contains <sha>` names at least one
+          branch in at least one registered scope that is a git work tree
+        - returns one error when every usable repo was searched and none has the
+          sha on a branch — this is the orphaned-object case: a sha left by a
+          reset or rebase resolves TODAY and vanishes at the next gc, so a
+          receipt pointing at one decays into a receipt pointing at nothing
+        - returns one error, naming the reason, when NO registered scope is a
+          usable git work tree — the store cannot check, so it REFUSES rather
+          than accepting quietly. An unverifiable receipt silently accepted is
+          the hole this rule exists to close, with extra steps
+        - never raises: a missing git binary, a timeout, or an unreadable repo
+          all resolve to the cannot-verify refusal, never to an exception and
+          never to a pass
+
+    Searches EVERY registered scope rather than the item's own project because a
+    receipt is checked here without the row in hand; a sha found on a branch of
+    any repo the store serves is a sha a human can go read.
+    """
+    roots     = scope_roots if scope_roots is not None else _get_default_scope_roots()
+    searched  = [ ]
+    unsearched = [ ]
+
+    for scope, root in sorted( roots.items() ):
+        if not root or not os.path.isdir( os.path.join( root, ".git" ) ):
+            unsearched.append( scope )
+            continue
+        try:
+            proc = subprocess.run(
+                [ "git", "-C", root, "branch", "--all", "--contains", sha ],
+                capture_output = True,
+                text           = True,
+                timeout        = 15,
+            )
+        except ( OSError, subprocess.SubprocessError ):
+            unsearched.append( scope )
+            continue
+
+        searched.append( scope )
+        # A non-zero exit means the object is unknown to THIS repo — not fatal,
+        # another scope may still have it. Empty stdout on a zero exit means the
+        # object exists but sits on no branch: the orphan case.
+        if proc.returncode == 0 and proc.stdout.strip():
+            return [ ]
+
+    if not searched:
+        return [
+            f"receipt commit '{sha}' could NOT be verified — no registered scope is a usable "
+            f"git work tree (checked: {sorted( roots ) or 'none'}). The store refuses a receipt "
+            f"it cannot check rather than accepting it quietly (row 9bfb4b73)."
+        ]
+
+    # WORDING IS LOAD-BEARING (María, 2026-08-15). This refusal must NOT lead with
+    # "fabricated". A commit that is perfectly real and on a branch reads exactly
+    # like this one when its repo is simply not mounted on the server — and being
+    # told your own sha looks fabricated sends an honest person hunting a bug that
+    # does not exist. The one cause they will never guess is the unmounted repo, so
+    # the message names the repos actually searched and the ones that were not. The
+    # refusal is right either way; the accusation is not.
+    not_searched = f" NOT searched (no git tree on this server): {unsearched}." if unsearched else ""
+    return [
+        f"receipt commit '{sha}' could not be found on any branch of the repos this server "
+        f"can search: {searched}.{not_searched} If your repo is in that not-searched list, the "
+        f"sha is probably fine and simply unreachable from here — cite a ts- test_run instead, "
+        f"or a commit from a searched repo, and put this sha in the reason. If your repo IS "
+        f"searched, the object is not on any branch: an orphan from a reset or rebase resolves "
+        f"today and is gone at the next gc. ANY branch counts, not just main (row 9bfb4b73)."
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Receipt validation (design §4.1 AC1 — "not theater-able")
 # ---------------------------------------------------------------------------
 
-def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None ) -> list:
+def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
+                           require_checkable: bool = False ) -> list:
     """
     Validate a receipt_refs object against the key whitelist + per-key shapes.
 
@@ -287,6 +374,9 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None ) ->
           non-dict and empty-dict are rejected with errors, not exceptions)
         - scope_roots: optional { scope: abs_root } override for path checks
           (tests inject tmpdirs; server uses the registry default)
+        - require_checkable: True on a ->done transition (row 9bfb4b73). It adds
+          the two CLOSING rules below; every other caller keeps the prior
+          shape-only behaviour exactly.
 
     Ensures:
         - returns [] iff receipt_refs is a non-empty dict whose every key is
@@ -298,6 +388,38 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None ) ->
             log_line - "<scope>/<rel>:<lineno>" with the file existing
         - a non-empty-but-junk receipt ({doc_path: "trust me"}) returns errors
         - never raises on malformed input — errors are data, not exceptions
+
+    WHAT require_checkable ADDS, AND WHY (row 9bfb4b73)
+
+    A row was closed citing `receipt_refs` that named the closer's own EDITED
+    FILE, while the same close's reason said "Uncommitted" — and the store took
+    it. Two separate gaps let that through, and both are closed here:
+
+    1. `doc_path` / `log_line` ARE UNVERIFIABLE BY CONSTRUCTION. The check is
+       "the file exists", and a file exists whether or not any work landed — you
+       can satisfy it by touching a file. So a path may still ACCOMPANY a close,
+       but it may no longer BE the close. A ->done receipt must carry at least
+       one thing a third party can independently check: a `commit` or a
+       `test_run`.
+
+    2. A `commit` WAS CHECKED BY SHAPE ONLY — 7-40 hex characters. "deadbeef"
+       passes that. So does a real sha that has since been orphaned by a reset
+       or rebase, which resolves today and is gone at the next gc. The commit is
+       now required to be REACHABLE FROM SOME BRANCH.
+
+    Deliberately NOT done: classifying a row as "code-bearing" to decide whether
+    it needs a commit. That is a category test standing in for the property —
+    the same mistake as the `--no-merges` filter and the withdrawn squash-shape
+    detector. Every closing row must cite something checkable, full stop.
+
+    ANY branch, never `main`: every commit landed on this branch tonight sits on
+    a wip branch, and requiring main would refuse every legitimate pre-merge
+    close and push people straight back to citing file paths — reintroducing gap
+    1 while looking stricter.
+
+    And when the store CANNOT check — no repo mounted, no scope root that is a
+    git work tree — it REFUSES and says so. An unverifiable receipt accepted
+    quietly is the same hole with extra steps.
     """
     if not isinstance( receipt_refs, dict ) or not receipt_refs:
         return [ f"receipt_refs must be a non-empty object with at least one whitelisted key {RECEIPT_KEY_WHITELIST}" ]
@@ -325,6 +447,21 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None ) ->
                 errors.append( f"receipt log_line '{value}' must be '<scope>/<rel-path>:<lineno>'" )
             else:
                 errors.extend( _validate_scoped_path( match.group( 1 ), scope_roots ) )
+
+    if require_checkable:
+        present = [ k for k in CHECKABLE_RECEIPT_KEYS if isinstance( receipt_refs.get( k ), str ) and receipt_refs[ k ] ]
+        if not present:
+            errors.append(
+                f"a ->done receipt must cite at least one INDEPENDENTLY CHECKABLE ref "
+                f"{CHECKABLE_RECEIPT_KEYS} — got only {sorted( receipt_refs )}. A doc_path or "
+                f"log_line proves a file exists, which is true whether or not the work landed; "
+                f"it may accompany a close but cannot be the close (row 9bfb4b73)."
+            )
+        # Reachability is checked only on a shape-valid sha — otherwise the caller
+        # would get two errors for one mistake, the second of them confusing.
+        commit = receipt_refs.get( "commit" )
+        if isinstance( commit, str ) and COMMIT_PATTERN.fullmatch( commit ):
+            errors.extend( _validate_commit_reachable( commit, scope_roots ) )
 
     return errors
 
@@ -1247,7 +1384,17 @@ def validate_transition(
         errors.append( f"no-op transition '{from_status}'->'{to_status}' rejected — not a legal edge" )
 
     if to_status == "done" or receipt_refs is not None:
-        errors.extend( validate_receipt_refs( receipt_refs, scope_roots ) )
+        # require_checkable ONLY on ->done: a receipt attached to any other
+        # transition is context, and forcing a commit there would gate progress
+        # notes behind work that has not happened yet (row 9bfb4b73).
+        # require_checkable ONLY on a ->done that could actually happen. Terminal
+        # rows cannot transition at all, so running the closing gate (and its git
+        # subprocess) on one spends work to emit a second error about a call that
+        # was already refused — noise that makes the real reason harder to find.
+        errors.extend( validate_receipt_refs(
+            receipt_refs, scope_roots,
+            require_checkable=( to_status == "done" and from_status not in TERMINAL_STATUSES ),
+        ) )
     if to_status == "blocked":
         # I3 kind-aware chase + >=1 typed ref — the ->blocked invariant, expressed
         # ONCE in validate_blocked_fields and shared VERBATIM with the create-as-

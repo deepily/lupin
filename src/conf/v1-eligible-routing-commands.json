@@ -1,0 +1,51 @@
+{
+  "_comment": [
+    "THE ROUTING DENOMINATOR, FROZEN. Row e2099400 / d8d019f6; frozen 2026-08-26 on Maria's review finding.",
+    "",
+    "WHY THIS FILE EXISTS. v2_eval's load_mappable_commands used to import load_v1_class_to_command from",
+    "v1_eval_arm, which reads the LIVE v1 registry out of the pinned worktree. That worktree and that",
+    "script are being deleted. The import runs on EVERY v2 eval, not only paired ones, and its failure",
+    "path returned None -- which makes routing accuracy score over the FULL corpus instead of the",
+    "eligible-only set, announced on stdout and nowhere else. Every number after the deletion would have",
+    "been silently incomparable to every number before it.",
+    "",
+    "WHAT IT IS. The commands the v1 registry at pin sha 15536409 could route, which is the denominator",
+    "both arms score on. It is a CONSTANT, not a lookup: the pin is a fixed sha, so reading it live was",
+    "never buying freshness -- only a dependency.",
+    "",
+    "HOW IT WAS GENERATED, and it is reproducible while the worktree still exists:",
+    "    LUPIN_ROOT=<pinned-worktree> PYTHONPATH=src python -c \"",
+    "        import sys; sys.path.insert(0,'src/scripts')",
+    "        from v1_eval_arm import load_v1_class_to_command",
+    "        print(sorted(set(load_v1_class_to_command()[0].values())))\"",
+    "",
+    "MEASURED BOTH WAYS, because the fork map is flag-dependent: with the pinned tree's own v2 registry",
+    "and with the main tree's, the class map has 7 entries and the COMMAND set is identical. CRUD forks",
+    "add class NAMES pointing at the same command (merge_fork_map ADDS, never RE-POINTS), so they cannot",
+    "change this list -- which is why freezing the commands is safe where freezing the classes would not be.",
+    "",
+    "IF THIS FILE IS MISSING OR UNREADABLE, v2_eval RAISES. It does not fall back to the full corpus:",
+    "a wider denominator that still prints a percentage is the exact defect this replaces."
+  ],
+  "pin_sha": "15536409",
+  "generated_at": "2026-08-26",
+  "generated_by": "mr radio (08e47ef3), from load_v1_class_to_command() against the pinned worktree",
+  "class_to_command": {
+    "CalculatorAgent": "agent router go to calculator",
+    "CalendaringAgent": "agent router go to calendar",
+    "DateAndTimeAgent": "agent router go to datetime",
+    "MathAgent": "agent router go to math",
+    "ReceptionistAgent": "agent router go to receptionist",
+    "TodoListAgent": "agent router go to todo",
+    "WeatherAgent": "agent router go to weather"
+  },
+  "commands": [
+    "agent router go to calculator",
+    "agent router go to calendar",
+    "agent router go to datetime",
+    "agent router go to math",
+    "agent router go to receptionist",
+    "agent router go to todo",
+    "agent router go to weather"
+  ]
+}

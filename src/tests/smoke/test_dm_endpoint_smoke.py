@@ -197,6 +197,7 @@ def test_dm_send_persona_addressed_returns_201( client, captured_pushes, persist
         "/api/dm/send",
         json = {
             "sender_session_id" : "sid_asker",
+            "sender_project"   : "lupin",              # REQUIRED on the DM write path (gate 1fa05b16)
             "body"             : "ready for review",
             "recipient_persona": "radio",
             "sender_persona"   : "tiffany",
@@ -242,6 +243,7 @@ def test_dm_send_null_persona_worker_by_short_sid_returns_201( client, captured_
         "/api/dm/send",
         json = {
             "sender_session_id"     : "sid_manager",
+            "sender_project"       : "lupin",           # REQUIRED on the DM write path (gate 1fa05b16)
             "body"                 : "you are reachable",
             "recipient_session_id" : _SID_NULL[ :8 ],   # "null0001" — short form
         },
@@ -288,6 +290,7 @@ def test_dm_respond_threaded_reply_returns_201( client, captured_pushes, persist
         "/api/dm/respond",
         json = {
             "sender_session_id" : "sid_asker",
+            "sender_project"   : "lupin",              # REQUIRED on the DM write path (gate 1fa05b16)
             "body"             : "ack — verdict GREEN",
             "recipient_persona": "rachel",
             "reply_to"         : "msg-original-1",

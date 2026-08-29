@@ -19,12 +19,15 @@ from pydantic import BaseModel
 
 import cosa.utils.util as cu
 
+from cosa.rest.routers._retired_doors import gone, tombstone_description
+
 # Import dependencies
 from cosa.rest.auth import get_current_user
 from cosa.rest.queue_auth import authorize_queue_filter
 from cosa.rest.auth_middleware import is_admin
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
+from cosa.rest.job_persistence import persist_job_cancelled, CANCELLABLE_QUEUES
 from cosa.rest.queue_util import emit_job_state_transition
 
 router = APIRouter(prefix="/api", tags=["queues"])
@@ -157,207 +160,87 @@ def _count_interactions_for_jobs( job_ids ):
         print( f"[WARN] _count_interactions_for_jobs failed: {e}" )
         return {}
 
+
+# ── TOMBSTONE — /api/push ──
+#   GONE. Work now enters through /api/v2/ask. REMOVE BY 2026-12-31.
+#   What was here: a handler that took a bare question and handed it to push_job.
+#   Why that was bad: eighteen doors into one queue meant eighteen places a guard
+#   would have to be installed, and the read guard could not cover them all. Rick,
+#   2026-08-21: ONE entry point, and it is v2.
+#   The body is DELETED rather than left unreachable below a raise: unreachable code
+#   is code nobody can test and everybody must still read. Recover it from git if any
+#   of its handling turns out to be worth carrying into /api/v2/ask.
 @router.post(
     "/push",
-    summary     = "Push job to queue",
-    description = "Submit a new job to the todo queue. Requires question and websocket_id in request body."
+    deprecated  = True,
+    status_code = 410,
+    summary     = "GONE — use /api/v2/ask",
+    description = tombstone_description( "/api/push" )
 )
-async def push(
-    request: Request,
-    current_user: dict = Depends(get_current_user),
-    todo_queue = Depends(get_todo_queue)
-):
+async def push():
     """
-    Add a question to the todo queue with required websocket tracking and user authentication.
-    
-    Requires:
-        - request body contains JSON with "question" and "websocket_id" fields
-        - question is a non-empty string query to process
-        - websocket_id is a valid WebSocket identifier from /api/get-session-id
-        - current_user is authenticated with valid token containing uid
-        - todo_queue is initialized and accessible
-        
+    Refuse this retired door with 410 Gone.
+
     Ensures:
-        - Question added to todo queue with metadata
-        - WebSocket ID and user ID properly associated with the job
-        - Returns confirmation with status and routing information
-        - Logs the push operation for debugging
-        
-    Raises:
-        - HTTPException with 400 status if request body is malformed
-        - HTTPException with 400 status if required fields are missing
-        - HTTPException if authentication fails
-        - Exception if queue push operation fails
-        
-    Args:
-        request: FastAPI request containing JSON body with question and websocket_id
-        current_user: Authenticated user info from token
-        todo_queue: Todo queue instance for job management
-        
-    Returns:
-        dict: Status, websocket_id, user_id, and result from queue push
+        - never returns; raises HTTPException( 410 ) naming /api/v2/ask
+          and the REMOVE BY 2026-12-31 date
     """
-    try:
-        # Parse JSON request body
-        request_data = await request.json()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON in request body: {str(e)}")
-    
-    # Validate required fields
-    if not isinstance(request_data, dict):
-        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
-    
-    question = request_data.get("question")
-    websocket_id = request_data.get("websocket_id")
-    
-    if not question:
-        raise HTTPException(status_code=400, detail="Missing required field: question")
-    
-    if not websocket_id:
-        raise HTTPException(status_code=400, detail="Missing required field: websocket_id")
-    
-    # Validate field types
-    if not isinstance(question, str):
-        raise HTTPException(status_code=400, detail="Field 'question' must be a string")
-    
-    if not isinstance(websocket_id, str):
-        raise HTTPException(status_code=400, detail="Field 'websocket_id' must be a string")
-    
-    # Validate field content
-    question = question.strip()
-    if not question:
-        raise HTTPException(status_code=400, detail="Field 'question' cannot be empty")
-    
-    websocket_id = websocket_id.strip()
-    if not websocket_id:
-        raise HTTPException(status_code=400, detail="Field 'websocket_id' cannot be empty")
-    
-    user_id    = current_user["uid"]
-    user_email = current_user["email"]
-    print( f"[API] /api/push called - question: '{question}', websocket_id: {websocket_id}, user_id: {user_id}, user_email: {user_email}" )
-
-    # Push to queue with websocket_id, user_id, and user_email for TTS routing
-    try:
-        result = await asyncio.to_thread( todo_queue.push_job, question, websocket_id, user_id, user_email )
-        print(f"[API] /api/push successful - result: {result}")
-    except Exception as e:
-        print(f"[API] /api/push failed - error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to push job to queue: {str(e)}")
-
-    return {
-        "status"       : "queued",
-        "websocket_id" : websocket_id,
-        "user_id"      : user_id,
-        "job_id"       : result.get( "job_id" ) if isinstance( result, dict ) else None,
-        "result"       : result.get( "message", str( result ) ) if isinstance( result, dict ) else str( result )
-    }
+    gone( "/api/push" )
 
 
+# ── TOMBSTONE — /api/push-agentic ──
+#
+#   What was here: the unattended, service-to-service twin of /api/push. The caller
+#   supplied a routing_command and a fully-specified args dict, and it went straight to
+#   the queue with no expeditor, no LORA parsing and no interactive Q&A — deliberately,
+#   because an unattended submitter cannot answer a question.
+#
+#   WHY THIS ONE IS THE EASIEST OF THE NINE, AND WHY THAT IS WORTH SAYING. Every other
+#   retired door named its own command and had to be told which one it was. This door
+#   already took the command as a parameter, which is exactly the shape of
+#   /api/v2/submit — a command string, an args dict, and the queue directives beside
+#   them. It was not a door that needed converting; it was /api/v2/submit with a
+#   different name and a worse contract.
+#
+#     POST /api/v2/submit
+#     { "command": "agent router go to deep research",
+#       "args"   : { "query": "..." },
+#       "question": "...", "websocket_id": "...",
+#       "scheduled_at": null, "monopolize": false }
+#
+#   The renames a caller has to make, stated so nobody has to diff two schemas:
+#   `routing_command` becomes `command`, and `websocket_id` — required here — is
+#   optional there. `args`, `question`, `scheduled_at` and `monopolize` keep their names
+#   and their meanings, and `parent_id_hash` is available now where it was not before.
+#
+#   The 400s this door raised by hand are not lost, they are Pydantic's now: a missing
+#   or non-string command, a non-object args, a body that is not a JSON object. It
+#   validated those itself because it read the raw request; SubmitRequest is a model.
+#
+#   WARNING: `todo_queue.push_job_agentic` HAS NO PRODUCTION CALLER AFTER THIS COMMIT —
+#   this door was its only one. That is the same state `push_job` reached at the end of
+#   the cutover, and it is recorded here rather than acted on: pinning it as dead is its
+#   own piece of work, the way 6c was for push_job, and the method's own coverage still
+#   stands under the unit suite.
+#
+#   The body is DELETED rather than left unreachable below a raise: unreachable code is
+#   code nobody can test and everybody must still read.
 @router.post(
     "/push-agentic",
-    summary     = "Submit agentic job without the runtime argument expeditor",
-    description = "Unattended / service-to-service agentic job submission. Caller supplies routing_command + explicit args dict. No voice-path LORA parsing, no interactive Q&A. Flexible passthrough args support current and future agents."
+    deprecated  = True,
+    status_code = 410,
+    summary     = "GONE — use /api/v2/submit",
+    description = tombstone_description( "/api/push-agentic" )
 )
-async def push_agentic(
-    request      : Request,
-    current_user : dict = Depends( get_current_user ),
-    todo_queue         = Depends( get_todo_queue )
-):
+async def push_agentic():
     """
-    Submit a fully-specified agentic job to the todo queue.
+    Refuse this retired door with 410 Gone.
 
-    Request body (JSON):
-        routing_command (str, required): e.g. "agent router go to deep research".
-            Must be one of the commands supported by create_agentic_job.
-        websocket_id (str, required): session routing id (same format + validation as /api/push).
-        args (dict, optional): fully-specified agent args. Passthrough — agent constructor validates.
-        question (str, optional): display-only text for the UI history card.
-        scheduled_at (str, optional): ISO-8601 timestamp for delayed execution.
-        monopolize (bool, optional): request a monopolized execution slot.
-
-    Contrast with POST /api/push: this endpoint bypasses the runtime argument
-    expeditor entirely. If args are incomplete, the agent constructor fails
-    explicitly rather than silently waiting for an interactive reply that
-    unattended submitters cannot provide.
-
-    Auth: same as /api/push (JWT or API key via get_current_user).
-
-    Returns:
-        { status, routing_command, websocket_id, user_id, job_id, result }
-
-    Raises:
-        HTTPException 400 on invalid body / missing fields / unknown routing_command.
+    Ensures:
+        - never returns; raises HTTPException( 410 ) naming /api/v2/submit
+          and the REMOVE BY 2026-12-31 date
     """
-    try:
-        body = await request.json()
-    except Exception as e:
-        raise HTTPException( status_code=400, detail=f"Invalid JSON in request body: {e}" )
-
-    if not isinstance( body, dict ):
-        raise HTTPException( status_code=400, detail="Request body must be a JSON object" )
-
-    routing_command = body.get( "routing_command" )
-    websocket_id    = body.get( "websocket_id" )
-    args_dict       = body.get( "args", { } ) or { }
-    question        = body.get( "question" )
-    scheduled_at    = body.get( "scheduled_at" )
-    monopolize      = bool( body.get( "monopolize", False ) )
-
-    # Validate required string fields
-    for field_name, field_value in (
-        ( "routing_command", routing_command ),
-        ( "websocket_id",    websocket_id ),
-    ):
-        if not field_value:
-            raise HTTPException( status_code=400, detail=f"Missing required field: {field_name}" )
-        if not isinstance( field_value, str ):
-            raise HTTPException( status_code=400, detail=f"Field {field_name!r} must be a string" )
-
-    routing_command = routing_command.strip()
-    websocket_id    = websocket_id.strip()
-    if not routing_command or not websocket_id:
-        raise HTTPException( status_code=400, detail="routing_command / websocket_id cannot be empty" )
-
-    if not isinstance( args_dict, dict ):
-        raise HTTPException( status_code=400, detail="Field 'args' must be a JSON object" )
-
-    user_id    = current_user[ "uid" ]
-    user_email = current_user[ "email" ]
-    print( f"[API] /api/push-agentic - command: {routing_command!r}, ws: {websocket_id}, user: {user_email}, args_keys: {list( args_dict.keys() )}" )
-
-    try:
-        result = await asyncio.to_thread(
-            todo_queue.push_job_agentic,
-            routing_command,
-            args_dict,
-            websocket_id,
-            user_id,
-            user_email,
-            question,
-            scheduled_at,
-            monopolize,
-        )
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException( status_code=500, detail=f"push-agentic failed: {e}" )
-
-    job_id = result.get( "job_id" ) if isinstance( result, dict ) else None
-    if job_id is None:
-        # Unknown command or construction failure bubbles up as a 400 so the
-        # caller can distinguish "submitted, await outcome" from "rejected".
-        raise HTTPException( status_code=400, detail=result.get( "message" ) if isinstance( result, dict ) else str( result ) )
-
-    return {
-        "status"          : "queued",
-        "routing_command" : routing_command,
-        "websocket_id"    : websocket_id,
-        "user_id"         : user_id,
-        "job_id"          : job_id,
-        "result"          : result.get( "message" ),
-    }
+    gone( "/api/push-agentic" )
 
 
 @router.get(
@@ -1039,73 +922,157 @@ async def send_job_message(
     }
 
 
+def _emit_job_removed( user_id, job_id, queue_name ):
+    """
+    Tell the owner and any watching admins that a job card is gone.
+
+    Best-effort: a websocket problem must never turn a completed queue mutation
+    into a failed request, so every failure is logged and swallowed.
+
+    Requires:
+        - user_id, job_id and queue_name are strings
+
+    Ensures:
+        - Emits a job_removed event, or logs and returns on any failure
+        - Never raises
+    """
+    try:
+        import lupin_app.main as main_module
+        ws_manager = main_module.websocket_manager
+        if ws_manager:
+            ws_manager.emit_to_user_and_admins_sync( user_id, 'job_removed', {
+                'job_id'    : job_id,
+                'queue'     : queue_name,
+                'timestamp' : cu.get_current_datetime_iso()
+            } )
+    except Exception as e:
+        print( f"[API] Warning: Failed to emit job_removed event: {e}" )
+
+
 @router.post(
     "/jobs/{job_id}/cancel",
-    summary     = "Cancel running job",
-    description = "Request graceful cancellation of a running agentic job at its next phase boundary."
+    summary     = "Cancel a queued or running job",
+    description = "Cancel a job whether it has started or not. A job still waiting in the "
+                  "todo queue is removed outright; a running agentic job is asked to stop "
+                  "gracefully at its next phase boundary."
 )
 async def cancel_job(
     job_id: str,
     current_user: dict = Depends( get_current_user ),
     running_queue = Depends( get_running_queue ),
+    todo_queue    = Depends( get_todo_queue ),
 ):
     """
-    Request graceful cancellation of a running agentic job.
+    Cancel a job in either of the two states a caller can meaningfully cancel from.
 
-    Sets the job's cancel flag so it stops at the next phase-boundary checkpoint.
-    Only agentic jobs (deep research, podcast generator) support cancellation.
+    The running queue is consulted first, so a job that has already started is
+    stopped gracefully rather than yanked out from under itself. If it has not
+    started, it is removed from the todo queue — that covers every pre-running
+    state, because a scheduled job sits in todo carrying a `scheduled_at` it is
+    simply not yet eligible against; there is no separate scheduled queue.
+
+    Row 4b87fe61: this endpoint used to look only in the running queue, so the
+    cheapest and safest moment to cancel — before any work has been done — was the
+    one moment it refused, with a 404 that read as "no such job".
 
     Requires:
-        - job_id identifies a currently running job
         - current_user is authenticated
         - Job belongs to current user OR user is admin
 
     Ensures:
-        - Job's _cancel_requested flag is set to True
-        - Orchestrator's _stop_requested flag is set (if available)
-        - Job will stop at next checkpoint (0-60 seconds latency)
-        - Returns confirmation of cancel request
+        - A queued job is removed from the todo queue and a job_removed event
+          is emitted; returns status="cancelled"
+        - A running agentic job has its cancel flag set and stops at its next
+          checkpoint; returns status="cancel_requested"
+        - A 404 says which states were searched, so it can never be mistaken for
+          "the job exists but has not started"
 
     Raises:
-        - HTTPException 404: Job not found in running queue
-        - HTTPException 403: User does not own this job
-        - HTTPException 400: Job type does not support cancellation
+        - HTTPException 404: No job with this id is queued or running
+        - HTTPException 403: User does not own this job and is not admin
+        - HTTPException 400: Running job type does not support graceful cancellation
+        - HTTPException 409: The job was found in todo but the delete did not take
 
     Args:
-        job_id: Target running job ID
+        job_id: Target job ID
         current_user: Authenticated user info
         running_queue: Running queue dependency
+        todo_queue: Todo queue dependency
 
     Returns:
-        dict: {status, job_id, message}
+        dict: {status, job_id, queue, message}
     """
     user_id = current_user[ "uid" ]
 
     print( f"[API] POST /api/jobs/{job_id}/cancel - user: {user_id}" )
 
-    # Validate job exists and is running
+    # Running first — a started job gets a graceful stop, not a yank
     try:
         job = running_queue.get_by_id_hash( job_id )
     except KeyError:
-        raise HTTPException( status_code=404, detail=f"Job not found or not running: {job_id}" )
+        job = None
 
-    # Validate ownership (user or admin)
+    if job is not None:
+
+        if job.user_id != user_id and not is_admin( current_user ):
+            raise HTTPException( status_code=403, detail="Not authorized to cancel this job" )
+
+        if not isinstance( job, AgenticJobBase ):
+            raise HTTPException(
+                status_code = 400,
+                detail      = f"Job {job_id} is already running and its type does not support graceful "
+                              f"cancellation. To stop it anyway, use DELETE /api/queue/run/{job_id} — "
+                              f"that removes it immediately and loses its work."
+            )
+
+        job.request_cancel()
+
+        print( f"[API] Cancel requested for running job {job_id} by user {user_id}" )
+
+        return {
+            "status"  : "cancel_requested",
+            "job_id"  : job_id,
+            "queue"   : "run",
+            "message" : "Cancellation requested. Job will stop at next checkpoint.",
+        }
+
+    # Not started yet — the cheap case, and the one this endpoint used to refuse
+    try:
+        job = todo_queue.get_by_id_hash( job_id )
+    except KeyError:
+        raise HTTPException(
+            status_code = 404,
+            detail      = f"No job with id {job_id} is queued or running. It may have already "
+                          f"finished, or the id may be wrong."
+        )
+
     if job.user_id != user_id and not is_admin( current_user ):
         raise HTTPException( status_code=403, detail="Not authorized to cancel this job" )
 
-    # Check if it's an agentic job (only agentic jobs support cancellation)
-    if not isinstance( job, AgenticJobBase ):
-        raise HTTPException( status_code=400, detail="Only agentic jobs support cancellation" )
+    if not todo_queue.delete_by_id_hash( job_id ):
+        raise HTTPException(
+            status_code = 409,
+            detail      = f"Job {job_id} was queued a moment ago but could not be removed — it has "
+                          f"most likely just started. Retry the cancel."
+        )
 
-    # Request graceful cancellation
-    job.request_cancel()
+    # The in-memory delete above is only half a cancellation. job_history keeps the
+    # row `pending`, and get_restorable_jobs() selects exactly PENDING — so without
+    # this line the next server start hands the cancelled job back to the queue and
+    # runs it. Measured 2026-08-28: a cancelled job returned across a bounce 26
+    # minutes later. Marking it CANCELLED (terminal) is what makes the message below
+    # true of the SYSTEM and not just of this process.
+    persist_job_cancelled( job_id )
 
-    print( f"[API] Cancel requested for job {job_id} by user {user_id}" )
+    _emit_job_removed( user_id, job_id, "todo" )
+
+    print( f"[API] Queued job {job_id} cancelled before starting, by user {user_id}" )
 
     return {
-        "status"  : "cancel_requested",
+        "status"  : "cancelled",
         "job_id"  : job_id,
-        "message" : "Cancellation requested. Job will stop at next checkpoint.",
+        "queue"   : "todo",
+        "message" : "Job removed from the queue before it started. No work was lost.",
     }
 
 
@@ -1162,8 +1129,15 @@ async def delete_all_queue_jobs(
     print( f"[API] DELETE /api/queue/{queue_name}/all - user: {user_id}, admin: {is_admin( current_user )}" )
 
     if is_admin( current_user ):
+        # Read the ids BEFORE clear() — after it there is nothing left to name, and an
+        # admin clear that leaves every row `pending` restores the whole queue on the
+        # next start. This is the widest-blast-radius path of the three.
+        cancelled_ids = ( [ j.id_hash for j in queue.get_all_jobs() ]
+                          if queue_name in CANCELLABLE_QUEUES else [] )
         count = queue.size()
         queue.clear()
+        for id_hash in cancelled_ids:
+            persist_job_cancelled( id_hash )
         items_deleted = count
     else:
         jobs = queue.get_jobs_for_user( user_id )
@@ -1173,6 +1147,8 @@ async def delete_all_queue_jobs(
                 job.request_cancel()
             deleted = queue.delete_by_id_hash( job.id_hash )
             if deleted:
+                if queue_name in CANCELLABLE_QUEUES:
+                    persist_job_cancelled( job.id_hash )
                 items_deleted += 1
 
     print( f"[API] Deleted {items_deleted} jobs from {queue_name} queue by user {user_id}" )
@@ -1272,24 +1248,16 @@ async def delete_queue_job(
     if not deleted:
         raise HTTPException( status_code=404, detail=f"Failed to delete job {job_id} from {queue_name} queue" )
 
+    # Same ledger write as the /cancel door — a delete from `todo` IS a cancellation,
+    # whichever endpoint the caller used. Guarded by queue because done/dead rows are
+    # already terminal and `run` deletes on its normal completion path.
+    if queue_name in CANCELLABLE_QUEUES:
+        persist_job_cancelled( job_id )
+
     # Emit WebSocket event for UI synchronization (canonical dual-emit:
     # owner + watching admins, deduplicated). See
     # WebSocketManager.emit_to_user_and_admins_sync for the rationale.
-    # NOTE: import path is `lupin_app.main` not `src.lupin_app.main` —
-    # PYTHONPATH already includes src/, so the `src.` prefix raises
-    # ModuleNotFoundError and silently swallowed every job_removed emit
-    # before today (Session 248e740e fix).
-    try:
-        import lupin_app.main as main_module
-        ws_manager = main_module.websocket_manager
-        if ws_manager:
-            ws_manager.emit_to_user_and_admins_sync( user_id, 'job_removed', {
-                'job_id'    : job_id,
-                'queue'     : queue_name,
-                'timestamp' : cu.get_current_datetime_iso()
-            } )
-    except Exception as e:
-        print( f"[API] Warning: Failed to emit job_removed event: {e}" )
+    _emit_job_removed( user_id, job_id, queue_name )
 
     print( f"[API] Job {job_id} removed from {queue_name} queue by user {user_id}" )
 
@@ -1309,7 +1277,8 @@ async def delete_queue_job(
     "/job-history",
     summary     = "Query job history",
     description = "Paginated history of agentic jobs from PostgreSQL persistence. "
-                  "Admin sees all jobs; regular users see only their own."
+                  "Admin sees all jobs; regular users see only their own. A `user_filter` "
+                  "a regular user is not entitled to is REFUSED with 403, never ignored."
 )
 async def get_job_history(
     current_user: dict      = Depends( get_current_user ),
@@ -1318,26 +1287,72 @@ async def get_job_history(
     limit: int              = Query( 20, ge=1, le=100, description="Results per page (max 100)" ),
     offset: int             = Query( 0, ge=0, description="Pagination offset" ),
     days: Optional[int]     = Query( None, ge=1, le=365, description="Time window in days (e.g. 7, 14, 30). None = all time." ),
-    exclude_ids: Optional[str] = Query( None, description="Comma-separated job IDs to exclude (for live queue deduplication)" )
+    exclude_ids: Optional[str] = Query( None, description="Comma-separated job IDs to exclude (for live queue deduplication)" ),
+    user_filter: Optional[str] = Query(
+        None,
+        description="User filter: omit for the default view, '*' for all users (admin), or a specific user_id (admin). Same vocabulary and same 403 as /api/get-queue/{queue_name}.",
+        example="ricardo_felipe_ruiz_6bdc"
+    )
 ):
     """
     Query paginated job history with optional filters.
+
+    🔴 WHY `user_filter` EXISTS HERE AT ALL (bug e205a3b1). It did not, and FastAPI
+    DROPS an unknown query parameter silently — so `?user_filter=*` came back 200 with
+    the caller's OWN rows and `filtered_by` still pinned to their uid. The sibling
+    endpoint `/api/get-queue/{queue_name}` refuses the same request with a 403 naming
+    the admin rule. Same permission model, two ways of saying no: one honest, one that
+    hands the caller a partial view they believe is complete.
+
+    MEASURED on 2026-08-17: two seats read the same `:8000` queue and got opposite
+    answers — one saw two scheduled jobs, one saw none — because the rows belonged to
+    a different account and nothing said so. The widening flag was passed and ignored.
+    Accept-and-ignore is what turned a wrong flag into a confident wrong answer.
 
     Requires:
         - Authenticated user (Bearer token)
 
     Ensures:
-        - Admin users see all jobs (user_id=None filter)
-        - Regular users see only their own jobs
+        - Admin users see all jobs by default (user_id=None filter)
+        - Regular users see only their own jobs by default
+        - A `user_filter` the caller is not entitled to raises 403 — NEVER a silently
+          narrowed 200
         - Results are paginated and sorted by created_at DESC
         - exclude_ids supports the overlay model: frontend passes live Done/Dead job IDs
           so they are excluded from history results (no duplicates)
         - Returns { jobs: [...], total: N, filtered_by: str, limit: N, offset: N }
+
+    Raises:
+        - HTTPException 403: caller is not entitled to the requested user_filter
+        - HTTPException 400: '!self' — authorized for admins on the queue endpoint, but
+          this store filters by user equality and cannot express exclusion. Refused
+          loudly rather than answered with the wrong rows.
     """
     from cosa.rest.job_persistence import query_job_history
 
-    # Admin sees all, regular user sees own only
-    user_id = None if is_admin( current_user ) else current_user[ "uid" ]
+    if user_filter is None:
+        # Unchanged default: admin sees all, regular user sees own only.
+        user_id = None if is_admin( current_user ) else current_user[ "uid" ]
+    else:
+        # Raises 403 for a filter this caller is not entitled to — the whole point.
+        authorized_filter = authorize_queue_filter(
+            current_user   = current_user,
+            filter_user_id = user_filter
+        )
+
+        if authorized_filter == "*":
+            user_id = None
+        elif authorized_filter.startswith( "!" ):
+            # `query_job_history` filters on user_id EQUALITY; there is no exclusion
+            # arm to hand "!uid" to, and passing it through would match no rows and
+            # read as "no such jobs" — the exact failure this endpoint just got fixed
+            # for. Refuse instead of answering wrongly.
+            raise HTTPException(
+                status_code = 400,
+                detail      = "The '!self' filter is not supported by job history, which filters by user equality. Use '*' for all users."
+            )
+        else:
+            user_id = authorized_filter
 
     # Parse comma-separated exclude_ids into a list
     exclude_list = [ eid.strip() for eid in exclude_ids.split( "," ) if eid.strip() ] if exclude_ids else None
@@ -1492,77 +1507,35 @@ async def delete_job_history_endpoint(
     return { "status": "deleted", "job_id": job_id }
 
 
+# ── TOMBSTONE — /api/job-history/{job_id}/retry ──
+#   GONE. Work now enters through /api/v2/ask. REMOVE BY 2026-12-31.
+#   What was here: a queue door wearing a job-history URL. It read `question_text` off
+#   the stored row and called push_job with it — its own comment said "the same pattern
+#   as POST /api/push". The client sent only a websocket_id, so the CALLER now has to
+#   hold the question: notifications.js already did (it shows it in the confirm dialog),
+#   and JobsPaneRenderer.ts reads it off the hydrated history row's meta.
+#   Why that was bad: eighteen doors into one queue meant eighteen places a guard
+#   would have to be installed, and the read guard could not cover them all. Rick,
+#   2026-08-21: ONE entry point, and it is v2.
+#   The body is DELETED rather than left unreachable below a raise: unreachable code
+#   is code nobody can test and everybody must still read. Recover it from git if any
+#   of its handling turns out to be worth carrying into /api/v2/ask.
 @router.post(
     "/job-history/{job_id}/retry",
-    summary     = "Retry a failed or interrupted job",
-    description = "Re-submit a failed or interrupted job to the todo queue as a new job."
+    deprecated  = True,
+    status_code = 410,
+    summary     = "GONE — use /api/v2/ask",
+    description = tombstone_description( "/api/job-history/{job_id}/retry" )
 )
-async def retry_job_history(
-    job_id: str,
-    request: Request,
-    current_user: dict = Depends( get_current_user ),
-    todo_queue         = Depends( get_todo_queue )
-):
+async def retry_job_history():
     """
-    Re-submit a failed/interrupted job to the CJ Flow todo queue.
-
-    Requires:
-        - Authenticated user (Bearer token)
-        - job_id is a valid id_hash of a failed or interrupted job
-        - Request body contains JSON with "websocket_id" field
-        - User must be admin or the job's owner
+    Refuse this retired door with 410 Gone.
 
     Ensures:
-        - Creates a new todo entry with the original question_text
-        - Returns { status: "retried", original_job_id: str }
-        - 404 if job not found
-        - 403 if unauthorized
-        - 400 if job status is not failed or interrupted
-        - 400 if websocket_id missing from request body
+        - never returns; raises HTTPException( 410 ) naming /api/v2/ask
+          and the REMOVE BY 2026-12-31 date
     """
-    import asyncio
-    from cosa.rest.job_persistence import get_job_by_id_hash
-
-    job = get_job_by_id_hash( job_id )
-
-    if job is None:
-        raise HTTPException( status_code=404, detail=f"Job not found: {job_id}" )
-
-    # Authorization: regular users can only retry their own jobs
-    if not is_admin( current_user ) and job.get( "user_id" ) != current_user[ "uid" ]:
-        raise HTTPException( status_code=403, detail="Not authorized to retry this job" )
-
-    # Only allow retry of terminal failure states
-    if job.get( "status" ) not in ( "failed", "interrupted" ):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot retry job with status '{job.get( 'status' )}'. Only failed or interrupted jobs can be retried."
-        )
-
-    # Parse request body for websocket_id
-    try:
-        request_data = await request.json()
-    except Exception as e:
-        raise HTTPException( status_code=400, detail=f"Invalid JSON in request body: {str( e )}" )
-
-    websocket_id = request_data.get( "websocket_id" )
-    if not websocket_id or not isinstance( websocket_id, str ):
-        raise HTTPException( status_code=400, detail="Missing required field: websocket_id" )
-
-    question     = job.get( "question_text", "" )
-    user_id      = current_user[ "uid" ]
-    user_email   = current_user[ "email" ]
-
-    print( f"[API] /api/job-history/{job_id}/retry - re-submitting: '{question[:80]}', user: {user_id}" )
-
-    # Push to todo queue using the same pattern as POST /api/push
-    result = await asyncio.to_thread( todo_queue.push_job, question, websocket_id, user_id, user_email )
-
-    return {
-        "status"          : "retried",
-        "original_job_id" : job_id,
-        "result"          : result
-    }
+    gone( "/api/job-history/{job_id}/retry" )
 
 
 # =============================================================================
@@ -1630,6 +1603,11 @@ async def pause_job(
         )
     except Exception as e:
         print( f"[API] Warning: WebSocket emission failed for pause transition: {e}" )
+
+    # Durably record the pause so a container bounce restores it PAUSED, not active
+    # (row 2817b0f5). No-op for non-agentic jobs absent from job_history.
+    from cosa.rest.job_persistence import persist_job_paused_state
+    persist_job_paused_state( job_id, True )
 
     print( f"[API] Job paused: {job_id} by user {user_id}" )
 
@@ -1702,6 +1680,11 @@ async def resume_job(
         )
     except Exception as e:
         print( f"[API] Warning: WebSocket emission failed for resume transition: {e}" )
+
+    # Clear the durable pause flag so a later restore does not re-hold a resumed job
+    # (row 2817b0f5). No-op for non-agentic jobs absent from job_history.
+    from cosa.rest.job_persistence import persist_job_paused_state
+    persist_job_paused_state( job_id, False )
 
     # Notify consumer to recalculate eligibility (may wake from timed sleep)
     with todo_queue.condition:

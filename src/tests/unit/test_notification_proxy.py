@@ -607,9 +607,9 @@ class TestProfileCoverage:
 
     def test_deep_research_covers_all_fallback_questions( self ):
         """Deep research profile covers all known question args."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        agent = AGENTIC_AGENTS[ "agent router go to deep research" ]
+        agent = JOB_ARG_CONTRACTS[ "agent router go to deep research" ]
         profile = TEST_PROFILES[ "deep_research" ]
 
         for arg_name in agent[ "fallback_questions" ]:
@@ -618,9 +618,9 @@ class TestProfileCoverage:
 
     def test_podcast_covers_all_fallback_questions( self ):
         """Podcast profile covers all known question args."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        agent = AGENTIC_AGENTS[ "agent router go to podcast generator" ]
+        agent = JOB_ARG_CONTRACTS[ "agent router go to podcast generator" ]
         profile = TEST_PROFILES[ "podcast" ]
 
         for arg_name in agent[ "fallback_questions" ]:
@@ -629,9 +629,9 @@ class TestProfileCoverage:
 
     def test_research_to_podcast_covers_all_fallback_questions( self ):
         """Research-to-podcast profile covers all known question args."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
-        agent = AGENTIC_AGENTS[ "agent router go to research to podcast" ]
+        agent = JOB_ARG_CONTRACTS[ "agent router go to research to podcast" ]
         profile = TEST_PROFILES[ "research_to_podcast" ]
 
         for arg_name in agent[ "fallback_questions" ]:
@@ -640,13 +640,13 @@ class TestProfileCoverage:
 
     def test_all_agents_profile_covers_all_arg_names( self ):
         """all_agents union profile covers every arg name across all 3 agents."""
-        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+        from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 
         profile = TEST_PROFILES[ "all_agents" ]
 
         # Collect all unique arg names across all agents
         all_arg_names = set()
-        for key, agent in AGENTIC_AGENTS.items():
+        for key, agent in JOB_ARG_CONTRACTS.items():
             for arg_name in agent[ "fallback_questions" ]:
                 all_arg_names.add( arg_name )
 
@@ -1293,14 +1293,26 @@ class TestQAScriptFormat:
             assert len( script[ "entries" ] ) > 0, f"{profile} has no entries"
 
     def test_entries_have_required_fields( self ):
-        """All script entries have question_pattern, answer, arg_name, response_types."""
+        """
+        Every entry is keyed on something and answers with something.
+
+        TWO KINDS OF KEY (row a1420538). A PROSE entry matches on question_pattern and
+        names the arg it fills. A CARD entry matches on card_id — the card names itself,
+        so the entry carries no question and no arg, which is the whole point: one
+        generic entry answers the same card for every agent that shows it, whatever
+        that agent calls its argument or phrases its question. Demanding a
+        question_pattern of a card entry would be demanding back the duplication the id
+        removed.
+        """
         for profile in [ "deep_research", "podcast", "research_to_podcast", "all_agents", "minimal" ]:
             script = self._load_script( profile )
             for i, entry in enumerate( script[ "entries" ] ):
-                assert "question_pattern" in entry, f"{profile} entry {i} missing question_pattern"
                 assert "answer" in entry, f"{profile} entry {i} missing answer"
-                assert "arg_name" in entry, f"{profile} entry {i} missing arg_name"
                 assert "response_types" in entry, f"{profile} entry {i} missing response_types"
+                if "card_id" in entry:
+                    continue
+                assert "question_pattern" in entry, f"{profile} entry {i} missing question_pattern"
+                assert "arg_name" in entry, f"{profile} entry {i} missing arg_name"
 
     def test_scripts_match_test_profiles( self ):
         """Q&A script answers are consistent with TEST_PROFILES values."""
@@ -1309,9 +1321,26 @@ class TestQAScriptFormat:
             profile  = TEST_PROFILES[ profile_name ]
 
             for entry in script[ "entries" ]:
+                # A card entry names no arg (row a1420538) — it answers a card, not a
+                # field, so there is no profile value to compare it against. Checked
+                # BEFORE the arg is read, because reading it is what raised KeyError.
+                if "card_id" in entry:
+                    continue
                 arg_name = entry[ "arg_name" ]
                 # Skip confirmation entries — not in TEST_PROFILES
                 if arg_name == "confirmation":
+                    continue
+                # SELECTION entries are not VALUE entries (row 9046ef58). An entry
+                # answerable ONLY as a choice card — the document choice card, TFE's
+                # two — carries a directive telling the matcher WHICH OPTION to pick,
+                # because its option labels are discovered at run time and no fixed
+                # value could match one. Comparing that directive to a profile value
+                # is comparing two different kinds of thing. The distinction is
+                # `response_types == ["multiple_choice"]` exactly: an entry that also
+                # accepts open_ended (like `audience`) does carry a real value, and is
+                # still checked. The document card entries have their own test,
+                # test_proxy_scripts_answer_the_choice_card.py.
+                if entry.get( "response_types" ) == [ "multiple_choice" ]:
                     continue
                 if arg_name in profile:
                     assert entry[ "answer" ] == profile[ arg_name ], \

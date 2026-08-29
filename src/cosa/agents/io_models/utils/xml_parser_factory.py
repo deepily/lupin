@@ -12,6 +12,8 @@ NOTE: Legacy baseline and hybrid strategies have been REMOVED as of Session 116.
 from typing import Dict, Any, Optional
 
 from cosa.config.configuration_manager import ConfigurationManager
+from cosa.agents.dm_compression.xml_models import DmCompressionResponse
+from cosa.agents.dm_tutor.xml_models import DmTutorResponse
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
 from cosa.agents.io_models.xml_models import (
     ReceptionistResponse, SimpleResponse, CommandResponse,
@@ -62,6 +64,13 @@ class PydanticXmlParser:
             "formatter for agent router go to receptionist": FormatterResponse,
             "formatter for agent router go to todo": FormatterResponse,
             "formatter for agent router go to weather": FormatterResponse,  # Could also use WeatherResponse
+
+            # DM compression (arm 4) — rewrites a frozen DM body, placeholders intact
+            "dm compression rewrite": DmCompressionResponse,
+
+            # DM tutor — distills a whole DM into a headline, two supporting
+            # statements, and the most relevant path or URL when one is present
+            "dm tutor rewrite": DmTutorResponse,
 
             # Future mappings will be added as more agents are migrated
         }

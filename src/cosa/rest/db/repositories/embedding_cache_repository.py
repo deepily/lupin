@@ -1,6 +1,6 @@
 """
 EmbeddingCacheRepository — Postgres storage for the ``embedding_cache``
-normalized_text→embedding cache (LanceDB source: EmbeddingCacheTable).
+normalized_text→embedding cache.
 
 Exact-match KV cache (btree on ``normalized_text``) — NOT ANN-searched.
 Storage-only: embeddings are always supplied by the caller.

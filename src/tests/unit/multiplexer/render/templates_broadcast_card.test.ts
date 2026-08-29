@@ -27,17 +27,17 @@ function mountFragment(cardOpen: boolean): HTMLElement {
 
 test("renders the card scaffold with all wired elements", () => {
   const host = mountFragment(true);
-  assert.notEqual(host.querySelector("#broadcast-submit-card"), null);
-  assert.notEqual(host.querySelector("#broadcast-submit-header"), null);
-  assert.notEqual(host.querySelector("#broadcast-submit-toggle"), null);
-  assert.notEqual(host.querySelector("#broadcast-submit-section"), null);
-  assert.notEqual(host.querySelector("#broadcast-recipients-row"), null);
-  assert.notEqual(host.querySelector("#broadcast-recipients-label"), null);
-  assert.notEqual(host.querySelector("#broadcast-recipients-refresh"), null);
-  assert.notEqual(host.querySelector("#broadcast-stt-button"), null);
-  assert.notEqual(host.querySelector("#broadcast-textarea"), null);
-  assert.notEqual(host.querySelector("#broadcast-send-button"), null);
-  assert.notEqual(host.querySelector("#broadcast-submit-status"), null);
+  assert.ok( host.querySelector("#broadcast-submit-card") !== null );
+  assert.ok( host.querySelector("#broadcast-submit-header") !== null );
+  assert.ok( host.querySelector("#broadcast-submit-toggle") !== null );
+  assert.ok( host.querySelector("#broadcast-submit-section") !== null );
+  assert.ok( host.querySelector("#broadcast-recipients-row") !== null );
+  assert.ok( host.querySelector("#broadcast-recipients-label") !== null );
+  assert.ok( host.querySelector("#broadcast-recipients-refresh") !== null );
+  assert.ok( host.querySelector("#broadcast-stt-button") !== null );
+  assert.ok( host.querySelector("#broadcast-textarea") !== null );
+  assert.ok( host.querySelector("#broadcast-send-button") !== null );
+  assert.ok( host.querySelector("#broadcast-submit-status") !== null );
 });
 
 test("open state: data-card-open=true, glyph ▼ (section visibility is CSS-driven)", () => {
@@ -66,16 +66,16 @@ test("send button starts disabled", () => {
 test("B1: renders the re-nested commons Recent-Activity chrome inside the card", () => {
   const host = mountFragment(true);
   // The full chrome CommonsActivityRenderer.mount() querySelects must be present.
-  assert.notEqual(host.querySelector("#commons-activity-pane"), null);
-  assert.notEqual(host.querySelector("#commons-activity-header"), null);
-  assert.notEqual(host.querySelector("#commons-activity-window"), null);
-  assert.notEqual(host.querySelector("#commons-activity-filter-direction"), null);
-  assert.notEqual(host.querySelector("#commons-activity-filter-kind"), null);
-  assert.notEqual(host.querySelector("#commons-activity-filter-persona"), null);
-  assert.notEqual(host.querySelector("#commons-activity-refresh"), null);
-  assert.notEqual(host.querySelector("#commons-activity-body"), null);
-  assert.notEqual(host.querySelector("#commons-activity-entries"), null);
-  assert.notEqual(host.querySelector("#commons-activity-empty"), null);
+  assert.ok( host.querySelector("#commons-activity-pane") !== null );
+  assert.ok( host.querySelector("#commons-activity-header") !== null );
+  assert.ok( host.querySelector("#commons-activity-window") !== null );
+  assert.ok( host.querySelector("#commons-activity-filter-direction") !== null );
+  assert.ok( host.querySelector("#commons-activity-filter-kind") !== null );
+  assert.ok( host.querySelector("#commons-activity-filter-persona") !== null );
+  assert.ok( host.querySelector("#commons-activity-refresh") !== null );
+  assert.ok( host.querySelector("#commons-activity-body") !== null );
+  assert.ok( host.querySelector("#commons-activity-entries") !== null );
+  assert.ok( host.querySelector("#commons-activity-empty") !== null );
 });
 
 test("B1: the commons chrome is a DESCENDANT of the broadcast card (not a sibling)", () => {

@@ -126,10 +126,17 @@ class PresenterNotes( BaseModel ):
     Ensures:
         - Contains all information needed to present the slide
     """
-    transition     : Optional[ str ] = None
-    talking_points : List[ str ]     = Field( default_factory=list )
-    timing_seconds : int             = 60
-    emphasis       : Optional[ str ] = None
+    transition         : Optional[ str ] = None
+    talking_points     : List[ str ]     = Field( default_factory=list )
+    timing_seconds     : int             = 60
+    # The model's PRE-CLAMP value (bug d5ecb753). `timing_seconds` is clamped to
+    # [MIN,MAX] for layout, which flattens every over-budget slide to a flat 180
+    # and makes deck-duration reports a fiction. This holds the raw truth so the
+    # clamp can be seen, not silently reported as a measurement. None when the
+    # model omitted timing or emitted a non-integer (there is no raw value to
+    # keep — distinct from a raw value that merely equalled the default).
+    timing_seconds_raw : Optional[ int ] = None
+    emphasis           : Optional[ str ] = None
 
 
 class SlideModel( BaseModel ):

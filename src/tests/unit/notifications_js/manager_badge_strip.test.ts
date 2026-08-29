@@ -95,7 +95,7 @@ test( "no manager badge when the sender has no manager (root session)", () => {
   const icon = document.getElementById( ui._stripIconIdFor( senderId ) ) as HTMLElement;
   assert.ok( icon, "strip icon still created" );
   assert.equal( icon.getAttribute( "data-has-manager" ), null, "no data-has-manager flag" );
-  assert.equal( icon.querySelector( ".cc-strip-manager-badge" ), null, "no badge child" );
+  assert.ok( icon.querySelector( ".cc-strip-manager-badge" ) === null, "no badge child" );
 } );
 
 test( "manager badge is letter-only and tolerates a missing initial", () => {
@@ -122,7 +122,7 @@ test( "_setManagerBadgeOnStripIcon live-patches a badge onto an already-rendered
   // Icon created BEFORE the manager is known (managerPersonaMap empty) → no badge.
   ui._addStripIcon( senderId, "LUPIN", { name: "Rio", color: "#28a745" }, "late01" );
   const icon = document.getElementById( ui._stripIconIdFor( senderId ) ) as HTMLElement;
-  assert.equal( icon.querySelector( ".cc-strip-manager-badge" ), null, "no badge at first render" );
+  assert.ok( icon.querySelector( ".cc-strip-manager-badge" ) === null, "no badge at first render" );
 
   // The voice_persona_assigned event arrives later → live-patch the existing icon.
   ui._setManagerBadgeOnStripIcon( senderId, { initial: "T", color: "#3F51B5", name: "Tiberius" } );
@@ -137,7 +137,7 @@ test( "_setManagerBadgeOnStripIcon is a no-op when the icon does not exist yet",
   buildStripDOM();
   ui._setManagerBadgeOnStripIcon( "claude.code@lupin.deepily.ai#ghost",
                                   { initial: "T", color: "#3F51B5", name: "Tiberius" } );
-  assert.equal( document.querySelector( ".cc-strip-manager-badge" ), null, "nothing rendered, no throw" );
+  assert.ok( document.querySelector( ".cc-strip-manager-badge" ) === null, "nothing rendered, no throw" );
 } );
 
 test( "_applyManagerBadge( icon, null ) clears the badge and the data-has-manager flag", () => {
@@ -150,7 +150,7 @@ test( "_applyManagerBadge( icon, null ) clears the badge and the data-has-manage
   assert.ok( icon.querySelector( ".cc-strip-manager-badge" ), "badge present" );
 
   ui._applyManagerBadge( icon, null );
-  assert.equal( icon.querySelector( ".cc-strip-manager-badge" ), null, "badge removed" );
+  assert.ok( icon.querySelector( ".cc-strip-manager-badge" ) === null, "badge removed" );
   assert.equal( icon.getAttribute( "data-has-manager" ), null, "flag cleared" );
 } );
 

@@ -1,0 +1,18 @@
+ORIGINAL (79 words)
+======================================================================
+Bounced — :7999 is back, health 200. Krishna can run his gate now.
+
+Krishna's three files shipped with it (judge.py, lupin-app-splainer.ini, test_dm_length_thresholds_reload.py), plus my two commits. Also bounced :8000 at Rick's request; it was idle, healthy in 12s.
+
+Correction on my last message: I said I was firing the bounce immediately. Rick stopped that one, and I re-asked before running it — so there was a gap of about ten minutes between my "right now" and the actual restart.
+
+PLACEHOLDER MAP
+======================================================================
+[[L00]]    FILENAME  'judge.py'
+[[L01]]    FILENAME  'lupin-app-splainer.ini'
+[[L02]]    FILENAME  'test_dm_length_thresholds_reload.py'
+[[L03]]    QUOTE     '"right now"'
+
+VERIFY-TIER (must survive unchanged, not substituted)
+======================================================================
+{'12s': 1, '7999': 1, '8000': 1, ':7999': 1, ':8000': 1}

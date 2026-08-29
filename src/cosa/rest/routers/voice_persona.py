@@ -278,6 +278,18 @@ async def allocate_voice_persona_endpoint(
     # misses); the strict-request and plain-allocation paths leave it None.
     chain_conflict: Optional[ dict ] = None
 
+    # The chain walk's per-entry outcomes, threaded onto the SUCCESS result so a
+    # caller can tell a clean first-element hit from a degraded landing — a named
+    # element skipped because it is nonexistent (not_in_pool) or occupied. Reuses
+    # the list allocate_persona_chain_for_session already computed (row 462b985c);
+    # NOT a second derivation. Distinct from chain_conflict: that is wildcard-only
+    # and drives the human notification; this is the full outcomes on every chain
+    # success, so a nonexistent name that lands on a later NAMED element (silent
+    # under chain_conflict, by design) is still visible to the caller. An outcome
+    # you cannot see is the same as one that did not happen (session_spawner.py:1004).
+    # None on the non-chain paths.
+    chain_outcomes: Optional[ dict ] = None
+
     async with _voice_persona_lock:
         # Re-read bridge under the lock — another request may have written
         # between the outer check and acquisition.
@@ -424,6 +436,15 @@ async def allocate_voice_persona_endpoint(
                         }
                     )
                 persona = chain_result[ "persona" ]
+                # Thread the walk's EXISTING per-entry outcomes onto the result,
+                # regardless of whether the wildcard fired — this is what lets a
+                # caller distinguish a degraded landing (a nonexistent/occupied
+                # named element was skipped) from a clean first-element hit.
+                chain_outcomes = {
+                    "satisfied_by"  : chain_result.get( "satisfied_by" ),
+                    "wildcard_used" : chain_result[ "wildcard_used" ],
+                    "outcomes"      : chain_result[ "outcomes" ],
+                }
                 if chain_result[ "wildcard_used" ] and chain_result[ "outcomes" ]:
                     # Named elements missed and the wildcard had to fire —
                     # surface WHO is holding the preferred names so the user
@@ -529,7 +550,8 @@ async def allocate_voice_persona_endpoint(
         "newly_allocated"     : True,
         "swapped"             : swap_from is not None,
         "broadcast_delivered" : broadcast_delivered,
-        "chain_conflict"      : chain_conflict
+        "chain_conflict"      : chain_conflict,
+        "chain_outcomes"      : chain_outcomes
     } )
 
 

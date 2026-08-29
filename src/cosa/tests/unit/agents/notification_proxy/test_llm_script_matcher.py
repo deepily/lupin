@@ -194,6 +194,205 @@ class TestHandleSingle:
         assert out is None
 
 
+class TestCardIdClaim:
+    """
+    Row a1420538. A card that names itself is matched, not guessed at.
+
+    The document choice card's QUESTION is derived per calling agent — "for the
+    podcast", "for the presentation" — so keying the proxy entry on that prose forced
+    one byte-identical copy per agent and let a wording change silently unanswer the
+    card. `card_id` rides in response_options, the entry declares the same id, and the
+    match is exact and happens BEFORE the model is asked anything. That also takes the
+    model out of the path that produced the original defect: asked to pick an option
+    label, it returned the script's directive verbatim.
+    """
+
+    CARD_SCRIPT = {
+        "entries": [
+            { "question_pattern": "Who is the target audience?", "answer": "general" },
+            { "card_id": "document_choice", "answer": "__first_option__",
+              "response_types": [ "multiple_choice" ] },
+        ],
+        "sender_ids"   : [ EXPEDITER ],
+        "profile_name" : "presentation",
+    }
+
+    def _card( self, card_id="document_choice" ):
+        notif = {
+            "response_type"    : "multiple_choice",
+            "message"          : "Which document should I use for the presentation?",
+            "title"            : "Missing: source",
+            "response_options" : { "questions": [ { "options": [ { "label": "kiss.md" } ] } ] },
+        }
+        if card_id is not None:
+            notif[ "response_options" ][ "card_id" ] = card_id
+        return notif
+
+    def test_a_declared_id_answers_without_asking_the_model( self ):
+        s, client = _make_matcher( script=self.CARD_SCRIPT, debug=True )
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( self._card() )
+        assert out == "__first_option__"
+        client.run.assert_not_called()
+
+    def test_the_wording_no_longer_matters( self ):
+        # The point of the id. The same entry answers a card whose question names a
+        # different agent, which under prose keying needed its own copy.
+        s, client = _make_matcher( script=self.CARD_SCRIPT )
+        notif = self._card()
+        notif[ "message" ] = "Which document should I use for the podcast?"
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( notif )
+        assert out == "__first_option__"
+        client.run.assert_not_called()
+
+    def test_the_id_match_is_exact( self ):
+        # An id is a token. A near miss must fall through to the ordinary path rather
+        # than claim the card, or the id stops being an identifier.
+        s, client = _make_matcher( script=self.CARD_SCRIPT )
+        client.run.return_value = SINGLE_MATCH_XML
+        s._processor.process_template.return_value = "{response_type}{title}{incoming_question}{options_section}{script_entries}"
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( self._card( card_id="Document_Choice" ) )
+        assert out == "academic"
+        client.run.assert_called_once()
+
+    def test_a_card_naming_no_id_takes_the_ordinary_path( self ):
+        s, client = _make_matcher( script=self.CARD_SCRIPT )
+        client.run.return_value = SINGLE_MATCH_XML
+        s._processor.process_template.return_value = "{response_type}{title}{incoming_question}{options_section}{script_entries}"
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( self._card( card_id=None ) )
+        assert out == "academic"
+
+    def test_an_id_no_entry_declares_takes_the_ordinary_path( self ):
+        # Adding an id to a card must never make a previously-answered card
+        # unanswerable. No entry claims it, so the prose path still gets its turn.
+        s, client = _make_matcher( script=self.CARD_SCRIPT )
+        client.run.return_value = SINGLE_MATCH_XML
+        s._processor.process_template.return_value = "{response_type}{title}{incoming_question}{options_section}{script_entries}"
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( self._card( card_id="some_other_card" ) )
+        assert out == "academic"
+
+    def test_an_entry_with_an_id_but_no_answer_is_not_a_match( self ):
+        # A half-written entry would otherwise claim the card and answer it with None,
+        # which reads downstream as "no strategy produced an answer" — true, but it
+        # would have silently blocked the strategies that could have.
+        script = { "entries": [ { "card_id": "document_choice" } ],
+                   "sender_ids": [ EXPEDITER ], "profile_name": "presentation" }
+        s, client = _make_matcher( script=script )
+        client.run.return_value = SINGLE_MATCH_XML
+        s._processor.process_template.return_value = "{response_type}{title}{incoming_question}{options_section}{script_entries}"
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( self._card() )
+        assert out == "academic"
+
+    # ── the tag says WHOSE, the id says WHICH (María, row 0c280989) ──────────
+    SCOPED_SCRIPT = {
+        "entries": [
+            { "card_id": "document_describe", "answer": "/tmp/mock-research-document.md",
+              "agents": [ "podcast" ], "response_types": [ "open_ended" ] },
+            { "card_id": "document_describe", "answer": "/tmp/mock-source-document.md",
+              "agents": [ "presentation" ], "response_types": [ "open_ended" ] },
+        ],
+        "sender_ids"   : [ EXPEDITER ],
+        "profile_name" : "all_agents",
+    }
+
+    def _ask_from( self, agent_name, card_id="document_describe", arg_name=None ):
+        options = { "questions": [ { "options": [] } ], "card_id": card_id }
+        if arg_name is not None:
+            options[ "arg_name" ] = arg_name
+        return {
+            "response_type"    : "open_ended",
+            "message"          : "Which document should I use?",
+            "title"            : "Missing: research",
+            "abstract"         : f"Agent: {agent_name}",
+            "response_options" : options,
+        }
+
+    def test_the_id_lookup_honours_the_agent_tag( self ):
+        # THE HOLE MARÍA FOUND, and it was live in the merged card path: the id lookup
+        # returned before _filter_entries_by_agent ever ran and iterated the UNFILTERED
+        # list, so a tagged entry answered every agent. With one id per ask and two
+        # agents in one profile, the podcast's entry would have fed its mock research
+        # path to the presentation agent's `source` argument.
+        # RED ON REVERT (searching self._entries again): the presentation ask gets
+        # '/tmp/mock-research-document.md'.
+        s, client = _make_matcher( script=self.SCOPED_SCRIPT )
+        with patch.object( sm, "cu", _patch_cu() ):
+            podcast      = s.respond( self._ask_from( "podcast" ) )
+            presentation = s.respond( self._ask_from( "presentation" ) )
+        assert podcast      == "/tmp/mock-research-document.md"
+        assert presentation == "/tmp/mock-source-document.md"
+        client.run.assert_not_called()
+
+    def test_an_untagged_entry_still_answers_any_agent( self ):
+        # Narrowing must not become a requirement to tag. Most profiles are
+        # single-agent and carry no tags at all.
+        script = { "entries": [ { "card_id": "document_describe", "answer": "latest",
+                                  "response_types": [ "open_ended" ] } ],
+                   "sender_ids": [ EXPEDITER ], "profile_name": "minimal" }
+        s, _ = _make_matcher( script=script )
+        with patch.object( sm, "cu", _patch_cu() ):
+            assert s.respond( self._ask_from( "podcast" ) )      == "latest"
+            assert s.respond( self._ask_from( "presentation" ) ) == "latest"
+
+    def test_an_agent_with_no_entry_of_its_own_falls_through( self ):
+        # A third agent in a profile that scopes both its entries has no answer here,
+        # and must reach the strategies that might. Answering it from someone else's
+        # entry is the behaviour change this narrowing exists to prevent.
+        s, client = _make_matcher( script=self.SCOPED_SCRIPT )
+        client.run.return_value = SINGLE_MATCH_XML
+        s._processor.process_template.return_value = "{response_type}{title}{incoming_question}{options_section}{script_entries}"
+        with patch.object( sm, "cu", _patch_cu() ):
+            out = s.respond( self._ask_from( "deep_research" ) )
+        assert out == "academic"
+
+    def test_arg_name_narrows_two_entries_sharing_an_id( self ):
+        # An id names the ASK; two agents can ask it for different arguments. Where the
+        # notification names its arg, an entry naming a different one is not a match —
+        # otherwise the choice falls to whichever comes first in the file.
+        script = { "entries": [
+            { "card_id": "document_describe", "arg_name": "research",
+              "answer": "latest", "response_types": [ "open_ended" ] },
+            { "card_id": "document_describe", "arg_name": "source",
+              "answer": "/tmp/mock-source-document.md", "response_types": [ "open_ended" ] },
+        ], "sender_ids": [ EXPEDITER ], "profile_name": "all_agents" }
+        s, _ = _make_matcher( script=script )
+        with patch.object( sm, "cu", _patch_cu() ):
+            assert s.respond( self._ask_from( "podcast", arg_name="research" ) ) == "latest"
+            assert s.respond( self._ask_from( "presentation", arg_name="source" ) ) == "/tmp/mock-source-document.md"
+
+    def test_an_entry_naming_no_arg_answers_an_ask_that_names_one( self ):
+        # Narrowing only ever removes candidates. A generic entry stays generic.
+        script = { "entries": [ { "card_id": "document_describe", "answer": "latest",
+                                  "response_types": [ "open_ended" ] } ],
+                   "sender_ids": [ EXPEDITER ], "profile_name": "minimal" }
+        s, _ = _make_matcher( script=script )
+        with patch.object( sm, "cu", _patch_cu() ):
+            assert s.respond( self._ask_from( "podcast", arg_name="research" ) ) == "latest"
+
+    def test_a_card_id_entry_is_kept_out_of_the_prompt( self ):
+        # It has no question to match on. Listing it would put a BLANK question in
+        # front of the model with a real answer attached — an invitation to answer the
+        # next unrelated question with "__first_option__".
+        s, _ = _make_matcher( script=self.CARD_SCRIPT )
+        formatted = s._format_entries( self.CARD_SCRIPT[ "entries" ] )
+        assert "Who is the target audience?" in formatted
+        assert "__first_option__" not in formatted
+
+    def test_an_entry_carrying_both_an_id_and_a_question_still_reaches_the_prompt( self ):
+        # The exclusion is for entries with NOTHING to match on. One that carries both
+        # is still usable by the prose path and must not be dropped from it.
+        entries   = [ { "card_id": "x", "question_pattern": "Who is the target audience?",
+                        "answer": "general" } ]
+        s, _      = _make_matcher( script=self.CARD_SCRIPT )
+        formatted = s._format_entries( entries )
+        assert "Who is the target audience?" in formatted
+
+
 class TestHandleBatch:
 
     def _process( self, s ):

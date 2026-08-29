@@ -32,7 +32,7 @@ from cosa.memory.input_and_output_table import InputAndOutputTable
 def _make_table() -> InputAndOutputTable:
     """
     Build an InputAndOutputTable with __init__ bypassed, wired with only the
-    async-accounting state. __init__ opens LanceDB / Postgres and constructs
+    async-accounting state. __init__ opens the Postgres store and constructs
     embedding engines — none of which this seam touches.
     """
     table                         = InputAndOutputTable.__new__( InputAndOutputTable )

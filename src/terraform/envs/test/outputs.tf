@@ -15,11 +15,6 @@ output "runtime_sa_email" {
   description = "Data-plane service account (integration follow-up: bind to the app's vm_sa instead)."
 }
 
-output "lancedb_bucket" {
-  value       = module.gcs_buckets.lancedb_bucket_name
-  description = "LanceDB GCS bucket name."
-}
-
 output "vpn_gateway_ip" {
   value       = module.onprem_vpn.vpn_gateway_ip
   description = "GCP VPN gateway IP for on-prem peer config (empty unless enable_vpn)."
