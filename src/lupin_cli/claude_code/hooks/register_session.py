@@ -1271,11 +1271,15 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
     """
     Find THIS seat's memento at the repo root.
 
-    Two-step, and the ORDER is the whole design:
+    Three-step, and the ORDER is the whole design:
 
       1. Exact session-id match. A self-re-spin types `/clear` into its own
          pane and keeps its session id, so when a record names this id it is
          unambiguously ours — the strongest signal available.
+      1.5 The canonical live slot `io/mementos/<slug>.md` in THIS repo. It is
+         where writers put the current record, so an exact-name hit beats any
+         historical sibling — including a sibling that carries a `written_at`
+         the bare slot does not (row f99bed95).
       2. Newest record for this PERSONA. A re-spin done as dismiss-then-spawn
          arrives as a brand-new session, so step 1 finds nothing while the
          memento sits right there named for the OLD id. The persona is what
@@ -1295,6 +1299,9 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
     Ensures:
         - Returns a confirmed memento path, or None when nothing resolves
         - Never returns a record belonging to a different persona
+        - Prefers this repo's `io/mementos/<slug>.md` over every sibling once an
+          exact session-id match has failed; never prefers the MIRROR's copy of
+          that same bare name
         - Never raises
     """
     sid8  = stable_session_id[:8] if stable_session_id and len( stable_session_id ) >= 8 else None
@@ -1310,6 +1317,28 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
         for path, header, _ in candidates:
             if header and f"session_id={sid8}" in header:      return path
             if os.path.basename( path ).endswith( f"-{sid8}.md" ): return path
+
+    # 1.5 THE CANONICAL LIVE SLOT OUTRANKS EVERY HISTORICAL SIBLING (row f99bed95).
+    #     `<repo_root>/io/mementos/<slug>.md` is the slot the fleet's writers target and
+    #     the one `reap_memento.seat_memento_slot` verifies. It is a BARE name, so it
+    #     frequently carries no `written_at` header — and step 2's ranking demotes an
+    #     unstamped record below EVERY stamped one, regardless of age. Measured against
+    #     the live tree on 2026-08-29: Rio's fresh 18:35 `io/mementos/rio.md` ranked 44th
+    #     of 79 and the resolver returned `rio-ea46bc1a.md`, 2.8 days old. The successor's
+    #     boot receipt then named that file and the wake check alarmed STALE_MEMENTO
+    #     against a seat that was fine.
+    #
+    #     Only the REPO's slot qualifies. The mirror holds a same-named `<slug>.md` whose
+    #     copy goes stale on its own schedule — that is what respin_wake_check's
+    #     SLOT_MIRROR alarm exists to catch, so it must not be promoted here.
+    #
+    #     Persona is still confirmed before the slot is accepted: a bare name is a claim,
+    #     and handing a seat another persona's state stays worse than handing it none.
+    for slug in slugs:
+        slot = os.path.normpath( os.path.join( repo_root, "io", "mementos", f"{slug}.md" ) )
+        for path, header, _ in candidates:
+            if os.path.normpath( path ) == slot and _persona_of( path, header ) == slug:
+                return path
 
     # 2. Newest record for this persona — survives dismiss-then-spawn, where
     #    the seat is new but the persona carried over. Slugs are tried in
