@@ -76,8 +76,16 @@ def _snapshot( **fields ):
     fake missing `crud_factory`, which broke a dozen tests on paths production handles fine.
 
     Tests that WANT an unconfirmed row pass answer_is_correct=None or False explicitly.
+
+    `id_hash` is defaulted for the SAME reason, and it is the third time this shape has
+    bitten (row 7e2125a7, D7). A real SolutionSnapshot ALWAYS has one — the constructor
+    binds it on both of its branches, generated or supplied — so a fake without it is not a
+    stricter test, it is an unfaithful one: the replay path reads the id of the row it is
+    about to serve, and a fake that omits it fails on a path production handles fine.
+    Tests asserting on the recorded id pass id_hash= explicitly.
     """
     fields.setdefault( "answer_is_correct", True )
+    fields.setdefault( "id_hash", "snap-id-hash" )
     return types.SimpleNamespace( **fields )
 
 
@@ -3046,6 +3054,180 @@ class TestAWrittenRowCanActuallyBeReplayed:
         assert r[ "error" ] is not None, "a failed replay still reached the client with error=null"
         assert "empty code list" in r[ "error" ]
 
+    def test_a_failed_replay_names_the_row_it_read( self, tmp_path, notifier, monkeypatch ):
+        """
+        Row 7e2125a7, D7 — THE FAILURE COULD NOT BE TRACED TO A SNAPSHOT.
+
+        MEASURED in eval-2026-08-21-11-37-48, and the asymmetry is the whole defect:
+            route_reason=exact_hit      job_id present on  85 of  85 rows
+            route_reason=replay_error   job_id present on   0 of 126 rows
+        A successful replay named its row (the replay Outcome's job_id IS the row's
+        id_hash); a FAILED one named nothing, because `_receptionist` builds a NEW Outcome
+        and every field of the failed replay's outcome is discarded at that boundary — the
+        same boundary, and the same reason, that loses the router's command.
+
+        ⚠️ ASSERTS ON THE EMITTED RECORD, NOT ON THE OUTCOME. The original D7 was a
+        one-line change to the executor's Outcome that would have passed any
+        Outcome-level assertion and changed nothing in the artifact, because nothing
+        downstream reads that field. Only reading what the flow actually emits can tell
+        the difference.
+
+        RED ON REVERT: drop replayed_snapshot_id= from the replay degrade call and this
+        goes None while `test_a_failed_replay_now_says_why` above stays green.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        snap     = _snapshot( routing_command="agent router go to math", id_hash="ROW-THAT-FAILED" )
+        cache    = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+        outcomes = [ _outcome( status="failed", answer=None, error="Cannot execute empty code list" ),
+                     _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work )
+                return outcomes.pop( 0 )
+
+        f = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), _SeqExecutor(),
+                        FakePending(), notifier )
+
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "route_reason" ] == "replay_error"
+        assert r[ "replayed_snapshot_id" ] == "ROW-THAT-FAILED", (
+            "a failed replay must name the row it read — that is the whole of D7" )
+
+    def test_the_id_survives_a_replay_that_dies_before_the_executor_reads_the_row(
+        self, tmp_path, notifier, monkeypatch
+    ):
+        """
+        🔴 THE SUB-CASE THAT KILLED THE ORIGINAL D7, TESTED DIRECTLY.
+
+        D7 as ratified read the id off the EXECUTOR, where `job_id = snap.id_hash` binds
+        INSIDE the try, one line after `work.job.for_current_user(...)` — a call that can
+        itself raise. On that earliest failure the name is unbound, so referencing it in
+        the handler raises NameError INSIDE THE EXCEPTION HANDLER: a cleanly recorded
+        degrade becomes an uncaught crash, on the exact path this row exists to make
+        observable.
+
+        Reading the id from the row the FLOW already holds cannot be skipped by any
+        failure inside the replay, which is why this test raises before the executor gets
+        anywhere near the snapshot and still expects the id.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        snap  = _snapshot( routing_command="agent router go to math", id_hash="ROW-READ-BEFORE-THE-CRASH" )
+        cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+
+        class _DiesImmediately( FakeExecutor ):
+            """Fails at the FIRST thing _replay does, before any id could be bound."""
+            def __init__( self ):
+                super().__init__()
+                self._first = True
+            def submit( self, work, trace ):
+                self.works.append( work )
+                if self._first:
+                    self._first = False
+                    return _outcome( status="failed", answer=None,
+                                     error="per-user copy failed before the snapshot was read" )
+                return _outcome( status="done" )
+
+        f = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), _DiesImmediately(),
+                        FakePending(), notifier )
+
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "route_reason" ] == "replay_error"
+        assert r[ "replayed_snapshot_id" ] == "ROW-READ-BEFORE-THE-CRASH"
+
+    def test_a_successful_replay_names_its_row_under_its_own_key( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE CONTROL, and the reason this is a NEW key rather than a reuse of `job_id`.
+
+        `job_id` already carried the row id on the SUCCESS path — but on the agent path the
+        same key means a QUEUE job id. One key with two meanings cannot be grouped on, so
+        the row identity gets its own name and is set on BOTH replay exits. Without this
+        assertion the new field could have been wired only into the failure path, and a
+        consumer computing a per-row failure RATE would have a numerator and no denominator.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        snap  = _snapshot( routing_command="agent router go to math", id_hash="ROW-THAT-SERVED" )
+        cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( outcome=_outcome( status="done" ) ), FakePending(), notifier )
+
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "route_reason" ] == "exact_hit"
+        assert r[ "replayed_snapshot_id" ] == "ROW-THAT-SERVED"
+
+    def test_a_route_that_never_replayed_carries_no_row_id( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE NEGATIVE CONTROL. A field stamped on every exit says nothing. An agent route
+        read no cached row, so it must report None rather than a plausible-looking id —
+        which is the defect family this whole row is about: a confident value nobody
+        observed.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        cache = FakeCache( lookup_result=_lookup( is_replay_hit=False ) )
+        f     = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(),
+                            FakeExecutor( outcome=_outcome( status="done" ) ), FakePending(), notifier )
+
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "route_reason" ] != "exact_hit"
+        assert r[ "replayed_snapshot_id" ] is None
+
+    def test_the_row_id_SURVIVES_THE_RESPONSE_MODEL_and_reaches_the_client(
+        self, tmp_path, notifier, monkeypatch
+    ):
+        """
+        🔴 THIS IS NOT REDUNDANT WITH THE TESTS ABOVE. DO NOT DELETE IT.
+
+        The tests above assert on the dict the FLOW returns. The client never sees that
+        dict: `/api/v2/ask` and `/api/v2/submit` both pass it through
+        `AskResponse( **result )`, and pydantic's default `extra` policy is **ignore** — so
+        a key the model does not declare is DROPPED IN SILENCE, with no error anywhere.
+
+        MEASURED before the model was updated:
+            AskResponse( ..., replayed_snapshot_id="ROW" ).model_dump()
+              -> the key is absent. The client receives nothing.
+
+        That is D7's own failure mode one layer further out: the original D7 attached a
+        field to an object that was discarded downstream, and it would have passed every
+        assertion made on that object. A field added to the flow but not to the response
+        model is the same defect wearing the fix's clothes — the eval artifact would be
+        exactly as empty as before while every flow test stayed green.
+
+        RED ON REVERT: remove `replayed_snapshot_id` from AskResponse and this reddens
+        while all four flow-level tests above stay green.
+        """
+        from cosa.rest.routers.v2_ask import AskResponse
+
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        snap     = _snapshot( routing_command="agent router go to math", id_hash="ROW-THE-CLIENT-MUST-SEE" )
+        cache    = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+        outcomes = [ _outcome( status="failed", answer=None, error="Cannot execute empty code list" ),
+                     _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work )
+                return outcomes.pop( 0 )
+
+        f = _make_flow( tmp_path, cache, FakeRouter(), FakeExpeditor(), _SeqExecutor(),
+                        FakePending(), notifier )
+
+        result   = f.ask( "what is 2+2", **_CTX )
+        # The exact call both routers make. Anything the model does not declare dies here.
+        delivered = AskResponse( **result ).model_dump()
+
+        assert delivered[ "replayed_snapshot_id" ] == "ROW-THE-CLIENT-MUST-SEE", (
+            "the flow recorded the row but the response model dropped it — the client, "
+            "and therefore the eval artifact, would see nothing" )
+
 
 # ────────────────────────────── 6b — the near-match ask
 
@@ -3109,6 +3291,44 @@ class TestTheFlowAsksAboutANearMatch:
         assert r[ "path" ] == "replay"
         assert r[ "route_reason" ] == "near_match_confirmed"
         assert r[ "cache_hit" ] is True
+
+    def test_a_confirmed_near_match_that_then_FAILS_still_names_the_row( self, tmp_path, notifier, monkeypatch ):
+        """
+        Row 7e2125a7, D7 — the SECOND replay door, which had no test of its own at all.
+
+        The near-match degrade (`flow.py`, the `replay_error` return under 2b) was an
+        UNCOVERED LINE before this: every near-match test served a row successfully, so
+        nothing exercised a near match that the user confirmed and that then died. It is
+        the same defect on a different door, and a fix wired only into the exact-hit path
+        would have looked complete and left this one silent.
+
+        RED ON REVERT: drop replayed_snapshot_id= from the near-match degrade call.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        candidate = _snapshot( question="what is on my todo list", id_hash="NEAR-ROW-THAT-FAILED" )
+        cache     = FakeCache( lookup_result=_lookup( is_replay_hit=False, best_candidate=candidate,
+                                                      best_score=95.0, similarity=95.0, tier="ann" ) )
+        outcomes  = [ _outcome( status="failed", answer=None, error="Cannot execute empty code list" ),
+                      _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work )
+                return outcomes.pop( 0 )
+
+        f = AskFlow(
+            cache, FakeRouter(), FakeExpeditor(), _SeqExecutor(), FakePending(),
+            crud_enabled=False, confirmation_threshold=90.0, confirmation_enabled=True,
+            confirmer=_FakeConfirmer( response_value="yes" ), receptionist_factory=FakeReceptionist,
+            notifier=notifier, trace_dir=str( tmp_path ),
+        )
+
+        r = f.ask( "what's on my todo list", **_CTX )
+
+        assert r[ "route_reason" ] == "replay_error"
+        assert r[ "replayed_snapshot_id" ] == "NEAR-ROW-THAT-FAILED", (
+            "the near-match door must name its row too — a fix on one door only is half a fix" )
 
     def test_the_question_is_the_one_the_voice_path_asks( self, tmp_path, notifier, monkeypatch ):
         """
