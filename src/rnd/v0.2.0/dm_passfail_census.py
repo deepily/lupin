@@ -24,6 +24,21 @@ RATIO = re.compile( r"\b(\d+)\s*(?:out of|of|/)\s*(\d+)\b", re.I )
 # A numeral bound to an outcome word, either order: "19 passed", "exits 4", "exit code 4".
 BOUND = re.compile( rf"\b(\d+)\s+{OUTCOME}\b|\b{OUTCOME}\s+(?:of\s+|code\s+|with\s+)?(\d+)\b", re.I )
 
+# The BARE PRESENT TENSE — "3 fail", "19 pass" — which OUTCOME above does not contain.
+#
+# ⚠️ THIS EXISTS BECAUSE ITS ABSENCE HID A REAL SPECIMEN — row `7fb0db55`. OUTCOME lists
+# inflected forms only (passed/passing/failed/failing/failure), so a sender writing
+# "so 3 fail and 2 pass" stated a test result that the gate could not see. Measured over
+# the corpus: 79 rows, 8.1% of the widened denominator, were invisible for that reason —
+# and one of the two real corruptions in the whole census was among them. The detector was
+# never blind to it; the gate in front of the detector was.
+#
+# LEADING FORM ONLY, deliberately. Trailing bare "pass 3" / "pass 2" is an ORDINAL — a
+# review pass, a second sweep — not a result. Admitting it added junk to the denominator
+# and deflated the rate; sampling found it at roughly one row in seven. The inflected forms
+# keep their trailing form in BOUND above, where "passed 16861" and "green 20/20" live.
+BARE_LEAD = re.compile( r"\b(\d+)\s+(?:pass|passes|fail|fails)\b", re.I )
+
 # Delivered text asserting something went wrong.
 ASSERTS_FAILURE = re.compile( r"\b(?:failure|failed|failing|error|did not exit|not exit|unsuccessful)\b", re.I )
 
@@ -31,13 +46,13 @@ ASSERTS_FAILURE = re.compile( r"\b(?:failure|failed|failing|error|did not exit|n
 def carries_a_result( submitted ):
     """True when the SUBMITTED body states a test or exit result at all — the denominator."""
 
-    return bool( BOUND.search( submitted ) )
+    return bool( BOUND.search( submitted ) or BARE_LEAD.search( submitted ) )
 
 
 def bound_numerals( text ):
     """The numerals this text binds to an outcome word."""
 
-    return { a or b for a, b in BOUND.findall( text ) }
+    return { a or b for a, b in BOUND.findall( text ) } | set( BARE_LEAD.findall( text ) )
 
 
 def ratios( text ):
@@ -99,7 +114,8 @@ def main():
     print( "POSITIVE CONTROLS — a method that misses these is measuring something else" )
     print( "=" * 78 )
     for label, needle in ( ( "1  Rio  19-of-21 (re-bound quantity)", "those 21 tests need" ),
-                           ( "2  Tiberius exit-4 (dropped + inverted)", "it does not exit 0" ) ):
+                           ( "2  Tiberius exit-4 (dropped + inverted)", "it does not exit 0" ),
+                           ( "3  Rio  3-of-5 (deterministic -> flaky)", "so 3 fail and 2 pass" ) ):
         found = [ r for r in denom if needle in ( r.get( "body" ) or "" ) ]
         caught = [ r for r in found if id( r ) in corrupted ]
         print( f"  {label:42s} in denominator: {len(found)}   flagged: {len(caught)}" )
@@ -115,8 +131,14 @@ def main():
     print( f"  D2 dropped result + failure claim              {len(d2_hits):6d}" )
     print( f"  corrupted (union)                              {len(corrupted):6d}" )
     if denom:
-        print( f"  RATE                                           {100*len(corrupted)/len(denom):6.2f}%  "
-               f"({len(corrupted)}/{len(denom)})" )
+        # ONE rate, for ONE shape. D1 is surface-checkable and passes its own controls, so it
+        # gets a number. D2 is DISQUALIFIED by this row's own criterion — it misses positive
+        # control 2 — so its count prints and its rate does not. A union rate would launder a
+        # disqualified detector into a publishable figure.
+        print( f"  D1 RATE (ratio re-binding)                     {100*len(d1_hits)/len(denom):6.2f}%  "
+               f"({len(d1_hits)}/{len(denom)})" )
+        print(  "  D2 RATE (verdict inversion)                    NONE — detector misses control 2" )
+        print( f"  union count, NOT a rate                        {len(corrupted):6d}" )
     if rows:
         span = ( min( r.get("ts","") for r in rows ), max( r.get("ts","") for r in rows ) )
         print( f"  window                                         {span[0]}  ->  {span[1]}" )
@@ -137,5 +159,5 @@ def main():
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - script entry point, exercised by running the file
     sys.exit( main() )
