@@ -87,16 +87,24 @@ def _citing_pragmas():
         - this file is skipped; it necessarily contains every phrase it bans
     """
     root      = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
-    offenders = [ ]
+    offenders  = [ ]
+    unreadable = [ ]
 
     for path in _iter_python_files():
         if os.path.abspath( path ) == os.path.abspath( __file__ ):
             continue
         try:
-            with open( path, encoding="utf-8" ) as handle:
-                lines = handle.readlines()
-        except ( UnicodeDecodeError, OSError ):
+            with open( path, "rb" ) as handle:
+                raw = handle.read()
+        except OSError as e:
+            # Skip so one bad path cannot take the sweep down — but record it, because a
+            # file this sweep never read is a file it never cleared (row 5c3f3d94).
+            unreadable.append( f"{path}: {type( e ).__name__}: {e}" )
             continue
+
+        # Decode permissively rather than skipping: a non-UTF8 file used to drop out of the
+        # census silently. Replacement preserves newlines, so line numbers stay honest.
+        lines = raw.decode( "utf-8", errors="replace" ).splitlines( keepends=True )
 
         for lineno, line in enumerate( lines, start=1 ):
             match = _PRAGMA_RE.search( line )
@@ -106,7 +114,7 @@ def _citing_pragmas():
             if _CITING_RE.search( reason ):
                 offenders.append( ( os.path.relpath( path, root ), lineno, reason.strip() ) )
 
-    return offenders
+    return offenders, unreadable
 
 
 def test_no_pragma_reason_claims_coverage_lives_elsewhere():
@@ -117,7 +125,12 @@ def test_no_pragma_reason_claims_coverage_lives_elsewhere():
         - the failure NAMES every offender with file and line, so acting on it
           does not require re-running a search
     """
-    offenders = _citing_pragmas()
+    offenders, unreadable = _citing_pragmas()
+
+    assert unreadable == [ ], (
+        f"{len( unreadable )} file(s) could not be opened, so this policy sweep never "
+        f"checked them:\n  " + "\n  ".join( unreadable ) )
+
 
     assert not offenders, (
         "A `pragma: no cover` reason must say why the LINE is unreachable. It may not\n"
@@ -181,12 +194,16 @@ def test_the_scan_actually_reads_the_tree():
     seen_any = False
     for path in files:
         try:
-            with open( path, encoding="utf-8" ) as handle:
-                if any( _PRAGMA_RE.search( line ) for line in handle ):
-                    seen_any = True
-                    break
-        except ( UnicodeDecodeError, OSError ):
+            with open( path, "rb" ) as handle:
+                raw = handle.read()
+        except OSError:
+            # This is the CONTROL loop — it only has to find one pragma anywhere, and its
+            # own assertion below reddens if it finds none. An unopenable path here cannot
+            # hide anything, so skipping is safe and stays a skip.
             continue
+        if _PRAGMA_RE.search( raw.decode( "utf-8", errors="replace" ) ):
+            seen_any = True
+            break
 
     assert seen_any, "found no `pragma: no cover` anywhere — the matcher is broken, not the tree clean"
 

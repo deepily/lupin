@@ -75,13 +75,15 @@ def _tracked_python_files():
     return [ line for line in out.stdout.splitlines() if line.strip() ]
 
 
-def _offenders( files=None, root=None ):
+def _offenders( files=None, root=None, skipped=None ):
     """
     Every ( path, line_number ) in tracked Python carrying the banned literal.
 
     Ensures:
         - scans docstrings and comments as well as code
-        - unreadable or non-UTF8 files are skipped rather than crashing the sweep
+        - a non-UTF8 file is READ AS BYTES rather than skipped, so it stays in the sweep
+        - a file that cannot be opened at all is skipped rather than crashing the sweep,
+          and is recorded in `skipped` so the omission is visible (row 5c3f3d94)
         - the files/root arguments exist so the sweep can be driven against a
           throwaway tree in BOTH directions, clean and dirty
     """
@@ -90,11 +92,19 @@ def _offenders( files=None, root=None ):
     for rel in ( _tracked_python_files() if files is None else files ):
         path = os.path.join( root, rel )
         try:
-            with open( path, "r", encoding="utf-8" ) as f:
-                for n, line in enumerate( f, start=1 ):
-                    if BANNED_LITERAL in line: found.append( ( rel, n ) )
-        except ( OSError, UnicodeDecodeError ):
+            with open( path, "rb" ) as f:
+                raw = f.read()
+        except OSError as e:
+            # Cannot be opened at all. Skip so one bad path cannot take the guard down —
+            # but record it, because a file this sweep never read is a file it never cleared.
+            if skipped is not None: skipped.append( f"{rel}: {type( e ).__name__}: {e}" )
             continue
+
+        # Decode permissively rather than skipping. A non-UTF8 file used to drop OUT of a
+        # SECURITY sweep entirely; you cannot certify a file you refused to read. Line
+        # numbering is preserved because replacement never removes a newline.
+        for n, line in enumerate( raw.decode( "utf-8", errors="replace" ).splitlines(), start=1 ):
+            if BANNED_LITERAL in line: found.append( ( rel, n ) )
     return found
 
 
@@ -157,7 +167,14 @@ def test_no_password_literal_in_tracked_python():
     if not _tracked_python_files():
         pytest.skip( "git ls-files returned nothing — cannot enumerate tracked Python here" )
 
-    offenders = _offenders()
+    skipped   = [ ]
+    offenders = _offenders( skipped=skipped )
+
+    assert skipped == [ ], (
+        f"{len( skipped )} tracked Python file(s) could not be opened, so this sweep never "
+        f"cleared them — a file it did not read is not a file it certified:\n  "
+        + "\n  ".join( skipped ) )
+
     assert not offenders, (
         f"{len( offenders )} plaintext password literal(s) at the tip of a PUBLIC repo:\n  "
         + "\n  ".join( f"{rel}:{n}" for rel, n in offenders )
@@ -201,6 +218,38 @@ def test_unreadable_and_missing_files_do_not_crash_the_sweep( tmp_path ):
     ( tmp_path / "dirty.py" ).write_text( 'pw = "%s"\n' % BANNED_LITERAL )
 
     assert _offenders( files=[ "binary.py", "missing.py", "dirty.py" ], root=str( tmp_path ) ) == [ ( "dirty.py", 1 ) ]
+
+
+def test_a_non_utf8_file_is_still_searched( tmp_path ):
+    """
+    The blind spot row 5c3f3d94 closed. A non-UTF8 file used to raise UnicodeDecodeError and
+    drop OUT of this SECURITY sweep entirely — you cannot certify a file you refused to read.
+    Reddens if the reader goes back to skipping on a decode error.
+
+    The literal is taken from the module under test, never typed here.
+    """
+    payload = b"\xff\xfe garbage " + BANNED_LITERAL.encode() + b" more \xff\n"
+    ( tmp_path / "binary_with_literal.py" ).write_bytes( payload )
+
+    assert _offenders( files=[ "binary_with_literal.py" ], root=str( tmp_path ) ) == [ ( "binary_with_literal.py", 1 ) ]
+
+
+def test_an_unopenable_file_is_recorded_rather_than_vanishing( tmp_path ):
+    """
+    A file the sweep cannot open at all is still skipped — one bad path must not take the
+    guard down — but it is now RECORDED, so the omission is visible. Reddens if the skip
+    goes back to being silent.
+    """
+    locked = tmp_path / "locked.py"
+    locked.write_text( "x = 1\n" )
+    locked.chmod( 0o000 )
+    skipped = [ ]
+
+    try:
+        assert _offenders( files=[ "locked.py" ], root=str( tmp_path ), skipped=skipped ) == [ ]
+        assert len( skipped ) == 1 and skipped[ 0 ].startswith( "locked.py: PermissionError" )
+    finally:
+        locked.chmod( 0o644 )
 
 
 def test_tracked_file_listing_is_empty_when_git_is_unavailable( monkeypatch ):
