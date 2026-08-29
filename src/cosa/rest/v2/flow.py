@@ -205,7 +205,8 @@ class AskFlow:
             if agentic is not None:
                 return self._ask_agentic( trace, agentic, command, raw_args, question, ctx, interactive )
             return self._receptionist( trace, question, ctx,
-                                       self._unresolved_route_reason( command ) )
+                                       self._unresolved_route_reason( command ),
+                                       routed_command=self._unresolved_routed_command( command ) )
 
         # 2 — cache: replay only on a tier-1 exact hit (R-C1); below perfect, run the agent.
         #
@@ -259,7 +260,8 @@ class AskFlow:
                 # not say why (bug 38815328).
                 return self._receptionist( trace, question, ctx, "replay_error",
                                            primary_error=outcome.error,
-                                           replayed_snapshot_id=replayed_id )
+                                           replayed_snapshot_id=replayed_id,
+                                           routed_command=command )
 
             # 2b — the NEAR match. Above the confirmation threshold but short of exact,
             # so the flow asks the user the question the voice path asks today and
@@ -279,7 +281,8 @@ class AskFlow:
                                          replayed_snapshot_id=replayed_id )
                 return self._receptionist( trace, question, ctx, "replay_error",
                                            primary_error=outcome.error,
-                                           replayed_snapshot_id=replayed_id )
+                                           replayed_snapshot_id=replayed_id,
+                                           routed_command=command )
 
         # 3 — arguments.
         if not spec.required_args:
@@ -290,7 +293,8 @@ class AskFlow:
             extraction = self.expeditor.extract( command, raw_args, question, arg_spec )
         except Exception as e:
             trace.set( "extract_error", str( e ) )
-            return self._receptionist( trace, question, ctx, "extract_error" )
+            return self._receptionist( trace, question, ctx, "extract_error",
+                                       routed_command=command )
         trace.update( args_known=sorted( extraction.final_args.keys() ), args_missing=list( extraction.missing ) )
         if extraction.missing:
             return self._needs_input( trace, command, extraction, question, ctx, interactive )
@@ -425,7 +429,8 @@ class AskFlow:
                                              scheduled_at, monopolize, parent_id_hash )
             route_reason = self._unresolved_route_reason( command )
             if route_reason == "unknown_command": trace.set( "unknown_command", command )
-            return self._receptionist( trace, question or command, ctx, route_reason )
+            return self._receptionist( trace, question or command, ctx, route_reason,
+                                       routed_command=self._unresolved_routed_command( command ) )
 
         if directives_set: trace.set( "queue_directives_ignored", ",".join( directives_set ) )
 
@@ -534,7 +539,8 @@ class AskFlow:
             extraction = self.expeditor.extract( command, raw_args, question, arg_spec )
         except Exception as e:
             trace.set( "extract_error", str( e ) )
-            return self._receptionist( trace, question, ctx, "extract_error" )
+            return self._receptionist( trace, question, ctx, "extract_error",
+                                       routed_command=command )
 
         trace.update( args_known=sorted( extraction.final_args.keys() ),
                       args_missing=list( extraction.missing ) )
@@ -610,14 +616,15 @@ class AskFlow:
         except Exception as e:
             trace.set( "agentic_build_error", str( e ) )
             return self._receptionist( trace, question or command, ctx, "agentic_build_error",
-                                       primary_error=str( e ) )
+                                       primary_error=str( e ), routed_command=command )
         if job is None:
             # The factory returns None for a command it does not know. The registry said
             # it was agentic, so the two tables disagree — say which command, because a
             # bare receptionist here would send the next reader hunting.
             trace.set( "agentic_build_error", f"factory returned None for {command}" )
             return self._receptionist( trace, question or command, ctx, "agentic_build_error",
-                                       primary_error=f"factory returned None for {command}" )
+                                       primary_error=f"factory returned None for {command}",
+                                       routed_command=command )
 
         return self._submit_prebuilt( trace, job, question or command, ctx )
 
@@ -635,7 +642,15 @@ class AskFlow:
         # a new non-success status appears — it would fall through as a success here while
         # both gates above refused it.
         if outcome.status not in SUCCESS_STATUSES:
-            return self._receptionist( trace, question, ctx, "agent_error", primary_error=outcome.error )
+            # `job.routing_command`, NOT `command` — there is no `command` in this scope, and
+            # my first pass wrote one here and raised NameError on the degrade path. Caught
+            # by test_a_prebuilt_job_that_fails_degrades_to_the_receptionist, which is the
+            # same failure D7's ratified form would have had: a record-improving change that
+            # crashes the exact path it was meant to make readable. The success exit two
+            # lines below already reads `job.routing_command`; the degrade now agrees with it.
+            return self._receptionist( trace, question, ctx, "agent_error",
+                                       primary_error=outcome.error,
+                                       routed_command=job.routing_command )
         # `routing_command` is REQUIRED by the QueueableJob protocol (queue_protocol.py:61),
         # so read it. It used to be a getattr with an "" fallback, which would have turned a
         # job that violates the protocol into a row with a blank command — silently, and into
@@ -1074,7 +1089,8 @@ class AskFlow:
         # to `!= "done"` and EVERY queued job degrades to the receptionist the moment
         # it is handed off, while the real agent still runs behind it.
         if outcome.status not in SUCCESS_STATUSES:
-            return self._receptionist( trace, question, ctx, "agent_error", primary_error=outcome.error )
+            return self._receptionist( trace, question, ctx, "agent_error",
+                                       primary_error=outcome.error, routed_command=command )
         return self._finish( trace, "agent", route_reason, outcome, question, ctx,
                              command=command, snapshotable=may_cache,
                              agent_class_name=spec.factory.__name__, agent_label=spec.label )
@@ -1146,6 +1162,30 @@ class AskFlow:
     RECEPTIONIST_COMMAND = "agent router go to receptionist"
 
     @classmethod
+    def _unresolved_routed_command( cls, command: str ) -> Optional[ str ]:
+        """The route to RECORD for a command that did not resolve (row 13e7c573).
+
+        THE ONE PLACE THE 8-vs-4 SPLIT IS NOT CLEAN. A command that failed to resolve
+        usually means no route was chosen, and recording it would assert a decision the
+        router did not make. But ONE sub-case is a genuine route: the receptionist is a
+        POSITIVE choice in the router's own command list, so `user_picked_receptionist`
+        means somebody really did select it and the receptionist really is the right
+        answer. Recording None there would throw away a real route.
+
+        DERIVED FROM `_unresolved_route_reason` RATHER THAN RE-DERIVED, deliberately: two
+        copies of "is this the deliberate pick" would drift, and a marker that disagrees
+        with the command beside it is the defect family this row belongs to.
+
+        Requires:
+            - command is the command the ROUTER or the CALLER named
+
+        Ensures:
+            - returns the command when it IS the deliberate receptionist pick
+            - returns None otherwise — `route_reason` already says which door it was
+        """
+        return command if cls._unresolved_route_reason( command ) == "user_picked_receptionist" else None
+
+    @classmethod
     def _unresolved_route_reason( cls, command: str ) -> str:
         """Why an unresolvable command is going to the receptionist.
 
@@ -1157,12 +1197,19 @@ class AskFlow:
               receptionist, i.e. somebody asked for it on purpose
             - returns "unknown_command" otherwise
 
-        🔴 READS THE INCOMING COMMAND, NEVER THE EMITTED ONE. Every degrade emits
-        command="agent router go to receptionist" because `_receptionist` rewrites it,
-        so deriving the marker from the emitted command would set it on every degrade —
-        a marker both doors can set is worse than no marker, because it looks like a
-        distinction. The degrade callers pass their own literal reason and never reach
-        this helper at all, which is what makes the marker unfakeable by construction.
+        🔴 READS THE INCOMING COMMAND, NEVER THE EMITTED ONE. The degrade callers pass
+        their own literal reason and never reach this helper at all, which is what makes
+        the marker unfakeable by construction.
+
+        ⚠️ THE ORIGINAL REASON FOR THAT IS NOW HISTORY, and the line is kept because the
+        property is still worth having. This used to read: "every degrade emits
+        command='agent router go to receptionist' because `_receptionist` rewrites it, so
+        deriving the marker from the emitted command would set it on every degrade — a
+        marker both doors can set is worse than no marker." That rewrite is GONE (row
+        13e7c573): a degrade now emits the route the router chose, or None where none was
+        chosen, so the emitted command would today be a usable discriminator. Reading the
+        incoming command remains correct and is one fewer thing to re-verify when the
+        emitted value changes again.
 
         ⚠️ THE TWO DOORS DO NOT MEAN QUITE THE SAME THING BY "PICKED" (Clayton, via
         Cheech, 2026-08-23). On `submit` the caller hands us the command, so a deliberate
@@ -1236,13 +1283,32 @@ class AskFlow:
 
     def _receptionist( self, trace: StageTrace, question: str, ctx: tuple, route_reason: str,
                        primary_error: Optional[ str ]=None,
-                       replayed_snapshot_id: Optional[ str ]=None ) -> dict:
+                       replayed_snapshot_id: Optional[ str ]=None,
+                       routed_command: Optional[ str ]=None ) -> dict:
         """The else — run the receptionist inline (its failure is terminal, no recursion).
 
         primary_error carries the FAILURE THAT CAUSED THE DEGRADE. Without it the
         emitted error is the fallback's, and a live failure reports why the
         receptionist died while saying nothing about why the real agent did — which
         is a fallback that hides the fault it was reached by.
+
+        routed_command IS THE ROUTE THE ROUTER ACTUALLY CHOSE (row 13e7c573), and passing it
+        is the whole of that fix. This exit used to report `command=RECEPTIONIST_COMMAND`
+        unconditionally, overwriting the router's decision with one nobody made — and doing
+        it in well-formed fashion, so no consumer could see it. It was the ONLY exit that
+        did: replay, agent, submitted_prebuilt and needs_input all report the route.
+
+        ⚠️ IT IS None AT THE FOUR SITES WHERE NO ROUTE RESOLVED, and that is deliberate, not
+        an oversight. `router_error` (the router itself answered "unknown") and the three
+        `unknown_command` doors have a command STRING in scope whose value names nothing
+        servable; recording it would assert a route the router explicitly did not choose —
+        swapping one invented label for another. `route_reason` already says which door it
+        was, and that is the honest answer.
+
+        WHAT RAN IS NOT LOST, and needs no new field: `path` is "receptionist" here and
+        NOWHERE ELSE in this flow, so it already marks the fallback exactly. Measured on
+        eval-2026-08-21-11-37-48: 317 of 317 relabelled rows carry path="receptionist", and
+        every path="receptionist" row is one of them — 1:1 in both directions.
 
         replayed_snapshot_id rides the same seam for the same reason (row 7e2125a7, D7).
         This method builds a NEW Outcome from the receptionist run, so EVERY field of the
@@ -1255,7 +1321,7 @@ class AskFlow:
                        ctx[ 0 ], ctx[ 1 ], ctx[ 2 ], snapshotable=False )
         outcome = self.executor.submit( work, trace )
         return self._finish( trace, "receptionist", route_reason, outcome, question, ctx,
-                             command=self.RECEPTIONIST_COMMAND, primary_error=primary_error,
+                             command=routed_command, primary_error=primary_error,
                              replayed_snapshot_id=replayed_snapshot_id )
 
     def _needs_input(

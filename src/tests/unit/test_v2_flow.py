@@ -3625,27 +3625,46 @@ def test_a_degraded_receptionist_never_carries_the_deliberate_pick_marker(
     """
     A DEGRADED receptionist must never come back saying the user asked for it.
 
-    This is the assertion that made the fix worth keeping. `_receptionist` overwrites
-    the caller's command with its own on the way out, so EVERY degrade emits
-    command="agent router go to receptionist" — meaning a marker derived from the
-    EMITTED command would be set on all of these, and would look like a distinction
-    while making none. The helper reads the INCOMING command instead.
+    This is the assertion that made the fix worth keeping. The helper reads the INCOMING
+    command, so the marker cannot be faked by whatever the exit happens to emit.
+
+    ⚠️ ITS PRECONDITION CHANGED, and the change is row 13e7c573, not drift. This used to
+    assert `r["command"] == RECEPTIONIST` as a precondition, with the note that
+    `_receptionist` overwrites the caller's command so EVERY degrade emits the receptionist
+    command. That overwrite is gone: a degrade now reports the route the router chose, or
+    None where none was chosen. The assertion below is the SAME claim stated against the
+    new truth — a degrade must not come back claiming the user asked for the receptionist —
+    and it is strictly stronger, because it now checks the command as well as the reason.
     """
     monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
     f = _make_flow( tmp_path, FakeCache(), FakeRouter( command=router_command ), FakeExpeditor(),
                     FakeExecutor(), FakePending(), notifier )
     r = f.ask( "what is the weather", **_CTX )
 
-    assert r[ "command" ]      == RECEPTIONIST, "precondition: the degrade emits the receptionist command"
+    assert r[ "command" ] is None, (
+        "a degrade with no resolved route must claim no route — not the receptionist's" )
     assert r[ "route_reason" ] == expected_reason
     assert r[ "route_reason" ] != "user_picked_receptionist"
 
 
 def test_the_two_doors_are_distinguishable_on_route_reason_alone( tmp_path, notifier, monkeypatch ):
     """
-    The conflation, stated as a test: path and command are IDENTICAL on both doors, so
-    route_reason is the only field that separates them. If this ever passes because the
-    paths or commands differ, the fix has drifted into a contract change.
+    The two receptionist doors — DELIBERATELY PICKED vs DEGRADED — must never be confusable.
+
+    ⚠️ THIS TEST'S CONTRACT WAS CHANGED ON PURPOSE by row 13e7c573, and the old wording is
+    kept here so the change is visible rather than silent. It used to read: "path and
+    command are IDENTICAL on both doors, so route_reason is the only field that separates
+    them. If this ever passes because the paths or commands differ, the fix has drifted
+    into a contract change." That guard was right for its time and it fired on this change
+    exactly as intended.
+
+    THE CONTRACT IS NOW BETTER, not merely different. A deliberate pick IS a real route —
+    the receptionist is a positive choice in the router's own command list, not an
+    else-branch — so it keeps its command. A degrade with no resolved route reports None.
+    The doors are therefore distinguishable on TWO fields instead of one.
+
+    route_reason ALONE still separates them, which is asserted below unchanged: a consumer
+    reading only that field is unaffected by this row.
     """
     monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
 
@@ -3656,9 +3675,16 @@ def test_the_two_doors_are_distinguishable_on_route_reason_alone( tmp_path, noti
     picked   = _ask( RECEPTIONIST )
     degraded = _ask( "agent router go to nowhere at all" )
 
-    assert picked[ "path" ]    == degraded[ "path" ]
-    assert picked[ "command" ] == degraded[ "command" ]
-    assert picked[ "route_reason" ] != degraded[ "route_reason" ]
+    assert picked[ "path" ] == degraded[ "path" ], "both are served by the receptionist"
+    assert picked[ "route_reason" ] != degraded[ "route_reason" ], (
+        "route_reason alone must still separate them — consumers reading only it are unaffected" )
+
+    # THE NEW HALF. A deliberate pick keeps its route; a degrade that resolved none reports
+    # none. Before this row both said "agent router go to receptionist" and the command was
+    # useless as a discriminator.
+    assert picked[ "command" ]   == RECEPTIONIST
+    assert degraded[ "command" ] is None
+    assert picked[ "command" ] != degraded[ "command" ]
 
 
 def test_a_deliberate_pick_is_not_filed_in_the_trace_as_an_unknown_command( tmp_path, notifier, monkeypatch ):
@@ -3697,3 +3723,209 @@ def test_the_helper_reads_the_incoming_command_not_the_emitted_one():
     assert AskFlow._unresolved_route_reason( "agent router go to math" )   == "unknown_command"
     assert AskFlow._unresolved_route_reason( "unknown" )                   == "unknown_command"
     assert AskFlow._unresolved_route_reason( "" )                          == "unknown_command"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Row 13e7c573 — the degrade exit must report the ROUTE THAT WAS CHOSEN
+# ══════════════════════════════════════════════════════════════════════════════
+class TestTheDegradeExitReportsTheRouteThatWasChosen:
+    """
+    `_finish` was called with `command=RECEPTIONIST_COMMAND` on every degrade, overwriting
+    whatever the router chose. The record then named a command nobody selected — and did it
+    in well-formed fashion, with no error string, so no consumer could see it.
+
+    MEASURED in eval-2026-08-21-11-37-48: 317 rows carry the receptionist command, of which
+    188 are unknown_command, 126 replay_error and 3 agent_error. `route_reason` was the only
+    field that said otherwise.
+
+    ⚠️ WHY THIS IS NOT ONE TEST WITH A LOOP. The twelve degrade sites do NOT all behave the
+    same, and that is the substance of the row: eight had a resolved route and must carry it,
+    three resolved none and must report None, and one is CONDITIONAL — the deliberate
+    receptionist pick is a real route and keeps its command. A single parametrised assertion
+    would have hidden the split that makes this fix correct.
+    """
+
+    def _flow( self, tmp_path, notifier, **kw ):
+        return _make_flow( tmp_path, kw.pop( "cache", None ) or FakeCache(),
+                           kw.pop( "router", None ) or FakeRouter(), FakeExpeditor(),
+                           kw.pop( "executor", None ) or FakeExecutor(), FakePending(), notifier )
+
+    def test_an_agent_failure_reports_the_command_the_router_chose( self, tmp_path, notifier, monkeypatch ):
+        """The single largest class in the artifact after unknown_command, and the plainest."""
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        outcomes = [ _outcome( status="failed", answer=None, error="the agent died" ),
+                     _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work ); return outcomes.pop( 0 )
+
+        f = self._flow( tmp_path, notifier,
+                        router=FakeRouter( command="agent router go to math" ),
+                        executor=_SeqExecutor() )
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "route_reason" ] == "agent_error"
+        assert r[ "path" ]         == "receptionist", "the receptionist really did serve it"
+        assert r[ "command" ]      == "agent router go to math", (
+            "the record must name the route the router chose, not the fallback that ran" )
+
+    def test_a_replay_failure_reports_the_command_the_router_chose( self, tmp_path, notifier, monkeypatch ):
+        """126 of the 317 relabelled rows. Same exit, different door."""
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        snap     = _snapshot( routing_command="agent router go to math", id_hash="ROW" )
+        outcomes = [ _outcome( status="failed", answer=None, error="Cannot execute empty code list" ),
+                     _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work ); return outcomes.pop( 0 )
+
+        f = self._flow( tmp_path, notifier,
+                        cache=FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) ),
+                        router=FakeRouter( command="agent router go to math" ),
+                        executor=_SeqExecutor() )
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "route_reason" ] == "replay_error"
+        assert r[ "command" ]      == "agent router go to math"
+        assert r[ "replayed_snapshot_id" ] == "ROW", "D7's field must survive this change"
+
+    def test_an_unresolvable_command_claims_NO_route_rather_than_inventing_one(
+        self, tmp_path, notifier, monkeypatch
+    ):
+        """
+        🔴 THE HALF A BLANKET PASS-THROUGH WOULD GET WRONG, and the reason this row is not
+        a one-liner.
+
+        188 of the 317 relabelled rows are `unknown_command`. There IS a command string in
+        scope at that door, so a fix that simply forwarded it would look complete and pass
+        any "the command survives" assertion — while asserting the router chose a route it
+        explicitly did not. That is the same defect with a different invented value.
+        """
+        monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
+        f = self._flow( tmp_path, notifier,
+                        router=FakeRouter( command="agent router go to nowhere at all" ) )
+        r = f.ask( "what is the weather", **_CTX )
+
+        assert r[ "route_reason" ] == "unknown_command"
+        assert r[ "command" ] is None, (
+            "no route resolved, so the record must name none — route_reason says which door" )
+
+    def test_a_deliberate_receptionist_pick_KEEPS_its_command( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE CONDITIONAL SITE, and the one the existing suite caught me on.
+
+        My first pass sent None from every unresolved door. But the receptionist is a
+        POSITIVE choice in the router's own command list — `_unresolved_route_reason` already
+        knows this and answers `user_picked_receptionist` — so this door DID choose a route
+        and throwing it away would be a second, quieter data loss.
+
+        The record's command is derived from that same helper rather than a second copy of
+        the test, so the reason and the command cannot drift into disagreeing.
+        """
+        monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: None )
+        f = self._flow( tmp_path, notifier, router=FakeRouter( command=RECEPTIONIST ) )
+        r = f.ask( "who are you", **_CTX )
+
+        assert r[ "route_reason" ] == "user_picked_receptionist"
+        assert r[ "command" ]      == RECEPTIONIST, (
+            "a deliberate pick is a real route and must keep it" )
+
+    def test_a_prebuilt_job_failure_reports_the_jobs_own_routing_command( self, tmp_path, notifier ):
+        """
+        THE SITE WITH NO `command` IN SCOPE — where my first pass raised NameError on the
+        degrade path, caught by the existing suite rather than by my reading. The success
+        exit two lines below reads `job.routing_command`; the degrade now agrees with it.
+        """
+        f = _submit_flow( tmp_path, notifier,
+                          executor=FakeExecutor( _outcome( status="failed", answer=None, error="boom" ) ) )
+        job = FakeAgent()
+        r   = f.submit( job=job, question="q", **_CTX )
+
+        assert r[ "route_reason" ] == "agent_error"
+        assert r[ "path" ]         == "receptionist"
+        assert r[ "command" ]      == job.routing_command
+
+    def test_a_route_that_never_degraded_is_untouched( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE NEGATIVE CONTROL. A change that made every exit report the router's command
+        would satisfy the tests above while saying nothing — the non-degraded exits already
+        did, and must keep doing so.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        f = self._flow( tmp_path, notifier, router=FakeRouter( command="agent router go to math" ),
+                        executor=FakeExecutor( _outcome( status="done" ) ) )
+        r = f.ask( "what is 2+2", **_CTX )
+
+        assert r[ "path" ]    == "agent", "no degrade happened"
+        assert r[ "command" ] == "agent router go to math"
+
+    def test_what_actually_ran_is_still_recorded_and_needs_no_new_field(
+        self, tmp_path, notifier, monkeypatch
+    ):
+        """
+        THE ROW ASKED FOR AN EXPLICIT FALLBACK MARKER. One already exists: `path`.
+
+        MEASURED on eval-2026-08-21-11-37-48 — `path == "receptionist"` is 1:1 with the
+        relabel in BOTH directions: all 317 relabelled rows carry it, and every row carrying
+        it is one of the 317. Read in the source, `_finish( trace, "receptionist", ... )` is
+        the ONLY producer of that value in the whole flow.
+
+        So "the route that was chosen" and "what actually served it" are now two fields that
+        already existed, and adding a third boolean meaning what `path` already means would
+        be a second source of truth for one fact — which is how the fields on this row's
+        parent drifted apart in the first place.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        outcomes = [ _outcome( status="failed", answer=None, error="the agent died" ),
+                     _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work ); return outcomes.pop( 0 )
+
+        f = self._flow( tmp_path, notifier, router=FakeRouter( command="agent router go to math" ),
+                        executor=_SeqExecutor() )
+        degraded = f.ask( "what is 2+2", **_CTX )
+
+        assert degraded[ "command" ] == "agent router go to math"   # what was ROUTED
+        assert degraded[ "path" ]    == "receptionist"              # what actually RAN
+
+    def test_the_honest_command_SURVIVES_THE_RESPONSE_MODEL( self, tmp_path, notifier, monkeypatch ):
+        """
+        🔴 THE BOUNDARY ASSERTION, and it is NOT the same shape as D7's.
+
+        D7 added a NEW key, so `AskResponse` dropped it silently until declared — a missing
+        field. `command` is an EXISTING declared key, so a WRONG value sails through the
+        response model untouched and no boundary check can catch it. The assertion therefore
+        has to be on the VALUE the client is handed, not on the key's presence.
+
+        Stated plainly because it is the trap one level on from D7's: the fix that worked
+        there — declare the field — would do nothing here, and a test copied from there
+        would pass while the client still received the wrong command.
+        """
+        from cosa.rest.routers.v2_ask import AskResponse
+
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False ) )
+        outcomes = [ _outcome( status="failed", answer=None, error="the agent died" ),
+                     _outcome( status="done" ) ]
+
+        class _SeqExecutor( FakeExecutor ):
+            def submit( self, work, trace ):
+                self.works.append( work ); return outcomes.pop( 0 )
+
+        f      = self._flow( tmp_path, notifier, router=FakeRouter( command="agent router go to math" ),
+                             executor=_SeqExecutor() )
+        result = f.ask( "what is 2+2", **_CTX )
+
+        delivered = AskResponse( **result ).model_dump()      # the exact call both routers make
+
+        assert delivered[ "command" ] == "agent router go to math", (
+            "the flow told the truth and the response model handed the client something else" )
+        assert delivered[ "path" ] == "receptionist"
