@@ -98,6 +98,7 @@ class AskResponse( BaseModel ):
     pending_id     : Optional[ str ]     = Field( None, description="Parked-request id when interactive + needs_input" )
     job_id         : Optional[ str ]     = Field( None, description="Executor job id (replay id_hash, etc.)" )
     snapshot_id    : Optional[ str ]     = Field( None, description="Written-back snapshot id, or null" )
+    replayed_snapshot_id : Optional[ str ] = Field( None, description="id_hash of the cached row this request REPLAYED (set on both the served and the failed replay); null when nothing was replayed. Distinct from `snapshot_id`, which is the WRITE-BACK id and is null on a warm pass by construction, and from `job_id`, which means a queue job on the agent path" )
     similarity     : Optional[ float ]   = Field( None, description="Best cache-candidate similarity" )
     wrote_snapshot : bool                = Field( False, description="Whether a snapshot was written back" )
     cache_hit      : bool                = Field( False, description="Whether this was a tier-1 exact replay" )

@@ -230,6 +230,13 @@ class AskFlow:
             # Refusing here falls through to routing, so the agent re-runs — which is
             # the whole observable behaviour, not a detail of it.
             if lookup.is_replay_hit and self._may_serve( trace, lookup.snapshot, "exact_hit" ):
+                # WHICH ROW WE ARE ABOUT TO REPLAY, captured HERE and not taken off the
+                # outcome (row 7e2125a7, D7). The executor binds the same value inside its
+                # own try, one line after a call that can raise, so on the earliest failure
+                # it has no id to report — and the failure Outcome is discarded at the
+                # degrade boundary below anyway. Reading it from the row we already hold
+                # cannot be skipped by any failure inside the replay.
+                replayed_id = lookup.snapshot.id_hash
                 work    = Work( "replay", lookup.snapshot, user_id, user_email, session_id, snapshotable=False )
                 outcome = self.executor.submit( work, trace )
                 # GATE 1 of 2. "waiting" means the queued executor handed the replay off —
@@ -244,14 +251,15 @@ class AskFlow:
                     # was unknown. Route-first means a real command always exists here.
                     return self._finish( trace, "replay", "exact_hit", outcome, question, ctx,
                                          command=command, cache_hit=True,
-                                         agent_label=spec.label )
+                                         agent_label=spec.label, replayed_snapshot_id=replayed_id )
                 # primary_error, like the agent path at the bottom of _run_agent. Without
                 # it the receptionist's own (absent) error is all that is emitted, so a
                 # replay that died of "Cannot execute empty code list" reached the client
                 # as error=null — 115 of 117 failures in the 2026-08-21 warm pass could
                 # not say why (bug 38815328).
                 return self._receptionist( trace, question, ctx, "replay_error",
-                                           primary_error=outcome.error )
+                                           primary_error=outcome.error,
+                                           replayed_snapshot_id=replayed_id )
 
             # 2b — the NEAR match. Above the confirmation threshold but short of exact,
             # so the flow asks the user the question the voice path asks today and
@@ -262,13 +270,16 @@ class AskFlow:
             # happened — and a 90-to-99% match would replay an answer nobody confirmed.
             near_match, near_reason = self._near_match_replay( trace, lookup, ctx, interactive )
             if near_match is not None:
+                replayed_id = near_match.id_hash          # same reason as the exact-hit site above
                 work    = Work( "replay", near_match, user_id, user_email, session_id, snapshotable=False )
                 outcome = self.executor.submit( work, trace )
                 if outcome.status in SUCCESS_STATUSES:
                     return self._finish( trace, "replay", near_reason, outcome, question, ctx,
-                                         command=command, cache_hit=True, agent_label=spec.label )
+                                         command=command, cache_hit=True, agent_label=spec.label,
+                                         replayed_snapshot_id=replayed_id )
                 return self._receptionist( trace, question, ctx, "replay_error",
-                                           primary_error=outcome.error )
+                                           primary_error=outcome.error,
+                                           replayed_snapshot_id=replayed_id )
 
         # 3 — arguments.
         if not spec.required_args:
@@ -1224,20 +1235,28 @@ class AskFlow:
         return True
 
     def _receptionist( self, trace: StageTrace, question: str, ctx: tuple, route_reason: str,
-                       primary_error: Optional[ str ]=None ) -> dict:
+                       primary_error: Optional[ str ]=None,
+                       replayed_snapshot_id: Optional[ str ]=None ) -> dict:
         """The else — run the receptionist inline (its failure is terminal, no recursion).
 
         primary_error carries the FAILURE THAT CAUSED THE DEGRADE. Without it the
         emitted error is the fallback's, and a live failure reports why the
         receptionist died while saying nothing about why the real agent did — which
         is a fallback that hides the fault it was reached by.
+
+        replayed_snapshot_id rides the same seam for the same reason (row 7e2125a7, D7).
+        This method builds a NEW Outcome from the receptionist run, so EVERY field of the
+        failed replay's outcome is discarded here — which is why the id is threaded as an
+        argument rather than read off `outcome` further down. Only the caller that ran the
+        replay still knows which row it read.
         """
         if primary_error: trace.set( "primary_agent_error", primary_error )
         work    = Work( "receptionist", self._build_agent( self.receptionist_factory, question, ctx ),
                        ctx[ 0 ], ctx[ 1 ], ctx[ 2 ], snapshotable=False )
         outcome = self.executor.submit( work, trace )
         return self._finish( trace, "receptionist", route_reason, outcome, question, ctx,
-                             command=self.RECEPTIONIST_COMMAND, primary_error=primary_error )
+                             command=self.RECEPTIONIST_COMMAND, primary_error=primary_error,
+                             replayed_snapshot_id=replayed_snapshot_id )
 
     def _needs_input(
         self, trace: StageTrace, command: str, extraction: Any, question: str,
@@ -1308,6 +1327,7 @@ class AskFlow:
         self, trace: StageTrace, path: str, route_reason: str, outcome: Any, question: str, ctx: tuple,
         command: str, cache_hit: bool=False, snapshotable: bool=False, agent_class_name: str="",
         primary_error: Optional[ str ]=None, agent_label: Optional[ str ]=None,
+        replayed_snapshot_id: Optional[ str ]=None,
     ) -> dict:
         """Stamp first-useful, write back, speak, and emit the terminal result."""
         trace.mark( "t_first_useful" )
@@ -1317,6 +1337,7 @@ class AskFlow:
             trace, path=path, status=outcome.status, route_reason=route_reason, answer=outcome.answer,
             answer_raw=outcome.answer_raw, command=command, ctx=ctx, job_id=outcome.job_id,
             snapshot_id=snapshot_id, cache_hit=cache_hit,
+            replayed_snapshot_id=replayed_snapshot_id,
             error=self._compose_error( primary_error, outcome.error ),
         )
 
@@ -1362,7 +1383,7 @@ class AskFlow:
                answer_raw: Optional[ str ], command: Optional[ str ], ctx: tuple, job_id: Optional[ str ]=None,
                snapshot_id: Optional[ str ]=None, pending_id: Optional[ str ]=None,
                cache_hit: bool=False, args_known: Optional[ list ]=None, args_missing: Optional[ list ]=None,
-               error: Optional[ str ]=None ) -> dict:
+               error: Optional[ str ]=None, replayed_snapshot_id: Optional[ str ]=None ) -> dict:
         """Assemble the §8 response dict and write the authoritative trace line.
 
         Stamps t_complete here — the single chokepoint every terminal exit funnels
@@ -1385,8 +1406,17 @@ class AskFlow:
         # _route_reason, which reads the INCOMING command on purpose (see its docstring).
         command = canonical_command( command )
         trace.mark( "t_complete" )
+        # WHICH ROW A REPLAY READ — its own field, never folded into `job_id` (row 7e2125a7).
+        # `job_id` already carried this value on the SUCCESS path only, because the replay
+        # Outcome's job_id IS the row's id_hash, while on the agent path the same key means
+        # a QUEUE job. One key with two meanings cannot be grouped on; and the failures —
+        # the rows that most need naming — carried neither. Measured in
+        # eval-2026-08-21-11-37-48: job_id present on 85 of 85 exact_hit rows and 0 of 126
+        # replay_error rows. `snapshot_id` is not the answer either: it is the WRITE-BACK
+        # id, so it is null by construction on a warm pass that writes nothing back.
         trace.update( path=path, status=status, route_reason=route_reason, cache_hit=cache_hit,
-                      wrote_snapshot=snapshot_id is not None )
+                      wrote_snapshot=snapshot_id is not None,
+                      replayed_snapshot_id=replayed_snapshot_id )
         trace.write()
         self._log_query( trace, ctx, snapshot_id=snapshot_id, cache_hit=cache_hit )
         return {
@@ -1396,6 +1426,7 @@ class AskFlow:
             "pending_id"  : pending_id,     "job_id"       : job_id,         "snapshot_id"  : snapshot_id,
             "similarity"  : trace.fields.get( "similarity" ),               "wrote_snapshot": snapshot_id is not None,
             "cache_hit"   : cache_hit,      "spoke"        : trace.has_mark( "t_tts_dispatch" ),
+            "replayed_snapshot_id" : replayed_snapshot_id,
             "timings_ms"  : trace.timings_ms(),                             "trace_id"     : trace.trace_id,
             "error"       : error,
         }
