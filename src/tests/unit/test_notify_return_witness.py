@@ -155,6 +155,59 @@ def test_call_ids_are_distinct_across_calls( events, monkeypatch ):
     assert len( ids ) == 2
 
 
+# ---------------------------------------------------------------------------
+# Payload size — making the row's untested hypothesis answerable
+# ---------------------------------------------------------------------------
+def test_the_entry_event_carries_the_payload_SIZE( events, monkeypatch ):
+    """
+    Row 03355649's own open question: "WHETHER it correlates with payload size...
+    a hypothesis with one data point behind it and no negative control." Nothing
+    in the hook log recorded a size, so it could not be tested against the 1,717
+    calls on record. It can be tested going forward now.
+    """
+    monkeypatch.setattr( cv, "_notify_send", lambda **kw: "ok" )
+    cv._notify_impl( message="12345", abstract="678" )
+
+    entry, ret = _notify_events( events )
+    assert entry[ "payload_bytes" ] == 8
+    assert "payload_bytes" not in ret          # the call_id already ties the pair
+
+
+def test_the_size_counts_BYTES_not_characters( events, monkeypatch ):
+    """
+    The abstracts this fleet writes are full of arrows and glyphs. A character
+    count would understate exactly the large payloads the hypothesis is about.
+    """
+    monkeypatch.setattr( cv, "_notify_send", lambda **kw: "ok" )
+    cv._notify_impl( message="⇒🦚", abstract=None )
+    assert _notify_events( events )[ 0 ][ "payload_bytes" ] == 7    # 3 + 4
+
+
+@pytest.mark.parametrize( "message,abstract,expected", [
+    ( "abc",  None,  3 ),
+    ( "",     "",    0 ),
+    ( "abc",  42,    3 ),      # a non-string part counts as zero, never raises
+    ( None,   "xy",  2 ),
+] )
+def test_a_missing_or_odd_payload_part_counts_as_zero( message, abstract, expected ):
+    assert cv._payload_bytes( message, abstract ) == expected
+
+
+def test_the_payload_is_SIZED_and_never_LOGGED( events, monkeypatch ):
+    """
+    hook-events.jsonl is already 66 MB and every session in the fleet writes to
+    it. A sizing question must not be answered by putting user-facing announcement
+    text into a debug log nobody scoped for it.
+    """
+    monkeypatch.setattr( cv, "_notify_send", lambda **kw: "ok" )
+    secret = "MERGE CONFIRMED AND THE BRANCH IS CUT"
+    cv._notify_impl( message=secret, abstract="a table plus several paragraphs" )
+
+    blob = json.dumps( _notify_events( events ) )
+    assert secret not in blob
+    assert "several paragraphs" not in blob
+
+
 def test_the_witness_writes_a_json_line_the_log_can_hold( tmp_path, monkeypatch ):
     """
     END-TO-END through the real writer, not the stub. A witness that only works

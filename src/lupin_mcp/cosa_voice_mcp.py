@@ -1485,10 +1485,14 @@ def _notify_impl(
     Ensures:
         - returns exactly what `_notify_send` returns, unchanged
         - an exception propagates unchanged, with a return event recorded first
+        - the entry event carries the payload SIZE (never the payload), so row
+          03355649's untested payload-size hypothesis becomes answerable from the
+          log instead of needing a live reproduction
         - logging never raises and never changes the outcome
     """
     call_id = _uuid.uuid4().hex[ :12 ]
-    _log_notify_event( "entry", call_id, None, None )
+    _log_notify_event( "entry", call_id, None, None,
+                       payload_bytes=_payload_bytes( message, abstract ) )
     started = time.monotonic()
     try:
         result = _notify_send(
@@ -1508,13 +1512,50 @@ def _elapsed_ms( started ):
     return int( ( time.monotonic() - started ) * 1000 )
 
 
-def _log_notify_event( phase, call_id, elapsed_ms, outcome ):
+def _payload_bytes( message, abstract ):
+    """
+    The size of what this call is carrying — LENGTH ONLY, never the content.
+
+    WHY IT IS HERE (row 03355649). The row's own hypothesis: "WHETHER it
+    correlates with payload size. This call carried a long `abstract` (a table
+    plus several paragraphs). That is a hypothesis with one data point behind it
+    and no negative control." Nothing in the hook log records a payload or a
+    size, so the hypothesis could not be tested retrospectively against the 1,717
+    calls already on record. Stamping the size makes it answerable going forward
+    with a grep instead of a reproduction.
+
+    SIZE, NOT CONTENT, DELIBERATELY. hook-events.jsonl is already 66 MB and every
+    session in the fleet writes to it. Logging message bodies to answer a sizing
+    question would cost more than the question is worth, and would put user-facing
+    announcement text into a debug log nobody scoped for it.
+
+    Requires:
+        - message / abstract are strings or None
+
+    Ensures:
+        - returns the combined UTF-8 byte length of message and abstract
+        - a None or non-string part counts as zero rather than raising
+        - never raises
+    """
+    # No try/except here on purpose: `isinstance( part, str )` already guarantees
+    # `.encode( "utf-8" )` succeeds, so a belt would be an unreachable branch
+    # needing a pragma to explain itself. Fewer branches beats a justified one.
+    total = 0
+    for part in ( message, abstract ):
+        if isinstance( part, str ): total += len( part.encode( "utf-8" ) )
+    return total
+
+
+def _log_notify_event( phase, call_id, elapsed_ms, outcome, payload_bytes=None ):
     """
     Append one `mcp_notify` line to hook-events.jsonl.
 
     Ensures:
-        - writes { phase, call_id, elapsed_ms, outcome }; elapsed_ms/outcome are
-          absent on the entry event, where neither exists yet
+        - writes { phase, call_id, elapsed_ms, outcome, payload_bytes }; each
+          optional field is omitted when it does not apply — elapsed_ms and
+          outcome are absent on the ENTRY event, where neither exists yet, and
+          payload_bytes is absent on the RETURN event, where it would be a
+          duplicate of the entry that shares its call_id
         - `outcome` is truncated to 120 chars — the status string is a label, and
           an instrument must not become the thing that bloats the log it writes to
         - NEVER raises. An instrument that can break the path it measures is worse
@@ -1522,8 +1563,9 @@ def _log_notify_event( phase, call_id, elapsed_ms, outcome ):
     """
     try:
         extra = { "phase": phase, "call_id": call_id }
-        if elapsed_ms is not None: extra[ "elapsed_ms" ] = elapsed_ms
-        if outcome    is not None: extra[ "outcome" ]    = str( outcome )[ :120 ]
+        if elapsed_ms   is not None: extra[ "elapsed_ms" ]    = elapsed_ms
+        if outcome      is not None: extra[ "outcome" ]       = str( outcome )[ :120 ]
+        if payload_bytes is not None: extra[ "payload_bytes" ] = payload_bytes
         log_to_stream( "mcp_notify", {}, extra=extra )
     except Exception:
         pass
