@@ -1485,6 +1485,61 @@ def is_park_legal_from( from_status ) -> bool:
     return from_status in PARK_LEGAL_FROM_STATUSES or from_status == PARK_STATUS
 
 
+# --- The tool-call envelope tail (row 91ccbc26) -------------------------------
+# THE DEFECT. Two authors, two rows, two different fragment sizes of the WRITER'S
+# OWN tool-call markup captured into park_reason. sam's row 9baba1f7 said it in
+# its own field: "Third park attempt - the two before it captured a stray
+# close-tag from my own tool call into this field." Rio's row 2ebe4ccb ended
+# 'thing to run the checklist against.</park_reason>\\n</invoke>\\n' - two closing tags
+# past the end of the author's sentence. Both writes landed SILENTLY, and both
+# were caught only by a human re-reading prose later.
+#
+# WHERE IT ENTERS - MEASURED 2026-08-29, eliminating two of the three candidate
+# layers the row named. A park_reason carrying this exact shape PLUS deliberate
+# legitimate angle brackets was sent through the live MCP verb and read straight
+# back out of postgres: 188 bytes, md5 91216ff1f24c05189d8e05c1fe761985,
+# byte-identical to what was sent. The transport and the store's write path
+# preserve the field EXACTLY. The corruption is composed by the CALLER, upstream
+# of anything this repo owns.
+#
+# => SO THE REMEDY IS REJECT, NOT STRIP. Stripping would paper over a caller-side
+# defect inside a store that is demonstrably innocent, and every stripping rule is
+# one bad guess away from eating content an author meant. Rejecting turns a silent
+# corruption into a loud one, which is the row's actual complaint - and it is known
+# to be recoverable: sam's THIRD attempt landed clean.
+#
+# TAIL-ONLY, DELIBERATELY. These names are barred only where the corruption
+# actually appears: at the very END of the field, possibly stacked. A reason may
+# legitimately QUOTE markup mid-sentence - row 91ccbc26 itself quotes both
+# specimens - and a guard that forbade the characters outright would refuse the
+# very rows written about this defect.
+_ENVELOPE_TAGS = ( "</park_reason>", "</invoke>", "</parameter>", "</function_calls>", "</antml:invoke>", "</antml:parameter>" )
+
+
+def envelope_tail_tag( park_reason ):
+    """
+    Name the tool-call closing tag a park_reason ENDS with, if any.
+
+    Requires:
+        - park_reason is a string, or any non-string (which is not a tail)
+
+    Ensures:
+        - returns the offending tag when the field, ignoring trailing whitespace,
+          ends with one of _ENVELOPE_TAGS - the tag NEAREST the end is the one
+          named, since the corruption stacks
+        - returns None for legitimate content, INCLUDING a reason that quotes one
+          of these tags anywhere but the very end
+        - returns None for a non-string or empty value; validate_park already
+          rejects those and must keep owning that message
+        - never raises
+    """
+    if not isinstance( park_reason, str ): return None
+    trimmed = park_reason.rstrip()
+    for tag in _ENVELOPE_TAGS:
+        if trimmed.endswith( tag ): return tag
+    return None
+
+
 def validate_park( from_status, next_chase_ts, park_reason ) -> list:
     """
     Validate a ->parked transition's source status and required fields.
@@ -1524,6 +1579,16 @@ def validate_park( from_status, next_chase_ts, park_reason ) -> list:
             "park_reason is REQUIRED (non-blank) when transitioning to 'parked' — "
             "it MUST quote the row's own decisive sentence, so the park is refutable"
         )
+    else:
+        tail = envelope_tail_tag( park_reason )
+        if tail is not None:
+            errors.append(
+                f"park_reason ends with `{tail}` — that is the tail of your own "
+                f"tool-call envelope, not something you wrote. Re-send the reason "
+                f"(row 91ccbc26: the same author's next attempt landed clean). "
+                f"Quoting this markup mid-sentence is fine; only a trailing tag is "
+                f"refused, because only a trailing tag has ever been the defect."
+            )
     return errors
 
 
