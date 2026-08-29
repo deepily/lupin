@@ -228,3 +228,16 @@ lupin-worktrees/
 # hand-run harness that still writes into the tree cannot re-introduce a tracked corpus.
 src/tmp/dm_traffic.jsonl
 src/rnd/**/live-runs/*.jsonl
+
+# Fleet data written INSIDE the repo by a NESTED-repo session — a BACKSTOP for a
+# real defect, not a place anything is supposed to live. fleet_data_root() takes
+# the sibling of the `projects` directory, which is correct for lupin itself
+# (…/www.deepily.ai/projects-data/lupin) and wrong for a repo nested under it:
+# a lupin-mobile session resolves …/projects/lupin/projects-data/lupin-mobile,
+# i.e. into this working tree. Reproduced 2026-08-29 from both roots; the
+# specimen was a Tiffany re-spin boot receipt. respin_wake_check.py's own header
+# warns against exactly this ("never the repo root … no reader looks there",
+# row 011f1f90) — so a file landing here is invisible to the readers that need
+# it AND dirties this repo. The fix belongs in the resolver; this pattern only
+# stops the debris from reaching a commit in the meantime.
+projects-data/

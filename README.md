@@ -257,13 +257,12 @@ src/scripts/lupin_config.py init
 
 # Start the server
 src/scripts/run-fastapi-lupin.sh          # FastAPI on port 7999
-src/scripts/run-lupin-gui.sh              # Browser GUI client
 
 # Run tests
-pytest src/tests/unit/                     # 12,436 unit tests
+pytest src/tests/unit/                     # 16,247 unit tests (see the table above)
 src/scripts/run-websocket-smoke-tests.sh   # 50 WebSocket tests
 src/tests/run-integration-tests.sh --bg -v # Integration gate (dual-container, :8000)
-src/scripts/run-e2e-ui-tests.sh --bg -v    # 678 Playwright tests incl. visual regression
+src/scripts/run-e2e-ui-tests.sh --bg -v    # 663 Playwright tests incl. visual regression
 
 # Install cosa-voice MCP server (for Claude Code voice I/O)
 claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.py
