@@ -25,6 +25,7 @@ This module is import-clean and pure so it is unit-testable in BOTH directions w
 container or a real worktree (mirrors tests/venue_routing.py); conftest is the thin wiring.
 """
 
+import fnmatch
 import os
 
 
@@ -115,3 +116,61 @@ def check_paths( file_paths, lupin_root ):
                 "(export LUPIN_ROOT=<that worktree>) before running these tests."
             )
     return None
+
+
+def is_test_file( file_path, patterns ):
+    """
+    Whether pytest would treat `file_path` as a test module, by the SAME `python_files`
+    patterns pytest itself uses.
+
+    THE REASON THIS IS NOT A HARDCODED "test_*.py": the caller passes
+    `config.getini( "python_files" )`, so the filter tracks pytest.ini rather than a
+    second copy of it that can drift. A conftest.py is offered to `pytest_collect_file`
+    too, and naming one as "the test file being collected" would send a reader to the
+    wrong file.
+
+    Requires:
+        - file_path is a path string
+        - patterns is an iterable of glob patterns (pytest's `python_files`)
+
+    Ensures:
+        - Returns True when the BASENAME matches at least one pattern, else False
+    """
+    name = os.path.basename( file_path )
+    for pattern in patterns:
+        if fnmatch.fnmatch( name, pattern ):
+            return True
+    return False
+
+
+def paths_to_scan( item_paths, collected_file_paths ):
+    """
+    Which paths the mismatch check should read — closing the ZERO-ITEM BLIND SPOT (row
+    08f6be8e).
+
+    THE GAP THIS FILLS, measured 2026-08-29 in a worktree with LUPIN_ROOT pointing at the
+    main tree: a module that skips at module level, or a file holding no test functions,
+    produces ZERO items. The guard was handed a list built from `items`, so it had nothing
+    to scan and stayed SILENT — the run exits 5, but the reader is told "1 skipped" instead
+    of "LUPIN_ROOT points at another tree". The files pytest WALKED are known even when no
+    item survives, so they are what to fall back to.
+
+    ⚠️ THIS DOES NOT MAKE EMPTINESS AN ERROR, and that distinction is the whole design.
+    The condition being reported is a TREE MISMATCH, which is wrong at any item count; an
+    empty selection on its own stays exactly as pytest already renders it (exit 5). A `-k`
+    that deliberately matches nothing in a correctly-configured tree is untouched here,
+    because the mismatch predicate never fires on it. A guard that cried wolf on every
+    empty run would earn an escape hatch within a week and become decoration.
+
+    Requires:
+        - item_paths is a list of paths of the items that survived collection
+        - collected_file_paths is a list of test-file paths pytest walked
+
+    Ensures:
+        - Returns item_paths when it is non-empty (the live case is byte-for-byte
+          unchanged — the fallback can only ADD coverage, never alter an existing verdict)
+        - Returns collected_file_paths when no item survived
+    """
+    if item_paths:
+        return item_paths
+    return collected_file_paths

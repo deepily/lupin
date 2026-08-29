@@ -417,10 +417,29 @@ def pytest_terminal_summary( terminalreporter, exitstatus, config ):
         # it back from; this hook only says WHY, next to the list it applies to.
 
 
+# ZERO-ITEM BLIND SPOT (row 08f6be8e). The check below reads the items that SURVIVED
+# collection, and a module-level skip or a file with no test functions leaves NONE — so a
+# tree mismatch went unreported in exactly the runs where a reader most needs to be told
+# why nothing ran. `pytest_collect_file` sees the file regardless, so it is recorded here
+# and used only as a fallback: a run with items behaves byte-for-byte as before.
+_collected_test_files = []
+
+
+def pytest_collect_file( file_path, parent ):
+    from tests.worktree_tree_guard import is_test_file as _is_test_file
+    if _is_test_file( str( file_path ), parent.config.getini( "python_files" ) ):
+        _collected_test_files.append( str( file_path ) )
+    return None
+
+
 def pytest_collection_modifyitems( config, items ):
     from tests.worktree_tree_guard import check_paths as _worktree_check_paths
+    from tests.worktree_tree_guard import paths_to_scan as _worktree_paths_to_scan
     _drift = _worktree_check_paths(
-        [ str( item.path ) for item in items if getattr( item, "path", None ) is not None ],
+        _worktree_paths_to_scan(
+            [ str( item.path ) for item in items if getattr( item, "path", None ) is not None ],
+            _collected_test_files,
+        ),
         os.environ.get( "LUPIN_ROOT" ),
     )
     if _drift is not None:
