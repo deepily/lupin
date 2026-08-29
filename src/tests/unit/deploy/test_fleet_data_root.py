@@ -31,6 +31,7 @@ Venue: :7999-eligible. tmp_path + env injection; no docker, no network.
 """
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -223,3 +224,274 @@ def test_an_explicit_base_dir_still_wins( tmp_path ):
     """Tests and explicit callers must keep their override, or every suite in this
     family would start writing to the real fleet data root."""
     assert _resolve_base_dir( tmp_path ) == tmp_path
+
+
+# ── row 1facc18e: THE DEPTH ASSUMPTION, AND THE PROPERTY THAT OUTLIVES IT ──
+#
+# The old fallback base was `main.parent.parent / projects-data` — a fixed DEPTH.
+# It is right only for a repo sitting exactly one level under `projects/`, and two
+# other depths were sitting on disk when this was written:
+#
+#   projects/lupin/src/lupin-mobile      -> projects/lupin/projects-data/...  (INSIDE a tree)
+#   projects/google/weil-parallel-search -> projects/projects-data/...        (not the fleet dir)
+#
+# Both had a real specimen. The first is the one row 011f1f90 warns about — a file
+# where the arbiter and the Stop hook do not look. The second passes the
+# "not inside a tree" check while still being unread, which is why there are TWO
+# properties below and not one.
+#
+# ⚠️ These are PROPERTIES over generated shapes, not assertions about the two paths
+# we happened to find. Two hardcoded paths go stale the day somebody adds a third
+# nested repo — that is exactly how this defect survived.
+
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import (
+    _fleet_data_base, _enclosing_tree_root, PROJECTS_DIR_NAME,
+)
+
+
+# The shapes are RELATIVE to a generated `projects/` dir, so the test says what a
+# layout IS rather than where it happens to live today. `nested_in` names the repo
+# whose working tree encloses this one.
+REPO_SHAPES = [
+    ( "flat",              "lupin",                              None ),
+    ( "grouped",           "google/weil-parallel-search",        None ),
+    ( "grouped_deeper",    "acme/team/some-service",             None ),
+    ( "nested_1",          "lupin/src/lupin-mobile",             "lupin" ),
+    ( "nested_2",          "lupin/src/lupin-plugin-firefox",     "lupin" ),
+    ( "nested_deep",       "lupin/src/vendor/a/b/deep-repo",     "lupin" ),
+    ( "nested_in_grouped", "acme/team/some-service/sub/inner",   "acme/team/some-service" ),
+]
+
+
+def _independent_enclosing_tree( path ):
+    """
+    Is this path inside a git working tree? Written HERE, deliberately, instead of
+    calling the production `_enclosing_tree_root`.
+
+    A guard that asks the code under test whether the code under test is correct
+    agrees with itself for free. This walks the ancestor chain for a `.git` entry
+    with nothing imported from the module it is judging.
+    """
+    here = Path( os.path.realpath( path ) )
+    for candidate in [ here, *here.parents ]:
+        if ( candidate / ".git" ).exists():
+            return candidate
+    return None
+
+
+@pytest.fixture
+def fleet_layout( tmp_path, monkeypatch ):
+    """
+    A generated `projects/` tree carrying every shape in REPO_SHAPES as a REAL repo.
+
+    Ensures:
+        - returns ( projects_dir, { name: repo_path } )
+        - each repo is a real git tree (a `.git` dir), so the enclosing-tree walk
+          is answering about the filesystem and not about a fixture's opinion
+        - DEEPILY_DATA_DIR is UNSET — the env var short-circuits the whole
+          derivation, so leaving it set would test nothing
+    """
+    monkeypatch.delenv( DATA_DIR_ENV, raising=False )
+    projects = tmp_path / PROJECTS_DIR_NAME
+    repos    = { }
+    for name, rel, _ in REPO_SHAPES:
+        repo = projects / rel
+        repo.mkdir( parents=True )
+        ( repo / ".git" ).mkdir()
+        repos[ name ] = repo
+    return projects, repos
+
+
+@pytest.mark.parametrize( "name", [ s[ 0 ] for s in REPO_SHAPES ] )
+def test_PROPERTY_no_data_root_ever_resolves_inside_a_git_working_tree( fleet_layout, name ):
+    """
+    THE PROPERTY, row 1facc18e. A data root inside a working tree is invisible to
+    the arbiter and the Stop hook — `respin_wake_check.py`'s own header says so for
+    the repo root, and this lands one directory below it.
+
+    Stated over generated shapes at four different depths so a THIRD nested repo
+    added next month is covered without anybody editing this file.
+    """
+    _, repos = fleet_layout
+    root     = fleet_data_root( repos[ name ] )
+    tree     = _independent_enclosing_tree( root )
+    assert tree is None, f"{name}: data root {root} sits inside the working tree {tree}"
+
+
+@pytest.mark.parametrize( "name,rel,nested_in", REPO_SHAPES )
+def test_the_fixture_actually_BUILT_an_enclosing_tree( fleet_layout, name, rel, nested_in ):
+    """
+    The discriminator for the property above. If the fixture silently stopped
+    creating `.git`, every shape would be "not inside a tree" and the property would
+    pass vacuously — green because the hazard was never constructed.
+    """
+    projects, repos = fleet_layout
+    enclosing = _independent_enclosing_tree( repos[ name ].parent )
+    if nested_in is None:
+        assert enclosing is None, f"{name} was supposed to sit outside every tree"
+    else:
+        assert enclosing == projects / nested_in, f"{name} was supposed to sit inside {nested_in}"
+
+
+def test_PROPERTY_every_repo_in_the_fleet_shares_ONE_base_directory( fleet_layout ):
+    """
+    THE SECOND PROPERTY, and the one the "not inside a tree" check alone would miss.
+
+    `projects/google/weil-parallel-search` produced `projects/projects-data/...` —
+    outside every working tree, so property one is satisfied, and still not the
+    directory any reader looks in. A real receipt for the maría seat was sitting
+    there. Fleet-global means ONE base for every repo, at every depth.
+    """
+    projects, repos = fleet_layout
+    bases = { name: fleet_data_root( repo ).parent for name, repo in repos.items() }
+    assert len( set( bases.values() ) ) == 1, f"the fleet split into several data dirs: {bases}"
+    assert set( bases.values() ) == { projects.parent / DATA_DIR_FALLBACK }
+
+
+def test_each_repo_still_keeps_its_OWN_dir_under_that_base( fleet_layout ):
+    """
+    The counterweight. Collapsing every repo onto one base must not collapse them
+    onto one DIR — lupin-mobile's holds are not lupin's, and a fix that merged them
+    would satisfy the property above while corrupting every reader.
+    """
+    _, repos = fleet_layout
+    names = { name: fleet_data_root( repo ).name for name, repo in repos.items() }
+    assert names[ "nested_1" ]        == "lupin-mobile"
+    assert names[ "flat" ]            == "lupin"
+    assert names[ "grouped" ]         == "weil-parallel-search"
+    assert len( set( names.values() ) ) == len( names ), f"two repos collided on one dir: {names}"
+
+
+def test_MUTATION_the_old_depth_arithmetic_is_wrong_for_every_nested_shape( fleet_layout ):
+    """
+    Proves the property is DERIVED and not accidentally true of the fixture: the
+    superseded rule is applied here by hand and must land inside a tree for every
+    nested shape. If this ever goes green, the fixture stopped building the hazard.
+    """
+    projects, repos = fleet_layout
+    for name, rel, nested_in in REPO_SHAPES:
+        if nested_in is None:
+            continue
+        old_base = repos[ name ].parent.parent / DATA_DIR_FALLBACK   # the pre-1facc18e rule
+        assert _independent_enclosing_tree( old_base ) == projects / nested_in, \
+            f"{name}: the old rule was supposed to land inside {nested_in}"
+
+
+# ── the anchor, stated directly ───────────────────────────────────────────
+
+def test_the_anchor_is_the_projects_DIRECTORY_not_a_depth( tmp_path, monkeypatch ):
+    """
+    Two repos at different depths under one `projects/` must produce the same base.
+    That is the whole content of the fix, said in one assertion.
+    """
+    monkeypatch.delenv( DATA_DIR_ENV, raising=False )
+    shallow = tmp_path / PROJECTS_DIR_NAME / "a"
+    deep    = tmp_path / PROJECTS_DIR_NAME / "a" / "b" / "c" / "d"
+    assert _fleet_data_base( shallow ) == _fleet_data_base( deep ) == tmp_path / DATA_DIR_FALLBACK
+
+
+def test_the_OUTERMOST_projects_ancestor_wins( tmp_path, monkeypatch ):
+    """
+    A repo carrying its own `projects/` subtree must map to the fleet's dir, not
+    mint a second one beside its own. Nearest-match would give the inner answer.
+    """
+    monkeypatch.delenv( DATA_DIR_ENV, raising=False )
+    inner = tmp_path / PROJECTS_DIR_NAME / "outer" / PROJECTS_DIR_NAME / "inner"
+    assert _fleet_data_base( inner ) == tmp_path / DATA_DIR_FALLBACK
+    assert _fleet_data_base( inner ) != tmp_path / PROJECTS_DIR_NAME / "outer" / DATA_DIR_FALLBACK
+
+
+def test_the_env_var_short_circuits_the_whole_derivation( tmp_path, monkeypatch ):
+    """A deployment that names its own base is not second-guessed — including for a
+    path with no `projects` ancestor at all."""
+    monkeypatch.setenv( DATA_DIR_ENV, "/named/by/hand" )
+    assert _fleet_data_base( tmp_path / "anywhere" ) == Path( "/named/by/hand" )
+
+
+# ── the last resort: no `projects` ancestor ───────────────────────────────
+
+def test_with_no_projects_ancestor_the_legacy_arithmetic_still_applies( tmp_path, monkeypatch ):
+    """
+    The unchanged behaviour for a repo outside any `projects/` tree — the anchor has
+    nothing to bite on, so the old rule stands.
+    """
+    monkeypatch.delenv( DATA_DIR_ENV, raising=False )
+    repo = tmp_path / "code" / "solo"
+    repo.mkdir( parents=True )
+    assert _fleet_data_base( repo ) == tmp_path / DATA_DIR_FALLBACK
+
+
+def test_the_last_resort_WALKS_OUT_of_a_working_tree_it_lands_in( tmp_path, monkeypatch ):
+    """
+    The escape loop. Without a `projects` anchor the depth arithmetic can still land
+    inside a tree — a repo nested in a repo, somewhere else on disk — and the
+    property must hold there too, or it is only true of today's layout.
+    """
+    monkeypatch.delenv( DATA_DIR_ENV, raising=False )
+    outer = tmp_path / "code" / "outer"
+    inner = outer / "vendor" / "inner"
+    inner.mkdir( parents=True )
+    ( outer / ".git" ).mkdir()
+    ( inner / ".git" ).mkdir()
+
+    base = _fleet_data_base( inner )
+    assert _independent_enclosing_tree( base ) is None, f"{base} is still inside a tree"
+    assert base == tmp_path / "code" / DATA_DIR_FALLBACK   # walked up out of `outer`, no further
+
+
+def test_the_escape_loop_walks_out_of_NESTED_trees_not_just_one( tmp_path, monkeypatch ):
+    """
+    One iteration is not the contract. Three tiers deep, the loop must keep going —
+    a single-step version passes the test above and fails here.
+    """
+    monkeypatch.delenv( DATA_DIR_ENV, raising=False )
+    a = tmp_path / "top" / "a"
+    b = a / "b"
+    c = b / "c" / "repo"
+    c.mkdir( parents=True )
+    for d in ( a, b, c ):
+        ( d / ".git" ).mkdir()
+
+    base = _fleet_data_base( c )
+    assert _independent_enclosing_tree( base ) is None
+    assert base == tmp_path / "top" / DATA_DIR_FALLBACK
+
+
+# ── _enclosing_tree_root, on its own ──────────────────────────────────────
+
+def test_enclosing_tree_root_finds_the_tree_a_path_sits_in( tmp_path ):
+    repo = tmp_path / "r"
+    ( repo / "deep" / "deeper" ).mkdir( parents=True )
+    ( repo / ".git" ).mkdir()
+    assert _enclosing_tree_root( repo / "deep" / "deeper" ) == repo
+    assert _enclosing_tree_root( repo ) == repo, "a repo root sits inside ITSELF"
+
+
+def test_enclosing_tree_root_returns_None_outside_every_tree( tmp_path ):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert _enclosing_tree_root( plain ) is None
+
+
+def test_enclosing_tree_root_counts_a_worktrees_dot_git_FILE( tmp_path ):
+    """
+    ⚠️ `.git` is a DIRECTORY in a main checkout and a FILE in a linked worktree. A
+    check written as `is_dir()` reads a worktree as "not a repo" and the data root
+    lands inside it — the exact placement this fix exists to stop.
+    """
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ( wt / ".git" ).write_text( "gitdir: /elsewhere/.git/worktrees/wt\n" )
+    assert _enclosing_tree_root( wt ) == wt
+
+
+def test_enclosing_tree_root_handles_a_path_that_does_not_exist_yet( tmp_path ):
+    """
+    THE REASON THIS IS NOT `git rev-parse`. The data root is resolved BEFORE it is
+    created, and `git -C <missing-dir>` answers about the CWD's repo instead — which
+    on this box is lupin, for every caller, silently.
+    """
+    repo = tmp_path / "r"
+    repo.mkdir()
+    ( repo / ".git" ).mkdir()
+    assert _enclosing_tree_root( repo / "not" / "created" / "yet" ) == repo
