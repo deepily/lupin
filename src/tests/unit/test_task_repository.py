@@ -703,22 +703,19 @@ def test_apply_patch_no_change_records_noop_marker( repo ):
     assert event.transition == "patched"
 
 
-def test_apply_patch_caller_reason_wins_over_field_delta( repo ):
+def test_apply_patch_caller_reason_is_appended_not_substituted( repo ):
     """
-    ITEM A (Tiffany's Phase-1 finding) — the caller-reason-WINS branch of
-    apply_patch's `event_reason = reason if reason else <auto-delta>` ternary is
-    COVERAGE-INVISIBLE: coverage.py reports the line 100% covered whether or not
-    its truthy arm ever runs (intra-line ternary branches are not tracked). The
-    caller-supplied reason IS the headline of task_reassign — recording the
-    manager's WHY — so the truthy arm must be proven directly.
+    BUG a01e4e2a — a caller-supplied reason used to REPLACE the computed field
+    delta (`event_reason = reason if reason else <auto-delta>`), so an edit that
+    overwrote a field while passing a polite justification recorded only the
+    justification and the prior value was unrecoverable from the event log. The
+    conscientious caller got the WORSE audit trail.
 
-    WITH a reason: the caller's "why" is recorded verbatim and the auto-delta is
-    NOT used, even though the field genuinely changed (a delta string would
-    otherwise have been generated). WITHOUT a reason: the SAME field change falls
-    back to the field-delta string — proving the ternary's else-arm is the only
-    thing that flipped the outcome.
+    The delta now always leads and the caller's "why" rides after it. Coverage
+    cannot see this: the old ternary's arms are intra-line and report covered
+    either way, so the composition must be asserted directly.
     """
-    # Truthy-arm: caller reason wins, auto-delta suppressed (the headline path).
+    # WITH a reason: BOTH the delta and the caller's why are on the event.
     item  = _item( title="old title" )
     event = repo.apply_patch(
         item      = item,
@@ -727,12 +724,11 @@ def test_apply_patch_caller_reason_wins_over_field_delta( repo ):
         authority = "standing",
         reason    = "reassigned to balance the queue",
     )
-    assert item.title       == "new title"                        # the edit still lands
-    assert event.reason     == "reassigned to balance the queue"  # caller reason WINS
-    assert "title:"     not in event.reason                       # the auto-delta is NOT used
+    assert item.title       == "new title"                                       # the edit still lands
+    assert event.reason     == "title: 'old title' -> 'new title' | reason: reassigned to balance the queue"
     assert event.transition == "patched"
 
-    # Else-arm parity: an absent reason on the SAME change falls back to the delta.
+    # WITHOUT a reason: the delta alone, unchanged from before the fix.
     item2  = _item( title="old title" )
     event2 = repo.apply_patch(
         item      = item2,
@@ -740,10 +736,10 @@ def test_apply_patch_caller_reason_wins_over_field_delta( repo ):
         actor     = "mr_radio a1b2c3",
         authority = "standing",
     )
-    assert event2.reason == "title: 'old title' -> 'new title'"   # absent-reason falls back to the delta
+    assert event2.reason == "title: 'old title' -> 'new title'"                  # no trailing separator when absent
 
-    # Else-arm also covers an EMPTY-STRING reason — `reason if reason` gates on
-    # truthiness, not `is not None`, so "" must behave like absent, not win.
+    # EMPTY-STRING reason behaves like absent — the gate is truthiness, not `is
+    # not None`, so "" must not append a dangling " | reason: ".
     item3  = _item( title="old title" )
     event3 = repo.apply_patch(
         item      = item3,
@@ -752,8 +748,64 @@ def test_apply_patch_caller_reason_wins_over_field_delta( repo ):
         authority = "standing",
         reason    = "",
     )
-    assert event3.reason == "title: 'old title' -> 'new title'"   # "" is falsy -> delta, not the empty reason
+    assert event3.reason == "title: 'old title' -> 'new title'"
 
+
+def test_apply_patch_body_overwrite_records_the_overwritten_text( repo ):
+    """
+    BUG a01e4e2a, the specimen that motivated it: a body overwrite carrying a
+    justification must still name what it destroyed. This is the assertion that
+    goes red if the substitution ternary ever comes back — the OLD body text has
+    to be present in the audit event, not just the polite reason.
+    """
+    item  = _item( body="the sixty-thousand-character original" )
+    event = repo.apply_patch(
+        item      = item,
+        fields    = { "body": "replacement" },
+        actor     = "mr_radio a1b2c3",
+        authority = "standing",
+        reason    = "tightening the spec per Rick",
+    )
+    assert "the sixty-thousand-character original" in event.reason              # the OVERWRITTEN text survives
+    assert "tightening the spec per Rick"          in event.reason              # and so does the why
+    assert item.body == "replacement"
+
+
+def test_apply_patch_noop_with_reason_keeps_the_noop_marker( repo ):
+    """
+    The genuinely-empty case keeps its exact wording and gains the caller's why —
+    an unchanged-field patch must not read as though a delta was recorded.
+    """
+    item  = _item( title="same" )
+    event = repo.apply_patch(
+        item      = item,
+        fields    = { "title": "same" },
+        actor     = "a b",
+        authority = "standing",
+        reason    = "no change intended",
+    )
+    assert event.reason == "no-op patch (no field changed) | reason: no change intended"
+
+
+def test_apply_patch_delta_reason_and_flag_suffix_all_survive( repo ):
+    """
+    Three-way composition: the persona-flag marker rides the RESOLVED reason, so
+    it must land after the caller's why, with the delta still leading. Before the
+    fix this event carried only "manager handoff [persona_flag: ...]".
+    """
+    item  = _item( owner_persona="krishna" )
+    event = repo.apply_patch(
+        item        = item,
+        fields      = { "owner_persona": "ziggy" },
+        actor       = "a b",
+        authority   = "standing",
+        reason      = "manager handoff",
+        flag_suffix = "[persona_flag: owner 'ziggy' off-roster]",
+    )
+    assert event.reason == (
+        "owner_persona: 'krishna' -> 'ziggy' | reason: manager handoff "
+        "[persona_flag: owner 'ziggy' off-roster]"
+    )
 
 # ---------------------------------------------------------------------------
 # Phase 2.1 — query_chase_due + apply_chase (chase consumer support)
@@ -1034,7 +1086,11 @@ def test_apply_patch_appends_flag_suffix_to_caller_reason( repo ):
         reason      = "manager handoff",
         flag_suffix = "[persona_flag: owner 'ziggy' off-roster]",
     )
-    assert event.reason == "manager handoff [persona_flag: owner 'ziggy' off-roster]"
+    # delta LEADS (bug a01e4e2a), caller why in the middle, marker last
+    assert event.reason == (
+        "owner_persona: 'krishna' -> 'ziggy' | reason: manager handoff "
+        "[persona_flag: owner 'ziggy' off-roster]"
+    )
 
 
 def test_apply_patch_none_flag_suffix_is_noop( repo ):

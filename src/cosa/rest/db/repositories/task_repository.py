@@ -562,7 +562,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
               (router validated via task_store_rules.validate_patch); values
               already wire-checked by the TaskPatchIn Pydantic model
             - reason is an OPTIONAL caller-supplied justification (e.g. why a
-              task was reassigned); None / "" means "auto-describe the edit"
+              task was reassigned); None / "" means "no justification given".
+              It is APPENDED to the field delta, never substituted for it
             - flag_suffix is an OPTIONAL advisory marker (the persona-flag
               "[persona_flag: … off-roster]") appended to the resolved event
               reason; None means no marker (the reason is unchanged)
@@ -579,16 +580,25 @@ class TaskRepository( BaseRepository[TaskItem] ):
         invalidated by text that did not change, and stamping there would re-import
         the false-positive class through a narrower door.
 
+        ⚠️ THE DELTA IS NEVER SUBSTITUTED (bug a01e4e2a, 2026-08-28). This used to
+        read `reason if reason else <delta>`: a caller-supplied reason REPLACED the
+        computed before/after, so a `task_edit` overwriting a 60,000-character body
+        with a polite justification recorded only the justification and the prior
+        text was unrecoverable from the event log. That rewarded the careless caller
+        with the better audit trail. The delta now always leads and the caller's
+        reason rides after it.
+
         Ensures:
             - each provided field whose value differs is written onto the item
             - body_changed_ts stamped from the DB clock IFF `body` changed value
             - exactly one TaskEvent appended: transition='patched',
-              receipt_refs=None, reason = the caller-supplied `reason` when it is
-              non-empty, else the field delta ("k: old -> new; ...") or a no-op
-              marker when nothing actually changed (R3 — the edit is auditable
-              either way), with flag_suffix appended when present (so the
-              off-roster marker rides the existing event — zero schema churn,
-              field-delta preserved)
+              receipt_refs=None, reason ALWAYS opens with the field delta
+              ("k: old -> new; ...") — or the no-op marker when nothing actually
+              changed — and the caller-supplied `reason`, when non-empty, is
+              APPENDED after " | reason: " rather than replacing it (bug
+              a01e4e2a). flag_suffix is appended last when present, so delta +
+              caller reason + off-roster marker all survive on the one event
+              (R3 — zero schema churn)
             - flush() called; commit NOT called (caller's get_db() commits)
 
         Returns:
@@ -609,9 +619,10 @@ class TaskRepository( BaseRepository[TaskItem] ):
         # whether the body changed.
         if body_changed: item.body_changed_ts = self._db_clock_now()
 
-        # Caller-supplied reason wins (the manager's "why" for a reassignment);
-        # otherwise auto-describe the field delta so the event is never blank.
-        event_reason = reason if reason else ( "; ".join( changes ) if changes else "no-op patch (no field changed)" )
+        # The field delta ALWAYS leads (bug a01e4e2a) — a caller "why" is additive,
+        # never a substitute, so an overwrite can no longer erase what it overwrote.
+        event_reason = "; ".join( changes ) if changes else "no-op patch (no field changed)"
+        if reason: event_reason = f"{event_reason} | reason: {reason}"
         # Fold the persona-flag marker into the resolved reason (policy 1) —
         # AFTER the field-delta is composed, so both survive on the one event.
         if flag_suffix:
