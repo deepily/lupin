@@ -142,17 +142,31 @@ accident; that mismatch is how the MASKED misassignment above got published in t
 a MASKED path needs the call to happen at all, a COINCIDENCE needs an input that separates the
 two answers. Reaching for one remedy across all three is how a "repaired" fixture stays blind.
 
-So the citable statement is **0 of 5 found, on a named sample**: the pre-`e23ef98c` state of those
-two files, measured by Clayton 2026-08-30.
+**The citable statement, in Chloé's wording**: *0 of 5 — four re-derivable at `e23ef98c^`, the
+sorted-order case only in Clayton's snapshot `2e86d57e68550816`, never committed.* Two numbers,
+not one, and conflating them is what this page kept getting wrong.
 
 🔴 **AND THE SAMPLE IS RE-DERIVABLE — IT DOES NOT REST ON A SNAPSHOT NOBODY ELSE HAS** (Chloé,
 2026-08-30, refusing this page for claiming more than it could show under its own new standard).
 An earlier cut cited "Chloé's worktree snapshot at 17:32:51", a transient artifact on one machine
-— the same defect as "ask Clayton for the other two", one level up. **The five samples ARE the
-findings repaired at `e23ef98c`**, so the pre-repair state is in git and anyone can reconstruct it:
+— the same defect as "ask Clayton for the other two", one level up. FOUR of the five are in git:
 
     git show e23ef98c^:src/tests/unit/scripts/test_thread_attribution_plugin.py
     git show e23ef98c^:src/tests/unit/scripts/test_probe_commons_post_direct.py
+
+🔴 **THE FIFTH IS IN NO COMMIT AT ALL, AND THE COMMAND ABOVE DOES NOT PRODUCE IT** — found
+independently by Clayton and by Chloé within a minute, each checking what the command actually
+returns rather than that it returned something. Measured: `e23ef98c^` resolves to `f6e77c79`, and
+at that commit the sorted-order test is ALREADY REPAIRED — its docstring describes the blind
+version in the past tense, *"used 30 / 10 / 20, and a mutation replacing `sorted( ls )` with
+`list( ls )` SURVIVED it"*. Chloé fixed it in her working copy BEFORE `f6e77c79`, so the blind form
+was never committed by anyone; it survives only in Clayton's snapshot `2e86d57e68550816`.
+
+⇒ **The only evidence in the repo for that one case is a sentence describing it** — a comment, not
+an artifact. Four can be reconstructed; the fifth is permanently on trust.
+
+⚠️ **A `git show` that SUCCEEDS is not proof it produced the state you wanted.** It printed a file
+both times. One of them was the repaired version and nothing in the output said so.
 
 ⚠️ **One caveat that does NOT go away**: the THIRD_PARTY fixture names a path under `/usr/lib` that
 exists on some machines and not others. The BLINDNESS is still checkable anywhere, because it is a
