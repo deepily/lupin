@@ -35,8 +35,222 @@ A repeat is legal, common, and usually fine. Treating this output as a defect li
 be an instrument certifying itself by counting hits nobody adjudicated — which is the
 exact failure the probe exists to help find.
 
+🔴 WHAT IT CANNOT SEE — THE RECALL SIDE, AND IT IS THE BIGGER HALF
+-----------------------------------------------------------------
+The caveat above is about PRECISION: hits that turn out fine. This one is about RECALL, and a
+zero from this probe is the more dangerous output, because a zero reads like an all-clear.
+
+**Measured 2026-08-30.** Run over `src/tests/unit/scripts` — 32 test files — it reports ZERO
+hits in `test_watch_hook_events.py`, a file of 63 tests.
+
+🔴 **THE FIRST VERSION OF THIS RECEIPT CLAIMED TWICE WHAT IT COULD SHOW** (Clayton, 2026-08-30,
+checking the file instead of accepting the claim). It said the file "contains BOTH" of the blind
+fixtures Maya found by mutation. **Only one of them is still in it.** Checked line by line at
+72157c17:
+
+    line 123   REPAIRED - now `assert root.is_absolute()` plus the parents[ 2 ] equality,
+               which is Maya's kill. The blind `.exists()` form is GONE, so a probe that
+               does not flag it has missed NOTHING.
+
+    line 218   STILL BLIND, verbatim: `_hhmmss( "2026.06.06 @ 01:45 abc" ) == "01:45:00"`.
+               "abc" has no digits, so the `.zfill( 2 )` under test is a no-op and the
+               assertion cannot see it either way. The probe does not flag it.
+
+⇒ **One real miss, not two** - and the survivor is the better example, because it is a blind
+assertion sitting in the tree right now that this probe cannot see. Its BEHAVIOUR is defended,
+by the sibling at line 228 using "7ms" - the precision caveat above running the other way:
+blind assertion, covered behaviour.
+
+**A LARGER AND PROPERLY-CONSTITUTED SAMPLE — Clayton, 2026-08-30, and it is HIS measurement, not
+this author's.** He first probed a set of five blind fixtures and got zero hits, then withdrew
+his own result for the same reason he had just corrected in mine: he had run against the
+REPAIRED tree (his tip 72157c17 has Chloé's adoption e23ef98c as an ancestor), so all five were
+already fixed and a zero proved nothing. He re-ran against the true pre-repair snapshot taken
+from Chloé's worktree at 17:32:51, **verifying each sample actually CONTAINS the blindness
+before counting a miss**. **Probe reports ZERO hits on all five**, in
+`test_thread_attribution_plugin.py` and `test_probe_commons_post_direct.py`:
+
+    1. line numbers (30, 10, 20) recorded in an order that is already what a sort would give
+    2. a THIRD_PARTY path under /usr/lib with no /src/ in it, rejected by the first clause
+    3. one file per thread, so sort_keys=True and sort_keys=False give identical output
+    4. OUT and PREFIX defaults executed at import and never asserted
+    5. a truncate-only _FakeStore
+
+**None of them repeats a literal**, which is why this probe cannot see any of them.
+
+**THREE SUB-SHAPES, NOT ONE** (Clayton, 2026-08-30, splitting a claim this author had collapsed).
+An earlier cut of this paragraph said shapes 1 and 3 were NO-OPs "like Maya's cases". Shape 1 is
+not a no-op — **the code is never evaluated at all**, which is a different failure and a
+different fix:
+
+    NO-OP         the operation under test runs and does nothing on this data
+                  · Maya's `.zfill( 2 )` against an input with no digits
+
+    MASKED        the code path is never evaluated, so its behaviour is not in the result
+                  · the THIRD_PARTY test whose fixture path is under /usr/lib/…/site-packages:
+                    an earlier clause matches first, so the THIRD_PARTY term never runs
+
+    COINCIDENCE   the wrong answer equals the right answer under this fixture's data or
+                  environment
+                  · Maya's `Path( "" )`, where both answers name the same file
+                  · shape 5, the truncate-only `_FakeStore`
+
+🔴 **AND A FOURTH THING THAT IS NOT A SUB-SHAPE AT ALL — SHAPE 4, WHICH COVERAGE ACTIVELY
+HIDES.** `OUT` and `PREFIX` defaults **execute at import**, so they are reported as COVERED, and
+nothing anywhere asserts them. Clayton places 6 of the 7 in the three buckets above and shape 4
+**outside** them, and he is right to: the other three are blind ASSERTIONS, this is a value with
+no assertion at all, wearing a green coverage mark. **A tool that counts executed lines says this
+is fine. It is the strongest single argument on this page for why neither coverage nor this probe
+substitutes for a mutation.**
+
+Two of his placements are measured rather than argued, and both are worth keeping because they
+are the kind of thing a reader would otherwise take on faith: `list( set )` equals
+`sorted( set )` for 30/10/20, and `json.dumps` with ONE key is byte-identical under
+`sort_keys=True` and `sort_keys=False` while two keys differ.
+
+🔴 **THE FULL ASSIGNMENT, CONFIRMED — AND IT OVERTURNS ONE THIS PAGE HAD ALREADY PUBLISHED.**
+An earlier cut put the **(30, 10, 20) sorted-order** case in MASKED. Clayton's confirmation, "both,
+no exceptions", puts it in **NO-OP**, and his measurement is why: `list( set )` equals
+`sorted( set )` for 30/10/20, so the sort RUNS and has no effect — which is a no-op, not an
+unevaluated path. The single-file `sort_keys` case is NO-OP for the same reason: `json.dumps`
+with ONE key is byte-identical under `sort_keys=True` and `sort_keys=False`.
+
+So of the five: **sorted-order NO-OP · single-file sort_keys NO-OP · THIRD_PARTY-under-/usr/lib
+MASKED · truncate-only `_FakeStore` COINCIDENCE · `OUT`/`PREFIX` outside the buckets entirely** —
+plus Maya's `.zfill( 2 )` NO-OP and her `Path( "" )` COINCIDENCE.
+
+🔴 **THE OFF-BY-ONE PRODUCED TWO ERRORS, NOT ONE.** Moving sorted-order into NO-OP was right, and
+the same misread numbering carried the THIRD_PARTY case out of MASKED with it — so a previous cut
+of this block declared MASKED empty. It is not: **THIRD_PARTY-under-/usr/lib is MASKED, and is the
+only MASKED case in the sample.** Clayton's receipt, which is a statement about the CODE and not
+about his machine, so anyone can check it:
+
+    fixture path /usr/lib/python3.13/site-packages/pytest/__init__.py
+        -> the THIRD_PARTY term reports EVALUATED=False   (an earlier clause matched first)
+    fixture path /src/cosa/.venv/lib/python3.11/site-packages/urllib3/connection.py
+        -> the THIRD_PARTY term reports EVALUATED=True
+
+⇒ **A correction that fixes one item by moving a boundary will move its neighbours too.** Re-check
+the cases either side of anything you re-bucket.
+
+⚠️ **KEY THESE BY NAME, NEVER BY NUMBER.** This author's numbering and Clayton's differ by one —
+what is "shape 1" here is "shape 2" in his messages — and an assignment read off the numbers
+alone would land on the wrong case. The names are unambiguous and the numbers are a local
+accident; that mismatch is how the MASKED misassignment above got published in the first place.
+
+⇒ **The three want different repairs**: a NO-OP needs data on which the operation has an effect,
+a MASKED path needs the call to happen at all, a COINCIDENCE needs an input that separates the
+two answers. Reaching for one remedy across all three is how a "repaired" fixture stays blind.
+
+**The citable statement, in Chloé's wording**: *0 of 5 — four re-derivable at `e23ef98c^`, the
+sorted-order case only in Clayton's snapshot `2e86d57e68550816`, never committed.* Two numbers,
+not one, and conflating them is what this page kept getting wrong.
+
+🔴 **AND THE SAMPLE IS RE-DERIVABLE — IT DOES NOT REST ON A SNAPSHOT NOBODY ELSE HAS** (Chloé,
+2026-08-30, refusing this page for claiming more than it could show under its own new standard).
+An earlier cut cited "Chloé's worktree snapshot at 17:32:51", a transient artifact on one machine
+— the same defect as "ask Clayton for the other two", one level up. FOUR of the five are in git:
+
+    git show e23ef98c^:src/tests/unit/scripts/test_thread_attribution_plugin.py
+    git show e23ef98c^:src/tests/unit/scripts/test_probe_commons_post_direct.py
+
+🔴 **THE FIFTH IS IN NO COMMIT AT ALL, AND THE COMMAND ABOVE DOES NOT PRODUCE IT** — found
+independently by Clayton and by Chloé within a minute, each checking what the command actually
+returns rather than that it returned something. Measured: `e23ef98c^` resolves to `f6e77c79`, and
+at that commit the sorted-order test is ALREADY REPAIRED — its docstring describes the blind
+version in the past tense, *"used 30 / 10 / 20, and a mutation replacing `sorted( ls )` with
+`list( ls )` SURVIVED it"*. Chloé fixed it in her working copy BEFORE `f6e77c79`, so the blind form
+was never committed by anyone; it survives only in Clayton's snapshot `2e86d57e68550816`.
+
+⇒ **The only evidence in the repo for that one case is a sentence describing it** — a comment, not
+an artifact. Four can be reconstructed; the fifth is permanently on trust.
+
+⚠️ **A `git show` that SUCCEEDS is not proof it produced the state you wanted.** It printed a file
+both times. One of them was the repaired version and nothing in the output said so.
+
+⚠️ **One caveat that does NOT go away**: the THIRD_PARTY fixture names a path under `/usr/lib` that
+exists on some machines and not others. The BLINDNESS is still checkable anywhere, because it is a
+property of clause ORDER and the two paths above demonstrate it — but do not expect that test to
+behave identically on every box.
+
+⚠️ **THAT SEQUENCE IS THE METHOD, not a footnote about one reviewer.** A recall check run against
+a tree where the blindness has been repaired reports zero and means nothing, and it looks
+identical to one that means something. **Verify the sample still contains what you claim the
+probe missed, and say which tree you ran in.**
+
+The two shapes, so the point survives the line numbers going stale:
+
+    # blind: Path( "" ) is RELATIVE, and pytest runs from the repo root, so the wrong
+    # answer and the right answer name the same file
+    assert ( root / "src" / "scripts" / "watch-hook-events.py" ).exists()
+
+    # blind: "abc" has no digits, so ss is already "00" — two characters — and the
+    # .zfill( 2 ) under test is a no-op either way
+    assert whe._hhmmss( "2026.06.06 @ 01:45 abc" ) == "01:45:00"
+
+Neither has a repeated literal ANYWHERE. There is nothing for this probe to match, so it finds
+nothing, and it would find nothing on a hundred more like them.
+
+**Why, stated as the rule rather than the two cases.** Repeated expected values are the corner
+of fixture blindness that leaves a SYNTACTIC trace. The family is much larger: a fixture is
+blind whenever the data it chose cannot distinguish right from wrong — because the value makes
+the operation a no-op, because the wrong answer coincides with the right one under that input,
+because the environment supplies what the code was supposed to. **None of those repeat
+anything.** They are properties of what the value MEANS to the code under test, and no scanner
+reading the test file can know that.
+
+⇒ **This probe answers "where do expected values repeat?" — a question with a mechanical
+answer. It does not answer "which fixtures cannot discriminate?", and the two are not close
+enough for a zero on the first to say anything about the second.**
+
+⇒ **A file with no hits has not been cleared. It has not been examined.** Only a mutation
+tells you whether a fixture can see what its name claims.
+
+⚠️ **AND THIS IS A DEMONSTRATION THAT RECALL IS NOT TOTAL — IT IS NOT A MEASUREMENT OF RECALL.**
+Neither number on this page is large. **Precision rests on TWO adjudicated hits** (both covered
+elsewhere, named above); the recall evidence is **two known blind fixtures in one file**. Two
+and two. A rate cannot be computed from either.
+
+🔴 **A "20-HIT ADJUDICATION, PRECISION 5-25%" FIGURE WAS IN CIRCULATION FOR THIS PROBE AND IT IS
+UNCITABLE — DO NOT REPEAT IT** (Rachel, 2026-08-30, refusing to approve until it was named or
+cut: *"name the twenty - when, which hits, what each resolved to - or cut it and say two"*).
+It could not be named. It reached this author in a session memento, was repeated in review DMs
+and in a commit message as though measured, and **the only adjudication evidence in this repo is
+the two hits above** - which this file's docstring and its own printed footer have said all
+along. **The page contradicted itself, and the smaller, true number was the one already written
+down.**
+
+⇒ **A figure that arrives without its receipts is a rumour with a provenance, and inheriting it
+from a prior session is not provenance.** Cut it and state what can be shown.
+
+**Recall has no denominator, and that — not the quality of the evidence — is why it cannot be
+rated.** A recall rate is (blind fixtures found) / (blind fixtures that exist). The numerator is
+obtainable. **The denominator is not: nobody can enumerate the blind fixtures in this repo**,
+because a fixture's blindness is a fact about what its data means to the code under test, and
+the only way to establish it is to mutate that code and watch. You can always find more by
+mutating more. There is no point at which the set is known to be complete, so there is nothing
+to divide by.
+
+🔴 **AN EARLIER CUT OF THIS PARAGRAPH GAVE THE WRONG REASON, AND THE WRONG REASON WAS THE
+DANGEROUS PART** (Clayton 😎, 2026-08-30, refusing to approve until it was fixed). It said a
+recall figure taken over mutation-found fixtures would be "the instrument certifying itself
+against its own reach." **That is backwards.** Mutation is a DIFFERENT instrument from this
+probe — it executes the code, this reads the source — so checking the probe against
+mutation-found fixtures is exactly the independent second reading that certification rule asks
+for. The old wording discouraged the one kind of evidence that would strengthen this page.
+
+⇒ **Measuring the probe against known blind fixtures is legitimate and worth doing.** It yields
+*"it missed N of the M we know about"* — a real statement about a named sample. It does not
+yield a recall rate, and the difference is the denominator, not the method.
+
+⇒ **Quote either as a count against a NAMED sample — "2 of 2 adjudicated hits were covered
+elsewhere", "missed 2 of the 2 blind fixtures known in that file" — never as a bare rate.** A
+ratio over a sample you name is honest and useful; what this page cannot support is an
+unqualified precision or recall *rate*, which implies a population neither number has.
+
 EXIT CODES
-    0  scanned, no interchangeable-value assertions found
+    0  scanned, no interchangeable-value assertions found — NOT an all-clear:
+       it means nothing MATCHED, never that no fixture is blind (see recall, above)
     1  findings present (a TRIAGE queue, never a defect count)
     2  nothing could be scanned — no readable files matched
 
@@ -205,15 +419,28 @@ def render( findings, files_read, limit ):
     if len( findings ) > limit:
         print( f"  … and {len( findings ) - limit} more (raise --limit to see them)" )
     if not findings:
-        print( "  (none — no assertion compares against a container whose values repeat)" )
+        # 🔴 A ZERO RUN IS THE OUTPUT MOST LIKELY TO BE MISREAD, so it says so HERE rather
+        # than only in the docstring (Chloé, 2026-08-30). A consumer reading stdout never
+        # opens this file, and "no findings" from a triage aid reads as an all-clear.
+        print( "  NOT FOUND — and NOT the same as none present." )
+        print( "  This probe matches REPEATED expected values, the one shape of fixture" )
+        print( "  blindness with a syntactic trace. A fixture blind because its value makes" )
+        print( "  the operation a no-op, or because the wrong answer coincides with the right" )
+        print( "  one, repeats nothing and CANNOT be found here. Measured: it returns zero on" )
+        print( "  a file carrying a blind assertion at src/tests/unit/scripts/" )
+        print( "  test_watch_hook_events.py. A file with no hits has not been cleared —" )
+        print( "  it has not been examined. Only a mutation clears it." )
 
     print( "\nWHAT THIS LIST IS — read before filing anything" )
     print( "  FINDS      : assertions whose expected values REPEAT, so a swap between the two"
            " things they describe cannot change the outcome." )
     print( "  DOES NOT   : find undefended behaviour. Discrimination often lives in a SIBLING"
            " assertion this probe cannot see." )
-    print( "  MEASURED   : the first two hits adjudicated (2026-08-30) were BOTH covered"
-           " elsewhere — one by the adjacent line, one by two sibling tests." )
+    print( "  MEASURED   : the two hits adjudicated so far (2026-08-30) were BOTH covered"
+           " elsewhere — one by the adjacent line, one by two sibling tests. Two is the"
+           " whole adjudicated sample; there is no larger one." )
+    print( "  MISSES     : returns zero on a file that carries a blind assertion — recall is"
+           " demonstrably not total, and its rate is unknown (no denominator)." )
     print( "  SO         : every hit needs a mutation to adjudicate. This narrows where to point"
            " one; it does not replace one, and it is NEVER a defect count." )
 
@@ -248,6 +475,12 @@ def main( argv=None ):
             "caveat"     : ( "Blind ASSERTIONS, not undefended BEHAVIOUR. Discrimination often "
                              "lives in a sibling assertion this probe cannot see; every hit needs "
                              "a mutation to adjudicate. Never a defect count." ),
+            "recall"     : ( "An empty findings list is NOT an all-clear. This probe matches "
+                             "repeated expected values only — the one shape of fixture blindness "
+                             "with a syntactic trace. Blindness from a no-op value, or from a "
+                             "wrong answer that coincides with the right one, repeats nothing and "
+                             "cannot be found here. Measured: zero hits on a file carrying a blind "
+                             "assertion. Recall is demonstrably not total and its rate is unknown." ),
         }, indent=2 ) )
     else:
         render( findings, files_read, args.limit )
