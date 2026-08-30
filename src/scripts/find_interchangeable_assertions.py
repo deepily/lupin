@@ -61,6 +61,23 @@ assertion sitting in the tree right now that this probe cannot see. Its BEHAVIOU
 by the sibling at line 228 using "7ms" - the precision caveat above running the other way:
 blind assertion, covered behaviour.
 
+**A LARGER AND PROPERLY-CONSTITUTED SAMPLE — Clayton, 2026-08-30, and it is HIS measurement, not
+this author's.** He first probed a set of five blind fixtures and got zero hits, then withdrew
+his own result for the same reason he had just corrected in mine: he had run against the
+REPAIRED tree (his tip 72157c17 has Chloé's adoption e23ef98c as an ancestor), so all five were
+already fixed and a zero proved nothing. He re-ran against the true pre-repair snapshot taken
+from Chloé's worktree at 17:32:51, **verifying each sample actually CONTAINS the blindness
+before counting a miss** — the (30, 10, 20) line numbers, the THIRD_PARTY path under /usr/lib
+with no /src/ in it, the truncate-only _FakeStore. **Probe reports ZERO hits.**
+
+So the citable statement is **0 of 5 found, on a named sample**: Chloé's pre-`e23ef98c` worktree
+snapshot, 17:32:51 on 2026-08-30, measured by Clayton. Ask him for the two not named here.
+
+⚠️ **THAT SEQUENCE IS THE METHOD, not a footnote about one reviewer.** A recall check run against
+a tree where the blindness has been repaired reports zero and means nothing, and it looks
+identical to one that means something. **Verify the sample still contains what you claim the
+probe missed, and say which tree you ran in.**
+
 The two shapes, so the point survives the line numbers going stale:
 
     # blind: Path( "" ) is RELATIVE, and pytest runs from the repo root, so the wrong
