@@ -483,11 +483,22 @@ def test_the_live_fixture_carries_a_reason_for_every_accepted_row():
     import json
     recorded = json.load( open( cu.get_project_root()
                                 + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json" ) )
+    # Same independence rule as the amnesty bound above: read the record directly, then
+    # cross-check the helper against it. A helper returning ( set(), [] ) would otherwise
+    # certify any record at all.
+    direct_unjustified = sorted( row for row, reason in recorded[ "branch_accepted" ].items()
+                                 if not ( reason or "" ).strip() )
     accepted, unjustified = accepted_rows_and_unjustified( recorded )
 
-    assert unjustified == [ ], (
-        f"{len( unjustified )} accepted row(s) in the live record carry no reason:\n"
-        + chr( 10 ).join( "    " + row for row in unjustified )
+    assert unjustified == direct_unjustified, (
+        f"accepted_rows_and_unjustified disagrees with a direct read: helper says "
+        f"{len( unjustified )} unjustified, the file says {len( direct_unjustified )}."
+    )
+    assert accepted, "the record holds no accepted rows at all — this test would pass on anything"
+
+    assert direct_unjustified == [ ], (
+        f"{len( direct_unjustified )} accepted row(s) in the live record carry no reason:\n"
+        + chr( 10 ).join( "    " + row for row in direct_unjustified )
     )
     assert len( accepted ) == 190, "the grandfathered set changed size — re-triage before re-pinning"
 
@@ -504,10 +515,29 @@ def test_the_amnesty_is_bounded_and_cannot_absorb_a_new_finding():
     import json
     recorded = json.load( open( cu.get_project_root()
                                 + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json" ) )
+
+    # ⚠️ COUNTED DIRECTLY FROM THE RECORD, NOT VIA amnesty_rows (Tiberius, reviewing
+    # 177c3542). Policing the amnesty with the very helper the amnesty is expressed in
+    # means a DEAD helper — one returning [] for any input — makes this test pass
+    # vacuously. The instrument cannot be its own control. Two independent readings,
+    # cross-checked below, so a broken helper reddens rather than certifies.
+    direct = [ row for row, reason in recorded[ "branch_accepted" ].items()
+               if reason == GRANDFATHER_REASON ]
     riding = amnesty_rows( recorded )
 
-    assert len( riding ) <= AMNESTY_ROWS, (
-        f"{len( riding )} rows now ride the 2026-08-17 amnesty, up from {AMNESTY_ROWS}. "
+    assert sorted( riding ) == sorted( direct ), (
+        f"amnesty_rows disagrees with a direct read of the record: helper says "
+        f"{len( riding )}, the file says {len( direct )}. The helper is wrong, or the "
+        "record's shape changed under it — either way the bound below means nothing."
+    )
+    assert direct, (
+        "NO row rides the amnesty. Either every row was individually re-triaged — worth "
+        "saying out loud and re-pinning AMNESTY_ROWS to 0 — or this test is reading an "
+        "empty record and would pass on anything."
+    )
+
+    assert len( direct ) <= AMNESTY_ROWS, (
+        f"{len( direct )} rows now ride the 2026-08-17 amnesty, up from {AMNESTY_ROWS}. "
         "A finding discovered after that date cannot have been triaged on it — give the new "
         "row its own reason, or say plainly why the amnesty was widened."
     )
