@@ -12,13 +12,14 @@ namespace, never globally, so nothing here depends on `:8001` being up — and a
 on a box where it IS up cannot silently measure the live roster instead of the
 fixture.
 
-⚠️ THE REAL FILESYSTEM MOVE IS NOT EXERCISED, and that is a property of the script
-rather than a gap I chose. `main()` builds its archive destination itself —
-`/tmp/lupin-heartbeat-purge-<timestamp>` — with no argument, environment variable
-or constant to redirect it, so an honest end-to-end apply test would have to write
-into the real `/tmp`. `shutil.move` and `os.makedirs` are recorded instead and
-asserted on their arguments. Reported to the fleet as a finding; this file adds
-tests and does not change the script.
+THE REAL FILESYSTEM MOVE IS EXERCISED, via `--archive-dir` into a tmp_path. That
+argument exists because this test could not honestly be written without it: `main()`
+used to build `/tmp/lupin-heartbeat-purge-<timestamp>` inline with nothing able to
+redirect it, so an end-to-end `--apply` test would have had to write into the one
+directory this fleet's doctrine tells every seat to stay out of. Reported as a
+finding, then made injectable on Mr. Radio's ruling. The DEFAULT path is still
+asserted, with `shutil.move` recorded rather than run, so the untouched behaviour is
+covered too.
 """
 
 import datetime
@@ -252,3 +253,42 @@ def test_running_the_script_calls_main( monkeypatch, tmp_path, capsys ):
     _argv( monkeypatch, "--events-dir", str( tmp_path ) )
     runpy.run_path( SCRIPT_PATH, run_name="__main__" )
     assert "[DRY-RUN] snapshot: offline=0 | keep(live/quiet)=0" in capsys.readouterr().out
+
+
+# ── the injectable archive destination ───────────────────────────────────────
+
+def test_apply_really_moves_the_file_when_given_an_archive_dir(
+        monkeypatch, tmp_path, capsys ):
+    """
+    The end-to-end move, on a real filesystem, with no recorder in the way — the test
+    `--archive-dir` was added to make possible. Source gone, destination present, and
+    the archive directory created on demand.
+    """
+    events  = tmp_path / "events";  events.mkdir()
+    archive = tmp_path / "archive"                 # deliberately absent — main creates it
+    ( events / "aaa.jsonl" ).write_text( "payload\n" )
+    _serve( monkeypatch, _state( _session( "Rio", "aaa", "offline" ) ) )
+    _argv( monkeypatch, "--apply", "--events-dir", str( events ),
+           "--archive-dir", str( archive ) )
+
+    purge.main()
+
+    assert not ( events / "aaa.jsonl" ).exists()               # moved, not copied
+    assert ( archive / "aaa.jsonl" ).read_text() == "payload\n"
+    assert f"ARCHIVED 1 offline event files -> {archive}" in capsys.readouterr().out
+
+
+def test_a_dry_run_with_an_archive_dir_still_creates_nothing(
+        monkeypatch, tmp_path, capsys ):
+    """--archive-dir must not turn a dry run into a real one."""
+    events  = tmp_path / "events";  events.mkdir()
+    archive = tmp_path / "archive"
+    ( events / "aaa.jsonl" ).write_text( "payload\n" )
+    _serve( monkeypatch, _state( _session( "Rio", "aaa", "offline" ) ) )
+    _argv( monkeypatch, "--events-dir", str( events ), "--archive-dir", str( archive ) )
+
+    purge.main()
+
+    assert ( events / "aaa.jsonl" ).exists()
+    assert not archive.exists()
+    assert "(DRY-RUN — nothing moved." in capsys.readouterr().out
