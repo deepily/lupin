@@ -583,6 +583,60 @@ def drain_and_acknowledge( session_id ):
 # self-contained <system-reminder> blocks), so a pure-DM context skips the rider.
 VOICE_LINE_PREFIX = "[Voice]: "
 
+# ── Backlog disclosure (row 298af249) ────────────────────────────────────────
+#
+# WHY THIS EXISTS, and it is a measured failure rather than a tidiness concern.
+# When a session is busy the listener BUFFERS inbound messages, and the drain is
+# uncapped at both steps — `drain_voice_buffer` returns every line and this
+# formatter turned every one of them into a flat run of blocks. A reader then
+# receives a wall with nothing in it saying it IS a wall.
+#
+# Measured 2026-08-30: a review approval reached its recipient as buffered
+# message #78 of 78 and did not register; the manager read the silence as "the
+# reviewer has not finished" and chased it by hand an hour later. The message was
+# never lost — `dispatched: true` was honest and the row was in the store the
+# whole time. What was missing was any signal that seventy-seven other messages
+# arrived with it.
+#
+# THIS IS DISCLOSURE, NOT A CAP. Dropping or truncating a backlog would convert a
+# hard-to-read delivery into a silent non-delivery, which is strictly worse and is
+# the defect one row over. Everything still gets through; the block now states its
+# own depth so a reader knows to scan rather than skim.
+BACKLOG_HEADER_THRESHOLD = 5
+BACKLOG_HEADER_PREFIX    = "[Backlog]: "
+
+
+def format_backlog_header( count, threshold=BACKLOG_HEADER_THRESHOLD ):
+    """
+    Build the one-line header that discloses how deep a drained backlog is.
+
+    Requires:
+        - count is an int (the number of formatted messages in this drain)
+        - threshold is an int
+
+    Ensures:
+        - returns "" when count <= threshold — an ordinary handful reads fine as
+          itself, and a header on every drain would be noise that teaches the
+          reader to skip the one line that matters
+        - returns a single line naming the exact count when count > threshold
+        - the line carries no message content, so it cannot itself bury anything
+        - never raises
+
+    Args:
+        count: number of messages in this drain
+        threshold: disclose only above this depth
+
+    Returns:
+        str: the header line, or "" when at or under the threshold
+    """
+    if count <= threshold:
+        return ""
+    return (
+        f"{BACKLOG_HEADER_PREFIX}{count} messages arrived while this session was busy "
+        f"and are delivered together below. They are NOT one conversation — read to the "
+        f"end before replying; a verdict or an approval may be anywhere in the run."
+    )
+
 
 # bug d0d7f068 (Part 2 / option C): the peer-DM envelope's frame prefix as a SHARED
 # constant. build_peer_dm_reminder emits it; is_injected_peer_dm + the Stop-hook
@@ -801,6 +855,11 @@ def format_voice_context( messages ):
             ) )
         else:
             lines.append( f"{VOICE_LINE_PREFIX}{text}" )
+    # Disclose the depth BEFORE the run, never after: a header under a wall is
+    # read at the same moment as the thing it was meant to warn about.
+    header = format_backlog_header( len( lines ) )
+    if header:
+        lines.insert( 0, header )
     return "\n".join( lines )
 
 
