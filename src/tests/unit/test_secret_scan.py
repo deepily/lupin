@@ -217,6 +217,48 @@ def _masked_rows( findings ):
              for origin, _lineno, key, _len, digest in findings }
 
 
+GRANDFATHER_REASON = "grandfathered: collectively triaged 2026-08-17, see branch_triage_note"
+
+
+def accepted_rows_and_unjustified( recorded ):
+    """
+    Split `branch_accepted` into the accepted set and the rows accepted WITHOUT a reason.
+
+    WHY THIS EXISTS (row off the 2026-08-30 working-tree-artifact audit). `branch_accepted`
+    was a list of bare strings, so the gate could not tell a TRIAGED acceptance from a
+    PASTED one — and the pasting move was the documented remediation: the failure message
+    told you to add the row, and adding the row was the whole procedure. A real credential
+    could therefore be waved through by someone following the instructions correctly and
+    hurriedly. No malice required, which is what made it the likeliest of the seven
+    false-greens to actually fire.
+
+    The fix is the discipline the task store already enforces on `->done`: if you cannot
+    cite a reason, the work is not done. Every accepted row now carries one.
+
+    Requires:
+        - recorded is the parsed fixture dict
+
+    Ensures:
+        - returns ( accepted_set, unjustified_rows ) — both derived from the SAME mapping,
+          so a row can never be silently accepted while being reported as unjustified
+        - a MAPPING is required. A bare list raises TypeError rather than being tolerated:
+          a compatibility fallback here would preserve the exact hole this closes
+        - a reason that is missing, None, blank, or whitespace-only counts as UNJUSTIFIED
+        - never raises on an empty mapping
+    """
+    accepted = recorded[ "branch_accepted" ]
+    if not isinstance( accepted, dict ):
+        raise TypeError(
+            "branch_accepted must be a MAPPING of row -> reason, not "
+            f"{type( accepted ).__name__}. A bare list cannot distinguish a triaged "
+            "acceptance from a pasted one, which is the defect this shape closes."
+        )
+
+    unjustified = sorted( row for row, reason in accepted.items()
+                          if not ( reason or "" ).strip() )
+    return set( accepted ), unjustified
+
+
 def test_a_detector_change_forces_a_full_rescan():
     """
     The trigger a calendar cannot cover (Mr Radio, 2026-08-17), built so it cannot be
@@ -319,7 +361,18 @@ def test_the_branch_we_commit_to_carries_no_untriaged_finding():
 
     _require_ref( recorded[ "branch_ref" ], root )
 
-    accepted = set( recorded[ "branch_accepted" ] )
+    accepted, unjustified = accepted_rows_and_unjustified( recorded )
+
+    # Checked BEFORE the scan: an acceptance with no reason is a defect in the record
+    # itself, true regardless of what the branch currently carries, and reporting it
+    # first stops it hiding behind a slow scan that may pass.
+    assert not unjustified, (
+        f"{len( unjustified )} accepted row(s) carry NO reason. An acceptance nobody can "
+        "justify is indistinguishable from one nobody made:\n"
+        + chr( 10 ).join( "    " + row for row in unjustified )
+        + "\n\nGive each a one-line reason saying why it is not a real credential."
+    )
+
     measured = _masked_rows( secret_scan.scan_ref( recorded[ "branch_ref" ], cwd=root ) )
     untriaged = sorted( measured - accepted )
 
@@ -329,6 +382,80 @@ def test_the_branch_we_commit_to_carries_no_untriaged_finding():
         "Values are masked — key, path and a truncated digest, never the secret:\n"
         + chr( 10 ).join( "    " + row for row in untriaged )
         + "\n\nIf one is real, remove it and read it from the environment or the secret store. "
-          "If it is a false positive, triage it and add its row above to branch_accepted:\n"
+          "If it is a false positive, triage it and add its row to branch_accepted AS A KEY "
+          "WHOSE VALUE IS A ONE-LINE REASON — a bare row is refused:\n"
         + steps
     )
+
+
+# ── the justification gate — negative controls ────────────────────────────────────
+#
+# THE CASE THIS GATE WAS PASSING, and these prove it now reds. Before 2026-08-30
+# `branch_accepted` was a list of bare strings, so a row pasted in without triage was
+# indistinguishable from one triaged properly — and pasting was what the failure message
+# told you to do. Each control below is the fooling move, executed.
+
+def test_a_pasted_row_with_no_reason_is_refused():
+    """THE NEGATIVE CONTROL. This is exactly what the gate used to accept in silence."""
+    recorded = { "branch_accepted": {
+        "src/cosa/rest/db.py|DB_PASSWORD|sha256:c20cc404fe15": "",   # ← the pasted row
+        "src/tests/thing.py|password|sha256:aaaaaaaaaaaa"    : "planted fixture, not real",
+    } }
+    accepted, unjustified = accepted_rows_and_unjustified( recorded )
+
+    assert unjustified == [ "src/cosa/rest/db.py|DB_PASSWORD|sha256:c20cc404fe15" ]
+    # and it is STILL in the accepted set — the two are derived from one mapping, so a row
+    # can never be quietly accepted while being reported as unjustified
+    assert len( accepted ) == 2
+
+
+@pytest.mark.parametrize( "reason,label", [
+    ( "",       "empty string" ),
+    ( "   ",    "whitespace only" ),
+    ( "\t\n",   "tabs and newlines" ),
+    ( None,     "explicit null" ),
+] )
+def test_every_shape_of_absent_reason_is_refused( reason, label ):
+    """A reason that is present-but-empty must not read as present. `" "` is truthy."""
+    recorded = { "branch_accepted": { "a|b|sha256:1": reason } }
+    _, unjustified = accepted_rows_and_unjustified( recorded )
+    assert unjustified == [ "a|b|sha256:1" ], f"{label} was accepted as a reason"
+
+
+def test_a_justified_row_passes():
+    """The positive control — without it the test above is satisfied by a broken helper."""
+    recorded = { "branch_accepted": { "a|b|sha256:1": "synthetic value in a test fixture" } }
+    accepted, unjustified = accepted_rows_and_unjustified( recorded )
+
+    assert unjustified == [ ]
+    assert accepted == { "a|b|sha256:1" }
+
+
+def test_a_bare_list_is_refused_rather_than_tolerated():
+    """
+    A compatibility fallback here would preserve the exact hole this closes, so the old
+    shape is a TypeError. Named explicitly because "be lenient with the old format" is the
+    obvious next edit somebody makes.
+    """
+    with pytest.raises( TypeError ) as error:
+        accepted_rows_and_unjustified( { "branch_accepted": [ "a|b|sha256:1" ] } )
+    assert "MAPPING" in str( error.value )
+
+
+def test_the_live_fixture_carries_a_reason_for_every_accepted_row():
+    """
+    The gate applied to the real record — the half that would catch a future paste.
+
+    Kept separate from the scanning test so it runs in milliseconds and fails for its own
+    reason: this one is about the RECORD, and stays true whatever the branch carries.
+    """
+    import json
+    recorded = json.load( open( cu.get_project_root()
+                                + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json" ) )
+    accepted, unjustified = accepted_rows_and_unjustified( recorded )
+
+    assert unjustified == [ ], (
+        f"{len( unjustified )} accepted row(s) in the live record carry no reason:\n"
+        + chr( 10 ).join( "    " + row for row in unjustified )
+    )
+    assert len( accepted ) == 190, "the grandfathered set changed size — re-triage before re-pinning"
