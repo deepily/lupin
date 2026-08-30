@@ -414,15 +414,26 @@ def test_migrate_file_logs_and_re_raises_a_save_failure( solutions_dir, capsys, 
 # ── the whole run ────────────────────────────────────────────────────────────────
 
 def test_migrate_all_counts_migrated_skipped_and_errored_separately( solutions_dir, capsys ):
-    _write( solutions_dir / "needs.json", _snapshot() )
-    _write( solutions_dir / "done.json",  _snapshot( user_id="someone" ) )
+    """⚠️ THE THREE COUNTS ARE DELIBERATELY UNEQUAL — 2 / 1 / 1, never 1 / 1 / 1.
+
+    This test used to use one file of each kind. Every assertion passed, the name read as a
+    promise that the three buckets are kept apart, and a mutation SWAPPING the migrated and
+    skipped counters SURVIVED it: with both counts equal to 1, a swap produces identical
+    numbers. The fixture was symmetric, so it could not tell the buckets apart no matter what
+    it asserted.
+
+    Two migrations against one skip breaks that symmetry, and the swap now reddens this test.
+    Any future edit here must keep migrated != skipped for the same reason."""
+    _write( solutions_dir / "needs-a.json", _snapshot() )
+    _write( solutions_dir / "needs-b.json", _snapshot() )
+    _write( solutions_dir / "done.json",    _snapshot( user_id="someone" ) )
     ( solutions_dir / "broken.json" ).write_text( "{ not json", encoding="utf-8" )
 
     migrator = mod.SolutionSnapshotMigrator()
     migrator.migrate_all()
 
-    assert migrator.stats[ "total_files" ]    == 3
-    assert migrator.stats[ "migrated_files" ] == 1
+    assert migrator.stats[ "total_files" ]    == 4
+    assert migrator.stats[ "migrated_files" ] == 2
     assert migrator.stats[ "skipped_files" ]  == 1
     assert migrator.stats[ "error_files" ]    == 1
     assert "Failed to process broken.json" in capsys.readouterr().out
