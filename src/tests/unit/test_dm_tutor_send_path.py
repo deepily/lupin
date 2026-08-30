@@ -1310,3 +1310,162 @@ class TestABareHashListIsNeverDelivered( unittest.TestCase ):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════
+# THE RETRACTION GUARD — row 29a986df
+# ═══════════════════════════════════════════════════════════════════════════════════════
+
+# 🔴 THIS IS THE MEASURED CASE, NOT A SYNTHETIC ONE. On 2026-08-30 (thread 22495f05,
+# message 497daf43) Krishna 🦚 DM'd a summary of his own commits. The correction banner he
+# sent is reproduced below verbatim in shape; what ARRIVED is `_INVERTED`, which asserts
+# the retracted window as current AND attributes it to the commit that removed it.
+#
+# Every number in `_INVERTED` is in `_RETRACTION_BODY`, so the fabrication guard passes it.
+# No ledger marker moved, so the re-scoping guard passes it. No name gained a speech act,
+# so the attribution check passes it. Only the tense changed — which is why this test
+# exists and why deleting the guard must turn it red rather than merely lossy.
+_RETRACTION_BODY = (
+    "CORRECTED 2026-08-30: this section USED TO NAME 12 AM to 9 AM EDT as the optimal window.\n"
+    "The box is powered off then, so a job scheduled there does not run late, it does not run.\n"
+    "The live table now reads 10 AM to 1 PM as optimal.\n"
+    "I landed that at 2df3aefb and I verified the boot times myself.\n"
+    "Tell me whether you read the boot history the same way."
+)
+
+# What the condenser delivered. The inversion, word for word in shape.
+_INVERTED = (
+    "The optimal window is named as 12 AM to 9 AM at 2df3aefb.\n"
+    "The box is powered off then.\n"
+    "Tell me whether you read the boot history the same way."
+)
+
+# The same three claims with the retraction marker KEPT. This must be delivered — the fix
+# is marker preservation, not silence about the past, and a guard that also refuses the
+# correct rewrite has replaced one defect with another.
+_RETRACTION_KEPT = (
+    "The window USED TO NAME 12 AM to 9 AM and the box is powered off then.\n"
+    "The live table now reads 10 AM to 1 PM.\n"
+    "Tell me whether you read the boot history the same way."
+)
+
+
+class TestRetractionIsRefused( unittest.TestCase ):
+    """
+    A rewrite may DROP a retraction. It may not INVERT one.
+
+    Dropping is the design — detail goes, and the reader can ask. Asserting the retracted
+    value as current is a different thing entirely: it is a fluent, plausible sentence
+    saying precisely what the sender's message existed to deny.
+    """
+
+    def setUp( self ):
+        from cosa.rest.routers.dm import _apply_dm_tutor
+        self.apply = _apply_dm_tutor
+
+    def test_the_fixture_is_over_the_trigger( self ):
+        """CONTROL — without this the tutor never fires and every test below asserts nothing."""
+        self.assertGreater( _count_claims_helper( _RETRACTION_BODY ), 4 )
+
+    def test_the_measured_inversion_is_refused_and_the_original_goes_out( self ):
+        text, meta = self.apply( _RETRACTION_BODY, config=_cfg(),
+                                 rewrite_fn=lambda b: _INVERTED )
+        self.assertEqual( meta[ "tutor_outcome" ], "retraction_blocked" )
+        self.assertEqual( text, _RETRACTION_BODY, "the sender's own words must be delivered" )
+        self.assertIn( "12", meta[ "tutor_retracted" ] )
+        self.assertIn( "9",  meta[ "tutor_retracted" ] )
+
+    def test_the_delivered_body_never_asserts_the_retracted_window( self ):
+        """
+        The row's own acceptance test, stated as the reader experiences it: whatever comes
+        out of the send path, it must not tell the reader the window is 12 AM to 9 AM.
+        """
+        text, _meta = self.apply( _RETRACTION_BODY, config=_cfg(),
+                                  rewrite_fn=lambda b: _INVERTED )
+        for line in text.splitlines():
+            if "12" in line and "9" in line:
+                self.assertRegex( line, r"(?i)USED TO|no longer|corrected|formerly",
+                                  "a line stating the retracted window carries no retraction marker" )
+
+    def test_a_rewrite_that_keeps_the_marker_is_delivered( self ):
+        _text, meta = self.apply( _RETRACTION_BODY, config=_cfg(),
+                                  rewrite_fn=lambda b: _RETRACTION_KEPT )
+        self.assertNotEqual( meta[ "tutor_outcome" ], "retraction_blocked" )
+
+    def test_dropping_the_retraction_entirely_is_still_legal( self ):
+        dropped = ( "The live table now reads 10 AM to 1 PM.\n"
+                    "I landed that at 2df3aefb.\n"
+                    "Tell me whether you read the boot history the same way." )
+        _text, meta = self.apply( _RETRACTION_BODY, config=_cfg(), rewrite_fn=lambda b: dropped )
+        self.assertNotEqual( meta[ "tutor_outcome" ], "retraction_blocked" )
+
+    def test_an_ordinary_message_is_untouched_by_the_guard( self ):
+        """The overwhelmingly common case — no retraction in, nothing for this guard to do."""
+        _text, meta = self.apply( _VERBOSE, config=_cfg(), rewrite_fn=lambda b: _FAITHFUL )
+        self.assertNotEqual( meta[ "tutor_outcome" ], "retraction_blocked" )
+        self.assertNotIn( "tutor_retracted", meta )
+
+
+class TestRetractionPredicate( unittest.TestCase ):
+    """The predicate itself, at its edges."""
+
+    def setUp( self ):
+        from cosa.rest.routers.dm import ( _retracted_assertions, _retraction_split,
+                                           _retraction_scope_start )
+        self.assertions  = _retracted_assertions
+        self.split       = _retraction_split
+        self.scope_start = _retraction_scope_start
+
+    def test_the_scope_opens_at_the_clause_not_at_the_marker( self ):
+        """
+        Both word orders occur in real banners. "USED TO NAME 12 AM" puts the marker first;
+        "12 AM was wrong" puts it last, and a scope anchored at the marker misses the value.
+        """
+        line = "The table is fine. 12 AM to 9 AM was wrong."
+        cut  = self.scope_start( line )
+        self.assertIn( "12", line[ cut: ] )
+        self.assertNotIn( "12", line[ :cut ] )
+
+    def test_a_shouted_banner_opens_the_scope_before_a_later_lowercase_marker( self ):
+        """
+        The earliest marker wins. Taking whichever regex matched first would let a
+        lower-case phrase later in the line hide the banner that opened the retraction.
+        """
+        line = "CORRECTED: the figure was 47 and it used to be quoted everywhere."
+        self.assertEqual( self.scope_start( line ), 0 )
+
+    def test_no_marker_means_no_scope( self ):
+        self.assertIsNone( self.scope_start( "The suite is green at 8671 tests." ) )
+
+    def test_an_empty_line_has_no_scope( self ):
+        self.assertIsNone( self.scope_start( "" ) )
+
+    def test_the_echo_vocabulary_is_wider_than_the_opening_one( self ):
+        """
+        Asymmetric on purpose. "corrected" in lower case is too weak to PROTECT a value —
+        "I corrected the test at abc1234" is an ordinary work sentence — but it is plenty
+        to show a rewrite KEPT the retraction. Both errors then push the same way.
+        """
+        line = "Krishna corrected the window on 2026-08-30."
+        self.assertIsNone( self.scope_start( line, echo=False ) )
+        self.assertEqual(  self.scope_start( line, echo=True ), 0 )
+
+    def test_a_literal_stated_live_anywhere_is_never_retracted( self ):
+        body = "It used to be 10 rows.\nThe table still has 10 rows today."
+        _live, retracted = self.split( body )
+        self.assertNotIn( "10", retracted )
+
+    def test_an_empty_body_splits_into_nothing( self ):
+        self.assertEqual( self.split( "" ), ( set(), set() ) )
+
+    def test_nothing_retracted_means_no_work_and_no_findings( self ):
+        self.assertEqual( self.assertions( "Plain body with 5 items.", "Still 5 items." ), [] )
+
+    def test_the_guard_fails_open_when_the_literal_pass_raises( self ):
+        """
+        A check that raises must not take the send path with it. An unreadable comparison
+        means "nothing proven inverted" — exactly as safe as before this guard existed.
+        """
+        from unittest.mock import patch as _patch
+        with _patch( "cosa.rest.routers.dm.count_all_literals", side_effect=RuntimeError( "boom" ) ):
+            self.assertEqual( self.assertions( _RETRACTION_BODY, _INVERTED ), [] )

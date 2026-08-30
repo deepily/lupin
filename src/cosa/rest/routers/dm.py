@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 
 import cosa.utils.util as cu
 from cosa.utils.dm_text import dm_word_count, WORD_COUNT_VERSION
+from cosa.agents.dm_compression.freeze import count_all_literals, segment_clauses
 from cosa.rest import dm_experiment
 
 # Import dependencies and services
@@ -1415,6 +1416,178 @@ def _id_label_bindings( text ):
     return out
 
 
+# ═══════════════════════════════════════════════════════════════════════════════════════
+# RETRACTION GUARD — row 29a986df
+# ═══════════════════════════════════════════════════════════════════════════════════════
+#
+# ⚠️ THE FAILURE THIS BOUNDS, and why none of the guards above can see it. On 2026-08-30
+# (thread 22495f05, message 497daf43) Krishna 🦚 sent a summary of his own commits. What
+# arrived read:
+#
+#     "The optimal window for operations is named as 12 AM to 9 AM at 2df3aefb."
+#
+# Commit 2df3aefb does the exact opposite — it REMOVED that window. The only surviving
+# occurrence of "12 AM – 9 AM" in the tree sits inside a correction banner reading
+# "THIS SECTION USED TO NAME 12 AM – 9 AM EDT AS OPTIMAL. THE BOX IS POWERED OFF THEN."
+#
+# So the condenser did two things: it dropped the "USED TO", and it re-attributed the
+# retracted value to the commit that killed it. Every number in the output was in the
+# input, so `_fabricated_facts` passes it. No ledger marker moved, so `_rescoped_quantities`
+# passes it. No name gained a speech act, so the attribution check passes it. The invented
+# thing is the TENSE.
+#
+# 🔴 WHY THIS ONE IS WORSE THAN AN ORDINARY LOSSY SUMMARY. A correction notice is written
+# as "this USED TO say X, and X was wrong." Strip the retraction marker and it becomes
+# "this says X" — a fluent, plausible sentence asserting precisely the thing the document
+# exists to deny. The output is not vague; it is confidently wrong in a shape
+# indistinguishable from a correct summary, and the delivered sentence instructed the
+# reader to schedule batch work into hours the host is powered off. This fleet's docs are
+# correction-heavy, so every "CORRECTED YYYY-MM-DD" banner is a candidate for the same
+# inversion on its way through a DM.
+#
+# THE RULE, and it is deliberately the narrowest one that catches the measured case: a
+# literal that the sender wrote ONLY inside a retraction scope must not appear in the
+# rewrite OUTSIDE one. Absence stays legal — dropping a retraction wholesale is a lossy
+# summary, which is the design. Asserting its retracted value as current is not.
+
+# Markers that open a retraction scope. Two sets, because the fleet writes retractions in
+# two registers and one regex cannot serve both without over-firing.
+#
+# Lower-case tier: phrases that are ONLY ever used to describe a former state. "used to",
+# "no longer" and "formerly" cannot appear in a sentence asserting a current value, so
+# admitting them costs nothing.
+_RETRACTION_MARKER = re.compile(
+    r"\b(?:used\s+to|no\s+longer|not\s+any\s?more|formerly|"
+    r"previously\s+(?:said|read|named|reported|gave)|"
+    r"supersed(?:ed|es)|retract(?:ed|ion)|retired|obsolete|"
+    r"(?:was|were|is\s+now)\s+wrong)\b", re.IGNORECASE )
+
+# SHOUTED tier, case-SENSITIVE and that is load-bearing. "CORRECTED" opening a banner is a
+# retraction; "I corrected the test at abc1234" is an ordinary work sentence, and admitting
+# the lower-case form would make every such sha a protected literal and refuse a clean
+# rewrite. A guard that fires on good text gets switched off, so the case is part of the
+# guard working — the same reasoning that puts a stop-list behind the attribution check.
+_RETRACTION_SHOUT = re.compile( r"\b(?:CORRECTED|CORRECTION|RETRACTED|SUPERSEDED|RE-MEASURED)\b" )
+
+# 🔴 THE TWO SIDES ASK DIFFERENT QUESTIONS, SO THEY GET DIFFERENT VOCABULARIES.
+#
+# Of the ORIGINAL we ask "is this a retraction?" — a claim strong enough to protect a
+# value, so the markers above are deliberately narrow. Of the REWRITE we ask "did the
+# retraction survive?" — and there the generous answer is the safe one, because admitting
+# a weaker word can only ever CLEAR a rewrite that kept some marker, never block one.
+#
+# It is not symmetry for its own sake, it is what stops a good rewrite being refused:
+# "Krishna corrected the window on 2026-08-30" preserves the retraction perfectly well in
+# lower case, and the narrow set would have called it an assertion of a retracted date.
+# Both vocabularies therefore err in the SAME direction — toward keeping the marker.
+_RETRACTION_ECHO = re.compile(
+    _RETRACTION_MARKER.pattern + r"|\b(?:correct(?:ed|ion|s)|was\s+removed|"
+    r"has\s+since|no\s+longer\s+holds|old\s+(?:window|value|figure|number))\b",
+    re.IGNORECASE )
+
+
+def _retraction_scope_start( line, echo=False ):
+    """
+    Where a retraction scope opens on one line, or None if it never does.
+
+    Scope runs from the START OF THE CLAUSE carrying the marker to the end of the
+    line, not from the marker itself. Both orders occur in real banners — "USED TO
+    NAME 12 AM – 9 AM" puts the marker first, "12 AM – 9 AM was wrong" puts it last —
+    and a scope anchored at the marker would miss the second one entirely.
+
+    Requires:
+        - line is a string
+        - echo is True when scanning a REWRITE (the generous vocabulary) and False when
+          scanning the sender's ORIGINAL (the narrow one)
+
+    Ensures:
+        - returns an index into `line`, or None when no marker is present
+        - never raises
+    """
+    if not line: return None
+
+    # 🔴 THE EARLIEST OF THE TWO, never the first regex that happens to match. An `or`
+    # here would let a lower-case marker later in the line hide a SHOUTED banner opening
+    # it, and the scope would start after the very words that declared the retraction.
+    lower = _RETRACTION_ECHO if echo else _RETRACTION_MARKER
+    hits  = [ m.start() for m in ( lower.search( line ),
+                                   _RETRACTION_SHOUT.search( line ) ) if m is not None ]
+    if not hits: return None
+    first = min( hits )
+
+    for start, end in segment_clauses( line ):
+        if start <= first < end: return start
+    # `segment_clauses` covers the line with no gaps or overlaps — its own contract — so a
+    # marker index found INSIDE the line always lands in a clause. Kept as a return rather
+    # than an assert because a guard must never be the thing that takes the send path down.
+    return 0   # pragma: no cover
+
+
+def _retraction_split( text ):
+    """
+    Literals `text` states as CURRENT, and the ones it states only as RETRACTED.
+
+    Scope is the LINE and not the whole body, deliberately. A correction banner is a
+    paragraph; the live value that replaced it is a different paragraph or a table row.
+    Marking the whole body from the first marker onward would swallow the replacement and
+    protect the very literal the document is trying to promote.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns ( live, retracted_only ) as two sets of literals
+        - a literal appearing on both sides is LIVE — the sender asserts it somewhere,
+          so the rewrite is free to assert it too
+        - never raises
+    """
+    live, retracted = set(), set()
+    for line in ( text or "" ).splitlines():
+        cut = _retraction_scope_start( line )
+        head = line if cut is None else line[ :cut ]
+        tail = ""   if cut is None else line[ cut: ]
+        live.update( count_all_literals( head, "" ) )
+        retracted.update( count_all_literals( tail, "" ) )
+    return live, retracted - live
+
+
+def _retracted_assertions( original, rewritten ):
+    """
+    Retracted values the rewrite asserts as current. Empty = clean.
+
+    Requires:
+        - original and rewritten are strings
+
+    Ensures:
+        - returns the sorted literals the ORIGINAL wrote only inside a retraction scope
+          and the REWRITE writes outside one
+        - returns [] when the original retracts nothing — the overwhelmingly common case,
+          and the whole check costs one literal pass on those
+        - a rewrite that KEEPS the marker is clean, which is the behaviour we want: the
+          fix is marker preservation, not silence about the past
+        - never raises
+
+    KNOWN LIMIT, stated rather than glossed: the marker vocabulary is a closed set, so
+    this catches retractions written the way this fleet writes them, not every possible
+    one. A retraction phrased without one of these markers passes untouched.
+    """
+    try:
+        _live, retracted = _retraction_split( original )
+        if not retracted: return []
+
+        asserted = set()
+        for line in ( rewritten or "" ).splitlines():
+            cut  = _retraction_scope_start( line, echo=True )
+            head = line if cut is None else line[ :cut ]
+            asserted.update( set( count_all_literals( head, "" ) ) & retracted )
+        return sorted( asserted )
+    except Exception:
+        # Same call as its two siblings: a check that raises must not take the send path
+        # with it. An unreadable comparison means "nothing proven inverted", which leaves
+        # the tutor exactly as safe as it was before this existed.
+        return []
+
+
 def _invented_id_labels( original, rewritten ):
     """
     Type nouns the rewrite attached to an id that the sender never attached. Empty = clean.
@@ -1832,6 +2005,18 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
             meta[ "tutor_outcome" ]  = "rescope_blocked"
             meta[ "tutor_rescoped" ] = rescoped
             print( f"[dm-tutor] REFUSED a rewrite that moved a quantity across a ledger: {rescoped}" )
+            return body_text, meta
+
+        # RETRACTION CHECK — refuse a rewrite that states a retracted value as current.
+        # Sits beside the re-scoping check because it is the third member of the same
+        # family: fabrication compares WHICH facts are present, re-scoping compares WHAT
+        # THEY ARE BOUND TO, and this compares WHEN THEY WERE TRUE. None of the three can
+        # see the other two's failure. Row 29a986df.
+        retracted = _retracted_assertions( body_text, rewritten )
+        if retracted:
+            meta[ "tutor_outcome" ]   = "retraction_blocked"
+            meta[ "tutor_retracted" ] = retracted
+            print( f"[dm-tutor] REFUSED a rewrite that asserts a retracted value as current: {retracted}" )
             return body_text, meta
 
         # ATTRIBUTION CHECK — MEASURED, AND NO LONGER A REFUSAL (row 20026f56, Rick
