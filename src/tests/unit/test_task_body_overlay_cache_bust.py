@@ -28,13 +28,49 @@ Verifies:
     (token 20260617 < css commit 20260629).
 
 Parity note (verified for f7486a9d): multiplexer.html links the mux sheet
-UNVERSIONED. Static files are served by Starlette StaticFiles with NO
-Cache-Control header — only ETag + Last-Modified — so the mux cache key is the
-bare URL and returning browsers revalidate + self-heal from the file's mtime.
-The mux therefore does NOT share the legacy's permanent-staleness defect and is
-intentionally left token-free (adding a manual token would re-introduce exactly
-the drift this guard exists to catch). Hence the freshness assertion is scoped
-to the versioned legacy link only.
+UNVERSIONED, so its cache key is the bare URL. It is intentionally left
+token-free — adding a manual token would re-introduce exactly the drift this
+guard exists to catch — and the freshness assertion is therefore scoped to the
+versioned legacy link only.
+
+🔴 DEPLOYMENT NOTE — WHAT A STALE TOKEN ACTUALLY COSTS (measured 2026-08-30, row
+a0a8ac19; this paragraph CORRECTS an overstatement that stood here and in the
+failure message). Both pages are served by the SAME bare `StaticFiles` mount,
+which sends NO Cache-Control and NO Expires — only a content-based ETag and a
+Last-Modified. Probed live rather than read off the code:
+
+    cache-control:  (absent)
+    expires:        (absent)
+    etag:           "f9c63b1d1e6806360c6e8fbceacbaa99"
+    last-modified:  Sat, 29 Aug 2026 22:19:11 GMT
+    If-None-Match → 304
+
+With no Cache-Control a browser falls back to HEURISTIC freshness (roughly a
+tenth of the cached copy's age). So a stale token does NOT strand a user
+permanently: the entry goes stale on its own within hours, the browser
+revalidates, the content-based ETag no longer matches, and it gets the new file.
+Nothing in docker/, src/terraform/ or docker-compose.yml adds cache headers in
+front of it.
+
+⇒ The earlier framing here — that the mux "does NOT share the legacy's
+permanent-staleness defect" — was wrong in BOTH halves: there is no permanent
+defect to share, and the legacy path self-heals by the same mechanism the mux
+does. Neither is permanent, because permanence needs a long `max-age` or
+`immutable`, which this deployment does not ship.
+
+⚠️ THIS DOES NOT WEAKEN THE GUARD, and the assertion below is unchanged. A FRESH
+token is a NEW cache key, so the new asset is fetched IMMEDIATELY — window zero.
+A STALE token reuses the old key and leaves a heuristic-freshness window during
+which a warm browser runs old front-end code against a new server. The token's
+value is eliminating that window, not preventing a permanence that was never
+there. It also becomes load-bearing the moment anyone puts a CDN or a
+`max-age` in front of /static — at which point the overstatement above would
+become true, and this guard is what keeps the tokens honest until then.
+
+Stating the cost accurately matters for triage: five reds under the old wording
+read as a live user-facing incident, and under the correct wording they are
+hygiene. A guard that overstates its own finding gets discounted the first time
+somebody checks it.
 """
 
 import os
@@ -55,8 +91,9 @@ TOKEN_LINK_RE = re.compile( r"/static/css/task-list\.css\?v=(\d{8})([a-z]?)" )
 
 # GENERALIZED guard (row 14e2c5c7): every versioned asset the page links, not just
 # task-list.css. A `?v=` token is part of the browser cache KEY, so ANY tokened
-# asset whose token date drifts behind the file's last commit serves a stale cached
-# copy to returning browsers. task-list.css was the only guarded one of SIX; bumping
+# asset whose token date drifts behind the file's last commit lets a warm browser go
+# on serving the old cached copy for as long as its cache entry stays fresh (bounded,
+# not forever — see the deployment note above). task-list.css was the only guarded one of SIX; bumping
 # just it would green the alarm while five siblings stayed broken (the failure mode
 # the row names). This regex discovers every `href`/`src` under /static/ carrying a
 # ?v=YYYYMMDD[suffix] token, so asset seven is covered the day it is linked.
@@ -203,8 +240,10 @@ def test_versioned_asset_token_not_stale( static_url, token_date ):
 
     The generalized f7486a9d recurrence guard (row 14e2c5c7): a `?v=` token is part
     of the browser cache KEY, so any asset whose token drifts behind its file's
-    last commit serves a STALE cached copy to returning browsers — a rendering
-    fault that looks like a bug on stage and cannot be diagnosed live. Naming
+    last commit lets a returning browser go on serving the OLD cached copy — a
+    rendering fault that looks like a bug on stage and cannot be diagnosed live.
+    ⚠️ The window is BOUNDED, not permanent — see the deployment note in the module
+    docstring; the token's job is to make it ZERO. Naming
     task-list.css alone let five siblings rot unguarded; this asserts the property
     over the whole set, so bumping one token can never green the page while another
     stays stale.
@@ -217,6 +256,8 @@ def test_versioned_asset_token_not_stale( static_url, token_date ):
     assert token_date >= commit_date, (
         f"notifications.html links {static_url}?v={token_date}, STALE vs the file's "
         f"last commit {commit_date} — bump the ?v= token to >= {commit_date} (e.g. "
-        f"?v={commit_date}a) so returning browsers refetch it. A `?v=` token is part "
-        f"of the cache key, so a stale token permanently serves the old cached asset."
+        f"?v={commit_date}a) so returning browsers refetch it IMMEDIATELY. A `?v=` "
+        f"token is part of the cache key: a fresh one is a new key, so the new asset is "
+        f"fetched at once; a stale one reuses the old key and lets a warm browser serve "
+        f"the OLD asset until its cache entry goes stale on its own."
     )
