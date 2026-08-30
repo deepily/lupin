@@ -885,8 +885,9 @@ recorded as KILLED. Run **unmutated**, the same two failed: they are two of the 
 artifacts from the gitignored `cloud-run.env`. **The failing SETS were byte-identical with and
 without the mutation. It had SURVIVED, and the exit code said the opposite.**
 
-⇒ **Assert the baseline is green BEFORE the mutation, or compare the failing SETS rather than the
-exit code.** 🔴 **A RESTORE CONTROL AT THE END IS NOT A BASELINE** (Rio ⚡, 2026-08-30, correcting
+⇒ **Assert the baseline is green BEFORE the mutation.** Comparing the failing SETS is the
+FALLBACK for when you cannot get a green baseline, not an equal alternative to one — see the
+next subsection for why a set comparison alone is not enough. 🔴 **A RESTORE CONTROL AT THE END IS NOT A BASELINE** (Rio ⚡, 2026-08-30, correcting
 the first cut of this section). The floor rule above asks for a trailing unmutated run, and it is
 easy to read that as discharging this one — it does not. A control that proves greenness only
 *afterwards* cannot separate a false kill from a real one *during* the pass: every verdict was
@@ -895,6 +896,34 @@ and it bites hardest **in a worktree** — which is where this fleet does all of
 and where ten failures are present before anybody edits anything. ⚠️ It is not only a worktree
 hazard: this branch's own unit tier was **RED for roughly four hours** on 2026-08-30 while several
 seats mutated against it.
+
+### 🔴 AND A FAILING SET COMPARES TEST IDS — COMPARE THE ASSERTION THAT FIRED
+
+Raised by Rachel 🕊️ and Mr Radio 🦉 independently, 2026-08-30, against the first cut of the
+subsection above. That cut offered *"compare the failing SETS"* as an equal alternative to a green
+baseline. **It is not one, because a failing set is a set of test IDs and a test id says nothing
+about WHY the test went red.** The two errors point opposite ways and both are live:
+
+| what you see | what you conclude | what may actually be true |
+|---|---|---|
+| mutated set = baseline set | **SURVIVED** | the mutation really did break a test that was ALREADY red for an unrelated reason — a false survivor |
+| mutated set = baseline set + one | **KILLED** | the extra red is a flake or a second artifact — a false kill |
+
+⇒ **Compare the assertion that fired, not only the test that failed** — the message, the line, the
+short-summary line, anything that distinguishes one red from another red in the same test.
+
+🔴 **AND THE SAME MECHANIC DECIDES WHETHER A NEW GUARD RUNS AT ALL.** A test's assertions execute in
+sequence, so an assertion added BEHIND one that is currently failing is **present in the file and
+absent from the run** — and the test id in the failing set is byte-identical whether the new guard
+passed, failed, or never executed. **A guard placed behind a red is carried, not exercised.**
+Worked instance, this reviewer's own: the counts guard added to
+`test_a_detector_change_forces_a_full_rescan` at `503000fe` sits after the fingerprint assertion,
+and that fingerprint is red in this tree (row `8202d795`). The commit reported the file as
+*"1 failed, 60 passed — byte-identical failing SET to the baseline"*, which was true and told
+nobody that the new assertion had not run.
+
+⇒ **Before claiming a new assertion guards anything, prove it is REACHED** — force the assertions
+ahead of it green, or move it into a test of its own.
 
 ### ⚠️ AND A CLEAN PASS IS A SAMPLE OF THE MUTATION SPACE, NOT A VERDICT ON IT
 

@@ -380,6 +380,26 @@ def test_a_detector_change_forces_a_full_rescan():
                    for field, value in counted.items() )
     )
 
+    # 🔴 `real_findings` IS DELIBERATELY NOT ASSERTED HERE, AND THAT IS THE REMAINING HOLE.
+    # The two counts above are derivable from `findings`, so they cannot be filled in by
+    # hand. `real_findings` is a TRIAGE VERDICT — how many candidates a human judged real —
+    # and no scan can compute it, so no assertion here can defend it. Measured 2026-08-30:
+    # re-derive both counts after the scan gains a candidate, leave `real_findings` at its
+    # old value, and this suite goes GREEN with the new candidate never triaged.
+    # ⇒ This test now proves the scan was re-run AND the counts re-derived from it. It still
+    #   does not prove anyone LOOKED at what moved. That needs a reviewer, not an assert.
+    #
+    # (Rachel 🕊️ and Mr Radio 🦉 both raised this against the first cut of the block above,
+    # independently, within four minutes. The block was written as though it closed the
+    # triage hole; it closes HAND-EDITING of two derived counts, which is a smaller thing.)
+    #
+    # ⚠️ AND THE GUARD ABOVE IS UNREACHABLE WHILE THE FINGERPRINT ASSERT IS RED. Every
+    # assertion in this test runs in sequence, so the counts check only executes once the
+    # fingerprint agrees. In the tree this was written in the fingerprint does NOT agree —
+    # that is row 8202d795, Maya's — so the guard is carried, not exercised. A new assertion
+    # placed behind a failing one is present in the file and absent from the run, and the
+    # test id in the failing set reads identically either way.
+
 
 def test_findings_never_carry_the_value():
     """A report that quotes the secret has spread it. Masked output is part of the contract."""
