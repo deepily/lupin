@@ -204,10 +204,16 @@ class TestWhatTheSecondRunCostsBesidesTheStamp:
     """
 
     @pytest.mark.xfail( strict=True,
-                        reason="row e9b78e51 — the wholesale write at register_session.py:2261 "
-                               "erases every on-disk key main() does not carry. Rick's call; "
-                               "option (d) is the one-line rebind at 2061. XPASS here means it "
-                               "landed and this test should become a plain assertion." )
+                        reason="row e9b78e51 — TWO DIFFERENT LINES, do not conflate them. The "
+                               "BUG is the wholesale write at register_session.py:2261 "
+                               "(listener_pid = _spawn_listener(...) -> _record_listener_pid), "
+                               "which erases every on-disk key main() does not carry. The FIX "
+                               "(option d, Rick's call) is authored at line 2061, by ADDING "
+                               "session_data = merged after merged = { **existing, **session_data }. "
+                               "It is an ADDED assignment, NOT a reordering of that merge: a swap "
+                               "changes precedence, rebinds nothing, and does not fire this marker "
+                               "(measured both ways). XPASS here means the fix landed and this test "
+                               "should become a plain assertion." )
     def test_an_on_disk_only_key_survives_the_next_session_start( self, monkeypatch, tmp_path ):
         seam = _seam( monkeypatch, tmp_path )
         bridge, field = _run_session_start( monkeypatch, seam )
