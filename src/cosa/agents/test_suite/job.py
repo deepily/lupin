@@ -50,6 +50,7 @@ SUITE_SCRIPTS = {
     "all"            : "src/tests/run-all-tests.sh",
     "presentation"   : "src/tests/run-presentation-regression.sh",
     "cosa"           : "src/tests/run-cosa-tests.sh",   # in-tree CoSA test tree (row c9d3ddcb); joined the merge pyramid 2026-08-13 (row d83d025b)
+    "coverage"       : "src/tests/run-coverage-gate.sh", # the Python coverage gate (row e2099400, 2026-08-29). Until it existed, pyproject's fail_under was invoked by NOTHING — no addopts, no runner, no injection here — so the 100% mandate had teeth on the TypeScript side only. Runs AFTER unit+cosa have appended to one data file; pass --run-tiers to make it run them itself.
     "v2_eval"        : "src/tests/run-v2-eval.sh",     # CJ Flow v2 paired eval (row 7e2125a7 D6). NOT in ALL_SUITE_COMPONENTS — ~105 min on the metered LLM path; see the runner's header
 }
 
@@ -67,6 +68,10 @@ SUITES_SUPPORTING_JUNIT_XML = frozenset( {
     "unit", "smoke", "smoke_direct", "pytest_direct",
     "integration", "e2e", "all", "cosa",
 } )
+# NOTE (row e2099400): "coverage" is deliberately NOT here. run-coverage-gate.sh is a
+# report-and-check wrapper, not a pytest run — an injected --junit-xml would reach
+# `coverage report` as an unknown option. It reports through _parse_non_pytest_stdout,
+# the same treatment as websocket and presentation.
 # NOTE (row 7e2125a7 D6): "v2_eval" is deliberately NOT here either. run-v2-eval.sh
 # wraps a plain python script, not pytest — an injected --junit-xml would reach
 # v2_eval.py's argparse as an unknown flag and kill the run at second one. It reports
@@ -91,7 +96,8 @@ SUITE_TIMEOUTS_SECONDS = {
                              # 29s for the suite: ONE file, audio_transport.test.ts, PASSES in 452s and owns
                              # essentially the entire wall clock. Fix that file and this budget could drop by an
                              # order of magnitude. Provenance: src/rnd/v0.2.0/2026.08.24-typescript-suite-memory-measured.md
-    "unit"         : 300,    #  5 min (bumped from 180s on 2026-06-12: observed ~185s on ts-b51e63c9 — suite grew to ~6745 tests and the 180s budget killed it mid-run; ~1.6x margin over observed)
+    "unit"         : 1800,   # 30 min. ⚠️ RAISED 300 -> 1800 on 2026-08-29 (row e2099400). The 300s figure was set on 2026-06-12 against a ~6,745-test suite; the suite is 19,128 tests now and MEASURED 800.55s UNINSTRUMENTED on this box — i.e. the tier had been exceeding its own timeout by 2.67x with nothing to do with coverage. Under --cov it measured 936.17s (+18.6%). 1800 is ~1.9x over the instrumented figure. This was found while wiring the coverage gate, not by the gate: a suite killed at 300s reports a truncated run, and the budget had gone stale silently as the suite grew.
+    "coverage"     : 2400,   # 40 min. As a pyramid STEP it is a report + a frame check, ~1 min; the budget covers the standalone --run-tiers form, which re-runs unit (936s) + cosa (301s) itself.
     "smoke"        : 3600,   # 60 min (bumped from 1800s on 2026-04-21: observed 2456s on ts-f55d172d — 160 tests + container_preflight adds overhead; ~1.46x margin over observed)
     "smoke_direct" : 1200,   # 20 min (longest: Phase D live ~10 min)
     "pytest_direct": 1200,   # 20 min (arbitrary pytest file — match smoke_direct budget)
@@ -149,7 +155,7 @@ STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 # merge pyramid would attach an hour and a half of billed work to every merge. Same
 # treatment as "presentation". Registration and gate-membership are separate decisions,
 # and conflating them is how a suite ends up either unreachable or unaffordable.
-ALL_SUITE_COMPONENTS = [ "unit", "cosa", "typescript", "smoke", "websocket", "integration", "e2e" ]
+ALL_SUITE_COMPONENTS = [ "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e" ]
 
 
 def _expand_all( test_types: List[ str ] ) -> List[ str ]:
@@ -1712,6 +1718,11 @@ class TestSuiteJob( AgenticJobBase ):
         "integration"  : "integration-latest.log",
         "e2e"          : "e2e-ui-latest.log",
         "all"          : "all-tests-latest.log",
+        # ADDED 2026-08-29 with the coverage gate (row e2099400). Caught by
+        # test_every_runnable_suite_can_write_a_stdout_log, which is the whole point of
+        # that test: a suite absent from this map has its stdout silently discarded, and
+        # a coverage gate that fails with no log on disk explains nothing about WHY.
+        "coverage"     : "coverage-gate-latest.log",
         # ⚠️ ADDED 2026-08-28. These three are registered in SUITE_SCRIPTS and were
         # MISSING here, and a suite absent from this map has its stdout silently thrown
         # away: `_write_stdout_log` no-ops on a falsy basename, so the run's only

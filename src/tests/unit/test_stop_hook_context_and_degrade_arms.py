@@ -118,10 +118,17 @@ class AnythingElseCardContextTest( unittest.TestCase ):
             captured[ "request" ] = request
             raise RuntimeError( "stop here — the card is built, the transport is not the subject" )
 
+        # `send_tts` is patched because THE RAISE ABOVE LANDS IN A REAL HANDLER.
+        # `_ask_anything_else` wraps its whole body in `except Exception`, and that arm's
+        # only action is `send_tts( f"Stop — notify error: {e}" )` — so the RuntimeError
+        # this method raises to stop at the card was being announced to the operator's
+        # live feed, four cards per run (row ebb2c061). Patching notify_user_sync and
+        # log_to_stream is not enough: the failure path uses a THIRD transport.
         with mock.patch.object( stop, "_get_session_context", return_value=( topic, branch ) ), \
              mock.patch.object( stop, "_summarize_task", return_value="the coverage work" ), \
              mock.patch.object( stop, "build_sender_id_for_cc", return_value=VALID_SENDER_ID ), \
              mock.patch.object( stop, "notify_user_sync", side_effect=capture ), \
+             mock.patch.object( stop, "send_tts" ), \
              mock.patch.object( stop, "log_to_stream" ):
             stop._ask_anything_else( "sess-1", "last message", cwd="/repo" )
 

@@ -462,6 +462,38 @@ ps -eo comm,args --no-headers | awk '$1=="pytest" || ($1 ~ /^python/ && $0 ~ / -
 
 ⇒ `comm` answers *what this process is*; the command line answers *what someone wrote about it*. A gate must ask the first question. The same trap applies to any `pgrep -f` over a fleet of agent processes — grep for a tool name and you will find every seat that was told about the tool.
 
+### 🔴 A COVERAGE LIST GOES STALE FROM A **MERGE**, NOT FROM A COMMIT
+
+**Measured 2026-08-29** (row `9595aaef`). A manager spent an evening assigning coverage work off a zero-coverage census, then retracted an assignment when the worker showed the file already at 100% with 61 tests by his own commit hours earlier. **The retraction was the error.** Checked by merge-base: that commit — and three others like it — are **not ancestors of HEAD**. They live on the workers' own branches. At HEAD no test imports that module at all, so the file is still at 0% on the branch.
+
+**Nobody was wrong. They measured different trees.**
+
+| question | answer |
+|---|---|
+| "Is my work done?" | ask the **worktree** — the tests exist and pass there |
+| "Is the branch covered?" | ask **HEAD** — and it is not, until the merge lands |
+
+⇒ **Work in an unmerged worktree moves nobody's coverage but its author's.** A seat that re-measures "in my own tree" will contradict a HEAD-derived list every single time, and both parties will have correct numbers for different propositions. That is what every tree-versus-tree argument on this epic has actually been.
+
+**Two obligations follow:**
+1. **State the sha with the list.** A coverage list without the sha it was taken at is not a measurement, it is a rumour with a timestamp. Say `at ef6e2bdc`, not "as of tonight".
+2. **Report "done" and "landed" as separate columns.** A worker's file can be finished and still be at zero on the branch. Collapsing the two is what turns an honest commit into a phantom reassignment.
+
+**And the durable fix is a command, not a list** — anyone can re-derive the current zero set at HEAD, and a list anyone can quote will outlive the tree it described:
+
+```bash
+# from your own worktree, checked out at the sha you mean to describe
+COVERAGE_FILE=/tmp/cov-$USER-$$.data LUPIN_ROOT="$PWD" \
+  .venv/bin/python -m pytest src/tests/unit/ -q --cov=src/scripts --cov-branch \
+  --cov-report=term-missing --cov-fail-under=0
+```
+
+⚠️ **Run the WHOLE tier, not a scoped subset.** A subset manufactures false zeros for any file whose only coverage comes from a test you excluded — which is the exact defect a zero list exists to find.
+
+⚠️ **AND DO NOT PASS `--cov=<path>` WHEN THE CONFIG ALREADY DEFINES `source`.** Measured 2026-08-29: a census run carried `--cov=src/scripts` out of habit, which **silently overrode** the seven-entry `source` list in `pyproject.toml` and produced a **61-file** frame instead of **73**. The twelve subdirectory files were not reported as `0%` — they were **never instrumented at all**, and the report says nothing about a file it never traced. Re-reporting the same `.coverage` data through `--rcfile` cannot recover them either; the data simply is not there.
+
+⇒ **A scoped override does not narrow the REPORT, it narrows what was ever MEASURED — and the difference is invisible in the output.** Both produce a clean table with a plausible total. Drop the flag and let the config's `source` govern; if you must scope, say in the same breath which files fell outside the frame, because "not listed" and "at zero" are different facts and only one of them is safe to act on.
+
 ## 100% COVERAGE MANDATE
 
 **Lupin-wide hard gate.** Ratified 2026-05-06 (multiplexer-only), **scope-expanded Lupin-wide 2026-05-16** ("Everything has to pass at 100%. Full stop."). CoSA inherits it as of the 2026-05-29 mono-repo fold, on a grandfathering ramp — see the TODO.md top entry (deadline 2026-06-05).
@@ -516,12 +548,14 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 **Coverage**: `pytest --cov=cosa --cov-report=html src/tests/` (Python). See §100% COVERAGE MANDATE for the hard gate.
 
+**Editing a `.py` file inside a test?** Use `tests.helpers.pyc_freshness` (`mutate_source` fixture / `refresh_source`). CPython validates a `.pyc` on the source's **whole-second** mtime **plus size**, so a mutation edit changes neither and the interpreter keeps running the *old* code after you restore the file and read it back — measured twice on 2026-08-29, on `job_state.py` and on the helper's own module (row `d18ce9ef`). ⚠️ `PYTHONDONTWRITEBYTECODE` does **not** fix it; it only stops pycs being *written*. Debugging a red you cannot explain? `find src -name '__pycache__' -type d -exec rm -rf {} +` before concluding anything. Detail: `src/tests/README.md` § EDITING A SOURCE FILE INSIDE A TEST, measurement `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
+
 **Docs**: `src/tests/README.md` (overview), `src/tests/integration/README.md`, `src/docs/automated-interactive-testing.md` (proxy), `src/tests/smoke/README.md`, `src/tests/AUTH-TESTING-GUIDE.md` (credentials), presentation strategy `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.07-e2e-testing-strategy.md`.
 
 ## PR MERGE REQUIREMENTS
 
-<!-- merge-pyramid-suites: unit cosa typescript smoke websocket e2e integration -->
-**All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **cosa (:7999 — in-tree `src/cosa/tests/**`, `src/tests/run-cosa-tests.sh`; joined the pyramid 2026-08-13, row d83d025b)** → **typescript (:8000 scheduled — `src/tests/run-typescript-tests.sh`, c8 at 100%, ~8-25 min so it fails the :7999 two-minute rubric; runs inside the capped `jstest.slice` cgroup — ban lifted 2026-08-25, row 92e94cb7)** → smoke (:7999) → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh` — read the note below before reading its verdict)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
+<!-- merge-pyramid-suites: unit cosa coverage typescript smoke websocket e2e integration -->
+**All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **cosa (:7999 — in-tree `src/cosa/tests/**`, `src/tests/run-cosa-tests.sh`; joined the pyramid 2026-08-13, row d83d025b)** → **coverage (:7999 — `src/tests/run-coverage-gate.sh`; joined the pyramid 2026-08-29, row e2099400). It does NOT re-run anything: the unit and cosa tiers above append to one isolated data file and this step renders it, checks pyproject's `fail_under`, and checks that the FRAME still measures every file it claims. Before it existed, NOTHING in the build asked for coverage — no addopts, no runner, no injection in `job.py` — so `fail_under` fired only when a human typed `--cov` by hand, and the 100% mandate had teeth on the TypeScript side only.** → **typescript (:8000 scheduled — `src/tests/run-typescript-tests.sh`, c8 at 100%, ~8-25 min so it fails the :7999 two-minute rubric; runs inside the capped `jstest.slice` cgroup — ban lifted 2026-08-25, row 92e94cb7)** → smoke (:7999) → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh` — read the note below before reading its verdict)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
 
 The **cosa tier's count was being asserted without ever being run.** Now measured **three times across two different trees**:
 
