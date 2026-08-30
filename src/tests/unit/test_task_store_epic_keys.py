@@ -182,6 +182,80 @@ def test_reach_disclosure_skips_when_keys_absent_even_if_audit_checked():
     assert "SKIPPED" in text
 
 
+# ── the FRAME: terminal rows and truncation (Tiberius, reviewing 2026-08-30) ─────────
+#
+# The defect: reach_disclosure printed a clean four-bucket table and never said the fetch
+# excludes TERMINAL rows by default. The script's module docstring said so — but nobody
+# reports a module docstring, they report this string. These hold the frame stated.
+#
+# The function CANNOT discover either fact: `report` comes from audit_rows, which sees
+# rows and nothing else. Both arrive as arguments, and an unpassed argument must read as
+# an ADMISSION, never as silence. That is what the first test below pins.
+
+def test_the_default_call_admits_it_was_not_told_the_frame():
+    """
+    THE ONE THAT MATTERS, and the one Tiberius asked for by name. Every other test here
+    passes the frame explicitly, so all of them would still pass if the default silently
+    meant "terminal excluded, not truncated" — which is the original omission wearing a
+    parameter. This calls it the way the old code did and demands an admission.
+    """
+    report = audit_rows( [ _row( "t0", "epic:board-visibility" ) ], known_epic_keys=KNOWN )
+    text   = reach_disclosure( report, KNOWN )
+
+    assert "row-status frame" in text and "fetch truncated" in text, (
+        "the frame must be named even when nobody passed it" )
+    assert text.count( "NOT STATED BY THE CALLER" ) == 2, (
+        "an unpassed frame must read as an explicit admission on BOTH lines; silence here "
+        "is the exact omission this parameter was added to end" )
+
+
+def test_excluding_terminal_rows_is_stated_as_a_blind_spot():
+    report = audit_rows( [ _row( "t1", "epic:board-visibility" ) ], known_epic_keys=KNOWN )
+    text   = reach_disclosure( report, KNOWN, include_terminal=False, truncated=False )
+
+    assert "EXCLUDED" in text
+    assert "done/dropped rows were never fetched" in text, (
+        "the line must say WHAT was excluded, not merely that something was — a bare "
+        "'EXCLUDED' survived a mutation that deleted this clause" )
+    assert "since closed is invisible here" in text, (
+        "naming the exclusion is not enough — it must say what the reader therefore cannot see" )
+    assert "NOT STATED BY THE CALLER" not in text
+
+
+def test_including_terminal_rows_is_stated_too():
+    report = audit_rows( [ _row( "t2", "epic:board-visibility" ) ], known_epic_keys=KNOWN )
+    text   = reach_disclosure( report, KNOWN, include_terminal=True, truncated=False )
+
+    assert "included — done/dropped rows were in frame" in text
+    assert "EXCLUDED" not in text
+
+
+def test_a_truncated_fetch_says_the_verdict_covers_a_subset():
+    report = audit_rows( [ _row( "t3", "epic:board-visibility" ) ], known_epic_keys=KNOWN )
+    text   = reach_disclosure( report, KNOWN, include_terminal=False, truncated=True )
+
+    assert "SUBSET" in text
+    assert "unseen rows may carry drift" in text
+
+
+def test_the_disclosure_no_longer_outsources_truncation_to_the_caller():
+    """
+    It used to end 'the caller must say so' — a mandatory discloser handing half its
+    disclosure to somebody else. That is how the terminal-row omission survived review.
+    """
+    report = audit_rows( [ _row( "t4", "epic:board-visibility" ) ], known_epic_keys=KNOWN )
+    text   = reach_disclosure( report, KNOWN, include_terminal=False, truncated=False )
+
+    assert "the caller must say so" not in text
+
+
+def test_the_frame_lines_survive_a_clean_and_a_dirty_board_alike():
+    for rows in ( [ _row( "t5", "epic:board-visibility" ) ], [ _row( "t6", "" ) ] ):
+        text = reach_disclosure( audit_rows( rows, known_epic_keys=KNOWN ), KNOWN,
+                                 include_terminal=False, truncated=False )
+        assert "row-status frame" in text and "fetch truncated" in text
+
+
 def test_quick_smoke_test_passes():
     """The module's own CLI smoke block is excluded from coverage BY POLICY, not because
     it is unreachable — so it gets a pytest wrapper like the rest of the house."""

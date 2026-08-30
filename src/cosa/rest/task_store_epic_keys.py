@@ -156,7 +156,7 @@ def audit_rows( rows, known_epic_keys=None ):
     }
 
 
-def reach_disclosure( report, known_epic_keys=None ):
+def reach_disclosure( report, known_epic_keys=None, include_terminal=None, truncated=None ):
     """
     The mandatory statement of what this scan covered and what it could not.
 
@@ -170,14 +170,57 @@ def reach_disclosure( report, known_epic_keys=None ):
         - report is an `audit_rows` return dict
         - known_epic_keys is the same iterable passed to audit_rows, or None
 
+    🔴 THE FRAME IS PART OF THE REACH, AND SILENCE ABOUT IT IS THE DEFECT THIS FUNCTION
+    EXISTS TO PREVENT. Tiberius, reviewing 2026-08-30: this printed a clean four-bucket
+    table and never said that the fetch excludes TERMINAL rows by default. The script's
+    module docstring said so at line 12, but nobody reports a module docstring — they
+    report this string. A reader saw "rows examined: N" above a full breakdown with no
+    way to know done/dropped rows were never in frame. A disclosure that omits its own
+    frame is the self-certifying instrument this module was written against.
+
+    THIS FUNCTION CANNOT DISCOVER EITHER FACT. `report` comes from `audit_rows`, which
+    sees rows and nothing else; only the fetch knows whether it filtered terminal rows
+    or stopped at a cap. So both arrive as arguments — and both DEFAULT TO None MEANING
+    "the caller did not say", which prints as an explicit admission. Passing them is how
+    a caller earns a clean-looking reach line; omitting them can never look complete.
+
+    Requires:
+        - report is an `audit_rows` return dict
+        - known_epic_keys is the same iterable passed to audit_rows, or None
+        - include_terminal / truncated are True, False, or None for "not stated"
+
     Ensures:
         - returns a multi-line str naming the rows seen, all four buckets, whether the
           unknown-slug check ran, and BOTH blind spots (the mirror tenant and the fact
           that a detector prevents nothing)
+        - ALWAYS names the row-status frame: terminal rows included, excluded, or not
+          stated by the caller — never silent about it
+        - ALWAYS names whether the fetch was truncated, including when unknown
         - the text is emitted whether the scan was clean or not
         - never raises
     """
     counts     = report[ "counts" ]
+
+    # None is NOT "no". An unstated frame prints as unstated: a default that silently
+    # read as "terminal excluded" would re-create the omission this is fixing.
+    if include_terminal is None:
+        terminal_note = ( "NOT STATED BY THE CALLER — this scan may or may not have seen "
+                          "done/dropped rows, so the counts cover an UNKNOWN slice of the board." )
+    elif include_terminal:
+        terminal_note = "included — done/dropped rows were in frame"
+    else:
+        terminal_note = ( "EXCLUDED — done/dropped rows were never fetched. A key that drifted on "
+                          "a row since closed is invisible here." )
+
+    if truncated is None:
+        truncated_note = ( "NOT STATED BY THE CALLER — this verdict may describe a subset of the "
+                           "board." )
+    elif truncated:
+        truncated_note = ( "YES — the fetch hit its row cap. This verdict describes a SUBSET; "
+                           "unseen rows may carry drift." )
+    else:
+        truncated_note = "no — the fetch reached the end of the board"
+
     known_note = (
         f"{len( set( known_epic_keys ) )} known epic keys"
         if report[ "known_keys_checked" ] and known_epic_keys is not None
@@ -187,6 +230,8 @@ def reach_disclosure( report, known_epic_keys=None ):
     return (
         f"REACH OF THIS SCAN — read before believing the verdict\n"
         f"  rows examined      : {report[ 'rows_seen' ]}\n"
+        f"  row-status frame   : {terminal_note}\n"
+        f"  fetch truncated    : {truncated_note}\n"
         f"  epic: keys         : {counts[ BUCKET_EPIC ]} "
         f"({counts[ 'unknown_epic' ]} carrying a slug with no story entry)\n"
         f"  blank              : {counts[ BUCKET_BLANK ]} (ungrouped — the drift this exists to find)\n"
@@ -202,8 +247,10 @@ def reach_disclosure( report, known_epic_keys=None ):
         f"  DOES NOT COVER     : prevention. Between two runs the board can be wrong and "
         f"nobody is told. It also cannot say whether a mirror row SHOULD have had an epic — "
         f"that needs the epic in its own column, not a scan.\n"
-        f"  SEES ONLY          : the rows handed to it. A truncated fetch yields a verdict "
-        f"about a subset; the caller must say so."
+        f"  SEES ONLY          : the rows handed to it — the two frame lines above say which "
+        f"rows those were. It no longer asks the CALLER to disclose that separately: a mandatory "
+        f"discloser that outsources half its disclosure is how the terminal-row omission survived "
+        f"review in the first place."
     )
 
 

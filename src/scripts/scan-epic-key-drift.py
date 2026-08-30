@@ -55,7 +55,11 @@ from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, _req
 
 from cosa.rest.task_store_epic_keys import audit_rows, reach_disclosure
 
-PAGE_SIZE = 500      # the router's hard `le=500` cap; not a tunable
+# The router caps `limit` at 500 (tasks.py:1131, `le=500`) but DEFAULTS to 100. So 500 is a
+# CEILING, not a forced value, and this IS tunable anywhere in 0..500 — the old comment said
+# "not a tunable", which was simply wrong (Tiberius, reviewing 2026-08-30). Kept at the
+# ceiling to minimise round-trips; lower it freely, raise it above 500 and the router 422s.
+PAGE_SIZE = 500
 
 
 def fetch_board( settings, api_key, max_rows, include_terminal=False ):
@@ -123,7 +127,7 @@ def fetch_known_epic_keys( settings, api_key ):
     return [ key for key in stories.keys() if not key.startswith( "_" ) ]
 
 
-def render( report, rows, known_keys, truncated ):
+def render( report, rows, known_keys, truncated, include_terminal ):
     """
     Print the human-readable report. Returns nothing; the caller owns the exit code.
 
@@ -140,7 +144,7 @@ def render( report, rows, known_keys, truncated ):
                f"{finding[ 'correlation_key' ]!r}" )
     if not report[ "findings" ]: print( "  (every row carries a known epic key)" )
     print()
-    print( reach_disclosure( report, known_keys ) )
+    print( reach_disclosure( report, known_keys, include_terminal, truncated ) )
 
 
 def main( argv=None ):
@@ -170,9 +174,11 @@ def main( argv=None ):
 
     if args.json:
         print( json.dumps( { **report, "truncated": truncated,
-                             "reach": reach_disclosure( report, known_keys ) }, indent=2 ) )
+                             "reach": reach_disclosure( report, known_keys,
+                                                        args.include_terminal, truncated ) },
+                            indent=2 ) )
     else:
-        render( report, rows, known_keys, truncated )
+        render( report, rows, known_keys, truncated, args.include_terminal )
 
     if truncated:
         print( f"\n⚠️  BOARD TRUNCATED at {args.max_rows} rows — this result is PARTIAL. "

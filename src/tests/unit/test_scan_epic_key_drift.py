@@ -145,7 +145,7 @@ def test_render_prints_each_finding_and_the_reach( capsys ):
     rows   = [ _row( "abcdef1234", None ), _row( "beef", "cascade-quick-ask" ) ]
     report = audit_rows( rows, known_epic_keys=[ "epic:x" ] )
 
-    scan.render( report, rows, [ "epic:x" ], truncated=False )
+    scan.render( report, rows, [ "epic:x" ], truncated=False, include_terminal=False )
     out = capsys.readouterr().out
 
     assert "BLANK" in out
@@ -159,7 +159,7 @@ def test_render_says_so_when_the_board_is_clean( capsys ):
     rows   = [ _row( "a", "epic:x" ) ]
     report = audit_rows( rows, known_epic_keys=[ "epic:x" ] )
 
-    scan.render( report, rows, [ "epic:x" ], truncated=False )
+    scan.render( report, rows, [ "epic:x" ], truncated=False, include_terminal=False )
     assert "every row carries a known epic key" in capsys.readouterr().out
 
 
@@ -167,7 +167,7 @@ def test_render_survives_a_finding_with_no_id_or_title( capsys ):
     from cosa.rest.task_store_epic_keys import audit_rows
     report = audit_rows( [ { } ], known_epic_keys=[ "epic:x" ] )
 
-    scan.render( report, [ { } ], [ "epic:x" ], truncated=False )
+    scan.render( report, [ { } ], [ "epic:x" ], truncated=False, include_terminal=False )
     assert "?" in capsys.readouterr().out
 
 
