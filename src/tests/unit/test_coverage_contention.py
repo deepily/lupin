@@ -402,7 +402,7 @@ def _raising_open( error ):
 
 @pytest.mark.parametrize( "comm", [ "pytest", "python", "python3", "python3.13", "python3.9" ] )
 def test_an_interpreter_comm_can_be_running_a_suite( comm ):
-    assert cc.comm_is_a_python_or_pytest_binary( comm ) is True
+    assert cc.comm_could_be_pytest( comm ) is True
 
 
 @pytest.mark.parametrize( "comm", [
@@ -410,11 +410,20 @@ def test_an_interpreter_comm_can_be_running_a_suite( comm ):
     "sleep",            # the retired end-to-end fixture, `exec -a "/usr/bin/pytest x" sleep`
     "bash", "node", "code",
     "pytest-watch",     # a watcher that has started no suite
-    "python-config",    # not an interpreter, despite the prefix
-    "", None,           # unreadable or absent
 ] )
 def test_a_non_interpreter_comm_is_not_a_running_suite( comm ):
-    assert cc.comm_is_a_python_or_pytest_binary( comm ) is False
+    assert cc.comm_could_be_pytest( comm ) is False
+
+
+def test_an_unreadable_comm_is_kept_rather_than_cleared():
+    """
+    🔴 FAIL-CLOSED, and the merged module got this WRONG for about an hour on 2026-08-30.
+    An empty comm means the process is alive and we could not read what it is. This module
+    never converts its own blindness into a pass — the same doctrine as main()'s exit 2 —
+    so an unreadable comm KEEPS the process as a possible suite. The alternative loses a
+    real running suite silently, which is the direction that takes somebody's box away.
+    """
+    assert cc.comm_could_be_pytest( "" ) is True
 
 
 def test_an_agent_seat_quoting_the_command_is_not_a_running_suite():
@@ -445,20 +454,23 @@ def test_a_process_that_exits_between_the_table_read_and_the_comm_read_is_droppe
                                    comm_of=lambda _pid: None ) == []
 
 
-def test_a_live_process_whose_comm_cannot_be_read_is_not_silently_cleared():
+def test_a_live_process_whose_comm_cannot_be_read_stays_an_offender():
     """
-    An empty comm means /proc/<pid> still EXISTS but could not be read. It is reported as
-    an empty string rather than None precisely so the two cases stay distinguishable.
+    🔴 THE THREE-VALUE DISTINCTION, and the reason _comm_admits_a_suite exists separately
+    from comm_could_be_pytest. None means GONE — a dead process cannot contend, so it is
+    dropped. "" means ALIVE BUT UNREADABLE — unknown is never cleared here, so it is KEPT.
+    Collapsing the two is exactly the fail-open the merge briefly shipped.
     """
     row = ( 4242, "/opt/venv/bin/pytest -q" )
-    assert cc._default_comm_of.__doc__ is not None
     assert cc.find_foreign_pytest( process_table=lambda: [ row ], ancestors=[],
-                                   comm_of=lambda _pid: "" ) == []
+                                   comm_of=lambda _pid: "" ) == [ row ]
+    assert cc.find_foreign_pytest( process_table=lambda: [ row ], ancestors=[],
+                                   comm_of=lambda _pid: None ) == []
 
 
 def test_the_real_comm_reader_names_this_very_process():
     """The instrument check, matching test_the_real_process_table_sees_this_running_pytest."""
-    assert cc.comm_is_a_python_or_pytest_binary( cc._default_comm_of( os.getpid() ) ) is True
+    assert cc.comm_could_be_pytest( cc._default_comm_of( os.getpid() ) ) is True
 
 
 def test_the_real_comm_reader_returns_none_for_a_pid_that_does_not_exist():

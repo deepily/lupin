@@ -36,10 +36,10 @@ substring match would otherwise have every run refuse itself.
 
 An offender must pass BOTH tests: its command line must be invocation-SHAPED
 (`looks_like_pytest`) AND the kernel must agree the process IS a python or pytest
-binary (`comm_is_a_python_or_pytest_binary`, read from /proc/<pid>/comm). The two
-answer different questions — the command line says what somebody WROTE, comm says
-what the process IS — and only the pair is sufficient. See the comment above
-`comm_is_a_python_or_pytest_binary` for the measurement that forced this.
+binary (`comm_could_be_pytest`, read from /proc/<pid>/comm). The two answer
+different questions — the command line says what somebody WROTE, comm says what
+the process IS — and only the pair is sufficient. See the docstring on
+`comm_could_be_pytest` for the measurements that forced this.
 
 CLI: `python3 -m cosa.utils.coverage_contention` — exit **0** clear, **1**
 contended (offenders printed to stderr), **2** unknown (could not read the
@@ -48,7 +48,6 @@ about it; this module does not soften it into a pass.
 """
 
 import os
-import re
 import sys
 from typing import Callable, Iterable, List, Optional, Tuple
 
@@ -147,25 +146,15 @@ def looks_like_pytest( cmdline: str ) -> bool:
 # also retired the old end-to-end fixture. `exec -a "/usr/bin/pytest x" sleep 20` has
 # comm="sleep" (verified), so it was never a real foreign suite, only a real foreign
 # COMMAND LINE. The end-to-end test now spawns an actual `-m pytest`.
-_PYTHON_COMM = re.compile( r"^python[0-9.]*$" )
-
-
-def comm_is_a_python_or_pytest_binary( comm: Optional[str] ) -> bool:
-    """
-    True when /proc/<pid>/comm names an interpreter that could be running a suite.
-
-    Requires:
-        - comm is the raw contents of /proc/<pid>/comm, already stripped, or None
-
-    Ensures:
-        - returns True for "pytest" and for "python", "python3", "python3.13"
-        - returns False for any other binary name, and for None or ""
-        - the comparison is on the whole name, so "python-config" and "pytest-watch"
-          are NOT interpreters (the kernel truncates comm at 15 characters, which
-          cannot turn a non-interpreter into one)
-    """
-    if not comm: return False
-    return comm == "pytest" or bool( _PYTHON_COMM.match( comm ) )
+# 🔴 THERE IS EXACTLY ONE comm PREDICATE, AND IT LIVES AT comm_could_be_pytest BELOW.
+# Two of them existed for about an hour on 2026-08-30: this row's fix and row 9078a035's
+# landed independently on the same function and were merged together, leaving one predicate
+# per author with OPPOSITE answers for an unreadable comm — one kept the process (fail
+# closed), one dropped it (fail open). The composition silently took the fail-OPEN answer,
+# which is the direction this module's whole doctrine forbids, and it contradicted the
+# commit message that introduced it. A guard with two sources of truth for one question is
+# the "frame in two places" hazard that pyproject's coverage comments warn about, one
+# mechanism over. If you are about to add a second one, do not.
 
 
 def _default_comm_of( pid: int ) -> Optional[str]:
@@ -276,6 +265,29 @@ def _default_process_table() -> List[ Tuple[ int, str ] ]:
     return rows
 
 
+def _comm_admits_a_suite( comm: Optional[str] ) -> bool:
+    """
+    Whether a pid's comm leaves open the possibility that it is running a suite.
+
+    The pid-level companion to comm_could_be_pytest, which takes a string. The ONLY thing
+    added here is the None case, and the two are deliberately different:
+
+        None  the process EXITED between the table read and this read. A dead process
+              cannot contend for the box, so it is dropped.
+        ""    the process is ALIVE and its comm could not be read. Unknown is never
+              cleared in this module (see main()'s exit 2), so it is KEPT.
+
+    Requires:
+        - comm is a comm string, "" for live-but-unreadable, or None for gone
+
+    Ensures:
+        - returns False for None
+        - otherwise defers entirely to comm_could_be_pytest, so there is one answer
+    """
+    if comm is None: return False
+    return comm_could_be_pytest( comm )
+
+
 def find_foreign_pytest(
     process_table : Optional[ Callable[ [], Iterable[ Tuple[ int, str ] ] ] ]=None,
     ancestors     : Optional[ Iterable[int] ]=None,
@@ -308,7 +320,7 @@ def find_foreign_pytest(
     found   = [ ( pid, cmd ) for pid, cmd in table
                 if pid not in ours
                 and looks_like_pytest( cmd )
-                and comm_is_a_python_or_pytest_binary( name_of( pid ) ) ]
+                and _comm_admits_a_suite( name_of( pid ) ) ]
     return sorted( found, key=lambda row: row[ 0 ] )
 
 
