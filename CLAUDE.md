@@ -400,6 +400,36 @@ cd <your-worktree> && LUPIN_ROOT="$PWD" .venv/bin/python -m pytest src/tests/uni
 
 `LUPIN_ROOT="$PWD"` is the one you must not forget — it is inherited from your shell and silently keeps pointing at `/…/lupin`. The other two are unfixable from inside a worktree: **subtract them, do not chase them.**
 
+⚠️ **THE SAME MISMATCH IS HARMLESS IN ONE DIRECTION AND SILENT-FATAL IN THE OTHER — SO READ THE
+WARNING, THEN ASK WHAT THE CODE WRITES.** Measured by Maya 🌻 2026-08-29, and added here rather than
+in a second section because it is a refinement of the three traps above, not a new one. Three cases,
+and they are not equally bad:
+
+| What the code writes | With a wrong `LUPIN_ROOT` | How bad |
+|---|---|---|
+| **Code path** — imports, runs a suite | your edits are not what runs; the tree you stand in is not the tree imported | misreports **your own** work, silently |
+| **Shared data, path NOT derived from `LUPIN_ROOT`** | lands correctly anyway | noise — *if* you read the result back |
+| **Shared data, path derived from `LUPIN_ROOT`** | writes where nobody reads, or into another repo's state | **worst** — corrupts **another seat**, not you (Tiberius's point) |
+
+**The measured case, and why it is the middle row rather than the bottom one.** The heartbeat-hold
+verb printed this section's WRONG-TREE warning at me — shell `LUPIN_ROOT` still naming `/…/lupin`
+while the file sat in my worktree — and the hold was still correct. Not by luck: `fleet_data_root()`
+calls `_main_repo_path()`, which collapses a worktree to its parent checkout, so the destination is
+invariant under the choice. Verified both ways rather than read off the source:
+
+```
+LUPIN_ROOT=lupin                    -> …/projects-data/lupin
+LUPIN_ROOT=lupin-wt-maya-ba6df71e   -> …/projects-data/lupin      # identical
+```
+
+Had that resolver taken `LUPIN_ROOT`'s basename instead, the hold would have gone to
+`projects-data/lupin-wt-maya-ba6df71e/`, where the arbiter and the Stop hook never look — a session
+parked invisibly, which is the bottom row and the exact failure row `011f1f90` exists to catch.
+
+⇒ **A wrong-tree warning is not one severity.** Ask which row you are in before deciding whether to
+act on it — and on the middle row, still read the result back, because "it landed correctly" is a
+claim until you have seen it.
+
 ⚠️ **The general shape, which outlives these three:** a worktree is `git`-identical to the main tree and **environment-identical to nothing**. Anything gitignored, untracked, or exported into your shell is a property of *where you are standing*, not of *what you are measuring*. That is why two counts should be **reconciled** rather than adjudicated — 25 − 14 = 11 with every one named is stronger evidence than either count alone, and a mismatch that reconciles is not a disagreement.
 
 ⚠️ **Related, same family** — the collected-test-id diff. Some test ids bake an **absolute path** into a parametrize id, so diffing collected ids between two worktrees shows the same test as one removal plus one addition. A raw diff read `+225 / −4` and looked like the merges had deleted four tests; they had not. Compare **counts** as well as ids, and treat the agreement of the two as the check.
