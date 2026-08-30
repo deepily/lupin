@@ -312,3 +312,40 @@ def test_the_table_marks_each_row_and_leaves_error_blank_on_success( store, caps
     out = capsys.readouterr().out
     assert "✅" in out
     assert "None" not in out
+
+
+# ── found by Clayton 😎's independent mutation run, adopted here ─────────────
+
+def test_a_body_that_comes_back_longer_is_not_reported_as_survived( monkeypatch, capsys ):
+    """
+    🔴 `_FakeStore` CAN ONLY TRUNCATE OR REFUSE, SO IT CANNOT SEE THE EQUALITY BEING LOOSENED.
+
+    `cap` cuts a body short and `raise_at` refuses it outright — every fixture above returns a
+    body no LONGER than the one sent. On that data `returned_len == sent_len` and
+    `returned_len >= sent_len` give the same verdict for every row, so a mutation loosening the
+    comparison survives the whole suite. Only a store that hands back MORE than it was given
+    separates them.
+
+    It is worth separating: a probe that called a grown body a survival would report a clean
+    round-trip while the store was concatenating entries — the opposite of the truncation this
+    script was written to find.
+
+    The general form, which is the part worth carrying: AN EQUALITY WHOSE FIXTURES ONLY EVER
+    APPROACH IT FROM ONE SIDE IS NOT BEING TESTED AS AN EQUALITY.
+    """
+    class _PaddingStore:
+        def __init__( self, root ):
+            self.entries = [ ]
+
+        def post( self, topic, body, **kwargs ):
+            self.entries.append( { "body": body + "EXTRA" } )
+
+        def read( self, topic, limit ):
+            return list( reversed( self.entries ) )[ :limit ]
+
+    monkeypatch.setattr( mod, "CommonsStore", _PaddingStore )
+
+    mod.run_probe()
+
+    out = capsys.readouterr().out
+    assert "All lengths survived" not in out, "a body that grew in transit was called a survival"

@@ -23,7 +23,9 @@ was EMPTY at `0f61dd85`, and empty is conclusive.
   tests. The fixture clears them before each test and disarms after, so no test depends on
   another's ordering.
 · `OUT` AND `PREFIX` ARE READ AT IMPORT TIME into module constants, so a test that changed the
-  environment would change nothing. Both are patched as module attributes instead.
+  environment would change nothing. Every test patches them as module attributes instead —
+  except `test_the_defaults_hold_when_the_environment_says_nothing`, which is the one place
+  the DEFAULTS themselves are reachable and therefore reloads the module deliberately.
 
 WHY `_dump` IS ASSERTED ON THE FILE CONTENTS rather than on `_hits`: the JSON on disk is the
 only output that survives the process, and `detect_thread_credited_coverage.py` is a separate
@@ -313,3 +315,78 @@ def test_unconfigure_after_a_dump_does_not_write_again( traced, tmp_path, monkey
 
     assert traced[ "sys" ] == [ None ]
     assert not ( tmp_path / "second.json" ).exists()
+
+
+# ── found by Clayton 😎's independent mutation run, adopted here ─────────────
+#
+# His harness and mine were built separately and disagreed usefully: he ran 40 mutants to my
+# 21 and found four survivors mine never posed. Every one is the FOURTH reading — a fixture
+# that cannot discriminate — so every fix below is in the DATA. No assertion above was
+# changed, because no assertion above was wrong.
+
+VENDORED = "/src/cosa/.venv/lib/python3.11/site-packages/urllib3/connection.py"
+
+
+def test_a_vendored_path_under_src_is_still_rejected():
+    """
+    🔴 THE `site-packages` CLAUSE IS THE ONLY THING THAT REJECTS THIS PATH, and until Clayton
+    posed the mutation, nothing here proved the clause did any work at all.
+
+    THIRD_PARTY above is `/usr/lib/...`, which carries no `/src/` — so the FIRST clause
+    rejects it and the site-packages clause is never reached. Deleting that clause left every
+    test in this file green. Verified mechanically rather than read off the source: `/src/` is
+    absent from THIRD_PARTY and present in VENDORED.
+
+    It is load-bearing in THIS repo specifically. `src/cosa/.venv` is a vendored 3.11
+    virtualenv of ~29,000 files whose paths carry BOTH `/src/` and `site-packages`
+    (CLAUDE.md § THERE IS A SECOND VIRTUALENV *INSIDE* `src/`), and the directory really is
+    on disk. Without the clause the tracer would attribute lines across all of it.
+    """
+    mod._tracer( _Frame( VENDORED, 11 ), "line", None )
+
+    assert mod._hits == { }, "a vendored site-packages path under /src/ was recorded"
+
+
+def test_dump_sorts_its_keys_and_not_only_its_line_lists( tmp_path, monkeypatch ):
+    """
+    ⚠️ ONE FILE PER THREAD CANNOT SHOW A KEY SORT DOING ANYTHING — `sort_keys=True` is
+    invisible until two keys arrive out of order, because with a single file the sorted and
+    unsorted renderings are byte-identical.
+
+    Asserted on the RAW TEXT, not the parsed dict: the parsed dicts compare equal either way,
+    so an assertion on the parse would hide exactly what this test exists to check.
+    """
+    out = tmp_path / "attrib.json"
+    monkeypatch.setattr( mod, "OUT", str( out ) )
+    for path in ( "/src/zulu.py", "/src/alpha.py" ):
+        mod._tracer( _Frame( path, 1 ), "line", None )
+
+    mod._dump()
+
+    text = out.read_text()
+    assert text.index( "/src/alpha.py" ) < text.index( "/src/zulu.py" ), \
+        "keys were written in insertion order — sort_keys is not doing its job"
+
+
+def test_the_defaults_hold_when_the_environment_says_nothing( monkeypatch ):
+    """
+    Every other test in this file patches `OUT`, so the DEFAULTS are executed at import and
+    then never asserted — they could be changed to any path at all and this suite would not
+    notice, while still reporting 100%. That is the gap between a line being EXECUTED and a
+    line being TESTED, and coverage cannot tell the two apart.
+
+    The module reads both from the environment at import, so the only way to reach the
+    default is a reload with the variables cleared. `importlib.reload` mutates the module in
+    place, so `mod` stays the one object this file's autouse fixture disarms at teardown.
+    """
+    import importlib
+
+    before_out, before_prefix = mod.OUT, mod.PREFIX
+    monkeypatch.delenv( "LUPIN_THREAD_ATTRIB_OUT",    raising=False )
+    monkeypatch.delenv( "LUPIN_THREAD_ATTRIB_PREFIX", raising=False )
+    try:
+        importlib.reload( mod )
+        assert mod.OUT    == "/tmp/thread-attrib.json"
+        assert mod.PREFIX == "/src/"
+    finally:
+        mod.OUT, mod.PREFIX = before_out, before_prefix
