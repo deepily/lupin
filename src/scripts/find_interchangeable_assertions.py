@@ -70,6 +70,20 @@ enough for a zero on the first to say anything about the second.**
 ⇒ **A file with no hits has not been cleared. It has not been examined.** Only a mutation
 tells you whether a fixture can see what its name claims.
 
+⚠️ **AND THIS IS A DEMONSTRATION THAT RECALL IS NOT TOTAL — IT IS NOT A MEASUREMENT OF RECALL.**
+The two figures on this page are not comparable and should not be read side by side as if they
+were. Precision rests on a **20-hit adjudication**; the recall evidence is **two known blind
+fixtures in one file**, and a miss rate cannot be computed from that.
+
+**Recall is unmeasured, and measuring it needs something nobody has**: a set of fixtures already
+known to be blind, complete enough to divide by. Every blind fixture in this repo that has been
+identified was found by MUTATING it — so any "recall" figure derived from that set would only
+report how well this probe agrees with the mutations somebody already thought to run, which is
+the instrument certifying itself against its own reach.
+
+⇒ **Quote the precision figure as a figure. Quote the recall evidence as an existence proof:
+this probe demonstrably misses whole blind fixtures, and how often is not known.**
+
 EXIT CODES
     0  scanned, no interchangeable-value assertions found
     1  findings present (a TRIAGE queue, never a defect count)
