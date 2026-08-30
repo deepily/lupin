@@ -181,6 +181,16 @@ if undeclared:
     print( "with the reason, so the frame's claim equals its measurement):" )
     for u in undeclared: print( f"    {u}" )
     sys.exit( 1 )
+dead = cf.unreachable_declarations( unseen )
+if dead:
+    # Row f3400eab. A declaration the census never reaches reads as "handled" while
+    # nothing has looked — the state the live tree was in until 2026-08-30, when the
+    # walk pruned src/cosa/rnd unread and KNOWN_UNSEEABLE named a file inside it.
+    print( "DECLARED UNSEEABLE BUT NEVER REACHED — these KNOWN_UNSEEABLE entries name" )
+    print( "paths this census did not find, so each is a receipt for a check that did" )
+    print( "not happen. The file was renamed or moved, or its source entry is gone:" )
+    for d in dead: print( f"    {d}" )
+    sys.exit( 1 )
 print( f"frame OK — {len( reported )} files reported, "
        f"{len( cf.KNOWN_UNSEEABLE )} declared unseeable, 0 unaccounted" )
 PY

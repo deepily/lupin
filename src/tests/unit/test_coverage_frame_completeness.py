@@ -285,3 +285,85 @@ def test_an_omitted_file_at_the_top_level_is_skipped_by_the_census( tmp_path ):
         str( tmp_path ), [ "top" ], [], ( "*/test_skip.py", ) )
     assert unexpected == [ os.path.join( "top", "keep.py" ) ]
     assert unseeable  == []
+
+
+# ── row f3400eab: the hole where both guards deferred to each other ───────────────────
+# A dot-named .py ALONE in a non-package subdir under a source root used to escape BOTH
+# checks. unseen_python_files pruned the directory unread (mirroring coverage's descent
+# rule); unreachable_subdirs exempts a directory whose files are all unseeable. Each skip
+# was defensible; together nobody was looking, and the live tree sat in exactly that state
+# — KNOWN_UNSEEABLE named a file inside src/cosa/rnd that the census could never reach.
+
+def test_a_dot_named_file_alone_in_a_non_package_subdir_is_still_reported( tmp_path ):
+    """The case itself. Pruning the directory must not hide a file coverage can never see."""
+    top = tmp_path / "top"
+    ( top / "notes" ).mkdir( parents=True )
+    ( top / "__init__.py" ).write_text( "" )
+    ( top / "notes" / "2026.09.01-probe.py" ).write_text( "x = 1\n" )
+
+    unexpected, unseeable = cf.unseen_python_files( str( tmp_path ), [ "top" ],
+                                                    reported_paths=[ os.path.join( "top", "__init__.py" ) ] )
+
+    assert unseeable  == [ os.path.join( "top", "notes", "2026.09.01-probe.py" ) ]
+    # ...and it must NOT become a false `unexpected`: the descent rule still governs which
+    # files coverage could have reported, and this one could never have been.
+    assert unexpected == [ ]
+
+
+def test_the_control_a_dotless_file_in_that_subdir_is_still_not_unseeable( tmp_path ):
+    """
+    The control that makes the test above a finding rather than a coincidence.
+
+    A dotless file in the same pruned directory is coverage-VISIBLE by name, so it is the
+    orphan check's business, not this census's — it must not leak into `unseeable`, or the
+    fix would be reporting "invisible" for a file whose only problem is where it sits.
+    """
+    top = tmp_path / "top"
+    ( top / "notes" ).mkdir( parents=True )
+    ( top / "__init__.py" ).write_text( "" )
+    ( top / "notes" / "plain_probe.py" ).write_text( "x = 1\n" )
+
+    unexpected, unseeable = cf.unseen_python_files( str( tmp_path ), [ "top" ],
+                                                    reported_paths=[ os.path.join( "top", "__init__.py" ) ] )
+
+    assert unseeable  == [ ]
+    assert unexpected == [ ]
+    # The orphan check is the one that owns this shape, and it still fires.
+    assert cf.unreachable_subdirs( str( tmp_path ), [ "top" ] ) == [ os.path.join( "top", "notes" ) ]
+
+
+def test_an_omitted_dot_named_file_in_a_pruned_subdir_stays_omitted( tmp_path ):
+    """The omit list must still win — the new branch reads it, rather than reporting first."""
+    top = tmp_path / "top"
+    ( top / "notes" ).mkdir( parents=True )
+    ( top / "__init__.py" ).write_text( "" )
+    ( top / "notes" / "2026.09.01-probe.py" ).write_text( "x = 1\n" )
+
+    _, unseeable = cf.unseen_python_files( str( tmp_path ), [ "top" ], reported_paths=[],
+                                           omit_globs=[ "*/notes/*" ] )
+    assert unseeable == [ ]
+
+
+# ── row f3400eab: a declaration that never fires ──────────────────────────────────────
+
+def test_a_declaration_the_census_never_reached_is_reported():
+    """A receipt for a check that did not happen is worse than no receipt."""
+    assert cf.unreachable_declarations( [ "a/b.py" ], declared={ "a/b.py" } ) == [ ]
+    assert cf.unreachable_declarations( [ ],          declared={ "a/b.py" } ) == [ "a/b.py" ]
+
+
+def test_the_live_declarations_are_all_doing_work():
+    """
+    The regression that would have caught this on 2026-08-30: KNOWN_UNSEEABLE named a file
+    the live census never reached, so it read as handled while nothing had looked.
+    """
+    text = open( os.path.join( _project_root(), "pyproject.toml" ), encoding="utf-8" ).read()
+    dirs = cf.source_dirs( text )
+    omit = cf.omit_patterns( text )
+    _, unseeable = cf.unseen_python_files( _project_root(), dirs, reported_paths=[], omit_globs=omit )
+
+    assert cf.unreachable_declarations( unseeable ) == [ ], (
+        "a KNOWN_UNSEEABLE entry names a path this census cannot reach — it was renamed, "
+        "moved, or its source entry is gone, and the declaration is now a receipt for a "
+        "check that does not happen"
+    )

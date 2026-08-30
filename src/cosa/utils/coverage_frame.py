@@ -101,6 +101,30 @@ def source_dirs( pyproject_text ):
         raise ValueError( "pyproject.toml has no [tool.coverage.run] source array" ) from exc
 
 
+def unreachable_declarations( unseeable_paths, declared=None ):
+    """
+    Declared-unseeable paths the census never reached.
+
+    🔴 A DECLARATION THAT NEVER FIRES IS WORSE THAN NO DECLARATION — it is a receipt for a
+    check that did not happen. Found by Rio ⚡ 2026-08-30 (row f3400eab): the live tree
+    reported `unseeable == []` while KNOWN_UNSEEABLE named a file, so the entry read as
+    "handled" when nothing had looked. The walk fix in unseen_python_files is what makes the
+    entry fire; this is what stops the same silence returning by another route — a renamed
+    file, a moved directory, or a source entry dropped from pyproject.
+
+    Requires:
+        - unseeable_paths is the second return of unseen_python_files()
+        - declared defaults to KNOWN_UNSEEABLE
+
+    Ensures:
+        - returns the sorted declared paths ABSENT from unseeable_paths
+        - an empty result means every declaration is doing work
+        - reads nothing and writes nothing
+    """
+    if declared is None: declared = KNOWN_UNSEEABLE
+    return sorted( set( declared ) - set( unseeable_paths ) )
+
+
 def unseen_python_files( root, source_entries, reported_paths, omit_globs=() ):
     """
     Census the gap between the .py files a frame CLAIMS and the files a coverage
@@ -120,8 +144,11 @@ def unseen_python_files( root, source_entries, reported_paths, omit_globs=() ):
         - `unseeable` holds files coverage's filename filter rejects, which no source
           entry can recover; they are reported separately because the remedy is a
           rename, not a config change
-        - a subdirectory is walked ONLY when its source entry is listed explicitly or
-          it is an import package, mirroring coverage's own descent rule
+        - a subdirectory is walked for the SEEN/UNSEEN split ONLY when its source entry
+          is listed explicitly or it is an import package, mirroring coverage's own
+          descent rule — but an UNSEEABLE file is reported from a pruned directory too
+          (row f3400eab), because the descent rule governs what coverage CAN SEE, not
+          what may be reported as invisible
     """
     reported   = set( reported_paths )
     omits      = tuple( omit_globs )
@@ -132,9 +159,33 @@ def unseen_python_files( root, source_entries, reported_paths, omit_globs=() ):
         abs_entry = os.path.join( root, entry )
         if not os.path.isdir( abs_entry ): continue
         for dirpath, dirnames, filenames in os.walk( abs_entry ):
-            # Mirror coverage: below the top level, descend only into packages.
+            # Mirror coverage: below the top level, descend only into packages — for the
+            # SEEN/UNSEEN split. But an UNSEEABLE file is reported even here (row f3400eab).
+            #
+            # 🔴 THE TWO GUARDS USED TO DEFER TO EACH OTHER AND LEAVE NOBODY LOOKING. A
+            # dot-named .py ALONE in a non-package subdir escaped both: this walk pruned the
+            # directory unread, and unreachable_subdirs() exempts a directory whose files are
+            # all unseeable. Measured 2026-08-30 — a dated file alone in src/cosa/notes gave
+            # unexpected=[], unseeable=[], orphans=[]; adding ONE dotless file beside it made
+            # the orphan check fire. So the discriminator was "are ALL the .py in this
+            # directory dot-named", and the live tree was in exactly that state: src/cosa/rnd
+            # is neither package nor listed source, so KNOWN_UNSEEABLE declared a file this
+            # census could never reach. A declaration that never fires is worse than none —
+            # it is a receipt for a check that did not happen.
+            #
+            # The distinction that makes this correct rather than a widening: coverage's
+            # descent rule governs what coverage CAN SEE, and therefore what may legitimately
+            # be missing from a report. It says nothing about what we are permitted to REPORT
+            # as invisible. An unseeable file is invisible wherever it sits, so reporting it
+            # from a pruned directory cannot produce a false `unexpected` — the branch below
+            # adds nothing to that list.
             if os.path.abspath( dirpath ) != os.path.abspath( abs_entry ) and not is_package_dir( dirpath ):
                 dirnames[ : ] = []
+                for filename in filenames:
+                    if not filename.endswith( ( ".py", ".pyw" ) ):  continue
+                    full = os.path.relpath( os.path.join( dirpath, filename ), root )
+                    if is_omitted( full, omits ):                   continue
+                    if not coverage_can_see( full ): unseeable.add( full )
                 continue
             dirnames[ : ] = [ d for d in dirnames if d != "__pycache__" ]
             for filename in filenames:
