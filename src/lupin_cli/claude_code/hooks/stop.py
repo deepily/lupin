@@ -903,9 +903,18 @@ def _ask_anything_else( session_id, last_assistant_message=None, cwd=None ):
         - Plain "no", timeout, error → allows stop ({})
         - On any exception, returns {} (allow stop gracefully)
     """
+    # `phase` names WHERE we got to, so the backstop below can say which step broke
+    # instead of emitting a bare exception string. Every callable in this body is
+    # already total (see the handler's comment), so a phase that appears in a card is
+    # naming OUR glue, not the thing it called.
+    phase     = "build_sender_id"
+    sender_id = None      # bound BEFORE the try: the handler reads it, and a throw in
+                          # build_sender_id_for_cc would otherwise make the handler
+                          # itself raise NameError — a backstop that fails is no backstop
     try:
         sender_id = build_sender_id_for_cc( session_id )
 
+        phase = "summarize_task"
         gist = _summarize_task( last_assistant_message )
         if gist:
             message = f'I\'m finished *"...{gist}"*. Is there anything else you want me to do?'
@@ -913,6 +922,7 @@ def _ask_anything_else( session_id, last_assistant_message=None, cwd=None ):
             message = "I've finished the current task. Is there anything else you'd like me to do?"
 
         # Build abstract with session-level context
+        phase = "session_context"
         topic, branch = _get_session_context( cwd )
         parts = []
         if topic:
@@ -921,6 +931,7 @@ def _ask_anything_else( session_id, last_assistant_message=None, cwd=None ):
             parts.append( f"**Branch**: `{branch}`" )
         abstract = "  \n".join( parts ) if parts else None
 
+        phase   = "build_request"
         request = NotificationRequest(
             message                  = message,
             response_type            = ResponseType.YES_NO,
@@ -933,8 +944,10 @@ def _ask_anything_else( session_id, last_assistant_message=None, cwd=None ):
             display_qualifier_widget = True
         )
 
+        phase    = "notify_sync"
         response = notify_user_sync( request )
 
+        phase = "parse_response"
         answer, qualifier = extract_qualifier_comment( response.response_value )
 
         print( f"[STOP] response: exit_code={response.exit_code}, value='{response.response_value}'", file=sys.stderr )
@@ -979,8 +992,48 @@ def _ask_anything_else( session_id, last_assistant_message=None, cwd=None ):
         return {}
 
     except Exception as e:
-        # Server down, network error, import error → allow stop gracefully
-        send_tts( f"Stop — notify error: {e}" )
+        # ⚠️ THE COMMENT HERE USED TO READ "Server down, network error, import error →
+        # allow stop gracefully". TWO OF THOSE THREE ARE FALSE, and the sentence was
+        # load-bearing: it is why a reviewer concluded this handler cannot tell an
+        # outage from a bug and priced a fix at "work at every raise site"
+        # (row e3dd1df2). Measured 2026-08-30:
+        #
+        #   · notify_user_sync is TOTAL. It catches ConnectionError / Timeout /
+        #     RequestException / bare Exception and RETURNS a NotificationResponse
+        #     (notify_user_sync.py:457-495; its docstring says "No exceptions raised").
+        #     A dead :7999 therefore returns response_value=None, extract_qualifier_comment
+        #     short-circuits, and we fall out of the `no` path. IT NEVER REACHES HERE.
+        #   · Every other callable in the try body is total too — build_sender_id_for_cc,
+        #     _summarize_task, _get_session_context, log_to_stream and
+        #     inject_qualifier_via_tmux all document "returns None / never raises".
+        #   · And send_tts rides notify_user_async to THE SAME SERVER notify_user_sync
+        #     would have failed to reach, so an announce-on-outage path could not
+        #     announce an outage even if one did arrive.
+        #
+        # ⇒ This is a BACKSTOP over a body whose components already swallow their own
+        # failures. What reaches it is OUR OWN GLUE breaking — a pydantic ValidationError
+        # building the request, an AttributeError, an ImportError. "An exception arrived"
+        # and "we have a bug" are the same statement at this site, which is exactly the
+        # traffic the fleet's liveness path should be loud about. KEPT ON PURPOSE.
+        #
+        # It is not narrowed to specific types because the caller (line ~2524) has NO
+        # guard of its own: a raise here kills the hook process before emit_json runs and
+        # the session's Stop goes unanswered. The narrowing that was available is the one
+        # applied — the catch now names the PHASE and the session instead of emitting a
+        # bare exception string that no reader could act on.
+        session_tag = ( session_id or "" )[ :8 ]
+        send_tts(
+            f"Stop hook defect in {phase} for session {session_tag}: "
+            f"{type( e ).__name__}: {e}",
+            sender_id = sender_id,
+        )
+        log_to_stream( "stop", {}, extra={
+            "phase"      : "ask_anything_else_error",
+            "failed_at"  : phase,
+            "session_id" : session_tag,
+            "error_type" : type( e ).__name__,
+            "error"      : str( e ),
+        } )
         return {}
 
 
