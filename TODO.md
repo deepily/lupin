@@ -80,6 +80,47 @@ Rick lifts the moratorium; nothing else about them changes.**
 
 ⚠️ **`866f43ce` carried a `[default used] no` from an earlier timed-out ask.** Rick's keypress is the opposite answer. Both are on the row and labelled — a row with two contradictory answers and no provenance is worse than a row with none.
 
+## 📨 FINDING 2026-08-30 (Clayton 😎 `1bfda44e`, with Chloé 🗼) — THE CONDENSER FIX **IS** LANDED, AND IT CANNOT SEE ANY OF TONIGHT'S FOUR INVERSIONS
+
+**Verified, because a DM said the opposite.** A condensed DM reported *"the condenser fix is not
+committed anywhere and needs to be landed."* It is committed: `_retracted_assertions` lives at
+`src/cosa/rest/routers/dm.py:1554`, is **wired into the guard chain at line 2015**, landed at
+`349aa8ba`, working tree clean, and `src/tests/unit/test_dm_tutor_send_path.py` is **111 passed**.
+The message claiming the condenser fix was missing was itself produced by the condenser.
+
+**What is NOT landed is a guard for the class that is actually firing.** §4's guard keys on
+**retraction markers**, and per Chloé's §7 at `bef61718` **not one of tonight's four inversions is
+a retraction** — they are a recommendation, a state report, a measurement, and a merge note. The
+guard is correct and it is aimed at a case that did not recur.
+
+⚠️ **The dangerous direction is the one that produces a green build.** Inversion #1 told a seat to
+**delete** the `site-packages` clause — a live guard over the ~29,000 vendored files in
+`src/cosa/.venv` — because doing so *"keeps all tests green."* It does keep them green; that is
+exactly why the mutation survived. A seat that complied would have shipped a passing suite, a
+removed guard, and **no artifact anywhere recording that a guard was removed.** An inverted
+retraction reads as odd; an inverted **recommendation** reads as ordinary technical advice.
+
+🔴 **The only remedy currently proposed is a HABIT — "open the path before acting on the DM" — and
+this fleet'"'"'s own doctrine is that a habit is not a control.** §4 makes that point about itself.
+Four inversions in one evening, three of them mine, and what caught every one was a human opening
+the artifact. That worked tonight and is not a mechanism.
+
+⇒ **Open question for Rick / Mr. Radio, deliberately NOT a store row under the moratorium**: does
+the non-retraction inversion class get a detector, or do we accept the habit and say so plainly?
+A third option is cheaper than either: **put the verdict in the path, not the prose** — the prose
+is the part that gets rewritten, and every one of the four had its corrective evidence one file
+open away.
+
+**Receipts**: guard `349aa8ba` · four inversions and the `262fc37cb0ae` measurement in
+`src/rnd/v0.2.1/2026.08.30-dm-condenser-inverts-retractions.md` §7 · mutation run
+`src/rnd/v0.2.1/2026.08.30-independent-mutation-run-chloe-four.md`.
+
+⚠️ **One correction that cannot be made where it belongs**: merge subject `199d9aca` says the
+sixth finding was *"refuted with a fixture."* It was not — `limit=1` → `limit=2` (`262fc37cb0ae`)
+is an equivalent mutant with deliberately no test, and it **survives deterministically at that
+very tip**, measured twice by me and once by Chloé. A merge subject cannot be rewritten once in
+history, so the correction lives here and in §7.
+
 ## 🌿 TONIGHT 2026-08-21 (Cheech 🌿 `5c04b97c`, nine re-spins; crew Krishna · Rachel · Pocholo · maya) — brain integration BUILT: `/api/v2 ask|submit`, ten doors retired, three tiers green at `8657cfa9`
 
 **Landed** on `wt-brain-integration-10ef4b64` (tip `7c00c787`, pushed): steps 1–9b, all ten doors (each deletes its own accordion card — Rick 20:44; Re-render button stays), door 8 voice→ask, step 12, class delete 7a20a09d, Mr Radio's B/C/D. Gate ts-6eaebff8 @888754f1 = no code regression; final tiers @8657cfa9 unit 16,876/0 · cosa 8,622/0 · guard 2/0 (María reproduced). Plan: `src/rnd/v0.2.0/2026.08.20-brain-integration-cascade-review-plan.md` § "Manager rulings after the 11:43 re-spin" (end-of-night fold).
