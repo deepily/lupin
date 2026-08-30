@@ -38,7 +38,14 @@ try:
 except Exception:
     sys.exit( 1 )
 v = d.get( "tool", { } ).get( "coverage", { } ).get( "report", { } ).get( "fail_under" )
-if v is None: sys.exit( 1 )
+# ⚠️ PRESENT IS NOT THE SAME AS USABLE. `fail_under = "abc"` and `fail_under = true` are
+# VALID TOML, so tomllib hands them back happily — and the float comparison downstream then
+# raised ValueError, which the shell read as "not lowered" and waved through with the
+# nonsense line "floor RAISED locally (92 -> abc) — allowed", exit 0. Measured 2026-08-30
+# while checking the fail-closed claim rather than asserting it. A value that cannot be
+# compared is a floor nobody can check, which is exactly what exit 2 is for.
+# `bool` is excluded explicitly because it is a subclass of int in Python.
+if v is None or isinstance( v, bool ) or not isinstance( v, ( int, float ) ): sys.exit( 1 )
 print( v )'
 }
 

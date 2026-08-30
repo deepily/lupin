@@ -14,6 +14,15 @@
 #   3. lowered floor,   raw `coverage report` -> EXIT 0  🔴 THE DEFECT, still demonstrable
 #   4. lowered floor,   gate  -> REFUSES                 (the fix, in place)
 #   5. malformed toml,  gate  -> REFUSES                 (FAIL CLOSED, not a shrug)
+#   6. fail_under="abc", gate  -> REFUSES                 (parseable but not comparable)
+#   7. fail_under=true,  gate  -> REFUSES                 (bool is an int subclass)
+#
+# ⚠️ 6 AND 7 EXIST BECAUSE 5 WAS NOT ENOUGH, and I only found that by checking the
+# fail-closed claim instead of asserting it. `fail_under = "abc"` is VALID TOML, so the
+# parse succeeded and the float comparison downstream raised ValueError — which the shell
+# read as "not lowered" and waved through, printing "floor RAISED locally (92 -> abc) —
+# allowed", exit 0. Unparseable and unusable are different failures and only one of them
+# was covered.
 #
 # ⚠️ SCENARIO 3 IS WHY THIS FILE STILL EARNS ITS KEEP once the gate is fixed. Without it
 # the suite would only prove the gate refuses things, never that there was anything to
@@ -82,6 +91,18 @@ echo "═══ 5. malformed pyproject — the gate must REFUSE, not shrug ═�
 printf '\nthis is not = = toml\n' >> pyproject.toml
 OUT="$( COVERAGE_FILE="$DATA" LUPIN_COVERAGE=1 "$GATE" 2>&1 )"
 assert "gate fails CLOSED on an unreadable threshold" "COVERAGE GATE REFUSED" "$( verdict "$OUT" )"
+git checkout -- pyproject.toml
+
+echo "═══ 6. fail_under is a STRING — parseable, not comparable — must REFUSE ═══"
+sed -i 's/^fail_under = .*/fail_under = "abc"/' pyproject.toml
+OUT="$( COVERAGE_FILE="$DATA" LUPIN_COVERAGE=1 "$GATE" 2>&1 )"
+assert "gate refuses a non-numeric floor" "COVERAGE GATE REFUSED" "$( verdict "$OUT" )"
+git checkout -- pyproject.toml
+
+echo "═══ 7. fail_under is a BOOL — an int subclass in Python — must REFUSE ═══"
+sed -i 's/^fail_under = .*/fail_under = true/' pyproject.toml
+OUT="$( COVERAGE_FILE="$DATA" LUPIN_COVERAGE=1 "$GATE" 2>&1 )"
+assert "gate refuses a boolean floor" "COVERAGE GATE REFUSED" "$( verdict "$OUT" )"
 git checkout -- pyproject.toml
 
 echo ""
