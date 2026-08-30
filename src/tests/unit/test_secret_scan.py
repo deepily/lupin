@@ -341,7 +341,7 @@ AMNESTY_ROWS       = 190
 ROTATION_HELD_SHA = "8675ec7a1c0c677e56dc6e243be7af51ee2c715f17ec6a93e1a3c731c360633f"
 ROTATION_HELD_NOTICE = (
     "\n"
-    "  🔴 IF THIS IS THE DETECTOR/RESCAN RED: DO NOT CLEAR IT BY RECORDING A SCAN.\n"
+    "  🔴 DO NOT CLEAR THIS RED BY RECORDING A SCAN.\n"
     "     The re-scan and triage are already done, on branch wt-maya-4f0ced13 at 034e44ac,\n"
     "     HELD UNMERGED until the postgres credential is rotated (Rick's call).\n"
     f"     A fixture change moving detector_sha256 to {ROTATION_HELD_SHA}\n"
