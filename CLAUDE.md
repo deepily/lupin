@@ -345,6 +345,11 @@ Suites that qualify:
 - Inline `quick_smoke_test()` blocks + `py_compile` + import-chain checks
 - `src/tests/smoke/test_calculator_live_pipeline.py`
 - `src/tests/smoke/test_container_preflight.py`
+- `src/tests/smoke/test_memory_cap_binds.py` — ⚠️ it EXECUTES `systemd-run` and gets a process
+  SIGKILLed, which reads like a :8000 suite and is not one. Routed by the rubric: the scope is
+  transient (`--scope --collect`, dies with the command), so nothing persists; ~0.5s; and the only
+  process it kills is the allocator it started, inside a cgroup it owns — which is the very
+  property one of its cases asserts. It needs no monopoly and takes none.
 - `src/tests/websocket_smoke/` (run via `src/scripts/run-websocket-smoke-tests.sh`)
 
 ### :8000 (test) — monopolize mode, scheduled only
