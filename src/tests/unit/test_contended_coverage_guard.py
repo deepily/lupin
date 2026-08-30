@@ -513,5 +513,9 @@ def test_a_real_pytest_is_still_found_when_comm_is_an_interpreter():
     real = "/opt/venv/bin/python -m pytest src/tests/unit/ -q --cov"
     assert cc.looks_like_pytest( real ) is True
     assert cc.comm_could_be_pytest( "python" ) is True
-    found = cc.find_foreign_pytest( process_table=lambda: [ ( 999, real ) ], ancestors=[ 1 ] )
+    # comm_of is injected: pid 999 is fictional, so the real reader would return None
+    # (exited) and correctly find nothing. The merge added that seam after this test was
+    # written — see row 9078a035.
+    found = cc.find_foreign_pytest( process_table=lambda: [ ( 999, real ) ], ancestors=[ 1 ],
+                                    comm_of=lambda _pid: "python3" )
     assert [ pid for pid, _ in found ] == [ 999 ]

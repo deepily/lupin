@@ -276,6 +276,50 @@ def _default_process_table() -> List[ Tuple[ int, str ] ]:
     return rows
 
 
+def _comm_admits_a_running_suite( comm: Optional[str] ) -> bool:
+    """
+    Whether a comm value leaves a pytest-shaped command line counting as an offender.
+
+    🔴 THE THREE VALUES ARE THREE DIFFERENT FACTS, and collapsing any two of them breaks
+    the guard in one direction or the other. Measured against HEAD 2026-08-30 (row
+    9078a035) before this existed: an injected table holding one real pytest command line
+    reported offenders=[999] for comm "python3" and offenders=[] for BOTH "" and None —
+    so a live process whose comm could not be read was waved through.
+
+        real name   ("python3", "bash")  ->  ASK THE PREDICATE. A named non-interpreter
+                                             is a seat quoting a command, not a suite.
+        ""          (alive, unreadable)  ->  OFFENDER. We could not look, and "could not
+                                             look" is not "nothing there". Refusing costs
+                                             a wait; passing costs a silently wrong
+                                             coverage number, which is what this whole
+                                             module exists to prevent.
+        None        (exited)             ->  NOT an offender. The process is gone; there
+                                             is nothing to contend with.
+
+    _default_comm_of already draws this distinction deliberately and its docstring already
+    promised the caller was FAIL-CLOSED on "". The caller was not: it passed "" to
+    comm_is_a_python_or_pytest_binary, which returns False for "" exactly as ITS docstring
+    says, and the process was dropped. Neither function was wrong on its own — the two
+    contracts simply did not meet, which is why reading either one alone finds nothing.
+
+    ⚠️ A POSITIVE CONTROL THAT TESTS ONE VALUE CANNOT SEE THIS. Two of the three inputs
+    produce the same observable answer under the old code, so a fixture exercising only a
+    readable interpreter name passes identically before and after the fix. The test for
+    this must supply all three.
+
+    Requires:
+        - comm is a real name, "" for a live process whose comm could not be read, or
+          None for a process that has exited
+
+    Ensures:
+        - returns False only for None, or for a real name that is not an interpreter
+        - returns True for "", keeping an unreadable live process an offender
+    """
+    if comm is None:  return False
+    if comm == "":    return True
+    return comm_is_a_python_or_pytest_binary( comm )
+
+
 def find_foreign_pytest(
     process_table : Optional[ Callable[ [], Iterable[ Tuple[ int, str ] ] ] ]=None,
     ancestors     : Optional[ Iterable[int] ]=None,
@@ -308,7 +352,7 @@ def find_foreign_pytest(
     found   = [ ( pid, cmd ) for pid, cmd in table
                 if pid not in ours
                 and looks_like_pytest( cmd )
-                and comm_is_a_python_or_pytest_binary( name_of( pid ) ) ]
+                and _comm_admits_a_running_suite( name_of( pid ) ) ]
     return sorted( found, key=lambda row: row[ 0 ] )
 
 

@@ -449,11 +449,17 @@ def test_a_live_process_whose_comm_cannot_be_read_is_not_silently_cleared():
     """
     An empty comm means /proc/<pid> still EXISTS but could not be read. It is reported as
     an empty string rather than None precisely so the two cases stay distinguishable.
+
+    🔴 THE ASSERTION HERE USED TO READ `== []`, which is the OPPOSITE of what this test's
+    name and docstring say, and it pinned the defect in place. Corrected 2026-08-30 (row
+    9078a035): a live process we could not read STAYS an offender. "Could not look" is not
+    "nothing there", and the cost is asymmetric — refusing costs a wait, passing costs a
+    silently wrong coverage number, which is the whole reason this module exists.
     """
     row = ( 4242, "/opt/venv/bin/pytest -q" )
     assert cc._default_comm_of.__doc__ is not None
     assert cc.find_foreign_pytest( process_table=lambda: [ row ], ancestors=[],
-                                   comm_of=lambda _pid: "" ) == []
+                                   comm_of=lambda _pid: "" ) == [ row ]
 
 
 def test_the_real_comm_reader_names_this_very_process():
@@ -478,3 +484,57 @@ def test_the_default_comm_reader_is_used_when_none_is_supplied( monkeypatch ):
     assert cc.find_foreign_pytest( process_table=lambda: [ ( 4242, "/opt/venv/bin/pytest -q" ) ],
                                    ancestors=[] ) == []
     assert seen == [ 4242 ], "the real comm reader was never consulted"
+
+
+# ── comm's three values are three different facts ────────────────────────────────
+#
+# Row 9078a035, measured against HEAD 2026-08-30. find_foreign_pytest passed comm
+# straight to comm_is_a_python_or_pytest_binary, which returns False for "" — so a LIVE
+# process whose comm could not be read was waved through, while _default_comm_of's own
+# docstring promised the caller was fail-closed on exactly that value. Neither function
+# was wrong alone; the two contracts did not meet.
+
+_REAL_PYTEST_CMD = "/opt/venv/bin/python -m pytest src/tests/unit/ -q --cov"
+
+
+@pytest.mark.parametrize( "comm,is_offender,why", [
+    ( "python3", True,  "a real interpreter running a pytest-shaped command line" ),
+    ( "pytest",  True,  "pytest invoked as a script" ),
+    ( "claude",  False, "a seat whose spawn brief merely quotes the command" ),
+    ( "bash",    False, "a named non-interpreter" ),
+    ( "",        True,  "ALIVE but comm unreadable — could-not-look is not nothing-there" ),
+    ( None,      False, "the process has exited; there is nothing to contend with" ),
+] )
+def test_all_three_comm_values_are_distinguished( comm, is_offender, why ):
+    """
+    ⚠️ A CONTROL THAT SUPPLIES ONE VALUE CANNOT SEE THE DEFECT THIS PINS. Under the old
+    code "" and None both produced [], so a fixture exercising only a readable interpreter
+    name passes identically before and after the fix. All three shapes must be supplied.
+    """
+    found = cc.find_foreign_pytest(
+        process_table = lambda: [ ( 999, _REAL_PYTEST_CMD ) ],
+        ancestors     = [ 1 ],
+        comm_of       = lambda _pid: comm,
+    )
+    assert bool( found ) is is_offender, why
+
+
+def test_an_unreadable_live_comm_refuses_rather_than_passes():
+    """
+    The direction matters, not just the discrimination. Refusing costs a wait; passing
+    costs a silently wrong coverage number, which is the whole reason this module exists.
+    """
+    assert cc._comm_admits_a_running_suite( "" ) is True
+    assert cc._comm_admits_a_running_suite( None ) is False
+
+
+def test_default_comm_of_still_produces_the_two_distinct_absences( monkeypatch ):
+    """
+    The seam only works if the producer keeps "" and None apart. Pinned here because the
+    caller's correctness now DEPENDS on that distinction, which it did not before.
+    """
+    monkeypatch.setattr( cc, "open", _raising_open( OSError( "no perms" ) ), raising=False )
+    monkeypatch.setattr( cc.os.path, "exists", lambda _p: True )
+    assert cc._default_comm_of( 4242 ) == "", "a live but unreadable process must give ''"
+    monkeypatch.setattr( cc.os.path, "exists", lambda _p: False )
+    assert cc._default_comm_of( 4242 ) is None, "an exited process must give None"
