@@ -2404,6 +2404,52 @@ The ratified **mux MVP-finish remediation** (6 items; plan `src/rnd/v0.1.9/2026.
 
 > Queue for `/plan-decide` (the **guided-decision-walkthrough** skill). One-line topics; the skill frames each live with pros/cons + a recommendation, descending priority. Detail lives in the linked design docs.
 
+---
+
+### 🔴 OPEN FOR RICK (2026-08-30, raised by Mr Radio 🦉, written up by Rachel 🕊️) — **a standing order that lives only in a TODO file is one re-spin from being broken**
+
+**The decision**: where does a standing fleet-wide order live so that a re-spun seat inherits it?
+
+**The evidence is this session, and it is a near miss rather than a theory.** Rick's no-new-tickets
+moratorium was issued 10:12 EDT. Mr Radio self-respun at 16:28 and **his own memento did not carry
+it** — he learned it back from the post-game an hour later. His words: *"I have created no rows this
+session, only amended two that already existed, so I am clean — but that is luck, not care."*
+
+⇒ **A manager who does not know a moratorium exists cannot comply with it, and nothing in the write
+path would have stopped him.** `task_create` has no knowledge of the order; the order lives in
+prose, in a file a rehydrating seat is not obliged to read before its first write.
+
+**Why it is worth Rick's time rather than a habit fix**: this is the fleet's own
+`rule-instead-of-mechanism` shape, on the surface where it costs most. Three instances the same day
+(misplaced mementos after the row was filed; checked-hash drift after the migration; zero rolling
+deposits after two runs of doctrine) all share it — **the instruction was correct, present, and
+changed nothing.**
+
+**Options, with the trade named:**
+
+| | Option | Cost | What it buys |
+|---|---|---|---|
+| **(a)** | **A store-side gate** — `task_create` refuses (or warns) while a moratorium flag is set | needs a flag with an owner and an off-switch; a wrong-on flag blocks legitimate work | the only option that reaches a seat which never read the order |
+| **(b)** | **Carry it in the memento contract** — a standing-orders element every re-spin inherits | free; it is a doc change | depends on the writer remembering, which is the failure being fixed |
+| **(c)** | **Leave it in TODO.md** — status quo | free | works for anyone who reads it; failed once today, silently |
+
+**Recommendation: (a), with (b) as the cheap companion.** (b) alone repeats the defect one layer
+over — it is still a rule that must be remembered, by the seat least able to know what it forgot.
+(a) is the only one that acts at the moment of the write, where the actor is present, which is the
+same argument that decided the memento-slot fork this afternoon.
+
+⚠️ **NOT ACTIONED, AND DELIBERATELY SO**: minting a store row to track a decision about not minting
+store rows would break the order it is about. **This entry is the surface the moratorium itself
+prescribes — findings to the local TODO** — which is also, precisely, the weakness being reported.
+It is filed in the place the item argues is not durable enough, because that is the only place
+currently permitted.
+
+**Receipts**: post-game `src/rnd/v0.2.1/2026.08.30-crew-day-post-game.md` (`d9e1193c`) · moratorium
+book above · Mr Radio's DM 16:51 EDT.
+
+---
+
+
 **Messaging-coordination plane (P0)** — ✅ **ALL 7 RESOLVED 2026-06-02 via `/plan-decide`** (Rick ratified every recommendation). Source `src/rnd/v0.1.8/2026.06.02-messaging-coordination-plane-design.md` (§ Ratified Decisions). Rulings in the Decisions Log below.
 - **Implementation queue — ✅ ALL 5 LEVERS COMPLETE:** A durable outbox · D pull-able inbox · B loop de-block · C express lane · E backpressure. In-process, no broker. **A ✅ · D ✅ (committed `722e624`, :8000 integration 2/2) · B ✅ · C ✅ · E ✅** — 990 unit tests green, no regressions. B/C/E committed in the wrap-up checkpoint.
 
