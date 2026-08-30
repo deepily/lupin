@@ -243,6 +243,17 @@ def _rotation_hold_is_active():
     return ROTATION_HOLD_ACTIVE
 
 
+# 🔴 THE POINTER BELOW USED TO SEND THE READER TO AN UNGATED COPY OF WHAT IT JUST REFUSED.
+# `_how_to_clear_the_red` lives in the fixture as unrefused prose, so the gate was a redirect
+# to a clean destination — suppress the recipe here, and the reader simply reads it there.
+# The fixture carries this ANNOTATION key beside it now, so the refusal travels with the
+# redirect. Mr Radio's ruling drew the line and it is worth stating: gate at the RENDER site
+# and never rewrite a RECORDED string — the record is evidence of what was scanned and what
+# the then-owner said to do about it — but ADDING a key is annotation, not rewriting, so the
+# direct-reader hole closes without touching a recorded value.
+FIXTURE_HOLD_KEY = "_rotation_hold"
+
+
 def _clear_the_red_steps( recorded, root ):
     """
     The recipe for clearing a red — or, while the rotation hold stands, the reason it is
@@ -271,8 +282,8 @@ def _clear_the_red_steps( recorded, root ):
             "    (THE RECIPE FOR CLEARING THIS RED IS WITHHELD while the rotation hold below\n"
             "     is active — it ends by telling you to update the record, which is the one\n"
             "     thing that hold refuses. It is not wrong and it is not gone: read it in the\n"
-            "     record's `_how_to_clear_the_red`, and it prints here again once rotation\n"
-            "     lands.)"
+            f"     record's `_how_to_clear_the_red`, where `{FIXTURE_HOLD_KEY}` beside it repeats\n"
+            "     this refusal, and it prints here again once rotation lands.)"
         )
     return chr( 10 ).join( "    " + s for s in recorded[ "_how_to_clear_the_red" ] )
 
@@ -378,6 +389,41 @@ def _rotation_held_notice():
     if not _rotation_hold_is_active(): return ""
 
     return ROTATION_HELD_NOTICE
+
+
+def _rescan_lead_sentence():
+    """
+    The sentence that INTRODUCES the recipe — held to the same condition as the recipe.
+
+    🔴 GATING A RECIPE DOES NOTHING WHILE THE SENTENCE ABOVE IT STILL GIVES THE INSTRUCTION.
+    Rachel 🕊️ found the recipe printing beside the refusal and the fix gated the recipe LIST.
+    One sentence higher, the red opened "Re-scan, TRIAGE the output, and record the result",
+    ungated — measured at 39d912ec, rendering THREE lines above the WITHHELD block and ELEVEN
+    above "DO NOT CLEAR THIS RED BY RECORDING A SCAN". So the red still argued with itself,
+    and in the worst possible ORDER: a reader acting on the first instruction found never
+    reaches the refusal eleven lines down (Mr Radio's reading, and the reason this is the
+    sharpest item in the sweep).
+
+    THE FACT SURVIVES, THE INSTRUCTION DOES NOT. "The fingerprint cannot be filled in without
+    scanning" is true in both states and worth saying in both — it is what stops someone
+    pasting a value. Only the imperative is suppressed, and only while the hold stands. Same
+    shape as `_rotation_held_notice`: ONE condition, no second flag.
+
+    Requires:
+        - nothing; safe to call in either hold state
+
+    Ensures:
+        - hold ACTIVE -> no imperative to re-scan, triage or record
+        - hold CLEAR  -> the full instruction, exactly as it read before the hold existed
+    """
+    unfakeable = ( "The fingerprint is measured by this test, so it cannot be filled in "
+                   "without scanning" )
+    if _rotation_hold_is_active():
+        return ( f"{unfakeable} — and while the rotation hold below stands it must not be "
+                 "filled in AT ALL. What follows is the state that was measured, not a "
+                 "recipe:" )
+    return ( "Re-scan, TRIAGE the output, and record the result — "
+             f"{unfakeable[ 0 ].lower()}{unfakeable[ 1: ]}:" )
 
 
 ROTATION_HELD_NOTICE = (
@@ -502,8 +548,7 @@ def test_a_detector_change_forces_a_full_rescan():
     measured = _scan_fingerprint( findings )
     assert measured == recorded.get( "scan_fingerprint" ), (
         f"{what} SINCE THE LAST RECORDED FULL SCAN, and re-running it here does not match "
-        "what is on record. Re-scan, TRIAGE the output, and record the result — the "
-        "fingerprint is measured by this test, so it cannot be filled in without scanning:\n"
+        f"what is on record. {_rescan_lead_sentence()}\n"
         f"{steps}\n"
         f"    detector_sha256   : {detector_now}\n"
         f"    scanned_ref_sha   : {ref_now}\n"
@@ -736,6 +781,107 @@ def test_once_the_hold_lifts_every_recorded_step_prints_again():
     assert "WITHHELD" not in steps
     for step in recorded[ "_how_to_clear_the_red" ]:
         assert step in steps
+
+
+def test_while_the_hold_stands_the_red_gives_no_instruction_to_re_scan_or_record():
+    """
+    THE SHARPEST ITEM IN THE SWEEP, AND IT IS AN ORDERING DEFECT AS MUCH AS A GATING ONE.
+    Gating the recipe LIST left the sentence introducing it untouched, so the red opened
+    "Re-scan, TRIAGE the output, and record the result" three lines above the WITHHELD block
+    and eleven above the refusal. A reader acting on the first instruction found never
+    reaches the eleventh line.
+
+    Asserted as ABSENCE OF AN IMPERATIVE rather than as an exact string, because the prose
+    should stay rewritable — the same call Mr Radio made for the notice's shas.
+    """
+    with _hold( True ):
+        lead = _rescan_lead_sentence()
+    lowered = lead.lower()
+    for imperative in ( "re-scan,", "record the result", "triage the output" ):
+        assert imperative not in lowered, (
+            f"while the hold stands the red must not tell anyone to {imperative!r} — it is "
+            "the one action the notice eleven lines below REFUSES, and it is read first" )
+
+
+def test_once_the_hold_lifts_the_red_tells_you_what_to_do_again():
+    """
+    The other half, and it is not decoration: a gate that never opens is indistinguishable
+    from having deleted the instruction. The recipe is CORRECT and becomes actionable the
+    moment the credential is rotated.
+    """
+    with _hold( False ):
+        lead = _rescan_lead_sentence()
+    assert "Re-scan, TRIAGE the output, and record the result" in lead, (
+        "once the hold lifts the instruction must come back in full — suppressing it "
+        "permanently is the deletion this design was written to avoid" )
+
+
+def test_the_unfakeable_fact_is_stated_in_BOTH_states():
+    """
+    The fingerprint cannot be filled in without scanning. That is true whatever the hold is
+    doing, and it is what stops somebody pasting a value — so it survives the gate. Only the
+    IMPERATIVE is suppressed, never the fact.
+    """
+    with _hold( True ):
+        held = _rescan_lead_sentence()
+    with _hold( False ):
+        clear = _rescan_lead_sentence()
+    for state, text in ( ( "held", held ), ( "clear", clear ) ):
+        assert "cannot be filled in without scanning" in text, (
+            f"the {state} sentence dropped the one fact that stops a paste" )
+
+
+def test_the_withheld_block_does_not_send_the_reader_to_an_ungated_recipe():
+    """
+    🔴 THE GATE WAS A REDIRECT TO A CLEAN DESTINATION. The withheld block names
+    `_how_to_clear_the_red` in the fixture as where to read the suppressed recipe — and that
+    file is unrefused prose, so the reader arrives at exactly the instruction the block just
+    refused. Suppressing a recipe and then pointing at an unsuppressed copy of it is not a
+    gate, it is a detour.
+
+    Both halves are asserted because either alone is satisfiable while the hole stays open:
+    a pointer naming a key that does not exist is a lie, and a key nobody is pointed to is
+    unread.
+    """
+    import json
+
+    recorded = _recorded_for_gate()
+    with _hold( True ):
+        steps = _clear_the_red_steps( recorded, cu.get_project_root() )
+
+    assert FIXTURE_HOLD_KEY in steps, (
+        "the withheld block sends the reader to the record without naming the key that "
+        "repeats the refusal there — the redirect must carry the hold with it" )
+    assert FIXTURE_HOLD_KEY in recorded, (
+        f"the withheld block names {FIXTURE_HOLD_KEY!r} in the record, and it is not there. "
+        "A pointer to a key that does not exist is worse than no pointer" )
+
+
+def test_the_records_own_annotation_refuses_the_recipe_it_sits_beside():
+    """
+    The direct-reader hole, closed. A human who opens the fixture is reached by no render
+    site — the gate suppresses the recipe where it is PRINTED, and this file is not printed.
+
+    ⚠️ THE ANNOTATION IS AN ADDED KEY, NEVER AN EDIT TO A RECORDED STRING. Mr Radio's
+    ruling: the record is evidence of what was scanned and what the then-owner said to do
+    about it, so rewriting `_how_to_clear_the_red` to fix a display destroys evidence.
+    Adding a key is annotation. That is why this test asserts the recipe is still INTACT.
+    """
+    recorded = _recorded_for_gate()
+    hold     = recorded[ FIXTURE_HOLD_KEY ]
+
+    assert "034e44ac" in hold, (
+        "the record's annotation must name the held commit carrying the finished re-scan — "
+        "it is what a reader checks instead of re-deriving a credential judgement" )
+    assert "DO NOT" in hold.upper(), (
+        "the annotation must REFUSE, not advise. A refusal that reads as a caveat is a "
+        "caveat, and this fleet has already learned that once" )
+
+    # 🔴 THE RECIPE MUST STILL BE THERE, WHOLE. Annotation adds; it never edits.
+    assert recorded[ "_how_to_clear_the_red" ], "the recipe was removed rather than annotated"
+    assert any( "detector_sha256" in step for step in recorded[ "_how_to_clear_the_red" ] ), (
+        "a recorded step was rewritten. The record is evidence — annotate beside it, never "
+        "edit inside it" )
 
 
 def test_the_hold_is_declared_not_derived_from_any_sha_or_scan():
