@@ -35,6 +35,41 @@ A repeat is legal, common, and usually fine. Treating this output as a defect li
 be an instrument certifying itself by counting hits nobody adjudicated — which is the
 exact failure the probe exists to help find.
 
+🔴 WHAT IT CANNOT SEE — THE RECALL SIDE, AND IT IS THE BIGGER HALF
+-----------------------------------------------------------------
+The caveat above is about PRECISION: hits that turn out fine. This one is about RECALL, and a
+zero from this probe is the more dangerous output, because a zero reads like an all-clear.
+
+**Measured 2026-08-30.** Run over `src/tests/unit/scripts` — 32 test files — it reports ZERO
+hits in `test_watch_hook_events.py`. That file has 63 tests and contains BOTH of the blind
+fixtures Maya 🌻 found by mutation the day before:
+
+    # blind: Path( "" ) is RELATIVE, and pytest runs from the repo root, so the wrong
+    # answer and the right answer name the same file
+    assert ( root / "src" / "scripts" / "watch-hook-events.py" ).exists()
+
+    # blind: "abc" has no digits, so ss is already "00" — two characters — and the
+    # .zfill( 2 ) under test is a no-op either way
+    assert whe._hhmmss( "2026.06.06 @ 01:45 abc" ) == "01:45:00"
+
+Neither has a repeated literal ANYWHERE. There is nothing for this probe to match, so it finds
+nothing, and it would find nothing on a hundred more like them.
+
+**Why, stated as the rule rather than the two cases.** Repeated expected values are the corner
+of fixture blindness that leaves a SYNTACTIC trace. The family is much larger: a fixture is
+blind whenever the data it chose cannot distinguish right from wrong — because the value makes
+the operation a no-op, because the wrong answer coincides with the right one under that input,
+because the environment supplies what the code was supposed to. **None of those repeat
+anything.** They are properties of what the value MEANS to the code under test, and no scanner
+reading the test file can know that.
+
+⇒ **This probe answers "where do expected values repeat?" — a question with a mechanical
+answer. It does not answer "which fixtures cannot discriminate?", and the two are not close
+enough for a zero on the first to say anything about the second.**
+
+⇒ **A file with no hits has not been cleared. It has not been examined.** Only a mutation
+tells you whether a fixture can see what its name claims.
+
 EXIT CODES
     0  scanned, no interchangeable-value assertions found
     1  findings present (a TRIAGE queue, never a defect count)
