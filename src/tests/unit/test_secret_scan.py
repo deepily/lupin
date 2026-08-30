@@ -261,7 +261,8 @@ AMNESTY_ROWS       = 190
 # ─────────────────────────────────────────────────────────────────────────────────────
 # 🔴 THIS RED IS DELIBERATE AND IT STAYS RED UNTIL A CREDENTIAL IS ROTATED.
 #
-# If `test_a_detector_change_forces_a_full_rescan` is failing for you, the remedy is NOT
+# If a secret-scan red is failing for you — the rescan tripwire or the counts gate — the
+# remedy is NOT
 # to re-scan and record — that work is DONE. It sits on branch `wt-maya-4f0ced13` at
 # commit `034e44ac`, and Mr. Radio is holding it unmerged ON PURPOSE.
 #
@@ -287,10 +288,12 @@ AMNESTY_ROWS       = 190
 # prevented.
 # ─────────────────────────────────────────────────────────────────────────────────────
 ROTATION_HELD_SHA = "8675ec7a1c0c677e56dc6e243be7af51ee2c715f17ec6a93e1a3c731c360633f"
+ROTATION_HELD_COMMIT = "034e44ac"   # the held commit carrying the done-but-unmergeable re-scan
 ROTATION_HELD_NOTICE = (
     "\n"
-    "  🔴 IF THIS IS THE DETECTOR/RESCAN RED: DO NOT CLEAR IT BY RECORDING A SCAN.\n"
-    "     The re-scan and triage are already done, on branch wt-maya-4f0ced13 at 034e44ac,\n"
+    "  🔴 DO NOT CLEAR THIS RED BY RECORDING A SCAN.\n"
+    f"     The re-scan and triage are already done, on branch wt-maya-4f0ced13 at "
+    f"{ROTATION_HELD_COMMIT},\n"
     "     HELD UNMERGED until the postgres credential is rotated (Rick's call).\n"
     f"     A fixture change moving detector_sha256 to {ROTATION_HELD_SHA}\n"
     "     is REFUSED until rotation lands. This red is the only branch-level signal that\n"
@@ -496,6 +499,44 @@ def test_the_recorded_counts_are_derived_from_the_same_scan():
     # that is row 8202d795, Maya's — so the guard is carried, not exercised. A new assertion
     # placed behind a failing one is present in the file and absent from the run, and the
     # test id in the failing set reads identically either way.
+
+
+def test_the_rescan_red_still_carries_the_two_shas_that_make_it_actionable():
+    """
+    Pins the SHAS, deliberately not the wording (Mr Radio, 2026-08-30).
+
+    The prose in ROTATION_HELD_NOTICE can be rewritten freely and should be — it is
+    documentation. What must survive every rewrite is the two identifiers a reader can
+    CHECK: the held commit that already contains the re-scan, and the detector sha whose
+    arrival in the fixture is refused before rotation. Assert the wording and this test
+    becomes churn at rotation for no safety; assert the shas and it stays true through any
+    rewrite that keeps the message useful.
+
+    🔴 THE SECOND ASSERTION IS THE LOAD-BEARING ONE. A notice that exists but is never
+    APPENDED to the failure message reaches nobody, and the first assertion alone cannot
+    tell the difference — the constant would still contain both shas while the red printed
+    without it. Tiberius's ec8627ad adds ~37 lines around that message region, so an edit
+    dropping the append is a live possibility rather than a hypothetical.
+    """
+    import inspect
+
+    # 🔴 LITERALS, NOT THE CONSTANTS. The first cut of this test asserted
+    # `ROTATION_HELD_COMMIT in ROTATION_HELD_NOTICE`, which is a tautology: the notice is
+    # built by interpolating that constant, so changing the constant changes both sides and
+    # the assertion stays true. Mutation-proven — swapping the commit to "deadbeef" and the
+    # detector sha to all-zeros both SURVIVED. Two values derived from each other cannot
+    # discriminate a swap between them, whatever the assertion is named.
+    assert "034e44ac" in ROTATION_HELD_NOTICE, (
+        "the notice must name the HELD COMMIT 034e44ac — it is what a reader checks instead "
+        "of re-deriving a credential judgement at 3am" )
+    assert "8675ec7a1c0c677e56dc6e243be7af51ee2c715f17ec6a93e1a3c731c360633f" in ROTATION_HELD_NOTICE, (
+        "the notice must name the detector sha whose arrival in the fixture is refused "
+        "before rotation" )
+
+    source = inspect.getsource( test_a_detector_change_forces_a_full_rescan )
+    assert "ROTATION_HELD_NOTICE" in source, (
+        "the rescan red no longer appends ROTATION_HELD_NOTICE, so the warning reaches "
+        "nobody who hits it. Re-attach it to the assert message." )
 
 
 def test_findings_never_carry_the_value():
