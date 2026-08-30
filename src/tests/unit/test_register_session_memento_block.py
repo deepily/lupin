@@ -486,7 +486,14 @@ def test_non_markdown_files_are_not_candidates( repo ):
 
 
 def test_candidate_whose_mtime_vanishes_still_lists( repo, monkeypatch ):
-    """A file deleted between listdir and stat must not take the hook down."""
+    """
+    A file deleted between listdir and stat must not take the hook down.
+
+    The sentinel changed with row f99bed95 — both ranking tiers now carry a float
+    instead of a string, so the unreadable-mtime floor is -inf rather than "".
+    Asserting the PROPERTY as well as the literal: the point was never the value,
+    it is that such a record ranks LAST and is still never dropped.
+    """
     _write_memento( repo, "cheech", "80c17315", written_at=None )
 
     import lupin_cli.claude_code.hooks.register_session as rs
@@ -496,7 +503,14 @@ def test_candidate_whose_mtime_vanishes_still_lists( repo, monkeypatch ):
 
     rows = _memento_candidates( repo )
     assert len( rows ) == 1
-    assert rows[0][2] == ( 0, "" )
+    assert rows[0][2] == ( 0, float( "-inf" ) )
+
+    # …and it loses to any record that still has a key, rather than merely
+    # carrying a sentinel nobody checks the consequence of.
+    dated = _write_memento( repo, "cheech", "aaaaaaaa", written_at="2026-08-15T20:11:52-04:00" )
+    rows  = _memento_candidates( repo )
+    assert rows[0][0] == dated
+    assert rows[-1][2] == ( 0, float( "-inf" ) )
 
 
 def test_unreadable_header_is_treated_as_absent( repo, monkeypatch ):
