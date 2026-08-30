@@ -519,21 +519,35 @@ judged unchanged, so the ORIGINAL bytecode runs and the mutation reports SURVIVE
 mutated sha `ab030e258b72` gave rc=0 through the harness and rc=1 run by hand seconds later, the
 only variable being bytecode caching.
 
-⇒ **PURGE THE TARGET'S `__pycache__/<stem>.*.pyc` AFTER WRITING EACH MUTANT.** The purge is the
-whole fix. 🔴 **`python -B` / `PYTHONDONTWRITEBYTECODE=1` does NOT fix this** — it only stops pycs
-being *written*; a stale one already on disk is still read and still wins. Measured three ways
-(baseline `dead`, `-B` `dead`, purge `todo`) in `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`
-(row `d18ce9ef`, Rio) and reproduced independently here. Keep `-B` if you like — in a multi-mutant
-loop it stops a fresh pyc being laid down between mutants — but a per-mutant purge already covers
-that, so it is belt, not half the fix. **Adopting the flag alone buys the appearance of safety.**
+🔴 **`python -B` / `PYTHONDONTWRITEBYTECODE=1` DOES NOT FIX THIS.** It suppresses *writing* a
+`.pyc`, never *trusting* one — and any repo that has ever run its tests already has the cache on
+disk. **The structural remedy is checked-hash invalidation** (`py_compile.PycInvalidationMode.CHECKED_HASH`
+/ `compileall --invalidation-mode checked-hash`), which hashes the source instead of comparing
+whole-second mtime and size, and is therefore immune to a same-size same-second edit by
+construction. Whether to adopt it repo-wide still **needs an owner's ruling** — see row `d18ce9ef`
+and Pocholo's write-up `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md` for the
+measurements, the six priced remedies, and the +3.3% import cost. Read those rather than re-deriving
+them here.
+
+⇒ **UNTIL THAT RULING, THE PER-HARNESS INSTRUCTION IS: PURGE THE TARGET'S `__pycache__/<stem>.*.pyc`
+AFTER WRITING EACH MUTANT.** It works, and it is what a harness can do for itself today — but it is a
+habit that fails the moment someone forgets, which is exactly why the tree-level remedy above is the
+real fix and this is the seatbelt. Keep `-B` if you like; in a multi-mutant loop it stops a fresh pyc
+being laid down between mutants, but a per-mutant purge already covers that. **Adopting the flag
+alone buys the appearance of safety, not safety.**
 
 ⚠️ **THE HAZARD IS NOT LIMITED TO MUTATION HARNESSES, AND IT IS CROSS-PROCESS.** A *fresh* pytest
 reads the stale pyc off disk, so any edit-then-run loop is exposed — including one an agent types by
 hand. Mutation testing is merely where it lands hardest, because mutate-and-restore are both
 same-size edits inside one second and **the failure points the wrong way**: you restore the file,
-read it back to confirm, and the interpreter keeps running the mutant. A repo-wide remedy
-(`compileall --invalidation-mode checked-hash`, measured at +3.3% import cost and self-sustaining
-across recompiles) is an OPEN DECISION on row `d18ce9ef` — do not adopt it unilaterally.
+read it back to confirm, and the interpreter keeps running the mutant.
+
+**Provenance, because three seats measured this independently and the numbers must be comparable**:
+found by Pocholo 📣 while mutation-proving AC-G4, filed and reproduced by Tiffany 💍 on row
+`d18ce9ef`, and reproduced a third time from the ramp (rows above). ⚠️ **The two published
+reproductions run OPPOSITE POLARITY** — one edits `"todo"` → `"dead"`, the other `"dead"` → `"todo"`
+— so the "wrong" answer is a different word in each. They agree completely: in both, the flag serves
+the pre-edit value. Do not read the mirrored tables as a conflict.
 
 ⚠️ **THE UNDER-REPORT IS SELECTIVE, WHICH IS WHAT MAKES IT DANGEROUS.** A length-changing swap
 invalidates the cache on its own, so most mutations in a pass are unaffected — 11 of 12 in the
