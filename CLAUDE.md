@@ -409,7 +409,13 @@ and they are not equally bad:
 |---|---|---|
 | **Code path** — imports, runs a suite | your edits are not what runs; the tree you stand in is not the tree imported | misreports **your own** work, silently |
 | **Shared data, path NOT derived from `LUPIN_ROOT`** | lands correctly anyway | noise — *if* you read the result back |
-| **Shared data, path derived from `LUPIN_ROOT`** | writes where nobody reads, or into another repo's state | **worst** — corrupts **another seat**, not you (Tiberius's point) |
+| **Shared data, path derived from `LUPIN_ROOT`** | writes where nobody reads, or into another repo's state | **worst** — corrupts **another seat**, not you |
+
+🔴 **I FIRST WROTE THIS AS "HARMLESS ON A SHARED-DATA WRITE" AND THAT WAS UNDERBUILT.** Harmless is
+a property of the RESOLVER, not of the destination: it holds only when the path does not derive from
+`LUPIN_ROOT`, and I had not checked that it doesn't before saying so. The correction is the bottom
+row, and it is the one that matters — a code-path mistake misreports your own work, a shared-data
+mistake corrupts somebody else's.
 
 **The measured case, and why it is the middle row rather than the bottom one.** The heartbeat-hold
 verb printed this section's WRONG-TREE warning at me — shell `LUPIN_ROOT` still naming `/…/lupin`
