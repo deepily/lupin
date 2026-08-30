@@ -76,9 +76,44 @@ before counting a miss**. **Probe reports ZERO hits on all five**, in
     4. OUT and PREFIX defaults executed at import and never asserted
     5. a truncate-only _FakeStore
 
-**None of them repeats a literal**, which is why this probe cannot see any of them. Note what
-shapes 1 and 3 have in common with Maya's cases: the fixture chose data for which the operation
-under test — sorting — is a NO-OP, so the assertion passes whether or not the sort happens.
+**None of them repeats a literal**, which is why this probe cannot see any of them.
+
+**THREE SUB-SHAPES, NOT ONE** (Clayton, 2026-08-30, splitting a claim this author had collapsed).
+An earlier cut of this paragraph said shapes 1 and 3 were NO-OPs "like Maya's cases". Shape 1 is
+not a no-op — **the code is never evaluated at all**, which is a different failure and a
+different fix:
+
+    NO-OP         the operation under test runs and does nothing on this data
+                  · Maya's `.zfill( 2 )` against an input with no digits
+
+    MASKED        the code path is never evaluated, so its behaviour is not in the result
+                  · shape 1, the (30, 10, 20) line numbers
+
+    COINCIDENCE   the wrong answer equals the right answer under this fixture's data or
+                  environment
+                  · Maya's `Path( "" )`, where both answers name the same file
+                  · shape 5, the truncate-only `_FakeStore`
+
+🔴 **AND A FOURTH THING THAT IS NOT A SUB-SHAPE AT ALL — SHAPE 4, WHICH COVERAGE ACTIVELY
+HIDES.** `OUT` and `PREFIX` defaults **execute at import**, so they are reported as COVERED, and
+nothing anywhere asserts them. Clayton places 6 of the 7 in the three buckets above and shape 4
+**outside** them, and he is right to: the other three are blind ASSERTIONS, this is a value with
+no assertion at all, wearing a green coverage mark. **A tool that counts executed lines says this
+is fine. It is the strongest single argument on this page for why neither coverage nor this probe
+substitutes for a mutation.**
+
+Two of his placements are measured rather than argued, and both are worth keeping because they
+are the kind of thing a reader would otherwise take on faith: `list( set )` equals
+`sorted( set )` for 30/10/20, and `json.dumps` with ONE key is byte-identical under
+`sort_keys=True` and `sort_keys=False` while two keys differ.
+
+⚠️ **The specific bucket for shapes 2 and 3 reached this author CONDENSED and is not recorded
+here** — confirm it with Clayton rather than inferring it from the measurements above, which is
+exactly the inference this block exists to stop.
+
+⇒ **The three want different repairs**: a NO-OP needs data on which the operation has an effect,
+a MASKED path needs the call to happen at all, a COINCIDENCE needs an input that separates the
+two answers. Reaching for one remedy across all three is how a "repaired" fixture stays blind.
 
 So the citable statement is **0 of 5 found, on a named sample**: Chloé's pre-`e23ef98c` worktree
 snapshot, 17:32:51 on 2026-08-30, measured by Clayton.
