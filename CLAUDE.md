@@ -454,6 +454,10 @@ COVERAGE_FILE=/tmp/cov-$USER-$$.data LUPIN_ROOT="$PWD" \
 
 ⚠️ **Run the WHOLE tier, not a scoped subset.** A subset manufactures false zeros for any file whose only coverage comes from a test you excluded — which is the exact defect a zero list exists to find.
 
+⚠️ **AND DO NOT PASS `--cov=<path>` WHEN THE CONFIG ALREADY DEFINES `source`.** Measured 2026-08-29: a census run carried `--cov=src/scripts` out of habit, which **silently overrode** the seven-entry `source` list in `pyproject.toml` and produced a **61-file** frame instead of **73**. The twelve subdirectory files were not reported as `0%` — they were **never instrumented at all**, and the report says nothing about a file it never traced. Re-reporting the same `.coverage` data through `--rcfile` cannot recover them either; the data simply is not there.
+
+⇒ **A scoped override does not narrow the REPORT, it narrows what was ever MEASURED — and the difference is invisible in the output.** Both produce a clean table with a plausible total. Drop the flag and let the config's `source` govern; if you must scope, say in the same breath which files fell outside the frame, because "not listed" and "at zero" are different facts and only one of them is safe to act on.
+
 ## 100% COVERAGE MANDATE
 
 **Lupin-wide hard gate.** Ratified 2026-05-06 (multiplexer-only), **scope-expanded Lupin-wide 2026-05-16** ("Everything has to pass at 100%. Full stop."). CoSA inherits it as of the 2026-05-29 mono-repo fold, on a grandfathering ramp — see the TODO.md top entry (deadline 2026-06-05).
