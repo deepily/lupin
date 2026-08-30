@@ -87,8 +87,8 @@ different fix:
                   · Maya's `.zfill( 2 )` against an input with no digits
 
     MASKED        the code path is never evaluated, so its behaviour is not in the result
-                  · NO CASE IN THIS SAMPLE. A real shape, kept because it is worth
-                    recognising, but nothing here exemplifies it — see the correction below
+                  · the THIRD_PARTY test whose fixture path is under /usr/lib/…/site-packages:
+                    an earlier clause matches first, so the THIRD_PARTY term never runs
 
     COINCIDENCE   the wrong answer equals the right answer under this fixture's data or
                   environment
@@ -115,9 +115,23 @@ no exceptions", puts it in **NO-OP**, and his measurement is why: `list( set )` 
 unevaluated path. The single-file `sort_keys` case is NO-OP for the same reason: `json.dumps`
 with ONE key is byte-identical under `sort_keys=True` and `sort_keys=False`.
 
-So of the five: **sorted-order NO-OP · single-file sort_keys NO-OP · truncate-only `_FakeStore`
-COINCIDENCE · `OUT`/`PREFIX` outside the buckets entirely** — plus Maya's `.zfill( 2 )` NO-OP and
-her `Path( "" )` COINCIDENCE.
+So of the five: **sorted-order NO-OP · single-file sort_keys NO-OP · THIRD_PARTY-under-/usr/lib
+MASKED · truncate-only `_FakeStore` COINCIDENCE · `OUT`/`PREFIX` outside the buckets entirely** —
+plus Maya's `.zfill( 2 )` NO-OP and her `Path( "" )` COINCIDENCE.
+
+🔴 **THE OFF-BY-ONE PRODUCED TWO ERRORS, NOT ONE.** Moving sorted-order into NO-OP was right, and
+the same misread numbering carried the THIRD_PARTY case out of MASKED with it — so a previous cut
+of this block declared MASKED empty. It is not: **THIRD_PARTY-under-/usr/lib is MASKED, and is the
+only MASKED case in the sample.** Clayton's receipt, which is a statement about the CODE and not
+about his machine, so anyone can check it:
+
+    fixture path /usr/lib/python3.13/site-packages/pytest/__init__.py
+        -> the THIRD_PARTY term reports EVALUATED=False   (an earlier clause matched first)
+    fixture path /src/cosa/.venv/lib/python3.11/site-packages/urllib3/connection.py
+        -> the THIRD_PARTY term reports EVALUATED=True
+
+⇒ **A correction that fixes one item by moving a boundary will move its neighbours too.** Re-check
+the cases either side of anything you re-bucket.
 
 ⚠️ **KEY THESE BY NAME, NEVER BY NUMBER.** This author's numbering and Clayton's differ by one —
 what is "shape 1" here is "shape 2" in his messages — and an assignment read off the numbers
@@ -128,8 +142,22 @@ accident; that mismatch is how the MASKED misassignment above got published in t
 a MASKED path needs the call to happen at all, a COINCIDENCE needs an input that separates the
 two answers. Reaching for one remedy across all three is how a "repaired" fixture stays blind.
 
-So the citable statement is **0 of 5 found, on a named sample**: Chloé's pre-`e23ef98c` worktree
-snapshot, 17:32:51 on 2026-08-30, measured by Clayton.
+So the citable statement is **0 of 5 found, on a named sample**: the pre-`e23ef98c` state of those
+two files, measured by Clayton 2026-08-30.
+
+🔴 **AND THE SAMPLE IS RE-DERIVABLE — IT DOES NOT REST ON A SNAPSHOT NOBODY ELSE HAS** (Chloé,
+2026-08-30, refusing this page for claiming more than it could show under its own new standard).
+An earlier cut cited "Chloé's worktree snapshot at 17:32:51", a transient artifact on one machine
+— the same defect as "ask Clayton for the other two", one level up. **The five samples ARE the
+findings repaired at `e23ef98c`**, so the pre-repair state is in git and anyone can reconstruct it:
+
+    git show e23ef98c^:src/tests/unit/scripts/test_thread_attribution_plugin.py
+    git show e23ef98c^:src/tests/unit/scripts/test_probe_commons_post_direct.py
+
+⚠️ **One caveat that does NOT go away**: the THIRD_PARTY fixture names a path under `/usr/lib` that
+exists on some machines and not others. The BLINDNESS is still checkable anywhere, because it is a
+property of clause ORDER and the two paths above demonstrate it — but do not expect that test to
+behave identically on every box.
 
 ⚠️ **THAT SEQUENCE IS THE METHOD, not a footnote about one reviewer.** A recall check run against
 a tree where the blindness has been repaired reports zero and means nothing, and it looks
