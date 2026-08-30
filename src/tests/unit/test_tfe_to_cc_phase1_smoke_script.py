@@ -676,6 +676,60 @@ class TestMain:
 
 
 # ────────────────────────────────────────────────────────────────────────
+# KNOWN DEFECT — PINNED, NOT FIXED
+# ────────────────────────────────────────────────────────────────────────
+
+class TestTheTwoVerdictsDisagree:
+    """🔴 A REAL DEFECT IN THE SCRIPT, PINNED HERE RATHER THAN FIXED, because this row's brief
+    was a coverage ramp with ZERO production lines touched.
+
+    A ramp test pins current behaviour, so an unfixed defect that is merely COVERED becomes
+    harder to fix later, not easier — the fixer meets a green suite and has to work out which
+    green is load-bearing. These two tests exist so that fixer meets a NAME instead: both say
+    `_pins_a_defect_` and both will go red on the fix, which is the point of them.
+
+    THE DEFECT. The script computes its verdict TWICE against different criteria:
+
+        _format_execution_section (what gets WRITTEN to the log)
+            exit_code == 0 · api_key_source == "none" · subtype == "success"
+            · is_error is False · parsed is not None · validation_ok
+            · num_turns < MAX_TURNS
+
+        main (what becomes the EXIT CODE)
+            exit_code == 0 · api_key_source == "none" · subtype == "success"
+            · parsed is not None · validation_ok
+
+    main omits `is_error is False` AND the turn-budget check. Measured, both directions:
+
+        case                                  logged verdict   exit code
+        clean run                             PASS             0          agree
+        burned the turn budget (num_turns=20) FAIL             0          DIVERGE
+        is_error=True, subtype="success"      FAIL             0          DIVERGE
+
+    So an unattended run can write ❌ FAIL into the execution log and still exit 0 — anything
+    reading the exit code calls it a pass while the document it just wrote says otherwise.
+
+    THE FIX, when someone takes it: give `main` the same criteria, ideally by having it reuse
+    one predicate rather than restating it — restating is what let the two drift apart. These
+    two tests then go red and should be REPLACED by their agreeing counterparts.
+    """
+
+    def test_a_turn_budget_burn_pins_a_defect_exit_zero_while_the_log_says_fail( self, wired_main, monkeypatch ):
+        result = { "subtype": "success", "is_error": False, "num_turns": mod.MAX_TURNS }
+        monkeypatch.setattr( mod, "_parse_stream", lambda path: _summary( result=result ) )
+
+        assert mod.main() == 0                                     # <- the defect
+        assert "**Verdict**: ❌ FAIL" in _section( summary=_summary( result=result ) )
+
+    def test_an_errored_result_pins_a_defect_exit_zero_while_the_log_says_fail( self, wired_main, monkeypatch ):
+        result = { "subtype": "success", "is_error": True, "num_turns": 4 }
+        monkeypatch.setattr( mod, "_parse_stream", lambda path: _summary( result=result ) )
+
+        assert mod.main() == 0                                     # <- the defect
+        assert "**Verdict**: ❌ FAIL" in _section( summary=_summary( result=result ) )
+
+
+# ────────────────────────────────────────────────────────────────────────
 # The __main__ guard
 # ────────────────────────────────────────────────────────────────────────
 
