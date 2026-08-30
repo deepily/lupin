@@ -211,22 +211,35 @@ def _scan_once( ref, root ):
     return _SCAN_MEMO[ key ]
 
 
-def _rotation_hold_is_active( root ):
+# 🔴 THE HOLD IS A DECLARED FACT, NOT A DERIVED ONE — set False only when the postgres
+# credential has actually been rotated and Maya's triage on wt-maya-4f0ced13 (034e44ac) has
+# merged. Flipping this is a deliberate, reviewable act; that is the entire point of it being
+# a constant rather than something computed.
+#
+# THE FIRST CUT DERIVED IT FROM THE SCANNER'S SHA and Rachel 🕊️ refuted it: the hold is about
+# an UNROTATED CREDENTIAL, and no detector sha expresses that. Keyed to ROTATION_HELD_SHA, the
+# NEXT detector change — any detector change, for any unrelated reason — makes the scanner stop
+# matching, reads as "hold cleared", and prints the contradictory recipe again. Worse, a
+# detector change is exactly the event that makes this red fire, so it would have un-gated
+# itself precisely when somebody was most likely to be reading it. That is this fleet's own
+# "a coordinate is not a reference" rule landing on my gate: I keyed a standing condition to a
+# value that moves for reasons that have nothing to do with it.
+#
+# ⚠️ AND MY OWN CONTROL HAD THE EVIDENCE. The hold-inactive arm showed the recipe printing
+# while both reds still fired. I read that as "the gate opens correctly" and never asked
+# whether opening was RIGHT in that state. A control answers the question you pose to it.
+ROTATION_HOLD_ACTIVE = True
+
+
+def _rotation_hold_is_active():
     """
     Is the postgres-rotation hold in force right now?
 
-    Requires:
-        - root is the repo root
-
     Ensures:
-        - True iff this tree's scanner hashes to ROTATION_HELD_SHA — the exact detector
-          state ROTATION_HELD_NOTICE refuses a record update for
-        - reads the scanner, so it cannot drift from what the fingerprint test measures
+        - returns the DECLARED hold state, never a value inferred from a sha or a scan
+        - takes no arguments, so no caller can accidentally key it to a coordinate
     """
-    import hashlib
-    return hashlib.sha256(
-        open( root + "/src/scripts/secret_scan.py", "rb" ).read()
-    ).hexdigest() == ROTATION_HELD_SHA
+    return ROTATION_HOLD_ACTIVE
 
 
 def _clear_the_red_steps( recorded, root ):
@@ -252,7 +265,7 @@ def _clear_the_red_steps( recorded, root ):
         - hold ACTIVE  -> a short block saying the recipe is withheld and where to read it
         - hold CLEAR   -> the recorded steps, indented, exactly as before
     """
-    if _rotation_hold_is_active( root ):
+    if _rotation_hold_is_active():
         return (
             "    (THE RECIPE FOR CLEARING THIS RED IS WITHHELD while the rotation hold below\n"
             "     is active — it ends by telling you to update the record, which is the one\n"
@@ -597,6 +610,69 @@ def test_the_rescan_red_still_carries_the_two_shas_that_make_it_actionable():
     assert "ROTATION_HELD_NOTICE" in source, (
         "the rescan red no longer appends ROTATION_HELD_NOTICE, so the warning reaches "
         "nobody who hits it. Re-attach it to the assert message." )
+
+
+# ── the rotation-hold gate — BOTH branches, because one of them had no test ────────
+#
+# Rachel 🕊️, 2026-08-30: "the hold-CLEAR branch has no test." It did not. The hold-active
+# path was exercised by every run of this file; the other one existed only in a manual
+# control arm that was never committed, which is the same thing as untested.
+
+
+def _recorded_for_gate():
+    import json
+    root = cu.get_project_root()
+    return json.load( open( root + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json" ) )
+
+
+def test_while_the_hold_stands_the_recipe_is_withheld_and_names_where_to_read_it():
+    """Suppressed, not deleted — the reader must be able to find it."""
+    recorded = _recorded_for_gate()
+    steps    = _clear_the_red_steps( recorded, cu.get_project_root() )
+    assert "WITHHELD" in steps
+    assert "_how_to_clear_the_red" in steps
+
+
+def test_while_the_hold_stands_no_step_telling_anyone_to_update_the_record_is_printed():
+    """
+    The whole defect in one assertion. The recipe ends by telling you to update
+    detector_sha256 and the counts; the hold refuses exactly that. While the hold stands,
+    that instruction must not appear.
+    """
+    recorded = _recorded_for_gate()
+    steps    = _clear_the_red_steps( recorded, cu.get_project_root() )
+    for step in recorded[ "_how_to_clear_the_red" ]:
+        assert step not in steps
+
+
+def test_once_the_hold_lifts_every_recorded_step_prints_again( monkeypatch ):
+    """
+    The half that had no test. A gate that never opens is indistinguishable from the
+    deletion this was written to avoid, so the open state has to be asserted, not assumed.
+    """
+    # 🔴 PATCH THE LIVE MODULE OBJECT, NOT A DOTTED NAME. The string form
+    # "tests.unit.test_secret_scan.ROTATION_HOLD_ACTIVE" resolves — `raising=True` does NOT
+    # complain — but it can import a SECOND copy of this module and patch that one, leaving
+    # the running copy untouched. Measured here: the patch silently did nothing and the test
+    # failed showing the withheld block it had just "disabled". `sys.modules[ __name__ ]` is
+    # the object actually executing.
+    import sys
+    monkeypatch.setattr( sys.modules[ __name__ ], "ROTATION_HOLD_ACTIVE", False )
+    recorded = _recorded_for_gate()
+    steps    = _clear_the_red_steps( recorded, cu.get_project_root() )
+    assert "WITHHELD" not in steps
+    for step in recorded[ "_how_to_clear_the_red" ]:
+        assert step in steps
+
+
+def test_the_hold_is_declared_not_derived_from_any_sha_or_scan():
+    """
+    Rachel's finding, pinned. The gate must take no arguments — a gate that accepts a root,
+    a sha, or a scan is a gate somebody can key to a coordinate, and a coordinate moves for
+    reasons that have nothing to do with an unrotated credential.
+    """
+    import inspect
+    assert inspect.signature( _rotation_hold_is_active ).parameters == {}
 
 
 def test_findings_never_carry_the_value():
