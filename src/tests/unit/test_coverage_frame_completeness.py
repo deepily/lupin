@@ -367,3 +367,19 @@ def test_the_live_declarations_are_all_doing_work():
         "moved, or its source entry is gone, and the declaration is now a receipt for a "
         "check that does not happen"
     )
+
+
+@pytest.mark.parametrize( "args", [
+    ( ".",                    None ),
+    ( [ ],                    "a/b.py" ),
+] )
+def test_a_string_where_a_path_list_belongs_is_refused( args ):
+    """
+    Rio ⚡ passed a ROOT PATH here minutes after the fix landed, assuming this function took
+    one like its neighbours in the module. A str is iterable, so the comparison ran against
+    its CHARACTERS and returned a plausible non-empty answer that looked like a finding —
+    the very shape unreachable_declarations exists to catch, produced by the check itself.
+    """
+    unseeable, declared = args
+    with pytest.raises( TypeError, match="str|not a path string" ):
+        cf.unreachable_declarations( unseeable, declared=declared )

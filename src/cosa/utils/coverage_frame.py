@@ -121,6 +121,19 @@ def unreachable_declarations( unseeable_paths, declared=None ):
         - an empty result means every declaration is doing work
         - reads nothing and writes nothing
     """
+    # 🔴 A STRING IS ITERABLE, so `unreachable_declarations( "." )` would silently compare
+    # against the CHARACTERS of that string and return a plausible non-empty answer —
+    # exactly the shape this function exists to catch. Caught by Rio ⚡ within minutes of
+    # the fix landing: he passed a root path, assuming this took one like its neighbours in
+    # this module, and got the rnd path back. It looked like a finding. Refuse instead of
+    # guessing what was meant; the failure must not be silent for the very defect the
+    # function reports.
+    if isinstance( unseeable_paths, str ):
+        raise TypeError( "unseeable_paths must be the LIST from unseen_python_files(), not a "
+                         "path string — a str would be compared character by character and "
+                         f"return a plausible wrong answer (got {unseeable_paths!r})" )
+    if isinstance( declared, str ):
+        raise TypeError( f"declared must be a collection of paths, not a str (got {declared!r})" )
     if declared is None: declared = KNOWN_UNSEEABLE
     return sorted( set( declared ) - set( unseeable_paths ) )
 
