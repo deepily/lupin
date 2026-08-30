@@ -87,7 +87,8 @@ different fix:
                   · Maya's `.zfill( 2 )` against an input with no digits
 
     MASKED        the code path is never evaluated, so its behaviour is not in the result
-                  · shape 1, the (30, 10, 20) line numbers
+                  · NO CASE IN THIS SAMPLE. A real shape, kept because it is worth
+                    recognising, but nothing here exemplifies it — see the correction below
 
     COINCIDENCE   the wrong answer equals the right answer under this fixture's data or
                   environment
@@ -107,9 +108,21 @@ are the kind of thing a reader would otherwise take on faith: `list( set )` equa
 `sorted( set )` for 30/10/20, and `json.dumps` with ONE key is byte-identical under
 `sort_keys=True` and `sort_keys=False` while two keys differ.
 
-⚠️ **The specific bucket for shapes 2 and 3 reached this author CONDENSED and is not recorded
-here** — confirm it with Clayton rather than inferring it from the measurements above, which is
-exactly the inference this block exists to stop.
+🔴 **THE FULL ASSIGNMENT, CONFIRMED — AND IT OVERTURNS ONE THIS PAGE HAD ALREADY PUBLISHED.**
+An earlier cut put the **(30, 10, 20) sorted-order** case in MASKED. Clayton's confirmation, "both,
+no exceptions", puts it in **NO-OP**, and his measurement is why: `list( set )` equals
+`sorted( set )` for 30/10/20, so the sort RUNS and has no effect — which is a no-op, not an
+unevaluated path. The single-file `sort_keys` case is NO-OP for the same reason: `json.dumps`
+with ONE key is byte-identical under `sort_keys=True` and `sort_keys=False`.
+
+So of the five: **sorted-order NO-OP · single-file sort_keys NO-OP · truncate-only `_FakeStore`
+COINCIDENCE · `OUT`/`PREFIX` outside the buckets entirely** — plus Maya's `.zfill( 2 )` NO-OP and
+her `Path( "" )` COINCIDENCE.
+
+⚠️ **KEY THESE BY NAME, NEVER BY NUMBER.** This author's numbering and Clayton's differ by one —
+what is "shape 1" here is "shape 2" in his messages — and an assignment read off the numbers
+alone would land on the wrong case. The names are unambiguous and the numbers are a local
+accident; that mismatch is how the MASKED misassignment above got published in the first place.
 
 ⇒ **The three want different repairs**: a NO-OP needs data on which the operation has an effect,
 a MASKED path needs the call to happen at all, a COINCIDENCE needs an input that separates the
