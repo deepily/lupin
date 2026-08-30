@@ -473,6 +473,30 @@ ps -eo comm,args --no-headers | awk '$1=="pytest" || ($1 ~ /^python/ && $0 ~ / -
 - **Excludes**: sub-repos `lupin-mobile`, `lupin-plugin-firefox`, and external-project bind-mounts.
 - **Canonical record**: auto-memory `feedback_100pct_coverage_multiplexer.md` (directive + Lupin-wide expansion). Origin doc: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/08-phase6a-jobs-surface-design.md` AC6.
 
+### 🔴 A SCOPED `--cov` ANSWERS ONE QUESTION AND CANNOT ANSWER THE OTHER
+
+Measured 2026-08-29. A narrowed scope — `--cov=<module>`, `--source=src/scripts` — does **not**
+narrow the REPORT, it narrows what is ever MEASURED. Nothing in the output says so, and that is the
+whole hazard.
+
+| Question | Scoped run |
+|---|---|
+| *"What is THIS file's coverage?"* | ✅ **safe, if the file is inside the scope.** Per-file counts are scope-INVARIANT — the scope decides which files appear, never the numbers for one that does |
+| *"WHICH files are at zero?"* | 🔴 **cannot answer it.** Use the project config |
+
+**Why the second one bites**: absence from a scoped report is **not evidence of zero coverage — it
+is evidence of never having been measured.** A census run this way returned thirteen files as
+UNKNOWN, and unknown read as zero. Same shape as the two-database trap in §TESTING VENUES: **an
+empty answer to a narrowed question is indistinguishable from a confident negative.**
+
+**The receipt for the safe half** (this is why the rule is "use the project config for a census",
+not "never scope"): `swe_workload_runner.py` was measured under two different scopes the same night
+— `--cov=swe_workload_runner` and `--source=src/scripts` — and both report **163 statements / 0
+miss, 44 branches / 0 partial**. Identical, because the file was inside both scopes.
+
+⇒ **Scope freely while working a single file. Never scope a run whose output you intend to read as
+a LIST.**
+
 ## TESTING
 
 Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:8000`) per §TESTING VENUES above; every suite is tagged with its venue. `:8000 (scheduled)` = submit via `POST /api/test-suite/submit`; **self-authorized on a verified-idle server** (place behind any already-scheduled/running job — see §TESTING VENUES).
