@@ -962,6 +962,16 @@ def amend_task(
             errors.append( f"authority '{payload.authority}' must be one of {rules.VALID_AUTHORITIES}" )
         if not payload.note.strip():
             errors.append( "note must be a non-blank string" )
+        # Envelope-tail refusal, row 91ccbc26. The amend path is the THIRD carrier
+        # the probe measured — a `note` stored the canary verbatim exactly as
+        # park_reason did. Its `reason` rides the same payload and is the same
+        # field by name and shape, so it is covered here too. Appended to the SAME
+        # errors list, so a blank note and a captured tag report together rather
+        # than one at a time.
+        errors.extend( rules.validate_no_envelope_tail( {
+            "note"   : payload.note,
+            "reason" : payload.reason,
+        } ) )
         _reject_if_errors( errors )
 
         event = repo.apply_amendment(

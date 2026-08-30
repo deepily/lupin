@@ -352,6 +352,29 @@ def test_transition_422_on_malformed_uuid( client, repo ):
     repo.get_by_id_for_update.assert_not_called()
 
 
+def test_transition_rejects_a_reason_ending_in_a_captured_envelope_tag( client, repo ):
+    # Row 91ccbc26 — the guard rides EVERY transition, not just ->parked, because
+    # `reason` was measured to carry caller markup exactly as park_reason does.
+    repo.get_by_id_for_update.return_value = make_item( status="queued" )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition",
+                     json=_transition_body( reason="picking this up" + ( "<" + "/" + "invoke>" ) ) )
+    assert r.status_code == 422
+    assert any( "reason ends with" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_transition.assert_not_called()
+
+
+def test_transition_ACCEPTS_a_reason_quoting_the_tag_mid_sentence( client, repo ):
+    # 🔴 THE CONTROL at the endpoint: an honest reason that quotes the offending
+    # markup and keeps speaking must still transition.
+    item = make_item( status="queued" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_transition.return_value = make_event( item.id )
+    r = client.post( f"/api/tasks/{item.id}/transition",
+                     json=_transition_body( reason="the tail was " + ( "<" + "/" + "invoke>" ) + " and I removed it" ) )
+    assert r.status_code == 200
+    repo.apply_transition.assert_called_once()
+
+
 def test_transition_rejects_done_without_receipts( client, repo ):
     repo.get_by_id_for_update.return_value = make_item( status="review" )
     r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body( to_status="done" ) )
@@ -1640,6 +1663,64 @@ def test_amend_rejects_empty_note_at_wire( client, repo ):
                      json={ **_AMEND_BODY, "note": "" } )
     assert r.status_code == 422
     repo.get_by_id_for_update.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Envelope-tail refusal on the amend path (row 91ccbc26, Mr. Radio 2026-08-29)
+# ---------------------------------------------------------------------------
+#
+# `note` is the THIRD carrier the differential probe measured — it stored a
+# canary verbatim exactly as park_reason did. These pin the ENDPOINT, not just
+# the predicate: the guard is only worth having if a real POST is refused and
+# apply_amendment is never reached.
+
+_INVOKE_CLOSE = "<" + "/" + "invoke>"
+
+
+def test_amend_rejects_a_note_ending_in_a_captured_envelope_tag( client, repo ):
+    repo.get_by_id_for_update.return_value = make_item()
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
+                     json={ **_AMEND_BODY, "note": "the checklist is done." + _INVOKE_CLOSE } )
+    assert r.status_code == 422
+    assert any( "note ends with" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_amendment.assert_not_called()
+
+
+def test_amend_rejects_a_reason_ending_in_a_captured_envelope_tag( client, repo ):
+    # The amend payload's own `reason` rides the same transport as the note.
+    repo.get_by_id_for_update.return_value = make_item()
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
+                     json={ **_AMEND_BODY, "reason": "recording the verdict" + _INVOKE_CLOSE } )
+    assert r.status_code == 422
+    assert any( "reason ends with" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_amendment.assert_not_called()
+
+
+def test_amend_ACCEPTS_a_note_that_quotes_the_tag_mid_sentence( client, repo ):
+    # 🔴 THE CONTROL, at the endpoint. Under a refusal policy a false positive
+    # blocks real work — and an amendment DOCUMENTING this defect must quote the
+    # offending tag. Row 91ccbc26's own amendments do exactly this.
+    item = make_item()
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_amendment.return_value = make_event( item.id, transition="amended" )
+    r = client.post( f"/api/tasks/{item.id}/amend",
+                     json={ **_AMEND_BODY,
+                            "note": "The tail was " + _INVOKE_CLOSE + " and I stripped it by hand." } )
+    assert r.status_code == 200
+    repo.apply_amendment.assert_called_once()
+
+
+def test_amend_reports_a_blank_note_and_a_captured_tag_together( client, repo ):
+    # One round trip, every violation — the module's existing discipline.
+    repo.get_by_id_for_update.return_value = make_item()
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/amend",
+                     json={ **_AMEND_BODY, "note": "   ",
+                            "reason": "see above" + _INVOKE_CLOSE } )
+    assert r.status_code == 422
+    errors = r.json()[ "detail" ][ "errors" ]
+    assert any( "note must be a non-blank string" in e for e in errors )
+    assert any( "reason ends with" in e for e in errors )
+    repo.apply_amendment.assert_not_called()
 
 
 def test_amend_reports_all_violations_together( client, repo ):
