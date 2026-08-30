@@ -117,6 +117,24 @@ fi
 # minutes and two peer commits apart, with nothing re-run).
 echo "[coverage-gate] sha=$(git rev-parse --short HEAD) tracked-dirty=$(git status --porcelain --untracked-files=no | wc -l) coverage-file=$COVERAGE_FILE"
 
+# 🔴 THE FLOOR MUST BE THE ONE THE BRANCH COMMITTED (Maya's working-tree-artifact audit,
+# src/rnd/v0.2.1/2026.08.30-working-tree-artifact-gate-audit.md — the coverage gate's own row).
+# The tell ABOVE is a print, not a check: measured 2026-08-30 at sha 908414ad, lowering
+# pyproject's fail_under from 92 to 0 in the working tree turned a 0.84% measurement into
+# "COVERAGE GATE PASSED", exit 0 — and the tell dutifully printed tracked-dirty=1 while it
+# happened. That count cannot carry the check either: an unrelated README edit prints the
+# IDENTICAL string while the gate correctly fails, because a repo-wide count is not a
+# statement about pyproject.
+#
+# ⇒ FAIL CLOSED, on Mr Radio's condition: ANY non-zero refuses. Exit 1 is a lowered floor,
+#   exit 2 is "cannot tell" — and a guard that shrugs on a parse error is the defect wearing
+#   the cure's clothes, so an unreadable threshold is a refusal too, never a pass.
+# Negative control: src/tests/control-coverage-gate-floor-tamper.sh
+if ! "$SCRIPT_DIR/lib/check-floor-not-lowered.sh" "$PYBIN"; then
+    echo "COVERAGE GATE REFUSED  (the floor this run would enforce is not the branch's floor)"
+    exit 1
+fi
+
 echo "═══ coverage gate: frame completeness ═══"
 # A data file that does not exist, or holds nothing, must say EXACTLY that. The first
 # version of this let `coverage json` fail silently and then handed the frame check a
