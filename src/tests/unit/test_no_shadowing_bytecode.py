@@ -62,7 +62,14 @@ SCAN_ROOTS = [ REPO_ROOT / "src" / "cosa",
                REPO_ROOT / "src" / "lupin_mcp",
                REPO_ROOT / "src" / "lupin_cli",
                REPO_ROOT / "src" / "lupin_arbiter_app",
-               REPO_ROOT / "src" / "lupin_model_server" ]
+               REPO_ROOT / "src" / "lupin_model_server",
+               # src/scripts joined on Mr Radio's ruling (2026-08-30): 74 first-party sources
+               # that were outside the scan for the same reason lupin_mcp was — nobody added
+               # them. It is operational fleet code, not scaffolding (v2_eval.py is a registered
+               # build suite; secret_scan.py, bounce_dev_warn.py, the schema-parity checks), and
+               # it entered the coverage frame on the same argument in row e2099400. A directory
+               # the guard declines to scan is a directory the guard reports clean about.
+               REPO_ROOT / "src" / "scripts" ]
 
 # A scan that assesses fewer than this has not looked at the tree, whatever it returns. Set well
 # below the ~2,100 observed on 2026-08-29 so ordinary growth or a pruned cache cannot make it flap;
@@ -339,7 +346,7 @@ def test_the_scan_covers_every_first_party_package_not_just_three():
     scanned = { root.name for root in SCAN_ROOTS }
 
     for package in ( "cosa", "tests", "lupin_app", "lupin_mcp",
-                     "lupin_cli", "lupin_arbiter_app", "lupin_model_server" ):
+                     "lupin_cli", "lupin_arbiter_app", "lupin_model_server", "scripts" ):
         assert package in scanned, f"{package} is first-party source and is not scanned"
 
 
