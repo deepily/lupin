@@ -185,6 +185,32 @@ def _scan_fingerprint( findings ):
     return hashlib.sha256( "\n".join( rows ).encode() ).hexdigest()
 
 
+_SCAN_MEMO = {}
+
+
+def _scan_once( ref, root ):
+    """
+    Run the published-ref scan at most once per session, and hand both callers the SAME
+    findings.
+
+    This is not an optimisation. Two tests need this scan — the fingerprint tripwire and
+    the counts guard — and the ~5s cost is exactly the pressure that put the second one
+    behind the first, where it never ran. Memoising is what lets the guard stand on its
+    own so the failing SET can tell the two reds apart.
+
+    Requires:
+        - ref is a readable git ref, root is the repo root
+
+    Ensures:
+        - returns the masked findings list for that ref
+        - a second call with the same ( ref, root ) returns the identical list object
+    """
+    key = ( ref, root )
+    if key not in _SCAN_MEMO:
+        _SCAN_MEMO[ key ] = secret_scan.scan_ref( ref, cwd=root )
+    return _SCAN_MEMO[ key ]
+
+
 def _require_ref( ref, root ):
     """
     Skip loudly when the ref cannot be read, rather than failing for the wrong reason.
@@ -378,7 +404,8 @@ def test_a_detector_change_forces_a_full_rescan():
               else "THE PUBLISHED TIP MOVED" if ref_now != recorded[ "scanned_ref_sha" ]
               else "THE RECORDED SCAN DOES NOT MATCH WHAT THIS SCANNER MEASURES" )
 
-    measured = _scan_fingerprint( secret_scan.scan_ref( recorded[ "scanned_ref" ], cwd=root ) )
+    findings = _scan_once( recorded[ "scanned_ref" ], root )
+    measured = _scan_fingerprint( findings )
     assert measured == recorded.get( "scan_fingerprint" ), (
         f"{what} SINCE THE LAST RECORDED FULL SCAN, and re-running it here does not match "
         "what is on record. Re-scan, TRIAGE the output, and record the result — the "
@@ -392,6 +419,83 @@ def test_a_detector_change_forces_a_full_rescan():
         f"{recorded[ 'real_findings' ]} real"
         + ROTATION_HELD_NOTICE
     )
+
+    # The COUNTS guard that used to live here now has its own test — see
+    # test_the_recorded_counts_are_derived_from_the_same_scan below. It was moved because
+    # an assertion placed behind this one never runs while this one is red, and the failing
+    # SET reads identically whether the guard passed, failed, or was never reached.
+
+
+def test_the_recorded_counts_are_derived_from_the_same_scan():
+    """
+    The recorded candidate/value counts must come from the scan, not from a keyboard.
+
+    🔴 THIS LIVES IN ITS OWN TEST ON PURPOSE, and the reason is the finding that produced
+    it (Mr Radio 🦉 + Rachel 🕊️, 2026-08-30, independently). It was first written as three
+    more lines inside test_a_detector_change_forces_a_full_rescan, BEHIND that test's
+    fingerprint assertion — and that fingerprint is red in this tree (row 8202d795). An
+    assertion behind a failing one is present in the file and absent from the run, and the
+    failing SET is byte-identical whether it passed, failed, or never executed. Measured:
+    with the guard inline the file reported 1 failed / 60 passed and the guard had not run;
+    standing on its own it reports 2 failed, and the second id NAMES this reason.
+
+    ⇒ A guard that shares a test with an assertion ahead of it is only as reachable as that
+      assertion. Separate tests are what make a failing set carry information.
+    """
+    import json
+
+    root     = cu.get_project_root()
+    record   = root + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json"
+    recorded = json.load( open( record ) )
+
+    _require_ref( recorded[ "scanned_ref" ], root )
+    findings = _scan_once( recorded[ "scanned_ref" ], root )
+
+    # 🔴 THE FINGERPRINT PROVES A RE-SCAN HAPPENED. IT PROVES NOTHING ABOUT A TRIAGE.
+    # Measured 2026-08-30 (row d8683a66): `distinct_values_at_tip` and
+    # `candidate_locations_at_tip` appeared in this file exactly ONCE each — inside the
+    # failure message above — and were never asserted. So a seat could paste the measured
+    # fingerprint into the record, leave the counts at their 2026-08-17 values, and this
+    # test would go green while the record claimed 116 distinct values against a scan
+    # returning 117. Self-inconsistent record, clean tier, nobody told.
+    #
+    # Both counts are DERIVED FROM `findings` — the same object the fingerprint is computed
+    # from — so like the fingerprint they cannot be filled in without scanning. A mismatch
+    # here means the record was HAND-EDITED rather than re-derived, which is the one thing
+    # the fingerprint alone cannot see.
+    counted = {
+        "candidate_locations_at_tip" : len( findings ),
+        "distinct_values_at_tip"     : len( { digest for _o, _n, _k, _len, digest in findings } ),
+    }
+    disagreed = [ field for field, value in counted.items() if recorded.get( field ) != value ]
+    assert not disagreed, (
+        "THE RECORDED COUNTS DO NOT MATCH THE SCAN THIS TEST JUST RAN — "
+        f"{', '.join( disagreed )}. These fields were not re-derived from the scan they "
+        "claim to summarise. Re-record them from the SAME scan, and "
+        "re-do the TRIAGE they summarise — a count that moved means findings moved:\n"
+        + "".join( f"    {field:28}: recorded {recorded.get( field )!r}, measured {value!r}\n"
+                   for field, value in counted.items() )
+    )
+
+    # 🔴 `real_findings` IS DELIBERATELY NOT ASSERTED HERE, AND THAT IS THE REMAINING HOLE.
+    # The two counts above are derivable from `findings`, so they cannot be filled in by
+    # hand. `real_findings` is a TRIAGE VERDICT — how many candidates a human judged real —
+    # and no scan can compute it, so no assertion here can defend it. Measured 2026-08-30:
+    # re-derive both counts after the scan gains a candidate, leave `real_findings` at its
+    # old value, and this suite goes GREEN with the new candidate never triaged.
+    # ⇒ This test now proves the scan was re-run AND the counts re-derived from it. It still
+    #   does not prove anyone LOOKED at what moved. That needs a reviewer, not an assert.
+    #
+    # (Rachel 🕊️ and Mr Radio 🦉 both raised this against the first cut of the block above,
+    # independently, within four minutes. The block was written as though it closed the
+    # triage hole; it closes HAND-EDITING of two derived counts, which is a smaller thing.)
+    #
+    # ⚠️ AND THE GUARD ABOVE IS UNREACHABLE WHILE THE FINGERPRINT ASSERT IS RED. Every
+    # assertion in this test runs in sequence, so the counts check only executes once the
+    # fingerprint agrees. In the tree this was written in the fingerprint does NOT agree —
+    # that is row 8202d795, Maya's — so the guard is carried, not exercised. A new assertion
+    # placed behind a failing one is present in the file and absent from the run, and the
+    # test id in the failing set reads identically either way.
 
 
 def test_findings_never_carry_the_value():

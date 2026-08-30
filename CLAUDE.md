@@ -900,6 +900,99 @@ are invisible to a careful re-read of the test body.
 anchor matched EXACTLY once, and the on-disk sha CHANGED — plus a restore control at the end that is
 actually READ, since `git checkout` cannot restore an untracked file (row `c0a829a3`).
 
+### 🔴 "I REPAIRED A FIXTURE" IS NOT "I PROVED THE REPAIR DISCRIMINATES" — TWO ARMS, ONE SHA
+
+Ratified fleet-wide by Mr. Radio 🦉, 2026-08-30, after three seats produced it independently in
+one evening. **A repaired fixture whose suite goes green has established NOTHING** — the suite was
+green before, for a different reason. What establishes the repair is **two arms driven from ONE
+mutated sha**:
+
+| arm | required result | what it proves |
+|---|---|---|
+| the **OLD** fixture + the mutation | **SURVIVES** | the test genuinely could not see the behaviour it was named for |
+| the **NEW** fixture + the *same* mutation | **KILLED**, by the named test | the repair is what closed it |
+
+**One sha across both arms**, so the only variable is the fixture. **Neither arm alone counts**: a
+lone red proves only that a test can fail, and a lone green proves nothing at all.
+
+**Three clean instances, same evening**: Krishna 🦚 `88631dc1` (sha `7c8faf911d84`, SURVIVED before
+the fixture reorder, KILLED after) · Chloé 🗼 `e23ef98c` (sha `914b6d4c0411`, 20 passed both ways on
+the old fixture, killed by `test_a_vendored_path_under_src_is_still_rejected` on the new) · the
+password-length repair on `migrate_mock_users.py` (sha `f83f1b901ade`).
+
+### 🔴 AND `rc == 1` IS A KILL **ONLY ON A SUITE THAT IS GREEN AT BASELINE**
+
+The rule above this one says to accept only `rc == 1`. **That is necessary and not sufficient**, and
+the gap produced a false kill the same evening. A mutation returned `rc=1`, reddening
+`test_the_flash_lite_arm_really_reaches_vertex` and `test_a_crossed_pair_is_refused` — it was nearly
+recorded as KILLED. Run **unmutated**, the same two failed: they are two of the ten known worktree
+artifacts from the gitignored `cloud-run.env`. **The failing SETS were byte-identical with and
+without the mutation. It had SURVIVED, and the exit code said the opposite.**
+
+⇒ **Assert the baseline is green BEFORE the mutation.** Comparing the failing SETS is the
+FALLBACK for when you cannot get a green baseline, not an equal alternative to one — see the
+next subsection for why a set comparison alone is not enough. 🔴 **A RESTORE CONTROL AT THE END IS NOT A BASELINE** (Rio ⚡, 2026-08-30, correcting
+the first cut of this section). The floor rule above asks for a trailing unmutated run, and it is
+easy to read that as discharging this one — it does not. A control that proves greenness only
+*afterwards* cannot separate a false kill from a real one *during* the pass: every verdict was
+already recorded by the time it runs. The baseline has to be taken **first**, or per-mutant. This is §TESTING VENUES' *"same SET beats same COUNT"* arriving in the mutation lane,
+and it bites hardest **in a worktree** — which is where this fleet does all of its mutation work,
+and where ten failures are present before anybody edits anything. ⚠️ It is not only a worktree
+hazard: this branch's own unit tier was **RED for roughly four hours** on 2026-08-30 while several
+seats mutated against it.
+
+### 🔴 AND A FAILING SET COMPARES TEST IDS — COMPARE THE ASSERTION THAT FIRED
+
+Raised by Rachel 🕊️ and Mr Radio 🦉 independently, 2026-08-30, against the first cut of the
+subsection above. That cut offered *"compare the failing SETS"* as an equal alternative to a green
+baseline. **It is not one, because a failing set is a set of test IDs and a test id says nothing
+about WHY the test went red.** The two errors point opposite ways and both are live:
+
+| what you see | what you conclude | what may actually be true |
+|---|---|---|
+| mutated set = baseline set | **SURVIVED** | the mutation really did break a test that was ALREADY red for an unrelated reason — a false survivor |
+| mutated set = baseline set + one | **KILLED** | the extra red is a flake or a second artifact — a false kill |
+
+⇒ **Compare the assertion that fired, not only the test that failed** — the message, the line, the
+short-summary line, anything that distinguishes one red from another red in the same test.
+
+🔴 **AND THE SAME MECHANIC DECIDES WHETHER A NEW GUARD RUNS AT ALL.** A test's assertions execute in
+sequence, so an assertion added BEHIND one that is currently failing is **present in the file and
+absent from the run** — and the test id in the failing set is byte-identical whether the new guard
+passed, failed, or never executed. **A guard placed behind a red is carried, not exercised.**
+**Worked instance, this reviewer's own, with the fix and both measurements.** The counts guard added
+to `test_a_detector_change_forces_a_full_rescan` at `503000fe` sat after that test's fingerprint
+assertion, and the fingerprint is red in this tree (row `8202d795`). The commit reported the file as
+*"1 failed, 60 passed — byte-identical failing SET to the baseline"*, which was true and told nobody
+the new assertion had not run. The counts were stale the whole time — recorded 239/116 against a
+scan measuring 240/117 — so the guard would have fired on its first execution and never got one.
+
+| placement, same record, same scan | result | what the failing set says |
+|---|---|---|
+| guard INLINE, behind the fingerprint assert | 1 failed, 60 passed | one id — the stale counts are invisible |
+| guard in its OWN test | **2 failed, 60 passed** | two ids — the second NAMES the counts |
+
+⇒ **Before claiming a new assertion guards anything, prove it is REACHED** — force the assertions
+ahead of it green, or **move it into a test of its own**, which is the durable form: a separate test
+is what lets a failing SET carry information instead of collapsing several reasons into one id.
+
+### ⚠️ AND A CLEAN PASS IS A SAMPLE OF THE MUTATION SPACE, NOT A VERDICT ON IT
+
+Six mutations against four files were run and reported as a pass. Clayton 😎's independent harness
+then posed **40** against the same files and found **four survivors nobody had posed** — including
+the one that mattered, a `site-packages` clause whose deletion left every test green. **The reviewer
+had mutated that exact line and picked a different clause of it.**
+
+⇒ A mutation pass reports on the mutations you thought of. **Two harnesses aimed at one file find
+different things**, and that — not a matching sha — is the real argument for a second harness. A
+cross-harness sha match establishes only **edit identity**: the same anchor and replacement against
+the same source bytes is deterministic, so two correct harnesses *must* agree, and the match says
+nothing about either verdict (Krishna 🦚, correcting this reviewer). **Exchange shas to catch a
+DISAGREEMENT, never to manufacture a confirmation.**
+
+Full derivation, with what each claim does NOT establish:
+`src/rnd/v0.2.1/2026.08.30-two-harnesses-one-file-cross-reproduced-shas.md`.
+
 ## TEST CREDENTIALS
 
 **CRITICAL**: Never hardcode test credentials. Always use environment variables.
