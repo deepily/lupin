@@ -405,6 +405,44 @@ cd <your-worktree> && LUPIN_ROOT="$PWD" .venv/bin/python -m pytest src/tests/uni
 
 `LUPIN_ROOT="$PWD"` is the one you must not forget — it is inherited from your shell and silently keeps pointing at `/…/lupin`. The other two are unfixable from inside a worktree: **subtract them, do not chase them.**
 
+⚠️ **THE SAME MISMATCH IS HARMLESS IN ONE DIRECTION AND SILENT-FATAL IN THE OTHER — SO READ THE
+WARNING, THEN ASK WHAT THE CODE WRITES.** Measured by Maya 🌻 2026-08-29, and added here rather than
+in a second section because it is a refinement of the three traps above, not a new one. Three cases,
+and they are not equally bad:
+
+| What the code writes | With a wrong `LUPIN_ROOT` | How bad |
+|---|---|---|
+| **Code path** — imports, runs a suite | your edits are not what runs; the tree you stand in is not the tree imported | misreports **your own** work, silently |
+| **Shared data, path NOT derived from `LUPIN_ROOT`** | lands correctly anyway | noise — *if* you read the result back |
+| **Shared data, path derived from `LUPIN_ROOT`** | writes where nobody reads, or into another repo's state | **worst** — corrupts **another seat**, not you |
+
+🔴 **I FIRST WROTE THIS AS "HARMLESS ON A SHARED-DATA WRITE" AND THAT WAS UNDERBUILT.** Harmless is
+a property of the RESOLVER, not of the destination: it holds only when the path does not derive from
+`LUPIN_ROOT`, and I had not checked that it doesn't before saying so. The correction is the bottom
+row, and it is the one that matters — a code-path mistake misreports your own work, a shared-data
+mistake corrupts somebody else's.
+
+**The measured case, and why it is the middle row rather than the bottom one.** The heartbeat-hold
+verb printed this section's WRONG-TREE warning at me — shell `LUPIN_ROOT` still naming `/…/lupin`
+while the file sat in my worktree — and the hold was still correct. Not by luck: `fleet_data_root()`
+calls `_main_repo_path()`, which collapses a worktree to its parent checkout, so the destination is
+invariant under the choice. Verified both ways rather than read off the source:
+
+```
+LUPIN_ROOT=lupin                    -> …/projects-data/lupin
+LUPIN_ROOT=lupin-wt-maya-ba6df71e   -> …/projects-data/lupin      # identical
+```
+
+Had that resolver taken `LUPIN_ROOT`'s basename instead, the hold would have gone to
+`projects-data/lupin-wt-maya-ba6df71e/`, where the arbiter and the Stop hook never look — a session
+parked invisibly, which is the bottom row and the exact failure row `011f1f90` exists to catch.
+
+⇒ **A wrong-tree warning is not one severity.** Ask which row you are in before deciding whether to
+act on it — and on the middle row, still read the result back, because "it landed correctly" is a
+claim until you have seen it.
+
+⚠️ **AND IT REACHES CONFIGURATION, NOT ONLY COVERAGE.** Measured 2026-08-29: two seats disagreed about whether `"src/scripts"` was in `pyproject.toml`'s coverage source list. It was present at HEAD (1), present in the worktree after a merge (1), absent at that worktree's pre-merge sha (0) — **both readings correct, about different files.** A run under a stale config would have measured none of those files and published an EMPTY zero list, with nothing in the output saying so. ⇒ **Verify the config in the tree you are about to RUN IN, immediately before the run. HEAD is not where the run happens.**
+
 ⚠️ **The general shape, which outlives these three:** a worktree is `git`-identical to the main tree and **environment-identical to nothing**. Anything gitignored, untracked, or exported into your shell is a property of *where you are standing*, not of *what you are measuring*. That is why two counts should be **reconciled** rather than adjudicated — 25 − 14 = 11 with every one named is stronger evidence than either count alone, and a mismatch that reconciles is not a disagreement.
 
 ⚠️ **Related, same family** — the collected-test-id diff. Some test ids bake an **absolute path** into a parametrize id, so diffing collected ids between two worktrees shows the same test as one removal plus one addition. A raw diff read `+225 / −4` and looked like the merges had deleted four tests; they had not. Compare **counts** as well as ids, and treat the agreement of the two as the check.
@@ -475,6 +513,30 @@ COVERAGE_FILE=/tmp/cov-$USER-$$.data LUPIN_ROOT="$PWD" \
 - **In plan ACs**: write "100% lines/branches/functions" — never ≥90%/≥95%.
 - **Excludes**: sub-repos `lupin-mobile`, `lupin-plugin-firefox`, and external-project bind-mounts.
 - **Canonical record**: auto-memory `feedback_100pct_coverage_multiplexer.md` (directive + Lupin-wide expansion). Origin doc: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/08-phase6a-jobs-surface-design.md` AC6.
+
+### 🔴 A SCOPED `--cov` ANSWERS ONE QUESTION AND CANNOT ANSWER THE OTHER
+
+Measured 2026-08-29. A narrowed scope — `--cov=<module>`, `--source=src/scripts` — does **not**
+narrow the REPORT, it narrows what is ever MEASURED. Nothing in the output says so, and that is the
+whole hazard.
+
+| Question | Scoped run |
+|---|---|
+| *"What is THIS file's coverage?"* | ✅ **safe, if the file is inside the scope.** Per-file counts are scope-INVARIANT — the scope decides which files appear, never the numbers for one that does |
+| *"WHICH files are at zero?"* | 🔴 **cannot answer it.** Use the project config |
+
+**Why the second one bites**: absence from a scoped report is **not evidence of zero coverage — it
+is evidence of never having been measured.** A census run this way returned thirteen files as
+UNKNOWN, and unknown read as zero. Same shape as the two-database trap in §TESTING VENUES: **an
+empty answer to a narrowed question is indistinguishable from a confident negative.**
+
+**The receipt for the safe half** (this is why the rule is "use the project config for a census",
+not "never scope"): `swe_workload_runner.py` was measured under two different scopes the same night
+— `--cov=swe_workload_runner` and `--source=src/scripts` — and both report **163 statements / 0
+miss, 44 branches / 0 partial**. Identical, because the file was inside both scopes.
+
+⇒ **Scope freely while working a single file. Never scope a run whose output you intend to read as
+a LIST.**
 
 ## TESTING
 
@@ -613,11 +675,58 @@ test code:
 | **A weak test** | the other two are ruled out | the only one that earns a new test |
 | **A broken harness** | re-run that ONE mutant by hand — if it reddens, the harness lied | you accept a lower kill count as the file's ceiling |
 | **An equivalent mutant** | read the edit: did it repair its own damage? | you write a test to kill something that was never a defect |
+| **A fixture that cannot discriminate** | read the DATA, not the assertions | you audit correct assertions, find nothing, and conclude the code is fine |
 
 Measured example of the third: an edit that dropped an `if row.get( "id" )` guard **and** swapped
 `row[ "id" ]` for `row.get( "id" )` in the same change turned a `KeyError` into a harmless `None`
 key. The mutation was wrong, not the test. **Reaching for "weak test" first is how a seat rewrites
 tests that were already fine.**
+
+🔴 **THE FOURTH IS THE ONE YOU CANNOT REACH BY READING THE TEST** (Krishna, row `9ad838d6`). The
+assertions can be present, correct, and named for exactly the thing that broke, while the FIXTURE
+cannot tell the difference: **values that are interchangeable in the data cannot reveal a swap
+between them.** Measured — `migrated=1` and `skipped=1` made a counter swap invisible, because
+swapping two equal numbers changes nothing; `2 / 1 / 1` kills it. The generalisation is worth more
+than the case: **if two quantities can be exchanged without changing the expected output, the test
+asserts their SUM, not their identity — whatever its name says.** The remedy is the fixture, never
+the assertions, and an assertion audit passes it clean every time.
+
+**TWO MORE WORKED EXAMPLES from the same evening**, both found by mutations surviving a suite whose
+assertions read correctly, and both fixed in the FIXTURE rather than the assertions. They are
+written out in full because the abstraction above is the part a reader skips; the shape is what
+gets recognised.
+
+**(a) The fixture agrees with the environment.** Testing that an empty `LUPIN_ROOT` falls through
+to the file-relative fallback rather than becoming `Path( "" )`:
+
+```python
+# SURVIVED a mutation that returned Path( "" ) instead of the real root
+assert ( root / "src" / "scripts" / "watch-hook-events.py" ).exists()
+
+# KILLS it — Path( "" ) is RELATIVE, and only resolves right from the repo root
+assert root.is_absolute()
+assert root == Path( whe.__file__ ).resolve().parents[ 2 ]
+```
+
+`Path( "" ) / "src" / …` is a relative path, and pytest runs from the repo root, so **the wrong
+answer and the right answer named the same file.** The assertion was measuring the CWD.
+
+**(b) The fixture already sits at the boundary it is testing.** Testing that a one-digit seconds
+field is zero-padded:
+
+```python
+# SURVIVED a mutation removing .zfill( 2 ) — "abc" has no digits, so ss is already "00",
+# two characters, and the padding is a no-op either way
+assert whe._hhmmss( "2026.06.06 @ 01:45 abc" ) == "01:45:00"
+
+# KILLS it — only a ONE-digit value separates 01:45:07 from 01:45:7
+assert whe._hhmmss( "2026.06.06 @ 01:45 7ms" ) == "01:45:07"
+```
+
+Both tests were named for the thing that broke. Neither could see it.
+
+⇒ **When a mutant survives, look at the DATA before the assertions.** Three of the four readings
+are invisible to a careful re-read of the test body.
 
 **Still the floor, unchanged**: every mutation asserts it APPLIED before its result is trusted — the
 anchor matched EXACTLY once, and the on-disk sha CHANGED — plus a restore control at the end that is
