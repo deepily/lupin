@@ -640,6 +640,59 @@ miss, 44 branches / 0 partial**. Identical, because the file was inside both sco
 ⇒ **Scope freely while working a single file. Never scope a run whose output you intend to read as
 a LIST.**
 
+### 🔴 COVERAGE MEASURES WHETHER A LINE **RAN**, NEVER WHETHER THE TEST COULD HAVE **NOTICED IT
+RUNNING WRONG**
+
+Measured three times in three files on one evening, 2026-08-30 (row `9124b70a`, Pocholo 📣 and
+Maya 🌻). **Two of those files were at 100% lines and branches with the defect live in them.** The
+coverage number was TRUE. It told us nothing.
+
+**The defect**, identical in all three: a paged fetch asked for a flat `limit=PAGE_SIZE` whatever
+cap the caller passed, so `--max-rows 100` fetched 500 rows and then announced *"truncated at 100
+rows"* — the one figure whose job is to say how partial a scan was.
+
+**Why every suite stayed green.** The fakes were `lambda *a, **k` — they returned their scripted
+page WHOLE, whatever was asked. So the line executed on every run, was asserted around, and was
+**unfalsifiable**: a capped request and an uncapped one produced byte-identical data.
+
+```python
+# BLIND — answers the same however the code behaves. Nothing downstream can recover.
+monkeypatch.setattr( mod, "_request", lambda *a, **k: _page( rows, has_more=True ) )
+
+# DISCRIMINATING — honours the input, so a wrong request yields a different observation.
+def _request( method, url, api_key, timeout, body=None ):
+    calls.append( url )
+    return _page( available[ :_limit_of( url ) ], has_more=True )
+```
+
+⇒ **A test asks two questions and coverage only ever answers the first**: did the line run, and
+*could the fixture have produced a different observation if the code were wrong?* A fake that
+ignores its input answers **no** to the second by construction, and **every assertion written over
+its output inherits that no.** The assertions here were not weak — they were correct, well-named,
+and blind. **An assertion audit passes a blind fixture clean every time**, which is why re-reading
+the test body is the wrong move.
+
+🔴 **THE TELL, AND IT IS MECHANICAL:** *replace the code under test with a constant. If the fixture
+still yields the same data, the suite is measuring the fixture.*
+
+⚠️ **AND THE DISCRIMINATING CASE USUALLY NEEDS TWO CONDITIONS AT ONCE, WHICH IS WHY ONE FIX IS NOT
+ENOUGH.** Measured: a fake that honours `limit` is still blind at `--max-rows 2000`, because
+`min( 500, 2000 )` is 500 either way; and a cap of 2 is still blind against a 2-row page, because
+both versions return 2. You need **a cap BELOW the page size AND a page LARGER than the cap.** A
+seat told only *"assert on a small max_rows"* writes a test that looks like it covers this and does
+not.
+
+⚠️ **A related shape, opposite polarity — a fixture can also make a test ENDORSE the defect rather
+than merely miss it.** Of the two landed copies, one asserted a result that *only the broken code
+produces*; the other was merely blind. **Blind and endorsing are different**: the first goes green
+on a correct fix, the second goes RED on one and reads as the patch having broken something. Check
+which you have before concluding a fix is wrong.
+
+**This is the fourth reading in § A MUTATION HARNESS CAN LIE, reached from the other direction** —
+there, a surviving mutant sends you looking for a fixture that cannot discriminate; here, there is
+no mutant and no red at all, only a coverage figure at 100%. **Same defect, and the coverage number
+is the more dangerous entry point, because it arrives looking like an answer.**
+
 ### 🔴 THERE IS A SECOND VIRTUALENV *INSIDE* `src/`, AND IT IS 92% OF EVERY DISK SWEEP
 
 `src/cosa/.venv` is a full vendored virtualenv living inside the source tree. Measured 2026-08-30:
