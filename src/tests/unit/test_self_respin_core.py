@@ -690,9 +690,42 @@ def test_parse_own_pressure_present_persona_returns_status_and_pct():
     assert sr.parse_own_pressure( section, "cheech" ) == ( "over_budget", 61.0 )
 
 
-def test_parse_own_pressure_absent_persona_is_unknown_none():
+def test_parse_own_pressure_absent_persona_is_UNMATCHED_not_unknown():
+    """
+    ⚠️ THIS TEST USED TO ASSERT `unknown`, AND THAT WAS THE DEFECT IT PINNED.
+    A roster we successfully READ, which does not contain this seat, is a different
+    fact from a roster we could not read at all — and returning the same answer for
+    both is how a lookup that asked the wrong KEY got reported as a missing seat.
+    """
     section = { "personas": { "someone_else": { "status": "within_budget" } } }
-    assert sr.parse_own_pressure( section, "cheech" ) == ( "unknown", None )
+    assert sr.parse_own_pressure( section, "cheech" ) == ( sr.PRESSURE_UNMATCHED, None )
+
+
+def test_parse_own_pressure_an_empty_roster_is_unknown_rather_than_unmatched():
+    """
+    The other side of the split, and the boundary is deliberate: an EMPTY roster is a
+    fact about the SENSOR (it listed nobody), not about this seat. Calling that
+    "unmatched" would accuse a seat of being absent on the strength of a reading that
+    never named anyone.
+    """
+    assert sr.parse_own_pressure( { "personas": { } }, "cheech" ) == ( sr.PRESSURE_UNKNOWN, None )
+
+
+def test_parse_own_pressure_matches_a_display_capitalised_roster_key():
+    """
+    Rio's finding, measured live 2026-08-30: the roster keys by DISPLAY capitalisation
+    and the fleet mixes conventions in ONE payload — six of eleven keys were not
+    lowercase. `personas.get( "rio" )` returned None while `personas.get( "Rio" )`
+    returned a live row at 32.1%.
+    """
+    section = { "personas": { "Rio": { "status": "within_budget", "consumption_pct_of_window": 32.1 } } }
+    assert sr.parse_own_pressure( section, "rio" ) == ( "within_budget", 32.1 )
+
+
+def test_parse_own_pressure_matches_a_lowercase_roster_key_from_a_display_cased_name():
+    """The mirror direction — neither lowercasing nor title-casing is safe on its own."""
+    section = { "personas": { "pocholo": { "status": "within_budget", "consumption_pct_of_window": 40.1 } } }
+    assert sr.parse_own_pressure( section, "Pocholo" ) == ( "within_budget", 40.1 )
 
 
 def test_parse_own_pressure_missing_status_is_unknown_but_keeps_pct():
@@ -709,6 +742,61 @@ def test_parse_own_pressure_blank_status_is_unknown():
 def test_parse_own_pressure_personas_not_a_dict_is_unknown_none():
     assert sr.parse_own_pressure( { "personas": None }, "cheech" ) == ( "unknown", None )
     assert sr.parse_own_pressure( { "personas": [ "not", "a", "dict" ] }, "cheech" ) == ( "unknown", None )
+
+
+def test_parse_own_pressure_a_matched_but_malformed_record_is_unknown_not_unmatched():
+    """
+    The third state, and it lands on the RIGHT side of the split: we found the seat in
+    the roster, so it is not "unmatched" — but the record is unusable, so there is no
+    reading either. Calling this "unmatched" would report a seat as absent from a
+    roster that plainly lists it.
+    """
+    assert sr.parse_own_pressure( { "personas": { "Rio": "not a dict" } }, "rio" ) \
+           == ( sr.PRESSURE_UNKNOWN, None )
+
+
+# ---------------------------------------------------------------------------
+# lookup_persona_record — the case-tolerant match, tested on its own because the
+# KEY it reports is what lets a caller tell "absent" from "matched but empty"
+# ---------------------------------------------------------------------------
+def test_lookup_persona_record_reports_the_key_it_matched():
+    personas = { "Rio": { "status": "within_budget" } }
+    assert sr.lookup_persona_record( personas, "rio" ) == ( { "status": "within_budget" }, "Rio" )
+
+
+def test_lookup_persona_record_prefers_an_EXACT_key_over_a_case_insensitive_one():
+    """
+    A roster carrying both spellings must resolve to the one actually asked for.
+    Without the exact-first check the answer would depend on dict ORDER, which is a
+    property of how the roster was built rather than of what the caller wanted.
+    """
+    personas = { "rio": { "status": "lowercase-row" }, "Rio": { "status": "display-row" } }
+    assert sr.lookup_persona_record( personas, "Rio" )[ 1 ] == "Rio"
+    assert sr.lookup_persona_record( personas, "rio" )[ 1 ] == "rio"
+
+
+def test_lookup_persona_record_ignores_surrounding_whitespace():
+    assert sr.lookup_persona_record( { "Mr Radio": { } }, "  mr radio  " )[ 1 ] == "Mr Radio"
+
+
+def test_lookup_persona_record_reports_no_match_as_a_None_KEY_not_an_empty_record():
+    """
+    The distinction the whole fix rests on: a record may legitimately be EMPTY, so a
+    falsy record cannot mean "absent". The matched KEY is what carries that fact.
+    """
+    assert sr.lookup_persona_record( { "Rio": { } }, "rio" )   == ( { }, "Rio" )
+    assert sr.lookup_persona_record( { "Rio": { } }, "nobody" ) == ( None, None )
+
+
+def test_lookup_persona_record_tolerates_a_non_dict_roster_and_a_non_string_name():
+    assert sr.lookup_persona_record( None, "rio" )        == ( None, None )
+    assert sr.lookup_persona_record( [ "not", "a", "dict" ], "rio" ) == ( None, None )
+    assert sr.lookup_persona_record( { "Rio": { } }, None ) == ( None, None )
+
+
+def test_lookup_persona_record_skips_a_non_string_key_rather_than_raising():
+    """A malformed roster must not take down a seat's own pressure read."""
+    assert sr.lookup_persona_record( { 7: { "status": "x" }, "Rio": { "status": "y" } }, "rio" )[ 1 ] == "Rio"
 
 
 def test_parse_own_pressure_section_not_a_dict_is_unknown_none():

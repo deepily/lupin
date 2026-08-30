@@ -826,6 +826,45 @@ def resolve_own_identity( get_cc_meta_fn, fallback_sid ):
     return resolve_identity_from_cc_meta( cc_meta, fallback_sid )
 
 
+# ── context-pressure roster lookup ────────────────────────────────────────────
+# The roster is keyed by each seat's DISPLAY capitalisation, and the fleet mixes both
+# conventions in ONE payload — measured live 2026-08-30: `Clayton`, `Krishna`, `Rachel`,
+# `Rio`, `Tiberius`, `Tiffany` beside `chloe`, `maria`, `maya`, `mr radio`, `pocholo`.
+# Six of eleven. So neither lowercasing nor title-casing a name is safe on its own, and
+# `personas.get( "rio" )` returns None while `personas.get( "Rio" )` returns a live row.
+PRESSURE_UNKNOWN   = "unknown"      # no reading — sensor unreachable, or an empty roster
+PRESSURE_UNMATCHED = "unmatched"    # a roster we READ, in which this seat does not appear
+
+
+def lookup_persona_record( personas, persona ):
+    """
+    Find one seat's record in a context-pressure roster, tolerating capitalisation.
+
+    Requires:
+        - personas is the roster dict (anything, defensively); persona is a seat name
+
+    Ensures:
+        - returns ( record, matched_key ); matched_key is None when nothing matched, so
+          a caller can tell "not in the roster" from "matched but empty" — a record can
+          legitimately be falsy, which is why the KEY is what reports the match
+        - an EXACT key wins over a case-insensitive one, so a roster holding both
+          spellings resolves to the one actually asked for rather than to dict order
+        - matching is casefold() on stripped keys — casefold, not lower(), because it
+          folds non-ASCII pairs that lower() leaves distinct, and these are display
+          names typed by humans
+        - never raises
+    """
+    if not isinstance( personas, dict ):     return ( None, None )
+    if persona in personas:                  return ( personas[ persona ], persona )
+    if not isinstance( persona, str ):       return ( None, None )
+
+    wanted = persona.strip().casefold()
+    for key, record in personas.items():
+        if isinstance( key, str ) and key.strip().casefold() == wanted:
+            return ( record, key )
+    return ( None, None )
+
+
 def parse_own_pressure( section, persona ):
     """
     Extract ( status, consumption_pct_of_window ) for `persona` from a
@@ -838,15 +877,40 @@ def parse_own_pressure( section, persona ):
 
     Ensures:
         - a present persona record carrying a `status` ⇒ ( status, pct )
-        - an absent persona, a missing/blank `status`, a non-dict `personas`, or a
-          non-dict `section` ⇒ ( "unknown", None ) — a missed reading is recorded
-          as unknown, NEVER a manufactured "over_budget" (Krishna condition #3). A
-          forged status would be a CLAIM that a reading happened; unknown is honest.
+        - a missing/blank `status`, a non-dict `personas`, an EMPTY roster, or a
+          non-dict `section` ⇒ ( PRESSURE_UNKNOWN, None ) — a missed reading is
+          recorded as unknown, NEVER a manufactured "over_budget" (Krishna condition
+          #3). A forged status would be a CLAIM that a reading happened.
+        - a roster that was READ but does not contain this seat under ANY casing ⇒
+          ( PRESSURE_UNMATCHED, None ). ⚠️ THIS USED TO BE "unknown" TOO, and that
+          conflation is the defect: no-data and not-there returned the same answer, so
+          a lookup that asked the wrong KEY reported the seat as missing. Splitting
+          them is what makes a casing miss visible instead of silent.
+        - the lookup is case-insensitive (`lookup_persona_record`) because the roster
+          keys by display capitalisation and the fleet mixes conventions
         - never raises
     """
     personas = section.get( "personas" ) if isinstance( section, dict ) else None
-    record   = ( personas.get( persona ) if isinstance( personas, dict ) else None ) or {}
-    status   = record.get( "status" ) or "unknown"
+
+    # No roster at all — a fact about the SENSOR, not about this seat.
+    if not isinstance( personas, dict ) or not personas:
+        return PRESSURE_UNKNOWN, None
+
+    record, matched_key = lookup_persona_record( personas, persona )
+
+    # A roster we READ that does not contain this seat. Distinct from "unknown" on
+    # purpose (row: Rio's roster-casing finding): a lookup miss used to be
+    # indistinguishable from a failed read, so a monitor concluded "this seat is
+    # gone" when the honest answer was "I asked the wrong key".
+    if matched_key is None:
+        return PRESSURE_UNMATCHED, None
+
+    # Matched, but the record is not usable — we found the seat and still have no
+    # reading, which is the "unknown" case rather than the "unmatched" one.
+    if not isinstance( record, dict ):
+        return PRESSURE_UNKNOWN, None
+
+    status = record.get( "status" ) or PRESSURE_UNKNOWN
     return status, record.get( "consumption_pct_of_window" )
 
 
