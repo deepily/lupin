@@ -138,7 +138,11 @@ src/conf/long-term-memory/question-embeddings-dictionary.pickle
 
 # Re-don't want to track venv!
 venv/**
-/.venv/
+# NOT `/.venv/` — a trailing slash matches DIRECTORIES ONLY, so a SYMLINK named .venv
+# (how a worktree gets one: src/scripts/link-worktree-venv.sh) is a FILE to git and stays
+# UNTRACKED in every worktree that adopts it. Measured, row f42ac20c. The bare form covers
+# both shapes.
+/.venv
 
 # Python web server artifact
 nohup.out

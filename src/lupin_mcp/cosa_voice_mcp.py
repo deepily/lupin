@@ -1443,7 +1443,135 @@ def strip_fenced_code_blocks( text: str ) -> str:
     return re.sub( r"```[^\n`]*\n.*?\n```\s*", "", text, flags=re.DOTALL )
 
 
+# ── The return-side witness (row 03355649) ────────────────────────────────────
+# THE DEFECT THIS ANSWERS. A notify() delivered its message and then never
+# returned; the harness reported "timed out after 660s" for work that had
+# succeeded 30 seconds in. Measured across the fleet's hook log: 12,420 notify
+# calls, 1,717 of them (13.8%) with a PreToolUse and no PostToolUse ever, against
+# 0.27% for get_session_info and 2.60% for task_query. Of 414 such calls since
+# 2026-08-20, 411 have a notifications row inside a 125s window — 239 already
+# `delivered` — versus 15.8% for a shuffled-session control. So the message lands
+# and the CALL is what goes missing.
+#
+# WHAT COULD NOT BE ANSWERED WITHOUT THIS. Every wait inside the handler is
+# bounded — `_wait_for_sender_id` caps at 12s, and notify_user_async's worst case
+# is 24s at the default request timeout and 267s at the model's maximum allowed
+# value of 30 — so the handler cannot itself produce 660s. That says where the
+# hang ISN'T. It cannot say whether the handler RETURNED and the response was
+# lost downstream, because nothing recorded the return. `ask_yes_no` already logs
+# `mcp_ask_yes_no` on its way out; notify logged nothing at all.
+#
+# THE DISCRIMINATOR. Two events sharing a `call_id`. Next occurrence:
+#   entry, no return   → the handler is where it hangs
+#   entry AND return, but no PostToolUse → the handler finished and the response
+#                                          was lost above it
+# One grep of hook-events.jsonl answers a question that has cost two sessions a
+# database lookup each. The log write is best-effort and swallows its own errors,
+# so an instrument can never break the path it measures.
 def _notify_impl(
+    message: str,
+    notification_type: str = "progress",
+    priority: str = "medium",
+    abstract: Optional[ str ] = None,
+    job_id: Optional[ str ] = None,
+    suppress_ding: bool = False,
+    progress_group_id: Optional[ str ] = None,
+    session_name: Optional[ str ] = None,
+    _internal_call: bool = False
+) -> str:
+    """
+    Time `_notify_send` and record BOTH ends of the call.
+
+    Ensures:
+        - returns exactly what `_notify_send` returns, unchanged
+        - an exception propagates unchanged, with a return event recorded first
+        - the entry event carries the payload SIZE (never the payload), so row
+          03355649's untested payload-size hypothesis becomes answerable from the
+          log instead of needing a live reproduction
+        - logging never raises and never changes the outcome
+    """
+    call_id = _uuid.uuid4().hex[ :12 ]
+    _log_notify_event( "entry", call_id, None, None,
+                       payload_bytes=_payload_bytes( message, abstract ) )
+    started = time.monotonic()
+    try:
+        result = _notify_send(
+            message=message, notification_type=notification_type, priority=priority,
+            abstract=abstract, job_id=job_id, suppress_ding=suppress_ding,
+            progress_group_id=progress_group_id, session_name=session_name,
+            _internal_call=_internal_call )
+    except BaseException as e:
+        _log_notify_event( "raised", call_id, _elapsed_ms( started ), type( e ).__name__ )
+        raise
+    _log_notify_event( "return", call_id, _elapsed_ms( started ), result )
+    return result
+
+
+def _elapsed_ms( started ):
+    """Ensures: whole milliseconds since the `time.monotonic()` reading `started`."""
+    return int( ( time.monotonic() - started ) * 1000 )
+
+
+def _payload_bytes( message, abstract ):
+    """
+    The size of what this call is carrying — LENGTH ONLY, never the content.
+
+    WHY IT IS HERE (row 03355649). The row's own hypothesis: "WHETHER it
+    correlates with payload size. This call carried a long `abstract` (a table
+    plus several paragraphs). That is a hypothesis with one data point behind it
+    and no negative control." Nothing in the hook log records a payload or a
+    size, so the hypothesis could not be tested retrospectively against the 1,717
+    calls already on record. Stamping the size makes it answerable going forward
+    with a grep instead of a reproduction.
+
+    SIZE, NOT CONTENT, DELIBERATELY. hook-events.jsonl is already 66 MB and every
+    session in the fleet writes to it. Logging message bodies to answer a sizing
+    question would cost more than the question is worth, and would put user-facing
+    announcement text into a debug log nobody scoped for it.
+
+    Requires:
+        - message / abstract are strings or None
+
+    Ensures:
+        - returns the combined UTF-8 byte length of message and abstract
+        - a None or non-string part counts as zero rather than raising
+        - never raises
+    """
+    # No try/except here on purpose: `isinstance( part, str )` already guarantees
+    # `.encode( "utf-8" )` succeeds, so a belt would be an unreachable branch
+    # needing a pragma to explain itself. Fewer branches beats a justified one.
+    total = 0
+    for part in ( message, abstract ):
+        if isinstance( part, str ): total += len( part.encode( "utf-8" ) )
+    return total
+
+
+def _log_notify_event( phase, call_id, elapsed_ms, outcome, payload_bytes=None ):
+    """
+    Append one `mcp_notify` line to hook-events.jsonl.
+
+    Ensures:
+        - writes { phase, call_id, elapsed_ms, outcome, payload_bytes }; each
+          optional field is omitted when it does not apply — elapsed_ms and
+          outcome are absent on the ENTRY event, where neither exists yet, and
+          payload_bytes is absent on the RETURN event, where it would be a
+          duplicate of the entry that shares its call_id
+        - `outcome` is truncated to 120 chars — the status string is a label, and
+          an instrument must not become the thing that bloats the log it writes to
+        - NEVER raises. An instrument that can break the path it measures is worse
+          than no instrument.
+    """
+    try:
+        extra = { "phase": phase, "call_id": call_id }
+        if elapsed_ms   is not None: extra[ "elapsed_ms" ]    = elapsed_ms
+        if outcome      is not None: extra[ "outcome" ]       = str( outcome )[ :120 ]
+        if payload_bytes is not None: extra[ "payload_bytes" ] = payload_bytes
+        log_to_stream( "mcp_notify", {}, extra=extra )
+    except Exception:
+        pass
+
+
+def _notify_send(
     message: str,
     notification_type: str = "progress",
     priority: str = "medium",

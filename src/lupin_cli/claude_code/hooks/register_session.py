@@ -1160,6 +1160,70 @@ def _names_this_seat( name, sid8, slugs ):
     return False
 
 
+def _stamp_instant( stamp ):
+    """
+    The INSTANT an ISO `written_at` names, as epoch seconds.
+
+    WHY NOT COMPARE THE STRINGS (row f99bed95). The ranking used to sort the raw
+    ISO text, and ISO text only orders chronologically when every stamp shares one
+    UTC offset. The live slot does not: measured 2026-08-29, 214 stamped records
+    carried two offsets (212 at -04:00, 2 at +00:00) and produced **12 inverted
+    pairs** — e.g. `2026-08-16T14:06:48-04:00` (18:06:48Z) sorts BELOW
+    `2026-08-16T17:44:53+0000` (17:44:53Z) as text while being the later moment.
+    Twelve pairs is small today and grows with every writer that stamps in UTC.
+
+    A NAIVE stamp is refused rather than assumed-local — the same call
+    `reap_memento._parse_iso_aware` makes, and for the same reason: ordering it
+    against an aware stamp means guessing a zone, and guessing a zone is what
+    produced the inversion in the first place. The caller demotes it to the mtime
+    tier, so it is ranked low, never dropped.
+
+    Requires:
+        - stamp is an ISO-8601 string, or None
+
+    Ensures:
+        - returns epoch seconds (float) for an AWARE stamp
+        - returns None for None, a naive stamp, or anything unparseable
+        - never raises
+    """
+    if not stamp: return None
+    try:
+        parsed = datetime.fromisoformat( stamp )
+    except ( ValueError, TypeError ):
+        return None
+    if parsed.tzinfo is None: return None
+    return parsed.timestamp()
+
+
+def _recency_key( path, stamp ):
+    """
+    Rank one memento record: ( tier, instant ), newest first, tier 1 over tier 0.
+
+    Tier 1 is a record whose header carries an orderable `written_at`; tier 0 is
+    everything else, ordered by mtime. The tier split is deliberate and predates
+    this row — the header stamp travels with the content, while mirroring and
+    rsync reset mtime — so a dated record must outrank an undated one even when
+    the undated file is newer on disk.
+
+    Requires:
+        - path is a filesystem path; stamp is an ISO string or None
+
+    Ensures:
+        - ( 1, epoch_seconds ) when the stamp names an instant
+        - ( 0, mtime ) when it does not — undated, naive, or unparseable
+        - ( 0, -inf ) when mtime is unreadable, so the record ranks last and is
+          still never dropped
+        - both tiers carry a float, so the second element is always comparable
+        - never raises
+    """
+    instant = _stamp_instant( stamp )
+    if instant is not None: return ( 1, instant )
+    try:
+        return ( 0, os.path.getmtime( path ) )
+    except OSError:
+        return ( 0, float( "-inf" ) )
+
+
 def _memento_candidates( repo_root, sid8=None, slugs=() ):
     """
     Memento RECORDS visible to this seat, across both slot families, newest first.
@@ -1170,9 +1234,11 @@ def _memento_candidates( repo_root, sid8=None, slugs=() ):
     hand one persona another persona's state. Empty is a safe answer; another
     seat's held merge and crew is not.
 
-    Ordering key is the header's `written_at` stamp, falling back to mtime only
-    when a record carries none. A record with neither still appears — it ranks
-    last, but it is never silently dropped.
+    Ordering key is the INSTANT the header's `written_at` names, falling back to
+    mtime only when a record carries no orderable stamp. A record with neither
+    still appears — it ranks last, but it is never silently dropped. The instant,
+    not the ISO text: mixed UTC offsets make text order disagree with time order
+    (row f99bed95, 12 inverted pairs measured on the live slot).
 
     Requires:
         - repo_root is a directory path
@@ -1204,16 +1270,8 @@ def _memento_candidates( repo_root, sid8=None, slugs=() ):
             if real in seen: continue      # the mirror and the repo can hold the same record
             seen.add( real )
 
-            header = _header_of( path )
-            stamp  = _written_at_of( header )
-            if stamp:
-                # ISO strings sort lexicographically; the "1" tier outranks mtime.
-                sort_key = ( 1, stamp )
-            else:
-                try:
-                    sort_key = ( 0, str( os.path.getmtime( path ) ) )
-                except OSError:
-                    sort_key = ( 0, "" )
+            header   = _header_of( path )
+            sort_key = _recency_key( path, _written_at_of( header ) )
             out.append( ( path, header, sort_key ) )
 
     return sorted( out, key=lambda row: row[2], reverse=True )
@@ -1271,11 +1329,15 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
     """
     Find THIS seat's memento at the repo root.
 
-    Two-step, and the ORDER is the whole design:
+    Three-step, and the ORDER is the whole design:
 
       1. Exact session-id match. A self-re-spin types `/clear` into its own
          pane and keeps its session id, so when a record names this id it is
          unambiguously ours — the strongest signal available.
+      1.5 The canonical live slot `io/mementos/<slug>.md` in THIS repo. It is
+         where writers put the current record, so an exact-name hit beats any
+         historical sibling — including a sibling that carries a `written_at`
+         the bare slot does not (row f99bed95).
       2. Newest record for this PERSONA. A re-spin done as dismiss-then-spawn
          arrives as a brand-new session, so step 1 finds nothing while the
          memento sits right there named for the OLD id. The persona is what
@@ -1295,6 +1357,9 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
     Ensures:
         - Returns a confirmed memento path, or None when nothing resolves
         - Never returns a record belonging to a different persona
+        - Prefers this repo's `io/mementos/<slug>.md` over every sibling once an
+          exact session-id match has failed; never prefers the MIRROR's copy of
+          that same bare name
         - Never raises
     """
     sid8  = stable_session_id[:8] if stable_session_id and len( stable_session_id ) >= 8 else None
@@ -1310,6 +1375,28 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
         for path, header, _ in candidates:
             if header and f"session_id={sid8}" in header:      return path
             if os.path.basename( path ).endswith( f"-{sid8}.md" ): return path
+
+    # 1.5 THE CANONICAL LIVE SLOT OUTRANKS EVERY HISTORICAL SIBLING (row f99bed95).
+    #     `<repo_root>/io/mementos/<slug>.md` is the slot the fleet's writers target and
+    #     the one `reap_memento.seat_memento_slot` verifies. It is a BARE name, so it
+    #     frequently carries no `written_at` header — and step 2's ranking demotes an
+    #     unstamped record below EVERY stamped one, regardless of age. Measured against
+    #     the live tree on 2026-08-29: Rio's fresh 18:35 `io/mementos/rio.md` ranked 44th
+    #     of 79 and the resolver returned `rio-ea46bc1a.md`, 2.8 days old. The successor's
+    #     boot receipt then named that file and the wake check alarmed STALE_MEMENTO
+    #     against a seat that was fine.
+    #
+    #     Only the REPO's slot qualifies. The mirror holds a same-named `<slug>.md` whose
+    #     copy goes stale on its own schedule — that is what respin_wake_check's
+    #     SLOT_MIRROR alarm exists to catch, so it must not be promoted here.
+    #
+    #     Persona is still confirmed before the slot is accepted: a bare name is a claim,
+    #     and handing a seat another persona's state stays worse than handing it none.
+    for slug in slugs:
+        slot = os.path.normpath( os.path.join( repo_root, "io", "mementos", f"{slug}.md" ) )
+        for path, header, _ in candidates:
+            if os.path.normpath( path ) == slot and _persona_of( path, header ) == slug:
+                return path
 
     # 2. Newest record for this persona — survives dismiss-then-spawn, where
     #    the seat is new but the persona carried over. Slugs are tried in

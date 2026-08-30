@@ -293,7 +293,8 @@ def run_migration( dry_run: bool = False ):
         sqlite_conn.close()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - unreachable under pytest: __name__ is the
+                            #   module name, never "__main__"
     # Check for dry-run flag
     dry_run = "--dry-run" in sys.argv
 

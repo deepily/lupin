@@ -289,7 +289,12 @@ def lineage_aware_endpoints( router_dir ):
         if LINEAGE_FIELD not in text: continue               # cheap pre-filter; the real test is below
         try:
             tree = ast.parse( text )
-        except SyntaxError:                                  # pragma: no cover - no router in the tree fails to parse
+        except SyntaxError as e:
+            # A router that does not parse is a router this checker did not read, so it
+            # rides the SAME `unmatched` channel as a door it cannot understand rather
+            # than dropping out silently. The pragma stayed: no router in the tree fails
+            # to parse today, and the arm is proven by its own fixture test (row 5c3f3d94).
+            unmatched.append( ( f"{name}::<unparseable>", f"{type( e ).__name__}: {e}" ) )
             continue
         if not _mentions_the_field_in_code( tree ): continue
         models, classes = _lineage_models( tree )

@@ -797,7 +797,7 @@ class TestAllExpansion:
         # skipped the entire TypeScript suite.
         # "cosa" joined 2026-08-13 (row d83d025b), right after "unit" — both are fast
         # server-free pytest, so they fail early together.
-        assert ALL_SUITE_COMPONENTS == [ "unit", "cosa", "typescript", "smoke", "websocket", "integration", "e2e" ]
+        assert ALL_SUITE_COMPONENTS == [ "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e" ]
 
     def test_expand_all_fans_out( self ):
         assert _expand_all( [ "all" ] ) == ALL_SUITE_COMPONENTS

@@ -26,6 +26,53 @@ Decisions Log, 2026-08-26).
 `fail_under` belongs to the coverage-ramp owner and stays there. The guard decides *where a
 run writes*, never *what threshold it must clear*.
 
+## 🔴 EDITING A SOURCE FILE INSIDE A TEST? THE NEXT IMPORT MAY NOT SEE IT
+
+If your test (or your by-hand probe) writes to a `.py` file and then imports or re-runs it, use
+the opt-in helper — otherwise the interpreter can keep running the *old* code:
+
+```python
+from tests.helpers.pyc_freshness import mutate_source     # the pytest fixture
+from tests.helpers.pyc_freshness import refresh_source    # or the bare function
+
+def test_thing( mutate_source ):
+    mutate_source( SRC, SRC.read_text().replace( '"todo"', '"dead"' ) )
+    ...                                    # every touched file restored at teardown
+```
+
+**Why (row `d18ce9ef`, measured 2026-08-29).** CPython validates a `.pyc` on the source's
+**whole-second** mtime **plus** its **size**. A mutation edit changes neither — `"todo"` → `"dead"`
+is four characters either way, and a scripted loop does the edit and the restore inside one second
+— so the stale bytecode is served as valid. Measured on `src/cosa/rest/job_state.py`: source mtime
+`21:33:22.780`, pyc built `21:33:22.568`; for minutes `grep` said `todo` and `import` said `dead`.
+
+**The failure points the wrong way.** You restore the file, read it back to confirm, and the
+interpreter keeps running the mutant. Mutation testing is how a great deal of this repo earns its
+receipts, so a hazard aimed at it is aimed at the evidence.
+
+**It is CROSS-PROCESS** — a *fresh* pytest reads the stale `.pyc` off disk. So this is not
+`importlib.reload` staleness, `sys.modules` bookkeeping does not fix it, and neither does
+`importlib.invalidate_caches()`, which clears finder caches rather than pyc validation.
+
+⚠️ **`PYTHONDONTWRITEBYTECODE` does NOT fix this** — measured. It only stops pycs being *written*;
+one already on disk is still read and still wins. It passes only from a tree cleaned first, which
+means the clean is the protection, not the flag. `PYTHONPYCACHEPREFIX` merely relocates the race.
+
+**If you are debugging a red you cannot explain**, clear the cache before concluding anything:
+
+```bash
+find src -name '__pycache__' -type d -exec rm -rf {} +
+```
+
+**Two sightings in one evening, on different files, with nobody hunting for it** — `job_state.py`
+during the AC-G4 mutation sweep, then `tests/helpers/pyc_freshness.py` itself while the helper was
+being built. The second went red against code no longer on disk and was nearly logged as a flake;
+it failed in the *safe* direction, which is luck, not design — the same collision with a mutant
+still live reads as **green**.
+
+Full measurement, six remedies priced, and the still-open repo-wide question:
+`src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
+
 ## Test Hierarchy
 
 ### 1. Unit Tests (`src/tests/unit/`)
@@ -343,6 +390,74 @@ can only be written after the danger has passed is worth having anyway** — mos
 long after, not during — but do not record it as though it protects the gap. It does not.
 
 ---
+
+## Mutation harnesses: restore by BYTE SNAPSHOT, and verify the restore
+
+Row `c0a829a3`, 2026-08-29. Tiberius reported this against his own work while closing
+`f42ac20c`, and caught it before it reached a claim:
+
+> "My first mutation harness restored with `git checkout`, which CANNOT restore an
+> UNTRACKED file. Three mutations stacked silently and the 'restored' line read
+> 4 failed instead of 7 passed. That line is the only reason I noticed."
+
+**The mechanism, measured 2026-08-29 rather than repeated.** `git checkout -- <path>` restores
+a file from the index, and a file git does not track has nothing to restore FROM — so the
+mutation stays on disk and every mutation after the first lands on a tree still carrying the
+one before it. This bites hardest exactly where mutation testing is most common: a test file
+added in the same commit is UNTRACKED while you are mutating against it.
+
+⚠️ **But it does NOT fail silently, and that changes where the fix goes.** Run live against an
+untracked file, `git checkout --` exits **1** and prints
+`error: pathspec '<path>' did not match any file(s) known to git`. So the restore announces
+its own failure; what makes the mutations stack is a harness that **does not check the exit
+code** — `subprocess.run(...)` without `check=True`, or a shell call whose status is
+discarded. Read that as the actual rule: *a restore step whose result you do not check is not
+a restore.* The byte-snapshot below is still the right tool, because it is the only one that
+works on an untracked file at all — but an unchecked `git checkout` is what turns a loud
+failure into a silent one.
+
+**Do this instead** — read the bytes, write them back, and *check*:
+
+```python
+import hashlib, pathlib
+p        = pathlib.Path( target )
+original = p.read_bytes()                      # snapshot BEFORE the first mutation
+before   = hashlib.sha256( original ).hexdigest()
+try:
+    p.write_bytes( mutated )
+    ...run the suite, record the result...
+finally:
+    p.write_bytes( original )                  # restore
+    after = hashlib.sha256( p.read_bytes() ).hexdigest()
+    if after != before:                        # ⬅ THE CONTROL. Do not skip it.
+        raise SystemExit( f"RESTORE FAILED for {p}: {before} != {after}" )
+```
+
+### 🔴 A mutation run whose final restore-and-verify control is not CHECKED is not evidence.
+
+That is the transferable sentence; everything above is how you get there. A harness must END
+with a restore-and-verify pass and must FAIL LOUDLY when the tree does not come back
+byte-identical. Without it you have a list of numbers measured against a tree nobody intended,
+and nothing anywhere says so. Tiberius only caught his because he ran a final control **and
+read it** — running one and not reading it is the same as not having one.
+
+⚠️ **Never use `git stash` as the restore mechanism.** The stash stack is **repo-global** and
+shared across every worktree and every live session — measured 2026-08-23 (bug `1ebc9be3`),
+where one seat's pop applied another seat's held work into the wrong tree. A `stash_guard.py`
+PreToolUse hook denies the mutating verbs. A byte snapshot held in your own process is the
+correct tool, and it is also the only one that works on an untracked file.
+
+⚠️ **Mutate in your own worktree, on files you own.** Never mutate a file in the shared tree
+while peers are live in it.
+
+**Scope, measured 2026-08-29 rather than assumed:** no SHARED harness in this repo is exposed.
+The only tracked tool with "mutant" in its name — `src/tests/tools/mutant_adequacy_generator.py`
+— derives how many mutants a predicate *should* have and performs **no file writes and no
+subprocess calls**, so it cannot mutate or restore anything. No `git checkout` / `git restore`
+/ `git stash` is used anywhere in this tree as a restore-after-mutation path. Mutation
+harnesses here are built ad hoc, per seat, per task — which is exactly why this note exists
+rather than a shared module: the next person builds their own, and this is the part they must
+not rediscover.
 
 ## Test Comparison Matrix
 

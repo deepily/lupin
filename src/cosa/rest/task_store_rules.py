@@ -1408,6 +1408,18 @@ def validate_transition(
     if to_status == PARK_STATUS:
         errors.extend( validate_park( from_status, next_chase_ts, park_reason ) )
 
+    # Envelope-tail refusal, row 91ccbc26 (Mr. Radio's ruling 2026-08-29). Runs on
+    # EVERY transition, not just ->parked: the probe measured that `reason` carries
+    # caller markup exactly as `park_reason` does, and guarding the field we happened
+    # to notice while its sibling stays open is half a fix. Placed LAST so a caller
+    # who is both mis-transitioning and carrying a captured tag hears about the
+    # transition first — that is the error they can act on, and a markup complaint on
+    # a write that was going to be refused anyway is noise.
+    errors.extend( validate_no_envelope_tail( {
+        "park_reason" : park_reason,
+        "reason"      : reason,
+    } ) )
+
     return errors
 
 
@@ -1615,6 +1627,121 @@ def validate_patch( fields: dict ) -> list:
         errors.append( f"gate_class '{fields[ 'gate_class' ]}' must be one of {VALID_GATE_CLASSES}" )
     if "urgency" in fields and fields[ "urgency" ] not in VALID_URGENCIES:
         errors.append( f"urgency '{fields[ 'urgency' ]}' must be one of {VALID_URGENCIES}" )
+    return errors
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# TOOL-CALL ENVELOPE TAIL — A LOUD REFUSAL (row 91ccbc26)
+#
+# THE DEFECT. Two writes, sam's and Rio's, on different rows at different
+# fragment sizes, silently stored the tail of the writer's own tool-call
+# envelope inside a free-text field. Neither failed. Neither warned. Both were
+# caught only when a human re-read his own prose later.
+#
+# WHERE IT ENTERS, established by measurement rather than by the shape of the
+# bytes. A differential probe (2026-08-29, Maya) sent one 242-byte canary
+# through two entry paths — raw HTTP, and an MCP tool call — and read back an
+# identical sha256 both ways. Krishna corroborated independently with an md5
+# read straight out of postgres. So the transport and the store are FAITHFUL:
+# `park_reason` is `Optional[str]` with only a max_length, and the repository
+# does a verbatim assignment. The corruption is composed by the CALLER, above
+# the JSON boundary, and nothing this repo owns can prevent it.
+#
+# WHY THIS REFUSES RATHER THAN ADVISES (Mr. Radio's ruling, 2026-08-29). What a
+# boundary CAN fix is the property both incidents shared: silence. A refusal is
+# recoverable and known to work — sam's THIRD attempt landed clean — and it
+# turns a silent corruption into a loud, actionable failure at the moment the
+# author can still fix it.
+#
+# 🔴 TAIL-ONLY, AND THE NARROWNESS IS THE WHOLE SAFETY ARGUMENT. A corrupted
+# write and an HONEST quote are BYTE-IDENTICAL here — proven by deliberately
+# sending the exact corruption bytes as legitimate content. Nothing at this
+# boundary can read intent. So the signature must be as tight as the evidence
+# allows: a CLOSED list of known envelope tags, matched only at the very END of
+# the field. A reason may legitimately quote code, angle brackets and all, and
+# row 91ccbc26 itself quotes both specimens mid-sentence — a guard that barred
+# the characters outright, or that fired on any trailing close-tag, would refuse
+# the very rows written about this defect. Under a REFUSAL policy a false
+# positive blocks real work, so breadth is a liability; the negative tests in
+# test_task_store_markup_tail.py are the load-bearing half of this feature.
+#
+# The closed list is Krishna's (commit bb73e857), kept over an open regex on
+# Mr. Radio's ruling. The tags are assembled from pieces rather than written as
+# literals: a real close-tag typed into a source file TERMINATES the tool call
+# that writes it — the second failure mode of this same defect, which bit both
+# of us while building the fix.
+_LT = "<" + "/"
+_ENVELOPE_TAGS = (
+    _LT + "park_reason>",
+    _LT + "invoke>",
+    _LT + "parameter>",
+    _LT + "function_calls>",
+    _LT + "antml:invoke>",
+    _LT + "antml:parameter>",
+)
+
+# EXACTLY THE THREE FIELDS Mr. Radio RULED, no more. The probe MEASURED that all
+# three carry caller markup verbatim: `park_reason` on a park, `reason` on every
+# transition, `note` on every amendment. Guarding one while its siblings stay
+# open is half a fix. `body` and `title` are composed the same way and are
+# presumably exposed too, but nobody has measured them and the ruling did not
+# name them — listing an unmeasured field here would imply coverage that the
+# call sites do not provide.
+MARKUP_PRONE_FIELDS = ( "park_reason", "reason", "note" )
+
+
+def envelope_tail_tag( text ):
+    """
+    Name the tool-call closing tag `text` ENDS with, if any.
+
+    Requires:
+        - text is anything; only a str can produce a non-None result
+
+    Ensures:
+        - returns the offending tag when the value, ignoring trailing
+          whitespace, ends with one of _ENVELOPE_TAGS
+        - returns None for legitimate content, INCLUDING a value that quotes one
+          of these tags anywhere but the very end
+        - returns None for a non-str and for a blank value — validate_park and
+          the amend handler already own the "missing / blank" message and must
+          keep owning it, so this never competes for that error
+        - NEVER mutates or truncates: refusal is the caller's job, and the
+          caller still holds every byte it sent
+    """
+    if not isinstance( text, str ): return None
+    trimmed = text.rstrip()
+    for tag in _ENVELOPE_TAGS:
+        if trimmed.endswith( tag ): return tag
+    return None
+
+
+def validate_no_envelope_tail( fields ) -> list:
+    """
+    Refuse any free-text field ending in a tool-call envelope tag.
+
+    Requires:
+        - fields is a dict mapping field name -> candidate value
+
+    Ensures:
+        - returns one error string per offending field, naming BOTH the field
+          and the tag, and telling the author what to do about it — a refusal
+          the author cannot act on is just a different kind of silence
+        - returns [] when every value is clean, non-str, or absent
+        - reports EVERY violation rather than the first, matching this module's
+          existing validators
+        - never mutates the input dict and never rewrites a value
+    """
+    errors = [ ]
+    for name in sorted( fields ):
+        tag = envelope_tail_tag( fields[ name ] )
+        if tag is None: continue
+        errors.append(
+            f"{name} ends with the tool-call markup '{tag}', which is almost certainly "
+            f"your own envelope captured into the text rather than something you wrote. "
+            f"Re-send it without the trailing tag. If you genuinely meant to END on that "
+            f"tag, add a closing sentence after it."
+        )
     return errors
 
 

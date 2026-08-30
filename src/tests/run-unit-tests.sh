@@ -52,6 +52,12 @@ echo "run-unit-tests.sh: using pytest at $PYTEST" >&2
 # pytest hook at all — so the exit code, read out here, is the only thing that can report
 # it (row 73c6819d). The wrapper re-raises pytest's status verbatim; `exec` is gone
 # because an exec'd shell has no life left in which to read a status.
+# Opt-in coverage (row e2099400). OFF unless LUPIN_COVERAGE is set, so an ad-hoc
+# scoped run never emits a partial tier-wide number. run-all-tests.sh sets it for the
+# pyramid; the floor is enforced once, afterwards, by run-coverage-gate.sh.
+source "$PROJECT_ROOT/src/scripts/lib/coverage-opt-in.sh"
+COV_FLAGS="$( coverage_opt_in_flags )" || exit $?
+
 source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
-run_pytest_with_diagnosis "$PYTEST" src/tests/unit/ "$@"
+run_pytest_with_diagnosis "$PYTEST" src/tests/unit/ $COV_FLAGS "$@"
 exit $?

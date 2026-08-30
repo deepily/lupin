@@ -382,6 +382,82 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 
 :7999 is an optimization for truly fast, truly read-only work. If you cannot prove a test meets all three :7999 criteria, schedule it on :8000.
 
+### 🔴 A TIER RUN FROM A WORKTREE REPORTS ~11 FAILURES THE MAIN TREE DOES NOT HAVE
+
+**Measured 2026-08-29** (row `3d01df71`). Two seats ran the unit tier on the same sha `31b2cfce` within the hour and got **25 failures in a worktree** against **14 in the main tree**. Neither number was wrong. The gap is **exactly 11**, and all of it is state that is present in the main tree and absent from every worktree — so a worktree tier accuses the branch of breakage it does not have.
+
+| n | what is missing | how it surfaces |
+|---|---|---|
+| 9 | `src/scripts/cloud-run.env` — **gitignored** at `.gitignore:79` | `gcp_project.py:115` `RuntimeError: LUPIN_GCP_PROJECT_ID is not set…` ×8, plus `KeyError: 'dm_tutor/flash_lite'`. The whole flash-lite / vertex family. |
+| 1 | `src/terraform/envs/test/.terraform/providers` — untracked local cache | `test_terraform_invariants.py` — "provider plugins are NOT cached at …" |
+| 1 | nothing missing — **`LUPIN_ROOT` still names the MAIN repo** while you stand in the worktree | the tests catch this one themselves and print `test file` / `its tree` / `LUPIN_ROOT` side by side |
+
+**Before running a tier from a worktree:**
+
+```bash
+cd <your-worktree> && LUPIN_ROOT="$PWD" .venv/bin/python -m pytest src/tests/unit/ -q
+```
+
+`LUPIN_ROOT="$PWD"` is the one you must not forget — it is inherited from your shell and silently keeps pointing at `/…/lupin`. The other two are unfixable from inside a worktree: **subtract them, do not chase them.**
+
+⚠️ **The general shape, which outlives these three:** a worktree is `git`-identical to the main tree and **environment-identical to nothing**. Anything gitignored, untracked, or exported into your shell is a property of *where you are standing*, not of *what you are measuring*. That is why two counts should be **reconciled** rather than adjudicated — 25 − 14 = 11 with every one named is stronger evidence than either count alone, and a mismatch that reconciles is not a disagreement.
+
+⚠️ **Related, same family** — the collected-test-id diff. Some test ids bake an **absolute path** into a parametrize id, so diffing collected ids between two worktrees shows the same test as one removal plus one addition. A raw diff read `+225 / −4` and looked like the merges had deleted four tests; they had not. Compare **counts** as well as ids, and treat the agreement of the two as the check.
+
+### 🔴 "IS ANOTHER SUITE RUNNING?" — MATCH `comm`, NEVER THE COMMAND LINE
+
+Before taking the box for a tier, seats check whether anyone else is mid-run. **Measured 2026-08-29, both wrong answers on the same box within minutes:**
+
+```bash
+# ✅ CORRECT — asks what the process IS
+ps -eo comm,args --no-headers | awk '$1=="pytest" || ($1 ~ /^python/ && $0 ~ / -m pytest/)' | wc -l
+```
+
+| pattern | reported | truth |
+|---|---|---|
+| `pgrep -f "\-m pytest"` | **0** | missed a live run — the script form `.venv/bin/python3 .venv/bin/pytest` has no `-m pytest` |
+| `pgrep -af "pytest"` | **5** | four spurious |
+| `comm`-based (above) | **1** | ✅ |
+
+**The two failure modes are opposite, and the second is the dangerous one.**
+
+1. **Too narrow → you take a box someone is using.** Matching only `-m pytest` misses `pytest` invoked as a script, which is how `run-*-tests.sh` launches it.
+2. **Too broad → the gate never opens, on an idle box, silently.** `pgrep -f` searches the whole command line, and **a Claude seat's entire spawn briefing is its command line**. Three live seats — Tiberius, Rachel, Rio — matched `pytest` purely because their instructions *discussed* running tests. A briefing about testing is exactly the text most likely to contain the word, so this false positive gets **more** likely the more the fleet coordinates about the box.
+
+⇒ `comm` answers *what this process is*; the command line answers *what someone wrote about it*. A gate must ask the first question. The same trap applies to any `pgrep -f` over a fleet of agent processes — grep for a tool name and you will find every seat that was told about the tool.
+
+### 🔴 A COVERAGE LIST GOES STALE FROM A **MERGE**, NOT FROM A COMMIT
+
+**Measured 2026-08-29** (row `9595aaef`). A manager spent an evening assigning coverage work off a zero-coverage census, then retracted an assignment when the worker showed the file already at 100% with 61 tests by his own commit hours earlier. **The retraction was the error.** Checked by merge-base: that commit — and three others like it — are **not ancestors of HEAD**. They live on the workers' own branches. At HEAD no test imports that module at all, so the file is still at 0% on the branch.
+
+**Nobody was wrong. They measured different trees.**
+
+| question | answer |
+|---|---|
+| "Is my work done?" | ask the **worktree** — the tests exist and pass there |
+| "Is the branch covered?" | ask **HEAD** — and it is not, until the merge lands |
+
+⇒ **Work in an unmerged worktree moves nobody's coverage but its author's.** A seat that re-measures "in my own tree" will contradict a HEAD-derived list every single time, and both parties will have correct numbers for different propositions. That is what every tree-versus-tree argument on this epic has actually been.
+
+**Two obligations follow:**
+1. **State the sha with the list.** A coverage list without the sha it was taken at is not a measurement, it is a rumour with a timestamp. Say `at ef6e2bdc`, not "as of tonight".
+2. **Report "done" and "landed" as separate columns.** A worker's file can be finished and still be at zero on the branch. Collapsing the two is what turns an honest commit into a phantom reassignment.
+
+**And the durable fix is a command, not a list** — anyone can re-derive the current zero set at HEAD, and a list anyone can quote will outlive the tree it described:
+
+```bash
+# from your own worktree, checked out at the sha you mean to describe
+COVERAGE_FILE=/tmp/cov-$USER-$$.data LUPIN_ROOT="$PWD" \
+  .venv/bin/python -m pytest src/tests/unit/ -q --cov=src/scripts --cov-branch \
+  --cov-report=term-missing --cov-fail-under=0
+```
+
+⚠️ **Run the WHOLE tier, not a scoped subset.** A subset manufactures false zeros for any file whose only coverage comes from a test you excluded — which is the exact defect a zero list exists to find.
+
+⚠️ **AND DO NOT PASS `--cov=<path>` WHEN THE CONFIG ALREADY DEFINES `source`.** Measured 2026-08-29: a census run carried `--cov=src/scripts` out of habit, which **silently overrode** the seven-entry `source` list in `pyproject.toml` and produced a **61-file** frame instead of **73**. The twelve subdirectory files were not reported as `0%` — they were **never instrumented at all**, and the report says nothing about a file it never traced. Re-reporting the same `.coverage` data through `--rcfile` cannot recover them either; the data simply is not there.
+
+⇒ **A scoped override does not narrow the REPORT, it narrows what was ever MEASURED — and the difference is invisible in the output.** Both produce a clean table with a plausible total. Drop the flag and let the config's `source` govern; if you must scope, say in the same breath which files fell outside the frame, because "not listed" and "at zero" are different facts and only one of them is safe to act on.
+
 ## 100% COVERAGE MANDATE
 
 **Lupin-wide hard gate.** Ratified 2026-05-06 (multiplexer-only), **scope-expanded Lupin-wide 2026-05-16** ("Everything has to pass at 100%. Full stop."). CoSA inherits it as of the 2026-05-29 mono-repo fold, on a grandfathering ramp — see the TODO.md top entry (deadline 2026-06-05).
@@ -412,12 +488,14 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 **Coverage**: `pytest --cov=cosa --cov-report=html src/tests/` (Python). See §100% COVERAGE MANDATE for the hard gate.
 
+**Editing a `.py` file inside a test?** Use `tests.helpers.pyc_freshness` (`mutate_source` fixture / `refresh_source`). CPython validates a `.pyc` on the source's **whole-second** mtime **plus size**, so a mutation edit changes neither and the interpreter keeps running the *old* code after you restore the file and read it back — measured twice on 2026-08-29, on `job_state.py` and on the helper's own module (row `d18ce9ef`). ⚠️ `PYTHONDONTWRITEBYTECODE` does **not** fix it; it only stops pycs being *written*. Debugging a red you cannot explain? `find src -name '__pycache__' -type d -exec rm -rf {} +` before concluding anything. Detail: `src/tests/README.md` § EDITING A SOURCE FILE INSIDE A TEST, measurement `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
+
 **Docs**: `src/tests/README.md` (overview), `src/tests/integration/README.md`, `src/docs/automated-interactive-testing.md` (proxy), `src/tests/smoke/README.md`, `src/tests/AUTH-TESTING-GUIDE.md` (credentials), presentation strategy `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.07-e2e-testing-strategy.md`.
 
 ## PR MERGE REQUIREMENTS
 
-<!-- merge-pyramid-suites: unit cosa typescript smoke websocket e2e integration -->
-**All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **cosa (:7999 — in-tree `src/cosa/tests/**`, `src/tests/run-cosa-tests.sh`; joined the pyramid 2026-08-13, row d83d025b)** → **typescript (:8000 scheduled — `src/tests/run-typescript-tests.sh`, c8 at 100%, ~8-25 min so it fails the :7999 two-minute rubric; runs inside the capped `jstest.slice` cgroup — ban lifted 2026-08-25, row 92e94cb7)** → smoke (:7999) → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh` — read the note below before reading its verdict)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
+<!-- merge-pyramid-suites: unit cosa coverage typescript smoke websocket e2e integration -->
+**All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **cosa (:7999 — in-tree `src/cosa/tests/**`, `src/tests/run-cosa-tests.sh`; joined the pyramid 2026-08-13, row d83d025b)** → **coverage (:7999 — `src/tests/run-coverage-gate.sh`; joined the pyramid 2026-08-29, row e2099400). It does NOT re-run anything: the unit and cosa tiers above append to one isolated data file and this step renders it, checks pyproject's `fail_under`, and checks that the FRAME still measures every file it claims. Before it existed, NOTHING in the build asked for coverage — no addopts, no runner, no injection in `job.py` — so `fail_under` fired only when a human typed `--cov` by hand, and the 100% mandate had teeth on the TypeScript side only.** → **typescript (:8000 scheduled — `src/tests/run-typescript-tests.sh`, c8 at 100%, ~8-25 min so it fails the :7999 two-minute rubric; runs inside the capped `jstest.slice` cgroup — ban lifted 2026-08-25, row 92e94cb7)** → smoke (:7999) → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh` — read the note below before reading its verdict)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
 
 The **cosa tier's count was being asserted without ever being run.** Now measured **three times across two different trees**:
 
@@ -457,6 +535,86 @@ Integration is the final gate because it exercises complete user workflows acros
 - Side-door injecting :8000 tests via curl / direct `/api/push` / in-process instantiation / anything but `POST /api/test-suite/submit` — collides with in-flight runs and poisons both. (Submission itself is self-authorized on a verified-idle server; the prohibition is on the side-door, not on submitting.)
 - Curl is acceptable ONLY for: API-reference docs, deployment health checks, one-off debugging (never committed).
 - New agent? Add an automated smoke test (see `.claude/skills/agentic-voice-workflow/SKILL.md`).
+
+### 🔴 A MUTATION HARNESS CAN LIE IN BOTH DIRECTIONS — READ A SURVIVOR THREE WAYS
+
+Measured 2026-08-29 on the coverage ramp (rows `ba6df71e`, `3b78bc8a`). Two instrument defects in
+one evening, both the same failure: **the harness reporting on an execution that never happened.**
+
+**OVER-REPORT — a non-zero exit is not a red test.** pytest's rc 4/5 mean it could not RUN the node
+(usage error / nothing collected). A harness counting any non-zero rc as a kill scores its own
+misses as hits. Receipt: an rc=4 was recorded as a caught mutation; the test had been appended into
+the wrong class and never ran. ⇒ **Accept only `rc == 1`.**
+
+**STALE BYTECODE — a mutant can run as some OTHER revision of itself, and this one lies BOTH ways.**
+CPython validates a cached `.pyc` on the source's whole-second mtime and size. A mutation changing
+NEITHER — single-character and digit swaps, `return 3` → `return 0`, `<` → `>` — landing in the same
+second as the cached compile is judged unchanged, so the cached bytecode runs instead.
+
+- **False SURVIVOR**: the ORIGINAL bytecode runs, the test passes because the original is correct,
+  and the mutation reports SURVIVED. Receipt: the same mutated sha `ab030e258b72` gave rc=0 through
+  a harness and rc=1 run by hand seconds later, the only variable being bytecode caching.
+- **False KILL**: in a SEQUENTIAL harness over one file, run N+1 can load run N's bytecode. The
+  suite then fails on the PREVIOUS mutant and the harness records a kill the CURRENT mutant never
+  earned. Mechanism and retraction on row `cfe0b15d` — the narrower "only fakes survivors, so an
+  all-killed pass is safe" was believed briefly and is WRONG for the loop shape every ramp harness
+  uses. ⇒ **Purge on EVERY pass, not only one that reports a survivor.** An all-green pass is
+  exactly the one that looks like it needs no checking.
+
+🔴 **`python -B` / `PYTHONDONTWRITEBYTECODE=1` DOES NOT FIX THIS.** It suppresses *writing* a
+`.pyc`, never *trusting* one — and any repo that has ever run its tests already has the cache on
+disk. **The structural remedy is checked-hash invalidation** (`py_compile.PycInvalidationMode.CHECKED_HASH`
+/ `compileall --invalidation-mode checked-hash`), which hashes the source instead of comparing
+whole-second mtime and size, and is therefore immune to a same-size same-second edit by
+construction. Whether to adopt it repo-wide is **decision `866f43ce`**, held by the Manager, with Rick ruling — see it and row `d18ce9ef`
+and Pocholo's write-up `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md` for the
+measurements, the six priced remedies, and the +3.3% import cost. Read those rather than re-deriving
+them here.
+
+⇒ **UNTIL THAT RULING, THE PER-HARNESS INSTRUCTION IS: PURGE THE TARGET'S `__pycache__/<stem>.*.pyc`
+AFTER WRITING EACH MUTANT.** It works, and it is what a harness can do for itself today — but it is a
+habit that fails the moment someone forgets, which is exactly why the tree-level remedy above is the
+real fix and this is the seatbelt. Keep `-B` if you like; in a multi-mutant loop it stops a fresh pyc
+being laid down between mutants, but a per-mutant purge already covers that. **Adopting the flag
+alone buys the appearance of safety, not safety.**
+
+⚠️ **THE HAZARD IS NOT LIMITED TO MUTATION HARNESSES, AND IT IS CROSS-PROCESS.** A *fresh* pytest
+reads the stale pyc off disk, so any edit-then-run loop is exposed — including one an agent types by
+hand. Mutation testing is merely where it lands hardest, because mutate-and-restore are both
+same-size edits inside one second and **the failure points the wrong way**: you restore the file,
+read it back to confirm, and the interpreter keeps running the mutant.
+
+**Provenance, because three seats measured this independently and the numbers must be comparable**:
+found by Pocholo 📣 while mutation-proving AC-G4, filed and reproduced by Tiffany 💍 on row
+`d18ce9ef`, and reproduced a third time from the ramp (rows above). ⚠️ **The two published
+reproductions run OPPOSITE POLARITY** — one edits `"todo"` → `"dead"`, the other `"dead"` → `"todo"`
+— so the "wrong" answer is a different word in each. They agree completely: in both, the flag serves
+the pre-edit value. Do not read the mirrored tables as a conflict.
+
+⚠️ **THE BYTECODE FAILURE IS SELECTIVE, WHICH IS WHAT MAKES IT DANGEROUS.** A length-changing swap
+invalidates the cache on its own, so most mutations in a pass are unaffected — 11 of 12 in the
+measured case. **A harness looks healthy while lying about exactly the mutations that leave mtime
+and size unchanged.** Re-verification is cheap and worth doing on any pass that predates this rule:
+re-running an unpurged 10/10 with the purge in place reproduced 10/10 with identical mutated shas,
+so that pass held — but it was not KNOWN to hold until it was re-run.
+
+⇒ **A SURVIVING MUTANT HAS THREE EXPLANATIONS, NOT ONE.** Separate them before writing a line of
+test code:
+
+| Explanation | How to tell | Cost of getting it wrong |
+|---|---|---|
+| **A weak test** | the other two are ruled out | the only one that earns a new test |
+| **A broken harness** | re-run that ONE mutant by hand — if it reddens, the harness lied | you accept a lower kill count as the file's ceiling |
+| **An equivalent mutant** | read the edit: did it repair its own damage? | you write a test to kill something that was never a defect |
+
+Measured example of the third: an edit that dropped an `if row.get( "id" )` guard **and** swapped
+`row[ "id" ]` for `row.get( "id" )` in the same change turned a `KeyError` into a harmless `None`
+key. The mutation was wrong, not the test. **Reaching for "weak test" first is how a seat rewrites
+tests that were already fine.**
+
+**Still the floor, unchanged**: every mutation asserts it APPLIED before its result is trusted — the
+anchor matched EXACTLY once, and the on-disk sha CHANGED — plus a restore control at the end that is
+actually READ, since `git checkout` cannot restore an untracked file (row `c0a829a3`).
 
 ## TEST CREDENTIALS
 
