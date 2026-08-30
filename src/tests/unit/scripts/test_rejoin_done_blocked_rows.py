@@ -34,6 +34,7 @@ import json
 import os
 import sys
 import urllib.request
+from urllib.parse import parse_qs, urlparse
 from datetime import datetime, timezone
 
 import pytest
@@ -50,6 +51,11 @@ def _load():
     sys.modules[ _NAME ] = module
     spec.loader.exec_module( module )
     return module
+
+
+def _limit_of( url ):
+    """The `limit=` the script actually asked for — the request, not the verdict."""
+    return int( parse_qs( urlparse( url ).query )[ "limit" ][ 0 ] )
 
 
 # ── Control 1: the plugin-level tripwire ──────────────────────────────────────
@@ -147,7 +153,15 @@ class TestFetchBoard:
         calls = []
         def _request( method, url, api_key, timeout, body=None ):
             calls.append( url )
-            return pages[ len( calls ) - 1 ]
+            ok, status, page = pages[ len( calls ) - 1 ]
+            # 🔴 THE FAKE HONOURS `limit=` (row 9124b70a). It used to hand back its page whole
+            # whatever was asked, so a capped request and an uncapped one produced IDENTICAL
+            # data — the fixture could not tell them apart, and no assertion written against
+            # the returned rows could either, whatever it was named. Serving `limit` rows is
+            # what makes the two distinguishable at all.
+            if ok and isinstance( page, dict ) and "tasks" in page:
+                page = { **page, "tasks": page[ "tasks" ][ :_limit_of( url ) ] }
+            return ( ok, status, page )
         monkeypatch.setattr( mod, "_request", _request )
         return calls
 
@@ -207,6 +221,68 @@ class TestFetchBoard:
 
         assert truncated is True, "a partial board reported as complete is the false green this pass is made of"
         assert len( rows ) == 2
+
+    # ── row 9124b70a: --max-rows is a CAP, and only the REQUEST can prove it ──────────
+    # 🔴 EVERY TEST BELOW ASSERTS ON THE `limit=` THE SCRIPT ISSUES, NEVER ON THE VERDICT.
+    # That is the whole lesson of the row. The defect changed only how many rows were pulled
+    # before truncation was declared — never an exit code, never a finding, never a row count
+    # this file's fixture could see. The case ABOVE is the proof: `max_rows=2` against a
+    # 2-row page returns 2 rows under the broken code AND under the fix, so it went green
+    # either way. It was blind, not wrong.
+
+    def test_a_small_cap_is_asked_for_rather_than_a_whole_page( self, mod, monkeypatch ):
+        calls = self._pages( mod, monkeypatch, [
+            ( True, 200, { "tasks": [ _row( f"r{i}", "done" ) for i in range( 10 ) ], "has_more": True } ),
+        ] )
+
+        mod.fetch_board( SETTINGS, "key", 3 )
+
+        assert _limit_of( calls[ 0 ] ) == 3
+
+    def test_a_cap_larger_than_a_page_still_asks_for_only_a_page( self, mod, monkeypatch ):
+        """The router's `le=500` is a hard cap; asking for more is a 422, not a bigger page."""
+        calls = self._pages( mod, monkeypatch, [
+            ( True, 200, { "tasks": [ _row( "a", "done" ) ], "has_more": False } ),
+        ] )
+
+        mod.fetch_board( SETTINGS, "key", 5000 )
+
+        assert _limit_of( calls[ 0 ] ) == mod.PAGE_SIZE
+
+    def test_each_later_page_asks_for_only_the_room_that_is_left( self, mod, monkeypatch ):
+        calls = self._pages( mod, monkeypatch, [
+            ( True, 200, { "tasks": [ _row( f"a{i}", "done" ) for i in range( 4 ) ], "has_more": True } ),
+            ( True, 200, { "tasks": [ _row( f"b{i}", "done" ) for i in range( 4 ) ], "has_more": True } ),
+        ] )
+
+        rows, truncated = mod.fetch_board( SETTINGS, "key", 7 )
+
+        assert [ _limit_of( c ) for c in calls ] == [ 7, 3 ]
+        assert len( rows ) == 7
+        assert truncated is True
+
+    def test_the_rows_returned_never_exceed_the_cap( self, mod, monkeypatch ):
+        for cap in ( 1, 2, 7, 25 ):
+            calls = self._pages( mod, monkeypatch, [
+                ( True, 200, { "tasks": [ _row( f"r{i}", "done" ) for i in range( 50 ) ], "has_more": True } ),
+            ] )
+            rows, _ = mod.fetch_board( SETTINGS, "key", cap )
+            assert len( rows ) <= cap, f"--max-rows {cap} fetched {len( rows )}"
+
+    def test_a_non_positive_cap_still_asks_for_at_least_one_row( self, mod, monkeypatch ):
+        """
+        `argparse` accepts `--max-rows 0` and the router rejects `limit=0`, so without the
+        clamp the run dies on a 422 instead of returning an honest result. The `max( 1, … )`
+        arm, reachable only from a caller passing a non-positive cap.
+        """
+        calls = self._pages( mod, monkeypatch, [
+            ( True, 200, { "tasks": [ _row( f"r{i}", "done" ) for i in range( 5 ) ], "has_more": True } ),
+        ] )
+
+        rows, truncated = mod.fetch_board( SETTINGS, "key", 0 )
+
+        assert _limit_of( calls[ 0 ] ) == 1
+        assert ( len( rows ), truncated ) == ( 1, True )
 
     @pytest.mark.parametrize( "body,expected", [
         ( { "error":  "boom" },         "boom" ),
@@ -541,6 +617,25 @@ class TestMain:
 
         assert mod.main( [] ) == 3
         assert "BOARD TRUNCATED" in capsys.readouterr().err
+
+    def test_the_truncation_warning_reports_ROWS_FETCHED_not_the_flag_it_was_given( self, mod, wired, capsys ):
+        """
+        Row `9124b70a`, half (b). The warning used to interpolate `args.max_rows` — the number
+        ASKED FOR — while the run had fetched a different one, so the single figure whose job
+        is to say how partial the scan was could not be trusted.
+
+        🔴 THE TWO NUMBERS MUST DIFFER OR THE TEST CANNOT SEE THE BUG. `fetch_board` is
+        stubbed here, so this fixture can hand back a row count that is not the flag — two
+        rows under `--max-rows 500`. An ordinary case, where the honoured cap makes them
+        equal, would go green against BOTH spellings.
+        """
+        wired[ "board" ] = ( [ _blocked( "r1", [ "b1" ] ), _row( "b1", "done" ) ], True )
+
+        assert mod.main( [ "--max-rows", "500" ] ) == 3
+
+        err = capsys.readouterr().err
+        assert "BOARD TRUNCATED at 2 rows" in err
+        assert "at 500 rows"           not in err
 
     def test_truncation_outranks_a_write_failure_because_partial_beats_partial( self, mod, wired ):
         """

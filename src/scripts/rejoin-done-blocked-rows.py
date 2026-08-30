@@ -89,8 +89,14 @@ def fetch_board( settings, api_key, max_rows ):
     truncated = False
 
     while True:
+        # Ask for no more than the caller still has room for. A flat PAGE_SIZE here made
+        # `--max-rows` a page-stop THRESHOLD rather than a cap (row 9124b70a): `--max-rows 100`
+        # fetched 500 and then reported "truncated at 100 rows" — a figure the run never
+        # honoured. `max( 1, … )` is reachable only via a direct non-positive max_rows; the
+        # break below guarantees the subtraction is >= 1 on every later pass.
+        limit = max( 1, min( PAGE_SIZE, max_rows - len( rows ) ) )
         query = ( f"include_terminal=true&unscoped_audit=true&hide_parked=false"
-                  f"&limit={PAGE_SIZE}&offset={offset}" )
+                  f"&limit={limit}&offset={offset}" )
         ok, status, page = _request( "GET", f"{settings[ 'api_base_url' ]}/api/tasks?{query}",
                                      api_key, settings[ "timeout_seconds" ] )
         if not ok:
@@ -251,7 +257,7 @@ def main( argv=None ):
                f"to rejoin these {len( eligible )} row(s)." )
 
     if truncated:
-        print( f"\n⚠️  BOARD TRUNCATED at {args.max_rows} rows — blockers outside the fetched set "
+        print( f"\n⚠️  BOARD TRUNCATED at {len( rows )} rows — blockers outside the fetched set "
                f"resolve as UNRESOLVED and were held, so this run under-reports. Re-run with a "
                f"larger --max-rows before believing it found everything.", file=sys.stderr )
         return 3

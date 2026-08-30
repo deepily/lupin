@@ -37,6 +37,7 @@ import json
 import os
 import sys
 import urllib.request
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -93,6 +94,11 @@ def _raise( error ):
     return _boom
 
 
+def _limit_of( url ):
+    """The `limit=` the script actually asked for — the request, not the verdict."""
+    return int( parse_qs( urlparse( url ).query )[ "limit" ][ 0 ] )
+
+
 class RanAway( AssertionError ):
     """The paging loop did not terminate."""
 
@@ -119,7 +125,15 @@ def wired( mod, monkeypatch ):
             raise RanAway( f"fetch_board asked for more than {MAX_PAGES} pages — the paging "
                            f"loop is not terminating" )
         index = min( len( state[ "calls" ] ) - 1, len( state[ "pages" ] ) - 1 )
-        return ( True, 200, state[ "pages" ][ index ] )
+        page  = state[ "pages" ][ index ]
+        # 🔴 THE FAKE HONOURS `limit=`, AND THAT IS THE WHOLE POINT (row 9124b70a).
+        # It used to return its page whole whatever was asked, so a capped request and an
+        # uncapped one produced IDENTICAL data — the fixture could not tell them apart, and no
+        # assertion written against the returned rows could either, however it was named. That
+        # is Maya's reading of a surviving mutant: the fault is in the DATA, not the
+        # assertions. Serving `limit` rows makes the two distinguishable at all.
+        served = { **page, "tasks": page.get( "tasks", [ ] )[ :_limit_of( url ) ] }
+        return ( True, 200, served )
 
     monkeypatch.setattr( mod, "_request", _request )
     monkeypatch.setattr( mod, "read_api_key", lambda: "test-key" )
@@ -246,8 +260,88 @@ class TestFetchBoard:
         rows, truncated = mod.fetch_board( SETTINGS, "k", 1 )
 
         assert truncated is True
-        assert [ r[ "id" ] for r in rows ] == [ "a", "b" ]
+        assert [ r[ "id" ] for r in rows ] == [ "a" ], "max_rows is a CAP, not a page-stop threshold"
         assert len( wired[ "calls" ] ) == 1
+
+
+class TestMaxRowsIsACap:
+    """
+    Row `9124b70a`. `--max-rows` used to name a limit the run never honoured: the request went
+    out as a flat `limit=PAGE_SIZE`, so `--max-rows 100` fetched 500 rows and then announced
+    "truncated at 100 rows".
+
+    🔴 EVERY TEST HERE ASSERTS ON THE REQUEST THE SCRIPT ISSUES, NOT ON THE VERDICT IT REACHES.
+    That is the whole lesson of the row. The defect never changed an exit code, a finding or a
+    row count that any fixture could see — it changed only how many rows were pulled before
+    truncation was declared. A test written against the verdict goes green on the broken code
+    AND stays green after the fix, which is the state this file and its sibling were both in.
+    """
+
+    def test_a_small_cap_is_asked_for_rather_than_a_whole_page( self, mod, wired ):
+        wired[ "pages" ] = [ { "tasks": [ _row( f"r{i}", "queued" ) for i in range( 10 ) ],
+                               "has_more": True } ]
+
+        mod.fetch_board( SETTINGS, "k", 3 )
+
+        assert _limit_of( wired[ "calls" ][ 0 ][ 1 ] ) == 3
+
+    def test_a_cap_larger_than_a_page_still_asks_for_only_a_page( self, mod, wired ):
+        """The router's `le=500` is a hard cap; asking for more is a 422, not a bigger page."""
+        wired[ "pages" ] = [ { "tasks": [ _row( f"r{i}", "queued" ) for i in range( 10 ) ],
+                               "has_more": False } ]
+
+        mod.fetch_board( SETTINGS, "k", 5000 )
+
+        assert _limit_of( wired[ "calls" ][ 0 ][ 1 ] ) == mod.PAGE_SIZE
+
+    def test_each_later_page_asks_for_only_the_room_that_is_left( self, mod, wired ):
+        """
+        The arithmetic, page by page. A flat page size here is the defect itself; asking for
+        the REMAINDER is what makes the flag mean what its name says.
+        """
+        wired[ "pages" ] = [ { "tasks": [ _row( f"a{i}", "queued" ) for i in range( 4 ) ],
+                               "has_more": True },
+                             { "tasks": [ _row( f"b{i}", "queued" ) for i in range( 4 ) ],
+                               "has_more": True } ]
+
+        rows, truncated = mod.fetch_board( SETTINGS, "k", 7 )
+
+        assert [ _limit_of( c[ 1 ] ) for c in wired[ "calls" ] ] == [ 7, 3 ]
+        assert len( rows ) == 7
+        assert truncated is True
+
+    def test_the_rows_returned_never_exceed_the_cap( self, mod, wired ):
+        """The property a caller actually relies on, stated once rather than per-case."""
+        wired[ "pages" ] = [ { "tasks": [ _row( f"r{i}", "queued" ) for i in range( 50 ) ],
+                               "has_more": True } ]
+
+        for cap in ( 1, 2, 7, 25, 50 ):
+            wired[ "calls" ].clear()
+            rows, _ = mod.fetch_board( SETTINGS, "k", cap )
+            assert len( rows ) <= cap, f"--max-rows {cap} fetched {len( rows )}"
+
+    def test_a_board_smaller_than_the_cap_is_not_reported_as_truncated( self, mod, wired ):
+        """The cap must not manufacture a partial verdict on a board that fitted."""
+        wired[ "pages" ] = [ { "tasks": [ _row( "a", "queued" ), _row( "b", "queued" ) ],
+                               "has_more": False } ]
+
+        rows, truncated = mod.fetch_board( SETTINGS, "k", 100 )
+
+        assert ( len( rows ), truncated ) == ( 2, False )
+
+    def test_a_non_positive_cap_still_asks_for_at_least_one_row( self, mod, wired ):
+        """
+        `argparse` accepts `--max-rows 0`, and the router rejects `limit=0`. Without the clamp
+        the run would die on a 422 instead of returning an honest empty-ish result. This is the
+        `max( 1, … )` arm, and it is reachable only from a caller passing a non-positive cap.
+        """
+        wired[ "pages" ] = [ { "tasks": [ _row( f"r{i}", "queued" ) for i in range( 5 ) ],
+                               "has_more": True } ]
+
+        rows, truncated = mod.fetch_board( SETTINGS, "k", 0 )
+
+        assert _limit_of( wired[ "calls" ][ 0 ][ 1 ] ) == 1
+        assert ( len( rows ), truncated ) == ( 1, True )
 
     def test_a_failed_request_raises_rather_than_returning_an_empty_board( self, mod, monkeypatch ):
         """
@@ -336,6 +430,27 @@ class TestMainExitCodes:
         assert "BOARD TRUNCATED" in captured.err
         assert "PARTIAL"         in captured.err
         assert "(no dead id-citations found)" in captured.out
+
+    def test_the_truncation_warning_reports_ROWS_FETCHED_not_the_flag_it_was_given( self, mod, wired, capsys ):
+        """
+        Row `9124b70a`, half (b). The warning used to interpolate `args.max_rows` — the number
+        ASKED FOR — while the run had fetched a different number, so the one figure whose job
+        is to say how partial the scan was could not be trusted.
+
+        🔴 THIS NEEDS A CASE WHERE THE TWO NUMBERS DIFFER, or the test cannot see the bug.
+        Now that the cap is honoured they are equal on every ordinary truncation, so an
+        ordinary case would go green against BOTH spellings — the same blind fixture this row
+        is about. `--max-rows 0` is the one input that separates them: the clamp asks for one
+        row, so the flag says 0 and the run fetched 1.
+        """
+        wired[ "pages" ] = [ { "tasks": [ _row( f"r{i}", "queued", body="clean" ) for i in range( 5 ) ],
+                               "has_more": True } ]
+
+        assert mod.main( [ "--max-rows", "0" ] ) == 3
+
+        err = capsys.readouterr().err
+        assert "BOARD TRUNCATED at 1 rows" in err
+        assert "at 0 rows"             not in err
 
     def test_a_truncated_board_with_findings_still_exits_3_not_1( self, mod, wired ):
         """Truncation outranks findings: the count is a floor, not a total."""
