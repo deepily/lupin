@@ -354,6 +354,31 @@ AMNESTY_ROWS       = 190
 # ─────────────────────────────────────────────────────────────────────────────────────
 ROTATION_HELD_SHA = "8675ec7a1c0c677e56dc6e243be7af51ee2c715f17ec6a93e1a3c731c360633f"
 ROTATION_HELD_COMMIT = "034e44ac"   # the held commit carrying the done-but-unmergeable re-scan
+def _rotation_held_notice():
+    """
+    The refusal, emitted ONLY while the hold is active.
+
+    🔴 ONE CONDITION FOR BOTH HALVES, WHICH IS THE WHOLE POINT. The recipe-withholding was
+    gated on `_rotation_hold_is_active()` and this notice was gated on nothing, so flipping
+    the flag HALF-lifted the hold: measured 2026-08-30 with the flag False, the recipe
+    RETURNED while this notice still insisted it was REFUSED — the same contradiction the
+    hold exists to remove, pointing the other way. Reproduced independently by Tiberius 👑
+    and cleared by Rachel 🕊️ in the same minute. Two halves of one condition on two switches
+    WILL drift apart, and them drifting apart IS the defect (Mr Radio's ruling; a second flag
+    would have reproduced it with more ceremony).
+
+    Requires:
+        - nothing; safe to call in either hold state
+
+    Ensures:
+        - hold ACTIVE -> the refusal, naming the held commit and the refused sha
+        - hold CLEAR  -> the empty string, so a lifted hold stops shouting
+    """
+    if not _rotation_hold_is_active(): return ""
+
+    return ROTATION_HELD_NOTICE
+
+
 ROTATION_HELD_NOTICE = (
     "\n"
     "  🔴 DO NOT CLEAR THIS RED BY RECORDING A SCAN.\n"
@@ -485,7 +510,7 @@ def test_a_detector_change_forces_a_full_rescan():
         f"    last recorded     : {recorded[ 'scanned_at' ]}, "
         f"{recorded[ 'distinct_values_at_tip' ]} distinct values, "
         f"{recorded[ 'real_findings' ]} real"
-        + ROTATION_HELD_NOTICE
+        + _rotation_held_notice()
     )
 
     # The COUNTS guard that used to live here now has its own test — see
@@ -550,7 +575,7 @@ def test_the_recorded_counts_are_derived_from_the_same_scan():
         "claim to summarise, and a count that moved means FINDINGS moved:\n"
         + "".join( f"    {field:28}: recorded {recorded.get( field )!r}, measured {value!r}\n"
                    for field, value in counted.items() )
-        + ROTATION_HELD_NOTICE
+        + _rotation_held_notice()
     )
 
     # 🔴 `real_findings` IS DELIBERATELY NOT ASSERTED HERE, AND THAT IS THE REMAINING HOLE.
@@ -607,7 +632,7 @@ def test_the_rescan_red_still_carries_the_two_shas_that_make_it_actionable():
         "before rotation" )
 
     source = inspect.getsource( test_a_detector_change_forces_a_full_rescan )
-    assert "ROTATION_HELD_NOTICE" in source, (
+    assert "_rotation_held_notice" in source, (
         "the rescan red no longer appends ROTATION_HELD_NOTICE, so the warning reaches "
         "nobody who hits it. Re-attach it to the assert message." )
 
@@ -673,6 +698,37 @@ def test_the_hold_is_declared_not_derived_from_any_sha_or_scan():
     """
     import inspect
     assert inspect.signature( _rotation_hold_is_active ).parameters == {}
+
+
+def test_lifting_the_hold_silences_the_refusal_as_well_as_restoring_the_recipe():
+    """
+    ONE SWITCH, BOTH HALVES. Before this, the recipe-withholding was gated and the refusal
+    was not, so flipping the flag restored the recipe while the notice kept insisting it was
+    REFUSED — the contradiction the hold exists to remove, pointing the other way.
+
+    🔴 THIS TEST ONLY MEANS SOMETHING IF IT CHECKS THE FLIPPED STATE. Asserting the notice is
+    present today would pass against both the gated and the ungated version, since today the
+    hold IS active. The discriminating case is the one nobody will run until rotation day.
+
+    Patches `sys.modules[ __name__ ]`, not the dotted name — Tiberius measured that the dotted
+    form resolves, does not trip raising=True, and patches a SECOND copy of the module while
+    the running one keeps its old value.
+    """
+    import sys
+
+    assert _rotation_held_notice() != "", "while the hold stands the refusal must be emitted"
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr( sys.modules[ __name__ ], "ROTATION_HOLD_ACTIVE", False )
+        assert _rotation_held_notice() == "", (
+            "once the hold lifts the refusal must go SILENT — otherwise the recipe returns "
+            "while the notice still calls it refused, which is the same contradiction "
+            "pointing the other way" )
+    finally:
+        monkeypatch.undo()
+
+    assert _rotation_held_notice() != "", "the flag must be restored after the flip"
 
 
 def test_findings_never_carry_the_value():
