@@ -441,6 +441,56 @@ at `625665bb`: **120 passed, 1 skipped, 0 failed**. (120 is every test in those 
 trees: `src/scripts/cloud-run.env` and `src/terraform/envs/test/.terraform/providers` are PRESENT in
 the main tree and ABSENT in the worktree.
 
+🔴 **AND A THIRD MEASUREMENT FOUND A THIRD VARIABLE: WHETHER THE WORKTREE HAS A `.venv` AT ALL.
+WITHOUT ONE THE GAP IS 43 OR 44, NOT 10 OR 11 — AND THIS IS THE SAME FINDING AGAIN, NOT A NEW
+DISPUTE.** Measured by Maya 🌻 2026-08-30 at sha `a4fd4551`, root
+`/mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-maya-5246-mergecheck`, `LUPIN_ROOT="$PWD"`
+exported. **The two rows above silently assume a `.venv` is present** — the remedy block prescribes
+`.venv/bin/python`, so a tree without one cannot even run the command this section hands you, and
+the reader who hits that has no number here to land on. Now they do.
+
+| | 08-29 (`3d01df71`) | 08-30 (Rio, `cc336880`) | 08-30 (Maya, `a4fd4551`) |
+|---|---|---|---|
+| `LUPIN_ROOT` exported? | no | yes | **yes** |
+| worktree has a `.venv`? | **yes** | **yes** | **NO** |
+| flash-lite / vertex (`cloud-run.env`) | 9 | 9 | 9 |
+| terraform provider cache | 1 | 1 | 1 |
+| wrong-tree `LUPIN_ROOT` row | 1 | 0 | 0 |
+| **missing-`.venv` rows** | **0** | **0** | **33** |
+| **gap** | **11** | **10** | **43** |
+
+**Verified both directions, in one tree, flipping one variable.** The seven files carrying those 33
+— `test_coverage_frame_excludes_non_src.py`, `test_coverage_gate_tier_status.py`,
+`test_presentation_regression_tier_classification.py`, `test_runner_collection_diagnosis.py`,
+`test_runner_coverage_blindness.py`, `test_runner_venv_pytest_guard.py`,
+`test_v2_survives_v1_excision.py` — fail with no `.venv` and give **124 passed, 1 skipped, 0 failed**
+the moment the main repo's `.venv` is symlinked in. The failure is a plain
+`FileNotFoundError: …/<worktree>/.venv/bin/python`. **And the branch under test was exonerated by a
+control, not by subtraction**: the same 33 reproduce identically at the base with the branch's merge
+absent — `comm` empty in both directions, not merely equal counts.
+
+⚠️ **THE 44th IS NOT AN ARTIFACT.** The raw tier reported **44 failed**; 43 are environment and the
+last is `test_secret_scan::test_a_detector_change_forces_a_full_rescan`, a known branch-level red
+held until a credential rotation lands. **Subtract 43, never 44** — folding a real held red into an
+artifact count is how a genuine signal gets explained away by its neighbours.
+
+🔴 **AND HERE IS THE PART THAT GENERALISES: A POPULATION CHOSEN BY GREP CANNOT FIND BREAKAGE OUTSIDE
+THE GREP.** Row `9b2abfb7` carries an earlier count of **14 → 1** across the 25 unit files whose text
+mentions `.venv`, and that number was reached the RIGHT way — by running both ways rather than
+assuming. Re-running that same method at `a4fd4551` (30 such files today) gives **19**, while the
+whole tier gives **33**. The two do not conflict: the grep-derived failures are a strict **subset**
+of the tier's, and the **14** extra live in `test_presentation_regression_tier_classification.py`
+and `test_runner_collection_diagnosis.py`, which mention `.venv` **zero times** — they shell out to
+a runner that resolves the interpreter for them. ⇒ **Running instead of grepping fixed the
+verification and left the SELECTION grep-shaped, so the improved instrument still could not see 14
+of its own class.** Widen the population before you widen the trust; the honest scope line is *"14
+failures across the files that name it"*, never *"14 failures."*
+
+⇒ **Wiring this symlink into the spawn path is row `9b2abfb7`** (Krishna 🦚, blocked on Rick's word —
+the spawn path is shared infrastructure every future seat inherits). Until it is ruled, symlinking is
+a manual step, and a step that depends on remembering is not installed. **The measurement above is
+what a forgotten step costs: 33 red tests that look like a broken branch.**
+
 ⚠️ **AND SUBTRACTING THE ARTIFACTS IS NOT THE WHOLE JOB — CHECK WHETHER THE BRANCH MOVED.** In the
 same reconciliation, 8 of the 9 remaining failures also passed in the main tree, and it would have
 been wrong to file them as worktree artifacts too: the main tree was a **descendant** of the
