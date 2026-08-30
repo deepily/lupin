@@ -217,6 +217,79 @@ def _masked_rows( findings ):
              for origin, _lineno, key, _len, digest in findings }
 
 
+# ── THE AMNESTY, stated in code rather than only in the data (Tiberius, reviewing 72c9e6a2) ──
+#
+# 190 rows carry this exact string instead of an individual reason. That is a DELIBERATE
+# AMNESTY, not an oversight: they were triaged COLLECTIVELY on 2026-08-17 by chloe + rachel
+# (see `branch_triage_note`), and re-triaging 190 rows was not part of closing this defect.
+#
+# IT IS DATED AND IT IS BOUNDED. Dated, because reusing this string on a finding discovered
+# after 2026-08-17 is an affirmative false statement rather than a shortcut — the date makes
+# that visible to a reviewer. Bounded, because `AMNESTY_ROWS` below pins how many rows may
+# ride it: paste it onto a new finding and the count grows and the gate reds. Without that
+# pin the amnesty would be an open door with a polite sign on it, which is the shape of the
+# defect this whole change is closing.
+GRANDFATHER_REASON = "grandfathered: collectively triaged 2026-08-17, see branch_triage_note"
+AMNESTY_ROWS       = 190
+
+
+def amnesty_rows( recorded ):
+    """
+    The rows riding the 2026-08-17 collective triage rather than an individual reason.
+
+    Requires:
+        - recorded is the parsed fixture dict with a MAPPING branch_accepted
+
+    Ensures:
+        - returns the sorted list of rows whose reason is exactly GRANDFATHER_REASON
+        - a row with its OWN reason is not counted, so individually re-triaging one
+          SHRINKS the amnesty — the only direction that should ever be free
+        - never raises on an empty mapping
+    """
+    accepted = recorded[ "branch_accepted" ]
+    return sorted( row for row, reason in accepted.items() if reason == GRANDFATHER_REASON )
+
+
+
+def accepted_rows_and_unjustified( recorded ):
+    """
+    Split `branch_accepted` into the accepted set and the rows accepted WITHOUT a reason.
+
+    WHY THIS EXISTS (row off the 2026-08-30 working-tree-artifact audit). `branch_accepted`
+    was a list of bare strings, so the gate could not tell a TRIAGED acceptance from a
+    PASTED one — and the pasting move was the documented remediation: the failure message
+    told you to add the row, and adding the row was the whole procedure. A real credential
+    could therefore be waved through by someone following the instructions correctly and
+    hurriedly. No malice required, which is what made it the likeliest of the seven
+    false-greens to actually fire.
+
+    The fix is the discipline the task store already enforces on `->done`: if you cannot
+    cite a reason, the work is not done. Every accepted row now carries one.
+
+    Requires:
+        - recorded is the parsed fixture dict
+
+    Ensures:
+        - returns ( accepted_set, unjustified_rows ) — both derived from the SAME mapping,
+          so a row can never be silently accepted while being reported as unjustified
+        - a MAPPING is required. A bare list raises TypeError rather than being tolerated:
+          a compatibility fallback here would preserve the exact hole this closes
+        - a reason that is missing, None, blank, or whitespace-only counts as UNJUSTIFIED
+        - never raises on an empty mapping
+    """
+    accepted = recorded[ "branch_accepted" ]
+    if not isinstance( accepted, dict ):
+        raise TypeError(
+            "branch_accepted must be a MAPPING of row -> reason, not "
+            f"{type( accepted ).__name__}. A bare list cannot distinguish a triaged "
+            "acceptance from a pasted one, which is the defect this shape closes."
+        )
+
+    unjustified = sorted( row for row, reason in accepted.items()
+                          if not ( reason or "" ).strip() )
+    return set( accepted ), unjustified
+
+
 def test_a_detector_change_forces_a_full_rescan():
     """
     The trigger a calendar cannot cover (Mr Radio, 2026-08-17), built so it cannot be
@@ -319,7 +392,18 @@ def test_the_branch_we_commit_to_carries_no_untriaged_finding():
 
     _require_ref( recorded[ "branch_ref" ], root )
 
-    accepted = set( recorded[ "branch_accepted" ] )
+    accepted, unjustified = accepted_rows_and_unjustified( recorded )
+
+    # Checked BEFORE the scan: an acceptance with no reason is a defect in the record
+    # itself, true regardless of what the branch currently carries, and reporting it
+    # first stops it hiding behind a slow scan that may pass.
+    assert not unjustified, (
+        f"{len( unjustified )} accepted row(s) carry NO reason. An acceptance nobody can "
+        "justify is indistinguishable from one nobody made:\n"
+        + chr( 10 ).join( "    " + row for row in unjustified )
+        + "\n\nGive each a one-line reason saying why it is not a real credential."
+    )
+
     measured = _masked_rows( secret_scan.scan_ref( recorded[ "branch_ref" ], cwd=root ) )
     untriaged = sorted( measured - accepted )
 
@@ -329,6 +413,148 @@ def test_the_branch_we_commit_to_carries_no_untriaged_finding():
         "Values are masked — key, path and a truncated digest, never the secret:\n"
         + chr( 10 ).join( "    " + row for row in untriaged )
         + "\n\nIf one is real, remove it and read it from the environment or the secret store. "
-          "If it is a false positive, triage it and add its row above to branch_accepted:\n"
+          "If it is a false positive, triage it and add its row to branch_accepted AS A KEY "
+          "WHOSE VALUE IS A ONE-LINE REASON — a bare row is refused:\n"
         + steps
     )
+
+
+# ── the justification gate — negative controls ────────────────────────────────────
+#
+# THE CASE THIS GATE WAS PASSING, and these prove it now reds. Before 2026-08-30
+# `branch_accepted` was a list of bare strings, so a row pasted in without triage was
+# indistinguishable from one triaged properly — and pasting was what the failure message
+# told you to do. Each control below is the fooling move, executed.
+
+def test_a_pasted_row_with_no_reason_is_refused():
+    """THE NEGATIVE CONTROL. This is exactly what the gate used to accept in silence."""
+    recorded = { "branch_accepted": {
+        "src/cosa/rest/db.py|DB_PASSWORD|sha256:c20cc404fe15": "",   # ← the pasted row
+        "src/tests/thing.py|password|sha256:aaaaaaaaaaaa"    : "planted fixture, not real",
+    } }
+    accepted, unjustified = accepted_rows_and_unjustified( recorded )
+
+    assert unjustified == [ "src/cosa/rest/db.py|DB_PASSWORD|sha256:c20cc404fe15" ]
+    # and it is STILL in the accepted set — the two are derived from one mapping, so a row
+    # can never be quietly accepted while being reported as unjustified
+    assert len( accepted ) == 2
+
+
+@pytest.mark.parametrize( "reason,label", [
+    ( "",       "empty string" ),
+    ( "   ",    "whitespace only" ),
+    ( "\t\n",   "tabs and newlines" ),
+    ( None,     "explicit null" ),
+] )
+def test_every_shape_of_absent_reason_is_refused( reason, label ):
+    """A reason that is present-but-empty must not read as present. `" "` is truthy."""
+    recorded = { "branch_accepted": { "a|b|sha256:1": reason } }
+    _, unjustified = accepted_rows_and_unjustified( recorded )
+    assert unjustified == [ "a|b|sha256:1" ], f"{label} was accepted as a reason"
+
+
+def test_a_justified_row_passes():
+    """The positive control — without it the test above is satisfied by a broken helper."""
+    recorded = { "branch_accepted": { "a|b|sha256:1": "synthetic value in a test fixture" } }
+    accepted, unjustified = accepted_rows_and_unjustified( recorded )
+
+    assert unjustified == [ ]
+    assert accepted == { "a|b|sha256:1" }
+
+
+def test_a_bare_list_is_refused_rather_than_tolerated():
+    """
+    A compatibility fallback here would preserve the exact hole this closes, so the old
+    shape is a TypeError. Named explicitly because "be lenient with the old format" is the
+    obvious next edit somebody makes.
+    """
+    with pytest.raises( TypeError ) as error:
+        accepted_rows_and_unjustified( { "branch_accepted": [ "a|b|sha256:1" ] } )
+    assert "MAPPING" in str( error.value )
+
+
+def test_the_live_fixture_carries_a_reason_for_every_accepted_row():
+    """
+    The gate applied to the real record — the half that would catch a future paste.
+
+    Kept separate from the scanning test so it runs in milliseconds and fails for its own
+    reason: this one is about the RECORD, and stays true whatever the branch carries.
+    """
+    import json
+    recorded = json.load( open( cu.get_project_root()
+                                + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json" ) )
+    # Same independence rule as the amnesty bound above: read the record directly, then
+    # cross-check the helper against it. A helper returning ( set(), [] ) would otherwise
+    # certify any record at all.
+    direct_unjustified = sorted( row for row, reason in recorded[ "branch_accepted" ].items()
+                                 if not ( reason or "" ).strip() )
+    accepted, unjustified = accepted_rows_and_unjustified( recorded )
+
+    assert unjustified == direct_unjustified, (
+        f"accepted_rows_and_unjustified disagrees with a direct read: helper says "
+        f"{len( unjustified )} unjustified, the file says {len( direct_unjustified )}."
+    )
+    assert accepted, "the record holds no accepted rows at all — this test would pass on anything"
+
+    assert direct_unjustified == [ ], (
+        f"{len( direct_unjustified )} accepted row(s) in the live record carry no reason:\n"
+        + chr( 10 ).join( "    " + row for row in direct_unjustified )
+    )
+    assert len( accepted ) == 190, "the grandfathered set changed size — re-triage before re-pinning"
+
+
+def test_the_amnesty_is_bounded_and_cannot_absorb_a_new_finding():
+    """
+    THE SEAM I FLAGGED TO MY OWN REVIEWER, now closed (Tiberius, reviewing 72c9e6a2).
+
+    Giving 190 rows a shared grandfather reason satisfies "every row has a reason" while
+    leaving an open door: paste that same string onto a NEW finding and it reads as
+    triaged. Pinning the count shuts it — the amnesty may shrink as rows are individually
+    re-triaged, never grow.
+    """
+    import json
+    recorded = json.load( open( cu.get_project_root()
+                                + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json" ) )
+
+    # ⚠️ COUNTED DIRECTLY FROM THE RECORD, NOT VIA amnesty_rows (Tiberius, reviewing
+    # 177c3542). Policing the amnesty with the very helper the amnesty is expressed in
+    # means a DEAD helper — one returning [] for any input — makes this test pass
+    # vacuously. The instrument cannot be its own control. Two independent readings,
+    # cross-checked below, so a broken helper reddens rather than certifies.
+    direct = [ row for row, reason in recorded[ "branch_accepted" ].items()
+               if reason == GRANDFATHER_REASON ]
+    riding = amnesty_rows( recorded )
+
+    assert sorted( riding ) == sorted( direct ), (
+        f"amnesty_rows disagrees with a direct read of the record: helper says "
+        f"{len( riding )}, the file says {len( direct )}. The helper is wrong, or the "
+        "record's shape changed under it — either way the bound below means nothing."
+    )
+    assert direct, (
+        "NO row rides the amnesty. Either every row was individually re-triaged — worth "
+        "saying out loud and re-pinning AMNESTY_ROWS to 0 — or this test is reading an "
+        "empty record and would pass on anything."
+    )
+
+    assert len( direct ) <= AMNESTY_ROWS, (
+        f"{len( direct )} rows now ride the 2026-08-17 amnesty, up from {AMNESTY_ROWS}. "
+        "A finding discovered after that date cannot have been triaged on it — give the new "
+        "row its own reason, or say plainly why the amnesty was widened."
+    )
+
+
+def test_pasting_the_amnesty_string_onto_a_new_finding_is_caught():
+    """The negative control for the bound: the fooling move, executed."""
+    recorded = { "branch_accepted": { f"row{i}|k|sha256:{i}": GRANDFATHER_REASON
+                                      for i in range( AMNESTY_ROWS + 1 ) } }
+    riding = amnesty_rows( recorded )
+
+    assert len( riding ) == AMNESTY_ROWS + 1
+    assert len( riding ) > AMNESTY_ROWS, "the bound must catch a grown amnesty"
+
+
+def test_individually_retriaging_a_row_shrinks_the_amnesty():
+    """The positive control — shrinking must stay free, or nobody will ever re-triage."""
+    recorded = { "branch_accepted": { "a|k|sha256:1": GRANDFATHER_REASON,
+                                      "b|k|sha256:2": "checked 2026-08-30: synthetic fixture" } }
+    assert amnesty_rows( recorded ) == [ "a|k|sha256:1" ]

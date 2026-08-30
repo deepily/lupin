@@ -102,9 +102,21 @@ and report it in complete good faith — the run really did pass, in the only tr
 marker is what separates *"I fixed it"* from *"my directory differs from the branch"*, and it costs
 one command.
 
-⚠️ **The class is wider than the secret scanner.** Any gate reading a pinned baseline, a recorded
-census or a fixture from the working tree behaves the same way — the coverage gate is the obvious
-neighbour. No audit of the others has been done; the tell applies to all of them.
+⚠️ **The class is wider than the secret scanner**, and it splits in two. The audit is at
+`src/rnd/v0.2.1/2026.08.30-working-tree-artifact-gate-audit.md`; the short version:
+
+- **TRACKED records** — the secret-scan fixture, the parity-oracle goldens, `pyproject.toml`'s
+  `fail_under`. Editing one turns red into green, and the `" M"` above catches all of them.
+  (`run-coverage-gate.sh` already prints `tracked-dirty=` for exactly this reason.)
+- 🔴 **GITIGNORED artifacts — `git status` CANNOT SEE THESE, so the tell above is blind.** An
+  ignored path produces no output at all, not even `??`. Two gates read one today:
+  `test_freeze.py` reads a DM corpus under `src/tmp/`, and `test_terraform_invariants.py` reads
+  a provider cache under `.terraform/`. Present ⇒ the tests run; absent ⇒ they **skip**, and the
+  summary still says green. Measured: `test_freeze.py` reports 494 passed on a host that has the
+  corpus; seven of its test functions skip on one that does not.
+
+⇒ **If a gate reads a path git ignores, its result is a property of your machine and no marker
+will tell you.** That one is answered by the audit above, once — not by a seat before every run.
 
 ## Test Hierarchy
 
