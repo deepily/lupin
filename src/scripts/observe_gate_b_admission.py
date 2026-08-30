@@ -398,5 +398,6 @@ def _report( args, my_job_id, qualifying, n ):
     return 1
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - unreachable under pytest: __name__ is the
+                            #   module name, never "__main__"
     sys.exit( main() )
