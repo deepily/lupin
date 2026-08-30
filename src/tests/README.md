@@ -344,6 +344,72 @@ long after, not during — but do not record it as though it protects the gap. I
 
 ---
 
+## Mutation harnesses: restore by BYTE SNAPSHOT, and verify the restore
+
+Row `c0a829a3`, 2026-08-29. Tiberius reported this against his own work while closing
+`f42ac20c`, and caught it before it reached a claim:
+
+> "My first mutation harness restored with `git checkout`, which CANNOT restore an
+> UNTRACKED file. Three mutations stacked silently and the 'restored' line read
+> 4 failed instead of 7 passed. That line is the only reason I noticed."
+
+**The mechanism, measured 2026-08-29 rather than repeated.** `git checkout -- <path>` restores
+a file from the index, and a file git does not track has nothing to restore FROM — so the
+mutation stays on disk and every mutation after the first lands on a tree still carrying the
+one before it. This bites hardest exactly where mutation testing is most common: a test file
+added in the same commit is UNTRACKED while you are mutating against it.
+
+⚠️ **But it does NOT fail silently, and that changes where the fix goes.** Run live against an
+untracked file, `git checkout --` exits **1** and prints
+`error: pathspec '<path>' did not match any file(s) known to git`. So the restore announces
+its own failure; what makes the mutations stack is a harness that **does not check the exit
+code** — `subprocess.run(...)` without `check=True`, or a shell call whose status is
+discarded. Read that as the actual rule: *a restore step whose result you do not check is not
+a restore.* The byte-snapshot below is still the right tool, because it is the only one that
+works on an untracked file at all — but an unchecked `git checkout` is what turns a loud
+failure into a silent one.
+
+**Do this instead** — read the bytes, write them back, and *check*:
+
+```python
+import hashlib, pathlib
+p        = pathlib.Path( target )
+original = p.read_bytes()                      # snapshot BEFORE the first mutation
+before   = hashlib.sha256( original ).hexdigest()
+try:
+    p.write_bytes( mutated )
+    ...run the suite, record the result...
+finally:
+    p.write_bytes( original )                  # restore
+    after = hashlib.sha256( p.read_bytes() ).hexdigest()
+    if after != before:                        # ⬅ THE CONTROL. Do not skip it.
+        raise SystemExit( f"RESTORE FAILED for {p}: {before} != {after}" )
+```
+
+**The control is the deliverable, not the mutation results.** A harness must end with a
+restore-and-verify pass and must FAIL LOUDLY when the tree does not come back byte-identical.
+A mutation run whose control was never checked is not evidence — it is a list of numbers
+measured against a tree nobody intended. Tiberius only caught his because he ran a final
+control and read it.
+
+⚠️ **Never use `git stash` as the restore mechanism.** The stash stack is **repo-global** and
+shared across every worktree and every live session — measured 2026-08-23 (bug `1ebc9be3`),
+where one seat's pop applied another seat's held work into the wrong tree. A `stash_guard.py`
+PreToolUse hook denies the mutating verbs. A byte snapshot held in your own process is the
+correct tool, and it is also the only one that works on an untracked file.
+
+⚠️ **Mutate in your own worktree, on files you own.** Never mutate a file in the shared tree
+while peers are live in it.
+
+**Scope, measured 2026-08-29 rather than assumed:** no SHARED harness in this repo is exposed.
+The only tracked tool with "mutant" in its name — `src/tests/tools/mutant_adequacy_generator.py`
+— derives how many mutants a predicate *should* have and performs **no file writes and no
+subprocess calls**, so it cannot mutate or restore anything. No `git checkout` / `git restore`
+/ `git stash` is used anywhere in this tree as a restore-after-mutation path. Mutation
+harnesses here are built ad hoc, per seat, per task — which is exactly why this note exists
+rather than a shared module: the next person builds their own, and this is the part they must
+not rediscover.
+
 ## Test Comparison Matrix
 
 | Test Type | Count | Files | Speed | Dependencies | Purpose |
