@@ -393,9 +393,11 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 
 :7999 is an optimization for truly fast, truly read-only work. If you cannot prove a test meets all three :7999 criteria, schedule it on :8000.
 
-### 🔴 A TIER RUN FROM A WORKTREE REPORTS ~11 FAILURES THE MAIN TREE DOES NOT HAVE
+### 🔴 A TIER RUN FROM A WORKTREE REPORTS 10 OR 11 FAILURES THE MAIN TREE DOES NOT HAVE
 
-**Measured 2026-08-29** (row `3d01df71`). Two seats ran the unit tier on the same sha `31b2cfce` within the hour and got **25 failures in a worktree** against **14 in the main tree**. Neither number was wrong. The gap is **exactly 11**, and all of it is state that is present in the main tree and absent from every worktree — so a worktree tier accuses the branch of breakage it does not have.
+**Which of the two you get is decided by ONE thing: whether you exported `LUPIN_ROOT="$PWD"`.** Both numbers below are correct; they are measurements of two different setups, not a disagreement. See the reconciliation under the table.
+
+**Measured 2026-08-29** (row `3d01df71`). Two seats ran the unit tier on the same sha `31b2cfce` within the hour and got **25 failures in a worktree** against **14 in the main tree**. Neither number was wrong. The gap is **exactly 11 in that setup** — measured WITHOUT `LUPIN_ROOT="$PWD"` exported; with the export it is 10, and the two reconcile (see below) — and all of it is state that is present in the main tree and absent from every worktree — so a worktree tier accuses the branch of breakage it does not have.
 
 | n | what is missing | how it surfaces |
 |---|---|---|
@@ -410,6 +412,40 @@ cd <your-worktree> && LUPIN_ROOT="$PWD" .venv/bin/python -m pytest src/tests/uni
 ```
 
 `LUPIN_ROOT="$PWD"` is the one you must not forget — it is inherited from your shell and silently keeps pointing at `/…/lupin`. The other two are unfixable from inside a worktree: **subtract them, do not chase them.**
+
+**RECONCILED 2026-08-30 — a second measurement got 10, and 10 and 11 are the SAME finding.** Rio ⚡
+ran the unit tier at sha `cc336880`, root `/mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-rio-8593bf65`,
+with `LUPIN_ROOT="$PWD"` exported, and measured a gap of **10** — not 11.
+
+| | 2026-08-29 (row `3d01df71`) | 2026-08-30 (Rio, sha `cc336880`) |
+|---|---|---|
+| `LUPIN_ROOT` exported? | **no** | **yes** |
+| flash-lite / vertex (`cloud-run.env`) | 9 | 9 |
+| terraform provider cache | 1 | 1 |
+| wrong-tree `LUPIN_ROOT` row | **1** | **0 — never fired** |
+| **gap** | **11** | **10** |
+
+⇒ **The third row of the table above is the entire difference, and it is the one this section
+already tells you to fix.** Follow the remedy and the gap is 10; skip it and the gap is 11. So the
+two counts agree completely once you know which setup produced each — which is why this section is
+amended to carry BOTH rather than overwritten to the newer one. **Per this section's own closing
+rule: two counts get RECONCILED, not adjudicated, and a mismatch that reconciles is not a
+disagreement.** A doc that had simply replaced 11 with 10 would have made the next reader who
+forgets the export think they had found a new failure.
+
+**Verified both directions, not asserted.** The 10 artifact tests were re-run in the MAIN tree at
+`625665bb` — **120 passed, 1 skipped, 0 failed** — and the two missing inputs were checked on both
+trees: `src/scripts/cloud-run.env` and `src/terraform/envs/test/.terraform/providers` are PRESENT in
+the main tree and ABSENT in the worktree.
+
+⚠️ **AND SUBTRACTING THE ARTIFACTS IS NOT THE WHOLE JOB — CHECK WHETHER THE BRANCH MOVED.** In the
+same reconciliation, 8 of the 9 remaining failures also passed in the main tree, and it would have
+been wrong to file them as worktree artifacts too: the main tree was a **descendant** of the
+worktree's sha, 12 commits ahead, and those 8 had been FIXED in that window (`51950988` for the
+manager-figure stamp; the venv-declaration guard across `20dc6b18`, `71637fe1`, `625665bb`). **A
+failure that passes in the main tree has TWO explanations — a worktree artifact, or a fix you do not
+have yet — and `git merge-base` tells you which.** Reporting the second as the first credits your
+environment for somebody else's repair.
 
 ⚠️ **THE SAME MISMATCH IS HARMLESS IN ONE DIRECTION AND SILENT-FATAL IN THE OTHER — SO READ THE
 WARNING, THEN ASK WHAT THE CODE WRITES.** Measured by Maya 🌻 2026-08-29, and added here rather than
