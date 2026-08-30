@@ -85,22 +85,32 @@ def looks_like_pytest( cmdline: str ) -> bool:
         - a path that merely CONTAINS the word pytest (a runner script named
           run-pytest-direct.sh, an open editor buffer, /usr/bin/pytest-watch)
           returns False
-        - a RELATIVE path ending in pytest returns False — it is overwhelmingly a
-          quoted `pgrep -f "bin/pytest ..."` search pattern rather than a program
+        - a RELATIVE path ending in pytest returns False UNLESS IT LEADS THE LINE —
+          `.venv/bin/pytest -q` is True (index 0); the same path in any later position
+          is overwhelmingly a quoted `pgrep -f "bin/pytest ..."` search pattern rather
+          than a program
         - never raises
 
     ⚠️ TWO KNOWN GAPS, both accepted deliberately, and for the same reason: every
-    sanctioned runner in this tree invokes pytest by an ABSOLUTE path
-    (src/scripts/lib/resolve-venv-pytest.sh resolves under $LUPIN_ROOT and refuses to
-    fall back to a bare `python3 -m pytest`), so neither shape occurs here, and
+    sanctioned runner in this tree resolves pytest through
+    src/scripts/lib/resolve-venv-pytest.sh, which resolves under $LUPIN_ROOT and refuses
+    to fall back to a bare `python3 -m pytest`. (This read "every sanctioned runner
+    invokes pytest by an ABSOLUTE path" — over-broad, per Rachel 2026-08-30: CLAUDE.md's
+    own comm-matching note shows the relative script form. What the code leans on is the
+    RESOLVER, not the spelling.) So neither shape is expected here, and
     widening the rule to cover either one re-admits the false positives above — which
     cost more, because a false positive refuses EVERY coverage run in the tree.
         1. a bare `pytest` behind an env prefix (`env FOO=1 pytest -q`) — neither
            first, nor absolute, nor after -m.
-        2. a RELATIVE path (`.venv/bin/pytest -q`, typed by hand from the repo root).
-           This is the one gap opened on 2026-08-26 to close the quoted-pattern false
-           positive, and it is the cheaper trade: a hand-typed relative invocation is
-           rare and visible, while the false positive was silent and total.
+        2. a RELATIVE path in a NON-LEADING position. Measured:
+           `.venv/bin/python3 .venv/bin/pytest src/tests/unit/ -q` -> False.
+           ⚠️ This example was WRONG until 2026-08-30 (Rachel's review). It read
+           `.venv/bin/pytest -q`, which the code CATCHES, because that token leads the
+           line — so the docstring named a gap the code does not have and missed the one
+           it does: the script form, which is how `run-*-tests.sh` actually launches.
+           The gap opened on 2026-08-26 to close the quoted-pattern false positive, and
+           it is still the cheaper trade: the false positive was silent and total,
+           refusing EVERY coverage run in the tree.
     """
     if not cmdline: return False
     tokens = cmdline.split()
@@ -316,6 +326,13 @@ def _comm_admits_a_running_suite( comm: Optional[str] ) -> bool:
         - returns True for "", keeping an unreadable live process an offender
     """
     if comm is None:  return False
+    # ⚠️ DELIBERATELY REDUNDANT with comm_could_be_pytest's own `if not comm: return True`
+    # (Rachel spotted the duplication 2026-08-30; keeping it is the considered answer).
+    # This line is the FAIL-CLOSED contract boundary. Folding it would make the gate's
+    # answer for "" depend on the predicate continuing to agree — and "two contracts that
+    # did not meet" is the exact defect this module was written to fix. Both are pinned
+    # independently by tests (comm_could_be_pytest( "" ) and this function's own case),
+    # so the duplication is checked, not merely asserted.
     if comm == "":    return True
     return comm_could_be_pytest( comm )
 

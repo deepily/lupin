@@ -562,3 +562,19 @@ def test_default_comm_of_still_produces_the_two_distinct_absences( monkeypatch )
     assert cc._default_comm_of( 4242 ) == "", "a live but unreadable process must give ''"
     monkeypatch.setattr( cc.os.path, "exists", lambda _p: False )
     assert cc._default_comm_of( 4242 ) is None, "an exited process must give None"
+
+
+# ── the docstring's two relative-path examples, pinned ────────────────────────────────
+# Rachel's review, 2026-08-30: looks_like_pytest's "KNOWN GAPS" note named
+# `.venv/bin/pytest -q` as the uncovered shape. The code CATCHES that one — the token
+# leads the line — and misses the SCRIPT form instead, which is how `run-*-tests.sh`
+# actually launches. The docstring was corrected; these pin both halves so the example
+# cannot drift from the code again without a red test.
+@pytest.mark.parametrize( "cmdline,expected,why", [
+    ( ".venv/bin/pytest -q",                                  True,
+      "a relative path that LEADS the line is a real invocation (index 0)" ),
+    ( ".venv/bin/python3 .venv/bin/pytest src/tests/unit/ -q", False,
+      "the script form — relative and non-leading — is the gap the docstring now names" ),
+] )
+def test_the_documented_relative_path_examples_match_the_code( cmdline, expected, why ):
+    assert cc.looks_like_pytest( cmdline ) is expected, why
