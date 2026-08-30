@@ -18,6 +18,7 @@ THE VALUES BELOW ARE SYNTHETIC. Nothing here is a real credential; the real cont
 the one line on origin/main the scanner was built for, and it is not reproduced here.
 """
 
+import contextlib
 import importlib.util
 import sys
 
@@ -650,10 +651,56 @@ def _recorded_for_gate():
     return json.load( open( root + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json" ) )
 
 
+@contextlib.contextmanager
+def _hold( active ):
+    """
+    Run a block with the rotation hold forced into a KNOWN position.
+
+    🔴 RACHEL'S FINDING 2 — THE FLIP-DAY HALF, AND IT IS THE SAME DEFECT AS FINDING 1 ONE
+    LEVEL UP. Finding 1 was two halves of the hold on two switches; this is a test asserting
+    a BRANCH while reading the AMBIENT switch. Both tests below were written while the hold
+    was active, so `_clear_the_red_steps` returned the withheld block without anybody asking
+    for it, and the assertions passed on a state they never declared. The day somebody
+    legitimately sets ROTATION_HOLD_ACTIVE False, they redden — not because the gate broke
+    but because the test was measuring the flag instead of the branch. A red on rotation day
+    is the worst possible red: it fires at the exact moment nobody has attention to spare for
+    triage, and it trains the reader to discount the reds that mean something.
+
+    THE FIX IS THE SAME SHAPE AS c21d1f60'S: ONE CONDITION, DECLARED, NOT A SECOND FLAG.
+    Every test that asserts hold-active behaviour says so, every test that asserts
+    hold-clear behaviour says so, and NONE of them consults the ambient value. The file then
+    stands green with the flag in either position — Rachel's own acceptance shape, and the
+    only version of this that can be verified before rotation day rather than during it.
+
+    Patches `sys.modules[ __name__ ]`, never the dotted name. Tiberius measured that the
+    dotted form resolves, does NOT trip raising=True, and patches a SECOND copy of the module
+    while the running one keeps its old value — a patch that silently does nothing.
+
+    Requires:
+        - active is a bool: True forces the hold ON, False forces it OFF
+
+    Ensures:
+        - ROTATION_HOLD_ACTIVE is `active` inside the block, whatever it was outside
+        - the prior value is restored on the way out, including on an exception
+    """
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr( sys.modules[ __name__ ], "ROTATION_HOLD_ACTIVE", active )
+        yield
+    finally:
+        monkeypatch.undo()
+
+
 def test_while_the_hold_stands_the_recipe_is_withheld_and_names_where_to_read_it():
-    """Suppressed, not deleted — the reader must be able to find it."""
-    recorded = _recorded_for_gate()
-    steps    = _clear_the_red_steps( recorded, cu.get_project_root() )
+    """
+    Suppressed, not deleted — the reader must be able to find it.
+
+    The hold is FORCED ON rather than assumed on: this asserts the hold-active branch, so it
+    has to be the branch that runs, on rotation day as much as today. See `_hold`.
+    """
+    with _hold( True ):
+        recorded = _recorded_for_gate()
+        steps    = _clear_the_red_steps( recorded, cu.get_project_root() )
     assert "WITHHELD" in steps
     assert "_how_to_clear_the_red" in steps
 
@@ -663,28 +710,29 @@ def test_while_the_hold_stands_no_step_telling_anyone_to_update_the_record_is_pr
     The whole defect in one assertion. The recipe ends by telling you to update
     detector_sha256 and the counts; the hold refuses exactly that. While the hold stands,
     that instruction must not appear.
+
+    The hold is FORCED ON rather than assumed on — see `_hold`.
     """
-    recorded = _recorded_for_gate()
-    steps    = _clear_the_red_steps( recorded, cu.get_project_root() )
+    with _hold( True ):
+        recorded = _recorded_for_gate()
+        steps    = _clear_the_red_steps( recorded, cu.get_project_root() )
     for step in recorded[ "_how_to_clear_the_red" ]:
         assert step not in steps
 
 
-def test_once_the_hold_lifts_every_recorded_step_prints_again( monkeypatch ):
+def test_once_the_hold_lifts_every_recorded_step_prints_again():
     """
     The half that had no test. A gate that never opens is indistinguishable from the
     deletion this was written to avoid, so the open state has to be asserted, not assumed.
+
+    This one already declared its state; it now says so through the same helper as its
+    mirror image above, so the two read as one pair rather than as one careful test and one
+    that happened to agree with the flag. The live-module-object caveat that used to sit here
+    lives in `_hold`.
     """
-    # 🔴 PATCH THE LIVE MODULE OBJECT, NOT A DOTTED NAME. The string form
-    # "tests.unit.test_secret_scan.ROTATION_HOLD_ACTIVE" resolves — `raising=True` does NOT
-    # complain — but it can import a SECOND copy of this module and patch that one, leaving
-    # the running copy untouched. Measured here: the patch silently did nothing and the test
-    # failed showing the withheld block it had just "disabled". `sys.modules[ __name__ ]` is
-    # the object actually executing.
-    import sys
-    monkeypatch.setattr( sys.modules[ __name__ ], "ROTATION_HOLD_ACTIVE", False )
-    recorded = _recorded_for_gate()
-    steps    = _clear_the_red_steps( recorded, cu.get_project_root() )
+    with _hold( False ):
+        recorded = _recorded_for_gate()
+        steps    = _clear_the_red_steps( recorded, cu.get_project_root() )
     assert "WITHHELD" not in steps
     for step in recorded[ "_how_to_clear_the_red" ]:
         assert step in steps
@@ -710,25 +758,30 @@ def test_lifting_the_hold_silences_the_refusal_as_well_as_restoring_the_recipe()
     present today would pass against both the gated and the ungated version, since today the
     hold IS active. The discriminating case is the one nobody will run until rotation day.
 
-    Patches `sys.modules[ __name__ ]`, not the dotted name — Tiberius measured that the dotted
-    form resolves, does not trip raising=True, and patches a SECOND copy of the module while
-    the running one keeps its old value.
+    ⚠️ AND IT CARRIED FINDING 2 ITSELF, IN THE COMMIT THAT CLOSED FINDING 1. The first and
+    last assertions read the AMBIENT flag — `!= ""` is the hold-ACTIVE answer, so both went
+    red the day the flag flipped, in the very test written to prove flip day was safe. Fixing
+    only the two tests Rachel named would have left this file red on rotation day anyway,
+    which is the whole thing she asked for: green in EITHER position.
+
+    The restore control is kept and made position-independent. Asserting the flag is True
+    afterwards was never testing the restore — it was testing the flag; comparing against the
+    value captured BEFORE the flip tests the restore in either position.
     """
-    import sys
+    before = _rotation_hold_is_active()
 
-    assert _rotation_held_notice() != "", "while the hold stands the refusal must be emitted"
+    with _hold( True ):
+        assert _rotation_held_notice() != "", "while the hold stands the refusal must be emitted"
 
-    monkeypatch = pytest.MonkeyPatch()
-    try:
-        monkeypatch.setattr( sys.modules[ __name__ ], "ROTATION_HOLD_ACTIVE", False )
+    with _hold( False ):
         assert _rotation_held_notice() == "", (
             "once the hold lifts the refusal must go SILENT — otherwise the recipe returns "
             "while the notice still calls it refused, which is the same contradiction "
             "pointing the other way" )
-    finally:
-        monkeypatch.undo()
 
-    assert _rotation_held_notice() != "", "the flag must be restored after the flip"
+    assert _rotation_hold_is_active() == before, (
+        "the flag must be restored to whatever it was before the flip — comparing against the "
+        "captured value, not against True, because True is only the right answer today" )
 
 
 def test_findings_never_carry_the_value():
