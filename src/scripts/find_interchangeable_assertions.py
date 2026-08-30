@@ -71,18 +71,46 @@ enough for a zero on the first to say anything about the second.**
 tells you whether a fixture can see what its name claims.
 
 ⚠️ **AND THIS IS A DEMONSTRATION THAT RECALL IS NOT TOTAL — IT IS NOT A MEASUREMENT OF RECALL.**
-The two figures on this page are not comparable and should not be read side by side as if they
-were. Precision rests on a **20-hit adjudication**; the recall evidence is **two known blind
-fixtures in one file**, and a miss rate cannot be computed from that.
+Neither number on this page is large. **Precision rests on TWO adjudicated hits** (both covered
+elsewhere, named above); the recall evidence is **two known blind fixtures in one file**. Two
+and two. A rate cannot be computed from either.
 
-**Recall is unmeasured, and measuring it needs something nobody has**: a set of fixtures already
-known to be blind, complete enough to divide by. Every blind fixture in this repo that has been
-identified was found by MUTATING it — so any "recall" figure derived from that set would only
-report how well this probe agrees with the mutations somebody already thought to run, which is
-the instrument certifying itself against its own reach.
+🔴 **A "20-HIT ADJUDICATION, PRECISION 5-25%" FIGURE WAS IN CIRCULATION FOR THIS PROBE AND IT IS
+UNCITABLE — DO NOT REPEAT IT** (Rachel, 2026-08-30, refusing to approve until it was named or
+cut: *"name the twenty - when, which hits, what each resolved to - or cut it and say two"*).
+It could not be named. It reached this author in a session memento, was repeated in review DMs
+and in a commit message as though measured, and **the only adjudication evidence in this repo is
+the two hits above** - which this file's docstring and its own printed footer have said all
+along. **The page contradicted itself, and the smaller, true number was the one already written
+down.**
 
-⇒ **Quote the precision figure as a figure. Quote the recall evidence as an existence proof:
-this probe demonstrably misses whole blind fixtures, and how often is not known.**
+⇒ **A figure that arrives without its receipts is a rumour with a provenance, and inheriting it
+from a prior session is not provenance.** Cut it and state what can be shown.
+
+**Recall has no denominator, and that — not the quality of the evidence — is why it cannot be
+rated.** A recall rate is (blind fixtures found) / (blind fixtures that exist). The numerator is
+obtainable. **The denominator is not: nobody can enumerate the blind fixtures in this repo**,
+because a fixture's blindness is a fact about what its data means to the code under test, and
+the only way to establish it is to mutate that code and watch. You can always find more by
+mutating more. There is no point at which the set is known to be complete, so there is nothing
+to divide by.
+
+🔴 **AN EARLIER CUT OF THIS PARAGRAPH GAVE THE WRONG REASON, AND THE WRONG REASON WAS THE
+DANGEROUS PART** (Clayton 😎, 2026-08-30, refusing to approve until it was fixed). It said a
+recall figure taken over mutation-found fixtures would be "the instrument certifying itself
+against its own reach." **That is backwards.** Mutation is a DIFFERENT instrument from this
+probe — it executes the code, this reads the source — so checking the probe against
+mutation-found fixtures is exactly the independent second reading that certification rule asks
+for. The old wording discouraged the one kind of evidence that would strengthen this page.
+
+⇒ **Measuring the probe against known blind fixtures is legitimate and worth doing.** It yields
+*"it missed N of the M we know about"* — a real statement about a named sample. It does not
+yield a recall rate, and the difference is the denominator, not the method.
+
+⇒ **Quote either as a count against a NAMED sample — "2 of 2 adjudicated hits were covered
+elsewhere", "missed 2 of the 2 blind fixtures known in that file" — never as a bare rate.** A
+ratio over a sample you name is honest and useful; what this page cannot support is an
+unqualified precision or recall *rate*, which implies a population neither number has.
 
 EXIT CODES
     0  scanned, no interchangeable-value assertions found
