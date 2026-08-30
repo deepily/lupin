@@ -34,6 +34,13 @@ this process or one of its ancestors. Ancestors are excluded because the runner
 script that invokes this check may itself be named `run-pytest-direct.sh` — a
 substring match would otherwise have every run refuse itself.
 
+An offender must pass BOTH tests: its command line must be invocation-SHAPED
+(`looks_like_pytest`) AND the kernel must agree the process IS a python or pytest
+binary (`comm_is_a_python_or_pytest_binary`, read from /proc/<pid>/comm). The two
+answer different questions — the command line says what somebody WROTE, comm says
+what the process IS — and only the pair is sufficient. See the comment above
+`comm_is_a_python_or_pytest_binary` for the measurement that forced this.
+
 CLI: `python3 -m cosa.utils.coverage_contention` — exit **0** clear, **1**
 contended (offenders printed to stderr), **2** unknown (could not read the
 process table). ⚠️ **UNKNOWN IS NOT CLEAR**, and the caller decides what to do
@@ -41,6 +48,7 @@ about it; this module does not soften it into a pass.
 """
 
 import os
+import re
 import sys
 from typing import Callable, Iterable, List, Optional, Tuple
 
@@ -113,6 +121,72 @@ def looks_like_pytest( cmdline: str ) -> bool:
     return False
 
 
+# ⚠️ THE COMMAND LINE ALONE IS NOT ENOUGH, AND THIS COST A GATE RUN ON 2026-08-30.
+# The shape test above was already tightened once (absolute paths only, so a quoted
+# `pgrep -f "bin/pytest src/"` no longer matches). The hole that survived is the `-m`
+# clause: a peer Claude seat whose SPAWN BRIEFING quoted the command
+#     LUPIN_ROOT="$PWD" .venv/bin/python -m pytest src/tests/unit/test_x.py -q
+# has that text in its own /proc/<pid>/cmdline, because a seat's briefing IS its command
+# line. So it read as a running suite and the coverage gate refused both tiers on a box
+# where the comm-based count of real pytest processes was ZERO (measured: pid 22130,
+# comm=claude). The sanctioned way out is the escape hatch, which stamps the number "not
+# comparable" — so the false positive does not merely annoy, it degrades the receipt.
+#
+# ⇒ ASK THE KERNEL WHAT THE PROCESS IS, not what its command line says about it. A
+# briefing that TALKS about running pytest has comm="claude"; a suite that IS running has
+# comm="pytest" or "python3.13". This is CLAUDE.md §"IS ANOTHER SUITE RUNNING?" — the
+# pgrep-over-a-fleet-of-agents trap — and it gets MORE likely the more the fleet
+# coordinates about the box, because a briefing about testing is the text most likely to
+# contain the command.
+#
+# ⚠️ THIS IS ADDED TO THE SHAPE TEST, NEVER SUBSTITUTED FOR IT. comm alone would flag every
+# `python3 -c ...` on the box. The shape test also still earns the pytest-watch exclusion
+# documented above. Both, or neither works.
+#
+# ⚠️ AND IT MEANS A SPOOFED argv NO LONGER FOOLS THE GUARD — which is the point, but it
+# also retired the old end-to-end fixture. `exec -a "/usr/bin/pytest x" sleep 20` has
+# comm="sleep" (verified), so it was never a real foreign suite, only a real foreign
+# COMMAND LINE. The end-to-end test now spawns an actual `-m pytest`.
+_PYTHON_COMM = re.compile( r"^python[0-9.]*$" )
+
+
+def comm_is_a_python_or_pytest_binary( comm: Optional[str] ) -> bool:
+    """
+    True when /proc/<pid>/comm names an interpreter that could be running a suite.
+
+    Requires:
+        - comm is the raw contents of /proc/<pid>/comm, already stripped, or None
+
+    Ensures:
+        - returns True for "pytest" and for "python", "python3", "python3.13"
+        - returns False for any other binary name, and for None or ""
+        - the comparison is on the whole name, so "python-config" and "pytest-watch"
+          are NOT interpreters (the kernel truncates comm at 15 characters, which
+          cannot turn a non-interpreter into one)
+    """
+    if not comm: return False
+    return comm == "pytest" or bool( _PYTHON_COMM.match( comm ) )
+
+
+def _default_comm_of( pid: int ) -> Optional[str]:
+    """
+    The kernel's name for a process, or None when it cannot be determined.
+
+    Ensures:
+        - returns the stripped contents of /proc/<pid>/comm when readable
+        - returns None when the process has EXITED (its /proc entry is gone) — the
+          same race `_default_process_table` already absorbs, one step later
+        - returns "" when /proc/<pid> still exists but comm could not be read, which
+          keeps the caller FAIL-CLOSED: an unreadable live process stays an offender
+          rather than being waved through on a technicality
+    """
+    try:
+        with open( f"/proc/{pid}/comm" ) as handle:
+            return handle.read().strip()
+    except OSError:
+        return "" if os.path.exists( f"/proc/{pid}" ) else None
+
+
 def _default_ancestors( pid: Optional[int]=None ) -> List[int]:
     """This process and every ancestor, walking /proc/<pid>/stat's ppid field."""
     chain = []
@@ -150,6 +224,7 @@ def _default_process_table() -> List[ Tuple[ int, str ] ]:
 def find_foreign_pytest(
     process_table : Optional[ Callable[ [], Iterable[ Tuple[ int, str ] ] ] ]=None,
     ancestors     : Optional[ Iterable[int] ]=None,
+    comm_of       : Optional[ Callable[ [int], Optional[str] ] ]=None,
 ) -> List[ Tuple[ int, str ] ]:
     """
     Pytest processes that are neither this process nor one of its ancestors.
@@ -157,20 +232,28 @@ def find_foreign_pytest(
     Requires:
         - process_table, when supplied, is a callable returning (pid, cmdline) pairs
         - ancestors, when supplied, is an iterable of pids to exclude
+        - comm_of, when supplied, maps a pid to its kernel name (or None if gone)
 
     Ensures:
         - returns [] when the only pytest processes belong to our own tree
         - excludes ancestors, so a runner script whose own name contains
           "pytest" never causes a run to refuse itself
+        - excludes any process whose command line is invocation-SHAPED but whose
+          comm is not an interpreter — a peer agent seat quoting `-m pytest` in
+          its briefing is not a running suite
+        - excludes a process that exited between the table read and the comm read
         - the result is sorted by pid, so two callers see the same order
 
     Raises:
         - OSError if the process table cannot be read at all
     """
-    table  = ( process_table or _default_process_table )()
-    ours   = set( _default_ancestors() if ancestors is None else ancestors )
-    found  = [ ( pid, cmd ) for pid, cmd in table
-               if pid not in ours and looks_like_pytest( cmd ) ]
+    table   = ( process_table or _default_process_table )()
+    ours    = set( _default_ancestors() if ancestors is None else ancestors )
+    name_of = comm_of or _default_comm_of
+    found   = [ ( pid, cmd ) for pid, cmd in table
+                if pid not in ours
+                and looks_like_pytest( cmd )
+                and comm_is_a_python_or_pytest_binary( name_of( pid ) ) ]
     return sorted( found, key=lambda row: row[ 0 ] )
 
 
@@ -204,7 +287,10 @@ def render_refusal( offenders: List[ Tuple[ int, str ] ] ) -> str:
         lines.append( f"  pid {pid}  {cmd[ :160 ]}" )
     lines += [
         "",
-        "REMEDY: wait for it to finish, then re-run. Check with:  pgrep -af pytest",
+        "REMEDY: wait for it to finish, then re-run. Check with:",
+        "  ps -eo comm,args --no-headers | awk '$1==\"pytest\" || ($1 ~ /^python/ && $0 ~ / -m pytest/)'",
+        "  (A pgrep over command lines is NOT equivalent: it also finds every agent seat",
+        "   whose briefing merely TALKS about running pytest. comm is what the process IS.)",
         f"DELIBERATE?  {ESCAPE_HATCH_ENV}=1 <your command>   (the number will not be comparable)",
     ]
     return "\n".join( lines )
