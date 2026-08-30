@@ -262,9 +262,19 @@ def test_a_detector_change_forces_a_full_rescan():
                                    capture_output=True, text=True ).stdout.strip()
 
     steps = chr( 10 ).join( "    " + s for s in recorded[ "_how_to_clear_the_red" ] )
-    what  = ( "THE DETECTOR CHANGED" if detector_now != recorded[ "detector_sha256" ]
-              else "THE PUBLISHED TIP MOVED" if ref_now != recorded[ "scanned_ref_sha" ]
-              else "THE RECORDED SCAN DOES NOT MATCH WHAT THIS SCANNER MEASURES" )
+
+    # EVERY true cause, not the first one (row 4f0ced13). This was an if/elif chain, and
+    # on 2026-08-30 BOTH causes were live: the detector file's sha had moved AND the
+    # public tip had moved. The chain printed "THE DETECTOR CHANGED" and never mentioned
+    # the tip, so the reader reasonably concluded the detector was the story — and
+    # measured, the detector change was behaviourally INERT (the current detector over
+    # the recorded tree reproduces the recorded fingerprint byte-for-byte). A diagnostic
+    # that names one of two causes points at the wrong one half the time it matters, and
+    # this red is read by somebody deciding whether a credential is loose.
+    causes = [ ]
+    if detector_now != recorded[ "detector_sha256" ]: causes.append( "THE DETECTOR CHANGED" )
+    if ref_now      != recorded[ "scanned_ref_sha" ]: causes.append( "THE PUBLISHED TIP MOVED" )
+    what = " AND ".join( causes ) or "THE RECORDED SCAN DOES NOT MATCH WHAT THIS SCANNER MEASURES"
 
     measured = _scan_fingerprint( secret_scan.scan_ref( recorded[ "scanned_ref" ], cwd=root ) )
     assert measured == recorded.get( "scan_fingerprint" ), (
