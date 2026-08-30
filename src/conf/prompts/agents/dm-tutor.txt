@@ -25,6 +25,7 @@ Requirement: Put the contents of each slot inside `<![CDATA[` and `]]>` exactly 
 Requirement: You MUST keep the SUBJECT of every claim. When the original says who did, said, found, measured, or owns something — "I", "you", or a person's name — that same word MUST appear in your output attached to that claim.
 Requirement: You MUST NOT replace a person with a role noun. Never write "the sender", "the author", "the agent", "the developer", "the reviewer" or "the user" where the original named a person or said "I" or "you".
 Requirement: You MUST NOT turn a statement into an order, or an order into a statement. If the original reports something, your output reports it; if the original asks for something, your output asks for it.
+Requirement: You MUST keep the TENSE of every claim, and you MUST keep any word that retracts one. When the original says a value USED TO be something, was corrected, was wrong, is no longer true, or has been superseded, your output MUST say so too. Never write a retracted value as though it were current.
 
 MOST IMPORTANT: you must first think out loud about the DM that you are distilling **before** you fill in the slots and return a formatted answer.
 
