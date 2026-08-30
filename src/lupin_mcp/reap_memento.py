@@ -353,6 +353,39 @@ def classify_slot_presence( slot_path, read_text_fn ):
     return "present"
 
 
+# ── The record's own header (pure) ────────────────────────────────────────────
+def slot_record_header( slot_path, read_text_fn ):
+    """
+    The parsed `memento-record` header of the RECORD this slot names, or {}.
+
+    Factored out because three callers need the same two steps — resolve a pointer
+    slot to its record, then parse that record's header — and a fourth reading of
+    those bytes by slightly different rules is how two verdicts start disagreeing
+    about the same file.
+
+    Requires:
+        - read_text_fn( path ) -> the file text, or None when unreadable
+
+    Ensures:
+        - resolves a pointer slot to its `current:` record first, exactly as
+          verify_seat_memento and classify_slot_owner do
+        - returns {} when the slot is unreadable, the record is unreadable, or no
+          header parses — the three cases that all mean "this file does not attest
+          to who wrote it or when"
+        - never raises
+    """
+    text = read_text_fn( slot_path )
+    if text is None:
+        return {}
+    record_path = resolve_pointer_target( slot_path, text )
+    if record_path is not None:
+        record_text = read_text_fn( record_path )
+        if record_text is None:
+            return {}
+        text = record_text
+    return parse_memento_header( text )
+
+
 # ── Whose file is in the slot? (pure) ─────────────────────────────────────────
 def classify_slot_owner( slot_path, seat_sid8, read_text_fn ):
     """
@@ -384,16 +417,7 @@ def classify_slot_owner( slot_path, seat_sid8, read_text_fn ):
           does, so the two never disagree about which bytes carry the header
         - never raises
     """
-    text = read_text_fn( slot_path )
-    if text is None:
-        return None
-    record_path = resolve_pointer_target( slot_path, text )
-    if record_path is not None:
-        record_text = read_text_fn( record_path )
-        if record_text is None:
-            return None
-        text = record_text
-    header  = parse_memento_header( text )
+    header  = slot_record_header( slot_path, read_text_fn )
     hdr_sid = ( header or {} ).get( "session_id" )
     if not hdr_sid:
         return None
@@ -428,7 +452,7 @@ def memento_alarm( outcomes ):
         - never raises
     """
     LOSING = ( "timeout_no_memento", "prior_holder_present", "unparseable_present",
-               "skipped", "skipped_no_cwd" )
+               "unproven_present", "skipped", "skipped_no_cwd" )
     losers = []
     for name in sorted( outcomes ):
         if name == "_error":
@@ -451,7 +475,8 @@ def memento_alarm( outcomes ):
 # `skipped*` verdicts are deliberately absent: they mean the slot could not be
 # derived at all (no persona/session, or no cwd), so there is no file to re-read
 # and nothing a second look could prove. They stay loud, untouched.
-RECHECKABLE = ( "timeout_no_memento", "prior_holder_present", "unparseable_present" )
+RECHECKABLE = ( "timeout_no_memento", "prior_holder_present", "unparseable_present",
+                "unproven_present" )
 
 
 def recheck_losing_seats(
@@ -639,13 +664,31 @@ def coordinate_mementos(
                                  because the recovery actions are opposite: here, opening
                                  the file teaches you about somebody else's work, and the
                                  thing to hunt for is a memento written to the wrong place
-            "unparseable_present" the child was asked and still no PROVABLE memento, but a
-                                 file IS on disk at the slot — a manager can OPEN and READ
-                                 it (RECOVERABLE). The present-but-unparseable case the
-                                 rows asked to split out (dffebbd6 / ebcb763e): a real
-                                 memento with only a markdown H1 header, or a pointer whose
-                                 record vanished. A prior-holder's file NO LONGER lands
-                                 here — it has its own verdict above
+            "unparseable_present" the child was asked and a file IS on disk at the slot,
+                                 but it carries NO parseable memento-record header at all,
+                                 so nothing in it attests to who wrote it or when
+                                 (RECOVERABLE — a manager can OPEN and READ it). Cases:
+                                 a hand-written memento with only a markdown H1 heading,
+                                 or a pointer whose record vanished. THE CAUSE IS A WRITER
+                                 BYPASSING memento_io, and the remedy is a writer fix.
+                                 A prior-holder's file does NOT land here (its own verdict
+                                 above), and neither does this seat's own headered memento
+                                 (see "unproven_present" below)
+            "unproven_present"   the child was asked and THIS SEAT'S OWN memento is at the
+                                 slot — the header parsed and named this session — but one
+                                 verify gate failed: stale beyond the window, under the
+                                 byte floor (a partial write), or a refuted merge claim.
+                                 The reason NAMES the gate verbatim from verify_seat_memento.
+
+                                 SPLIT OUT OF "unparseable_present" (row 48b5f19e) because
+                                 the two read identically and mean opposite things. Measured
+                                 2026-08-29: one seat was 45 seconds past the poll deadline
+                                 with a perfect memento, another had hand-written a slot with
+                                 no header at all, and BOTH drew "unparseable_present" — so a
+                                 manager had to open every file to learn which. Here the
+                                 writer is fine and the remedy is a TIMEOUT (or the post-kill
+                                 re-check); there the writer is the defect. Same verdict for
+                                 both is what trains a manager to stop reading the alarm
             "skipped"            no persona/session in the bridge identity, so the
                                  slot cannot be derived — surfaced, not silently ok
             "skipped_no_cwd"     persona+session known but the bridge carries no `cwd`,
@@ -775,11 +818,29 @@ def coordinate_mementos(
                        f"slot. Do not open it expecting this seat's context. If the seat wrote one "
                        f"elsewhere (the repo root is the usual wrong place), move it to the slot before "
                        f"re-spinning; otherwise it was never written; at ask time: {info[ 'pre_ask_reason' ]}" )
+        elif presence == "present" and slot_record_header( info[ "slot" ], read_text_fn ):
+            # The file ATTESTS to being this seat's — the header parsed and named this
+            # seat. So the failure is a GATE (stale / partial / merge-claim), never a
+            # missing writer, and verify_seat_memento already computed WHICH gate. Pass 4
+            # used to discard that sentence and substitute a generic one, which is what
+            # made "mid-write" and "written wrong" read identically (row 48b5f19e).
+            _usable, gate = verify_seat_memento( info[ "slot" ], info[ "session_id" ][ :8 ], now_fn(),
+                                                 read_text_fn=read_text_fn,
+                                                 window_seconds=window_seconds, min_bytes=min_bytes,
+                                                 repo_root=info[ "repo_root" ], merge_claim_fn=merge_claim_fn )
+            status = "unproven_present"
+            reason = ( f"asked{info[ 'ask_note' ]}, and THIS SEAT'S OWN memento is at the slot — the "
+                       f"header parses and names this session — but one gate failed within "
+                       f"{ask_timeout_sec}s: {gate}. A writer bug is NOT indicated; the seat used the "
+                       f"sanctioned path. If the gate is a small staleness it was still writing when "
+                       f"the window closed; at ask time: {info[ 'pre_ask_reason' ]}" )
         elif presence == "present":
             status = "unparseable_present"
-            reason = ( f"asked{info[ 'ask_note' ]}, a file is on disk at the slot but could not be "
-                       f"proven fresh+complete within {ask_timeout_sec}s — OPEN AND READ IT "
-                       f"(RECOVERABLE, not missing); at ask time: {info[ 'pre_ask_reason' ]}" )
+            reason = ( f"asked{info[ 'ask_note' ]}, a file is on disk at the slot but it carries NO "
+                       f"parseable memento-record header, so nothing in it attests to who wrote it or "
+                       f"when — hand-written, bypassing memento_io. OPEN AND READ IT (RECOVERABLE, not "
+                       f"missing), and note the slot may have overwritten a pointer; at ask time: "
+                       f"{info[ 'pre_ask_reason' ]}" )
         else:
             status     = "timeout_no_memento"
             empty_note = ( " slot file present but empty (0 bytes — a write started and died);"

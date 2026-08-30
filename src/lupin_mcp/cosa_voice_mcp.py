@@ -3090,15 +3090,25 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     DM the still-alive child to write it and WAIT (bounded) for it to appear, so its
     specialization survives a future re-spawn (pass that path back as `seed_memento`).
     The result's `memento_outcomes` carries an EXPLICIT per-seat verdict (verified /
-    written / prior_holder_present / unparseable_present / timeout_no_memento / skipped)
+    written / prior_holder_present / unproven_present / unparseable_present /
+    timeout_no_memento / skipped)
     — a seat that produced no PROVABLE memento fails VISIBLY, never as a silent success
-    (row 0a36d83d — the flag used to be a no-op). The verdict splits three recovery
-    actions apart: `unparseable_present` (a file IS on disk and it may well be this
-    seat's — OPEN AND READ it, RECOVERABLE), `prior_holder_present` (the file at the
-    slot parsed fine and names ANOTHER session — this seat's memento is NOT there, so
-    do not read it expecting their context; hunt for one written to the wrong place,
-    usually the repo root, or accept it was never written), and `timeout_no_memento`
-    (nothing readable on disk at all — ABSENT, unrecoverable). Before the middle one
+    (row 0a36d83d — the flag used to be a no-op). The verdict splits FOUR recovery
+    actions apart, and the split exists so a manager can tell them apart WITHOUT
+    opening the file: `unproven_present` (THIS seat's own memento is at the slot — the
+    header parses and names this session — but a gate failed, and the reason names
+    which; the writer is fine, so a small staleness means it was still writing when the
+    window closed), `unparseable_present` (a file is on disk but carries NO parseable
+    memento-record header, so nothing attests to who wrote it or when — a WRITER
+    bypassed memento_io; OPEN AND READ it, RECOVERABLE), `prior_holder_present` (the
+    file at the slot parsed fine and names ANOTHER session — this seat's memento is NOT
+    there, so do not read it expecting their context; hunt for one written to the wrong
+    place, usually the repo root, or accept it was never written), and
+    `timeout_no_memento` (nothing readable on disk at all — ABSENT, unrecoverable).
+    The first two were ONE verdict until row 48b5f19e: measured on a live reap
+    2026-08-29, a seat 45 seconds past the poll deadline with a perfect memento and a
+    seat that hand-wrote a header-less slot drew the same string, and both read as
+    failures when only one was. Before the middle one
     existed, a race and a lost memento returned the SAME verdict ten minutes apart
     (row 3b0c5f90), which forced a manual check on every reap.
 
