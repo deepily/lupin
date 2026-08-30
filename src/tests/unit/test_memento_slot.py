@@ -362,3 +362,82 @@ def test_self_respin_slot_is_root_and_disjoint_from_the_reap_slot():
     """The doctrine reap_memento records: a reap reads `io`, a self-respin reads `root`."""
     assert ms.SELF_RESPIN_SLOT == ms.SLOT_ROOT
     assert ms.SLOT_ROOT != ms.SLOT_IO
+
+
+# ---------------------------------------------------------------------------
+# The MIRROR-home clause on an abort (Tiberius's request, 2026-08-30)
+#
+# The abort message is the only text a seat in this situation actually reads —
+# he wrote to ~/.claude/mementos without consulting the docs, because that
+# directory looks exactly like where mementos go. It IS one: memento_io's
+# out-of-repo mirror. Saying so is what the old message left out.
+# ---------------------------------------------------------------------------
+def test_mirror_clause_fires_for_a_file_at_the_bare_mirror_home( monkeypatch, tmp_path ):
+    """Tiberius's exact shape: <mirror_home>/<persona>-<sid>-memento.md."""
+    mirror = tmp_path / "home" / ".claude" / "mementos"
+    mirror.mkdir( parents=True )
+    monkeypatch.setattr( ms, "MIRROR_HOME", mirror )
+
+    clause = ms.mirror_home_clause( mirror / "tiberius-f032ae9f-memento.md" )
+    assert "MIRROR, not a slot" in clause
+    assert "<mirror_home>/<repo>/<record-path>" in clause
+    assert clause.startswith( " " )          # it appends to a sentence, not a new line
+
+
+def test_mirror_clause_fires_for_a_correctly_shaped_mirror_path_too( monkeypatch, tmp_path ):
+    """
+    A real mirror path is still not a SLOT — self_respin reads the repo, never the mirror.
+    The clause explains the directory; it does not grade the path under it.
+    """
+    mirror = tmp_path / "home" / ".claude" / "mementos"
+    mirror.mkdir( parents=True )
+    monkeypatch.setattr( ms, "MIRROR_HOME", mirror )
+    assert ms.mirror_home_clause( mirror / "lupin" / ".claude-memento-chloe-5288a6e5.md" ) != ""
+
+
+def test_mirror_clause_is_silent_for_every_other_wrong_path( monkeypatch, tmp_path ):
+    """
+    🔴 The clause must NOT be appended always. A message that explains every case is a
+    message nobody finishes reading — it fires for the one plausible destination only.
+    """
+    mirror = tmp_path / "home" / ".claude" / "mementos"
+    mirror.mkdir( parents=True )
+    monkeypatch.setattr( ms, "MIRROR_HOME", mirror )
+    assert ms.mirror_home_clause( tmp_path / "repo" / "notes.md" ) == ""
+
+
+def test_mirror_clause_is_silent_rather_than_raising_on_an_unresolvable_path( monkeypatch, tmp_path ):
+    monkeypatch.setattr( ms, "MIRROR_HOME", tmp_path / "home" / ".claude" / "mementos" )
+    assert ms.mirror_home_clause( "/repo/\x00bad.md" ) == ""
+
+
+def test_the_abort_carries_the_clause_for_the_tiberius_case( monkeypatch, tmp_path ):
+    """End to end: his real case, and the message now says WHY the directory is wrong."""
+    mirror = tmp_path / "home" / ".claude" / "mementos"
+    mirror.mkdir( parents=True )
+    monkeypatch.setattr( ms, "MIRROR_HOME", mirror )
+    stray = mirror / "tiberius-f032ae9f-memento.md"
+    stray.write_text( _record_text( "tiberius", "f032ae9f", _dt( 20 ) ) )
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    ok, reason = ms.verify_memento_at_slot(
+        str( stray ), repo_root=str( repo ), persona="Tiberius 👑",
+        session_id="f032ae9f", now=_dt( 25 ), read_text_fn=lambda p: None,
+    )
+    assert ok is False
+    assert "not at this seat's 'root' slot" in reason   # the placement verdict, unchanged
+    assert "MIRROR, not a slot"             in reason   # ...and now the reason WHY
+
+
+def test_the_abort_stays_short_for_an_ordinary_wrong_path( monkeypatch, tmp_path ):
+    """The paired negative: no clause, so every other abort is unchanged in length."""
+    monkeypatch.setattr( ms, "MIRROR_HOME", tmp_path / "home" / ".claude" / "mementos" )
+    stray = tmp_path / "elsewhere.md"
+    stray.write_text( _record_text( "chloe", "5288a6e5", _dt( 20 ) ) )
+    ok, reason = ms.verify_memento_at_slot(
+        str( stray ), repo_root=str( tmp_path ), persona="chloe",
+        session_id="5288a6e5", now=_dt( 25 ), read_text_fn=lambda p: None,
+    )
+    assert ok is False
+    assert "MIRROR, not a slot" not in reason
