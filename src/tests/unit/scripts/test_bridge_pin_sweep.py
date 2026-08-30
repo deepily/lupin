@@ -146,14 +146,29 @@ def test_classify_counts_a_pin_that_lives_in_a_shared_helper():
     """
     The pin is in `_arrange`, not in the test body — a sweep reading bodies alone
     would call this exposed and send someone to fix correct code.
+
+    🔴 THE HELPER MUST BE DEFINED BEFORE THE TEST, AND THAT IS THE WHOLE FIXTURE.
+    `functions()` runs a test's body to the NEXT test def, or to end-of-file when there
+    is none. So a helper written BELOW the last test is already inside that test's span,
+    and `classify` sees the pin whether or not it appends helper bodies at all.
+
+    Measured 2026-08-30: with the helper below the test, deleting the append
+    (`body += helpers.get( h, "" )` -> `body += ""`) leaves this test GREEN — the
+    assertion is correct, correctly named, and structurally blind. With the helper above
+    it, the same deletion reports `[ "get_speakerphone" ]` and the test reddens.
+
+    ⇒ The defect was the fixture's ORDER, never the assertion. Do not "simplify" this by
+    moving `_arrange` back below the test.
     """
     src = (
         "class TestProbe:\n"
+        "    def _arrange( self ):\n"
+        "        monkeypatch.setattr( sb, \"get_speakerphone\", lambda sid: False )\n"
         "    def test_uses_helper( self ):\n"
         "        self._arrange()\n"
         "        cv._notify_impl( \"hello\" )\n"
-        "    def _arrange( self ):\n"
-        "        monkeypatch.setattr( sb, \"get_speakerphone\", lambda sid: False )\n"
+        "    def test_after( self ):\n"
+        "        pass\n"
     )
     ( _l, _f, _d, unpinned ), = bps.classify( src )
     assert unpinned == [ ]
