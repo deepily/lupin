@@ -586,6 +586,8 @@ ps -eo comm,args --no-headers | awk '$1=="pytest" || ($1 ~ /^python/ && $0 ~ / -
 
 **Two obligations follow:**
 1. **State the sha with the list.** A coverage list without the sha it was taken at is not a measurement, it is a rumour with a timestamp. Say `at ef6e2bdc`, not "as of tonight".
+
+   ⚠️ **AND IT IS NOT ONLY COVERAGE LISTS — IT COVERS EVERY LINE-NUMBER CITATION YOU SEND A PEER.** Measured 2026-08-30: two seats quoted different `CLAUDE.md` line numbers for the same two sections and spent a round trip finding out why — one was reading numbers from his own branch, uncommitted, where the section had already moved. **A bare `file.py:482` is a pointer into whichever tree the reader happens to be standing in**, and on this fleet that is never reliably yours: peers work in worktrees, branches sit unmerged for hours, and one section can carry three different line numbers before dinner. Write `file.py:482 @ 8bf71a64` — the sha costs eight characters and turns a pointer into a fact. **Better still, cite the section heading or the symbol name: a heading survives an edit above it and a line number does not.**
 2. **Report "done" and "landed" as separate columns.** A worker's file can be finished and still be at zero on the branch. Collapsing the two is what turns an honest commit into a phantom reassignment.
 
 **And the durable fix is a command, not a list** — anyone can re-derive the current zero set at HEAD, and a list anyone can quote will outlive the tree it described:

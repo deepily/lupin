@@ -76,7 +76,8 @@ def test_every_hard_and_soft_kind_actually_produces_a_span():
     pattern wants a SPELLED-OUT number. Both name tests were green at the time.
 
     Scoped to HARD and SOFT because `extract_spans` accepts only those two tiers
-    (freeze.py:482, `tier="HARD+SOFT"`, ValueError on anything else). VERIFY kinds are
+    (freeze.py:482 @ 8bf71a64, `tier="HARD+SOFT"`, ValueError on anything else).
+    VERIFY kinds are
     excluded there BY DESIGN and are covered by the next test instead — asserting them
     here would be measuring the wrong function, which is what the first draft of this
     file did.
