@@ -150,7 +150,7 @@ def _server_map():
         f"This is not a parity failure — it is a STALE IMPORT. Python is serving bytecode that "
         f"no longer matches the file. Most likely a same-second, same-size edit defeated pyc "
         f"timestamp validation (measured here 2026-08-29). Clear it and re-run:\n"
-        f"  find src -name '__pycache__' -type d -exec rm -rf {{}} +\n"
+        f"  src/scripts/purge-pycache.sh\n"
         f"If it persists, another job_state module is shadowing this one on sys.path."
     )
     return mapping

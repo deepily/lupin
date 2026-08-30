@@ -557,7 +557,7 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 **Coverage**: `pytest --cov=cosa --cov-report=html src/tests/` (Python). See §100% COVERAGE MANDATE for the hard gate.
 
-**Editing a `.py` file inside a test?** Use `tests.helpers.pyc_freshness` (`mutate_source` fixture / `refresh_source`). CPython validates a `.pyc` on the source's **whole-second** mtime **plus size**, so a mutation edit changes neither and the interpreter keeps running the *old* code after you restore the file and read it back — measured twice on 2026-08-29, on `job_state.py` and on the helper's own module (row `d18ce9ef`). ⚠️ `PYTHONDONTWRITEBYTECODE` does **not** fix it; it only stops pycs being *written*. Debugging a red you cannot explain? `find src -name '__pycache__' -type d -exec rm -rf {} +` before concluding anything. Detail: `src/tests/README.md` § EDITING A SOURCE FILE INSIDE A TEST, measurement `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
+**Editing a `.py` file inside a test?** Use `tests.helpers.pyc_freshness` (`mutate_source` fixture / `refresh_source`). CPython validates a `.pyc` on the source's **whole-second** mtime **plus size**, so a mutation edit changes neither and the interpreter keeps running the *old* code after you restore the file and read it back — measured twice on 2026-08-29, on `job_state.py` and on the helper's own module (row `d18ce9ef`). ⚠️ `PYTHONDONTWRITEBYTECODE` does **not** fix it; it only stops pycs being *written*. Debugging a red you cannot explain? Run **`src/scripts/purge-pycache.sh`** before concluding anything. 🔴 **NOT a raw `rm -rf __pycache__` — that now RE-OPENS the very hole it used to plug** (row `866f43ce`, §100% COVERAGE MANDATE below): the tree is on checked-hash invalidation, a pyc written where none exists is timestamp-based, so a bare purge silently reverts the tree with nothing in any output saying so. The script purges **and** reconverts, ~3.5s, so the two cannot be half-done. Detail: `src/tests/README.md` § EDITING A SOURCE FILE INSIDE A TEST, measurement `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
 
 **Docs**: `src/tests/README.md` (overview), `src/tests/integration/README.md`, `src/docs/automated-interactive-testing.md` (proxy), `src/tests/smoke/README.md`, `src/tests/AUTH-TESTING-GUIDE.md` (credentials), presentation strategy `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.07-e2e-testing-strategy.md`.
 
@@ -658,11 +658,19 @@ an **existing** checked-hash pyc **stays** checked-hash — edit the source, re-
 regenerates it in the same mode, so no build step is needed on every run. But **a pyc written when
 no prior pyc exists is TIMESTAMP-based**, because there is nothing to inherit a mode from.
 
-🔴 **WHICH MEANS THE OLD PURGE HABIT NOW RE-OPENS THE HOLE IT USED TO PLUG.** `find src -name
-__pycache__ -exec rm -rf {} +` deletes the checked-hash caches, and the next import silently rebuilds
-them as **timestamp**. The tree is then back to the original defect with nothing in any output saying
-so. This is the most likely way a converted tree regresses — the instruction people already have in
-their fingers is now the thing that breaks it. **Convert after any purge, or do not purge.**
+🔴 **WHICH MEANS THE OLD PURGE HABIT NOW RE-OPENS THE HOLE IT USED TO PLUG.** A raw
+`find src -name __pycache__ -exec rm -rf {} +` deletes the checked-hash caches, and the next import
+silently rebuilds them as **timestamp**. The tree is then back to the original defect with nothing in
+any output saying so. This is the most likely way a converted tree regresses — the instruction people
+already have in their fingers is now the thing that breaks it.
+
+⇒ **THE FIX IS A SCRIPT, NOT A RULE: use `src/scripts/purge-pycache.sh`.** It purges *and*
+reconverts in one command (~3.5s), so the halves cannot come apart. "Remember to reconvert after
+purging" would be a habit, and this fleet's own doctrine is that a habit is not a control — the raw
+command has been replaced everywhere it was documented (CLAUDE.md, `src/tests/README.md`, the three
+`pyc_freshness` failure messages, and the mobile-parity test's remedy line) so the thing people copy
+is safe by construction. Measured, both ways: after a raw purge plus one import the verifier reports
+`timestamp=3`; after the script it reports every pyc checked-hash.
 
 ⇒ Three ways a tree drifts back, all one mechanism: a **new** `.py` file, a **purged**
 `__pycache__`, or a module **imported for the first time** since the last conversion. Measured live

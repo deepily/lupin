@@ -58,9 +58,23 @@ PYTHON="${PYTHON:-$LUPIN_ROOT/.venv/bin/python}"
 VERIFY_ONLY=0
 [[ "${1:-}" == "--verify" ]] && VERIFY_ONLY=1
 
-# Repo source only. The venv's site-packages is deliberately NOT converted: it is not our
-# code, nobody mutation-tests it, and rewriting thousands of third-party pycs buys nothing
-# while widening the blast radius onto every seat sharing the interpreter.
+# Repo source only. Third-party code is deliberately NOT converted: nobody mutation-tests
+# it, and rewriting thousands of vendored pycs buys nothing while widening the blast radius.
+#
+# 🔴 EXCLUDING THE NESTED VENV IS NOT AN OPTIMISATION — WITHOUT IT THIS SCRIPT MEASURES THE
+# WRONG POPULATION. The root `.venv` sits outside `src/` and is excluded for free, which is
+# what the first cut of this script assumed was the whole story. It is not: `src/cosa/.venv`
+# is a SECOND virtualenv INSIDE the tree. Measured 2026-08-30:
+#
+#     .py files under src/                        31,734
+#     .py files in src/cosa/.venv (3.11 vendor)   29,303   <-- 92%
+#     actual Lupin source                          2,431
+#
+# So the un-excluded version spent minutes rewriting third-party bytecode for an interpreter
+# this repo does not run, and reported a five-figure "converted" count that was ~92% vendor.
+# A number that large reads like a thorough migration; it was mostly noise — the same
+# wrong-population defect this row's own epic keeps finding, this time in the fix.
+EXCLUDE_RE='(^|/)(\.venv|node_modules|\.git|__pypackages__|site-packages)(/|$)'
 TARGETS=( "$LUPIN_ROOT/src" )
 
 if [[ ! -x "$PYTHON" ]]; then
@@ -76,7 +90,8 @@ fi
 # 🔴 THE CENSUS SPLITS THREE POPULATIONS, because two of them are NOT compileall's to own
 # and folding them into the verdict would make this gate permanently red and therefore
 # useless. Both are REPORTED rather than silently dropped — "not listed" and "fine" are
-# different facts. Measured on this tree 2026-08-30: 31,719 / 32 / 782.
+# different facts. Counts below are AFTER the venv exclusion above — see it for why that
+# matters more than it looks.
 #
 #   1. THIS interpreter's own pycs (`cpython-313.pyc`) — compileall's responsibility, and
 #      the ONLY population the exit code is about.
@@ -99,8 +114,13 @@ mine      = f"cpython-{tag}.pyc"
 buckets   = { "mine": [], "other_interpreter": [], "pytest_rewritten": [] }
 modes     = { "mine": {}, "other_interpreter": {}, "pytest_rewritten": {} }
 
+EXCLUDED = { ".venv", "node_modules", ".git", "__pypackages__", "site-packages" }
+
 for root in sys.argv[ 1: ]:
     for pyc in Path( root ).rglob( "__pycache__/*.pyc" ):
+        # Same exclusion as the conversion. A census over a population the converter never
+        # visited would report offenders nobody can fix, and bury the real ones under them.
+        if EXCLUDED & set( pyc.parts ): continue
         try:
             flags = struct.unpack( "<I", pyc.read_bytes()[ 4:8 ] )[ 0 ]
         except Exception:
@@ -143,7 +163,8 @@ if [[ $VERIFY_ONLY -eq 0 ]]; then
     # -q twice = errors only. A failure to compile one file must not abort the migration:
     # the tree legitimately contains files that are not importable under this interpreter,
     # and their pycs are not what this is protecting.
-    "$PYTHON" -m compileall -f --invalidation-mode checked-hash -q -q "${TARGETS[@]}"
+    "$PYTHON" -m compileall -f --invalidation-mode checked-hash -q -q \
+              -x "$EXCLUDE_RE" "${TARGETS[@]}"
     echo "compileall exited $? (non-zero = some file failed to compile; census below is the verdict)"
     echo
 fi

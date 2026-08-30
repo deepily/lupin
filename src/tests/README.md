@@ -61,7 +61,7 @@ means the clean is the protection, not the flag. `PYTHONPYCACHEPREFIX` merely re
 **If you are debugging a red you cannot explain**, clear the cache before concluding anything:
 
 ```bash
-find src -name '__pycache__' -type d -exec rm -rf {} +
+src/scripts/purge-pycache.sh   # purge AND reconvert to checked-hash (row 866f43ce)
 ```
 
 **Two sightings in one evening, on different files, with nobody hunting for it** — `job_state.py`

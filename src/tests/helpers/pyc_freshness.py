@@ -143,7 +143,7 @@ def refresh_source( source_path ):
             f"lands on the same whole second the mutation's own .pyc recorded.\n"
             f"Proceeding would hand you a result that looks clean and is not.\n\n"
             f"CLEAR THE CACHE AND RE-RUN:\n"
-            f"  find src -name '__pycache__' -type d -exec rm -rf {{}} +"
+            f"  src/scripts/purge-pycache.sh"
         )
 
     # Move the mtime a whole second into the past. FORWARD would be the obvious choice and is the
@@ -312,7 +312,7 @@ def describe_shadowing( shadowed ):
         f"Nothing you read from these files right now describes what will execute. Treat any test "
         f"result involving them as void until this is cleared.\n\n"
         f"REMEDY — clear the cached bytecode and re-run:\n"
-        f"  find src -name '__pycache__' -type d -exec rm -rf {{}} +\n\n"
+        f"  src/scripts/purge-pycache.sh\n\n"
         f"To avoid causing this from a test that edits sources, use the mutate_source fixture in "
         f"this module rather than writing the file directly."
     )
@@ -384,5 +384,5 @@ def mutate_source():
             + "\n\nDo not trust this test's result, and check the files above before running "
               "anything else — other seats share this checkout.\n"
               "CLEAR THE CACHE AND RE-RUN:\n"
-              "  find src -name '__pycache__' -type d -exec rm -rf {} +"
+              "  src/scripts/purge-pycache.sh"
         )
