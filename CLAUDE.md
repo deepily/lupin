@@ -502,6 +502,62 @@ Integration is the final gate because it exercises complete user workflows acros
 - Curl is acceptable ONLY for: API-reference docs, deployment health checks, one-off debugging (never committed).
 - New agent? Add an automated smoke test (see `.claude/skills/agentic-voice-workflow/SKILL.md`).
 
+### 🔴 A MUTATION HARNESS CAN LIE IN BOTH DIRECTIONS — READ A SURVIVOR THREE WAYS
+
+Measured 2026-08-29 on the coverage ramp (rows `ba6df71e`, `3b78bc8a`). Two instrument defects in
+one evening, both the same failure: **the harness reporting on an execution that never happened.**
+
+**OVER-REPORT — a non-zero exit is not a red test.** pytest's rc 4/5 mean it could not RUN the node
+(usage error / nothing collected). A harness counting any non-zero rc as a kill scores its own
+misses as hits. Receipt: an rc=4 was recorded as a caught mutation; the test had been appended into
+the wrong class and never ran. ⇒ **Accept only `rc == 1`.**
+
+**UNDER-REPORT — a mutant can run as its own original.** CPython validates a cached `.pyc` on the
+source's whole-second mtime and size. A mutation changing NEITHER — single-character and digit
+swaps, `return 3` → `return 0`, `<` → `>` — landing in the same second as the cached compile is
+judged unchanged, so the ORIGINAL bytecode runs and the mutation reports SURVIVED. Receipt: the same
+mutated sha `ab030e258b72` gave rc=0 through the harness and rc=1 run by hand seconds later, the
+only variable being bytecode caching.
+
+⇒ **PURGE THE TARGET'S `__pycache__/<stem>.*.pyc` AFTER WRITING EACH MUTANT.** The purge is the
+whole fix. 🔴 **`python -B` / `PYTHONDONTWRITEBYTECODE=1` does NOT fix this** — it only stops pycs
+being *written*; a stale one already on disk is still read and still wins. Measured three ways
+(baseline `dead`, `-B` `dead`, purge `todo`) in `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`
+(row `d18ce9ef`, Rio) and reproduced independently here. Keep `-B` if you like — in a multi-mutant
+loop it stops a fresh pyc being laid down between mutants — but a per-mutant purge already covers
+that, so it is belt, not half the fix. **Adopting the flag alone buys the appearance of safety.**
+
+⚠️ **THE HAZARD IS NOT LIMITED TO MUTATION HARNESSES, AND IT IS CROSS-PROCESS.** A *fresh* pytest
+reads the stale pyc off disk, so any edit-then-run loop is exposed — including one an agent types by
+hand. Mutation testing is merely where it lands hardest, because mutate-and-restore are both
+same-size edits inside one second and **the failure points the wrong way**: you restore the file,
+read it back to confirm, and the interpreter keeps running the mutant. A repo-wide remedy
+(`compileall --invalidation-mode checked-hash`, measured at +3.3% import cost and self-sustaining
+across recompiles) is an OPEN DECISION on row `d18ce9ef` — do not adopt it unilaterally.
+
+⚠️ **THE UNDER-REPORT IS SELECTIVE, WHICH IS WHAT MAKES IT DANGEROUS.** A length-changing swap
+invalidates the cache on its own, so most mutations in a pass are unaffected — 11 of 12 in the
+measured case. **A harness looks healthy while lying about exactly the mutations that leave mtime
+and size unchanged.**
+
+⇒ **A SURVIVING MUTANT HAS THREE EXPLANATIONS, NOT ONE.** Separate them before writing a line of
+test code:
+
+| Explanation | How to tell | Cost of getting it wrong |
+|---|---|---|
+| **A weak test** | the other two are ruled out | the only one that earns a new test |
+| **A broken harness** | re-run that ONE mutant by hand — if it reddens, the harness lied | you accept a lower kill count as the file's ceiling |
+| **An equivalent mutant** | read the edit: did it repair its own damage? | you write a test to kill something that was never a defect |
+
+Measured example of the third: an edit that dropped an `if row.get( "id" )` guard **and** swapped
+`row[ "id" ]` for `row.get( "id" )` in the same change turned a `KeyError` into a harmless `None`
+key. The mutation was wrong, not the test. **Reaching for "weak test" first is how a seat rewrites
+tests that were already fine.**
+
+**Still the floor, unchanged**: every mutation asserts it APPLIED before its result is trusted — the
+anchor matched EXACTLY once, and the on-disk sha CHANGED — plus a restore control at the end that is
+actually READ, since `git checkout` cannot restore an untracked file (row `c0a829a3`).
+
 ## TEST CREDENTIALS
 
 **CRITICAL**: Never hardcode test credentials. Always use environment variables.
