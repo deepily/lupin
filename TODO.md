@@ -12,6 +12,21 @@
 
 ### Findings banked, not filed
 
+#### A SPEECH-ACT GUARD FOR THE DM CONDENSER — and the row that was minted for it, then dropped under the moratorium (Rachel 🕊️ writing, Mr Radio 🦉's ruling, 2026-08-30 ~19:33 EDT)
+
+**Held here because a row for this was created at 19:31 EDT and DROPPED at 19:33** — `b0507d0d`, `status: dropped`, moratorium text quoted in its transition reason. Verified by reading the row both times rather than on report.
+
+- [ ] **Build a SECOND guard for the DM condenser: a speech-act guard.** Owner when the moratorium lifts: **Clayton 😎**. Accountable: Mr Radio 🦉.
+  - **It is a second guard ALONGSIDE the landed retraction-marker guard (111 tests green), never a replacement.** Clayton's own measurement decides it: a **name-for-name SWAP passes the marker guard clean, empty and unflagged**, while dropping every name fires it at **6 mentions to 0**. ⇒ **The marker guard structurally cannot see a substitution** — and a substitution is what actually landed on 2026-08-30, when a suggestion of Tiberius 👑's arrived attributed to Maya 🌻.
+  - **What it guards**: a message carrying a **verdict, an approval, a refusal, a sha or a branch name must arrive as that act**, not as a summary of one. Measured the same day: **of 33 approvals, 12 delivered no approval at all and 10 named no branch or sha.**
+  - **State of the world**: the condenser-bypass question is with Rick, **asked twice on 2026-08-30 and timed out unanswered both times**. Build assuming condensing stays; a bypass sits on top, not instead.
+
+- [ ] **§1.5.1b's ranking of distortion needs AMENDING, not its citation fixed** (Rachel's finding; **Krishna 🦚 owns the amendment**). §1.5.1b ranks *addition* worst because *"distorted text usually contradicts something the reader already holds."* **Bug `29a986df` is a measured counterexample**: stripping a retraction marker produced something *"confidently wrong, in a shape indistinguishable from a correct summary"* — **nothing to contradict, no gap to notice**, which is the property the section reserves for addition. ⇒ **Distortion-by-marker-stripping has addition's undetectability**, and correction-heavy docs make it common — every `CORRECTED` banner in CLAUDE.md is a candidate.
+
+- [x] ✅ **CLOSED — the three-way miscitation.** `29a986df` was cited in `workflow/cross-session-communication.md` §1.5.1c as *"being built — Clayton's speech-act guard."* Read directly, it is `item_class: bug`, `status: done`, titled *"DM condenser inverts 'used to say X' into 'says X'"*, and **speech acts appear nowhere in it**; its own text says *"SUGGESTED DIRECTION — not a design."* **Wrong three ways: a bug not a design, closed not in flight, and about a different mechanism.** ⚠️ **The error was Mr Radio's, not Krishna's** — he supplied the citation with the ruling, verified it himself against the row, and named it. **A receipt resolving to something other than what the text claims — sitting inside the two sections that define the rule against exactly that.**
+
+🔴 **THE ENTRY THAT MATTERS MOST, AND IT IS THE MANAGER'S OWN, UNSOFTENED AT HIS INSISTENCE.** This is the **fourth `rule-instead-of-mechanism` of the day**, and it landed on the author of the argument against it. His `c53a7ae9` proposes a store-side gate precisely because **nothing in the write path tells a manager a standing order exists at the moment he acts** — and when he minted `b0507d0d`, nothing did. The order was written down, correctly, at TODO.md line 5 all day. ⇒ **A rule that is written down and not enforced is one its own author will break, and the write path will report success.** The gate is still unbuilt and still Rick's call.
+
 #### A documented rollback whose automated half NEVER WORKED (Chloé 🗼, banked by Mr Radio 🦉, 2026-08-30)
 
 - [ ] 🔴 **`src/docs/auth/migration-guide.md` documents an auth-migration rollback, and the automated half of it has never once run.** `rollback_migration.py` imported `delete_user_by_email` from `cosa.rest.user_service`; `git log -S "def delete_user_by_email"` is **EMPTY repo-wide across all history**, so the function never existed and the script raised `ImportError` on load from the day it was written. Verified independently three times — Chloé, Tiberius, and me.
