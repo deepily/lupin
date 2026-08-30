@@ -119,9 +119,9 @@ last -x reboot | head -20      # read the morning boot times yourself
 
 | Window (EDT) | Verdict | Why |
 |---|---|---|
-| ~11 PM – 9 AM | ☠️ **DEAD — never schedule here** | Host is usually powered off, and on most days is still down well past 8:52 AM. A job here does not run late — it does not run at all until boot. |
+| ~11 PM – 10 AM | ☠️ **DEAD — never schedule here** | Host is usually powered off, and on most days is still down past 09:30 (16 boots to Aug 30: median 09:45, earliest 09:03, two past 11:00). A job here does not run late — it does not run at all until boot. |
 | 9 PM – 11 PM | ❌ Peak — avoid | Rick's interactive window; competes with his real work. |
-| **10 AM – 1 PM** | ✅ **OPTIMAL — schedule batch work here** | Comfortably after the 09:24 median boot, and Rick is barely on. The only window that is reliably both up and quiet. |
+| **10 AM – 1 PM** | ✅ **OPTIMAL — schedule batch work here** | Comfortably after the median boot (09:24 on the Aug-4 sample, 09:45 on the Aug-30 one — it moved later, so this window got safer). Rick is barely on. The only window reliably both up and quiet. |
 | 1 PM – 9 PM | 🟡 Acceptable | Box up, some interactive use, well below peak. |
 
 **Rule**: any non-interactive bounded job (batch generation, scheduled regression sweeps, podcast/presentation/research) MUST set `scheduled_at` inside a window the box is UP for — **prefer 10 AM – 1 PM EDT** — via `/api/v2/submit` (field defined on `SubmitRequest` at `src/cosa/rest/routers/v2_ask.py`). User-clicked synchronous bounded jobs are exempt.
