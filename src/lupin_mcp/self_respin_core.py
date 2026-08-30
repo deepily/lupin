@@ -55,6 +55,7 @@ import uuid
 from dataclasses import dataclass
 
 from cosa.agents.heartbeat_arbiter.self_respin_observer import build_marker_dict, _parse_iso
+from lupin_mcp.memento_slot import SELF_RESPIN_SLOT, resolve_repo_root, verify_memento_at_slot
 
 
 # The literal ask_yes_no prepends on any non-answer (cosa_voice_mcp.DEFAULT_USED_MARKER).
@@ -509,8 +510,10 @@ def perform_self_respin(
     ready_timeout_polls  = DEFAULT_READY_TIMEOUT_POLLS,
     poll_interval_seconds = DEFAULT_POLL_INTERVAL_SECONDS,
     base_dir             = None,
+    repo_root            = None,
     now                  = None,
     resolve_tmux_fn      = None,
+    verify_slot_fn       = None,
     resolve_bridge_path_fn = None,
     ask_fn               = None,
     schedule_fn          = None,
@@ -527,23 +530,29 @@ def perform_self_respin(
          clear is a real over_budget reading. A failed pressure fetch degrades to
          "unknown"; forging or defaulting it turns a visible unknown into an invisible
          lie, and a non-over_budget marker can NEVER be classified RETURNED anyway.)
-      3. verify the memento (nonce + freshness)    — fail ⇒ aborted (clear into nothing averted)
-      4. fire the confirmation ask, always         — real "no"/"neither" ⇒ declined
-      5. write the persistent OBSERVER marker + read it back for durability
+      3. prove the memento is AT THIS SEAT'S SLOT and clears the reap's own memento
+         proof                                     — fail ⇒ aborted (row 8068c65e)
+      4. verify the memento (nonce + freshness)    — fail ⇒ aborted (clear into nothing averted)
+      5. fire the confirmation ask, always         — real "no"/"neither" ⇒ declined
+      6. write the persistent OBSERVER marker + read it back for durability
          AND write the one-shot FIRE token         — read-back fail ⇒ aborted
-      6. schedule the guarded, fire-point-consuming detached /clear (+ the wake that
+      7. schedule the guarded, fire-point-consuming detached /clear (+ the wake that
          rides the SAME chain once the rehydrate bridge write proves the reset)
 
     Requires:
         - session_id, persona non-empty; memento_path points at the seat's memento
         - memento_nonce is the uuid the caller stamped into that memento this cycle
+        - repo_root is the seat's own repo root, or None to resolve it live from cwd;
+          an unresolvable root ABORTS rather than guessing one (row 8068c65e)
         - pre_clear_status is the seat's context-pressure `status` at fire time
           (recorded so the observer can prove the over_budget→within_budget return)
         - the *_fn seams are callables (or None ⇒ the live defaults)
 
     Ensures:
         - returns a SelfRespinResult; status ∈ {scheduled, declined, aborted}
-        - NO detached /clear is scheduled unless memento verify passed AND the ask
+        - NO detached /clear is scheduled unless the memento is proven to be AT the
+          seat's slot (never merely at the caller-supplied path) AND memento verify
+          passed AND the ask
           resolved to yes/default-yes AND the observer marker is durable on disk
         - the ask is ALWAYS called on the go-path — there is no kwarg that skips it
         - makes NO task-store calls (the verb never marks its own row done)
@@ -560,6 +569,7 @@ def perform_self_respin(
     schedule_fn     = schedule_fn     if schedule_fn     is not None else _default_schedule
     read_text_fn    = read_text_fn    if read_text_fn    is not None else _default_read_text
     write_json_fn   = write_json_fn   if write_json_fn   is not None else _write_json_atomic
+    verify_slot_fn  = verify_slot_fn  if verify_slot_fn  is not None else _default_verify_slot
 
     # 1. resolve tmux session
     tmux_session = resolve_tmux_fn( session_id )
@@ -576,19 +586,34 @@ def perform_self_respin(
             reason=f"pre-clear status is {pre_clear_status!r}, not a proven 'over_budget' reading — no grounds to clear",
         )
 
-    # 3. memento verify — BEFORE the ask (no point asking to clear into nothing)
+    # 3. SLOT PLACEMENT + the reap's own memento proof (row 8068c65e) — BEFORE the
+    # nonce verify, because a nonce proves the file you named is fresh and says nothing
+    # about whether it is the file any reader will look at. The old check took its
+    # success criterion from the same caller whose mistake it was meant to catch, so it
+    # could not fail; this one derives the slot from the seat's identity and looks THERE,
+    # then runs the very predicate dismiss_sessions runs — closing the gap that let
+    # Tiberius's misplaced memento go unreported on this path while Pocholo's was caught
+    # on the reap path.
+    ok, reason = verify_slot_fn(
+        memento_path, repo_root=repo_root, persona=persona, session_id=session_id,
+        now=now, read_text_fn=read_text_fn,
+    )
+    if not ok:
+        return SelfRespinResult( status="aborted", reason=f"memento slot check failed: {reason}" )
+
+    # 4. memento verify — BEFORE the ask (no point asking to clear into nothing)
     ok, reason = verify_memento_content(
         read_text_fn( memento_path ), memento_nonce, now, cycle_window_seconds=cycle_window_seconds
     )
     if not ok:
         return SelfRespinResult( status="aborted", reason=f"memento verify failed: {reason}" )
 
-    # 4. confirmation ask — ALWAYS runs on this path; no skip kwarg exists
+    # 5. confirmation ask — ALWAYS runs on this path; no skip kwarg exists
     proceed, gate_reason = gate_proceed( ask_fn() )
     if not proceed:
         return SelfRespinResult( status="declined", reason=gate_reason )
 
-    # 5. resolve the wake BEFORE the marker so the marker records the wake_nonce the
+    # 6. resolve the wake BEFORE the marker so the marker records the wake_nonce the
     # seat must echo. The wake rides the SAME chain (ruling 3) behind the bridge-mtime
     # readiness gate; if the bridge can't be resolved we fall back to a plain clear
     # (still a valid re-spin — the seat is left for the observer to wake/alarm). The
@@ -639,7 +664,7 @@ def perform_self_respin(
             reason="fire token did not survive read-back — refusing to schedule a clear that would self-cancel",
         )
 
-    # 6. schedule the guarded, fire-point-consuming detached /clear (+ the readiness-
+    # 7. schedule the guarded, fire-point-consuming detached /clear (+ the readiness-
     # gated wake built above).
     schedule_fn( build_guarded_clear_argv(
         tmux_session, fire_token_path, delay_seconds,
@@ -656,6 +681,30 @@ def perform_self_respin(
         marker_path=marker_path,
         fire_token_path=fire_token_path,
         expected_return_by=marker[ "expected_return_by" ],
+    )
+
+
+def _default_verify_slot( memento_path, *, repo_root, persona, session_id, now, read_text_fn ):
+    """
+    The live slot check: resolve the seat's repo root when the caller did not supply
+    one, then run both legs of memento_slot.verify_memento_at_slot.
+
+    Requires:
+        - repo_root is the seat's repo root, or None to resolve it from the process cwd
+        - persona, session_id identify the seat; now is aware; read_text_fn reads a path
+
+    Ensures:
+        - returns ( ok, reason ) from verify_memento_at_slot against the `root` slot
+          (a self-respin rehydrates from `root`; a reap reads `io` — reap_memento's
+          module docstring is the authority on that split)
+        - an unresolvable repo root reaches verify_memento_at_slot as None, which
+          REFUSES there — the refusal lives in one place, not two
+        - never raises
+    """
+    root = repo_root if repo_root is not None else resolve_repo_root()
+    return verify_memento_at_slot(
+        memento_path, repo_root=root, persona=persona, session_id=session_id,
+        now=now, read_text_fn=read_text_fn, slot=SELF_RESPIN_SLOT,
     )
 
 
