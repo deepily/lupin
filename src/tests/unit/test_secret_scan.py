@@ -217,7 +217,38 @@ def _masked_rows( findings ):
              for origin, _lineno, key, _len, digest in findings }
 
 
+# ── THE AMNESTY, stated in code rather than only in the data (Tiberius, reviewing 72c9e6a2) ──
+#
+# 190 rows carry this exact string instead of an individual reason. That is a DELIBERATE
+# AMNESTY, not an oversight: they were triaged COLLECTIVELY on 2026-08-17 by chloe + rachel
+# (see `branch_triage_note`), and re-triaging 190 rows was not part of closing this defect.
+#
+# IT IS DATED AND IT IS BOUNDED. Dated, because reusing this string on a finding discovered
+# after 2026-08-17 is an affirmative false statement rather than a shortcut — the date makes
+# that visible to a reviewer. Bounded, because `AMNESTY_ROWS` below pins how many rows may
+# ride it: paste it onto a new finding and the count grows and the gate reds. Without that
+# pin the amnesty would be an open door with a polite sign on it, which is the shape of the
+# defect this whole change is closing.
 GRANDFATHER_REASON = "grandfathered: collectively triaged 2026-08-17, see branch_triage_note"
+AMNESTY_ROWS       = 190
+
+
+def amnesty_rows( recorded ):
+    """
+    The rows riding the 2026-08-17 collective triage rather than an individual reason.
+
+    Requires:
+        - recorded is the parsed fixture dict with a MAPPING branch_accepted
+
+    Ensures:
+        - returns the sorted list of rows whose reason is exactly GRANDFATHER_REASON
+        - a row with its OWN reason is not counted, so individually re-triaging one
+          SHRINKS the amnesty — the only direction that should ever be free
+        - never raises on an empty mapping
+    """
+    accepted = recorded[ "branch_accepted" ]
+    return sorted( row for row, reason in accepted.items() if reason == GRANDFATHER_REASON )
+
 
 
 def accepted_rows_and_unjustified( recorded ):
@@ -459,3 +490,41 @@ def test_the_live_fixture_carries_a_reason_for_every_accepted_row():
         + chr( 10 ).join( "    " + row for row in unjustified )
     )
     assert len( accepted ) == 190, "the grandfathered set changed size — re-triage before re-pinning"
+
+
+def test_the_amnesty_is_bounded_and_cannot_absorb_a_new_finding():
+    """
+    THE SEAM I FLAGGED TO MY OWN REVIEWER, now closed (Tiberius, reviewing 72c9e6a2).
+
+    Giving 190 rows a shared grandfather reason satisfies "every row has a reason" while
+    leaving an open door: paste that same string onto a NEW finding and it reads as
+    triaged. Pinning the count shuts it — the amnesty may shrink as rows are individually
+    re-triaged, never grow.
+    """
+    import json
+    recorded = json.load( open( cu.get_project_root()
+                                + "/src/tests/unit/fixtures/secret_scan_last_full_scan.json" ) )
+    riding = amnesty_rows( recorded )
+
+    assert len( riding ) <= AMNESTY_ROWS, (
+        f"{len( riding )} rows now ride the 2026-08-17 amnesty, up from {AMNESTY_ROWS}. "
+        "A finding discovered after that date cannot have been triaged on it — give the new "
+        "row its own reason, or say plainly why the amnesty was widened."
+    )
+
+
+def test_pasting_the_amnesty_string_onto_a_new_finding_is_caught():
+    """The negative control for the bound: the fooling move, executed."""
+    recorded = { "branch_accepted": { f"row{i}|k|sha256:{i}": GRANDFATHER_REASON
+                                      for i in range( AMNESTY_ROWS + 1 ) } }
+    riding = amnesty_rows( recorded )
+
+    assert len( riding ) == AMNESTY_ROWS + 1
+    assert len( riding ) > AMNESTY_ROWS, "the bound must catch a grown amnesty"
+
+
+def test_individually_retriaging_a_row_shrinks_the_amnesty():
+    """The positive control — shrinking must stay free, or nobody will ever re-triage."""
+    recorded = { "branch_accepted": { "a|k|sha256:1": GRANDFATHER_REASON,
+                                      "b|k|sha256:2": "checked 2026-08-30: synthetic fixture" } }
+    assert amnesty_rows( recorded ) == [ "a|k|sha256:1" ]
