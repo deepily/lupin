@@ -703,10 +703,15 @@ def test_parse_own_pressure_absent_persona_is_UNMATCHED_not_unknown():
 
 def test_parse_own_pressure_an_empty_roster_is_unknown_rather_than_unmatched():
     """
-    The other side of the split, and the boundary is deliberate: an EMPTY roster is a
-    fact about the SENSOR (it listed nobody), not about this seat. Calling that
-    "unmatched" would accuse a seat of being absent on the strength of a reading that
-    never named anyone.
+    The other side of the split, and it is DECIDABLE rather than a preference
+    (Tiberius): THE ASKER IS ITSELF A LIVE SEAT, so a roster that omits everyone —
+    the caller included — cannot be a true reading. A genuinely empty fleet cannot be
+    observed by a member of it.
+
+    ⚠️ Note that "unmatched" is LITERALLY TRUE here — the roster was read, and this
+    seat is not in it — and is still wrong. That is why this case has a test of its
+    own rather than being left to the reader: the tempting answer is the defensible-
+    sounding one.
     """
     assert sr.parse_own_pressure( { "personas": { } }, "cheech" ) == ( sr.PRESSURE_UNKNOWN, None )
 

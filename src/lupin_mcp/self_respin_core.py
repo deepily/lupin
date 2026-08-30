@@ -877,8 +877,9 @@ def parse_own_pressure( section, persona ):
 
     Ensures:
         - a present persona record carrying a `status` ⇒ ( status, pct )
-        - a missing/blank `status`, a non-dict `personas`, an EMPTY roster, or a
-          non-dict `section` ⇒ ( PRESSURE_UNKNOWN, None ) — a missed reading is
+        - a missing/blank `status`, a non-dict `personas`, an EMPTY roster (see the
+          decidability note at the guard), or a non-dict `section` ⇒
+          ( PRESSURE_UNKNOWN, None ) — a missed reading is
           recorded as unknown, NEVER a manufactured "over_budget" (Krishna condition
           #3). A forged status would be a CLAIM that a reading happened.
         - a roster that was READ but does not contain this seat under ANY casing ⇒
@@ -892,7 +893,12 @@ def parse_own_pressure( section, persona ):
     """
     personas = section.get( "personas" ) if isinstance( section, dict ) else None
 
-    # No roster at all — a fact about the SENSOR, not about this seat.
+    # No roster at all ⇒ UNKNOWN, and for an EMPTY one this is DECIDABLE rather than
+    # merely preferable (Tiberius): THE ASKER IS ITSELF A LIVE SEAT, so a roster that
+    # omits everyone — including the caller — cannot be a true reading. A genuinely
+    # empty fleet cannot be observed by a member of it. "unmatched" is literally true
+    # of an empty roster ("we read it, you are not in it") and is still the WRONG
+    # answer, which is exactly why the reasoning is written down here.
     if not isinstance( personas, dict ) or not personas:
         return PRESSURE_UNKNOWN, None
 
