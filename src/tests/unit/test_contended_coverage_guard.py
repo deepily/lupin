@@ -398,6 +398,18 @@ def test_end_to_end_an_agent_seat_quoting_the_command_does_not_refuse_a_real_run
     Asserted at PID level rather than on the exit code, because a peer's genuine suite may
     be running on this box at any moment and would make an exit-code assertion flaky. The
     pid-level claim is decisive regardless of what else is live.
+
+    ⚠️ OPEN QUESTION, INHERITED RATHER THAN RE-FOUND (row c5e6d272, 2026-08-30). This test
+    used to fail intermittently on a race between its own argv read and the child's execve
+    — see the comment on the poll below for the mechanism and the measurements. It
+    reproduced at ~25% under pytest (3 of 12 solo runs) but only ~5% standalone (2 of 40
+    trials of the identical Popen). WHY THE TWO RATES DIFFER WAS NEVER MEASURED. The
+    plausible story is that under pytest the parent does more work between fork and read,
+    but that is a guess and is deliberately not recorded as a cause.
+
+    Do not chase it on this test's behalf — the poll below closes the race whatever the
+    rate is. It is written down so the next reader inherits an open question instead of
+    re-deriving it, and so nobody later mistakes the guess for a finding.
     """
     briefing = ( 'claude --model claude-opus-5 PROVE THE GATE GREEN: '
                  'LUPIN_ROOT="$PWD" .venv/bin/python -m pytest src/tests/unit/test_x.py -q' )
