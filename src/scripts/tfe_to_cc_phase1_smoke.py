@@ -191,6 +191,29 @@ def _append_to_execution_log( section_md: str ) -> None:
     print( f"[SMOKE] Execution log updated: {EXECUTION_LOG}", flush=True )
 
 
+def _run_passed( summary: dict, parsed: dict | None, validation_ok: bool, exit_code: int ) -> bool:
+    """The plan's success criteria (1-6), in ONE place.
+
+    Both the logged verdict and the process exit code read this. They used to state the
+    criteria separately and had drifted apart: the log applied `is_error` and the turn-budget
+    cap, the exit code did not, so an unattended run could write a FAIL verdict and still
+    exit 0.
+    """
+    result = summary.get( "result" ) or {}
+    return (
+        exit_code == 0
+        and summary.get( "api_key_source" ) == "none"
+        # no `result` truthiness test: an absent result event leaves `result` == {} and the
+        # subtype check below already fails it. A mutation removing such a clause SURVIVES,
+        # because it is an equivalent mutant rather than an untested one.
+        and result.get( "subtype" ) == "success"
+        and result.get( "is_error" ) is False
+        and parsed is not None
+        and validation_ok
+        and int( result.get( "num_turns" ) or 0 ) < MAX_TURNS
+    )
+
+
 def _format_execution_section( summary: dict, parsed: dict | None, validation_ok: bool,
                                 validation_issues: list, fallback_used: bool,
                                 exit_code: int, stream_path: Path, prompt_size: int ) -> str:
@@ -251,14 +274,7 @@ def _format_execution_section( summary: dict, parsed: dict | None, validation_ok
     lines.append( "" )
 
     # Overall pass/fail verdict per the plan's success criteria
-    verdict_ok = (
-        exit_code == 0
-        and summary.get( "api_key_source" ) == "none"
-        and result and result.get( "subtype" ) == "success" and result.get( "is_error" ) is False
-        and parsed is not None
-        and validation_ok
-        and result and int( result.get( "num_turns" ) or 0 ) < MAX_TURNS
-    )
+    verdict_ok = _run_passed( summary, parsed, validation_ok, exit_code )
     lines.append( f"**Verdict**: {'✅ PASS' if verdict_ok else '❌ FAIL'} vs. plan success criteria (1-6)" )
 
     return "\n".join( lines )
@@ -332,15 +348,8 @@ def main() -> int:
     )
     _append_to_execution_log( section )
 
-    # Exit 0 on verdict PASS, else 1
-    verdict_ok = (
-        exit_code == 0
-        and summary.get( "api_key_source" ) == "none"
-        and summary.get( "result" ) and summary[ "result" ].get( "subtype" ) == "success"
-        and parsed is not None
-        and validation_ok
-    )
-    return 0 if verdict_ok else 1
+    # Exit 0 on verdict PASS, else 1 — the SAME predicate the logged verdict used
+    return 0 if _run_passed( summary, parsed, validation_ok, exit_code ) else 1
 
 
 if __name__ == "__main__":
