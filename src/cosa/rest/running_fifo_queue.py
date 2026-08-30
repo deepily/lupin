@@ -305,9 +305,30 @@ class RunningFifoQueue( FifoQueue ):
                         score, cached_snapshot = cached_snapshots[ 0 ]
 
                         if score >= 100.0:
-                            # Exact match — auto-accept
-                            if self.debug: print( f"[CACHE] EXACT HIT: score {score:.1f}% from {cached_snapshot.run_date}" )
-                            running_job = self._format_cached_result( cached_snapshot, running_job, truncated_question, run_timer )
+                            # Exact match — served ONLY if the answer was CONFIRMED correct.
+                            # Rick, 2026-08-30 (row 54589356): "Incorrect answers should never
+                            # be replayed no matter where they are called from." The v2 door
+                            # already refused unconfirmed rows, and THIS is the layer it fell
+                            # through to — its own comment says so ("Refusing here falls through
+                            # to routing, so the agent re-runs"). The two floors are identical
+                            # (`v2 similarity floor = 100.0` against the `>= 100.0` above), so
+                            # the exact row v2 refuses is the exact row this branch matched.
+                            if self._may_serve_cached( cached_snapshot, "exact_hit" ):
+                                if self.debug: print( f"[CACHE] EXACT HIT: score {score:.1f}% from {cached_snapshot.run_date}" )
+                                served = self._format_cached_result( cached_snapshot, running_job, truncated_question, run_timer )
+                                if served is None:
+                                    # The second gate declined mid-serve. Nothing user-visible
+                                    # has happened yet (see its comment), so the agent runs.
+                                    running_job = self._handle_base_agent( running_job, truncated_question, run_timer )
+                                else:
+                                    running_job = served
+                            else:
+                                # A REFUSAL, not a miss — said out loud at print level, not
+                                # behind self.debug. The user sees the cache appear to stop
+                                # working, and the only way to tell "guard refused it" from
+                                # "cache is broken" is to have written down which happened.
+                                print( f"[CACHE] REFUSED: exact hit at {score:.1f}% is unconfirmed — routing to agent (row 54589356)" )
+                                running_job = self._handle_base_agent( running_job, truncated_question, run_timer )
 
                         else:
                             # ── the ACCEPT-ABOVE-FLOOR branch was DELETED here (step 7b) ──
@@ -1807,6 +1828,53 @@ class RunningFifoQueue( FifoQueue ):
         thread = threading.Thread( target=_ask_and_update, daemon=True, name=f"correctness-{snapshot.id_hash[:8]}" )
         thread.start()
 
+    def _may_serve_cached( self, cached_snapshot: Any, why: str ) -> bool:
+        """
+        The READ guard for the QUEUE layer. A cached row is served only if its answer was
+        CONFIRMED correct. Deliberately mirrors `AskFlow._may_serve` (v2/flow.py:1099) —
+        same tri-state, same `is True`, same fail-closed — so the two layers cannot drift.
+
+        WHY THIS EXISTS ON THIS LAYER AT ALL (row 54589356). The v2 door already had a
+        guard, and it was the only one. `_may_serve` has exactly two call sites, both on
+        the `ask` path, so `/api/v2/submit` never consulted it — and on the `ask` path a
+        refusal falls through to routing, which enqueues the work that lands HERE. With
+        `v2 similarity floor = 100.0` matching this layer's `score >= 100.0`, the exact row
+        v2 refused was the exact row this layer then matched and replayed. The guard was
+        not merely missing from a second door; on the first door it was undone one step
+        after it fired.
+
+        THREE STATES, STARTING AT UNKNOWN, SO IT FAILS CLOSED. `None` (never answered),
+        `False` (the user said no) and `True` are all possible, and only `True` serves.
+        `is True`, not truthiness: the verdict rides a nullable column, and a value that
+        arrives as the string "true", or as 1, must not be read as consent.
+
+        `None` IS THE COMMON CASE, NOT AN EDGE. Confirmation comes from the end-of-run
+        "was this answer correct?" prompt, which needs a live human and lands on a daemon
+        thread that does not block. Every unattended run therefore deposits an unconfirmed
+        row. Rick accepted that cost explicitly when he ruled: it turns a real number of
+        today's exact-match hits into misses.
+
+        Requires:
+            - cached_snapshot is a hydrated SolutionSnapshot (never a raw DB row)
+            - why is a short string naming the call site, for the refusal log
+
+        Ensures:
+            - returns True ONLY when answer_is_correct is exactly True
+            - returns False for None, False, and any non-True value
+            - prints a refusal line naming the call site and the verdict
+
+        Raises:
+            - None
+        """
+        verdict = cached_snapshot.answer_is_correct
+        if verdict is True:
+            return True
+
+        # Named at print level, not behind self.debug: a refusal that leaves no trace is
+        # indistinguishable from a broken cache to whoever debugs it next.
+        print( f"[CACHE] guard refused ({why}): answer_is_correct={verdict!r} — row 54589356" )
+        return False
+
     def _format_cached_result( self, cached_snapshot: Any, original_job: Any, truncated_question: str, run_timer: sw.Stopwatch ) -> Any:
         """
         Format cached snapshot result to behave like a freshly executed job.
@@ -1844,7 +1912,22 @@ class RunningFifoQueue( FifoQueue ):
             cached_snapshot.run_formatter()
             if self.debug: print( f"[CACHE] ✓ Code re-executed successfully" )
         else:
-            # Code failed - use cached answer as fallback
+            # Code failed. Serving from here means serving the STORED answer VERBATIM —
+            # `run_formatter()` in the branch above is what refreshes it, and this branch
+            # skips it. That makes this the call site that actually replays an unconfirmed
+            # ANSWER rather than merely re-running its code, which is the distinction Rick
+            # ruled on (row 54589356): both forms of reuse are gated, neither is exempt.
+            #
+            # Gate 1 refuses unconfirmed rows before this method is entered, so arriving
+            # here unconfirmed means a future caller reached _format_cached_result without
+            # it. Defence in depth, and deliberately NOT an assert: declining to serve is
+            # correct behaviour, taking down the consumer thread is not. Returning None is
+            # safe here because every user-visible side effect — record_replay, _notify,
+            # the queue move — happens further down.
+            if not self._may_serve_cached( cached_snapshot, "failed_reexecution_fallback" ):
+                print( "[CACHE] REFUSED: re-execution failed and the stored answer is unconfirmed — not serving (row 54589356)" )
+                return None
+
             if self.debug: print( f"[CACHE] ⚠ Re-execution failed, using cached answer" )
 
         # Calculate time saved (first_run_ms - current cache retrieval time)

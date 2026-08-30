@@ -974,8 +974,10 @@ class TestProcessJob( _RFQBase ):
         rq.snapshot_mgr.get_snapshots_by_question.assert_not_called()
 
     def test_agent_cache_exact_hit( self ):
+        # answer_is_correct=True is now load-bearing, not decoration: row 54589356 gates
+        # the serve on it. _SnapFake defaults it to None, which is a REFUSAL.
         rq = self.build( **{ "app debug": True } ); rq._format_cached_result = MagicMock( return_value="c" )
-        snap = _SnapFake( run_date="2026" )
+        snap = _SnapFake( run_date="2026", answer_is_correct=True )
         rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 100.0, snap ) ]
         rq._process_job( _AgentBaseFake() )
         rq._format_cached_result.assert_called_once()
@@ -1006,17 +1008,140 @@ class TestProcessJob( _RFQBase ):
 
     def test_an_exact_hit_is_still_served( self ):
         """
-        NEGATIVE CONTROL for the deletion: 100% is a deterministic exact match, it needs
-        no confirmation, and 7b does not touch it. A change that removed the whole second
-        cache read instead of the unconfirmed branch would go red here.
+        NEGATIVE CONTROL for the deletion: a change that removed the whole second cache
+        read instead of the unconfirmed branch would go red here.
+
+        🔴 THIS TEST'S PREMISE WAS RETIRED BY RICK, 2026-08-30 (row 54589356). It used to
+        read "100% is a deterministic exact match, it needs no confirmation" — and needing
+        no confirmation is exactly the reading he overruled: "Incorrect answers should
+        never be replayed no matter where they are called from." An exact match is still
+        served, but ONLY once its answer is confirmed correct, which is why the snapshot
+        below now carries answer_is_correct=True. The sentence was left in place for a
+        while after the code stopped agreeing with it; corrected here rather than deleted,
+        so the reason the fixture changed is legible.
         """
         rq = self.build()
         rq._format_cached_result = MagicMock( return_value="c" )
-        rq.snapshot_mgr.get_snapshots_by_question.return_value = [ ( 100.0, _SnapFake( run_date="2026" ) ) ]
+        rq.snapshot_mgr.get_snapshots_by_question.return_value = [
+            ( 100.0, _SnapFake( run_date="2026", answer_is_correct=True ) )
+        ]
 
         rq._process_job( _AgentBaseFake() )
 
         rq._format_cached_result.assert_called_once()
+
+    # ── row 54589356: the READ guard on the QUEUE layer ──────────────────────────
+    #
+    # Rick, 2026-08-30: "Incorrect answers should never be replayed no matter where they
+    # are called from." The v2 door already refused unconfirmed rows and this is the layer
+    # it fell through TO, so these tests are the ones that make the refusal real.
+
+    def test_an_unconfirmed_exact_hit_is_refused_and_routed_to_the_agent( self ):
+        """
+        The defect itself. answer_is_correct=None is the COMMON case, not an edge — the
+        confirmation prompt needs a live human and does not block, so every unattended run
+        deposits one. It must not be served.
+        """
+        rq = self.build()
+        rq._format_cached_result = MagicMock( return_value="c" )
+        rq._handle_base_agent    = MagicMock( return_value="a" )
+        rq.snapshot_mgr.get_snapshots_by_question.return_value = [
+            ( 100.0, _SnapFake( run_date="2026", answer_is_correct=None ) )
+        ]
+
+        rq._process_job( _AgentBaseFake() )
+
+        rq._format_cached_result.assert_not_called()
+        rq._handle_base_agent.assert_called_once()
+
+    def test_an_exact_hit_the_user_marked_WRONG_is_refused( self ):
+        """False is a different state from None and must also refuse — the user said no."""
+        rq = self.build()
+        rq._format_cached_result = MagicMock( return_value="c" )
+        rq._handle_base_agent    = MagicMock( return_value="a" )
+        rq.snapshot_mgr.get_snapshots_by_question.return_value = [
+            ( 100.0, _SnapFake( run_date="2026", answer_is_correct=False ) )
+        ]
+
+        rq._process_job( _AgentBaseFake() )
+
+        rq._format_cached_result.assert_not_called()
+        rq._handle_base_agent.assert_called_once()
+
+    def test_a_truthy_verdict_that_is_not_True_does_not_count_as_consent( self ):
+        """
+        `is True`, not truthiness. The verdict rides a NULLABLE column, and this is the
+        second guard in this area hung on a loosely-typed one — the first was
+        routing_command, and it failed OPEN. A future writer emitting the string "true"
+        or a 1 must not be read as the user having said yes.
+        """
+        for verdict in ( "true", 1, "True", [ True ] ):
+            with self.subTest( verdict=verdict ):
+                rq = self.build()
+                rq._format_cached_result = MagicMock( return_value="c" )
+                rq._handle_base_agent    = MagicMock( return_value="a" )
+                rq.snapshot_mgr.get_snapshots_by_question.return_value = [
+                    ( 100.0, _SnapFake( run_date="2026", answer_is_correct=verdict ) )
+                ]
+
+                rq._process_job( _AgentBaseFake() )
+
+                rq._format_cached_result.assert_not_called()
+                rq._handle_base_agent.assert_called_once()
+
+    def test_the_guard_predicate_itself_serves_only_on_exactly_True( self ):
+        """
+        The helper in isolation, so a caller-level pass cannot hide a broken predicate —
+        the same not-vacuous discipline the collision guard on row c89cec9b uses.
+        """
+        rq = self.build()
+        self.assertIs( rq._may_serve_cached( _SnapFake( answer_is_correct=True ), "t" ), True )
+        for verdict in ( None, False, "true", 1, 0, "" ):
+            with self.subTest( verdict=verdict ):
+                self.assertIs( rq._may_serve_cached( _SnapFake( answer_is_correct=verdict ), "t" ), False )
+
+    def test_gate_two_refuses_to_serve_a_stale_answer_when_re_execution_fails( self ):
+        """
+        The SECOND call site, and the one that actually replays an unconfirmed ANSWER:
+        run_formatter() is what refreshes the text, and the failure branch skips it, so
+        serving there emits the STORED answer verbatim. Gate 1 keeps unconfirmed rows out
+        of this method, so this is defence in depth against a future caller — it must
+        decline, not crash the consumer thread.
+        """
+        rq   = self.build()
+        snap = _SnapFake( run_date="2026", answer_is_correct=None,
+                          _code_response={ "return_code": 1, "output": "boom" } )
+        snap.run_code      = MagicMock( return_value={ "return_code": 1, "output": "boom" } )
+        snap.run_formatter = MagicMock()
+        snap.record_replay = MagicMock()
+
+        result = rq._format_cached_result( snap, _AgentBaseFake(), "q", MagicMock() )
+
+        self.assertIsNone( result, "an unconfirmed stale answer must not be served" )
+        snap.record_replay.assert_not_called()
+        rq.jobs_done_queue.push.assert_not_called()
+
+    def test_gate_two_still_serves_a_CONFIRMED_row_when_re_execution_fails( self ):
+        """
+        The paired positive control. Rick allowed BOTH reuse forms once the answer is
+        confirmed, so a confirmed row whose code fails still serves its stored answer —
+        without this, the gate above could be passing by refusing everything.
+        """
+        rq   = self.build()
+        snap = _SnapFake( run_date="2026", answer_is_correct=True )
+        snap.run_code      = MagicMock( return_value={ "return_code": 1, "output": "boom" } )
+        snap.run_formatter = MagicMock()
+        snap.record_replay = MagicMock()
+
+        # a real number, not a bare MagicMock: the serve path does arithmetic on the
+        # timer (max(0, first_run_ms - delta)), which the refusal path returns before.
+        timer = MagicMock(); timer.get_delta_ms.return_value = 5
+
+        result = rq._format_cached_result( snap, _AgentBaseFake(), "q", timer )
+
+        self.assertIsNotNone( result )
+        snap.run_formatter.assert_not_called()   # the failure branch skips the refresh
+        snap.record_replay.assert_called_once()
 
     def test_agent_cache_threshold_reject_routes_to_agent( self ):
         rq = self.build(); rq._handle_base_agent = MagicMock( return_value="a" )
