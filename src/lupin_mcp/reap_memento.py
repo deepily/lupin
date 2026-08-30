@@ -125,6 +125,98 @@ def seat_memento_slot( repo_root, persona_name ):
     return Path( repo_root ) / "io" / "mementos" / f"{persona_slug( persona_name )}.md"
 
 
+def seat_memento_root_record( repo_root, persona_name, seat_sid8 ):
+    """
+    The ROOT-slot RECORD for one seat — the reap's SECOND place to look (Rick-ruled
+    via Mr. Radio, 2026-08-30, row 8068c65e).
+
+    WHY THE RECORD AND NEVER THE ROOT POINTER, which is the whole content of the
+    ruling: `.claude-memento.md` is PERSONA-LESS — one file per repo, shared by every
+    seat in it. Measured 2026-08-30: Pocholo's record took it at 14:41 and Mr. Radio's
+    took it back at 15:20, so it was silently reassigned between seats twice inside
+    forty minutes. Following it on a batch reap resolves EVERY seat to whichever one
+    wrote last, which manufactures the exact failure this row exists for — a memento
+    that parses fine and names the wrong work. The RECORD carries persona AND session
+    in its name, so it identifies whose work it holds; the pointer cannot.
+
+    Requires:
+        - repo_root is the seat's OWN repo (seat_repo_root), never the host's
+        - persona_name, seat_sid8 identify the seat
+
+    Ensures:
+        - returns <repo_root>/.claude-memento-<persona-slug>-<sid8>.md
+        - derives it through memento_slot, which is the single layout authority —
+          a second copy of the derivation is a second thing to drift
+    """
+    # Local import: memento_slot composes THIS module's verify predicate, so importing
+    # it at module level would close a cycle. The layout lives there; the predicate
+    # lives here; neither is duplicated.
+    from lupin_mcp.memento_slot import SLOT_ROOT, slot_record_path
+    return slot_record_path( repo_root, persona_name, seat_sid8, SLOT_ROOT )
+
+
+def verify_seat_memento_at_any_readable_slot(
+    repo_root,
+    persona_name,
+    seat_sid8,
+    now,
+    *,
+    read_text_fn,
+    window_seconds = DEFAULT_WINDOW_SECONDS,
+    min_bytes      = DEFAULT_MIN_BYTES,
+    merge_claim_fn = None,
+    verify_fn      = None,
+):
+    """
+    Prove a reapable memento exists for this seat at EITHER readable location.
+
+    THE DEFECT THIS CLOSES (row 8068c65e): the verb offers `--slot root` as an
+    ordinary documented option and the reap read `--slot io` only, so a correct call
+    with a well-formed header produced a file nothing would find. Rachel's census of
+    all four of 2026-08-30's mementos found no misuse anywhere — one sanctioned verb,
+    right headers every time, and the entire split was that one field. A parameter
+    whose legal values are not all readable is the tool's defect, not the seat's.
+
+    ORDER, and it is not arbitrary: `io` is the reap's PRIMARY slot and its failure
+    reason is the actionable one, so it is tried first and its reason is what a total
+    miss reports. The root RECORD is a FALLBACK — it rescues an already-written
+    memento rather than blessing root as a reap destination.
+
+    Requires:
+        - repo_root is the seat's own repo; persona_name / seat_sid8 identify it
+        - now is AWARE; read_text_fn( path ) -> text or None
+        - verify_fn is verify_seat_memento (or a test double)
+
+    Ensures:
+        - returns ( usable, reason, slot_path ) where slot_path is the location that
+          ANSWERED — the io slot on success there, the root record on a fallback hit,
+          and the io slot on a total miss (so callers keep reporting the primary)
+        - the root POINTER is NEVER consulted (see seat_memento_root_record)
+        - a fallback hit says so in its reason, naming both the slot it was found at
+          and the slot it should have been written to — a silent rescue teaches the
+          fleet nothing and the next seat repeats it
+        - never raises
+    """
+    verify_fn = verify_fn if verify_fn is not None else verify_seat_memento
+    io_slot   = seat_memento_slot( repo_root, persona_name )
+    usable, reason = verify_fn( io_slot, seat_sid8, now, read_text_fn=read_text_fn,
+                                window_seconds=window_seconds, min_bytes=min_bytes,
+                                repo_root=repo_root, merge_claim_fn=merge_claim_fn )
+    if usable:
+        return True, reason, io_slot
+
+    root_record = seat_memento_root_record( repo_root, persona_name, seat_sid8 )
+    root_usable, root_reason = verify_fn( root_record, seat_sid8, now, read_text_fn=read_text_fn,
+                                          window_seconds=window_seconds, min_bytes=min_bytes,
+                                          repo_root=repo_root, merge_claim_fn=merge_claim_fn )
+    if root_usable:
+        return True, ( f"found at the root-slot RECORD {root_record}, not the io slot {io_slot} "
+                       f"({reason}) — usable, but write it with `--slot io` next time so the reap "
+                       f"finds it first: {root_reason}" ), root_record
+
+    return False, reason, io_slot
+
+
 def seat_repo_root( ident ):
     """
     The repo a reaped seat ACTUALLY sits in, read from its own bridge `cwd`
@@ -545,11 +637,10 @@ def recheck_losing_seats(
         repo_root = seat_repo_root( identities.get( name ) )
         if repo_root is None:
             continue
-        slot           = seat_memento_slot( repo_root, outcome.get( "persona" ) )
-        usable, reason = verify_seat_memento( slot, ( outcome.get( "session_id" ) or "" )[ :8 ], now,
-                                              read_text_fn=read_text_fn,
-                                              window_seconds=window_seconds, min_bytes=min_bytes,
-                                              repo_root=repo_root, merge_claim_fn=merge_claim_fn )
+        usable, reason, slot = verify_seat_memento_at_any_readable_slot(
+            repo_root, outcome.get( "persona" ), ( outcome.get( "session_id" ) or "" )[ :8 ], now,
+            read_text_fn=read_text_fn, window_seconds=window_seconds, min_bytes=min_bytes,
+            merge_claim_fn=merge_claim_fn )
         if not usable:
             continue
         rechecked[ name ] = dict( outcome )
@@ -755,11 +846,10 @@ def coordinate_mementos(
                                            "and guessing one reads another persona's memento",
                                  "persona": persona_name, "session_id": session_id }
             continue
-        slot          = seat_memento_slot( repo_root, persona_name )
-        usable, reason = verify_seat_memento( slot, session_id[ :8 ], now,
-                                              read_text_fn=read_text_fn,
-                                              window_seconds=window_seconds, min_bytes=min_bytes,
-                                              repo_root=repo_root, merge_claim_fn=merge_claim_fn )
+        usable, reason, slot = verify_seat_memento_at_any_readable_slot(
+            repo_root, persona_name, session_id[ :8 ], now,
+            read_text_fn=read_text_fn, window_seconds=window_seconds, min_bytes=min_bytes,
+            merge_claim_fn=merge_claim_fn )
         if usable:
             outcomes[ name ] = { "status": "verified", "reason": reason,
                                  "persona": persona_name, "session_id": session_id, "slot": str( slot ) }
@@ -888,8 +978,14 @@ def describe_slot(
 
     Ensures:
         - returns { slot, verdict, detail, foreign_session_id }
-        - verdict is "ready" ONLY when verify_seat_memento proves the slot — the same
-          predicate the reap uses, so this command and the reap can never disagree
+        - verdict is "ready" ONLY when the memento is proven at one of the two
+          READABLE locations — the io slot, or this seat's root RECORD (row 8068c65e)
+          — via the same predicate the reap uses, so this command and the reap can
+          never disagree. `slot` then names WHERE it was actually found, which is the
+          fact the caller acts on; the root POINTER is never among them, being
+          persona-less and therefore unable to say whose work it holds
+        - every verdict below "ready" is about the IO slot specifically — whose
+          pointer it is, and whether anything sits there at all
         - verdict is "prior_holder" when the slot names a DIFFERENT session, and
           foreign_session_id names it
         - verdict is "absent" when nothing readable with content is at the slot
@@ -899,12 +995,16 @@ def describe_slot(
         - never raises
     """
     read_text_fn = read_text_fn if read_text_fn is not None else _default_read_text
-    slot         = seat_memento_slot( repo_root, persona_name )
-    usable, detail = verify_seat_memento( slot, seat_sid8, now, read_text_fn=read_text_fn,
-                                          window_seconds=window_seconds, min_bytes=min_bytes )
+    slot           = seat_memento_slot( repo_root, persona_name )
+    usable, detail, found_at = verify_seat_memento_at_any_readable_slot(
+        repo_root, persona_name, seat_sid8, now, read_text_fn=read_text_fn,
+        window_seconds=window_seconds, min_bytes=min_bytes )
     if usable:
-        return { "slot": str( slot ), "verdict": "ready", "detail": detail,
+        return { "slot": str( found_at ), "verdict": "ready", "detail": detail,
                  "foreign_session_id": None }
+    # Below here the seat has NO usable memento at either readable location, so the
+    # remaining classification is about the io slot specifically — whose pointer it is,
+    # and whether anything is sitting there at all.
     foreign = classify_slot_owner( slot, seat_sid8, read_text_fn )
     if foreign is not None:
         return { "slot": str( slot ), "verdict": "prior_holder", "detail": detail,

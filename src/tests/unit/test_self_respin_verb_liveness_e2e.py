@@ -55,6 +55,9 @@ from cosa.agents.heartbeat_arbiter.self_respin_observer import (
 )
 
 
+from lupin_mcp.memento_slot import SLOT_ROOT, slot_pointer_path, slot_record_path
+
+
 UTC     = datetime.timezone.utc
 FIRED   = datetime.datetime( 2026, 8, 15, 2, 0, 0, tzinfo=UTC )
 SESSION = "d15fa6fa"
@@ -99,13 +102,37 @@ class _Schedule:
         self.argv = argv
 
 
-def _seed_memento( tmp_path, nonce_uuid, stamp_ts=FIRED ):
-    """Write a complete memento carrying a fresh this-cycle nonce line."""
-    memento = tmp_path / "tiberius-memento.md"
-    memento.write_text(
-        "# Memento\n" + _REAL_BODY + build_nonce_line( nonce_uuid, stamp_ts ) + "\n"
+def _seed_memento( tmp_path, nonce_uuid, stamp_ts=FIRED, now=FIRED ):
+    """
+    Write this seat's REAL root slot — record + pointer — carrying a this-cycle nonce.
+
+    ⚠️ THIS FIXTURE USED TO WRITE `tiberius-memento.md`, A PATH THAT IS NOW ILLEGAL, and
+    the suite going red on it is the new gate WORKING rather than collateral damage
+    (row 8068c65e, Mr. Radio's ruling; found by Tiberius). The old name is the exact
+    shape of the 2026-08-30 defect: a complete, fresh, correctly-stamped memento sitting
+    somewhere no reader looks. A fixture that hands the verb an arbitrary path was only
+    ever valid while the verb accepted arbitrary paths — which was the bug. So the
+    fixture moves to the slot; the gate is not relaxed to admit it.
+
+    `written_at` is pegged to `now`, NOT to `stamp_ts`: the two gates test different
+    things and must stay separable. `stamp_ts` drives the NONCE line, which is what
+    test_aborted_memento_verify_leaves_nothing_for_the_observer ages out to reach the
+    cycle-freshness gate. Ageing the header too would abort at the SLOT gate first and
+    silently convert that test into a test of something else.
+    """
+    record  = slot_record_path( tmp_path, PERSONA, SESSION, SLOT_ROOT )
+    header  = ( f"<!-- memento-record: persona={PERSONA} session_id={SESSION} "
+                f"written_at={now.isoformat()} slot=root -->\n" )
+    body    = header + "# Memento\n" + _REAL_BODY * 3   # clears the reap's 1000B floor, not just the 400B one
+    record.write_text( body )
+
+    pointer = slot_pointer_path( tmp_path, PERSONA, SLOT_ROOT )
+    pointer.write_text(
+        "<!-- MEMENTO POINTER — NOT THE RECORD. Safe to overwrite; it destroys nothing. -->\n"
+        f"<!-- current: {record.name} -->\n"
+        + body + "\n" + build_nonce_line( nonce_uuid, stamp_ts ) + "\n"
     )
-    return str( memento )
+    return str( pointer )
 
 
 def _fire_the_verb( tmp_path, schedule, *, ask="[default used] ", nonce_uuid="nonce-abc",
@@ -115,7 +142,7 @@ def _fire_the_verb( tmp_path, schedule, *, ask="[default used] ", nonce_uuid="no
     real tmp-dir disk, returning its SelfRespinResult. The marker + fire token
     land on disk exactly as production writes them.
     """
-    memento_path = _seed_memento( tmp_path, nonce_uuid, stamp_ts )
+    memento_path = _seed_memento( tmp_path, nonce_uuid, stamp_ts, now )
     return perform_self_respin(
         SESSION,
         persona              = PERSONA,
@@ -126,6 +153,7 @@ def _fire_the_verb( tmp_path, schedule, *, ask="[default used] ", nonce_uuid="no
         delay_seconds        = DELAY,
         wake_nonce           = WAKE_NONCE,   # mint the proof nonce into the marker
         base_dir             = str( tmp_path ),
+        repo_root            = str( tmp_path ),   # the seat's repo IS the tmp dir here — the slot resolves inside it
         now                  = now,
         resolve_tmux_fn      = lambda sid: TMUX if sid == SESSION else None,
         resolve_bridge_path_fn = lambda sid: str( tmp_path / f"cc-{sid}.json" ),   # bridge resolves ⇒ do_wake

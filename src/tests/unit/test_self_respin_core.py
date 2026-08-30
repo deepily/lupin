@@ -22,6 +22,7 @@ import os
 import pytest
 
 import lupin_mcp.self_respin_core as sr
+from lupin_mcp.persona_normalization import persona_slug
 
 
 UTC = datetime.timezone.utc
@@ -279,7 +280,7 @@ def test_perform_aborts_when_not_over_budget( tmp_path, status ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status=status, pre_clear_pct=None,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=ask, schedule_fn=sched,
-        base_dir=str( tmp_path ),
+        base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "aborted"
     assert "no grounds to clear" in r.reason
@@ -299,7 +300,7 @@ def test_perform_schedules_wake_argv_when_bridge_resolves( tmp_path ):
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
         wake_nonce="wn-1", resolve_bridge_path_fn=lambda sid: "/s/cc-42.json",
-        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "scheduled"
     argv = scheduled[ 0 ]
@@ -321,7 +322,7 @@ def test_perform_falls_back_to_plain_clear_when_bridge_unresolvable( tmp_path ):
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
         wake_nonce="wn-1", resolve_bridge_path_fn=lambda sid: None,
-        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "scheduled"
     argv = scheduled[ 0 ]
@@ -353,10 +354,31 @@ def _seat( tmux="cheech-mgr" ):
     return lambda sid: tmux
 
 
-def _write_memento( tmp_path, uuid, ts ):
-    p = tmp_path / ".claude-memento.md"
-    p.write_text( _memento_with_nonce( uuid, ts ) )
-    return str( p )
+# The go-path memento must now satisfy the SLOT check too (row 8068c65e), so this
+# helper writes the shape memento_io actually produces at `--slot root`: an immutable
+# RECORD carrying the machine-readable header, plus the mutable POINTER beside it
+# holding a copy of the record's bytes behind `current:`. The nonce is stamped into
+# the POINTER, which is the file self_respin is handed and rehydrates from.
+_SEAT_PERSONA = "cheech"
+_SEAT_SID     = "sid1"
+
+
+def _write_memento( tmp_path, uuid, ts, *, persona=_SEAT_PERSONA, sid=_SEAT_SID, written_at=None ):
+    """Write a real root-slot record+pointer pair under tmp_path; return the pointer path."""
+    stamp  = ( written_at if written_at is not None else ts ).isoformat()
+    slug   = persona_slug( persona )
+    record = tmp_path / f".claude-memento-{slug}-{sid[ :8 ].lower()}.md"
+    header = f"<!-- memento-record: persona={slug} session_id={sid[ :8 ].lower()} written_at={stamp} slot=root -->\n"
+    body   = header + "# memento\n" + _REAL_BODY * 4
+    record.write_text( body )
+
+    pointer = tmp_path / ".claude-memento.md"
+    pointer.write_text(
+        "<!-- MEMENTO POINTER — NOT THE RECORD. Safe to overwrite; it destroys nothing. -->\n"
+        f"<!-- current: {record.name} -->\n"
+        + body + "\n" + sr.build_nonce_line( uuid, ts ) + "\n"
+    )
+    return str( pointer )
 
 
 def test_perform_aborts_when_no_tmux():
@@ -380,7 +402,7 @@ def test_perform_aborts_on_bad_memento_without_asking( tmp_path ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="this-cycle",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=ask, schedule_fn=sched,
-        base_dir=str( tmp_path ),
+        base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "aborted"
     assert ask.calls   == 0
@@ -394,7 +416,7 @@ def test_perform_declines_on_human_no_schedules_nothing( tmp_path ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "no", schedule_fn=sched,
-        base_dir=str( tmp_path ),
+        base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "declined"
     assert sched.calls == 0
@@ -409,7 +431,7 @@ def test_perform_scheduled_happy_path_writes_marker_and_token( tmp_path ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat( "cheech-mgr" ), ask_fn=lambda: "yes",
-        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "scheduled"
     # observer marker persists (it is NOT the file the injector rm's)
@@ -431,7 +453,7 @@ def test_perform_proceeds_on_offline_default_used( tmp_path ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: f"{sr.DEFAULT_USED_MARKER}yes",
-        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "scheduled"
     assert len( scheduled ) == 1
@@ -446,7 +468,7 @@ def test_perform_aborts_when_marker_readback_fails( tmp_path ):
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes", schedule_fn=sched,
-        base_dir=str( tmp_path ), write_json_fn=lambda path, data: None,
+        base_dir=str( tmp_path ), repo_root=str( tmp_path ), write_json_fn=lambda path, data: None,
     )
     assert r.status == "aborted"
     assert sched.calls == 0
@@ -469,7 +491,7 @@ def test_perform_aborts_when_fire_token_readback_fails_and_removes_marker( tmp_p
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes", schedule_fn=sched,
-        base_dir=str( tmp_path ), write_json_fn=selective_write,
+        base_dir=str( tmp_path ), repo_root=str( tmp_path ), write_json_fn=selective_write,
     )
     assert r.status == "aborted"
     assert sched.calls == 0
@@ -487,7 +509,7 @@ def test_perform_honors_grace_seconds_in_deadline( tmp_path ):
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 20 ), delay_seconds=20, grace_seconds=100,
         resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
-        schedule_fn=lambda argv: None, base_dir=str( tmp_path ),
+        schedule_fn=lambda argv: None, base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     # deadline = fired 02:20:00 + 20 + 100 = 02:22:00
     assert r.expected_return_by == _dt( 22 ).isoformat()
@@ -651,7 +673,7 @@ def test_schedule_path_never_applies_speakerphone_rider( tmp_path, monkeypatch )
         "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
         now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
-        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ),
+        schedule_fn=lambda argv: scheduled.append( argv ), base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
     assert r.status == "scheduled"
     assert wraps == []                              # the rider was NEVER applied
@@ -753,7 +775,7 @@ def test_the_default_ask_receives_the_persona( tmp_path, monkeypatch ):
     r  = sr.perform_self_respin(
         "sid1", persona="Tiberius", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
-        now=_dt( 21 ), resolve_tmux_fn=_seat(), base_dir=str( tmp_path ),
+        now=_dt( 21 ), resolve_tmux_fn=_seat(), base_dir=str( tmp_path ), repo_root=str( tmp_path ),
     )
 
     assert seen[ "persona" ] == "Tiberius"      # ...and NOT a zero-arg call
@@ -914,3 +936,153 @@ def test_only_the_BODY_moves_the_verdict_not_the_nonce_freshness():
     assert husk_ok is False and real_ok is True     # same nonce, same clock — only the body differs
     assert "nonce-only" in husk_why
     assert "stale" not in husk_why                  # it failed on SUBSTANCE, not freshness
+
+
+# ---------------------------------------------------------------------------
+# The SLOT gate inside perform_self_respin (row 8068c65e)
+#
+# The gap this closes: `dismiss_sessions` runs a real memento proof and raises
+# memento_alarm on a miss; `self_respin` ran no equivalent, so Tiberius's misplaced
+# memento went unreported on 2026-08-30 while Pocholo's was caught on the reap path.
+# These tests prove the gate exists, fires BEFORE the ask, and runs the reap's own
+# predicate — and the negative control proves it can fail on a real misplacement.
+# ---------------------------------------------------------------------------
+def _slot_kwargs( tmp_path, mp, **over ):
+    kw = dict(
+        persona=_SEAT_PERSONA, memento_path=mp, memento_nonce="u1",
+        pre_clear_status="over_budget", pre_clear_pct=61.0,
+        now=_dt( 21 ), resolve_tmux_fn=_seat(),
+        base_dir=str( tmp_path ), repo_root=str( tmp_path ),
+    )
+    kw.update( over )
+    return kw
+
+
+def test_slot_gate_aborts_and_never_asks_when_the_memento_is_off_slot( tmp_path ):
+    """
+    🔴 NEGATIVE CONTROL — Tiberius's real case, at the orchestrator.
+
+    The memento is complete, fresh, correctly nonce-stamped, and would have passed the
+    OLD check exactly as it did on 2026-08-30 — it is simply not at the seat's slot.
+    The verb must abort, and must never reach the human with a confirmation ask for a
+    clear that would land in nothing any reader follows.
+    """
+    stray = tmp_path / "elsewhere" / "tiberius-f032ae9f-memento.md"
+    stray.parent.mkdir()
+    stray.write_text( _memento_with_nonce( "u1", _dt( 20 ) ) )
+    ask, sched = _Spy(), _Spy()
+
+    r = sr.perform_self_respin( _SEAT_SID, ask_fn=ask, schedule_fn=sched,
+                                **_slot_kwargs( tmp_path, str( stray ) ) )
+
+    assert r.status == "aborted"
+    assert "memento slot check failed" in r.reason
+    assert "not at this seat's 'root' slot" in r.reason
+    assert ask.calls   == 0     # never asked
+    assert sched.calls == 0     # never scheduled
+
+
+def test_the_same_memento_passes_once_it_is_written_to_the_slot( tmp_path ):
+    """The paired positive: identical content, at the slot, schedules. Only place changed."""
+    mp    = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    sched = _Spy()
+    r = sr.perform_self_respin( _SEAT_SID, ask_fn=lambda: "yes", schedule_fn=sched,
+                                **_slot_kwargs( tmp_path, mp ) )
+    assert r.status == "scheduled"
+    assert sched.calls == 1
+
+
+def test_slot_gate_runs_before_the_nonce_verify( tmp_path ):
+    """
+    Order matters: a nonce proves the file you NAMED is fresh and says nothing about
+    whether any reader will look at it. So an off-slot memento reports the SLOT failure,
+    not a nonce failure — even when its nonce is also wrong.
+    """
+    stray = tmp_path / "stray.md"
+    stray.write_text( _memento_with_nonce( "old", _dt( 20 ) ) )
+    r = sr.perform_self_respin( _SEAT_SID, ask_fn=_Spy(), schedule_fn=_Spy(),
+                                **_slot_kwargs( tmp_path, str( stray ), memento_nonce="this-cycle" ) )
+    assert "memento slot check failed" in r.reason
+    assert "memento verify failed"    not in r.reason
+
+
+def test_slot_gate_aborts_when_the_repo_root_cannot_be_resolved( tmp_path ):
+    """An unresolvable root REFUSES — a guessed root finds the WRONG memento, not none."""
+    mp = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    r  = sr.perform_self_respin(
+        _SEAT_SID, ask_fn=_Spy(), schedule_fn=_Spy(),
+        **_slot_kwargs( tmp_path, mp, repo_root="" ),
+    )
+    assert r.status == "aborted"
+    assert "cannot resolve this seat's repo root" in r.reason
+
+
+def test_slot_gate_is_injectable_and_receives_the_seats_identity( tmp_path ):
+    seen = {}
+    def fake_verify( memento_path, **k ):
+        seen.update( k, memento_path=memento_path )
+        return True, "ok"
+    mp = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    sr.perform_self_respin( _SEAT_SID, ask_fn=lambda: "yes", schedule_fn=_Spy(),
+                            verify_slot_fn=fake_verify, **_slot_kwargs( tmp_path, mp ) )
+    assert seen[ "memento_path" ] == mp
+    assert seen[ "persona" ]      == _SEAT_PERSONA
+    assert seen[ "session_id" ]   == _SEAT_SID
+    assert seen[ "repo_root" ]    == str( tmp_path )
+    assert seen[ "now" ]          == _dt( 21 )
+
+
+def test_default_verify_slot_delegates_to_memento_slot_with_the_root_slot( tmp_path ):
+    """The live seam: root slot, and the caller's repo_root passed straight through."""
+    read, pointer = None, str( tmp_path / ".claude-memento.md" )
+    _write_memento( tmp_path, "u1", _dt( 20 ) )
+    ok, reason = sr._default_verify_slot(
+        pointer, repo_root=str( tmp_path ), persona=_SEAT_PERSONA, session_id=_SEAT_SID,
+        now=_dt( 21 ), read_text_fn=lambda p: open( p, encoding="utf-8" ).read()
+                       if os.path.exists( p ) else None,
+    )
+    assert ok is True
+    assert "'root' slot" in reason
+
+
+def test_default_verify_slot_resolves_the_repo_root_when_none_is_given( monkeypatch ):
+    """repo_root=None ⇒ resolve it live; an unresolvable one reaches the single refusal."""
+    monkeypatch.setattr( sr, "resolve_repo_root", lambda: None )
+    ok, reason = sr._default_verify_slot(
+        "/anywhere/.claude-memento.md", repo_root=None, persona="cheech",
+        session_id="sid1", now=_dt( 21 ), read_text_fn=lambda p: None,
+    )
+    assert ok is False
+    assert "cannot resolve this seat's repo root" in reason
+
+
+def test_negative_control_the_old_tautological_check_accepts_the_same_off_slot_memento( tmp_path ):
+    """
+    🔴 THE CONTROL, MADE PERMANENT — remove the fix and watch it redden, in-suite.
+
+    A test that only proves the new gate REJECTS an off-slot memento cannot show the
+    gate is what rejected it; the old check passed everything, so "it passes now" was
+    never the discriminator. This runs the SAME input twice, changing only whether the
+    slot check is the real one or the old tautological one — "does the file you named
+    exist?", whose success criterion comes from the caller it is checking.
+
+    REJECTED under the real check, SCHEDULED under the old one. That difference is the
+    fix, and it is asserted here rather than described in a commit message.
+    """
+    stray = tmp_path / "elsewhere" / "tiberius-f032ae9f-memento.md"
+    stray.parent.mkdir()
+    stray.write_text( _memento_with_nonce( "u1", _dt( 20 ) ) )
+
+    def old_tautological_check( memento_path, **k ):
+        return os.path.exists( memento_path ), "the file you named is where you said it is"
+
+    with_fix = sr.perform_self_respin(
+        _SEAT_SID, ask_fn=lambda: "yes", schedule_fn=_Spy(),
+        **_slot_kwargs( tmp_path, str( stray ) ) )
+    without_fix = sr.perform_self_respin(
+        _SEAT_SID, ask_fn=lambda: "yes", schedule_fn=_Spy(),
+        verify_slot_fn=old_tautological_check,
+        **_slot_kwargs( tmp_path, str( stray ) ) )
+
+    assert with_fix.status    == "aborted"      # the gate catches it
+    assert without_fix.status == "scheduled"    # ...and nothing else would have

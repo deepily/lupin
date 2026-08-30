@@ -37,6 +37,9 @@ _REAL_BODY = ( "board state: row 4cf9f9fd, manager mr radio, venue :8000 idle, "
 
 UTC     = datetime.timezone.utc
 NOW     = datetime.datetime( 2026, 8, 14, 2, 0, 0, tzinfo=UTC )
+from tests.helpers.memento_slot_seed import seed_root_slot
+
+
 SESSION = "9662b5ac"
 NONCE   = "11111111-2222-3333-4444-555555555555"
 
@@ -44,10 +47,10 @@ NONCE   = "11111111-2222-3333-4444-555555555555"
 def test_fire_token_readback_failure_aborts_and_removes_marker( tmp_path ):
     """Token read-back fails → aborted, nothing scheduled, marker cleaned up."""
     base    = str( tmp_path )
-    memento = tmp_path / "memento.md"
-    # A body over the substance floor (row 4cf9f9fd) — this test is about the fire-token
-    # read-back, so its memento must clear the nonce-only gate on the way there.
-    memento.write_text( _REAL_BODY + build_nonce_line( NONCE, NOW ) + "\n" )
+    # A REAL slot, not a convenient path (row 8068c65e). This test is about the
+    # fire-token read-back, so its memento must clear the placement + reap gates on
+    # the way there — the same way a live seat's does.
+    memento = seed_root_slot( tmp_path, "maria", SESSION, nonce_uuid=NONCE, nonce_ts=NOW, written_at=NOW )
 
     scheduled = []
 
@@ -60,6 +63,9 @@ def test_fire_token_readback_failure_aborts_and_removes_marker( tmp_path ):
 
     def read_text_fn( path ):
         # Force ONLY the fire-token read-back to fail; memento + marker read normally.
+        # str() because the slot check resolves a pointer's `current:` to a Path — the
+        # live seam (_default_read_text) already accepts both.
+        path = str( path )
         if path.endswith( ".token" ):
             return None
         return open( path ).read() if os.path.exists( path ) else None
@@ -67,12 +73,13 @@ def test_fire_token_readback_failure_aborts_and_removes_marker( tmp_path ):
     result = perform_self_respin(
         SESSION,
         persona          = "maria",
-        memento_path     = str( memento ),
+        memento_path     = memento,
         memento_nonce    = NONCE,
         pre_clear_status = "over_budget",
         pre_clear_pct    = 61.0,
         now              = NOW,
         base_dir         = base,
+        repo_root        = base,
         resolve_tmux_fn  = lambda _s: "cc-author-maria-1",
         ask_fn           = lambda: "yes",
         schedule_fn      = schedule_fn,
