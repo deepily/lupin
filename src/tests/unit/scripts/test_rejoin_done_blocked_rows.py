@@ -554,52 +554,54 @@ class TestMain:
         assert mod.main( [ "--apply", "--actor", "a" ] ) == 3
 
     # --json ─────────────────────────────────────────────────────────────────
-    def test_json_mode_emits_the_report_and_suppresses_the_human_table( self, mod, wired, capsys ):
+    def test_json_mode_stdout_is_parseable_when_rows_were_found( self, mod, wired, capsys ):
+        """
+        THE WHOLE POINT OF THE FLAG, and it used to be false — row 022d4232. The dry-run
+        notice printed after the JSON whenever the pass found something, so `json.loads` on
+        stdout raised; the output parsed only when there was nothing to report, which is the
+        case nobody writes a parser for. The fix guards that line with `and not args.json`.
+
+        Asserted against the WHOLE of stdout, deliberately. Slicing to the last `}` before
+        parsing — which is what this test did while it pinned the defect — would pass again
+        the moment the trailing line came back.
+        """
         wired[ "board" ] = self._eligible_board()
 
         assert mod.main( [ "--json" ] ) == 1
 
-        out = capsys.readouterr().out
-        report = json.loads( out[ : out.rindex( "}" ) + 1 ] )
+        out    = capsys.readouterr().out
+        report = json.loads( out )
         assert report[ "eligible" ]  == [ "r1" ]
         assert report[ "truncated" ] is False
         assert report[ "counts" ][ "examined" ] == 1
         assert "DONE-ARM REJOIN" not in out, "the human table must not be interleaved into the JSON"
+        assert "DRY RUN" not in out, "the dry-run notice is human output and must stay out of --json"
 
-    def test_json_mode_stdout_is_NOT_parseable_when_rows_were_found( self, mod, wired, capsys ):
+    def test_the_dry_run_notice_still_prints_in_human_mode( self, mod, wired, capsys ):
         """
-        🔴 THIS PINS A DEFECT, NOT A DESIGN — filed as its own row, deliberately not fixed
-        inside a coverage ramp on someone else's file.
-
-        `--json` exists so a caller can parse the result. The `elif eligible:` dry-run notice
-        sits OUTSIDE the `if args.json / else` split, so whenever the pass actually finds
-        something the JSON is followed by a line of English and `json.loads` on stdout
-        raises. It is parseable only when there is nothing to report, which is the case
-        nobody writes a parser for.
-
-        Confirmed outside pytest against the script directly, so it is not an artifact of
-        capsys. When the one-line fix lands this test reddens and points at itself.
+        The other arm of the same guard. Suppressing the notice for EVERYONE would be a
+        second defect wearing the fix's clothes: a human dry run has to say it wrote nothing
+        and name the command that would.
         """
         wired[ "board" ] = self._eligible_board()
 
-        mod.main( [ "--json" ] )
-        out = capsys.readouterr().out
+        assert mod.main( [] ) == 1
 
-        with pytest.raises( json.JSONDecodeError ):
-            json.loads( out )
+        out = capsys.readouterr().out
         assert "DRY RUN — nothing was written" in out
+        assert "--apply --actor" in out
 
     def test_json_mode_still_reports_truncation_in_the_payload_and_the_exit_code( self, mod, wired, capsys ):
         """
         Truncation rides in the payload AND the exit code. The warning itself goes to
-        stderr, so it is the one loud path that does not corrupt stdout.
+        stderr, so it is the one loud path that never corrupts stdout.
         """
         wired[ "board" ] = ( [ _blocked( "r1", [ "b1" ] ), _row( "b1", "done" ) ], True )
 
         assert mod.main( [ "--json" ] ) == 3
 
         captured = capsys.readouterr()
-        report   = json.loads( captured.out[ : captured.out.rindex( "}" ) + 1 ] )
+        report   = json.loads( captured.out )
         assert report[ "truncated" ] is True
         assert "BOARD TRUNCATED" in captured.err
 
