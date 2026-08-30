@@ -47,7 +47,17 @@ set -u
 set -o pipefail
 
 cd "$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
-PYBIN="$PWD/.venv/bin/python"
+
+# Resolve the interpreter the way every other runner does, rather than naming
+# .venv/bin/python by hand. A hand-picked path is exactly what rows c98bce3f and
+# fc74c1d4 exist to stop: it silently works on a host developer venv and silently
+# does not in the container, where the interpreter is /opt/venv/bin/python3 — and a
+# CONTROL that cannot run is worse than no control, because its absence reads as
+# "the guard was never exercised" only if someone goes looking.
+PROJECT_ROOT="$PWD"
+source "$PROJECT_ROOT/src/scripts/lib/resolve-venv-pytest.sh"
+resolve_venv_python || exit $?
+PYBIN="$VENV_PYTHON"
 GATE="./src/tests/run-coverage-gate.sh"
 GUARD="./src/tests/lib/check-floor-not-lowered.sh"
 DATA="$( mktemp -u /tmp/covgate-control-XXXXXX.data )"
