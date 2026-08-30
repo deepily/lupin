@@ -24,9 +24,15 @@ Venue: :7999-eligible. Subprocess bash against tmp_path stubs plus one short-liv
 server, no state mutation, no network.
 """
 
+import contextlib
 import os
+import pathlib
 import re
+import shlex
 import subprocess
+import sys
+import tempfile
+import time
 
 import pytest
 
@@ -340,31 +346,79 @@ def test_the_declared_exemptions_still_exist_and_still_ask_for_no_coverage():
 
 # ── end to end, against the real checker ─────────────────────────────────────
 
+# ⚠️ THE OLD FIXTURE HERE WAS A SPOOF, AND ON 2026-08-30 IT STOPPED WORKING FOR THE RIGHT
+# REASON. It spawned `exec -a "/usr/bin/pytest lupin-suite" sleep 20`, which changes argv[0]
+# only: the kernel still calls that process `sleep` (verified by reading /proc/<pid>/comm).
+# So it was never a real foreign SUITE, only a real foreign COMMAND LINE — and once the
+# checker started asking comm what the process IS, it correctly declined to be fooled.
+# The replacement spawns an actual `-m pytest`, which is what the test always claimed.
+@contextlib.contextmanager
+def _a_real_foreign_pytest():
+    """A genuine pytest process, not a renamed sleep: comm reads python, cmdline has -m pytest."""
+    with tempfile.NamedTemporaryFile( "w", suffix="_test.py", delete=False ) as handle:
+        handle.write( "import time\n\n\ndef test_occupies_the_box(): time.sleep( 30 )\n" )
+        path = handle.name
+    foreign = subprocess.Popen( [ sys.executable, "-m", "pytest", path, "-q",
+                                  "-p", "no:cacheprovider" ],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )
+    try:
+        # The checker reads a LIVE process table, so the child must actually be up first.
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            if cc.comm_is_a_python_or_pytest_binary( cc._default_comm_of( foreign.pid ) ):
+                break
+            time.sleep( 0.2 )
+        else:                                             # pragma: no cover - only on a wedged box
+            raise AssertionError( "the foreign pytest never came up" )
+        yield foreign
+    finally:
+        foreign.terminate(); foreign.wait( timeout=10 )
+        os.unlink( path )
+
+
 def test_end_to_end_a_real_foreign_pytest_refuses_a_real_coverage_run():
     """
-    No stub anywhere: the real guard, the real checker, and a process we spawn that genuinely
-    looks like somebody else's suite. This is the seam the stubbed cases cannot prove.
+    No stub anywhere: the real guard, the real checker, and a process that genuinely IS
+    somebody else's suite. This is the seam the stubbed cases cannot prove.
     """
-    foreign = subprocess.Popen( [ "bash", "-c", 'exec -a "/usr/bin/pytest lupin-suite" sleep 20' ] )
-    try:
+    with _a_real_foreign_pytest():
         done = _call_guard( [ "pytest", "--cov=cosa" ] )
         assert done.returncode == EXIT_CONTENDED, f"the real checker missed it: {done.stderr}"
         assert "REFUSING" in done.stderr
-        assert "pgrep -af pytest" in done.stderr, "the refusal does not say how to check"
+        assert "ps -eo comm,args" in done.stderr, "the refusal does not say how to check"
+
+
+def test_end_to_end_an_agent_seat_quoting_the_command_does_not_refuse_a_real_run():
+    """
+    THE OTHER DIRECTION, and the one this pair exists for. A process whose command line
+    QUOTES a pytest invocation — exactly the shape of a Claude seat's spawn briefing — must
+    not take the box away from anybody. Measured 2026-08-30: it did, and the coverage gate
+    refused both tiers on a box with zero real suites running.
+
+    Asserted at PID level rather than on the exit code, because a peer's genuine suite may
+    be running on this box at any moment and would make an exit-code assertion flaky. The
+    pid-level claim is decisive regardless of what else is live.
+    """
+    briefing = ( 'claude --model claude-opus-5 PROVE THE GATE GREEN: '
+                 'LUPIN_ROOT="$PWD" .venv/bin/python -m pytest src/tests/unit/test_x.py -q' )
+    seat = subprocess.Popen( [ "bash", "-c", f'exec -a {shlex.quote( briefing )} sleep 30' ] )
+    try:
+        raw = pathlib.Path( f"/proc/{seat.pid}/cmdline" ).read_bytes()
+        assert cc.looks_like_pytest( raw.replace( b"\0", b" " ).decode() ), \
+            "precondition: this seat's command line must be invocation-shaped"
+        assert seat.pid not in { pid for pid, _ in cc.find_foreign_pytest() }, \
+            "an agent seat that merely QUOTES the command was counted as a running suite"
     finally:
-        foreign.terminate(); foreign.wait( timeout=10 )
+        seat.terminate(); seat.wait( timeout=10 )
 
 
 def test_end_to_end_the_escape_hatch_lets_a_deliberate_contended_run_through():
-    """The operator's override — same conditions as above, one env var different."""
-    foreign = subprocess.Popen( [ "bash", "-c", 'exec -a "/usr/bin/pytest lupin-suite" sleep 20' ] )
-    try:
+    """The operator's override — same conditions as the refusal above, one env var different."""
+    with _a_real_foreign_pytest():
         done = _call_guard( [ "pytest", "--cov=cosa" ],
                             env_extra={ "LUPIN_ALLOW_CONTENDED_COVERAGE": "1" } )
         assert done.returncode == 0, f"the escape hatch did not open: {done.stderr}"
         assert "check skipped" in done.stderr, "an override that says nothing is a silent hole"
-    finally:
-        foreign.terminate(); foreign.wait( timeout=10 )
 
 
 # ── a test that spawns a --cov child must not be flaky-by-construction ───────

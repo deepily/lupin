@@ -32,10 +32,20 @@
 #   · An EXISTING checked-hash pyc STAYS checked-hash. Edit the source, re-import, and
 #     CPython regenerates it in the same mode — it inherits, it does not degrade. So you do
 #     not need a build step on every run for files that are already converted.
-#   · A BRAND-NEW source file gets a TIMESTAMP pyc. There is no prior pyc to inherit a mode
-#     from, and CPython's default is timestamp.
+#   · A pyc written when NO prior pyc exists is TIMESTAMP-based — nothing to inherit from,
+#     and CPython's default is timestamp.
 #
-#   ⇒ Re-run this after adding Python files. `--verify` tells you whether you need to.
+# 🔴 SO THE OLD PURGE HABIT NOW RE-OPENS THE HOLE IT USED TO PLUG. `rm -rf __pycache__`
+#    deletes the checked-hash caches and the next import silently rebuilds them as
+#    timestamp, putting the tree back to the original defect with nothing saying so.
+#    Convert after any purge, or do not purge.
+#
+#   ⇒ Three ways a tree drifts back, one mechanism: a NEW .py file, a PURGED __pycache__, or
+#     a module imported for the FIRST TIME since the last conversion. Measured live
+#     2026-08-30 — a verify minutes after a clean conversion found exactly one offender
+#     (src/cosa/utils/coverage_contention.py, arrived on a peer's commit, imported before
+#     the next conversion). Re-run this after adding files or purging; `--verify` tells you
+#     whether you need to.
 #
 # Usage:
 #   src/scripts/migrate-pyc-to-checked-hash.sh            # convert, then verify

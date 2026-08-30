@@ -655,9 +655,23 @@ as it found it — the setting "changed" and the tree is still vulnerable. The s
 
 ⚠️ **NOT CONVERT-ONCE-AND-FORGET, and the two halves pull opposite ways** (both measured):
 an **existing** checked-hash pyc **stays** checked-hash — edit the source, re-import, and CPython
-regenerates it in the same mode, so no build step is needed on every run. But a **brand-new source
-file gets a TIMESTAMP pyc**, because there is no prior pyc to inherit a mode from. ⇒ **re-run the
-script after adding Python files**, and use `--verify` when you want to know rather than assume.
+regenerates it in the same mode, so no build step is needed on every run. But **a pyc written when
+no prior pyc exists is TIMESTAMP-based**, because there is nothing to inherit a mode from.
+
+🔴 **WHICH MEANS THE OLD PURGE HABIT NOW RE-OPENS THE HOLE IT USED TO PLUG.** `find src -name
+__pycache__ -exec rm -rf {} +` deletes the checked-hash caches, and the next import silently rebuilds
+them as **timestamp**. The tree is then back to the original defect with nothing in any output saying
+so. This is the most likely way a converted tree regresses — the instruction people already have in
+their fingers is now the thing that breaks it. **Convert after any purge, or do not purge.**
+
+⇒ Three ways a tree drifts back, all one mechanism: a **new** `.py` file, a **purged**
+`__pycache__`, or a module **imported for the first time** since the last conversion. Measured live
+2026-08-30 — a verify run minutes after a clean conversion found exactly one offender,
+`src/cosa/utils/coverage_contention.py`, which had reached this working tree on a peer's commit and
+was imported before the next conversion. The gap is not theoretical; it fired inside the hour.
+
+⇒ **Re-run the script after adding Python files or purging a cache; `--verify` when you want to know
+rather than assume.** It exits non-zero if this interpreter would read a timestamp pyc.
 
 ⇒ **THE PER-HARNESS PURGE IS NOW THE FALLBACK, NOT THE INSTRUCTION.** On a converted tree a
 mutation harness no longer needs to purge `__pycache__` between mutants — that habit existed only

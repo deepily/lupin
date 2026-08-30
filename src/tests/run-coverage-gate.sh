@@ -57,13 +57,57 @@ if [ -z "${COVERAGE_FILE:-}" ]; then
     echo "run-coverage-gate.sh: COVERAGE_FILE was unset; using an isolated $COVERAGE_FILE" >&2
 fi
 
+# 🔴 A TIER THAT NEVER RAN MUST NOT BECOME A LOW PERCENTAGE (row e2099400, 2026-08-30).
+# These two invocations discarded both exit statuses until today — the script sets
+# `-o pipefail` but NOT `-e`, so a refused tier fell straight through to the report. A peer
+# suite arrived mid-run, the contention guard correctly refused the cosa tier with exit 6,
+# and this gate published 70.68% / "FAILED" against 95.14% from the identical tree an hour
+# earlier. Nothing had regressed; 8,769 cosa tests simply never ran, and the verdict said so
+# nowhere. See src/scripts/lib/tier-measured.sh for the full measurement and for why a tier
+# with FAILING TESTS still counts as measured.
+source "$PROJECT_ROOT/src/scripts/lib/tier-measured.sh"
+
+INCONCLUSIVE_TIERS=()
+
+# Run one tier and record whether its data can be trusted. Never aborts here: both tiers are
+# attempted so the operator learns about both problems in one run rather than one per re-run,
+# which is the same reason the frame and floor verdicts are both printed below.
+run_tier() {
+    local label="$1" script="$2" status=0
+    echo "═══ coverage gate: running $label tier ═══"
+    bash "$PROJECT_ROOT/$script" -q || status=$?
+    if ! tier_measured "$status"; then
+        INCONCLUSIVE_TIERS+=( "$label|$status|$( tier_not_measured_reason "$status" )" )
+    fi
+}
+
 if [ "$RUN_TIERS" -eq 1 ]; then
     rm -f "$COVERAGE_FILE"
     export LUPIN_COVERAGE=1
-    echo "═══ coverage gate: running unit tier ═══"
-    bash "$PROJECT_ROOT/src/tests/run-unit-tests.sh" -q
-    echo "═══ coverage gate: running cosa tier ═══"
-    bash "$PROJECT_ROOT/src/tests/run-cosa-tests.sh" -q
+    run_tier unit src/tests/run-unit-tests.sh
+    run_tier cosa src/tests/run-cosa-tests.sh
+
+    # ⚠️ REFUSE TO RENDER, rather than render a number over a denominator known to be short.
+    # This exits BEFORE the floor comparison on purpose: a percentage printed beside a
+    # fail_under is read as a verdict on the code, and this one would be a verdict on the
+    # box. Exit 2 is distinct from the floor/frame breach (1) so a caller can tell
+    # "the gate says you are below the line" from "the gate could not tell".
+    if [ ${#INCONCLUSIVE_TIERS[@]} -ne 0 ]; then
+        echo ""
+        echo "COVERAGE GATE INCONCLUSIVE — a tier did not run, so no percentage is owed."
+        for entry in "${INCONCLUSIVE_TIERS[@]}"; do
+            IFS="|" read -r label status reason <<< "$entry"
+            echo "  the $label tier exited $status: $reason"
+        done
+        echo ""
+        echo "  NOTHING HERE IS A COVERAGE VERDICT. The data file holds only the tiers that"
+        echo "  finished, so any number rendered from it would be measured over a SHORT"
+        echo "  denominator — and an unmeasured file reads exactly like an untested one."
+        echo "  Measured 2026-08-30: one refused tier turned 95.14% into 70.68% on an"
+        echo "  unchanged tree, and the old verdict called that a floor breach."
+        echo "  Re-run when the cause above is cleared."
+        exit 2
+    fi
 fi
 
 # Record the tree the figure is earned on. A coverage number without a sha cannot be
@@ -100,8 +144,8 @@ if ! "$PYBIN" -c "import json,sys; sys.exit( 0 if json.load( open( sys.argv[1] )
     echo "  (exit 6) because a peer was already running --cov; or they wrote a different"
     echo "  COVERAGE_FILE than this gate is reading."
     echo "  Re-run with:  src/tests/run-coverage-gate.sh --run-tiers"
-    echo "COVERAGE GATE FAILED  (no data)"
-    exit 1
+    echo "COVERAGE GATE INCONCLUSIVE  (no data)"
+    exit 2
 fi
 FRAME_EXIT=0
 "$PYBIN" - "$REPORT_JSON" <<'PY' || FRAME_EXIT=$?
