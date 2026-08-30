@@ -82,6 +82,51 @@ SLOT_ROOT = "root"
 # reap_memento's `io` is visible as a DELIBERATE disjointness, not a coincidence.
 SELF_RESPIN_SLOT = SLOT_ROOT
 
+# memento_io's MIRROR_HOME. Duplicated here DELIBERATELY rather than imported: memento_io
+# lives in the planning-is-prompting repo and is not importable from this one, and the
+# alternative — saying nothing — is what let a seat write here and be told only that its
+# path was "neither" of two others. Used for ONE thing: recognising the single most
+# plausible wrong destination so the abort can say WHY it is wrong (Tiberius, who wrote
+# here and had no reason to think it wrong).
+MIRROR_HOME = Path.home() / ".claude" / "mementos"
+
+
+def mirror_home_clause( memento_path ):
+    """
+    The extra sentence an abort earns when the caller's path is under the MIRROR home.
+
+    WHY THIS EXISTS AND WHY IT IS CONDITIONAL. The abort message is the only text a seat
+    in this situation actually reads — Tiberius wrote to `~/.claude/mementos/<persona>-<sid>-memento.md`
+    without consulting the docs, because that directory looks exactly like where mementos
+    go. It IS a memento directory: it is memento_io's out-of-repo MIRROR. What makes his
+    file wrong is not the directory but the missing `<repo>/<record-path>` beneath it.
+    Telling him "neither of these two paths" leaves that unsaid; telling him it is the
+    mirror closes it.
+
+    It fires ONLY for this one destination rather than being appended always, so the
+    message stays short for every other wrong path. A message that explains every case
+    is a message nobody finishes reading.
+
+    Requires:
+        - memento_path is the caller-supplied path (any type; garbage compares False)
+
+    Ensures:
+        - a leading-space sentence naming ~/.claude/mementos as the MIRROR when
+          `memento_path` is INSIDE it, and "" otherwise
+        - never raises — an unresolvable path yields ""
+    """
+    try:
+        resolved = Path( os.path.realpath( str( memento_path ) ) )
+    except ( OSError, ValueError, TypeError ):
+        return ""
+    if not resolved.is_relative_to( os.path.realpath( MIRROR_HOME ) ):
+        return ""
+    return (
+        f" NOTE: {MIRROR_HOME} is memento_io's out-of-repo MIRROR, not a slot — a mirror lives at "
+        f"<mirror_home>/<repo>/<record-path>, so a file at its bare top is neither slot nor mirror."
+    )
+
+
 
 def slot_pointer_path( repo_root, persona, slot=SELF_RESPIN_SLOT ):
     """
@@ -239,6 +284,7 @@ def verify_memento_at_slot(
             f"{pointer_path} (the slot pointer) nor {record_path} (this session's record). "
             f"Write it with `memento_io.py write --slot {slot}`, which lands the record, the "
             f"mirror AND the pointer in one operation."
+            + mirror_home_clause( memento_path )
         )
 
     # LEG 2 — the reap's own proof, against the DERIVED pointer (never the caller's path).
