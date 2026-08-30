@@ -24,8 +24,10 @@ REPO_ROOT = Path( __file__ ).resolve().parents[ 3 ]
 if str( REPO_ROOT / "src" ) not in sys.path: sys.path.insert( 0, str( REPO_ROOT / "src" ) )
 
 from tests.helpers.pyc_freshness import (            # noqa: E402
+    StalePycError,
     bytecode_files_for,
     drop_from_sys_modules,
+    mutate_source,                                   # noqa: F401 — the fixture, opt-in by import
     mutated_source,
     refresh_source,
 )
@@ -193,3 +195,97 @@ def test_drop_from_sys_modules_takes_submodules_too( tmp_path ):
     finally:
         sys.path.remove( str( tmp_path ) )
         drop_from_sys_modules( "probe_pkg" )
+
+
+# ---------------------------------------------------------------------------
+# The fixture, and its LOUD failure modes
+# ---------------------------------------------------------------------------
+
+def test_fixture_mutates_then_restores( tmp_path, mutate_source ):
+    """
+    Ensures:
+        - the mutation is visible to a fresh interpreter inside the test
+        - (restoration at teardown is asserted by the test below, which reads the file after)
+    """
+    src = _build_pkg( tmp_path, "todo" )
+    _read_lane( tmp_path )
+
+    mutate_source( src, 'LANE = "dead"\n' )
+
+    assert _read_lane( tmp_path ) == "dead"
+
+
+def test_fixture_restores_even_after_the_test_body_failed( tmp_path ):
+    """
+    Teardown must run on a FAILING test, not just a passing one — that is the case that leaves a
+    shared checkout mutated. Driven through a real pytest run so the fixture's own teardown is
+    what executes, rather than a hand-rolled imitation of it.
+
+    Ensures:
+        - the inner test fails
+        - the source file is back to its original bytes afterwards
+    """
+    src = _build_pkg( tmp_path, "todo" )
+    original = src.read_bytes()
+
+    inner = tmp_path / "test_inner.py"
+    inner.write_text(
+        f"import sys\n"
+        f"sys.path.insert( 0, {str( REPO_ROOT / 'src' )!r} )\n"
+        f"from tests.helpers.pyc_freshness import mutate_source\n"
+        f"def test_boom( mutate_source ):\n"
+        f"    mutate_source( {str( src )!r}, 'LANE = \"dead\"\\n' )\n"
+        f"    assert False, 'deliberate'\n",
+        encoding="utf-8",
+    )
+    out = subprocess.run(
+        [ sys.executable, "-m", "pytest", str( inner ), "-q", "-p", "no:cacheprovider" ],
+        capture_output=True, text=True, timeout=120, cwd=str( tmp_path ),
+    )
+
+    assert out.returncode != 0, f"the inner test was supposed to FAIL:\n{out.stdout}"
+    assert src.read_bytes() == original, (
+        "the fixture did not restore the file after a failing test — this is the case that leaves "
+        f"a shared checkout mutated.\n{out.stdout}"
+    )
+
+
+def test_refresh_source_RAISES_when_the_pyc_cannot_be_deleted( tmp_path ):
+    """
+    THE LOUD FAILURE. A cache we cannot clear must refuse, not warn: mutation H1 measured that the
+    mtime fallback alone still reads stale bytecode on the round trip, so continuing would hand
+    back a result that looks clean and is not.
+
+    Ensures:
+        - StalePycError is raised
+        - the message names the pycache clear, so the reader knows the remedy without digging
+    """
+    src = _build_pkg( tmp_path, "todo" )
+    _read_lane( tmp_path )
+    pycs = bytecode_files_for( src )
+    assert pycs, "no .pyc produced — this probe cannot test what it claims to"
+
+    cache_dir = pycs[ 0 ].parent
+    os.chmod( cache_dir, 0o500 )                     # read+execute: readable, not writable
+    try:
+        with pytest.raises( StalePycError ) as caught:
+            refresh_source( src )
+        assert "__pycache__" in str( caught.value )
+        assert "rm -rf" in str( caught.value )
+    finally:
+        os.chmod( cache_dir, 0o700 )
+
+
+def test_refresh_source_does_NOT_raise_when_there_is_no_bytecode( tmp_path ):
+    """
+    The negative half of the loud check: a source with no cached bytecode is the normal case and
+    must stay quiet. Without this, an over-eager raise would make the helper unusable and the test
+    above would not notice.
+
+    Ensures:
+        - refresh_source succeeds when no .pyc exists
+    """
+    src = _build_pkg( tmp_path, "todo" )
+    assert not bytecode_files_for( src )
+
+    refresh_source( src )                            # must not raise

@@ -42,6 +42,17 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+
+class StalePycError( RuntimeError ):
+    """
+    Raised when cached bytecode that could shadow a source edit cannot be removed.
+
+    A LOUD failure is the whole point. The hazard this module exists for is one that reports
+    success — you restore the file, read it back, and the interpreter keeps running the mutant. A
+    helper that quietly half-worked would reproduce exactly that, one layer up, and the caller
+    would take the green as proof.
+    """
+
 def bytecode_files_for( source_path ):
     """
     Every cached `.pyc` that could satisfy an import of `source_path`.
@@ -99,11 +110,25 @@ def refresh_source( source_path ):
     source_path = Path( source_path ).resolve()
     assert source_path.exists(), f"refresh_source: {source_path} does not exist"
 
+    survivors = []
     for pyc in bytecode_files_for( source_path ):
         try:
             pyc.unlink()
-        except OSError:
-            pass                                    # read-only cache dir; the mtime bump below carries it
+        except OSError as exc:
+            survivors.append( ( pyc, exc ) )
+
+    if survivors:
+        detail = "\n".join( f"  {pyc}  ({exc.__class__.__name__}: {exc})" for pyc, exc in survivors )
+        raise StalePycError(
+            f"could NOT delete cached bytecode for {source_path}:\n{detail}\n\n"
+            f"This is refused rather than warned about. The mtime bump is a FALLBACK for caches we "
+            f"cannot see, not a substitute for the delete — measured (mutation H1): with the delete "
+            f"removed, the mutate/restore round trip still reads stale bytecode, because the restore "
+            f"lands on the same whole second the mutation's own .pyc recorded.\n"
+            f"Proceeding would hand you a result that looks clean and is not.\n\n"
+            f"CLEAR THE CACHE AND RE-RUN:\n"
+            f"  find src -name '__pycache__' -type d -exec rm -rf {{}} +"
+        )
 
     # Move the mtime a whole second into the past. FORWARD would be the obvious choice and is the
     # wrong one: a future mtime makes the NEXT compile record a timestamp already in the future, so
@@ -169,4 +194,75 @@ def mutated_source( source_path, new_text ):
         assert source_path.read_bytes() == original, (
             f"mutated_source failed to restore {source_path} — the file on disk is NOT what it was. "
             f"Do not trust any result from this block."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Pytest fixture — opt in by IMPORTING it into your test module:
+#
+#     from tests.helpers.pyc_freshness import mutate_source     # noqa: F401
+#
+#     def test_something( mutate_source ):
+#         mutate_source( SRC, SRC.read_text().replace( '"todo"', '"dead"' ) )
+#         ...                                    # restored automatically at teardown
+#
+# Deliberately NOT registered in any conftest.py: a fixture that arrives without being asked for
+# is not opt-in, and this one edits files on disk. Importing it by name is the whole registration.
+# ---------------------------------------------------------------------------
+
+import pytest
+
+
+@pytest.fixture
+def mutate_source():
+    """
+    Mutate one or more source files for the length of a test; restore every one at teardown.
+
+    Restoration runs even when the test fails, and it runs for EVERY file touched even if an
+    earlier restore raises — a partial restore is how one red test leaves production source
+    mutated for every seat sharing the checkout.
+
+    LOUD BY CONSTRUCTION, which is the point rather than a nicety. Two ways this refuses instead of
+    warning:
+      - a `.pyc` it cannot delete raises `StalePycError` naming the cache clear (see
+        `refresh_source`); a mutation probe running against shadowed bytecode produces a result
+        that looks clean and is not;
+      - a file whose restored bytes do not match what was read at setup raises at teardown, so a
+        corrupted tree is reported by the test that corrupted it rather than by whoever runs next.
+
+    Ensures:
+        - returns a callable ( path, new_text ) -> Path
+        - every mutated path holds its original bytes after teardown, verified
+        - teardown attempts every file before re-raising anything
+    """
+    originals = {}
+
+    def _mutate( source_path, new_text ):
+        source_path = Path( source_path ).resolve()
+        if source_path not in originals:
+            originals[ source_path ] = source_path.read_bytes()
+        source_path.write_text( new_text, encoding="utf-8" )
+        refresh_source( source_path )
+        return source_path
+
+    yield _mutate
+
+    failures = []
+    for source_path, original in originals.items():
+        try:
+            source_path.write_bytes( original )
+            refresh_source( source_path )
+            if source_path.read_bytes() != original:
+                failures.append( f"{source_path}: restored bytes do not match the original" )
+        except Exception as exc:                    # keep going; every other file still needs restoring
+            failures.append( f"{source_path}: {exc.__class__.__name__}: {exc}" )
+
+    if failures:
+        raise StalePycError(
+            "mutate_source could NOT return the tree to its original state:\n  "
+            + "\n  ".join( failures )
+            + "\n\nDo not trust this test's result, and check the files above before running "
+              "anything else — other seats share this checkout.\n"
+              "CLEAR THE CACHE AND RE-RUN:\n"
+              "  find src -name '__pycache__' -type d -exec rm -rf {} +"
         )
