@@ -1,22 +1,69 @@
 """
-Carveout-scoped unit tests for `lupin_app.main` lifespan switch — Phase 5.6
+Carveout-scoped unit tests for the `lupin_app.main` lifespan switch — Phase 5.6
 of the 2026-05-16 model-server carve-out.
 
-The lifespan switch is inline inside a 700+ LOC async function with ~10
-collaborator dependencies (commons init, websocket manager, prediction
-engine, model loading, etc.). Full lifespan unit-testing would require
-mocking the entire startup graph and provides marginal coverage gain over
-what `src/tests/smoke/test_model_server_smoke.py` already exercises against
-a live `:7998`.
+🔴 READ THIS BEFORE TRUSTING THE FILENAME. This file does NOT import
+`lupin_app.main`, and therefore contributes ZERO coverage to it. Measured
+2026-08-30 at sha `e1fc27ae`: running this file under `--cov=lupin_app.main`
+reports `module-not-imported` / `no-data-collected`. A file called a carve-out
+test that never imports the module it carves out is exactly the shape this
+docstring exists to stop you assuming away. The name was kept deliberately (Mr.
+Radio's ruling, 2026-08-30) — the honest answer here is a DECLARED gap, not a
+manufactured one, so the gap is declared below instead of being papered over
+with tests that buy a number.
 
-Per Q9 hybrid scope ratification: this file's carveout-scoped tests cover:
-    - Module-level imports of the carveout symbols (no import-time regression)
-    - The trivial branch-decision predicate: `provider_mode == "model-server"`
-    - The flag-declaration call sites at the API level (already 100% covered
-      in test_speech_to_text_provider.py + test_embedding_provider_carveout.py)
+What is actually covered, and by what:
 
-Branch-body coverage (the actual remote-vs-local model loading + probe loop)
-is smoke-tier per `91-phase5-smoke-audit.md`.
+| surface | covered by | state |
+|---|---|---|
+| the carve-out symbols import cleanly | this file (`cosa.memory.*`, not `main`) | ✅ |
+| the `.lower().strip()` + `== "model-server"` predicate | this file, on string literals | ⚠️ tautological — no edit to `main.py` can redden it |
+| `declare_remote_only` / `declare_in_process_*` API surface | `test_speech_to_text_provider.py`, `test_embedding_provider_carveout.py` | ✅ 100% |
+| the REMOTE branch body (probe loop + HTTP routing) | ONE smoke test — see the warning below | 🟡 end-to-end only |
+| the LOCAL branch body (eager GPU load of 3 models) | **nothing** | 🔴 declared gap |
+| the switch region itself, lines 898–1015 of `main.py` | **nothing** | 🔴 60 of 60 statements missing |
+
+⚠️ THE SINGLE COVERING SMOKE TEST SILENTLY SKIPS IN ANY WORKTREE. Of the nine
+tests in `src/tests/smoke/test_model_server_smoke.py`, eight hit `:7998`
+directly and say nothing about this file; only `test_proxy_through_compute_mp3`
+transcribes through `:7999`, which can succeed only if that process's lifespan
+took the remote branch. That one test needs `src/conf/keys/model-server-api`,
+which is gitignored at `.gitignore:71` — present in the main tree, absent from
+every worktree. It reports `SKIPPED`, not a failure, so a seat verifying this
+exemption from a worktree sees the suite pass and concludes nothing covers the
+branch. Measured both ways at `e1fc27ae`: `4 passed, 5 skipped` without the key
+file, `9 passed` with it.
+
+WHY THE LIFESPAN IS NOT UNIT-TESTED (the ruling, and where it actually lives):
+the switch sits inside a 683-line async function with ~10 collaborator
+dependencies (commons init, websocket manager, prediction engine, model
+loading). 274 of `main.py`'s 296 missing statements are inside it; mocking that
+startup graph buys a percentage, not confidence.
+
+The ruling is `92-phase5-closure.md:18` (Q9 hybrid scope ratification), verbatim:
+
+    Lifespan switch in `fastapi_app/main.py` documented as smoke-tier coverage
+    (the live branch behavior is exercised by
+    `src/tests/smoke/test_model_server_smoke.py`).
+
+`fastapi_app/main.py` IS this file — renamed `R090` to `src/lupin_app/main.py`
+in commit `53fef419`, 2026-06-19. The rename is noted so the trail survives a
+`grep` for the old path.
+
+⚠️ CITATION CORRECTED 2026-08-30. This docstring previously cited
+`91-phase5-smoke-audit.md` for the smoke-tier ruling. That document mentions
+`lupin_app` / `fastapi_app` ZERO times — it audits two smoke test FILES for
+carve-out compatibility and refines a test list for `lupin_model_server/main.py`,
+a different file. The ruling was real, but a reader checking the citation landed
+on a document about something else. Full audit and measurements:
+`src/rnd/v0.2.1/2026.08.30-lifespan-carveout-citation-audit.md`.
+
+ALSO UNWRITTEN, on purpose: design doc
+`src/rnd/v0.1.7/2026.05.16-model-server-carveout/02-phase5-unit-tests-and-coverage-design.md`
+§8 named three lifespan tests
+(`test_lifespan_declares_local_owner_...`, `..._remote_only_...`,
+`..._handles_load_failure_gracefully`). None were written, here or anywhere.
+That stays true by ruling, not by oversight.
 """
 
 import importlib
