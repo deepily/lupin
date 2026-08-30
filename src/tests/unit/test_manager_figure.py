@@ -270,9 +270,12 @@ class TestResolveImplicitManagerFigure:
 # a test invented to match its own expectations (row a4d483e0). MEASURED shape: the
 # key is ABSENT (not present-and-null); the null shape is derived from this same
 # artifact below so BOTH legacy shapes are covered from one real source.
+# MOVED 2026-08-30 (row 6325123c): this artifact lived in src/rnd/ and was deleted there
+# as 'detritus' by c752ab9e, reddening all 7 tests below. A live fixture belongs under
+# src/tests/fixtures/, where a housekeeping sweep of R&D docs cannot reach it.
 _CAPTURED_LEGACY_BRIDGE = os.path.join(
     os.environ.get( "LUPIN_ROOT", os.getcwd() ),
-    "src/rnd/v0.2.0/2026.08.16-nameless-seat-e071e834-live-evidence.md.bridge.json"
+    "src/tests/fixtures/captured-legacy-bridge-c1404a70.json"
 )
 
 

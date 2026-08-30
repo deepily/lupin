@@ -2223,9 +2223,20 @@ def main():
     if session_id:
         try:
             from lupin_cli.claude_code.hooks.lib.manager_figure import resolve_implicit_manager_figure
-            from lupin_cli.claude_code.hooks.lib.session_bridge import set_manager_figure_implicit
+            from lupin_cli.claude_code.hooks.lib.session_bridge import (
+                MANAGER_FIGURE_BRIDGE_FIELD, set_manager_figure_implicit )
             _mf_persona  = ( session_data.get( "voice_persona" ) or {} ).get( "name" )
             _mf_implicit = resolve_implicit_manager_figure( _mf_persona, os.environ )
+            # Keep the IN-MEMORY dict in sync with the disk stamp (row 6325123c).
+            # set_manager_figure_implicit() writes the FILE; _record_listener_pid()
+            # at the end of main() then writes this dict WHOLESALE over that same
+            # file (atomic_write_json, not read-modify-write), so a stamp that only
+            # reached disk was erased ~45 lines later on every real session — 0 of
+            # 47 bridges carried the field. Measured 2026-08-30: reproduced with a
+            # stamp-then-_record_listener_pid sequence; the field vanishes. The
+            # out-of-band drive never saw it because the test monkeypatches
+            # _spawn_listener, so the clobbering write never runs.
+            session_data[ MANAGER_FIGURE_BRIDGE_FIELD ] = _mf_implicit
             if not set_manager_figure_implicit( stable_session_id, _mf_implicit ):
                 print( "[register_session] WARNING: manager-figure stamp not written "
                        "(bridge unresolved); is_manager_figure will fall back to the "

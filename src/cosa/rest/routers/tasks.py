@@ -615,7 +615,12 @@ def _blocked_mint_denial_detail( reason: str ) -> str:
 
     Ensures:
         - DENIAL_STALE_BRIDGE → names the ABSENT stamp field and prescribes a
-          session RESTART (which re-stamps the bridge at SessionStart)
+          session RESTART (which re-stamps the bridge at SessionStart). It states
+          the OBSERVATION and not a cause: on 2026-08-30 (row 6325123c) the message
+          asserted "this session started before the stamp existed" to a session
+          started that same day — Phase 4.6 stamped the file and _record_listener_pid
+          then wrote a pre-stamp dict over it, so the field was absent for a reason
+          the message ruled out. A message must not assert a cause it never checked.
         - DENIAL_NO_SESSION_ID / DENIAL_DENIED → the permission message, unchanged
           in intent (a genuinely-denied caller is still told it is not a manager)
     """
@@ -623,9 +628,10 @@ def _blocked_mint_denial_detail( reason: str ) -> str:
         return (
             "cannot verify manager status to mint a 'blocked' task: the caller's "
             "session bridge is missing the 'manager_figure_implicit' stamp that the "
-            "manager-figure check reads (field ABSENT, not false) — this session "
-            "started before the stamp existed. RESTART the session to re-stamp the "
-            "bridge, then retry. (If you are intentionally a non-manager: create the "
+            "manager-figure check reads (field ABSENT, not false). This states what "
+            "was OBSERVED, not why: the bridge may predate the stamp field, or the "
+            "stamp may have been written and then lost. RESTART the session to "
+            "re-stamp the bridge, then retry. (If you are intentionally a non-manager: create the "
             "item queued and transition it to blocked, or have a manager mint it directly.)"
         )
     if reason == DENIAL_NO_SESSION_ID:

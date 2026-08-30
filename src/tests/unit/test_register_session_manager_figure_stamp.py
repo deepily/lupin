@@ -19,7 +19,7 @@ import pytest
 HOOK_MODULE = "lupin_cli.claude_code.hooks.register_session"
 
 
-def _drive_stamp( monkeypatch, tmp_path, session_id, persona_name, chain ):
+def _drive_stamp( monkeypatch, tmp_path, session_id, persona_name, chain, real_listener=False ):
     home = tmp_path / "home"
     seam = tmp_path / "seam"
     ( home / ".claude" / "sessions" ).mkdir( parents=True )
@@ -50,7 +50,31 @@ def _drive_stamp( monkeypatch, tmp_path, session_id, persona_name, chain ):
                                    "transcript_path": "/x" } )
     monkeypatch.setattr( module, "emit_json", lambda *a, **k: None )
     monkeypatch.setattr( module, "send_tts", lambda *a, **k: None )
-    monkeypatch.setattr( module, "_spawn_listener", lambda *a, **k: None )
+    if real_listener:
+        # Row 6325123c — run the REAL _spawn_listener so _record_listener_pid()
+        # actually fires. That call writes the in-memory session_data dict
+        # WHOLESALE over the bridge, ~45 lines after Phase 4.6 stamped the file,
+        # and it erased the stamp on every production session. Patching
+        # _spawn_listener out (the other path below) hides the clobber entirely,
+        # which is why the original stamp test passed while 0 of 47 real bridges
+        # carried the field. Only the subprocess is faked here, not the write.
+        class _FakeProc:
+            pid = __import__( "os" ).getpid()   # a live pid, so the liveness check passes
+        _real_popen = module.subprocess.Popen
+        def _popen( cmd, *a, **k ):
+            # Fake ONLY the listener spawn; main() also shells out elsewhere
+            # (tree-state), and those must keep working.
+            # `pgrep` scans for the same module name, so match the ACTUAL spawn:
+            # this interpreter, run with -m on the listener module.
+            if ( isinstance( cmd, list ) and len( cmd ) > 2
+                 and cmd[ 0 ] == __import__( "sys" ).executable and cmd[ 1 ] == "-m"
+                 and "cc_notification_listener" in cmd[ 2 ] ):
+                return _FakeProc()
+            return _real_popen( cmd, *a, **k )
+        monkeypatch.setattr( module.subprocess, "Popen", _popen )
+        monkeypatch.setattr( module.time, "sleep", lambda *a, **k: None )
+    else:
+        monkeypatch.setattr( module, "_spawn_listener", lambda *a, **k: None )
     # Allocation is the only source of the persona name Phase 4.6 reads.
     monkeypatch.setattr( module, "_allocate_voice_persona_via_http",
                          lambda *a, **k: ( { "name": persona_name }, None ) )
@@ -86,3 +110,32 @@ def test_worker_persona_stamps_false( monkeypatch, tmp_path ):
         persona_name="Tiffany", chain="Krishna,*",
     )
     assert data[ field ] is False
+
+
+@pytest.mark.parametrize( "persona,chain,expected", [
+    ( "Krishna", "Krishna,*", True  ),
+    ( "Tiffany", "Krishna,*", False ),
+] )
+def test_stamp_survives_the_listener_pid_write( monkeypatch, tmp_path, persona, chain, expected ):
+    """
+    Row 6325123c — the stamp must survive to the END of main(), not merely be
+    written by Phase 4.6.
+
+    MEASURED 2026-08-30: Phase 4.6 called set_manager_figure_implicit(), which
+    writes the FILE. main() then called _spawn_listener() -> _record_listener_pid(),
+    which does atomic_write_json( session_file, session_data ) — a WHOLESALE write
+    of a dict captured before the stamp, not a read-modify-write. The field was
+    therefore erased on every real session; 0 of 47 live bridges carried it, and
+    the server's blocked-mint guard answered 403 to every caller.
+
+    The two tests above cannot see this because they patch _spawn_listener away.
+    This one leaves it real and fakes only the subprocess.
+    """
+    data, field = _drive_stamp(
+        monkeypatch, tmp_path,
+        session_id="1ed3e116-1111-2222-3333-444444444444",
+        persona_name=persona, chain=chain, real_listener=True,
+    )
+    assert "listener_pid" in data, "the clobbering write did not run — test is not exercising the bug"
+    assert field in data, "manager-figure stamp was erased by the listener-pid write (row 6325123c)"
+    assert data[ field ] is expected
