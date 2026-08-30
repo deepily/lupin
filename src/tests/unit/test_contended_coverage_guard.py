@@ -403,7 +403,23 @@ def test_end_to_end_an_agent_seat_quoting_the_command_does_not_refuse_a_real_run
                  'LUPIN_ROOT="$PWD" .venv/bin/python -m pytest src/tests/unit/test_x.py -q' )
     seat = subprocess.Popen( [ "bash", "-c", f'exec -a {shlex.quote( briefing )} sleep 30' ] )
     try:
-        raw = pathlib.Path( f"/proc/{seat.pid}/cmdline" ).read_bytes()
+        # 🔴 WAIT FOR THE ARGV TO EXIST BEFORE READING IT. Popen returns as soon as the child
+        # is forked; /proc/<pid>/cmdline is EMPTY until execve has installed the new argv, so
+        # reading it immediately races the `exec -a`. Measured 2026-08-30 (row c5e6d272):
+        # 3 failures in 12 solo runs, every one `looks_like_pytest('')` on a b'' read — the
+        # test blaming the guard for a process that had not yet become the thing under test.
+        #
+        # ⚠️ The empty read is the SAME SHAPE as this whole row's family: an empty answer is
+        # indistinguishable from a negative one, so "not invocation-shaped" and "not there
+        # yet" arrived as the same value. Waiting is not weakening — the assertion below is
+        # unchanged and still fails loudly if the argv never becomes invocation-shaped.
+        deadline = time.monotonic() + 10.0
+        raw      = b""
+        while time.monotonic() < deadline:
+            raw = pathlib.Path( f"/proc/{seat.pid}/cmdline" ).read_bytes()
+            if raw: break
+            time.sleep( 0.01 )
+        assert raw, f"the seat's argv never materialised within 10s (pid {seat.pid})"
         assert cc.looks_like_pytest( raw.replace( b"\0", b" " ).decode() ), \
             "precondition: this seat's command line must be invocation-shaped"
         assert seat.pid not in { pid for pid, _ in cc.find_foreign_pytest() }, \

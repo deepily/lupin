@@ -67,6 +67,15 @@ DETECTED_BUT_DOES_NOT_BREAK = {
     "test_run_unit_tests_fail_loud.py":
         "`_REAL_VENV_PATHS` holds the literals the test string-replaces inside a patched copy "
         "of the runner. They are the subject of a substitution, not a command that runs.",
+    "test_contended_coverage_guard.py":
+        "the single `.venv/bin/python` is inside a BRIEFING STRING at line 403 — the fake "
+        "spawn-brief argv the guard must NOT mistake for a running suite. It is handed to "
+        "`exec -a` as a process name and never executed; the file's only interpreter spawn "
+        "(line 361) uses `sys.executable`, whatever that happens to be. Measured green in a "
+        "tree with no `.venv` (lupin-wt-krishna-f99bed95, 31 passed) — ⚠️ that checkout is "
+        "125 commits behind, so the run corroborates the MECHANISM rather than this exact "
+        "revision; the current revision's independent evidence is the grep (one hit, at 403) "
+        "plus the sys.executable spawn.",
     "test_v2_eligible_routing_denominator.py":
         "does spawn PROJECT_ROOT/.venv/bin/python, but skips first when the pinned baseline "
         "worktree is absent — which it is. Reaching the spawn again in an unprovisioned tree "
