@@ -436,6 +436,8 @@ parked invisibly, which is the bottom row and the exact failure row `011f1f90` e
 act on it — and on the middle row, still read the result back, because "it landed correctly" is a
 claim until you have seen it.
 
+⚠️ **AND IT REACHES CONFIGURATION, NOT ONLY COVERAGE.** Measured 2026-08-29: two seats disagreed about whether `"src/scripts"` was in `pyproject.toml`'s coverage source list. It was present at HEAD (1), present in the worktree after a merge (1), absent at that worktree's pre-merge sha (0) — **both readings correct, about different files.** A run under a stale config would have measured none of those files and published an EMPTY zero list, with nothing in the output saying so. ⇒ **Verify the config in the tree you are about to RUN IN, immediately before the run. HEAD is not where the run happens.**
+
 ⚠️ **The general shape, which outlives these three:** a worktree is `git`-identical to the main tree and **environment-identical to nothing**. Anything gitignored, untracked, or exported into your shell is a property of *where you are standing*, not of *what you are measuring*. That is why two counts should be **reconciled** rather than adjudicated — 25 − 14 = 11 with every one named is stronger evidence than either count alone, and a mismatch that reconciles is not a disagreement.
 
 ⚠️ **Related, same family** — the collected-test-id diff. Some test ids bake an **absolute path** into a parametrize id, so diffing collected ids between two worktrees shows the same test as one removal plus one addition. A raw diff read `+225 / −4` and looked like the merges had deleted four tests; they had not. Compare **counts** as well as ids, and treat the agreement of the two as the check.
