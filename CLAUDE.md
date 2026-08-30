@@ -512,19 +512,27 @@ one evening, both the same failure: **the harness reporting on an execution that
 misses as hits. Receipt: an rc=4 was recorded as a caught mutation; the test had been appended into
 the wrong class and never ran. ⇒ **Accept only `rc == 1`.**
 
-**UNDER-REPORT — a mutant can run as its own original.** CPython validates a cached `.pyc` on the
-source's whole-second mtime and size. A mutation changing NEITHER — single-character and digit
-swaps, `return 3` → `return 0`, `<` → `>` — landing in the same second as the cached compile is
-judged unchanged, so the ORIGINAL bytecode runs and the mutation reports SURVIVED. Receipt: the same
-mutated sha `ab030e258b72` gave rc=0 through the harness and rc=1 run by hand seconds later, the
-only variable being bytecode caching.
+**STALE BYTECODE — a mutant can run as some OTHER revision of itself, and this one lies BOTH ways.**
+CPython validates a cached `.pyc` on the source's whole-second mtime and size. A mutation changing
+NEITHER — single-character and digit swaps, `return 3` → `return 0`, `<` → `>` — landing in the same
+second as the cached compile is judged unchanged, so the cached bytecode runs instead.
+
+- **False SURVIVOR**: the ORIGINAL bytecode runs, the test passes because the original is correct,
+  and the mutation reports SURVIVED. Receipt: the same mutated sha `ab030e258b72` gave rc=0 through
+  a harness and rc=1 run by hand seconds later, the only variable being bytecode caching.
+- **False KILL**: in a SEQUENTIAL harness over one file, run N+1 can load run N's bytecode. The
+  suite then fails on the PREVIOUS mutant and the harness records a kill the CURRENT mutant never
+  earned. Mechanism and retraction on row `cfe0b15d` — the narrower "only fakes survivors, so an
+  all-killed pass is safe" was believed briefly and is WRONG for the loop shape every ramp harness
+  uses. ⇒ **Purge on EVERY pass, not only one that reports a survivor.** An all-green pass is
+  exactly the one that looks like it needs no checking.
 
 🔴 **`python -B` / `PYTHONDONTWRITEBYTECODE=1` DOES NOT FIX THIS.** It suppresses *writing* a
 `.pyc`, never *trusting* one — and any repo that has ever run its tests already has the cache on
 disk. **The structural remedy is checked-hash invalidation** (`py_compile.PycInvalidationMode.CHECKED_HASH`
 / `compileall --invalidation-mode checked-hash`), which hashes the source instead of comparing
 whole-second mtime and size, and is therefore immune to a same-size same-second edit by
-construction. Whether to adopt it repo-wide still **needs an owner's ruling** — see row `d18ce9ef`
+construction. Whether to adopt it repo-wide is **decision `866f43ce`**, held by the Manager, with Rick ruling — see it and row `d18ce9ef`
 and Pocholo's write-up `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md` for the
 measurements, the six priced remedies, and the +3.3% import cost. Read those rather than re-deriving
 them here.
@@ -549,10 +557,12 @@ reproductions run OPPOSITE POLARITY** — one edits `"todo"` → `"dead"`, the o
 — so the "wrong" answer is a different word in each. They agree completely: in both, the flag serves
 the pre-edit value. Do not read the mirrored tables as a conflict.
 
-⚠️ **THE UNDER-REPORT IS SELECTIVE, WHICH IS WHAT MAKES IT DANGEROUS.** A length-changing swap
+⚠️ **THE BYTECODE FAILURE IS SELECTIVE, WHICH IS WHAT MAKES IT DANGEROUS.** A length-changing swap
 invalidates the cache on its own, so most mutations in a pass are unaffected — 11 of 12 in the
 measured case. **A harness looks healthy while lying about exactly the mutations that leave mtime
-and size unchanged.**
+and size unchanged.** Re-verification is cheap and worth doing on any pass that predates this rule:
+re-running an unpurged 10/10 with the purge in place reproduced 10/10 with identical mutated shas,
+so that pass held — but it was not KNOWN to hold until it was re-run.
 
 ⇒ **A SURVIVING MUTANT HAS THREE EXPLANATIONS, NOT ONE.** Separate them before writing a line of
 test code:
