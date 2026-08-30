@@ -426,6 +426,34 @@ ps -eo comm,args --no-headers | awk '$1=="pytest" || ($1 ~ /^python/ && $0 ~ / -
 
 ⇒ `comm` answers *what this process is*; the command line answers *what someone wrote about it*. A gate must ask the first question. The same trap applies to any `pgrep -f` over a fleet of agent processes — grep for a tool name and you will find every seat that was told about the tool.
 
+### 🔴 A COVERAGE LIST GOES STALE FROM A **MERGE**, NOT FROM A COMMIT
+
+**Measured 2026-08-29** (row `9595aaef`). A manager spent an evening assigning coverage work off a zero-coverage census, then retracted an assignment when the worker showed the file already at 100% with 61 tests by his own commit hours earlier. **The retraction was the error.** Checked by merge-base: that commit — and three others like it — are **not ancestors of HEAD**. They live on the workers' own branches. At HEAD no test imports that module at all, so the file is still at 0% on the branch.
+
+**Nobody was wrong. They measured different trees.**
+
+| question | answer |
+|---|---|
+| "Is my work done?" | ask the **worktree** — the tests exist and pass there |
+| "Is the branch covered?" | ask **HEAD** — and it is not, until the merge lands |
+
+⇒ **Work in an unmerged worktree moves nobody's coverage but its author's.** A seat that re-measures "in my own tree" will contradict a HEAD-derived list every single time, and both parties will have correct numbers for different propositions. That is what every tree-versus-tree argument on this epic has actually been.
+
+**Two obligations follow:**
+1. **State the sha with the list.** A coverage list without the sha it was taken at is not a measurement, it is a rumour with a timestamp. Say `at ef6e2bdc`, not "as of tonight".
+2. **Report "done" and "landed" as separate columns.** A worker's file can be finished and still be at zero on the branch. Collapsing the two is what turns an honest commit into a phantom reassignment.
+
+**And the durable fix is a command, not a list** — anyone can re-derive the current zero set at HEAD, and a list anyone can quote will outlive the tree it described:
+
+```bash
+# from your own worktree, checked out at the sha you mean to describe
+COVERAGE_FILE=/tmp/cov-$USER-$$.data LUPIN_ROOT="$PWD" \
+  .venv/bin/python -m pytest src/tests/unit/ -q --cov=src/scripts --cov-branch \
+  --cov-report=term-missing --cov-fail-under=0
+```
+
+⚠️ **Run the WHOLE tier, not a scoped subset.** A subset manufactures false zeros for any file whose only coverage comes from a test you excluded — which is the exact defect a zero list exists to find.
+
 ## 100% COVERAGE MANDATE
 
 **Lupin-wide hard gate.** Ratified 2026-05-06 (multiplexer-only), **scope-expanded Lupin-wide 2026-05-16** ("Everything has to pass at 100%. Full stop."). CoSA inherits it as of the 2026-05-29 mono-repo fold, on a grandfathering ramp — see the TODO.md top entry (deadline 2026-06-05).
