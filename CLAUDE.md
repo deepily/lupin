@@ -382,6 +382,50 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 
 :7999 is an optimization for truly fast, truly read-only work. If you cannot prove a test meets all three :7999 criteria, schedule it on :8000.
 
+### 🔴 A TIER RUN FROM A WORKTREE REPORTS ~11 FAILURES THE MAIN TREE DOES NOT HAVE
+
+**Measured 2026-08-29** (row `3d01df71`). Two seats ran the unit tier on the same sha `31b2cfce` within the hour and got **25 failures in a worktree** against **14 in the main tree**. Neither number was wrong. The gap is **exactly 11**, and all of it is state that is present in the main tree and absent from every worktree — so a worktree tier accuses the branch of breakage it does not have.
+
+| n | what is missing | how it surfaces |
+|---|---|---|
+| 9 | `src/scripts/cloud-run.env` — **gitignored** at `.gitignore:79` | `gcp_project.py:115` `RuntimeError: LUPIN_GCP_PROJECT_ID is not set…` ×8, plus `KeyError: 'dm_tutor/flash_lite'`. The whole flash-lite / vertex family. |
+| 1 | `src/terraform/envs/test/.terraform/providers` — untracked local cache | `test_terraform_invariants.py` — "provider plugins are NOT cached at …" |
+| 1 | nothing missing — **`LUPIN_ROOT` still names the MAIN repo** while you stand in the worktree | the tests catch this one themselves and print `test file` / `its tree` / `LUPIN_ROOT` side by side |
+
+**Before running a tier from a worktree:**
+
+```bash
+cd <your-worktree> && LUPIN_ROOT="$PWD" .venv/bin/python -m pytest src/tests/unit/ -q
+```
+
+`LUPIN_ROOT="$PWD"` is the one you must not forget — it is inherited from your shell and silently keeps pointing at `/…/lupin`. The other two are unfixable from inside a worktree: **subtract them, do not chase them.**
+
+⚠️ **The general shape, which outlives these three:** a worktree is `git`-identical to the main tree and **environment-identical to nothing**. Anything gitignored, untracked, or exported into your shell is a property of *where you are standing*, not of *what you are measuring*. That is why two counts should be **reconciled** rather than adjudicated — 25 − 14 = 11 with every one named is stronger evidence than either count alone, and a mismatch that reconciles is not a disagreement.
+
+⚠️ **Related, same family** — the collected-test-id diff. Some test ids bake an **absolute path** into a parametrize id, so diffing collected ids between two worktrees shows the same test as one removal plus one addition. A raw diff read `+225 / −4` and looked like the merges had deleted four tests; they had not. Compare **counts** as well as ids, and treat the agreement of the two as the check.
+
+### 🔴 "IS ANOTHER SUITE RUNNING?" — MATCH `comm`, NEVER THE COMMAND LINE
+
+Before taking the box for a tier, seats check whether anyone else is mid-run. **Measured 2026-08-29, both wrong answers on the same box within minutes:**
+
+```bash
+# ✅ CORRECT — asks what the process IS
+ps -eo comm,args --no-headers | awk '$1=="pytest" || ($1 ~ /^python/ && $0 ~ / -m pytest/)' | wc -l
+```
+
+| pattern | reported | truth |
+|---|---|---|
+| `pgrep -f "\-m pytest"` | **0** | missed a live run — the script form `.venv/bin/python3 .venv/bin/pytest` has no `-m pytest` |
+| `pgrep -af "pytest"` | **5** | four spurious |
+| `comm`-based (above) | **1** | ✅ |
+
+**The two failure modes are opposite, and the second is the dangerous one.**
+
+1. **Too narrow → you take a box someone is using.** Matching only `-m pytest` misses `pytest` invoked as a script, which is how `run-*-tests.sh` launches it.
+2. **Too broad → the gate never opens, on an idle box, silently.** `pgrep -f` searches the whole command line, and **a Claude seat's entire spawn briefing is its command line**. Three live seats — Tiberius, Rachel, Rio — matched `pytest` purely because their instructions *discussed* running tests. A briefing about testing is exactly the text most likely to contain the word, so this false positive gets **more** likely the more the fleet coordinates about the box.
+
+⇒ `comm` answers *what this process is*; the command line answers *what someone wrote about it*. A gate must ask the first question. The same trap applies to any `pgrep -f` over a fleet of agent processes — grep for a tool name and you will find every seat that was told about the tool.
+
 ## 100% COVERAGE MANDATE
 
 **Lupin-wide hard gate.** Ratified 2026-05-06 (multiplexer-only), **scope-expanded Lupin-wide 2026-05-16** ("Everything has to pass at 100%. Full stop."). CoSA inherits it as of the 2026-05-29 mono-repo fold, on a grandfathering ramp — see the TODO.md top entry (deadline 2026-06-05).
