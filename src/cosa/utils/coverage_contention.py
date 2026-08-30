@@ -133,8 +133,57 @@ def _default_ancestors( pid: Optional[int]=None ) -> List[int]:
     return chain
 
 
+def comm_could_be_pytest( comm: str ) -> bool:
+    """
+    True when a process's `comm` is one a pytest run could actually have.
+
+    ⚠️ THIS IS THE HALF THE COMMAND LINE CANNOT ANSWER, and it is why the guard reads
+    /proc/<pid>/comm at all. `comm` says what a process IS; the command line says what
+    somebody WROTE about it. A Claude seat carries its entire spawn brief in argv, so a
+    brief that merely QUOTES a command — `.venv/bin/python -B -m pytest src/tests/unit/`
+    — is indistinguishable from a running suite to any argv-only check.
+
+    MEASURED 2026-08-30 (row 9078a035, while taking a coverage measurement that could not
+    start). The guard refused a --cov run naming two processes as live suites:
+
+        pid  22130  comm=claude   argv contains "-m pytest"   (spawn brief for row a8222a71)
+        pid 124554  comm=claude   argv contains "-m pytest"   (spawn brief for row c89cec9b)
+
+    Neither was running anything. Both are long-lived seats, so the guard would not have
+    opened again for as long as they lived — the "gate never opens on an idle box" failure,
+    which is worse than the contention it guards against because it has no timeout. The
+    real suite on the box at that moment appeared in NEITHER of the guard's two named rows.
+
+    This is the same family as the quoted-search-pattern case fixed above on 2026-08-26,
+    one vector over: that one was a peer's `pgrep -f "bin/pytest src/"`, this one is a
+    peer's spawn brief. Requiring an absolute path closed the first and cannot close the
+    second, because "-m pytest" is exactly the shape a brief quotes.
+
+    ⇒ The positive form is the one CLAUDE.md § "IS ANOTHER SUITE RUNNING?" already
+    prescribes: match `comm`, never the command line.
+
+    Requires:
+        - comm is a string (may be empty)
+
+    Ensures:
+        - True for "pytest" and for any interpreter name beginning "python"
+          (python, python3, python3.13 — a real pytest runs under one of these)
+        - False for "claude", and for anything else that is not interpreter-shaped
+        - an EMPTY comm returns True, so an unreadable comm can never turn a real
+          suite invisible — unknown stays a refusal, never a pass
+    """
+    if not comm: return True
+    return comm == "pytest" or comm.startswith( "python" )
+
+
 def _default_process_table() -> List[ Tuple[ int, str ] ]:
-    """Every readable (pid, cmdline) from /proc. Raises OSError if /proc is unusable."""
+    """
+    Every readable (pid, cmdline) from /proc, EXCLUDING processes whose `comm` says they
+    cannot be a pytest run. See comm_could_be_pytest for why the cmdline alone is not
+    enough and what it measured.
+
+    Raises OSError if /proc is unusable.
+    """
     rows = []
     for entry in os.listdir( "/proc" ):
         if not entry.isdigit(): continue
@@ -143,6 +192,12 @@ def _default_process_table() -> List[ Tuple[ int, str ] ]:
                 raw = handle.read()
         except OSError:
             continue                      # the process exited between listdir and open
+        try:
+            with open( f"/proc/{entry}/comm" ) as handle:
+                comm = handle.read().strip()
+        except OSError:
+            comm = ""                     # unreadable -> treated as could-be, never skipped
+        if not comm_could_be_pytest( comm ): continue
         rows.append( ( int( entry ), raw.replace( b"\0", b" " ).decode( "utf-8", "replace" ).strip() ) )
     return rows
 

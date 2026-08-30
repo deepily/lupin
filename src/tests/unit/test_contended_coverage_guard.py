@@ -31,6 +31,7 @@ import subprocess
 import pytest
 
 import cosa.utils.util as cu
+import cosa.utils.coverage_contention as cc
 
 
 PROJECT_ROOT = cu.get_project_root()
@@ -414,3 +415,49 @@ def test_a_test_that_spawns_a_coverage_child_engages_the_escape_hatch():
     assert not offenders, (
         "these tests spawn a --cov child without engaging LUPIN_ALLOW_CONTENDED_COVERAGE, so "
         f"they go red whenever a peer session runs any suite: {offenders}" )
+
+
+# ── comm_could_be_pytest: a seat's spawn brief is not a running suite ─────────────
+#
+# Row 9078a035, measured 2026-08-30. The guard refused a --cov run on an otherwise-idle
+# box, naming two `comm=claude` processes whose argv merely QUOTED "-m pytest" as part of
+# their spawn briefs. Both were long-lived, so the gate would never have reopened.
+
+@pytest.mark.parametrize( "comm,could_be", [
+    ( "pytest",     True  ),
+    ( "python",     True  ),
+    ( "python3",    True  ),
+    ( "python3.13", True  ),
+    ( "",           True  ),   # unreadable comm must never hide a real suite
+    ( "claude",     False ),   # the measured false positive
+    ( "bash",       False ),
+    ( "node",       False ),
+] )
+def test_comm_could_be_pytest_asks_what_the_process_is( comm, could_be ):
+    assert cc.comm_could_be_pytest( comm ) is could_be
+
+
+def test_a_seat_whose_brief_quotes_a_pytest_command_is_not_a_running_suite():
+    """
+    The exact measured shape: argv that would pass looks_like_pytest, on a process whose
+    comm says it is a Claude seat. The cmdline check alone still says True — that is the
+    point; comm is what discriminates.
+    """
+    # NOTE: the measured briefs named a per-repo virtualenv interpreter by path; these
+    # fixtures use a bare `python3` and an /opt path instead, because
+    # test_venv_dependent_tests_are_declared.py reddens on a unit test naming a path into
+    # a repo-local virtualenv (only 5 of 29 trees have one). Nothing is lost — the
+    # discriminating property is the `-m pytest` token, not which interpreter precedes it.
+    brief = ( "/home/rruiz/.local/bin/claude --model claude-opus-5 You own row c89cec9b. "
+              "Run: python3 -B -m pytest src/tests/unit/foo.py -q" )
+    assert cc.looks_like_pytest( brief ) is True          # argv cannot tell
+    assert cc.comm_could_be_pytest( "claude" ) is False    # comm can
+
+
+def test_a_real_pytest_is_still_found_when_comm_is_an_interpreter():
+    """The positive control — the fix must not blind the guard to actual runs."""
+    real = "/opt/venv/bin/python -m pytest src/tests/unit/ -q --cov"
+    assert cc.looks_like_pytest( real ) is True
+    assert cc.comm_could_be_pytest( "python" ) is True
+    found = cc.find_foreign_pytest( process_table=lambda: [ ( 999, real ) ], ancestors=[ 1 ] )
+    assert [ pid for pid, _ in found ] == [ 999 ]

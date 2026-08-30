@@ -217,6 +217,40 @@ def test_the_process_table_decodes_nul_separated_cmdlines( monkeypatch ):
     assert cc._default_process_table() == [ ( 4242, "/opt/venv/bin/pytest -q" ) ]
 
 
+def test_the_process_table_drops_a_seat_whose_brief_merely_quotes_a_pytest_command(
+    monkeypatch,
+):
+    """
+    🔴 THE MEASURED FALSE POSITIVE, row 9078a035, 2026-08-30. A Claude seat carries its
+    whole spawn brief in argv, so a brief that QUOTES `-m pytest` is argv-identical to a
+    running suite. Two such seats (pids 22130 / 124554, both comm=claude) made the guard
+    refuse a --cov run on a box whose only real suite appeared in NEITHER named row — and
+    being long-lived, they would have kept it shut indefinitely.
+
+    The cmdline still passes looks_like_pytest; comm is what discriminates.
+    """
+    brief = b"/home/rruiz/.local/bin/claude\x00--model\x00claude-opus-5\x00Run: python -m pytest src/\x00"
+    monkeypatch.setattr( cc.os, "listdir", lambda _p: [ "22130" ] )
+    monkeypatch.setattr( cc, "open", _fake_open( brief, comm="claude" ), raising=False )
+    assert cc._default_process_table() == [], "a comm=claude seat is not a running suite"
+    # the positive control: identical argv, interpreter comm -> still seen
+    monkeypatch.setattr( cc, "open", _fake_open( brief, comm="python3" ), raising=False )
+    assert len( cc._default_process_table() ) == 1
+
+
+def test_an_unreadable_comm_keeps_the_process_in_the_table( monkeypatch ):
+    """
+    UNKNOWN MUST NOT BECOME A PASS. If comm cannot be read, the row stays — a guard that
+    goes quiet when it cannot see is the defect it exists to prevent.
+    """
+    def _opener( path, *_args, **_kwargs ):
+        if str( path ).endswith( "/comm" ): raise OSError( "gone" )
+        return _Handle( b"/opt/venv/bin/pytest\x00-q\x00" )
+    monkeypatch.setattr( cc.os, "listdir", lambda _p: [ "4242" ] )
+    monkeypatch.setattr( cc, "open", _opener, raising=False )
+    assert cc._default_process_table() == [ ( 4242, "/opt/venv/bin/pytest -q" ) ]
+
+
 # ── the escape hatch ─────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize( "raw", [ "1", "true", "TRUE", "yes", "on", " 1 " ] )
@@ -313,9 +347,20 @@ class _Handle:
     def __exit__( self, *_exc ): return False
 
 
-def _fake_open( payload ):
-    """A stand-in for open() that always yields `payload` (str for stat, bytes for cmdline)."""
-    def _opener( *_args, **_kwargs ): return _Handle( payload )
+def _fake_open( payload, comm="python3" ):
+    """
+    A stand-in for open() yielding `payload` (str for stat, bytes for cmdline).
+
+    ⚠️ PATH-AWARE SINCE 2026-08-30 (row 9078a035). _default_process_table now reads
+    /proc/<pid>/comm as well as /proc/<pid>/cmdline, because a command line cannot
+    distinguish a running suite from a Claude seat whose spawn brief merely QUOTES one.
+    A fake that returned the same bytes for every path handed the comm check the
+    cmdline's bytes; `comm` defaults to an interpreter so existing cases still describe
+    a real pytest, and a caller can pass another value to model a non-suite process.
+    """
+    def _opener( path, *_args, **_kwargs ):
+        if str( path ).endswith( "/comm" ): return _Handle( comm )
+        return _Handle( payload )
     return _opener
 
 
