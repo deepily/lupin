@@ -241,7 +241,12 @@ def main( argv=None ):
                 if stage == "transition":
                     print( f"      the row is STILL BLOCKED and now carries a stamp that has not "
                            f"come true — re-run to retry; the second stamp is honest.", file=sys.stderr )
-    elif eligible:
+    elif eligible and not args.json:
+        # `and not args.json` (row 022d4232): --json exists so a caller can parse stdout, and
+        # this line used to print after the JSON whenever the pass found something — making
+        # the output parseable only when there was nothing to report. It stays coupled to
+        # `if args.apply:` rather than moving into the human `else:` arm above, because it is
+        # the else-branch of "did we write"; up there it would also print after an --apply run.
         print( f"DRY RUN — nothing was written. Re-run with --apply --actor '<persona> <sid8>' "
                f"to rejoin these {len( eligible )} row(s)." )
 
