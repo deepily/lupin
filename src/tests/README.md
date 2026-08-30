@@ -386,11 +386,13 @@ finally:
         raise SystemExit( f"RESTORE FAILED for {p}: {before} != {after}" )
 ```
 
-**The control is the deliverable, not the mutation results.** A harness must end with a
-restore-and-verify pass and must FAIL LOUDLY when the tree does not come back byte-identical.
-A mutation run whose control was never checked is not evidence — it is a list of numbers
-measured against a tree nobody intended. Tiberius only caught his because he ran a final
-control and read it.
+### 🔴 A mutation run whose final restore-and-verify control is not CHECKED is not evidence.
+
+That is the transferable sentence; everything above is how you get there. A harness must END
+with a restore-and-verify pass and must FAIL LOUDLY when the tree does not come back
+byte-identical. Without it you have a list of numbers measured against a tree nobody intended,
+and nothing anywhere says so. Tiberius only caught his because he ran a final control **and
+read it** — running one and not reading it is the same as not having one.
 
 ⚠️ **Never use `git stash` as the restore mechanism.** The stash stack is **repo-global** and
 shared across every worktree and every live session — measured 2026-08-23 (bug `1ebc9be3`),
