@@ -20,9 +20,23 @@ itself has to go, or the mtime has to move — this module does both.
 
 SCOPE, stated so nobody reads it as more: this makes YOUR next import honest. It does not change
 how the repo compiles, and it cannot help a subprocess that imported before you called it.
-Repo-wide options (`compileall --invalidation-mode checked-hash`, which measured self-sustaining at
-+3.3%) are priced in `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md` and are a
-separate, still-open decision.
+
+🔨 THE REPO-WIDE DECISION IS NO LONGER OPEN — Rick ruled YES on 2026-08-30 (row `866f43ce`), so
+checked-hash invalidation is the tree's remedy and this helper is the migration path rather than the
+answer. Convert with `src/scripts/migrate-pyc-to-checked-hash.sh` (`--verify` to check without
+changing anything). On a CONVERTED tree the hazard this module works around is gone by construction,
+and calling it is harmless but unnecessary; it still earns its place in a tree you have not converted
+and for a file created after the last conversion, since a brand-new source file gets a TIMESTAMP pyc.
+
+⚠️ TWO CORRECTIONS TO WHAT THIS DOCSTRING USED TO SAY, both measured 2026-08-30:
+  · "+3.3%" was an ANALYTIC figure and did NOT survive measurement. Across 8 interleaved A/B pairs
+    on the real unit tier's import-dominated collection phase, timestamp and checked-hash medians
+    were ~15.2s against ~15.1s — the difference is below this measurement's noise floor. See
+    `866f43ce` for the numbers and the conditions; quote the row, not the 3.3%.
+  · "self-sustaining" is HALF right, and the wrong half is the one that bites. An existing
+    checked-hash pyc does stay checked-hash when CPython regenerates it — but a brand-new source
+    file gets a timestamp pyc, because there is no prior pyc to inherit a mode from. The migration
+    has to be re-run after Python files are added.
 
 Usage:
 
@@ -129,7 +143,7 @@ def refresh_source( source_path ):
             f"lands on the same whole second the mutation's own .pyc recorded.\n"
             f"Proceeding would hand you a result that looks clean and is not.\n\n"
             f"CLEAR THE CACHE AND RE-RUN:\n"
-            f"  find src -name '__pycache__' -type d -exec rm -rf {{}} +"
+            f"  src/scripts/purge-pycache.sh"
         )
 
     # Move the mtime a whole second into the past. FORWARD would be the obvious choice and is the
@@ -298,7 +312,7 @@ def describe_shadowing( shadowed ):
         f"Nothing you read from these files right now describes what will execute. Treat any test "
         f"result involving them as void until this is cleared.\n\n"
         f"REMEDY — clear the cached bytecode and re-run:\n"
-        f"  find src -name '__pycache__' -type d -exec rm -rf {{}} +\n\n"
+        f"  src/scripts/purge-pycache.sh\n\n"
         f"To avoid causing this from a test that edits sources, use the mutate_source fixture in "
         f"this module rather than writing the file directly."
     )
@@ -370,5 +384,5 @@ def mutate_source():
             + "\n\nDo not trust this test's result, and check the files above before running "
               "anything else — other seats share this checkout.\n"
               "CLEAR THE CACHE AND RE-RUN:\n"
-              "  find src -name '__pycache__' -type d -exec rm -rf {} +"
+              "  src/scripts/purge-pycache.sh"
         )

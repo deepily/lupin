@@ -258,7 +258,8 @@ def test_refresh_source_RAISES_when_the_pyc_cannot_be_deleted( tmp_path ):
 
     Ensures:
         - StalePycError is raised
-        - the message names the pycache clear, so the reader knows the remedy without digging
+        - the message names the SAFE purge script, so the reader gets a remedy that does not
+              silently revert the tree to timestamp invalidation (row 866f43ce)
     """
     src = _build_pkg( tmp_path, "todo" )
     _read_lane( tmp_path )
@@ -271,7 +272,12 @@ def test_refresh_source_RAISES_when_the_pyc_cannot_be_deleted( tmp_path ):
         with pytest.raises( StalePycError ) as caught:
             refresh_source( src )
         assert "__pycache__" in str( caught.value )
-        assert "rm -rf" in str( caught.value )
+        # The remedy the message names must be the SAFE purge, not a raw `rm -rf`. Row
+        # 866f43ce: on a checked-hash tree a bare purge silently reverts it to timestamp
+        # invalidation, so an error message that told the reader to run one would be handing
+        # out the defect as the fix. This assertion is what keeps that from drifting back.
+        assert "purge-pycache.sh" in str( caught.value )
+        assert "rm -rf" not in str( caught.value )
     finally:
         os.chmod( cache_dir, 0o700 )
 

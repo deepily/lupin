@@ -103,6 +103,12 @@ Max-plan usage has rolling-window limits. Batch bounded jobs running during Rick
 
 ⚠️ **CORRECTED AGAIN 2026-08-20 (Rick's ruling). The 08-17 correction replaced hours the box was OFF with hours it is usually NOT UP YET — same failure, one step smaller.** It named **7:30 AM** as the start, derived from a single boot at 07:17 on Aug 6. **Measured across the 12 morning boots since Aug 4** — `08:52 · 09:27 · 07:17 · 09:14 · 09:52 · 09:56 · 09:20 · 10:52 · 09:48 · 09:03 · 09:17 · 09:43` — the **median is 09:24 and eleven of twelve are after 08:52**. A job placed at 7:30 sits dead ~1.5–2.5h on almost every day.
 
+⚠️ **RE-MEASURED 2026-08-30 (Krishna 🦚, row 9078a035 · commit 2df3aefb). THE WINDOW HOLDS; THE FIGURES BELOW ARE NOW OPTIMISTIC — AND THIS IS AN UPDATE, NOT A CONTRADICTION.** Taking `last -x reboot | head -20` afresh gives **16 morning boots** spanning Aug 10–30: `09:27 · 10:15 · 09:35 · 09:27 · 11:58 · 11:01 · 09:53 · 09:19 · 09:43 · 09:17 · 09:03 · 09:48 · 10:52 · 09:20 · 09:56 · 09:52` — **median 09:45, earliest 09:03, latest 11:58**, shutdowns clustering 22:26–00:20.
+
+**The two samples RECONCILE rather than disagree**, which is the only reason to trust either: the 08-20 list starts Aug 4 and includes the 07:17 outlier from Aug 6 that sits outside this window; this list adds six newer days and no boot in it is before 09:03. **The distribution moved later — median 09:24 → 09:45 — so 10 AM – 1 PM is more right than when it was written, not less.** What is now stale is the **9 AM** boundary in the DEAD row and the "well past 8:52 AM" phrasing: on this sample the box is usually still down at 9:30, and on two of sixteen days past 11:00. Read the dead window as ending at **10 AM**.
+
+⇒ **This is the third measurement of the same rule and the first one that did not move the recommendation.** That is what a stabilising figure looks like — but it is still 16 samples, so re-derive rather than quote this paragraph too.
+
 🔴 **DO NOT TRUST THIS TABLE EITHER — RE-DERIVE IT.** This rule has now been wrong twice, both times because someone generalised from too few boots. **Measure before you schedule:**
 
 ```bash
@@ -113,9 +119,9 @@ last -x reboot | head -20      # read the morning boot times yourself
 
 | Window (EDT) | Verdict | Why |
 |---|---|---|
-| ~11 PM – 9 AM | ☠️ **DEAD — never schedule here** | Host is usually powered off, and on most days is still down well past 8:52 AM. A job here does not run late — it does not run at all until boot. |
+| ~11 PM – 10 AM | ☠️ **DEAD — never schedule here** | Host is usually powered off, and on most days is still down past 09:30 (16 boots to Aug 30: median 09:45, earliest 09:03, two past 11:00). A job here does not run late — it does not run at all until boot. |
 | 9 PM – 11 PM | ❌ Peak — avoid | Rick's interactive window; competes with his real work. |
-| **10 AM – 1 PM** | ✅ **OPTIMAL — schedule batch work here** | Comfortably after the 09:24 median boot, and Rick is barely on. The only window that is reliably both up and quiet. |
+| **10 AM – 1 PM** | ✅ **OPTIMAL — schedule batch work here** | Comfortably after the median boot (09:24 on the Aug-4 sample, 09:45 on the Aug-30 one — it moved later, so this window got safer). Rick is barely on. The only window reliably both up and quiet. |
 | 1 PM – 9 PM | 🟡 Acceptable | Box up, some interactive use, well below peak. |
 
 **Rule**: any non-interactive bounded job (batch generation, scheduled regression sweeps, podcast/presentation/research) MUST set `scheduled_at` inside a window the box is UP for — **prefer 10 AM – 1 PM EDT** — via `/api/v2/submit` (field defined on `SubmitRequest` at `src/cosa/rest/routers/v2_ask.py`). User-clicked synchronous bounded jobs are exempt.
@@ -538,6 +544,32 @@ miss, 44 branches / 0 partial**. Identical, because the file was inside both sco
 ⇒ **Scope freely while working a single file. Never scope a run whose output you intend to read as
 a LIST.**
 
+### 🔴 THERE IS A SECOND VIRTUALENV *INSIDE* `src/`, AND IT IS 92% OF EVERY DISK SWEEP
+
+`src/cosa/.venv` is a full vendored virtualenv living inside the source tree. Measured 2026-08-30:
+
+| population | count |
+|---|---|
+| `find src -name '*.py'` | **31,734** |
+| of which `src/cosa/.venv` (3.11 vendor) | **29,303 — 92%** |
+| `git ls-files 'src/**/*.py'` | **2,415** |
+
+It is **untracked and ignore-matched**, which is exactly what decides who it fools:
+
+- **git-derived** sweeps (`git ls-files`, `git grep`) never see it and are **correct as-is**.
+- **disk-derived** sweeps (`find`, `rglob`, `compileall`, an unscoped `--cov`, a bare `grep -r`) see
+  it and are **inflated ~13×** with third-party code for an interpreter this repo does not run.
+
+**Receipt for why this is not theoretical**: the first cut of `migrate-pyc-to-checked-hash.sh`
+targeted `src/` with `rglob`, spent 40+ seconds rewriting vendored 3.11 bytecode, and reported
+"30,621 converted" — a five-figure number that read like a thorough migration and was 92% a fact
+about somebody else's code. The honest figure was 1,318. Excluding the venv cut the run to 3.5s.
+
+⇒ **Any tree-wide operation must exclude `.venv` / `node_modules` / `site-packages`, or be
+git-derived.** This is the same lesson as the collision guard on row `c89cec9b` from the opposite
+direction — there, disk-derived counting *added* a machine-local leftover; here it adds 29,303
+vendored files. **Ask what population your command actually walks before you read its number.**
+
 ## TESTING
 
 Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:8000`) per §TESTING VENUES above; every suite is tagged with its venue. `:8000 (scheduled)` = submit via `POST /api/test-suite/submit`; **self-authorized on a verified-idle server** (place behind any already-scheduled/running job — see §TESTING VENUES).
@@ -557,7 +589,7 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 **Coverage**: `pytest --cov=cosa --cov-report=html src/tests/` (Python). See §100% COVERAGE MANDATE for the hard gate.
 
-**Editing a `.py` file inside a test?** Use `tests.helpers.pyc_freshness` (`mutate_source` fixture / `refresh_source`). CPython validates a `.pyc` on the source's **whole-second** mtime **plus size**, so a mutation edit changes neither and the interpreter keeps running the *old* code after you restore the file and read it back — measured twice on 2026-08-29, on `job_state.py` and on the helper's own module (row `d18ce9ef`). ⚠️ `PYTHONDONTWRITEBYTECODE` does **not** fix it; it only stops pycs being *written*. Debugging a red you cannot explain? `find src -name '__pycache__' -type d -exec rm -rf {} +` before concluding anything. Detail: `src/tests/README.md` § EDITING A SOURCE FILE INSIDE A TEST, measurement `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
+**Editing a `.py` file inside a test?** Use `tests.helpers.pyc_freshness` (`mutate_source` fixture / `refresh_source`). CPython validates a `.pyc` on the source's **whole-second** mtime **plus size**, so a mutation edit changes neither and the interpreter keeps running the *old* code after you restore the file and read it back — measured twice on 2026-08-29, on `job_state.py` and on the helper's own module (row `d18ce9ef`). ⚠️ `PYTHONDONTWRITEBYTECODE` does **not** fix it; it only stops pycs being *written*. Debugging a red you cannot explain? Run **`src/scripts/purge-pycache.sh`** before concluding anything. 🔴 **NOT a raw `rm -rf __pycache__` — that now RE-OPENS the very hole it used to plug** (row `866f43ce`, §100% COVERAGE MANDATE below): the tree is on checked-hash invalidation, a pyc written where none exists is timestamp-based, so a bare purge silently reverts the tree with nothing in any output saying so. The script purges **and** reconverts, ~3.5s, so the two cannot be half-done. Detail: `src/tests/README.md` § EDITING A SOURCE FILE INSIDE A TEST, measurement `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
 
 **Docs**: `src/tests/README.md` (overview), `src/tests/integration/README.md`, `src/docs/automated-interactive-testing.md` (proxy), `src/tests/smoke/README.md`, `src/tests/AUTH-TESTING-GUIDE.md` (credentials), presentation strategy `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.07-e2e-testing-strategy.md`.
 
@@ -635,17 +667,63 @@ second as the cached compile is judged unchanged, so the cached bytecode runs in
 disk. **The structural remedy is checked-hash invalidation** (`py_compile.PycInvalidationMode.CHECKED_HASH`
 / `compileall --invalidation-mode checked-hash`), which hashes the source instead of comparing
 whole-second mtime and size, and is therefore immune to a same-size same-second edit by
-construction. Whether to adopt it repo-wide is **decision `866f43ce`**, held by the Manager, with Rick ruling — see it and row `d18ce9ef`
-and Pocholo's write-up `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md` for the
-measurements, the six priced remedies, and the +3.3% import cost. Read those rather than re-deriving
-them here.
+construction.
 
-⇒ **UNTIL THAT RULING, THE PER-HARNESS INSTRUCTION IS: PURGE THE TARGET'S `__pycache__/<stem>.*.pyc`
-AFTER WRITING EACH MUTANT.** It works, and it is what a harness can do for itself today — but it is a
-habit that fails the moment someone forgets, which is exactly why the tree-level remedy above is the
-real fix and this is the seatbelt. Keep `-B` if you like; in a multi-mutant loop it stops a fresh pyc
-being laid down between mutants, but a per-mutant purge already covers that. **Adopting the flag
-alone buys the appearance of safety, not safety.**
+🔨 **RICK RULED YES — 2026-08-30, decision `866f43ce`. Checked-hash goes repo-wide.** Convert your
+tree with `src/scripts/migrate-pyc-to-checked-hash.sh`; `--verify` reports without changing anything
+and exits non-zero if any pyc under `src/` is still timestamp-based.
+
+🔴 **THE `-f` IS THE WHOLE MIGRATION, AND WITHOUT IT THE COMMAND CONVERTS NOTHING WHILE REPORTING
+SUCCESS.** Measured 2026-08-30 — do not retype the command from memory without it:
+
+```
+python -m compileall    --invalidation-mode checked-hash .   ->  pyc stays TIMESTAMP
+python -m compileall -f --invalidation-mode checked-hash .   ->  pyc becomes checked-hash
+```
+
+compileall treats an existing up-to-date `.pyc` as needing no work. **Any tree that has ever run its
+tests is already full of timestamp pycs**, so the un-forced command leaves every one of them exactly
+as it found it — the setting "changed" and the tree is still vulnerable. The script passes `-f`.
+
+⚠️ **NOT CONVERT-ONCE-AND-FORGET, and the two halves pull opposite ways** (both measured):
+an **existing** checked-hash pyc **stays** checked-hash — edit the source, re-import, and CPython
+regenerates it in the same mode, so no build step is needed on every run. But **a pyc written when
+no prior pyc exists is TIMESTAMP-based**, because there is nothing to inherit a mode from.
+
+🔴 **WHICH MEANS THE OLD PURGE HABIT NOW RE-OPENS THE HOLE IT USED TO PLUG.** A raw
+`find src -name __pycache__ -exec rm -rf {} +` deletes the checked-hash caches, and the next import
+silently rebuilds them as **timestamp**. The tree is then back to the original defect with nothing in
+any output saying so. This is the most likely way a converted tree regresses — the instruction people
+already have in their fingers is now the thing that breaks it.
+
+⇒ **THE FIX IS A SCRIPT, NOT A RULE: use `src/scripts/purge-pycache.sh`.** It purges *and*
+reconverts in one command (~3.5s), so the halves cannot come apart. "Remember to reconvert after
+purging" would be a habit, and this fleet's own doctrine is that a habit is not a control — the raw
+command has been replaced everywhere it was documented (CLAUDE.md, `src/tests/README.md`, the three
+`pyc_freshness` failure messages, and the mobile-parity test's remedy line) so the thing people copy
+is safe by construction. Measured, both ways: after a raw purge plus one import the verifier reports
+`timestamp=3`; after the script it reports every pyc checked-hash.
+
+⇒ Three ways a tree drifts back, all one mechanism: a **new** `.py` file, a **purged**
+`__pycache__`, or a module **imported for the first time** since the last conversion. Measured live
+2026-08-30 — a verify run minutes after a clean conversion found exactly one offender,
+`src/cosa/utils/coverage_contention.py`, which had reached this working tree on a peer's commit and
+was imported before the next conversion. The gap is not theoretical; it fired inside the hour.
+
+⇒ **Re-run the script after adding Python files or purging a cache; `--verify` when you want to know
+rather than assume.** It exits non-zero if this interpreter would read a timestamp pyc.
+
+⇒ **THE PER-HARNESS PURGE IS NOW THE FALLBACK, NOT THE INSTRUCTION.** On a converted tree a
+mutation harness no longer needs to purge `__pycache__` between mutants — that habit existed only
+because the cache could not be trusted, and it failed the moment someone forgot. Purge only when
+working in a tree you have not converted (`--verify` tells you which you are in). Keep `-B` if you
+like; it stops a fresh pyc being laid down mid-loop, but **the flag alone buys the appearance of
+safety, not safety** — it suppresses *writing*, never *trusting*.
+
+See row `d18ce9ef` and Pocholo's write-up
+`src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md` for the six priced remedies.
+⚠️ **That write-up's "+3.3% import cost" is an ANALYTIC figure and did not survive measurement on the
+real tier** — see `866f43ce` for the observed numbers. Quote the row, not the 3.3%.
 
 ⚠️ **THE HAZARD IS NOT LIMITED TO MUTATION HARNESSES, AND IT IS CROSS-PROCESS.** A *fresh* pytest
 reads the stale pyc off disk, so any edit-then-run loop is exposed — including one an agent types by
