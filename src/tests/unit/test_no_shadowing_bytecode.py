@@ -45,6 +45,7 @@ from tests.helpers.pyc_freshness import (            # noqa: E402
     bytecode_files_for,
     describe_shadowing,
     find_shadowing_bytecode,
+    invalidation_mode_is_safe,
     scan_is_meaningful,
 )
 
@@ -99,10 +100,10 @@ def test_the_detector_actually_sees_a_shadowing_pyc( tmp_path ):
     """
     src = _manufacture_shadowed_source( tmp_path )
 
-    shadowed, examined, _protected = find_shadowing_bytecode( [ tmp_path ] )
+    tally = find_shadowing_bytecode( [ tmp_path ] )
 
-    assert examined >= 1
-    assert src in shadowed, (
+    assert tally.examined >= 1
+    assert src in tally.shadowed, (
         "the detector did NOT see a shadowing .pyc that was deliberately manufactured. Its "
         "comparison is broken, which means its zero-findings result on the real tree is "
         "meaningless — a broken comparison and a clean tree look identical from the outside."
@@ -123,10 +124,10 @@ def test_a_source_with_matching_bytecode_is_not_reported( tmp_path ):
                       f"import sys; sys.path.insert( 0, {str( tmp_path )!r} ); import honest" ],
                     capture_output=True, timeout=60 )
 
-    shadowed, examined, _protected = find_shadowing_bytecode( [ tmp_path ] )
+    tally = find_shadowing_bytecode( [ tmp_path ] )
 
-    assert examined >= 1
-    assert shadowed == []
+    assert tally.examined >= 1
+    assert tally.shadowed == []
 
 
 def test_the_scan_examined_a_meaningful_number_of_files():
@@ -160,6 +161,10 @@ def test_no_source_in_the_tree_is_shadowed_by_stale_bytecode():
     tally = find_shadowing_bytecode( SCAN_ROOTS )
 
     assert not tally.shadowed, describe_shadowing( tally.shadowed )
+    # (3) the mode question — a tree that is one edit from permanent shadowing is not clean,
+    # even when nothing is shadowed today.
+    safe, why_safe = invalidation_mode_is_safe( tally )
+    assert safe, why_safe
     # belt: a scan that looked at nothing must not read as a pass — but a MIGRATED tree looked at
     # nothing for the right reason, so this asks scan_is_meaningful rather than examined alone.
     ok, why = scan_is_meaningful( tally, MIN_ASSESSABLE )
@@ -297,11 +302,17 @@ def test_timestamp_sources_are_assessed_not_counted_as_protected( tmp_path ):
     assert tally.hash_protected == 0
 
 
-def test_the_tally_still_unpacks_for_callers_that_want_three_values( tmp_path ):
+def test_the_tally_is_addressed_by_FIELD_not_by_position( tmp_path ):
+    """
+    An earlier version of this test asserted three-value unpacking, and adding the
+    `unchecked` field broke it within the hour. Positional unpacking is a promise that
+    expires the next time the tally learns something; the field names are the contract.
+    """
     ( tmp_path / "x.py" ).write_text( "V = 1\n", encoding="utf-8" )
-    shadowed, examined, protected = find_shadowing_bytecode( [ tmp_path ] )
+    tally = find_shadowing_bytecode( [ tmp_path ] )
 
-    assert shadowed == [] and examined == 0 and protected == 0
+    assert tally.shadowed == [] and tally.examined == 0
+    assert tally.hash_protected == 0 and tally.unchecked == 0
 
 
 def test_the_remedy_names_the_raw_purge_as_a_way_to_revert_the_tree():
@@ -337,3 +348,126 @@ def test_every_scan_root_exists_so_a_typo_cannot_silently_shrink_the_scan():
     renamed package is a named failure rather than a quietly smaller denominator."""
     for root in SCAN_ROOTS:
         assert root.is_dir(), f"scan root does not exist: {root}"
+
+
+# ── The THIRD invalidation mode (Tiberius 👑, reviewing 18593313) ─────────────
+# CPython has three, not two: bit 0 is hash-based, bit 1 is check_source.
+#   TIMESTAMP flags=0 · CHECKED_HASH flags=3 · UNCHECKED_HASH flags=1
+# Testing `flags & 1` alone reads UNCHECKED-hash as protected — exactly backwards, because
+# CPython never revalidates it. Measured: a module compiled UNCHECKED_HASH kept serving the OLD
+# value after its source was rewritten; the same edit under CHECKED_HASH served the new one.
+
+def _compile_as( tmp_path, name, mode, text="VALUE = 1\n" ):
+    import py_compile
+    src = tmp_path / f"{name}.py"
+    src.write_text( text, encoding="utf-8" )
+    py_compile.compile( str( src ), doraise=True,
+                        invalidation_mode=getattr( py_compile.PycInvalidationMode, mode ) )
+    return src
+
+
+def test_the_three_modes_are_told_apart( tmp_path ):
+    from tests.helpers.pyc_freshness import (
+        pyc_invalidation_mode, MODE_TIMESTAMP, MODE_CHECKED_HASH, MODE_UNCHECKED_HASH )
+
+    assert pyc_invalidation_mode( _compile_as( tmp_path, "a", "TIMESTAMP"      ) ) == MODE_TIMESTAMP
+    assert pyc_invalidation_mode( _compile_as( tmp_path, "b", "CHECKED_HASH"   ) ) == MODE_CHECKED_HASH
+    assert pyc_invalidation_mode( _compile_as( tmp_path, "c", "UNCHECKED_HASH" ) ) == MODE_UNCHECKED_HASH
+    assert pyc_invalidation_mode( tmp_path / "never_compiled.py" ) is None
+
+
+def test_an_unchecked_hash_pyc_is_NOT_counted_as_protected( tmp_path ):
+    """The defect itself. `flags & 1` is true for BOTH hash modes; only checked-hash is safe."""
+    _compile_as( tmp_path, "unchecked", "UNCHECKED_HASH" )
+
+    tally = find_shadowing_bytecode( [ tmp_path ] )
+
+    assert tally.hash_protected == 0, "an unchecked-hash pyc was counted as protected"
+    assert tally.unchecked == 1
+
+
+def test_one_unchecked_hash_pyc_makes_the_mode_unsafe_at_any_count():
+    """
+    THE THIRD QUESTION, and it belongs to its own predicate (Tiberius). No floor rescues it: a
+    tree with 2,158 genuinely-protected sources AND one unchecked-hash pyc is still unsafe,
+    because that one file can never self-correct.
+    """
+    from tests.helpers.pyc_freshness import ScanTally
+
+    ok, why = invalidation_mode_is_safe( ScanTally( [], 0, 2158, 1 ) )
+
+    assert not ok
+    assert "UNCHECKED" in why and "never revalidates" in why
+
+
+def test_a_fully_migrated_tree_reports_a_safe_mode():
+    from tests.helpers.pyc_freshness import ScanTally
+
+    ok, why = invalidation_mode_is_safe( ScanTally( [], 0, 2158, 0 ) )
+
+    assert ok and "no unchecked-hash" in why
+
+
+def test_the_three_questions_are_answered_by_three_DIFFERENT_predicates():
+    """
+    The separation itself. An unchecked-hash pyc that currently MATCHES its source is:
+      - not shadowing anything today          -> find_shadowing_bytecode says nothing
+      - no obstacle to a meaningful scan      -> scan_is_meaningful can still pass
+      - a tree one edit from permanent damage -> invalidation_mode_is_safe REFUSES
+    Collapsing any two of these makes one of the three answers a lie.
+    """
+    from tests.helpers.pyc_freshness import ScanTally
+    tally = ScanTally( [], 0, 2158, 1 )        # protected floor met, one unchecked pyc, none stale
+
+    assert tally.shadowed == []                                        # (1) nothing shadowed YET
+    assert scan_is_meaningful( tally, MIN_ASSESSABLE )[ 0 ] is True     # (2) verdict IS evidence
+    assert invalidation_mode_is_safe( tally )[ 0 ] is False             # (3) mode is NOT safe
+
+
+def test_an_unchecked_hash_pyc_that_differs_is_reported_as_shadowing( tmp_path ):
+    """
+    CPython will never invalidate it, so a stale unchecked-hash pyc shadows PERMANENTLY — worse
+    than the timestamp case the detector was built for, which at least clears on a size change.
+    """
+    src = _compile_as( tmp_path, "drifted", "UNCHECKED_HASH", "VALUE = 1\n" )
+    src.write_text( "VALUE = 22222\n", encoding="utf-8" )      # size differs; nothing revalidates
+
+    tally = find_shadowing_bytecode( [ tmp_path ] )
+
+    assert src in tally.shadowed
+
+
+def test_a_checked_hash_pyc_that_differs_is_NOT_shadowing( tmp_path ):
+    """The other arm: CPython hashes the source, so a drifted checked-hash pyc is caught by it."""
+    src = _compile_as( tmp_path, "safe", "CHECKED_HASH", "VALUE = 1\n" )
+    src.write_text( "VALUE = 22222\n", encoding="utf-8" )
+
+    tally = find_shadowing_bytecode( [ tmp_path ] )
+
+    assert tally.shadowed == []
+    assert tally.hash_protected == 1
+
+
+def test_a_hash_based_pycs_bytes_8_to_16_are_the_source_hash_not_mtime_and_size():
+    """
+    WHY THE mtime GATE IS SKIPPED, and it is stronger than "the gate does not apply" (Tiberius,
+    reviewing the three-mode fix). In a hash-based pyc those bytes ARE the 8-byte source hash.
+    Running the timestamp gate on them would compare the source's real mtime against a slice of
+    a hash — a verdict on noise, not a conservative extra check.
+    """
+    import importlib.util, py_compile, struct, tempfile
+    from pathlib import Path
+
+    tmp = Path( tempfile.mkdtemp() )
+    src = tmp / "hashed.py"
+    src.write_text( "VALUE = 1\n", encoding="utf-8" )
+    py_compile.compile( str( src ), doraise=True,
+                        invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH )
+
+    raw = Path( importlib.util.cache_from_source( str( src ) ) ).read_bytes()
+
+    assert raw[ 8:16 ] == importlib.util.source_hash( src.read_bytes() )
+    # and read as (mtime, size) the same bytes are nonsense — not merely a different number
+    fake_mtime, fake_size = struct.unpack( "<II", raw[ 8:16 ] )
+    assert fake_mtime != int( src.stat().st_mtime )
+    assert fake_size  != src.stat().st_size

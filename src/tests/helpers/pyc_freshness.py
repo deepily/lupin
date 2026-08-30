@@ -245,12 +245,27 @@ def _shadow_verdict( source_path ):
     if len( raw ) < 16: return None
 
     flags = struct.unpack( "<I", raw[ 4:8 ] )[ 0 ]
-    if flags & 1: return None                            # hash-based; CPython checks it itself
+    # ONLY checked-hash is self-validating. The old test here was `flags & 1`, with the comment
+    # "hash-based; CPython checks it itself" — true of checked-hash, FALSE of unchecked-hash,
+    # which CPython never revalidates at all (Tiberius, reviewing 18593313).
+    if flags & 0b11 == 0b11: return None                 # checked-hash; CPython hashes the source
 
-    recorded_mtime, recorded_size = struct.unpack( "<II", raw[ 8:16 ] )
-    stat = source_path.stat()
-    if recorded_mtime != int( stat.st_mtime ) or recorded_size != stat.st_size:
-        return False                                     # CPython will invalidate it normally
+    if flags & 0b01:
+        # UNCHECKED-HASH. Skipping the gate below is not merely "it does not apply" — THOSE BYTES
+        # ARE NOT AN mtime AND A SIZE AT ALL (Tiberius, reviewing this change). In a hash-based
+        # pyc, bytes 8:16 hold the 8-byte SOURCE HASH. Measured: for a checked-hash pyc they equal
+        # importlib.util.source_hash( source_bytes ) exactly, while unpacking them as "<II" yields
+        # (3415366734, 3019497518) — a mtime in the year 2078 and an eleven-megabyte "size" for a
+        # ten-byte file. So running the gate here would not be a conservative extra check, it
+        # would compare the source's real mtime against a slice of a hash and return a verdict on
+        # noise. Nothing will ever invalidate this pyc, so if the stored code differs from the
+        # source it is shadowing PERMANENTLY — compare the code objects directly.
+        pass
+    else:
+        recorded_mtime, recorded_size = struct.unpack( "<II", raw[ 8:16 ] )
+        stat = source_path.stat()
+        if recorded_mtime != int( stat.st_mtime ) or recorded_size != stat.st_size:
+            return False                                 # CPython will invalidate it normally
 
     try:
         stored = marshal.loads( raw[ 16: ] )
@@ -261,25 +276,57 @@ def _shadow_verdict( source_path ):
     return stored != fresh
 
 
-def _has_hash_based_cache( source_path ):
+# CPython has THREE pyc invalidation modes, not two, and the distinction is the whole safety
+# question (found by Tiberius 👑 reviewing 18593313; classification matches
+# src/scripts/migrate-pyc-to-checked-hash.sh:130, which had it right first).
+#
+#   flags bit 0 = hash-based   ·   flags bit 1 = check_source
+#
+#   TIMESTAMP        flags=0   validated on the source's whole-second mtime + size
+#   CHECKED_HASH     flags=3   validated by HASHING the source on every import — safe
+#   UNCHECKED_HASH   flags=1   NEVER VALIDATED. CPython trusts it blindly, forever.
+#
+# ⚠️ UNCHECKED-HASH IS THE WORST OF THE THREE, not a variant of the safe one. Timestamp at least
+# invalidates when size or mtime moves; unchecked-hash invalidates on NOTHING. Measured:
+# compile a module UNCHECKED_HASH, then rewrite the source to a different value entirely —
+# the import still serves the OLD value. The same edit under CHECKED_HASH serves the new one.
+# Testing `flags & 1` alone reads unchecked-hash as protected, which is exactly backwards.
+MODE_TIMESTAMP      = "timestamp"
+MODE_CHECKED_HASH   = "checked-hash"
+MODE_UNCHECKED_HASH = "unchecked-hash"
+
+
+def pyc_invalidation_mode( source_path ):
     """
+    The invalidation mode of `source_path`'s cached pyc, or None when there is no readable cache.
+
     Ensures:
-        - True iff `source_path` has a cached pyc whose flags mark it CHECKED-HASH
-        - False when there is no cache, it is too short to carry a header, or it is timestamp-based
+        - returns one of MODE_TIMESTAMP / MODE_CHECKED_HASH / MODE_UNCHECKED_HASH, or None
         - never raises
     """
     cache = Path( importlib.util.cache_from_source( str( source_path ) ) )
-    if not cache.exists(): return False
+    if not cache.exists(): return None
     raw = cache.read_bytes()
-    if len( raw ) < 16: return False
-    return bool( struct.unpack( "<I", raw[ 4:8 ] )[ 0 ] & 1 )
+    if len( raw ) < 16: return None
+    flags = struct.unpack( "<I", raw[ 4:8 ] )[ 0 ]
+    if flags & 0b11 == 0b11: return MODE_CHECKED_HASH
+    if flags & 0b01:         return MODE_UNCHECKED_HASH
+    return MODE_TIMESTAMP
 
 
 class ScanTally( NamedTuple ):
-    """What one shadowing scan saw. A tuple, so existing 3-value unpacking keeps working."""
+    """
+    What one shadowing scan saw.
+
+    ⚠️ ADDRESS THESE BY FIELD, NOT BY POSITION. This docstring used to promise that "3-value
+    unpacking keeps working", and `unchecked` broke that promise within the hour of it being
+    written. Arity is a guarantee that expires the next time the tally learns something; the
+    field names are the contract.
+    """
     shadowed       : list
     examined       : int
     hash_protected : int
+    unchecked      : int = 0
 
 
 def find_shadowing_bytecode( roots ):
@@ -315,19 +362,65 @@ def find_shadowing_bytecode( roots ):
     for root in roots:
         assert root.is_dir(), f"find_shadowing_bytecode: root does not exist: {root}"
 
-    shadowed, examined, hash_protected = [], 0, 0
+    shadowed, examined, hash_protected, unchecked = [], 0, 0, 0
     for root in roots:
         for source in sorted( root.rglob( "*.py" ) ):
             if ".venv" in source.parts: continue
-            if _has_hash_based_cache( source ):
+            mode = pyc_invalidation_mode( source )
+            if mode == MODE_CHECKED_HASH:
                 hash_protected += 1
                 continue
+            if mode == MODE_UNCHECKED_HASH:
+                # NOT protected — CPython will never revalidate this. Counted separately AND
+                # assessed below, because a differing unchecked-hash pyc shadows forever.
+                unchecked += 1
             verdict = _shadow_verdict( source )
             if verdict is None: continue
             examined += 1
             if verdict: shadowed.append( source )
 
-    return ScanTally( shadowed, examined, hash_protected )
+    return ScanTally( shadowed, examined, hash_protected, unchecked )
+
+
+def invalidation_mode_is_safe( tally ):
+    """
+    ( ok, reason ) — is the tree's bytecode invalidation MODE safe to rely on?
+
+    THE THIRD QUESTION (Tiberius 👑, reviewing the three-mode fix). This module answers three
+    genuinely different things, and for a while two functions carried all three:
+
+        1. is anything shadowed RIGHT NOW?      -> find_shadowing_bytecode
+        2. is a clean verdict EVIDENCE?         -> scan_is_meaningful
+        3. is the tree's invalidation mode SAFE? -> this
+
+    The unchecked-hash refusal lived in (2) and did not belong there. It is not a floor question
+    — no number of assessed or protected files makes an unvalidatable one safe — and it is not a
+    shadowing question either, because an unchecked-hash pyc that currently MATCHES its source is
+    not shadowing anything today. The claim it actually makes is narrower and worth its own name:
+    THIS TREE IS ONE EDIT AWAY FROM PERMANENT SHADOWING THAT NOTHING WILL EVER INVALIDATE.
+
+    Requires:
+        - tally is a ScanTally
+
+    Ensures:
+        - ( False, reason ) when ANY unchecked-hash pyc is present, at any count, with no floor
+          and no threshold — one is enough, because the file it caches can never self-correct
+        - ( True, reason ) otherwise, the reason naming the population it cleared
+        - never raises
+    """
+    if tally.unchecked:
+        return False, (
+            f"{tally.unchecked} UNCHECKED-hash pyc(s) present. CPython never revalidates these — "
+            f"not on mtime, not on size, not on content, ever — so this is the WORST of the three "
+            f"modes, not a variant of the safe one. Timestamp at least invalidates when size or "
+            f"mtime moves; unchecked-hash invalidates on NOTHING, so the next edit to any of these "
+            f"sources shadows permanently and no test, purge, or rebuild will surface it.\n"
+            f"Nothing is necessarily shadowed YET — that is a separate question this does not "
+            f"answer — but the tree is one edit away from a defect that cannot self-correct.\n"
+            f"REMEDY — run src/scripts/migrate-pyc-to-checked-hash.sh to convert them." )
+    return True, ( f"no unchecked-hash pycs: every cached pyc is either timestamp-validated "
+                   f"({tally.examined} assessable) or hash-validated ({tally.hash_protected} "
+                   f"protected), so every one of them can still self-correct." )
 
 
 def scan_is_meaningful( tally, min_assessable ):
@@ -352,7 +445,8 @@ def scan_is_meaningful( tally, min_assessable ):
         - never raises
     """
     counts = ( f"{tally.examined} assessable (timestamp-based pyc), "
-               f"{tally.hash_protected} protected (checked-hash pyc)" )
+               f"{tally.hash_protected} protected (checked-hash pyc), "
+               f"{tally.unchecked} UNCHECKED-hash" )
     if tally.examined >= min_assessable:
         return True, f"scan assessed {counts} — the clean verdict is evidence."
     if tally.hash_protected >= min_assessable:
