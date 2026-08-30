@@ -211,6 +211,58 @@ def _scan_once( ref, root ):
     return _SCAN_MEMO[ key ]
 
 
+def _rotation_hold_is_active( root ):
+    """
+    Is the postgres-rotation hold in force right now?
+
+    Requires:
+        - root is the repo root
+
+    Ensures:
+        - True iff this tree's scanner hashes to ROTATION_HELD_SHA — the exact detector
+          state ROTATION_HELD_NOTICE refuses a record update for
+        - reads the scanner, so it cannot drift from what the fingerprint test measures
+    """
+    import hashlib
+    return hashlib.sha256(
+        open( root + "/src/scripts/secret_scan.py", "rb" ).read()
+    ).hexdigest() == ROTATION_HELD_SHA
+
+
+def _clear_the_red_steps( recorded, root ):
+    """
+    The recipe for clearing a red — or, while the rotation hold stands, the reason it is
+    not being printed.
+
+    🔴 THE RECIPE IS CORRECT AND IT IS REFUSED RIGHT NOW, AND THAT IS ONLY A CONTRADICTION
+    ONCE BOTH ARE PRINTED TOGETHER. `_how_to_clear_the_red` ends "update detector_sha256,
+    scanned_ref_sha, scan_fingerprint, the counts and real_findings" — precisely what
+    ROTATION_HELD_NOTICE, seven lines below it in the same failure message, refuses. Found
+    by Rachel 🕊️ 2026-08-30, one level inside the defect it extends: making both reds carry
+    the notice stopped the two TESTS disagreeing and left each red arguing with ITSELF.
+
+    SUPPRESSED, NOT DELETED, and the distinction is the whole design. The recipe is right
+    and becomes right again the moment the credential is rotated; deleting it would lose
+    knowledge to fix a sequencing problem. Ordering costs nothing.
+
+    Requires:
+        - recorded is the loaded record dict, root is the repo root
+
+    Ensures:
+        - hold ACTIVE  -> a short block saying the recipe is withheld and where to read it
+        - hold CLEAR   -> the recorded steps, indented, exactly as before
+    """
+    if _rotation_hold_is_active( root ):
+        return (
+            "    (THE RECIPE FOR CLEARING THIS RED IS WITHHELD while the rotation hold below\n"
+            "     is active — it ends by telling you to update the record, which is the one\n"
+            "     thing that hold refuses. It is not wrong and it is not gone: read it in the\n"
+            "     record's `_how_to_clear_the_red`, and it prints here again once rotation\n"
+            "     lands.)"
+        )
+    return chr( 10 ).join( "    " + s for s in recorded[ "_how_to_clear_the_red" ] )
+
+
 def _require_ref( ref, root ):
     """
     Skip loudly when the ref cannot be read, rather than failing for the wrong reason.
@@ -399,7 +451,7 @@ def test_a_detector_change_forces_a_full_rescan():
     ref_now      = subprocess.run( [ "git", "rev-parse", recorded[ "scanned_ref" ] ], cwd=root,
                                    capture_output=True, text=True ).stdout.strip()
 
-    steps = chr( 10 ).join( "    " + s for s in recorded[ "_how_to_clear_the_red" ] )
+    steps = _clear_the_red_steps( recorded, root )
     what  = ( "THE DETECTOR CHANGED" if detector_now != recorded[ "detector_sha256" ]
               else "THE PUBLISHED TIP MOVED" if ref_now != recorded[ "scanned_ref_sha" ]
               else "THE RECORDED SCAN DOES NOT MATCH WHAT THIS SCANNER MEASURES" )
@@ -559,7 +611,7 @@ def test_the_branch_we_commit_to_carries_no_untriaged_finding():
     measured = _masked_rows( secret_scan.scan_ref( recorded[ "branch_ref" ], cwd=root ) )
     untriaged = sorted( measured - accepted )
 
-    steps = chr( 10 ).join( "    " + s for s in recorded[ "_how_to_clear_the_red" ] )
+    steps = _clear_the_red_steps( recorded, root )
     assert not untriaged, (
         f"{len( untriaged )} finding(s) on {recorded[ 'branch_ref' ]} have never been triaged. "
         "Values are masked — key, path and a truncated digest, never the secret:\n"
