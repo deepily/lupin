@@ -33,6 +33,34 @@ src/scripts/conf wins. It is LATENT today only because nothing in the tree impor
 a module — verified by grep for `import conf` and `from conf import` across src/, which finds
 nothing. It is DECLARED below rather than hidden behind an exclusion, and a second test
 asserts the reason it is harmless is still true.
+
+🔴 THE POPULATION IS WHAT GIT TRACKS, NOT WHAT IS ON DISK — corrected 2026-08-30 (row
+c89cec9b, Mr Radio's measurement). The first version of this file built both repo-side pools
+with `os.listdir`, so machine-local leftovers entered the comparison indistinguishably from
+repo content. It was green in its author's worktree and RED at HEAD in the main tree, on
+`lib`: `src/lib` was DELETED by Rick on 2026-08-26, `git ls-files src/lib` is empty, and what
+remained here was a `clients/` directory holding nothing but `.pyc` files. A clean checkout of
+this branch has no `src/lib` and no second collision, so the guard was accusing the branch of
+a defect the branch does not have.
+
+The deciding question is which population an import would meet on a CLEAN CHECKOUT of this
+branch, and `git ls-files` answers exactly that:
+
+  · it is the branch's own content, so the verdict no longer depends on what junk a
+    particular checkout happened to keep;
+  · it reads the INDEX, so a STAGED addition is already in the pool — the guard reddens when
+    a collision is PROPOSED, not a commit later;
+  · `git check-ignore src/lib` returns FALSE. `src/lib` is not ignore-matched at all; it only
+    reports as `!!` because every file beneath it is. So "disk minus ignored paths" would NOT
+    have caught this one, and would still admit any untracked-but-unignored directory. That
+    is measurement, not preference — it is why this is tracked-only rather than filtered-disk.
+
+What that deliberately gives up: on THIS machine a bare `import lib` really would find
+`src/lib`. The guard no longer describes that, and should not — a leftover in one working
+copy is not a property of the branch, and the remedy for it is `git clean`, not a permanent
+entry in DECLARED_DIRECTORY_COLLISIONS. Declaring it would launder a local artifact into the
+tree's record, which is the very rot `test_no_declared_collision_has_gone_stale` exists to
+prevent.
 """
 
 import os
@@ -43,8 +71,9 @@ import cosa.utils.util as cu
 import pytest
 
 
-SCRIPTS_DIR = os.path.join( cu.get_project_root(), "src", "scripts" )
-SRC_DIR     = os.path.join( cu.get_project_root(), "src" )
+PROJECT_ROOT = cu.get_project_root()
+SCRIPTS_DIR  = os.path.join( PROJECT_ROOT, "src", "scripts" )
+SRC_DIR      = os.path.join( PROJECT_ROOT, "src" )
 
 # name -> the measured reason it is currently harmless. A declaration, never a silencer:
 # the entry states what was checked, and `test_no_declared_collision_has_gone_stale` fails
@@ -59,8 +88,54 @@ DECLARED_DIRECTORY_COLLISIONS = {
 }
 
 
+# git env that would silently redirect a subprocess at a DIFFERENT repo or index. Scrubbed
+# whenever we drive a throwaway repo, so the hermetic control below measures the repo it just
+# built rather than whatever the ambient shell was pointing at.
+_GIT_REDIRECTS = ( "GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_COMMON_DIR" )
+
+
+def _env_without_git_redirects():
+    return { k: v for k, v in os.environ.items() if k not in _GIT_REDIRECTS }
+
+
+def _tracked_children( repo_rel_dir, cwd=None, env=None ):
+    """
+    The immediate children of `repo_rel_dir` that GIT TRACKS, as ( files, directories ).
+
+    This — not `os.listdir` — is the population, because it is what a clean checkout of the
+    branch materialises. See the 🔴 block in this module's docstring for the measurement that
+    forced the change. `git ls-files` reads the index, so a staged addition counts.
+
+    Raises loudly if git fails: a pool that silently came back empty would make the guard pass
+    by blindness, which is the defect family this whole file exists to catch.
+    """
+    completed = subprocess.run(
+        [ "git", "ls-files", "-z", "--", repo_rel_dir ],
+        cwd=cwd or PROJECT_ROOT, env=env, capture_output=True, text=True, check=True
+    )
+    prefix     = repo_rel_dir.rstrip( "/" ) + "/"
+    files      = set()
+    directories = set()
+    for path in completed.stdout.split( "\0" ):
+        if not path.startswith( prefix ):
+            continue
+        head, separator, _rest = path[ len( prefix ) : ].partition( "/" )
+        ( directories if separator else files ).add( head )
+    return files, directories
+
+
+def _importable_names_of( files, directories ):
+    """Every name a bare `import` resolves to, given a directory's files and subdirectories."""
+    return { f[ : -3 ] for f in files if f.endswith( ".py" ) } | set( directories )
+
+
 def _top_level_names( directory ):
-    """Every name a bare `import` could resolve to if `directory` were on sys.path."""
+    """
+    Every name a bare `import` could resolve to if `directory` were on sys.path.
+
+    Still an on-disk read, and correctly so — its only caller is site-packages, which git
+    does not track and which genuinely IS the environment an import would meet.
+    """
     names = set()
     if not os.path.isdir( directory ):
         return names
@@ -75,17 +150,21 @@ def _top_level_names( directory ):
     return names
 
 
+def _src_top_level_names():
+    """The `src/` names a bare import could hit — tracked content only."""
+    return _importable_names_of( *_tracked_children( "src" ) )
+
+
 def _script_modules():
-    """The .py files directly in src/scripts — the ones a bare import reaches."""
-    return { e[ : -3 ] for e in os.listdir( SCRIPTS_DIR ) if e.endswith( ".py" ) }
+    """The tracked .py files directly in src/scripts — the ones a bare import reaches."""
+    files, _directories = _tracked_children( "src/scripts" )
+    return { f[ : -3 ] for f in files if f.endswith( ".py" ) }
 
 
 def _script_directories():
-    """Subdirectories of src/scripts. Importable as namespace packages, __init__.py or not."""
-    return {
-        e for e in os.listdir( SCRIPTS_DIR )
-        if os.path.isdir( os.path.join( SCRIPTS_DIR, e ) ) and e != "__pycache__"
-    }
+    """Tracked subdirectories of src/scripts. Importable as namespace packages, __init__.py or not."""
+    _files, directories = _tracked_children( "src/scripts" )
+    return directories
 
 
 def _site_packages():
@@ -98,7 +177,7 @@ def _site_packages():
 def _importable_pools():
     """The three places a bare import could otherwise have landed."""
     return {
-        "src/ top-level"  : _top_level_names( SRC_DIR ),
+        "src/ top-level"  : _src_top_level_names(),
         "the stdlib"      : set( sys.stdlib_module_names ),
         "site-packages"   : _site_packages(),
     }
@@ -198,3 +277,52 @@ def test_the_pools_are_populated_so_an_empty_result_means_something():
         assert len( pool ) > 0, f"pool '{label}' is empty — the guard would pass by blindness"
     assert len( _script_modules() ) > 0
     assert len( _script_directories() ) > 0
+
+
+def test_the_population_is_what_git_tracks_not_what_is_on_disk( tmp_path ):
+    """
+    The control for the defect that made this guard red at HEAD and green in its author's
+    worktree: an untracked directory must NOT enter the pool, and the same directory MUST
+    enter it the moment it is tracked.
+
+    Run against a throwaway repo rather than the real tree — mutating `src/` mid-run would
+    hand a concurrently-running peer a collision that is not in anybody's branch, which is
+    this row's own failure shape pointed at someone else.
+    """
+    env = _env_without_git_redirects()
+    subprocess.run( [ "git", "init", "-q" ], cwd=tmp_path, env=env, check=True )
+    ( tmp_path / "src" ).mkdir()
+    ( tmp_path / "src" / "untracked_dir" ).mkdir()
+    ( tmp_path / "src" / "untracked_dir" / "leftover.py" ).write_text( "" )
+    ( tmp_path / "src" / "tracked_dir" ).mkdir()
+    ( tmp_path / "src" / "tracked_dir" / "real.py" ).write_text( "" )
+    ( tmp_path / "src" / "tracked_module.py" ).write_text( "" )
+
+    subprocess.run( [ "git", "add", "src/tracked_dir", "src/tracked_module.py" ],
+                    cwd=tmp_path, env=env, check=True )
+
+    files, directories = _tracked_children( "src", cwd=tmp_path, env=env )
+    assert directories == { "tracked_dir" },   f"untracked content leaked into the pool: {directories}"
+    assert files       == { "tracked_module.py" }
+    assert _importable_names_of( files, directories ) == { "tracked_dir", "tracked_module" }
+
+    # ...and the pair that proves the pool is not simply blind: track it, and it appears.
+    subprocess.run( [ "git", "add", "src/untracked_dir" ], cwd=tmp_path, env=env, check=True )
+    _files, directories = _tracked_children( "src", cwd=tmp_path, env=env )
+    assert directories == { "tracked_dir", "untracked_dir" }
+
+
+def test_a_deleted_directory_still_littering_the_checkout_is_not_a_collision():
+    """
+    The specific regression, named. `src/lib` was deleted 2026-08-26 and `git ls-files
+    src/lib` is empty, yet a `clients/` directory of stale `.pyc` files survived in this
+    checkout and made `src/scripts/lib` read as an undeclared collision. Whatever is left on
+    THIS disk, `lib` must not be in the tracked `src/` pool while git tracks nothing there.
+    """
+    tracked_under_lib = subprocess.run(
+        [ "git", "ls-files", "--", "src/lib" ],
+        cwd=PROJECT_ROOT, capture_output=True, text=True, check=True
+    ).stdout
+    if tracked_under_lib.strip():
+        pytest.skip( "src/lib is tracked again — this regression no longer describes the tree" )
+    assert "lib" not in _src_top_level_names()
