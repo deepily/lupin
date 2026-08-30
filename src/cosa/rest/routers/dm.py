@@ -2608,6 +2608,13 @@ def _dispatch_outbound( *, prep, body, authenticated_user_id, notification_queue
         # later, not read a send response. A flag that could only ever be False may
         # look pointless; it is the difference between a response that overclaims
         # and one that states its own limit, which is the whole defect.
+        #
+        # 🔴 NOTHING CONSUMES THIS YET, and nothing branches on `dispatched`
+        # either — both are claims made only to an AI caller, so this field is
+        # exactly as easy to ignore as the old one was to misread. It removes
+        # the EXCUSE, not the failure. A caller that wants delivery must still
+        # ask later; there is no verb for that yet either. Said plainly here
+        # rather than letting a reader conclude the contract is now honest.
         "delivery_confirmed"      : False,
     }
 

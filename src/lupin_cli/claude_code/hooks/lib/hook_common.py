@@ -602,6 +602,13 @@ VOICE_LINE_PREFIX = "[Voice]: "
 # hard-to-read delivery into a silent non-delivery, which is strictly worse and is
 # the defect one row over. Everything still gets through; the block now states its
 # own depth so a reader knows to scan rather than skim.
+#
+# 🔴 WHAT THIS DOES NOT DO, stated here so the tests below are not read as
+# proving more than they do (Mr Radio's challenge, 2026-08-30): 78 items still
+# arrive as one wall. THIS LABELS THE FLOOD, it does not end it. The reader is
+# told it is a wall before reading it, which is the whole of the improvement.
+# Ranking the run — verdicts first, or a separate high-priority block — would be
+# the real fix and is deliberately not attempted here.
 BACKLOG_HEADER_THRESHOLD = 5
 BACKLOG_HEADER_PREFIX    = "[Backlog]: "
 

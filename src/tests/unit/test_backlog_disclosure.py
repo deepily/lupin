@@ -103,12 +103,26 @@ def test_disclosure_is_not_a_cap_every_message_still_arrives():
     The load-bearing test. Turning a hard-to-read delivery into a silent
     non-delivery would be a worse defect than the one being fixed, so the count of
     delivered bodies must be untouched by the header.
+
+    🔴 THE FIRST VERSION OF THIS TEST COULD NOT SEE A DROPPED MESSAGE (found by
+    Tiberius 👑 reviewing it, 2026-08-30). It used bodies `unique-body-0` ..
+    `unique-body-24` and asserted each was `in out` — but `unique-body-2` is a
+    SUBSTRING of `unique-body-24`, so a formatter that dropped message 2 and kept
+    24 passed it clean. The fixture, not the assertions, was the defect: the test
+    was named for completeness and measured prefix collision.
+
+    Two things fix it, and both are needed. The bodies are zero-padded so no id is
+    a prefix of another, and the LINE COUNT is asserted — a substring check can
+    only ever show a body is present somewhere, never that all of them are.
     """
     n    = BACKLOG_HEADER_THRESHOLD + 20
-    msgs = [ _voice( f"unique-body-{i}" ) for i in range( n ) ]
+    msgs = [ _voice( f"body-{i:03d}-end" ) for i in range( n ) ]
     out  = format_voice_context( msgs )
+    lines = out.splitlines()
+    # header + one line per message, and nothing else
+    assert len( lines ) == n + 1
     for i in range( n ):
-        assert f"unique-body-{i}" in out
+        assert f"body-{i:03d}-end" in out
 
 
 def test_the_count_reflects_FORMATTED_messages_not_drained_ones():
