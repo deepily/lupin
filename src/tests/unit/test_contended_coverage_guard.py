@@ -403,15 +403,29 @@ def test_end_to_end_an_agent_seat_quoting_the_command_does_not_refuse_a_real_run
                  'LUPIN_ROOT="$PWD" .venv/bin/python -m pytest src/tests/unit/test_x.py -q' )
     seat = subprocess.Popen( [ "bash", "-c", f'exec -a {shlex.quote( briefing )} sleep 30' ] )
     try:
-        # 🔴 WAIT FOR THE ARGV TO EXIST BEFORE READING IT. Popen returns as soon as the child
-        # is forked; /proc/<pid>/cmdline is EMPTY until execve has installed the new argv, so
-        # reading it immediately races the `exec -a`. Measured 2026-08-30 (row c5e6d272):
-        # 3 failures in 12 solo runs, every one `looks_like_pytest('')` on a b'' read — the
-        # test blaming the guard for a process that had not yet become the thing under test.
+        # 🔴 WAIT FOR THE ARGV TO EXIST BEFORE READING IT — the two things that interleave are
+        # THIS READ and the CHILD'S EXECVE two lines up. Popen returns after the FORK, not
+        # after the child's exec, so until execve installs the new argv there is no argv
+        # region for that pid and /proc/<pid>/cmdline reads b''.
         #
-        # ⚠️ The empty read is the SAME SHAPE as this whole row's family: an empty answer is
-        # indistinguishable from a negative one, so "not invocation-shaped" and "not there
-        # yet" arrived as the same value. Waiting is not weakening — the assertion below is
+        # MEASURED 2026-08-30 (row c5e6d272), so nobody has to re-derive it:
+        #     as the test ran it        3 failures in 12 solo runs (~25%)
+        #     40 trials of this Popen   immediate read EMPTY in 2 of 40 (~5%)
+        #     the empty window          0.04 ms (min = max, n=2)
+        #     same pid at 200 ms        126 bytes, comm=sleep
+        # ⚠️ The two rates differ and WHY was not measured — under pytest the parent does more
+        # work between fork and read. The mechanism is settled; the rate is not.
+        #
+        # THE FAILURE VALUE IS WHAT DISCRIMINATES, and it is why this is a test race rather
+        # than the defect the test's own name describes: the assertion failed as
+        # `looks_like_pytest('')` — on an EMPTY string. A briefing wrongly shaped or wrongly
+        # counted would have returned the real 126-byte argv and failed on ACTUAL TEXT.
+        # False on '' is a read that happened before there was anything to read.
+        #
+        # ⚠️ SAME SHAPE AS THIS ROW'S WHOLE FAMILY: an empty answer is indistinguishable from
+        # a negative one, so "not invocation-shaped" and "not there yet" arrived as the same
+        # value. This POLLS rather than sleeping — a widened sleep would trade one race for a
+        # slower one and still be a guess. Waiting is not weakening: the assertion below is
         # unchanged and still fails loudly if the argv never becomes invocation-shaped.
         deadline = time.monotonic() + 10.0
         raw      = b""
