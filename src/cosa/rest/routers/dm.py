@@ -2545,7 +2545,12 @@ def _dispatch_outbound( *, prep, body, authenticated_user_id, notification_queue
     Ensures:
         - persists the DM (direction='ai_to_ai', stamped body inline) and pushes it
         - returns the 201 result dict (message_id, thread_id, recipient_session,
-          recipient_session_hash8, recipient_persona, dispatched)
+          recipient_session_hash8, recipient_persona, dispatched,
+          delivery_confirmed)
+        - `dispatched` is HAND-OFF, not receipt: persisted + queued to the
+          recipient's listener. `delivery_confirmed` is always False and says so
+          explicitly — the recipient may buffer the message and never drain it
+          (row 298af249)
 
     Raises:
         - propagates any persist_fn / push_notification error to the caller
@@ -2585,6 +2590,32 @@ def _dispatch_outbound( *, prep, body, authenticated_user_id, notification_queue
         "recipient_session_hash8" : job_id,
         "recipient_persona"       : target_persona,
         "dispatched"              : True,
+        # 🔴 `dispatched` MEANS HANDED OFF, NOT READ — and it was being read as
+        # "they got it" (row 298af249). It goes true the moment the row is
+        # persisted and the notification is queued for the recipient's listener.
+        # Everything after that is somebody else's timeline: the listener may
+        # BUFFER the message while the session is busy, and if that session ends
+        # before a hook drains the buffer, nobody ever reads it.
+        #
+        # MEASURED 2026-08-30: 45 orphaned buffer files were holding 67 such
+        # messages, oldest last written 2026-07-02. Every one of those senders was
+        # told `dispatched: true` and every one of those messages is still on disk,
+        # unread, for a session that is never coming back.
+        #
+        # So this key states the OTHER half explicitly rather than leaving it to be
+        # inferred from a word. It is always False here because at this instant the
+        # server genuinely does not know — and a caller that wants to know must ask
+        # later, not read a send response. A flag that could only ever be False may
+        # look pointless; it is the difference between a response that overclaims
+        # and one that states its own limit, which is the whole defect.
+        #
+        # 🔴 NOTHING CONSUMES THIS YET, and nothing branches on `dispatched`
+        # either — both are claims made only to an AI caller, so this field is
+        # exactly as easy to ignore as the old one was to misread. It removes
+        # the EXCUSE, not the failure. A caller that wants delivery must still
+        # ask later; there is no verb for that yet either. Said plainly here
+        # rather than letting a reader conclude the contract is now honest.
+        "delivery_confirmed"      : False,
     }
 
 
@@ -2795,7 +2826,11 @@ def execute_dm_send(
         - 201 persists + pushes the ai_to_ai notification (body EDT-prefixed in BOTH
           the persisted row and the pushed message) and returns
           {http_status, message_id, thread_id, recipient_session,
-           recipient_session_hash8, recipient_persona, dispatched}
+           recipient_session_hash8, recipient_persona, dispatched,
+           delivery_confirmed}
+        - `dispatched: True` means HANDED OFF (persisted + queued), never read.
+          `delivery_confirmed: False` states that limit rather than leaving a
+          caller to infer it from the word "dispatched" (row 298af249)
         - `recipient_session` is the FULL resolved session id (unchanged
           contract — reusable as `recipient_session_id` on a subsequent send);
           `recipient_session_hash8` is the 8-char form actually persisted and
