@@ -12,8 +12,9 @@ Measured on 2026-08-29, that is FALSE in two ways, and both were live:
      silently outside a path that reads as inclusive.
   2. coverage skips any filename carrying a dot (or one of #~!$@%^&*()+=,) before
      the extension — editor-junk protection. `probe-cc-bounded-billing-2026.05.12.py`
-     is invisible for that reason and CANNOT be brought into the frame without
-     renaming it.
+     was invisible for that reason and could not be brought into the frame without
+     renaming it; it was renamed to `probe_cc_bounded_billing.py` on 2026-08-30
+     (row 9078a035) and is now measured.
 
 Both were found by counting files, not by reading the config: the report listed
 61 files where the disk held 74. A percentage cannot tell you about code it never
@@ -41,10 +42,6 @@ _COVERAGE_FILENAME_RE = re.compile( r"^[^.#~!$@%^&*()+=,]+\.pyw?$" )
 # naming them here keeps the frame's claim equal to its measurement, and the test
 # fails if this list stops matching reality in either direction.
 KNOWN_UNSEEABLE = {
-    # Throwaway probe from 2026-05-12. Its own R&D write-up
-    # (src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md:73)
-    # describes it as "NOT committed, deleted after use" — it was neither.
-    "src/scripts/probe-cc-bounded-billing-2026.05.12.py",
     # Dated R&D prototype; src/cosa/rnd is the frame's only non-package directory.
     "src/cosa/rnd/2026.05.21-git-loc-delta-plot-prototype.py",
 }

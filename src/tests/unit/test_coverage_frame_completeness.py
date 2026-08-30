@@ -45,6 +45,9 @@ def _project_root():
     ( "has-dashes.py",                 True  ),   # dashes are FINE — measured, not assumed
     ( "module.pyw",                    True  ),
     ( "dotted.name.2026.05.12.py",     False ),   # a dot in the stem is the killer
+    # kept as a fixture after the real file was renamed 2026-08-30 (row 9078a035):
+    # this feeds a STRING to the filter and never touches disk, so it stays a valid
+    # regression case for the rule regardless of what is on disk.
     ( "probe-cc-bounded-billing-2026.05.12.py", False ),
     ( "2026.05.21-prototype.py",       False ),
     ( "junk~.py",                      False ),
