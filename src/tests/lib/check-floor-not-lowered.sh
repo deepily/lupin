@@ -18,7 +18,13 @@
 # DELIBERATELY NOT CHECKED HERE, and named so nobody reads more into a pass than it carries:
 #   · `source` / `omit` edits, which shrink the DENOMINATOR rather than the threshold.
 #     That is the frame check's territory and belongs in its own row.
-#   · a floor RAISED locally — stricter than HEAD, so it is announced, not refused.
+#   · a floor RAISED locally — ALLOWED, and the reason is one-directional rather than a
+#     matter of taste (Tiberius's ruling, 2026-08-30). This guard exists to stop the gate
+#     certifying against a threshold the branch never agreed to, and a RAISED floor cannot
+#     produce a false green: a run that passes at 99 would also have passed at 92, so the
+#     verdict transfers to HEAD's floor a fortiori. A LOWERED floor has no such transfer,
+#     which is why the two directions are treated differently. The message says so out
+#     loud, because somebody will screenshot that line without this comment beside it.
 #
 # Exit: 0 floor intact (or raised) · 1 floor LOWERED · 2 CANNOT TELL.
 # 1 and 2 are BOTH refusals — the codes differ only so the cause is diagnosable.
@@ -75,7 +81,8 @@ if "$PYBIN" -c "import sys; sys.exit( 0 if float( sys.argv[1] ) < float( sys.arg
 fi
 
 if [ "$tree_floor" != "$head_floor" ]; then
-    echo "[floor-guard] floor RAISED locally ($head_floor -> $tree_floor) — stricter than HEAD, allowed."
+    echo "[floor-guard] floor RAISED locally ($head_floor -> $tree_floor) — stricter than HEAD," \
+         "allowed: a pass here is also a pass at HEAD's $head_floor."
 else
     echo "[floor-guard] floor intact — fail_under = $tree_floor, same as HEAD."
 fi

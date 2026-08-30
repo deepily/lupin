@@ -16,6 +16,15 @@
 #   5. malformed toml,  gate  -> REFUSES                 (FAIL CLOSED, not a shrug)
 #   6. fail_under="abc", gate  -> REFUSES                 (parseable but not comparable)
 #   7. fail_under=true,  gate  -> REFUSES                 (bool is an int subclass)
+#   8. floor RAISED,     gate  -> proceeds, NOT refused    (a pass transfers to HEAD)
+#
+# ⚠️ 8 DEFENDS A DECISION, not a mechanism. Tiberius ruled 2026-08-30 that a raised floor
+# keeps passing, because a run passing at 99 would also have passed at 92 — the verdict
+# transfers to HEAD's floor a fortiori, so a raise cannot manufacture a false green. That
+# is a policy, and an undefended policy drifts into whatever the next edit makes it. The
+# assertion is that the gate does NOT print REFUSED — it still fails on the floor here,
+# because the measurement is genuinely low; what is asserted is that the GUARD let it
+# through to be judged on its merits.
 #
 # ⚠️ 6 AND 7 EXIST BECAUSE 5 WAS NOT ENOUGH, and I only found that by checking the
 # fail-closed claim instead of asserting it. `fail_under = "abc"` is VALID TOML, so the
@@ -103,6 +112,12 @@ echo "═══ 7. fail_under is a BOOL — an int subclass in Python — must R
 sed -i 's/^fail_under = .*/fail_under = true/' pyproject.toml
 OUT="$( COVERAGE_FILE="$DATA" LUPIN_COVERAGE=1 "$GATE" 2>&1 )"
 assert "gate refuses a boolean floor" "COVERAGE GATE REFUSED" "$( verdict "$OUT" )"
+git checkout -- pyproject.toml
+
+echo "═══ 8. floor RAISED locally — the guard must NOT refuse (a pass transfers to HEAD) ═══"
+sed -i 's/^fail_under = .*/fail_under = 99/' pyproject.toml
+OUT="$( COVERAGE_FILE="$DATA" LUPIN_COVERAGE=1 "$GATE" 2>&1 )"
+assert "gate lets a stricter-than-HEAD floor through to be judged" "COVERAGE GATE FAILED" "$( verdict "$OUT" )"
 git checkout -- pyproject.toml
 
 echo ""
