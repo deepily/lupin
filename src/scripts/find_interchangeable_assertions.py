@@ -67,11 +67,21 @@ his own result for the same reason he had just corrected in mine: he had run aga
 REPAIRED tree (his tip 72157c17 has Chloé's adoption e23ef98c as an ancestor), so all five were
 already fixed and a zero proved nothing. He re-ran against the true pre-repair snapshot taken
 from Chloé's worktree at 17:32:51, **verifying each sample actually CONTAINS the blindness
-before counting a miss** — the (30, 10, 20) line numbers, the THIRD_PARTY path under /usr/lib
-with no /src/ in it, the truncate-only _FakeStore. **Probe reports ZERO hits.**
+before counting a miss**. **Probe reports ZERO hits on all five**, in
+`test_thread_attribution_plugin.py` and `test_probe_commons_post_direct.py`:
+
+    1. line numbers (30, 10, 20) recorded in an order that is already what a sort would give
+    2. a THIRD_PARTY path under /usr/lib with no /src/ in it, rejected by the first clause
+    3. one file per thread, so sort_keys=True and sort_keys=False give identical output
+    4. OUT and PREFIX defaults executed at import and never asserted
+    5. a truncate-only _FakeStore
+
+**None of them repeats a literal**, which is why this probe cannot see any of them. Note what
+shapes 1 and 3 have in common with Maya's cases: the fixture chose data for which the operation
+under test — sorting — is a NO-OP, so the assertion passes whether or not the sort happens.
 
 So the citable statement is **0 of 5 found, on a named sample**: Chloé's pre-`e23ef98c` worktree
-snapshot, 17:32:51 on 2026-08-30, measured by Clayton. Ask him for the two not named here.
+snapshot, 17:32:51 on 2026-08-30, measured by Clayton.
 
 ⚠️ **THAT SEQUENCE IS THE METHOD, not a footnote about one reviewer.** A recall check run against
 a tree where the blindness has been repaired reports zero and means nothing, and it looks
