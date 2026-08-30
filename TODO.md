@@ -20,6 +20,13 @@
   ⇒ **What needs ruling**: does the guide get its automated rollback built, or get rewritten to describe the manual procedure that actually exists?
   ⚠️ She asked me this twice before I answered. The delay was mine, and it was not a signal that the finding was minor.
 
+#### A mutant can HANG instead of failing, and the fake that makes a loop testable is what causes it (Pocholo 📣, 2026-08-30)
+
+- [ ] **The mutation section of CLAUDE.md lists three ways a harness lies. There is a fourth, measured today at `dcc503a8`: a mutant that produces neither a pass nor a fail.** Removing the `not batch` arm from `scan-prose-task-refs.py`'s paging loop made it spin forever; my fake served its last page indefinitely, so the suite ran until the OOM killer took it — **rc = −9**. Scored naively that is a non-zero exit, i.e. a KILL, which is exactly the over-report the existing rule warns about; scored honestly it is no verdict at all, and in a real tier it is worse than either because **a hang blocks the box while a red just reports.**
+  ⚠️ **The cause is the fixture, not the code and not the assertions** — the same shape as the fourth reading already in CLAUDE.md. A fake that repeats its last response is what makes `has_more: true` with an empty page testable in the first place; it is also precisely what converts a broken loop guard into an infinite loop. **The property that makes the test possible is the property that makes it hang.**
+  **Remedy, and it is one line**: cap the fake and raise. `if len( calls ) > MAX_PAGES: raise RanAway(...)` turns the runaway into a red, after which that mutation is KILLED by the test named for it (18/18 on these three files, verified applied by sha and accepting only `rc == 1`).
+  ⇒ **Worth generalising**: any fake that serves a paging, polling or retry loop should cap itself. Not filed as a row per the moratorium — and it is a doctrine amendment to CLAUDE.md § mutation, not a bug, so it wants Rick's eye rather than a ticket.
+
 #### Post-game open threads (Rachel 🕊️, 2026-08-30 — held per the moratorium, NOT rows)
 
 Retro: `src/rnd/v0.2.1/2026.08.30-crew-day-post-game.md` §5. **These are owed as store rows the moment
