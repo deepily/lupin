@@ -191,9 +191,54 @@ class TestMigrateUsers:
             assert saved[ call[ "email" ] ][ "password" ] == call[ "password" ]
 
     def test_debug_true_announces_the_superuser( self, monkeypatch, tmp_path, capsys ):
+        """
+        ⚠️ ASSERTS THE ASSOCIATION, NOT THE WORD. This read `"SUPERUSER" in out` and
+        survived a mutation inverting the very check it is named for — flipping
+        `if "admin" in roles` to `not in` still prints SUPERUSER, just beside alice and
+        bob instead of the admin. The word appears either way, so the substring cannot
+        see the defect. Measured 2026-08-30 at 36f56b90: mutation SURVIVED with 18 passed,
+        reproduced by hand.
+
+        The line that carries the badge is what distinguishes them, so that is what is
+        asserted — and both other users are asserted NOT to carry it, because a mutation
+        that hands the badge to everyone leaves the admin's line correct.
+        """
         _wire( monkeypatch, tmp_path )
         mod.migrate_users( debug=True )
-        assert "SUPERUSER" in capsys.readouterr().out
+        out = capsys.readouterr().out
+
+        # Only the per-user progress lines — the password summary prints its own badge on
+        # a Roles line that carries no email, and sweeping it in here made this assertion
+        # fail against correct code on its first writing.
+        creating = [ line for line in out.splitlines() if line.startswith( "Creating " ) ]
+        badged   = [ line for line in creating if "SUPERUSER" in line ]
+        assert badged, "nobody was announced as a superuser at all"
+        assert all( "ricardo.felipe.ruiz@gmail.com" in line for line in badged ), (
+            f"the superuser badge went to the wrong account(s): {badged}" )
+        for ordinary in ( "alice@example.com", "bob@example.com" ):
+            assert not any( ordinary in line for line in badged ), (
+                f"{ordinary} was announced as a superuser" )
+
+    def test_the_password_summary_badges_only_the_admin( self, monkeypatch, tmp_path, capsys ):
+        """
+        The SECOND `if "admin" in roles` — the one in the password summary, which is not
+        gated by `debug` and so prints on every run. It survived the same inversion for the
+        same reason, and it is the more visible of the two: this block is what a human
+        reads off the terminal after a migration.
+
+        The badge sits on the Roles line, one line below the email, so the assertion walks
+        the block rather than the whole capture — checking `"⭐" in out` would pass with the
+        star on every user.
+        """
+        _wire( monkeypatch, tmp_path )
+        mod.migrate_users( debug=False )
+        lines = capsys.readouterr().out.splitlines()
+
+        badged_after = { lines[ i - 2 ].strip().removeprefix( "✅ " )
+                         for i, line in enumerate( lines )
+                         if "⭐ SUPERUSER" in line and i >= 2 }
+        assert badged_after == { "ricardo.felipe.ruiz@gmail.com" }, (
+            f"the summary badged {badged_after or 'nobody'}" )
 
     def test_debug_false_still_prints_the_passwords( self, monkeypatch, tmp_path, capsys ):
         """
