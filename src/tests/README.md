@@ -73,6 +73,39 @@ still live reads as **green**.
 Full measurement, six remedies priced, and the still-open repo-wide question:
 `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
 
+## 🔴 A GREEN THAT DEPENDS ON AN UNCOMMITTED FILE IS YOURS, NOT THE BRANCH'S
+
+Some checks read a **recorded artifact from the working tree** rather than from git. The pass
+condition is then *"the file exists on disk"* — not *"the file is committed"*, and not *"the fix is
+on the branch"*. Drop the artifact in without committing and your tier goes green while **anyone
+cloning fresh still gets the red**.
+
+**Measured 2026-08-30** on `test_secret_scan.py::test_a_detector_change_forces_a_full_rescan`, same
+tree at `12b4bdb4`, one variable:
+
+| tree state | result |
+|---|---|
+| clean, fixture not updated | **1 failed** |
+| same tree, updated fixture copied in, **uncommitted** | **1 passed** (`git status`: `" M"`) |
+
+That test does `json.load( open( record ) )`. Git never touches the fixture.
+
+⇒ **THE TELL IS MECHANICAL — USE IT INSTEAD OF TRYING TO BE CAREFUL.** Before reporting a suite
+green, check whether its recorded artifact is modified:
+
+```bash
+git status --porcelain src/tests/unit/fixtures/     # " M" on a recorded artifact = LOCAL green
+```
+
+**This is not a warning about dishonesty.** Someone can drop a fixture in, watch the red go away,
+and report it in complete good faith — the run really did pass, in the only tree they can see. The
+marker is what separates *"I fixed it"* from *"my directory differs from the branch"*, and it costs
+one command.
+
+⚠️ **The class is wider than the secret scanner.** Any gate reading a pinned baseline, a recorded
+census or a fixture from the working tree behaves the same way — the coverage gate is the obvious
+neighbour. No audit of the others has been done; the tell applies to all of them.
+
 ## Test Hierarchy
 
 ### 1. Unit Tests (`src/tests/unit/`)
