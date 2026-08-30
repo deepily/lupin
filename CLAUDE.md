@@ -635,17 +635,41 @@ second as the cached compile is judged unchanged, so the cached bytecode runs in
 disk. **The structural remedy is checked-hash invalidation** (`py_compile.PycInvalidationMode.CHECKED_HASH`
 / `compileall --invalidation-mode checked-hash`), which hashes the source instead of comparing
 whole-second mtime and size, and is therefore immune to a same-size same-second edit by
-construction. Whether to adopt it repo-wide is **decision `866f43ce`**, held by the Manager, with Rick ruling — see it and row `d18ce9ef`
-and Pocholo's write-up `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md` for the
-measurements, the six priced remedies, and the +3.3% import cost. Read those rather than re-deriving
-them here.
+construction.
 
-⇒ **UNTIL THAT RULING, THE PER-HARNESS INSTRUCTION IS: PURGE THE TARGET'S `__pycache__/<stem>.*.pyc`
-AFTER WRITING EACH MUTANT.** It works, and it is what a harness can do for itself today — but it is a
-habit that fails the moment someone forgets, which is exactly why the tree-level remedy above is the
-real fix and this is the seatbelt. Keep `-B` if you like; in a multi-mutant loop it stops a fresh pyc
-being laid down between mutants, but a per-mutant purge already covers that. **Adopting the flag
-alone buys the appearance of safety, not safety.**
+🔨 **RICK RULED YES — 2026-08-30, decision `866f43ce`. Checked-hash goes repo-wide.** Convert your
+tree with `src/scripts/migrate-pyc-to-checked-hash.sh`; `--verify` reports without changing anything
+and exits non-zero if any pyc under `src/` is still timestamp-based.
+
+🔴 **THE `-f` IS THE WHOLE MIGRATION, AND WITHOUT IT THE COMMAND CONVERTS NOTHING WHILE REPORTING
+SUCCESS.** Measured 2026-08-30 — do not retype the command from memory without it:
+
+```
+python -m compileall    --invalidation-mode checked-hash .   ->  pyc stays TIMESTAMP
+python -m compileall -f --invalidation-mode checked-hash .   ->  pyc becomes checked-hash
+```
+
+compileall treats an existing up-to-date `.pyc` as needing no work. **Any tree that has ever run its
+tests is already full of timestamp pycs**, so the un-forced command leaves every one of them exactly
+as it found it — the setting "changed" and the tree is still vulnerable. The script passes `-f`.
+
+⚠️ **NOT CONVERT-ONCE-AND-FORGET, and the two halves pull opposite ways** (both measured):
+an **existing** checked-hash pyc **stays** checked-hash — edit the source, re-import, and CPython
+regenerates it in the same mode, so no build step is needed on every run. But a **brand-new source
+file gets a TIMESTAMP pyc**, because there is no prior pyc to inherit a mode from. ⇒ **re-run the
+script after adding Python files**, and use `--verify` when you want to know rather than assume.
+
+⇒ **THE PER-HARNESS PURGE IS NOW THE FALLBACK, NOT THE INSTRUCTION.** On a converted tree a
+mutation harness no longer needs to purge `__pycache__` between mutants — that habit existed only
+because the cache could not be trusted, and it failed the moment someone forgot. Purge only when
+working in a tree you have not converted (`--verify` tells you which you are in). Keep `-B` if you
+like; it stops a fresh pyc being laid down mid-loop, but **the flag alone buys the appearance of
+safety, not safety** — it suppresses *writing*, never *trusting*.
+
+See row `d18ce9ef` and Pocholo's write-up
+`src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md` for the six priced remedies.
+⚠️ **That write-up's "+3.3% import cost" is an ANALYTIC figure and did not survive measurement on the
+real tier** — see `866f43ce` for the observed numbers. Quote the row, not the 3.3%.
 
 ⚠️ **THE HAZARD IS NOT LIMITED TO MUTATION HARNESSES, AND IT IS CROSS-PROCESS.** A *fresh* pytest
 reads the stale pyc off disk, so any edit-then-run loop is exposed — including one an agent types by
