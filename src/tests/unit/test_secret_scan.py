@@ -232,6 +232,45 @@ def _masked_rows( findings ):
 GRANDFATHER_REASON = "grandfathered: collectively triaged 2026-08-17, see branch_triage_note"
 AMNESTY_ROWS       = 190
 
+# ─────────────────────────────────────────────────────────────────────────────────────
+# 🔴 THIS RED IS DELIBERATE AND IT STAYS RED UNTIL A CREDENTIAL IS ROTATED.
+#
+# If `test_a_detector_change_forces_a_full_rescan` is failing for you, the remedy is NOT
+# to re-scan and record — that work is DONE. It sits on branch `wt-maya-4f0ced13` at
+# commit `034e44ac`, and Mr. Radio is holding it unmerged ON PURPOSE.
+#
+# WHY A GREEN HERE WOULD BE THE DEFECT. The scan behind that commit found the postgres
+# password still live at the PUBLIC TIP in 8 locations, plus a JWT signing key and an
+# account password that are off the tip but still reachable from `origin/main` history —
+# removing a secret from the tip does not unpublish it. Nothing has been scrubbed and
+# nothing has been rotated; rotation is Rick's call and comes first. This failing test is
+# the only branch-level signal that the credential work is unfinished. Landing the fixture
+# deletes that signal while changing nothing about the exposure.
+#
+# 🔴 THE TRAP IS THAT THE WRONG FIX LOOKS LIKE DILIGENCE. You find a red, you find a
+# branch that already contains the fixture, you land it, and every log line reads as
+# competence. That is why this notice names a sha you can check instead of a judgement you
+# have to re-derive at 3am:
+#
+#     A fixture change moving `detector_sha256` TO
+#         8675ec7a1c0c677e56dc6e243be7af51ee2c715f17ec6a93e1a3c731c360633f
+#     is REFUSED until rotation lands. Not deferred, not "probably fine" — refused.
+#
+# When rotation HAS landed, `wt-maya-4f0ced13` merges whole. Do not split it to land a
+# safe half; splitting exists only to let part of it in early, which is the thing being
+# prevented.
+# ─────────────────────────────────────────────────────────────────────────────────────
+ROTATION_HELD_SHA = "8675ec7a1c0c677e56dc6e243be7af51ee2c715f17ec6a93e1a3c731c360633f"
+ROTATION_HELD_NOTICE = (
+    "\n"
+    "  🔴 IF THIS IS THE DETECTOR/RESCAN RED: DO NOT CLEAR IT BY RECORDING A SCAN.\n"
+    "     The re-scan and triage are already done, on branch wt-maya-4f0ced13 at 034e44ac,\n"
+    "     HELD UNMERGED until the postgres credential is rotated (Rick's call).\n"
+    f"     A fixture change moving detector_sha256 to {ROTATION_HELD_SHA}\n"
+    "     is REFUSED until rotation lands. This red is the only branch-level signal that\n"
+    "     the credential work is unfinished; greening it changes the signal, not the risk."
+)
+
 
 def amnesty_rows( recorded ):
     """
@@ -351,6 +390,7 @@ def test_a_detector_change_forces_a_full_rescan():
         f"    last recorded     : {recorded[ 'scanned_at' ]}, "
         f"{recorded[ 'distinct_values_at_tip' ]} distinct values, "
         f"{recorded[ 'real_findings' ]} real"
+        + ROTATION_HELD_NOTICE
     )
 
 
