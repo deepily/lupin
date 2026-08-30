@@ -572,11 +572,35 @@ test code:
 | **A weak test** | the other two are ruled out | the only one that earns a new test |
 | **A broken harness** | re-run that ONE mutant by hand — if it reddens, the harness lied | you accept a lower kill count as the file's ceiling |
 | **An equivalent mutant** | read the edit: did it repair its own damage? | you write a test to kill something that was never a defect |
+| **A fixture that cannot discriminate** | read the DATA, not the assertions | you audit correct assertions, find nothing, and conclude the code is fine |
 
 Measured example of the third: an edit that dropped an `if row.get( "id" )` guard **and** swapped
 `row[ "id" ]` for `row.get( "id" )` in the same change turned a `KeyError` into a harmless `None`
 key. The mutation was wrong, not the test. **Reaching for "weak test" first is how a seat rewrites
 tests that were already fine.**
+
+🔴 **THE FOURTH IS THE ONE YOU CANNOT REACH BY READING THE TEST** (Krishna, row `9ad838d6`). The
+assertions can be present, correct, and named for exactly the thing that broke, while the FIXTURE
+cannot tell the difference: **values that are interchangeable in the data cannot reveal a swap
+between them.** Measured — `migrated=1` and `skipped=1` made a counter swap invisible, because
+swapping two equal numbers changes nothing; `2 / 1 / 1` kills it. The generalisation is worth more
+than the case: **if two quantities can be exchanged without changing the expected output, the test
+asserts their SUM, not their identity — whatever its name says.** The remedy is the fixture, never
+the assertions, and an assertion audit passes it clean every time.
+
+Two more from the same evening, both found by mutations surviving a suite whose assertions read
+correctly, and both fixtures rather than assertions:
+- **A fixture that agrees with the environment.** `_project_root()` returning `Path( "" )` instead
+  of the real root passed a test asserting `root / "src" / "scripts" / <file>` exists — because a
+  relative path resolves against the CWD, and pytest runs from the repo root. The wrong answer and
+  the right answer named the same file. Fix: assert `root.is_absolute()` and the identity, not that
+  something exists underneath it.
+- **A fixture already at the boundary it is testing.** A zero-pad check fed `"abc"`, whose
+  no-digits path yields `"00"` — already two characters, so `zfill( 2 )` is a no-op and the
+  assertion holds with or without it. Only a ONE-digit value separates `01:45:07` from `01:45:7`.
+
+⇒ **When a mutant survives, look at the DATA before the assertions.** Three of the four readings
+are invisible to a careful re-read of the test body.
 
 **Still the floor, unchanged**: every mutation asserts it APPLIED before its result is trusted — the
 anchor matched EXACTLY once, and the on-disk sha CHANGED — plus a restore control at the end that is
