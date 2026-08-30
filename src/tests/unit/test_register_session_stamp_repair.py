@@ -189,23 +189,26 @@ class TestWhatTheSecondRunCostsBesidesTheStamp:
     """
     The class defect, MEASURED HERE BUT NOT FIXED HERE — it is Rick's call on e9b78e51.
 
-    Recording it in an executable test rather than only in prose, because the class
-    question ("what else does that write erase") has been asked three times on that
-    row and answered in prose twice. A test states today's answer in a form that
-    fails when somebody changes it.
+    🔴 THIS ASSERTS THE BEHAVIOUR WE WANT AND IS MARKED xfail(strict=True), NOT A
+    PASSING TEST THAT ASSERTS THE BUG. My first cut did the latter and Mr. Radio 🦉
+    called it a trap: a green test asserting a defect reads as APPROVED BEHAVIOUR to
+    anyone who did not write it, and the comment saying otherwise is not what a reader
+    checks. Same signal, no trap — `strict=True` means the day Rick's one-line rebind
+    at register_session.py:2061 lands, this XPASSes and pytest turns that into a
+    FAILURE, so whoever lands it is forced back here. It cannot be mistaken for a
+    blessing in the meantime.
+
+    `session_topic` is the named production victim: the MCP server writes it via
+    set_session_topic, it lives only on the bridge, and it is what the stop-hook
+    "Continue Session?" notification reads.
     """
 
-    def test_an_on_disk_only_key_is_erased_by_the_next_session_start( self, monkeypatch, tmp_path ):
-        """
-        ⚠️ THIS TEST ASSERTS THE BUG, ON PURPOSE. It pins the behaviour Pocholo 📣
-        measured — every on-disk key `main()` does not carry is dropped on the next
-        SessionStart — so that landing the one-line rebind at register_session.py:2061
-        turns it RED and forces whoever lands it to come back here.
-
-        `session_topic` is the named production victim: the MCP server writes it via
-        set_session_topic, it lives only on the bridge, and it is what the stop-hook
-        "Continue Session?" notification reads.
-        """
+    @pytest.mark.xfail( strict=True,
+                        reason="row e9b78e51 — the wholesale write at register_session.py:2261 "
+                               "erases every on-disk key main() does not carry. Rick's call; "
+                               "option (d) is the one-line rebind at 2061. XPASS here means it "
+                               "landed and this test should become a plain assertion." )
+    def test_an_on_disk_only_key_survives_the_next_session_start( self, monkeypatch, tmp_path ):
         seam = _seam( monkeypatch, tmp_path )
         bridge, field = _run_session_start( monkeypatch, seam )
         _erase_stamp( bridge, field,
@@ -215,8 +218,21 @@ class TestWhatTheSecondRunCostsBesidesTheStamp:
         _run_session_start( monkeypatch, seam )
         after = json.loads( bridge.read_text() )
 
-        assert SENTINEL_KEY     not in after, "the class defect is FIXED — update row e9b78e51"
-        assert "session_topic"  not in after, "the class defect is FIXED — update row e9b78e51"
-        # And the contrast that makes the class fix worth landing: the stamp came back
-        # only because the narrow fix put it in session_data. Nothing rescues the rest.
-        assert field in after
+        assert SENTINEL_KEY    in after
+        assert "session_topic" in after
+
+    def test_the_stamp_is_the_only_key_with_a_rescue( self, monkeypatch, tmp_path ):
+        """
+        The contrast that makes the class fix worth landing, kept as a REAL assertion
+        because it is true today and is meant to stay true: the stamp comes back only
+        because the narrow fix put it in session_data. Nothing rescues the rest.
+        """
+        seam = _seam( monkeypatch, tmp_path )
+        bridge, field = _run_session_start( monkeypatch, seam )
+        _erase_stamp( bridge, field, extra={ SENTINEL_KEY: "x" } )
+
+        _run_session_start( monkeypatch, seam )
+        after = json.loads( bridge.read_text() )
+
+        assert field        in after, "the narrow fix rescued the stamp"
+        assert SENTINEL_KEY not in after, "nothing rescues an unrelated on-disk key"
