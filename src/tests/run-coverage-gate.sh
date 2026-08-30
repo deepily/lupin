@@ -1,0 +1,155 @@
+#!/bin/bash
+# The Python coverage gate — the step that makes pyproject's `fail_under` mean something.
+#
+# WHY THIS EXISTS (row e2099400, 2026-08-29). The 100% COVERAGE MANDATE had teeth on the
+# TypeScript side (run-typescript-tests.sh runs c8 --check-coverage at 100) and NONE on the
+# Python side: pytest.ini's addopts carried no --cov, no runner passed one, TestSuiteJob
+# injected none, and run-all-tests.sh mentioned coverage only in a comment. `fail_under`
+# sat in pyproject and fired only when a human typed --cov by hand.
+#
+# WHAT IT CHECKS, and both halves are load-bearing:
+#   1. THE FLOOR — the measured total against pyproject's `fail_under`.
+#   2. THE FRAME — that every .py the frame CLAIMS is actually in the report. A frame that
+#      silently stops covering a directory reports a HIGHER number, because unmeasured code
+#      is usually the least-tested code. Measured 2026-08-29: 13 files / 1,234 statements
+#      under src/scripts sat outside a `source` entry that reads as inclusive. Checking the
+#      floor without checking the frame certifies a percentage over an unknown denominator.
+#
+# USAGE
+#   As a pyramid step, after unit and cosa have appended to one data file:
+#       LUPIN_COVERAGE=1 COVERAGE_FILE=<isolated> src/tests/run-coverage-gate.sh
+#   Standalone, running the tiers itself:
+#       src/tests/run-coverage-gate.sh --run-tiers
+
+set -u
+set -o pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_ROOT"
+
+export PYTHONPATH="$PROJECT_ROOT/src:${PYTHONPATH:-}"
+export LUPIN_ROOT="$PROJECT_ROOT"
+
+# Never a bare `python3`: an under-provisioned interpreter would make the gate report
+# on a tree it cannot import. Resolved the same way the tiers resolve pytest.
+source "$PROJECT_ROOT/src/scripts/lib/resolve-venv-pytest.sh"
+resolve_venv_pytest || exit $?
+PYBIN="$(dirname "$PYTEST")/python3"
+if [ ! -x "$PYBIN" ]; then PYBIN="$(dirname "$PYTEST")/python"; fi
+if [ ! -x "$PYBIN" ]; then
+    echo "run-coverage-gate.sh: found pytest at $PYTEST but no interpreter beside it" >&2
+    exit 3
+fi
+
+RUN_TIERS=0
+for arg in "$@"; do
+    case "$arg" in
+        --run-tiers) RUN_TIERS=1 ;;
+    esac
+done
+
+# An isolated data file is a PRECONDITION, not a nicety. The repo-root default is shared
+# by every session and pytest-cov ERASES it at startup, so a twenty-minute measurement and
+# a nine-second one share one file and the short one wins (measured 2026-08-26).
+if [ -z "${COVERAGE_FILE:-}" ]; then
+    export COVERAGE_FILE="$PROJECT_ROOT/.coverage-gate-$$"
+    echo "run-coverage-gate.sh: COVERAGE_FILE was unset; using an isolated $COVERAGE_FILE" >&2
+fi
+
+if [ "$RUN_TIERS" -eq 1 ]; then
+    rm -f "$COVERAGE_FILE"
+    export LUPIN_COVERAGE=1
+    echo "═══ coverage gate: running unit tier ═══"
+    bash "$PROJECT_ROOT/src/tests/run-unit-tests.sh" -q
+    echo "═══ coverage gate: running cosa tier ═══"
+    bash "$PROJECT_ROOT/src/tests/run-cosa-tests.sh" -q
+fi
+
+# Record the tree the figure is earned on. A coverage number without a sha cannot be
+# recovered later, only re-earned: coverage stores line NUMBERS and parses the file at
+# RENDER time, so once the source moves underneath, previously-recorded lines land on
+# different statements (measured 2026-08-26 — one data file read 99% then 38%, seventy
+# minutes and two peer commits apart, with nothing re-run).
+echo "[coverage-gate] sha=$(git rev-parse --short HEAD) tracked-dirty=$(git status --porcelain --untracked-files=no | wc -l) coverage-file=$COVERAGE_FILE"
+
+echo "═══ coverage gate: frame completeness ═══"
+# A data file that does not exist, or holds nothing, must say EXACTLY that. The first
+# version of this let `coverage json` fail silently and then handed the frame check a
+# missing path, which surfaced as a FileNotFoundError traceback — a red that does not
+# say what is red, which is this row's own defect wearing a stack trace.
+# ⚠️ THE REPORT MUST NOT LIVE BESIDE THE DATA FILE. coverage combines every path matching
+# `$COVERAGE_FILE.*` as a parallel data file, so writing the report to "$COVERAGE_FILE.json"
+# makes the next read try to parse the JSON as a coverage database ("file is not a
+# database", "Combined 0 files, 1 file errored") and the gate destroys its own input.
+# Measured 2026-08-29 while verifying this script.
+REPORT_JSON="${COVERAGE_FILE%/*}/coverage-frame-report-$$.json"
+[ "$REPORT_JSON" = "$COVERAGE_FILE" ] && REPORT_JSON="./coverage-frame-report-$$.json"
+trap 'rm -f "$REPORT_JSON"' EXIT
+
+# ⚠️ AND THE EXIT CODE CANNOT BE THE NO-DATA TEST. `coverage json` also exits non-zero
+# for a fail_under breach, so keying "no data" on it reported NO DATA over a perfectly
+# good measurement — a false negative of exactly the kind this row exists to catch.
+# Ask the report whether it holds files instead.
+"$PYBIN" -m coverage json -o "$REPORT_JSON" >/dev/null 2>&1 || true
+if ! "$PYBIN" -c "import json,sys; sys.exit( 0 if json.load( open( sys.argv[1] ) ).get( 'files' ) else 1 )" "$REPORT_JSON" 2>/dev/null; then
+    echo "NO COVERAGE DATA TO GATE ON."
+    echo "  COVERAGE_FILE=$COVERAGE_FILE holds no measurement, so there is nothing to"
+    echo "  check and NOTHING HERE SHOULD BE READ AS A PASS. Usual causes: the tiers ran"
+    echo "  without LUPIN_COVERAGE set; they were refused by the contended-coverage guard"
+    echo "  (exit 6) because a peer was already running --cov; or they wrote a different"
+    echo "  COVERAGE_FILE than this gate is reading."
+    echo "  Re-run with:  src/tests/run-coverage-gate.sh --run-tiers"
+    echo "COVERAGE GATE FAILED  (no data)"
+    exit 1
+fi
+FRAME_EXIT=0
+"$PYBIN" - "$REPORT_JSON" <<'PY' || FRAME_EXIT=$?
+import sys
+import cosa.utils.coverage_frame as cf
+
+report_json = sys.argv[ 1 ]
+pyproject   = open( "pyproject.toml", encoding="utf-8" ).read()
+dirs        = cf.source_dirs( pyproject )
+# READ, not restated. A hard-coded copy of this list had already drifted from
+# pyproject's `omit` the first time this gate ran.
+OMIT        = cf.omit_patterns( pyproject )
+
+orphans = cf.unreachable_subdirs( ".", dirs, OMIT )
+if orphans:
+    print( "FRAME IS NOT WHAT IT CLAIMS — these directories hold .py files that no source" )
+    print( "entry can reach, so their code is outside the denominator while `source` reads" )
+    print( "as if it covered them. coverage's walk does not descend into non-package dirs." )
+    for o in orphans: print( f"    {o}" )
+    print( "Fix: add each as its own entry in [tool.coverage.run] source." )
+    sys.exit( 1 )
+
+reported            = cf.report_paths( report_json )
+unexpected, unseen  = cf.unseen_python_files( ".", dirs, reported, OMIT )
+undeclared          = [ u for u in unseen if u not in cf.KNOWN_UNSEEABLE ]
+if unexpected:
+    print( "FILES THE FRAME CLAIMS BUT THE REPORT DOES NOT CARRY:" )
+    for u in unexpected: print( f"    {u}" )
+    sys.exit( 1 )
+if undeclared:
+    print( "FILES COVERAGE CANNOT SEE AND NOBODY HAS DECLARED (a dot in the filename stem" )
+    print( "makes a file invisible to coverage; rename it, or add it to KNOWN_UNSEEABLE" )
+    print( "with the reason, so the frame's claim equals its measurement):" )
+    for u in undeclared: print( f"    {u}" )
+    sys.exit( 1 )
+print( f"frame OK — {len( reported )} files reported, "
+       f"{len( cf.KNOWN_UNSEEABLE )} declared unseeable, 0 unaccounted" )
+PY
+
+echo "═══ coverage gate: floor ═══"
+FLOOR_EXIT=0
+"$PYBIN" -m coverage report --precision=2 | tail -3 || FLOOR_EXIT=$?
+
+# Report BOTH verdicts before exiting. Failing at the first one hides the second, and a
+# gate that shows you one problem at a time costs a full re-run to learn the next.
+if [ "$FRAME_EXIT" -ne 0 ] || [ "$FLOOR_EXIT" -ne 0 ]; then
+    echo "COVERAGE GATE FAILED  (frame_exit=$FRAME_EXIT floor_exit=$FLOOR_EXIT)"
+    exit 1
+fi
+echo "COVERAGE GATE PASSED"
+exit 0

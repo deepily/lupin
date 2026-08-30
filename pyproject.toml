@@ -204,6 +204,32 @@ source = [
     "src/lupin_arbiter_app",
     "src/lupin_app",
     "src/lupin_model_server",
+    # ── src/scripts entered the frame 2026-08-29 (row e2099400, Rick's ruling) ──
+    # It is operational fleet code, not scaffolding: v2_eval.py is a REGISTERED build
+    # suite, plus secret_scan.py, check-arbiter-venv.py, bounce_dev_warn.py,
+    # bridge_pin_sweep.py, check_dead_claims.py and the schema-parity checks. Measured
+    # before it was added: 48.94% ALREADY covered, 32 of 61 files, several at 100% —
+    # tests reach it by `sys.path.insert(...)` + a bare `import secret_scan`, so the
+    # coverage was real and simply not counted. test_v2_eval.py:17 even says it imports
+    # the script "so coverage can target it", and all 603 of its covered statements were
+    # being discarded because this directory was not listed here.
+    "src/scripts",
+    # ⚠️ THE SUBDIRECTORIES ARE LISTED SEPARATELY AND MUST STAY THAT WAY — see the
+    # comment on `source` above about paths-not-names. That comment claimed a directory
+    # path makes coverage "enter every .py at 0%". MEASURED 2026-08-29: IT DOES NOT.
+    # coverage's unexecuted-file walk covers a source directory's TOP LEVEL only and does
+    # NOT descend into subdirectories that are not import packages. None of these has an
+    # __init__.py, so 12 files / 1,091 statements were silently outside a path that reads
+    # as inclusive — the same defect this row exists for, arriving through the fix.
+    # `include_namespace_packages = true` does NOT help; that was tested and made no
+    # difference. Listing each subdirectory as its own source entry does, and is why the
+    # file count is asserted by src/tests/unit/test_coverage_frame_completeness.py.
+    "src/scripts/auth_migration",
+    "src/scripts/debug",
+    "src/scripts/dm-experiment",
+    "src/scripts/lib",
+    "src/scripts/loc-analysis",
+    "src/scripts/presentation-gate-silence-proof",
 ]
 omit   = [
     "*/cosa/tests/*",               # CoSA's own test suites — test code, not a coverage denominator
@@ -266,7 +292,34 @@ omit   = [
 #
 # WHERE THE REMAINING 960 ARE: lupin_app 367 (its runtime is the :8000 tiers — the
 # ratified fold-in, §3c, is not done yet), cosa 334, lupin_cli 255, lupin_mcp 4.
-fail_under = 98
+# ── RE-BASED 98 -> 92 on 2026-08-29 (row e2099400; Rick ruled: include src/scripts
+#    and re-base the floor to the measured truth). NOT a lowered standard — the FRAME
+#    got bigger, so the same tests now answer a harder question.
+#
+#    MEASURED at sha e7724693, main tree, isolated COVERAGE_FILE, unit + cosa tiers,
+#    frame-dirty = 0 (the tree's 163 dirty paths were all src/rnd docs, outside every
+#    source entry, so they cannot move the number):
+#
+#        92.25%  ·  70,697 statements + 20,768 branch arcs = 91,465 denominator
+#                ·  5,626 lines missing  ·  696 files
+#        unit 936.17s (15 failed / 19,123 passed) + cosa 301.27s (0 failed / 8,769 passed)
+#
+#    ⚠️ DIRECTION, because this WILL be misread as a regression: 98.46 -> 92.25 IS NOT A
+#    FALL. Nothing got worse and no test was removed. src/scripts entered the denominator
+#    (8,271 statements at 42.61%) and the omission fix added 12 more files, so the
+#    denominator grew ~12.9%. The instrument got honest; the code did not get worse.
+#
+#    ⚠️ LOWER BOUND, not a point estimate. The 15 unit failures are peer-owned and
+#    pre-existing — verified by running them WITH and WITHOUT this config and getting the
+#    identical set — and a failing test dies early and executes less, so the true figure
+#    at this sha is at or above 92.25.
+#
+#    THIS IS A RUNG, NOT THE DESTINATION. The ramp to 100 is the row's standing work; the
+#    largest single lever is the 29 files under src/scripts still at 0% (lupin_config.py
+#    358 statements, seed_proxy_decisions.py 211). Raise this floor as they close — the
+#    rule is unchanged: the integer floor BELOW a measurement taken on a quiet box with an
+#    isolated COVERAGE_FILE, never a number anybody hoped for.
+fail_under = 92
 # exclude_also APPENDS to defaults (keeps `# pragma: no cover` working)
 exclude_also = [
     # ⚠️ EXCLUDED BY POLICY, NOT BECAUSE IT IS UNREACHABLE (row 3c0d3d1c, 2026-07-25).
