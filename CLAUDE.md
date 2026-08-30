@@ -588,16 +588,39 @@ than the case: **if two quantities can be exchanged without changing the expecte
 asserts their SUM, not their identity — whatever its name says.** The remedy is the fixture, never
 the assertions, and an assertion audit passes it clean every time.
 
-Two more from the same evening, both found by mutations surviving a suite whose assertions read
-correctly, and both fixtures rather than assertions:
-- **A fixture that agrees with the environment.** `_project_root()` returning `Path( "" )` instead
-  of the real root passed a test asserting `root / "src" / "scripts" / <file>` exists — because a
-  relative path resolves against the CWD, and pytest runs from the repo root. The wrong answer and
-  the right answer named the same file. Fix: assert `root.is_absolute()` and the identity, not that
-  something exists underneath it.
-- **A fixture already at the boundary it is testing.** A zero-pad check fed `"abc"`, whose
-  no-digits path yields `"00"` — already two characters, so `zfill( 2 )` is a no-op and the
-  assertion holds with or without it. Only a ONE-digit value separates `01:45:07` from `01:45:7`.
+**TWO MORE WORKED EXAMPLES from the same evening**, both found by mutations surviving a suite whose
+assertions read correctly, and both fixed in the FIXTURE rather than the assertions. They are
+written out in full because the abstraction above is the part a reader skips; the shape is what
+gets recognised.
+
+**(a) The fixture agrees with the environment.** Testing that an empty `LUPIN_ROOT` falls through
+to the file-relative fallback rather than becoming `Path( "" )`:
+
+```python
+# SURVIVED a mutation that returned Path( "" ) instead of the real root
+assert ( root / "src" / "scripts" / "watch-hook-events.py" ).exists()
+
+# KILLS it — Path( "" ) is RELATIVE, and only resolves right from the repo root
+assert root.is_absolute()
+assert root == Path( whe.__file__ ).resolve().parents[ 2 ]
+```
+
+`Path( "" ) / "src" / …` is a relative path, and pytest runs from the repo root, so **the wrong
+answer and the right answer named the same file.** The assertion was measuring the CWD.
+
+**(b) The fixture already sits at the boundary it is testing.** Testing that a one-digit seconds
+field is zero-padded:
+
+```python
+# SURVIVED a mutation removing .zfill( 2 ) — "abc" has no digits, so ss is already "00",
+# two characters, and the padding is a no-op either way
+assert whe._hhmmss( "2026.06.06 @ 01:45 abc" ) == "01:45:00"
+
+# KILLS it — only a ONE-digit value separates 01:45:07 from 01:45:7
+assert whe._hhmmss( "2026.06.06 @ 01:45 7ms" ) == "01:45:07"
+```
+
+Both tests were named for the thing that broke. Neither could see it.
 
 ⇒ **When a mutant survives, look at the DATA before the assertions.** Three of the four readings
 are invisible to a careful re-read of the test body.
