@@ -147,15 +147,13 @@ def looks_like_pytest( cmdline: str ) -> bool:
 # also retired the old end-to-end fixture. `exec -a "/usr/bin/pytest x" sleep 20` has
 # comm="sleep" (verified), so it was never a real foreign suite, only a real foreign
 # COMMAND LINE. The end-to-end test now spawns an actual `-m pytest`.
-# 🔴 THERE IS EXACTLY ONE comm PREDICATE, AND IT LIVES AT comm_could_be_pytest BELOW.
-# Two of them existed for about an hour on 2026-08-30: this row's fix and row 9078a035's
-# landed independently on the same function and were merged together, leaving one predicate
-# per author with OPPOSITE answers for an unreadable comm — one kept the process (fail
-# closed), one dropped it (fail open). The composition silently took the fail-OPEN answer,
-# which is the direction this module's whole doctrine forbids, and it contradicted the
-# commit message that introduced it. A guard with two sources of truth for one question is
-# the "frame in two places" hazard that pyproject's coverage comments warn about, one
-# mechanism over. If you are about to add a second one, do not.
+# 🔴 THERE IS EXACTLY ONE comm PREDICATE, AND IT IS comm_could_be_pytest BELOW.
+# Two existed for a few hours on 2026-08-30: this row's fix and row 9078a035's landed
+# independently on the same function and merged together, leaving one predicate per author
+# with OPPOSITE answers for an unreadable comm. The composition silently took the fail-OPEN
+# one, contradicting this module's doctrine AND the commit message that introduced it. A
+# guard with two sources of truth for one question is the "one truth in two places" hazard
+# pyproject's coverage comments warn about, one mechanism over. Do not add a second.
 
 
 def _default_comm_of( pid: int ) -> Optional[str]:
@@ -236,21 +234,20 @@ def comm_could_be_pytest( comm: str ) -> bool:
         - True for "pytest" and for a WHOLE interpreter name (python, python3,
           python3.13) — a real pytest runs under one of these
         - False for "claude", and for anything else that is not interpreter-shaped
-        - False for "python3-config" and "python3.10-config", which are PRESENT on
-          this box and which a startswith("python") test called interpreters. They
-          cannot run a suite, so excluding them costs nothing and removes a whole
-          class of false positive — which is the defect this row exists to close.
-          Measured 2026-08-30: both names are on /usr/bin here, and the shell-script
-          shebang means their real comm is "sh", so the practical exposure was nil;
-          the predicate should still answer its own question correctly.
+        - False for "python3-config" and "python3.10-config", which a
+          startswith("python") test called interpreters. Krishna measured both on
+          /usr/bin here; I checked and they are present, with the honest
+          qualification that their shebang is #!/bin/sh, so a real invocation's comm
+          is "sh" and the practical exposure was nil. The predicate should still
+          answer its own question correctly.
         - an EMPTY comm returns True, so an unreadable comm can never turn a real
           suite invisible — unknown stays a refusal, never a pass
 
-    ⚠️ THE WHOLE-NAME MATCH IS THE POINT, and it is a narrowing, so it deserves the
-    argument against it: a tighter test risks MISSING a real suite, which takes
-    somebody's box away. It does not here, because the excluded names provably
-    cannot run pytest. "Looser is safer under fail-closed doctrine" holds only when
-    the excluded thing COULD be an interpreter. These cannot.
+    ⚠️ THE WHOLE-NAME MATCH IS A NARROWING, so it owes the argument against itself: a
+    tighter test risks MISSING a real suite, which takes somebody's box away. It does
+    not here, because the excluded names provably cannot run pytest. "Looser is safer
+    under fail-closed doctrine" — which I argued first and Krishna corrected — holds
+    only when the excluded thing COULD be an interpreter. These cannot.
     """
     if not comm: return True
     return comm == "pytest" or bool( _PYTHON_COMM.match( comm ) )
@@ -261,11 +258,11 @@ def _default_process_table() -> List[ Tuple[ int, str ] ]:
     Every readable (pid, cmdline) from /proc. Raises OSError if /proc is unusable.
 
     ⚠️ THE comm FILTER LIVES IN find_foreign_pytest, NOT HERE, AND DELIBERATELY SO. It sat
-    in both places for an hour on 2026-08-30, when this row's fix and row 9078a035's landed
-    independently on the same function. Two gates meant the REAL path was filtered twice
-    and an INJECTED process_table only once — so a test could pass against a shape
-    production never sees, which is the asymmetry that makes a green a claim. One gate, one
-    code path, and every caller gets the same answer.
+    in both places for a few hours on 2026-08-30, when this row's fix and row 9078a035's
+    landed independently on the same function. Two gates meant the REAL path was filtered
+    twice and an INJECTED process_table only once — so a test could pass against a shape
+    production never sees, which is the asymmetry that turns a green into a claim. One
+    gate, one code path, every caller gets the same answer.
     """
     rows = []
     for entry in os.listdir( "/proc" ):
@@ -279,26 +276,47 @@ def _default_process_table() -> List[ Tuple[ int, str ] ]:
     return rows
 
 
-def _comm_admits_a_suite( comm: Optional[str] ) -> bool:
+def _comm_admits_a_running_suite( comm: Optional[str] ) -> bool:
     """
-    Whether a pid's comm leaves open the possibility that it is running a suite.
+    Whether a comm value leaves a pytest-shaped command line counting as an offender.
 
-    The pid-level companion to comm_could_be_pytest, which takes a string. The ONLY thing
-    added here is the None case, and the two are deliberately different:
+    🔴 THE THREE VALUES ARE THREE DIFFERENT FACTS, and collapsing any two of them breaks
+    the guard in one direction or the other. Measured against HEAD 2026-08-30 (row
+    9078a035) before this existed: an injected table holding one real pytest command line
+    reported offenders=[999] for comm "python3" and offenders=[] for BOTH "" and None —
+    so a live process whose comm could not be read was waved through.
 
-        None  the process EXITED between the table read and this read. A dead process
-              cannot contend for the box, so it is dropped.
-        ""    the process is ALIVE and its comm could not be read. Unknown is never
-              cleared in this module (see main()'s exit 2), so it is KEPT.
+        real name   ("python3", "bash")  ->  ASK THE PREDICATE. A named non-interpreter
+                                             is a seat quoting a command, not a suite.
+        ""          (alive, unreadable)  ->  OFFENDER. We could not look, and "could not
+                                             look" is not "nothing there". Refusing costs
+                                             a wait; passing costs a silently wrong
+                                             coverage number, which is what this whole
+                                             module exists to prevent.
+        None        (exited)             ->  NOT an offender. The process is gone; there
+                                             is nothing to contend with.
+
+    _default_comm_of already draws this distinction deliberately and its docstring already
+    promised the caller was FAIL-CLOSED on "". The caller was not: it passed "" to
+    the predicate, which returned False for "" exactly as ITS OWN docstring
+    says, and the process was dropped. Neither function was wrong on its own — the two
+    contracts simply did not meet, which is why reading either one alone finds nothing.
+
+    ⚠️ A POSITIVE CONTROL THAT TESTS ONE VALUE CANNOT SEE THIS. Two of the three inputs
+    produce the same observable answer under the old code, so a fixture exercising only a
+    readable interpreter name passes identically before and after the fix. The test for
+    this must supply all three.
 
     Requires:
-        - comm is a comm string, "" for live-but-unreadable, or None for gone
+        - comm is a real name, "" for a live process whose comm could not be read, or
+          None for a process that has exited
 
     Ensures:
-        - returns False for None
-        - otherwise defers entirely to comm_could_be_pytest, so there is one answer
+        - returns False only for None, or for a real name that is not an interpreter
+        - returns True for "", keeping an unreadable live process an offender
     """
-    if comm is None: return False
+    if comm is None:  return False
+    if comm == "":    return True
     return comm_could_be_pytest( comm )
 
 
@@ -334,7 +352,7 @@ def find_foreign_pytest(
     found   = [ ( pid, cmd ) for pid, cmd in table
                 if pid not in ours
                 and looks_like_pytest( cmd )
-                and _comm_admits_a_suite( name_of( pid ) ) ]
+                and _comm_admits_a_running_suite( name_of( pid ) ) ]
     return sorted( found, key=lambda row: row[ 0 ] )
 
 

@@ -365,11 +365,7 @@ def _a_real_foreign_pytest():
         # The checker reads a LIVE process table, so the child must actually be up first.
         deadline = time.time() + 20
         while time.time() < deadline:
-            # A NON-EMPTY comm that admits a suite: the child is genuinely up. Empty would
-            # mean unreadable, which the predicate accepts (fail closed) but which does
-            # not prove readiness — so it is excluded here on purpose.
-            comm = cc._default_comm_of( foreign.pid )
-            if comm and cc.comm_could_be_pytest( comm ):
+            if cc.comm_could_be_pytest( cc._default_comm_of( foreign.pid ) ):
                 break
             time.sleep( 0.2 )
         else:                                             # pragma: no cover - only on a wedged box
@@ -517,10 +513,9 @@ def test_a_real_pytest_is_still_found_when_comm_is_an_interpreter():
     real = "/opt/venv/bin/python -m pytest src/tests/unit/ -q --cov"
     assert cc.looks_like_pytest( real ) is True
     assert cc.comm_could_be_pytest( "python" ) is True
-    # ⚠️ comm_of MUST be injected alongside process_table. pid 999 does not exist on this
-    # box, so the real reader correctly reports it GONE and the row is dropped — the test
-    # would fail for a reason having nothing to do with what it is checking. An injected
-    # process table needs an injected comm reader; the two are one seam, not two.
+    # comm_of is injected: pid 999 is fictional, so the real reader would return None
+    # (exited) and correctly find nothing. The merge added that seam after this test was
+    # written — see row 9078a035.
     found = cc.find_foreign_pytest( process_table=lambda: [ ( 999, real ) ], ancestors=[ 1 ],
-                                    comm_of=lambda _pid: "python" )
+                                    comm_of=lambda _pid: "python3" )
     assert [ pid for pid, _ in found ] == [ 999 ]
