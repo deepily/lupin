@@ -538,6 +538,32 @@ miss, 44 branches / 0 partial**. Identical, because the file was inside both sco
 ⇒ **Scope freely while working a single file. Never scope a run whose output you intend to read as
 a LIST.**
 
+### 🔴 THERE IS A SECOND VIRTUALENV *INSIDE* `src/`, AND IT IS 92% OF EVERY DISK SWEEP
+
+`src/cosa/.venv` is a full vendored virtualenv living inside the source tree. Measured 2026-08-30:
+
+| population | count |
+|---|---|
+| `find src -name '*.py'` | **31,734** |
+| of which `src/cosa/.venv` (3.11 vendor) | **29,303 — 92%** |
+| `git ls-files 'src/**/*.py'` | **2,415** |
+
+It is **untracked and ignore-matched**, which is exactly what decides who it fools:
+
+- **git-derived** sweeps (`git ls-files`, `git grep`) never see it and are **correct as-is**.
+- **disk-derived** sweeps (`find`, `rglob`, `compileall`, an unscoped `--cov`, a bare `grep -r`) see
+  it and are **inflated ~13×** with third-party code for an interpreter this repo does not run.
+
+**Receipt for why this is not theoretical**: the first cut of `migrate-pyc-to-checked-hash.sh`
+targeted `src/` with `rglob`, spent 40+ seconds rewriting vendored 3.11 bytecode, and reported
+"30,621 converted" — a five-figure number that read like a thorough migration and was 92% a fact
+about somebody else's code. The honest figure was 1,318. Excluding the venv cut the run to 3.5s.
+
+⇒ **Any tree-wide operation must exclude `.venv` / `node_modules` / `site-packages`, or be
+git-derived.** This is the same lesson as the collision guard on row `c89cec9b` from the opposite
+direction — there, disk-derived counting *added* a machine-local leftover; here it adds 29,303
+vendored files. **Ask what population your command actually walks before you read its number.**
+
 ## TESTING
 
 Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:8000`) per §TESTING VENUES above; every suite is tagged with its venue. `:8000 (scheduled)` = submit via `POST /api/test-suite/submit`; **self-authorized on a verified-idle server** (place behind any already-scheduled/running job — see §TESTING VENUES).
