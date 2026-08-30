@@ -327,6 +327,50 @@ find . -name ".git" -type d | grep -v "^./.git$"
 - Manage as independent project
 - Has own git history and workflows
 
+## 🔴 A COORDINATE IS NOT A REFERENCE — NAME THE CONTENT
+
+**Derived independently three times on 2026-08-30** — Tiberius 👑 and Maya 🌻 from different
+directions, and a third time when this reviewer handed a peer `CLAUDE.md:888` as an insertion point
+for a file that had already moved several times that day, by the very commit under review. Written
+here because a lesson three seats reach separately is one the file should have carried already.
+
+**A coordinate says WHERE something sat when you looked. A reference says WHAT it is.** Only the
+second survives someone else editing between your reading and their acting — and in a fleet, someone
+always does.
+
+| Don't hand over | Hand over |
+|---|---|
+| `CLAUDE.md:888` | the anchor sentence, verified to match **exactly once** |
+| `stash@{2}` | the commit sha (`git rev-parse` it first) |
+| "the third finding in the output" | the finding's own text or id |
+| "the file I edited earlier" | the path, and the sha or content hash you read |
+| "as of tonight" | the sha, or the wall-clock time of the read |
+
+**The tell is mutability, not format.** A line number in a frozen artifact is fine; a line number in
+a live file is a bet that nobody edits above it. `stash@{N}` renumbers when any entry is dropped —
+that hazard is already in the global CLAUDE.md, and this is the same defect wearing a different
+notation, which is exactly why it keeps being re-derived instead of recognised.
+
+**When you must point at a position, make the pointer self-checking**: give the anchor text, say it
+must match **exactly once**, and say what to do when it matches zero or twice — *come back to me*,
+never *guess at placement*. A pointer that cannot fail is a pointer that silently lands in the wrong
+place.
+
+**AND THE SAME RULE GOVERNS THE CHANNEL, NOT ONLY THE POINTER** (Maya 🌻 §1.5.1b — *adapt what you
+send to the channel you measured*). Text sent between sessions is **condensed in transit**, and a
+condenser reorders and drops. Measured 2026-08-30: an insert handed to a peer for verbatim paste
+arrived **summarised**, and he correctly rebuilt it from its three points rather than pasting what
+he received — the hand-off worked only because he flagged it. ⇒ **Send a to-be-pasted artifact
+BARE — one artifact per message, no surrounding prose for the condenser to fold it into** — and say
+plainly that it is verbatim. A paragraph explaining the paste is the thing most likely to absorb it.
+
+⚠️ **THIS DOES NOT CONTRADICT "STATE THE COORDINATES", AND THE TWO ARE EASY TO READ AS OPPOSITES.**
+They govern different acts. **Reporting a measurement**: state the coordinates — the sha, the frame,
+the root set, the wall-clock time — because without them a reading is not wrong, it is
+*unfalsifiable*. **Pointing someone at content**: name the content, because a coordinate is what
+goes stale. ⇒ *Coordinates make your reading checkable. Content-names make your pointer durable.*
+Say what you measured **and** name what you mean.
+
 ## TESTING VENUES
 
 **MANDATE**: Every automated test runs on exactly one of two servers. Pick by rubric, never by habit.
