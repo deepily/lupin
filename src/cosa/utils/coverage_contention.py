@@ -36,10 +36,10 @@ substring match would otherwise have every run refuse itself.
 
 An offender must pass BOTH tests: its command line must be invocation-SHAPED
 (`looks_like_pytest`) AND the kernel must agree the process IS a python or pytest
-binary (`comm_is_a_python_or_pytest_binary`, read from /proc/<pid>/comm). The two
-answer different questions — the command line says what somebody WROTE, comm says
-what the process IS — and only the pair is sufficient. See the comment above
-`comm_is_a_python_or_pytest_binary` for the measurement that forced this.
+binary (`comm_could_be_pytest`, read from /proc/<pid>/comm). The two answer
+different questions — the command line says what somebody WROTE, comm says what
+the process IS — and only the pair is sufficient. See the docstring on
+`comm_could_be_pytest` for the measurements that forced this.
 
 CLI: `python3 -m cosa.utils.coverage_contention` — exit **0** clear, **1**
 contended (offenders printed to stderr), **2** unknown (could not read the
@@ -147,25 +147,13 @@ def looks_like_pytest( cmdline: str ) -> bool:
 # also retired the old end-to-end fixture. `exec -a "/usr/bin/pytest x" sleep 20` has
 # comm="sleep" (verified), so it was never a real foreign suite, only a real foreign
 # COMMAND LINE. The end-to-end test now spawns an actual `-m pytest`.
-_PYTHON_COMM = re.compile( r"^python[0-9.]*$" )
-
-
-def comm_is_a_python_or_pytest_binary( comm: Optional[str] ) -> bool:
-    """
-    True when /proc/<pid>/comm names an interpreter that could be running a suite.
-
-    Requires:
-        - comm is the raw contents of /proc/<pid>/comm, already stripped, or None
-
-    Ensures:
-        - returns True for "pytest" and for "python", "python3", "python3.13"
-        - returns False for any other binary name, and for None or ""
-        - the comparison is on the whole name, so "python-config" and "pytest-watch"
-          are NOT interpreters (the kernel truncates comm at 15 characters, which
-          cannot turn a non-interpreter into one)
-    """
-    if not comm: return False
-    return comm == "pytest" or bool( _PYTHON_COMM.match( comm ) )
+# 🔴 THERE IS EXACTLY ONE comm PREDICATE, AND IT IS comm_could_be_pytest BELOW.
+# Two existed for a few hours on 2026-08-30: this row's fix and row 9078a035's landed
+# independently on the same function and merged together, leaving one predicate per author
+# with OPPOSITE answers for an unreadable comm. The composition silently took the fail-OPEN
+# one, contradicting this module's doctrine AND the commit message that introduced it. A
+# guard with two sources of truth for one question is the "one truth in two places" hazard
+# pyproject's coverage comments warn about, one mechanism over. Do not add a second.
 
 
 def _default_comm_of( pid: int ) -> Optional[str]:
@@ -207,6 +195,9 @@ def _default_ancestors( pid: Optional[int]=None ) -> List[int]:
     return chain
 
 
+_PYTHON_COMM = re.compile( r"^python[0-9.]*$" )
+
+
 def comm_could_be_pytest( comm: str ) -> bool:
     """
     True when a process's `comm` is one a pytest run could actually have.
@@ -240,23 +231,38 @@ def comm_could_be_pytest( comm: str ) -> bool:
         - comm is a string (may be empty)
 
     Ensures:
-        - True for "pytest" and for any interpreter name beginning "python"
-          (python, python3, python3.13 — a real pytest runs under one of these)
+        - True for "pytest" and for a WHOLE interpreter name (python, python3,
+          python3.13) — a real pytest runs under one of these
         - False for "claude", and for anything else that is not interpreter-shaped
+        - False for "python3-config" and "python3.10-config", which a
+          startswith("python") test called interpreters. Krishna measured both on
+          /usr/bin here; I checked and they are present, with the honest
+          qualification that their shebang is #!/bin/sh, so a real invocation's comm
+          is "sh" and the practical exposure was nil. The predicate should still
+          answer its own question correctly.
         - an EMPTY comm returns True, so an unreadable comm can never turn a real
           suite invisible — unknown stays a refusal, never a pass
+
+    ⚠️ THE WHOLE-NAME MATCH IS A NARROWING, so it owes the argument against itself: a
+    tighter test risks MISSING a real suite, which takes somebody's box away. It does
+    not here, because the excluded names provably cannot run pytest. "Looser is safer
+    under fail-closed doctrine" — which I argued first and Krishna corrected — holds
+    only when the excluded thing COULD be an interpreter. These cannot.
     """
     if not comm: return True
-    return comm == "pytest" or comm.startswith( "python" )
+    return comm == "pytest" or bool( _PYTHON_COMM.match( comm ) )
 
 
 def _default_process_table() -> List[ Tuple[ int, str ] ]:
     """
-    Every readable (pid, cmdline) from /proc, EXCLUDING processes whose `comm` says they
-    cannot be a pytest run. See comm_could_be_pytest for why the cmdline alone is not
-    enough and what it measured.
+    Every readable (pid, cmdline) from /proc. Raises OSError if /proc is unusable.
 
-    Raises OSError if /proc is unusable.
+    ⚠️ THE comm FILTER LIVES IN find_foreign_pytest, NOT HERE, AND DELIBERATELY SO. It sat
+    in both places for a few hours on 2026-08-30, when this row's fix and row 9078a035's
+    landed independently on the same function. Two gates meant the REAL path was filtered
+    twice and an INJECTED process_table only once — so a test could pass against a shape
+    production never sees, which is the asymmetry that turns a green into a claim. One
+    gate, one code path, every caller gets the same answer.
     """
     rows = []
     for entry in os.listdir( "/proc" ):
@@ -266,12 +272,6 @@ def _default_process_table() -> List[ Tuple[ int, str ] ]:
                 raw = handle.read()
         except OSError:
             continue                      # the process exited between listdir and open
-        try:
-            with open( f"/proc/{entry}/comm" ) as handle:
-                comm = handle.read().strip()
-        except OSError:
-            comm = ""                     # unreadable -> treated as could-be, never skipped
-        if not comm_could_be_pytest( comm ): continue
         rows.append( ( int( entry ), raw.replace( b"\0", b" " ).decode( "utf-8", "replace" ).strip() ) )
     return rows
 
@@ -298,7 +298,7 @@ def _comm_admits_a_running_suite( comm: Optional[str] ) -> bool:
 
     _default_comm_of already draws this distinction deliberately and its docstring already
     promised the caller was FAIL-CLOSED on "". The caller was not: it passed "" to
-    comm_is_a_python_or_pytest_binary, which returns False for "" exactly as ITS docstring
+    the predicate, which returned False for "" exactly as ITS OWN docstring
     says, and the process was dropped. Neither function was wrong on its own — the two
     contracts simply did not meet, which is why reading either one alone finds nothing.
 
@@ -317,7 +317,7 @@ def _comm_admits_a_running_suite( comm: Optional[str] ) -> bool:
     """
     if comm is None:  return False
     if comm == "":    return True
-    return comm_is_a_python_or_pytest_binary( comm )
+    return comm_could_be_pytest( comm )
 
 
 def find_foreign_pytest(

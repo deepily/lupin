@@ -365,7 +365,7 @@ def _a_real_foreign_pytest():
         # The checker reads a LIVE process table, so the child must actually be up first.
         deadline = time.time() + 20
         while time.time() < deadline:
-            if cc.comm_is_a_python_or_pytest_binary( cc._default_comm_of( foreign.pid ) ):
+            if cc.comm_could_be_pytest( cc._default_comm_of( foreign.pid ) ):
                 break
             time.sleep( 0.2 )
         else:                                             # pragma: no cover - only on a wedged box

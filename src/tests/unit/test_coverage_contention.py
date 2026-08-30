@@ -227,9 +227,7 @@ def test_the_process_table_decodes_nul_separated_cmdlines( monkeypatch ):
     assert cc._default_process_table() == [ ( 4242, "/opt/venv/bin/pytest -q" ) ]
 
 
-def test_the_process_table_drops_a_seat_whose_brief_merely_quotes_a_pytest_command(
-    monkeypatch,
-):
+def test_a_seat_whose_brief_merely_quotes_a_pytest_command_is_dropped():
     """
     🔴 THE MEASURED FALSE POSITIVE, row 9078a035, 2026-08-30. A Claude seat carries its
     whole spawn brief in argv, so a brief that QUOTES `-m pytest` is argv-identical to a
@@ -238,14 +236,24 @@ def test_the_process_table_drops_a_seat_whose_brief_merely_quotes_a_pytest_comma
     being long-lived, they would have kept it shut indefinitely.
 
     The cmdline still passes looks_like_pytest; comm is what discriminates.
+
+    ⚠️ MOVED DOWN ONE LEVEL 2026-08-30, claim unchanged. This asserted on
+    _default_process_table while a comm filter lived there as well as in
+    find_foreign_pytest. Two gates meant the REAL path was filtered twice and an INJECTED
+    table only once, so a test could pass against a shape production never sees. The table
+    gate was removed; the discriminating now happens in one place, and this asserts it
+    there. Krishna's measured pids and reasoning above are untouched — the gate moved, the
+    evidence did not.
     """
-    brief = b"/home/rruiz/.local/bin/claude\x00--model\x00claude-opus-5\x00Run: python -m pytest src/\x00"
-    monkeypatch.setattr( cc.os, "listdir", lambda _p: [ "22130" ] )
-    monkeypatch.setattr( cc, "open", _fake_open( brief, comm="claude" ), raising=False )
-    assert cc._default_process_table() == [], "a comm=claude seat is not a running suite"
+    brief = "/home/rruiz/.local/bin/claude --model claude-opus-5 Run: python -m pytest src/"
+    assert cc.looks_like_pytest( brief ) is True, "precondition: argv cannot tell"
+    table = lambda: [ ( 22130, brief ) ]
+    assert cc.find_foreign_pytest( process_table=table, ancestors=[],
+                                   comm_of=lambda _pid: "claude" ) == [], \
+        "a comm=claude seat is not a running suite"
     # the positive control: identical argv, interpreter comm -> still seen
-    monkeypatch.setattr( cc, "open", _fake_open( brief, comm="python3" ), raising=False )
-    assert len( cc._default_process_table() ) == 1
+    assert len( cc.find_foreign_pytest( process_table=table, ancestors=[],
+                                        comm_of=lambda _pid: "python3" ) ) == 1
 
 
 def test_an_unreadable_comm_keeps_the_process_in_the_table( monkeypatch ):
@@ -402,19 +410,35 @@ def _raising_open( error ):
 
 @pytest.mark.parametrize( "comm", [ "pytest", "python", "python3", "python3.13", "python3.9" ] )
 def test_an_interpreter_comm_can_be_running_a_suite( comm ):
-    assert cc.comm_is_a_python_or_pytest_binary( comm ) is True
+    assert cc.comm_could_be_pytest( comm ) is True
 
 
 @pytest.mark.parametrize( "comm", [
     "claude",           # the live false positive: an agent seat quoting the command
     "sleep",            # the retired end-to-end fixture, `exec -a "/usr/bin/pytest x" sleep`
     "bash", "node", "code",
-    "pytest-watch",     # a watcher that has started no suite
-    "python-config",    # not an interpreter, despite the prefix
-    "", None,           # unreadable or absent
+    "pytest-watch",       # a watcher that has started no suite
+    "python-config",      # not an interpreter, despite the prefix
+    "python3-config",     # present on /usr/bin here; startswith("python") called it one
+    "python3.10-config",  # likewise. Krishna's measurement, checked before adopting
 ] )
 def test_a_non_interpreter_comm_is_not_a_running_suite( comm ):
-    assert cc.comm_is_a_python_or_pytest_binary( comm ) is False
+    assert cc.comm_could_be_pytest( comm ) is False
+
+
+def test_an_unreadable_comm_is_kept_rather_than_cleared():
+    """
+    🔴 FAIL-CLOSED, and the ONE case that must not join the list above. An empty comm means
+    the process is alive and we could not read what it is. This module never converts its
+    own blindness into a pass — the same doctrine as main()'s exit 2 — so an unreadable
+    comm KEEPS the process as a possible suite. The alternative loses a real running suite
+    silently, which is the direction that takes somebody's box away.
+
+    ⚠️ THIS ASSERTED False FOR "" UNTIL 2026-08-30, matching a predicate that failed OPEN
+    while its own commit message claimed the opposite. The test agreed with the code rather
+    than with the design, which is exactly why it did not catch it.
+    """
+    assert cc.comm_could_be_pytest( "" ) is True
 
 
 def test_an_agent_seat_quoting_the_command_is_not_a_running_suite():
@@ -464,7 +488,7 @@ def test_a_live_process_whose_comm_cannot_be_read_is_not_silently_cleared():
 
 def test_the_real_comm_reader_names_this_very_process():
     """The instrument check, matching test_the_real_process_table_sees_this_running_pytest."""
-    assert cc.comm_is_a_python_or_pytest_binary( cc._default_comm_of( os.getpid() ) ) is True
+    assert cc.comm_could_be_pytest( cc._default_comm_of( os.getpid() ) ) is True
 
 
 def test_the_real_comm_reader_returns_none_for_a_pid_that_does_not_exist():
@@ -489,7 +513,7 @@ def test_the_default_comm_reader_is_used_when_none_is_supplied( monkeypatch ):
 # ── comm's three values are three different facts ────────────────────────────────
 #
 # Row 9078a035, measured against HEAD 2026-08-30. find_foreign_pytest passed comm
-# straight to comm_is_a_python_or_pytest_binary, which returns False for "" — so a LIVE
+# straight to the predicate, which returned False for "" — so a LIVE
 # process whose comm could not be read was waved through, while _default_comm_of's own
 # docstring promised the caller was fail-closed on exactly that value. Neither function
 # was wrong alone; the two contracts did not meet.
