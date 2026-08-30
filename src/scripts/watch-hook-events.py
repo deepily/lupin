@@ -141,7 +141,7 @@ def _format_oracle( e ):
     poke          = f"{e.get( 'poke_count', '?' )}/{e.get( 'cap', '?' )}"
     awaiting      = e.get( "awaiting" )
     tail          = f"  awaiting={awaiting}" if awaiting else ""
-    stuck         = _c( C.RED + C.BOLD, "  ← STUCK" ) if outcome == "cap_reached" else ""
+    stuck         = _c( C.RED + C.BOLD, "  ← STUCK" ) if outcome == OUTCOME_CAP_REACHED else ""
 
     line = (
         f"{_c( C.GREY, _hhmmss( e.get( 'ts' ) ) )}  "
