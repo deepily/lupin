@@ -159,5 +159,5 @@ def main():
     return 0
 
 
-if __name__ == "__main__":  # pragma: no cover - script entry point, exercised by running the file
+if __name__ == "__main__":  # pragma: no cover - unreachable under pytest: __name__ is the module name, never "__main__"
     sys.exit( main() )
