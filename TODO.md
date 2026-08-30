@@ -29,6 +29,19 @@
 
 #### A GENUINE PRE-EXISTING RED ON THE BRANCH, WITH NO OWNER (Pocholo 📣, measured 2026-08-30 ~18:10 EDT)
 
+> 🔴 **SUPERSEDED 2026-08-30 ~19:24 EDT (Rachel 🕊️, at Mr Radio 🦉's word). THE ENTRY BELOW WAS TRUE AT 18:10 AND ITS REMEDY IS NOW REFUSED. DO NOT ACT ON IT.**
+>
+> **It is deliberate, and it is BLOCKED — not owned by any seat.** The red is the postgres-rotation **HOLD**. The owed action is **Rick's credential rotation**; nobody on this crew can take it, and nobody should be assigned it. 🔴 *Blocked is not the same as unowned, and it is also not the same as somebody working it — do not "pick this up".* The re-scan and triage are **already done**, on `wt-maya-4f0ced13` at **`034e44ac`**, held unmerged until the credential is rotated (Rick's call).
+>
+> ⚠️ **The instruction below is the one thing the hold refuses.** It says to re-scan and record `detector_sha256`, `scanned_ref_sha`, `scan_fingerprint`, the counts and `real_findings`. `ROTATION_HELD_NOTICE` in `src/tests/unit/test_secret_scan.py` refuses exactly that: *"DO NOT CLEAR THIS RED BY RECORDING A SCAN… greening it changes the signal, not the risk."*
+>
+> 🔴 **This is the SAME composition failure, in a fourth surface.** Tonight it was found three times and fixed three times — two guards disagreeing across two tests (`c8524ed0`), a recipe and a refusal disagreeing inside one message (`90f6c896`), and a half-lifted hold where the recipe was gated and the refusal was not (`c21d1f60`, merged `7120f90a`). **Each fix gated an OUTPUT. This one is PROSE, and nothing gates prose.** Two individually-correct changes, and a reader acting on the first instruction they find is told to do the refused thing.
+>
+> **The actual owed action is the ROTATION**, not a re-record. Until it lands the red stays red, and that is the signal working. When it lands: merge `034e44ac`, then flip `ROTATION_HOLD_ACTIVE` — the suite is already proven green in **either** flag position (`ad0a8ebf`, merged `39d912ec`), so the flip is a one-line change and not an afternoon.
+>
+> ⇒ **The durable lesson, and it outlives this entry**: a finding written down as narrative keeps giving its original instruction long after the code stopped. **A doc that records a remedy needs the same supersession discipline as a guard that prints one** — and it will not get it automatically, because nobody re-runs prose.
+
+
 - [ ] 🔴 **`test_secret_scan.py::test_a_detector_change_forces_a_full_rescan` FAILS on the branch and reproduces in the MAIN tree.** Not a worktree artifact and not anyone's uncommitted work — it fails at the branch tip, in the main checkout, with `LUPIN_ROOT` correct. Its message is the remedy: *"THE DETECTOR CHANGED SINCE THE LAST RECORDED FULL SCAN, and re-running it here does not match what is on record."* `detector_sha256` is `8675ec7a…`; the fix is to re-scan, **TRIAGE the masked output** (a raw candidate count is not a finding), and record `detector_sha256`, `scanned_ref_sha`, `scan_fingerprint`, the counts and `real_findings`.
   ⚠️ **This is a merge-gate red that nobody is carrying.** It is not mine — no commit of mine touches `secret_scan.py` or its test — and I am flagging rather than fixing it because the remedy requires TRIAGING secret-scanner output, which is a judgement call about real findings, not a mechanical re-record. **Needs an owner.**
 
