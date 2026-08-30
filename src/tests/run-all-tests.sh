@@ -62,10 +62,16 @@ done
 # cosa/agents/test_suite/job.py — test_typescript_suite_gate.py asserts they
 # match, because a suite present in one list and absent from the other runs or
 # skips depending on which door you came through.
-SUITES=( "unit" "cosa" "typescript" "smoke" "websocket" "integration" "e2e" )
+SUITES=( "unit" "cosa" "coverage" "typescript" "smoke" "websocket" "integration" "e2e" )
 declare -A SCRIPTS=(
     [unit]="src/tests/run-unit-tests.sh"
     [cosa]="src/tests/run-cosa-tests.sh"
+    # The Python coverage gate (row e2099400, 2026-08-29). Placed straight after the two
+    # tiers that feed it: they append to ONE data file (set up below) and this step renders
+    # it, checks pyproject's fail_under, and checks that the FRAME still measures everything
+    # it claims. Before this existed, nothing in the build asked for coverage at all — so
+    # fail_under was enforced only when a human typed --cov by hand.
+    [coverage]="src/tests/run-coverage-gate.sh"
     [typescript]="src/tests/run-typescript-tests.sh"
     [smoke]="src/tests/run-smoke-tests.sh"
     [websocket]="src/scripts/run-websocket-smoke-tests.sh"
@@ -103,6 +109,19 @@ echo "Lupin run-all-tests.sh" | tee -a "$COMBINED_LOG"
 echo "Started: $(date '+%Y-%m-%d %H:%M:%S %Z')" | tee -a "$COMBINED_LOG"
 echo "Mode: $([ $FAIL_FAST -eq 1 ] && echo 'fail-fast' || echo 'continue-on-failure')" | tee -a "$COMBINED_LOG"
 echo "==================================================================" | tee -a "$COMBINED_LOG"
+
+# ── Coverage: ONE isolated data file for the whole pyramid (row e2099400) ────────
+# LUPIN_COVERAGE makes the unit and cosa tiers append instead of measuring nothing. It is
+# OFF everywhere else, so an ad-hoc scoped run never emits a partial tier-wide number —
+# a scoped run reporting a tier figure is this row's own recurring defect.
+# COVERAGE_FILE is isolated per invocation because the repo-root default is shared by every
+# session and pytest-cov ERASES it at startup: measured 2026-08-26, a twenty-minute
+# measurement and a nine-second one shared one file, the short one won, and the run
+# reported 96.59% "green" with ~28,000 statements silently outside the denominator.
+export COVERAGE_FILE="${COVERAGE_FILE:-/tmp/lupin-coverage-$$.data}"
+export LUPIN_COVERAGE=1
+rm -f "$COVERAGE_FILE"
+echo "Coverage: enabled for unit+cosa; data file $COVERAGE_FILE" | tee -a "$COMBINED_LOG"
 
 for suite in "${SUITES[@]}"; do
     echo "" | tee -a "$COMBINED_LOG"
