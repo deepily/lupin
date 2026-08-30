@@ -666,8 +666,17 @@ class TestMain:
         assert mod.main() == 1
 
     def test_a_non_success_result_subtype_fails_the_run( self, wired_main, monkeypatch ):
+        """⚠️ THE SUBTYPE IS THE ONLY THING WRONG HERE, DELIBERATELY.
+
+        This payload used to read {"subtype": "error_max_turns", "is_error": True,
+        "num_turns": 20} — which fails for THREE independent reasons at once. A mutation
+        REMOVING the subtype check survived it: the run still failed on the other two, so the
+        test could not tell which criterion did the work, whatever its name said.
+
+        is_error is False and the turn count is well under the cap, so the subtype is the sole
+        cause and removing its check now reddens this test. Keep it isolated for that reason."""
         monkeypatch.setattr( mod, "_parse_stream",
-                             lambda path: _summary( result={ "subtype": "error_max_turns", "is_error": True, "num_turns": 20 } ) )
+                             lambda path: _summary( result={ "subtype": "error_max_turns", "is_error": False, "num_turns": 4 } ) )
         assert mod.main() == 1
 
     def test_a_failed_validation_fails_the_run( self, wired_main, monkeypatch ):
@@ -676,57 +685,62 @@ class TestMain:
 
 
 # ────────────────────────────────────────────────────────────────────────
-# KNOWN DEFECT — PINNED, NOT FIXED
+# The defect that WAS pinned here — now fixed (bug c2ee8c96)
 # ────────────────────────────────────────────────────────────────────────
 
-class TestTheTwoVerdictsDisagree:
-    """🔴 A REAL DEFECT IN THE SCRIPT, PINNED HERE RATHER THAN FIXED, because this row's brief
-    was a coverage ramp with ZERO production lines touched.
+class TestTheTwoVerdictsAgree:
+    """These are the AGREEING COUNTERPARTS of two tests that used to pin a defect.
 
-    A ramp test pins current behaviour, so an unfixed defect that is merely COVERED becomes
-    harder to fix later, not easier — the fixer meets a green suite and has to work out which
-    green is load-bearing. These two tests exist so that fixer meets a NAME instead: both say
-    `_pins_a_defect_` and both will go red on the fix, which is the point of them.
+    Until bug c2ee8c96 was fixed, the script computed its verdict TWICE against different
+    criteria: `_format_execution_section` (what gets WRITTEN to the log) applied `is_error`
+    and the turn-budget cap, `main` (what becomes the EXIT CODE) applied neither. So an
+    unattended run could write ❌ FAIL into the execution log and still exit 0 — and the
+    exit code is the half automation reads.
 
-    THE DEFECT. The script computes its verdict TWICE against different criteria:
+    Two tests named `_pins_a_defect_` asserted that WRONG behaviour on purpose so the next
+    reader met a name rather than an unexplained green. Their docstring said that on the fix
+    they must be REPLACED by their agreeing counterparts rather than patched green. This
+    class is that replacement, and these two cases are the two that used to diverge.
 
-        _format_execution_section (what gets WRITTEN to the log)
-            exit_code == 0 · api_key_source == "none" · subtype == "success"
-            · is_error is False · parsed is not None · validation_ok
-            · num_turns < MAX_TURNS
+    The fix was one shared predicate — `_run_passed` — read by both sites. Restating the
+    criteria is what let them drift apart, so a third restatement here would be the same bug
+    waiting; that is why these tests assert the two ANSWERS agree rather than re-listing the
+    criteria."""
 
-        main (what becomes the EXIT CODE)
-            exit_code == 0 · api_key_source == "none" · subtype == "success"
-            · parsed is not None · validation_ok
-
-    main omits `is_error is False` AND the turn-budget check. Measured, both directions:
-
-        case                                  logged verdict   exit code
-        clean run                             PASS             0          agree
-        burned the turn budget (num_turns=20) FAIL             0          DIVERGE
-        is_error=True, subtype="success"      FAIL             0          DIVERGE
-
-    So an unattended run can write ❌ FAIL into the execution log and still exit 0 — anything
-    reading the exit code calls it a pass while the document it just wrote says otherwise.
-
-    THE FIX, when someone takes it: give `main` the same criteria, ideally by having it reuse
-    one predicate rather than restating it — restating is what let the two drift apart. These
-    two tests then go red and should be REPLACED by their agreeing counterparts.
-    """
-
-    def test_a_turn_budget_burn_pins_a_defect_exit_zero_while_the_log_says_fail( self, wired_main, monkeypatch ):
+    def test_a_turn_budget_burn_fails_the_exit_code_and_the_log_together( self, wired_main, monkeypatch ):
         result = { "subtype": "success", "is_error": False, "num_turns": mod.MAX_TURNS }
         monkeypatch.setattr( mod, "_parse_stream", lambda path: _summary( result=result ) )
 
-        assert mod.main() == 0                                     # <- the defect
+        assert mod.main() == 1
         assert "**Verdict**: ❌ FAIL" in _section( summary=_summary( result=result ) )
 
-    def test_an_errored_result_pins_a_defect_exit_zero_while_the_log_says_fail( self, wired_main, monkeypatch ):
+    def test_an_errored_result_fails_the_exit_code_and_the_log_together( self, wired_main, monkeypatch ):
         result = { "subtype": "success", "is_error": True, "num_turns": 4 }
         monkeypatch.setattr( mod, "_parse_stream", lambda path: _summary( result=result ) )
 
-        assert mod.main() == 0                                     # <- the defect
+        assert mod.main() == 1
         assert "**Verdict**: ❌ FAIL" in _section( summary=_summary( result=result ) )
+
+    def test_a_clean_run_passes_both( self, wired_main, monkeypatch ):
+        """The control. Without it the pair above would be satisfied by a predicate that
+        simply fails everything."""
+        result = { "subtype": "success", "is_error": False, "num_turns": 4 }
+        monkeypatch.setattr( mod, "_parse_stream", lambda path: _summary( result=result ) )
+
+        assert mod.main() == 0
+        assert "**Verdict**: ✅ PASS" in _section( summary=_summary( result=result ) )
+
+    def test_one_predicate_backs_both_verdicts( self, wired_main, monkeypatch ):
+        """Pins the SHAPE of the fix, not just its effect: both sites must call `_run_passed`.
+        If someone re-inlines either one, the two can drift apart again silently and every
+        other test here would still pass."""
+        calls = []
+        real  = mod._run_passed
+        monkeypatch.setattr( mod, "_run_passed",
+                             lambda *a, **k: calls.append( 1 ) or real( *a, **k ) )
+
+        mod.main()
+        assert len( calls ) >= 2, "main and the logged section must BOTH consult _run_passed"
 
 
 # ────────────────────────────────────────────────────────────────────────

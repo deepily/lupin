@@ -120,6 +120,8 @@ Documents are archived into the branch/version where they were completed. Date p
 3. Documents that straddle two branches are placed in the branch where they were **finished**
 4. Subdirectories (multi-file research topics) move as a unit based on their date prefix
 
+- [2026.08.29 — Memento header drift: root cause](v0.2.0/2026.08.29-memento-header-drift-root-cause.md) — why memento slots keep failing the freshness guard as header-less (row 5680c544)
+
 ## Adding New Documents
 
 New R&D documents should be placed directly in the **current version directory** (currently `v0.2.0/`). When a new version branch is created, create a new directory for it and place subsequent documents there.
