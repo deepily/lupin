@@ -17,6 +17,7 @@ it never actually read.
 
 import importlib.util
 import json
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -69,6 +70,93 @@ def test_fetch_board_stops_and_reports_truncation_at_max_rows( monkeypatch ):
 
     assert truncated is True
     assert len( rows ) == 1
+
+
+# ── --max-rows is a real cap (row 9124b70a, Pocholo's patch, landed verbatim) ──────
+#
+# THE DEFECT. `fetch_board` asked for a flat `limit=PAGE_SIZE` whatever the caller passed,
+# so `--max-rows` was a page-stop THRESHOLD, not a cap: `--max-rows 100` fetched 500 and
+# then announced "truncated at 100 rows" — the one figure whose job is to say how partial
+# a scan was, and it could not be trusted.
+#
+# 🔴 WHY NO TEST ABOVE CAUGHT IT, WHICH IS THE MORE USEFUL HALF. The fakes above are
+# `lambda *a, **k` — they return their page WHOLE whatever was asked, so a capped request
+# and an uncapped one produce identical data. Even the max_rows=1 case is blind: it hands
+# back one row either way. The assertions were not weak, they were BLIND, and an assertion
+# audit passes them clean every time. Two conditions are needed to see this bug at all: a
+# cap BELOW the page size, and a fake that HONOURS the limit it was asked for. Every test
+# below asserts on the REQUEST the script issued, never on the verdict it reached.
+
+def _limit_of( url ):
+    """The `limit=` the script actually asked for — the request, not the verdict."""
+    return int( parse_qs( urlparse( url ).query )[ "limit" ][ 0 ] )
+
+
+def _honouring_pages( monkeypatch, available, has_more=True ):
+    """
+    A fake that SLICES its page to the requested limit, the way a real router does.
+
+    A fake that ignores `limit` cannot tell a capped request from an uncapped one, which
+    is exactly how this defect survived a full suite.
+    """
+    calls = [ ]
+
+    def _request( method, url, api_key, timeout, body=None ):
+        calls.append( url )
+        limit = _limit_of( url )
+        return _page( available[ :limit ], has_more=has_more )
+
+    monkeypatch.setattr( scan, "_request", _request )
+    return calls
+
+
+def test_a_small_cap_is_asked_for_rather_than_a_whole_page( monkeypatch ):
+    calls = _honouring_pages( monkeypatch, [ _row( f"r{i}", "epic:x" ) for i in range( 50 ) ] )
+
+    scan.fetch_board( SETTINGS, "key", 3 )
+
+    assert _limit_of( calls[ 0 ] ) == 3
+
+
+def test_a_cap_larger_than_a_page_still_asks_for_only_a_page( monkeypatch ):
+    """The router's `le=500` is a hard cap; asking for more is a 422, not a bigger page."""
+    calls = _honouring_pages( monkeypatch, [ _row( "a", "epic:x" ) ], has_more=False )
+
+    scan.fetch_board( SETTINGS, "key", 5000 )
+
+    assert _limit_of( calls[ 0 ] ) == scan.PAGE_SIZE
+
+
+def test_each_later_page_asks_for_only_the_room_that_is_left( monkeypatch ):
+    calls = _honouring_pages( monkeypatch, [ _row( f"r{i}", "epic:x" ) for i in range( 4 ) ] )
+
+    rows, truncated = scan.fetch_board( SETTINGS, "key", 7 )
+
+    assert [ _limit_of( c ) for c in calls ] == [ 7, 3 ]
+    assert len( rows ) == 7
+    assert truncated is True
+
+
+def test_the_rows_returned_never_exceed_the_cap( monkeypatch ):
+    for cap in ( 1, 2, 7, 25 ):
+        _honouring_pages( monkeypatch, [ _row( f"r{i}", "epic:x" ) for i in range( 50 ) ] )
+        rows, _ = scan.fetch_board( SETTINGS, "key", cap )
+
+        assert len( rows ) <= cap, f"--max-rows {cap} fetched {len( rows )}"
+
+
+def test_a_non_positive_cap_still_asks_for_at_least_one_row( monkeypatch ):
+    """
+    `argparse` accepts `--max-rows 0` and the router rejects `limit=0`, so without the
+    clamp the run dies on a 422 instead of returning an honest result. The `max( 1, … )`
+    arm, reachable only from a caller passing a non-positive cap.
+    """
+    calls = _honouring_pages( monkeypatch, [ _row( f"r{i}", "epic:x" ) for i in range( 5 ) ] )
+
+    rows, truncated = scan.fetch_board( SETTINGS, "key", 0 )
+
+    assert _limit_of( calls[ 0 ] ) == 1
+    assert ( len( rows ), truncated ) == ( 1, True )
 
 
 def test_fetch_board_breaks_on_an_empty_batch_even_when_has_more_lies( monkeypatch ):
@@ -214,6 +302,29 @@ def test_main_exits_three_and_warns_when_truncated( monkeypatch, capsys ):
 
     assert scan.main( [ "--max-rows", "1" ] ) == 3
     assert "BOARD TRUNCATED" in capsys.readouterr().err
+
+
+def test_the_truncation_warning_reports_ROWS_FETCHED_not_the_flag_it_was_given( monkeypatch, capsys ):
+    """
+    Row `9124b70a`, half (b). The warning used to interpolate `args.max_rows` — the number
+    ASKED FOR — while the run had fetched a different one, so the single figure whose job is
+    to say how partial the scan was could not be trusted.
+
+    🔴 THE TWO NUMBERS MUST DIFFER OR THE TEST CANNOT SEE THE BUG. `fetch_board` is stubbed
+    through `_wire`, so this hands back a row count that is not the flag: two rows under
+    `--max-rows 500`. An ordinary case, where an honoured cap makes the two equal, goes green
+    against BOTH spellings — which is how the old wording survived.
+    """
+    _wire( monkeypatch, [ _row( "a", "epic:x" ), _row( "b", "epic:x" ) ],
+           truncated=True, known=[ "epic:x" ] )
+
+    assert scan.main( [ "--max-rows", "500" ] ) == 3
+
+    err = capsys.readouterr().err
+    assert "BOARD TRUNCATED at 2 rows" in err, (
+        "the warning must report what was FETCHED; it said 500, the flag it was handed" )
+    assert "500" not in err.split( "--max-rows" )[ 0 ], (
+        "the asked-for figure must not appear as though it were the fetched one" )
 
 
 def test_main_json_mode_emits_the_report_and_the_reach( monkeypatch, capsys ):
