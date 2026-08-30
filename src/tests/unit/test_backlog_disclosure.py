@@ -20,6 +20,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     format_voice_context,
     BACKLOG_HEADER_PREFIX,
     BACKLOG_HEADER_THRESHOLD,
+    VOICE_LINE_PREFIX,
 )
 
 
@@ -151,3 +152,37 @@ def test_an_all_blank_drain_stays_empty_and_gains_no_header():
 
 def test_an_empty_drain_is_still_the_empty_string():
     assert format_voice_context( [] ) == ""
+
+
+def test_the_run_preserves_SENDER_ORDER_not_merely_the_set_of_messages():
+    """
+    ORDER, asserted separately from membership (gap found by Tiberius 👑 reviewing
+    250baf4b). The count-plus-unique-bodies test above pins the MULTISET: every
+    message arrives, exactly once. It says nothing about SEQUENCE, and he proved
+    it — `lines.reverse()` passed the whole suite 16 of 16, delivering every
+    message in reverse.
+
+    That gap cannot stand on THIS row. The measured defect it exists to guard
+    against is a condenser REORDERING a message so a trailing question led and the
+    verdict sank into the middle. A backlog formatter free to permute its run
+    would reproduce that harm one layer down, and the header would faithfully
+    announce the depth of a scrambled wall.
+
+    Membership and order are two claims. This file now makes both.
+    """
+    n     = BACKLOG_HEADER_THRESHOLD + 6
+    msgs  = [ _voice( f"body-{i:03d}-end" ) for i in range( n ) ]
+    body  = format_voice_context( msgs ).splitlines()[ 1: ]   # drop the header
+    assert body == [ f"{VOICE_LINE_PREFIX}body-{i:03d}-end" for i in range( n ) ]
+
+
+def test_order_is_preserved_in_a_run_SHORT_enough_to_carry_no_header():
+    """
+    The no-header branch permutes just as silently, and it has no leading line to
+    make a reader suspicious. Asserted separately so the guarantee does not depend
+    on the run being deep enough to disclose itself.
+    """
+    msgs = [ _voice( f"body-{i:03d}-end" ) for i in range( 3 ) ]
+    assert format_voice_context( msgs ).splitlines() == [
+        f"{VOICE_LINE_PREFIX}body-{i:03d}-end" for i in range( 3 )
+    ]
