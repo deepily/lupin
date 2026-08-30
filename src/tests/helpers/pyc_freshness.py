@@ -35,7 +35,9 @@ Usage:
 
 import importlib
 import importlib.util
+import marshal
 import os
+import struct
 import sys
 
 from contextlib import contextmanager
@@ -196,6 +198,110 @@ def mutated_source( source_path, new_text ):
             f"Do not trust any result from this block."
         )
 
+
+
+# ---------------------------------------------------------------------------
+# Detector — find bytecode that is SHADOWING its own source right now
+# ---------------------------------------------------------------------------
+
+def _shadow_verdict( source_path ):
+    """
+    Is `source_path` currently shadowed by a `.pyc` that CPython will accept as valid?
+
+    Three states, kept distinct on purpose — collapsing "no cached bytecode" into "fine" is how a
+    scan that examined nothing reports a clean bill of health:
+        True   -> a timestamp pyc claims validity for this source and holds DIFFERENT code
+        False  -> checked, and it is fine (no shadow)
+        None   -> not assessable (no pyc cached, hash-based pyc, or the source will not compile)
+
+    Hash-based pycs return None rather than False: CPython validates those itself, so this detector
+    has nothing to add and should not take credit for them.
+
+    ⚠️ THE COMPARISON IS BY CODE OBJECT, NOT BY MARSHAL BYTES, and that is not a style choice.
+    Measured 2026-08-29: comparing `marshal.dumps( marshal.loads( stored ) )` against a fresh
+    `marshal.dumps` reported **1093 shadowing pycs** across `src/cosa` where the true count was
+    **zero**. `marshal` is not canonical — it emits back-references, so re-dumping objects that are
+    equal produces different bytes. Code objects compare by value; marshal bytes do not.
+    """
+    cache = Path( importlib.util.cache_from_source( str( source_path ) ) )
+    if not cache.exists(): return None
+
+    raw = cache.read_bytes()
+    if len( raw ) < 16: return None
+
+    flags = struct.unpack( "<I", raw[ 4:8 ] )[ 0 ]
+    if flags & 1: return None                            # hash-based; CPython checks it itself
+
+    recorded_mtime, recorded_size = struct.unpack( "<II", raw[ 8:16 ] )
+    stat = source_path.stat()
+    if recorded_mtime != int( stat.st_mtime ) or recorded_size != stat.st_size:
+        return False                                     # CPython will invalidate it normally
+
+    try:
+        stored = marshal.loads( raw[ 16: ] )
+        fresh  = compile( source_path.read_bytes(), str( source_path ), "exec", dont_inherit=True )
+    except ( SyntaxError, ValueError, EOFError, TypeError ):
+        return None
+
+    return stored != fresh
+
+
+def find_shadowing_bytecode( roots ):
+    """
+    Scan for sources whose cached bytecode differs from the file on disk while still passing
+    CPython's validity check — i.e. code that WILL be run in place of what is written.
+
+    Requires:
+        - roots is a non-empty iterable of existing directories
+
+    Ensures:
+        - returns ( shadowed, examined ): the list of offending source Paths, and the count of
+          sources that were actually ASSESSABLE (a cached, timestamp-based pyc present)
+        - raises if roots is empty or names a missing directory
+
+    `examined` is returned, not logged, because it is the only thing separating "clean" from
+    "looked at nothing". A caller that ignores it can assert a green over an empty scan.
+    """
+    roots = [ Path( r ) for r in roots ]
+    assert roots, "find_shadowing_bytecode: no roots given — an empty scan reports clean"
+    for root in roots:
+        assert root.is_dir(), f"find_shadowing_bytecode: root does not exist: {root}"
+
+    shadowed, examined = [], 0
+    for root in roots:
+        for source in sorted( root.rglob( "*.py" ) ):
+            if ".venv" in source.parts: continue
+            verdict = _shadow_verdict( source )
+            if verdict is None: continue
+            examined += 1
+            if verdict: shadowed.append( source )
+
+    return shadowed, examined
+
+
+def describe_shadowing( shadowed ):
+    """
+    The failure text. Separate from the assertion so the message itself can be tested — a remedy
+    that is only reachable by making a test fail is a remedy nobody checks.
+
+    Ensures:
+        - names every offending file
+        - states the cache clear as the remedy, as a runnable command
+    """
+    listing = "\n".join( f"  {path}" for path in shadowed )
+    return (
+        f"{len( shadowed )} source file(s) are being SHADOWED by stale cached bytecode. Python is "
+        f"running code that is NOT what these files contain:\n{listing}\n\n"
+        f"CPython validates a .pyc on the source's whole-second mtime PLUS its size. An edit that "
+        f"changes neither — which every same-size mutation does, inside one second — is invisible, "
+        f"so the stale bytecode is served as valid (row d18ce9ef).\n"
+        f"Nothing you read from these files right now describes what will execute. Treat any test "
+        f"result involving them as void until this is cleared.\n\n"
+        f"REMEDY — clear the cached bytecode and re-run:\n"
+        f"  find src -name '__pycache__' -type d -exec rm -rf {{}} +\n\n"
+        f"To avoid causing this from a test that edits sources, use the mutate_source fixture in "
+        f"this module rather than writing the file directly."
+    )
 
 # ---------------------------------------------------------------------------
 # Pytest fixture — opt in by IMPORTING it into your test module:
