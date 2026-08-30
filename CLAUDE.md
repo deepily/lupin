@@ -456,6 +456,8 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 **Coverage**: `pytest --cov=cosa --cov-report=html src/tests/` (Python). See §100% COVERAGE MANDATE for the hard gate.
 
+**Editing a `.py` file inside a test?** Use `tests.helpers.pyc_freshness` (`mutate_source` fixture / `refresh_source`). CPython validates a `.pyc` on the source's **whole-second** mtime **plus size**, so a mutation edit changes neither and the interpreter keeps running the *old* code after you restore the file and read it back — measured twice on 2026-08-29, on `job_state.py` and on the helper's own module (row `d18ce9ef`). ⚠️ `PYTHONDONTWRITEBYTECODE` does **not** fix it; it only stops pycs being *written*. Debugging a red you cannot explain? `find src -name '__pycache__' -type d -exec rm -rf {} +` before concluding anything. Detail: `src/tests/README.md` § EDITING A SOURCE FILE INSIDE A TEST, measurement `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
+
 **Docs**: `src/tests/README.md` (overview), `src/tests/integration/README.md`, `src/docs/automated-interactive-testing.md` (proxy), `src/tests/smoke/README.md`, `src/tests/AUTH-TESTING-GUIDE.md` (credentials), presentation strategy `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.07-e2e-testing-strategy.md`.
 
 ## PR MERGE REQUIREMENTS

@@ -26,6 +26,53 @@ Decisions Log, 2026-08-26).
 `fail_under` belongs to the coverage-ramp owner and stays there. The guard decides *where a
 run writes*, never *what threshold it must clear*.
 
+## 🔴 EDITING A SOURCE FILE INSIDE A TEST? THE NEXT IMPORT MAY NOT SEE IT
+
+If your test (or your by-hand probe) writes to a `.py` file and then imports or re-runs it, use
+the opt-in helper — otherwise the interpreter can keep running the *old* code:
+
+```python
+from tests.helpers.pyc_freshness import mutate_source     # the pytest fixture
+from tests.helpers.pyc_freshness import refresh_source    # or the bare function
+
+def test_thing( mutate_source ):
+    mutate_source( SRC, SRC.read_text().replace( '"todo"', '"dead"' ) )
+    ...                                    # every touched file restored at teardown
+```
+
+**Why (row `d18ce9ef`, measured 2026-08-29).** CPython validates a `.pyc` on the source's
+**whole-second** mtime **plus** its **size**. A mutation edit changes neither — `"todo"` → `"dead"`
+is four characters either way, and a scripted loop does the edit and the restore inside one second
+— so the stale bytecode is served as valid. Measured on `src/cosa/rest/job_state.py`: source mtime
+`21:33:22.780`, pyc built `21:33:22.568`; for minutes `grep` said `todo` and `import` said `dead`.
+
+**The failure points the wrong way.** You restore the file, read it back to confirm, and the
+interpreter keeps running the mutant. Mutation testing is how a great deal of this repo earns its
+receipts, so a hazard aimed at it is aimed at the evidence.
+
+**It is CROSS-PROCESS** — a *fresh* pytest reads the stale `.pyc` off disk. So this is not
+`importlib.reload` staleness, `sys.modules` bookkeeping does not fix it, and neither does
+`importlib.invalidate_caches()`, which clears finder caches rather than pyc validation.
+
+⚠️ **`PYTHONDONTWRITEBYTECODE` does NOT fix this** — measured. It only stops pycs being *written*;
+one already on disk is still read and still wins. It passes only from a tree cleaned first, which
+means the clean is the protection, not the flag. `PYTHONPYCACHEPREFIX` merely relocates the race.
+
+**If you are debugging a red you cannot explain**, clear the cache before concluding anything:
+
+```bash
+find src -name '__pycache__' -type d -exec rm -rf {} +
+```
+
+**Two sightings in one evening, on different files, with nobody hunting for it** — `job_state.py`
+during the AC-G4 mutation sweep, then `tests/helpers/pyc_freshness.py` itself while the helper was
+being built. The second went red against code no longer on disk and was nearly logged as a flake;
+it failed in the *safe* direction, which is luck, not design — the same collision with a mutant
+still live reads as **green**.
+
+Full measurement, six remedies priced, and the still-open repo-wide question:
+`src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
+
 ## Test Hierarchy
 
 ### 1. Unit Tests (`src/tests/unit/`)
