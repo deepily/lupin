@@ -339,7 +339,8 @@ def test_a_detector_change_forces_a_full_rescan():
               else "THE PUBLISHED TIP MOVED" if ref_now != recorded[ "scanned_ref_sha" ]
               else "THE RECORDED SCAN DOES NOT MATCH WHAT THIS SCANNER MEASURES" )
 
-    measured = _scan_fingerprint( secret_scan.scan_ref( recorded[ "scanned_ref" ], cwd=root ) )
+    findings = secret_scan.scan_ref( recorded[ "scanned_ref" ], cwd=root )
+    measured = _scan_fingerprint( findings )
     assert measured == recorded.get( "scan_fingerprint" ), (
         f"{what} SINCE THE LAST RECORDED FULL SCAN, and re-running it here does not match "
         "what is on record. Re-scan, TRIAGE the output, and record the result — the "
@@ -351,6 +352,32 @@ def test_a_detector_change_forces_a_full_rescan():
         f"    last recorded     : {recorded[ 'scanned_at' ]}, "
         f"{recorded[ 'distinct_values_at_tip' ]} distinct values, "
         f"{recorded[ 'real_findings' ]} real"
+    )
+
+    # 🔴 THE FINGERPRINT PROVES A RE-SCAN HAPPENED. IT PROVES NOTHING ABOUT A TRIAGE.
+    # Measured 2026-08-30 (row d8683a66): `distinct_values_at_tip` and
+    # `candidate_locations_at_tip` appeared in this file exactly ONCE each — inside the
+    # failure message above — and were never asserted. So a seat could paste the measured
+    # fingerprint into the record, leave the counts at their 2026-08-17 values, and this
+    # test would go green while the record claimed 116 distinct values against a scan
+    # returning 117. Self-inconsistent record, clean tier, nobody told.
+    #
+    # Both counts are DERIVED FROM `findings` — the same object the fingerprint is computed
+    # from — so like the fingerprint they cannot be filled in without scanning. A mismatch
+    # here means the record was HAND-EDITED rather than re-derived, which is the one thing
+    # the fingerprint alone cannot see.
+    counted = {
+        "candidate_locations_at_tip" : len( findings ),
+        "distinct_values_at_tip"     : len( { digest for _o, _n, _k, _len, digest in findings } ),
+    }
+    disagreed = [ field for field, value in counted.items() if recorded.get( field ) != value ]
+    assert not disagreed, (
+        "THE RECORDED COUNTS DO NOT MATCH THE SCAN THIS TEST JUST RAN — "
+        f"{', '.join( disagreed )}. The fingerprint above agrees, so the scan was re-run; "
+        "these fields were not re-derived from it. Re-record them from the SAME scan, and "
+        "re-do the TRIAGE they summarise — a count that moved means findings moved:\n"
+        + "".join( f"    {field:28}: recorded {recorded.get( field )!r}, measured {value!r}\n"
+                   for field, value in counted.items() )
     )
 
 
