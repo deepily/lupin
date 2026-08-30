@@ -48,15 +48,65 @@
 #     whether you need to.
 #
 # Usage:
-#   src/scripts/migrate-pyc-to-checked-hash.sh            # convert, then verify
-#   src/scripts/migrate-pyc-to-checked-hash.sh --verify   # report only, change nothing
+#   src/scripts/migrate-pyc-to-checked-hash.sh                  # convert, then verify
+#   src/scripts/migrate-pyc-to-checked-hash.sh --verify         # report only, change nothing
+#   src/scripts/migrate-pyc-to-checked-hash.sh [--verify] DIR…  # scope to DIR(s) instead of src/
 #
+# 🔴 THE ARGUMENT SURFACE IS PART OF THE MEASUREMENT (row a4e36bcb, 2026-08-30).
+# An earlier cut of this script tested `$1` only for the literal `--verify` and assigned
+# TARGETS unconditionally, so a path on the command line was neither used NOR rejected — it
+# was silently discarded while the script scanned `$LUPIN_ROOT/src` and printed a verdict that
+# read as if it were about the path you typed. Measured: a temp dir holding exactly ONE
+# unchecked-hash pyc got `2416 (checked-hash=2416)` and `exit 0`. That was caught only because
+# 2,416 was implausible for a temp dir; with a plausible count it would have produced a wrong
+# bug report carrying what looked like clean evidence.
+#
+# This is the same failure family as the `src/cosa/.venv` mis-population recorded below — the
+# scope silently differing from the scope the operator meant — arriving through the argument
+# surface instead of the exclude pattern. Hence: every argument is either HONOURED or REFUSED
+# (never discarded), and the census NAMES the roots it actually scanned.
 set -uo pipefail
 
 LUPIN_ROOT="${LUPIN_ROOT:-$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )}"
 PYTHON="${PYTHON:-$LUPIN_ROOT/.venv/bin/python}"
 VERIFY_ONLY=0
-[[ "${1:-}" == "--verify" ]] && VERIFY_ONLY=1
+ROOTS=()
+
+usage() {
+    cat <<'USAGE'
+Usage: migrate-pyc-to-checked-hash.sh [--verify] [DIR...]
+
+  --verify     report only; change nothing (exit 1 if any pyc THIS interpreter
+               reads is not checked-hash)
+  DIR...       directories to convert/verify. Default: $LUPIN_ROOT/src
+  -h, --help   this message
+
+Every argument is honoured or refused — never silently discarded. The census
+names the roots it scanned, so the scope is visible in the same breath as the
+verdict.
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --verify )    VERIFY_ONLY=1 ;;
+        -h|--help )   usage; exit 0 ;;
+        -- )          shift; ROOTS+=( "$@" ); break ;;
+        -* )          echo "ERROR: unknown option '$1'" >&2; usage >&2; exit 2 ;;
+        * )           ROOTS+=( "$1" ) ;;
+    esac
+    shift
+done
+
+# A path that is not a directory is REFUSED, not coerced. The census walks
+# `__pycache__/*.pyc` under each root, so a file or a typo would scan nothing and report a
+# clean bill — the exact silent-wrong-scope this row exists to close.
+for root in "${ROOTS[@]+"${ROOTS[@]}"}"; do
+    if [[ ! -d "$root" ]]; then
+        echo "ERROR: not a directory: $root" >&2
+        exit 2
+    fi
+done
 
 # Repo source only. Third-party code is deliberately NOT converted: nobody mutation-tests
 # it, and rewriting thousands of vendored pycs buys nothing while widening the blast radius.
@@ -75,7 +125,8 @@ VERIFY_ONLY=0
 # A number that large reads like a thorough migration; it was mostly noise — the same
 # wrong-population defect this row's own epic keeps finding, this time in the fix.
 EXCLUDE_RE='(^|/)(\.venv|node_modules|\.git|__pypackages__|site-packages)(/|$)'
-TARGETS=( "$LUPIN_ROOT/src" )
+if [[ ${#ROOTS[@]} -gt 0 ]]; then TARGETS=( "${ROOTS[@]}" )
+else                              TARGETS=( "$LUPIN_ROOT/src" ); fi
 
 if [[ ! -x "$PYTHON" ]]; then
     echo "ERROR: no interpreter at $PYTHON (set PYTHON=... or build the venv)" >&2
@@ -115,6 +166,12 @@ buckets   = { "mine": [], "other_interpreter": [], "pytest_rewritten": [] }
 modes     = { "mine": {}, "other_interpreter": {}, "pytest_rewritten": {} }
 
 EXCLUDED = { ".venv", "node_modules", ".git", "__pypackages__", "site-packages" }
+
+# The scope belongs NEXT TO the verdict. Printed RESOLVED, so a relative path, a symlink or a
+# worktree that is not the tree you think you are standing in is visible rather than inferred.
+print( "  scanned roots:" )
+for root in sys.argv[ 1: ]:
+    print( f"      {Path( root ).resolve()}" )
 
 for root in sys.argv[ 1: ]:
     for pyc in Path( root ).rglob( "__pycache__/*.pyc" ):
@@ -169,18 +226,24 @@ if [[ $VERIFY_ONLY -eq 0 ]]; then
     echo
 fi
 
-echo "Census of $( [[ $VERIFY_ONLY -eq 1 ]] && echo "this tree" || echo "the converted tree" ):"
+echo "Census of $( [[ $VERIFY_ONLY -eq 1 ]] && echo "the roots below" || echo "the converted roots below" ):"
 "$PYTHON" -c "$CENSUS_PY" "${TARGETS[@]}"
 STATUS=$?
 
 if [[ $STATUS -eq 0 ]]; then
     echo
     echo "✓ every pyc THIS interpreter reads is checked-hash — a same-size same-second edit"
-    echo "  to library code under src/ will be SEEN. See the note above for what is excluded;"
-    echo "  the claim is deliberately scoped to the population the verdict measured."
+    echo "  to library code under the scanned roots named above will be SEEN. See the note above"
+    echo "  for what is excluded; the claim is scoped to the population the verdict measured."
 else
     echo
-    echo "✗ pycs above are still timestamp-based and would serve stale bytecode."
+    # The mode is NOT asserted here: the census one screen up already splits timestamp from
+    # unchecked-hash, and this line used to claim "timestamp-based" directly beneath a census
+    # reading `unchecked-hash=1`. Unchecked-hash is the more dangerous of the two — timestamp at
+    # least invalidates on mtime+size, unchecked-hash is never revalidated at all — so naming
+    # the wrong one understates the finding.
+    echo "✗ pycs above are NOT checked-hash (see the census for which mode) and would serve"
+    echo "  stale bytecode."
     [[ $VERIFY_ONLY -eq 1 ]] && echo "  Fix: run this script without --verify."
 fi
 exit $STATUS
