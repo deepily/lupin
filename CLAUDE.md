@@ -397,7 +397,7 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 
 **Which of the two you get is decided by ONE thing: whether you exported `LUPIN_ROOT="$PWD"`.** Both numbers below are correct; they are measurements of two different setups, not a disagreement. See the reconciliation under the table.
 
-**Measured 2026-08-29** (row `3d01df71`). Two seats ran the unit tier on the same sha `31b2cfce` within the hour and got **25 failures in a worktree** against **14 in the main tree**. Neither number was wrong. The gap is **exactly 11 in that setup** — measured WITHOUT `LUPIN_ROOT="$PWD"` exported; with the export it is 10, and the two reconcile (see below) — and all of it is state that is present in the main tree and absent from every worktree — so a worktree tier accuses the branch of breakage it does not have.
+**Measured 2026-08-29** (row `3d01df71`). Two seats ran the unit tier on the same sha `31b2cfce` within the hour and got **25 failures in a worktree** against **14 in the main tree**. Neither number was wrong. The gap is **exactly 11 in that setup** — INFERRED (not measured) to be without `LUPIN_ROOT="$PWD"` exported, from the fact that its third row fired at all; with the export it is 10, and the two reconcile (see below) — and all of it is state that is present in the main tree and absent from every worktree — so a worktree tier accuses the branch of breakage it does not have.
 
 | n | what is missing | how it surfaces |
 |---|---|---|
@@ -433,8 +433,11 @@ rule: two counts get RECONCILED, not adjudicated, and a mismatch that reconciles
 disagreement.** A doc that had simply replaced 11 with 10 would have made the next reader who
 forgets the export think they had found a new failure.
 
-**Verified both directions, not asserted.** The 10 artifact tests were re-run in the MAIN tree at
-`625665bb` — **120 passed, 1 skipped, 0 failed** — and the two missing inputs were checked on both
+**Verified both directions, not asserted.** The four files carrying those 10 artifact failures —
+`test_dm_tutor_flash_lite_routing.py`, `test_flash_lite_arm_vertex_markers.py`,
+`test_phi4_flash_lite_replay.py`, `test_terraform_invariants.py` — were re-run WHOLE in the MAIN tree
+at `625665bb`: **120 passed, 1 skipped, 0 failed**. (120 is every test in those four files, not the
+10 failures; the 10 are a subset that passed along with the rest.) and the two missing inputs were checked on both
 trees: `src/scripts/cloud-run.env` and `src/terraform/envs/test/.terraform/providers` are PRESENT in
 the main tree and ABSENT in the worktree.
 
@@ -444,8 +447,15 @@ been wrong to file them as worktree artifacts too: the main tree was a **descend
 worktree's sha, 12 commits ahead, and those 8 had been FIXED in that window (`51950988` for the
 manager-figure stamp; the venv-declaration guard across `20dc6b18`, `71637fe1`, `625665bb`). **A
 failure that passes in the main tree has TWO explanations — a worktree artifact, or a fix you do not
-have yet — and `git merge-base` tells you which.** Reporting the second as the first credits your
-environment for somebody else's repair.
+have yet.** Reporting the second as the first credits your environment for somebody else's repair.
+
+⚠️ **AND THE TWO-STEP THAT SEPARATES THEM IS NOT ONE COMMAND** (Tiberius 👑, reviewing this section
+2026-08-30 — the original text said "`git merge-base` tells you which", which OVERSTATES what it
+returns). `git merge-base --is-ancestor <your-sha> <main-HEAD>` establishes **ancestry**, which shows
+only that a fix **COULD** be missing. What proves one **WAS** is **naming the commit**:
+`git log --oneline <your-sha>..<main-HEAD> -- <the failing test's path>`. Ancestry narrows the
+suspects; the commit closes it. A section whose whole theme is descriptions drifting from evidence
+should not itself claim more than its command returns.
 
 ⚠️ **THE SAME MISMATCH IS HARMLESS IN ONE DIRECTION AND SILENT-FATAL IN THE OTHER — SO READ THE
 WARNING, THEN ASK WHAT THE CODE WRITES.** Measured by Maya 🌻 2026-08-29, and added here rather than
