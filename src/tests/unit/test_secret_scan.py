@@ -500,7 +500,15 @@ def test_the_live_fixture_carries_a_reason_for_every_accepted_row():
         f"{len( direct_unjustified )} accepted row(s) in the live record carry no reason:\n"
         + chr( 10 ).join( "    " + row for row in direct_unjustified )
     )
-    assert len( accepted ) == 190, "the grandfathered set changed size — re-triage before re-pinning"
+    # Pins the ACCEPTED count, and says so. It used to say "the grandfathered set changed
+    # size", which named a different set (Tiberius, reviewing aab06b9c): today all 190
+    # accepted rows ride the amnesty, so the two counts coincide — but the moment one row
+    # earns an individual reason the grandfathered set drops to 189 while accepted stays
+    # 190, and this would have fired with a message about the wrong thing. The
+    # grandfathered set has its own bound in test_the_amnesty_is_bounded_*.
+    assert len( accepted ) == 190, (
+        f"the ACCEPTED set is now {len( accepted )}, not 190. A row was added or removed — "
+        "triage the addition and re-pin deliberately, rather than adjusting this number." )
 
 
 def test_the_amnesty_is_bounded_and_cannot_absorb_a_new_finding():
