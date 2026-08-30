@@ -62,11 +62,14 @@ COMPOSE_TARGETS = {
 # entry here turns out to be covered after all — so landing a mount forces the entry out.
 #
 # ⚠️ MOUNT-ABSENT, NOT CONTENT-ABSENT — the distinction cost a red here and is worth keeping.
-# `lupin-mobile` is NOT listed: its INI path `/var/lupin/src/lupin-mobile` sits inside the
-# `./src -> /var/lupin/src` code mount, so it IS covered by this test's definition. It is
-# nonetheless missing on the VM, because that nested repo is absent from the VM's checkout —
-# a CONTENT gap no compose edit can fix, and one this static tier cannot see by construction.
-# Listing it here would have been a false exemption that read as a handled case.
+# `lupin-mobile` USED to be exempt from this list on every deployment: its old INI path
+# `/var/lupin/src/lupin-mobile` sat inside the `./src -> /var/lupin/src` code mount, so it was
+# covered by this test's definition everywhere the code mount existed. On 2026-08-30 Rick moved
+# that repo OUT of `src/` to a sibling of lupin, and the INI now points at
+# `/var/external-projects/lupin-mobile` (row f2f7b0cd). On dev/test that is still covered — the
+# whole projects directory is bound at `/var/external-projects`. On cloud-gpu it is NOT, so the
+# scope now needs the entry below. The CONTENT gap named above is unchanged and is the reason
+# the honest fix is a KNOWN_ABSENT entry rather than a new mount: the repo is not on the VM.
 KNOWN_ABSENT = {
     "docker-compose.cloud-gpu.yml": {
         "cosa-voice"                 : "not cloned on the GCP test VM",
@@ -76,6 +79,7 @@ KNOWN_ABSENT = {
         "retail-ai-location-strategy": "not cloned on the GCP test VM",
         "google-project-wonderwall"  : "not cloned on the GCP test VM",
         "scratchpad"                 : "dev-host scratch project; intentionally not on the VM",
+        "lupin-mobile"               : "not cloned on the GCP test VM. Until 2026-08-30 it rode the `./src -> /var/lupin/src` code mount as a nested repo and so was never listed here; Rick moved it to a sibling of lupin that day (row f2f7b0cd) and the INI now points at /var/external-projects/lupin-mobile, which cloud-gpu does not bind. Landing a mount for it forces this entry out, which is correct — but the repo has to reach the VM first.",
         "weil-parallel-search"       : "registered 2026-08-19 (5394ca55) for the dev doc viewer at Clayton's request; nobody has said it exists on the VM and no seat here can read the VM's disk. Its sibling parallel-search IS bound on cloud-gpu from /mnt/lupin-data/google/, so if this repo is on the VM too the right fix is a MOUNT and this entry must go — the reverse-direction test forces that the moment one lands.",
     },
 }

@@ -231,7 +231,7 @@ POST /api/v2/submit
 - **ARCHIVE ACCESS**: If deeper historical context needed, follow links to `history/YYYY-MM-history.md` files
 - **IGNORE SUB-REPO HISTORIES**: Do NOT read these sub-repository history files as they are managed separately:
   - `src/lupin-plugin-firefox/history.md` (Firefox plugin sub-repo)
-  - `src/lupin-mobile/history.md` (Mobile app sub-repo)
+  - `../lupin-mobile/history.md` (Mobile app — a SIBLING of lupin since 2026-08-30, no longer under `src/`)
   - (`src/cosa/history.md` is **no longer** a sub-repo history — CoSA folded into the mono-repo 2026-05-29; it is now a normal in-tree doc.)
 
 ## PROJECT SHORT NAMES
@@ -273,7 +273,7 @@ POST /api/v2/submit
    - **History**: Has own history.md (DO NOT read from Lupin context)
 
 2. **Mobile App**
-   - **Location**: `/src/lupin-mobile/`
+   - **Location**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin-mobile/` — a **SIBLING** of the Lupin repo since 2026-08-30, moved out of `src/`. It is no longer nested, so it will not appear in Lupin's `git status` at all.
    - **Management**: Separate repository, managed independently
    - **History**: Has own history.md (DO NOT read from Lupin context)
 
@@ -291,7 +291,7 @@ The `/plan-session-end` workflow has been configured with nested repository awar
 **What you'll see**:
 ```
 ⚠️ Detected changes in nested repositories:
-• /src/lupin-mobile/ (1 new file)
+• ../lupin-mobile/ (1 new file — sibling repo, detected only if explicitly scanned)
 
 These are separate Git repositories and will not be included in this commit.
 Reminder: Manage nested repositories in their own sessions/contexts.
@@ -317,7 +317,7 @@ find . -name ".git" -type d | grep -v "^./.git$"
 - Manage as independent project
 - Has own git history and workflows
 
-**When working in Mobile App** (`cd src/lupin-mobile/`):
+**When working in Mobile App** (`cd ../lupin-mobile/`):
 - Manage as independent project
 - Has own git history and workflows
 
