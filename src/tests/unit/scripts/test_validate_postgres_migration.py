@@ -31,9 +31,9 @@ WHAT THIS FILE IS CAREFUL ABOUT:
 · ✅ THE ORM MODELS ARE REAL. `User`, `RefreshToken`, `ApiKey` and `AuthAuditLog` construct fine
   without a connection.
 
-⚠️ ONE TEST HERE PINS A KNOWN DEFECT RATHER THAN A REQUIREMENT — see
-`test_the_script_prepends_an_unnormalised_parent_path_on_every_import` at the bottom, and bug
-row `bef58663`. Whoever fixes that bug must update that test in the same commit.
+⚠️ ONE TEST HERE USED TO PIN A KNOWN DEFECT AND NOW ASSERTS ITS FIX — see
+`test_the_script_normalises_and_guards_its_sys_path_insert` at the bottom — it USED to pin the
+defect in bug row `bef58663`, and was flipped to assert the fix in the same commit that made it.
 
 Each test names the change that reddens it.
 """
@@ -693,6 +693,14 @@ def test_the_by_path_load_never_puts_scripts_on_sys_path( monkeypatch ):
     """
 
     monkeypatch.setattr( sys, "path", list( sys.path ) )
+
+    # Start from a path that does NOT already carry `src`, so "exactly one entry was
+    # prepended" is a claim about the LOADER rather than about what a neighbour left
+    # behind. Since the fix for bug bef58663 the script's insert is GUARDED, so with
+    # `src` already present it would correctly add nothing and the length assertion
+    # below would be measuring the guard instead of the recipe.
+    sys.path[ : ] = [ p for p in sys.path
+                      if os.path.realpath( p ) != os.path.realpath( _SRC ) ]
     before = list( sys.path )
 
     probe = _load_probe( "validate_postgres_migration_probe" )
@@ -706,36 +714,40 @@ def test_the_by_path_load_never_puts_scripts_on_sys_path( monkeypatch ):
     assert probe.__file__.endswith( "validate-postgres-migration.py" )
 
 
-def test_the_script_prepends_an_unnormalised_parent_path_on_every_import( monkeypatch ):
+def test_the_script_normalises_and_guards_its_sys_path_insert( monkeypatch ):
     """
-    🔴 THIS TEST PINS A KNOWN DEFECT, NOT A REQUIREMENT — bug row `bef58663`.
+    The FIX for bug `bef58663`, and this test used to assert the opposite.
 
-    `validate-postgres-migration.py:26` inserts `<root>/src/scripts/..` at position 0 with NO
-    membership guard. Two consequences, both asserted here:
-      · The string is UNNORMALISED, so it is not equal to `<root>/src` even though it resolves
-        there. A `if path not in sys.path` guard written elsewhere cannot recognise it as the
-        same entry.
-      · There is no guard at all, so each import prepends ANOTHER copy.
+    Until the fix, `validate-postgres-migration.py:26` read
+        sys.path.insert( 0, os.path.join( os.path.dirname( __file__ ), '..' ) )
+    which was wrong twice over, and an earlier version of this test PINNED both as though they
+    were requirements — because the coverage ramp reached this file before the fix did:
+      · UNNORMALISED. The entry was the literal `<root>/src/scripts/..`, not `<root>/src`. It
+        resolves to the same directory but is a different STRING, so an ordinary
+        `if path not in sys.path` check elsewhere could not recognise it as already present.
+      · UNGUARDED. No membership check at all, so every import prepended another copy.
 
-    ⚠️ WHOEVER FIXES bef58663 MUST UPDATE THIS TEST IN THE SAME COMMIT. That is the standing
-    cost of covering a file before fixing it: the ramp does not leave a defect where it found
-    it, it leaves it nailed down by a passing test. A fix that leaves this green has not fixed
-    anything; a fix that turns it red without updating it reads as a regression.
+    ⚠️ THAT IS THE STANDING COST OF COVERING A FILE BEFORE FIXING IT: the ramp does not leave a
+    defect where it found it, it leaves it nailed down by a passing test. Flipping this test is
+    the second half of the fix, and it had to land in the SAME COMMIT — green here after the
+    code change would have meant nothing was fixed.
 
-    The sibling `migrate-sqlite-to-postgres.py` carries the identical defect and its own
-    identically-named pinning test (commit 0ca03736). Those two files are the entire blast
-    radius — measured, 37 files under src/scripts touch sys.path, 31 are guarded, and only
-    these two are both unguarded and unnormalised.
+    Now asserted: the entry is normalised, equals `<root>/src` exactly, and a second import adds
+    NOTHING because the guard sees it.
     """
 
     monkeypatch.setattr( sys, "path", list( sys.path ) )
     unnormalised = os.path.join( os.path.dirname( _SCRIPT ), ".." )
-    start        = sys.path.count( unnormalised )
 
-    for n in ( 1, 2 ):
-        _load_probe( f"probe_{n}" )
-        assert sys.path[ 0 ] == unnormalised
-        assert sys.path.count( unnormalised ) == start + n     # no guard: it accumulates
+    # Start from a path that does NOT already contain the entry, so "was it added" is readable.
+    sys.path[ : ] = [ p for p in sys.path
+                      if os.path.realpath( p ) != os.path.realpath( _SRC ) ]
 
-    assert unnormalised != _SRC                                # unnormalised, so never equal
-    assert os.path.realpath( unnormalised ) == os.path.realpath( _SRC )
+    _load_probe( "probe_first" )
+    assert sys.path[ 0 ] == _SRC                     # normalised, not "<root>/src/scripts/.."
+    assert unnormalised not in sys.path              # the old spelling is gone for good
+    assert sys.path.count( _SRC ) == 1
+
+    before = list( sys.path )
+    _load_probe( "probe_second" )
+    assert sys.path == before                        # guarded: a re-import adds nothing

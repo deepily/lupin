@@ -872,9 +872,12 @@ def test_the_by_path_load_never_puts_scripts_on_sys_path( monkeypatch ):
         multi-file run: a neighbour — `test_detect_thread_credited_coverage.py:18` — does
         exactly the insert this recipe avoids, so the directory is already there. A test that
         reads global state it does not own reports its neighbours' behaviour as its own defect.
-    (2) Asserting the load adds NOTHING. False, and for a reason belonging to the script rather
-        than the loader: `migrate-sqlite-to-postgres.py:28` runs
-        `sys.path.insert( 0, os.path.join( os.path.dirname( __file__ ), '..' ) )` at import.
+    (2) Asserting the load adds NOTHING. That was false WHEN THIS TEST WAS WRITTEN, for a
+        reason belonging to the script rather than the loader: `migrate-sqlite-to-postgres.py:28`
+        ran an UNGUARDED `sys.path.insert( 0, ... )` at import. The fix for bug bef58663
+        guards it, so it now adds nothing when `src` is ALREADY present — which is exactly
+        why the body below removes `src` first. Recipe (2) is not wrong any more; it is
+        simply no longer a claim about the loader.
     (3) Computing what was added with `p not in before` — a MEMBERSHIP test where the thing
         being measured is a COUNT. This module's own top-level load already put that entry on
         the path, so the script's unguarded re-insert adds a DUPLICATE that membership cannot
@@ -887,6 +890,14 @@ def test_the_by_path_load_never_puts_scripts_on_sys_path( monkeypatch ):
     """
 
     monkeypatch.setattr( sys, "path", list( sys.path ) )
+
+    # Start from a path that does NOT already carry `src`, so "exactly one entry was
+    # prepended" is a claim about the LOADER rather than about what a neighbour left
+    # behind. Since the fix for bug bef58663 the script's insert is GUARDED, so with
+    # `src` already present it would correctly add nothing and the length assertion
+    # below would be measuring the guard instead of the recipe.
+    sys.path[ : ] = [ p for p in sys.path
+                      if os.path.realpath( p ) != os.path.realpath( _SRC ) ]
     before = list( sys.path )
 
     probe = _load_probe( "migrate_sqlite_to_postgres_probe" )
@@ -900,35 +911,43 @@ def test_the_by_path_load_never_puts_scripts_on_sys_path( monkeypatch ):
     assert probe.__file__.endswith( "migrate-sqlite-to-postgres.py" )
 
 
-def test_the_script_prepends_an_unnormalised_parent_path_on_every_import( monkeypatch ):
+def test_the_script_normalises_and_guards_its_sys_path_insert( monkeypatch ):
     """
-    Documents a real, minor defect in the script rather than papering over it.
+    The FIX for bug `bef58663`, and this test used to assert the opposite.
 
-    `migrate-sqlite-to-postgres.py:28` inserts `<root>/src/scripts/..` at position 0 with NO
-    membership guard. Two consequences, both asserted here:
-      · The string is UNNORMALISED, so it is not equal to `<root>/src` even though it resolves
-        there. A `if path not in sys.path` guard elsewhere cannot recognise it as the same
-        entry — which is exactly how wrong version (3) of the test above fooled itself.
-      · There is no guard at all, so each import prepends ANOTHER copy and `sys.path` grows
-        once per import.
+    Until the fix, `migrate-sqlite-to-postgres.py:28` read
+        sys.path.insert( 0, os.path.join( os.path.dirname( __file__ ), '..' ) )
+    which was wrong twice over, and an earlier version of this test PINNED both as though they
+    were requirements — because the coverage ramp reached this file before the fix did:
+      · UNNORMALISED. The entry was the literal `<root>/src/scripts/..`, not `<root>/src`. It
+        resolves to the same directory but is a different STRING, so an ordinary
+        `if path not in sys.path` check elsewhere could not recognise it as already present.
+      · UNGUARDED. No membership check at all, so every import prepended another copy.
 
-    Harmless for a script run once from a shell, which is how this one is used. Recorded so the
-    next reader knows it was measured and judged rather than missed. The sibling
-    `create_service_account_postgres.py` guards the same insert with
-    `if src_path not in sys.path`, so the better pattern exists in-tree; this file predates it.
+    ⚠️ THAT IS THE STANDING COST OF COVERING A FILE BEFORE FIXING IT: the ramp does not leave a
+    defect where it found it, it leaves it nailed down by a passing test. Flipping this test is
+    the second half of the fix, and it had to land in the SAME COMMIT — green here after the
+    code change would have meant nothing was fixed.
+
+    Now asserted: the entry is normalised, equals `<root>/src` exactly, and a second import adds
+    NOTHING because the guard sees it.
     """
 
     monkeypatch.setattr( sys, "path", list( sys.path ) )
     unnormalised = os.path.join( os.path.dirname( _SCRIPT ), ".." )
-    start        = sys.path.count( unnormalised )
 
-    for n in ( 1, 2 ):
-        _load_probe( f"probe_{n}" )
-        assert sys.path[ 0 ] == unnormalised
-        assert sys.path.count( unnormalised ) == start + n     # no guard: it accumulates
+    # Start from a path that does NOT already contain the entry, so "was it added" is readable.
+    sys.path[ : ] = [ p for p in sys.path
+                      if os.path.realpath( p ) != os.path.realpath( _SRC ) ]
 
-    assert unnormalised != _SRC                                # unnormalised, so never equal
-    assert os.path.realpath( unnormalised ) == os.path.realpath( _SRC )
+    _load_probe( "probe_first" )
+    assert sys.path[ 0 ] == _SRC                     # normalised, not "<root>/src/scripts/.."
+    assert unnormalised not in sys.path              # the old spelling is gone for good
+    assert sys.path.count( _SRC ) == 1
+
+    before = list( sys.path )
+    _load_probe( "probe_second" )
+    assert sys.path == before                        # guarded: a re-import adds nothing
 
 
 def test_the_module_under_test_was_itself_loaded_by_path():
