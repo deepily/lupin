@@ -45,6 +45,7 @@ from tests.helpers.pyc_freshness import (            # noqa: E402
     bytecode_files_for,
     describe_shadowing,
     find_shadowing_bytecode,
+    scan_is_meaningful,
 )
 
 SCAN_ROOTS = [ REPO_ROOT / "src" / "cosa",
@@ -87,7 +88,7 @@ def test_the_detector_actually_sees_a_shadowing_pyc( tmp_path ):
     """
     src = _manufacture_shadowed_source( tmp_path )
 
-    shadowed, examined = find_shadowing_bytecode( [ tmp_path ] )
+    shadowed, examined, _protected = find_shadowing_bytecode( [ tmp_path ] )
 
     assert examined >= 1
     assert src in shadowed, (
@@ -111,7 +112,7 @@ def test_a_source_with_matching_bytecode_is_not_reported( tmp_path ):
                       f"import sys; sys.path.insert( 0, {str( tmp_path )!r} ); import honest" ],
                     capture_output=True, timeout=60 )
 
-    shadowed, examined = find_shadowing_bytecode( [ tmp_path ] )
+    shadowed, examined, _protected = find_shadowing_bytecode( [ tmp_path ] )
 
     assert examined >= 1
     assert shadowed == []
@@ -119,19 +120,19 @@ def test_a_source_with_matching_bytecode_is_not_reported( tmp_path ):
 
 def test_the_scan_examined_a_meaningful_number_of_files():
     """
-    DEFENSE 2 — a scan that assessed nothing reports a clean tree.
+    DEFENSE 2 — a scan that looked at nothing reports a clean tree.
+
+    "Looked at nothing" has TWO opposite causes and they used to share one failure string
+    (row 866f43ce): the checked-hash migration landed, so nothing CAN be shadowed, or the cache
+    is cold, so nothing WAS read. `scan_is_meaningful` separates them; the first is a pass.
 
     Ensures:
-        - the real scan assessed at least MIN_ASSESSABLE sources
+        - the real scan met the floor on assessable OR on hash-protected sources
     """
-    _, examined = find_shadowing_bytecode( SCAN_ROOTS )
+    tally   = find_shadowing_bytecode( SCAN_ROOTS )
+    ok, why = scan_is_meaningful( tally, MIN_ASSESSABLE )
 
-    assert examined >= MIN_ASSESSABLE, (
-        f"the shadowing scan assessed only {examined} source file(s), below the {MIN_ASSESSABLE} "
-        f"floor. Its clean verdict is not evidence of a clean tree — most likely the roots are "
-        f"wrong, a filter is over-eager, or the bytecode cache was cleared out from under it.\n"
-        f"Roots scanned: {[ str( r ) for r in SCAN_ROOTS ]}"
-    )
+    assert ok, f"{why}\nRoots scanned: {[ str( r ) for r in SCAN_ROOTS ]}"
 
 
 def test_no_source_in_the_tree_is_shadowed_by_stale_bytecode():
@@ -145,10 +146,13 @@ def test_no_source_in_the_tree_is_shadowed_by_stale_bytecode():
     Ensures:
         - no assessable source in src/cosa, src/tests or src/lupin_app is shadowed
     """
-    shadowed, examined = find_shadowing_bytecode( SCAN_ROOTS )
+    tally = find_shadowing_bytecode( SCAN_ROOTS )
 
-    assert not shadowed, describe_shadowing( shadowed )
-    assert examined >= MIN_ASSESSABLE           # belt: a zero-file scan must not read as a pass
+    assert not tally.shadowed, describe_shadowing( tally.shadowed )
+    # belt: a scan that looked at nothing must not read as a pass — but a MIGRATED tree looked at
+    # nothing for the right reason, so this asks scan_is_meaningful rather than examined alone.
+    ok, why = scan_is_meaningful( tally, MIN_ASSESSABLE )
+    assert ok, why
 
 
 def test_the_failure_message_names_the_files_and_the_remedy():
@@ -164,7 +168,7 @@ def test_the_failure_message_names_the_files_and_the_remedy():
     text = describe_shadowing( [ Path( "/x/alpha.py" ), Path( "/x/beta.py" ) ] )
 
     assert "/x/alpha.py" in text and "/x/beta.py" in text
-    assert "__pycache__" in text and "rm -rf" in text
+    assert "src/scripts/purge-pycache.sh" in text
     assert "d18ce9ef" in text
 
 
@@ -182,3 +186,105 @@ def test_empty_roots_are_refused_rather_than_reported_clean():
 
     with pytest.raises( AssertionError, match="root does not exist" ):
         find_shadowing_bytecode( [ REPO_ROOT / "no_such_directory_here" ] )
+
+
+# ── The two-causes split (row 866f43ce) ───────────────────────────────────────
+# `examined == 0` used to be one failure string over two opposite facts: the checked-hash
+# migration landed (nothing CAN be shadowed — the goal state), or the cache is cold (nothing WAS
+# read — the scan is blind). Measured on the live tree 2026-08-30: 2,158 sources hash-protected,
+# ZERO timestamp-assessable, against the "~2,100 observed on 2026-08-29" this floor was set from.
+# The population did not shrink; its invalidation mode flipped, and the guard called that a
+# failure while naming three causes, none of which was the real one.
+
+def _tally( examined, hash_protected, shadowed=() ):
+    from tests.helpers.pyc_freshness import ScanTally
+    return ScanTally( list( shadowed ), examined, hash_protected )
+
+
+def test_a_migrated_tree_passes_even_though_it_assessed_nothing():
+    ok, why = scan_is_meaningful( _tally( examined=0, hash_protected=2158 ), MIN_ASSESSABLE )
+
+    assert ok
+    assert "MIGRATION HAVING LANDED" in why
+    assert "cannot shadow" in why
+
+
+def test_a_cold_cache_fails_even_though_it_also_assessed_nothing():
+    ok, why = scan_is_meaningful( _tally( examined=0, hash_protected=0 ), MIN_ASSESSABLE )
+
+    assert not ok
+    assert "blind scan" in why
+
+
+def test_the_two_zero_examined_cases_do_not_share_a_verdict_or_a_message():
+    """The split itself: identical `examined`, opposite verdicts, different text."""
+    migrated_ok, migrated_why = scan_is_meaningful( _tally( 0, 2158 ), MIN_ASSESSABLE )
+    cold_ok,     cold_why     = scan_is_meaningful( _tally( 0, 0 ),    MIN_ASSESSABLE )
+
+    assert migrated_ok is True and cold_ok is False
+    assert migrated_why != cold_why
+
+
+def test_an_assessable_tree_still_passes_the_old_way():
+    ok, why = scan_is_meaningful( _tally( examined=2100, hash_protected=0 ), MIN_ASSESSABLE )
+
+    assert ok and "is evidence" in why
+
+
+def test_every_verdict_names_both_counts_so_it_can_be_re_derived():
+    for tally in ( _tally( 0, 2158 ), _tally( 0, 0 ), _tally( 2100, 0 ), _tally( 5, 5 ) ):
+        _ok, why = scan_is_meaningful( tally, MIN_ASSESSABLE )
+        assert f"{tally.examined} assessable"      in why
+        assert f"{tally.hash_protected} protected" in why
+
+
+def test_the_cold_cache_remedy_does_not_tell_you_to_reintroduce_the_defect():
+    """
+    A remedy that says "run a suite to warm the cache" would clear the message by writing
+    TIMESTAMP pycs — CPython's default, and the exact invalidation mode 866f43ce moved off.
+    The remedy must name the migration script instead. (I wrote the wrong one first.)
+    """
+    _ok, why = scan_is_meaningful( _tally( 0, 0 ), MIN_ASSESSABLE )
+
+    assert "migrate-pyc-to-checked-hash.sh" in why
+    assert "Do NOT just run a suite" in why
+
+
+def test_hash_protected_sources_are_counted_and_not_assessed( tmp_path ):
+    """
+    End to end on real bytecode: a source compiled with checked-hash invalidation must land in
+    `hash_protected`, never in `examined` — it is not a gap in the scan, it is immune by
+    construction.
+    """
+    import py_compile
+    src = tmp_path / "hashed.py"
+    src.write_text( "VALUE = 1\n", encoding="utf-8" )
+    py_compile.compile( str( src ), doraise=True,
+                        invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH )
+
+    tally = find_shadowing_bytecode( [ tmp_path ] )
+
+    assert tally.hash_protected == 1
+    assert tally.examined == 0
+    assert tally.shadowed == []
+
+
+def test_timestamp_sources_are_assessed_not_counted_as_protected( tmp_path ):
+    """The other arm, so the two counters cannot both be fed by one branch."""
+    import py_compile
+    src = tmp_path / "stamped.py"
+    src.write_text( "VALUE = 1\n", encoding="utf-8" )
+    py_compile.compile( str( src ), doraise=True,
+                        invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP )
+
+    tally = find_shadowing_bytecode( [ tmp_path ] )
+
+    assert tally.examined == 1
+    assert tally.hash_protected == 0
+
+
+def test_the_tally_still_unpacks_for_callers_that_want_three_values( tmp_path ):
+    ( tmp_path / "x.py" ).write_text( "V = 1\n", encoding="utf-8" )
+    shadowed, examined, protected = find_shadowing_bytecode( [ tmp_path ] )
+
+    assert shadowed == [] and examined == 0 and protected == 0

@@ -55,6 +55,7 @@ import struct
 import sys
 
 from contextlib import contextmanager
+from typing import NamedTuple
 from pathlib import Path
 
 
@@ -260,6 +261,27 @@ def _shadow_verdict( source_path ):
     return stored != fresh
 
 
+def _has_hash_based_cache( source_path ):
+    """
+    Ensures:
+        - True iff `source_path` has a cached pyc whose flags mark it CHECKED-HASH
+        - False when there is no cache, it is too short to carry a header, or it is timestamp-based
+        - never raises
+    """
+    cache = Path( importlib.util.cache_from_source( str( source_path ) ) )
+    if not cache.exists(): return False
+    raw = cache.read_bytes()
+    if len( raw ) < 16: return False
+    return bool( struct.unpack( "<I", raw[ 4:8 ] )[ 0 ] & 1 )
+
+
+class ScanTally( NamedTuple ):
+    """What one shadowing scan saw. A tuple, so existing 3-value unpacking keeps working."""
+    shadowed       : list
+    examined       : int
+    hash_protected : int
+
+
 def find_shadowing_bytecode( roots ):
     """
     Scan for sources whose cached bytecode differs from the file on disk while still passing
@@ -269,28 +291,86 @@ def find_shadowing_bytecode( roots ):
         - roots is a non-empty iterable of existing directories
 
     Ensures:
-        - returns ( shadowed, examined ): the list of offending source Paths, and the count of
-          sources that were actually ASSESSABLE (a cached, timestamp-based pyc present)
+        - returns a ScanTally( shadowed, examined, hash_protected ) — still a plain tuple, so
+          `shadowed, examined, hash_protected = ...` unpacks
+        - `shadowed` is the list of offending source Paths
+        - `examined` counts sources that were ASSESSABLE: a cached, TIMESTAMP-based pyc present.
+          Only those can be shadowed, so only those can be checked
+        - `hash_protected` counts sources whose cached pyc is CHECKED-HASH. They are not
+          assessable and are not a gap — CPython validates them by hashing the source, so they
+          cannot be shadowed at all
         - raises if roots is empty or names a missing directory
 
-    `examined` is returned, not logged, because it is the only thing separating "clean" from
-    "looked at nothing". A caller that ignores it can assert a green over an empty scan.
+    WHY THE THIRD COUNTER EXISTS (row 866f43ce). `examined` alone was the only thing separating
+    "clean" from "looked at nothing" — but once the tree migrates to checked-hash invalidation,
+    `examined` falls to ZERO because there is nothing left that CAN be shadowed. That is the
+    migration SUCCEEDING, and it produced the same number, and very nearly the same failure text,
+    as a wiped cache. Measured on the live tree 2026-08-30: 2,158 sources with a checked-hash pyc,
+    ZERO with a timestamp pyc — against the "~2,100 observed on 2026-08-29" the floor was set
+    from. The population did not shrink; its invalidation mode flipped. Counting the hash-based
+    ones is what lets a reader tell the two apart without opening anything. See scan_is_meaningful.
     """
     roots = [ Path( r ) for r in roots ]
     assert roots, "find_shadowing_bytecode: no roots given — an empty scan reports clean"
     for root in roots:
         assert root.is_dir(), f"find_shadowing_bytecode: root does not exist: {root}"
 
-    shadowed, examined = [], 0
+    shadowed, examined, hash_protected = [], 0, 0
     for root in roots:
         for source in sorted( root.rglob( "*.py" ) ):
             if ".venv" in source.parts: continue
+            if _has_hash_based_cache( source ):
+                hash_protected += 1
+                continue
             verdict = _shadow_verdict( source )
             if verdict is None: continue
             examined += 1
             if verdict: shadowed.append( source )
 
-    return shadowed, examined
+    return ScanTally( shadowed, examined, hash_protected )
+
+
+def scan_is_meaningful( tally, min_assessable ):
+    """
+    ( ok, reason ) — whether this scan's clean verdict is EVIDENCE about the tree.
+
+    THE DISCRIMINATION THIS EXISTS FOR. `examined == 0` has two opposite causes and they used to
+    produce one failure string: the checked-hash migration landed (nothing CAN be shadowed —
+    the best possible outcome), or the bytecode cache is cold (nothing WAS looked at — the scan
+    proves nothing). The reader could not tell which without going and counting pyc headers by
+    hand, and the old message named three causes, all of them wrong for the first case.
+
+    Requires:
+        - tally is a ScanTally; min_assessable is a positive int
+
+    Ensures:
+        - ( True, reason ) when at least `min_assessable` sources were assessed, OR when at least
+          that many are checked-hash protected — protection is as good as assessment here,
+          because a hash-based pyc cannot be shadowed by construction
+        - ( False, reason ) only when NEITHER floor is met, which is the genuinely blind scan
+        - the reason always names both counts, so the verdict can be re-derived from the message
+        - never raises
+    """
+    counts = ( f"{tally.examined} assessable (timestamp-based pyc), "
+               f"{tally.hash_protected} protected (checked-hash pyc)" )
+    if tally.examined >= min_assessable:
+        return True, f"scan assessed {counts} — the clean verdict is evidence."
+    if tally.hash_protected >= min_assessable:
+        return True, (
+            f"scan assessed {counts}. Below the {min_assessable} assessable floor, and that is the "
+            f"CHECKED-HASH MIGRATION HAVING LANDED, not a broken scan: CPython validates these by "
+            f"hashing the source, so stale bytecode cannot shadow them at all. Nothing to assess "
+            f"is the goal state here (row 866f43ce)." )
+    return False, (
+        f"scan assessed {counts} — below the {min_assessable} floor on BOTH counts, so its clean "
+        f"verdict is not evidence of anything. This is a blind scan, not a migrated tree: a "
+        f"migrated tree shows a large protected count. Most likely the bytecode cache was cleared "
+        f"and never rebuilt, or the roots are wrong.\n"
+        f"REMEDY — run src/scripts/migrate-pyc-to-checked-hash.sh, which compiles the tree with "
+        f"checked-hash invalidation and leaves this scan with nothing it NEEDS to assess.\n"
+        f"Do NOT just run a suite to warm the cache: ordinary imports write TIMESTAMP pycs, which "
+        f"is CPython's default and is exactly the invalidation mode row 866f43ce moved off. That "
+        f"would clear this message by re-introducing the defect it guards." )
 
 
 def describe_shadowing( shadowed ):
