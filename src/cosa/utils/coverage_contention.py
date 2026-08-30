@@ -330,9 +330,22 @@ def _comm_admits_a_running_suite( comm: Optional[str] ) -> bool:
     # (Rachel spotted the duplication 2026-08-30; keeping it is the considered answer).
     # This line is the FAIL-CLOSED contract boundary. Folding it would make the gate's
     # answer for "" depend on the predicate continuing to agree — and "two contracts that
-    # did not meet" is the exact defect this module was written to fix. Both are pinned
-    # independently by tests (comm_could_be_pytest( "" ) and this function's own case),
-    # so the duplication is checked, not merely asserted.
+    # did not meet" is the exact defect this module was written to fix.
+    #
+    # 🔴 AND THIS LINE IS **MASKED**: NO TEST CAN FAIL ON IT WHILE THE DELEGATE AGREES.
+    # I first wrote here that both sites were "pinned independently, so the duplication is
+    # checked, not merely asserted". That was WRONG, and Rachel's mutation proved it —
+    # confirmed independently: DELETE THIS LINE and the suites stay green (127 passed),
+    # because `test_all_three_comm_values_are_distinguished` and this function's own `""`
+    # case both observe the OUTPUT, which comm_could_be_pytest still supplies. Mutating the
+    # DELEGATE is caught (rc=1); mutating THIS site is not caught by anything.
+    #
+    # That is the price of the belt, and it is stated rather than hidden: the redundancy is
+    # deliberate AND unfalsifiable, so it is defended by this comment and by review, not by
+    # the harness. Catalogued as `masked-invariant`
+    # (io/post-games/2026.08.30-instruments-that-cannot-fail-post-game.md §6). ⚠️ Do NOT
+    # "fix" the masking by deleting this line — the redundancy is the point; the missing
+    # proof is the cost.
     if comm == "":    return True
     return comm_could_be_pytest( comm )
 
