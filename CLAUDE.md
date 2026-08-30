@@ -916,14 +916,21 @@ short-summary line, anything that distinguishes one red from another red in the 
 sequence, so an assertion added BEHIND one that is currently failing is **present in the file and
 absent from the run** — and the test id in the failing set is byte-identical whether the new guard
 passed, failed, or never executed. **A guard placed behind a red is carried, not exercised.**
-Worked instance, this reviewer's own: the counts guard added to
-`test_a_detector_change_forces_a_full_rescan` at `503000fe` sits after the fingerprint assertion,
-and that fingerprint is red in this tree (row `8202d795`). The commit reported the file as
-*"1 failed, 60 passed — byte-identical failing SET to the baseline"*, which was true and told
-nobody that the new assertion had not run.
+**Worked instance, this reviewer's own, with the fix and both measurements.** The counts guard added
+to `test_a_detector_change_forces_a_full_rescan` at `503000fe` sat after that test's fingerprint
+assertion, and the fingerprint is red in this tree (row `8202d795`). The commit reported the file as
+*"1 failed, 60 passed — byte-identical failing SET to the baseline"*, which was true and told nobody
+the new assertion had not run. The counts were stale the whole time — recorded 239/116 against a
+scan measuring 240/117 — so the guard would have fired on its first execution and never got one.
+
+| placement, same record, same scan | result | what the failing set says |
+|---|---|---|
+| guard INLINE, behind the fingerprint assert | 1 failed, 60 passed | one id — the stale counts are invisible |
+| guard in its OWN test | **2 failed, 60 passed** | two ids — the second NAMES the counts |
 
 ⇒ **Before claiming a new assertion guards anything, prove it is REACHED** — force the assertions
-ahead of it green, or move it into a test of its own.
+ahead of it green, or **move it into a test of its own**, which is the durable form: a separate test
+is what lets a failing SET carry information instead of collapsing several reasons into one id.
 
 ### ⚠️ AND A CLEAN PASS IS A SAMPLE OF THE MUTATION SPACE, NOT A VERDICT ON IT
 
