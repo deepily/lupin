@@ -48,9 +48,20 @@ from tests.helpers.pyc_freshness import (            # noqa: E402
     scan_is_meaningful,
 )
 
+# WIDENED (row ae7ed041). The three original roots missed every other first-party package, and
+# the drift that row measured — 77 timestamp pycs surviving on a supposedly-migrated tree — was
+# CONCENTRATED IN src/lupin_mcp, which this guard never looked at. That is the third drift path
+# CLAUDE.md names, "a module imported for the first time since the last conversion", and lupin_mcp
+# is imported by the running MCP server rather than by the test tier, so nothing in the pyramid
+# was re-converting it and nothing was watching it either. A guard whose roots exclude the code
+# most likely to drift reports clean about the part of the tree it chose not to look at.
 SCAN_ROOTS = [ REPO_ROOT / "src" / "cosa",
                REPO_ROOT / "src" / "tests",
-               REPO_ROOT / "src" / "lupin_app" ]
+               REPO_ROOT / "src" / "lupin_app",
+               REPO_ROOT / "src" / "lupin_mcp",
+               REPO_ROOT / "src" / "lupin_cli",
+               REPO_ROOT / "src" / "lupin_arbiter_app",
+               REPO_ROOT / "src" / "lupin_model_server" ]
 
 # A scan that assesses fewer than this has not looked at the tree, whatever it returns. Set well
 # below the ~2,100 observed on 2026-08-29 so ordinary growth or a pruned cache cannot make it flap;
@@ -247,7 +258,10 @@ def test_the_cold_cache_remedy_does_not_tell_you_to_reintroduce_the_defect():
     _ok, why = scan_is_meaningful( _tally( 0, 0 ), MIN_ASSESSABLE )
 
     assert "migrate-pyc-to-checked-hash.sh" in why
-    assert "Do NOT just run a suite" in why
+    # assert the HAZARD is named, not one phrasing of it — this file already carried one test
+    # that went red because 65a55eb2 reworded the message under a literal assertion, and the
+    # first version of THIS test repeated the mistake within the hour.
+    assert "WARMING THE CACHE" in why and "TIMESTAMP" in why
 
 
 def test_hash_protected_sources_are_counted_and_not_assessed( tmp_path ):
@@ -288,3 +302,38 @@ def test_the_tally_still_unpacks_for_callers_that_want_three_values( tmp_path ):
     shadowed, examined, protected = find_shadowing_bytecode( [ tmp_path ] )
 
     assert shadowed == [] and examined == 0 and protected == 0
+
+
+def test_the_remedy_names_the_raw_purge_as_a_way_to_revert_the_tree():
+    """
+    A raw `rm -rf __pycache__` deletes every checked-hash pyc, and what gets compiled next is
+    TIMESTAMP-based — a deleted file carries no mode to inherit, and timestamp is CPython's
+    default. So the most obvious "clear the cache" reflex REVERTS the tree into the invalidation
+    mode row 866f43ce moved off, and the message has to say so or it is inviting the reflex.
+    """
+    _ok, why = scan_is_meaningful( _tally( 0, 0 ), MIN_ASSESSABLE )
+
+    assert "RAW PURGE" in why
+    assert "purge-pycache.sh" in why
+    assert "RECONVERT" in why
+
+
+def test_the_scan_covers_every_first_party_package_not_just_three():
+    """
+    ROW ae7ed041's other half. The drift it measured — timestamp pycs surviving a migration —
+    was concentrated in src/lupin_mcp, which the original three roots did not include. A guard
+    that reports clean about the code it declined to look at is the vacuous pass this file exists
+    to prevent, one level up from the count.
+    """
+    scanned = { root.name for root in SCAN_ROOTS }
+
+    for package in ( "cosa", "tests", "lupin_app", "lupin_mcp",
+                     "lupin_cli", "lupin_arbiter_app", "lupin_model_server" ):
+        assert package in scanned, f"{package} is first-party source and is not scanned"
+
+
+def test_every_scan_root_exists_so_a_typo_cannot_silently_shrink_the_scan():
+    """A root that does not exist raises in find_shadowing_bytecode — assert it here too, so a
+    renamed package is a named failure rather than a quietly smaller denominator."""
+    for root in SCAN_ROOTS:
+        assert root.is_dir(), f"scan root does not exist: {root}"

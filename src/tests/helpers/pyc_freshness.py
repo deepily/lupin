@@ -368,9 +368,15 @@ def scan_is_meaningful( tally, min_assessable ):
         f"and never rebuilt, or the roots are wrong.\n"
         f"REMEDY — run src/scripts/migrate-pyc-to-checked-hash.sh, which compiles the tree with "
         f"checked-hash invalidation and leaves this scan with nothing it NEEDS to assess.\n"
-        f"Do NOT just run a suite to warm the cache: ordinary imports write TIMESTAMP pycs, which "
-        f"is CPython's default and is exactly the invalidation mode row 866f43ce moved off. That "
-        f"would clear this message by re-introducing the defect it guards." )
+        f"TWO WAYS TO 'FIX' THIS THAT SILENTLY RE-INTRODUCE THE DEFECT IT GUARDS:\n"
+        f"  - A RAW PURGE. `find . -name __pycache__ -exec rm -rf` deletes every checked-hash pyc, "
+        f"and whatever is compiled next is TIMESTAMP-based, because a deleted file carries no mode "
+        f"to inherit and timestamp is CPython's default. A raw purge REVERTS the tree. Use "
+        f"src/scripts/purge-pycache.sh, which purges and then RECONVERTS — the reconvert step is "
+        f"the half that is easy to leave out and impossible to notice missing.\n"
+        f"  - WARMING THE CACHE BY RUNNING A SUITE. Ordinary imports also write TIMESTAMP pycs. "
+        f"This clears the message by putting the tree back in the invalidation mode row 866f43ce "
+        f"moved off." )
 
 
 def describe_shadowing( shadowed ):
