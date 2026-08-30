@@ -95,6 +95,16 @@ def presence_disagreement( md_text, raw_json_text ):
     return disagreements
 
 
+def _walk_files( root ):
+    """
+    Every (dirpath, filename) under `root` — the ONE walk both the pair finder and the
+    reach probe use, so a walk that silently sees nothing cannot report differently to them.
+    """
+    for dirpath, _dirnames, filenames in os.walk( root ):
+        for name in filenames:
+            yield dirpath, name
+
+
 def find_paired_evidence( rnd_root ):
     """
     Every (md_path, raw_json_path) under `rnd_root` where `<md>.bridge.json` exists.
@@ -105,14 +115,37 @@ def find_paired_evidence( rnd_root ):
           bridge) yields NO pair — it makes no projection claim to verify.
     """
     pairs = []
-    for dirpath, _dirnames, filenames in os.walk( rnd_root ):
-        for name in filenames:
-            if name.endswith( RAW_SIBLING_SUFFIX ):
-                raw  = os.path.join( dirpath, name )
-                md   = raw[ : -len( RAW_SIBLING_SUFFIX ) ]        # strip ".bridge.json"
-                if os.path.exists( md ):
-                    pairs.append( ( md, raw ) )
+    for dirpath, name in _walk_files( rnd_root ):
+        if name.endswith( RAW_SIBLING_SUFFIX ):
+            raw  = os.path.join( dirpath, name )
+            md   = raw[ : -len( RAW_SIBLING_SUFFIX ) ]            # strip ".bridge.json"
+            if os.path.exists( md ):
+                pairs.append( ( md, raw ) )
     return sorted( pairs )
+
+
+def scan_reach( rnd_root ):
+    """
+    How much the scan's walk actually SAW under `rnd_root`: { "files", "markdown", "raw_siblings" }.
+
+    A clean verdict from check_evidence_tree() means "no dishonest pair" only if the walk
+    reached real content. Pointed at a missing or wrong root it reaches nothing and reports
+    clean — vacuously. This exposes the reach so a caller can tell the two apart.
+
+    Requires:
+        - `rnd_root` is a path; a missing one is not an error.
+
+    Ensures:
+        - Counts come from _walk_files, the SAME walk find_paired_evidence uses, so a
+          broken walk reddens the reach probe too.
+        - Returns all-zero counts for a missing or empty root rather than raising.
+    """
+    reach = { "files": 0, "markdown": 0, "raw_siblings": 0 }
+    for _dirpath, name in _walk_files( rnd_root ):
+        reach[ "files" ] += 1
+        if name.endswith( ".md" ):                 reach[ "markdown" ]     += 1
+        if name.endswith( RAW_SIBLING_SUFFIX ):    reach[ "raw_siblings" ] += 1
+    return reach
 
 
 def check_pair( md_text, raw_json_text ):

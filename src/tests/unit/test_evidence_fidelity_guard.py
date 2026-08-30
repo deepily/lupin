@@ -117,23 +117,67 @@ class TestTreeScan( unittest.TestCase ):
         self._write( "d/e.md.bridge.json", json.dumps( _RAW ) )
         self.assertEqual( guard.check_evidence_tree( self._tmp ), [] )
 
+    def test_scan_reach_counts_what_the_walk_saw( self ):
+        self._write( "d/e.md", "# x" )
+        self._write( "d/e.md.bridge.json", json.dumps( _RAW ) )
+        self._write( "d/notes.txt", "x" )
+        self.assertEqual(
+            guard.scan_reach( self._tmp ),
+            { "files": 3, "markdown": 1, "raw_siblings": 1 }
+        )
+
+    def test_scan_reach_is_all_zero_for_a_root_that_is_not_there( self ):
+        # the vacuity the real-tree canary exists to catch: a walk over nothing.
+        self.assertEqual(
+            guard.scan_reach( os.path.join( self._tmp, "no-such-dir" ) ),
+            { "files": 0, "markdown": 0, "raw_siblings": 0 }
+        )
+
 
 class TestRealTreeIsClean( unittest.TestCase ):
     """The live src/rnd tree must be clean — so a FUTURE unlabelled projection lands red here."""
 
+    def _rnd( self ):
+        return cu.get_project_root() + "/src/rnd"
+
     def test_no_unlabelled_projection_in_src_rnd( self ):
-        rnd = cu.get_project_root() + "/src/rnd"
-        problems = guard.check_evidence_tree( rnd )
+        problems = guard.check_evidence_tree( self._rnd() )
         self.assertEqual( problems, [], "evidence-fidelity problems in src/rnd:\n" + "\n".join( problems ) )
 
-    def test_the_scan_actually_found_the_known_pair( self ):
-        # guard against a silent-empty scan: the e071e834 pair must be discovered, or the
-        # real-tree assertion above is vacuously green.
-        rnd   = cu.get_project_root() + "/src/rnd"
-        pairs = guard.find_paired_evidence( rnd )
-        self.assertTrue(
-            any( md.endswith( "2026.08.16-nameless-seat-e071e834-live-evidence.md" ) for md, _raw in pairs ),
-            f"expected the e071e834 evidence pair in the scan; found {[ os.path.basename( m ) for m, _ in pairs ]}"
+    def test_the_clean_verdict_is_not_vacuous( self ):
+        """
+        The canary for the assertion above, which can go vacuously green two ways — and
+        BOTH are checked here, neither by naming a file in the tree.
+
+        The previous shape asserted one hard-coded src/rnd filename was in the scan, and
+        went red the day Rick deleted that doc (c752ab9e, row a8222a71). Worse, the tree now
+        holds ZERO paired evidence, so no assertion about the real tree's CONTENTS can be
+        both green and meaningful. So: prove the FINDER on a pair this test plants itself
+        (repo-independent — no future tidy-up of src/rnd can break it), and prove the WALK
+        reaches the real root separately.
+        """
+        # (1) the finder still finds — the pair-discovery check_evidence_tree() depends on.
+        tmp = tempfile.mkdtemp()
+        self.addCleanup( shutil.rmtree, tmp, True )
+        md  = os.path.join( tmp, "deep", "nested", "planted-evidence.md" )
+        os.makedirs( os.path.dirname( md ), exist_ok=True )
+        with open( md, "w", encoding="utf-8" ) as handle:
+            handle.write( _md_with_json( _RAW, labelled=False ) )
+        with open( md + guard.RAW_SIBLING_SUFFIX, "w", encoding="utf-8" ) as handle:
+            handle.write( json.dumps( _RAW ) )
+        self.assertEqual(
+            guard.find_paired_evidence( tmp ),
+            [ ( md, md + guard.RAW_SIBLING_SUFFIX ) ],
+            "the pair finder no longer finds a planted pair — the real-tree scan above is "
+            "reporting clean because it discovers nothing, not because the tree is honest"
+        )
+
+        # (2) the walk still reaches the real root — same walk find_paired_evidence uses.
+        reach = guard.scan_reach( self._rnd() )
+        self.assertGreater(
+            reach[ "markdown" ], 0,
+            f"src/rnd looks unreachable or empty at {self._rnd()}: {reach} — a clean verdict "
+            "from a walk that saw nothing is vacuous, check LUPIN_ROOT and the tree"
         )
 
 
