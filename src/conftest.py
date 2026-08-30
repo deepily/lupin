@@ -196,6 +196,35 @@ importlib._bootstrap._find_and_load = _find_and_load_watching_reimports
 # PRODUCE AN UNATTRIBUTABLE FIGURE.
 #
 # Escape hatch for a deliberate shared-file run: LUPIN_ALLOW_SHARED_COVERAGE=1.
+# ══════════════════════════════════════════════════════════════════════════════
+# GUARD: a TEST that writes into the OPERATOR'S LIVE NOTIFICATION FEED (row ebb2c061)
+# ══════════════════════════════════════════════════════════════════════════════
+# Rick received eight "Stop — notify error" cards and read them as a stuck worker. They
+# were a unit test. `AnythingElseCardContextTest` mocks the notify transport with a
+# side_effect that raises ON PURPOSE, to stop `_ask_anything_else` once the card is built;
+# that hook catches every exception and its handler's only action is
+# `send_tts( f"Stop — notify error: {e}" )` — a THIRD transport the test never patched.
+# Four test methods, four cards, twice over two tier runs: exactly the eight he saw.
+#
+# ⚠️ THE ESCAPE IS NOT THE TEST'S FAULT, AND NEITHER EXISTING GUARD COULD CATCH IT:
+#   · `is_tts_enabled()` reads HOOK_TTS_ENABLED with a default of "true", so a test
+#     process is opt-OUT, not opt-in — nothing had to go wrong for the line to be live.
+#   · The outbound-network guard above exempts LOOPBACK_HOSTS on purpose, and the
+#     notification server IS local. That run logged "outbound connections: 0" and was,
+#     by that line, perfectly clean. A green guard line is not evidence that nothing
+#     left the process.
+#
+# THIS BELONGS IN conftest, NOT IN A RUNNER SCRIPT. The run that produced the cards was a
+# bare `python -m pytest src/tests/unit/`, not `run-unit-tests.sh` — an export in the
+# runners would have missed it exactly as it missed this. Here it covers every invocation:
+# runner, ad-hoc, IDE, CI.
+#
+# setdefault, NOT a hard set: a test that deliberately exercises the enabled path can
+# still export HOOK_TTS_ENABLED=true for itself. The default is what changes — from
+# "speak unless told otherwise" to "silent unless asked".
+os.environ.setdefault( "HOOK_TTS_ENABLED", "false" )
+
+
 def pytest_configure( config ):
     """
     Refuse a coverage run that cannot be attributed to this process.
