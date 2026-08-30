@@ -41,8 +41,27 @@ The caveat above is about PRECISION: hits that turn out fine. This one is about 
 zero from this probe is the more dangerous output, because a zero reads like an all-clear.
 
 **Measured 2026-08-30.** Run over `src/tests/unit/scripts` — 32 test files — it reports ZERO
-hits in `test_watch_hook_events.py`. That file has 63 tests and contains BOTH of the blind
-fixtures Maya 🌻 found by mutation the day before:
+hits in `test_watch_hook_events.py`, a file of 63 tests.
+
+🔴 **THE FIRST VERSION OF THIS RECEIPT CLAIMED TWICE WHAT IT COULD SHOW** (Clayton, 2026-08-30,
+checking the file instead of accepting the claim). It said the file "contains BOTH" of the blind
+fixtures Maya found by mutation. **Only one of them is still in it.** Checked line by line at
+72157c17:
+
+    line 123   REPAIRED - now `assert root.is_absolute()` plus the parents[ 2 ] equality,
+               which is Maya's kill. The blind `.exists()` form is GONE, so a probe that
+               does not flag it has missed NOTHING.
+
+    line 218   STILL BLIND, verbatim: `_hhmmss( "2026.06.06 @ 01:45 abc" ) == "01:45:00"`.
+               "abc" has no digits, so the `.zfill( 2 )` under test is a no-op and the
+               assertion cannot see it either way. The probe does not flag it.
+
+⇒ **One real miss, not two** - and the survivor is the better example, because it is a blind
+assertion sitting in the tree right now that this probe cannot see. Its BEHAVIOUR is defended,
+by the sibling at line 228 using "7ms" - the precision caveat above running the other way:
+blind assertion, covered behaviour.
+
+The two shapes, so the point survives the line numbers going stale:
 
     # blind: Path( "" ) is RELATIVE, and pytest runs from the repo root, so the wrong
     # answer and the right answer name the same file
@@ -113,7 +132,8 @@ ratio over a sample you name is honest and useful; what this page cannot support
 unqualified precision or recall *rate*, which implies a population neither number has.
 
 EXIT CODES
-    0  scanned, no interchangeable-value assertions found
+    0  scanned, no interchangeable-value assertions found — NOT an all-clear:
+       it means nothing MATCHED, never that no fixture is blind (see recall, above)
     1  findings present (a TRIAGE queue, never a defect count)
     2  nothing could be scanned — no readable files matched
 
@@ -282,15 +302,28 @@ def render( findings, files_read, limit ):
     if len( findings ) > limit:
         print( f"  … and {len( findings ) - limit} more (raise --limit to see them)" )
     if not findings:
-        print( "  (none — no assertion compares against a container whose values repeat)" )
+        # 🔴 A ZERO RUN IS THE OUTPUT MOST LIKELY TO BE MISREAD, so it says so HERE rather
+        # than only in the docstring (Chloé, 2026-08-30). A consumer reading stdout never
+        # opens this file, and "no findings" from a triage aid reads as an all-clear.
+        print( "  NOT FOUND — and NOT the same as none present." )
+        print( "  This probe matches REPEATED expected values, the one shape of fixture" )
+        print( "  blindness with a syntactic trace. A fixture blind because its value makes" )
+        print( "  the operation a no-op, or because the wrong answer coincides with the right" )
+        print( "  one, repeats nothing and CANNOT be found here. Measured: it returns zero on" )
+        print( "  a file carrying a blind assertion at src/tests/unit/scripts/" )
+        print( "  test_watch_hook_events.py. A file with no hits has not been cleared —" )
+        print( "  it has not been examined. Only a mutation clears it." )
 
     print( "\nWHAT THIS LIST IS — read before filing anything" )
     print( "  FINDS      : assertions whose expected values REPEAT, so a swap between the two"
            " things they describe cannot change the outcome." )
     print( "  DOES NOT   : find undefended behaviour. Discrimination often lives in a SIBLING"
            " assertion this probe cannot see." )
-    print( "  MEASURED   : the first two hits adjudicated (2026-08-30) were BOTH covered"
-           " elsewhere — one by the adjacent line, one by two sibling tests." )
+    print( "  MEASURED   : the two hits adjudicated so far (2026-08-30) were BOTH covered"
+           " elsewhere — one by the adjacent line, one by two sibling tests. Two is the"
+           " whole adjudicated sample; there is no larger one." )
+    print( "  MISSES     : returns zero on a file that carries a blind assertion — recall is"
+           " demonstrably not total, and its rate is unknown (no denominator)." )
     print( "  SO         : every hit needs a mutation to adjudicate. This narrows where to point"
            " one; it does not replace one, and it is NEVER a defect count." )
 
@@ -325,6 +358,12 @@ def main( argv=None ):
             "caveat"     : ( "Blind ASSERTIONS, not undefended BEHAVIOUR. Discrimination often "
                              "lives in a sibling assertion this probe cannot see; every hit needs "
                              "a mutation to adjudicate. Never a defect count." ),
+            "recall"     : ( "An empty findings list is NOT an all-clear. This probe matches "
+                             "repeated expected values only — the one shape of fixture blindness "
+                             "with a syntactic trace. Blindness from a no-op value, or from a "
+                             "wrong answer that coincides with the right one, repeats nothing and "
+                             "cannot be found here. Measured: zero hits on a file carrying a blind "
+                             "assertion. Recall is demonstrably not total and its rate is unknown." ),
         }, indent=2 ) )
     else:
         render( findings, files_read, args.limit )

@@ -195,7 +195,12 @@ class TestRender:
         mod.render( [ ], 5, 40 )
         out = capsys.readouterr().out
         assert "DOES NOT   : find undefended behaviour" in out
-        assert "(none —" in out
+        # 🔴 A ZERO RUN MUST SAY IT IS NOT AN ALL-CLEAR, in the OUTPUT (Chloé, 2026-08-30).
+        # The docstring caveat only reaches someone who opens the source; a consumer reads
+        # stdout, and "no findings" from a triage aid reads as a clean bill of health.
+        assert "NOT FOUND — and NOT the same as none present." in out
+        assert "has not been cleared" in out
+        assert "Only a mutation clears it." in out
 
     def test_it_truncates_and_says_how_many_it_withheld( self, capsys ):
         mod.render( self._findings( 10 ), 3, 4 )
@@ -230,7 +235,9 @@ class TestMain:
     def test_a_clean_scan_exits_0( self, wired, capsys ):
         wired( { "a.py": "assert x == ( 1, 2 )\n" } )
         assert mod.main( [ ] ) == 0
-        assert "(none —" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        # 0 means nothing MATCHED, never that no fixture is blind — and the run has to say so.
+        assert "NOT FOUND — and NOT the same as none present." in out
 
     def test_nothing_readable_exits_2_and_says_it_is_not_clean( self, wired, capsys ):
         """
