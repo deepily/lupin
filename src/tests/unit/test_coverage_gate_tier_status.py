@@ -99,6 +99,33 @@ def test_an_unrecognised_status_still_gets_a_reason():
 
 # ── the gate itself, driven against stub tiers ───────────────────────────────
 
+def _give_the_fake_repo_a_floor( tmp_path ):
+    """
+    A committed `pyproject.toml` carrying a floor, so the guard can compare the working
+    tree against HEAD and find them equal.
+
+    WHY A GIT REPO AND NOT JUST A FILE: `check-floor-not-lowered.sh` reads the branch's
+    floor with `git show HEAD:pyproject.toml`, and REFUSES — deliberately, exit 2, never a
+    pass — when it cannot read one. Without a commit here the gate would stop at
+    "CANNOT TELL" before reaching the tier and data logic these cases exist to pin, which
+    is the guard behaving correctly against a fixture that had not caught up.
+
+    The floor is 0 on purpose: these cases are about the TIER and DATA checks, and a
+    fixture that can fail for a second reason tells you less, not more. It is asserted
+    equal to HEAD's rather than matched to the real pyproject, because the guard's question
+    is "is this tree's floor the branch's floor", not "what number is it".
+    """
+    ( tmp_path / "pyproject.toml" ).write_text(
+        "[tool.coverage.run]\nsource = [ \"src\" ]\n\n"
+        "[tool.coverage.report]\nfail_under = 0\n" )
+    run = lambda *args: subprocess.run( args, cwd=tmp_path, capture_output=True, text=True,
+                                        timeout=30, check=True )
+    run( "git", "init", "-q", "." )
+    run( "git", "add", "pyproject.toml" )
+    run( "git", "-c", "user.email=fixture@lupin", "-c", "user.name=fixture",
+         "commit", "-qm", "fixture floor" )
+
+
 def _fake_repo( tmp_path, unit_exit, cosa_exit ):
     """
     A repo-shaped tree whose two tier scripts exit with the statuses we choose. The gate
@@ -114,6 +141,18 @@ def _fake_repo( tmp_path, unit_exit, cosa_exit ):
         source = f"{PROJECT_ROOT}/src/scripts/lib/{lib}"
         if os.path.exists( source ):
             ( tmp_path / "src/scripts/lib" / lib ).write_text( open( source ).read() )
+    # 🔴 EVERY LIBRARY THE GATE REACHES FOR MUST BE HERE, and this list has been short once.
+    # The floor guard was added to the gate at `1d7f4846` and runs BEFORE the tier and data
+    # checks; this fake repo did not carry it, so the gate died with "No such file or
+    # directory" and two cases below failed for a reason that had nothing to do with what
+    # they pin. The guard was right and the FIXTURE was stale — a fixture that does not
+    # track the thing it stubs starts failing on somebody else's correct change.
+    ( tmp_path / "src/tests/lib" ).mkdir( parents=True, exist_ok=True )
+    floor_guard = f"{PROJECT_ROOT}/src/tests/lib/check-floor-not-lowered.sh"
+    target      = tmp_path / "src/tests/lib/check-floor-not-lowered.sh"
+    target.write_text( open( floor_guard ).read() )
+    target.chmod( 0o755 )
+    _give_the_fake_repo_a_floor( tmp_path )
     # The gate resolves an EXPLICIT venv pytest before anything else and exits 3 without one
     # (row c98bce3f — never a silent `python3 -m pytest` fallback). Link the real one in, or
     # every case below dies at that guard instead of reaching the tier logic under test.
@@ -177,3 +216,45 @@ def test_an_empty_data_file_is_inconclusive_rather_than_a_floor_breach( tmp_path
     done = _run_gate( tmp_path, 0, 0 )
     assert done.returncode == 2
     assert "INCONCLUSIVE" in done.stdout
+
+
+# ── the floor guard is LIVE in this fixture, not stubbed around ──────────────
+
+def test_the_floor_guard_still_refuses_a_lowered_floor_inside_this_fixture( tmp_path ):
+    """
+    THE CONTROL ON THE FIX ABOVE, and the reason it is here rather than in the guard's own
+    suite: the cases in this file were failing because the guard refused, and the cheap way
+    to make them pass would have been to neuter it — stub the script, skip it, or give the
+    fake repo an unreadable floor so nothing is compared. Every one of those turns the
+    green above into a statement about nothing.
+
+    So: lower the working tree's floor below the committed one and the gate must REFUSE,
+    from inside this same fixture. If someone later satisfies these tests by disabling the
+    guard, this case reddens and says so.
+    """
+    _fake_repo( tmp_path, 0, 0 )
+    ( tmp_path / "pyproject.toml" ).write_text(
+        '[tool.coverage.run]\nsource = [ "src" ]\n\n'
+        '[tool.coverage.report]\nfail_under = -1\n' )
+
+    env = dict( os.environ )
+    env[ "COVERAGE_FILE" ] = str( tmp_path / ".coverage-stub" )
+    env.pop( "LUPIN_COVERAGE", None )
+    done = subprocess.run( [ "bash", str( tmp_path / "src/tests/run-coverage-gate.sh" ),
+                             "--run-tiers" ],
+                           capture_output=True, text=True, env=env, timeout=120 )
+
+    assert done.returncode != 0
+    assert "the coverage floor is LOWERED in the working tree" in done.stdout
+    assert "COVERAGE GATE REFUSED" in done.stdout
+
+
+def test_the_unmodified_fixture_reports_its_floor_as_intact( tmp_path ):
+    """
+    The other half of the pair: with the tree untouched the guard says INTACT and gets out
+    of the way, so the cases above reach the tier and data logic they actually pin. A guard
+    that refused either way would be indistinguishable from one that never ran.
+    """
+    done = _run_gate( tmp_path, 0, 1 )
+    assert "[floor-guard] floor intact" in done.stdout
+    assert "NO COVERAGE DATA TO GATE ON" in done.stdout
