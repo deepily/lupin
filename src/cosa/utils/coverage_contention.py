@@ -48,6 +48,7 @@ about it; this module does not soften it into a pass.
 """
 
 import os
+import re
 import sys
 from typing import Callable, Iterable, List, Optional, Tuple
 
@@ -196,6 +197,9 @@ def _default_ancestors( pid: Optional[int]=None ) -> List[int]:
     return chain
 
 
+_PYTHON_COMM = re.compile( r"^python[0-9.]*$" )
+
+
 def comm_could_be_pytest( comm: str ) -> bool:
     """
     True when a process's `comm` is one a pytest run could actually have.
@@ -229,23 +233,39 @@ def comm_could_be_pytest( comm: str ) -> bool:
         - comm is a string (may be empty)
 
     Ensures:
-        - True for "pytest" and for any interpreter name beginning "python"
-          (python, python3, python3.13 — a real pytest runs under one of these)
+        - True for "pytest" and for a WHOLE interpreter name (python, python3,
+          python3.13) — a real pytest runs under one of these
         - False for "claude", and for anything else that is not interpreter-shaped
+        - False for "python3-config" and "python3.10-config", which are PRESENT on
+          this box and which a startswith("python") test called interpreters. They
+          cannot run a suite, so excluding them costs nothing and removes a whole
+          class of false positive — which is the defect this row exists to close.
+          Measured 2026-08-30: both names are on /usr/bin here, and the shell-script
+          shebang means their real comm is "sh", so the practical exposure was nil;
+          the predicate should still answer its own question correctly.
         - an EMPTY comm returns True, so an unreadable comm can never turn a real
           suite invisible — unknown stays a refusal, never a pass
+
+    ⚠️ THE WHOLE-NAME MATCH IS THE POINT, and it is a narrowing, so it deserves the
+    argument against it: a tighter test risks MISSING a real suite, which takes
+    somebody's box away. It does not here, because the excluded names provably
+    cannot run pytest. "Looser is safer under fail-closed doctrine" holds only when
+    the excluded thing COULD be an interpreter. These cannot.
     """
     if not comm: return True
-    return comm == "pytest" or comm.startswith( "python" )
+    return comm == "pytest" or bool( _PYTHON_COMM.match( comm ) )
 
 
 def _default_process_table() -> List[ Tuple[ int, str ] ]:
     """
-    Every readable (pid, cmdline) from /proc, EXCLUDING processes whose `comm` says they
-    cannot be a pytest run. See comm_could_be_pytest for why the cmdline alone is not
-    enough and what it measured.
+    Every readable (pid, cmdline) from /proc. Raises OSError if /proc is unusable.
 
-    Raises OSError if /proc is unusable.
+    ⚠️ THE comm FILTER LIVES IN find_foreign_pytest, NOT HERE, AND DELIBERATELY SO. It sat
+    in both places for an hour on 2026-08-30, when this row's fix and row 9078a035's landed
+    independently on the same function. Two gates meant the REAL path was filtered twice
+    and an INJECTED process_table only once — so a test could pass against a shape
+    production never sees, which is the asymmetry that makes a green a claim. One gate, one
+    code path, and every caller gets the same answer.
     """
     rows = []
     for entry in os.listdir( "/proc" ):
@@ -255,12 +275,6 @@ def _default_process_table() -> List[ Tuple[ int, str ] ]:
                 raw = handle.read()
         except OSError:
             continue                      # the process exited between listdir and open
-        try:
-            with open( f"/proc/{entry}/comm" ) as handle:
-                comm = handle.read().strip()
-        except OSError:
-            comm = ""                     # unreadable -> treated as could-be, never skipped
-        if not comm_could_be_pytest( comm ): continue
         rows.append( ( int( entry ), raw.replace( b"\0", b" " ).decode( "utf-8", "replace" ).strip() ) )
     return rows
 

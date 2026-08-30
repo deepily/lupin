@@ -227,9 +227,7 @@ def test_the_process_table_decodes_nul_separated_cmdlines( monkeypatch ):
     assert cc._default_process_table() == [ ( 4242, "/opt/venv/bin/pytest -q" ) ]
 
 
-def test_the_process_table_drops_a_seat_whose_brief_merely_quotes_a_pytest_command(
-    monkeypatch,
-):
+def test_a_seat_whose_brief_merely_quotes_a_pytest_command_is_dropped():
     """
     🔴 THE MEASURED FALSE POSITIVE, row 9078a035, 2026-08-30. A Claude seat carries its
     whole spawn brief in argv, so a brief that QUOTES `-m pytest` is argv-identical to a
@@ -238,14 +236,24 @@ def test_the_process_table_drops_a_seat_whose_brief_merely_quotes_a_pytest_comma
     being long-lived, they would have kept it shut indefinitely.
 
     The cmdline still passes looks_like_pytest; comm is what discriminates.
+
+    ⚠️ MOVED DOWN ONE LEVEL 2026-08-30, intent unchanged. This asserted on
+    _default_process_table while a comm filter lived there too; that gate was removed so
+    the real and injected paths run through ONE filter (see the note on
+    _default_process_table). The table now reports every process and
+    find_foreign_pytest does the discriminating — so the claim is made where the
+    behaviour now lives, rather than deleted with the gate it used to ride.
     """
-    brief = b"/home/rruiz/.local/bin/claude\x00--model\x00claude-opus-5\x00Run: python -m pytest src/\x00"
-    monkeypatch.setattr( cc.os, "listdir", lambda _p: [ "22130" ] )
-    monkeypatch.setattr( cc, "open", _fake_open( brief, comm="claude" ), raising=False )
-    assert cc._default_process_table() == [], "a comm=claude seat is not a running suite"
+    brief = ( "/home/rruiz/.local/bin/claude --model claude-opus-5 "
+              "Run: python -m pytest src/" )
+    assert cc.looks_like_pytest( brief ) is True, "precondition: argv cannot tell"
+    table = lambda: [ ( 22130, brief ) ]
+    assert cc.find_foreign_pytest( process_table=table, ancestors=[],
+                                   comm_of=lambda _pid: "claude" ) == [], \
+        "a comm=claude seat is not a running suite"
     # the positive control: identical argv, interpreter comm -> still seen
-    monkeypatch.setattr( cc, "open", _fake_open( brief, comm="python3" ), raising=False )
-    assert len( cc._default_process_table() ) == 1
+    assert len( cc.find_foreign_pytest( process_table=table, ancestors=[],
+                                        comm_of=lambda _pid: "python3" ) ) == 1
 
 
 def test_an_unreadable_comm_keeps_the_process_in_the_table( monkeypatch ):
