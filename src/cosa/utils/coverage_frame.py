@@ -13,8 +13,11 @@ Measured on 2026-08-29, that is FALSE in two ways, and both were live:
   2. coverage skips any filename carrying a dot (or one of #~!$@%^&*()+=,) before
      the extension — editor-junk protection. `probe-cc-bounded-billing-2026.05.12.py`
      was invisible for that reason and could not be brought into the frame without
-     renaming it; it was renamed to `probe_cc_bounded_billing.py` on 2026-08-30
-     (row 9078a035) and is now measured.
+     renaming it (row 9078a035, 2026-08-30). That file was DELETED by `c3626795`
+     on 2026-08-31 — a self-declared throwaway with no caller — so it is no longer
+     measured, and this paragraph keeps the MECHANISM rather than its status: a
+     dot before the extension will make the next file invisible for a reason that
+     has nothing to do with its contents.
 
 Both were found by counting files, not by reading the config: the report listed
 61 files where the disk held 74. A percentage cannot tell you about code it never
