@@ -540,6 +540,26 @@ def _rescan_lead_sentence():
              f"{unfakeable[ 0 ].lower()}{unfakeable[ 1: ]}:" )
 
 
+# ── WHAT THE NOTICE MUST STILL SAY, AS LITERALS ───────────────────────────────────
+#
+# 🔨 MR RADIO 🦉'S RULING, 2026-08-30 — and it is a DISTINCTION, not an exception to the
+# earlier one. He ruled we pin the SHAS and deliberately not the wording, because prose should
+# stay rewritable and asserting it is churn at rotation for no safety. That ruling stands
+# untouched. This is a different class:
+#
+#   the "below" I declined to pin is a POINTER — a wrong pointer misleads about LOCATION
+#   the first line is the REFUSAL — an inverted refusal misleads about the DECISION
+#
+# ⇒ Prose stays free. MEANING does not. These are the words that make the sentence a refusal
+#   rather than a suggestion, and they are LITERALS here on purpose — the moment they are
+#   derived from ROTATION_HELD_NOTICE they stop being able to disagree with it.
+#
+# ⚠️ SHA LITERALS ALONE DO NOT CLOSE THIS, and that was my first proposal. Clayton measured it:
+# a notice naming both shas correctly can still say the opposite of a refusal. The shas answer
+# "is this notice about the right thing"; only these answer "does it still refuse".
+REFUSAL_MARKERS = ( "DO NOT CLEAR THIS RED BY RECORDING A SCAN", "is REFUSED until rotation lands" )
+
+
 ROTATION_HELD_NOTICE = (
     "\n"
     "  🔴 DO NOT CLEAR THIS RED BY RECORDING A SCAN.\n"
@@ -749,6 +769,34 @@ def test_the_recorded_counts_are_derived_from_the_same_scan():
     # test id in the failing set reads identically either way.
 
 
+def test_the_refusal_markers_are_themselves_pinned():
+    """
+    🔴 THE YARDSTICK CAN BE EDITED, AND NOTHING NOTICED. Found by my own arm 3 while proving
+    the pin: shortening `REFUSAL_MARKERS` from two entries to one leaves the file GREEN at
+    2 failed / 73 passed. Every check that uses the tuple keeps passing, because they all ask
+    "is each marker present" and there is simply one less marker to ask about.
+
+    So the guard could be narrowed to nothing, one entry at a time, and the suite would agree
+    at every step. That is Clayton 😎's own line arriving on my own work for the second time
+    tonight — NEVER LET AN INSTRUMENT CERTIFY ITSELF — and it is the fourth appearance of the
+    shape this file has been chasing all evening: a check protected by nothing but the absence
+    of an edit.
+
+    ⚠️ THE LITERALS BELOW ARE SPELLED OUT A SECOND TIME ON PURPOSE. Deriving them from
+    `REFUSAL_MARKERS` would make this a tautology — the exact defect that let the notice be
+    inverted, since the anchor there was derived from the constant it was checking. Two
+    independent spellings can disagree; one spelling read twice cannot.
+    """
+    assert "DO NOT CLEAR THIS RED BY RECORDING A SCAN" in REFUSAL_MARKERS, (
+        "the refusal's imperative is no longer among the pinned markers — the guard has been "
+        "narrowed, and a narrowed guard passes everything it stopped looking at" )
+    assert "is REFUSED until rotation lands" in REFUSAL_MARKERS, (
+        "the refusal's verdict is no longer among the pinned markers" )
+    assert len( REFUSAL_MARKERS ) >= 2, (
+        f"REFUSAL_MARKERS is down to {len( REFUSAL_MARKERS )} entr(y/ies). Adding a marker is "
+        "fine; removing one silently shrinks what 'still refuses' means" )
+
+
 def test_the_rescan_red_still_carries_the_two_shas_that_make_it_actionable():
     """
     Pins the SHAS, deliberately not the wording (Mr Radio, 2026-08-30).
@@ -780,6 +828,16 @@ def test_the_rescan_red_still_carries_the_two_shas_that_make_it_actionable():
     assert "8675ec7a1c0c677e56dc6e243be7af51ee2c715f17ec6a93e1a3c731c360633f" in ROTATION_HELD_NOTICE, (
         "the notice must name the detector sha whose arrival in the fixture is refused "
         "before rotation" )
+
+    # 🔴 THE SHAS SAY WHAT THE NOTICE IS ABOUT. THEY DO NOT SAY IT STILL REFUSES.
+    # Clayton 😎 measured exactly that: a notice naming both shas correctly, with its first
+    # line rewritten to "it is probably fine to record a scan here", passed every check in
+    # this file. Pinning identifiers and pinning a decision are different jobs.
+    for marker in REFUSAL_MARKERS:
+        assert marker in ROTATION_HELD_NOTICE, (
+            f"the notice no longer contains {marker!r}, so it has stopped refusing. Rewrite "
+            "the prose freely — but a rewrite that removes the refusal is an inversion, and "
+            "this red is the only branch-level signal that the credential work is unfinished" )
 
     # 🔴 THE LEAD SENTENCE MUST STAY BEHIND ITS GATE, AND ONLY A RENDERED CHECK SEES IT.
     # Found by mutation rather than by reading, and it was the ONLY survivor of an eight-arm
@@ -901,7 +959,18 @@ def test_every_red_that_withholds_the_recipe_also_carries_the_notice():
         "exists to prevent — add the red there, do not narrow the derivation" )
 
     promise    = "rotation hold below"
-    first_line = ROTATION_HELD_NOTICE.strip().splitlines()[ 0 ].strip()
+    # 🔴 THIS ANCHOR USED TO BE DERIVED FROM THE THING IT CHECKS, WHICH MADE IT A TAUTOLOGY.
+    # It read `ROTATION_HELD_NOTICE.strip().splitlines()[ 0 ]`, and the message it is looked
+    # for in is built by `_rotation_held_notice()`, which RETURNS that constant. Both sides
+    # moved together, so no edit to the notice could ever make them disagree. Measured, and
+    # reproduced independently by Clayton 😎 (sha `350540e02edf`): rewriting the first line to
+    # "it is probably fine to record a scan here" left the file GREEN at 2 failed / 73 passed.
+    # **The refusal could be INVERTED and nothing noticed.**
+    #
+    # My own note, written earlier tonight and then built into the guard meant to catch this
+    # family: two values derived from each other cannot discriminate a swap between them,
+    # whatever the assertion is named.
+    first_line = REFUSAL_MARKERS[ 0 ]
 
     # 🔴 THE PROMISE MUST LIVE IN THE BLOCK, NOT MERELY SOMEWHERE IN THE MESSAGE.
     # Clayton 😎's survivor 2 is what exposed this, though not the way either of us first read
@@ -959,6 +1028,12 @@ def test_every_red_that_withholds_the_recipe_also_carries_the_notice():
         assert promise in message.lower(), (
             f"{name} no longer prints the withheld block. If that is deliberate this guard "
             "should go with it; if not, the hold stopped being visible where somebody reads it" )
+        for marker in REFUSAL_MARKERS:
+            assert marker in message, (
+                f"{name}'s notice no longer REFUSES — {marker!r} is gone. Prose here is free "
+                "to be rewritten and should be; its MEANING is not. A notice that reads as "
+                "permission is worse than no notice, because the reader acts on it" )
+
         assert first_line in message, (
             f"{name} prints the withheld block — which says the rotation hold is BELOW — and "
             "its message does not carry the refusal. The reader is pointed downward at "
