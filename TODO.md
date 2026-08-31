@@ -217,6 +217,48 @@ control, hand-written against anchors I chose, run against `src/tests/unit/test_
 edits do and **nothing about any edit I did not pose.** Kill judged by the NAMED failing set
 against the baseline above, never by `rc` — this file exits 1 before any mutation is applied.
 
+
+##### THE MIRROR OF THE HOLE MAYA JUST CLOSED — a guard can read a message for a component's WORDS and never ask whether the component is THERE (Clayton 😎 `84cbe224`, reviewing Maya 🌻's `0cf9fdd5`, 2026-08-30 ~21:10 EDT)
+
+Reviewing her fix for Survivor 2 above. **Her fix discriminates** — I re-posed her mutation
+rather than trusting it: SURVIVES at `285b373d` (2 failed / 73), KILLED at `0cf9fdd5`
+(3 failed / 72, sha `2a1dcd7a61c5`). **Merged on that.** Two things came out of the review
+that outlive the file, and the second is Maya's own framing of what I found.
+
+- [ ] **`src/tests/unit/test_secret_scan.py` — the rescan red can stop printing the withheld block ENTIRELY and every check stays green** (Clayton's finding, **MAYA'S FILE**; remedy handed over measured, she is landing it).
+  Surviving mutation: drop `f"{steps}\n"` from `_rescan_red_message`, keeping the
+  `_clear_the_red_steps` call in the test body so the red stays in the derived `reds` set
+  (mutated sha `718f150ec828`). Result: **2 failed / 73 passed — baseline set, nothing red.**
+  The new assert reads the block from the HELPER; the loop reads the MESSAGE as text;
+  **nothing binds the two.** `promise in message` is satisfied by the red's lead sentence,
+  `first_line in message` by the notice appended at the end, and the position check compares
+  two things that are both still present. **The whole guard passes a message that no longer
+  withholds anything.**
+  Remedy, verified BOTH ways rather than proposed: `assert block in message` at the TOP of the
+  loop — with the mutation it KILLS (3 failed / 72, sha `7284451e4684`), alone it stays green
+  (2 failed / 73). Placement matters: an assert behind an already-failing one is carried, not
+  exercised.
+
+- [ ] **THE DECOY READING — a copy that looks like ornament in the file can be load-bearing in the test** (Clayton's, adopted by Maya 🌻 as replacing her own reasoning).
+  She declined to pin the lead sentence's `below`, correctly, calling it *"decoration that
+  reads well"*. **The verdict is right and that reason would have misled the next reader.**
+  That copy is what keeps `promise in message.lower()` green exactly when the block's copy is
+  gone — it is a **decoy**, not decoration. ⇒ The answer to a decoy is never to pin its
+  wording (that is churn at rotation for no safety); it is to **stop the guard reading it**.
+  *Ask what a string is doing in the TEST before deciding it is ornament in the FILE.*
+
+**AND THE TWO HOLES ARE ONE SHAPE, WHICH IS WHY NAMING IT DID NOT PREVENT THE SECOND** —
+Maya's words, worth more than either finding: in `0cf9fdd5` the block's **PROMISE** was
+protected by the absence of a sentence somewhere else; in this one the block's **PRESENCE**
+was protected by nothing at all. **She named that shape in the commit that closed the first
+instance and still did not see the second**, which is the argument for an outside arm rather
+than a more careful re-read. An assertion audit passes both clean.
+
+**Aperture**: five hand-written arms against `src/tests/unit/test_secret_scan.py` alone in
+`lupin-wt-maya-s2` — not the unit tier, not generated, not exhaustive. Kill judged by the
+NAMED failing set against a baseline taken FIRST (2 failed / 73, the two deliberate rotation
+reds), never by `rc`. Every arm restored, restore verified clean. **Nothing repaired.**
+
 #### TWO CITATION HABITS, WRITTEN AS REASONS RATHER THAN INSTRUCTIONS (Clayton 😎, Mr Radio 🦉's ruling, 2026-08-30 ~19:58 EDT)
 
 Both come out of the same evening and the same failure: **a reference that resolves to
