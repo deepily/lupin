@@ -204,6 +204,14 @@ def test_a_missing_interpreter_refuses_before_purging_anything( planted_root ):
     assert result.returncode == 2
     assert "Refusing to purge" in result.stderr
 
+    # A refusal that only says what it declined leaves the seat stuck. Both
+    # supported ways forward must be named, and both are load-bearing: the
+    # PYTHON= form is the stopgap already published in CLAUDE.md, and it still
+    # works -- an explicitly named interpreter is honoured, only silent borrowing
+    # is refused.
+    assert "PYTHON=" in result.stderr
+    assert "link-worktree-venv.sh" in result.stderr
+
 
 def test_the_interpreter_default_matches_the_script_it_calls():
     """

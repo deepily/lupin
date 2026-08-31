@@ -107,10 +107,15 @@ if [[ ! -x "$PYTHON" ]]; then
     echo "Refusing to purge: the reconvert would fail and leave this tree on timestamp" >&2
     echo "invalidation. ${#CACHES[@]} __pycache__ directories left untouched." >&2
     echo "" >&2
-    echo "In a worktree? Give it a venv once, and the whole unit tier benefits:" >&2
-    echo "  $HERE/link-worktree-venv.sh" >&2
-    echo "Deliberately NOT falling back to the main repo's interpreter: that would be the" >&2
-    echo "one remaining way a command run here reaches into a tree you are not in." >&2
+    echo "Two ways forward, both supported:" >&2
+    echo "  1. Name an interpreter for this one run:" >&2
+    echo "       PYTHON=\"\$( git rev-parse --git-common-dir )/../.venv/bin/python\" $0" >&2
+    echo "  2. Give this worktree a venv once — the whole unit tier benefits, not just this:" >&2
+    echo "       $HERE/link-worktree-venv.sh" >&2
+    echo "" >&2
+    echo "What it will NOT do is reach for another tree's interpreter on its own. An override" >&2
+    echo "you type is a decision; one this script makes for you is invisible, and invisible" >&2
+    echo "cross-tree reach is the defect the root resolution above was just repaired for." >&2
     exit 2
 fi
 
