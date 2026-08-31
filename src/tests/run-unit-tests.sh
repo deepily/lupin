@@ -1,5 +1,12 @@
 #!/bin/bash
-# Runs Lupin unit tests (fast, no server dependency, ~915 tests).
+# Runs Lupin unit tests (fast, no server dependency).
+#
+# COUNT: 20,974 collected, 11 deselected by pytest.ini's marker addopts, measured
+# 2026-08-30 at a5e13262 and again at 742ac477 with the same result. The "~915" that
+# stood on this line from this file's creation (172cb57f, 2026-04-05) until today had
+# aged by a factor of 23. So DATE the figure, and re-derive rather than quote it:
+#
+#   run-unit-tests.sh --collect-only -q 2>/dev/null | tail -1
 #
 # Usage:
 #   run-unit-tests.sh [pytest flags...]
@@ -7,7 +14,19 @@
 # Examples:
 #   run-unit-tests.sh                       # all unit tests
 #   run-unit-tests.sh -k jwt                # tests matching 'jwt'
-#   run-unit-tests.sh -v --cov=cosa         # verbose + coverage
+#
+# COVERAGE — use the LUPIN_COVERAGE opt-in, never a `--cov=<path>` flag:
+#
+#   LUPIN_COVERAGE=1 COVERAGE_FILE=/tmp/cov-$USER.data run-unit-tests.sh
+#
+# This example read `-v --cov=cosa` until 2026-08-30, and that TAUGHT the defect row
+# e2099400 exists to close: a scoped `--cov=<path>` OVERRIDES pyproject's `source`
+# list, so the run measures a SMALLER frame than the config names — and a report says
+# nothing at all about a file it never traced, so the output looks clean either way.
+# Absence from a scoped report means never-measured, not zero. The opt-in passes a
+# BARE `--cov`, which uses the config's own source list; see the reasoning in
+# src/scripts/lib/coverage-opt-in.sh. No single tier meets the whole-system floor —
+# enforcement happens once, after every tier has appended, in run-coverage-gate.sh.
 #
 # Called by TestSuiteJob when test_types="unit" — pytest_args become "$@".
 # Writes output to /tmp/unit-latest.log via TestSuiteJob log_symlinks dict.
