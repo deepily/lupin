@@ -1724,7 +1724,14 @@ def quick_smoke_test():
         print( "Testing PostgreSQL connection and schema validation..." )
         import os
         from sqlalchemy import text
-        db_url = os.environ.get( 'DATABASE_URL', 'postgresql://lupin_dev:dev_password@localhost:5432/lupin_auth' )
+        # No baked-in credential default (row baac2474): build from the same env the
+        # app reads, so this smoke block cannot carry a password literal in the tree.
+        db_url = os.environ.get( 'DATABASE_URL' )
+        if not db_url:
+            _pw    = os.environ.get( 'DB_PASSWORD', '' )
+            _host  = os.environ.get( 'DB_HOST', 'localhost' )
+            _port  = os.environ.get( 'DB_PORT', '5432' )
+            db_url = f"postgresql://lupin_dev:{_pw}@{_host}:{_port}/lupin_auth"
         try:
             engine = create_engine( db_url )
             # Test connection

@@ -232,7 +232,7 @@ class TestAutoMigrateLive( unittest.TestCase ):
         self._sql = sql
         with self._admin.cursor() as cur:
             cur.execute( sql.SQL( "CREATE DATABASE {}" ).format( sql.Identifier( self.dbname ) ) )
-        self.url = f"postgresql+psycopg2://lupin_dev:dev_password@localhost:5432/{self.dbname}"
+        self.url = f"postgresql+psycopg2://lupin_dev:{_PG[ 'password' ]}@localhost:5432/{self.dbname}"
 
     def tearDown( self ):
         with self._admin.cursor() as cur:
@@ -314,7 +314,7 @@ class TestAutoMigrateLive( unittest.TestCase ):
         # Task (a): with NO DATABASE_URL and NO injected url, env.py must fall
         # through to cosa.rest.db.database.get_database_url() — the app builder —
         # to find the right database. We point the builder at this throwaway DB
-        # via DB_NAME (development branch: localhost:5432, lupin_dev/dev_password).
+        # via DB_NAME (development branch: localhost:5432, lupin_dev/$DB_PASSWORD).
         from alembic import command
 
         # First bring the DB to head normally (empty -> create_all + stamp head).

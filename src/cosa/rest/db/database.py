@@ -94,7 +94,12 @@ def get_database_url() -> str:
         # Testing environment (PostgreSQL-in-Docker, separate database)
         # Uses same Docker container but different database name
         user = os.environ.get( "DB_USER", "lupin_dev" )
-        password = os.environ.get( "DB_PASSWORD", "dev_password" )
+        # No baked-in password default (row baac2474). This module builds the URL at
+        # IMPORT time (see the create_engine call below), so an unset DB_PASSWORD must
+        # NOT raise here — it would break every importer. Containers get the value from
+        # docker-compose.yml, which reads the untracked .env; a host shell must export
+        # it. Env resolves at container CREATE: `up -d --force-recreate`, not a restart.
+        password = os.environ.get( "DB_PASSWORD", "" )
         host = os.environ.get( "DB_HOST", "localhost" )
         port = os.environ.get( "DB_PORT", "5432" )
         database = os.environ.get( "DB_NAME", "lupin_db_test" )  # Separate test database
@@ -104,7 +109,12 @@ def get_database_url() -> str:
     else:  # development (default)
         # Local PostgreSQL-in-Docker
         user = os.environ.get( "DB_USER", "lupin_dev" )
-        password = os.environ.get( "DB_PASSWORD", "dev_password" )
+        # No baked-in password default (row baac2474). This module builds the URL at
+        # IMPORT time (see the create_engine call below), so an unset DB_PASSWORD must
+        # NOT raise here — it would break every importer. Containers get the value from
+        # docker-compose.yml, which reads the untracked .env; a host shell must export
+        # it. Env resolves at container CREATE: `up -d --force-recreate`, not a restart.
+        password = os.environ.get( "DB_PASSWORD", "" )
         host = os.environ.get( "DB_HOST", "localhost" )
         port = os.environ.get( "DB_PORT", "5432" )
         database = os.environ.get( "DB_NAME", "lupin_db_dev" )

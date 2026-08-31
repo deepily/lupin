@@ -480,7 +480,7 @@ def handback_ctx( tmp_path_factory ):
         "DB_HOST"                 : server_url.host or "localhost",
         "DB_PORT"                 : str( server_url.port or 5432 ),
         "DB_USER"                 : server_url.username or "lupin_dev",
-        "DB_PASSWORD"             : server_url.password or "dev_password",
+        "DB_PASSWORD"             : server_url.password or os.environ.get( "DB_PASSWORD", "" ),
     } )
 
     ctx = {
