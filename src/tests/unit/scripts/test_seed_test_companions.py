@@ -20,6 +20,7 @@ pass whether or not that sentence is true.
 Each test names the change that reddens it.
 """
 
+import json
 import os
 import sys
 
@@ -482,7 +483,7 @@ def test_both_upserts_CONVERGE_the_credential_columns_rather_than_DO_NOTHING( wi
             f"'{column}' is never refreshed from dev, so a rotated value cannot reach test"
 
 
-def test_the_INSERT_binds_each_parameter_to_the_column_that_NAMES_it( wired ):
+def test_the_users_INSERT_binds_each_parameter_to_the_column_that_NAMES_it( wired ):
     """
     CHLOÉ 🗼's finding. Every other assertion in this file reads the statement TEXT, and
     the text is identical whichever order the parameters are bound in. Swapping `email`
@@ -520,3 +521,49 @@ def test_the_INSERT_binds_each_parameter_to_the_column_that_NAMES_it( wired ):
     assert bound[ "created_at" ]     == row[ 3 ]
     assert bound[ "email_verified" ] == row[ 4 ]
     assert bound[ "is_active" ]      == row[ 5 ]
+    # CHLOÉ 🗼: position 6 was covered only INCIDENTALLY — a swap touching it moved
+    # created_at as well, and the two roles tests above read index 6 by hand. Both are
+    # real, and both move if anyone renumbers. Naming it here makes the seventh column
+    # carry its own assertion rather than inherit one.
+    assert bound[ "roles" ]          == json.dumps( row[ 6 ] )
+
+
+def test_the_api_keys_INSERT_binds_each_parameter_to_the_column_that_NAMES_it( wired ):
+    """
+    The same class as the users test above, on the other upsert — and it was open while
+    that one was closed. TIBERIUS 👑 caught the gap from the NAME rather than the code:
+    the first test was called `test_the_INSERT_…`, which claims both statements, and
+    asserted only the users one. Swapping key_hash and description here writes the
+    description into the key_hash column, leaves the SQL byte-identical, and SURVIVED the
+    whole file at sha 10ecb3653ffb, 23 passed.
+
+    A test whose name claims more than its assertions reach does not merely overstate —
+    it tells the next reader the other half is covered, so nobody goes looking.
+
+    _key_row's seven defaults are already pairwise distinct, so no fixture change is
+    needed here; the users test needed active=False only because its two booleans were
+    both True.
+    """
+    _all_companions( wired )
+    wired[ "keys_by_email" ][ mod.SERVICE_ACCT ] = [ _key_row() ]
+
+    mod.seed_if_missing()
+
+    test_cur    = wired[ "conns" ][ 1 ].cursor()
+    sql, params = next( ( s, p ) for s, p in test_cur.executed if "INSERT INTO api_keys" in s )
+
+    named   = " ".join( sql.split() ).split( "INSERT INTO api_keys (", 1 )[ 1 ].split( ")", 1 )[ 0 ]
+    columns = [ c.strip() for c in named.split( "," ) ]
+    assert len( columns ) == len( params ), \
+        f"{len( columns )} columns named but {len( params )} parameters bound"
+
+    bound = dict( zip( columns, params ) )
+    row   = _key_row()
+
+    assert bound[ "id" ]           == row[ 0 ]
+    assert bound[ "user_id" ]      == row[ 1 ]
+    assert bound[ "key_hash" ]     == row[ 2 ], "the key_hash column is not receiving the key hash"
+    assert bound[ "description" ]  == row[ 3 ], "the description column is not receiving the description"
+    assert bound[ "is_active" ]    == row[ 4 ]
+    assert bound[ "created_at" ]   == row[ 5 ]
+    assert bound[ "last_used_at" ] == row[ 6 ]
