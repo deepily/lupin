@@ -937,7 +937,14 @@ class TodoFifoQueue( FifoQueue ):
         Raises:
             - None
         """
-        job = best_snapshot.get_copy( user_email=user_email )
+        # Both halves of the requester's identity, not just the email (row `0e7c9214`).
+        # The stored snapshot carries whoever asked FIRST; the frames have to reach
+        # whoever is asking NOW. Passing only the email left the copy addressed to the
+        # original creator, and `_transition_to_done` emits with `job.user_id` — so the
+        # completion frame for a repeat ask went to a key with no session under it.
+        # Scope: this closes the dropped frames. The missing SPOKEN answer in the same
+        # row has a separate cause — an empty `user_email` arriving here.
+        job = best_snapshot.get_copy( user_email=user_email, user_id=user_id )
         print( "Python object ID for copied job: " + str( id( job ) ) )
         job.debug   = self.debug
         job.verbose = self.verbose
