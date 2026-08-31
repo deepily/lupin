@@ -639,7 +639,10 @@ a LIST.**
 Found by Krishna 🦚 2026-08-30 as *"a `.py` path silently measures zero"*; both halves of that
 moved under measurement, and the corrected rule is more useful than the original.
 
-**`--cov=<target>` reports nothing whenever the target is never IMPORTED by the tests in that run.**
+**`--cov=<target>` needs BOTH conditions, and fails identically when either is missing: the target
+must be spelled as an IMPORTABLE module or directory, AND actually IMPORTED by the tests in that
+run.** (Conjunction stated by Krishna 🦚 after the first rewrite — tighter than the two-case table
+below, which is kept because it shows which condition each failure breaks.)
 Two ways to land there:
 
 | `--cov=` | result | why |
