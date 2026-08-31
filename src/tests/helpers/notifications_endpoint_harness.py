@@ -138,6 +138,22 @@ class Spy:
         self.calls     = []
 
     # ── programming ──────────────────────────────────────────────────────────────
+    def strict( self ):
+        """
+        Make unprogrammed calls RAISE (the default for the repo spy).
+
+        Worth flipping on the queue/websocket spies whenever the collaborator IS the
+        subject — a lenient double returning None lets a handler reach for the wrong
+        method and still produce a plausible envelope.
+        """
+        self._lenient = False
+        return self
+
+    def lenient( self ):
+        """Make unprogrammed calls return None — for a genuinely incidental double."""
+        self._lenient = True
+        return self
+
     def returns( self, name, value ):
         """Program `name` to return `value` on every call. Chainable."""
         self._returns[ name ] = value
