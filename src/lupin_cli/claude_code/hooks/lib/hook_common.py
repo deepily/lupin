@@ -1645,7 +1645,14 @@ def _brevity_rules():
     Returns:
         str: Brevity guidance text
     """
-    cap = cu.get_spoken_char_cap()
+    # WRAPPED TOO, and the reason is that leaving it bare made the fix
+    # ORDER-DEPENDENT (Mr Radio, 2026-08-30). On today's hook path
+    # _speakerphone_reminder_body runs first and builds the config, so this call
+    # finds it cached and prints nothing — the banner is suppressed by ACCIDENT of
+    # ordering, not by the guard. Reorder the callers and the leak comes back with
+    # nothing failing. Same masked-invariant shape as two sites agreeing for a
+    # reason neither states.
+    cap = quiet_stdout( cu.get_spoken_char_cap )
     return (
         "Brevity for TTS: re-craft the spoken `message` for speech — don't pipe "
         "terminal markdown through `notify()`. Strip headings, bullets, code "
@@ -1717,7 +1724,17 @@ def _routing_reminder():
 #     trace is why this one names a function instead.
 def quiet_stdout( fn, *args, **kwargs ):
     """
-    Call `fn` with anything it writes to stdout discarded.
+    Call `fn` with its PYTHON-LEVEL writes to `sys.stdout` discarded.
+
+    🔴 THE NARROWER WORDING IS THE ACCURATE ONE (Tiberius 👑, reviewing this).
+    `contextlib.redirect_stdout` rebinds `sys.stdout`; it does not touch file
+    descriptor 1. So a subprocess — or anything writing to fd 1 directly — still
+    reaches the hook's channel. Not live for today's only caller, which reads an
+    int out of the config, but it is the boundary that would come back if
+    `ConfigurationManager` ever shelled out. Two further measured edges, neither
+    live here: a lazily-returned generator runs its body AFTER the redirect exits,
+    so its output escapes; and `sys.stdout` is process-global, so another thread
+    printing during the window is silently swallowed (measured: MainThread only).
 
     Requires:
         - fn is callable

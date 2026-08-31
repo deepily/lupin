@@ -46,6 +46,11 @@ from pathlib import Path
 # (The guard that caught this matches on TEXT, so it flagged an earlier version of
 # this very comment for quoting the expression it forbids. It cannot tell a use
 # from a mention — worth knowing before assuming a hit is a real one.)
+# DELIBERATE DEPARTURE from the LUPIN_ROOT bootstrap the other eight scripts in
+# this directory use (CLAUDE.md § PATH MANAGEMENT). Resolving from __file__ is
+# safer HERE: run from a worktree while LUPIN_ROOT still names the main repo, the
+# prescribed pattern would import the MAIN repo's sessions_dir — the wrong-tree
+# hazard CLAUDE.md spends a section on. Noted so nobody "corrects" it back.
 _SRC = Path( __file__ ).resolve().parents[ 1 ]
 if str( _SRC ) not in sys.path:
     sys.path.insert( 0, str( _SRC ) )
