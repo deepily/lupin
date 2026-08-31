@@ -282,8 +282,9 @@ def _clear_the_red_steps( recorded, root ):
             "    (THE RECIPE FOR CLEARING THIS RED IS WITHHELD while the rotation hold below\n"
             "     is active — it ends by telling you to update the record, which is the one\n"
             "     thing that hold refuses. It is not wrong and it is not gone: read it in the\n"
-            f"     record's `_how_to_clear_the_red`, where `{FIXTURE_HOLD_KEY}` beside it repeats\n"
-            "     this refusal, and it prints here again once rotation lands.)"
+            f"     record's `_how_to_clear_the_red` — `{FIXTURE_HOLD_KEY}`, the record's FIRST\n"
+            "     key, repeats this refusal there — and it prints here again once rotation\n"
+            "     lands.)"
         )
     return chr( 10 ).join( "    " + s for s in recorded[ "_how_to_clear_the_red" ] )
 
@@ -857,7 +858,7 @@ def test_the_withheld_block_does_not_send_the_reader_to_an_ungated_recipe():
         "A pointer to a key that does not exist is worse than no pointer" )
 
 
-def test_the_records_own_annotation_refuses_the_recipe_it_sits_beside():
+def test_the_records_own_annotation_leads_it_and_refuses_the_recipe_below():
     """
     The direct-reader hole, closed. A human who opens the fixture is reached by no render
     site — the gate suppresses the recipe where it is PRINTED, and this file is not printed.
@@ -866,9 +867,26 @@ def test_the_records_own_annotation_refuses_the_recipe_it_sits_beside():
     ruling: the record is evidence of what was scanned and what the then-owner said to do
     about it, so rewriting `_how_to_clear_the_red` to fix a display destroys evidence.
     Adding a key is annotation. That is why this test asserts the recipe is still INTACT.
+
+    🔴 AND IT MUST LEAD THE RECORD, NOT MERELY APPEAR IN IT (Krishna 🦚, reviewing 01516300).
+    I first placed it BESIDE the recipe, which reads as tidy and is **the defect this change
+    exists to fix, wearing the fix's own clothes**: a reader acts on the first instruction
+    they find. Placed there, the order was `_why` on line 2 — which ends "goes red until
+    somebody re-scans and records the result here" — the six steps on 3 to 10, and the
+    refusal on 11. The reader met the refused action twice before the refusal.
+
+    🔴 THE ORDER IS ASSERTED, NOT JUST FIXED. Krishna found nothing pinning key order, and a
+    fix nothing defends is one the next person re-breaks by adding a dict entry in the
+    natural place — at the end. Position is load-bearing in a file whose failure mode is
+    somebody acting too early.
     """
     recorded = _recorded_for_gate()
     hold     = recorded[ FIXTURE_HOLD_KEY ]
+
+    assert list( recorded.keys() )[ 0 ] == FIXTURE_HOLD_KEY, (
+        f"{FIXTURE_HOLD_KEY!r} must be the FIRST key in the record — it currently sits at "
+        f"position {list( recorded.keys() ).index( FIXTURE_HOLD_KEY ) + 1}. A refusal the "
+        "reader reaches AFTER the instruction it refuses is not a refusal, it is a footnote" )
 
     assert "034e44ac" in hold, (
         "the record's annotation must name the held commit carrying the finished re-scan — "
