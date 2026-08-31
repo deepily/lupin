@@ -201,7 +201,7 @@ the right tree"* both LOOK like remedies and **neither can be failed**.
 falsifiability check on a rule, and this log did not have one before tonight. It governs every entry
 above, retroactively.
   🔧 **REMEDY (D10 applied to itself — artifact).** The artifact is **this pass**: every ruling above now carries either a command / comparison / artifact, or an explicit statement that it takes none (D9).
-  **FAILS IF** any future ruling lands with a remedy field that names no command, no comparison and no artifact. ⚠️ **Discharged by RUNNING, not by writing**: the D4 and D3 commands above are shapes carrying placeholders; the D1 and D6 remedies were executed tonight, and the config-list command banked in the moratorium book was run before it was committed. **A remedy command that has not been run is the same defect one level up.**
+  **FAILS IF** any future ruling lands with a remedy field that names no command, no comparison and no artifact. ⚠️ **Discharged by RUNNING, not by writing — and here is exactly which of these have been, because the distinction is the rule.** RUN tonight: the `exclude_list` command banked in the moratorium book (exit 0, before its commit), and **D7's baseline-first** on `54bea5bf` (stock baseline 7 passed / 3 failed, then 10 with the fix). **RUNNING, not yet complete**: D1's union command, which is why nothing was merged on it. **NOT run, shapes carrying placeholders**: D3 and D4. **A remedy command that has not been run is the same defect one level up** — so this list says which is which instead of implying all ten were exercised.
 
 **D9 — the run's signature was TEN REFUSALS, not the defects.** Five seats refused a leading
 question; three refused the sharpened rule I drew from them, including the versions that flattered
