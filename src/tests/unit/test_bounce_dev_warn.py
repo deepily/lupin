@@ -420,3 +420,69 @@ def test_the_partial_line_says_how_many_of_how_many_before_the_kill( monkeypatch
 
     err = capsys.readouterr().err
     assert "2" in err and str( RECIPIENTS ) in err
+
+
+# ── the .get() DEFAULTS, which every fixture above silently skips ────────────────
+#
+# Found by Rachel 🕊️, and it is the sharpest of the three gaps this file has had:
+# `body.get( "recipients", 0 )` changed to `body.get( "recipients", 1 )` SURVIVED all
+# 24 tests. Every fixture supplies the key, so the default is never the value used —
+# a whole branch of behaviour that the assertions cannot see however well they are
+# named, and coverage cannot see either, because the line runs every time.
+#
+# It is a real defect and not an equivalent mutant. A body missing `recipients`
+# would resolve to 1, skip the zero-recipients early return, open the store and wait
+# on an ack that nobody was ever asked for — burning the whole deadline before killing
+# the server, on the path where the correct answer is "nobody to warn, proceed".
+#
+# ⇒ THE GENERAL SHAPE, worth more than the case: a `.get( key, default )` is TWO
+# behaviours on one line. A fixture that always supplies the key tests one of them and
+# reads as covering both.
+
+def test_a_body_with_no_recipients_key_is_treated_as_nobody_to_warn( monkeypatch, wired ):
+    """
+    The default is the value here, so the mutation Rachel posed — 0 becoming 1 — changes
+    the outcome rather than nothing: exit 0 and no store, versus a full deadline spent
+    waiting for an ack no recipient was asked for.
+    """
+    built = []
+    body  = { "broadcast_id": "bc-no-key" }          # deliberately missing "recipients"
+    monkeypatch.setattr( bounce_dev_warn, "_request", lambda *a, **kw: ( True, 200, body ) )
+    monkeypatch.setattr( bounce_dev_warn, "CommonsStore", lambda root: built.append( root ) )
+
+    assert bounce_dev_warn.main() == 0
+    assert built == [], "waited on acks for a recipient count that was never reported"
+
+
+def test_a_body_with_no_filtered_out_key_still_reports_a_count( monkeypatch, wired, capsys ):
+    """
+    Same class, the other default on the same path: `filtered_out` defaults to `[]` and
+    the no-recipients line takes `len()` of it. A default of `None` would raise inside
+    the branch whose whole job is to exit cleanly.
+    """
+    body = { "broadcast_id": "bc-no-filtered", "recipients": 0 }   # no "filtered_out"
+    monkeypatch.setattr( bounce_dev_warn, "_request", lambda *a, **kw: ( True, 200, body ) )
+
+    assert bounce_dev_warn.main() == 0
+    assert "0" in capsys.readouterr().out
+
+
+def test_a_body_with_no_broadcast_id_still_reaches_the_wait( monkeypatch, wired ):
+    """
+    `broadcast_id` has NO default — it is `body.get( "broadcast_id" )`, so a MISSING KEY
+    is None rather than a KeyError. Asserted so the absence of a default is a decision on
+    the record: None is carried into the wait, where it matches no ack, rather than
+    crashing the script before the bounce.
+
+    ⚠️ THE KEY IS OMITTED, NOT SET TO None, and the difference is the whole test. My
+    first version passed `{ "broadcast_id": None }`, which makes `.get` return the
+    PRESENT value and never consults the default — so adding a default to that line
+    SURVIVED (sha 8c305fc372ae, caught by my own harness). A fixture that supplies the
+    key cannot test what happens when the key is absent, however the assertion reads.
+    """
+    body = { "recipients": RECIPIENTS }              # NO "broadcast_id" key at all
+    monkeypatch.setattr( bounce_dev_warn, "_request", lambda *a, **kw: ( True, 200, body ) )
+
+    bounce_dev_warn.main()
+
+    assert wired[ "poll" ][ "broadcast_id" ] is None
