@@ -444,6 +444,43 @@ def _branch_triage_message( untriaged, steps, recorded ):
     )
 
 
+def _refusal_lands_below_every_promise( message, promise, refusal ):
+    """
+    Does every "the hold is BELOW" in this message have the refusal below it?
+
+    🔴 BOTH OPERANDS ARE `rindex`, AND EACH SIDE COST A SEPARATE MEASUREMENT.
+
+    The RIGHT side first: written with `.index( promise )` a mutation SURVIVED, because the
+    phrase appears twice in the rescan red — once in the lead sentence, once in the withheld
+    block — and a refusal sitting between them satisfied the first. Every promise needs the
+    refusal below IT, so the binding promise is the LAST.
+
+    The LEFT side is the same bug mirrored, found by Krishna 🦚 reviewing the fix for the
+    right one. `.index( refusal )` takes the FIRST mention of the refusal, so a message that
+    MENTIONS the refusal early and also appends it properly at the end is rejected. That errs
+    safe — a false fail, never a false pass — but it is exactly what this file's own guard
+    comment condemns: punishing a shape it should be indifferent to. The binding refusal is
+    the last one too.
+
+    ⇒ The pair is the lesson: fixing one end of a two-sided comparison is half a fix, and the
+      half you did not look at is the one that reads as correct because you just thought hard
+      about its neighbour.
+
+    Requires:
+        - message, promise and refusal are strings; promise is matched case-insensitively
+
+    Ensures:
+        - True when the message makes no promise at all (nothing to point at)
+        - True when the last refusal appears after the last promise
+        - False otherwise
+        - never raises
+    """
+    lowered = message.lower()
+    if promise.lower() not in lowered: return True
+    if refusal not in message:         return False
+    return message.rindex( refusal ) > lowered.rindex( promise.lower() )
+
+
 def _render_every_red_under_a_hold():
     """
     Every red's message, actually rendered, with the hold forced ACTIVE.
@@ -766,6 +803,36 @@ def test_the_rescan_red_still_carries_the_two_shas_that_make_it_actionable():
         "nobody who hits it. Re-attach it to the assert message." )
 
 
+def test_the_position_rule_is_measured_on_constructed_strings_not_only_on_the_real_message():
+    """
+    🔴 THE REAL MESSAGE EXERCISES ONE ROW OF THIS TABLE. That is the whole reason the rule
+    was wrong twice: a check that only ever sees the shape it was written against agrees with
+    itself. These five strings are the shapes, built by hand so the ordering is the only
+    variable — Krishna 🦚's table, pinned rather than quoted, because a truth table in a DM
+    is a claim and a truth table in a test is a control.
+
+    Row 5 is the one that matters and the one neither of us saw first: a message MENTIONING
+    the refusal early and also appending it properly at the end is CORRECTLY SERVED, and the
+    guard rejected it while `.index` was on the left. Erring safe is not the same as being
+    right, and this file's own comments condemn exactly that shape.
+    """
+    P, R = "rotation hold below", "🔴 DO NOT CLEAR"
+    cases = [
+        ( f"{P} ... {R}",              True,  "the ordinary case — one promise, refusal below" ),
+        ( f"{P} ... {P} ... {R}",      True,  "two promises, refusal below both" ),
+        ( f"{P} ... {R} ... {P}",      False, "a promise with nothing below it — the right-side bug" ),
+        ( f"{R} ... {P}",              False, "refusal above the only promise" ),
+        ( f"{R} ... {P} ... {R}",      True,  "mentioned above AND appended below — the left-side bug" ),
+    ]
+    for text, expected, why in cases:
+        assert _refusal_lands_below_every_promise( text, P, R ) is expected, (
+            f"the position rule got {why!r} wrong — expected {expected}" )
+
+    assert _refusal_lands_below_every_promise( "no promise here at all", P, R ) is True, (
+        "a message that makes no promise has nothing to point at, so it cannot point at "
+        "nothing — this guard is about a broken promise, not about mandating one" )
+
+
 def test_every_red_that_withholds_the_recipe_also_carries_the_notice():
     """
     🔴 THE GUARD ABOVE COVERED ONE RED OUT OF THREE, AND THE UNCOVERED ONE WAS BROKEN.
@@ -846,13 +913,7 @@ def test_every_red_that_withholds_the_recipe_also_carries_the_notice():
             "its message does not carry the refusal. The reader is pointed downward at "
             "nothing, which reads as a stale copy-paste and teaches them to discount the next "
             "refusal too" )
-        # 🔴 THE **LAST** PROMISE, NOT THE FIRST — and my own mutation is what found this.
-        # The phrase appears TWICE in the rescan red: once in the lead sentence and once in
-        # the withheld block. Written against `.index` the check passed a mutation that put
-        # the notice between them — above the block that promises it, below the sentence
-        # that also does. Every promise needs the refusal below IT, so the binding one is
-        # the last.
-        assert message.index( first_line ) > message.lower().rindex( promise ), (
+        assert _refusal_lands_below_every_promise( message, promise, first_line ), (
             f"{name} carries the refusal ABOVE the block that promises it BELOW. Present but "
             "misplaced still leaves the reader looking down at nothing — which is why this "
             "asserts a POSITION and not a membership" )
