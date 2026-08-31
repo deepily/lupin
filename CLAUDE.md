@@ -864,7 +864,7 @@ which welds a real answer to a failure-to-answer:
 |---|---|
 | **0** | every pyc this interpreter reads is checked-hash |
 | **1** | ⚠️ **the real finding** — timestamp pycs are present |
-| **2** | **it never ran** — unknown option, *or* no interpreter at `$PYTHON` |
+| **2** | **it never ran** — **three** conditions share this code: unknown option · root is not a directory · no interpreter at `$PYTHON`. Each prints a distinct message to **stderr**, so the message is the only discriminator — capture stderr, or you cannot tell them apart |
 
 **Exit 2 is common, not exotic**: `PYTHON` defaults to `$LUPIN_ROOT/.venv/bin/python`, and
 **29 of the fleet's 74 worktrees have no `.venv`** — so the bare command fails on roughly two in
@@ -953,6 +953,14 @@ a particular command:
 |---|---|
 | **rebuild the sandbox per arm** — tree, scripts and caches together | ✅ strongest: nothing survives *by construction*, so there is no cache to forget |
 | `src/scripts/purge-pycache.sh` between arms | good, and the practical choice in a working tree |
+| a raw `find … __pycache__ -delete` between arms | 🔴 **RE-OPENS THE DEFECT** — see below |
+
+🔴 **A RAW PURGE INSIDE A MUTATION HARNESS MANUFACTURES THE BUG IT IS THERE TO PREVENT** — measured
+by Pocholo 📣, 2026-08-30, as a **false survivor**. His harness isolated arms with
+`find … __pycache__ -delete`, which deletes the *checked-hash* caches; the next import rebuilds them
+**timestamp-based**, because a pyc written where none exists has no mode to inherit. **The isolation
+step put the tree back into exactly the state the isolation existed to prevent**, and nothing in the
+output said so. ⇒ **Use the script — it purges AND reconverts, so the halves cannot come apart.**
 
 ⚠️ **Do not read this as requiring a purge you do not need.** Krishna's arms rebuild from scratch
 each time and are already isolated; demanding a purge there would be cargo cult.
