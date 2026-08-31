@@ -359,3 +359,64 @@ def test_src_is_put_on_the_path_when_it_is_missing( monkeypatch, tmp_path ):
     _exec_bootstrap_fresh( monkeypatch, lupin_root_value=str( scratch ), path=working )
 
     assert working[ 0 ] == expected, "the bootstrap did not prepend the computed src path"
+
+
+# ── what the OPERATOR reads, which the exit codes above cannot check ─────────────
+#
+# Found the same way as the store-root gap: by posing mutations neither suite had.
+# FOUR of them survived this file — the failure message dropping the status, the
+# no-recipients line dropping the filtered count, and both reach messages dropping
+# "how many of how many". Every one left 20 tests green, because asserting an exit
+# code says nothing about the sentence printed beside it.
+#
+# The source itself argues these matter: "warned N of M is actionable; a silent
+# proceed is the guessed-pause failure this ack-confirmation replaced." An exit 1 that
+# does not say 2-of-3 sends a human to the logs to find out what the script already
+# knew. Clayton 😎's suite covered this class; mine did not.
+
+def test_the_failure_message_names_the_status_it_got_back( monkeypatch, wired, capsys ):
+    """The operator's next move differs for a 503 and a 401; the code alone is exit 2 for both."""
+    monkeypatch.setattr( bounce_dev_warn, "_request", lambda *a, **kw: ( False, 503, "upstream gone" ) )
+
+    bounce_dev_warn.main()
+
+    assert "503" in capsys.readouterr().err
+
+
+def test_the_no_recipients_line_says_how_many_were_filtered_out( monkeypatch, wired, capsys ):
+    """
+    "Nobody to warn" and "everybody was filtered out" are different situations with the
+    same exit code. The filtered count is the only thing that separates them.
+    """
+    monkeypatch.setattr( bounce_dev_warn, "_request",
+                         lambda *a, **kw: ( True, 200, _ok_body( recipients=0,
+                                                                 filtered_out=[ "a", "b", "c" ] ) ) )
+
+    bounce_dev_warn.main()
+
+    assert "3" in capsys.readouterr().out
+
+
+def test_the_success_line_reports_how_many_acked_of_how_many( wired, capsys ):
+    """Exit 0 proves the wait was satisfied; only the message says on what evidence."""
+    bounce_dev_warn.main()
+
+    out = capsys.readouterr().out
+    assert f"{RECIPIENTS}/{RECIPIENTS}" in out
+
+
+def test_the_partial_line_says_how_many_of_how_many_before_the_kill( monkeypatch, wired, capsys ):
+    """
+    The source calls this out itself: "warned N of M is actionable; a silent proceed is
+    the guessed-pause failure this ack-confirmation replaced." 2 and 3 are deliberately
+    different numbers — "2 of 2" would read as success in a message about failure.
+    """
+    monkeypatch.setattr(
+        bounce_dev_warn, "poll_acks_until_satisfied",
+        lambda **kw: { "satisfied": False, "acked": 2, "elapsed": CONFIG_DEADLINE },
+    )
+
+    bounce_dev_warn.main()
+
+    err = capsys.readouterr().err
+    assert "2" in err and str( RECIPIENTS ) in err
