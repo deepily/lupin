@@ -657,6 +657,26 @@ def test_terse_title_trimmed_carries_the_PREDICATE_not_a_constant( client, repo 
     assert rows[ 1 ][ "title_trimmed" ] is False               # ...and a short one is not
 
 
+def test_terse_does_not_flag_an_over_cap_LEGACY_row( client, repo ):
+    """
+    Rachel 🕊️'s S1, projection half. Her fixture, landed by me.
+
+    `make_item` builds a TaskItem straight from kwargs — `soft_guard_title` appears
+    nowhere in it — so an over-cap title reaches the projection here exactly as one of
+    the 333 legacy rows in the store does. That is what makes the discriminating input
+    two lines rather than impossible.
+
+    She measured both arms in her own detached worktree at c64da293: pristine, this
+    passes; with `==` changed to `>=` (sha 7b187f8b224d) it FAILS, alongside 472 passed.
+    The mutant that survived the entire existing suite dies on the first fixture that
+    hands the predicate an input the suite could not produce.
+    """
+    repo.query_tasks.return_value = [ make_item( title="X" * 90 ) ]
+    r = client.get( "/api/tasks", params={ "terse": "true" } )
+    assert r.status_code == 200
+    assert r.json()[ "tasks" ][ 0 ][ "title_trimmed" ] is False
+
+
 def test_query_terse_serializes_nullable_next_chase_ts( client, repo ):
     # The terse projection's only conditional: next_chase_ts → None when unset.
     repo.query_tasks.return_value = [ make_item( next_chase_ts=NOW ), make_item( next_chase_ts=None ) ]
