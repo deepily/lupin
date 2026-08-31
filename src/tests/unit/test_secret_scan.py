@@ -18,6 +18,7 @@ THE VALUES BELOW ARE SYNTHETIC. Nothing here is a real credential; the real cont
 the one line on origin/main the scanner was built for, and it is not reproduced here.
 """
 
+import ast
 import contextlib
 import importlib.util
 import sys
@@ -684,6 +685,81 @@ def test_the_rescan_red_still_carries_the_two_shas_that_make_it_actionable():
         "nobody who hits it. Re-attach it to the assert message." )
 
 
+def test_every_red_that_withholds_the_recipe_also_carries_the_notice():
+    """
+    🔴 THE GUARD ABOVE COVERED ONE RED OUT OF THREE, AND THE UNCOVERED ONE WAS BROKEN.
+
+    `test_the_rescan_red_still_carries_the_two_shas_that_make_it_actionable` inspects
+    exactly one function by name. Measured 2026-08-30: three reds print the withheld
+    block, two appended the notice, and the third —
+    `test_the_branch_we_commit_to_carries_no_untriaged_finding` — did not. The withheld
+    block says "while the rotation hold BELOW is active", so that red pointed a reader at
+    a hold that never appeared. A guard naming ONE site cannot see a second site going
+    wrong, which is the same shape as every finding on this file tonight.
+
+    ⚠️ AND A LIST OF NAMES WOULD ROT THE SAME WAY. This does not enumerate the reds; it
+    DERIVES them — every function whose body renders `_clear_the_red_steps` into an
+    assert message — so a fourth red added next month is covered on the day it is
+    written, by nobody remembering anything.
+
+    The helper tests that call `_clear_the_red_steps` to assert ON it are excluded by the
+    same mechanical rule rather than by name: they inspect the returned block, they do not
+    put it in front of a reader, so they have nothing to point at.
+
+    Ensures:
+        - every red rendering the withheld block also references `_rotation_held_notice`
+        - the reds are derived from the source, never listed, so the check cannot go stale
+        - it fails loudly if it finds NO reds at all, because a guard that silently
+          measures an empty set is the failure mode this file already has three of
+    """
+    import ast, inspect
+
+    module_src = inspect.getsource( sys.modules[ __name__ ] )
+    reds       = []
+    for node in ast.walk( ast.parse( module_src ) ):
+        if not isinstance( node, ast.FunctionDef ): continue
+        body = ast.get_source_segment( module_src, node ) or ""
+        if "_clear_the_red_steps" not in body:  continue
+        if not _renders_into_a_failure_message( node ): continue
+        reds.append( ( node.name, "_rotation_held_notice" in body ) )
+
+    assert reds, (
+        "no red was found rendering the withheld block — either the reds were renamed or "
+        "this derivation broke. An empty set passing is not a pass." )
+
+    missing = [ name for name, has in reds if not has ]
+    assert not missing, (
+        f"{len( missing )} red(s) print the withheld block without the notice it points "
+        f"at: {missing}. The block says the hold is 'below'; at these sites nothing is. "
+        "Append _rotation_held_notice() to the assert message." )
+
+
+def _renders_into_a_failure_message( node ):
+    """
+    Does this function put `_clear_the_red_steps`'s output in front of a READER?
+
+    The distinction the guard above turns on, and it is structural rather than nominal: a
+    red interpolates the block into an assert's MESSAGE, while a helper test passes it to
+    an assert's CONDITION to inspect it. Only the first has a reader to mislead.
+
+    Requires:
+        - node is an ast.FunctionDef
+
+    Ensures:
+        - True when some `assert`'s message mentions the steps variable or the helper
+        - False otherwise, including for a function with no asserts at all
+        - never raises
+    """
+    try:
+        for inner in ast.walk( node ):
+            if not isinstance( inner, ast.Assert ) or inner.msg is None: continue
+            msg = ast.dump( inner.msg )
+            if "steps" in msg or "_clear_the_red_steps" in msg: return True
+        return False
+    except Exception:
+        return False
+
+
 # ── the rotation-hold gate — BOTH branches, because one of them had no test ────────
 #
 # Rachel 🕊️, 2026-08-30: "the hold-CLEAR branch has no test." It did not. The hold-active
@@ -1010,6 +1086,19 @@ def test_the_branch_we_commit_to_carries_no_untriaged_finding():
           "If it is a false positive, triage it and add its row to branch_accepted AS A KEY "
           "WHOSE VALUE IS A ONE-LINE REASON — a bare row is refused:\n"
         + steps
+        # 🔴 THE WITHHELD BLOCK PROMISES A NOTICE "BELOW" AND THIS RED HAD NONE.
+        # `_clear_the_red_steps` renders "while the rotation hold BELOW is active", which
+        # is true at the two reds that append the notice and a dangling forward reference
+        # here — a reader who hits only this red is pointed at a hold that never appears.
+        # Found by RENDERING both messages rather than reading them: the code is correct
+        # at every site, and only the assembled output shows the promise going unmet.
+        #
+        # Appending is the fix rather than rewording "below", because this red's own
+        # remedy — add a triaged row to `branch_accepted` — is NOT what the hold refuses;
+        # the hold refuses moving `detector_sha256`. So the reader needs the notice's
+        # information, not a softer sentence. Every red that prints the withheld block now
+        # carries the thing the block points at.
+        + _rotation_held_notice()
     )
 
 
