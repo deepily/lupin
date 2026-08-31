@@ -657,6 +657,25 @@ def test_terse_title_trimmed_reads_the_COLUMN_not_the_title_length( client, repo
     assert rows[ 1 ][ "title_trimmed" ] is False     # cap-length, flag clear  -> not derived from length
 
 
+def test_terse_does_not_flag_an_over_cap_LEGACY_row( client, repo ):
+    """
+    Rachel 🕊️'s S1 projection fixture, carried onto the stored-flag branch — where it
+    proves something STRONGER than it could against the predicate it was written for.
+
+    Against `len(title) == cap` this test said: a legacy over-cap title is not flagged.
+    Against a stored column it says: the flag is not derived from the title's length AT
+    ALL. `make_item` supplies a 90-character title and the default flag, exactly as one
+    of the 333 legacy rows in the store does, and the answer comes off the column.
+
+    Her fixture outlives the function it was written against. Kept here rather than
+    dropped with the predicate, so the concern survives the surface it was measured on.
+    """
+    repo.query_tasks.return_value = [ make_item( title="X" * 90 ) ]
+    r = client.get( "/api/tasks", params={ "terse": "true" } )
+    assert r.status_code == 200
+    assert r.json()[ "tasks" ][ 0 ][ "title_trimmed" ] is False
+
+
 def test_query_terse_serializes_nullable_next_chase_ts( client, repo ):
     # The terse projection's only conditional: next_chase_ts → None when unset.
     repo.query_tasks.return_value = [ make_item( next_chase_ts=NOW ), make_item( next_chase_ts=None ) ]
