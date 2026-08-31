@@ -20,7 +20,9 @@ pass whether or not that sentence is true.
 Each test names the change that reddens it.
 """
 
+import json
 import os
+import re
 import sys
 
 import pytest
@@ -471,6 +473,107 @@ def test_both_upserts_CONVERGE_the_credential_columns_rather_than_DO_NOTHING( wi
 
     assert "ON CONFLICT ( id ) DO UPDATE SET" in sql, \
         "DO NOTHING freezes the test row at its first value — the 2026-08-19 defect"
+    # Split the SET clause into whole assignments and compare each EXACTLY. A substring
+    # check cannot do this job: "EXCLUDED.email" sits inside "EXCLUDED.email_verified",
+    # so dropping the email assignment survives one, and so does pointing it at any
+    # source column whose name STARTS WITH the right one.
+    set_clause = " ".join( sql.split() ).split( "DO UPDATE SET ", 1 )[ 1 ]
+    set_clause = re.split( r"\bRETURNING\b", set_clause, maxsplit=1, flags=re.IGNORECASE )[ 0 ]
+    # A WHERE here is NOT formatting. `DO UPDATE SET ... WHERE users.is_active = false`
+    # refreshes only the rows matching it, so a rotated credential never reaches the rest —
+    # the 2026-08-19 defect wearing a condition. 08fce017 discarded the clause and PASSED
+    # it: sha 74fe21bff4de, 24 passed. Treating it as reformatting was my error, not
+    # RACHEL's arm: her trailing WHERE was a TRUE red and I turned it into a green.
+    assert not re.search( r"\bWHERE\b", set_clause, re.IGNORECASE ), \
+        "a conditional DO UPDATE refreshes only the rows matching it - the rest stay frozen"
+    assignments = { " = ".join( half.strip() for half in a.split( "=", 1 ) )
+                    for a in set_clause.split( "," ) }
     for column in columns:
-        assert f"{column}" in sql and f"EXCLUDED.{column}" in sql, \
+        assert f"{column} = EXCLUDED.{column}" in assignments, \
             f"'{column}' is never refreshed from dev, so a rotated value cannot reach test"
+
+
+def test_the_users_INSERT_binds_each_parameter_to_the_column_that_NAMES_it( wired ):
+    """
+    CHLOÉ 🗼's finding. Every other assertion in this file reads the statement TEXT, and
+    the text is identical whichever order the parameters are bound in. Swapping `email`
+    and `pw_hash` in the tuple writes the password hash into the email column and leaves
+    the SQL byte-for-byte unchanged — measured 2026-08-31, it SURVIVES the whole file at
+    sha 3a0a397f2b0e, 22 passed.
+
+    The seam was already here: the fake cursor records ( sql, params ) and two tests
+    above read params by a hardcoded index. This binds them BY NAME, parsed out of the
+    INSERT's own column list, so the assertion cannot drift when a column is added and
+    an index silently means something else.
+
+    `active=False` is deliberate. Every other field the fixture builds is distinct, but
+    email_verified and is_active are both True by default — two equal values cannot
+    reveal a swap between them, so the test would assert their sum and not their
+    identity however it were named.
+    """
+    _all_companions( wired, active=False )
+    mod.seed_if_missing()
+
+    test_cur    = wired[ "conns" ][ 1 ].cursor()
+    sql, params = next( ( s, p ) for s, p in test_cur.executed if "INSERT INTO users" in s )
+
+    named   = " ".join( sql.split() ).split( "INSERT INTO users (", 1 )[ 1 ].split( ")", 1 )[ 0 ]
+    columns = [ c.strip() for c in named.split( "," ) ]
+    assert len( columns ) == len( params ), \
+        f"{len( columns )} columns named but {len( params )} parameters bound"
+
+    bound = dict( zip( columns, params ) )
+    row   = wired[ "users_by_email" ][ mod.COMPANION_EMAILS[ 0 ] ]
+
+    assert bound[ "id" ]             == row[ 0 ]
+    assert bound[ "email" ]          == row[ 1 ], "the email column is not receiving the email"
+    assert bound[ "password_hash" ]  == row[ 2 ], "the password_hash column is not receiving the hash"
+    assert bound[ "created_at" ]     == row[ 3 ]
+    assert bound[ "email_verified" ] == row[ 4 ]
+    assert bound[ "is_active" ]      == row[ 5 ]
+    # CHLOÉ 🗼: position 6 was covered only INCIDENTALLY — a swap touching it moved
+    # created_at as well, and the two roles tests above read index 6 by hand. Both are
+    # real, and both move if anyone renumbers. Naming it here makes the seventh column
+    # carry its own assertion rather than inherit one.
+    assert bound[ "roles" ]          == json.dumps( row[ 6 ] )
+
+
+def test_the_api_keys_INSERT_binds_each_parameter_to_the_column_that_NAMES_it( wired ):
+    """
+    The same class as the users test above, on the other upsert — and it was open while
+    that one was closed. TIBERIUS 👑 caught the gap from the NAME rather than the code:
+    the first test was called `test_the_INSERT_…`, which claims both statements, and
+    asserted only the users one. Swapping key_hash and description here writes the
+    description into the key_hash column, leaves the SQL byte-identical, and SURVIVED the
+    whole file at sha 10ecb3653ffb, 23 passed.
+
+    A test whose name claims more than its assertions reach does not merely overstate —
+    it tells the next reader the other half is covered, so nobody goes looking.
+
+    _key_row's seven defaults are already pairwise distinct, so no fixture change is
+    needed here; the users test needed active=False only because its two booleans were
+    both True.
+    """
+    _all_companions( wired )
+    wired[ "keys_by_email" ][ mod.SERVICE_ACCT ] = [ _key_row() ]
+
+    mod.seed_if_missing()
+
+    test_cur    = wired[ "conns" ][ 1 ].cursor()
+    sql, params = next( ( s, p ) for s, p in test_cur.executed if "INSERT INTO api_keys" in s )
+
+    named   = " ".join( sql.split() ).split( "INSERT INTO api_keys (", 1 )[ 1 ].split( ")", 1 )[ 0 ]
+    columns = [ c.strip() for c in named.split( "," ) ]
+    assert len( columns ) == len( params ), \
+        f"{len( columns )} columns named but {len( params )} parameters bound"
+
+    bound = dict( zip( columns, params ) )
+    row   = _key_row()
+
+    assert bound[ "id" ]           == row[ 0 ]
+    assert bound[ "user_id" ]      == row[ 1 ]
+    assert bound[ "key_hash" ]     == row[ 2 ], "the key_hash column is not receiving the key hash"
+    assert bound[ "description" ]  == row[ 3 ], "the description column is not receiving the description"
+    assert bound[ "is_active" ]    == row[ 4 ]
+    assert bound[ "created_at" ]   == row[ 5 ]
+    assert bound[ "last_used_at" ] == row[ 6 ]
