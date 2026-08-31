@@ -186,6 +186,31 @@ class TestTheLookupIsFailSoft:
         assert r.status_code == 200
         assert engine[ "calls" ][ 0 ][ "question" ] == "CLIENT-QUESTION"
 
+    def test_a_row_that_cannot_answer_an_attribute_still_records( self, harness, engine ):
+        """
+        🔴 ADDED AFTER A MUTATION SURVIVED, AND THE FIXTURE WAS THE DEFECT, NOT THE
+        ASSERTIONS. Narrowing `except ( ValueError, AttributeError, TypeError )` down
+        to `except ( ValueError, )` changed nothing anywhere in this file: every case
+        posed reached the block through `uuid.UUID( "not-a-uuid" )`, which raises
+        ValueError, so two of the three named exceptions were never exercised at all.
+
+        This poses the AttributeError arm directly. The question is supplied, so
+        resolution skips to `notif.response_type` on a row that does not have one —
+        which is what a repo handing back a dict, or a partially-loaded row, produces.
+        The vote must still be recorded: the resolution step is a convenience, and an
+        answer a human already gave must not be lost to it.
+        """
+        class _RowWithoutAResponseType:
+            message = "STORED-QUESTION-VALUE"
+            def __getattr__( self, name ):
+                raise AttributeError( name )
+
+        harness.repo.returns( "get_by_id", _RowWithoutAResponseType() )
+        r = harness.client.post( _URL, json=_body( question="CLIENT-QUESTION" ) )
+        assert r.status_code == 200
+        assert engine[ "calls" ][ 0 ][ "question" ]      == "CLIENT-QUESTION"
+        assert engine[ "calls" ][ 0 ][ "response_type" ] is None
+
     def test_a_dead_database_is_a_500_and_the_vote_IS_lost( self, harness, engine ):
         """
         🔴 THE FAIL-SOFT IS NARROWER THAN IT LOOKS, AND I EXPECTED THE OPPOSITE.
