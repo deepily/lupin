@@ -259,6 +259,44 @@ than a more careful re-read. An assertion audit passes both clean.
 NAMED failing set against a baseline taken FIRST (2 failed / 73, the two deliberate rotation
 reds), never by `rc`. Every arm restored, restore verified clean. **Nothing repaired.**
 
+
+##### THE HOLD NOTICE CAN BE INVERTED TO ITS OPPOSITE AND THE FILE STAYS GREEN — measured, and the obvious remedy does not close it (Clayton 😎 `84cbe224`, raised by Maya 🌻, 2026-08-30 ~21:12 EDT)
+
+Maya raised it; **I measured it rather than agreeing.** Posed against `f06eb997` on
+`wt-maya-survivor2` — the notice's first line flipped from
+`🔴 DO NOT CLEAR THIS RED BY RECORDING A SCAN.` to
+`🟢 It is fine to clear this red by recording a scan.`, nothing else touched
+(mutated sha `350540e02edf`, inverted and restored, **nothing repaired — the file is hers**).
+
+**Result: 2 failed / 73 passed — the baseline set. The refusal can be turned into its own
+opposite and no test notices.**
+
+**The mechanism**: `first_line = ROTATION_HELD_NOTICE.strip().splitlines()[ 0 ].strip()`. The
+guard derives its expectation FROM the notice, then checks the notice against it — so it holds
+for whatever the notice happens to say. `NEVER LET AN INSTRUMENT CERTIFY ITSELF`, in the one
+place where the thing being certified is a **refusal**, i.e. the sentence whose meaning is the
+entire point.
+
+🔴 **AND THE OBVIOUS REMEDY IS ALREADY IN THE FILE AND DOES NOT CLOSE IT.** Anchoring on sha
+literals was proposed; lines 777 and 780 **already** pin `034e44ac` and the detector sha as
+literals, and line 772 **already** names `ROTATION_HELD_COMMIT in ROTATION_HELD_NOTICE` as the
+tautology. Adding sha literals adds nothing that is not there — **a notice can carry both shas
+and still say the opposite of what it must say.** Maya said this herself before I checked; the
+check is what turns it from a worry into a fact.
+
+- [ ] **PENDING MR RADIO 🦉 / RICK — the only thing that closes it crosses a standing ruling.**
+  What catches an inversion is asserting the **ACT** rather than the wording: the first line must
+  REFUSE. A small polarity vocabulary — `DO NOT` / `REFUSED` / `must not` — is one step up from
+  prose and survives an honest rewrite, which is the same shape as the speech-act guard landed
+  at `4d4eb954`. **But Mr Radio ruled against pinning the notice's wording** (assert the wording
+  and the test becomes churn at rotation for no safety), and this sits close enough to that line
+  that it is his call, not a drive-by. Held here, unfixed, with the measurement attached.
+
+⚠️ **Do NOT read this as "the hold is broken".** The hold works; what is unguarded is the
+possibility of somebody rewriting the refusal into a permission — by accident during a tidy-up,
+or by a condenser — with every test still green. The risk is a **silent** inversion, not a
+present one.
+
 #### TWO CITATION HABITS, WRITTEN AS REASONS RATHER THAN INSTRUCTIONS (Clayton 😎, Mr Radio 🦉's ruling, 2026-08-30 ~19:58 EDT)
 
 Both come out of the same evening and the same failure: **a reference that resolves to
