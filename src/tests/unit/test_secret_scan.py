@@ -821,6 +821,32 @@ def test_the_refusal_markers_are_themselves_pinned():
     # ⚠️ THE LITERALS ARE SPELLED A SECOND TIME ON PURPOSE. Deriving `expected` from
     # REFUSAL_MARKERS rebuilds the tautology this branch exists to remove — it is exactly how
     # the notice became invertible: an anchor derived from the thing it checks.
+    # 🔴 THE SET ASSERT FREEZES THE SET. IT DOES NOT TEST THAT A MARKER DISCRIMINATES.
+    # Clayton 😎 found this by TESTING the claim rather than reading it, and he is right: my
+    # comment above said the vacuous-marker case is caught, and what actually catches `""`
+    # today is set-equality refusing ANY change — legitimate ones included. Freezing a set and
+    # checking a set can tell a refusal from a permission are different properties, and I
+    # asserted the first while describing the second.
+    #
+    # The gap is not theoretical: the price stated above is that widening is allowed by a
+    # DELIBERATE two-place edit. Do that with a vacuous marker — add `""` to the tuple AND to
+    # `expected` — and the set assert is satisfied, because it now describes what it is
+    # measuring. The guard would be back to zero discrimination by the sanctioned route.
+    #
+    # ⇒ So test the property directly: every marker must be ABSENT from text that does not
+    #   refuse. A marker that appears in a permission is not a refusal marker, whatever else
+    #   is true of it, and `""` fails this by construction rather than by enumeration.
+    NON_REFUSING = (
+        "It is fine to clear this red by recording a scan. The hold has lifted and the "
+        "credential was rotated, so update the record from the scan you just ran."
+    )
+    for marker in REFUSAL_MARKERS:
+        assert marker not in NON_REFUSING, (
+            f"{marker!r} appears in text that grants permission, so it cannot distinguish a "
+            "refusal from its opposite. An empty or near-empty marker fails here by "
+            "construction — which is the point: this asks what the marker can TELL APART, not "
+            "whether somebody remembered to list it" )
+
     expected = {
         "DO NOT CLEAR THIS RED BY RECORDING A SCAN",
         "is REFUSED until rotation lands",
