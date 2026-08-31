@@ -20,6 +20,7 @@ surviving directory says what it did.
 """
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -60,6 +61,24 @@ def _run( root, *args ):
 
 def _caches( root ):
     return list( root.rglob( "__pycache__" ) )
+
+
+def test_the_no_flag_arm_still_purges( planted_root ):
+    """
+    THE POSITIVE CONTROL, and the arm this file was missing until Krishna ran it
+    by hand. Every other test here asserts the script did NOT purge, and a suite
+    made only of those is satisfied by a script that never purges at all -- the
+    refusals would all pass against a no-op. This is the one that fails if the
+    argument loop or the preflight ever refuses the ordinary case.
+    """
+    ( planted_root / "src" / "other" / "__pycache__" ).mkdir( parents=True )
+    assert len( _caches( planted_root ) ) == 2
+
+    env = dict( os.environ, LUPIN_ROOT=str( planted_root ), PYTHON=sys.executable )
+    result = subprocess.run( [ str( SCRIPT ) ], capture_output=True, text=True, env=env )
+
+    assert result.returncode == 0, result.stderr
+    assert _caches( planted_root ) == []
 
 
 def test_a_mistyped_dry_run_is_refused_and_purges_nothing( planted_root ):
