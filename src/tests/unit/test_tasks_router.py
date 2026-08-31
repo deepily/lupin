@@ -15,7 +15,7 @@ import os
 import sys
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -582,27 +582,21 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
     body = r.json()
     assert body[ "count" ] == 1
     row = body[ "tasks" ][ 0 ]
-    assert set( row.keys() ) == {
-        "id", "title", "status", "blocked_by", "next_chase_ts", "priority", "park_reason_stale",
-        # `blocker_terminal` joined 2026-07-25 (row 00a6bde2) on the SAME argument
-        # park_reason_stale joined on, and a stronger one: blocked rows are excluded
-        # from the workable-now count by design, so a stranded row is invisible in
-        # exactly the way a finished row is. A flag absent from the projection a board
-        # glance reads is a flag nobody sees.
-        "blocker_terminal",
-        # `project` joined 2026-07-25 (row d23147e8) on a COST argument rather than a visibility
-        # one: without it, "which project strings exist?" costs 1,227 FULL rows, so the census
-        # that catches an orphan alias is never routine — and the next orphan gets found by
-        # accident too. A short string that makes a check habitual instead of heroic.
-        "project",
-        # `title_trimmed` joined 2026-08-31 (row a6cb24e8) on the SAME visibility argument,
-        # and it is the sharpest case of it: the store trims a title at 60 chars and files
-        # the tail into `body` — which THIS projection drops. So the recovered tail is
-        # invisible on the one surface a title is read alone, and the trim leaves no mark:
-        # a truncated title simply stops. Rio ⚡ measured a live P1 whose 60-char title
-        # asserts a diagnosis the row's own amendment retracts.
-        "title_trimmed",
-    }
+    # BUILT FROM THE ROUTER'S OWN DECLARATIONS, not a flat literal (row 9dbffefb,
+    # 2026-08-31). Every key the projection carries is classified in one of the two
+    # sets — DATA is carried off the row, ADVISORY is derived by a predicate — so a
+    # new key cannot join without a human choosing which it is, and choosing ADVISORY
+    # immediately demands a two-value recipe in TestTerseAdvisoryFieldsAreWired below.
+    #
+    # The individual joining arguments are preserved on the declarations themselves in
+    # tasks.py; the history for each is: park_reason_stale (staleness §3.3, 2026-07-19),
+    # blocker_terminal (row 00a6bde2, 2026-07-25 — a stranded blocked row is invisible in
+    # exactly the way a finished one is), project (row d23147e8, 2026-07-25, a COST
+    # argument: the orphan-alias census costs 1,227 full rows without it), and
+    # title_trimmed (row a6cb24e8, 2026-08-31 — the trim files the tail into `body`,
+    # which THIS projection drops, and leaves no mark behind).
+    assert set( row.keys() ) == tasks.TERSE_DATA_FIELDS | tasks.TERSE_ADVISORY_FIELDS
+    assert not ( tasks.TERSE_DATA_FIELDS & tasks.TERSE_ADVISORY_FIELDS )   # no key is both
     assert "body" not in row                                  # the token win — body dropped
     # `is False`, not a truthiness check, and a type assertion beside it: the SQL
     # twin of this predicate returns NULL (not False) on its null arms when run as
@@ -655,6 +649,113 @@ def test_terse_title_trimmed_carries_the_PREDICATE_not_a_constant( client, repo 
     rows = r.json()[ "tasks" ]
     assert rows[ 0 ][ "title_trimmed" ] is True                # the cut row is flagged
     assert rows[ 1 ][ "title_trimmed" ] is False               # ...and a short one is not
+
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# THE ADVISORY-FIELD REGISTRY (row 9dbffefb, 2026-08-31)
+#
+# WHY IT EXISTS. `title_trimmed` reached the terse projection with its key asserted
+# by the exact-set test above and its VALUE read by nothing: replacing its predicate
+# call with a bare `False` left all 471 tests green (row f3230576). An advisory field
+# wired to a constant is indistinguishable from a correct one that happens to be
+# False, so a key-presence assertion cannot tell them apart — and the fix for that is
+# a registry, not a resolution to be careful.
+#
+# HOW IT BINDS. `tasks.TERSE_ADVISORY_FIELDS` is the router's own declaration, and
+# `test_every_advisory_field_has_a_recipe` asserts this registry covers it EXACTLY.
+# So a field cannot be declared advisory without supplying a two-value recipe here,
+# and the exact-set assertion above means a key cannot reach the projection without
+# being declared as one thing or the other.
+#
+# WRITING A RECIPE — the two ways to get this wrong, both measured tonight:
+#   · the FALSE arm must be false for the RIGHT reason. `title_trimmed` over-reports
+#     by construction (length-only), so its false arm needs a title STRICTLY under
+#     the cap — a 60-char stand-in would report True and the test would pass while
+#     asserting the opposite of what it names. (Pocholo 📣 raised this; it is the
+#     same shape as his 63-char fixture whose cut portion was "ign".)
+#   · the two arms must differ ONLY in what drives the field. If they differ in
+#     something else as well, the test can pass on the other difference.
+_ADVISORY_RECIPES = { }
+
+
+def _advisory_recipe( field ):
+    """Register the True/False item pair for one advisory field."""
+    def register( fn ):
+        _ADVISORY_RECIPES[ field ] = fn
+        return fn
+    return register
+
+
+@_advisory_recipe( "title_trimmed" )
+def _recipe_title_trimmed():
+    # TRUE arm driven from soft_guard_title's OWN output, never a hand-written
+    # 60-char string, so the pair tracks the cap if it ever moves.
+    trimmed, _overflow, advisory = rules.soft_guard_title( "T" * 90, None )
+    assert advisory[ "trimmed" ] is True
+    false_title = "a title strictly under the cap"
+    assert len( false_title ) < rules.TITLE_SOFT_CAP        # the over-report trap, closed
+    return ( make_item( title=trimmed ), make_item( title=false_title ), { } )
+
+
+@_advisory_recipe( "park_reason_stale" )
+def _recipe_park_reason_stale():
+    # The quote is FROZEN at park time; a LATER body change is what makes it stale.
+    # Both arms are parked and differ only in which timestamp is the later one.
+    later = NOW + timedelta( hours=1 )
+    return (
+        make_item( status="parked", park_reason_captured_at=NOW,   body_changed_ts=later ),
+        make_item( status="parked", park_reason_captured_at=later, body_changed_ts=NOW   ),
+        { },
+    )
+
+
+@_advisory_recipe( "blocker_terminal" )
+def _recipe_blocker_terminal():
+    # Both arms are blocked on a real item id and differ only in that blocker's
+    # status, which is what the predicate reads.
+    done_id, live_id = uuid.uuid4(), uuid.uuid4()
+    return (
+        _blocked_item( done_id ),
+        _blocked_item( live_id ),
+        { str( done_id ): "done", str( live_id ): "queued" },
+    )
+
+
+def test_every_advisory_field_has_a_recipe():
+    """
+    The binding that makes the registry mechanical instead of a habit. Declaring a
+    field advisory in the router without registering its two arms here fails HERE,
+    at the moment of the declaration, rather than silently shipping a flag nothing
+    reads. The reverse is caught too: a recipe for a field that is no longer in the
+    projection is dead weight that would keep passing.
+    """
+    assert set( _ADVISORY_RECIPES ) == set( tasks.TERSE_ADVISORY_FIELDS )
+
+
+@pytest.mark.parametrize( "field", sorted( tasks.TERSE_ADVISORY_FIELDS ) )
+def test_every_advisory_field_is_wired_on_the_terse_path( client, repo, field ):
+    """
+    Row 9dbffefb. Every DERIVED field in the terse projection must be shown to carry
+    its predicate's answer, not a constant — both directions, through the endpoint.
+
+    A constant False dies on the first assertion and a constant True on the second,
+    so no constant survives for any registered field. This is the generalisation of
+    the single-field test above it, which caught `title_trimmed` after a constant
+    passed 471 tests green.
+    """
+    true_item, false_item, blocker_statuses = _ADVISORY_RECIPES[ field ]()
+
+    repo.query_tasks.return_value      = [ true_item, false_item ]
+    repo.statuses_for_ids.return_value = blocker_statuses
+
+    r = client.get( "/api/tasks", params={ "terse": "true" } )
+    assert r.status_code == 200
+    rows = r.json()[ "tasks" ]
+
+    assert type( rows[ 0 ][ field ] ) is bool                 # TYPE FIRST — never None
+    assert type( rows[ 1 ][ field ] ) is bool
+    assert rows[ 0 ][ field ] is True,  f"{field}: the TRUE arm did not report True"
+    assert rows[ 1 ][ field ] is False, f"{field}: the FALSE arm did not report False"
 
 
 def test_query_terse_serializes_nullable_next_chase_ts( client, repo ):
