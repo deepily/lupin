@@ -1083,9 +1083,33 @@ leaves your worktree exactly as poisoned as it found it.
 ⚠️ **THE SUCCESS BANNER IS THE WHOLE PROBLEM** — this is the wrong-tree family's signature: not a
 crash, a **confident verdict about a tree you were not asking about.**
 
-```bash
-LUPIN_ROOT="$PWD" src/scripts/purge-pycache.sh     # ALWAYS, from a worktree
+🔴 **PIN BOTH VARIABLES, OR THE STOPGAP ITSELF LEAVES A HALF-DONE TREE.** An earlier cut of this
+paragraph gave only `LUPIN_ROOT="$PWD"`. **Measured — that command purges and then fails to
+reconvert** in a worktree with no `.venv` (30 of 76), because `PYTHON` derives from `LUPIN_ROOT` and
+the worktree has no interpreter at that path:
+
 ```
+Purging 1 __pycache__ directories under src/ …
+Reconverting to checked-hash — WITHOUT THIS STEP THE PURGE SILENTLY REVERTS THE TREE …
+ERROR: no interpreter at …/headwt/.venv/bin/python
+EXIT=2
+```
+
+The caches are **gone and unreconverted** — precisely the half-done state the script exists to
+prevent, reached by following the documented remedy. Found by Rachel 🕊️.
+
+```bash
+# from a worktree — pin BOTH. Verified exit 0 with the caches reconverted.
+LUPIN_ROOT="$PWD" \
+PYTHON="$( dirname "$( git rev-parse --path-format=absolute --git-common-dir )" )/.venv/bin/python" \
+  src/scripts/purge-pycache.sh
+```
+
+⚠️ **`LUPIN_ROOT` and `PYTHON` answer different questions** — *which tree do I clean* versus *what do
+I run `compileall` with*. Pinning only the first repoints the second at a venv that does not exist.
+⇒ **A fix is in review** (rows `f26f7308` / `3ac368b4`) that derives the tree from `BASH_SOURCE`
+unconditionally; **when it lands, the `LUPIN_ROOT` half of this becomes a no-op** and this paragraph
+must be re-cut rather than left standing.
 
 ⇒ **Two harms, and the second is the quiet one.** It reaches into a shared tree other seats are
 working in; and it leaves you **believing you isolated a mutation arm that you did not**. A seat
