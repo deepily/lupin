@@ -194,6 +194,19 @@ class QueuedExecutor:
         try:
             trace.mark( "t_enqueue" )
             job         = work.job
+            # Address the job to whoever is asking NOW (row `0e7c9214`). A snapshot
+            # loaded from storage carries whoever asked FIRST, and this pushed it
+            # verbatim — so the completion frame went to an old-format user_id nobody
+            # holds a session under, and the EMPTY stored email made `_notify` return
+            # before TTS. Both symptoms Rick reported, one omission.
+            #
+            # `Work` has always carried both fields; until now neither was READ in this
+            # module, which is what an unused dataclass field usually means.
+            #
+            # Falsy means "no requester context", never "blank it out" — an erased
+            # identity is as undeliverable as a stale one.
+            if work.user_id:    job.user_id    = work.user_id
+            if work.user_email: job.user_email = work.user_email
             job.id_hash = self.todo_queue.user_job_tracker.register_scoped_job(
                 job.id_hash, work.user_id, work.session_id
             )

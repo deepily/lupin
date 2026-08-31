@@ -875,7 +875,7 @@ class SolutionSnapshot( RunnableCode ):
         if len( self.replay_history ) > max_history:
             self.replay_history.pop( 0 )  # Remove oldest
 
-    def for_current_user( self, user_id: str, session_id: str ) -> 'SolutionSnapshot':
+    def for_current_user( self, user_id: str, session_id: str, user_email: str="" ) -> 'SolutionSnapshot':
         """
         Create a shallow copy with current user context for done queue display.
 
@@ -894,6 +894,11 @@ class SolutionSnapshot( RunnableCode ):
         # Override user context
         user_copy.user_id    = user_id
         user_copy.session_id = session_id
+        # user_email joined the other two on 2026-08-30 (row `0e7c9214`): without it the
+        # inline replay copy kept the stored (empty) address and the answer was computed
+        # and never spoken. Defaulted, so no existing caller changes behaviour.
+        if user_email:
+            user_copy.user_email = user_email
         user_copy.run_date   = self.get_timestamp()
 
         # Mark as cache hit for UI display
