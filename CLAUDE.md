@@ -914,6 +914,56 @@ command has been replaced everywhere it was documented (CLAUDE.md, `src/tests/RE
 is safe by construction. Measured, both ways: after a raw purge plus one import the verifier reports
 `timestamp=3`; after the script it reports every pyc checked-hash.
 
+### 🔴 THE CHECKED-HASH VERIFIER SCANS `$LUPIN_ROOT/src`, NOT WHERE YOU ARE STANDING
+
+Found by Tiberius 👑 while reviewing a peer's mutation pass, 2026-08-30; cleared by Rachel 🕊️.
+`migrate-pyc-to-checked-hash.sh` takes its target from **`$LUPIN_ROOT/src`** (`TARGETS=(
+"$LUPIN_ROOT/src" )`), never `$PWD`. Run it from a worktree with `LUPIN_ROOT` still naming the main
+repo — **the default, since the variable is inherited from your shell** — and it blesses the MAIN
+REPO, then prints its checkmark about a tree you are not testing:
+
+```
+$ cd <a worktree> && ./src/scripts/migrate-pyc-to-checked-hash.sh --verify
+  scanned roots:
+      /mnt/DATA01/include/www.deepily.ai/projects/lupin/src      <-- THE MAIN REPO
+  every pyc THIS interpreter reads is checked-hash
+```
+
+The same command with `LUPIN_ROOT="$PWD"` **exits 1** on that worktree. A "checked-hash verified in
+the worktree" certification was made against the wrong tree **twice within the hour**.
+
+⇒ **This is worse than an unconverted tree, because it is an unconverted tree wearing a checkmark.**
+The script's own output names its scanned roots — **read that line, not the verdict.**
+
+**To diagnose a tree you have already used, pin BOTH the root and the interpreter.** `LUPIN_ROOT`
+alone is not enough: `PYTHON` is *derived* from it, so pinning only the root repoints the interpreter
+at a venv the worktree does not have.
+
+```bash
+LUPIN_ROOT="$PWD" \
+PYTHON="$( dirname "$( git rev-parse --path-format=absolute --git-common-dir )" )/.venv/bin/python" \
+  ./src/scripts/migrate-pyc-to-checked-hash.sh --verify
+```
+
+`git-common-dir` resolves to the MAIN checkout from inside any worktree, so this needs no hardcoded
+path and works from every tree. **29 of 75 seat worktrees have no `.venv`** (measured 2026-08-30
+~22:26 EDT, excluding the six `.claude/worktrees/tfe-*` harness trees; the total moves as seats come
+and go), which is why the `PYTHON` pin is not optional.
+
+⚠️ **Exit 2 at least fails LOUDLY** — it never prints a verdict, so unlike the unpinned run it cannot
+certify the wrong tree. The three-way exit-code table is above.
+
+🔴 **AND `purge-pycache.sh` ACCEPTS NO `--verify` — IT IS A DESTRUCTIVE COMMAND WEARING A READ-ONLY
+NAME.** It tests only `$1 == "--dry-run"`; anything else is silently ignored and it **purges**. It
+also runs under `set -uo pipefail` **without `-e`** and never checks its `rm`, so it can print
+`Permission denied` and still **exit 0** — a caller reading `$?` sees success. **The read-only
+verifier is `migrate-pyc-to-checked-hash.sh --verify`.** (Fix in review, row `3ac368b4`.)
+
+⚠️ **Never run a mutation harness inside a peer's LIVE worktree** — it writes to their source. Check
+the sha out into a detached worktree of your own. Learned in this same review: the peer lost nothing,
+but the restore control read a dirty tree.
+
+
 ⇒ Three ways a tree drifts back, all one mechanism: a **new** `.py` file, a **purged**
 `__pycache__`, or a module **imported for the first time** since the last conversion. Measured live
 2026-08-30 — a verify run minutes after a clean conversion found exactly one offender,
