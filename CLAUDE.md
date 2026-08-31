@@ -1070,11 +1070,18 @@ that existed when you ran it.
 verify. A verify on an unused tree is not evidence.
 
 🔴🔴 **BUT PIN `LUPIN_ROOT` FIRST — `purge-pycache.sh` MUTATES THE MAIN REPO FROM INSIDE A WORKTREE.**
-Found by Rachel 🕊️ 2026-08-30; confirmed in the source. Line 40 is `find "$LUPIN_ROOT/src"`, the same
-wrong-tree resolution as the verifier — **except this script DELETES rather than reports**, and the
-reconvert it chains to inherits the same resolution. Run it from a worktree with `LUPIN_ROOT`
-inherited from your shell (**the default**) and it purges and reconverts the **MAIN REPO's** caches
-while the tree you are standing in is **left untouched**.
+**Found and documented by Pocholo 📣 at ~17:52 EDT** (`TODO.md` § *purges the wrong tree … and prints
+its success banner anyway*); independently re-derived by Rachel 🕊️ five hours later, who then
+**declined the credit and pointed at his entry**. `purge-pycache.sh:32` reads
+`LUPIN_ROOT="${LUPIN_ROOT:-<derived from BASH_SOURCE>}"` — the fallback is right, but **a set variable
+wins**, and every seat's shell has `LUPIN_ROOT` pointing at the MAIN checkout. Line 40 then does
+`find "$LUPIN_ROOT/src"`, and the reconvert it chains to inherits the same resolution.
+
+⇒ Run it from a worktree and it purges and reconverts `/…/lupin`, **prints its success banner**, and
+leaves your worktree exactly as poisoned as it found it.
+
+⚠️ **THE SUCCESS BANNER IS THE WHOLE PROBLEM** — this is the wrong-tree family's signature: not a
+crash, a **confident verdict about a tree you were not asking about.**
 
 ```bash
 LUPIN_ROOT="$PWD" src/scripts/purge-pycache.sh     # ALWAYS, from a worktree
@@ -1087,7 +1094,16 @@ landing on the main repo.
 
 ⇒ **The wrong-tree family now has three members** (verifier, purge script, and the tier itself, see
 § TESTING VENUES). Anything that resolves `$LUPIN_ROOT` is asking about *your shell*, not *your
-location*. Fix in review, row `3ac368b4`.
+location*.
+
+**The proper fix is Pocholo's and it is one sentence**: these scripts should derive their root from
+`BASH_SOURCE` **unconditionally**, because *a script shipped INSIDE the tree it cleans can only be
+disagreed with by the environment, never informed by it.* Row `3ac368b4`.
+
+🔴 **AND NOTE HOW LONG IT SAT.** It was written down, correctly and in detail, at 17:52 — and the
+whole crew walked into it anyway for five hours, including a reviewer whose per-arm isolations all
+went to the wrong tree. **A defect recorded in `TODO.md` is not a control**; only the code is. That
+is the same conclusion three separate rows reached tonight from three directions.
 
 ⇒ **A clean verify in the MAIN repo says nothing about your worktree** — the verifier scans
 `$LUPIN_ROOT/src`, not where you stand. See the wrong-tree section below.
