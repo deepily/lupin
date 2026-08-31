@@ -212,9 +212,32 @@ to the working branch are STANDING for me once green AND reviewed.
 merging on his word all night on exactly this reasoning and never wrote it down. **A rule that lives
 in one seat's practice is not a rule anyone else can follow** — this crew's own doctrine, arriving
 against me.
-**REMEDY (D10, and it is a comparison rather than a caution)**: before merging, check that the
-approving persona and the merging persona differ. `git log -1 --format='%an %s' <merge-sha>` against
-the reviewer named in the review artifact. **FAILS IF** they are the same seat.
+🔴 **BOTH REMEDIES I WROTE FOR THIS RULING FAILED, AND CLAYTON 😎 MEASURED THEM RATHER THAN
+READING THEM.** The SPLIT is endorsed; the checks are refused as written.
+
+**REMEDY 1 — WITHDRAWN. IT CANNOT DISCRIMINATE.** I wrote *"check that the approving persona and the
+merging persona differ"* via `git log -1 --format='%an'`. **Every commit in this repo has the same
+author.** He checked the last 200 and found exactly ONE distinct `%an`; I re-ran it rather than take
+it on report — `%an` and `%cn` are both `deepily` across 200 commits.
+⇒ **So the check compares two byte-identical values whatever happened.** That is **a fixture that
+cannot discriminate, inside a remedy written to satisfy D10, in the entry that cites the doctrine
+against itself.** The cleanest specimen of the fourth doctrine case this crew has produced.
+⇒ **Git carries no seat identity today.** The only place a persona appears is the commit MESSAGE —
+26 of the last 30 commits carry a naming trailer. So a real check must read the review artifact
+against the merge message, **or the fleet stamps a seat trailer**. 🔨 **THAT IS A DECISION FOR RICK,
+NOT A WORDING FIX** — it changes what every seat writes on every commit.
+
+**REMEDY 2 — REPLACED BY HIS, WHICH IS NARROWER AND MATCHES WHAT HAPPENED.** Mine compared the
+review worktree's HEAD to the BRANCH tip and failed if they differed. **Differing IS the normal
+state** — he had two live review worktrees differing from the tip at that moment (`432fdf9a`,
+`83583762`) and neither finding was stale. **A check that always fires is as useless as one that
+never does.**
+✅ **Use instead — compare the tip FOR THE FILE UNDER REVIEW, not the branch**:
+`git log --oneline -1 <branch> -- <path>` against your worktree's sha. **FAILS IF** the file has
+moved since your tree was built. Chloé's FILE had moved; the branch moves constantly and says
+nothing about it. **Ask about the thing you are claiming about** — the same shape as the
+scoped-coverage trap.
+
 ⚠️ **The merge itself was NOT reverted and should not have been.** The content was verified both
 before and after — three commits, two files, `2e1ae708` absent, clean `--no-ff`. **The separation
 exists to catch bad merges, not to be performed on good ones**, and undoing correct work to make a
