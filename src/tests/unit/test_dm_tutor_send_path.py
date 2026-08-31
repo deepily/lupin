@@ -1534,6 +1534,47 @@ class TestSenderActPolarities:
         assert p( "I do not approve the change." ) == set()
         assert p( "I cannot approve this." )       == set()
 
+    def test_the_window_does_not_reach_across_a_sentence( self ):
+        """
+        A pronoun in one sentence must not bind the verb of the next.
+
+        FOUND BY MUTATION, NOT BY READING - neutering the boundary break
+        (`if word in ".!?;": break` -> `if False: break`) survived this whole file, sha
+        d7e1dd1957ca, because nothing had a polarity verb across a break AND inside the
+        window. The two constraints look alike and only one of them was being exercised.
+
+        `Rachel` is not a pronoun, and `approved` lands INSIDE the three-word window, so
+        the break is the only thing that can reject it. Measured both ways: with the
+        break, set(); with it neutered, { +1 }.
+        """
+        from cosa.rest.routers.dm import _sender_act_polarities as p
+        assert p( "I stopped. Rachel approved." ) == set(), \
+            "the pronoun of one sentence bound the verb of the next"
+
+    def test_an_act_beyond_the_window_is_not_the_senders( self ):
+        """
+        The window's SIZE, which nothing pinned. Widening `_SENDER_WINDOW` from 3 to 12
+        survived the whole file, sha ada8575f4d7b, because no fixture had a polarity verb
+        four-to-twelve words from a pronoun - so the constant could grow until "I" bound a
+        verb across half a paragraph with nothing going red.
+
+        Here `approved` sits nine words out: inside a widened window, outside the real
+        one. Measured: set() at 3, { +1 } at 12.
+        """
+        from cosa.rest.routers.dm import _sender_act_polarities as p
+        assert p( "I ran the tier last night and then approved it." ) == set(), \
+            "a verb nine words from the pronoun was read as the sender's own act"
+
+    def test_the_window_still_reaches_the_acts_it_is_meant_to( self ):
+        """
+        The control the two above need, and they are dangerous without it: narrow the
+        window to ZERO and both of them still pass, because a window that binds nothing
+        satisfies every negative. This is the positive edge - three words out, which is
+        exactly what the window exists to admit.
+        """
+        from cosa.rest.routers.dm import _sender_act_polarities as p
+        assert p( "I would therefore approve it." ) == { +1 }
+
     def test_it_returns_empty_rather_than_raising_on_a_non_string( self ):
         from cosa.rest.routers.dm import _sender_act_polarities as p
         assert p( None ) == set()
