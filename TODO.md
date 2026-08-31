@@ -203,6 +203,25 @@ above, retroactively.
   🔧 **REMEDY (D10 applied to itself — artifact).** The artifact is **this pass**: every ruling above now carries either a command / comparison / artifact, or an explicit statement that it takes none (D9).
   **FAILS IF** any future ruling lands with a remedy field that names no command, no comparison and no artifact. ⚠️ **Discharged by RUNNING, not by writing — and here is exactly which of these have been, because the distinction is the rule.** RUN tonight: the `exclude_list` command banked in the moratorium book (exit 0, before its commit), and **D7's baseline-first** on `54bea5bf` (stock baseline 7 passed / 3 failed, then 10 with the fix). **RUNNING, not yet complete**: D1's union command, which is why nothing was merged on it. **NOT run, shapes carrying placeholders**: D3 and D4. **A remedy command that has not been run is the same defect one level up** — so this list says which is which instead of implying all ten were exercised.
 
+**D11 — THE SEAT THAT APPROVES A CHANGE DOES NOT LAND IT.** Ruled 2026-08-31 ~01:00 with
+Tiberius 👑's agreement, after he approved Chloé 🗼's rebuilt branch and merged it himself at
+`3dca0a61`. **He named it momentum rather than a read of the envelope, and endorsed the split.**
+⇒ **The merge is performed by a seat that did not approve it** — normally the manager, since merges
+to the working branch are STANDING for me once green AND reviewed.
+🔴 **THE RULE EXISTED ONLY IN MY HABITS UNTIL NOW, WHICH IS WHY THIS ENTRY EXISTS.** I had been
+merging on his word all night on exactly this reasoning and never wrote it down. **A rule that lives
+in one seat's practice is not a rule anyone else can follow** — this crew's own doctrine, arriving
+against me.
+**REMEDY (D10, and it is a comparison rather than a caution)**: before merging, check that the
+approving persona and the merging persona differ. `git log -1 --format='%an %s' <merge-sha>` against
+the reviewer named in the review artifact. **FAILS IF** they are the same seat.
+⚠️ **The merge itself was NOT reverted and should not have been.** The content was verified both
+before and after — three commits, two files, `2e1ae708` absent, clean `--no-ff`. **The separation
+exists to catch bad merges, not to be performed on good ones**, and undoing correct work to make a
+process point is theatre.
+⚠️ **And the check was not idle**: Chloé found a real defect in Tiberius's own coverage-guard fix
+while reviewing it — the reviewer being reviewed, which is the whole argument for the split.
+
 **D9 — the run's signature was TEN REFUSALS, not the defects.** Five seats refused a leading
 question; three refused the sharpened rule I drew from them, including the versions that flattered
 them; one declined to endorse an attribution he had no evidence for; and one refused the weak form
