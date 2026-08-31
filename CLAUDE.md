@@ -465,6 +465,39 @@ Say what you measured **and** name what you mean.
 
 **MANDATE**: Every automated test runs on exactly one of two servers. Pick by rubric, never by habit.
 
+### 🔴 AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE
+
+**You searched the WRONG population, or you searched an EMPTY one. The output is identical, and
+nothing in it tells you which.** Four receipts in this file are the same defect; they are listed
+here rather than left to be re-derived a fifth time.
+
+| receipt | the population that was actually searched | what it looked like |
+|---|---|---|
+| the two-database trap (**directly below**) | `lupin_db_dev`, from a host shell chasing a `:8000` job | *"test_suite jobs are never persisted"* — false |
+| the scoped `--cov` census (§100% COVERAGE MANDATE, *"A SCOPED `--cov` ANSWERS ONE QUESTION"*) | 61 files instead of 73 | twelve never-instrumented files read as **zero coverage** |
+| the `pgrep -f` gate (*"IS ANOTHER SUITE RUNNING?"*) | every process whose **command line mentioned pytest** — including three seats whose briefing merely *discussed* testing | a gate that never opens, on an idle box |
+| a `git grep` for a doctrine claim (2026-08-31) | tracked files only — and `io/post-games/` is **gitignored** | *"nothing on disk"*, from a search that could not see where doctrine lands |
+
+**The fourth is the clearest, because it took two people and neither had both halves.** Mr Radio
+caught the wrong population — `git grep` cannot see untracked files. Maya caught that the
+population was never verified — *no hits* and *no files* are byte-identical output. **Each of us
+would have signed off on the other's search.**
+
+⇒ **THE DISCHARGE IS TWO MOVES AND BOTH ARE CHEAP:**
+1. **NAME the population** — the database, the `source` list, `comm` not the command line, the
+   directory *and* whether your tool can see untracked files. Say it out loud in the command.
+2. **PROVE THE SEARCH CAN FIND SOMETHING** — a positive control over the same corpus. A negative
+   result is worth nothing until you have watched the instrument return a positive one.
+
+**A positive control is what turns a shrug into a measurement.** Receipt: `grep -rl
+"masked-invariant" io/post-games/` returns 2 hits, so the same search returning nothing for another
+string is now evidence rather than silence.
+
+⚠️ **THIS IS NOT ONLY ABOUT SEARCH TOOLS.** It governs every absence-claim: a census, a coverage
+zero-list, *"no rows matched"*, *"no other suite is running"*, *"that persona has no memento"*.
+**Absence is the one finding that looks the same whether you did the work or not.**
+
+
 > 🔴 **THE TWO VENUES ALSO HAVE TWO DATABASES, and a host shell silently reads the wrong one.** Neither container sets `DB_NAME`, so each falls through to its own config block: `lupin-rest-dev` → **`lupin_db_dev`**, `lupin-rest-test` → **`lupin_db_test`**. A host shell inherits the *Development* block, so `PYTHONPATH=src python3` on the host queries **dev** even when the job you are chasing ran on `:8000`.
 >
 > **Measured 2026-08-28**, both directions inside a minute: host/dev returned **205 rows, zero `ts-` rows, nothing newer than the previous day**; the same query inside `lupin-rest-test` returned **4 rows, all same-day**, including the one at issue. The host answer reads exactly like *"test_suite jobs are never persisted"* — which is false, and a correct fix was one message from being retracted on it. **An empty result from the wrong box is not evidence; it is a confident answer to a question you did not ask.**
