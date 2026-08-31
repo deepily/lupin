@@ -344,7 +344,29 @@ put side by side.
 ⇒ **THE FAILURE AND THE SUCCESS PRINT THE SAME THING.** In every case the caller checked the exit
 code, saw what they expected, and carried a conclusion forward that the tool had never supported.
 
-**The discriminator is never the exit code — it is the tool's own account of what it touched:**
+🔴 **THE FIX IS A TOOL THAT REFUSES, NOT A CALLER WHO CHECKS** (Rachel 🕊️, correcting the first cut
+of this rule, which asked the reader to be vigilant — and a rule that depends on remembering is not a
+control, which is this page's own doctrine).
+
+**A tool facing a job it cannot finish has two options, and only one of them is honest:**
+
+| ❌ no-op and report cleanly | ✅ REFUSE and say what it did not do |
+|---|---|
+| purge, then fail to reconvert, exit 2 with the caches gone | `Refusing to purge: the reconvert would fail. 1 __pycache__ directories left untouched.` |
+| apply a mutation at a guessed location | `ANCHOR MATCHED 2x — NOT APPLIED` |
+| report coverage for a target never imported | name the target and say it was never imported |
+
+**Both live examples are from tonight and both are ours**: Rio's purge script declines *before* the
+`rm` when the reconvert cannot run, and Rachel's mutation harness skips an arm whose anchor matched
+twice rather than guessing at placement. **Neither leaves the caller a clean-looking result to
+misread**, which is what makes them different in kind from a checking rule.
+
+⇒ **Build this into anything you write.** A step that cannot complete must decline the whole
+operation and name the part it did not do — never half-finish and return a status the caller can read
+as success.
+
+**Until a tool refuses, the caller's fallback is the tool's own account of what it touched — never
+the exit code:**
 
 | ask | not |
 |---|---|
