@@ -214,10 +214,6 @@ KNOWN_DIVERGENT_ENV = {
         "dev-dev"  : "2026-07-26 — see DB_NAME.",
         "dev-test" : "2026-07-26 — same.",
     },
-    "DB_PASSWORD": {
-        "dev-dev"  : "2026-07-26 — see DB_NAME.",
-        "dev-test" : "2026-07-26 — same.",
-    },
     "CLOUD_SQL_CONNECTION_NAME": {
         "dev-dev"  : "2026-07-26 — no Cloud SQL on dev.",
         "dev-test" : "2026-07-26 — same.",
