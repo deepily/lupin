@@ -1801,6 +1801,273 @@ def _count_attributions( text, personas ):
         return 0
 
 
+# ── SPEECH-ACT GUARD (Mr. Radio's ruling, 2026-08-30 ~19:27 EDT) ────────────────────
+#
+# Recorded in TODO.md, under the moratorium book: "A SPEECH-ACT GUARD FOR THE DM
+# CONDENSER" (Rachel, 19:33 EDT). A row WAS minted for this at 19:31 and DROPPED at
+# 19:33 under Rick's no-new-tickets order, so it is cited nowhere here — a reference
+# that resolves to a dropped row is the exact defect this guard exists to stop.
+#
+# A SECOND guard alongside the marker-based retraction check, never a replacement for it
+# — the ruling is explicit on that, and the measurement behind it is that the two cannot
+# see each other's failure.
+#
+# 🔴 WHY THE EXISTING FOUR ARE ALL BLIND TO THIS. Every one of them asks whether something
+# is PRESENT: which facts (`_fabricated_facts`), what they are bound to
+# (`_rescoped_quantities`), when they were true (`_retracted_assertions`), whether anyone
+# is named at all (`_dropped_attribution`). None asks WHO PERFORMED WHICH ACT, and a
+# substitution preserves every count those four take. Measured 2026-08-30 on the live
+# predicate: swapping one persona name for another returns "" — clean, no flag — while
+# dropping every name fires at 6-to-0. That empty string is the hole this fills, and it is
+# how a suggestion of Tiberius's reached Mr. Radio attributed to Maya.
+#
+# THE FOUR MEASURED INVERSIONS THIS IS BUILT AGAINST, all 2026-08-30:
+#   1. a recommendation ("the site-packages clause is LOAD-BEARING") arrived as its own
+#      opposite ("delete the site-packages clause — the exclusion is unnecessary")
+#   2. a suggestion by Tiberius arrived attributed to Maya
+#   3. a verdict ("mutation six is EQUIVALENT, no test") arrived as "all six KILLED"
+#   4. a gate ("push stays Rick's call") arrived as an instruction to push
+#
+# ⚠️ IT CATCHES THREE OF THOSE FOUR, NOT FOUR. #3 is a FACT flip, not an act flip: the
+# sender's verdict and the rewrite's differ in what is TRUE of the mutation, not in who
+# performed what act, and this guard measured "" on it. That case belongs to the
+# fabrication / re-scoping family and is named here so the next reader does not assume a
+# reach this does not have. Verified rather than reasoned: the pair above returns "".
+#
+# ⚠️ #1 IS THE DANGEROUS SHAPE AND THE REASON THIS IS NOT A MARKER CHECK. An inverted
+# retraction reads as odd — a reader who knows the topic feels the tense slip. An inverted
+# RECOMMENDATION reads as ordinary technical advice, carries no marker to preserve, and in
+# that case pointed at an action that makes every test pass. Nothing in the message was
+# self-contradictory, so nothing in the message could raise a flag.
+#
+# SCOPE, deliberately narrow — it fires on a CHANGED act, never on a dropped one. Dropping
+# an act wholesale is a lossy summary, which is the design; re-attributing one, or
+# reversing its polarity, or promoting an opinion into an order, is not. Absence stays
+# legal here for the same reason it does in the retraction guard.
+
+# 🔴 THIS LIST IS A JUDGEMENT CALL TOO — THE SAME SHAPE AS THE IMPERATIVE LIST BELOW, AND
+# THE FIRST CUT OF THIS GUARD DISCLOSED ONLY THE OTHER ONE. Twenty-six words somebody
+# chose; "is this word an approval" has no mechanical answer either. Named here after
+# Tiberius refuted a claim that FLIPPED was mechanical while SUBSTITUTED and COMMANDED
+# were the judgement calls — SUBSTITUTED is genuinely mechanical (a name set comparison
+# against the live voice pool), and this list never was.
+#
+# ⚠️ AND ITS FAILURE POINTS THE OTHER WAY FROM THE IMPERATIVE LIST'S. A missing imperative
+# verb under-fires, which is safe. A polarity verb appearing in a sentence the SENDER does
+# not own over-fires, which REFUSES REAL TRAFFIC. Measured 2026-08-30, all three refusing
+# before the first-person restriction below existed:
+#
+#     "the linter rejected the file"   -> "accepted"   REFUSED
+#     "CI blocked the build"           -> "approved"   REFUSED
+#     "the reviewer refused the patch" -> "approved"   REFUSED
+#
+# Every one of those is a FACT flip — what some third party did — which this guard's own
+# docstring puts in the fabrication family and out of scope. A guard that refuses a case
+# its code says it does not handle is not conservative, it is wrong. Hence
+# `_sender_act_polarities`: the act must be one the SENDER performs.
+_ACT_POLARITY = {
+    "approve"    : +1, "approved"   : +1, "approves"    : +1, "approval"  : +1,
+    "accept"     : +1, "accepted"   : +1, "accepts"     : +1,
+    "recommend"  : +1, "recommends" : +1, "recommended" : +1,
+    "endorse"    : +1, "endorsed"   : +1,
+    "refuse"     : -1, "refused"    : -1, "refuses"     : -1, "refusal"   : -1,
+    "reject"     : -1, "rejected"   : -1, "rejects"     : -1,
+    "block"      : -1, "blocked"    : -1, "blocks"      : -1,
+    "deny"       : -1, "denied"     : -1, "denies"      : -1,
+}
+
+# Bare imperatives that turn an opinion into an order. Matched only at the start of a
+# sentence, because "we should delete the clause" is a recommendation and "Delete the
+# clause" is an instruction, and the difference is the whole point of case #1.
+#
+# 🔴 THIS LIST IS A JUDGEMENT CALL, NOT A LOOKUP — AND SO IS THE POLARITY LIST ABOVE.
+#
+# ⚠️ THIS PARAGRAPH USED TO SAY COMMANDED WAS "THE ONLY ONE OF THE THREE CONDITIONS THAT
+# IS", and that FLIPPED and SUBSTITUTED were "mechanical, reproducible by anyone from the
+# code". Tiberius disproved it by measurement, 2026-08-30. COMMANDED rests on fourteen
+# verbs somebody chose; FLIPPED rests on twenty-six verbs somebody chose. Same shape.
+# ONE of the three is genuinely mechanical: SUBSTITUTED compares name sets against the
+# live voice pool, which is data rather than a judgement, and it survived his check.
+#
+# The correction is here rather than only in a commit message because this is where a
+# reader meets the list, and a wrong claim is not repaired by adding a true one beside
+# it.
+#
+# WHAT IT THEREFORE CANNOT SEE -- the false-negative shape, stated so nobody has to
+# rediscover it:
+#
+#   1. THE FIFTEENTH VERB. Any imperative not on this list passes clean and silently.
+#      "Strip the guard" is caught; "excise the guard" is not, and nothing in the output
+#      says a verb was considered and rejected. This is the same shape as the marker
+#      guard missing a name-for-name swap: a check that answers only about the members of
+#      a set it was handed.
+#   2. THE UNIMPERATIVE ORDER. "The clause should be removed" and "the clause is
+#      unnecessary and can go" are instructions in effect and imperatives in neither
+#      form. Sentence-initial matching cannot reach them.
+#   3. THE SECOND CLAUSE. "For clarity, delete the clause" buries the verb mid-sentence,
+#      where the anchor does not look.
+#
+# The list is deliberately NARROW so it under-fires rather than over-fires, because this
+# guard REFUSES and a false fire costs every sender their compression. That trade is
+# defensible; leaving it undisclosed is not. A conservative check whose conservatism is
+# not written down reads to the next person as a complete one.
+_ACT_IMPERATIVE = re.compile(
+    r"(?:^|(?<=[.!?]\s))\s*(delete|remove|drop|strip|revert|disable|push|merge|deploy|"
+    r"force|overwrite|skip|bypass)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+# A first-person subject, and how far after it an act may sit. The window exists because
+# "I have approved", "I would recommend" and "we therefore reject" all put words between
+# the pronoun and the verb; three is enough for those and short enough that the pronoun of
+# one sentence cannot reach the verb of the next — which is why the scan below stops at
+# sentence-ending punctuation rather than only counting words.
+_SENDER_PRONOUN = { "i", "we" }
+_SENDER_WINDOW  = 3
+
+_ACT_NEGATOR = { "not", "never", "cannot", "won't", "wont", "don't", "dont", "didn't",
+                 "didnt", "no", "nor", "neither" }
+
+
+def _sender_act_polarities( text ):
+    """
+    The polarity of every speech act THE SENDER PERFORMS, as a set of ints.
+
+    Not every polarity word in the text — that was the first cut, and it refused real
+    traffic. "The linter rejected the file" carries a listed verb and is a report about a
+    third party, not an act by the sender; flipping it to "accepted" is a FACT flip, which
+    belongs to the fabrication family and is explicitly out of this guard's scope.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns a set drawn from { +1, -1 }, empty when the sender performs no such act
+        - only counts an act with a first-person subject within three words before it
+        - SKIPS a negated occurrence entirely rather than guessing its sign: "I do not
+          approve" is a refusal, but reading it as one means parsing scope, and a guard
+          that refuses is the wrong place to guess. Dropping it is the safe direction
+          because FLIPPED only fires on a single-polarity original — one dropped act
+          makes the check quieter, never wronger.
+        - matching is word-boundaried and case-insensitive, so "disapprove" is not a match
+        - NEVER raises
+
+    Raises:
+        - nothing
+    """
+    try:
+        found  = set()
+        tokens = re.findall( r"[A-Za-z']+|[.!?;]", text or "" )
+        for i, token in enumerate( tokens ):
+            if token.lower() not in _SENDER_PRONOUN: continue
+            negated = False
+            for word in tokens[ i + 1 : i + 2 + _SENDER_WINDOW ]:
+                if word in ".!?;": break          # the pronoun's sentence ended
+                low = word.lower()
+                if low in _ACT_NEGATOR:
+                    negated = True
+                    continue
+                pol = _ACT_POLARITY.get( low )
+                if pol is not None:
+                    if not negated: found.add( pol )
+                    break
+        return found
+    except Exception:
+        return set()
+
+
+def _altered_speech_acts( original, rewritten ):
+    """
+    Why the rewrite performs a DIFFERENT act than the sender did, or "" when it does not.
+
+    Three conditions, any of which fires. Each is the narrowest form that catches its
+    measured case, and each is independent — a rewrite can flip a polarity without
+    touching attribution, and vice versa.
+
+      FLIPPED       the original performs acts of one polarity only and the rewrite
+                    performs the opposite one. Restricted to a single-polarity original
+                    because a message that both approves one thing and refuses another
+                    carries both signs already, and comparing sets there would fire on
+                    every ordinary mixed verdict.
+
+      SUBSTITUTED   the original names exactly one persona and the rewrite names exactly
+                    one, and they are different people. This is case #2 and it is the one
+                    `_dropped_attribution` structurally cannot see, because the count of
+                    named people never changes. Held to one-and-one deliberately: with two
+                    or more names on either side, which name attaches to which act is a
+                    question this cannot answer from counting, and guessing would flag
+                    every honest summary that mentions a second person.
+
+      COMMANDED     the rewrite opens a sentence with a bare imperative the original never
+                    issued. This is case #1 — an opinion promoted to an order. It compares
+                    the SET of imperative verbs, so a rewrite that keeps the sender's own
+                    "delete" is untouched and only a NEW one fires.
+
+    Requires:
+        - original and rewritten are strings
+
+    Ensures:
+        - returns "" when the rewrite performs the same acts as the original
+        - returns a short human-readable reason otherwise, naming what changed, so the
+          finding is auditable rather than a bare boolean
+        - NEVER raises: on any internal failure it returns "", so a broken check flags
+          nothing rather than blocking every DM in the fleet — the same fail-open posture
+          the other four guards take, and for the same reason
+
+    Raises:
+        - nothing
+    """
+    try:
+        orig    = _attribution_prose( original or "" )
+        rewrite = _attribution_prose( rewritten or "" )
+
+        orig_pol    = _sender_act_polarities( orig )
+        rewrite_pol = _sender_act_polarities( rewrite )
+        if len( orig_pol ) == 1 and len( rewrite_pol ) == 1 and orig_pol != rewrite_pol:
+            was, now = next( iter( orig_pol ) ), next( iter( rewrite_pol ) )
+            return f"flipped: sender's act was {was:+d}, rewrite performs {now:+d}"
+
+        personas     = _attribution_personas()
+        orig_names   = _named_personas( orig,    personas )
+        rewrite_names = _named_personas( rewrite, personas )
+        if len( orig_names ) == 1 and len( rewrite_names ) == 1 and orig_names != rewrite_names:
+            return ( f"substituted: sender named {sorted( orig_names )[ 0 ]}, "
+                     f"rewrite names {sorted( rewrite_names )[ 0 ]}" )
+
+        orig_cmds    = { m.lower() for m in _ACT_IMPERATIVE.findall( orig ) }
+        rewrite_cmds = { m.lower() for m in _ACT_IMPERATIVE.findall( rewrite ) }
+        introduced   = rewrite_cmds - orig_cmds
+        if introduced:
+            return f"commanded: rewrite issues an instruction the sender did not: {sorted( introduced )}"
+
+        return ""
+    except Exception:
+        return ""
+
+
+def _named_personas( text, personas ):
+    """
+    The set of persona names `text` mentions.
+
+    Requires:
+        - text is a string
+        - personas is a list of lowercase names
+
+    Ensures:
+        - returns a set of lowercase names, word-boundaried and case-insensitive
+        - returns an empty set rather than raising on anything
+
+    Raises:
+        - nothing
+    """
+    try:
+        return { name for name in personas
+                 if re.search( r"\b" + re.escape( name ) + r"\b", text, re.IGNORECASE ) }
+    except Exception:
+        return set()
+
+
 def _dropped_attribution( original, rewritten, min_persons=3 ):
     """
     Why a reader may not be able to attribute this rewrite, or "" when they can.
@@ -2017,6 +2284,28 @@ def _apply_dm_tutor( body_text, config=None, rewrite_fn=None ):
             meta[ "tutor_outcome" ]   = "retraction_blocked"
             meta[ "tutor_retracted" ] = retracted
             print( f"[dm-tutor] REFUSED a rewrite that asserts a retracted value as current: {retracted}" )
+            return body_text, meta
+
+        # SPEECH-ACT CHECK — REFUSES, and it is the fourth member of the refusing family.
+        # The three above compare WHICH facts are present, WHAT they are bound to, and
+        # WHEN they were true. This compares WHO PERFORMED WHICH ACT, which none of them
+        # can see: measured 2026-08-30, a name-for-name swap returns "" from the
+        # attribution predicate while dropping every name fires at 6-to-0, so a
+        # substitution passes every existing check with all their counts intact.
+        #
+        # It REFUSES rather than merely recording, unlike the attribution sensor below,
+        # because the harm is different in kind. A reader who cannot attribute a rewrite
+        # knows they cannot, and asks. A reader handed an inverted recommendation has no
+        # such signal - it reads as ordinary advice, and on 2026-08-30 one pointed at
+        # deleting a live guard over ~29,000 vendored files, an action under which every
+        # test passes. Falling back to the sender's own words costs a longer DM; the other
+        # direction costs a guard nobody knows was removed. Mr. Radio's ruling,
+        # 2026-08-30; see TODO.md under the moratorium book.
+        altered = _altered_speech_acts( body_text, rewritten )
+        if altered:
+            meta[ "tutor_outcome" ]    = "speech_act_blocked"
+            meta[ "tutor_speech_act" ] = altered
+            print( f"[dm-tutor] REFUSED a rewrite that performs a different act: {altered}" )
             return body_text, meta
 
         # ATTRIBUTION CHECK — MEASURED, AND NO LONGER A REFUSAL (row 20026f56, Rick
