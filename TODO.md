@@ -284,13 +284,17 @@ tautology. Adding sha literals adds nothing that is not there — **a notice can
 and still say the opposite of what it must say.** Maya said this herself before I checked; the
 check is what turns it from a worry into a fact.
 
-- [ ] **PENDING MR RADIO 🦉 / RICK — the only thing that closes it crosses a standing ruling.**
-  What catches an inversion is asserting the **ACT** rather than the wording: the first line must
-  REFUSE. A small polarity vocabulary — `DO NOT` / `REFUSED` / `must not` — is one step up from
-  prose and survives an honest rewrite, which is the same shape as the speech-act guard landed
-  at `4d4eb954`. **But Mr Radio ruled against pinning the notice's wording** (assert the wording
-  and the test becomes churn at rotation for no safety), and this sits close enough to that line
-  that it is his call, not a drive-by. Held here, unfixed, with the measurement attached.
+- [x] **RULED — PIN THE REFUSAL. Asserting the ACT does not cross the earlier ruling** (Mr Radio 🦉,
+  2026-08-30 ~21:10 EDT; the ruling predates my entry by five minutes and I wrote the entry
+  without it). What catches an inversion is asserting the **ACT** rather than the wording: the
+  first line must REFUSE. A small polarity vocabulary — `DO NOT` / `REFUSED` / `must not` —
+  survives an honest rewrite, the same shape as the speech-act guard landed at `4d4eb954`.
+  🔴 **I read his earlier ruling too widely, and the distinction is the point**: that ruling was
+  about a **POINTER** — the word *"below"* — where being wrong misleads about **location**, so
+  pinning it is churn. **A refusal is not a pointer.** Being wrong about a refusal misleads about
+  **permission**, which is the whole subject. Pinning the ACT was never inside what he ruled out.
+  **Owner: Maya 🌻 — she raised it, it is her file. I declined the fix on Mr Radio's instruction**
+  and handed her `81253062` as the evidence.
 
 ⚠️ **Do NOT read this as "the hold is broken".** The hold works; what is unguarded is the
 possibility of somebody rewriting the refusal into a permission — by accident during a tidy-up,
