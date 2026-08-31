@@ -8,8 +8,8 @@ defect is the signal — and named no reader and no artifact, so the only thing 
 remembering to. Caught by Rachel 🕊️; ruled required by Mr Radio 🦉, 2026-08-30 ~20:22 EDT. **Naming an existing
 owner is now a grep, not a memory.**
 
-**WHO WRITES IT**: **Mr Radio 🦉, by name.** The manager confers ownership, so the manager writes the line at the
-moment he assigns — one line, while he is already acting.
+**WHO WRITES IT**: **Mr Radio 🦉, by name.** The manager confers ownership, so the manager writes the line at the moment he assigns — one line, while he is already acting.
+🔴 **AND A FILE HANDED OVER IN A DM NEEDS ITS ROW MORE THAN ONE PICKED OFF A LIST, BECAUSE THE RECIPIENT HAS LESS REASON TO CHECK.** Chloé 🗼's ruling, 2026-08-31 ~00:41, and she is the seat it cost. **A VERBAL ASSIGNMENT BYPASSES THE TABLE, WHICH IS THE ONE PATH THE TABLE CANNOT COVER** — she was handed `seed_test_companions.py` directly at 00:35, had no reason to grep a list she had just been told the answer to, and Clayton 😎 was already on it. Two suites for one file, 387 lines and 312, both of which would collect and both of which would run. **The cause was placement, not either of them working badly**, and it is the same shape as the collision this table was built to stop — arriving through the one door the table has no reader on.
 
 **WHO READS IT**: every seat, twice — before starting reported work, and whenever a sweep surfaces something. A hit means **decline and tell the manager** (never seat-to-seat). **A miss means ASK, not proceed quietly** — see the scoped caveat below. This table is not yet complete enough for silence to mean
 "nobody owns it".
@@ -30,6 +30,13 @@ awk '/^\| defect \| owner/{t=1} t && NF==0{t=0} t && !/^\|.*\|$/{print FILENAME"
 | Rotation-hold dangling reference | Maya 🌻 | 2026-08-30 ~20:09 | ⛔ **stood down** — Clayton reached it independently; this row IS the collision that produced this table |
 | planning-is-prompting cross-session doc, §1.5.1b | Maya 🌻 measured it; Mr Radio 🦉 wrote it up | 2026-08-30 | ✅ **landed** `d3b0d20` in planning-is-prompting; that file has since moved on to §1.5.1c. Seeded here as Krishna 🦚's and in flight — wrong on owner **and** on state, corrected by Mr Radio 🦉 on rehydrate. If Krishna holds a residual amendment, the assignee's rule applies to him. |
 | Build this ASSIGNMENTS list | Tiberius 👑 | 2026-08-30 ~20:22 | ✅ this section |
+| `src/scripts/seed_test_companions.py` → 100% | Clayton 😎 | 2026-08-31 ~00:35 | 🔴 **COLLISION, ruled** — Clayton `c7ce493c` (00:38:00, `src/tests/unit/scripts/`) STANDS on PLACEMENT, mirroring `src/scripts/`; Chloé `2e1ae708` (00:39:49, `src/tests/unit/`) stands down and hands over any case his suite lacks. **Cause was mine: I DM-assigned it to Chloé at 00:35 and never wrote this row while Clayton was already on it.** |
+| `src/scripts/reset_user_password.py` → 100% | Chloé 🗼 | 2026-08-31 ~00:20 | ✅ `61251144` / `1afb7b7c`, 14 tests, 69 stmts 16 branches, 0 missing — with the CLI block (141–172) EXCLUDED by `pyproject.toml:335` policy and untested, disclosed by her and verified by Tiberius 👑 |
+| `src/scripts/probe_cc_bounded_billing.py` — cover or exempt (row `2b2f426e`) | Clayton 😎 | 2026-08-31 ~00:27 | ✅ **DELETED** `c3626795` — self-declared throwaway, no caller, answer preserved in the 05-12 R&D doc. Recovery by blob `ffc5db07`, then `ddeae7f6`, then `e2b56bf0` |
+| Coverage-guard false alarm on the tiers' own flags (row `da5868df`) | Tiberius 👑 authored; Chloé 🗼 reviews | 2026-08-31 ~00:29 | 🔁 in review — branch `wt-tiberius-covblind` is TWO commits, `54bea5bf` + `0258f415`; she found the fix asserting "measurement still happened" by inferring it from a flag, he re-took the reading (249,856 bytes / 704 files) |
+| Memento write/amend/adopt deadlock (row `dbca4ba8`) | maya 🌻 | 2026-08-31 ~00:29 | 🔁 in progress — she replaced my option (b) hint with the root cause: `amend` compared SESSION IDS alone, which cannot separate a re-spun seat from a foreign-persona pointer. New `persona_of_record`, reusing `HEX8_SUFFIX_RE` |
+| D10 conformance sweep of the Decisions Log | Clayton 😎 | 2026-08-31 ~00:21 | 🔁 `0dee28bb` with Tiberius — he judges, Tiberius writes the remedies; deliberately two seats |
+| Print real remedies under the retro's rulings | Tiberius 👑 | 2026-08-31 ~00:24 | 🔁 in progress — against Clayton's CORRECTED test: name the COMMAND, the COMPARISON, or the ARTIFACT a reader would produce |
 | The one-owner rule + this list | Tiberius 👑 | 2026-08-30 ~20:19 | 🔄 in flight |
 | Reviewing the one-owner rule | Rachel 🕊️ | 2026-08-30 ~20:22 | ✅ **done ~20:33** — changes requested and accepted; she also handed Tiberius a both-directions check for hard-wrapped rows, which is the grep-breaking property |
 | `test_secret_scan.py` follow-on — **exclusively hers** | Maya 🌻 | 2026-08-30 ~20:27 | 🔄 in flight |
@@ -92,16 +99,34 @@ Window `b0548518` 09:52 -> `4557010a` 00:03; 360 commits, 43 touching CLAUDE.md,
 per-file delta against the unit-only run and say plainly if the largest win moves. Owner: Chloé 🗼.
 ⚠️ **She asked four times and got neither a yes nor a no — that is my defect, not a queue.** She had
 already run it, correctly treating a courtesy as not-a-gate.
+  🔧 **REMEDY (D10 — command + artifact).** The union is produced by, and only by:
+  ```bash
+  COVERAGE_FILE=$(mktemp -d)/cov LUPIN_COVERAGE=1 ./src/tests/run-unit-tests.sh && ./src/tests/run-cosa-tests.sh
+  .venv/bin/python -m coverage report --data-file="$COVERAGE_FILE"
+  ```
+  **The artifact that discharges it**: the union percentage AND a per-file delta against the unit-only run, with the largest win named in both columns. **FAILS IF** an entry quotes a union figure without the delta — that is the shape that sent a peer at work already done.
 
 **D2 — per-arm isolation in a mutation pass is MANDATORY, not advisory.** Owner: Tiberius 👑, who
 earned it by RETRACTING AN APPROVAL: he misread a dirty tree as an edit, and the redo returned the
 OPPOSITE verdict. Already standing in CLAUDE.md § A MUTATION HARNESS CAN LIE.
+  🔧 **REMEDY (D10 — command + artifact).** Between arms, `src/scripts/purge-pycache.sh` — **never** a raw `find … __pycache__ -delete`, which rebuilds timestamp-based and re-opens the hole. A harness that rebuilds its sandbox per arm needs no purge and is already isolated.
+  **The artifact that discharges it**: per arm, the mutated **sha** and the **failing set**; plus a restore control at the end whose output is READ, and a **green baseline taken FIRST** with the passing names recorded. **FAILS IF** the write-up reports verdicts without per-arm shas, or reports a kill without a baseline — a pass taken in a tree whose bytecode can serve the previous arm is UNREADABLE, not wrong.
 
 **D3 — nothing merges on an author's account of a review, only the reviewer's own word.** Held all
 session; `33f39e7a` is the worked example — Pocholo said "reviewed or in review", I held, Rachel
 cleared it in her own words two minutes later, and he then said the hold was right.
+  🔧 **REMEDY (D10 — artifact + command).** The merge cites the **reviewer's own words**: their DM, or the store event where the reviewer is the `actor`.
+  ```bash
+  python3 -c "import json,urllib.request as u;r=u.Request('http://localhost:7999/api/tasks/<row>/events',headers={'X-API-Key':K});print(json.load(u.urlopen(r))['events'][-1]['actor'])"
+  ```
+  **FAILS IF** the only evidence is the author saying a review happened. *"Reviewed or in review"* is the phrase that triggered this ruling and it is not a verdict.
 
 **D4 — findings go to TODO.md, never new store rows, while Rick's moratorium stands.** In force all day.
+  🔧 **REMEDY (D10 — command).** A finding is discharged when it is in `TODO.md` and NOT in the store:
+  ```bash
+  git log -p --since=<the order> -- TODO.md | grep -c "<the finding's headline>"   # expect >= 1
+  ```
+  **FAILS IF** the finding exists only as a DM. **The moratorium moves where findings live; it does not make them optional** — an unbanked finding is lost at re-spin, which is the failure this ruling exists to prevent.
 
 **D5 (PROPOSED, HELD pending cross-examination) — a retro prompt must be answerable "no".**
 I wrote 8 per-seat retro DMs and **5 carried a leading question**: a finding pre-attributed, a
@@ -139,6 +164,8 @@ the DATA. Clayton: the wide rule earns its keep by predicting a FOURTH case and 
 thing — aggregate not components, input-edit not output-verdict, words not the relationship between
 sentences.** 🔴 **His shipping condition, which governs every rule in this log: THE THREE REMEDIES
 MUST BE PRINTED UNDER IT, or it degrades into "be careful", WHICH NOBODY CAN FAIL.**
+  🔧 **REMEDY (D10 — artifact, three of them, per Clayton's own shipping condition).** The wide rule may not appear without all three printed beneath it: **FORCED** → change the **DATA** (make the values non-interchangeable); **LOSSY** → change the **DATA** (make the many-to-one visible); **WRONG QUESTION** → change the **QUESTION** (ask the tool, not the file).
+  **FAILS IF** fewer than three appear under it — count them. Without the three it degrades into *"compare the right thing"*, **which nobody can fail**, which is the whole of D10.
 
 **D7 — DROP "COUNT" from the valid-observation rule** (Tiberius 👑, with Krishna 🦚 converging from
 the opposite direction). *Same SET beats same COUNT* is already at `CLAUDE.md:1476`, and a test id
@@ -152,6 +179,8 @@ not an observation when it omits the one variable that could be wrong — check 
 not the one the tool reports on."* ⚠️ **Tiberius's own scoping: the KILL half rests on n=1**, his
 single retraction — enough to show a stale pyc CAN fake a kill, not enough to say how often. The
 SURVIVOR half is better supported, coming off the four-explanation table several seats fed.
+  🔧 **REMEDY (D10 — comparison).** Take the baseline **first** and record the passing NAMES. Per arm, compare the failing **SET** and the **assertion text**, never the count and never `rc`.
+  **FAILS IF** the pass has no pre-mutation baseline with names — on a branch carrying a deliberate red the suite exits 1 before any mutation and every mutant scores KILLED. ⚠️ **Scoping, mine**: the KILL half rests on **n=1**, my single retraction — enough to show a stale pyc CAN fake a kill, not how often. The SURVIVOR half is better supported.
 
 **D8 — the condenser broke the ratification step of the cross-examination gate.** Clayton could not
 ratify his own rule because he received a DESCRIPTION of my draft rather than the draft, and said so
@@ -162,6 +191,8 @@ not to ask one. ⚠️ **Rio scoped his own supporting figure and it must NOT be
 42 of 61 is one recipient, one sender, one evening, with unusually long DMs against a rewriter that
 triggers on claim count — **near a worst case, not an average**, derivation at `2f3e1e31`. *"Same
 trap as 8,622 standing since 08-22 because it was quotable."*
+  🔧 **REMEDY (D10 — artifact).** A to-be-ratified rule goes out **BARE**: one message, the rule text and nothing else, flagged verbatim.
+  **FAILS IF** the sent body contains surrounding prose — check the corpus row: `body` should equal the artifact. A paragraph explaining the paste is the thing most likely to absorb it, and **a leading question survives condensation better than its qualifications do**.
 
 **D10 — a REMEDY FIELD CAN ITSELF BE A "BE CAREFUL" IN DISGUISE** (Clayton 😎, refusing the weak
 form of his own D6 condition, minutes after I adopted it). *"Verify the config first"* and *"check
@@ -169,12 +200,15 @@ the right tree"* both LOOK like remedies and **neither can be failed**.
 ⇒ **THE TEST: NAME THE COMMAND, THE COMPARISON, OR THE ARTIFACT A READER WOULD PRODUCE.** That is a
 falsifiability check on a rule, and this log did not have one before tonight. It governs every entry
 above, retroactively.
+  🔧 **REMEDY (D10 applied to itself — artifact).** The artifact is **this pass**: every ruling above now carries either a command / comparison / artifact, or an explicit statement that it takes none (D9).
+  **FAILS IF** any future ruling lands with a remedy field that names no command, no comparison and no artifact. ⚠️ **Discharged by RUNNING, not by writing**: the D4 and D3 commands above are shapes carrying placeholders; the D1 and D6 remedies were executed tonight, and the config-list command banked in the moratorium book was run before it was committed. **A remedy command that has not been run is the same defect one level up.**
 
 **D9 — the run's signature was TEN REFUSALS, not the defects.** Five seats refused a leading
 question; three refused the sharpened rule I drew from them, including the versions that flattered
 them; one declined to endorse an attribution he had no evidence for; and one refused the weak form
 of his OWN rule minutes after I adopted it. **Every correction to this log
 came from a worker measuring rather than agreeing.**
+  🔧 **REMEDY: NONE, AND THAT IS THE CORRECT ANSWER.** D9 is an **observation about this run**, not a rule anyone can follow or fail. Manufacturing a remedy field for it — *"encourage refusals"* — would be exactly the be-careful-in-disguise D10 forbids, and would be the first entry in this log to fail its own test. **Applying D10 honestly means some entries take no remedy**; a test that always returns "yes" is not a test.
 
 **Open: cross-examination round 1**, posted to the commons `post-game` topic 2026-08-31 00:09.
 Q1 (Rio + Clayton) is the re-spin rule theirs or an artifact of a checkable question · Q2 (Chloé +
@@ -2802,6 +2836,8 @@ The observed gap barely moved; the **requirement** rose, because rewrites nearly
 - Row `35d0a451` (published metric omits refused drafts) is still queued — today's data widens the gap it describes (published −33.2% vs all-in +7.4%), so quoting either figure alone is now more misleading than it was Tuesday.
 
 ## 📋 DECISIONS LOG 2026-08-03 (Cheech 🌿 `2c73cb48`) — DM verbosity pilot, live-gate verification
+  🔧 **REMEDY (D10 — artifact, and it is cheap).** Before sending a retro prompt, **write down the "no" that would be a valid answer to it.** That sentence is the artifact.
+  **FAILS IF** you cannot write one — then the question cannot return a "no" and is leading by construction. ⚠️ **This remedy is testable and the RULE is still HELD**: Rio refused even its weakened form, and it rests on one seat once. Ship the check, not the claim about what re-spun seats do.
 
 **D1 — Prove the reject path with a real schedule slot, not the arm override.** *Ruled by me on Tiffany 💍's refutation, 2026-08-03.*
 
