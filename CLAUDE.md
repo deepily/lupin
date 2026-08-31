@@ -1144,6 +1144,50 @@ python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write \
 
 **Principle**: FastAPI `/docs` and `/redoc` are the authoritative API reference. Hand-written docs cover architecture, concepts, and operations only.
 
+## 🔴 A MEMENTO HAS TWO SLOTS, AND THE TWO DOORS READ DIFFERENT ONES
+
+**This is not a defect and it is not a fallback.** `self_respin` reads the **root** slot;
+`dismiss_sessions` (the reap) reads **io**. Written down here because it was filed as a bug on
+2026-08-30 (row `f74d226a`, dropped as invalid) by a seat that had the measurement right and the
+diagnosis wrong — a memento written to `io/` was refused by `self_respin`, which is the code doing
+exactly what it says.
+
+| Door | Slot | Pointer | Record |
+|---|---|---|---|
+| `dismiss_sessions` — a manager reaps a seat it **SPAWNED** | `io` | `io/mementos/<persona>.md` | `io/mementos/<persona>-<sid8>.md` |
+| `self_respin` — a manager clears its **OWN** pane | `root` | `.claude-memento.md` (**persona-less**) | `.claude-memento-<persona>-<sid8>.md` |
+
+**Write with the slot named** — the writer lands record, mirror and pointer in one operation, and
+picking the slot is the whole decision:
+
+```bash
+memento_io.py write --slot root   # you are about to self_respin
+memento_io.py write --slot io     # a manager is about to reap you
+```
+
+**Source of truth, cited rather than restated** — `SELF_RESPIN_SLOT = SLOT_ROOT` at
+`src/lupin_mcp/memento_slot.py:83`, whose comment calls the split *"a DELIBERATE disjointness, not
+a coincidence"*; `reap_memento`'s module docstring is the authority on which door owns which slot.
+The check is wired, not decorative: `src/lupin_mcp/self_respin_core.py:572` defaults the
+`verify_slot_fn` seam to `_default_verify_slot` and line 597 calls it on the live path.
+
+⚠️ **THE ROOT POINTER IS PERSONA-LESS AND EVERY PERSONA IN THE REPO SHARES IT.** `.claude-memento.md`
+is one file; measured 2026-08-30, Pocholo wrote `--slot root` at 14:41 and took the pointer, Mr.
+Radio wrote at 15:20 and took it back. So your record can sit correctly at its own derived path
+while the pointer a naive reader follows names **somebody else**. That is why the verifier's second
+leg re-reads the pointer's own header `session_id` instead of trusting placement.
+
+**A refusal here is legible — read it before theorising.** Given the wrong slot it names both
+acceptable targets and the exact remedy command, and it recognises the one plausible wrong
+destination (`~/.claude/mementos` at its bare top, which is neither slot nor a well-formed mirror —
+a mirror lives at `<mirror_home>/<repo>/<record-path>`). If you are guessing which slot the verb
+wanted, you did not read what it told you.
+
+⇒ **Two records for one session is the NORMAL steady state**, not drift: a seat that may be either
+reaped or self-respun legitimately has one in each slot. They are written by separate calls, so
+they agree only where the writer put the same bytes in both — expect the self-respin nonce to
+differ, and do not read that difference as corruption.
+
 ## HISTORY STRUCTURE NOTES
 - **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)
 - **Key Archived Periods**: 
