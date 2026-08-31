@@ -299,7 +299,11 @@ def test_api_keys_are_counted_by_the_same_xmax_rule_as_users( wired, capsys ):
     mod.seed_if_missing()
 
     out = capsys.readouterr().out
-    assert "Seeded API key:" in out
+    # CHLOÉ 🗼's strengthening. "Seeded API key:" alone names the line and not the value —
+    # the fixture CAN discriminate (desc="a key", kid="k-1", both truthy and distinct) and
+    # the assertion simply did not look. Naming the description makes this test fail for
+    # its OWN reason rather than relying on its neighbour to catch an operand swap.
+    assert "Seeded API key: a key" in out
     assert "Seeded 0 user(s) and 1 API key(s)" in out
     assert "2 API key(s)" in out
 
