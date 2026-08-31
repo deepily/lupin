@@ -2059,6 +2059,16 @@ def main():
             except ( json.JSONDecodeError, OSError ):
                 existing = { }
         merged = { **existing, **session_data }
+        # 🔴 REBIND, not decoration (row from Clayton 😎's measurement, 2026-08-30).
+        # The write two dozen lines below persists `merged` correctly — and then
+        # `_record_listener_pid()` at the end of main() writes THIS dict WHOLESALE
+        # over the same path (atomic_write_json, not read-modify-write), so every
+        # on-disk key main() does not itself carry was erased ~180 lines later.
+        # `session_topic` is a confirmed production victim: silently dropped on
+        # every /clear. Same mechanism as the manager-figure stamp at row 6325123c,
+        # which was fixed by keeping the in-memory dict in sync; this closes it at
+        # the source instead of one field at a time.
+        session_data = merged
         # Atomic (row 49b2c80b). The stable-id lockfile twelve lines above
         # is already O_EXCL against "the documented double-fire on
         # --continue (two concurrent SessionStart hooks)" — that same
