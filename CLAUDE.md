@@ -942,9 +942,32 @@ serves the PREVIOUS arm's bytecode against the RESTORED source.
 | Rio ⚡ | `purge-pycache.sh`'s reconvert needs `$LUPIN_ROOT/.venv/bin/python`; **35 of the repo's 80 worktrees lack it**, so there a purge leaves the tree on timestamp invalidation |
 | Krishna 🦚 | corrected the first cut of this rule: **a harness that rebuilds its sandbox per arm is already isolated** and needs no purge |
 
-**Why conversion is not enough**: a mutation loop first-imports modules *during* the loop, so it
-MANUFACTURES timestamp pycs in a tree that verified clean before it started. **`--verify` exiting 0
-at the top of a pass says nothing about the pycs the pass itself creates.**
+🔴 **WHY CONVERSION IS NOT ENOUGH — AND IT IS WORSE THAN "A MUTATION LOOP CREATES SOME."** Measured
+by Tiberius 👑 and Rachel 🕊️ independently, 2026-08-30, and this is the finding that reframes the
+whole section:
+
+```
+fresh worktree                  --verify  ->  exit 0   (clean, every pyc checked-hash)
+…one ORDINARY pytest run…
+same worktree                   --verify  ->  exit 1   (timestamp pycs present)
+```
+
+**One normal test run undoes the conversion.** Not a mutation harness, not a purge, not anything
+exotic — the first ordinary use of any new worktree. A pyc written where none existed is
+timestamp-based, a fresh worktree starts with no `__pycache__`, and a test run writes hundreds.
+
+⇒ **Every seat that has ever run a test in a fresh worktree has been sitting on an unconverted tree
+ever since, with nothing in any output saying so.** The repo-wide conversion ratified in `866f43ce`
+holds for the main checkout and is **undone in a worktree by that worktree's first test run** — which
+is where this fleet does its mutation work.
+
+⇒ **`--verify` exiting 0 before a pass says nothing about the pycs the pass creates**, and — the
+stronger form — **a tree that verified clean this morning is not clean now if anyone has run a test
+in it since.** Re-verify immediately before you rely on it, never once per tree.
+
+⚠️ **Do not count `.pyc` files to check this** — Tiberius tried and corrected himself: the count
+moves for ordinary reasons and tells you nothing about invalidation mode. **The verify status flip
+is the measurement**; the file count is not.
 
 ⇒ **Isolate every arm.** The requirement is that **nothing carries between arms** — not that you run
 a particular command:
