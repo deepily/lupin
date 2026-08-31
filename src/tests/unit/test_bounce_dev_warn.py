@@ -279,6 +279,29 @@ def test_a_broken_config_falls_back_instead_of_blocking_the_bounce( monkeypatch,
     assert "config unavailable" in capsys.readouterr().err
 
 
+# ── found by exchanging mutation sets with Clayton 😎's independent suite ────────
+#
+# Both suites killed all ten of my mutations, so the exchange looked like agreement.
+# It was not. A mutation NEITHER of us had posed — opening the commons store at the
+# wrong root — SURVIVED this suite and DIED in his, because my fixture stubbed
+# `CommonsStore` as `lambda root: object()` and threw the argument away. His asserted
+# on it. That is the whole argument for a second harness: two correct harnesses aimed
+# at one file pose different mutations, and only the union found this.
+#
+# The store is where the acks are read from. Opened at the wrong root it reads an empty
+# or foreign ack log, so every recipient looks un-acked and the bounce reports a partial
+# reach it did not have — a wrong answer that still exits cleanly.
+
+def test_the_commons_store_is_opened_at_the_project_root( monkeypatch, wired ):
+    seen_roots = []
+    monkeypatch.setattr( bounce_dev_warn, "CommonsStore",
+                         lambda root: seen_roots.append( root ) or object() )
+
+    bounce_dev_warn.main()
+
+    assert seen_roots == [ bounce_dev_warn.lupin_root ]
+
+
 # ── the bootstrap, which runs at IMPORT and so cannot be reached by calling main() ──
 #
 # These three lines are the entry-point exception every `src/scripts` file carries: they
