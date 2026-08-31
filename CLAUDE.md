@@ -903,6 +903,32 @@ there, a surviving mutant sends you looking for a fixture that cannot discrimina
 no mutant and no red at all, only a coverage figure at 100%. **Same defect, and the coverage number
 is the more dangerous entry point, because it arrives looking like an answer.**
 
+### 🔴 UNGUARDED IS A THIRD STATE, AND A BINARY THAT EXCLUDES IT IS STILL WORTH ASKING
+
+Measured 2026-08-31 (rows `f3230576`, `9dbffefb`). A manager asked whether a flag was **FIXED**
+or only **DETECTED**. Both were false. The predicate had always been correct; what was missing
+was a test that could have noticed if it weren't. **A field can be right and untestable-if-wrong
+at the same time**, and neither word in the question fits that.
+
+| state | the code | a test that could see it break |
+|---|---|---|
+| broken | wrong | — |
+| **UNGUARDED** | **right** | **absent** |
+| guarded | right | present |
+
+⇒ **Say which one you are in, and prove it.** Here the proof was a byte-identical diff of the
+serializer's return block across the two shas — the fix commit added declarations and tests and
+changed no projection value. *"Detected"* would have asserted a live defect that never shipped.
+
+🔴 **AND THE FORCED CHOICE WAS NOT THE ERROR — IT WAS THE INSTRUMENT.** Being made to pick
+between two wrong words is what sent the answerer to the diff instead of to the nearer-sounding
+one. **A binary that excludes the true answer earns its place when it is answered with a
+MEASUREMENT, and manufactures a durable false claim when it is answered with a preference.**
+Same question either way; the whole difference is what the answerer does next.
+
+⇒ So neither party should soften the question. **Ask the sharp binary — and when neither box
+fits, name the third state and show the evidence, never tick the closer box and move on.**
+
 ### 🔴 THERE IS A SECOND VIRTUALENV *INSIDE* `src/`, AND IT IS 92% OF EVERY DISK SWEEP
 
 `src/cosa/.venv` is a full vendored virtualenv living inside the source tree. Measured 2026-08-30:

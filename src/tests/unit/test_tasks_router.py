@@ -819,6 +819,24 @@ def test_every_advisory_field_is_wired_on_the_terse_path( client, repo, field ):
     assert type( rows[ 1 ][ field ] ) is bool
     assert rows[ 0 ][ field ] is True,  f"{field}: the TRUE arm did not report True"
     assert rows[ 1 ][ field ] is False, f"{field}: the FALSE arm did not report False"
+def test_terse_does_not_flag_an_over_cap_LEGACY_row( client, repo ):
+    """
+    Rachel 🕊️'s S1, projection half. Her fixture, landed by me.
+
+    `make_item` builds a TaskItem straight from kwargs — `soft_guard_title` appears
+    nowhere in it — so an over-cap title reaches the projection here exactly as one of
+    the 333 legacy rows in the store does. That is what makes the discriminating input
+    two lines rather than impossible.
+
+    She measured both arms in her own detached worktree at c64da293: pristine, this
+    passes; with `==` changed to `>=` (sha 7b187f8b224d) it FAILS, alongside 472 passed.
+    The mutant that survived the entire existing suite dies on the first fixture that
+    hands the predicate an input the suite could not produce.
+    """
+    repo.query_tasks.return_value = [ make_item( title="X" * 90 ) ]
+    r = client.get( "/api/tasks", params={ "terse": "true" } )
+    assert r.status_code == 200
+    assert r.json()[ "tasks" ][ 0 ][ "title_trimmed" ] is False
 
 
 def test_query_terse_serializes_nullable_next_chase_ts( client, repo ):
