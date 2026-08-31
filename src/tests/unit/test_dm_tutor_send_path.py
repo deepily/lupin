@@ -1575,6 +1575,22 @@ class TestSenderActPolarities:
         from cosa.rest.routers.dm import _sender_act_polarities as p
         assert p( "I would therefore approve it." ) == { +1 }
 
+    def test_the_window_admits_exactly_three_and_no_further( self ):
+        """
+        PROPOSED BY TIBERIUS 👑 REVIEWING cd74c38f, RE-POSED HERE RATHER THAN TRUSTED.
+
+        The two tests above pin the window to a RANGE, not a value. Their negatives sit
+        NINE words from the pronoun and the positive at three, so `_SENDER_WINDOW` can be
+        any of 2, 3 or 4 and the whole file still passes. Measured at cd74c38f: 3->2
+        SURVIVED at 150 passed, 3->4 SURVIVED at 150 passed.
+
+        Only the two distances either side of the boundary can tell 3 from its neighbours.
+        Re-posed by Clayton: FAILS at window=2, FAILS at window=4, PASSES unmutated.
+        """
+        from cosa.rest.routers.dm import _sender_act_polarities as p
+        assert p( "I aa bb cc approve it." )    == { +1 }, "distance 3 must be INSIDE the window"
+        assert p( "I aa bb cc dd approve it." ) == set(),  "distance 4 must be OUTSIDE the window"
+
     def test_it_returns_empty_rather_than_raising_on_a_non_string( self ):
         from cosa.rest.routers.dm import _sender_act_polarities as p
         assert p( None ) == set()
