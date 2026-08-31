@@ -201,3 +201,70 @@ class TestNoLancedbSurface( unittest.TestCase ):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAnEmbeddingTheApiCouldNotProduce( unittest.TestCase ):
+    """
+    `EmbeddingManager.generate_embedding` returns `[]` on API errors — its own Ensures
+    block says so, and two of its three such paths print "CONTINUING WITHOUT EMBEDDINGS".
+    That empty list is a value pgvector refuses, so before this fix one API error took
+    down the whole INSERT and the synonym was silently lost behind a bare `False`.
+
+    Found by Rachel 🕊️ reviewing the twin defect in the query-log write (row 0e7c9214
+    symptom 4), after I had claimed this file was not affected.
+    """
+
+    def _kwargs_when_embeddings_return( self, value ):
+        table, _, emb = _make()
+        emb.generate_embedding.return_value = value
+        repo, ctx, repo_ctx = _patch_repo()
+        repo.find_exact_verbatim.return_value = None
+        with ctx, repo_ctx, \
+             patch( "cosa.memory.canonical_synonyms_table.du.get_current_datetime", return_value="TS" ), \
+             patch( "cosa.memory.canonical_synonyms_table.du.get_timestamp_ms", return_value="NOW" ):
+            added = table.add_synonym( "snap1", "How Are You?" )
+        return added, repo.add_synonym.call_args.kwargs
+
+    def test_an_api_error_stores_nulls_and_still_writes_the_row( self ):
+        """
+        The row must survive. This table earns its keep through exact-match lookups on the
+        TEXT columns — its repository's own module docstring says the embedding columns are
+        "stored but NOT ANN-searched", and the indexes are on `snapshot_id` and
+        `question_normalized`. So NULL embeddings still do the job; losing the row does not.
+        """
+        added, kw = self._kwargs_when_embeddings_return( [] )
+        self.assertTrue( added )
+        self.assertIsNone( kw[ "embedding_verbatim" ] )
+        self.assertIsNone( kw[ "embedding_normalized" ] )
+        self.assertIsNone( kw[ "embedding_gist" ] )
+        self.assertEqual( kw[ "question_verbatim" ], "How Are You?" )
+        self.assertEqual( kw[ "question_normalized" ], "how are you?" )
+
+    def test_a_real_vector_is_not_touched( self ):
+        """
+        Guards the opposite over-correction. Mapping every embedding to None would also
+        make the write succeed, while silently dropping the vectors we do have.
+        """
+        _added, kw = self._kwargs_when_embeddings_return( [ 0.25 ] * 768 )
+        self.assertEqual( kw[ "embedding_verbatim" ], [ 0.25 ] * 768 )
+        self.assertEqual( kw[ "embedding_gist" ], [ 0.25 ] * 768 )
+
+    def test_what_we_pass_is_what_pgvector_accepts( self ):
+        """
+        The discriminating case. The two tests above assert against a MagicMock, which
+        would swallow `[]` as happily as None — so on their own they cannot tell a fixed
+        module from a broken one at the point that actually matters. This drives the REAL
+        pgvector binder at the real column width, and its `[]` arm reproduces the
+        production error verbatim.
+        """
+        from pgvector.utils import Vector
+        from cosa.memory.canonical_synonyms_table import _vector_or_none
+
+        with self.assertRaises( ValueError ) as caught:
+            Vector._to_db( [], 768 )
+        self.assertIn( "expected 768 dimensions, not 0", str( caught.exception ) )
+
+        for returned in ( [], None ):
+            value = _vector_or_none( returned )
+            self.assertIsNone( Vector._to_db( value, 768 ),
+                               f"{returned!r} produced {value!r}, which pgvector will not store" )

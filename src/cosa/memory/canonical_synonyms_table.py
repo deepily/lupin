@@ -18,6 +18,55 @@ from cosa.memory.normalizer import Normalizer
 from cosa.memory.embedding_manager import EmbeddingManager
 
 
+def _vector_or_none( embedding: Optional[list[float]] ) -> Optional[list[float]]:
+    """
+    Translate "the embedding API gave us nothing" into the value the storage layer
+    actually accepts.
+
+    `EmbeddingManager.generate_embedding` returns an EMPTY LIST on API errors — its
+    own Ensures block says so, and two of its three such paths print
+    "CONTINUING WITHOUT EMBEDDINGS". That is a deliberate keep-going fallback, and
+    it hands this module a value pgvector will not store: `Vector( 768 )` binds
+    None as SQL NULL and raises `ValueError: expected 768 dimensions, not 0` on
+    `[]`. CanonicalSynonymRepository.add_synonym states the contract in its own
+    docstring — "the three embedding_* args are dim-768 lists or None".
+
+    So without this, one embedding API error takes down the entire INSERT, the
+    caught exception reports a bare False, and the synonym is silently lost.
+
+    STORING NULL RATHER THAN REFUSING THE ROW IS THE RIGHT TRADE HERE, and the
+    repository's own module docstring is what settles it: "the 3 embedding columns
+    are stored but NOT ANN-searched." The indexes are on `snapshot_id` and
+    `question_normalized`. This table earns its keep through exact-match lookups on
+    the TEXT columns, so a row with NULL embeddings still does the job it exists
+    for — while losing the row costs that job entirely.
+
+    Twin of `QueryLogTable._vector_or_none`, which fixes the identical defect in
+    the query-log write (row 0e7c9214 symptom 4). Deliberately duplicated rather
+    than shared: that fix is on a separate branch cleared at specific file hashes,
+    and moving its helper would invalidate the clearance. Fold the two together
+    once both have landed.
+
+    Requires:
+        - embedding is None, or a list of floats
+
+    Ensures:
+        - returns None when the embedding is absent or empty
+        - returns the list unchanged when it is non-empty
+        - never returns an empty list
+
+    Args:
+        embedding: What the embedding manager returned
+
+    Returns:
+        The embedding, or None when there is nothing storable
+
+    Raises:
+        - None
+    """
+    return embedding or None
+
+
 class CanonicalSynonymsTable:
     """
     Manages canonical synonyms in Postgres for fast exact-match lookups.
@@ -70,6 +119,8 @@ class CanonicalSynonymsTable:
         Ensures:
             - Generates normalized and gist versions
             - Creates embeddings for all three levels (cache-first)
+            - An embedding the API could not produce is stored as NULL rather than
+              costing the whole row — see _vector_or_none
             - Adds row if not a duplicate
             - Returns True if added, False if duplicate or on error
 
@@ -94,9 +145,9 @@ class CanonicalSynonymsTable:
             question_normalized = self._normalizer.normalize( question_verbatim )
             question_gist       = question_normalized      # simplified — gist normalizer not wired yet
 
-            embedding_verbatim   = self._embedding_manager.generate_embedding( question_verbatim,   normalize_for_cache=False )
-            embedding_normalized = self._embedding_manager.generate_embedding( question_normalized, normalize_for_cache=False )
-            embedding_gist       = self._embedding_manager.generate_embedding( question_gist,       normalize_for_cache=False )
+            embedding_verbatim   = _vector_or_none( self._embedding_manager.generate_embedding( question_verbatim,   normalize_for_cache=False ) )
+            embedding_normalized = _vector_or_none( self._embedding_manager.generate_embedding( question_normalized, normalize_for_cache=False ) )
+            embedding_gist       = _vector_or_none( self._embedding_manager.generate_embedding( question_gist,       normalize_for_cache=False ) )
 
             synonym_id = f"{snapshot_id}_{du.get_current_datetime( format_str='%Y%m%d_%H%M%S_%f' )}"
             now        = du.get_timestamp_ms()
