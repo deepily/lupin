@@ -117,11 +117,49 @@ _cov_table_present() {
     grep -qE 'coverage: platform|^TOTAL[[:space:]]' "$1" 2>/dev/null
 }
 
+# True when the command explicitly asked for NO terminal report: a bare `--cov-report=` with
+# an empty value. This is not a mistake and not blindness — it is what this repo's own
+# `coverage_opt_in_flags()` emits for every tier (row e2099400), because the tiers APPEND to
+# one data file and the number is rendered ONCE afterwards by run-coverage-gate.sh.
+#
+# Without this predicate the block below fires on the repo's own sanctioned tier invocation
+# the moment that tier has any red, and tells the reader "this run measured nothing" while
+# the run has in fact measured the whole frame. Measured 2026-08-30: the exact tier flags
+# against one red test printed the block while 704 measured files / 204 KB sat in
+# COVERAGE_FILE. Two seats hit it and read it as a defect in their own run.
+_cov_report_suppressed() {
+    local a
+    for a in "$@"; do [ "$a" = "--cov-report=" ] && return 0; done
+    return 1
+}
+
 _warn_if_coverage_went_blind() {
     local capture="$1" status="$2"; shift 2
     _cov_requested "$@"           || return 0
     [ "$status" -eq 0 ]           && return 0   # a green run reports; nothing to warn about
     _cov_table_present "$capture" && return 0
+
+    # A table suppressed ON PURPOSE is not blindness. Say what is true — the run measured,
+    # it simply did not RENDER — and point at the step that does. Still a note, because you
+    # genuinely cannot cite a number from THIS run; just not an alarm about a defect.
+    #
+    # ⚠️ `--no-cov-on-fail` WINS OVER THIS, AND THE ORDER IS THE WHOLE POINT. A run carrying
+    # BOTH flags is the named cause with a named remedy, so it keeps the full block. Measured
+    # 2026-08-30 while writing this: `--no-cov-on-fail` drops the REPORT but still writes
+    # measurement data, so a data-file check does NOT separate these two cases — only the flag
+    # does. A first cut of this branch sat above the check and silently swallowed the one
+    # explanation in here that tells the reader exactly what to re-run.
+    if _cov_report_suppressed "$@" && ! _cov_suppressed_on_fail "$@"; then
+        {
+            echo ""
+            echo "  note: no coverage table here, because --cov-report= asked for none. That is"
+            echo "        this repo's tier default (row e2099400): tiers APPEND to COVERAGE_FILE"
+            echo "        and src/tests/run-coverage-gate.sh renders the number once, afterwards."
+            echo "        Measurement still happened. Cite the gate's number, never this run's."
+            echo ""
+        } >&2
+        return 0
+    fi
 
     {
         echo ""

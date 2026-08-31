@@ -223,3 +223,115 @@ def test_quiet_when_coverage_was_never_requested( tmp_path ):
     assert proc.returncode == 1, "this case needs a red run to be meaningful"
     assert BLOCK_HEADLINE not in proc.stderr, \
         f"fired on a run that never asked for coverage.\n--- stderr ---\n{proc.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# It stays quiet when the table was suppressed ON PURPOSE
+#
+# This is the shape the repo's own tiers use. `coverage_opt_in_flags()` emits
+# `--cov --cov-report= --cov-fail-under=0 --cov-append` for every tier (row e2099400),
+# because the tiers APPEND to one data file and run-coverage-gate.sh renders the number
+# once, afterwards. Before this section existed the block fired on that sanctioned
+# invocation the moment a tier had any red, and told the reader the run "measured
+# nothing" while the whole frame had in fact been measured. Two seats hit it and read
+# it as a defect in their own run, which is the cost of a warning that cannot tell
+# "measured nothing" from "was told not to print".
+# ---------------------------------------------------------------------------
+
+TIER_FLAGS = ( "--cov", "--cov-report=", "--cov-fail-under=0", "--cov-append" )
+
+
+def _child_measured_files( suite_dir ):
+    """
+    Read the child's OWN coverage data back and return how many files it measured.
+
+    Requires:
+        - suite_dir is the directory _run used, so `.coverage-child` sits inside it
+
+    Ensures:
+        - returns an int, 0 when the file is absent or holds no measurement
+        - reads the CHILD's data file, never the parent's — see _run's note on why
+          these children are given their own COVERAGE_FILE
+    """
+    import coverage
+
+    path = os.path.join( suite_dir, ".coverage-child" )
+    if not os.path.exists( path ):
+        return 0
+    data = coverage.CoverageData( path )
+    data.read()
+    return len( list( data.measured_files() ) )
+
+
+def test_a_deliberately_suppressed_table_is_not_reported_as_blindness( tmp_path ):
+    """
+    The repo's own tier flags against a red run. No table is printed, and that is correct
+    — `--cov-report=` asked for none. The block must not fire.
+
+    ⚠️ THE MEASUREMENT PRECONDITION IS ASSERTED FIRST, AND IT IS THE WHOLE TEST. Silence
+    alone would pass vacuously if the run had genuinely measured nothing — that is exactly
+    the case the block SHOULD fire on. What makes this a false positive rather than a
+    judgement call is that the data file is non-empty: the run measured, it simply did not
+    render.
+    """
+    suite = _suite( tmp_path, red=True )
+    proc  = _run( suite, *TIER_FLAGS )
+
+    assert proc.returncode == 1, f"this case needs a red run to be meaningful; got {proc.returncode}"
+    assert "coverage: platform" not in proc.stdout, \
+        "this case depends on NO table being printed; one appeared, so it is testing nothing"
+
+    measured = _child_measured_files( suite )
+    assert measured > 0, (
+        "the run measured nothing, so silence here would be WRONG rather than a false "
+        f"positive — this test would pass for the opposite reason. measured={measured}"
+    )
+
+    assert BLOCK_HEADLINE not in proc.stderr, (
+        f"fired on the repo's own tier flags, which suppress the table on purpose and "
+        f"measured {measured} files.\n--- stderr ---\n{proc.stderr}"
+    )
+
+
+def test_the_suppressed_run_still_says_not_to_cite_a_number_from_it( tmp_path ):
+    """
+    Quiet is not the same as saying nothing. You still cannot cite coverage from a run that
+    rendered none, so the note has to survive — it is the alarm and the false "measured
+    nothing" claim that go, not the guidance. Pinned separately from the silence above
+    because dropping the note entirely would still pass that test.
+    """
+    proc = _run( _suite( tmp_path, red=True ), *TIER_FLAGS )
+
+    assert "run-coverage-gate.sh" in proc.stderr, (
+        "the note must name the step that actually renders the number, or the reader is "
+        f"left knowing only that this run did not.\n--- stderr ---\n{proc.stderr}"
+    )
+
+
+def test_suppression_alone_does_not_excuse_the_other_blind_shapes( tmp_path ):
+    """
+    The narrowing is on `--cov-report=` ONLY. `--no-cov-on-fail` is a different cause with a
+    different remedy, and a run carrying BOTH is still genuinely blind — pytest-cov drops the
+    data, so there is nothing for the gate to render later.
+
+    This is the case that keeps the fix from becoming a blanket mute.
+
+    ⚠️ THE OBVIOUS DISCRIMINATOR DOES NOT WORK, AND THIS TEST IS WHERE THAT WAS MEASURED.
+    A first cut asserted `_child_measured_files( suite ) == 0` here, on the assumption that
+    `--no-cov-on-fail` discards the data as well as the report. It does not: the run still
+    writes measurement data, so a data-file check cannot separate this case from an ordinary
+    suppressed-table run. Only the FLAG separates them, which is why the wrapper branches on
+    the flag and why the precedence between the two flags had to be made explicit.
+    """
+    suite = _suite( tmp_path, red=True )
+    proc  = _run( suite, *TIER_FLAGS, "--no-cov-on-fail" )
+
+    assert proc.returncode == 1, "this case needs a red run to be meaningful"
+    assert BLOCK_HEADLINE in proc.stderr, (
+        f"went quiet on a genuinely blind run just because --cov-report= was present.\n"
+        f"--- stderr ---\n{proc.stderr}"
+    )
+    assert "--no-cov-on-fail was passed" in proc.stderr, (
+        "the block fired but did not name the flag as the cause — the named-cause branch is "
+        f"the most actionable thing in here and it must survive the narrowing.\n{proc.stderr}"
+    )
