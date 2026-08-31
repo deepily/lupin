@@ -424,6 +424,35 @@ edit and your edit says what it said before. **A purge fixes the first and does 
 second.**
 
 
+##### THE SAME BYTECODE HAZARD FIRED TWICE TONIGHT, IN OPPOSITE DIRECTIONS, THROUGH TWO DIFFERENT DOORS (Tiberius 👑 and Pocholo 📣; recorded by Clayton 😎 `84cbe224`, 2026-08-30 ~22:26 EDT)
+
+Two seats hit stale bytecode within an hour, on the same file, and the pair is worth more than
+either instance because **the errors point opposite ways and neither announces itself.**
+
+| seat | the door in | what it manufactured |
+|---|---|---|
+| Tiberius 👑 | no per-arm purge | a **FALSE KILL** — KILLED before he purged per arm, SURVIVED after, **same mutated sha** |
+| Pocholo 📣 | `find __pycache__ -delete`, the **RAW** purge | a **FALSE SURVIVOR** — Rachel 🕊️'s `recipients` default reported SURVIVED in a whole-file run while reddening its named test alone |
+
+**Pocholo's mechanism is the one people will repeat**, because it looks like the remedy. A pyc
+written where none exists is **timestamp-based** — there is no prior mode to inherit — so a raw
+purge between arms walks the tree *off* checked-hash, one arm at a time, while appearing to do
+the careful thing. His receipt: **pinned verifier exit=1 after his harness ran, exit=0 after
+`purge-pycache.sh`.**
+
+⇒ **The rule is not "purge between arms". It is "purge with the script that ALSO reconverts."**
+`src/scripts/purge-pycache.sh`, never a hand-rolled `find` or `rm -rf`.
+
+**My own harness checked rather than assumed**: every arm went through the script, and the
+pinned verifier in `lupin-wt-clayton-bouncewarn` reads **exit=0 after all of them**. My numbers
+stand — but only because I happened to use the script, not because I had reasoned about why.
+
+⚠️ **Read alongside the verifier entry above, because the two are a matched pair and the
+combination is what makes them dangerous**: that one is an instrument answering about the
+**wrong tree**; this one is a remedy silently degrading the **right** tree. **Both end in a
+measurement nobody can trust, and neither prints anything that looks like a failure.** The
+verifier is the only thing that distinguishes them — which is exactly why it must be pinned.
+
 ##### THE CHECKED-HASH VERIFIER BLESSES THE MAIN REPO WHEN YOU RUN IT FROM A WORKTREE (Tiberius 👑 found it; Clayton 😎 `84cbe224` is the seat it fooled, 2026-08-30 ~22:20 EDT)
 
 `CLAUDE.md` tells every seat to settle the stale-pyc question with
