@@ -222,14 +222,26 @@ def test_a_new_row_counts_as_SEEDED_and_an_existing_one_as_REFRESHED( wired, cap
     assert "refreshed 5 user(s)" in out
 
 
-def test_roles_reach_the_insert_as_JSON_when_they_are_a_list( wired ):
-    """Reddens if the `isinstance( roles, ( list, dict ) )` arm stops serializing."""
-    _all_companions( wired, roles=[ "admin", "tester" ] )
+@pytest.mark.parametrize( "roles,expected", [
+    ( [ "admin", "tester" ],   '["admin", "tester"]' ),
+    ( { "role": "admin" },     '{"role": "admin"}'   ),
+] )
+def test_roles_reach_the_insert_as_JSON_when_they_are_a_list_OR_A_DICT( wired, roles, expected ):
+    """
+    Reddens if the `isinstance( roles, ( list, dict ) )` arm stops serializing.
+
+    CHLOÉ 🗼 FOUND THE DICT ROW — my first version tested only the list, and measured:
+    narrowing the check to `( list, )` SURVIVES at sha 1c4baa9ebdaa, 19 passed. The column
+    is jsonb and psycopg2 will not auto-cast a dict back to it, so an unserialised dict is
+    a live failure the suite could not see. A tuple of accepted types needs a row PER TYPE
+    — testing one member proves nothing about the others.
+    """
+    _all_companions( wired, roles=roles )
     mod.seed_if_missing()
 
     test_cur = wired[ "conns" ][ 1 ].cursor()
     user_sql = [ p for s, p in test_cur.executed if "INSERT INTO users" in s ]
-    assert user_sql[ 0 ][ 6 ] == '["admin", "tester"]'
+    assert user_sql[ 0 ][ 6 ] == expected
 
 
 def test_roles_that_are_ALREADY_a_string_are_passed_through_untouched( wired ):
@@ -290,6 +302,37 @@ def test_api_keys_are_counted_by_the_same_xmax_rule_as_users( wired, capsys ):
     assert "Seeded API key:" in out
     assert "Seeded 0 user(s) and 1 API key(s)" in out
     assert "2 API key(s)" in out
+
+
+@pytest.mark.parametrize( "description,expected,why", [
+    ( "the cosa-voice key", "the cosa-voice key", "a described key is announced BY its description" ),
+    ( None,                 "k-only",             "a key with no description falls back to its id" ),
+] )
+def test_a_seeded_api_key_is_announced_by_its_description_or_its_id( wired, capsys, description, expected, why ):
+    """
+    CHLOÉ 🗼's TEST, and she was right that mine could not see this.
+
+    We wrote this suite concurrently — Mr Radio's DM-assignment crossed my start — and she
+    ruled to keep mine because it was larger. I checked the ruling rather than accept it in
+    my own favour, and hers catches something mine did not: `description or key_id`.
+
+    Measured — collapsing that to plain `{key_id}` SURVIVES my 17 tests at sha b92989afe6a8,
+    17 passed, while the file still reports 100%. It is invisible to the gate because
+    coverage.py does not treat an `or` short-circuit as a branch, so the fallback arm is
+    never reported as unreached. Same class as the `.get` default that survived on
+    bounce_dev_warn tonight: an arm nothing exercises, under a report that looks finished.
+
+    Both rows are needed. With only the described one, deleting `or key_id` still passes;
+    with only the None one, deleting `description or` still passes.
+    """
+    _all_companions( wired )
+    wired[ "keys_by_email" ][ mod.SERVICE_ACCT ] = [ _key_row( kid="k-only", desc=description ) ]
+    wired[ "user_inserted" ] = [ False ] * 6
+    wired[ "key_inserted" ]  = [ True ]
+
+    mod.seed_if_missing()
+
+    assert f"Seeded API key: {expected}" in capsys.readouterr().out, why
 
 
 def test_the_summary_reports_a_pure_REFRESH_as_none_newly_created( wired, capsys ):
