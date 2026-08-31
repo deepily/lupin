@@ -791,8 +791,27 @@ def test_the_refusal_markers_are_themselves_pinned():
     # reason generalises past this tuple: **a presence-check over a list is satisfied by
     # SHORTENING the list.** My first version asserted each expected marker was `in` the tuple
     # plus `len >= 2`. That catches a removal only because I happened to name both survivors,
-    # and says nothing about a tuple that GROWS an entry nothing checks — which reads as
-    # coverage the guard does not have.
+    # and says nothing about a tuple that GROWS.
+    #
+    # 🔴 AND MY FIRST STATEMENT OF *WHY* THAT MATTERS WAS WRONG — Clayton 😎 corrected it, and
+    # the correction is worth more than the assert. I wrote that an added entry is "coverage
+    # the guard does not have, because nothing checks it". False: BOTH loops check every
+    # marker. The real hazard is a marker that is TRIVIALLY SATISFIED. Measured, and it is the
+    # strongest single receipt this guard has:
+    #
+    #     adding `""` to REFUSAL_MARKERS  ->  2 failed / 74 passed, GREEN before this assert
+    #
+    # `""` is `in` every string, so every presence check passes, the tuple looks longer, and
+    # DISCRIMINATION GOES TO ZERO while the suite reports health. That is this file's recurring
+    # shape once more: a guard weakened by an edit that makes it look stronger.
+    #
+    # ⚠️ AND THE PRICE, STATED RATHER THAN OMITTED. This assert also blocks a LEGITIMATE
+    # tightening — adding "greening it changes the signal, not the risk", a real phrase from
+    # the notice that both loops would genuinely check, reddens here too (measured: 3 failed /
+    # 73 passed). That is not a false positive to be fixed; it is the COST of the rule.
+    # Widening the guard now takes ONE DELIBERATE TWO-PLACE EDIT — add the marker to the tuple
+    # AND to `expected` below, in the same change. Cheap, and it makes widening a decision
+    # somebody made rather than a line that drifted in.
     #
     # It is the fixture-that-cannot-discriminate class from CLAUDE.md, arriving on a yardstick
     # rather than on a test: if two quantities can be exchanged without changing the expected
@@ -808,9 +827,11 @@ def test_the_refusal_markers_are_themselves_pinned():
     }
     assert set( REFUSAL_MARKERS ) == expected, (
         f"REFUSAL_MARKERS is not the pinned set. missing={sorted( expected - set( REFUSAL_MARKERS ) )} "
-        f"unexpected={sorted( set( REFUSAL_MARKERS ) - expected )}. A marker REMOVED narrows what "
-        "'still refuses' means; a marker ADDED that nothing checks reads as coverage this guard "
-        "does not have. Change the set here and there deliberately, in one edit" )
+        f"unexpected={sorted( set( REFUSAL_MARKERS ) - expected )}. A marker REMOVED narrows "
+        "what 'still refuses' means. A marker ADDED is not automatically wrong — a real phrase "
+        "from the notice genuinely strengthens this guard — but an empty or near-empty one is "
+        "satisfied by any text at all and quietly takes the discrimination to zero. So widening "
+        "is allowed and must be DELIBERATE: add it to the tuple AND to `expected`, in one edit" )
     assert len( REFUSAL_MARKERS ) == len( expected ), (
         f"REFUSAL_MARKERS has {len( REFUSAL_MARKERS )} entries against {len( expected )} pinned. "
         "The set comparison above is blind to a DUPLICATE, which would make a two-marker guard "
