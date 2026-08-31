@@ -41,6 +41,8 @@ awk '/^\| defect \| owner/{t=1} t && NF==0{t=0} t && !/^\|.*\|$/{print FILENAME"
 | Surviving mutant in `dm.py` found by his own pass | Clayton 😎 | 2026-08-30 ~20:36 | 🔄 in flight — his own work, his to fix |
 | Two surviving mutants in `test_secret_scan.py` (Clayton's pass, reported not fixed) | Maya 🌻 | 2026-08-30 ~20:36 | 🔄 folded into her exclusive follow-on above; Clayton writes them into the book rather than DMing them |
 | Reviewing Chloé's coverage work | Rachel 🕊️ | 2026-08-30 ~20:36 | 🔄 in flight |
+| Fold the baseline-red instrument finding into CLAUDE.md's mutation section — `rc == 1` is not a kill on a branch carrying intentional reds | Clayton 😎 | 2026-08-30 ~20:40 | 🔄 in flight — his own measurement; it sharpens a rule already in the file |
+| CLAUDE.md says the `pyproject.toml` coverage `source` list has **seven** entries; at `841c06be` it has **THIRTEEN** | Chloé 🗼 | 2026-08-30 ~20:41 | 🔄 in flight — **reached by Rachel 🕊️ and Chloé 🗼 within 21 seconds of each other**; conferred on Chloé because it sits inside her census, **Rachel declines and reviews**. Mr Radio 🦉 counted 13 independently. Six packages + `src/scripts` + six `src/scripts` subdirs listed separately because coverage's unexecuted-file walk does not descend into non-package subdirs. ⚠️ **Fix by DATING the figure, not by writing 13** — it went stale once and will again |
 | *(unassigned — free seats)* | Pocholo 📣 | — | 🟢 available (IDLE, stale transcript) |
 | Flip-day: the hold tests stop measuring the flag | Maya 🌻 | 2026-08-30 ~19:0x | ✅ merged `39d912ec` — reviewer Rachel 🕊️, not Tiberius (the gate was his) |
 | Probe-recall caveat — docstring only, row `40f8e3cc` | Tiberius 👑 | 2026-08-30 | ✅ merged `a91f2ad1` — reviewer Chloé 🗼, after two refusals |
