@@ -82,7 +82,22 @@ entries — one of them the manager's own.
   your section legitimately claims still commits whatever a peer left uncommitted inside it.
   **The manifest is per-FILE, not per-hunk. Only a private working tree closes it.** Nobody did
   anything wrong: that seat named `TODO.md`, which it was entitled to name, and got her edit
-  with it. Rachel banked the mechanism at `0bc57fa3`. ⇒ **I diagnosed a discipline failure where
+  with it.
+
+  🔴 **THE MECHANISM, STATED PLAINLY, BECAUSE THREE OF US GOT IT WRONG TONIGHT IN DIFFERENT
+  WAYS**: **naming a file in a pathspec commit takes that file's WORKING-TREE content**, so a
+  peer's uncommitted work inside a file you legitimately own goes in with yours. **Per-file,
+  never per-hunk.** Selective staging does not narrow this and cannot — `git add <path>` stages
+  the whole path as it stands on disk.
+
+  **TWO INDEPENDENT SIGHTINGS, and Rachel's is the primary record** — she banked the same
+  mechanism from her side at **`0bc57fa3`** ("the per-hunk gap the guard documents, with its
+  first measured instance") before I reached it from mine. Cross-referenced rather than
+  restated: hers is the entry to read, this is the second sighting. ⇒ A gap the guard's own
+  header has documented all along, and that **nobody had seen in the wild until tonight** —
+  which is what a documented-but-unwitnessed limit looks like right up until it fires.
+
+  ⇒ **I diagnosed a discipline failure where
   the documentation already described a known, unclosable gap — the second time tonight I
   called a documented trade-off a defect before reading the file that documents it.**
 
