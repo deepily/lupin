@@ -866,10 +866,44 @@ class TestSoftGuardTitle:
         flag that is True on every row is not a flag. Driven from the guard's own
         no-op arm.
         """
+        # Rachel 🕊️'s S3. The empty-string case used to hand-write
+        # `advisory = None` through a ternary, so `assert advisory is None` asserted
+        # None is None on that iteration and bought nothing. Measured:
+        # soft_guard_title( "", "a body" ) returns ( "", "a body", None ) and does not
+        # raise, so the guard can drive all three cases and the assertion becomes real.
         for original in ( "", "a", "Z" * 59 ):
-            stored, body, advisory = rules.soft_guard_title( original, "a body" ) if original else ( original, "a body", None )
+            stored, body, advisory = rules.soft_guard_title( original, "a body" )
             assert advisory is None
             assert rules.title_may_be_trimmed( stored ) is False
+
+    def test_a_legacy_over_cap_title_was_never_trimmed_so_is_NOT_flagged( self ):
+        """
+        Rachel 🕊️'s S1, and the fixture is hers — she measured the surviving mutant and
+        declined to write the test into my branch, because a reviewer who writes it
+        becomes its author.
+
+        `len(title) == cap` mutated to `>=` SURVIVED the whole suite (sha 7b187f8b224d,
+        472 passed). Not an equivalent mutant: measured in lupin_db_dev, **333 of 2,281
+        rows carry titles LONGER than 60** — oldest 2026-06-12, newest 2026-07-21, all
+        written before the guard existed and the set is not growing.
+
+        Nothing was CUT from those rows, so no tail is hiding in their bodies and False
+        is the right answer. `>=` would flag all 333 — a false positive on 14.6% of the
+        store.
+
+        ⚠️ WHY THE EXISTING SUITE COULD NOT SEE IT, which is the transferable part: all
+        three predicate call sites drive it from `soft_guard_title`'s own output, which
+        is <= cap by construction, or from a natural cap-length string. Pairing the
+        fixture to the guard is the RIGHT choice for the property those tests assert,
+        and it closes off the one input class that separates `==` from `>=`. A correct
+        design decision with an invisible cost.
+
+        ⚠️ AND THE INPUT IS NOT UNREACHABLE, which was briefly ruled and then withdrawn.
+        The write path trims NEW titles; it did not retroactively trim rows already
+        stored. The predicate runs on the READ path, where history that predates the
+        guard still lives.
+        """
+        assert rules.title_may_be_trimmed( "X" * 90 ) is False
 
     def test_title_may_be_trimmed_OVER_reports_and_that_is_the_chosen_direction( self ):
         """
