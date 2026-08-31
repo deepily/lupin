@@ -340,3 +340,114 @@ def test_suppression_alone_does_not_excuse_the_other_blind_shapes( tmp_path ):
         "the block fired but did not name the flag as the cause — the named-cause branch is "
         f"the most actionable thing in here and it must survive the narrowing.\n{proc.stderr}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Chloé 🗼's review of the first cut (row da5868df) — three findings, three pins.
+#
+# F1: the note claimed "Measurement still happened" WITHOUT LOOKING, which is the
+#     exact charge this file levels at the old block, pointing the other way. A
+#     false alarm gets investigated; a false reassurance does not.
+# F2: the same false join survived on the branch that was deliberately KEPT.
+# F3: the exact-match judgement was a judgement no test defended — her mutation
+#     widening it to the prefix form SURVIVED all 79 tests.
+# ---------------------------------------------------------------------------
+
+def test_a_suppressed_table_over_an_empty_data_file_is_not_called_measurement( tmp_path ):
+    """
+    F1. `--cov` scoped to code the run never imports measures NOTHING, and the suppressed-table
+    note must not reassure over it.
+
+    ⚠️ THE POINT IS THE DIRECTION OF THE ERROR. The old block's failure was loud and false; this
+    one would be quiet and false, and quiet is worse because nobody goes and checks it. The data
+    file DOES discriminate here — 0 against 704 — which is exactly why the check belongs on this
+    branch even though it is unavailable one branch over (see the --no-cov-on-fail test below).
+    """
+    suite = _suite( tmp_path, red=True )
+    proc  = _run( suite, "--cov=cosa.agents.deep_research.deep_research_job",
+                  "--cov-report=", "--cov-fail-under=0" )
+
+    assert _child_measured_files( suite ) == 0, (
+        "this case needs a genuinely dead scope; something was measured, so it is testing "
+        "the opposite of what it claims"
+    )
+    assert "Measurement did happen" not in proc.stderr, (
+        f"claimed measurement over an EMPTY data file — the false-reassurance shape.\n{proc.stderr}"
+    )
+    assert "0 files measured" in proc.stderr, (
+        f"went quiet instead of naming the empty data file.\n--- stderr ---\n{proc.stderr}"
+    )
+
+
+def test_the_no_cov_on_fail_block_says_the_report_was_dropped_not_that_nothing_was_measured( tmp_path ):
+    """
+    F2. `--no-cov-on-fail` drops the REPORT and still WRITES the data. The first cut measured
+    that, wrote it into a docstring, and left the block's prose saying the opposite.
+
+    Pinned separately from the block firing at all, because the block firing is correct here —
+    what was wrong was what it SAID once it fired.
+    """
+    suite = _suite( tmp_path, red=True )
+    proc  = _run( suite, *TIER_FLAGS, "--no-cov-on-fail" )
+
+    measured = _child_measured_files( suite )
+    assert measured > 0, (
+        f"this case assumes --no-cov-on-fail still writes data; it wrote {measured}, so the "
+        "assertion below would be testing something else"
+    )
+    assert "BUT THE DATA SURVIVED" in proc.stderr, (
+        f"the block still implies nothing was measured while {measured} files sit in "
+        f"COVERAGE_FILE.\n--- stderr ---\n{proc.stderr}"
+    )
+    assert "do NOT re-run" in proc.stderr, (
+        "the remedy still says re-run, which under the tier architecture buys a number that is "
+        f"already on disk at the price of a full tier.\n--- stderr ---\n{proc.stderr}"
+    )
+
+
+def test_a_real_terminal_report_is_not_mistaken_for_a_suppressed_one( tmp_path ):
+    """
+    F3, and this is Chloé's mutation arm rather than mine. My pass widened the predicate to
+    `--cov-report` (no `=`), which the tests killed. Hers widened it to the PREFIX form a
+    well-meaning editor would actually write — `case "$a" in --cov-report=*)` — and it
+    SURVIVED all 79 tests.
+
+    The harm the survival hid: `--cov-report=term` REQUESTS a terminal report, and under the
+    prefix form it would be told no table was asked for. Exact match is the right judgement;
+    it simply had no test defending it, which is a different problem from being wrong.
+
+    ⚠️ Two harnesses aimed at one file found different arms. That — not a matching sha — is
+    the argument for a second harness.
+
+    🔴 IT TOOK TWO WRONG PINS TO REACH THIS ONE, AND THE REASON IS THE USEFUL PART.
+    Measured, with a suite that DOES import the measured module:
+
+        --cov-report=''      -> 0 table markers   (the guard proceeds)
+        --cov-report=term    -> 2
+        --cov-report=html    -> 1
+        --cov-report=xml     -> 1
+
+    Every NON-EMPTY report form prints coverage's `coverage: platform` header whenever there
+    is data, so `_cov_table_present` returns early and the predicate is never consulted. My
+    first pin used `term` and my second used `html`; both were unreachable, and her mutation
+    survived tests written specifically to catch it.
+
+    ⇒ On a run WITH data the prefix mutation is an EQUIVALENT mutant — unreachable, not
+    merely untested. The one reachable case needs BOTH a non-empty report form AND a scope
+    that measures nothing, because then there is no table to return early on. That is the
+    case below, and it is where exact-versus-prefix finally changes the output.
+
+    ⇒ A test aimed at the right BEHAVIOUR still misses if its input never reaches the code.
+    """
+    proc = _run( _suite( tmp_path, red=True ),
+                 "--cov=cosa.agents.deep_research.deep_research_job",
+                 f"--cov-report=html:{tmp_path}/htmlcov", "--cov-fail-under=0" )
+
+    assert "coverage: platform" not in proc.stdout, (
+        "this case needs a report that prints NO terminal table; one appeared, so the guard "
+        "returns early and the predicate under test is never reached"
+    )
+    assert "asked for none" not in proc.stderr, (
+        "treated an html report as a request for NO report. Exact match on '--cov-report=' is "
+        f"what keeps these apart.\n--- stderr ---\n{proc.stderr}"
+    )
