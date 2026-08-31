@@ -17,13 +17,12 @@ pinned corpus snapshot.
 """
 
 import dataclasses
-import json
-import os
 import random
 import string
 
 import pytest
 
+from cosa.agents.dm_compression.corpus_synth import synth_corpus
 from cosa.agents.dm_compression.freeze import (
     freeze,
     validate,
@@ -41,10 +40,11 @@ from cosa.agents.dm_compression.freeze import (
     REMOVABLE_KINDS,
 )
 
-import cosa.utils.util as cu
 
 
-SNAPSHOT = cu.get_project_root() + "/src/tmp/arm4/dm_traffic_snapshot_2026.08.07.jsonl"
+# NOTE: the real snapshot path is deliberately NOT referenced here any more. It was
+# `src/tmp/arm4/dm_traffic_snapshot_2026.08.07.jsonl`, it is gitignored, and it is ruled
+# out of the repo permanently — see the `corpus` fixture below.
 
 # Deliberately a REALISTIC message rather than a minimal one.
 #
@@ -64,20 +64,29 @@ SAMPLE = (
 
 @pytest.fixture( scope="module" )
 def corpus():
-    """Real DM bodies from the pinned snapshot."""
-    if not os.path.exists( SNAPSHOT ):
-        pytest.skip( f"corpus snapshot not present: {SNAPSHOT}" )
+    """
+    Synthetic DM bodies, generated in-process. NEVER the real traffic snapshot.
 
-    bodies = []
-    with open( SNAPSHOT ) as handle:
-        for line in handle:
-            line = line.strip()
-            if not line: continue
-            try: record = json.loads( line )
-            except json.JSONDecodeError: continue
-            if record.get( "body" ): bodies.append( record[ "body" ] )
+    THIS USED TO READ A GITIGNORED FILE AND SKIP WHEN IT WAS ABSENT. With the file the
+    module reported 494 passed; without it, 488 passed and 6 skipped — both reading as
+    success, and `git status` structurally unable to say which run you got, because a
+    gitignored path is suppressed from it entirely.
 
-    return bodies
+    Mr. Radio ruled 2026-08-30 that the real snapshot never enters the repo: 2,951 real
+    message bodies and two dozen personal email addresses do not belong in a public tree,
+    and this repo's secret scanner cannot read `.jsonl`, so it could not vouch for them
+    either. Tracking a redacted copy was rejected for the same reason — the redaction
+    would have been VERIFIED by the scanner that cannot read the format.
+
+    ⇒ The corpus is now CODE. It cannot be absent from a clean checkout, so these six
+    tests cannot silently not-run, and two machines cannot measure different things.
+
+    🔴 READ `corpus_synth`'s MODULE DOCSTRING BEFORE TRUSTING A GREEN FROM THESE SIX. A
+    generator written alongside the checks cannot supply what real traffic did —
+    combinations nobody designed. This corpus is adversarial text we thought of, and it
+    says so at length.
+    """
+    return synth_corpus()
 
 
 @pytest.fixture

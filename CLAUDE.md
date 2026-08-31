@@ -575,6 +575,56 @@ at `625665bb`: **120 passed, 1 skipped, 0 failed**. (120 is every test in those 
 trees: `src/scripts/cloud-run.env` and `src/terraform/envs/test/.terraform/providers` are PRESENT in
 the main tree and ABSENT in the worktree.
 
+🔴 **AND A THIRD MEASUREMENT FOUND A THIRD VARIABLE: WHETHER THE WORKTREE HAS A `.venv` AT ALL.
+WITHOUT ONE THE GAP IS 43 OR 44, NOT 10 OR 11 — AND THIS IS THE SAME FINDING AGAIN, NOT A NEW
+DISPUTE.** Measured by Maya 🌻 2026-08-30 at sha `a4fd4551`, root
+`/mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-maya-5246-mergecheck`, `LUPIN_ROOT="$PWD"`
+exported. **The two rows above silently assume a `.venv` is present** — the remedy block prescribes
+`.venv/bin/python`, so a tree without one cannot even run the command this section hands you, and
+the reader who hits that has no number here to land on. Now they do.
+
+| | 08-29 (`3d01df71`) | 08-30 (Rio, `cc336880`) | 08-30 (Maya, `a4fd4551`) |
+|---|---|---|---|
+| `LUPIN_ROOT` exported? | no | yes | **yes** |
+| worktree has a `.venv`? | **yes** | **yes** | **NO** |
+| flash-lite / vertex (`cloud-run.env`) | 9 | 9 | 9 |
+| terraform provider cache | 1 | 1 | 1 |
+| wrong-tree `LUPIN_ROOT` row | 1 | 0 | 0 |
+| **missing-`.venv` rows** | **0** | **0** | **33** |
+| **gap** | **11** | **10** | **43** |
+
+**Verified both directions, in one tree, flipping one variable.** The seven files carrying those 33
+— `test_coverage_frame_excludes_non_src.py`, `test_coverage_gate_tier_status.py`,
+`test_presentation_regression_tier_classification.py`, `test_runner_collection_diagnosis.py`,
+`test_runner_coverage_blindness.py`, `test_runner_venv_pytest_guard.py`,
+`test_v2_survives_v1_excision.py` — fail with no `.venv` and give **124 passed, 1 skipped, 0 failed**
+the moment the main repo's `.venv` is symlinked in. The failure is a plain
+`FileNotFoundError: …/<worktree>/.venv/bin/python`. **And the branch under test was exonerated by a
+control, not by subtraction**: the same 33 reproduce identically at the base with the branch's merge
+absent — `comm` empty in both directions, not merely equal counts.
+
+⚠️ **THE 44th IS NOT AN ARTIFACT.** The raw tier reported **44 failed**; 43 are environment and the
+last is `test_secret_scan::test_a_detector_change_forces_a_full_rescan`, a known branch-level red
+held until a credential rotation lands. **Subtract 43, never 44** — folding a real held red into an
+artifact count is how a genuine signal gets explained away by its neighbours.
+
+🔴 **AND HERE IS THE PART THAT GENERALISES: A POPULATION CHOSEN BY GREP CANNOT FIND BREAKAGE OUTSIDE
+THE GREP.** Row `9b2abfb7` carries an earlier count of **14 → 1** across the 25 unit files whose text
+mentions `.venv`, and that number was reached the RIGHT way — by running both ways rather than
+assuming. Re-running that same method at `a4fd4551` (30 such files today) gives **19**, while the
+whole tier gives **33**. The two do not conflict: the grep-derived failures are a strict **subset**
+of the tier's, and the **14** extra live in `test_presentation_regression_tier_classification.py`
+and `test_runner_collection_diagnosis.py`, which mention `.venv` **zero times** — they shell out to
+a runner that resolves the interpreter for them. ⇒ **Running instead of grepping fixed the
+verification and left the SELECTION grep-shaped, so the improved instrument still could not see 14
+of its own class.** Widen the population before you widen the trust; the honest scope line is *"14
+failures across the files that name it"*, never *"14 failures."*
+
+⇒ **Wiring this symlink into the spawn path is row `9b2abfb7`** (Krishna 🦚, blocked on Rick's word —
+the spawn path is shared infrastructure every future seat inherits). Until it is ruled, symlinking is
+a manual step, and a step that depends on remembering is not installed. **The measurement above is
+what a forgotten step costs: 33 red tests that look like a broken branch.**
+
 ⚠️ **AND SUBTRACTING THE ARTIFACTS IS NOT THE WHOLE JOB — CHECK WHETHER THE BRANCH MOVED.** In the
 same reconciliation, 8 of the 9 remaining failures also passed in the main tree, and it would have
 been wrong to file them as worktree artifacts too: the main tree was a **descendant** of the
@@ -670,6 +720,8 @@ ps -eo comm,args --no-headers | awk '$1=="pytest" || ($1 ~ /^python/ && $0 ~ / -
 
 **Two obligations follow:**
 1. **State the sha with the list.** A coverage list without the sha it was taken at is not a measurement, it is a rumour with a timestamp. Say `at ef6e2bdc`, not "as of tonight".
+
+   ⚠️ **AND IT IS NOT ONLY COVERAGE LISTS — IT COVERS EVERY LINE-NUMBER CITATION YOU SEND A PEER.** Measured 2026-08-30: two seats quoted different `CLAUDE.md` line numbers for the same two sections and spent a round trip finding out why — one was reading numbers from his own branch, uncommitted, where the section had already moved. **A bare `file.py:482` is a pointer into whichever tree the reader happens to be standing in**, and on this fleet that is never reliably yours: peers work in worktrees, branches sit unmerged for hours, and one section can carry three different line numbers before dinner. Write `file.py:482 @ 8bf71a64` — the sha costs eight characters and turns a pointer into a fact. **Better still, cite the section heading or the symbol name: a heading survives an edit above it and a line number does not.**
 2. **Report "done" and "landed" as separate columns.** A worker's file can be finished and still be at zero on the branch. Collapsing the two is what turns an honest commit into a phantom reassignment.
 
 **And the durable fix is a command, not a list** — anyone can re-derive the current zero set at HEAD, and a list anyone can quote will outlive the tree it described:
@@ -768,6 +820,58 @@ a human reading a tail sees a clean finish among deprecation warnings.
 number.** This is the third mechanism on this page producing a confident-looking nothing, alongside
 the narrowed census and the two-database trap. **And note how this entry got its own count wrong —
 a probe that filters warnings cannot report on warnings.**
+### 🔴 COVERAGE MEASURES WHETHER A LINE **RAN**, NEVER WHETHER THE TEST COULD HAVE **NOTICED IT
+RUNNING WRONG**
+
+Measured three times in three files on one evening, 2026-08-30 (row `9124b70a`, Pocholo 📣 and
+Maya 🌻). **Two of those files were at 100% lines and branches with the defect live in them.** The
+coverage number was TRUE. It told us nothing.
+
+**The defect**, identical in all three: a paged fetch asked for a flat `limit=PAGE_SIZE` whatever
+cap the caller passed, so `--max-rows 100` fetched 500 rows and then announced *"truncated at 100
+rows"* — the one figure whose job is to say how partial a scan was.
+
+**Why every suite stayed green.** The fakes were `lambda *a, **k` — they returned their scripted
+page WHOLE, whatever was asked. So the line executed on every run, was asserted around, and was
+**unfalsifiable**: a capped request and an uncapped one produced byte-identical data.
+
+```python
+# BLIND — answers the same however the code behaves. Nothing downstream can recover.
+monkeypatch.setattr( mod, "_request", lambda *a, **k: _page( rows, has_more=True ) )
+
+# DISCRIMINATING — honours the input, so a wrong request yields a different observation.
+def _request( method, url, api_key, timeout, body=None ):
+    calls.append( url )
+    return _page( available[ :_limit_of( url ) ], has_more=True )
+```
+
+⇒ **A test asks two questions and coverage only ever answers the first**: did the line run, and
+*could the fixture have produced a different observation if the code were wrong?* A fake that
+ignores its input answers **no** to the second by construction, and **every assertion written over
+its output inherits that no.** The assertions here were not weak — they were correct, well-named,
+and blind. **An assertion audit passes a blind fixture clean every time**, which is why re-reading
+the test body is the wrong move.
+
+🔴 **THE TELL, AND IT IS MECHANICAL:** *replace the code under test with a constant. If the fixture
+still yields the same data, the suite is measuring the fixture.*
+
+⚠️ **AND THE DISCRIMINATING CASE USUALLY NEEDS TWO CONDITIONS AT ONCE, WHICH IS WHY ONE FIX IS NOT
+ENOUGH.** Measured: a fake that honours `limit` is still blind at `--max-rows 2000`, because
+`min( 500, 2000 )` is 500 either way; and a cap of 2 is still blind against a 2-row page, because
+both versions return 2. You need **a cap BELOW the page size AND a page LARGER than the cap.** A
+seat told only *"assert on a small max_rows"* writes a test that looks like it covers this and does
+not.
+
+⚠️ **A related shape, opposite polarity — a fixture can also make a test ENDORSE the defect rather
+than merely miss it.** Of the two landed copies, one asserted a result that *only the broken code
+produces*; the other was merely blind. **Blind and endorsing are different**: the first goes green
+on a correct fix, the second goes RED on one and reads as the patch having broken something. Check
+which you have before concluding a fix is wrong.
+
+**This is the fourth reading in § A MUTATION HARNESS CAN LIE, reached from the other direction** —
+there, a surviving mutant sends you looking for a fixture that cannot discriminate; here, there is
+no mutant and no red at all, only a coverage figure at 100%. **Same defect, and the coverage number
+is the more dangerous entry point, because it arrives looking like an answer.**
 
 ### 🔴 THERE IS A SECOND VIRTUALENV *INSIDE* `src/`, AND IT IS 92% OF EVERY DISK SWEEP
 
