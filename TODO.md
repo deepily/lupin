@@ -83,6 +83,59 @@ one seat's DM record** — still a snapshot of what he holds rather than a read 
 assignee's rule above, and it is not a licence to skip the check — a miss means *ask*, not *proceed quietly*. Verify anything here that a decision rests on — the merge shas are
 `git merge-base --is-ancestor`-checkable and were checked; the assignment times are from DM timestamps.
 
+## 📚 DECISIONS LOG 2026-08-30 night — post-game of the 8-seat crew run (Mr. Radio 🦉 `93a8751c`)
+
+Retro: `src/rnd/v0.2.1/2026.08.30-crew-run-post-game.md` (pointer stub in the gitignored corpus).
+Window `b0548518` 09:52 -> `4557010a` 00:03; 360 commits, 43 touching CLAUDE.md, 26 R&D docs, 50 new test files.
+
+**D1 — the cosa-tier coverage append is a YES.** One data file, one frame; report the union with the
+per-file delta against the unit-only run and say plainly if the largest win moves. Owner: Chloé 🗼.
+⚠️ **She asked four times and got neither a yes nor a no — that is my defect, not a queue.** She had
+already run it, correctly treating a courtesy as not-a-gate.
+
+**D2 — per-arm isolation in a mutation pass is MANDATORY, not advisory.** Owner: Tiberius 👑, who
+earned it by RETRACTING AN APPROVAL: he misread a dirty tree as an edit, and the redo returned the
+OPPOSITE verdict. Already standing in CLAUDE.md § A MUTATION HARNESS CAN LIE.
+
+**D3 — nothing merges on an author's account of a review, only the reviewer's own word.** Held all
+session; `33f39e7a` is the worked example — Pocholo said "reviewed or in review", I held, Rachel
+cleared it in her own words two minutes later, and he then said the hold was right.
+
+**D4 — findings go to TODO.md, never new store rows, while Rick's moratorium stands.** In force all day.
+
+**D5 (PROPOSED, HELD pending cross-examination) — a retro prompt must be answerable "no".**
+I wrote 8 per-seat retro DMs and **5 carried a leading question**: a finding pre-attributed, a
+grievance pre-sized, a firsthand account demanded from a seat whose firsthand context had died.
+**Five seats refused the frame and not one did it by arguing** — Rio ⚡ (*"I am going to disappoint
+you rather than reconstruct"*), Clayton 😎 (this seat never ran those 40 mutations), Rachel 🕊
+(handed back a credit for `816e9d8b`, her second of the day), Tiffany 💍 (refused the size I
+offered: ~10 minutes, wrong target), maya 🌻 (refused the sharpening, gave a better reason).
+⇒ **A leading question is an instrument, and mine could not have returned a "no"** — the same defect
+this crew spent the day naming in test fixtures, arriving inside the retro built to harvest it.
+⇒ **The control was the seats, not my marking.** I asked re-spun seats to tag entries `from-memento`;
+**nobody needed the tag** — Rio and Clayton named the boundary of their own knowledge unprompted.
+*A label the moderator applies is a hope; a seat that names where its own knowledge stops is a mechanism.*
+🔴 **HELD from graduating to `workflow/post-game.md` until cross-examination answers land** — the
+doctrine's own gate says take the drafted rule back to the seat that produced it, and writing this
+one down unrefuted would repeat the defect it describes.
+
+**Open: cross-examination round 1**, posted to the commons `post-game` topic 2026-08-31 00:09.
+Q1 (Rio + Clayton) is the re-spin rule theirs or an artifact of a checkable question · Q2 (Chloé +
+Clayton + Pocholo) are a matching TOTAL, a matching SHA and a grep for withdrawn WORDS one finding
+in three notations or three · Q3 (Tiffany) what made COMPLYING with an unverified 403 report look
+like the safe move — an instruction-following finding, and I write those instructions · Q4
+(Tiberius + Krishna) is it "re-run, don't re-read", or narrower: a status line is not an
+observation, only a COUNT or a NAMED FAILING TEST is.
+
+**New failure mode: `leading-harvest`** — the retro instrument that cannot return a "no". Trigger: a
+moderator drafting per-seat prompts under time pressure from a memento that already names who found
+what. Symptom: contributions that agree with the moderator, indistinguishable from a run that went
+well. Guard: ask for PROVENANCE and the BOUNDARY OF KNOWLEDGE and nothing else — never name the
+finding you expect back. Siblings: `blind-fixture`, `vacuous-verify`, `wrong-tree`. **All four are
+one shape: an instrument that cannot distinguish the good state from the bad one, reporting the good one.**
+
+---
+
 ## 📋 MORATORIUM BOOK 2026-08-30 (Mr. Radio 🦉 `93a8751c`, crew of five) — findings held OUT of the store per Rick's no-new-tickets order, and the 96% ratchet
 
 **Rick's order, 10:12 EDT**: *"We're declaring a no new tickets moratorium for the entire day or until I lift the moratorium… workers, if you've got issues you're discovering along the way, you're going to have to surface that to your managers who will then track everything in the local to-do files, not the task list."* Everything below arrived by DM and is deliberately NOT a row.
