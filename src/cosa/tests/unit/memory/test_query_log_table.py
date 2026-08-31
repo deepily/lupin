@@ -91,8 +91,11 @@ class TestLogQuery( unittest.TestCase ):
              patch( "cosa.memory.query_log_table.du.get_timestamp_ms", return_value="TS" ):
             table.log_query( query_verbatim="v", query_normalized="n", query_gist="g", user_id="u" )
         kw = repo.log_query.call_args.kwargs
-        self.assertEqual( kw[ "embedding_verbatim" ], [] )
-        self.assertEqual( kw[ "embedding_normalized" ], [] )
+        # CHANGED 2026-08-30 (row 0e7c9214, symptom 4). This used to assert `[]`, and that
+        # assertion ENDORSED the defect: `[]` is the value pgvector refuses. The repository's
+        # own contract is "dim-768 lists or None", so absent must arrive as None.
+        self.assertIsNone( kw[ "embedding_verbatim" ] )
+        self.assertIsNone( kw[ "embedding_normalized" ] )
         self.assertEqual( kw[ "match_type" ], "none" )
         self.assertEqual( kw[ "matched_snapshot_id" ], "" )
         self.assertEqual( kw[ "match_confidence" ], 0.0 )
@@ -109,6 +112,75 @@ class TestLogQuery( unittest.TestCase ):
              patch( "cosa.memory.query_log_table.du.print_stack_trace" ) as trace:
             self.assertEqual( table.log_query( "v", "n", "g", "u" ), "" )
         trace.assert_called_once()
+
+
+class TestAbsentEmbeddingsAreStorableNulls( unittest.TestCase ):
+    """
+    An embedding this caller does not have must reach storage as NULL, never as `[]`.
+
+    Row 0e7c9214, symptom 4, measured live on :7999 2026-08-30. `v2.flow.FlowEngine._log_query`
+    passes no embeddings — deliberately, with its reasons in its own docstring. This class
+    turned that absence into `[]`, pgvector refused it, and the whole INSERT died inside the
+    caught-and-printed except block. The dev query_log's newest row is 2026-08-21.
+    """
+
+    def _kwargs_for( self, **log_kwargs ):
+        table = _make_table()
+        repo, ctx, repo_ctx = _patch_repo()
+        with ctx, repo_ctx, \
+             patch( "cosa.memory.query_log_table.du.get_current_datetime", return_value="QID" ), \
+             patch( "cosa.memory.query_log_table.du.get_timestamp_ms", return_value="TS" ):
+            table.log_query( query_verbatim="v", query_normalized="n", query_gist="g",
+                             user_id="u", **log_kwargs )
+        return repo.log_query.call_args.kwargs
+
+    def test_no_embeddings_argument_at_all_becomes_null( self ):
+        """The v2 shape: the caller passes nothing."""
+        kw = self._kwargs_for()
+        self.assertIsNone( kw[ "embedding_verbatim" ] )
+        self.assertIsNone( kw[ "embedding_normalized" ] )
+
+    def test_an_explicitly_empty_vector_becomes_null( self ):
+        """
+        The v1 shape when generation comes back empty. v1 computes its cache-hit flags as
+        `len( embedding ) > 0`, so it already anticipates an empty vector — and would have
+        handed that straight through to the same refusal.
+        """
+        kw = self._kwargs_for( embeddings={ "verbatim": [], "normalized": [] } )
+        self.assertIsNone( kw[ "embedding_verbatim" ] )
+        self.assertIsNone( kw[ "embedding_normalized" ] )
+
+    def test_one_present_one_absent_are_treated_separately( self ):
+        """
+        A real vector must survive unchanged. Guards the opposite over-correction — mapping
+        every embedding to None would also make this class's writes succeed, and would
+        silently stop storing the vectors it does have.
+        """
+        kw = self._kwargs_for( embeddings={ "verbatim": [ 0.5 ] * 768 } )
+        self.assertEqual( kw[ "embedding_verbatim" ], [ 0.5 ] * 768 )
+        self.assertIsNone( kw[ "embedding_normalized" ] )
+
+    def test_what_we_pass_is_what_pgvector_accepts( self ):
+        """
+        The discriminating case, and the reason the three tests above are not enough on their
+        own: they assert against a MagicMock, which would accept `[]` just as happily as None.
+        This one puts both values through the REAL pgvector binder for the real column width,
+        so the assertion is about the storage contract rather than about our own fake.
+
+        The `[]` arm reproduces the production error verbatim — `expected 768 dimensions,
+        not 0` — which is the string the live server printed four times.
+        """
+        from pgvector.utils import Vector
+        from cosa.memory.query_log_table import QueryLogTable
+
+        with self.assertRaises( ValueError ) as caught:
+            Vector._to_db( [], 768 )
+        self.assertIn( "expected 768 dimensions, not 0", str( caught.exception ) )
+
+        for embeddings in ( None, {}, { "verbatim": [] } ):
+            value = QueryLogTable._vector_or_none( embeddings, "verbatim" )
+            self.assertIsNone( Vector._to_db( value, 768 ),
+                               f"{embeddings!r} produced {value!r}, which pgvector will not store" )
 
 
 class TestGetRecentQueries( unittest.TestCase ):
