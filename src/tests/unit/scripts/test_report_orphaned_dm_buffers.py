@@ -262,3 +262,34 @@ def test_a_buffer_whose_mtime_cannot_be_read_is_skipped_not_fatal( tmp_path, mon
 
     monkeypatch.setattr( rob.os.path, "getmtime", _boom )
     assert rob.collect_orphans( session_dir=tmp_path, now_fn=lambda: NOW ) == []
+
+
+# ── the DEFAULT branch, which nothing else here executes ─────────────────────
+
+def test_the_default_session_dir_follows_the_seam( tmp_path, monkeypatch ):
+    """
+    Pins the one line `2cffd529` changed, which NO other test in this file can see.
+
+    Found by Tiberius 👑 reviewing that commit: every other test passes
+    `session_dir=tmp_path` explicitly, so the `session_dir is None` branch never
+    runs. He mutated it two ways — reverting to the pre-fix hardcoded home path,
+    and returning outright garbage (`Path( "/nonexistent-xyz" )`) — and BOTH
+    SURVIVED a 38-test green suite. Garbage surviving is the proof: the receipt
+    "seam suite 14 passed, reporter 24 passed" could not distinguish the fix from
+    its absence, and the next person to simplify that line back would get a green.
+
+    Without the fix this reads the REAL fleet directory and finds its buffers
+    (45 at review time) instead of the one planted here.
+    """
+    monkeypatch.setenv( "LUPIN_HOOK_SESSIONS_DIR", str( tmp_path ) )
+    # _write_buffer stamps the mtime relative to the frozen NOW. My first cut wrote
+    # the file with a REAL mtime against a 1970 NOW, giving a negative age that the
+    # min_age_hours filter dropped — so the test was RED in all three arms and
+    # discriminated nothing. A test red everywhere proves as little as one green
+    # everywhere; the mutation check is what exposed it.
+    _write_buffer( tmp_path, "deadbeef", [ "planted" ], persona="probe" )
+
+    found = rob.collect_orphans( now_fn=lambda: NOW )
+
+    assert [ o[ "session" ] for o in found ] == [ "deadbeef" ]
+    assert str( tmp_path ) in found[ 0 ][ "path" ], "must read the SEAM, not the fleet"

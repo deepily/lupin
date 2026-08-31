@@ -36,7 +36,26 @@ import time
 from pathlib import Path
 
 
-DEFAULT_SESSION_DIR = Path.home() / ".claude" / "sessions"
+# 🔴 RESOLVE THE SESSIONS DIR THROUGH THE SEAM, NEVER BY HAND (row 8ccc20ab).
+# The first cut of this script built the path from the home directory by hand,
+# which reads the REAL fleet directory even when a test has redirected the seam —
+# so a test could report on, or deposit into, live sessions. `sessions_dir()`
+# honours LUPIN_HOOK_SESSIONS_DIR and falls back to the identical default, so
+# production behaviour is unchanged and the lever actually works.
+#
+# (The guard that caught this matches on TEXT, so it flagged an earlier version of
+# this very comment for quoting the expression it forbids. It cannot tell a use
+# from a mention — worth knowing before assuming a hit is a real one.)
+# DELIBERATE DEPARTURE from the LUPIN_ROOT bootstrap the other eight scripts in
+# this directory use (CLAUDE.md § PATH MANAGEMENT). Resolving from __file__ is
+# safer HERE: run from a worktree while LUPIN_ROOT still names the main repo, the
+# prescribed pattern would import the MAIN repo's sessions_dir — the wrong-tree
+# hazard CLAUDE.md spends a section on. Noted so nobody "corrects" it back.
+_SRC = Path( __file__ ).resolve().parents[ 1 ]
+if str( _SRC ) not in sys.path:
+    sys.path.insert( 0, str( _SRC ) )
+
+from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 
 
 def read_buffer( path ):
@@ -157,7 +176,7 @@ def collect_orphans( session_dir=None, min_age_hours=0.0, now_fn=time.time ):
     Returns:
         list[dict]: the orphan records, youngest first
     """
-    session_dir = Path( session_dir ) if session_dir is not None else DEFAULT_SESSION_DIR
+    session_dir = Path( session_dir ) if session_dir is not None else sessions_dir()
     if not session_dir.is_dir():
         return []
 
@@ -244,7 +263,7 @@ def main( argv=None ):
         description="Report peer DMs buffered for sessions that never drained them."
     )
     parser.add_argument( "--session-dir", default=None,
-                         help="where the buffers live (default: ~/.claude/sessions)" )
+                         help="where the buffers live (default: the sessions-dir seam)" )
     parser.add_argument( "--min-age-hours", type=float, default=0.0,
                          help="ignore buffers touched more recently than this" )
     parser.add_argument( "--json", action="store_true", help="emit JSON records" )
