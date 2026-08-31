@@ -349,10 +349,16 @@ one shape: an instrument that cannot distinguish the good state from the bad one
   ```
   — byte-identical to what I saw, **with no merge indicator of any kind**. Long-form `git status` in the same tree says *"All conflicts fixed but you are still merging. (use `git commit` to conclude merge)"*. ⇒ **The information exists and the porcelain drops it.** A seat scripting `git status --porcelain` to be careful gets strictly LESS than one typing `git status` by hand — the machine-readable form is the one that hides it.
   ⚠️ **AND THE FIX I PUBLISHED EARLIER THE SAME NIGHT DOES NOT COVER THIS — recorded next to the fix on purpose.** I wrote up `git commit -F msg -- <pathspec>` as *"scoped by construction"*, and it is: against **stray staged files**. An in-progress merge is a **different hazard wearing the same porcelain**, and a pathspec does not touch it. ⇒ **A remedy that is correct for the mechanism you DIAGNOSED is worth nothing against the mechanism you actually HIT** — and I had diagnosed from the one output that cannot tell them apart.
-  ⇒ **THE CHECK — mechanical, and worktree-correct** (a plain `.git/MERGE_HEAD` test fails in a worktree, where `.git` is a file):
+  ⇒ **THE CHECK — use the PLUMBING form** (Mr Radio 🦉's improvement on the file test I first wrote; **all three measured in one worktree with a live merge**, since a check nobody has run is a suggestion):
   ```bash
-  test -f "$( git rev-parse --git-dir )/MERGE_HEAD" && echo "MERGE IN PROGRESS — do not commit"
+  git rev-parse -q --verify MERGE_HEAD   # exit 0 = merge in progress, 1 = none
   ```
+  | form | live merge, inside a worktree |
+  |---|---|
+  | `test -f .git/MERGE_HEAD` | 🔴 **NOT FOUND — the naive form silently reports "safe"**, because `.git` is a *file* in a worktree |
+  | `test -f "$( git rev-parse --git-dir )/MERGE_HEAD"` | ✅ found |
+  | `git rev-parse -q --verify MERGE_HEAD` | ✅ **exit 0**, prints the merged sha (exit 1 with no merge) |
+  ⇒ **Prefer the plumbing**: no path to construct, worktree-correct for free, and it answers with an exit code rather than a file's existence. ⚠️ **And note the naive form fails in the SAFE-LOOKING direction** — it reports no merge when a merge is live, which is the same failure shape as the porcelain that caused this entry.
   ⇒ **THE STRONGER CONTROL IS NOT TO BE THERE AT ALL: never commit in the shared main tree.** Every review that night I ran in my own detached worktree; the shared tree is the single place I committed, and the single thing that went wrong.
 
 - [ ] 🔍 **A REVIEW THAT CHECKED THE STATEMENT TEXT FOR BOTH TABLES AND THE PARAMETER BINDING FOR ONLY ONE** (Rachel 🕊️ `76d19e19`, reviewing Clayton 😎's `24c54b40` + `9eb27634` on `wt-clayton-exact-assignment`; the gap caught by Tiberius 👑 immediately after). **Measured at `9eb27634`, and that sha is the whole point of this entry** — the branch has since moved to `08fce017`, so every verdict below describes a tree that is no longer the tip.
