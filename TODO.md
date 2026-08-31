@@ -1,5 +1,57 @@
 # TODO
 
+## 📌 ASSIGNMENTS — one line per defect that has an owner (live index; grep before you start work)
+
+**WHY THIS EXISTS**: it is the missing half of the one-owner rule recorded in the moratorium book under *"THE SAME
+COORDINATION FAILURE FIRED A SECOND TIME THE SAME NIGHT"*. That rule said a sweep surfacing an already-assigned
+defect is the signal — and named no reader and no artifact, so the only thing that could notice was a manager
+remembering to. Caught by Rachel 🕊️; ruled required by Mr Radio 🦉, 2026-08-30 ~20:22 EDT. **Naming an existing
+owner is now a grep, not a memory.**
+
+**WHO WRITES IT**: **Mr Radio 🦉, by name.** The manager confers ownership, so the manager writes the line at the
+moment he assigns — one line, while he is already acting.
+
+**WHO READS IT**: every seat, twice — before starting reported work, and whenever a sweep surfaces something. A
+hit means **decline and tell the manager** (never seat-to-seat). **A miss means ASK, not proceed
+quietly** — see the scoped caveat below. This table is not yet complete enough for silence to mean
+"nobody owns it".
+
+| defect | owner | assigned | state |
+|---|---|---|---|
+| Speech-act guard for the DM condenser | Clayton 😎 | 2026-08-30 ~19:33 | ✅ merged `4d4eb954` |
+| Hold-notice dangling reference — every red that withholds the recipe carries the notice | Clayton 😎 | 2026-08-30 ~20:09 | ✅ merged `39343c24` |
+| Sweep for surfaces still printing the remedy the rotation hold refuses | Maya 🌻 | 2026-08-30 | ✅ merged `2b2b0980` |
+| Rotation-hold dangling reference | Maya 🌻 | 2026-08-30 ~20:09 | ⛔ **stood down** — Clayton reached it independently; this row IS the collision that produced this table |
+| planning-is-prompting cross-session doc, §1.5.1b amendment | Krishna 🦚 | 2026-08-30 | 🔄 in flight |
+| Build this ASSIGNMENTS list | Tiberius 👑 | 2026-08-30 ~20:22 | ✅ this section |
+| The one-owner rule + this list | Tiberius 👑 | 2026-08-30 ~20:19 | 🔄 in flight |
+| Reviewing the one-owner rule | Rachel 🕊️ | 2026-08-30 ~20:22 | 🔄 in flight |
+| `test_secret_scan.py` follow-on — **exclusively hers** | Maya 🌻 | 2026-08-30 ~20:27 | 🔄 in flight |
+| Mutation pass over the three merged tips | Clayton 😎 | 2026-08-30 ~20:27 | 🔄 in flight |
+| Reviewing Maya's follow-on | Krishna 🦚 | 2026-08-30 ~20:27 | 🔄 in flight |
+| Blocked row `298af249` | Rio ⚡ | 2026-08-30 ~20:27 | 🅿️ parked — blocked |
+| *(unassigned — free seats)* | Pocholo 📣, Chloé 🗼's successor | — | 🟢 available |
+| Completing this table from the manager's own view | Mr Radio 🦉 | 2026-08-30 ~20:27 | 🔄 first act in his memento; he re-spun at 51.3% |
+
+🔴 **THE ASSIGNEE'S RULE — AND IT HAS NO CAVEAT.** If you HOLD an assignment and find no line for it here, you
+have found a **missing line, which is the signal**, and the fix is to tell Mr Radio 🦉 so he writes it. You know
+your own assignment; incompleteness of this table is never a reason to leave your own row unwritten. **Work that
+turns up with no entry here was either never assigned or assigned without being recorded, and both are worth
+stopping for.** (Rachel 🕊️,
+second review: the caveat below was unscoped, which let the one person who cannot honestly appeal to it do exactly
+that.)
+
+⚠️ **THE CAVEAT, AND IT IS SCOPED TO ONE READER ONLY — the seat asking "does somebody ELSE already own this?"**
+For that query, and that query alone, a miss is weak evidence rather than a clear road. **NARROWED 2026-08-30
+~20:27**: the rows below the seed are Mr Radio 🦉's own dictation of the live set, given as he re-spun, so this is
+no longer one seat's DM record — but it is still a snapshot he owned rather than a read of any system, and he
+named completing it as the first act after his re-spin. ⚠️ **One item moved and I could not verify it**: Krishna 🦚
+was earlier described to me as amending planning-is-prompting §1.5.1b, and the manager's live set has him reviewing
+Maya instead. I recorded the manager's version and left the amendment OFF rather than guess whether it finished —
+if you are Krishna and it is still open, that is a missing line and the assignee's rule above applies to you. The caveat does NOT reach the
+assignee's rule above, and it is not a licence to skip the check — a miss means *ask*, not *proceed quietly*. Verify anything here that a decision rests on — the merge shas are
+`git merge-base --is-ancestor`-checkable and were checked; the assignment times are from DM timestamps.
+
 ## 📋 MORATORIUM BOOK 2026-08-30 (Mr. Radio 🦉 `93a8751c`, crew of five) — findings held OUT of the store per Rick's no-new-tickets order, and the 96% ratchet
 
 **Rick's order, 10:12 EDT**: *"We're declaring a no new tickets moratorium for the entire day or until I lift the moratorium… workers, if you've got issues you're discovering along the way, you're going to have to surface that to your managers who will then track everything in the local to-do files, not the task list."* Everything below arrived by DM and is deliberately NOT a row.
@@ -244,6 +296,15 @@ Rick lifts the moratorium; nothing else about them changes.**
 
 - [ ] 🔴 **A COMMIT MESSAGE DESCRIBED THE BEHAVIOUR THE AUTHOR MEANT, NOT THE ONE HE SHIPPED** (Tiberius 👑, self-caught, 2026-08-30). `7ba8d630`'s message states *"a live pid whose comm cannot be read stays an offender, so unknown is not cleared."* **The code did the opposite.** The merge with Krishna's independent fix did not create the contradiction — it **exposed one already in the tree**. ⇒ The message is what a reviewer trusts, and one describing the INTENDED behaviour is **indistinguishable from one describing the SHIPPED behaviour** until somebody runs it. Worth more than the fail-open itself: the fail-open was findable, and this is the thing that would have stopped anyone looking.
 - [ ] **My own coordination failure: two seats fixed one guard** (Mr Radio 🦉, 2026-08-30). Krishna `929b36f8` and Tiberius `7ba8d630`, independently, both correct. I assigned `17486970` to Tiberius and never told Krishna it was taken when he raised it. Cost: a merge conflict, a red tip, and a lost fail-closed property. ⇒ **The moratorium moved where visibility lives and I did not adjust.** A store row used to be what made a claim visible; with rows frozen, findings travel by DM and the manager becomes the only index. **Under a no-new-tickets rule the manager must BROADCAST an assignment, not merely record it.**
+- [ ] 🔴 **THE SAME COORDINATION FAILURE FIRED A SECOND TIME THE SAME NIGHT — AND THE REMEDY WRITTEN FOR THE FIRST ONE IS WHY** (Mr Radio 🦉 naming himself; written up by Tiberius 👑 at his instruction, 2026-08-30 ~20:19 EDT). The entry directly above prescribes *"the manager must BROADCAST an assignment"*. **Hours later he routed one finding to two seats again**: Tiberius reported the rotation-hold dangling-reference defect; Mr Radio assigned it to Maya 🌻 while Clayton 😎 independently reached it through his completeness sweep and fixed it. Cost was small — Clayton's fix landed at `39343c24`, Maya was stood down in time — but the mechanism is identical and the interval was under two hours. ⇒ **The receipt is not the collision, it is that the first entry's remedy did not hold.** *Broadcast every assignment* is a thing a manager must REMEMBER, and in his own words: *"a rule I have to remember is one I will break again at midnight."* A habit is not a control; it failed on its first live test. **By this book's own tally it is the FIFTH `rule-instead-of-mechanism`** — the count is not mine and not freshly derived: the entry beginning *"THE ENTRY THAT MATTERS MOST"* already numbers itself the fourth, so verify it THERE rather than on this sentence. ⚠️ The category is a judgement, not something countable mechanically, so treat the number as a pointer into the series and not as a measurement. ⇒ What makes this the series' strongest argument for a detector is Mr Radio's own observation about it: **the rule that failed was one he had written, read and personally endorsed** — and it still did not stop him.
+  **RULED AND ADOPTED (Mr Radio, 20:19 EDT)** — three parts, in force now:
+  1. **Reporting is not routing.** Anyone may report a finding to anyone, and a reviewer NEVER weighs who else might act on it. Rejected explicitly: Tiberius proposed reporting upward only, and Mr Radio overruled it — *"a reviewer who worries about who else might act on a finding will start withholding findings, and that trade is much worse."* What is bounded is OWNERSHIP, never disclosure.
+  2. **Exactly one owner per defect, conferred only by the manager** — who, at assignment, NAMES any sweep or review already covering that ground, so the second seat can **DECLINE rather than DISCOVER**. Tonight's cost was not that two seats knew; it was that neither knew the other did until the work was done twice.
+  3. **A decline routes to the MANAGER, never seat-to-seat** — otherwise the same collision reappears one level down as two seats negotiating ownership between themselves.
+  🔴 **THE SIGNAL, AND WHY THE FIRST DRAFT OF THIS LINE WAS ITSELF A RULE-INSTEAD-OF-MECHANISM** (Rachel 🕊️, reviewing, 2026-08-30 ~20:22 EDT — the catch is hers and it landed on the entry arguing against exactly this). **The signal is real**: when a sweep surfaces a defect that is already assigned, that arrival IS the tell, and it is available BEFORE any duplicate work rather than after. Tonight both arrivals landed within minutes and nothing looked at the coincidence. But the first draft called it a *free detector* that *"requires nobody to remember anything"*, and **that was false as written**: it named no READER and no ARTIFACT to read against, so the only thing that could have noticed the coincidence was a manager remembering to. ⇒ **A signal with nobody assigned to watch it is a rule wearing a mechanism's clothes** — which is the fourth time tonight this shape was written by the person arguing against it.
+  **THE MISSING HALF, Rachel's proposal, and it is what turns this into a control**: an **`## ASSIGNMENTS`** list in TODO.md. The manager APPENDS a line when he confers ownership — the defect, the owner, the date — which is one line at the moment he is already acting. The READER is the seat: before starting reported work, and whenever a sweep surfaces something, it CHECKS that list. A hit means decline-and-tell-the-manager; a miss means proceed. Neither party has to remember, because each side is a step in work they are already doing.
+  ✅ **BUILT — the list exists**: `## ASSIGNMENTS` at the top of this file, above the moratorium book. Written by Tiberius 👑 on Mr Radio 🦉's ruling, reviewed by Rachel 🕊️ across three rounds; Mr Radio writes a line at assignment and owns keeping it complete, every seat reads it before starting reported work and whenever a sweep surfaces something. ⚠️ **This paragraph previously read "the list is unbuilt, owner unassigned" and was left standing AFTER the list was built** — caught by Rachel on review. ⇒ **A doc that still describes its own remedy as missing sends the next reader looking for work that is already done**, and the stale sentence is more convincing than the fix because it is the one written in the reader's own words.
+  ⚠️ **Scope, so this does not overreach**: it governs defects that become WORK. A finding mentioned in passing, or a review verdict, needs no owner and should keep flowing freely to whoever benefits.
 - [ ] **The contention guard's shape test can safely widen, once one predicate exists** (Tiberius 👑). `looks_like_pytest` requires an ABSOLUTE path, so real script-form (`.venv/bin/python3 .venv/bin/pytest`) and bare-console-script invocations read `shape=False` and go **unflagged**. **The gap does not reach production** — `resolve_venv_pytest` always yields an absolute path, so every sanctioned runner is caught; the failing fixtures were hand-typed relative forms, which he named as his own rather than banking the receipt. ⇒ The absolute-path rule existed only to stop a quoted command line matching, and the **comm gate now kills that class outright** (measured: a seat briefing quoting an absolute path reads `flagged=False` on comm alone). Shape test can widen to any path containing a slash. **Approved as the follow-on — after reconciliation, not on top of an unreconciled merge.**
 
 - [ ] 🔴 **THE COVERAGE GATE CANNOT FAIL ON A RED TIER** (Tiberius 👑, found in the no-escape-hatch re-run; verified independently by Mr Radio 🦉, 2026-08-30). `src/tests/run-coverage-gate.sh --run-tiers` invokes both tiers with a bare `bash …` at lines 64 and 66 and captures **neither exit status**; line 25 sets `-o pipefail` but **not** `-e`, so a non-zero walks straight on to the report step. ⇒ **Every green this gate has reported since it landed means "coverage rendered above `fail_under`", NOT "the tests passed"** — and nothing in the output distinguishes the two. This is the gate the PR merge ritual stands on. Fix assigned to Tiberius: capture each status, fail and NAME the failing tier, and prove it with a positive control (force a tier non-zero, show the gate goes red) — because a gate that cannot fail is precisely the thing you cannot prove by watching it pass. ⚠️ It landed as a **post-terminal addendum on the already-closed `e2099400`**, which is not where anyone will look; that is why it is here.
