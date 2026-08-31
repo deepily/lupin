@@ -840,17 +840,31 @@ def test_the_refusal_markers_are_themselves_pinned():
     # permission I happened to imagine. Deriving it means the control tracks the notice
     # instead of drifting from it.
     #
-    # ⚠️ AND THIS IS NOT THE TAUTOLOGY THIS FILE KEEPS FINDING, though it has its shape. The
-    # text is built by REMOVING each marker, so a well-formed marker is absent by
-    # construction and the assert is trivially true FOR IT — that is the point. What the
-    # assert catches is a marker that SURVIVES ITS OWN REMOVAL, which is exactly what a
-    # non-discriminating marker is: `""` is `in` every string including the one that deleted
-    # it. A marker overlapping another's replacement is caught the same way. The check earns
-    # its keep on the pathological cases and says nothing about the healthy ones, which is
-    # the correct division of labour with the set assert below.
+    # 🔴 THE PHRASES BELOW ARE LITERALS, AND MY FIRST CUT LOOPED OVER `REFUSAL_MARKERS` HERE
+    # INSTEAD. Clayton 😎 said that version was blind and I could not reproduce it; the arm he
+    # sent reproduces on my own tree, so the correction is his and the measurement is mine.
+    #
+    # Building the permission by removing every marker makes the control SELF-REMOVING: the
+    # text is stripped of exactly the thing the assert then looks for, so a marker is absent
+    # BY CONSTRUCTION and the assert can never fail for it. That is the tautology this whole
+    # file exists to remove, wearing one more disguise — and it is worse here than elsewhere,
+    # because the loop reads like extra rigour.
+    #
+    # MEASURED, two arms at one sha (56fa6b21), one mutation — `"\n"` added to the tuple AND
+    # to `expected`, which is the sanctioned two-place edit:
+    #     looping over REFUSAL_MARKERS   2 failed / 74 passed   SURVIVED (set identical to baseline)
+    #     these literals                 3 failed / 73 passed   KILLED by this test
+    # A newline is `in` the real notice and `in` any permission derived from it, so it cannot
+    # tell a refusal from its opposite — it is exactly the vacuous marker this guard is for.
+    # The marker loop strips every newline out of the permission and then reports the marker
+    # absent, which is the guard congratulating itself.
+    #
+    # THE COST IS A TWO-PLACE EDIT and it is the same cost `expected` already pays, for the
+    # same reason: two independent spellings can disagree, one spelling read twice cannot.
+    # Adding a real marker means adding it to the tuple, to `expected`, and here.
     permission = ROTATION_HELD_NOTICE
-    for marker in REFUSAL_MARKERS:
-        permission = permission.replace( marker, "it is fine to do this now" )
+    for _phrase in ( "DO NOT CLEAR THIS RED BY RECORDING A SCAN", "is REFUSED until rotation lands" ):
+        permission = permission.replace( _phrase, "it is fine to do this now" )
 
     for marker in REFUSAL_MARKERS:
         assert marker not in permission, (
