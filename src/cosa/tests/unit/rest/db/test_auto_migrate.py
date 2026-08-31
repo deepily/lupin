@@ -148,7 +148,14 @@ class TestRunMigrationsToHead( unittest.TestCase ):
 # ---------------------------------------------------------------------------
 # Live integration tests — real throwaway DB (skipped if Postgres unreachable)
 # ---------------------------------------------------------------------------
-_PG = dict( host="localhost", port=5432, user="lupin_dev", password="dev_password" )
+# The password is read from the ENVIRONMENT, never hardcoded (row baac2474). It used to be a
+# literal, and that same literal configured the live container while sitting in a PUBLIC repo.
+#
+# ⚠️ A PLACEHOLDER HERE WOULD BE A MASK, NOT A SCRUB. These are real connections: a fake value
+# makes _pg_reachable() fail and turns every live test below into a PERMANENT SKIP that reads
+# like "Postgres is down". Unset DB_PASSWORD and they skip honestly; set it and they run.
+_PG = dict( host="localhost", port=5432, user="lupin_dev",
+            password=os.environ.get( "DB_PASSWORD", "" ) )
 
 
 def _pg_reachable():
@@ -318,7 +325,7 @@ class TestAutoMigrateLive( unittest.TestCase ):
             "DB_HOST"     : "localhost",
             "DB_PORT"     : "5432",
             "DB_USER"     : "lupin_dev",
-            "DB_PASSWORD" : "dev_password",
+            "DB_PASSWORD" : _PG[ "password" ],
         }
         # build_alembic_config(database_url=None) => NO injected_db_url attribute,
         # so env.py's OWN resolution (DATABASE_URL -> injected -> builder) runs.
