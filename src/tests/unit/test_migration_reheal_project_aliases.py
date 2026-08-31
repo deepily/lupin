@@ -70,6 +70,7 @@ CREATE TABLE task_items (
     park_reason         TEXT,
     park_reason_captured_at TEXT,
     body_changed_ts     TEXT,
+    title_trimmed       INTEGER NOT NULL DEFAULT 0,
     gate_class          TEXT NOT NULL DEFAULT 'none',
     priority            TEXT NOT NULL DEFAULT 'P2',
     urgency             TEXT NOT NULL DEFAULT 'normal',

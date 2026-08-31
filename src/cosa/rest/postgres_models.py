@@ -1412,6 +1412,40 @@ class TaskItem( Base ):
        # assert a fact about history nobody recorded. NULL reads as FRESH
        # (ambiguity -> FRESH), which is also why migration 38e025169a73 does not
        # backfill — every value it could have written would be a fabrication.
+    title_trimmed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable      = False,
+        default       = False,
+        server_default= "false"
+    )  # WHETHER THIS ROW'S STORED TITLE WAS CUT BY soft_guard_title. A RECORD of
+       # what the write did, not a re-derivation at read time — that distinction is
+       # the whole bug (769b3574, 2026-08-31).
+       #
+       # It replaces `title_may_be_trimmed( title )`, which is `len(title) == cap`
+       # and takes the CURRENT cap. Measured over all 2,278 rows of lupin_db_dev,
+       # driven through the real terse serializer, two arms over one variable:
+       #     cap  60 -> 1,606 rows flagged
+       #     cap 120 ->     1 row  flagged
+       # 951 of the 1,606 are provably trimmed (the overflow marker is in their
+       # body) and 21 of those are non-terminal. So raising the cap — decision
+       # cc6519a6 — would have switched the board signal off across the entire
+       # existing corpus, silently, with nothing failing.
+       #
+       # WRITTEN BY BOTH WRITE PATHS from `soft_guard_title`'s own third return
+       # value, which both sites already had in hand and discarded:
+       #     POST  /api/tasks       -> title_guard is not None
+       #     PATCH /api/tasks/{id}  -> title_guard is not None, on EVERY title edit
+       #
+       # ⚠️ THE PATCH PATH MUST CLEAR IT, NOT ONLY SET IT. A row trimmed once and
+       # later REPAIRED by a shorter retitle has a complete title, so False is the
+       # correct answer — six live rows are exactly that case. A set-only flag
+       # would get them wrong on purpose where the old length check got them right
+       # by accident of length. That is why the router writes this on every title
+       # change rather than only when the guard fires.
+       #
+       # NOT NULL with a default, which is the OPPOSITE choice from body_changed_ts
+       # above: that column had no recoverable history, this one does — migration
+       # 47513717b7e5 backfills from the overflow marker in the body.
     gate_class: Mapped[str] = mapped_column(
         String( 32 ),
         nullable=False,

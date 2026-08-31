@@ -227,6 +227,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         source_qid          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         flag_suffix         : Optional[str] = None,
+        title_trimmed       : bool = False,
     ) -> TaskItem:
         """
         Create a new task item plus its "->{status}" creation event.
@@ -300,6 +301,11 @@ class TaskRepository( BaseRepository[TaskItem] ):
             urgency             = urgency,
             source_qid          = source_qid,
             correlation_key     = correlation_key,
+            # A RECORD of what soft_guard_title did on THIS write, never a
+            # read-time re-derivation from length (bug 769b3574). The router
+            # passes `title_guard is not None`; it defaults False so every
+            # other caller and every test fixture keeps its current shape.
+            title_trimmed       = title_trimmed,
         )
         self._append_event( item.id, created_by, f"->{status}", authority, receipt_refs=None, reason=creation_reason )
         return item

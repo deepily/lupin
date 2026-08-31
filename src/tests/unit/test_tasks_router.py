@@ -54,6 +54,10 @@ def make_item( **overrides ):
         correlation_key     = None,
         created_ts          = NOW,
         updated_ts          = NOW,
+        # Explicit, because a SQLAlchemy column `default` fires at INSERT and
+        # NOT at construction — an unset flag here would reach the serializer as
+        # None and serialize as null, which is neither True nor False.
+        title_trimmed       = False,
     )
     fields.update( overrides )
     return TaskItem( **fields )
@@ -619,42 +623,38 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
     repo.query_tasks.assert_called_once()                    # rows ARE materialized (not count mode)
 
 
-def test_terse_title_trimmed_carries_the_PREDICATE_not_a_constant( client, repo ):
-    # WRITTEN BY TIBERIUS 👑 in review of 5f7b0e1f, integrated verbatim but for this
-    # header. Row a6cb24e8.
+def test_terse_title_trimmed_reads_the_COLUMN_not_the_title_length( client, repo ):
+    # DESCENDED FROM TIBERIUS 👑's test of the same name at c64da293, which drove the
+    # flag through the title's LENGTH because the flag WAS the length. Bug 769b3574
+    # moved it onto the row, so this fixture now has to separate two things his could
+    # not: reading the stored column, and re-deriving it from the title.
     #
-    # The exact-set assertion above proves the KEY reaches the terse projection; it
-    # cannot prove the VALUE does. Measured 2026-08-31: replacing
-    # `rules.title_may_be_trimmed( item.title )` with a bare `False` left all 471
-    # tests green — the flag was wired to nothing a test could see, and a flag that
-    # reports False on every row is the defect it exists to surface. I reproduced
-    # that mutant myself before accepting the finding.
+    # THE FIXTURE IS DELIBERATELY CROSSED, and that is the whole test. Row 0 has a
+    # SHORT title and the flag True; row 1 has a title at exactly the cap and the flag
+    # False. So:
+    #     a constant False              -> dies on row 0
+    #     a constant True               -> dies on row 1
+    #     `len( title ) == cap` restored -> dies on BOTH, in opposite directions
     #
-    # My own tests covered the predicate, and the key set covered the projection.
-    # Neither covered the WIRE BETWEEN THEM, which is where the value travels. My
-    # commit message even claimed the write and read sides "cannot drift apart" —
-    # true of guard-to-predicate, which I did test, and false of
-    # predicate-to-projection, which I did not.
+    # A fixture whose title length AGREES with its flag cannot tell the third case
+    # from a correct read — the values would be interchangeable, and a test over
+    # interchangeable values asserts their agreement rather than their identity. That
+    # is the blind-fixture shape this file has now been bitten by twice.
     #
-    # Both directions in one test on purpose: a constant False dies on the first
-    # assertion and a constant True dies on the second, so no constant survives.
-    #
-    # The trimmed title is taken from soft_guard_title's OWN output rather than a
-    # hand-written 60-char string, matching the principle the predicate's tests
-    # already follow: whatever the guard cuts, the reader-side flag must flag, so
-    # the two cannot drift apart as the cap moves.
-    trimmed_title, _overflow, advisory = rules.soft_guard_title( "T" * 90, None )
-    assert advisory[ "trimmed" ] is True                       # the fixture is the real thing
+    # Row 1's title comes from soft_guard_title's OWN no-op arm, so "exactly at the
+    # cap and NOT trimmed" is the guard's verdict rather than my arithmetic.
+    at_cap_but_untrimmed = "N" * rules.TITLE_SOFT_CAP
+    assert rules.soft_guard_title( at_cap_but_untrimmed, None )[ 2 ] is None   # the guard did not cut it
 
     repo.query_tasks.return_value = [
-        make_item( title=trimmed_title ),
-        make_item( title="a title well under the cap" ),
+        make_item( title="short", title_trimmed=True ),
+        make_item( title=at_cap_but_untrimmed, title_trimmed=False ),
     ]
     r = client.get( "/api/tasks", params={ "terse": "true" } )
     assert r.status_code == 200
     rows = r.json()[ "tasks" ]
-    assert rows[ 0 ][ "title_trimmed" ] is True                # the cut row is flagged
-    assert rows[ 1 ][ "title_trimmed" ] is False               # ...and a short one is not
+    assert rows[ 0 ][ "title_trimmed" ] is True      # short title, flag set   -> not derived from length
+    assert rows[ 1 ][ "title_trimmed" ] is False     # cap-length, flag clear  -> not derived from length
 
 
 def test_query_terse_serializes_nullable_next_chase_ts( client, repo ):
@@ -1299,7 +1299,10 @@ def test_patch_happy_path_returns_item_and_event( client, repo ):
     body = r.json()
     assert body[ "event" ][ "transition" ] == "patched"
     args, kwargs = repo.apply_patch.call_args.args, repo.apply_patch.call_args.kwargs
-    assert args[ 1 ] == { "title": "edited title" }              # fields passed positionally; actor/authority excluded from it
+    # fields passed positionally; actor/authority excluded from it. The
+    # `title_trimmed` key rides along on every title edit (bug 769b3574) — it is
+    # the flag being written to match the title now stored.
+    assert args[ 1 ] == { "title": "edited title", "title_trimmed": False }
     assert kwargs[ "actor" ] == "krishna a38ee857" and kwargs[ "authority" ] == "standing"
     repo.get_by_id_for_update.assert_called_once()               # N3 row-lock parity
     repo.get_by_id.assert_not_called()
@@ -1373,7 +1376,10 @@ def test_patch_under_cap_title_is_a_strict_no_op( client, repo ):
 
     assert r.json()[ "title_guard" ] is None
     fields = repo.apply_patch.call_args.args[ 1 ]
-    assert fields == { "title": "edited title" }                  # NO body key manufactured
+    # `title_trimmed: False` is NOT a manufactured delta — it is the flag being
+    # written to match the title now stored (bug 769b3574). Every title edit writes
+    # it; a body key would still be a fabrication and is still absent.
+    assert fields == { "title": "edited title", "title_trimmed": False }
 
 
 def test_patch_without_a_title_never_touches_the_body( client, repo ):
@@ -1386,6 +1392,81 @@ def test_patch_without_a_title_never_touches_the_body( client, repo ):
 
     assert r.json()[ "title_guard" ] is None
     assert repo.apply_patch.call_args.args[ 1 ] == { "priority": "P1" }
+
+
+def test_create_STORES_the_trim_verdict_rather_than_leaving_it_to_be_re_derived( client, repo ):
+    """
+    Bug 769b3574. The create path already held soft_guard_title's third return value
+    and threw it away; the flag was then re-computed at read time from the title's
+    LENGTH, against whatever the cap happened to be.
+
+    Both arms in one test, because a constant passes either one alone.
+    """
+    repo.create_item.return_value = make_item()
+
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title="T" * 90 ) )
+    assert r.status_code == 201
+    assert repo.create_item.call_args.kwargs[ "title_trimmed" ] is True
+
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title="a title well under the cap" ) )
+    assert r.status_code == 201
+    assert repo.create_item.call_args.kwargs[ "title_trimmed" ] is False
+
+
+def test_patch_CLEARS_the_flag_when_a_retitle_repairs_a_trimmed_title( client, repo ):
+    """
+    THE BUG I NEARLY BUILT, asserted so nobody else can.
+
+    A stored flag is tempting to write only when the guard fires. That is wrong: six
+    live rows were trimmed once and later REPAIRED by a shorter retitle, and their
+    titles are complete sentences now. False is the correct answer for them, and a
+    set-only flag would report True forever — getting on purpose the answer the old
+    length check got right by accident.
+
+    So the row starts flagged, takes an under-cap retitle, and must come out clear.
+    """
+    item = make_item( title="X" * 60, title_trimmed=True )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+
+    r = client.patch( f"/api/tasks/{item.id}", json={ "title": "a repaired, complete title", "actor": "pocholo 056e2aeb" } )
+
+    assert r.status_code == 200
+    assert r.json()[ "title_guard" ] is None                       # nothing was cut this time
+    assert repo.apply_patch.call_args.args[ 1 ][ "title_trimmed" ] is False
+
+
+def test_patch_SETS_the_flag_when_the_new_title_is_itself_over_cap( client, repo ):
+    """
+    The other direction, and the negative control for the test above: clearing must
+    not be unconditional either. A row that was clean and takes an over-cap retitle
+    comes out flagged.
+    """
+    item = make_item( title="a short clean title", title_trimmed=False )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+
+    r = client.patch( f"/api/tasks/{item.id}", json={ "title": "Y" * 95, "actor": "pocholo 056e2aeb" } )
+
+    assert r.status_code == 200
+    assert r.json()[ "title_guard" ][ "trimmed" ] is True
+    assert repo.apply_patch.call_args.args[ 1 ][ "title_trimmed" ] is True
+
+
+def test_a_patch_that_does_not_touch_the_title_leaves_the_flag_alone( client, repo ):
+    """
+    Scope control. The flag describes the TITLE, so a priority-only edit must not
+    write it — otherwise an unrelated edit would stamp a verdict on a field it never
+    looked at, which is the shape of bug 54924128 one column over.
+    """
+    item = make_item( title="X" * 60, title_trimmed=True )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+
+    r = client.patch( f"/api/tasks/{item.id}", json={ "priority": "P1", "actor": "pocholo 056e2aeb" } )
+
+    assert r.status_code == 200
+    assert repo.apply_patch.call_args.args[ 1 ] == { "priority": "P1" }   # no title_trimmed key at all
 
 
 def test_create_and_patch_produce_THE_SAME_title_for_the_same_input( client, repo ):
