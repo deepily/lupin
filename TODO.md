@@ -228,13 +228,19 @@ been closed. Reported by Clayton 😎, 2026-08-31 ~01:03.
 before any of this. What falls is the *"and here is evidence it works"* clause, which I added because
 it made the ruling feel earned. **That is the overclaim in the join, committed inside the entry that
 cites the doctrine against it.**
-⚠️ **THE REAL FINDING IS THE ONE UNDERNEATH, AND IT IS MINE**: a seat I re-spun forty minutes earlier
-carried a **coordinate** in its memento, and coordinates go stale. **A memento should name the
-BRANCH and the file, not the sha** — this repo's own *"a coordinate is not a reference"* rule,
-reaching the re-spin path.
-**REMEDY (D10)**: before reviewing, re-derive the tip for the file under review —
-`git log -1 --format=%h -- <path>` on the branch you were given — and compare it to any sha your
-brief or memento hands you. **FAILS IF** they differ and you proceed on the older one.
+🔴 **AND I GOT THE CAUSE WRONG TOO, ON THE FIRST TRY — CORRECTED BY CLAYTON 😎 MINUTES LATER.**
+I wrote that a **stale sha in her memento** was the cause. **It was not.** Chloé 🗼 confirmed the
+cause was **the REVIEW WORKTREE having been built at a superseded sha** — the tree she was reading,
+not a coordinate she was handed. Different mechanism, and my remedy was aimed at the wrong one.
+⇒ **Three framings of one event inside ten minutes**, each stated as fact: a real defect · a stale
+memento sha · the actual cause. **Only the third was measured, and by somebody else both times.**
+**REMEDY (D10) — against the cause that was measured**: when creating a review worktree, record the
+sha it was built at, and before reporting a finding re-derive the branch tip and compare.
+`git -C <review-worktree> rev-parse HEAD` against `git rev-parse <branch>`. **FAILS IF** they differ
+and the finding is reported anyway.
+⚠️ **UNENDORSED AS OF THIS WRITING**: Clayton has asked to review D11 before endorsing it, on the
+grounds that a remedy must name an ACTION. **Do not read this entry as ratified** — the ruling has
+Tiberius 👑's agreement on the split itself and does not yet have Clayton's on the form.
 
 **D9 — the run's signature was TEN REFUSALS, not the defects.** Five seats refused a leading
 question; three refused the sharpened rule I drew from them, including the versions that flattered
