@@ -77,6 +77,22 @@ if [[ $DRY_RUN -eq 1 ]]; then
     exit 0
 fi
 
+# PREFLIGHT THE RECONVERT BEFORE DESTROYING ANYTHING. This script's whole promise is that
+# purge and reconvert "cannot be half-done" — but the reconvert needs an interpreter, and 35 of
+# this repo's 80 worktrees have no .venv/bin/python. There, the old order purged, THEN failed,
+# and left the tree timestamp-based: exactly the defect row 866f43ce closed, reported at the
+# moment it was already too late to decline. Checking first makes the weld real.
+#
+# Resolution is deliberately identical to migrate-pyc-to-checked-hash.sh:71 — if that line
+# changes, this one must change with it, and test_purge_pycache_args.py fails if they diverge.
+PYTHON="${PYTHON:-$LUPIN_ROOT/.venv/bin/python}"
+if [[ ! -x "$PYTHON" ]]; then
+    echo "ERROR: no interpreter at $PYTHON (set PYTHON=... or build the venv)" >&2
+    echo "Refusing to purge: the reconvert would fail and leave this tree on timestamp" >&2
+    echo "invalidation. ${#CACHES[@]} __pycache__ directories left untouched." >&2
+    exit 2
+fi
+
 echo "Purging ${#CACHES[@]} __pycache__ directories under src/ (vendored trees excluded)..."
 rm -rf "${CACHES[@]}"
 

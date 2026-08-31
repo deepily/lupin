@@ -90,6 +90,37 @@ def test_dry_run_still_previews_and_removes_nothing( planted_root ):
     assert "Would remove" in result.stdout
 
 
+def test_a_missing_interpreter_refuses_before_purging_anything( planted_root ):
+    """
+    The script promises purge and reconvert "cannot be half-done". The reconvert
+    needs an interpreter; 35 of this repo's 80 worktrees have no .venv/bin/python.
+    Before the preflight, running here purged and THEN failed, leaving the tree on
+    timestamp invalidation -- the defect row 866f43ce closed -- and reported it at
+    the moment it was too late to decline.
+    """
+    env = dict( os.environ, LUPIN_ROOT=str( planted_root ),
+                PYTHON=str( planted_root / "no-such-interpreter" ) )
+    result = subprocess.run( [ str( SCRIPT ) ], capture_output=True, text=True, env=env )
+
+    # Survival first: the exit code says what it decided, the directory says what it did.
+    assert _caches( planted_root ), "purged despite having no interpreter to reconvert with"
+    assert result.returncode == 2
+    assert "Refusing to purge" in result.stderr
+
+
+def test_the_interpreter_default_matches_the_script_it_calls():
+    """
+    The preflight duplicates migrate-pyc-to-checked-hash.sh's PYTHON resolution.
+    Duplication is the point -- it must fail closed BEFORE the purge -- so this
+    fails if the two ever drift apart.
+    """
+    default = 'PYTHON="${PYTHON:-$LUPIN_ROOT/.venv/bin/python}"'
+    sibling = SCRIPT.parent / "migrate-pyc-to-checked-hash.sh"
+
+    assert default in SCRIPT.read_text()
+    assert default in sibling.read_text()
+
+
 def test_help_exits_zero_and_removes_nothing( planted_root ):
     result = _run( planted_root, "--help" )
 
