@@ -661,6 +661,38 @@ def test_clause_two_does_not_fire_on_a_mention( cmdline, why ):
     assert cc.looks_like_a_running_suite( cmdline ) is False, f"false positive via the gate: {why}"
 
 
+@pytest.mark.parametrize( "cmdline,why", [
+    ( "python3",                     "the bare interpreter — a REPL, no script at all" ),
+    ( "python3 -v",                  "options only; the loop never meets a non-option token" ),
+    ( "/usr/bin/python3.13 -O",      "an absolute interpreter with a flag and nothing to run" ),
+    ( "python3 -X importtime",       "CORROBORATION ONLY, and measured as such: 'importtime' is "
+                                     "a non-option token, so this returns from the line ABOVE the "
+                                     "fall-through and passes with or without the mutation" ),
+    ( "   ",                         "whitespace only — non-empty, so the empty-string guard lets "
+                                     "it through, but it splits to ZERO tokens. A SECOND branch "
+                                     "nothing reached: the file read 99% with 215->exit partial" ),
+] )
+def test_an_interpreter_with_no_script_at_all_is_not_a_direct_test_run( cmdline, why ):
+    """
+    RACHEL'S SURVIVOR (found 2026-08-30; measured surviving here at sha f1e9491aa10e).
+    The final `return False` — reached only when the token loop finds NO non-option token
+    — was mutated to `return True` and the whole file stayed green, 107 passed either way.
+    With these cases the same sha fails 3 of 5 by name; the other two are noted in the list.
+
+    The twelve cases in test_clause_two_does_not_fire_on_a_mention are correct and none of
+    them can see it: every one bails at the interpreter check, at the -c/-m abort, or by
+    returning a non-test basename from the line ABOVE the fall-through. So the list is
+    named for false positives and cannot reach the only shape that produces this one —
+    read the fixture, not the assertions (row 9ad838d6).
+
+    Nothing subjective rides on it either: this fall-through is the module's stated
+    fail-safe direction. Returning True here is a FALSE REFUSAL, which the function's own
+    docstring says blocks every coverage run in the tree, where a miss blocks none.
+    """
+    assert cc.looks_like_a_direct_test_file_run( cmdline ) is False, f"false refusal: {why}"
+    assert cc.looks_like_a_running_suite( cmdline ) is False, f"false refusal via the gate: {why}"
+
+
 def test_the_accepted_narrowing_is_pinned_rather_than_left_to_drift():
     """
     An option taking a SEPARATE value before the script reads as a miss. Documented in
