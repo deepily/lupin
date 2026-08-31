@@ -566,6 +566,54 @@ def test_query_count_only_still_validates_enums( client, repo ):
     repo.query_tasks.assert_not_called()
 
 
+def _classification_help( actual_keys ):
+    """
+    The failure message for the key-set guard — and it is load-bearing, not decoration
+    (Chloé 🗼's finding on 2d9c779a, row 9dbffefb).
+
+    A bare set-difference tells a reader THAT a key is unclassified and leaves them to
+    guess WHICH set to add it to. The two guesses are not equally safe: DATA is the
+    silent one. Declare a derived field as DATA and no recipe is ever demanded, so the
+    field ships wired to whatever it likes — which is the exact residual this guard
+    admits it cannot close, and a bare message walks the reader straight into it.
+
+    So the message names the choice, names the consequence of each branch, and says
+    which way the failure is silent.
+    """
+    declared = tasks.TERSE_DATA_FIELDS | tasks.TERSE_ADVISORY_FIELDS
+    unclassified = sorted( actual_keys - declared )
+    departed     = sorted( declared - actual_keys )
+
+    lines = [ "the terse projection and its declarations disagree." ]
+    if unclassified:
+        lines += [
+            "",
+            f"UNCLASSIFIED KEY(S) IN THE PROJECTION: {unclassified}",
+            "Add each to exactly ONE set in cosa/rest/routers/tasks.py, and the choice matters:",
+            "",
+            "  TERSE_DATA_FIELDS      — the value is CARRIED off the row (item.<attr>).",
+            "                           Nothing further is required.",
+            "  TERSE_ADVISORY_FIELDS  — the value is DERIVED by a predicate at serialize",
+            "                           time. You must also register a True/False recipe in",
+            "                           _ADVISORY_RECIPES, or test_every_advisory_field_has_a_recipe",
+            "                           fails immediately and tells you so.",
+            "",
+            "⚠️ IF YOU ARE UNSURE, IT IS ADVISORY. The two mistakes are not symmetric:",
+            "   calling a carried field advisory costs you one recipe you did not need;",
+            "   calling a DERIVED field data demands nothing, so it ships unguarded and",
+            "   a constant in its place stays green forever. That is the failure this",
+            "   whole guard exists to prevent, and DATA is the box it hides in.",
+        ]
+    if departed:
+        lines += [
+            "",
+            f"DECLARED BUT ABSENT FROM THE PROJECTION: {departed}",
+            "Either the key was removed — delete its declaration (and its recipe, if advisory)",
+            "— or the serializer stopped emitting it, which is the regression this catches.",
+        ]
+    return "\n".join( lines )
+
+
 def test_query_terse_returns_glance_projection_only( client, repo ):
     # §G: terse=true serializes the at-a-glance projection — EXACTLY the seven
     # glance keys, with `body` (and every other full-row field) dropped.
@@ -595,8 +643,12 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
     # argument: the orphan-alias census costs 1,227 full rows without it), and
     # title_trimmed (row a6cb24e8, 2026-08-31 — the trim files the tail into `body`,
     # which THIS projection drops, and leaves no mark behind).
-    assert set( row.keys() ) == tasks.TERSE_DATA_FIELDS | tasks.TERSE_ADVISORY_FIELDS
-    assert not ( tasks.TERSE_DATA_FIELDS & tasks.TERSE_ADVISORY_FIELDS )   # no key is both
+    assert set( row.keys() ) == tasks.TERSE_DATA_FIELDS | tasks.TERSE_ADVISORY_FIELDS, \
+        _classification_help( set( row.keys() ) )
+    assert not ( tasks.TERSE_DATA_FIELDS & tasks.TERSE_ADVISORY_FIELDS ), \
+        "a key is in BOTH TERSE_DATA_FIELDS and TERSE_ADVISORY_FIELDS: " \
+        f"{sorted( tasks.TERSE_DATA_FIELDS & tasks.TERSE_ADVISORY_FIELDS )}. " \
+        "A key is carried OR derived, never both — pick one."
     assert "body" not in row                                  # the token win — body dropped
     # `is False`, not a truthiness check, and a type assertion beside it: the SQL
     # twin of this predicate returns NULL (not False) on its null arms when run as
@@ -729,7 +781,18 @@ def test_every_advisory_field_has_a_recipe():
     reads. The reverse is caught too: a recipe for a field that is no longer in the
     projection is dead weight that would keep passing.
     """
-    assert set( _ADVISORY_RECIPES ) == set( tasks.TERSE_ADVISORY_FIELDS )
+    missing = sorted( set( tasks.TERSE_ADVISORY_FIELDS ) - set( _ADVISORY_RECIPES ) )
+    extra   = sorted( set( _ADVISORY_RECIPES ) - set( tasks.TERSE_ADVISORY_FIELDS ) )
+    assert set( _ADVISORY_RECIPES ) == set( tasks.TERSE_ADVISORY_FIELDS ), (
+        f"advisory fields with NO recipe: {missing}\n"
+        f"recipes for fields no longer declared advisory: {extra}\n"
+        "\n"
+        "For each missing one, register a recipe with @_advisory_recipe( <field> )\n"
+        "returning ( true_item, false_item, blocker_statuses ). The two items must differ\n"
+        "ONLY in what drives the field, and the FALSE arm must be false for the RIGHT\n"
+        "reason — see the recipe comments above for the over-report trap that makes a\n"
+        "cap-length fixture report True while the test's name says otherwise."
+    )
 
 
 @pytest.mark.parametrize( "field", sorted( tasks.TERSE_ADVISORY_FIELDS ) )
