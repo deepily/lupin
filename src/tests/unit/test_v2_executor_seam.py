@@ -60,7 +60,12 @@ class FakeSnapshot:
         self._conversational       = conversational
         self.is_copy               = False
 
-    def for_current_user( self, user_id: str, session_id: str ) -> "FakeSnapshot":
+    # user_email joined the real signature on 2026-08-30 (row `0e7c9214`). A fake that
+    # does NOT track the thing it stands in for turns a production fix into a red
+    # suite and reads like the fix broke something — this one raised TypeError and
+    # the executor reported it as a replay failure, which is exactly the shape of a
+    # real defect.
+    def for_current_user( self, user_id: str, session_id: str, user_email: str="" ) -> "FakeSnapshot":
         copy_snap                          = type( self )( self.id_hash, self.answer, self._conversational )
         copy_snap.user_id                  = user_id
         copy_snap.session_id               = session_id
