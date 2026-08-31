@@ -227,24 +227,28 @@ _warn_if_coverage_went_blind() {
         echo "================================================================================"
         echo "NO COVERAGE NUMBER WAS PRODUCED BY THIS RUN  (row f8e5215b)"
         echo "--------------------------------------------------------------------------------"
+        # CHLOE's F2, second cut -- and the placement is the whole fix. The headline used to
+        # read "This run measured nothing you can cite" UNCONDITIONALLY, with the correction
+        # printed fifteen lines below it and only inside the --no-cov-on-fail arm. Both
+        # sentences were then true of the same block, and a reader who stops at the headline
+        # -- which is what a headline is FOR -- carries the one this branch already knows to
+        # be false. An addition below a wrong sentence does not correct it; it outranks it
+        # only for whoever reads that far. Decide the fact BEFORE the headline and say the
+        # true sentence FIRST.
+        local measured_any; measured_any="$( _cov_measured_files )"
         echo "Coverage was requested, the run exited $status, and no coverage table appeared in"
-        echo "the output. This run measured nothing you can cite. An absent table looks exactly"
-        echo "like never having asked for coverage, which is why this says so out loud."
+        if [ -n "$measured_any" ] && [ "$measured_any" -gt 0 ]; then
+            echo "the output. BUT THE DATA SURVIVED: $measured_any files are in COVERAGE_FILE."
+            echo "The REPORT was dropped, the MEASUREMENT was not. No number from THIS output is"
+            echo "citable; the data is on disk, and whether anything renders it is the next line."
+        else
+            echo "the output. This run measured nothing you can cite. An absent table looks exactly"
+            echo "like never having asked for coverage, which is why this says so out loud."
+        fi
         if _cov_suppressed_on_fail "$@"; then
-            local measured_ncof; measured_ncof="$( _cov_measured_files )"
             echo ""
             echo "  Cause: --no-cov-on-fail was passed. pytest-cov drops the REPORT when any test"
             echo "         fails, so a tier with tolerated red never PRINTS a number."
-            # Chloe's F2: the headline above says "measured nothing", and on THIS branch that
-            # is often false -- --no-cov-on-fail drops the report and still WRITES the data.
-            # The first cut of this fix measured that fact, put it in a test docstring, and
-            # left the block's prose claiming the opposite. Say it here, where it is read.
-            if [ -n "$measured_ncof" ] && [ "$measured_ncof" -gt 0 ]; then
-                echo ""
-                echo "         BUT THE DATA SURVIVED: $measured_ncof files are in COVERAGE_FILE."
-                echo "         The headline above overstates for this case -- the REPORT was"
-                echo "         dropped, the MEASUREMENT was not."
-            fi
             # WHICH REMEDY IS RIGHT DEPENDS ON WHETHER ANYTHING WILL RENDER THIS LATER, AND
             # THAT IS THE TIER SHAPE (--cov-append), NOT MERELY THE DATA EXISTING. An earlier
             # cut of this branch keyed on "data survived" alone and told an AD-HOC run not to

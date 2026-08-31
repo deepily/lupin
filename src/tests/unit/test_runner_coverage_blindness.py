@@ -399,6 +399,15 @@ def test_the_no_cov_on_fail_block_says_the_report_was_dropped_not_that_nothing_w
         f"the block still implies nothing was measured while {measured} files sit in "
         f"COVERAGE_FILE.\n--- stderr ---\n{proc.stderr}"
     )
+    # CHLOE's RESIDUAL, and the reason the assertion above was not enough. It is satisfied by
+    # an ADDITION: the block could print "measured nothing you can cite" AND "BUT THE DATA
+    # SURVIVED" and pass, which is exactly what it did -- the false sentence in the headline,
+    # the true one fifteen lines below. A correction that only appends leaves the wrong claim
+    # standing for every reader who stops at the summary. Pin the ABSENCE too.
+    assert "measured nothing you can cite" not in proc.stderr, (
+        f"the headline still says nothing was measured while {measured} files sit in "
+        f"COVERAGE_FILE. A later correction does not unsay it.\n--- stderr ---\n{proc.stderr}"
+    )
     assert "do NOT re-run" in proc.stderr, (
         "the remedy still says re-run, which under the tier architecture buys a number that is "
         f"already on disk at the price of a full tier.\n--- stderr ---\n{proc.stderr}"
