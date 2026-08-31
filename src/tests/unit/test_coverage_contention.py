@@ -578,3 +578,133 @@ def test_default_comm_of_still_produces_the_two_distinct_absences( monkeypatch )
 ] )
 def test_the_documented_relative_path_examples_match_the_code( cmdline, expected, why ):
     assert cc.looks_like_pytest( cmdline ) is expected, why
+
+
+# ── clause 2: an interpreter running a TEST FILE directly ─────────────────────────────
+# Found by Rachel 🕊️ 2026-08-30, measured by Tiberius 👑. A test file invoked as
+# `python <file>.py` runs a real suite and contains NO pytest token anywhere, so
+# looks_like_pytest cannot see it and the process never reaches the comm gate — which
+# would have admitted it (comm=python3.13). 181 of the 699 files under src/tests/unit/
+# run this way, via pytest.main(...) / unittest.main(...) in __main__.
+#
+# ⚠️ EVERY TEST BELOW ASSERTS AGAINST looks_like_a_running_suite, THE COMPOSED GATE, and
+# the independence test asserts both clauses separately on ONE string. Asserting only the
+# new clause would pass whether or not it was ever wired into find_foreign_pytest.
+
+A_REAL_DIRECT_RUN = ".venv/bin/python src/tests/unit/test_outreach_ledger.py"
+
+
+def test_a_test_file_run_directly_is_a_suite_and_clause_one_cannot_see_it():
+    """
+    THE DISCRIMINATING TEST. Both halves on ONE string, because either alone is weak:
+    the first would pass if clause 2 merely duplicated clause 1, and the second is
+    already true at HEAD before any fix.
+
+    Measured 2026-08-30: this exact command prints "12 passed in 0.17s".
+    """
+    assert cc.looks_like_pytest( A_REAL_DIRECT_RUN ) is False, (
+        "precondition — the pytest-token rule genuinely cannot see this line; if this "
+        "ever goes True the token rule was widened, which is what clause 2 exists to avoid"
+    )
+    assert cc.looks_like_a_direct_test_file_run( A_REAL_DIRECT_RUN ) is True
+    assert cc.looks_like_a_running_suite( A_REAL_DIRECT_RUN ) is True, (
+        "the composed gate must catch it — this is the wiring, not the clause"
+    )
+
+
+@pytest.mark.parametrize( "cmdline,why", [
+    ( A_REAL_DIRECT_RUN,                              "the measured case" ),
+    ( "python3 src/tests/unit/test_x.py",             "a PATH-resolved interpreter" ),
+    ( "/usr/bin/python3.13 /abs/path/test_x.py",      "absolute interpreter, absolute script" ),
+    ( "/usr/bin/python3.13 /abs/path/foo_test.py",    "the *_test.py spelling" ),
+    ( "python3 -B -u src/tests/unit/test_x.py",       "options before the script" ),
+] )
+def test_direct_test_file_runs_are_recognised( cmdline, why ):
+    assert cc.looks_like_a_running_suite( cmdline ) is True, f"missed a real suite: {why}"
+
+
+@pytest.mark.parametrize( "cmdline,why", [
+    # 🔴 THESE FOUR ARE THE DISCRIMINATING ONES, AND MY FIRST CUT OF THIS LIST WAS NOT.
+    # Mutation-measured 2026-08-30: deleting the -c/-m abort, and deleting the regex's
+    # trailing anchor, BOTH survived — because the fixtures I first wrote here reach
+    # neither guard. `python3 -c "import x; run( 'test_x.py' )"` splits so that the CODE
+    # token is the first non-option token and is not test-shaped, so the line returns
+    # False whether or not -c aborts; same for `-m json.tool`. The fixture agreed with the
+    # code for the wrong reason. These four separate the guards from their absence:
+    ( "python3 -c test_x.py",
+      "-c: the code is the literal string 'test_x.py'. WITHOUT the -c abort this reads as a "
+      "script and returns True — the only shape that reaches that guard" ),
+    ( "python3 -m test_x.py",
+      "-m: same, one option over. A real -m pytest is clause 1's job" ),
+    ( "python3 src/tests/unit/test_x.pyc",
+      "BYTECODE, not source. WITHOUT the regex's trailing $ anchor, `test_.+\\.py` matches "
+      "the PREFIX of test_x.pyc and this reads as a suite" ),
+    ( "python3 test_x.py.bak",
+      "a backup file — the same missing anchor, a different suffix" ),
+    ( 'python3 -c "import x; run( \'test_x.py\' )"',
+      "-c with a realistic code string. Kept as CORROBORATION, not proof: it passes with or "
+      "without the abort, which is exactly why it could not carry this on its own" ),
+    ( "python3 -m json.tool test_x.py",
+      "-m with a real module. Corroboration for the same reason" ),
+    ( "python3 manage.py test",
+      "an ordinary script that merely takes 'test' as an argument" ),
+    ( "python3 src/scripts/run_something.py --file test_x.py",
+      "only the FIRST non-option token is examined — a test path in a later ARGUMENT is not "
+      "the program being run" ),
+    ( "vim src/tests/unit/test_x.py",       "an editor buffer — the leader is not an interpreter" ),
+    ( "grep -rn test_x.py src/",            "a grep" ),
+    ( "python3-config --ldflags test_x.py", "not an interpreter; the whole-name comm rule again" ),
+    ( "",                                   "empty" ),
+] )
+def test_clause_two_does_not_fire_on_a_mention( cmdline, why ):
+    assert cc.looks_like_a_direct_test_file_run( cmdline ) is False, f"false positive: {why}"
+    assert cc.looks_like_a_running_suite( cmdline ) is False, f"false positive via the gate: {why}"
+
+
+def test_the_accepted_narrowing_is_pinned_rather_than_left_to_drift():
+    """
+    An option taking a SEPARATE value before the script reads as a miss. Documented in
+    looks_like_a_direct_test_file_run's docstring as deliberate: it fails toward a MISS,
+    never a false refusal, and no sanctioned invocation uses the form. Pinned so the
+    docstring cannot quietly stop matching the code — which is the exact defect Rachel
+    found in clause 1's own "KNOWN GAPS" note.
+    """
+    assert cc.looks_like_a_direct_test_file_run( "python3 -X importtime test_x.py" ) is False
+
+
+def test_clause_one_is_untouched_by_the_addition():
+    """
+    The token rule has been tightened twice and must not move. Both prior false positives
+    stay closed, and the still-open script form stays exactly as documented.
+    """
+    assert cc.looks_like_pytest( 'pgrep -f "bin/pytest src/"' ) is False, "the quoted pattern"
+    assert cc.looks_like_pytest( ".venv/bin/python3 .venv/bin/pytest src/tests/unit/ -q" ) is False, (
+        "the script form is gap 2 and clause 2 must NOT accidentally close it — clause 2 keys "
+        "on a test_*.py script, and 'pytest' is not one"
+    )
+    assert cc.looks_like_pytest( "/opt/venv/bin/pytest -q" ) is True, "a real invocation"
+
+
+def test_a_direct_test_file_run_reaches_the_public_finder():
+    """End to end: the gap closes where it matters, not merely in the predicate."""
+    table = [ ( 777, A_REAL_DIRECT_RUN ) ]
+    assert cc.find_foreign_pytest( lambda: table, ancestors=[], comm_of=_AN_INTERPRETER ) == table
+
+
+def test_a_seat_brief_quoting_a_direct_run_is_still_dropped_by_comm():
+    """
+    Clause 2 widens the SHAPE half, so it owes the argument against itself: does it re-open
+    the spawn-brief false positive that forced the comm gate? No — comm is what discriminates,
+    exactly as it does for clause 1, and the widening does not touch it.
+    """
+    brief = A_REAL_DIRECT_RUN
+    table = [ ( 22130, brief ) ]
+    assert cc.looks_like_a_running_suite( brief ) is True, "precondition: argv cannot tell"
+    assert cc.find_foreign_pytest( lambda: table, ancestors=[],
+                                   comm_of=lambda _pid: "claude" ) == [], (
+        "a seat whose brief quotes the command is not a running suite"
+    )
+    assert cc.find_foreign_pytest( lambda: table, ancestors=[],
+                                   comm_of=_AN_INTERPRETER ) == table, (
+        "the positive control — the same line under a real interpreter IS one"
+    )

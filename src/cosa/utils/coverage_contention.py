@@ -34,12 +34,29 @@ this process or one of its ancestors. Ancestors are excluded because the runner
 script that invokes this check may itself be named `run-pytest-direct.sh` — a
 substring match would otherwise have every run refuse itself.
 
-An offender must pass BOTH tests: its command line must be invocation-SHAPED
-(`looks_like_pytest`) AND the kernel must agree the process IS a python or pytest
-binary (`comm_could_be_pytest`, read from /proc/<pid>/comm). The two answer
+An offender must pass BOTH tests: its command line must be suite-SHAPED
+(`looks_like_a_running_suite`) AND the kernel must agree the process IS a python or
+pytest binary (`comm_could_be_pytest`, read from /proc/<pid>/comm). The two answer
 different questions — the command line says what somebody WROTE, comm says what
 the process IS — and only the pair is sufficient. See the docstring on
 `comm_could_be_pytest` for the measurements that forced this.
+
+The shape half is itself TWO INDEPENDENT CLAUSES, and they are independent on
+purpose (row from 2026-08-30, Rachel's second gap):
+
+  1. `looks_like_pytest`             — a `pytest` token in a program position.
+  2. `looks_like_a_direct_test_file_run` — an interpreter running a `test_*.py`
+                                       path directly, which carries NO pytest
+                                       token at all.
+
+Clause 2 exists because **181 of 699 files under `src/tests/unit/` run a real
+suite when invoked as `python <file>.py`** — their `__main__` calls
+`pytest.main(...)` or `unittest.main(...)`. Measured 2026-08-30:
+`.venv/bin/python src/tests/unit/test_outreach_ledger.py` prints "12 passed" and
+read False under clause 1 alone. It is a second clause rather than a widening of
+clause 1's token rule precisely because widening that rule re-admits the
+quoted-search-pattern and spawn-brief false positives clause 1 was tightened
+TWICE to close.
 
 CLI: `python3 -m cosa.utils.coverage_contention` — exit **0** clear, **1**
 contended (offenders printed to stderr), **2** unknown (could not read the
@@ -129,6 +146,103 @@ def looks_like_pytest( cmdline: str ) -> bool:
         if token.startswith( "/" ): return True
         if tokens[ index - 1 ] == "-m": return True
     return False
+
+
+# ⚠️ A SECOND SHAPE CLAUSE, NOT A WIDENING OF THE FIRST — row from 2026-08-30 (found by
+# Rachel 🕊️, measured by Tiberius 👑). The token rule above can only see a command line that
+# CONTAINS the word pytest. A test file invoked directly does not contain it anywhere:
+#
+#     .venv/bin/python src/tests/unit/test_outreach_ledger.py     -> 12 passed in 0.17s
+#
+# **181 of the 699 files under src/tests/unit/ run a real suite this way**, because their
+# `__main__` calls pytest.main(...) or unittest.main(...). Every one of them was invisible to
+# this module: looks_like_pytest returned False, so the process never reached the comm gate —
+# which would have admitted it (comm=python3.13). The shape test was the sole thing hiding it.
+#
+# ⇒ THE FIX IS A SEPARATE CLAUSE BECAUSE THE TOKEN RULE MUST NOT MOVE. That rule has been
+# tightened twice — absolute-paths-only (2026-08-26, the quoted `pgrep -f "bin/pytest src/"`
+# pattern) and the comm gate (2026-08-30, a peer seat whose spawn brief quotes `-m pytest`).
+# Loosening it to catch a no-pytest-token command line would have to match on something other
+# than the token, i.e. re-open both. A clause keyed on the SCRIPT BEING RUN shares no
+# machinery with it and therefore cannot.
+#
+# ⚠️ AND IT IS NOT A LICENCE TO BE LOOSE. This clause is deliberately narrow in three ways,
+# each closing a false positive the token rule already paid for:
+#   - the interpreter must LEAD the line, so `vim .../test_x.py` and `grep -rn test_x.py src/`
+#     never match;
+#   - `-c` and `-m` ABORT it, so `python3 -c "... test_x.py ..."` (this row's own repro
+#     command, and every seat brief that quotes one) does not match — under -c the following
+#     token is code, and under -m it is a module name, neither of which is a script;
+#   - only the FIRST non-option token is examined — the script — never a later argument.
+# The comm gate still applies on top, exactly as it does to the token rule.
+
+
+_TEST_FILE_BASENAME = re.compile( r"^(test_.+|.+_test)\.py$" )
+
+
+def looks_like_a_direct_test_file_run( cmdline: str ) -> bool:
+    """
+    True when `cmdline` is an interpreter running a TEST FILE directly.
+
+    The shape is `<python> [options] <path/to/test_something.py> [args]` — no pytest
+    token anywhere on the line, which is why `looks_like_pytest` cannot see it and why
+    this is a separate clause rather than a relaxation of that one.
+
+    Requires:
+        - cmdline is a string (may be empty)
+
+    Ensures:
+        - True for an interpreter LEADING the line whose first non-option argument has a
+          basename matching `test_*.py` or `*_test.py`, by absolute or relative path
+        - False when the leading token is not an interpreter — an editor, a grep, a
+          `pytest` invocation (that one is clause 1's job)
+        - False when `-c` or `-m` appears before the script: under `-c` the next token is
+          CODE and under `-m` it is a MODULE NAME, so neither is a file being run, and both
+          are shapes a peer's command line quotes verbatim
+        - False when the first non-option token is an ordinary script (`manage.py`)
+        - never raises
+
+    ⚠️ ONE ACCEPTED NARROWING: an option that takes a SEPARATE value before the script
+    (`python -X importtime test_x.py`) is read as `-X` then `importtime`, and `importtime`
+    is not test-shaped, so the line returns False. It fails toward a MISS rather than a
+    false refusal, which is the direction this module can afford — a false refusal blocks
+    every coverage run in the tree, a miss blocks none. No sanctioned or observed
+    invocation uses that form; widening to a table of value-taking options would add a
+    second thing to keep in sync with CPython for no measured gain.
+    """
+    if not cmdline: return False
+    tokens = cmdline.split()
+    if not tokens: return False
+    if not _PYTHON_COMM.match( os.path.basename( tokens[ 0 ] ) ): return False
+    for token in tokens[ 1: ]:
+        if token.startswith( "-" ):
+            if token in ( "-c", "-m" ): return False
+            continue
+        return bool( _TEST_FILE_BASENAME.match( os.path.basename( token ) ) )
+    return False
+
+
+def looks_like_a_running_suite( cmdline: str ) -> bool:
+    """
+    The whole shape half of the gate: either clause is sufficient.
+
+    🔴 ONE SHAPE PREDICATE, AND THIS IS IT. The comm half of this module carries the same
+    rule ("THERE IS EXACTLY ONE comm PREDICATE") for the same reason: when two callers each
+    compose the clauses themselves, they drift, and a guard with two sources of truth for
+    one question answers differently depending on which door you came in. `find_foreign_pytest`
+    calls this and nothing else.
+
+    Requires:
+        - cmdline is a string (may be empty)
+
+    Ensures:
+        - True when EITHER a pytest token is in a program position (clause 1) OR an
+          interpreter is running a test file directly (clause 2)
+        - the two clauses are disjoint in practice — clause 2 requires no pytest token —
+          so neither can mask a regression in the other
+        - never raises
+    """
+    return looks_like_pytest( cmdline ) or looks_like_a_direct_test_file_run( cmdline )
 
 
 # ⚠️ THE COMMAND LINE ALONE IS NOT ENOUGH, AND THIS COST A GATE RUN ON 2026-08-30.
@@ -381,7 +495,7 @@ def find_foreign_pytest(
     name_of = comm_of or _default_comm_of
     found   = [ ( pid, cmd ) for pid, cmd in table
                 if pid not in ours
-                and looks_like_pytest( cmd )
+                and looks_like_a_running_suite( cmd )
                 and _comm_admits_a_running_suite( name_of( pid ) ) ]
     return sorted( found, key=lambda row: row[ 0 ] )
 
