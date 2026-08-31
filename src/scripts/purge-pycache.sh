@@ -32,7 +32,28 @@ set -uo pipefail
 LUPIN_ROOT="${LUPIN_ROOT:-$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )}"
 HERE="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 DRY_RUN=0
-[[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
+
+usage() {
+    cat <<'USAGE'
+Usage: purge-pycache.sh [--dry-run]
+
+  --dry-run    list what would be removed; change nothing
+  -h, --help   this message
+
+Takes no positional arguments. Every argument is honoured or refused — never
+silently discarded, because the silent path here is a REAL purge: a mistyped
+--dry-run used to preview nothing and delete everything.
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run )   DRY_RUN=1 ;;
+        -h|--help )   usage; exit 0 ;;
+        * )           echo "ERROR: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
+done
 
 # Same exclusions as the migration: never touch vendored trees. Purging src/cosa/.venv would
 # throw away ~29k third-party pycs that nothing here is debugging, and cost minutes to rebuild.
