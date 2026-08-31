@@ -144,11 +144,25 @@ _warn_if_coverage_went_blind() {
     # genuinely cannot cite a number from THIS run; just not an alarm about a defect.
     #
     # ⚠️ `--no-cov-on-fail` WINS OVER THIS, AND THE ORDER IS THE WHOLE POINT. A run carrying
-    # BOTH flags is the named cause with a named remedy, so it keeps the full block. Measured
-    # 2026-08-30 while writing this: `--no-cov-on-fail` drops the REPORT but still writes
-    # measurement data, so a data-file check does NOT separate these two cases — only the flag
-    # does. A first cut of this branch sat above the check and silently swallowed the one
-    # explanation in here that tells the reader exactly what to re-run.
+    # BOTH flags is the named cause with a named remedy, so it keeps the full block.
+    #
+    # WHY A DATA-FILE CHECK CANNOT REPLACE THIS FLAG CHECK — measured, and here is the number
+    # rather than the word "measured". The tier flags plus `--no-cov-on-fail`, against a suite
+    # with one red, still wrote **249,856 bytes / 704 measured files** to COVERAGE_FILE. So the
+    # data file is NON-EMPTY in both cases and cannot tell them apart; only the flag can.
+    # Reproduce:
+    #     COVERAGE_FILE=/tmp/probe.dat .venv/bin/pytest <a red suite> -q \
+    #       --cov --cov-report= --cov-fail-under=0 --cov-append --no-cov-on-fail
+    #     python -c "import coverage;d=coverage.CoverageData('/tmp/probe.dat');d.read();\
+    #                print(len(list(d.measured_files())))"    # -> non-zero
+    #
+    # ⚠️ THE FIRST VERSION OF THIS COMMENT SAID "measured" ON THE STRENGTH OF A PRECONDITION
+    # ASSERTION FAILING, WHICH SHOWED ONLY THAT THE COUNT WAS NOT ZERO — I never printed it.
+    # That is an inference from a flag dressed as a measurement, and it was caught in review.
+    # The figure above is the actual reading.
+    #
+    # A first cut of this branch also sat ABOVE the `--no-cov-on-fail` check and silently
+    # swallowed the one explanation in here that tells the reader exactly what to re-run.
     if _cov_report_suppressed "$@" && ! _cov_suppressed_on_fail "$@"; then
         {
             echo ""

@@ -318,10 +318,15 @@ def test_suppression_alone_does_not_excuse_the_other_blind_shapes( tmp_path ):
 
     ⚠️ THE OBVIOUS DISCRIMINATOR DOES NOT WORK, AND THIS TEST IS WHERE THAT WAS MEASURED.
     A first cut asserted `_child_measured_files( suite ) == 0` here, on the assumption that
-    `--no-cov-on-fail` discards the data as well as the report. It does not: the run still
-    writes measurement data, so a data-file check cannot separate this case from an ordinary
-    suppressed-table run. Only the FLAG separates them, which is why the wrapper branches on
-    the flag and why the precedence between the two flags had to be made explicit.
+    `--no-cov-on-fail` discards the data as well as the report. It does not. Measured directly
+    afterwards, with the figure rather than the word: this flag combination against a red suite
+    wrote **249,856 bytes / 704 measured files**. So a data-file check cannot separate this case
+    from an ordinary suppressed-table run — the file is non-empty either way, and only the FLAG
+    separates them. That is why the wrapper branches on the flag and why the precedence between
+    the two flags had to be made explicit.
+
+    ⚠️ The failing assertion above showed only that the count was NOT ZERO; it never printed one.
+    Reporting that as "measured" was an inference dressed as a reading, and review caught it.
     """
     suite = _suite( tmp_path, red=True )
     proc  = _run( suite, *TIER_FLAGS, "--no-cov-on-fail" )
