@@ -42,20 +42,39 @@ from the guard's own return value, never re-derived at read time.
 `38e025169a73` deliberately left `body_changed_ts` nullable with no backfill,
 because every value it could have written would have been a fabrication about
 history nobody recorded. **This column is the other case**: the history IS
-recorded, in the rows themselves. `soft_guard_title` relocated the overflow
-into the body under a greppable marker, so "was this row trimmed" is answerable
-from the data rather than guessed.
+recorded, in the rows themselves. `soft_guard_title` trims to EXACTLY the cap,
+so a title still sitting at the cap is the record of the cut, and "was this row
+trimmed" is answerable from the data rather than guessed.
+
+⚠️ THE BODY MARKER IS NOT THAT RECORD, THOUGH IT LOOKS LIKE ONE. It makes the
+cut text RECOVERABLE by grep, which is what it was built for, but its presence
+in a body is not evidence that THAT row's title is currently cut — see the two
+false-positive classes below.
 
 THE BACKFILL, and what it is allowed to claim
 ----------------------------------------------
-    title_trimmed = TRUE  WHERE body LIKE '%[title overflow%'   -- provably trimmed
-                       OR length( title ) = 60                  -- the value the board shows today
+    title_trimmed = TRUE  WHERE length( title ) = 60
 
-The second arm is deliberately the CURRENT derived value, not a stricter truth.
-It makes the backfill a SUPERSET of what a reader sees right now, so nothing
-that is flagged today stops being flagged when this lands. That matters more
-than precision here: this migration must not itself be the regression it exists
-to prevent.
+ONE arm, deliberately: the CURRENT read-time derived value, frozen. The backfill
+therefore agrees EXACTLY with what a reader sees today, so nothing that is
+flagged now stops being flagged when this lands. This migration must not itself
+be the regression it exists to prevent.
+
+⚠️ THERE WAS A SECOND ARM — `OR body LIKE '%[title overflow%'` — AND IT IS
+REMOVED RATHER THAN NARROWED. Rio ⚡ found it stamping TRUE on rows that were
+trimmed and then REPAIRED by a shorter retitle (row 6a43a4be), and proposed
+`AND length( title ) = cap`. That is correct, and it makes the arm DEAD: `A AND B`
+OR'd with `B` is `B`. Measured rather than argued from algebra, in lupin_db_dev:
+
+    body LIKE marker OR  length( title ) = 60                    1620   <- original
+    ( body LIKE marker AND length( title ) = 60 ) OR len = 60     1612   <- Rio's narrowing
+    length( title ) = 60                                         1612   <- this clause
+
+The deeper reason the arm can go outright is in `soft_guard_title` itself: it
+trims with `title[ :cap ]`, so a trimmed title is EXACTLY cap characters, never
+fewer. A row that was trimmed AND is still hiding a tail therefore ALWAYS
+satisfies the length arm. The marker could only ever contribute rows whose length
+DIFFERS from the cap — and every one of those is a false positive.
 
 ⚠️ **60 IS A HISTORICAL LITERAL, NOT THE CURRENT CAP, AND MUST NOT BE UPDATED
 WHEN THE CAP CHANGES.** It names the cap that trimmed the existing rows. If a
@@ -67,22 +86,44 @@ WHAT THE BACKFILL CANNOT SEPARATE, stated rather than papered over: 655 rows sit
 at exactly 60 with no marker. Every one has a non-empty body, so each is
 consistent with having been trimmed into an EMPTY body (that arm relocates the
 overflow unmarked, because there is nothing for it to be distinguished from).
-None can be shown to be naturally 60. So the second arm's false-positive rate is
+None can be shown to be naturally 60. So the clause's false-positive rate is
 UNKNOWN rather than zero, and it is the harmless direction: a false positive
 costs a reader one look at a body with nothing missing.
 
-⚠️ IT DOES NOT CLEAR A REPAIRED ROW, AND THAT IS THE RIGHT CALL AT MIGRATION TIME
----------------------------------------------------------------------------------
-Six rows (`f45b37a9` `462b985c` `309f4213` `c89cec9b` `21792c5d` `c1bbb917`)
-were trimmed and then REPAIRED by a shorter retitle: their titles are complete
-sentences now, and the length check happens to return False for them. This
-backfill's first arm sets them TRUE, because the marker is still in the body.
+(This paragraph said "the second arm's" while there were two. There is one now,
+and the sentence describes it unchanged — the length arm was always the one this
+uncertainty belonged to.)
 
-That is a knowing over-report of six rows, chosen over the alternative of
-teaching the migration to guess which retitles were repairs. The going-forward
-behaviour is what fixes them properly: `apply_patch` writes the flag on EVERY
-title change, so the next edit to any of the six clears it. A stale over-report
-that self-corrects on the next write beats a migration inferring intent.
+⚠️ WHAT THE MARKER ARM ACTUALLY MATCHED — TWO CLASSES, NEITHER OF THEM TRIMMED
+---------------------------------------------------------------------------------
+Measured 2026-08-31 in `lupin_db_dev`, named because a host shell reads dev while
+a `:8000` job writes test — and `lupin_db_test` holds ZERO task_items, so the same
+query run there returns an empty answer indistinguishable from "no such rows".
+The same query returns 963 marker rows in dev, which is the positive control that
+makes the test-side zero readable as an empty population rather than a real absence.
+
+`body LIKE '%[title overflow%' AND length( title ) <> 60` returns 8 rows, none of
+them OVER the cap:
+
+  · 4 carry the FULL marker line and WERE trimmed, then REPAIRED by a shorter
+    retitle — f45b37a9, 462b985c, 309f4213, c89cec9b. Their titles are complete
+    sentences now and nothing is hidden, so FALSE is the right answer. This is the
+    class Rio found.
+  · 4 carry only the loose prefix `[title overflow`, because their bodies QUOTE
+    the marker while DISCUSSING it — 21792c5d, c1bbb917, 26a672b3, and 6a43a4be,
+    which is Rio's own bug row. These were never trimmed at all.
+
+⚠️ THE SECOND CLASS IS WHY THE ARM GOES RATHER THAN SHRINKS, AND IT GROWS ON ITS
+OWN. Every future row written ABOUT this defect matches a body-text search for the
+marker: filing the bug at 16:25:10 is what took the population from the 7 rows
+Mr. Radio 🦉 measured to the 8 above — the two counts reconcile exactly, and the
+new member is the bug row itself. A text search over bodies cannot separate a row
+that WAS trimmed from a row that TALKS about trimming; `length( title ) = cap`
+never had to.
+
+GOING FORWARD, unchanged: `apply_patch` writes the flag on EVERY title change from
+the guard's own verdict, so a later retitle keeps the value honest without this
+UPDATE having to infer anyone's intent.
 
 SCOPE: adds one column and one UPDATE over `task_items`. No CHECK, no other
 table, no title text altered anywhere.
@@ -139,7 +180,11 @@ def upgrade() -> None:
         - the backfill runs ONLY in the same branch as the add, so a re-run never
           re-stamps a row whose flag a later retitle legitimately cleared
         - every row flagged by the pre-migration read-time predicate is still
-          flagged afterwards (the length arm is that predicate, frozen)
+          flagged afterwards, and no other row is (the clause IS that predicate,
+          frozen at the historical cap)
+        - a row carrying the overflow marker but a title NOT at the cap is left
+          False: it was either repaired by a later retitle, or its body merely
+          quotes the marker while discussing it
     """
     bind      = op.get_bind()
     inspector = inspect( bind )
@@ -157,14 +202,14 @@ def upgrade() -> None:
     result = bind.execute(
         sa.text(
             f"UPDATE {TABLE_NAME} SET {COLUMN_NAME} = true "
-            f"WHERE body LIKE :marker OR length( title ) = :cap"
+            f"WHERE length( title ) = :cap"
         ),
-        { "marker": "%[title overflow%", "cap": HISTORICAL_CAP },
+        { "cap": HISTORICAL_CAP },
     )
     print(
         f"[{revision}] added {TABLE_NAME}.{COLUMN_NAME} and backfilled "
-        f"{result.rowcount} row(s) — the overflow marker OR a title at the "
-        f"historical {HISTORICAL_CAP}-char cap"
+        f"{result.rowcount} row(s) — titles sitting at the historical "
+        f"{HISTORICAL_CAP}-char cap"
     )
 
 

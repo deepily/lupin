@@ -29,7 +29,7 @@ from sqlalchemy.pool import StaticPool
 from alembic.script import ScriptDirectory
 
 from cosa.rest.db.auto_migrate import build_alembic_config
-from cosa.rest.task_store_rules import TITLE_OVERFLOW_MARKER
+from cosa.rest.task_store_rules import TITLE_OVERFLOW_MARKER, soft_guard_title
 
 
 _REVISION = "47513717b7e5"
@@ -152,28 +152,93 @@ def test_a_legacy_over_cap_row_is_NOT_flagged_by_the_backfill( monkeypatch, engi
     assert _flags( engine )[ "legacy" ] == 0
 
 
-def test_the_backfill_flags_a_trimmed_row_by_its_marker_and_by_the_cap( monkeypatch, engine ):
+def test_the_backfill_flags_a_row_at_the_cap_and_leaves_a_short_one_alone( monkeypatch, engine ):
     """
-    The positive arms, both of them, so the negative above means something. A flag that
-    is False on every row is not a flag — the same argument Rachel made for the
-    predicate's own negative control.
+    The positive arm, so the negatives around it mean something. A flag that is False on
+    every row is not a flag — the same argument Rachel made for the predicate's own
+    negative control.
 
-    `marked` carries the overflow marker: PROVABLY trimmed, whatever its length.
-    `at_cap` sits at exactly 60 with no marker: the value the board shows today, frozen
-    rather than re-derived. Keeping it is what makes the backfill a SUPERSET of the
-    current display, so nothing a reader sees flagged stops being flagged.
+    `at_cap` sits at exactly 60: the value the board shows today, frozen rather than
+    re-derived. That is what makes the backfill agree with the current display, so
+    nothing a reader sees flagged stops being flagged when this lands.
     """
     module = _load_migration_module()
     _seed( engine, [
-        ( "marked", "a short repaired title", _MARKED_BODY ),
-        ( "at_cap", "N" * 60,                 "a plain body" ),
-        ( "short",  "an ordinary title",      "a plain body" ),
+        ( "at_cap", "N" * 60,            "a plain body" ),
+        ( "short",  "an ordinary title", "a plain body" ),
     ] )
     _upgrade( engine, module, monkeypatch )
     flags = _flags( engine )
-    assert flags[ "marked" ] == 1
     assert flags[ "at_cap" ] == 1
     assert flags[ "short"  ] == 0
+
+
+def test_a_row_the_REAL_guard_trimmed_lands_at_the_cap_and_is_flagged( monkeypatch, engine ):
+    """
+    THE ARGUMENT FOR DROPPING THE MARKER ARM, DRIVEN THROUGH THE GUARD ITSELF RATHER
+    THAN A HAND-BUILT 60-CHARACTER STRING.
+
+    The marker arm was removed on the claim that `soft_guard_title` trims with
+    `title[ :cap ]`, so a genuinely trimmed row ALWAYS sits at exactly the cap and the
+    length arm always catches it. A fixture that hard-codes `"N" * 60` cannot see that
+    claim break — it would keep passing if the guard started trimming at a word boundary,
+    at which point real trimmed rows would fall UNDER the cap and this backfill would
+    start missing them.
+
+    So the row is seeded from the guard's own return values. If the trim ever stops
+    landing exactly on the cap, this test goes red and says so.
+    """
+    module = _load_migration_module()
+    trimmed_title, new_body, advisory = soft_guard_title( "L" * 140, "a pre-existing body" )
+    assert advisory[ "trimmed" ] is True
+    assert TITLE_OVERFLOW_MARKER in new_body
+
+    _seed( engine, [ ( "guard_trimmed", trimmed_title, new_body ) ] )
+    _upgrade( engine, module, monkeypatch )
+    assert _flags( engine )[ "guard_trimmed" ] == 1
+
+
+def test_a_repaired_row_carrying_the_full_marker_is_NOT_flagged( monkeypatch, engine ):
+    """
+    RIO'S FINDING (row 6a43a4be), AS A TEST. This assertion was INVERTED before — the
+    suite asserted 1 here, which is a result only the defect produces.
+
+    A row trimmed long ago and then REPAIRED by a shorter retitle still carries the
+    overflow banner in its body, because nothing rewrites a body on retitle. Its title is
+    a complete sentence now and nothing is hidden, so False is the right answer. The
+    removed marker arm stamped it True permanently, and the PATCH-path clearing could not
+    rescue it: its retitle happened before the column existed.
+
+    Measured in lupin_db_dev, four live rows are in exactly this state — f45b37a9,
+    462b985c, 309f4213, c89cec9b.
+    """
+    module = _load_migration_module()
+    _seed( engine, [ ( "repaired", "a short repaired title", _MARKED_BODY ) ] )
+    _upgrade( engine, module, monkeypatch )
+    assert _flags( engine )[ "repaired" ] == 0
+
+
+def test_a_row_whose_body_merely_QUOTES_the_marker_is_NOT_flagged( monkeypatch, engine ):
+    """
+    THE SECOND FALSE-POSITIVE CLASS, AND THE ONE THAT GROWS ON ITS OWN.
+
+    The removed arm was a text search over bodies for the marker prefix. It cannot
+    separate a row that WAS trimmed from a row that TALKS about trimming, so every row
+    written ABOUT this defect matched it. Four live rows are in this state, including
+    Rio's own bug row: filing that bug is what took the affected population from the 7
+    rows Mr. Radio measured to the 8 measured an hour later.
+
+    Same shape as matching a process by its command line and catching every session that
+    merely mentions the tool.
+    """
+    module = _load_migration_module()
+    discussing = (
+        "The backfill said WHERE body LIKE '%[title overflow%' OR length( title ) = 60, "
+        "and the first arm is what stamped these rows."
+    )
+    _seed( engine, [ ( "discussing", "Backfill marker arm stamps a wrong TRUE", discussing ) ] )
+    _upgrade( engine, module, monkeypatch )
+    assert _flags( engine )[ "discussing" ] == 0
 
 
 def test_the_backfill_runs_only_with_the_add_so_a_re_run_cannot_re_stamp( monkeypatch, engine ):
