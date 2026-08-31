@@ -76,7 +76,14 @@ entries — one of them the manager's own.
 
   🔴 **AND A CORRECTION AGAINST MYSELF, WHICH IS THE HALF WORTH KEEPING.** I first reported
   that commit as a seat sweeping up Rachel's uncommitted edit, *"exactly what the per-session
-  manifest exists to prevent."* **That is wrong, and the guard's own header says so** —
+  manifest exists to prevent."*
+
+  ⚠️ **AND RACHEL CORRECTED THE CORRECTION, WHICH IS WHY IT READS THIS WAY**: the first half was
+  RIGHT. A seat's commit did carry her uncommitted edit — **the mechanism I described held; the
+  CLASSIFICATION did not.** Filing the whole report as an error over-claimed my own mistake,
+  which is the same failure as over-claiming a finding and no more accurate for pointing at
+  myself. **Precisely one clause was wrong**, the manifest one, and the guard's own header
+  says so —
   `src/lupin_cli/claude_code/hooks/lib/commit_scope_guard.py`, under *"WHAT NO GUARD HERE CAN
   CLOSE"*: a pathspec commit takes each named path's **working-tree** content, so naming a file
   your section legitimately claims still commits whatever a peer left uncommitted inside it.
