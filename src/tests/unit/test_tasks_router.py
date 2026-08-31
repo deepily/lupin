@@ -1286,6 +1286,7 @@ def test_patch_over_cap_title_is_guarded_by_THE_SAME_helper_as_create( client, r
         "original_length"       : 95,
         "cap"                   : tasks.rules.TITLE_SOFT_CAP,
         "overflow_moved_to_body": True,
+        "lost_tail"             : "P" * 35,
     }
     fields = repo.apply_patch.call_args.args[ 1 ]
     assert fields[ "title" ] == "P" * 60

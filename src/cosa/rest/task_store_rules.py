@@ -1018,8 +1018,13 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
             * `title + <the overflow substring of new_body>` reconstructs the
               original title EXACTLY, on BOTH arms — nothing is ever lost
             * advisory is { trimmed, original_length, cap,
-              overflow_moved_to_body }, and overflow_moved_to_body is now True
-              on BOTH arms because both arms relocate
+              overflow_moved_to_body, lost_tail }, and overflow_moved_to_body is
+              now True on BOTH arms because both arms relocate
+            * `lost_tail` is the exact text cut from the title — the same string
+              relocated into the body — so the writer is shown the words they lost
+              rather than a count of them. It is advisory ONLY: it changes nothing
+              about what is stored, rejects nothing, and leaves the fail-open
+              ruling and the exact-reconstruction guarantee untouched
         - never raises; never returns a title longer than cap
     """
     if len( title ) <= cap:
@@ -1034,6 +1039,14 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
         "original_length"       : len( title ),
         "cap"                   : cap,
         "overflow_moved_to_body": True,
+        # THE WORDS THAT FELL OFF, not just how many (row a6cb24e8, 2026-08-31).
+        # The advisory used to report only a LENGTH, so a writer had to reconstruct
+        # what was cut from a number. Seven titles lost their qualifier in one night
+        # and nobody noticed, including three seats who had this advisory in hand.
+        # `original_length: 106` is a fact about a string; "by design" is the claim
+        # you just deleted. Showing the text is what makes the advisory readable at
+        # the speed people actually read tool output.
+        "lost_tail"             : overflow,
     }
     if body_is_empty:
         return trimmed, overflow, advisory

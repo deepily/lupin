@@ -726,6 +726,7 @@ class TestSoftGuardTitle:
             "original_length"       : 90,
             "cap"                   : rules.TITLE_SOFT_CAP,
             "overflow_moved_to_body": True,
+            "lost_tail"             : title[ rules.TITLE_SOFT_CAP: ],
         }
 
     @pytest.mark.parametrize( "blank_body", [ None, "", "   ", "\n\t " ] )
@@ -757,6 +758,7 @@ class TestSoftGuardTitle:
             "original_length"       : 75,
             "cap"                   : rules.TITLE_SOFT_CAP,
             "overflow_moved_to_body": True,
+            "lost_tail"             : title[ rules.TITLE_SOFT_CAP: ],
         }
 
     def test_over_cap_nonempty_body_ROUND_TRIPS_the_original_title_exactly( self ):
@@ -809,6 +811,42 @@ class TestSoftGuardTitle:
         assert after_second.split( "\n" )[ 0 ] == "THE REAL OPENING LINE"
         assert after_second.count( rules.TITLE_OVERFLOW_MARKER ) == 2   # both kept...
         assert after_second.index( "A" * 15 ) < after_second.index( "B" * 15 )  # ...in order
+
+    def test_the_advisory_shows_the_WORDS_that_were_cut_not_just_a_count( self ):
+        """
+        Row a6cb24e8. The advisory used to report only `original_length`, so a writer
+        had to reconstruct what was cut from a number. Seven titles lost their
+        qualifier in one night and nobody noticed — including three seats who had
+        this advisory in hand and skimmed past it.
+
+        `original_length: 106` is a fact about a string. "by design" is the claim you
+        just deleted. This asserts the advisory carries the TEXT.
+
+        Advisory ONLY: it changes nothing stored, rejects nothing, and leaves both the
+        fail-open ruling and the exact-reconstruction guarantee untouched — which is
+        why this half needed no ruling while the cap itself does.
+        """
+        # The REAL title of row 675e44f9, verbatim — 106 chars, and the qualifier
+        # "by design" is genuinely inside the cut portion. My first draft of this
+        # test used a 63-char stand-in whose whole tail was "ign", so it could not
+        # have shown the qualifier no matter what the code did: a fixture that
+        # cannot demonstrate the thing its own name claims. Caught by running it.
+        title = ( "[LUPIN] add_synonym() hits the same empty-vector wall — "
+                  "EmbeddingManager returns [] on API error by design" )
+        assert len( title ) == 106                            # the fixture's own premise
+        _new_title, _new_body, advisory = rules.soft_guard_title( title, "a body" )
+
+        assert advisory[ "lost_tail" ] == title[ rules.TITLE_SOFT_CAP: ]
+        assert "by design" in advisory[ "lost_tail" ]       # the QUALIFIER, in the advisory
+        assert "by design" not in _new_title                # ...and gone from the title
+        assert _new_title + advisory[ "lost_tail" ] == title   # and it still round-trips
+
+    def test_an_under_cap_title_gets_no_advisory_at_all( self ):
+        """
+        The negative control. A normal title must not acquire a `lost_tail` — or any
+        advisory — so a reader who sees the field knows something was genuinely cut.
+        """
+        assert rules.soft_guard_title( "a short title", "a body" ) == ( "a short title", "a body", None )
 
     def test_custom_cap_is_honored( self ):
         # The cap is parameterizable — proves the guard is not hard-wired to 60.
