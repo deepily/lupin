@@ -219,8 +219,22 @@ the reviewer named in the review artifact. **FAILS IF** they are the same seat.
 before and after — three commits, two files, `2e1ae708` absent, clean `--no-ff`. **The separation
 exists to catch bad merges, not to be performed on good ones**, and undoing correct work to make a
 process point is theatre.
-⚠️ **And the check was not idle**: Chloé found a real defect in Tiberius's own coverage-guard fix
-while reviewing it — the reviewer being reviewed, which is the whole argument for the split.
+🔴 **WITHDRAWN, SAME NIGHT — THE SUPPORTING EVIDENCE I ATTACHED TO THIS RULING WAS NOT REAL.**
+I wrote *"Chloé found a real defect in Tiberius's own coverage-guard fix while reviewing it — the
+reviewer being reviewed, which is the whole argument for the split."* **There was no defect.** She
+reviewed against a **superseded sha carried in her memento**, and the gap she reported had already
+been closed. Reported by Clayton 😎, 2026-08-31 ~01:03.
+⇒ **D11 STANDS ON ITS OWN REASONING and loses nothing** — Tiberius endorsed the split independently,
+before any of this. What falls is the *"and here is evidence it works"* clause, which I added because
+it made the ruling feel earned. **That is the overclaim in the join, committed inside the entry that
+cites the doctrine against it.**
+⚠️ **THE REAL FINDING IS THE ONE UNDERNEATH, AND IT IS MINE**: a seat I re-spun forty minutes earlier
+carried a **coordinate** in its memento, and coordinates go stale. **A memento should name the
+BRANCH and the file, not the sha** — this repo's own *"a coordinate is not a reference"* rule,
+reaching the re-spin path.
+**REMEDY (D10)**: before reviewing, re-derive the tip for the file under review —
+`git log -1 --format=%h -- <path>` on the branch you were given — and compare it to any sha your
+brief or memento hands you. **FAILS IF** they differ and you proceed on the older one.
 
 **D9 — the run's signature was TEN REFUSALS, not the defects.** Five seats refused a leading
 question; three refused the sharpened rule I drew from them, including the versions that flattered
