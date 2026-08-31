@@ -11,9 +11,7 @@ owner is now a grep, not a memory.**
 **WHO WRITES IT**: **Mr Radio 🦉, by name.** The manager confers ownership, so the manager writes the line at the
 moment he assigns — one line, while he is already acting.
 
-**WHO READS IT**: every seat, twice — before starting reported work, and whenever a sweep surfaces something. A
-hit means **decline and tell the manager** (never seat-to-seat). **A miss means ASK, not proceed
-quietly** — see the scoped caveat below. This table is not yet complete enough for silence to mean
+**WHO READS IT**: every seat, twice — before starting reported work, and whenever a sweep surfaces something. A hit means **decline and tell the manager** (never seat-to-seat). **A miss means ASK, not proceed quietly** — see the scoped caveat below. This table is not yet complete enough for silence to mean
 "nobody owns it".
 
 | defect | owner | assigned | state |
@@ -36,10 +34,7 @@ quietly** — see the scoped caveat below. This table is not yet complete enough
 | Roster lookup-miss reads as a missing seat | Pocholo 📣 | 2026-08-30 | ✅ merged `eac4fb9c` |
 | Completing this table from the manager's own view | Mr Radio 🦉 | 2026-08-30 ~20:27 | ✅ **done 2026-08-30 ~20:40** — the three rows above plus the §1.5.1b correction. Every sha `git merge-base --is-ancestor`-checked against tip `0f3e75b8`. |
 
-🔴 **THE ASSIGNEE'S RULE — AND IT HAS NO CAVEAT.** If you HOLD an assignment and find no line for it here, you
-have found a **missing line, which is the signal**, and the fix is to tell Mr Radio 🦉 so he writes it. You know
-your own assignment; incompleteness of this table is never a reason to leave your own row unwritten. **Work that
-turns up with no entry here was either never assigned or assigned without being recorded, and both are worth
+🔴 **THE ASSIGNEE'S RULE — AND IT HAS NO CAVEAT.** If you HOLD an assignment and find no line for it here, you have found a **missing line, which is the signal**, and the fix is to tell Mr Radio 🦉 so he writes it. You know your own assignment; incompleteness of this table is never a reason to leave your own row unwritten. **Work that turns up with no entry here was either never assigned or assigned without being recorded, and both are worth
 stopping for.** (Rachel 🕊️,
 second review: the caveat below was unscoped, which let the one person who cannot honestly appeal to it do exactly
 that.)
