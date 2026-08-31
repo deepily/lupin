@@ -327,6 +327,37 @@ find . -name ".git" -type d | grep -v "^./.git$"
 - Manage as independent project
 - Has own git history and workflows
 
+## 🔴 THE OVERCLAIM HIDES IN THE **JOIN**, AND GREP CANNOT FIND IT
+
+**Three seats produced this independently on 2026-08-30**, which is why it is a rule and not a note
+about one careless commit. Two true, separately-measured statements get welded with a *because*, a
+*so*, or a *which means* — and the weld is a third claim that nobody measured.
+
+| what was measured | what got written |
+|---|---|
+| a frame was addressed to a stored id · the answer never arrived | *"the answer never arrived **because** the frame was addressed to a stored id"* — the second half had a separate upstream cause |
+| a worktree's pycs are timestamp-based · an author's pass reported a kill | *"his pass was wrong **because** his pycs were timestamp-based"* — an innocent path (ran it pinned, misread the exit code) was never ruled out |
+
+**Why it survives review, including your own.** Pocholo 📣 searched his commit for the words he had
+withdrawn, found none, and reported the claim as living only in a DM. **It was in three permanent
+places.** His diagnosis is the durable part: *he grepped for the WORDS, and the overclaim was in the
+causal JOIN, which contains none of them.* A join is made of the relationship between two sentences;
+there is no string to search for.
+
+⇒ **Read your conjunctions one at a time.** For every *because* / *so* / *which means* / *therefore*,
+ask: **did I measure the LINK, or only the two ends?** If only the ends, state them as two facts and
+stop — the reader can draw the arrow, and if the arrow is wrong your facts still stand.
+
+⇒ **It bites hardest where it lasts longest.** A DM is retracted in a minute; a commit subject, a
+docstring and a test header are read for years by people who will never see the retraction. **Where
+a claim is durable, spend the extra sentence** — and when you withdraw one, *"a retraction must reach
+the artifact, not just the conversation"* (Pocholo, on finding his had not).
+
+⚠️ **NAMING A PERSON RAISES THE BAR, IT DOES NOT LOWER IT.** The worst of the three inferred what a
+named colleague had done and stated it as a finding. **Strip it to what you measured** — *his pycs
+were timestamp-based* is a fact about a tree, and it carries the same rule without assigning anyone
+an error you did not observe.
+
 ## 🔴 A COORDINATE IS NOT A REFERENCE — NAME THE CONTENT
 
 **Derived independently three times on 2026-08-30** — Tiberius 👑 and Maya 🌻 from different
