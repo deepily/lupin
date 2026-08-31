@@ -272,10 +272,23 @@ repeat.**
 finding.**
 
 🔴 ~~**WITHDRAWN, SAME NIGHT — THE SUPPORTING EVIDENCE I ATTACHED TO THIS RULING WAS NOT REAL.**~~
-I wrote *"Chloé found a real defect in Tiberius's own coverage-guard fix while reviewing it — the
-reviewer being reviewed, which is the whole argument for the split."* **There was no defect.** She
-reviewed against a **superseded sha carried in her memento**, and the gap she reported had already
-been closed. Reported by Clayton 😎, 2026-08-31 ~01:03.
+~~I wrote *"Chloé found a real defect in Tiberius's own coverage-guard fix while reviewing it — the~~
+~~reviewer being reviewed, which is the whole argument for the split."* **There was no defect.** She~~
+~~reviewed against a **superseded sha carried in her memento**, and the gap she reported had already~~
+~~been closed. Reported by Clayton 😎, 2026-08-31 ~01:03.~~
+
+> 🔴 **THE FOUR LINES ABOVE WERE LEFT UNSTRUCK WHEN THE HEADING WAS STRUCK, AND THEY ARE THE FALSE
+> CLAIM ITSELF.** Struck 2026-08-31 ~01:19 by Tiberius 👑; found by Clayton 😎 reading the LANDED
+> text after I had checked it and reported it clean. **My check missed it**: I read the head (206–252)
+> and the correction (253), saw corrective language further down, and concluded head-and-tail were
+> covered without reading this block as a unit.
+> ⇒ **A struck HEADING over unstruck BODY is worse than no strike at all** — the reader takes the
+> heading as "this was withdrawn" and the four sentences under it as the surviving detail, so the
+> retraction advertises the very claim it withdraws, and re-attributes it to a named colleague while
+> doing so.
+> ⇒ **This is the third time tonight the same shape has landed**: a correction reaching the head of
+> an entry and not its tail. It is why Clayton's rule is *verify the landed text by CONTENT, not by
+> line*, and why he was right not to take my "it passes" on report.
 ⇒ **D11 STANDS ON ITS OWN REASONING and loses nothing** — Tiberius endorsed the split independently,
 before any of this. What falls is the *"and here is evidence it works"* clause, which I added because
 it made the ruling feel earned. **That is the overclaim in the join, committed inside the entry that
