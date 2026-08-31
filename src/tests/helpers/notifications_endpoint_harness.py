@@ -267,6 +267,31 @@ class ConfigStub:
         return self._values.get( key, default )
 
 
+class _StubConfigurationManager:
+    """
+    Stands in for a locally-constructed `ConfigurationManager`.
+
+    Four of the history handlers do NOT read `lupin_app.main.config_mgr` — they build
+    their own ConfigurationManager inside the function and ask it for the app timezone,
+    then serialise every timestamp through it. Left real, that reads the INI off disk
+    and makes assertions depend on whatever timezone the machine is configured for.
+
+    The default is UTC so a serialised timestamp is exactly reproducible. Set a
+    non-zero-offset zone when the claim is that a stamp was actually CONVERTED — under
+    UTC a converted and an unconverted stamp are the same string.
+    """
+
+    timezone_name = "UTC"
+
+    def __init__( self, *_args, **_kwargs ):
+        pass
+
+    def get( self, key, default=None, **_kwargs ):
+        if key == "app timezone":
+            return type( self ).timezone_name
+        return default
+
+
 class _DbSession:
     """A unique, inert stand-in for a SQLAlchemy session."""
 
@@ -311,6 +336,12 @@ class Harness:
         guard several endpoints carry.
         """
         self._state[ "user_id" ] = user_id
+        return self
+
+    # ── config ───────────────────────────────────────────────────────────────────
+    def set_app_timezone( self, timezone_name ):
+        """Set the timezone the locally-built ConfigurationManager reports (default UTC)."""
+        _StubConfigurationManager.timezone_name = timezone_name
         return self
 
     # ── db ───────────────────────────────────────────────────────────────────────
@@ -375,6 +406,13 @@ def build_harness( monkeypatch, strict_repo=True ):
 
     # ── the timestamp: fixed, so an envelope's value is assertable ───────────────
     monkeypatch.setattr( notif, "get_local_timestamp", lambda: FROZEN_TIMESTAMP )
+
+    # ── the OTHER config door: a locally-built ConfigurationManager ──────────────
+    # Patched on its DEFINING module, because the handlers import it inside the
+    # function body — patching the router's namespace leaves the real one running.
+    import cosa.config.configuration_manager as cfg_module
+    monkeypatch.setattr( cfg_module, "ConfigurationManager", _StubConfigurationManager )
+    monkeypatch.setattr( _StubConfigurationManager, "timezone_name", "UTC" )
 
     # ── the db seam ──────────────────────────────────────────────────────────────
     class _Ctx:
