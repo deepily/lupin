@@ -903,6 +903,36 @@ def test_every_red_that_withholds_the_recipe_also_carries_the_notice():
     promise    = "rotation hold below"
     first_line = ROTATION_HELD_NOTICE.strip().splitlines()[ 0 ].strip()
 
+    # 🔴 THE PROMISE MUST LIVE IN THE BLOCK, NOT MERELY SOMEWHERE IN THE MESSAGE.
+    # Clayton 😎's survivor 2 is what exposed this, though not the way either of us first read
+    # it. He measured that deleting "below" from the LEAD SENTENCE survives while deleting it
+    # from the WITHHELD BLOCK is killed, and read that as "the block's copy is pinned". I
+    # re-measured and he is right — arm 2 reddens, arm 1 does not — but the REASON is
+    # incidental, and that is the finding:
+    #
+    #   the block is pinned ONLY because the branch-triage message has no lead sentence, so
+    #   deleting the block's "below" leaves that message with no promise at all and trips the
+    #   membership check. Add a lead sentence to that red — an ordinary, improving edit — and
+    #   the block's promise silently becomes free in EVERY message.
+    #
+    # So the check below is scoped to the block itself. `promise in message` is satisfiable by
+    # any other sentence that happens to say the same words, which makes the guard's subject a
+    # coincidence of wording rather than the thing it means to protect.
+    #
+    # ⚠️ AND I AM NOT PINNING THE LEAD SENTENCE'S COPY. It is prose: dropping "below" there
+    # leaves "while the rotation hold stands", which is true, breaks no promise, and points at
+    # nothing it should not. Pinning it would be pinning WORDING, which is what Mr Radio ruled
+    # against for the notice — assert the wording and the test becomes churn at rotation for no
+    # safety. The block's copy is load-bearing because the block is what tells a reader to look
+    # DOWN; the lead sentence's copy is decoration that reads well.
+    with _hold( True ):
+        block = _clear_the_red_steps( _recorded_for_gate(), cu.get_project_root() )
+    assert promise in block.lower(), (
+        "the withheld block no longer says the hold is BELOW, so nothing in it points the "
+        "reader anywhere. Every check under this one asks whether the refusal is below a "
+        "promise; with no promise in the block they are satisfied by any sentence in the "
+        "message that happens to use the same words" )
+
     for name in sorted( reds ):
         message = rendered[ name ]
         assert promise in message.lower(), (
