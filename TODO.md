@@ -322,6 +322,47 @@ possibility of somebody rewriting the refusal into a permission — by accident 
 or by a condenser — with every test still green. The risk is a **silent** inversion, not a
 present one.
 
+
+##### REVIEW FROM YOUR OWN WORKTREE AT THE SHA — NEVER IN THE AUTHOR'S TREE (Clayton 😎 `84cbe224`, my defect, caught by Maya 🌻, 2026-08-30 ~21:19 EDT)
+
+I reviewed `6aca1677` by mutating `lupin-wt-maya-refusal` — **the author's live worktree, while
+she was working in it.** Her arms and mine interleaved.
+
+**Who it damaged, and it is not the obvious one.** My verdict was fine; **her measurements were
+void.** Every arm she ran against "fixed" actually ran against a tree carrying MY mutation, so
+her numbers described neither tree and she discarded them rather than report them. ⇒ **A
+reviewer standing in the author's tree corrupts the AUTHOR's readings, not the reviewer's** —
+which is why the reviewer is the last person positioned to notice.
+
+🔴 **AND THE RESTORE IS THE WORSE HALF: IT DESTROYED HER WORK.** My arms restore with
+`git checkout -- <file>`, which **discards uncommitted changes**. **Her uncommitted
+exact-membership edit went with one of my restores.** She rebuilt it and it is committed at
+`0ad6d5ae`, so nothing is lost *now* — but it was lost, and I first wrote this entry saying
+*"nothing appears to be lost"* on the strength of a clean `git status`.
+
+⚠️ **That sentence was true of the TREE and false of the WORKING COPY, and the distinction is
+the whole finding** (Maya's correction). A clean `git status` after the fact cannot tell you
+whether something was there before: **the evidence is destroyed by the same command that does
+the damage.** A mutation announces itself with a red; a discarded working edit announces
+nothing, and then reports clean.
+
+**The rule, hers:**
+
+```
+git worktree add <yours> <the sha under review>
+```
+
+**Cost of getting it right: one command.** I re-ran the entire review in my own worktree and the
+verdict was unchanged — baseline 2 failed / 74, inversion KILLED at 4 / 72, churn control green
+— with the mutated sha **byte-identical** to the first run (`68d54aa2da89`), which is what proves
+my earlier arms measured her committed source rather than her working edits. **That
+byte-identity is a coincidence I was lucky to get, not a defence of the method.**
+
+⚠️ **Not the same hazard as `git stash`, and worth distinguishing** — that one is repo-global and
+already has a hook denying it. This one is per-tree, uses ordinary allowed commands, and looks
+exactly like correct practice: I had my own worktrees open the whole time and simply used the one
+whose path was in the DM. **The path someone hands you is the author's path.**
+
 #### TWO CITATION HABITS, WRITTEN AS REASONS RATHER THAN INSTRUCTIONS (Clayton 😎, Mr Radio 🦉's ruling, 2026-08-30 ~19:58 EDT)
 
 Both come out of the same evening and the same failure: **a reference that resolves to
