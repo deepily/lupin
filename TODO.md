@@ -135,8 +135,12 @@ entries — one of them the manager's own.
   **one**. The other three are seats *discussing* it in DMs — including this author's own
   session, which matched only because Rachel sent me the id. ⇒ `grep '"toolUseID":"<id>"'`, not
   `grep '<id>'`. **Same rule as the straggler ledger's**: a HIT proves the string is present,
-  never that the event happened there; only the FIELD proves the event. **Confirmed
-  independently by Rachel 🕊️**, who measured the same 4-versus-1 split from her side.
+  never that the event happened there; only the FIELD proves the event. **Re-derived by Rachel 🕊️**
+  from this finding — her own correction: she was DOWNSTREAM of it, not beside it, so her
+  matching 4-versus-1 count is a verification and not a second sighting. ⚠️ **The two are worth
+  distinguishing and only a timestamp separates them**: an independent derivation is evidence
+  the finding is real, a re-derivation is evidence it was reported clearly. Calling the second
+  the first inflates a single measurement into two.
 
   ⇒ **THIRD INSTANCE OF ONE MECHANISM, NOT A NEW LESSON** (Mr Radio 🦉 made the connection).
   CLAUDE.md § *"IS ANOTHER SUITE RUNNING? — MATCH `comm`, NEVER THE COMMAND LINE"* already
