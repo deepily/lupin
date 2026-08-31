@@ -203,17 +203,6 @@ class TestWhatTheSecondRunCostsBesidesTheStamp:
     "Continue Session?" notification reads.
     """
 
-    @pytest.mark.xfail( strict=True,
-                        reason="row e9b78e51 — TWO DIFFERENT LINES, do not conflate them. The "
-                               "BUG is the wholesale write at register_session.py:2261 "
-                               "(listener_pid = _spawn_listener(...) -> _record_listener_pid), "
-                               "which erases every on-disk key main() does not carry. The FIX "
-                               "(option d, Rick's call) is authored at line 2061, by ADDING "
-                               "session_data = merged after merged = { **existing, **session_data }. "
-                               "It is an ADDED assignment, NOT a reordering of that merge: a swap "
-                               "changes precedence, rebinds nothing, and does not fire this marker "
-                               "(measured both ways). XPASS here means the fix landed and this test "
-                               "should become a plain assertion." )
     def test_an_on_disk_only_key_survives_the_next_session_start( self, monkeypatch, tmp_path ):
         seam = _seam( monkeypatch, tmp_path )
         bridge, field = _run_session_start( monkeypatch, seam )
@@ -227,11 +216,19 @@ class TestWhatTheSecondRunCostsBesidesTheStamp:
         assert SENTINEL_KEY    in after
         assert "session_topic" in after
 
-    def test_the_stamp_is_the_only_key_with_a_rescue( self, monkeypatch, tmp_path ):
+    def test_the_stamp_is_no_longer_the_only_key_with_a_rescue( self, monkeypatch, tmp_path ):
         """
-        The contrast that makes the class fix worth landing, kept as a REAL assertion
-        because it is true today and is meant to stay true: the stamp comes back only
-        because the narrow fix put it in session_data. Nothing rescues the rest.
+        Both the stamp and an unrelated on-disk key survive the next SessionStart, from
+        ONE mechanism rather than one rescue per field.
+
+        Keeping the stamp assertion beside the sentinel is deliberate: it proves the
+        class fix did not merely move the problem, and it fails loudly if a future
+        change starts rescuing fields one at a time again.
+
+        This test asserted the inverse before the rebind landed. That history is in the
+        commit that changed it (git log -p on this file), not restated here — Clayton 😎
+        on review: a defect written out in the docstring of a green test is read as
+        current behaviour by anyone who does not check the assertions underneath it.
         """
         seam = _seam( monkeypatch, tmp_path )
         bridge, field = _run_session_start( monkeypatch, seam )
@@ -240,5 +237,5 @@ class TestWhatTheSecondRunCostsBesidesTheStamp:
         _run_session_start( monkeypatch, seam )
         after = json.loads( bridge.read_text() )
 
-        assert field        in after, "the narrow fix rescued the stamp"
-        assert SENTINEL_KEY not in after, "nothing rescues an unrelated on-disk key"
+        assert field        in after, "the stamp survives"
+        assert SENTINEL_KEY in after, "and so does an unrelated on-disk key — the class fix"
