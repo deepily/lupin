@@ -1003,28 +1003,52 @@ serves the PREVIOUS arm's bytecode against the RESTORED source.
 | Rio ⚡ | `purge-pycache.sh`'s reconvert needs `$LUPIN_ROOT/.venv/bin/python`; **35 of the repo's 80 worktrees lack it**, so there a purge leaves the tree on timestamp invalidation |
 | Krishna 🦚 | corrected the first cut of this rule: **a harness that rebuilds its sandbox per arm is already isolated** and needs no purge |
 
-🔴 **WHY CONVERSION IS NOT ENOUGH — AND IT IS WORSE THAN "A MUTATION LOOP CREATES SOME."** Measured
-by Tiberius 👑 and Rachel 🕊️ independently, 2026-08-30, and this is the finding that reframes the
-whole section:
+🔴 **CORRECTED 2026-08-30, THE SAME EVENING IT WAS WRITTEN. "ONE PYTEST RUN UNDOES THE CONVERSION"
+IS FALSE — THE REAL HAZARD IS A TREE THAT WAS NEVER CONVERTED.** Four seats measured this from four
+directions and the reconciliation is the useful part: **a conversion STICKS; what does not exist
+cannot stick.**
 
-```
-fresh worktree                  --verify  ->  exit 0   (clean, every pyc checked-hash)
-…one ORDINARY pytest run…
-same worktree                   --verify  ->  exit 1   (timestamp pycs present)
-```
+**Maya 🌻 disproved the original claim** with a probe module and a two-directional negative control —
+a real source module, imported by a real pytest run, then mutated same-size with mtime restored so
+neither size nor whole-second mtime moves:
 
-**One normal test run undoes the conversion.** Not a mutation harness, not a purge, not anything
-exotic — the first ordinary use of any new worktree. A pyc written where none existed is
-timestamp-based, a fresh worktree starts with no `__pycache__`, and a test run writes hundreds.
+| | |
+|---|---|
+| source pyc after convert | checked-hash |
+| source pyc **after an ordinary pytest run** | **checked-hash — UNCHANGED** |
+| convert → pytest → mutate → fresh import | **returns the mutated value — protection HOLDS** |
+| negative control on a timestamp pyc | serves **stale** bytecode — so the probe *can* see the failure |
 
-⇒ **Every seat that has ever run a test in a fresh worktree has been sitting on an unconverted tree
-ever since, with nothing in any output saying so.** The repo-wide conversion ratified in `866f43ce`
-holds for the main checkout and is **undone in a worktree by that worktree's first test run** — which
-is where this fleet does its mutation work.
+**Pytest's rewriting is a DISJOINT set**, which is what made two honest counts look contradictory:
+it writes `…cpython-313-pytest-8.4.2.pyc`, which never replaces `…cpython-313.pyc` and is not read on
+a normal import. One seat counted the population that matters for mutation and found it unchanged;
+another counted a set that starts empty and grows. **Both were right.**
 
-⇒ **`--verify` exiting 0 before a pass says nothing about the pycs the pass creates**, and — the
-stronger form — **a tree that verified clean this morning is not clean now if anyone has run a test
-in it since.** Re-verify immediately before you rely on it, never once per tree.
+**And yet Clayton 😎 and Tiberius 👑 really did see a fresh worktree go `--verify` 0 → 1 after one
+ordinary run**, with `src/scripts/__pycache__/bounce_dev_warn.cpython-313.pyc` heading the offender
+list. Not a contradiction — **their trees had never been converted.** Measured across three real
+trees the same night, `src/` only, `cpython-313` normal-import pycs, vendored trees excluded:
+
+| tree | checked-hash | TIMESTAMP |
+|---|---|---|
+| **main checkout** (converted with `-f`) | **2452** | **0** |
+| a converted worktree | 2434 | 1 |
+| **an unconverted worktree** | **0** | **724** |
+
+⇒ **A BRAND-NEW WORKTREE IS NEVER CONVERTED, AND ITS CLEAN VERIFY IS VACUOUS.** It has no
+`__pycache__`, so `--verify` passes because **there was nothing to judge**; the first run then writes
+timestamp pycs, since a pyc written where none existed has no mode to inherit. That is the state a
+mutation pass then measures in — and it is why *"I verified, then mutated"* protected nobody.
+
+⇒ **CONVERT A NEW WORKTREE BEFORE YOU TRUST IT.** Use it once, then run
+`src/scripts/purge-pycache.sh` (purge **and** reconvert), *then* verify. A verify on an unused tree is
+not evidence.
+
+⇒ **A clean verify in the MAIN repo says nothing about your worktree** — the verifier scans
+`$LUPIN_ROOT/src`, not where you stand. See the wrong-tree section below.
+
+⚠️ **STILL EXPOSED, unchanged**: editing a **TEST** file inside a test. Use
+`tests.helpers.pyc_freshness` there.
 
 ⚠️ **Do not count `.pyc` files to check this** — Tiberius tried and corrected himself: the count
 moves for ordinary reasons and tells you nothing about invalidation mode. **The verify status flip
