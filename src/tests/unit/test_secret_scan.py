@@ -787,14 +787,34 @@ def test_the_refusal_markers_are_themselves_pinned():
     inverted, since the anchor there was derived from the constant it was checking. Two
     independent spellings can disagree; one spelling read twice cannot.
     """
-    assert "DO NOT CLEAR THIS RED BY RECORDING A SCAN" in REFUSAL_MARKERS, (
-        "the refusal's imperative is no longer among the pinned markers — the guard has been "
-        "narrowed, and a narrowed guard passes everything it stopped looking at" )
-    assert "is REFUSED until rotation lands" in REFUSAL_MARKERS, (
-        "the refusal's verdict is no longer among the pinned markers" )
-    assert len( REFUSAL_MARKERS ) >= 2, (
-        f"REFUSAL_MARKERS is down to {len( REFUSAL_MARKERS )} entr(y/ies). Adding a marker is "
-        "fine; removing one silently shrinks what 'still refuses' means" )
+    # 🔴 EXACT MEMBERSHIP AND COUNT — Mr Radio 🦉's ruling, tightening my first cut, and the
+    # reason generalises past this tuple: **a presence-check over a list is satisfied by
+    # SHORTENING the list.** My first version asserted each expected marker was `in` the tuple
+    # plus `len >= 2`. That catches a removal only because I happened to name both survivors,
+    # and says nothing about a tuple that GROWS an entry nothing checks — which reads as
+    # coverage the guard does not have.
+    #
+    # It is the fixture-that-cannot-discriminate class from CLAUDE.md, arriving on a yardstick
+    # rather than on a test: if two quantities can be exchanged without changing the expected
+    # output, the check asserts their SUM and not their identity, whatever it is named. A set
+    # comparison discriminates where a membership loop cannot.
+    #
+    # ⚠️ THE LITERALS ARE SPELLED A SECOND TIME ON PURPOSE. Deriving `expected` from
+    # REFUSAL_MARKERS rebuilds the tautology this branch exists to remove — it is exactly how
+    # the notice became invertible: an anchor derived from the thing it checks.
+    expected = {
+        "DO NOT CLEAR THIS RED BY RECORDING A SCAN",
+        "is REFUSED until rotation lands",
+    }
+    assert set( REFUSAL_MARKERS ) == expected, (
+        f"REFUSAL_MARKERS is not the pinned set. missing={sorted( expected - set( REFUSAL_MARKERS ) )} "
+        f"unexpected={sorted( set( REFUSAL_MARKERS ) - expected )}. A marker REMOVED narrows what "
+        "'still refuses' means; a marker ADDED that nothing checks reads as coverage this guard "
+        "does not have. Change the set here and there deliberately, in one edit" )
+    assert len( REFUSAL_MARKERS ) == len( expected ), (
+        f"REFUSAL_MARKERS has {len( REFUSAL_MARKERS )} entries against {len( expected )} pinned. "
+        "The set comparison above is blind to a DUPLICATE, which would make a two-marker guard "
+        "read as though it checked more than it does" )
 
 
 def test_the_rescan_red_still_carries_the_two_shas_that_make_it_actionable():
