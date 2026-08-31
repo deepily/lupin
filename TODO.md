@@ -257,13 +257,18 @@ cause was **the REVIEW WORKTREE having been built at a superseded sha** — the 
 not a coordinate she was handed. Different mechanism, and my remedy was aimed at the wrong one.
 ⇒ **Three framings of one event inside ten minutes**, each stated as fact: a real defect · a stale
 memento sha · the actual cause. **Only the third was measured, and by somebody else both times.**
-**REMEDY (D10) — against the cause that was measured**: when creating a review worktree, record the
-sha it was built at, and before reporting a finding re-derive the branch tip and compare.
-`git -C <review-worktree> rev-parse HEAD` against `git rev-parse <branch>`. **FAILS IF** they differ
-and the finding is reported anyway.
-⚠️ **UNENDORSED AS OF THIS WRITING**: Clayton has asked to review D11 before endorsing it, on the
-grounds that a remedy must name an ACTION. **Do not read this entry as ratified** — the ruling has
-Tiberius 👑's agreement on the split itself and does not yet have Clayton's on the form.
+🔴 **WITHDRAWN — a second copy of the failed Remedy 2 stood here, unmarked, after I had already
+struck it above. Caught by Clayton 😎.** The text was: *"record the sha the review worktree was
+built at, and before reporting a finding re-derive the branch tip and compare —
+`git -C <review-worktree> rev-parse HEAD` against `git rev-parse <branch>`, FAILS IF they differ."*
+**It fires on EVERY review**, because a review worktree differing from the tip is the normal state.
+⇒ **My retraction reached the head of this entry and not its tail.** *A retraction must reach the
+artifact, not just the conversation* — and when the claim appears twice, reaching one copy is
+reaching the conversation. **Grep for the withdrawn text before believing a withdrawal has landed.**
+✅ **The live remedy is the one at the head of this entry**: compare the tip FOR THE FILE UNDER
+REVIEW — `git log --oneline -1 <branch> -- <path>` against your worktree's sha.
+✅ **ENDORSED ON THE SPLIT** by Clayton 😎, 2026-08-31 ~01:06, with both of my original remedies
+refused and replaced. The earlier "UNENDORSED" note that stood here is superseded.
 
 **D9 — the run's signature was TEN REFUSALS, not the defects.** Five seats refused a leading
 question; three refused the sharpened rule I drew from them, including the versions that flattered
