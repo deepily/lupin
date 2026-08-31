@@ -919,12 +919,16 @@ def test_every_red_that_withholds_the_recipe_also_carries_the_notice():
     # any other sentence that happens to say the same words, which makes the guard's subject a
     # coincidence of wording rather than the thing it means to protect.
     #
-    # ⚠️ AND I AM NOT PINNING THE LEAD SENTENCE'S COPY. It is prose: dropping "below" there
-    # leaves "while the rotation hold stands", which is true, breaks no promise, and points at
-    # nothing it should not. Pinning it would be pinning WORDING, which is what Mr Radio ruled
-    # against for the notice — assert the wording and the test becomes churn at rotation for no
-    # safety. The block's copy is load-bearing because the block is what tells a reader to look
-    # DOWN; the lead sentence's copy is decoration that reads well.
+    # ⚠️ THE LEAD SENTENCE'S OWN COPY STAYS UNPINNED — right call, WRONG REASON, and Clayton
+    # 😎 replaced the reason on review. I declined on the ground that it is prose carrying no
+    # contract. It is not decoration: it is a DECOY. `promise in message` reads the whole
+    # message, so the lead sentence's copy is what keeps that check GREEN when the block's copy
+    # is gone — load-bearing in the test while reading as ornament in the file.
+    #
+    # ⇒ So the answer was never to pin the prose. It is to stop the guard READING the prose:
+    #   the assert below asks the block itself, and the one at the top of the loop binds that
+    #   block to the message. Pinning the wording would have been churn at rotation AND would
+    #   have left the decoy doing its work.
     with _hold( True ):
         block = _clear_the_red_steps( _recorded_for_gate(), cu.get_project_root() )
     assert promise in block.lower(), (
@@ -935,6 +939,23 @@ def test_every_red_that_withholds_the_recipe_also_carries_the_notice():
 
     for name in sorted( reds ):
         message = rendered[ name ]
+
+        # 🔴 BIND THE BLOCK TO THE MESSAGE FIRST — Clayton 😎, reviewing 0cf9fdd5, and it is
+        # the mirror of the hole that commit closed. My block-scoped assert above reads the
+        # block from the HELPER; every check below reads the MESSAGE as text. Nothing bound
+        # the two, so a red could stop rendering the block ENTIRELY and stay green: he
+        # dropped `{steps}` from the rescan message and got 2 failed / 73 passed, because
+        # `promise` was satisfied by the lead sentence, `first_line` by the notice at the
+        # end, and the position check compared two things that were both still there. **The
+        # whole guard passed a message that no longer withheld anything.**
+        #
+        # ⚠️ FIRST IN THE BODY, NOT AFTER THE PROMISE CHECK. An assert behind one that is
+        # already failing is carried, not exercised, and the failing SET reads identically
+        # either way — this file has been bitten by that once already.
+        assert block in message, (
+            f"{name} does not print the withheld block at all. Every check below reads the "
+            "message for the block's WORDS, which any other sentence can supply" )
+
         assert promise in message.lower(), (
             f"{name} no longer prints the withheld block. If that is deliberate this guard "
             "should go with it; if not, the hold stopped being visible where somebody reads it" )
