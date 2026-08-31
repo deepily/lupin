@@ -393,6 +393,14 @@ def build_harness( monkeypatch, strict_repo=True ):
     ws     = Spy( "ws",    lenient=True )
     config = ConfigStub()
 
+    # The notify path reads three DICTS off the websocket manager for its offline
+    # diagnostics, not methods. Real attributes are set here so an attribute access
+    # finds a mapping instead of falling through to the recorder factory, which would
+    # hand back a function and blow up on `.get(...)`.
+    ws.user_sessions      = {}
+    ws.active_connections = {}
+    ws.user_to_email      = {}
+
     sessions      = []
     repo_built_on = []
 
