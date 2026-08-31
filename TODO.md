@@ -694,6 +694,53 @@ Rick lifts the moratorium; nothing else about them changes.**
 
 ⚠️ **`866f43ce` carried a `[default used] no` from an earlier timed-out ask.** Rick's keypress is the opposite answer. Both are on the row and labelled — a row with two contradictory answers and no provenance is worse than a row with none.
 
+## 📐 FINDINGS 2026-08-30 (Chloé 🗼 `d9944608`, census seat; reviewers Rachel 🕊️ `c93013ad` · Clayton 😎 · Mr Radio 🦉) — four, from one unit-tier census at `5506e9a4`
+
+**The census itself** — `703` files, `71,600` statements, `21,104` branches, **73.14%**, `46` files at 0%, largest gap
+`src/cosa/rest/routers/notifications.py` (979 stmts, 45.13%, 670 uncovered). Frame verified complete by Rachel against
+pyproject's seven roots. 🔴 **UNIT TIER ALONE — not comparable to the 95.14% branch figure**, which is unit AND cosa
+appended to one data file. Do not read the difference as a regression.
+
+### 1. THE SANCTIONED COVERAGE PATH PRINTS "THIS RUN MEASURED NOTHING YOU CAN CITE" ON EVERY RED TIER — AND IT IS FALSE
+Found by **Rachel 🕊️**, who nearly declined this census on it; mechanism read from source afterwards.
+`_warn_if_coverage_went_blind` (`src/scripts/lib/pytest-with-diagnosis.sh`) fires on **coverage-requested AND non-zero
+exit AND no table in the output**. `coverage-opt-in.sh` emits an **empty `--cov-report=` on purpose**, because
+`run-coverage-gate.sh` renders later from the data file. ⇒ **The table is never present on the sanctioned path, so our
+own runner guarantees the trigger.** Measured: the run that printed it wrote **3.9 MB** of coverage data.
+Rachel's form is *absent TABLE is not absent DATA*; the sharpening is that **on this path an absent table is the
+CONTRACT**, so this is the default case and not an edge one. Row `f8e5215b`.
+⚠️ **Against the author**: I saw this banner on my first run, recognised it was false because the data file existed, and
+reported anyway without flagging it. **Seeing a false alarm and staying quiet is worse than missing it** — a reviewer
+then spent her credibility declining a census on an alarm I had already dismissed in private.
+
+### 2. THE CONTENTION GUARD CHECKS ONCE, AT START — SO A LONG CENSUS HAS A BLIND WINDOW ITS OWN LENGTH
+`guard_contended_coverage` runs at the top of `run_pytest_with_diagnosis`, before pytest starts. A peer arriving later is
+invisible to it. **Measured**: my run began on a verified-clear box and a peer landed **90 seconds in**; across 13
+one-minute samples, **9 peer processes** appeared and the gate saw **none** of them.
+⚠️ **A shape hypothesis was raised and REFUTED, and is recorded so nobody re-files it**: the intruder is *not* invisible
+for want of a pytest token — `looks_like_pytest()` returns **True** on its exact command line, machine-extracted from the
+log rather than retyped. **Timing is the cause. There is no known shape gap.**
+
+### 3. "SUBTRACT THE UNFIXABLE WORKTREE FAILURES" IS RIGHT FOR A PASS/FAIL TIER AND WRONG FOR A COVERAGE CENSUS
+**Rachel 🕊️'s.** CLAUDE.md gives that advice unqualified, in a section written for tier runs. For coverage, a failure
+means **lines that never executed**, so subtracting removes the test from the count and leaves the hole in the numerator.
+⇒ **Copy the gitignored inputs in instead** — `src/scripts/cloud-run.env` and `src/terraform/envs/test/.terraform/providers`
+— and **verify by md5 and by file-count+bytes, never by `cp` exiting zero**. Done here: 0 flash-lite/vertex/terraform
+failures in the run, against the 9–10 a bare worktree manufactures.
+
+### 4. A COUNT ANSWERS HOW MANY AND CAN NEVER ANSWER WHOSE — THIRD INSTANCE OF ONE MECHANISM
+**Rachel 🕊️'s formulation**, and my failure supplied the instance. I recorded `ps … | wc -l` = 3 during a run, inferred
+peers, and had to retract: **109 files under `src/tests/unit/` spawn pytest subprocesses** (one spawns a pytest *to test
+the contention guard*), so 3 is consistent with zero peers — and the command lines were gone, so the observation was
+**unrecoverable**. Log `ps -eo pid,ppid,comm,etime,args`; **`ppid` decides ownership at the moment of observation**.
+⇒ Same mechanism as `pgrep -f pytest` matching seats that merely *discuss* pytest, and a bare tool id matching
+transcripts that merely *quote* it. **The cheap aggregate discards the field that identifies the owner, and the loss is
+silent and unrecoverable.**
+
+⚠️ **A fresh worktree is born TIMESTAMP-based** — a pyc written where none exists has no mode to inherit. So a new
+worktree is a **fourth** drift path alongside a new file, a purged cache, and a first import. Run
+`src/scripts/purge-pycache.sh` in any new worktree **before** mutating in it.
+
 ## 📨 FINDING 2026-08-30 (Clayton 😎 `1bfda44e`, with Chloé 🗼) — THE CONDENSER FIX **IS** LANDED, AND IT CANNOT SEE ANY OF TONIGHT'S FOUR INVERSIONS
 
 **Verified, because a DM said the opposite.** A condensed DM reported *"the condenser fix is not
