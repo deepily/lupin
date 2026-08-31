@@ -164,9 +164,19 @@ services:
         target: /var/external-projects/planning-is-prompting
         read_only: true
         bind: { create_host_path: false }
+      # skills-distillation is NOT on this VM — measured 2026-08-31 over IAP: absent
+      # from /mnt/lupin-data/google/, which is exactly what stopped the container
+      # starting (create_host_path: false, working as designed). Bind removed; the
+      # scope is recorded in KNOWN_ABSENT instead. Restore both together if it is
+      # ever cloned there. The two weil-* repos below WERE measured present.
       - type: bind
-        source: /mnt/lupin-data/google/skills-distillation
-        target: /var/external-projects/google/skills-distillation
+        source: /mnt/lupin-data/google/weil-parallel-search
+        target: /var/external-projects/google/weil-parallel-search
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: /mnt/lupin-data/google/weil-nda-drafting-suite
+        target: /var/external-projects/google/weil-nda-drafting-suite
         read_only: true
         bind: { create_host_path: false }
       - type: bind
