@@ -471,6 +471,12 @@ def test_both_upserts_CONVERGE_the_credential_columns_rather_than_DO_NOTHING( wi
 
     assert "ON CONFLICT ( id ) DO UPDATE SET" in sql, \
         "DO NOTHING freezes the test row at its first value — the 2026-08-19 defect"
+    # Split the SET clause into whole assignments and compare each EXACTLY. A substring
+    # check cannot do this job: "EXCLUDED.email" sits inside "EXCLUDED.email_verified",
+    # so dropping the email assignment survives one, and so does pointing it at any
+    # source column whose name STARTS WITH the right one.
+    set_clause  = " ".join( sql.split() ).split( "DO UPDATE SET ", 1 )[ 1 ]
+    assignments = { a.strip() for a in set_clause.split( "RETURNING" )[ 0 ].split( "," ) }
     for column in columns:
-        assert f"{column}" in sql and f"EXCLUDED.{column}" in sql, \
+        assert f"{column} = EXCLUDED.{column}" in assignments, \
             f"'{column}' is never refreshed from dev, so a rotated value cannot reach test"
