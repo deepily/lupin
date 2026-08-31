@@ -135,7 +135,18 @@ entries — one of them the manager's own.
   **one**. The other three are seats *discussing* it in DMs — including this author's own
   session, which matched only because Rachel sent me the id. ⇒ `grep '"toolUseID":"<id>"'`, not
   `grep '<id>'`. **Same rule as the straggler ledger's**: a HIT proves the string is present,
-  never that the event happened there; only the FIELD proves the event.
+  never that the event happened there; only the FIELD proves the event. **Confirmed
+  independently by Rachel 🕊️**, who measured the same 4-versus-1 split from her side.
+
+  ⇒ **THIRD INSTANCE OF ONE MECHANISM, NOT A NEW LESSON** (Mr Radio 🦉 made the connection).
+  CLAUDE.md § *"IS ANOTHER SUITE RUNNING? — MATCH `comm`, NEVER THE COMMAND LINE"* already
+  records it from the process side: `pgrep -f pytest` matched three live seats whose **spawn
+  briefings merely discussed testing**, and its closing line is the general form — *"grep for a
+  tool name and you will find every seat that was told about the tool."* **Transcripts are the
+  same surface.** A fleet that coordinates in writing puts its identifiers into everyone's text,
+  so **the more the crew discusses a thing, the more false positives a text search for it
+  returns** — the corpus pollutes itself by talking, and the pollution grows with the
+  coordination. ⇒ Key on a STRUCTURED field (`comm`, `"toolUseID":`), never the free text.
 
   ⇒ **I diagnosed a discipline failure where
   the documentation already described a known, unclosable gap — the second time tonight I
