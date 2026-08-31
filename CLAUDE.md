@@ -327,6 +327,43 @@ find . -name ".git" -type d | grep -v "^./.git$"
 - Manage as independent project
 - Has own git history and workflows
 
+## 🔴 A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED
+
+**Five instances in one evening, 2026-08-30, in five different tools.** Written as one rule because
+five seats each found it separately and none of them recognised it as the same shape until they were
+put side by side.
+
+| tool | the clean-looking result | what it actually meant |
+|---|---|---|
+| `--cov=<bad target>` | exit 0, no coverage table | **nothing was ever measured** |
+| `migrate-pyc…--verify` on a fresh tree | exit 0, ✓ | **nothing there to judge** — vacuous, not converted |
+| `purge-pycache.sh --verify` | exit 0 | **flag ignored**, and it purged |
+| `purge-pycache.sh` on an emptied tree | exit 0, *"nothing to purge"* | **it never ran** — the previous command had emptied it |
+| `rc == 1` as a mutation kill | looks like a kill | the suite was **already red** at baseline |
+
+⇒ **THE FAILURE AND THE SUCCESS PRINT THE SAME THING.** In every case the caller checked the exit
+code, saw what they expected, and carried a conclusion forward that the tool had never supported.
+
+**The discriminator is never the exit code — it is the tool's own account of what it touched:**
+
+| ask | not |
+|---|---|
+| does the coverage table list the file? | did it exit 0? |
+| does the verify name **your** tree in *scanned roots*? | did it print ✓? |
+| does the purge report a **count** matching what you planted? | did it say nothing to purge? |
+| did a **named test that was passing** now fail? | is `rc` non-zero? |
+
+⚠️ **THE SECOND-RUN TRAP, and it is the one that nearly published a wrong result** (Rachel 🕊️): she
+ran arm B of a two-arm comparison *after* arm A had already emptied the tree. It printed **"nothing
+to purge"** and **exited 0**, and the check afterwards then failed — reading exactly like *arm B does
+not work* when arm B **had not run at all**. She caught it because the phrase did not match a tree she
+had just populated by hand.
+
+⇒ **In a two-arm comparison, each arm needs its own freshly built state**, and **read the tool's
+narration, not just its status.** An arm that no-ops because the previous arm consumed its input is
+indistinguishable from an arm that failed — and it is the second arm, the one you are testing, that
+gets the blame.
+
 ## 🔴 THE OVERCLAIM HIDES IN THE **JOIN**, AND GREP CANNOT FIND IT
 
 **Three seats produced this independently on 2026-08-30**, which is why it is a rule and not a note
