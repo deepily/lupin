@@ -726,6 +726,7 @@ class TestSoftGuardTitle:
             "original_length"       : 90,
             "cap"                   : rules.TITLE_SOFT_CAP,
             "overflow_moved_to_body": True,
+            "lost_tail"             : title[ rules.TITLE_SOFT_CAP: ],
         }
 
     @pytest.mark.parametrize( "blank_body", [ None, "", "   ", "\n\t " ] )
@@ -737,7 +738,7 @@ class TestSoftGuardTitle:
         assert new_body  == title[ rules.TITLE_SOFT_CAP: ]
         assert advisory[ "overflow_moved_to_body" ] is True
 
-    def test_over_cap_nonempty_body_RELOCATES_overflow_above_the_body( self ):
+    def test_over_cap_nonempty_body_RELOCATES_overflow_BELOW_the_body( self ):
         # bug 28fc1fb4. This test previously asserted the DEFECT as correct: it
         # required new_body == body and overflow_moved_to_body == False — i.e. it
         # pinned the silent discard in place and went green on every run. The
@@ -749,7 +750,7 @@ class TestSoftGuardTitle:
 
         assert new_title == title[ :rules.TITLE_SOFT_CAP ]
         assert body in new_body                                  # still never clobbered...
-        assert new_body.endswith( body )                         # ...and still last, verbatim
+        assert new_body.startswith( body )                       # ...and now FIRST, verbatim
         assert rules.TITLE_OVERFLOW_MARKER in new_body           # findable by grep, store-wide
         assert title[ rules.TITLE_SOFT_CAP: ] in new_body        # the overflow SURVIVED
         assert advisory == {
@@ -757,6 +758,7 @@ class TestSoftGuardTitle:
             "original_length"       : 75,
             "cap"                   : rules.TITLE_SOFT_CAP,
             "overflow_moved_to_body": True,
+            "lost_tail"             : title[ rules.TITLE_SOFT_CAP: ],
         }
 
     def test_over_cap_nonempty_body_ROUND_TRIPS_the_original_title_exactly( self ):
@@ -773,10 +775,114 @@ class TestSoftGuardTitle:
         body  = "pre-existing body text\nwith a second line"
         new_title, new_body, _ = rules.soft_guard_title( title, body )
 
-        marker_line, overflow_line, _blank, *rest = new_body.split( "\n" )
+        *rest, marker_line, overflow_line = new_body.split( "\n" )
         assert marker_line == rules.TITLE_OVERFLOW_MARKER
         assert new_title + overflow_line == title                # EXACT reconstruction
-        assert "\n".join( rest ) == body                         # the body, verbatim, intact
+        assert "\n".join( rest ).rstrip( "\n" ) == body           # the body, verbatim, intact
+
+    def test_the_bodys_own_first_line_is_still_the_first_line( self ):
+        """
+        THE GUARANTEE THIS CHANGE EXISTS FOR (row a6cb24e8).
+
+        Prepending was permitted by the ruling — it is not clobbering — but it cost
+        the body its opening line, which is the part a reader sees first. Appending
+        satisfies the same ruling and keeps it.
+        """
+        title = "Q" * 75
+        body  = "THE REAL OPENING LINE\nand a second line"
+        _new_title, new_body, _advisory = rules.soft_guard_title( title, body )
+
+        assert new_body.split( "\n" )[ 0 ] == "THE REAL OPENING LINE"
+
+    def test_a_second_trim_does_not_bury_the_body_under_stacked_banners( self ):
+        """
+        The compounding half, reproduced by Tiberius 👑 and Maya 🌻 independently:
+        a RETITLE that is also over the cap used to prepend a SECOND marker above
+        the first, so the body's head was corrupted once per retitle attempt and
+        both banners had to be unpicked by hand.
+
+        Appending makes repeated trims collect at the FOOT in the order they
+        happened — a readable history rather than a corrupted head.
+        """
+        body                = "THE REAL OPENING LINE"
+        _t1, after_first, _ = rules.soft_guard_title( "A" * 75, body )
+        _t2, after_second, _ = rules.soft_guard_title( "B" * 75, after_first )
+
+        assert after_second.split( "\n" )[ 0 ] == "THE REAL OPENING LINE"
+        assert after_second.count( rules.TITLE_OVERFLOW_MARKER ) == 2   # both kept...
+        assert after_second.index( "A" * 15 ) < after_second.index( "B" * 15 )  # ...in order
+
+    def test_the_advisory_shows_the_WORDS_that_were_cut_not_just_a_count( self ):
+        """
+        Row a6cb24e8. The advisory used to report only `original_length`, so a writer
+        had to reconstruct what was cut from a number. Seven titles lost their
+        qualifier in one night and nobody noticed — including three seats who had
+        this advisory in hand and skimmed past it.
+
+        `original_length: 106` is a fact about a string. "by design" is the claim you
+        just deleted. This asserts the advisory carries the TEXT.
+
+        Advisory ONLY: it changes nothing stored, rejects nothing, and leaves both the
+        fail-open ruling and the exact-reconstruction guarantee untouched — which is
+        why this half needed no ruling while the cap itself does.
+        """
+        # The REAL title of row 675e44f9, verbatim — 106 chars, and the qualifier
+        # "by design" is genuinely inside the cut portion. My first draft of this
+        # test used a 63-char stand-in whose whole tail was "ign", so it could not
+        # have shown the qualifier no matter what the code did: a fixture that
+        # cannot demonstrate the thing its own name claims. Caught by running it.
+        title = ( "[LUPIN] add_synonym() hits the same empty-vector wall — "
+                  "EmbeddingManager returns [] on API error by design" )
+        assert len( title ) == 106                            # the fixture's own premise
+        _new_title, _new_body, advisory = rules.soft_guard_title( title, "a body" )
+
+        assert advisory[ "lost_tail" ] == title[ rules.TITLE_SOFT_CAP: ]
+        assert "by design" in advisory[ "lost_tail" ]       # the QUALIFIER, in the advisory
+        assert "by design" not in _new_title                # ...and gone from the title
+        assert _new_title + advisory[ "lost_tail" ] == title   # and it still round-trips
+
+    def test_an_under_cap_title_gets_no_advisory_at_all( self ):
+        """
+        The negative control. A normal title must not acquire a `lost_tail` — or any
+        advisory — so a reader who sees the field knows something was genuinely cut.
+        """
+        assert rules.soft_guard_title( "a short title", "a body" ) == ( "a short title", "a body", None )
+
+    def test_title_may_be_trimmed_flags_exactly_what_the_guard_cut( self ):
+        """
+        Row a6cb24e8. Whatever soft_guard_title trims, this predicate must flag — it is
+        the reader-side half, and the two must agree by construction or the flag is
+        decoration. Driven from the guard's OWN output rather than from a hand-written
+        60-char string, so the pair cannot drift apart.
+        """
+        for original in ( "Z" * 61, "Z" * 90, "Q" * 200 ):
+            stored, _body, advisory = rules.soft_guard_title( original, "a body" )
+            assert advisory[ "trimmed" ] is True
+            assert rules.title_may_be_trimmed( stored ) is True
+
+    def test_title_may_be_trimmed_is_silent_on_a_short_title( self ):
+        """
+        The negative control, and it is the one that makes the flag mean something: a
+        flag that is True on every row is not a flag. Driven from the guard's own
+        no-op arm.
+        """
+        for original in ( "", "a", "Z" * 59 ):
+            stored, body, advisory = rules.soft_guard_title( original, "a body" ) if original else ( original, "a body", None )
+            assert advisory is None
+            assert rules.title_may_be_trimmed( stored ) is False
+
+    def test_title_may_be_trimmed_OVER_reports_and_that_is_the_chosen_direction( self ):
+        """
+        The honest limitation, asserted rather than only documented. The predicate is
+        length-only, so a title that is NATURALLY exactly at the cap reports True.
+
+        That is deliberate and the directions are not symmetric: a false positive costs
+        a reader one look at a body with nothing missing; a false negative IS the defect
+        this exists to surface. Erring the other way needs a stored flag and a migration.
+        """
+        natural = "N" * rules.TITLE_SOFT_CAP
+        assert rules.soft_guard_title( natural, "a body" )[ 2 ] is None   # never trimmed...
+        assert rules.title_may_be_trimmed( natural ) is True              # ...and still flagged
 
     def test_custom_cap_is_honored( self ):
         # The cap is parameterizable — proves the guard is not hard-wired to 60.

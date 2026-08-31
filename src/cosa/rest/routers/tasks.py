@@ -384,6 +384,21 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
     precisely why the NEXT orphan also gets found by accident. `project` is a short string; adding
     it makes the check habitual instead of heroic.
 
+    `title_trimmed` rides here on the SAME argument again, and it is the fourth
+    application of it rather than a new policy (row a6cb24e8, 2026-08-31). The store
+    trims a title at 60 chars and files the tail into `body` — and THIS projection
+    drops `body`. So on the one surface where a reader meets a title alone, the
+    recovered tail is invisible, and the trim leaves no ellipsis or any other mark:
+    a truncated title simply stops, indistinguishable from a short one. Rio ⚡
+    measured a live P1 whose 60-char title asserts a diagnosis the row's own
+    amendment retracts — a board glance returns a claim the row disproves.
+
+    ⚠️ IT OVER-REPORTS BY CONSTRUCTION, and that is the deliberate direction. The
+    predicate is length-only, so a title that is NATURALLY exactly 60 chars reports
+    True. A false positive costs a reader one look at a body with nothing missing;
+    a false negative is the defect this exists to surface. Erring the other way
+    would need a stored flag and a migration — worth doing, and not this change.
+
     `blocker_terminal` rides here on the SAME argument, and the argument is stronger:
     blocked rows are EXCLUDED from the workable-now count by design, so a stranded row
     is invisible in exactly the way a finished row is — it costs nothing to look at and
@@ -403,6 +418,9 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
           two projections can never disagree about staleness
         - blocker_terminal is likewise DERIVED and ADVISORY, computed by the same
           predicate as the full shape's, for the same reason
+        - title_trimmed is DERIVED and ADVISORY: True when the title is exactly at
+          the soft cap, which every trimmed title is. It over-reports on a natural
+          cap-length title and never under-reports
     """
     return {
         "id"                : str( item.id ),
@@ -415,6 +433,7 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
         # body_changed_ts, matching _serialize_item — see the note there (54924128).
         "park_reason_stale" : park_reason_is_stale( item.status, item.park_reason_captured_at, item.body_changed_ts ),
         "blocker_terminal"  : blocker_is_terminal( item.status, item.blocked_by, blocker_statuses or { } ),
+        "title_trimmed"     : rules.title_may_be_trimmed( item.title ),
     }
 
 

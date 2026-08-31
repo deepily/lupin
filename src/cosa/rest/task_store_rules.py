@@ -939,6 +939,55 @@ TITLE_SOFT_CAP = 60
 TITLE_OVERFLOW_MARKER = "[title overflow — the stored title was trimmed at the cap; the original continues here]"
 
 
+def title_may_be_trimmed( title, cap=TITLE_SOFT_CAP ):
+    """
+    Advisory predicate: does this stored title look like one soft_guard_title cut?
+
+    THE GAP THIS FILLS (row a6cb24e8, 2026-08-31). soft_guard_title relocates the
+    tail into `body` and never loses it — but `_serialize_item_terse` DROPS `body`,
+    and terse is the mandated shape for a board glance. So on the one surface where
+    a reader meets a title alone, the recovered tail is invisible. Worse, the trim
+    leaves no mark: a truncated title simply stops, indistinguishable from a short
+    one, so nothing prompts a reader to go looking for a body they were not sent.
+    Rio ⚡ measured a live P1 whose 60-char title asserts a diagnosis the row's own
+    amendment retracts.
+
+    ⚠️ IT OVER-REPORTS, DELIBERATELY. soft_guard_title trims to EXACTLY cap, so
+    every trimmed title satisfies this — but so does a title that happens to be
+    cap chars long on its own. The failure directions are not symmetric: a false
+    positive costs a reader one look at a body with nothing missing, while a false
+    negative IS the defect. Erring the other way needs a stored flag and a
+    migration, which is worth doing and is not this change.
+
+    ⚠️ NOT A REPLACEMENT FOR THE FIRST-ORDER FIX. This makes the trim VISIBLE; it
+    does not stop the trim. The title still loses its tail, and the qualifier still
+    goes with it. The fixes that would reach that — rejecting an over-cap write,
+    an in-title ellipsis, raising the cap — each collide with a stated ruling or
+    guarantee and are staged for one decision on row 45c4c932.
+
+    Requires:
+        - title is a string (the column is NOT NULL)
+        - cap is a positive int
+
+    Ensures:
+        - returns True iff len( title ) == cap — never raises, never inspects body
+        - True for every title soft_guard_title trimmed, by construction, since
+          that helper trims to exactly cap
+        - False for every title shorter than the cap
+
+    Args:
+        title: The STORED title, as it came back from the store
+        cap: The soft cap the title would have been trimmed to
+
+    Returns:
+        bool — advisory only; nothing is gated on it
+
+    Raises:
+        - None
+    """
+    return len( title ) == cap
+
+
 def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
     """
     Non-destructively soft-guard an over-long item title on write (design
@@ -970,8 +1019,32 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
 
     The original ruling — "an existing body always wins" — forbade CLOBBERING a
     body, and it still holds: the pre-existing body is preserved verbatim, in
-    full, and the overflow is filed ABOVE it under TITLE_OVERFLOW_MARKER. Adding
-    to a body is not overwriting one, so nothing about that ruling is reversed.
+    full, and the overflow is filed under TITLE_OVERFLOW_MARKER. Adding to a body
+    is not overwriting one, so nothing about that ruling is reversed.
+
+    ⚠️ THE OVERFLOW IS APPENDED, NOT PREPENDED (row a6cb24e8, 2026-08-31). It was
+    prepended until now, and prepending damages the body in a way the ruling was
+    never asked about: the body's own opening line stops being the first thing a
+    reader sees, and a RETITLE over the cap prepends a SECOND marker above the
+    first. Tiberius 👑 and Maya 🌻 hit that independently within minutes — a body
+    opening with two stacked banners and the fragment "us", the tail of the word
+    "Tiberius", with the real opening line buried two blocks down. Both had to be
+    unpicked by hand.
+
+    Appending satisfies the same ruling and costs the reader nothing: the body
+    still wins, still appears verbatim, and now still STARTS where its author
+    started it. Stacked overflows from repeated retitles collect at the foot in
+    the order they happened, which is a readable history instead of a corrupted
+    head. The marker STRING is deliberately unchanged so the grep-recovery
+    property holds for rows written before this.
+
+    ⚠️ WHAT THIS DOES NOT FIX, and nobody should read it as fixing: the trim still
+    silently deletes the TAIL of a title, which is where writers put qualifiers —
+    "…DECLINED", "CONDITIONAL on…", "…by design". Six instances in one night each
+    lost a word whose job was to LIMIT the claim in front of it. The three fixes
+    that would address THAT — reject over-cap writes, mark the trim where readers
+    are, raise the cap — each collide with something this file or its clients
+    already state, so they belong to Rick and not to this change. Row a6cb24e8.
 
     Requires:
         - title is a non-empty string (the column is NOT NULL; the wire model
@@ -987,14 +1060,20 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
             * when body is empty (None / whitespace-only): new_body IS the
               overflow (title[cap:]) — unmarked, because there is nothing for it
               to be distinguished FROM
-            * when body is non-empty: new_body is the marker line + the overflow
-              + the ORIGINAL BODY VERBATIM, in that order. The pre-existing body
-              is never truncated, reordered, or rewritten
+            * when body is non-empty: new_body is the ORIGINAL BODY VERBATIM,
+              then the marker line, then the overflow — in that order. The
+              pre-existing body is never truncated, reordered, or rewritten,
+              and its FIRST LINE is never displaced (see the append note below)
             * `title + <the overflow substring of new_body>` reconstructs the
               original title EXACTLY, on BOTH arms — nothing is ever lost
             * advisory is { trimmed, original_length, cap,
-              overflow_moved_to_body }, and overflow_moved_to_body is now True
-              on BOTH arms because both arms relocate
+              overflow_moved_to_body, lost_tail }, and overflow_moved_to_body is
+              now True on BOTH arms because both arms relocate
+            * `lost_tail` is the exact text cut from the title — the same string
+              relocated into the body — so the writer is shown the words they lost
+              rather than a count of them. It is advisory ONLY: it changes nothing
+              about what is stored, rejects nothing, and leaves the fail-open
+              ruling and the exact-reconstruction guarantee untouched
         - never raises; never returns a title longer than cap
     """
     if len( title ) <= cap:
@@ -1009,10 +1088,18 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
         "original_length"       : len( title ),
         "cap"                   : cap,
         "overflow_moved_to_body": True,
+        # THE WORDS THAT FELL OFF, not just how many (row a6cb24e8, 2026-08-31).
+        # The advisory used to report only a LENGTH, so a writer had to reconstruct
+        # what was cut from a number. Seven titles lost their qualifier in one night
+        # and nobody noticed, including three seats who had this advisory in hand.
+        # `original_length: 106` is a fact about a string; "by design" is the claim
+        # you just deleted. Showing the text is what makes the advisory readable at
+        # the speed people actually read tool output.
+        "lost_tail"             : overflow,
     }
     if body_is_empty:
         return trimmed, overflow, advisory
-    return trimmed, f"{TITLE_OVERFLOW_MARKER}\n{overflow}\n\n{body}", advisory
+    return trimmed, f"{body}\n\n{TITLE_OVERFLOW_MARKER}\n{overflow}", advisory
 
 
 # ---------------------------------------------------------------------------

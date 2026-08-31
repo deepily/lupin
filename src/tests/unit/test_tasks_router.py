@@ -29,6 +29,7 @@ if _src_path not in sys.path:
 
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.routers import tasks
+from cosa.rest import task_store_rules as rules
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 
 NOW = datetime( 2026, 6, 12, 0, 0, tzinfo=timezone.utc )
@@ -204,7 +205,7 @@ def test_create_over_cap_title_with_body_RELOCATES_overflow( client, repo ):
     assert guard[ "overflow_moved_to_body" ] is True
     kwargs = repo.create_item.call_args.kwargs
     assert kwargs[ "title" ] == "W" * 60
-    assert kwargs[ "body" ].endswith( "keep me" )                # body never clobbered
+    assert kwargs[ "body" ].startswith( "keep me" )              # body never clobbered, and still first
     assert "W" * 20 in kwargs[ "body" ]                          # ...and the overflow survived
     assert kwargs[ "title" ] + "W" * 20 == "W" * 80              # round-trips to the original
 
@@ -594,6 +595,13 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
         # that catches an orphan alias is never routine — and the next orphan gets found by
         # accident too. A short string that makes a check habitual instead of heroic.
         "project",
+        # `title_trimmed` joined 2026-08-31 (row a6cb24e8) on the SAME visibility argument,
+        # and it is the sharpest case of it: the store trims a title at 60 chars and files
+        # the tail into `body` — which THIS projection drops. So the recovered tail is
+        # invisible on the one surface a title is read alone, and the trim leaves no mark:
+        # a truncated title simply stops. Rio ⚡ measured a live P1 whose 60-char title
+        # asserts a diagnosis the row's own amendment retracts.
+        "title_trimmed",
     }
     assert "body" not in row                                  # the token win — body dropped
     # `is False`, not a truthiness check, and a type assertion beside it: the SQL
@@ -609,6 +617,44 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
     assert row[ "blocker_terminal" ] is False                 # an unblocked row is never stranded
     assert row[ "priority" ] == "P1" and row[ "status" ] == "queued"
     repo.query_tasks.assert_called_once()                    # rows ARE materialized (not count mode)
+
+
+def test_terse_title_trimmed_carries_the_PREDICATE_not_a_constant( client, repo ):
+    # WRITTEN BY TIBERIUS 👑 in review of 5f7b0e1f, integrated verbatim but for this
+    # header. Row a6cb24e8.
+    #
+    # The exact-set assertion above proves the KEY reaches the terse projection; it
+    # cannot prove the VALUE does. Measured 2026-08-31: replacing
+    # `rules.title_may_be_trimmed( item.title )` with a bare `False` left all 471
+    # tests green — the flag was wired to nothing a test could see, and a flag that
+    # reports False on every row is the defect it exists to surface. I reproduced
+    # that mutant myself before accepting the finding.
+    #
+    # My own tests covered the predicate, and the key set covered the projection.
+    # Neither covered the WIRE BETWEEN THEM, which is where the value travels. My
+    # commit message even claimed the write and read sides "cannot drift apart" —
+    # true of guard-to-predicate, which I did test, and false of
+    # predicate-to-projection, which I did not.
+    #
+    # Both directions in one test on purpose: a constant False dies on the first
+    # assertion and a constant True dies on the second, so no constant survives.
+    #
+    # The trimmed title is taken from soft_guard_title's OWN output rather than a
+    # hand-written 60-char string, matching the principle the predicate's tests
+    # already follow: whatever the guard cuts, the reader-side flag must flag, so
+    # the two cannot drift apart as the cap moves.
+    trimmed_title, _overflow, advisory = rules.soft_guard_title( "T" * 90, None )
+    assert advisory[ "trimmed" ] is True                       # the fixture is the real thing
+
+    repo.query_tasks.return_value = [
+        make_item( title=trimmed_title ),
+        make_item( title="a title well under the cap" ),
+    ]
+    r = client.get( "/api/tasks", params={ "terse": "true" } )
+    assert r.status_code == 200
+    rows = r.json()[ "tasks" ]
+    assert rows[ 0 ][ "title_trimmed" ] is True                # the cut row is flagged
+    assert rows[ 1 ][ "title_trimmed" ] is False               # ...and a short one is not
 
 
 def test_query_terse_serializes_nullable_next_chase_ts( client, repo ):
@@ -1286,11 +1332,12 @@ def test_patch_over_cap_title_is_guarded_by_THE_SAME_helper_as_create( client, r
         "original_length"       : 95,
         "cap"                   : tasks.rules.TITLE_SOFT_CAP,
         "overflow_moved_to_body": True,
+        "lost_tail"             : "P" * 35,
     }
     fields = repo.apply_patch.call_args.args[ 1 ]
     assert fields[ "title" ] == "P" * 60
     assert fields[ "title" ] + "P" * 35 == long_title             # round-trips EXACTLY
-    assert fields[ "body" ].endswith( "the existing body" )       # the row's body, preserved
+    assert fields[ "body" ].startswith( "the existing body" )     # the row's body, preserved and still first
 
 
 def test_patch_relocates_overflow_into_the_body_THE_PATCH_IS_WRITING( client, repo ):
@@ -1310,7 +1357,7 @@ def test_patch_relocates_overflow_into_the_body_THE_PATCH_IS_WRITING( client, re
     fields = repo.apply_patch.call_args.args[ 1 ]
     assert r.status_code == 200
     assert "R" * 10 in fields[ "body" ]                           # overflow survived...
-    assert fields[ "body" ].endswith( "the NEW body" )            # ...above the INCOMING body
+    assert fields[ "body" ].startswith( "the NEW body" )          # ...below the INCOMING body
     assert "about to be replaced" not in fields[ "body" ]         # never the stale one
 
 
