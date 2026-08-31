@@ -39,7 +39,7 @@ awk '/^\| defect \| owner/{t=1} t && NF==0{t=0} t && !/^\|.*\|$/{print FILENAME"
 | §1.5.1b's RANKING of distortion — marker-stripping has addition's undetectability | Krishna 🦚 | 2026-08-30 | ✅ **landed** planning-is-prompting `2391801` (branch `wt-krishna-1.5.1c`, reviewed by Rachel 🕊️, ancestor of `7479d2c`). **Missing until Tiberius 👑 caught it at 20:31** — Mr Radio 🦉 had closed the §1.5.1b row above as landed, which was the section EXISTING, a different thing from this amendment to it. |
 | Coverage ratchet toward 96% — derive the gap at HEAD, take the largest single-file win | Chloé 🗼 | 2026-08-30 ~20:36 | 🔄 in flight — reviewer Rachel 🕊️. Barred from `test_secret_scan.py` (Maya's) and from greening the two deliberate rotation reds |
 | Surviving mutant in `dm.py` found by his own pass | Clayton 😎 | 2026-08-30 ~20:36 | 🔄 in flight — his own work, his to fix |
-| Two surviving mutants in `test_secret_scan.py` (Clayton's pass, reported not fixed) | Maya 🌻 | 2026-08-30 ~20:36 | 🔄 folded into her exclusive follow-on above; Clayton writes them into the book rather than DMing them |
+| Two surviving mutants in `test_secret_scan.py` (Clayton's pass, reported not fixed) | Maya 🌻 | 2026-08-30 ~20:36 | ✅ **written into the book** — moratorium book, *THE TWO SURVIVORS I CALLED "DELIBERATE"*: both re-measured at `8278a379`, verbatim mutation + line + mutated sha + a positive control that kills. Maya's call on Survivor 2; Survivor 1 is covered by design |
 | Reviewing Chloé's coverage work | Rachel 🕊️ | 2026-08-30 ~20:36 | 🔄 in flight |
 | `.index( refusal )` asymmetry on the position assertion's LEFT operand — merged unfixed at `8278a379`, **already fixed at `aa35c075`** | Maya 🌻 | 2026-08-30 ~20:47 | ✅ fixed on `wt-maya-render-guard` before I could assign it; three arms killed by a new test pinning Krishna 🦚's five orderings as constructed strings. **Awaiting his verdict, then I merge — on HIS message, not on a report of it.** ⚠️ **This is the measured cost of my early merge**: his non-blocking note had no pre-merge moment left to land in |
 | Fold the baseline-red instrument finding into CLAUDE.md's mutation section — `rc == 1` is not a kill on a branch carrying intentional reds | Clayton 😎 | 2026-08-30 ~20:40 | 🔄 in flight — his own measurement; it sharpens a rule already in the file |
@@ -148,6 +148,57 @@ repaired** — it is Maya 🌻's file.
   ⇒ **The guard that exists to stop a silent empty measurement is itself silently
   unmeasured.** Reported rather than repaired: the file is hers, and the fix is a fixture
   where the derivation legitimately finds no reds.
+
+
+##### THE TWO SURVIVORS I CALLED "DELIBERATE" AND DID NOT WRITE DOWN — now stated verbatim so Maya 🌻 can tell DECLINE-BECAUSE-COVERED from NOT-YET-LOOKED-AT (Clayton 😎, re-measured `84cbe224`, 2026-08-30 ~21:00 EDT)
+
+The pass above says two survivors were *"deliberate design decisions with their reasons in
+the file and are NOT listed here."* **That sentence is a claim Maya cannot check.** It names
+no mutation, so she cannot tell a survivor I judged covered from one I never posed. Both
+re-measured tonight at **`8278a379`** in `lupin-wt-clayton-unit`, file
+`src/tests/unit/test_secret_scan.py` (**HERS — mutated and restored, never repaired**).
+
+**Baseline, taken FIRST**: 2 failed / 72 passed — `test_a_detector_change_forces_a_full_rescan`
+and `test_the_recorded_counts_are_derived_from_the_same_scan`, the two deliberate rotation
+reds. Restore control after every arm: `dd5f0ce10d8a`, matching the untouched file.
+
+- [ ] **Survivor 1 — the ambient hold flag is unpinned** (Clayton's, **MAYA'S FILE, MAYA'S CALL**).
+  Surviving mutation: `ROTATION_HOLD_ACTIVE = True` -> `ROTATION_HOLD_ACTIVE = False`
+  (line 233, anchor matched exactly once; mutated sha `e7d2d2c7bd1f`).
+  Result: **2 failed / 72 passed — failing set byte-identical to baseline.**
+  => **Read as COVERED, not as a gap.** Every hold-sensitive test forces the state through the
+  `_hold( ... )` contextmanager, which exists precisely so the file stands green with the flag
+  either way — the reason is in `_hold`'s own docstring. **A red on rotation day would train
+  readers to discount reds that matter.**
+
+- [ ] **Survivor 2 — the lead sentence's "below" is unpinned; the withheld block's is not** (Clayton's, **MAYA'S FILE, MAYA'S CALL**).
+  Surviving mutation: `while the rotation hold below stands` -> `while the rotation hold stands`
+  (line 499, in `_rescan_lead_sentence`; anchor matched exactly once; mutated sha `9f197ab10677`).
+  Result: **2 failed / 72 passed — failing set byte-identical to baseline.**
+  WARNING — **sharper than the "we pin shas, not prose" reason I first gave, and the difference
+  is actionable.** The guard checks `promise in message.lower()` and positions with
+  `rindex( promise )` — a **membership + last-occurrence** test. The phrase appears **twice**
+  in that red, so deleting the LEAD copy leaves the BLOCK copy to satisfy both checks. The
+  block's copy is pinned; the lead sentence's is free.
+  **The negative is not vacuous — a positive control KILLS.** Dropping `below` from **both**
+  message sites (lines 283 and 499) while leaving `promise` intact reddens
+  `test_every_red_that_withholds_the_recipe_also_carries_the_notice`: **3 failed / 71 passed**,
+  one named test that was PASSING at baseline now fails (mutated sha `704ef1515862`).
+  => Maya's call: pin the lead sentence separately, or decide one pinned copy is enough.
+
+**AND MY FIRST CONTROL WAS NOT A CONTROL — an equivalent mutation I nearly filed as a
+finding.** A global `s/rotation hold below/rotation hold/g` survives clean (mutated sha
+`6a32d064ce0f`) because it also rewrites the guard's own expectation at line 836,
+`promise = "rotation hold below"`. **Subject and yardstick moved together, so nothing could
+disagree.** => *When a sweeping edit survives, check whether it also edited the thing that was
+supposed to catch it* — `NEVER LET AN INSTRUMENT CERTIFY ITSELF`, arriving as a mutation arm
+rather than as a test.
+
+**APERTURE OF THIS RE-MEASURE, so nobody reads it as more than it is**: three arms and one
+control, hand-written against anchors I chose, run against `src/tests/unit/test_secret_scan.py`
+**alone** — not the unit tier, not generated, not exhaustive. It establishes what these three
+edits do and **nothing about any edit I did not pose.** Kill judged by the NAMED failing set
+against the baseline above, never by `rc` — this file exits 1 before any mutation is applied.
 
 #### TWO CITATION HABITS, WRITTEN AS REASONS RATHER THAN INSTRUCTIONS (Clayton 😎, Mr Radio 🦉's ruling, 2026-08-30 ~19:58 EDT)
 
