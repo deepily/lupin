@@ -848,6 +848,42 @@ class TestSoftGuardTitle:
         """
         assert rules.soft_guard_title( "a short title", "a body" ) == ( "a short title", "a body", None )
 
+    def test_title_may_be_trimmed_flags_exactly_what_the_guard_cut( self ):
+        """
+        Row a6cb24e8. Whatever soft_guard_title trims, this predicate must flag — it is
+        the reader-side half, and the two must agree by construction or the flag is
+        decoration. Driven from the guard's OWN output rather than from a hand-written
+        60-char string, so the pair cannot drift apart.
+        """
+        for original in ( "Z" * 61, "Z" * 90, "Q" * 200 ):
+            stored, _body, advisory = rules.soft_guard_title( original, "a body" )
+            assert advisory[ "trimmed" ] is True
+            assert rules.title_may_be_trimmed( stored ) is True
+
+    def test_title_may_be_trimmed_is_silent_on_a_short_title( self ):
+        """
+        The negative control, and it is the one that makes the flag mean something: a
+        flag that is True on every row is not a flag. Driven from the guard's own
+        no-op arm.
+        """
+        for original in ( "", "a", "Z" * 59 ):
+            stored, body, advisory = rules.soft_guard_title( original, "a body" ) if original else ( original, "a body", None )
+            assert advisory is None
+            assert rules.title_may_be_trimmed( stored ) is False
+
+    def test_title_may_be_trimmed_OVER_reports_and_that_is_the_chosen_direction( self ):
+        """
+        The honest limitation, asserted rather than only documented. The predicate is
+        length-only, so a title that is NATURALLY exactly at the cap reports True.
+
+        That is deliberate and the directions are not symmetric: a false positive costs
+        a reader one look at a body with nothing missing; a false negative IS the defect
+        this exists to surface. Erring the other way needs a stored flag and a migration.
+        """
+        natural = "N" * rules.TITLE_SOFT_CAP
+        assert rules.soft_guard_title( natural, "a body" )[ 2 ] is None   # never trimmed...
+        assert rules.title_may_be_trimmed( natural ) is True              # ...and still flagged
+
     def test_custom_cap_is_honored( self ):
         # The cap is parameterizable — proves the guard is not hard-wired to 60.
         new_title, new_body, advisory = rules.soft_guard_title( "abcdefghij", None, cap=4 )

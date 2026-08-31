@@ -594,6 +594,13 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
         # that catches an orphan alias is never routine — and the next orphan gets found by
         # accident too. A short string that makes a check habitual instead of heroic.
         "project",
+        # `title_trimmed` joined 2026-08-31 (row a6cb24e8) on the SAME visibility argument,
+        # and it is the sharpest case of it: the store trims a title at 60 chars and files
+        # the tail into `body` — which THIS projection drops. So the recovered tail is
+        # invisible on the one surface a title is read alone, and the trim leaves no mark:
+        # a truncated title simply stops. Rio ⚡ measured a live P1 whose 60-char title
+        # asserts a diagnosis the row's own amendment retracts.
+        "title_trimmed",
     }
     assert "body" not in row                                  # the token win — body dropped
     # `is False`, not a truthiness check, and a type assertion beside it: the SQL
