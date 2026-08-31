@@ -791,8 +791,27 @@ def test_the_refusal_markers_are_themselves_pinned():
     # reason generalises past this tuple: **a presence-check over a list is satisfied by
     # SHORTENING the list.** My first version asserted each expected marker was `in` the tuple
     # plus `len >= 2`. That catches a removal only because I happened to name both survivors,
-    # and says nothing about a tuple that GROWS an entry nothing checks — which reads as
-    # coverage the guard does not have.
+    # and says nothing about a tuple that GROWS.
+    #
+    # 🔴 AND MY FIRST STATEMENT OF *WHY* THAT MATTERS WAS WRONG — Clayton 😎 corrected it, and
+    # the correction is worth more than the assert. I wrote that an added entry is "coverage
+    # the guard does not have, because nothing checks it". False: BOTH loops check every
+    # marker. The real hazard is a marker that is TRIVIALLY SATISFIED. Measured, and it is the
+    # strongest single receipt this guard has:
+    #
+    #     adding `""` to REFUSAL_MARKERS  ->  2 failed / 74 passed, GREEN before this assert
+    #
+    # `""` is `in` every string, so every presence check passes, the tuple looks longer, and
+    # DISCRIMINATION GOES TO ZERO while the suite reports health. That is this file's recurring
+    # shape once more: a guard weakened by an edit that makes it look stronger.
+    #
+    # ⚠️ AND THE PRICE, STATED RATHER THAN OMITTED. This assert also blocks a LEGITIMATE
+    # tightening — adding "greening it changes the signal, not the risk", a real phrase from
+    # the notice that both loops would genuinely check, reddens here too (measured: 3 failed /
+    # 73 passed). That is not a false positive to be fixed; it is the COST of the rule.
+    # Widening the guard now takes ONE DELIBERATE TWO-PLACE EDIT — add the marker to the tuple
+    # AND to `expected` below, in the same change. Cheap, and it makes widening a decision
+    # somebody made rather than a line that drifted in.
     #
     # It is the fixture-that-cannot-discriminate class from CLAUDE.md, arriving on a yardstick
     # rather than on a test: if two quantities can be exchanged without changing the expected
@@ -802,15 +821,69 @@ def test_the_refusal_markers_are_themselves_pinned():
     # ⚠️ THE LITERALS ARE SPELLED A SECOND TIME ON PURPOSE. Deriving `expected` from
     # REFUSAL_MARKERS rebuilds the tautology this branch exists to remove — it is exactly how
     # the notice became invertible: an anchor derived from the thing it checks.
+    # 🔴 THE SET ASSERT FREEZES THE SET. IT DOES NOT TEST THAT A MARKER DISCRIMINATES.
+    # Clayton 😎 found this by TESTING the claim rather than reading it: my comment said the
+    # vacuous-marker case was caught, and what caught `""` was set-equality refusing ANY
+    # change, legitimate ones included. Freezing a set and checking a set can tell a refusal
+    # from a permission are different properties; I asserted the first and described the
+    # second.
+    #
+    # And the gap was reachable BY THE ROUTE I SANCTIONED — widening via a deliberate
+    # two-place edit. Add `""` to the tuple AND to `expected` and set-equality is satisfied,
+    # because it then describes what it is measuring. Measured: SURVIVED at 7bc011b9,
+    # 2 failed / 74 passed. The guard could be returned to zero discrimination through the
+    # approved door with everything green.
+    #
+    # 🔴 THE PERMISSION IS DERIVED FROM THE REAL NOTICE, NOT COMPOSED — Clayton's improvement
+    # on my first fix, and it removes a weakness I had flagged against myself: I wrote the
+    # non-refusing sample by hand, so it could only catch markers that fail against the
+    # permission I happened to imagine. Deriving it means the control tracks the notice
+    # instead of drifting from it.
+    #
+    # 🔴 THE PHRASES BELOW ARE LITERALS, AND MY FIRST CUT LOOPED OVER `REFUSAL_MARKERS` HERE
+    # INSTEAD. Clayton 😎 said that version was blind and I could not reproduce it; the arm he
+    # sent reproduces on my own tree, so the correction is his and the measurement is mine.
+    #
+    # Building the permission by removing every marker makes the control SELF-REMOVING: the
+    # text is stripped of exactly the thing the assert then looks for, so a marker is absent
+    # BY CONSTRUCTION and the assert can never fail for it. That is the tautology this whole
+    # file exists to remove, wearing one more disguise — and it is worse here than elsewhere,
+    # because the loop reads like extra rigour.
+    #
+    # MEASURED, two arms at one sha (56fa6b21), one mutation — `"\n"` added to the tuple AND
+    # to `expected`, which is the sanctioned two-place edit:
+    #     looping over REFUSAL_MARKERS   2 failed / 74 passed   SURVIVED (set identical to baseline)
+    #     these literals                 3 failed / 73 passed   KILLED by this test
+    # A newline is `in` the real notice and `in` any permission derived from it, so it cannot
+    # tell a refusal from its opposite — it is exactly the vacuous marker this guard is for.
+    # The marker loop strips every newline out of the permission and then reports the marker
+    # absent, which is the guard congratulating itself.
+    #
+    # THE COST IS A TWO-PLACE EDIT and it is the same cost `expected` already pays, for the
+    # same reason: two independent spellings can disagree, one spelling read twice cannot.
+    # Adding a real marker means adding it to the tuple, to `expected`, and here.
+    permission = ROTATION_HELD_NOTICE
+    for _phrase in ( "DO NOT CLEAR THIS RED BY RECORDING A SCAN", "is REFUSED until rotation lands" ):
+        permission = permission.replace( _phrase, "it is fine to do this now" )
+
+    for marker in REFUSAL_MARKERS:
+        assert marker not in permission, (
+            f"{marker!r} is still present after the notice had every marker replaced with a "
+            "permission — so it cannot distinguish a refusal from its opposite. An empty or "
+            "near-empty marker fails here BY CONSTRUCTION, which is the difference between a "
+            "rule and a list of the cases somebody thought of" )
+
     expected = {
         "DO NOT CLEAR THIS RED BY RECORDING A SCAN",
         "is REFUSED until rotation lands",
     }
     assert set( REFUSAL_MARKERS ) == expected, (
         f"REFUSAL_MARKERS is not the pinned set. missing={sorted( expected - set( REFUSAL_MARKERS ) )} "
-        f"unexpected={sorted( set( REFUSAL_MARKERS ) - expected )}. A marker REMOVED narrows what "
-        "'still refuses' means; a marker ADDED that nothing checks reads as coverage this guard "
-        "does not have. Change the set here and there deliberately, in one edit" )
+        f"unexpected={sorted( set( REFUSAL_MARKERS ) - expected )}. A marker REMOVED narrows "
+        "what 'still refuses' means. A marker ADDED is not automatically wrong — a real phrase "
+        "from the notice genuinely strengthens this guard — but an empty or near-empty one is "
+        "satisfied by any text at all and quietly takes the discrimination to zero. So widening "
+        "is allowed and must be DELIBERATE: add it to the tuple AND to `expected`, in one edit" )
     assert len( REFUSAL_MARKERS ) == len( expected ), (
         f"REFUSAL_MARKERS has {len( REFUSAL_MARKERS )} entries against {len( expected )} pinned. "
         "The set comparison above is blind to a DUPLICATE, which would make a two-marker guard "
