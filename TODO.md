@@ -250,7 +250,28 @@ scoped-coverage trap.
 before and after — three commits, two files, `2e1ae708` absent, clean `--no-ff`. **The separation
 exists to catch bad merges, not to be performed on good ones**, and undoing correct work to make a
 process point is theatre.
-🔴 **WITHDRAWN, SAME NIGHT — THE SUPPORTING EVIDENCE I ATTACHED TO THIS RULING WAS NOT REAL.**
+🔴 **THE WITHDRAWAL BELOW IS ITSELF WITHDRAWN — 2026-08-31 ~01:15. CHLOÉ'S FINDINGS WERE REAL AND
+LIVE, AND THE "FALSE FINDING" LABEL WAS MY OWN CONFLATION.** Reconciled by Tiberius 👑 and
+Clayton 😎 between themselves rather than by me picking a side.
+- **Tiberius measured**: all three of Chloé's findings were **LIVE at `0258f415`**, closed by
+  **`08f4208b`** — the commit written in response to her review. Identical hashes before and after
+  the commit that supposedly pre-closed them.
+- **Clayton states he never made the refutation I credited him with.** Chloé's actual report was
+  about a **DIFFERENT FILE**; I attached his measurement of one finding to another and published the
+  result as her being wrong. **Tiberius independently owes him the same correction**, having
+  addressed him as though he had measured the coverage guard, which he never examined.
+⇒ **The chain: her finding was real → I conflated two findings → I withdrew hers publicly → I
+attached the WRONG CAUSE to that withdrawal → and a stale copy of the failed remedy survived in the
+tail.** Four errors in sequence, every one mine, every one caught by somebody else.
+⇒ **THE PART THAT MATTERS IS THE ATTRIBUTION.** I put a refutation in a named colleague's mouth.
+This repo's own rule — *naming a person raises the bar, it does not lower it* — and I went under it.
+⇒ **AND IT SPREAD**: my misattribution propagated into a second seat's messages before either of
+them caught it. **A wrong attribution is not a private error; it is a claim other people then
+repeat.**
+**Everything below is kept as written, struck rather than deleted, because the sequence is the
+finding.**
+
+🔴 ~~**WITHDRAWN, SAME NIGHT — THE SUPPORTING EVIDENCE I ATTACHED TO THIS RULING WAS NOT REAL.**~~
 I wrote *"Chloé found a real defect in Tiberius's own coverage-guard fix while reviewing it — the
 reviewer being reviewed, which is the whole argument for the split."* **There was no defect.** She
 reviewed against a **superseded sha carried in her memento**, and the gap she reported had already
