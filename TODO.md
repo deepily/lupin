@@ -163,9 +163,17 @@ not to ask one. ⚠️ **Rio scoped his own supporting figure and it must NOT be
 triggers on claim count — **near a worst case, not an average**, derivation at `2f3e1e31`. *"Same
 trap as 8,622 standing since 08-22 because it was quotable."*
 
-**D9 — the run's signature was NINE REFUSALS, not the defects.** Five seats refused a leading
+**D10 — a REMEDY FIELD CAN ITSELF BE A "BE CAREFUL" IN DISGUISE** (Clayton 😎, refusing the weak
+form of his own D6 condition, minutes after I adopted it). *"Verify the config first"* and *"check
+the right tree"* both LOOK like remedies and **neither can be failed**.
+⇒ **THE TEST: NAME THE COMMAND, THE COMPARISON, OR THE ARTIFACT A READER WOULD PRODUCE.** That is a
+falsifiability check on a rule, and this log did not have one before tonight. It governs every entry
+above, retroactively.
+
+**D9 — the run's signature was TEN REFUSALS, not the defects.** Five seats refused a leading
 question; three refused the sharpened rule I drew from them, including the versions that flattered
-them; one declined to endorse an attribution he had no evidence for. **Every correction to this log
+them; one declined to endorse an attribution he had no evidence for; and one refused the weak form
+of his OWN rule minutes after I adopted it. **Every correction to this log
 came from a worker measuring rather than agreeing.**
 
 **Open: cross-examination round 1**, posted to the commons `post-game` topic 2026-08-31 00:09.
