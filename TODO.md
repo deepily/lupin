@@ -423,6 +423,50 @@ edit is real and the interpreter reads an older compile; here the interpreter re
 edit and your edit says what it said before. **A purge fixes the first and does nothing for the
 second.**
 
+
+##### THE CHECKED-HASH VERIFIER BLESSES THE MAIN REPO WHEN YOU RUN IT FROM A WORKTREE (Tiberius 👑 found it; Clayton 😎 `84cbe224` is the seat it fooled, 2026-08-30 ~22:20 EDT)
+
+`CLAUDE.md` tells every seat to settle the stale-pyc question with
+`src/scripts/migrate-pyc-to-checked-hash.sh --verify`. **Run from a worktree with an ordinary
+shell, that command answers about a DIFFERENT TREE and prints its checkmark.** It resolves
+`LUPIN_ROOT/src`, and `LUPIN_ROOT` is inherited — so it measures wherever your shell points,
+which for most seats is the main checkout.
+
+**Measured both ways in `lupin-wt-clayton-bouncewarn`:**
+
+```
+./src/scripts/migrate-pyc-to-checked-hash.sh --verify        exit 0   <- the MAIN repo
+LUPIN_ROOT="$PWD" ./src/scripts/… --verify                   exit 1   <- my actual tree
+```
+
+🔴 **I quoted that exit 0 to two peers as evidence my mutation pass was safe.** It was a
+statement about a tree I was not standing in.
+
+**How it was caught is the only way it can be**: a stale pyc manufactured a **FALSE KILL** on
+one of Tiberius's arms — KILLED before he purged per arm, SURVIVED after, **same mutated sha**.
+
+⚠️ **Worse than the ordinary wrong-tree trap, and the difference is the DIRECTION of the
+error.** A wrong-`LUPIN_ROOT` test run fails confusingly, or trips the warning this repo added
+for exactly that. **A verifier fails silently and in the reassuring direction**: it does not say
+*"I cannot find your tree"*, it says ✓. The output does name the roots it scanned — and that
+reads as confirmation, because you already believe you know which tree you are in.
+
+⇒ **Pin it every time from anywhere that is not the main checkout:**
+
+```
+LUPIN_ROOT="$PWD" ./src/scripts/migrate-pyc-to-checked-hash.sh --verify ; echo "exit=$?"
+```
+
+- [ ] **PROPOSED for Mr Radio 🦉 / Rick — this wants a mechanical fix, not a habit.** Derive the
+  root from `git rev-parse --show-toplevel` and refuse when it disagrees with `LUPIN_ROOT`, the
+  same shape as the wrong-tree warning the unit tests already print. **A rule that says
+  "remember to pin it" is what this book keeps recording as insufficient** — and this is the
+  command the fleet reaches for *specifically* when it does not trust its own measurements.
+
+**Receipt that the habit does not hold**: the pinning instruction was available to me, I have
+read the wrong-tree section, and I still quoted a main-repo checkmark for my own worktree in the
+same hour I was writing careful two-arm proofs about everything else.
+
 #### TWO CITATION HABITS, WRITTEN AS REASONS RATHER THAN INSTRUCTIONS (Clayton 😎, Mr Radio 🦉's ruling, 2026-08-30 ~19:58 EDT)
 
 Both come out of the same evening and the same failure: **a reference that resolves to
