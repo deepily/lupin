@@ -97,6 +97,11 @@ if [[ ! -x "$PYTHON" ]]; then
     echo "ERROR: no interpreter at $PYTHON (set PYTHON=... or build the venv)" >&2
     echo "Refusing to purge: the reconvert would fail and leave this tree on timestamp" >&2
     echo "invalidation. ${#CACHES[@]} __pycache__ directories left untouched." >&2
+    echo "" >&2
+    echo "In a worktree? Give it a venv once, and the whole unit tier benefits:" >&2
+    echo "  $HERE/link-worktree-venv.sh" >&2
+    echo "Deliberately NOT falling back to the main repo's interpreter: that would be the" >&2
+    echo "one remaining way a command run here reaches into a tree you are not in." >&2
     exit 2
 fi
 
