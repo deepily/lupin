@@ -929,8 +929,19 @@ $ cd <a worktree> && ./src/scripts/migrate-pyc-to-checked-hash.sh --verify
   every pyc THIS interpreter reads is checked-hash
 ```
 
-The same command with `LUPIN_ROOT="$PWD"` **exits 1** on that worktree. A "checked-hash verified in
-the worktree" certification was made against the wrong tree **twice within the hour**.
+A "checked-hash verified in the worktree" certification was made against the wrong tree this way.
+
+⚠️ **AND `LUPIN_ROOT="$PWD"` ALONE DOES NOT RELIABLY FIX IT — WHAT YOU GET DEPENDS ON THE WORKTREE**
+(Rachel 🕊️ caught this contradiction; measured both ways at `3019fed9`):
+
+| worktree | `LUPIN_ROOT="$PWD"` alone |
+|---|---|
+| **has** its own `.venv` | **exit 1** — the real answer: this tree has timestamp pycs |
+| **no** `.venv` (29 of 75) | **exit 2** — `ERROR: no interpreter at …/.venv/bin/python`; nothing was checked |
+
+An earlier cut of this section claimed a flat "exits 1", which **contradicted its own next paragraph**
+— the one explaining that `PYTHON` is derived from `LUPIN_ROOT`, so pinning only the root repoints
+the interpreter at a venv the worktree does not have. ⇒ **Pin both, as below.**
 
 ⇒ **This is worse than an unconverted tree, because it is an unconverted tree wearing a checkmark.**
 The script's own output names its scanned roots — **read that line, not the verdict.**
