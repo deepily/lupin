@@ -14,6 +14,10 @@ moment he assigns — one line, while he is already acting.
 **WHO READS IT**: every seat, twice — before starting reported work, and whenever a sweep surfaces something. A hit means **decline and tell the manager** (never seat-to-seat). **A miss means ASK, not proceed quietly** — see the scoped caveat below. This table is not yet complete enough for silence to mean
 "nobody owns it".
 
+🔴 **FORMAT INVARIANT — EVERY NORMATIVE SENTENCE AND EVERY TABLE ROW IN THIS SECTION SITS ON ONE UNWRAPPED PHYSICAL LINE, AND A REWRAP IS A DEFECT.** Rachel 🕊️'s ruling on the form, 2026-08-30 ~20:31 EDT, and it is written here rather than left to taste because the instances were fixed once and the property was not, which is how they get re-wrapped by the next editor tidying the file.
+⚠️ **The receipt**: an hour after this section shipped, `grep "A miss means ASK, not proceed quietly"` returned **0** — the one rule telling a reader what to do when the list is silent could not be found by searching for it, inside a section whose whole argument is that naming an owner should be a grep rather than a memory. The assignee's rule was broken the same way.
+✅ **How to check before you commit an edit here** — `grep -c` counts matching LINES, so an unwrapped sentence returns NON-ZERO and a wrapped one returns exactly **0**; the test is therefore **"must not return 0"**, never "must return 1". ⚠️ **The first cut of this line said "must return exactly 1" and was wrong the moment it was written**, because this very line quotes the phrases it counts and so adds to their own totals — an instruction that fails on the file containing it. Check these three: `A miss means ASK, not proceed quietly` · `missing line, which is the signal` · `decline and tell the manager`
+
 | defect | owner | assigned | state |
 |---|---|---|---|
 | Speech-act guard for the DM condenser | Clayton 😎 | 2026-08-30 ~19:33 | ✅ merged `4d4eb954` |
@@ -23,13 +27,17 @@ moment he assigns — one line, while he is already acting.
 | planning-is-prompting cross-session doc, §1.5.1b | Maya 🌻 measured it; Mr Radio 🦉 wrote it up | 2026-08-30 | ✅ **landed** `d3b0d20` in planning-is-prompting; that file has since moved on to §1.5.1c. Seeded here as Krishna 🦚's and in flight — wrong on owner **and** on state, corrected by Mr Radio 🦉 on rehydrate. If Krishna holds a residual amendment, the assignee's rule applies to him. |
 | Build this ASSIGNMENTS list | Tiberius 👑 | 2026-08-30 ~20:22 | ✅ this section |
 | The one-owner rule + this list | Tiberius 👑 | 2026-08-30 ~20:19 | 🔄 in flight |
-| Reviewing the one-owner rule | Rachel 🕊️ | 2026-08-30 ~20:22 | 🔄 in flight |
+| Reviewing the one-owner rule | Rachel 🕊️ | 2026-08-30 ~20:22 | ✅ **done ~20:33** — changes requested and accepted; she also handed Tiberius a both-directions check for hard-wrapped rows, which is the grep-breaking property |
 | `test_secret_scan.py` follow-on — **exclusively hers** | Maya 🌻 | 2026-08-30 ~20:27 | 🔄 in flight |
 | Mutation pass over the three merged tips | Clayton 😎 | 2026-08-30 ~20:27 | 🔄 in flight |
 | Reviewing Maya's follow-on | Krishna 🦚 | 2026-08-30 ~20:27 | 🔄 in flight |
 | Blocked row `298af249` | Rio ⚡ | 2026-08-30 ~20:27 | 🅿️ parked — blocked |
 | §1.5.1b's RANKING of distortion — marker-stripping has addition's undetectability | Krishna 🦚 | 2026-08-30 | ✅ **landed** planning-is-prompting `2391801` (branch `wt-krishna-1.5.1c`, reviewed by Rachel 🕊️, ancestor of `7479d2c`). **Missing until Tiberius 👑 caught it at 20:31** — Mr Radio 🦉 had closed the §1.5.1b row above as landed, which was the section EXISTING, a different thing from this amendment to it. |
-| *(unassigned — free seats)* | Pocholo 📣, Chloé 🗼's successor | — | 🟢 available |
+| Coverage ratchet toward 96% — derive the gap at HEAD, take the largest single-file win | Chloé 🗼 | 2026-08-30 ~20:36 | 🔄 in flight — reviewer Rachel 🕊️. Barred from `test_secret_scan.py` (Maya's) and from greening the two deliberate rotation reds |
+| Surviving mutant in `dm.py` found by his own pass | Clayton 😎 | 2026-08-30 ~20:36 | 🔄 in flight — his own work, his to fix |
+| Two surviving mutants in `test_secret_scan.py` (Clayton's pass, reported not fixed) | Maya 🌻 | 2026-08-30 ~20:36 | 🔄 folded into her exclusive follow-on above; Clayton writes them into the book rather than DMing them |
+| Reviewing Chloé's coverage work | Rachel 🕊️ | 2026-08-30 ~20:36 | 🔄 in flight |
+| *(unassigned — free seats)* | Pocholo 📣 | — | 🟢 available (IDLE, stale transcript) |
 | Flip-day: the hold tests stop measuring the flag | Maya 🌻 | 2026-08-30 ~19:0x | ✅ merged `39d912ec` — reviewer Rachel 🕊️, not Tiberius (the gate was his) |
 | Probe-recall caveat — docstring only, row `40f8e3cc` | Tiberius 👑 | 2026-08-30 | ✅ merged `a91f2ad1` — reviewer Chloé 🗼, after two refusals |
 | Roster lookup-miss reads as a missing seat | Pocholo 📣 | 2026-08-30 | ✅ merged `eac4fb9c` |
@@ -79,6 +87,49 @@ assignee's rule above, and it is not a licence to skip the check — a miss mean
 - [x] ✅ **CLOSED — the three-way miscitation.** `29a986df` was cited in `workflow/cross-session-communication.md` §1.5.1c as *"being built — Clayton's speech-act guard."* Read directly, it is `item_class: bug`, `status: done`, titled *"DM condenser inverts 'used to say X' into 'says X'"*, and **speech acts appear nowhere in it**; its own text says *"SUGGESTED DIRECTION — not a design."* **Wrong three ways: a bug not a design, closed not in flight, and about a different mechanism.** ⚠️ **The error was Mr Radio's, not Krishna's** — he supplied the citation with the ruling, verified it himself against the row, and named it. **A receipt resolving to something other than what the text claims — sitting inside the two sections that define the rule against exactly that.**
 
 🔴 **THE ENTRY THAT MATTERS MOST, AND IT IS THE MANAGER'S OWN, UNSOFTENED AT HIS INSISTENCE.** This is the **fourth `rule-instead-of-mechanism` of the day**, and it landed on the author of the argument against it. His `c53a7ae9` proposes a store-side gate precisely because **nothing in the write path tells a manager a standing order exists at the moment he acts** — and when he minted `b0507d0d`, nothing did. The order was written down, correctly, at TODO.md line 5 all day. ⇒ **A rule that is written down and not enforced is one its own author will break, and the write path will report success.** The gate is still unbuilt and still Rick's call.
+
+#### THREE FIXTURE GAPS FOUND BY MUTATING TONIGHT'S OWN MERGED GUARDS (Clayton 😎, 2026-08-30 ~20:30 EDT)
+
+**The pass**: 14 hand-written arms against the merged tips `4d4eb954`, `39343c24` and
+`2b2b0980`. **9 killed, 5 survived.** Two survivors are deliberate design decisions with
+their reasons in the file and are NOT listed here — flipping `ROTATION_HOLD_ACTIVE`
+(the `_hold` contextmanager exists so the file stands green with the flag either way) and
+dropping the word *"below"* (the file pins the shas and explicitly not the prose). **All
+three real gaps below are in MY OWN work.**
+
+🔴 **THE INSTRUMENT HAD TO CHANGE BEFORE THE PASS MEANT ANYTHING, and this generalises.**
+Baseline: `test_secret_scan.py` **2 failing**, `test_dm_tutor_send_path.py` **0**. The
+suite exits **1 before any mutation is applied**, so under the standing `rc == 1` rule
+**every mutant scores as killed** and the pass reports a perfect result while measuring
+nothing. ⇒ **Kill = a NAMED test that was PASSING at baseline now fails.** That is what
+the exit code was always proxying for; on any branch carrying an intentional red the proxy
+breaks. `rc` 4/5 still means could-not-run and is never a kill.
+
+⚠️ **APERTURE THIS PASS COVERED, so nobody reads it as more than it is**: hand-written
+source edits against anchors I chose, reaching the conditions I thought to attack **and
+nothing else** — no generated or exhaustive arm. **Two of the three merges are my own
+work**, so on those I am not the independent reader the task asked for; only `2b2b0980` got
+a genuinely outside arm from me. `test_secret_scan.py` was mutated and restored, **never
+repaired** — it is Maya 🌻's file.
+
+- [ ] **`src/tests/unit/test_dm_tutor_send_path.py` — the sender window is unpinned** (Clayton's, **FIXING MYSELF**).
+  Surviving mutation: `_SENDER_WINDOW = 3` → `12` in `src/cosa/rest/routers/dm.py`.
+  *No test has a polarity verb sitting 4-to-12 words from a first-person pronoun*, so the
+  window can be widened until it binds across half a paragraph with nothing red.
+
+- [ ] **`src/tests/unit/test_dm_tutor_send_path.py` — the sentence boundary is unpinned** (Clayton's, **FIXING MYSELF**).
+  Surviving mutation: `if word in ".!?;": break` → `if False: break`.
+  ⚠️ **`test_the_window_does_not_reach_across_a_sentence` passes on the WINDOW LIMIT, not
+  the boundary it is named for** — its verb sits far enough away that the 3-word cap
+  catches it either way. **The fourth reading, in a test I wrote hours after explaining it
+  to a peer.** An assertion audit passes it clean; only a mutation shows it.
+
+- [ ] **`src/tests/unit/test_secret_scan.py` — my derived guard's fail-loud-on-empty assert is itself unmeasured** (Clayton's finding, **MAYA 🌻'S FILE, MAYA'S CALL**).
+  Surviving mutation: `assert reds, (` → `assert True or reds, (`.
+  Neutering it changes nothing, because `reds` is never empty against the current fixture.
+  ⇒ **The guard that exists to stop a silent empty measurement is itself silently
+  unmeasured.** Reported rather than repaired: the file is hers, and the fix is a fixture
+  where the derivation legitimately finds no reds.
 
 #### TWO CITATION HABITS, WRITTEN AS REASONS RATHER THAN INSTRUCTIONS (Clayton 😎, Mr Radio 🦉's ruling, 2026-08-30 ~19:58 EDT)
 
