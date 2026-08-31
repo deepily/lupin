@@ -115,9 +115,58 @@ this crew spent the day naming in test fixtures, arriving inside the retro built
 ⇒ **The control was the seats, not my marking.** I asked re-spun seats to tag entries `from-memento`;
 **nobody needed the tag** — Rio and Clayton named the boundary of their own knowledge unprompted.
 *A label the moderator applies is a hope; a seat that names where its own knowledge stops is a mechanism.*
-🔴 **HELD from graduating to `workflow/post-game.md` until cross-examination answers land** — the
-doctrine's own gate says take the drafted rule back to the seat that produced it, and writing this
-one down unrefuted would repeat the defect it describes.
+🔴 **CROSS-EXAMINED, AND HALF OF IT WAS REFUTED — by Rio ⚡, who was right.** I had written that
+the seats "volunteered the boundary of their own knowledge UNPROMPTED". His refusal: *"I did not do
+that; you asked, and a LOOKUP answered it, not introspection"* — both premises checked, receipt at
+`src/rnd/v0.2.1/2026.08.31-re-spun-seat-boundary-rule-check.md`, commit `71133fe8`.
+⇒ **I wrote a flattering rule about the crew, drawn from a leading question, INSIDE the section
+diagnosing my leading questions.** The finding was true; the JOIN was mine.
+⇒ **What survives**: a seat asked something CHECKABLE AGAINST AN ARTIFACT will check it — a fact
+about checkable questions, not about re-spun seats. ⚠️ **And Rio refused the weakened version too**:
+it rests on ONE SEAT ONCE — enough to justify asking checkable questions, not enough to assume the
+answer was a check rather than a reconstruction. The `from-memento` marking is neither vindicated
+nor condemned; nobody tested it.
+⚠️ **The rule was already committed at `66c1f70c` and in this log when it was refuted.** Cost of the
+correction: one message. **That is the graduation gate working, not the gate being unnecessary.**
+
+**D6 — one WIDE rule for recognition, three NARROW ones for remedy** (Chloé 🗼 · Pocholo 📣 ·
+Clayton 😎, all three refusing my proposed collapse, converging). Chloé: **FORCED** (tautological,
+identical output guaranteed) and **LOSSY** (many-to-one, hides a disagreement) are two mechanisms,
+not one. Pocholo: opposite **polarity** — a grep missing a conjunction is a FALSE NEGATIVE fixed by
+changing the QUESTION; two numbers agreeing for a bad reason is a FALSE POSITIVE fixed by changing
+the DATA. Clayton: the wide rule earns its keep by predicting a FOURTH case and must NOT absorb the
+"measured nothing" family. Wide rule, ratified bare in his words: **all three compared the wrong
+thing — aggregate not components, input-edit not output-verdict, words not the relationship between
+sentences.** 🔴 **His shipping condition, which governs every rule in this log: THE THREE REMEDIES
+MUST BE PRINTED UNDER IT, or it degrades into "be careful", WHICH NOBODY CAN FAIL.**
+
+**D7 — DROP "COUNT" from the valid-observation rule** (Tiberius 👑, with Krishna 🦚 converging from
+the opposite direction). *Same SET beats same COUNT* is already at `CLAUDE.md:1476`, and a test id
+alone does not say WHY it went red (`CLAUDE.md:1482`). ⇒ **The valid observation is a NAMED test
+that was PASSING at baseline, now failing, ON AN ASSERTION YOU CAN POINT AT.**
+⇒ **And "re-run, don't re-read" is wrong stated unconditionally**: a **KILL** you distrust needs an
+**isolated re-run** (bytecode can manufacture a kill and reading cannot see it); a **SURVIVOR** you
+distrust needs the **EDIT and the DATA read first** (three of four survivor explanations are
+invisible to a re-run, which merely reproduces the survival). Krishna's half: *"a summary line is
+not an observation when it omits the one variable that could be wrong — check the target YOU named,
+not the one the tool reports on."* ⚠️ **Tiberius's own scoping: the KILL half rests on n=1**, his
+single retraction — enough to show a stale pyc CAN fake a kill, not enough to say how often. The
+SURVIVOR half is better supported, coming off the four-explanation table several seats fed.
+
+**D8 — the condenser broke the ratification step of the cross-examination gate.** Clayton could not
+ratify his own rule because he received a DESCRIPTION of my draft rather than the draft, and said so
+rather than agreeing. ⇒ **Send a to-be-ratified rule BARE — one artifact per message, no surrounding
+prose** — `CLAUDE.md`'s own instruction, arriving as a live request from the seat it protects. A
+leading question survives condensation better than its qualifications do, which is a second reason
+not to ask one. ⚠️ **Rio scoped his own supporting figure and it must NOT be quoted as fleet-wide**:
+42 of 61 is one recipient, one sender, one evening, with unusually long DMs against a rewriter that
+triggers on claim count — **near a worst case, not an average**, derivation at `2f3e1e31`. *"Same
+trap as 8,622 standing since 08-22 because it was quotable."*
+
+**D9 — the run's signature was NINE REFUSALS, not the defects.** Five seats refused a leading
+question; three refused the sharpened rule I drew from them, including the versions that flattered
+them; one declined to endorse an attribution he had no evidence for. **Every correction to this log
+came from a worker measuring rather than agreeing.**
 
 **Open: cross-examination round 1**, posted to the commons `post-game` topic 2026-08-31 00:09.
 Q1 (Rio + Clayton) is the re-spin rule theirs or an artifact of a checkable question · Q2 (Chloé +
