@@ -1049,14 +1049,45 @@ trees the same night, `src/` only, `cpython-313` normal-import pycs, vendored tr
 | a converted worktree | 2434 | 1 |
 | **an unconverted worktree** | **0** | **724** |
 
-⇒ **A BRAND-NEW WORKTREE IS NEVER CONVERTED, AND ITS CLEAN VERIFY IS VACUOUS.** It has no
-`__pycache__`, so `--verify` passes because **there was nothing to judge**; the first run then writes
-timestamp pycs, since a pyc written where none existed has no mode to inherit. That is the state a
-mutation pass then measures in — and it is why *"I verified, then mutated"* protected nobody.
+⇒ **THERE ARE THREE STATES, NOT TWO** (Pocholo 📣 — a two-state headline hides the middle one,
+which is where people are actually standing):
 
-⇒ **CONVERT A NEW WORKTREE BEFORE YOU TRUST IT.** Use it once, then run
-`src/scripts/purge-pycache.sh` (purge **and** reconvert), *then* verify. A verify on an unused tree is
-not evidence.
+| tree | `--verify` | what it MEANS |
+|---|---|---|
+| **fresh, never used** | **0** | 🔴 **VACUOUS — nothing there to judge.** Not a conversion |
+| **fresh, then one ordinary run** | **1** | timestamp pycs, written where none existed — no mode to inherit |
+| **converted AND populated** | **0** | ✅ genuine — an ordinary run does **not** undo it |
+
+**The first and third both print `0` and mean opposite things.** That is why *"I verified, then
+mutated"* protected nobody: the reader saw state 1, believed state 3, and mutated in state 2.
+
+⚠️ **A live residual survives in state 3** (Clayton 😎): a module **imported for the first time since
+the last conversion** arrives timestamp-based even in a converted tree, because it too has no prior
+pyc to inherit from. Conversion is not a permanent property of a tree; it is a property of the pycs
+that existed when you ran it.
+
+⇒ **CONVERT A NEW WORKTREE BEFORE YOU TRUST IT.** Use it once, then purge-and-reconvert, *then*
+verify. A verify on an unused tree is not evidence.
+
+🔴🔴 **BUT PIN `LUPIN_ROOT` FIRST — `purge-pycache.sh` MUTATES THE MAIN REPO FROM INSIDE A WORKTREE.**
+Found by Rachel 🕊️ 2026-08-30; confirmed in the source. Line 40 is `find "$LUPIN_ROOT/src"`, the same
+wrong-tree resolution as the verifier — **except this script DELETES rather than reports**, and the
+reconvert it chains to inherits the same resolution. Run it from a worktree with `LUPIN_ROOT`
+inherited from your shell (**the default**) and it purges and reconverts the **MAIN REPO's** caches
+while the tree you are standing in is **left untouched**.
+
+```bash
+LUPIN_ROOT="$PWD" src/scripts/purge-pycache.sh     # ALWAYS, from a worktree
+```
+
+⇒ **Two harms, and the second is the quiet one.** It reaches into a shared tree other seats are
+working in; and it leaves you **believing you isolated a mutation arm that you did not**. A seat
+reported exactly that tonight — repeated per-arm purges from inside worktrees, every one of them
+landing on the main repo.
+
+⇒ **The wrong-tree family now has three members** (verifier, purge script, and the tier itself, see
+§ TESTING VENUES). Anything that resolves `$LUPIN_ROOT` is asking about *your shell*, not *your
+location*. Fix in review, row `3ac368b4`.
 
 ⇒ **A clean verify in the MAIN repo says nothing about your worktree** — the verifier scans
 `$LUPIN_ROOT/src`, not where you stand. See the wrong-tree section below.
