@@ -822,30 +822,42 @@ def test_the_refusal_markers_are_themselves_pinned():
     # REFUSAL_MARKERS rebuilds the tautology this branch exists to remove — it is exactly how
     # the notice became invertible: an anchor derived from the thing it checks.
     # 🔴 THE SET ASSERT FREEZES THE SET. IT DOES NOT TEST THAT A MARKER DISCRIMINATES.
-    # Clayton 😎 found this by TESTING the claim rather than reading it, and he is right: my
-    # comment above said the vacuous-marker case is caught, and what actually catches `""`
-    # today is set-equality refusing ANY change — legitimate ones included. Freezing a set and
-    # checking a set can tell a refusal from a permission are different properties, and I
-    # asserted the first while describing the second.
+    # Clayton 😎 found this by TESTING the claim rather than reading it: my comment said the
+    # vacuous-marker case was caught, and what caught `""` was set-equality refusing ANY
+    # change, legitimate ones included. Freezing a set and checking a set can tell a refusal
+    # from a permission are different properties; I asserted the first and described the
+    # second.
     #
-    # The gap is not theoretical: the price stated above is that widening is allowed by a
-    # DELIBERATE two-place edit. Do that with a vacuous marker — add `""` to the tuple AND to
-    # `expected` — and the set assert is satisfied, because it now describes what it is
-    # measuring. The guard would be back to zero discrimination by the sanctioned route.
+    # And the gap was reachable BY THE ROUTE I SANCTIONED — widening via a deliberate
+    # two-place edit. Add `""` to the tuple AND to `expected` and set-equality is satisfied,
+    # because it then describes what it is measuring. Measured: SURVIVED at 7bc011b9,
+    # 2 failed / 74 passed. The guard could be returned to zero discrimination through the
+    # approved door with everything green.
     #
-    # ⇒ So test the property directly: every marker must be ABSENT from text that does not
-    #   refuse. A marker that appears in a permission is not a refusal marker, whatever else
-    #   is true of it, and `""` fails this by construction rather than by enumeration.
-    NON_REFUSING = (
-        "It is fine to clear this red by recording a scan. The hold has lifted and the "
-        "credential was rotated, so update the record from the scan you just ran."
-    )
+    # 🔴 THE PERMISSION IS DERIVED FROM THE REAL NOTICE, NOT COMPOSED — Clayton's improvement
+    # on my first fix, and it removes a weakness I had flagged against myself: I wrote the
+    # non-refusing sample by hand, so it could only catch markers that fail against the
+    # permission I happened to imagine. Deriving it means the control tracks the notice
+    # instead of drifting from it.
+    #
+    # ⚠️ AND THIS IS NOT THE TAUTOLOGY THIS FILE KEEPS FINDING, though it has its shape. The
+    # text is built by REMOVING each marker, so a well-formed marker is absent by
+    # construction and the assert is trivially true FOR IT — that is the point. What the
+    # assert catches is a marker that SURVIVES ITS OWN REMOVAL, which is exactly what a
+    # non-discriminating marker is: `""` is `in` every string including the one that deleted
+    # it. A marker overlapping another's replacement is caught the same way. The check earns
+    # its keep on the pathological cases and says nothing about the healthy ones, which is
+    # the correct division of labour with the set assert below.
+    permission = ROTATION_HELD_NOTICE
     for marker in REFUSAL_MARKERS:
-        assert marker not in NON_REFUSING, (
-            f"{marker!r} appears in text that grants permission, so it cannot distinguish a "
-            "refusal from its opposite. An empty or near-empty marker fails here by "
-            "construction — which is the point: this asks what the marker can TELL APART, not "
-            "whether somebody remembered to list it" )
+        permission = permission.replace( marker, "it is fine to do this now" )
+
+    for marker in REFUSAL_MARKERS:
+        assert marker not in permission, (
+            f"{marker!r} is still present after the notice had every marker replaced with a "
+            "permission — so it cannot distinguish a refusal from its opposite. An empty or "
+            "near-empty marker fails here BY CONSTRUCTION, which is the difference between a "
+            "rule and a list of the cases somebody thought of" )
 
     expected = {
         "DO NOT CLEAR THIS RED BY RECORDING A SCAN",
