@@ -393,6 +393,81 @@ def _rotation_held_notice():
     return ROTATION_HELD_NOTICE
 
 
+# ── THE MESSAGES, AS BUILDERS, SO A GUARD CAN RENDER THEM ─────────────────────────
+#
+# 🔴 A CALL-SHAPE ASSERTION CANNOT SEE A MISSING REFERENT (Mr Radio 🦉's requirement, and
+# my own evidence for it). Clayton 😎's guard DERIVES the reds — the right half, kept below
+# unchanged in spirit — and then asks whether each red's SOURCE mentions
+# `_rotation_held_notice`. I built the same source-shaped check first and mutation-proved it
+# worthless for two of the four things it should catch: a red losing its notice, and the
+# guard narrowing itself back to one subject, both SURVIVED. Both are invisible in how the
+# code is WRITTEN and plain in what it PRINTS.
+#
+# These were inline assert expressions, which can only be checked by reading them. As
+# functions they can be RENDERED, and the guard asks the question that actually matters:
+# does the message a human sees carry the refusal, and carry it where the block says it is?
+
+
+def _rescan_red_message( what, steps, detector_now, ref_now, measured, recorded ):
+    """The rescan red's message. The withheld block promises a notice BELOW; this ends with one."""
+    return (
+        f"{what} SINCE THE LAST RECORDED FULL SCAN, and re-running it here does not match "
+        f"what is on record. {_rescan_lead_sentence()}\n"
+        f"{steps}\n"
+        f"    detector_sha256   : {detector_now}\n"
+        f"    scanned_ref_sha   : {ref_now}\n"
+        f"    scan_fingerprint  : {measured}\n"
+        f"    last recorded     : {recorded[ 'scanned_at' ]}, "
+        f"{recorded[ 'distinct_values_at_tip' ]} distinct values, "
+        f"{recorded[ 'real_findings' ]} real"
+        + _rotation_held_notice()
+    )
+
+
+def _branch_triage_message( untriaged, steps, recorded ):
+    """
+    The branch-triage red's message.
+
+    ⚠️ Its TRIAGE instruction is deliberately NOT gated: adding a triaged row with a
+    one-line reason is triage, which the hold asks for. The hold separates TRIAGE from
+    RECORDING A SCAN, not writes from reads (Mr Radio's ruling, 2026-08-30).
+    """
+    return (
+        f"{len( untriaged )} finding(s) on {recorded[ 'branch_ref' ]} have never been triaged. "
+        "Values are masked — key, path and a truncated digest, never the secret:\n"
+        + chr( 10 ).join( "    " + row for row in untriaged )
+        + "\n\nIf one is real, remove it and read it from the environment or the secret store. "
+          "If it is a false positive, triage it and add its row to branch_accepted AS A KEY "
+          "WHOSE VALUE IS A ONE-LINE REASON — a bare row is refused:\n"
+        + steps
+        + _rotation_held_notice()
+    )
+
+
+def _render_every_red_under_a_hold():
+    """
+    Every red's message, actually rendered, with the hold forced ACTIVE.
+
+    🔴 THE REGISTRY IS CHECKED AGAINST THE DERIVATION, NOT TRUSTED. A hand-written dict of
+    builders is exactly the "list of names that rots" Clayton's derivation exists to avoid —
+    so the guard asserts this registry covers every red the AST walk finds. A new red with
+    no entry here does not slip through; it fails loudly, naming itself.
+
+    Ensures:
+        - returns {red name -> the message that red would print}, hold ACTIVE
+    """
+    recorded = _recorded_for_gate()
+    root     = cu.get_project_root()
+    with _hold( True ):
+        steps = _clear_the_red_steps( recorded, root )
+        return {
+            "test_a_detector_change_forces_a_full_rescan" : _rescan_red_message(
+                "THE DETECTOR CHANGED", steps, "sha-a", "sha-b", "sha-c", recorded ),
+            "test_the_branch_we_commit_to_carries_no_untriaged_finding" : _branch_triage_message(
+                [ "a|masked|row" ], steps, recorded ),
+        }
+
+
 def _rescan_lead_sentence():
     """
     The sentence that INTRODUCES the recipe — held to the same condition as the recipe.
@@ -548,18 +623,8 @@ def test_a_detector_change_forces_a_full_rescan():
 
     findings = _scan_once( recorded[ "scanned_ref" ], root )
     measured = _scan_fingerprint( findings )
-    assert measured == recorded.get( "scan_fingerprint" ), (
-        f"{what} SINCE THE LAST RECORDED FULL SCAN, and re-running it here does not match "
-        f"what is on record. {_rescan_lead_sentence()}\n"
-        f"{steps}\n"
-        f"    detector_sha256   : {detector_now}\n"
-        f"    scanned_ref_sha   : {ref_now}\n"
-        f"    scan_fingerprint  : {measured}\n"
-        f"    last recorded     : {recorded[ 'scanned_at' ]}, "
-        f"{recorded[ 'distinct_values_at_tip' ]} distinct values, "
-        f"{recorded[ 'real_findings' ]} real"
-        + _rotation_held_notice()
-    )
+    assert measured == recorded.get( "scan_fingerprint" ), _rescan_red_message(
+        what, steps, detector_now, ref_now, measured, recorded )
 
     # The COUNTS guard that used to live here now has its own test — see
     # test_the_recorded_counts_are_derived_from_the_same_scan below. It was moved because
@@ -679,8 +744,24 @@ def test_the_rescan_red_still_carries_the_two_shas_that_make_it_actionable():
         "the notice must name the detector sha whose arrival in the fixture is refused "
         "before rotation" )
 
+    # 🔴 THE LEAD SENTENCE MUST STAY BEHIND ITS GATE, AND ONLY A RENDERED CHECK SEES IT.
+    # Found by mutation rather than by reading, and it was the ONLY survivor of an eight-arm
+    # sweep: replace `{_rescan_lead_sentence()}` in the rescan red with the literal text it
+    # used to carry, and the gate is bypassed completely with every test still passing. The
+    # notice has had a tripwire for exactly this shape since it was written; its own opening
+    # sentence had none, and the tests that touch `_rescan_lead_sentence` all call it
+    # directly — so nothing asked whether the RED still goes through it.
+    #
+    # Asserted on the rendered message, not on the call: what matters is that a reader under
+    # a hold is never told to re-scan and record, whatever the code looks like.
+    held = _render_every_red_under_a_hold()[ "test_a_detector_change_forces_a_full_rescan" ]
+    assert "re-scan, triage the output, and record the result" not in held.lower(), (
+        "the rescan red tells a reader to re-scan and record while the hold stands — the one "
+        "action the notice in the same message REFUSES, and it is read first. The lead "
+        "sentence has been inlined past _rescan_lead_sentence()" )
+
     source = inspect.getsource( test_a_detector_change_forces_a_full_rescan )
-    assert "_rotation_held_notice" in source, (
+    assert "_rotation_held_notice" in source or "_rescan_red_message" in source, (
         "the rescan red no longer appends ROTATION_HELD_NOTICE, so the warning reaches "
         "nobody who hits it. Re-attach it to the assert message." )
 
@@ -721,17 +802,60 @@ def test_every_red_that_withholds_the_recipe_also_carries_the_notice():
         body = ast.get_source_segment( module_src, node ) or ""
         if "_clear_the_red_steps" not in body:  continue
         if not _renders_into_a_failure_message( node ): continue
-        reds.append( ( node.name, "_rotation_held_notice" in body ) )
+        reds.append( node.name )
 
     assert reds, (
         "no red was found rendering the withheld block — either the reds were renamed or "
         "this derivation broke. An empty set passing is not a pass." )
 
-    missing = [ name for name, has in reds if not has ]
-    assert not missing, (
-        f"{len( missing )} red(s) print the withheld block without the notice it points "
-        f"at: {missing}. The block says the hold is 'below'; at these sites nothing is. "
-        "Append _rotation_held_notice() to the assert message." )
+    # 🔴 RENDER, DO NOT READ THE SOURCE — Maya 🌻, on Mr Radio 🦉's requirement, upgrading
+    # the second half of this guard while keeping Clayton 😎's derivation above untouched.
+    # **A call-shape assertion cannot see a missing referent.** The check here used to be
+    # `"_rotation_held_notice" in body`, and it fails in BOTH directions:
+    #
+    #   FALSE PASS — measured. I wrote the same check myself and mutation-proved it blind to
+    #   two of the four things it should catch: a red losing its notice, and the guard
+    #   narrowing itself back to one subject. Both SURVIVED.
+    #   FALSE FAIL — measured, one commit ago. Moving each message into a builder is a pure
+    #   improvement, and the source check reddened on it because the notice was no longer
+    #   spelled inside the red. A guard that punishes a refactor it should be indifferent to
+    #   is measuring the wrong thing.
+    #
+    # THE INVARIANT IS A PROMISE ABOUT POSITION. The block says "the rotation hold BELOW is
+    # active", so the refusal must be present AND below. A notice above the block passes any
+    # `in` check and still leaves the reader looking downward at nothing.
+    rendered = _render_every_red_under_a_hold()
+
+    unrendered = sorted( set( reds ) - set( rendered ) )
+    assert not unrendered, (
+        f"{unrendered} print the withheld block and have no entry in "
+        "_render_every_red_under_a_hold, so this guard cannot see what they say. A registry "
+        "that silently covers less than the derivation is the staleness the derivation "
+        "exists to prevent — add the red there, do not narrow the derivation" )
+
+    promise    = "rotation hold below"
+    first_line = ROTATION_HELD_NOTICE.strip().splitlines()[ 0 ].strip()
+
+    for name in sorted( reds ):
+        message = rendered[ name ]
+        assert promise in message.lower(), (
+            f"{name} no longer prints the withheld block. If that is deliberate this guard "
+            "should go with it; if not, the hold stopped being visible where somebody reads it" )
+        assert first_line in message, (
+            f"{name} prints the withheld block — which says the rotation hold is BELOW — and "
+            "its message does not carry the refusal. The reader is pointed downward at "
+            "nothing, which reads as a stale copy-paste and teaches them to discount the next "
+            "refusal too" )
+        # 🔴 THE **LAST** PROMISE, NOT THE FIRST — and my own mutation is what found this.
+        # The phrase appears TWICE in the rescan red: once in the lead sentence and once in
+        # the withheld block. Written against `.index` the check passed a mutation that put
+        # the notice between them — above the block that promises it, below the sentence
+        # that also does. Every promise needs the refusal below IT, so the binding one is
+        # the last.
+        assert message.index( first_line ) > message.lower().rindex( promise ), (
+            f"{name} carries the refusal ABOVE the block that promises it BELOW. Present but "
+            "misplaced still leaves the reader looking down at nothing — which is why this "
+            "asserts a POSITION and not a membership" )
 
 
 def _renders_into_a_failure_message( node ):
@@ -1078,28 +1202,7 @@ def test_the_branch_we_commit_to_carries_no_untriaged_finding():
     untriaged = sorted( measured - accepted )
 
     steps = _clear_the_red_steps( recorded, root )
-    assert not untriaged, (
-        f"{len( untriaged )} finding(s) on {recorded[ 'branch_ref' ]} have never been triaged. "
-        "Values are masked — key, path and a truncated digest, never the secret:\n"
-        + chr( 10 ).join( "    " + row for row in untriaged )
-        + "\n\nIf one is real, remove it and read it from the environment or the secret store. "
-          "If it is a false positive, triage it and add its row to branch_accepted AS A KEY "
-          "WHOSE VALUE IS A ONE-LINE REASON — a bare row is refused:\n"
-        + steps
-        # 🔴 THE WITHHELD BLOCK PROMISES A NOTICE "BELOW" AND THIS RED HAD NONE.
-        # `_clear_the_red_steps` renders "while the rotation hold BELOW is active", which
-        # is true at the two reds that append the notice and a dangling forward reference
-        # here — a reader who hits only this red is pointed at a hold that never appears.
-        # Found by RENDERING both messages rather than reading them: the code is correct
-        # at every site, and only the assembled output shows the promise going unmet.
-        #
-        # Appending is the fix rather than rewording "below", because this red's own
-        # remedy — add a triaged row to `branch_accepted` — is NOT what the hold refuses;
-        # the hold refuses moving `detector_sha256`. So the reader needs the notice's
-        # information, not a softer sentence. Every red that prints the withheld block now
-        # carries the thing the block points at.
-        + _rotation_held_notice()
-    )
+    assert not untriaged, _branch_triage_message( untriaged, steps, recorded )
 
 
 # ── the justification gate — negative controls ────────────────────────────────────
