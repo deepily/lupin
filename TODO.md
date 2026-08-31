@@ -222,10 +222,18 @@ it on report — `%an` and `%cn` are both `deepily` across 200 commits.
 ⇒ **So the check compares two byte-identical values whatever happened.** That is **a fixture that
 cannot discriminate, inside a remedy written to satisfy D10, in the entry that cites the doctrine
 against itself.** The cleanest specimen of the fourth doctrine case this crew has produced.
-⇒ **Git carries no seat identity today.** The only place a persona appears is the commit MESSAGE —
-26 of the last 30 commits carry a naming trailer. So a real check must read the review artifact
+⇒ **Git carries no seat identity today.** The only place a persona appears is the commit MESSAGE.
+🔴 **AND MY OWN FIGURE FOR THIS WAS WRONG — corrected by Clayton 😎 and re-measured by me.** I
+published *"26 of the last 30 commits carry a naming trailer."* **What I actually counted was
+`Co-Authored-By: Claude Opus 5`** — a line that names the MODEL and carries **zero seat identity**,
+so it cannot support the claim I made with it. A persona appears only in the free PROSE of the
+message. **Say which you are counting**: Clayton measured **55 persona MENTIONS across the last 30
+commits**; my own broader pattern over the same window returns **68 matching lines**. Neither is a
+trailer, and the two figures count different things rather than disagreeing. So a real check must read the review artifact
 against the merge message, **or the fleet stamps a seat trailer**. 🔨 **THAT IS A DECISION FOR RICK,
 NOT A WORDING FIX** — it changes what every seat writes on every commit.
+🔴 **UNTIL HE RULES, D11 HAS NO WORKING CHECK FOR ITS MAIN RULE.** Clayton's point, and it must
+not be softened: the split is endorsed and **unenforced**. Do not read the endorsement as coverage.
 
 **REMEDY 2 — REPLACED BY HIS, WHICH IS NARROWER AND MATCHES WHAT HAPPENED.** Mine compared the
 review worktree's HEAD to the BRANCH tip and failed if they differed. **Differing IS the normal
