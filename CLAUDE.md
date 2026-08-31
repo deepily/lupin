@@ -866,9 +866,9 @@ which welds a real answer to a failure-to-answer:
 | **1** | ⚠️ **the real finding** — timestamp pycs are present |
 | **2** | **it never ran** — **three** conditions share this code: unknown option · root is not a directory · no interpreter at `$PYTHON`. Each prints a distinct message to **stderr**, so the message is the only discriminator — capture stderr, or you cannot tell them apart |
 
-**Exit 2 is common, not exotic**: `PYTHON` defaults to `$LUPIN_ROOT/.venv/bin/python`, and
-**29 of the fleet's 74 worktrees have no `.venv`** — so the bare command fails on roughly two in
-five, and a reader treating any non-zero as "vulnerable tree" mis-reads a script that never started.
+**Exit 2 is common, not exotic**: `PYTHON` defaults to `$LUPIN_ROOT/.venv/bin/python`, and **roughly
+two in five worktrees have no `.venv`** — so a reader treating any non-zero as "vulnerable tree"
+mis-reads a script that never started. **Re-derive the ratio rather than quoting one; see below.**
 
 ```bash
 # in a worktree without its own .venv — name the interpreter
@@ -957,9 +957,23 @@ PYTHON="$( dirname "$( git rev-parse --path-format=absolute --git-common-dir )" 
 ```
 
 `git-common-dir` resolves to the MAIN checkout from inside any worktree, so this needs no hardcoded
-path and works from every tree. **29 of 75 seat worktrees have no `.venv`** (measured 2026-08-30
-~22:26 EDT, excluding the six `.claude/worktrees/tfe-*` harness trees; the total moves as seats come
-and go), which is why the `PYTHON` pin is not optional.
+path and works from every tree.
+
+🔴 **DO NOT QUOTE THE VENV-LESS COUNT — RE-DERIVE IT.** Three figures appeared in one evening
+(29/74, 29/75, 30/76) and **all three were correct when taken**; the population changes as seats come
+and go, so a quoted ratio is a rumour with a timestamp. Same rule as *a coordinate is not a
+reference* — **ship the command, not the number**:
+
+```bash
+git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r w; do
+    [ -x "$w/.venv/bin/python" ] || echo "$w"
+done | wc -l
+```
+
+Snapshot for scale only, **not to be quoted**: **30 of 76** at 2026-08-30 22:44 EDT, excluding the
+six `.claude/worktrees/tfe-*` harness trees (82 and 36 including them — say which you mean). The
+ratio has stayed near two in five across every measurement, which is why the `PYTHON` pin is not
+optional.
 
 ⚠️ **Exit 2 at least fails LOUDLY** — it never prints a verdict, so unlike the unpinned run it cannot
 certify the wrong tree. The three-way exit-code table is above.
