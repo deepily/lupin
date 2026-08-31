@@ -61,6 +61,15 @@ BREAKS_WITHOUT_VENV = {
 # Detected, but measured GREEN without a venv. Each entry states why it survives, so the next
 # reader can refute the classification instead of re-deriving it.
 DETECTED_BUT_DOES_NOT_BREAK = {
+    "test_purge_pycache_args.py":
+        "the two `.venv/bin/python` strings are ASSERTION SUBJECTS, not paths this file "
+        "walks. One is the literal the drift check greps for inside both shell scripts "
+        "(`PYTHON=\"${PYTHON:-$LUPIN_ROOT/.venv/bin/python}\"`), the other is prose in a "
+        "docstring. Every subprocess here runs a COPY of the script planted in a tmp_path "
+        "checkout, and every interpreter is either `sys.executable` or a deliberately "
+        "nonexistent path used to prove the refusal fires. Measured BOTH ways at 998dd427 "
+        "in this worktree, the `.venv` symlink moved aside and restored between the two "
+        "runs: 10 passed without, 10 passed with.",
     "test_coverage_contention.py":
         "the `.venv/bin/pytest` strings are FIXTURE DATA — command lines the checker under "
         "test is asked to parse. Nothing is executed, so no interpreter is needed.",
