@@ -58,6 +58,34 @@ entries — one of them the manager's own.
     exists. The **author's own edit** goes in the DM and the review trail — that is the one
     whose secrecy has any value.
 
+- [ ] **Ask WHO wrote a commit with the session trailer, never the author field** (Chloé 🗼,
+  2026-08-30; Mr Radio 🦉 adopted it and placed it here). *Reason:* **every seat on this box
+  commits as `deepily`**, so `%an` looks like provenance and carries none — it is the same
+  family as the two above, a reference that resolves to something other than what its text
+  claims. The discriminator is the `Claude-Session:` trailer.
+
+  Measured tonight: Rachel 🕊️ asked whether `1939c2bc` was mine. The author field says
+  `deepily` for her, for me and for the seat that actually made it; the trailers say
+  `session_01V5CKHbsim2T3hNEargPHBK` against my `session_01UsqMiuVpnhciqTuSFPiRxX`, and that
+  settled it in seconds. ⇒ `git log -1 --format=%B <sha> | grep Claude-Session`.
+
+  ⚠️ **This one has a receipt against its own manager**: Mr Radio credited Rachel's self-catch
+  to me twice, and said on adopting this that his attribution errors were *"partly structural
+  rather than only careless."* A field that looks authoritative and is blank of information
+  will be read as authoritative by everyone, including the person who knows better.
+
+  🔴 **AND A CORRECTION AGAINST MYSELF, WHICH IS THE HALF WORTH KEEPING.** I first reported
+  that commit as a seat sweeping up Rachel's uncommitted edit, *"exactly what the per-session
+  manifest exists to prevent."* **That is wrong, and the guard's own header says so** —
+  `src/lupin_cli/claude_code/hooks/lib/commit_scope_guard.py`, under *"WHAT NO GUARD HERE CAN
+  CLOSE"*: a pathspec commit takes each named path's **working-tree** content, so naming a file
+  your section legitimately claims still commits whatever a peer left uncommitted inside it.
+  **The manifest is per-FILE, not per-hunk. Only a private working tree closes it.** Nobody did
+  anything wrong: that seat named `TODO.md`, which it was entitled to name, and got her edit
+  with it. Rachel banked the mechanism at `0bc57fa3`. ⇒ **I diagnosed a discipline failure where
+  the documentation already described a known, unclosable gap — the second time tonight I
+  called a documented trade-off a defect before reading the file that documents it.**
+
 #### A documented rollback whose automated half NEVER WORKED (Chloé 🗼, banked by Mr Radio 🦉, 2026-08-30)
 
 - [ ] 🔴 **`src/docs/auth/migration-guide.md` documents an auth-migration rollback, and the automated half of it has never once run.** `rollback_migration.py` imported `delete_user_by_email` from `cosa.rest.user_service`; `git log -S "def delete_user_by_email"` is **EMPTY repo-wide across all history**, so the function never existed and the script raised `ImportError` on load from the day it was written. Verified independently three times — Chloé, Tiberius, and me.
