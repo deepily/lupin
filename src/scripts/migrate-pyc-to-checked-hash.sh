@@ -67,7 +67,14 @@
 # (never discarded), and the census NAMES the roots it actually scanned.
 set -uo pipefail
 
-LUPIN_ROOT="${LUPIN_ROOT:-$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )}"
+# 🔴 DERIVED UNCONDITIONALLY — $LUPIN_ROOT IS NOT CONSULTED. This script is shipped INSIDE the
+# tree it cleans, so the environment can only DISAGREE with it, never inform it. The old line
+# read "${LUPIN_ROOT:-<this same expression>}": the fallback was already right, and a SET
+# variable simply won over it. Every seat's shell exports LUPIN_ROOT pointing at the MAIN
+# checkout, so running this from a worktree purged /…/lupin, printed its success banner, and
+# left the worktree exactly as poisoned as it found it — two harms in one command, and the
+# clobbered tree belongs to somebody else. Found and remedied by Pocholo 📣, 2026-08-30 ~17:52.
+LUPIN_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
 PYTHON="${PYTHON:-$LUPIN_ROOT/.venv/bin/python}"
 VERIFY_ONLY=0
 ROOTS=()
