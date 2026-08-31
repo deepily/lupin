@@ -659,16 +659,26 @@ def test_terse_title_trimmed_reads_the_COLUMN_not_the_title_length( client, repo
 
 def test_terse_does_not_flag_an_over_cap_LEGACY_row( client, repo ):
     """
-    Rachel 🕊️'s S1 projection fixture, carried onto the stored-flag branch — where it
-    proves something STRONGER than it could against the predicate it was written for.
+    Rachel 🕊️'s S1 projection fixture, carried onto the stored-flag branch so her
+    concern survives the deletion of the predicate it was written against.
 
-    Against `len(title) == cap` this test said: a legacy over-cap title is not flagged.
-    Against a stored column it says: the flag is not derived from the title's length AT
-    ALL. `make_item` supplies a 90-character title and the default flag, exactly as one
-    of the 333 legacy rows in the store does, and the answer comes off the column.
+    🔴 WHAT THIS TEST DOES **NOT** PROVE, corrected after Mr Radio 🦉 caught me claiming
+    it did. I wrote that against a stored column this says "the flag is not derived from
+    the title's length AT ALL". IT DOES NOT. Measured: restore the length derivation in
+    the serializer (sha 1e6f1ce41a5a) and THIS TEST STILL PASSES — 90 != 60, so a length
+    check and a column read give the same answer on this input. A test that cannot tell
+    the two apart cannot be evidence about which one is running.
 
-    Her fixture outlives the function it was written against. Kept here rather than
-    dropped with the predicate, so the concern survives the surface it was measured on.
+    ⇒ The independence claim belongs to
+    `test_terse_title_trimmed_reads_the_COLUMN_not_the_title_length`, whose fixture is
+    CROSSED — a short title flagged True, a cap-length title flagged False — and which
+    goes RED on that same mutant. On the length question this test is strictly subsumed
+    by that one.
+
+    WHAT IT DOES PROVE, which is Rachel's actual finding and worth keeping: a legacy
+    over-cap row is not flagged. `make_item` bypasses the write path exactly as one of
+    the 333 rows already in the store does, so this pins the answer for a real input
+    class that the write path can no longer produce.
     """
     repo.query_tasks.return_value = [ make_item( title="X" * 90 ) ]
     r = client.get( "/api/tasks", params={ "terse": "true" } )
