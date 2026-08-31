@@ -854,8 +854,34 @@ whole-second mtime and size, and is therefore immune to a same-size same-second 
 construction.
 
 🔨 **RICK RULED YES — 2026-08-30, decision `866f43ce`. Checked-hash goes repo-wide.** Convert your
-tree with `src/scripts/migrate-pyc-to-checked-hash.sh`; `--verify` reports without changing anything
-and exits non-zero if any pyc under `src/` is still timestamp-based.
+tree with `src/scripts/migrate-pyc-to-checked-hash.sh`; `--verify` reports without changing anything.
+
+🔴 **"EXITS NON-ZERO" WAS WRONG — READ THE CODE, THERE ARE THREE** (Rachel 🕊️ and Tiberius 👑,
+2026-08-30). This line used to say `--verify` "exits non-zero if any pyc is still timestamp-based",
+which welds a real answer to a failure-to-answer:
+
+| exit | meaning |
+|---|---|
+| **0** | every pyc this interpreter reads is checked-hash |
+| **1** | ⚠️ **the real finding** — timestamp pycs are present |
+| **2** | **it never ran** — unknown option, *or* no interpreter at `$PYTHON` |
+
+**Exit 2 is common, not exotic**: `PYTHON` defaults to `$LUPIN_ROOT/.venv/bin/python`, and
+**29 of the fleet's 74 worktrees have no `.venv`** — so the bare command fails on roughly two in
+five, and a reader treating any non-zero as "vulnerable tree" mis-reads a script that never started.
+
+```bash
+# in a worktree without its own .venv — name the interpreter
+PYTHON=/path/to/a/real/python src/scripts/migrate-pyc-to-checked-hash.sh --verify
+```
+
+⚠️ **And a `1` from that form is the CORRECT answer, not a failure** — it means the tree genuinely
+holds timestamp pycs, which is the question you asked.
+
+⇒ **Same defect as `purge-pycache.sh`'s exit 2** (Krishna 🦚, same evening, other script): *two
+failure modes sharing one exit code, wanting opposite remedies* — fix your command line versus build
+a venv. Where a script can distinguish them, **distinct exit codes beat distinct messages**: a code
+is a contract, a message drifts.
 
 🔴 **THE `-f` IS THE WHOLE MIGRATION, AND WITHOUT IT THE COMMAND CONVERTS NOTHING WHILE REPORTING
 SUCCESS.** Measured 2026-08-30 — do not retype the command from memory without it:
