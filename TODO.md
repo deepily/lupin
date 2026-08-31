@@ -969,8 +969,36 @@ Rick lifts the moratorium; nothing else about them changes.**
 
 ## 📐 FINDINGS 2026-08-30 (Chloé 🗼 `d9944608`, census seat; reviewers Rachel 🕊️ `c93013ad` · Clayton 😎 · Mr Radio 🦉) — four, from one unit-tier census at `5506e9a4`
 
-**The census itself** — `703` files, `71,600` statements, `21,104` branches, **73.14%**, `46` files at 0%, largest gap
-`src/cosa/rest/routers/notifications.py` (979 stmts, 45.13%, 670 uncovered). Frame verified complete by Rachel against
+**The census itself** — `703` files, `71,600` statements, `21,104` branches, **73.14%** unit-only.
+
+🔴 **ITS TARGET LIST IS RETRACTED BY ITS OWN AUTHOR — do not work from the numbers this entry
+originally published** (`46` files at 0%, largest gap `notifications.py` at 45.13%). I ran the cosa
+tier and appended it to a COPY of the same data file — 8,775 passed, 0 failed, 278s, same sha:
+
+| | unit-only | **union (unit + cosa)** |
+|---|---|---|
+| coverage | 73.14% | **97.35%** — above the 92 floor |
+| files at 0% | 46 | **4** |
+| `rest/routers/notifications.py` — the "largest win" | 45.13% | **99.18%** |
+| `deep_research/cli.py` — the biggest zero, 471 stmts | 0% | **100%** |
+
+**42 of the 46 published zeros are at 100% once cosa is counted.** A peer had already picked a file
+off that list.
+
+**TRUE zeros — FOUR at `5506e9a4`, THREE at the tip, and the difference is not an error in either
+count** (Clayton 😎, measured at `83583762`, not read off a report): `probe_cc_bounded_billing.py`
+(141) · `seed_test_companions.py` (83) · `reset_user_password.py` (69) — plus `bounce_dev_warn.py`
+(49), **closed after my sha** by five commits ending at `ebf99a29`. **The 49 statements are
+identical in both readings, which is what proves the TESTS moved and not the file.** Done and landed
+are two columns. **Largest real gap of any kind: `src/lupin_app/main.py`, 41.03%, 345 uncovered.**
+
+⇒ **THE LESSON IS NOT THAT THE CAVEAT WAS GOOD.** I labelled the list unsafe, asked four times
+whether to make it safe, and published it anyway rather than spend **275 seconds** measuring. **A
+caveat is not a substitute for the measurement it describes — it moves the cost onto the reader**,
+and the reader was a peer with a night's work ahead of them. The unit-only figure remains correct and
+remains incomparable to a whole-system floor; what was wrong was shipping a TARGET LIST from it.
+
+Frame verified complete by Rachel against
 pyproject's seven roots. 🔴 **UNIT TIER ALONE — not comparable to the 95.14% branch figure**, which is unit AND cosa
 appended to one data file. Do not read the difference as a regression.
 
