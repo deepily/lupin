@@ -204,7 +204,7 @@ def test_create_over_cap_title_with_body_RELOCATES_overflow( client, repo ):
     assert guard[ "overflow_moved_to_body" ] is True
     kwargs = repo.create_item.call_args.kwargs
     assert kwargs[ "title" ] == "W" * 60
-    assert kwargs[ "body" ].endswith( "keep me" )                # body never clobbered
+    assert kwargs[ "body" ].startswith( "keep me" )              # body never clobbered, and still first
     assert "W" * 20 in kwargs[ "body" ]                          # ...and the overflow survived
     assert kwargs[ "title" ] + "W" * 20 == "W" * 80              # round-trips to the original
 
@@ -1290,7 +1290,7 @@ def test_patch_over_cap_title_is_guarded_by_THE_SAME_helper_as_create( client, r
     fields = repo.apply_patch.call_args.args[ 1 ]
     assert fields[ "title" ] == "P" * 60
     assert fields[ "title" ] + "P" * 35 == long_title             # round-trips EXACTLY
-    assert fields[ "body" ].endswith( "the existing body" )       # the row's body, preserved
+    assert fields[ "body" ].startswith( "the existing body" )     # the row's body, preserved and still first
 
 
 def test_patch_relocates_overflow_into_the_body_THE_PATCH_IS_WRITING( client, repo ):
@@ -1310,7 +1310,7 @@ def test_patch_relocates_overflow_into_the_body_THE_PATCH_IS_WRITING( client, re
     fields = repo.apply_patch.call_args.args[ 1 ]
     assert r.status_code == 200
     assert "R" * 10 in fields[ "body" ]                           # overflow survived...
-    assert fields[ "body" ].endswith( "the NEW body" )            # ...above the INCOMING body
+    assert fields[ "body" ].startswith( "the NEW body" )          # ...below the INCOMING body
     assert "about to be replaced" not in fields[ "body" ]         # never the stale one
 
 

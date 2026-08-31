@@ -737,7 +737,7 @@ class TestSoftGuardTitle:
         assert new_body  == title[ rules.TITLE_SOFT_CAP: ]
         assert advisory[ "overflow_moved_to_body" ] is True
 
-    def test_over_cap_nonempty_body_RELOCATES_overflow_above_the_body( self ):
+    def test_over_cap_nonempty_body_RELOCATES_overflow_BELOW_the_body( self ):
         # bug 28fc1fb4. This test previously asserted the DEFECT as correct: it
         # required new_body == body and overflow_moved_to_body == False — i.e. it
         # pinned the silent discard in place and went green on every run. The
@@ -749,7 +749,7 @@ class TestSoftGuardTitle:
 
         assert new_title == title[ :rules.TITLE_SOFT_CAP ]
         assert body in new_body                                  # still never clobbered...
-        assert new_body.endswith( body )                         # ...and still last, verbatim
+        assert new_body.startswith( body )                       # ...and now FIRST, verbatim
         assert rules.TITLE_OVERFLOW_MARKER in new_body           # findable by grep, store-wide
         assert title[ rules.TITLE_SOFT_CAP: ] in new_body        # the overflow SURVIVED
         assert advisory == {
@@ -773,10 +773,42 @@ class TestSoftGuardTitle:
         body  = "pre-existing body text\nwith a second line"
         new_title, new_body, _ = rules.soft_guard_title( title, body )
 
-        marker_line, overflow_line, _blank, *rest = new_body.split( "\n" )
+        *rest, marker_line, overflow_line = new_body.split( "\n" )
         assert marker_line == rules.TITLE_OVERFLOW_MARKER
         assert new_title + overflow_line == title                # EXACT reconstruction
-        assert "\n".join( rest ) == body                         # the body, verbatim, intact
+        assert "\n".join( rest ).rstrip( "\n" ) == body           # the body, verbatim, intact
+
+    def test_the_bodys_own_first_line_is_still_the_first_line( self ):
+        """
+        THE GUARANTEE THIS CHANGE EXISTS FOR (row a6cb24e8).
+
+        Prepending was permitted by the ruling — it is not clobbering — but it cost
+        the body its opening line, which is the part a reader sees first. Appending
+        satisfies the same ruling and keeps it.
+        """
+        title = "Q" * 75
+        body  = "THE REAL OPENING LINE\nand a second line"
+        _new_title, new_body, _advisory = rules.soft_guard_title( title, body )
+
+        assert new_body.split( "\n" )[ 0 ] == "THE REAL OPENING LINE"
+
+    def test_a_second_trim_does_not_bury_the_body_under_stacked_banners( self ):
+        """
+        The compounding half, reproduced by Tiberius 👑 and Maya 🌻 independently:
+        a RETITLE that is also over the cap used to prepend a SECOND marker above
+        the first, so the body's head was corrupted once per retitle attempt and
+        both banners had to be unpicked by hand.
+
+        Appending makes repeated trims collect at the FOOT in the order they
+        happened — a readable history rather than a corrupted head.
+        """
+        body                = "THE REAL OPENING LINE"
+        _t1, after_first, _ = rules.soft_guard_title( "A" * 75, body )
+        _t2, after_second, _ = rules.soft_guard_title( "B" * 75, after_first )
+
+        assert after_second.split( "\n" )[ 0 ] == "THE REAL OPENING LINE"
+        assert after_second.count( rules.TITLE_OVERFLOW_MARKER ) == 2   # both kept...
+        assert after_second.index( "A" * 15 ) < after_second.index( "B" * 15 )  # ...in order
 
     def test_custom_cap_is_honored( self ):
         # The cap is parameterizable — proves the guard is not hard-wired to 60.
