@@ -995,8 +995,10 @@ are two columns. **Largest real gap of any kind: `src/lupin_app/main.py`, 41.03%
 ⇒ **THE LESSON IS NOT THAT THE CAVEAT WAS GOOD.** I labelled the list unsafe, asked four times
 whether to make it safe, and published it anyway rather than spend **275 seconds** measuring. **A
 caveat is not a substitute for the measurement it describes — it moves the cost onto the reader**,
-and the reader was a peer with a night's work ahead of him. The unit-only figure remains correct and
-remains incomparable to a whole-system floor; what was wrong was shipping a TARGET LIST from it. Frame verified complete by Rachel against
+and the reader was a peer with a night's work ahead of them. The unit-only figure remains correct and
+remains incomparable to a whole-system floor; what was wrong was shipping a TARGET LIST from it.
+
+Frame verified complete by Rachel against
 pyproject's seven roots. 🔴 **UNIT TIER ALONE — not comparable to the 95.14% branch figure**, which is unit AND cosa
 appended to one data file. Do not read the difference as a regression.
 
