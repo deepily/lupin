@@ -670,13 +670,33 @@ class SolutionSnapshot( RunnableCode ):
         data = { field: value for field, value in self.__dict__.items() if field not in fields_to_exclude }
         return json.dumps( data )
         
-    def get_copy( self, user_email: str = "" ) -> 'SolutionSnapshot':
+    def get_copy( self, user_email: str = "", user_id: str = "" ) -> 'SolutionSnapshot':
         """
         Create a copy of this snapshot for queue execution.
 
-        Note: user_email is passed here (not in constructor) because snapshots
-        are loaded from storage without user context. The requesting user's
-        email is injected at copy time for TTS notification routing.
+        Note: user_email and user_id are passed here (not in constructor) because
+        snapshots are loaded from storage without user context. The REQUESTING
+        user's identity is injected at copy time — the email for TTS routing, the
+        id for WebSocket delivery.
+
+        🔴 user_id JOINED user_email HERE ON 2026-08-30 (row `0e7c9214`), and its
+        absence made a WebSocket frame undeliverable, not merely untidy. The copy kept
+        the ORIGINAL creator's id straight through to `_transition_to_done`, which
+        emits with `user_id = job.user_id`, so on a repeat ask the frame was addressed
+        to a stored id nobody holds a session under —
+
+            [WS] emit_to_user: user ricardo_felipe_ruiz_6bdc not in user_sessions
+                 — delivery skipped
+
+        while that browser session was registered under the asker's UUID. The
+        principle was already written in this docstring; only the email obeyed it.
+
+        ⚠️ SCOPE — this closes the DROPPED job_state_transition FRAMES and nothing
+        else. The same row reports the spoken answer never arriving either; that has
+        a SEPARATE cause, upstream of this copy, where `job.user_email` arrives empty
+        (`fifo_queue.py`, the `if not resolved_email ...` branch). An earlier draft of
+        this docstring joined the two with a "because" and that join was never
+        measured — it was inferred from two log lines being adjacent.
 
         Requires:
             - None
@@ -685,6 +705,11 @@ class SolutionSnapshot( RunnableCode ):
             - Returns new instance with same values
             - Shallow copy (references shared)
             - user_email is set on copy if provided
+            - user_id is set on copy if provided
+            - the ORIGINAL is never mutated — it is shared and gets saved back
+            - a falsy user_email / user_id means "no requester context" and leaves
+              the stored value alone; it never blanks it, since an erased id is as
+              undeliverable as a stale one
 
         Raises:
             - None
@@ -692,6 +717,8 @@ class SolutionSnapshot( RunnableCode ):
         snapshot_copy = copy.copy( self )
         if user_email:
             snapshot_copy.user_email = user_email
+        if user_id:
+            snapshot_copy.user_id = user_id
         return snapshot_copy
     
     def write_current_state_to_file( self ) -> None:
