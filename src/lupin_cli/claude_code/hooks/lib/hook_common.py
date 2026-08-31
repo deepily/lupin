@@ -15,6 +15,8 @@ Usage from hook scripts:
     )
 """
 import configparser
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -1685,6 +1687,61 @@ def _routing_reminder():
     )
 
 
+# ── A HOOK'S STDOUT IS ITS RETURN CHANNEL, NOT A LOG (row 298af249) ──────────
+#
+# `ConfigurationManager.__init__` prints a banner and a section table to stdout
+# (configuration_manager.py:164). In a terminal that is useful. Inside a hook it
+# is prepended to the only channel the harness reads an answer from, and the
+# harness truncates a large payload to a ~2 KB preview, writing the rest to a
+# file nothing reads.
+#
+# MEASURED across 505 saved payloads in this project: that noise averaged 1,660
+# bytes and filled the entire preview BY ITSELF in 391 of them — so in 77% of
+# truncated turns the reader's whole budget went on our own banner before the
+# peer DM had started. End-to-end on this hook, fix off vs on: 2,997 bytes led by
+# the banner versus 791 bytes starting at `{`. The noise alone exceeded the
+# preview on a turn carrying no DM at all.
+#
+# WHERE THE FIX GOES, and the two rejected alternatives matter more than the one
+# chosen because each was TRIED and MEASURED:
+#   · NOT in ConfigurationManager — that print is correct in a terminal, and the
+#     library cannot know it is running inside a hook.
+#   · NOT a process-wide stdout swap — tried first, and it BROKE 5 existing hook
+#     tests: they patch `sys.stdout` to capture the payload, and an `emit_json`
+#     bound to a saved handle ignores the patch. A guard that defeats the tests
+#     guarding the channel is not a guard.
+#   · NOT a redirect around the imports — tried second, and it changed NOTHING
+#     (2,997 bytes either way). A stack trace put the print inside `main()`, not
+#     import: `_speakerphone_reminder_body` builds the config on every turn. The
+#     comment I had already written said "at import time" and was wrong; the
+#     trace is why this one names a function instead.
+def quiet_stdout( fn, *args, **kwargs ):
+    """
+    Call `fn` with anything it writes to stdout discarded.
+
+    Requires:
+        - fn is callable
+
+    Ensures:
+        - returns fn's return value unchanged
+        - stdout written during the call goes to a throwaway buffer; STDERR IS
+          UNTOUCHED, so real diagnostics still surface
+        - sys.stdout is restored even if fn raises, so one failure cannot leave
+          the hook's channel pointed at a discard buffer
+        - the exception itself PROPAGATES — swallowing it here would hide a real
+          config failure behind a quiet hook
+        - never suppresses anything outside the call
+
+    Args:
+        fn: the callable whose stdout noise must not reach the harness
+
+    Returns:
+        whatever fn returns
+    """
+    with contextlib.redirect_stdout( io.StringIO() ):
+        return fn( *args, **kwargs )
+
+
 def _speakerphone_reminder_body( source ):
     """
     Build the slim per-turn rider body for the given input source. The body is
@@ -1734,7 +1791,7 @@ def _speakerphone_reminder_body( source ):
     Returns:
         str: System-reminder body text (the slim per-turn rider)
     """
-    cap      = cu.get_spoken_char_cap()
+    cap      = quiet_stdout( cu.get_spoken_char_cap )
     words    = spoken_word_budget( cap )
     modality = "voice(distance)" if source == "voice" else "typed"
     return (
