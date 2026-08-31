@@ -19,6 +19,7 @@ that the planted cache SURVIVES. An exit code says what the script decided; the
 surviving directory says what it did.
 """
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -28,6 +29,35 @@ import pytest
 SCRIPT = Path( __file__ ).resolve().parents[ 3 ] / "src" / "scripts" / "purge-pycache.sh"
 
 
+def _plant_tree( root ):
+    """
+    Requires:
+        - root is a path that may or may not exist yet
+
+    Ensures:
+        - root is a self-contained fake checkout: src/scripts/ holding COPIES of
+          purge-pycache.sh and the migrate script it chains to, plus one
+          src/pkg/__pycache__
+        - returns the path of the purge script INSIDE that tree
+
+    Copies rather than pointing the real script at a temp directory, because the
+    behaviour under test is precisely that the script cleans THE TREE IT SITS IN.
+    A test that ran the repo's own copy could not observe that property, and after
+    the LUPIN_ROOT override was dropped it would purge this worktree for real.
+    """
+    scripts = root / "src" / "scripts"
+    scripts.mkdir( parents=True )
+    for name in ( "purge-pycache.sh", "migrate-pyc-to-checked-hash.sh" ):
+        target = scripts / name
+        shutil.copy2( SCRIPT.parent / name, target )
+        target.chmod( 0o755 )
+
+    cache = root / "src" / "pkg" / "__pycache__"
+    cache.mkdir( parents=True )
+    ( cache / "mod.cpython-313.pyc" ).write_bytes( b"not really bytecode" )
+    return scripts / "purge-pycache.sh"
+
+
 @pytest.fixture
 def planted_root( tmp_path ):
     """
@@ -35,32 +65,78 @@ def planted_root( tmp_path ):
         - tmp_path is an existing empty directory
 
     Ensures:
-        - returns a directory usable as LUPIN_ROOT holding exactly one
-          src/pkg/__pycache__ with a file in it
+        - returns a fake checkout holding its own copy of the script under test
         - the real repository tree is never the target of a run
     """
-    cache = tmp_path / "src" / "pkg" / "__pycache__"
-    cache.mkdir( parents=True )
-    ( cache / "mod.cpython-313.pyc" ).write_bytes( b"not really bytecode" )
+    _plant_tree( tmp_path )
     return tmp_path
 
 
 def _run( root, *args ):
     """
     Requires:
-        - root is a directory to be used as LUPIN_ROOT
-        - args are the command-line arguments under test
+        - root is a fake checkout produced by _plant_tree
 
     Ensures:
-        - returns the CompletedProcess with stdout/stderr captured as text
-        - LUPIN_ROOT is pinned to root, so no run can reach the real tree
+        - runs THAT TREE'S copy of the script, which is the only way to address a
+          tree now that the environment override is gone
+        - LUPIN_ROOT is deliberately left pointing somewhere else, so every case
+          here doubles as evidence that it is ignored
     """
-    env = dict( os.environ, LUPIN_ROOT=str( root ) )
-    return subprocess.run( [ str( SCRIPT ), *args ], capture_output=True, text=True, env=env )
+    env = dict( os.environ, LUPIN_ROOT="/nonexistent-elsewhere" )
+    return subprocess.run( [ str( root / "src" / "scripts" / "purge-pycache.sh" ), *args ],
+                           capture_output=True, text=True, env=env )
 
 
 def _caches( root ):
     return list( root.rglob( "__pycache__" ) )
+
+
+def test_it_cleans_its_own_tree_and_leaves_the_one_lupin_root_names_alone( tmp_path ):
+    """
+    POCHOLO'S CASE (📣, 2026-08-30 ~17:52), and the worst on this file: it damages a
+    tree the operator does not own. `LUPIN_ROOT` is exported by every seat's shell
+    pointing at the MAIN checkout, and the old line
+
+        LUPIN_ROOT="${LUPIN_ROOT:-<derived from BASH_SOURCE>}"
+
+    had a correct fallback that a SET variable simply beat. Running the worktree's
+    own copy purged /…/lupin — measured at 188 directories from this worktree —
+    printed its success banner, and left the worktree as poisoned as it found it.
+
+    ASSERTS ON BOTH TREES ON PURPOSE. Checking only that the calling tree was
+    cleaned is satisfied by a script that cleaned NEITHER; checking only that the
+    other tree survived is satisfied by a script that did nothing at all. One
+    assertion each way is what distinguishes "targeted the right tree" from
+    "happened not to run".
+    """
+    caller = tmp_path / "caller"
+    other  = tmp_path / "other"
+    script = _plant_tree( caller )
+    _plant_tree( other )
+
+    env = dict( os.environ, LUPIN_ROOT=str( other ), PYTHON=sys.executable )
+    result = subprocess.run( [ str( script ) ], capture_output=True, text=True, env=env )
+
+    assert result.returncode == 0, result.stderr
+    assert _caches( caller ) == [], "the calling tree was not cleaned"
+    assert _caches( other ),        "purged the tree LUPIN_ROOT named, not its own"
+
+
+def test_the_scripts_do_not_consult_lupin_root_for_their_root( ):
+    """
+    The remedy is the ABSENCE of an override, which no behavioural test can show
+    directly -- a passing run cannot prove the variable was never read. This holds
+    the shape instead, on both scripts, because Pocholo's entry says the same
+    defect lives in the one this chains to.
+    """
+    derived = 'LUPIN_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"'
+    overridden = 'LUPIN_ROOT="${LUPIN_ROOT:-'
+
+    for name in ( "purge-pycache.sh", "migrate-pyc-to-checked-hash.sh" ):
+        text = ( SCRIPT.parent / name ).read_text()
+        assert derived in text, name
+        assert overridden not in text, name
 
 
 def test_the_no_flag_arm_still_purges( planted_root ):
@@ -75,7 +151,8 @@ def test_the_no_flag_arm_still_purges( planted_root ):
     assert len( _caches( planted_root ) ) == 2
 
     env = dict( os.environ, LUPIN_ROOT=str( planted_root ), PYTHON=sys.executable )
-    result = subprocess.run( [ str( SCRIPT ) ], capture_output=True, text=True, env=env )
+    result = subprocess.run( [ str( planted_root / "src" / "scripts" / "purge-pycache.sh" ) ],
+                             capture_output=True, text=True, env=env )
 
     assert result.returncode == 0, result.stderr
     assert _caches( planted_root ) == []
@@ -119,7 +196,8 @@ def test_a_missing_interpreter_refuses_before_purging_anything( planted_root ):
     """
     env = dict( os.environ, LUPIN_ROOT=str( planted_root ),
                 PYTHON=str( planted_root / "no-such-interpreter" ) )
-    result = subprocess.run( [ str( SCRIPT ) ], capture_output=True, text=True, env=env )
+    result = subprocess.run( [ str( planted_root / "src" / "scripts" / "purge-pycache.sh" ) ],
+                             capture_output=True, text=True, env=env )
 
     # Survival first: the exit code says what it decided, the directory says what it did.
     assert _caches( planted_root ), "purged despite having no interpreter to reconvert with"
