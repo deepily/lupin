@@ -916,8 +916,15 @@ half succeeds and the reconvert half does not. **Check the purge's exit code** r
 it did both.
 
 **What the retraction cost and what it bought.** Two mutation passes reported earlier that evening —
-a 7-for-7 and a 10-for-10 — became unreadable, not because either author was careless but because
-the instrument was. **A pass taken before this rule should be re-run, not re-argued.**
+a 7-for-7 and a 10-for-10 — became **UNREADABLE, which is not the same as WRONG** (Tiberius's
+distinction, and it is the one to defend): a number taken in a tree whose bytecode can serve the
+previous arm establishes nothing **in either direction**. It is not evidence the tests are weak, and
+it is not evidence they are strong.
+
+⇒ **Re-run such a pass WITH EVERY ARM ISOLATED — never simply re-run it.** The failure was not bad
+luck that a second attempt averages out; re-running in the same tree reproduces the same instrument.
+**That is why the remedy is isolation and not repetition**, and it is the whole reason this rule
+names a property rather than a command.
 
 See row `d18ce9ef` and Pocholo's write-up
 `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md` for the six priced remedies.
