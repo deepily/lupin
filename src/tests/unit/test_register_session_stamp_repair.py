@@ -218,18 +218,17 @@ class TestWhatTheSecondRunCostsBesidesTheStamp:
 
     def test_the_stamp_is_no_longer_the_only_key_with_a_rescue( self, monkeypatch, tmp_path ):
         """
-        This test used to assert the OPPOSITE and was right to, which is why it is
-        rewritten rather than deleted — the record of what changed lives here.
+        Both the stamp and an unrelated on-disk key survive the next SessionStart, from
+        ONE mechanism rather than one rescue per field.
 
-        Until the rebind landed, `field` came back only because the NARROW fix put it
-        into session_data by hand, and an unrelated on-disk key did not: the assertion
-        read `SENTINEL_KEY not in after`. That was a true statement about a defect, and
-        it is the reason the class fix was worth landing.
+        Keeping the stamp assertion beside the sentinel is deliberate: it proves the
+        class fix did not merely move the problem, and it fails loudly if a future
+        change starts rescuing fields one at a time again.
 
-        Now both survive, from ONE mechanism rather than one rescue per field. Keeping
-        the stamp assertion beside the sentinel is deliberate: it proves the class fix
-        did not merely move the problem, and it fails loudly if a future change starts
-        rescuing fields one at a time again.
+        This test asserted the inverse before the rebind landed. That history is in the
+        commit that changed it (git log -p on this file), not restated here — Clayton 😎
+        on review: a defect written out in the docstring of a green test is read as
+        current behaviour by anyone who does not check the assertions underneath it.
         """
         seam = _seam( monkeypatch, tmp_path )
         bridge, field = _run_session_start( monkeypatch, seam )
