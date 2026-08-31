@@ -112,7 +112,11 @@ class InlineExecutor:
     def _replay( self, work: Work, trace: StageTrace ) -> Outcome:
         """Replay a cached snapshot on a per-user copy, formatting the answer."""
         try:
-            snap   = work.job.for_current_user( work.user_id, work.session_id )
+            # work.user_email is passed, not merely carried: without it the replay copy
+            # keeps the STORED (empty) address and `_notify` returns before TTS, which is
+            # the missing-spoken-answer half of row `0e7c9214`.
+            snap   = work.job.for_current_user( work.user_id, work.session_id,
+                                                user_email=work.user_email )
             job_id = snap.id_hash
             trace.mark( "t_replay_code" )
             snap.run_code()

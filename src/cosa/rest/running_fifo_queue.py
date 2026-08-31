@@ -1939,6 +1939,12 @@ class RunningFifoQueue( FifoQueue ):
         # Phase 2: Direct attribute access - Protocol guarantees these exist
         current_user_id    = original_job.user_id
         current_session_id = original_job.session_id
+        # The third site of the same omission (row `0e7c9214`). This block's own comment
+        # has always said "use current user, not original creator" — it carried the id and
+        # the session and stopped short of the email, so a cache hit was announced to the
+        # ORIGINAL asker's address (empty, for a snapshot loaded from storage) and
+        # `_notify` returned before TTS.
+        current_user_email = original_job.user_email
 
         # Record replay on canonical snapshot (updates the stored record for analytics)
         cached_snapshot.record_replay(
@@ -1956,7 +1962,8 @@ class RunningFifoQueue( FifoQueue ):
         # Create user-contextualized copy for done queue (FIX: use current user, not original creator)
         done_queue_entry = cached_snapshot.for_current_user(
             user_id=current_user_id,
-            session_id=current_session_id
+            session_id=current_session_id,
+            user_email=current_user_email
         )
 
         # FIX (Session 98): Preserve original job's id_hash for user association matching

@@ -169,3 +169,60 @@ def test_the_inline_replay_copy_carries_the_asker_email( monkeypatch ):
     assert copy_.user_id    == ASKER_USER_ID
     assert copy_.user_email == ASKER_USER_EMAIL
     assert snap.user_email  == STORED_USER_EMAIL, "the stored snapshot was mutated"
+
+
+# ── the PRODUCTION callers, added after Rachel 🕊️ caught a parameter with none ───
+#
+# The first cut added `user_email` to `for_current_user` and then never passed it from
+# production code — a parameter only my own test exercised. A defaulted parameter with
+# no caller is not a fix; it is a fix-shaped thing that leaves the defect running, and
+# the suite reads green either way. Both live callers are now wired and asserted.
+
+def test_the_inline_executor_passes_the_asker_email_to_the_copy( monkeypatch ):
+    """
+    `InlineExecutor._replay` — executor.py:115. Asserted on the ARGUMENTS the executor
+    hands `for_current_user`, not on a downstream verdict: a test watching only the
+    answer cannot tell a wrong address from a delivery that failed for another reason.
+    """
+    from cosa.rest.v2.executor import InlineExecutor
+    from cosa.rest.v2.trace import StageTrace
+
+    seen = {}
+
+    class _Snap:
+        def for_current_user( self, user_id, session_id, user_email="" ):
+            seen.update( user_id=user_id, session_id=session_id, user_email=user_email )
+            return self
+        id_hash = "4b0b5204"
+        answer  = "391"
+        def run_code( self ): pass
+        def run_formatter( self ): return "391"
+
+    InlineExecutor()._replay( _work( _Snap() ), StageTrace() )
+
+    assert seen[ "user_email" ] == ASKER_USER_EMAIL
+    assert seen[ "user_id" ]    == ASKER_USER_ID
+
+
+def test_the_v1_cache_hit_path_passes_the_current_asker_email():
+    """
+    `RunningFifoQueue` cache hit — running_fifo_queue.py:1957, the THIRD site of the same
+    omission. Its own comment has always read "use current user, not original creator";
+    it carried the id and the session and stopped short of the email, so a cache hit was
+    announced to the original asker's (empty) address.
+
+    Asserted by reading the call the source makes, because standing up a RunningFifoQueue
+    here would test the harness rather than the line.
+    """
+    import inspect
+
+    from cosa.rest import running_fifo_queue
+
+    src = inspect.getsource( running_fifo_queue )
+    call = src.split( "done_queue_entry = cached_snapshot.for_current_user(" )[ 1 ].split( ")" )[ 0 ]
+
+    assert "user_email=current_user_email" in call, (
+        "the cache-hit copy does not carry the current asker's email; the answer is "
+        "announced to whoever asked first"
+    )
+    assert "current_user_email = original_job.user_email" in src
