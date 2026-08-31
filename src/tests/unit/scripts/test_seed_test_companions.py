@@ -432,3 +432,45 @@ def test_running_the_module_as_a_script_invokes_the_seed( monkeypatch, capsys ):
     runpy.run_path( mod.__file__, run_name="__main__" )
 
     assert "Cannot connect" in capsys.readouterr().out
+
+
+# ── The converge contract (the 2026-08-19 fix itself) ──
+
+@pytest.mark.parametrize( "table,columns", [
+    ( "INSERT INTO users",    [ "email", "password_hash", "email_verified", "is_active", "roles" ] ),
+    ( "INSERT INTO api_keys", [ "key_hash", "description", "is_active" ] ),
+] )
+def test_both_upserts_CONVERGE_the_credential_columns_rather_than_DO_NOTHING( wired, table, columns ):
+    """
+    TIBERIUS 👑's TEST, sent verbatim. Reddens if either ON CONFLICT arm reverts to DO
+    NOTHING, or stops refreshing any one credential column.
+
+    This is the defect the script was rewritten for on 2026-08-19: create-only seeding froze
+    the test row at whatever it was first given, so a password or key rotated in dev never
+    reached test and :8000 returned 401 for credentials that worked on :7999 — while the seed
+    reported success on every container start.
+
+    Measured, and I reproduced the gap independently before taking his patch: reverting the
+    users upsert to DO NOTHING SURVIVES my 20 tests at sha 277b0937b7bc. His four shas for the
+    same family — 06afafb1f88b, e552fc8737cb, 50a2127fbb39, f9c81295be5e — are his measurement,
+    not mine; I verified the class, he enumerated it.
+
+    The fake cursor returns its scripted `xmax` whatever the SQL says, so no assertion over its
+    OUTPUT can reach this — the conflict clause is observable only in the statement TEXT, which
+    is how test_every_companion_is_marked_protected_TRUE already reads `is_protected = TRUE`.
+    I had documented this as a ceiling of a unit test against a database script. It was not a
+    ceiling; it was a seam I did not use. Documenting a gap is not closing one.
+    """
+    _all_companions( wired )
+    wired[ "keys_by_email" ][ mod.SERVICE_ACCT ] = [ _key_row() ]
+
+    mod.seed_if_missing()
+
+    test_cur = wired[ "conns" ][ 1 ].cursor()
+    sql      = next( s for s, _ in test_cur.executed if table in s )
+
+    assert "ON CONFLICT ( id ) DO UPDATE SET" in sql, \
+        "DO NOTHING freezes the test row at its first value — the 2026-08-19 defect"
+    for column in columns:
+        assert f"{column}" in sql and f"EXCLUDED.{column}" in sql, \
+            f"'{column}' is never refreshed from dev, so a rotated value cannot reach test"
