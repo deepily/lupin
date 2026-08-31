@@ -104,6 +104,39 @@ entries — one of them the manager's own.
   header has documented all along, and that **nobody had seen in the wild until tonight** —
   which is what a documented-but-unwitnessed limit looks like right up until it fires.
 
+- [ ] 🔴 **READ THE TRANSCRIPT — a claim about what a terminal printed is usually RECOVERABLE,
+  not unverifiable** (Chloé 🗼 measured it, Mr Radio 🦉 ruled it into the book; pointer refined
+  by Rachel 🕊️, 2026-08-30). *Reason:* **session transcripts persist on disk** at
+  `~/.claude/projects/<project>/<session-id>.jsonl`, hook output included. So *"my predecessor's
+  terminal, nobody can check it"* is almost never true — and three of us asserted it tonight
+  before anyone looked.
+
+  **The receipt, and it settled a live disagreement**: Rachel wrote that the commit-scope guard
+  passed `ef8ebcef` through *"with no output at all"*. One grep found
+  `ce8930f9-f591-472b-80d9-dbea99ac85b8.jsonl` and the record whose payload begins **`Commit
+  scope guard: NOT REVIEWED — the command's quoting does not parse`**. **It printed.** Her
+  wording went from *unsupported* to *disproven by her own predecessor's record* — and **both
+  halves of her finding then held at once**: the commit DID go in unreviewed, and the guard DID
+  say so. Her memento said *unreviewed* all along; only *silent* was added later.
+
+  ⚠️ **STATE YOUR INDEXING BASE, OR THE CITATION REPRODUCES THE BUG IT IS FIXING.** Mr Radio and
+  I promptly disagreed about which record held that text — 913/914/915 against 912/913/914 —
+  and **neither of us had misread the file**: he counts 1-indexed, I count 0-indexed, and
+  neither said so. Two correct readings disagreeing because the frame went unstated is exactly
+  CLAUDE.md § *"A COORDINATE IS NOT A REFERENCE — NAME THE CONTENT"*, **fired inside the
+  argument about the transcript that proved a different coordinate failure.**
+
+  ⇒ **The durable pointer is the tool id, not the line number** (Rachel's refinement, better
+  than the payload quote I proposed): grep `toolUseID` — here
+  `toolu_01S7dTHQ31HeGHXmqa24ZSm6` — and the base stops mattering.
+
+  🔴 **BUT GREP THE FIELD, NOT THE STRING — a tool id spreads by being QUOTED.** Measured: that
+  id appears in **four** transcripts and is a real `toolUseID`/`tool_use_id` field in exactly
+  **one**. The other three are seats *discussing* it in DMs — including this author's own
+  session, which matched only because Rachel sent me the id. ⇒ `grep '"toolUseID":"<id>"'`, not
+  `grep '<id>'`. **Same rule as the straggler ledger's**: a HIT proves the string is present,
+  never that the event happened there; only the FIELD proves the event.
+
   ⇒ **I diagnosed a discipline failure where
   the documentation already described a known, unclosable gap — the second time tonight I
   called a documented trade-off a defect before reading the file that documents it.**
