@@ -397,12 +397,31 @@ def test_the_no_recipients_line_says_how_many_were_filtered_out( monkeypatch, wi
     assert "3" in capsys.readouterr().out
 
 
-def test_the_success_line_reports_how_many_acked_of_how_many( wired, capsys ):
-    """Exit 0 proves the wait was satisfied; only the message says on what evidence."""
+def test_the_success_line_reports_how_many_acked_of_how_many( monkeypatch, wired, capsys ):
+    """
+    Exit 0 proves the wait was satisfied; only the message says on what evidence.
+
+    🔴 THE ACKED COUNT IS DELIBERATELY NOT THE RECIPIENT COUNT, and that is the whole
+    test. This first read `f"{RECIPIENTS}/{RECIPIENTS}"` against the ordinary fixture,
+    where both are 3 — so swapping the two operands in the f-string produced the
+    IDENTICAL sentence and SURVIVED (sha be5217551cd2, Tiberius 👑's mutation, relayed
+    by Clayton 😎, reproduced here at the same sha). Two equal numbers cannot reveal an
+    order between them, however the assertion is named.
+
+    `satisfied=True` with `acked=2` of 3 is not production-reachable, and does not need
+    to be: `poll_acks_until_satisfied` is a seam, and the fake can report the one state
+    in which a wrong operand ORDER is visible. Repair the FIXTURE, not the assertion.
+    """
+    monkeypatch.setattr(
+        bounce_dev_warn, "poll_acks_until_satisfied",
+        lambda **kw: { "satisfied": True, "acked": 2, "elapsed": 0.4 },
+    )
+
     bounce_dev_warn.main()
 
     out = capsys.readouterr().out
-    assert f"{RECIPIENTS}/{RECIPIENTS}" in out
+    assert f"2/{RECIPIENTS}" in out
+    assert f"{RECIPIENTS}/2" not in out, "acked and recipients are printed in the wrong order"
 
 
 def test_the_partial_line_says_how_many_of_how_many_before_the_kill( monkeypatch, wired, capsys ):
