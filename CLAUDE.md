@@ -468,8 +468,7 @@ Say what you measured **and** name what you mean.
 ### 🔴 AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE
 
 **You searched the WRONG population, or you searched an EMPTY one. The output is identical, and
-nothing in it tells you which.** Four receipts in this file are the same defect; they are listed
-here rather than left to be re-derived a fifth time.
+nothing in it tells you which.** Four receipts in this file are the same defect.
 
 | receipt | the population that was actually searched | what it looked like |
 |---|---|---|
@@ -489,14 +488,12 @@ would have signed off on the other's search.**
 2. **PROVE THE SEARCH CAN FIND SOMETHING** — a positive control over the same corpus. A negative
    result is worth nothing until you have watched the instrument return a positive one.
 
-**A positive control is what turns a shrug into a measurement.** Receipt: `grep -rl
-"masked-invariant" io/post-games/` returns 2 hits, so the same search returning nothing for another
-string is now evidence rather than silence.
+Receipt: `grep -rl "masked-invariant" io/post-games/` returns 2 hits, so the same search returning
+nothing for another string is now evidence rather than silence.
 
 ⚠️ **THIS IS NOT ONLY ABOUT SEARCH TOOLS.** It governs every absence-claim: a census, a coverage
 zero-list, *"no rows matched"*, *"no other suite is running"*, *"that persona has no memento"*.
 **Absence is the one finding that looks the same whether you did the work or not.**
-
 
 > 🔴 **THE TWO VENUES ALSO HAVE TWO DATABASES, and a host shell silently reads the wrong one.** Neither container sets `DB_NAME`, so each falls through to its own config block: `lupin-rest-dev` → **`lupin_db_dev`**, `lupin-rest-test` → **`lupin_db_test`**. A host shell inherits the *Development* block, so `PYTHONPATH=src python3` on the host queries **dev** even when the job you are chasing ran on `:8000`.
 >
