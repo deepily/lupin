@@ -29,6 +29,7 @@ if _src_path not in sys.path:
 
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.routers import tasks
+from cosa.rest import task_store_rules as rules
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 
 NOW = datetime( 2026, 6, 12, 0, 0, tzinfo=timezone.utc )
@@ -616,6 +617,44 @@ def test_query_terse_returns_glance_projection_only( client, repo ):
     assert row[ "blocker_terminal" ] is False                 # an unblocked row is never stranded
     assert row[ "priority" ] == "P1" and row[ "status" ] == "queued"
     repo.query_tasks.assert_called_once()                    # rows ARE materialized (not count mode)
+
+
+def test_terse_title_trimmed_carries_the_PREDICATE_not_a_constant( client, repo ):
+    # WRITTEN BY TIBERIUS 👑 in review of 5f7b0e1f, integrated verbatim but for this
+    # header. Row a6cb24e8.
+    #
+    # The exact-set assertion above proves the KEY reaches the terse projection; it
+    # cannot prove the VALUE does. Measured 2026-08-31: replacing
+    # `rules.title_may_be_trimmed( item.title )` with a bare `False` left all 471
+    # tests green — the flag was wired to nothing a test could see, and a flag that
+    # reports False on every row is the defect it exists to surface. I reproduced
+    # that mutant myself before accepting the finding.
+    #
+    # My own tests covered the predicate, and the key set covered the projection.
+    # Neither covered the WIRE BETWEEN THEM, which is where the value travels. My
+    # commit message even claimed the write and read sides "cannot drift apart" —
+    # true of guard-to-predicate, which I did test, and false of
+    # predicate-to-projection, which I did not.
+    #
+    # Both directions in one test on purpose: a constant False dies on the first
+    # assertion and a constant True dies on the second, so no constant survives.
+    #
+    # The trimmed title is taken from soft_guard_title's OWN output rather than a
+    # hand-written 60-char string, matching the principle the predicate's tests
+    # already follow: whatever the guard cuts, the reader-side flag must flag, so
+    # the two cannot drift apart as the cap moves.
+    trimmed_title, _overflow, advisory = rules.soft_guard_title( "T" * 90, None )
+    assert advisory[ "trimmed" ] is True                       # the fixture is the real thing
+
+    repo.query_tasks.return_value = [
+        make_item( title=trimmed_title ),
+        make_item( title="a title well under the cap" ),
+    ]
+    r = client.get( "/api/tasks", params={ "terse": "true" } )
+    assert r.status_code == 200
+    rows = r.json()[ "tasks" ]
+    assert rows[ 0 ][ "title_trimmed" ] is True                # the cut row is flagged
+    assert rows[ 1 ][ "title_trimmed" ] is False               # ...and a short one is not
 
 
 def test_query_terse_serializes_nullable_next_chase_ts( client, repo ):
