@@ -17,6 +17,10 @@ moment he assigns — one line, while he is already acting.
 🔴 **FORMAT INVARIANT — EVERY NORMATIVE SENTENCE AND EVERY TABLE ROW IN THIS SECTION SITS ON ONE UNWRAPPED PHYSICAL LINE, AND A REWRAP IS A DEFECT.** Rachel 🕊️'s ruling on the form, 2026-08-30 ~20:31 EDT, and it is written here rather than left to taste because the instances were fixed once and the property was not, which is how they get re-wrapped by the next editor tidying the file.
 ⚠️ **The receipt**: an hour after this section shipped, `grep "A miss means ASK, not proceed quietly"` returned **0** — the one rule telling a reader what to do when the list is silent could not be found by searching for it, inside a section whose whole argument is that naming an owner should be a grep rather than a memory. The assignee's rule was broken the same way.
 ✅ **How to check before you commit an edit here** — `grep -c` counts matching LINES, so an unwrapped sentence returns NON-ZERO and a wrapped one returns exactly **0**; the test is therefore **"must not return 0"**, never "must return 1". ⚠️ **The first cut of this line said "must return exactly 1" and was wrong the moment it was written**, because this very line quotes the phrases it counts and so adds to their own totals — an instruction that fails on the file containing it. Check these three: `A miss means ASK, not proceed quietly` · `missing line, which is the signal` · `decline and tell the manager`
+🔎 **AND THE ROW HALF IS MECHANICAL — Rachel 🕊️'s detector, pasted verbatim; it prints every physically-wrapped row in the table and stays silent when there are none.** She tested it on a scratch copy with a row deliberately hard-wrapped; I re-ran it here both ways rather than take that on report.
+```bash
+awk '/^\| defect \| owner/{t=1} t && NF==0{t=0} t && !/^\|.*\|$/{print FILENAME":"NR": BROKEN ROW"}' TODO.md
+```
 
 | defect | owner | assigned | state |
 |---|---|---|---|
