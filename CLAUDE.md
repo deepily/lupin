@@ -866,12 +866,58 @@ was imported before the next conversion. The gap is not theoretical; it fired in
 ⇒ **Re-run the script after adding Python files or purging a cache; `--verify` when you want to know
 rather than assume.** It exits non-zero if this interpreter would read a timestamp pyc.
 
-⇒ **THE PER-HARNESS PURGE IS NOW THE FALLBACK, NOT THE INSTRUCTION.** On a converted tree a
-mutation harness no longer needs to purge `__pycache__` between mutants — that habit existed only
-because the cache could not be trusted, and it failed the moment someone forgot. Purge only when
-working in a tree you have not converted (`--verify` tells you which you are in). Keep `-B` if you
-like; it stops a fresh pyc being laid down mid-loop, but **the flag alone buys the appearance of
-safety, not safety** — it suppresses *writing*, never *trusting*.
+🔴 **REVERSED 2026-08-30 — ISOLATE EVERY ARM. A CONVERTED TREE DOES NOT PROTECT A MUTATION LOOP.**
+This paragraph used to read *"the per-harness purge is now the FALLBACK, not the instruction"*, on
+the reasoning that a checked-hash tree can be trusted. **Four seats disproved it independently in
+one evening**, on two different branches, and the reasoning was wrong for a mechanism this page
+already documents two paragraphs above.
+
+**CONFIRMED AT THE BYTE LEVEL** (Tiberius 👑). In a fresh worktree the pyc header reads **`flags=0`,
+timestamp-based** — a worktree starts with no `__pycache__`, and a pyc written where none existed
+has no mode to inherit. Timestamp validation compares whole-second mtime **and size**; swapping two
+names inside an f-string changes neither — **6,533 bytes before and after** — so the interpreter
+serves the PREVIOUS arm's bytecode against the RESTORED source.
+
+| seat | receipt |
+|---|---|
+| Tiberius 👑 | byte-identical source: **7 failed** with the stale pyc, **18 passed** after removing one file. One arm read **KILLED** without a per-arm purge and **SURVIVED** with it — and he **retracted an approval** over it |
+| Rachel 🕊️ | a test failed **deterministically four times** — under coverage, without it, in isolation — then passed permanently after a purge, **unreproducible** |
+| Rio ⚡ | `purge-pycache.sh`'s reconvert needs `$LUPIN_ROOT/.venv/bin/python`; **35 of the repo's 80 worktrees lack it**, so there a purge leaves the tree on timestamp invalidation |
+| Krishna 🦚 | corrected the first cut of this rule: **a harness that rebuilds its sandbox per arm is already isolated** and needs no purge |
+
+**Why conversion is not enough**: a mutation loop first-imports modules *during* the loop, so it
+MANUFACTURES timestamp pycs in a tree that verified clean before it started. **`--verify` exiting 0
+at the top of a pass says nothing about the pycs the pass itself creates.**
+
+⇒ **Isolate every arm.** The requirement is that **nothing carries between arms** — not that you run
+a particular command:
+
+| form | strength |
+|---|---|
+| **rebuild the sandbox per arm** — tree, scripts and caches together | ✅ strongest: nothing survives *by construction*, so there is no cache to forget |
+| `src/scripts/purge-pycache.sh` between arms | good, and the practical choice in a working tree |
+
+⚠️ **Do not read this as requiring a purge you do not need.** Krishna's arms rebuild from scratch
+each time and are already isolated; demanding a purge there would be cargo cult.
+
+🔴 **AND IT IS A REVIEWER'S OBLIGATION, NOT ONLY AN AUTHOR'S** (Rachel 🕊️). An author can isolate
+every arm perfectly and a reviewer re-running the suite in a shared tree still gets served stale
+bytecode — which is exactly how both of tonight's sightings reached a reviewer rather than an
+author. ⇒ **Before you approve on a green you watched turn, or red you cannot explain, isolate and
+re-run.** A deterministic failure that vanishes after a purge is not flaky and is not fixed; it is
+the instrument, and saying so is a finding rather than a shrug.
+
+⇒ **`--verify` before a pass is necessary and NOT sufficient** — it describes the tree you started
+with, not the one you are measuring in.
+⇒ **`-B` / `PYTHONDONTWRITEBYTECODE` still buys the appearance of safety, not safety** — it
+suppresses *writing*, never *trusting*, and a repo that has run its tests already has the cache.
+⇒ ⚠️ **Rio's finding makes the purge remedy conditional**: in a worktree with no `.venv` the purge
+half succeeds and the reconvert half does not. **Check the purge's exit code** rather than assuming
+it did both.
+
+**What the retraction cost and what it bought.** Two mutation passes reported earlier that evening —
+a 7-for-7 and a 10-for-10 — became unreadable, not because either author was careless but because
+the instrument was. **A pass taken before this rule should be re-run, not re-argued.**
 
 See row `d18ce9ef` and Pocholo's write-up
 `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md` for the six priced remedies.
