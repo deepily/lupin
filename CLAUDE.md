@@ -634,6 +634,38 @@ miss, 44 branches / 0 partial**. Identical, because the file was inside both sco
 ⇒ **Scope freely while working a single file. Never scope a run whose output you intend to read as
 a LIST.**
 
+#### 🔴 AND A THIRD FORM MEASURES **NOTHING** WHILE EXITING 0 — `--cov=<a .py PATH>`
+
+Measured by Krishna 🦚, 2026-08-30. The two readings above are about a scope that is too NARROW.
+This one is about a scope that silently matches **no files at all**, and it is worse than both
+because the report is not partial — it is absent.
+
+| form | exit | table | files measured |
+|---|---|---|---|
+| `--cov=<path>/<file>.py` | **0** | none, one WARNING line | **zero** |
+| `--cov=<dotted.module.name>` | **0** | normal | one |
+
+**`--cov` takes a module name or a DIRECTORY, never a path to a single `.py` file.** Hand it one and
+coverage matches nothing and the run exits clean.
+
+**Measured twice, on two different files, which is why it is here rather than in a DM.** Krishna 🦚
+found it with `--cov=src/cosa/rest/routers/notifications.py`; this reviewer reproduced it
+independently at `c91bd1bb` against `src/cosa/memory/solution_snapshot.py` — the path form gave
+`WARNING: Failed to generate report: No data to report.` and no table, the dotted form
+(`--cov=cosa.memory.solution_snapshot`, no `src.` prefix, since `src` is already on the path) gave
+`328 stmts / 262 miss / 82 branch / 17%`. Both exited **0**.
+
+⚠️ **It is NOT fully silent, and saying so would be the overclaim this page keeps warning about.**
+There IS one `WARNING:` line. But it does not move the exit code, it does not fail the run, and in a
+tier's output it sits among deprecation warnings — so a gate that shells out and checks `rc == 0`
+passes on a run that measured nothing, and a human skimming a tail sees a clean finish.
+
+⇒ **Read the coverage TABLE, not the exit code.** No table means no measurement — never full
+coverage. This is the same shape as the two-database trap in §TESTING VENUES and as the narrowed
+census above: **an empty answer to a malformed question is indistinguishable from a clean result.**
+Three different mechanisms on this page now produce a confident-looking nothing; the common defence
+is to check that the output contains the rows you expected before reading any number off it.
+
 ### 🔴 THERE IS A SECOND VIRTUALENV *INSIDE* `src/`, AND IT IS 92% OF EVERY DISK SWEEP
 
 `src/cosa/.venv` is a full vendored virtualenv living inside the source tree. Measured 2026-08-30:
