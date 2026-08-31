@@ -634,37 +634,47 @@ miss, 44 branches / 0 partial**. Identical, because the file was inside both sco
 ⇒ **Scope freely while working a single file. Never scope a run whose output you intend to read as
 a LIST.**
 
-#### 🔴 AND A THIRD FORM MEASURES **NOTHING** WHILE EXITING 0 — `--cov=<a .py PATH>`
+#### 🔴 AND A THIRD WAY TO MEASURE **NOTHING** WHILE EXITING 0
 
-Measured by Krishna 🦚, 2026-08-30. The two readings above are about a scope that is too NARROW.
-This one is about a scope that silently matches **no files at all**, and it is worse than both
-because the report is not partial — it is absent.
+Found by Krishna 🦚 2026-08-30 as *"a `.py` path silently measures zero"*; both halves of that
+moved under measurement, and the corrected rule is more useful than the original.
 
-| form | exit | table | files measured |
-|---|---|---|---|
-| `--cov=<path>/<file>.py` | **0** | none, one WARNING line | **zero** |
-| `--cov=<dotted.module.name>` | **0** | normal | one |
+**`--cov=<target>` reports nothing whenever the target is never IMPORTED by the tests in that run.**
+Two ways to land there:
 
-**`--cov` takes a module name or a DIRECTORY, never a path to a single `.py` file.** Hand it one and
-coverage matches nothing and the run exits clean.
+| `--cov=` | result | why |
+|---|---|---|
+| a **`.py` file path** | **always zero** | nothing is ever importable under that name — fails 100% of the time |
+| a **dotted module** your tests never import | **zero** | the form is right, the run simply never touched it |
+| a **dotted module** your tests do import | correct | |
 
-**Measured twice, on two different files, which is why it is here rather than in a DM.** Krishna 🦚
-found it with `--cov=src/cosa/rest/routers/notifications.py`; this reviewer reproduced it
-independently at `c91bd1bb` against `src/cosa/memory/solution_snapshot.py` — the path form gave
-`WARNING: Failed to generate report: No data to report.` and no table, the dotted form
-(`--cov=cosa.memory.solution_snapshot`, no `src.` prefix, since `src` is already on the path) gave
-`328 stmts / 262 miss / 82 branch / 17%`. Both exited **0**.
+**Measured at `c91bd1bb`, one test file** (`test_replay_carries_the_requesting_user_id.py`):
+`--cov=src/cosa/memory/solution_snapshot.py` → zero, while `--cov=cosa.memory.solution_snapshot`
+→ `328 stmts / 262 miss / 82 branch / 17%`. And `--cov=cosa.rest.routers.notifications` → **also
+zero**, dotted and well-formed, because that test does not import notifications.
+`src.`-prefixed → zero as well; `src` is already on the path here.
 
-⚠️ **It is NOT fully silent, and saying so would be the overclaim this page keeps warning about.**
-There IS one `WARNING:` line. But it does not move the exit code, it does not fail the run, and in a
-tier's output it sits among deprecation warnings — so a gate that shells out and checks `rc == 0`
-passes on a run that measured nothing, and a human skimming a tail sees a clean finish.
+⇒ **"Use the dotted form" is NOT the fix, and stopping at the path-vs-dotted framing would have
+shipped a rule that still returns zero.** The fix is to check that the run you are about to trust
+actually exercises the target.
 
-⇒ **Read the coverage TABLE, not the exit code.** No table means no measurement — never full
-coverage. This is the same shape as the two-database trap in §TESTING VENUES and as the narrowed
-census above: **an empty answer to a malformed question is indistinguishable from a clean result.**
-Three different mechanisms on this page now produce a confident-looking nothing; the common defence
-is to check that the output contains the rows you expected before reading any number off it.
+⚠️ **IT IS NOT SILENT — three warnings fire, and the FIRST one names the file.** Calling it silent
+was this reviewer's error, from a `grep -v warning` in the probe that stripped the evidence:
+
+```
+CoverageWarning: Module <target> was never imported. (module-not-imported)
+CoverageWarning: No data was collected. (no-data-collected)
+WARNING: Failed to generate report: No data to report.
+```
+
+**The hazard is the EXIT CODE, not the absence of a signal.** Coverage says exactly what is wrong;
+the run still exits **0**, so a gate checking `rc == 0` passes on a run that measured nothing, and
+a human reading a tail sees a clean finish among deprecation warnings.
+
+⇒ **Read the coverage TABLE, and grep the output for `module-not-imported` before trusting a
+number.** This is the third mechanism on this page producing a confident-looking nothing, alongside
+the narrowed census and the two-database trap. **And note how this entry got its own count wrong —
+a probe that filters warnings cannot report on warnings.**
 
 ### 🔴 THERE IS A SECOND VIRTUALENV *INSIDE* `src/`, AND IT IS 92% OF EVERY DISK SWEEP
 
