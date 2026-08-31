@@ -480,3 +480,43 @@ def test_both_upserts_CONVERGE_the_credential_columns_rather_than_DO_NOTHING( wi
     for column in columns:
         assert f"{column} = EXCLUDED.{column}" in assignments, \
             f"'{column}' is never refreshed from dev, so a rotated value cannot reach test"
+
+
+def test_the_INSERT_binds_each_parameter_to_the_column_that_NAMES_it( wired ):
+    """
+    CHLOÉ 🗼's finding. Every other assertion in this file reads the statement TEXT, and
+    the text is identical whichever order the parameters are bound in. Swapping `email`
+    and `pw_hash` in the tuple writes the password hash into the email column and leaves
+    the SQL byte-for-byte unchanged — measured 2026-08-31, it SURVIVES the whole file at
+    sha 3a0a397f2b0e, 22 passed.
+
+    The seam was already here: the fake cursor records ( sql, params ) and two tests
+    above read params by a hardcoded index. This binds them BY NAME, parsed out of the
+    INSERT's own column list, so the assertion cannot drift when a column is added and
+    an index silently means something else.
+
+    `active=False` is deliberate. Every other field the fixture builds is distinct, but
+    email_verified and is_active are both True by default — two equal values cannot
+    reveal a swap between them, so the test would assert their sum and not their
+    identity however it were named.
+    """
+    _all_companions( wired, active=False )
+    mod.seed_if_missing()
+
+    test_cur    = wired[ "conns" ][ 1 ].cursor()
+    sql, params = next( ( s, p ) for s, p in test_cur.executed if "INSERT INTO users" in s )
+
+    named   = " ".join( sql.split() ).split( "INSERT INTO users (", 1 )[ 1 ].split( ")", 1 )[ 0 ]
+    columns = [ c.strip() for c in named.split( "," ) ]
+    assert len( columns ) == len( params ), \
+        f"{len( columns )} columns named but {len( params )} parameters bound"
+
+    bound = dict( zip( columns, params ) )
+    row   = wired[ "users_by_email" ][ mod.COMPANION_EMAILS[ 0 ] ]
+
+    assert bound[ "id" ]             == row[ 0 ]
+    assert bound[ "email" ]          == row[ 1 ], "the email column is not receiving the email"
+    assert bound[ "password_hash" ]  == row[ 2 ], "the password_hash column is not receiving the hash"
+    assert bound[ "created_at" ]     == row[ 3 ]
+    assert bound[ "email_verified" ] == row[ 4 ]
+    assert bound[ "is_active" ]      == row[ 5 ]
