@@ -22,6 +22,7 @@ Each test names the change that reddens it.
 
 import json
 import os
+import re
 import sys
 
 import pytest
@@ -477,14 +478,14 @@ def test_both_upserts_CONVERGE_the_credential_columns_rather_than_DO_NOTHING( wi
     # so dropping the email assignment survives one, and so does pointing it at any
     # source column whose name STARTS WITH the right one.
     set_clause = " ".join( sql.split() ).split( "DO UPDATE SET ", 1 )[ 1 ]
-    # RACHEL 🕊️: the clause ends at RETURNING *or* at a conditional WHERE, and an
-    # assignment may be written with or without spaces around the equals. Both are valid
-    # SQL that means what this test wants, and both used to REDDEN it — a false red, never
-    # a false green, because a mis-split leaves no member matching the expected pair. Safe
-    # direction, still worth removing: a test that reddens on a legitimate reformat trains
-    # the next reader to weaken it.
-    for terminator in ( "RETURNING", "WHERE" ):
-        set_clause = set_clause.split( terminator )[ 0 ]
+    set_clause = re.split( r"\bRETURNING\b", set_clause, maxsplit=1, flags=re.IGNORECASE )[ 0 ]
+    # A WHERE here is NOT formatting. `DO UPDATE SET ... WHERE users.is_active = false`
+    # refreshes only the rows matching it, so a rotated credential never reaches the rest —
+    # the 2026-08-19 defect wearing a condition. 08fce017 discarded the clause and PASSED
+    # it: sha 74fe21bff4de, 24 passed. Treating it as reformatting was my error, not
+    # RACHEL's arm: her trailing WHERE was a TRUE red and I turned it into a green.
+    assert not re.search( r"\bWHERE\b", set_clause, re.IGNORECASE ), \
+        "a conditional DO UPDATE refreshes only the rows matching it - the rest stay frozen"
     assignments = { " = ".join( half.strip() for half in a.split( "=", 1 ) )
                     for a in set_clause.split( "," ) }
     for column in columns:
