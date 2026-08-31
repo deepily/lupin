@@ -363,6 +363,49 @@ already has a hook denying it. This one is per-tree, uses ordinary allowed comma
 exactly like correct practice: I had my own worktrees open the whole time and simply used the one
 whose path was in the DM. **The path someone hands you is the author's path.**
 
+
+##### A MUTATION CAN PASS BOTH HALVES OF THE APPLIED-CHECK AND STILL NOT APPLY (Clayton 😎 `84cbe224`, my own arms, 2026-08-30 ~21:30 EDT)
+
+CLAUDE.md's floor rule for a mutation arm is: **the anchor matched EXACTLY once, and the on-disk
+sha CHANGED.** Tonight two of my arms passed **both** and mutated nothing.
+
+**What happened.** Adding a marker to a tuple, I appended text before the closing paren:
+
+```python
+REFUSAL_MARKERS = ( "DO NOT CLEAR THIS RED BY RECORDING A SCAN", "is REFUSED until rotation lands" "" )
+```
+
+**Python concatenates adjacent string literals.** The missing comma made that a two-entry tuple
+whose second element had a suffix, not a three-entry tuple. The anchor matched once, the file's
+sha changed, the source parsed, the suite ran — **and the thing under test never moved.**
+
+**How it read**: both arms "SURVIVED", identically, on both trees. A clean, plausible,
+symmetrical result. I nearly reported it as *"her exact-set assert does not catch an added
+marker"* — **the opposite of the truth**, since re-posed correctly the arm is KILLED and NAMED
+at `0ad6d5ae` (3 failed / 73) and SURVIVES at `6aca1677` (2 failed / 74).
+
+⇒ **The floor rule checks that the FILE changed. It cannot check that the VALUE changed.** A
+sha proves bytes moved; it says nothing about whether the bytes you moved mean anything
+different to the interpreter. Every same-line, same-expression edit is exposed: a missing comma,
+an operator inside a string, an edit landing in a docstring or a comment.
+
+**The remedy is one line and it belongs in every arm** — evaluate the mutated construct and
+print what it became:
+
+```python
+ns = {}; exec( mutated_line, ns )
+print( "tuple is now %d entries: %r" % ( len( ns[ "REFUSAL_MARKERS" ] ), ns[ "REFUSAL_MARKERS" ][ 2 ] ) )
+```
+
+That is what caught it: `tuple is now 3 entries: ''` on the corrected arm, against a silent
+two-entry tuple on the broken one. **State what the mutation BECAME, not that it happened.**
+
+⚠️ **Same family as the stale-`.pyc` trap and NOT the same mechanism** — worth separating,
+because both end with *"the code you think you are running is not the code running"*. There the
+edit is real and the interpreter reads an older compile; here the interpreter reads exactly your
+edit and your edit says what it said before. **A purge fixes the first and does nothing for the
+second.**
+
 #### TWO CITATION HABITS, WRITTEN AS REASONS RATHER THAN INSTRUCTIONS (Clayton 😎, Mr Radio 🦉's ruling, 2026-08-30 ~19:58 EDT)
 
 Both come out of the same evening and the same failure: **a reference that resolves to
