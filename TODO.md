@@ -923,6 +923,16 @@ Rick lifts the moratorium; nothing else about them changes.**
 
 ⚠️ **`866f43ce` carried a `[default used] no` from an earlier timed-out ask.** Rick's keypress is the opposite answer. Both are on the row and labelled — a row with two contradictory answers and no provenance is worse than a row with none.
 
+- [ ] 🟡 **AN EMPTY GREP FOR A CONFIG KEY IS EVIDENCE ABOUT MY SEARCH TERM, NOT ABOUT THE POLICY** (Tiberius 👑 naming his own near-miss while verifying Chloé 🗼's `1afb7b7c`, 2026-08-31 00:36; banked at Mr Radio 🦉's instruction). She wrote that `reset_user_password.py`'s CLI block is *"out of the denominator BY POLICY"*. I grepped `pyproject.toml` for `exclude_lines`, got **zero hits**, and was one step from filing **"no such policy exists"** as a finding against her. **The key is `exclude_also`.** Her claim was exact: excluded lines **141–172**, 28 lines, **0 statements** from that range in the denominator, configured at `pyproject.toml:335` — and line 334 carries the phrase *"out of the denominator BY POLICY"* verbatim, so her wording was the config's own.
+  ⇒ **THE COMMAND THAT WOULD HAVE CAUGHT IT — ask the TOOL for its EFFECTIVE config, never the FILE for a key name you guessed:**
+  ```bash
+  .venv/bin/python -c "from coverage import Coverage; print( Coverage( config_file='pyproject.toml' ).config.exclude_list )"
+  ```
+  It returns the list coverage actually applies, **whatever the TOML key happens to be called** — `exclude_also` appends to `exclude_lines`, and a reader who knows only one of those two names sees an empty result and reads it as an empty policy. **The comparison that settles it**: that effective list against the range in dispute, via `coverage.parser.PythonParser(..., exclude=<the joined list>)`, which reports `excluded` directly — 141–172 here, measured rather than argued.
+  ⇒ **Same family as the scoped-`--cov` trap and the two-database trap**: a narrowed question returning nothing is indistinguishable from a confident negative. **A grep proves its own term absent. It proves nothing about the behaviour.**
+  ⚠️ **The near-miss is the finding; the confirmation is not.** Had I published it, a correct author would have had to defend a correct claim against a reviewer's search-term error — and the artefact would have carried my sentence, not her measurement.
+  ⚠️ **Held OUT of the store per the moratorium.**
+
 ## 📐 FINDINGS 2026-08-30 (Chloé 🗼 `d9944608`, census seat; reviewers Rachel 🕊️ `c93013ad` · Clayton 😎 · Mr Radio 🦉) — four, from one unit-tier census at `5506e9a4`
 
 **The census itself** — `703` files, `71,600` statements, `21,104` branches, **73.14%**, `46` files at 0%, largest gap
