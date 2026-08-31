@@ -186,6 +186,33 @@ def test_dry_run_still_previews_and_removes_nothing( planted_root ):
     assert "Would remove" in result.stdout
 
 
+def test_an_explicitly_named_interpreter_is_honoured( planted_root ):
+    """
+    THE PROPERTY THE PUBLISHED STOPGAP RESTS ON, asserted under its own name.
+
+        PYTHON="$( git rev-parse --git-common-dir )/../.venv/bin/python" purge-pycache.sh
+
+    is what CLAUDE.md tells a seat in a venv-less worktree to run, and it works
+    only because the preflight reads PYTHON="${PYTHON:-...}". The distinction the
+    script is built on is that a deliberate override is HONOURED while silent
+    borrowing is REFUSED -- and until now only the refusing half had a test of its
+    own. The honouring half was exercised incidentally by two tests named for
+    other things, so a change that dropped it would have reddened them under
+    names that do not mention interpreters.
+
+    The fixture has no .venv, so the default resolution CANNOT succeed here: if
+    this passes, the explicit value was used.
+    """
+    assert not ( planted_root / ".venv" ).exists()
+
+    env = dict( os.environ, PYTHON=sys.executable )
+    result = subprocess.run( [ str( planted_root / "src" / "scripts" / "purge-pycache.sh" ) ],
+                             capture_output=True, text=True, env=env )
+
+    assert result.returncode == 0, result.stderr
+    assert _caches( planted_root ) == []
+
+
 def test_a_missing_interpreter_refuses_before_purging_anything( planted_root ):
     """
     The script promises purge and reconvert "cannot be half-done". The reconvert
