@@ -31,11 +31,20 @@ set -uo pipefail
 
 # 🔴 DERIVED UNCONDITIONALLY — $LUPIN_ROOT IS NOT CONSULTED. This script is shipped INSIDE the
 # tree it cleans, so the environment can only DISAGREE with it, never inform it. The old line
-# read "${LUPIN_ROOT:-<this same expression>}": the fallback was already right, and a SET
-# variable simply won over it. Every seat's shell exports LUPIN_ROOT pointing at the MAIN
+# read "${LUPIN_ROOT:-<this same expression>}": the shell default was already right, and a SET
+# variable simply won over it. ("Default" not "fallback" — the only thing in this script now
+# called a fallback is the interpreter one further down, which it deliberately does NOT do.) Every seat's shell exports LUPIN_ROOT pointing at the MAIN
 # checkout, so running this from a worktree purged /…/lupin, printed its success banner, and
 # left the worktree exactly as poisoned as it found it — two harms in one command, and the
 # clobbered tree belongs to somebody else. Found and remedied by Pocholo 📣, 2026-08-30 ~17:52.
+#
+# ⚠️ SO THE TARGET CANNOT BE STEERED, AND THE OLD STOPGAP IS NOW A NO-OP. The remedy that
+# circulated while this was broken —
+#     LUPIN_ROOT="$PWD" src/scripts/purge-pycache.sh
+# — still gives the right answer, but for the wrong reason: the prefix does nothing at all now,
+# and what makes it correct is that you were standing in the tree whose copy you ran. Harmless
+# to keep typing; misleading to keep believing. The one way to aim this script is to run the
+# copy that lives in the tree you mean.
 LUPIN_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
 HERE="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 DRY_RUN=0
