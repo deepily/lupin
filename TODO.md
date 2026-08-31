@@ -462,6 +462,31 @@ one shape: an instrument that cannot distinguish the good state from the bad one
 
 ### Findings banked, not filed
 
+#### A CARRIED TEST KEEPS ITS ASSERTIONS AND SILENTLY LOSES ITS DISCRIMINATION (Rachel 🕊️ `792661b1`, at Mr Radio 🦉's question, 2026-08-31 ~05:15 EDT)
+
+**Banked, not filed** — the fix is a two-line docstring edit already in Pocholo 📣's hands as row `40a13f4e`. What is held here is the mechanism, which is not about that file.
+
+**The question that found it was Mr Radio's, and neither the author nor I asked it**: *does the coverage survive the deletion IN SUBSTANCE, or only the test files?*
+
+A fixture I wrote against `title_may_be_trimmed` was carried onto the branch that DELETES that function and replaces it with a stored column. The file diffs clean. The suite is green. The docstring over it says it now proves something stronger. **Measured at `90f06e9a`, green baseline 474/0, three arms on the serializer:**
+
+| arm | sha | killed by |
+|---|---|---|
+| column -> constant `False` | `340d2c4da2f4` | **only** the crossed-pair COLUMN test |
+| column -> constant `True` | `0fe328662960` | mine **and** the COLUMN test |
+| column -> `len( item.title ) == 60` | `6fe6604d2c5c` | **only** the COLUMN test |
+
+=> **Strictly subsumed** — it fires in one arm of three and is redundant in the one it fires in. And the carried docstring claims it proves the flag is *"not derived from the title's length AT ALL"*, which **a length re-derivation passes straight through**: the 90-character fixture returns `False` because the column says `False`, and `False` again because 90 is not 60. **The right answer and the wrong answer coincide.**
+
+🔴 **THE MECHANISM: A TEST'S DISCRIMINATION IS A PROPERTY OF THE MUTATION SET IT FACES, NOT OF THE TEST.** Against `len( title ) == cap`, that 90-character row was the ONE input separating `==` from `>=` — it is why the test was written. Against a stored column the same row separates nothing. **Nothing in the test changed. What changed was underneath it**, and a carried test passing is evidence about the code it was written for.
+
+=> **When you carry a test across a reimplementation, RE-RUN THE MUTATIONS, NOT THE TEST.** A green carried test is the weakest possible evidence that the concern survived, and it is exactly what gets cited as proof that it did.
+
+=> **And it cannot always be repaired in place.** To catch the length re-derivation the fixture needs a row where length-derived and column-stored DISAGREE — which is precisely the crossed pair the other test already supplies. **Sometimes the honest finding is that your test is now carried, not carrying** — keep it for the narrow thing it still pins, and move the credit to the test that earned it.
+
+⚠️ **Fourth sighting of the blind-fixture shape in two nights, and the first one reached through a DELETION.** The others were fixtures that agreed with themselves from the start; this one discriminated correctly for hours and stopped when the implementation moved. **Same symptom, and no re-reading of the test body can find either** — the defect is in the data both times.
+
+
 #### A SPEECH-ACT GUARD FOR THE DM CONDENSER — and the row that was minted for it, then dropped under the moratorium (Rachel 🕊️ writing, Mr Radio 🦉's ruling, 2026-08-30 ~19:33 EDT)
 
 **Held here because a row for this was created at 19:31 EDT and DROPPED at 19:33** — `b0507d0d`, `status: dropped`, moratorium text quoted in its transition reason. Verified by reading the row both times rather than on report.
