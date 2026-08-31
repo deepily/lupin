@@ -22,7 +22,7 @@ quietly** — see the scoped caveat below. This table is not yet complete enough
 | Hold-notice dangling reference — every red that withholds the recipe carries the notice | Clayton 😎 | 2026-08-30 ~20:09 | ✅ merged `39343c24` |
 | Sweep for surfaces still printing the remedy the rotation hold refuses | Maya 🌻 | 2026-08-30 | ✅ merged `2b2b0980` |
 | Rotation-hold dangling reference | Maya 🌻 | 2026-08-30 ~20:09 | ⛔ **stood down** — Clayton reached it independently; this row IS the collision that produced this table |
-| planning-is-prompting cross-session doc, §1.5.1b amendment | Krishna 🦚 | 2026-08-30 | 🔄 in flight |
+| planning-is-prompting cross-session doc, §1.5.1b | Maya 🌻 measured it; Mr Radio 🦉 wrote it up | 2026-08-30 | ✅ **landed** `d3b0d20` in planning-is-prompting; that file has since moved on to §1.5.1c. Seeded here as Krishna 🦚's and in flight — wrong on owner **and** on state, corrected by Mr Radio 🦉 on rehydrate. If Krishna holds a residual amendment, the assignee's rule applies to him. |
 | Build this ASSIGNMENTS list | Tiberius 👑 | 2026-08-30 ~20:22 | ✅ this section |
 | The one-owner rule + this list | Tiberius 👑 | 2026-08-30 ~20:19 | 🔄 in flight |
 | Reviewing the one-owner rule | Rachel 🕊️ | 2026-08-30 ~20:22 | 🔄 in flight |
@@ -31,7 +31,10 @@ quietly** — see the scoped caveat below. This table is not yet complete enough
 | Reviewing Maya's follow-on | Krishna 🦚 | 2026-08-30 ~20:27 | 🔄 in flight |
 | Blocked row `298af249` | Rio ⚡ | 2026-08-30 ~20:27 | 🅿️ parked — blocked |
 | *(unassigned — free seats)* | Pocholo 📣, Chloé 🗼's successor | — | 🟢 available |
-| Completing this table from the manager's own view | Mr Radio 🦉 | 2026-08-30 ~20:27 | 🔄 first act in his memento; he re-spun at 51.3% |
+| Flip-day: the hold tests stop measuring the flag | Maya 🌻 | 2026-08-30 ~19:0x | ✅ merged `39d912ec` — reviewer Rachel 🕊️, not Tiberius (the gate was his) |
+| Probe-recall caveat — docstring only, row `40f8e3cc` | Tiberius 👑 | 2026-08-30 | ✅ merged `a91f2ad1` — reviewer Chloé 🗼, after two refusals |
+| Roster lookup-miss reads as a missing seat | Pocholo 📣 | 2026-08-30 | ✅ merged `eac4fb9c` |
+| Completing this table from the manager's own view | Mr Radio 🦉 | 2026-08-30 ~20:27 | ✅ **done 2026-08-30 ~20:40** — the three rows above plus the §1.5.1b correction. Every sha `git merge-base --is-ancestor`-checked against tip `0f3e75b8`. |
 
 🔴 **THE ASSIGNEE'S RULE — AND IT HAS NO CAVEAT.** If you HOLD an assignment and find no line for it here, you
 have found a **missing line, which is the signal**, and the fix is to tell Mr Radio 🦉 so he writes it. You know
@@ -45,10 +48,12 @@ that.)
 For that query, and that query alone, a miss is weak evidence rather than a clear road. **NARROWED 2026-08-30
 ~20:27**: the rows below the seed are Mr Radio 🦉's own dictation of the live set, given as he re-spun, so this is
 no longer one seat's DM record — but it is still a snapshot he owned rather than a read of any system, and he
-named completing it as the first act after his re-spin. ⚠️ **One item moved and I could not verify it**: Krishna 🦚
-was earlier described to me as amending planning-is-prompting §1.5.1b, and the manager's live set has him reviewing
-Maya instead. I recorded the manager's version and left the amendment OFF rather than guess whether it finished —
-if you are Krishna and it is still open, that is a missing line and the assignee's rule above applies to you. The caveat does NOT reach the
+named completing it as the first act after his re-spin. ✅ **RESOLVED 2026-08-30 ~20:40 by Mr Radio 🦉 on rehydrate**: the one item
+Tiberius 👑 could not verify — §1.5.1b, seeded as Krishna 🦚's and in flight — is **landed** at
+planning-is-prompting `d3b0d20`, and that file has since moved on to §1.5.1c. The seed had it wrong on owner and on
+state; the row now says so. Three merges from before the seed were added at the same time, each sha
+`git merge-base --is-ancestor`-checked against tip `0f3e75b8`. **The table is now the manager's full live set, not
+one seat's DM record** — still a snapshot of what he holds rather than a read of any system, so the caveat stands. The caveat does NOT reach the
 assignee's rule above, and it is not a licence to skip the check — a miss means *ask*, not *proceed quietly*. Verify anything here that a decision rests on — the merge shas are
 `git merge-base --is-ancestor`-checkable and were checked; the assignment times are from DM timestamps.
 
