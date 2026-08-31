@@ -31,14 +31,14 @@ def _base_url() -> str:
     Ensures:
         - honors PGVECTOR_TEST_DATABASE_URL when set (must end with '/')
         - else builds from DB_USER/DB_PASSWORD/DB_HOST/DB_PORT with the
-          documented local-Docker defaults (lupin_dev / dev_password)
+          documented local-Docker defaults (lupin_dev / $DB_PASSWORD)
     """
     override = os.environ.get( "PGVECTOR_TEST_DATABASE_URL" )
     if override:
         return override if override.endswith( "/" ) else override + "/"
 
     user = os.environ.get( "DB_USER", "lupin_dev" )
-    pw   = os.environ.get( "DB_PASSWORD", "dev_password" )
+    pw   = os.environ.get( "DB_PASSWORD", "" )
     host = os.environ.get( "DB_HOST", "localhost" )
     port = os.environ.get( "DB_PORT", "5432" )
     return f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/"

@@ -257,6 +257,10 @@ services:
       LUPIN_DM_CORPUS_DIR: /var/lupin/dm-corpus
       LUPIN_SERVER_PORT: "7999"
       DB_HOST: lupin-postgres
+      # database.py no longer carries a baked-in password default (row baac2474).
+      # Same untracked .env as POSTGRES_PASSWORD above; env resolves at container
+      # CREATE, so picking this up needs `up -d --force-recreate`, not a restart.
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env — see row 856882e4}
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
       # The model-server client's own credential — NOT the notifications key
@@ -439,6 +443,10 @@ services:
       LUPIN_DM_CORPUS_DIR: /var/lupin/dm-corpus
       LUPIN_SERVER_PORT: "8000"
       DB_HOST: lupin-postgres
+      # database.py no longer carries a baked-in password default (row baac2474).
+      # Same untracked .env as POSTGRES_PASSWORD above; env resolves at container
+      # CREATE, so picking this up needs `up -d --force-recreate`, not a restart.
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env — see row 856882e4}
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
       # The model-server client's own credential — NOT the notifications key
