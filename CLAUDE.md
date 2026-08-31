@@ -737,6 +737,24 @@ one evening, both the same failure: **the harness reporting on an execution that
 misses as hits. Receipt: an rc=4 was recorded as a caught mutation; the test had been appended into
 the wrong class and never ran. ⇒ **Accept only `rc == 1`.**
 
+🔴 **AND `rc == 1` ITSELF FAILS ON A BRANCH THAT CARRIES A DELIBERATE RED — measured
+2026-08-30.** The rule above assumes a GREEN baseline. `src/tests/unit/test_secret_scan.py`
+holds two intentional reds (the rotation hold), so **the suite exits 1 before a single
+mutation is applied**: under `rc == 1` every mutant scores as KILLED and the pass reports a
+perfect result while measuring nothing at all. A 14-arm pass run that way would have read
+14/14; judged properly it was **9/14**.
+
+⇒ **The kill signal is the FAILING SET, not the exit code: killed iff a NAMED test that was
+PASSING at baseline now fails.** `rc` 4/5 still means could-not-run and is never a kill.
+This is not a departure from the rule — the exit code was only ever a *proxy* for "a test
+that passed now fails", and the proxy breaks the moment anything is red on purpose.
+
+⇒ **TAKE THE BASELINE FIRST, ALWAYS, AND RECORD THE NAMES.** It costs one run, it is the
+only way to tell a mutant's red from a red that was already there, and a harness that
+skips it cannot distinguish a perfect score from a broken instrument. Two of tonight's
+five survivors were **deliberate design decisions with their reasons in the file** —
+readable only because the baseline said which reds were expected.
+
 **STALE BYTECODE — a mutant can run as some OTHER revision of itself, and this one lies BOTH ways.**
 CPython validates a cached `.pyc` on the source's whole-second mtime and size. A mutation changing
 NEITHER — single-character and digit swaps, `return 3` → `return 0`, `<` → `>` — landing in the same
