@@ -769,13 +769,24 @@ def _advisory_recipe( field ):
 
 @_advisory_recipe( "title_trimmed" )
 def _recipe_title_trimmed():
-    # TRUE arm driven from soft_guard_title's OWN output, never a hand-written
-    # 60-char string, so the pair tracks the cap if it ever moves.
+    # ⚠️ REWRITTEN AT THE 769b3574 MERGE. This recipe used to set neither arm's flag and
+    # let the TITLE decide — TRUE arm a guard-trimmed 60-char title, FALSE arm a short
+    # one — because `title_trimmed` was RE-DERIVED from length on read. It is a STORED
+    # column now, so a title alone decides nothing and the TRUE arm reported False.
+    #
+    # The arms are now the STRONGER pair the stored column makes available, and they
+    # discriminate in a way the old ones could not: both titles sit at exactly the cap,
+    # so LENGTH is held constant across the pair and only the column differs. Any
+    # regression back to a length-derived answer reports True on BOTH and dies on the
+    # FALSE arm. Under the old recipe that same regression passed.
     trimmed, _overflow, advisory = rules.soft_guard_title( "T" * 90, None )
-    assert advisory[ "trimmed" ] is True
-    false_title = "a title strictly under the cap"
-    assert len( false_title ) < rules.TITLE_SOFT_CAP        # the over-report trap, closed
-    return ( make_item( title=trimmed ), make_item( title=false_title ), { } )
+    assert advisory[ "trimmed" ] is True                    # the title still comes from
+    assert len( trimmed ) == rules.TITLE_SOFT_CAP           # the guard, not a literal
+    return (
+        make_item( title=trimmed, title_trimmed=True  ),
+        make_item( title=trimmed, title_trimmed=False ),
+        { },
+    )
 
 
 @_advisory_recipe( "park_reason_stale" )
