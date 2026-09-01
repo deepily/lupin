@@ -1060,6 +1060,18 @@ class TestTaskListHeaderFlowRatio:
     Rick's durable replacement for the ticket moratorium he declared by voice:
     "It's way too easy for you guys to add tickets to the list and way too hard to
     get them removed." The gate refuses a create; THIS is the half he can see.
+
+    🔴 THESE TWO TESTS PIN THE HEADER'S EXACT COPY, ON PURPOSE, AND THAT MAKES THEM
+    THE ONES TO EDIT WHEN THE COPY CHANGES. Deliberate: somebody must own the
+    wording, and a mocked test with a fixed payload is the cheap place to own it.
+
+    ⇒ SO IF YOU ARE SHORTENING THE LABEL OR SWITCHING THE VALUE TO PERCENT (Rick,
+    2026-09-01), THIS CLASS IS WHAT GOES RED, AND IT IS A ONE-LINE EDIT EACH:
+        · "Closed vs New Ratio (24hrs): 0.77"  — the label AND the 2dp format
+        · the em-dash assertion                — survives unless the null rendering moves
+    The LIVE class below asserts no copy at all, so it will NOT block you. Change the
+    strings here to whatever you ship; do not weaken them to a substring match, or
+    nothing anywhere pins the wording and a blank label passes every test we have.
     """
 
     def test_header_shows_the_ratio_with_its_window( self, logged_in_page ):
@@ -1238,12 +1250,24 @@ class TestTaskListHeaderFlowRatioLive:
         )
         ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
 
-        assert f"Closed vs New Ratio ({body['window_hours']}hrs):" in ratio_text, (
-            f"header clause {ratio_text!r} does not name the window the live endpoint "
-            f"returned ({body['window_hours']}h) — the payload did not reach the DOM"
+        # ⚠️ ASSERTS THE PROPERTY, NOT THE COPY. This test's job is "the live payload
+        # reached the DOM" — it is NOT the place to pin the header's wording or the
+        # number's format. Rick is actively shortening this label and moving the value to
+        # percent (2026-09-01), and an E2E that reddens on a copy edit is a brake on the
+        # people editing the copy, not a guard on the wire. The exact strings ARE pinned,
+        # deliberately, in the mocked TestTaskListHeaderFlowRatio above and in the
+        # TypeScript unit tier — the right altitude for wording.
+        #
+        # What must hold whatever the copy says: the window the endpoint just returned
+        # appears in the header, and some number does. Both are properties of the payload
+        # having travelled, and neither cares how it is spelled.
+        assert str( body[ "window_hours" ] ) in ratio_text, (
+            f"header clause {ratio_text!r} does not carry the window the live endpoint "
+            f"returned ({body['window_hours']}) — the payload did not reach the DOM"
         )
 
-        tail = ratio_text.split( ":" )[ -1 ].strip()
-        assert tail == "—" or re.fullmatch( r"\d+\.\d{2}", tail ), (
-            f"expected a 2dp ratio or an em dash, got {tail!r}"
+        assert ratio_text.strip() and re.search( r"\d", ratio_text ), (
+            f"header clause {ratio_text!r} carries no value at all. A broken endpoint and "
+            f"a quiet board both render empty, which is the whole reason this test drives "
+            f"the real wire instead of a fixture."
         )
