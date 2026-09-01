@@ -161,6 +161,7 @@ class NotificationsUI {
         // Storage keys
         this.QUEUE_SESSION_KEY = 'notifications_queue_session_id';
         this.AUDIO_SESSION_KEY = 'notifications_audio_session_id';
+        this.SESSION_FALLBACK_REASON_KEY = 'notifications_session_fallback_reason';
         this.USER_EMAIL_KEY = 'notifications_user_email';
         this.VERSION_KEY = 'notifications_version';
         this.QUEUE_FILTER_PREF_KEY = 'notifications_filter_preference';  // Filter mode storage
@@ -2212,41 +2213,195 @@ class NotificationsUI {
         }
         
         // Generate new session ID
+        //
+        // Every throw below is TAGGED with an origin before it reaches the catch.
+        // The catch is shared by five distinguishable failures whose causes have
+        // nothing to do with each other, and the old single log line named none
+        // of them — see FALLBACK_ORIGIN for the list.
         try {
-            // Ensure token is valid before API call (auto-refresh if expired)
-            await this.ensureValidToken();
-
-            const response = await fetch( '/api/get-session-id', {
-                method: 'GET',
-                headers: {
-                    'Authorization': this.getAuthHeader()
-                }
-            });
-            
-            if ( response.ok ) {
-                const data = await response.json();
-                const sessionId = data.session_id;
-                
-                if ( !sessionId ) {
-                    throw new Error( 'Session ID not found in response' );
-                }
-                
-                localStorage.setItem( storageKey, sessionId );
-                this.log( `[SESSION] Generated new ${sessionType} session: ${sessionId}` );
-                return sessionId;
-            } else {
-                throw new Error( `HTTP ${response.status}: ${response.statusText}` );
+            // Ensure token is valid before API call (auto-refresh if expired).
+            // This runs BEFORE the fetch, so when it throws no HTTP request is
+            // ever made and the session endpoint is not implicated at all.
+            try {
+                await this.ensureValidToken();
+            } catch ( tokenError ) {
+                throw this.tagSessionIdFailure( tokenError, this.FALLBACK_ORIGIN.TOKEN_REFRESH_FAILED );
             }
-            
+
+            let response;
+            try {
+                response = await fetch( '/api/get-session-id', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': this.getAuthHeader()
+                    }
+                });
+            } catch ( networkError ) {
+                // fetch() rejects only on a transport failure — DNS, refused
+                // connection, a dropped tunnel, CORS. It never rejects on an
+                // HTTP status, so this arm cannot be confused with one.
+                throw this.tagSessionIdFailure( networkError, this.FALLBACK_ORIGIN.NETWORK_UNREACHABLE );
+            }
+
+            if ( !response.ok ) {
+                throw this.tagSessionIdFailure(
+                    new Error( `HTTP ${response.status}: ${response.statusText}` ),
+                    this.FALLBACK_ORIGIN.HTTP_STATUS,
+                    { httpStatus: response.status }
+                );
+            }
+
+            let data;
+            try {
+                data = await response.json();
+            } catch ( parseError ) {
+                // A 200 that is not JSON. The likely author is an intermediary
+                // (proxy, tunnel, captive portal) answering with an HTML page
+                // instead of the endpoint — which is why this is NOT folded in
+                // with the missing-field case below.
+                throw this.tagSessionIdFailure( parseError, this.FALLBACK_ORIGIN.PAYLOAD_NOT_JSON );
+            }
+
+            const sessionId = data.session_id;
+
+            if ( !sessionId ) {
+                throw this.tagSessionIdFailure(
+                    new Error( 'Session ID not found in response' ),
+                    this.FALLBACK_ORIGIN.PAYLOAD_MISSING_FIELD
+                );
+            }
+
+            localStorage.setItem( storageKey, sessionId );
+            this.log( `[SESSION] Generated new ${sessionType} session: ${sessionId}` );
+            return sessionId;
+
         } catch ( error ) {
-            this.error( `Failed to get session ID for ${sessionType}:`, error );
-            
-            // Generate fallback session ID
-            const fallbackId = this.generateFallbackSessionId();
-            localStorage.setItem( storageKey, fallbackId );
-            this.log( `[SESSION] Using fallback ${sessionType} session: ${fallbackId}` );
-            return fallbackId;
+            // `error` is not guaranteed to be an object — a rejected promise can
+            // carry null or a primitive. Hardening, not a live crash: MEASURED
+            // with this guard reverted, the method still returns an id, because
+            // the strict-mode TypeError from tagging a primitive is itself
+            // caught here. What is lost is the DIAGNOSIS — the origin degrades
+            // to 'unclassified' and the TypeError's message replaces the real
+            // cause, which is the one thing this row exists to preserve.
+            const origin = ( error && error.lupinFallbackOrigin ) || this.FALLBACK_ORIGIN.UNCLASSIFIED;
+            return this.useFallbackSessionId( sessionType, storageKey, origin, error );
         }
+    }
+
+    /**
+     * The distinguishable reasons getOrCreateSessionId() can end up on the
+     * fallback. They have different causes and different owners, so the log
+     * line has to name which one fired.
+     */
+    get FALLBACK_ORIGIN() {
+        return {
+            TOKEN_REFRESH_FAILED  : 'token-refresh-failed',
+            NETWORK_UNREACHABLE   : 'network-unreachable',
+            HTTP_STATUS           : 'http-status',
+            PAYLOAD_NOT_JSON      : 'payload-not-json',
+            PAYLOAD_MISSING_FIELD : 'payload-missing-field',
+            UNCLASSIFIED          : 'unclassified'
+        };
+    }
+
+    tagSessionIdFailure( error, origin, detail = {} ) {
+        /**
+         * Stamp an origin onto an error on its way to the shared catch.
+         *
+         * Requires:
+         *     - error is an Error (or anything with settable properties)
+         *     - origin is one of the FALLBACK_ORIGIN values
+         *
+         * Ensures:
+         *     - returns the same error object, carrying lupinFallbackOrigin
+         *     - merges any detail fields onto the error for the log line
+         *
+         * Raises:
+         *     - None
+         */
+        // A primitive cannot carry a property, and assigning one in strict mode
+        // throws. Wrapping keeps the ORIGIN — without this the tagger's own
+        // TypeError becomes the error the catch sees, and the real cause is
+        // gone. Raised by Tiberius in review as hardening; measured as a
+        // diagnosis loss, not a crash.
+        if ( error === null || typeof error !== 'object' ) {
+            const wrapped = new Error( String( error ) );
+            wrapped.lupinFallbackOrigin = origin;
+            Object.assign( wrapped, detail );
+            return wrapped;
+        }
+
+        error.lupinFallbackOrigin = origin;
+        Object.assign( error, detail );
+        return error;
+    }
+
+    useFallbackSessionId( sessionType, storageKey, origin, error ) {
+        /**
+         * Mint, persist and ANNOUNCE a locally-generated session ID.
+         *
+         * A client running on an id the server never issued is a state worth
+         * seeing, so this announces at error level rather than at this.log.
+         * Before the separator fix the degradation announced itself as a 403
+         * reconnect loop; now the socket works, so nothing else will say it.
+         *
+         * The degradation is STICKY: the id is written to localStorage, and the
+         * top of getOrCreateSessionId() returns a stored id without ever asking
+         * the server again. One transient failure therefore pins this browser to
+         * a self-minted id for every later page load, after the cause has
+         * cleared. That is why the reason is persisted alongside the id.
+         *
+         * Requires:
+         *     - storageKey is the localStorage key for this session type
+         *     - origin is one of the FALLBACK_ORIGIN values
+         *
+         * Ensures:
+         *     - returns a session id matching the server's ^[a-z]+ [a-z]+$ format
+         *     - the id and the origin that caused it are both persisted
+         *     - a rejecting localStorage degrades to console output, not a throw,
+         *       for BOTH the session id and the diagnostic record
+         *
+         * Raises:
+         *     - None
+         */
+        const fallbackId = this.generateFallbackSessionId();
+
+        // Both writes are guarded, and the ORDER matters. A full or disabled
+        // localStorage must not turn a degraded session into a thrown error
+        // escaping getOrCreateSessionId() — the caller asked for an id and an
+        // id is available. Guarding only the diagnostic write below and leaving
+        // this one bare would protect the less important of the two.
+        try {
+            localStorage.setItem( storageKey, fallbackId );
+        } catch ( storageError ) {
+            this.error( '[SESSION] Could not persist fallback session id:', storageError );
+        }
+
+        const record = {
+            origin      : origin,
+            sessionType : sessionType,
+            sessionId   : fallbackId,
+            message     : error && error.message ? error.message : String( error ),
+            httpStatus  : error && error.httpStatus ? error.httpStatus : null,
+            at          : new Date().toISOString()
+        };
+
+        try {
+            localStorage.setItem( this.SESSION_FALLBACK_REASON_KEY, JSON.stringify( record ) );
+        } catch ( storageError ) {
+            // A full or disabled localStorage must not turn a diagnostic into
+            // a second failure. The console line below still carries the origin.
+            this.error( '[SESSION] Could not persist fallback reason:', storageError );
+        }
+
+        this.error(
+            `[SESSION] FALLBACK ENGAGED for ${sessionType} — origin=${origin} — ` +
+            `using self-minted id "${fallbackId}" that the server never issued. ` +
+            `Cause: ${record.message}`,
+            record
+        );
+
+        return fallbackId;
     }
     
     generateFallbackSessionId() {
