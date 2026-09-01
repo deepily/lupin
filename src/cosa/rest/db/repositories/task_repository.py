@@ -20,6 +20,27 @@ from sqlalchemy.orm import Session
 
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.db.repositories.base import BaseRepository
+
+# ---------------------------------------------------------------------------
+# Closed-vs-new ratio gate — the two SQL LIKE patterns, exported so they can be
+# tested against a real LIKE engine rather than asserted through a mock.
+# ---------------------------------------------------------------------------
+#
+# A creation stamp has an EMPTY left side ("->queued", "->blocked"); a closure
+# has any left side and "done" on the right. Census, whole board, lupin_db_dev,
+# 2026-09-01 — these are matched patterns, NOT an enumerated status list, because
+# a list is something somebody has to keep current:
+#
+#   created  ->queued 2292 · ->blocked 4
+#   closed   in_progress->done 941 · queued->done 659 · blocked->done 210
+#            review->done 56 · parked->done 24
+#
+# Neither pattern matches the non-arrow events (amended 2086, patched 1123,
+# amended_post_terminal 188, re-correlated 108), and "%->dropped" is deliberately
+# NOT a closure — see count_created_and_closed's docstring for why that exclusion
+# is the load-bearing choice.
+CREATED_TRANSITION_LIKE = "->%"
+CLOSED_TRANSITION_LIKE  = "%->done"
 from cosa.rest.task_store_rules import (
     TERMINAL_STATUSES,
     UNSCOPED_QUERY_THRESHOLD,
@@ -1300,6 +1321,100 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if until is not None:      query = query.filter( TaskEvent.ts <= until )
 
         return query.order_by( TaskEvent.ts.desc(), TaskEvent.id.desc() ).limit( limit ).offset( offset ).all()
+
+    def count_created_and_closed(
+        self,
+        since   : datetime,
+        until   : Optional[datetime] = None,
+        project : Optional[str]      = None,
+    ) -> dict:
+        """
+        Count creations and closures in a time window — SERVER-SIDE, in SQL.
+
+        Feeds the closed-vs-new ratio gate (María's design,
+        planning-is-prompting/src/rnd/2026.09.01-closed-vs-new-ratio-gate.md), which is
+        Rick's durable, mechanical replacement for the ticket moratorium he declared by
+        voice: "It's way too easy for you guys to add tickets to the list and way too hard
+        to get them removed."
+
+        🔴 WHY THIS EXISTS RATHER THAN A CALLER PAGING query_events. Two reasons, both
+        measured rather than argued:
+
+        1. `query_events` filters are EXACT-MATCH ("each filter is None or an exact-match
+           value" — its own contract, one method up). Neither half of this question is an
+           exact match. Closures arrive as several distinct strings, and an enumeration is
+           a list somebody has to keep current: add a status, and the closure count
+           silently undercounts with nothing failing.
+
+        2. `query_events` returns a PAGE, and a caller counting `len( rows )` gets a number
+           that is right until it quietly is not. The endpoint caps `limit` at 500. This
+           returns a COUNT from the database, so there is no page to cap.
+
+        SUFFIX AND PREFIX MATCHING, and the census behind each (whole board,
+        `lupin_db_dev`, 2026-09-01):
+
+            created  = transition LIKE '->%'      an EMPTY left side is the creation stamp
+                       ->queued   2292
+                       ->blocked     4
+            closed   = transition LIKE '%->done'
+                       in_progress->done  941   queued->done  659   blocked->done  210
+                       review->done        56   parked->done   24
+
+        ⚠️ A HARDCODED '->queued' WOULD UNDERCOUNT, and the rate depends entirely on the
+        window you measure. María measured 2 of 10 creations as `->blocked` in one 24-hour
+        window — 20%. Across the whole board it is 4 of 2296 — 0.17%. Both numbers are
+        correct about different populations; neither is the rate. That is exactly why this
+        matches a PREFIX instead of a status list.
+
+        🔴 `dropped` IS EXCLUDED FROM `closed`, BY RULING, AND IT IS THE LOAD-BEARING
+        CHOICE. If dropping counted, the gate is trivially defeated: drop three stale rows,
+        mint three new ones, ratio holds at 1.0 forever and the list never shrinks — the
+        exact asymmetry this was filed against, wearing a green light. The cost is that
+        legitimate board hygiene earns no credit, accepted deliberately: the alternative is
+        a gate satisfied by deleting the evidence.
+
+        ⚠️ THE TWO PATTERNS CAN OVERLAP IN PRINCIPLE. A `->done` stamp — a row created
+        directly into done — matches BOTH, and would count once in each. That is the right
+        answer (a row really was created, and it really was closed), not a bug to suppress.
+        Measured today: ZERO such events exist, and no `->dropped` either. Pinned by
+        `test_a_row_born_done_would_count_as_both` so the assumption fails loudly rather
+        than drifting.
+
+        Requires:
+            - since is a datetime bounding TaskEvent.ts inclusively (>=)
+            - until is None (meaning "up to now") or a datetime bounding it inclusively
+            - project is None (fleet-wide, which is Rick's ruling) or an exact project name
+
+        Ensures:
+            - returns { "created": int, "closed": int, "window_start": datetime,
+                        "window_end": datetime | None, "project": str | None }
+            - counts come from SQL COUNT, never from len() of a page, so no cap applies
+            - the caller computes the ratio — division by zero is a POLICY question
+              (`closed == 0` with creations is a DENY, `0/0` is an ALLOW showing "—"),
+              and policy does not belong in a repository
+
+        Returns:
+            dict as described above; both counts are 0 on an empty window, never None
+        """
+        created_pattern = CREATED_TRANSITION_LIKE
+        closed_pattern  = CLOSED_TRANSITION_LIKE
+
+        def _scoped( pattern ):
+            q = self.session.query( func.count( TaskEvent.id ) )
+            if project is not None:
+                q = q.join( TaskItem, TaskEvent.item_id == TaskItem.id ).filter( TaskItem.project == project )
+            q = q.filter( TaskEvent.transition.like( pattern ) )
+            q = q.filter( TaskEvent.ts >= since )
+            if until is not None: q = q.filter( TaskEvent.ts <= until )
+            return q.scalar() or 0
+
+        return {
+            "created"      : _scoped( created_pattern ),
+            "closed"       : _scoped( closed_pattern ),
+            "window_start" : since,
+            "window_end"   : until,
+            "project"      : project,
+        }
 
     def _append_event(
         self,
