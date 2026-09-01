@@ -124,6 +124,36 @@ def test_the_repo_idiom_this_follows_is_still_present():
 
 # ---------------------------------------------------------------------------
 # The "updated" stamp's own line (Rick, 2026-09-01).
+#
+# 🔴 AUTHORSHIP: THE TWO TESTS BELOW ARE KRISHNA 🦚's, AND `a936601f` SAYS OTHERWISE.
+# That commit's message claims "I wrote two" — Pocholo 📣. It is wrong. These functions,
+# their docstrings and the 826px/493px Chromium measurement in them are Krishna's; the
+# measurement is the same one his `a4595654` reports as "the first row loses 333px".
+#
+# HOW: they sat uncommitted in the shared working tree, and I assumed a file I had worked
+# in was mine rather than measuring. Then `git commit -F msg -- <path>` committed them,
+# which is the part worth knowing — from `git commit --help`, verbatim:
+#
+#     "When pathspec is given on the command line, commit the contents of the files
+#      that match the pathspec without recording the changes already added to the index."
+#
+# It takes the WORKING TREE content of the named paths. So the pathspec form protects the
+# file LIST and not the file CONTENT: it correctly kept `epic-stories.json` and two of
+# worker 3's websocket files out of that commit, and could do nothing about a peer's
+# uncommitted edits INSIDE a path I named. The commit looked perfectly scoped, which is
+# why I reported it as clean. Krishna found it and diagnosed it; the fix he and I could
+# both see — read `git diff HEAD -- <paths>` before committing and recognise whose work
+# it is — is a human check, and this fleet's own doctrine says a human check is not a
+# control. Left for Rick as a real gap rather than papered over.
+#
+# NOT REWRITTEN: a peer has built on `a936601f`. The correction lives here, in the
+# artifact, because a retraction that reaches only the conversation reaches nobody.
+#
+# ⚠️ SCOPE OF THE SECOND TEST, also Krishna's correction. It cannot fail on the
+# pre-stamp tree — it asserts `display: block` has NOT migrated onto the shared class,
+# which was true before `a4595654` and after. It is a real guard on the SCOPING decision
+# (a mutation moving the declaration onto `.task-list-updated` does turn it red), but it
+# is not evidence for the stamp move, and it must not be counted as an arm proving it.
 # ---------------------------------------------------------------------------
 
 def test_the_updated_stamp_gets_its_own_line_left_aligned( css ):

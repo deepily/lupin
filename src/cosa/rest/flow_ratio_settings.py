@@ -111,8 +111,10 @@ def override_path():
     Ensures:
         - returns $LUPIN_FLOW_RATIO_DIR/flow-ratio-settings.json when the variable is
           set (the container's mount point — see the note beside _SETTINGS_DIR_ENV)
-        - otherwise <fleet_data_root()>/flow-ratio-settings.json, the host-side
-          convention hold files and the rest of the fleet's runtime state already use
+        - otherwise <fleet_data_root()>/flow-ratio/flow-ratio-settings.json — the
+          host-side convention hold files and the rest of the fleet's runtime state
+          already use, with OVERRIDE_SUBDIR appended so this names the SAME file the
+          env-var branch does. The subdirectory is not decoration; see below.
         - does NOT create the file or the directory (reads tolerate absence)
 
     🔴 THE FALLBACK MUST APPEND `flow-ratio/`, AND FOR THREE DAYS IT DID NOT. Measured
