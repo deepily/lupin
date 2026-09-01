@@ -172,10 +172,38 @@ own worktree where a window harms nobody; verify green there; then fast-forward.
 shared tree never held a merge in flight for a second, and ancestry is fully
 preserved — all seven commits are ancestors, which is the receipt that matters.
 
-⇒ THE GENERAL RULE, worth more than this one landing: when the thing you are merging
-is a control over merging, prefer the landing that does not exercise the hazard.
-(Written down at mr radio 🦉's instruction — the reasoning had been living in a DM
-and a task-store field, where the next reader would never find it.)
+🔴 AND THAT REASONING WAS BROADER THAN THE MECHANISM SUPPORTS — NARROWED HERE, one
+hour later, after Rachel 🕊️ landed a different lane with `--no-ff` and mr radio 🦉
+noticed two opposite readings of one rule on one branch. MEASURED, and it settles it:
+
+    CLEAN `--no-ff` merge        MERGE_HEAD after the command: NONE
+    CONFLICTING merge            MERGE_HEAD after the command: LIVE
+
+A clean merge AUTO-COMMITS inside the single `git merge` invocation, so there is no
+interval in which a peer can commit into a staged merge. THE WINDOW IS NOT CREATED BY
+`--no-ff`; it is created by a merge that does NOT auto-commit — a CONFLICT, or an
+explicit `--no-commit`. My original phrasing implicated the merge STYLE, which is the
+wrong variable.
+
+⇒ SO BOTH LANDINGS WERE CORRECT AND THEY ARE NOT IN TENSION. A clean `--no-ff` is the
+better default — it preserves lane ancestry in one commit and opens nothing. A
+fast-forward is worth reaching for when a merge is EXPECTED TO CONFLICT in a shared
+checkout, which is the only case where the style choice changes the exposure.
+
+⇒ THE RULE, RESTATED AT THE ALTITUDE THE EVIDENCE ACTUALLY REACHES: prefer a landing
+that cannot leave a merge STAGED-BUT-UNCOMMITTED in a tree other people are working
+in. Merge style is a proxy for that and a poor one; auto-commit is the property.
+
+⇒ AND THE GUARD IS INDIFFERENT TO ALL OF IT, which is the reassuring part: it fires
+on a live MERGE_HEAD at commit time however that state arose. A conflicting `--no-ff`
+leaves MERGE_HEAD live, the merger concludes with `git commit`, and the guard refuses
+until they use the hatch — the designed friction, working. A clean `--no-ff` never
+reaches the guard at all, because git commits internally rather than through a Bash
+`git commit`, and there is nothing there to protect.
+
+(This paragraph exists because the first version of it was written from reasoning and
+the correction came from measurement. A retraction has to reach the artifact, not
+just the conversation it happened in.)
 
 ⚠️ THE FRICTION THIS BUYS, stated so it can be re-measured rather than defended:
 the seat that legitimately concludes its own merge must use the hatch every time.
