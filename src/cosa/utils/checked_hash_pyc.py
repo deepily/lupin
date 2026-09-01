@@ -92,6 +92,44 @@ _EXCLUDED_PARTS = frozenset( ( ".venv", "node_modules", ".git", "__pypackages__"
 
 _LEDGER_RELATIVE = "io/pyc-mode-ledger.jsonl"
 
+
+class _Outcome( str ):
+    """
+    A string that REFUSES to be a boolean, so the question a caller is really
+    asking has to be asked out loud.
+
+    ⚠️ IT RAISES RATHER THAN ANSWERING, and that is the whole design. `install()`
+    answers "did THIS call newly install the patch?"; `is_installed()` answers "is
+    the patch active?". For a caller who meant the second, ALREADY_INSTALLED is a
+    SUCCESS — so ANY truthiness answer here is wrong for somebody: False re-runs
+    the old conflation one level out, and True is wrong for the caller who meant
+    the first. Ruled by Mr Radio 🦉 2026-08-31, rejecting a quietly-truthy value
+    as "wrong in a new way".
+
+    Subclassing str keeps the value printable, comparable and usable in a message;
+    only the implicit bool is refused. `install()` still returns a real `True` on
+    the newly-installed path, so `if install():` works there and fails LOUDLY, with
+    the remedy named, on exactly the paths where its meaning was ambiguous.
+    """
+    __slots__ = ()
+
+    def __bool__( self ):
+        raise TypeError(
+            f"install() returned {str( self )!r}, which has no truth value: "
+            f"'did this call install it?' and 'is the patch active?' are different "
+            f"questions and this value answers only the first. Compare it "
+            f"explicitly (is chp.ALREADY_INSTALLED / is chp.UNSUPPORTED_INTERPRETER), "
+            f"or call is_installed() if you meant 'is the patch active?'."
+        )
+
+
+# The two reasons install() does not newly install. BOTH were `False` until
+# 2026-08-31 — one value for "the patch is already in place" and for "this
+# interpreter cannot be patched", which are opposite facts. A caller reading the
+# old False could not tell a working preventer from an impossible one.
+ALREADY_INSTALLED       = _Outcome( "already-installed" )
+UNSUPPORTED_INTERPRETER = _Outcome( "unsupported-interpreter" )
+
 _installed  = False
 _original   = None
 _converted  = 0          # writes this process actually rewrote — the install's own receipt
@@ -154,16 +192,32 @@ def _in_scope( source_path, roots ):
 
     Requires:
         - source_path is a filesystem path string
-        - roots is an iterable of absolute directory paths ( empty = every path is in scope )
+        - roots is an iterable of absolute directory paths
 
     Ensures:
         - returns False for any path under a vendored directory
-        - returns True only when the path sits under one of roots ( or roots is empty )
+        - returns True only when the path sits under one of roots
+        - 🔴 AN EMPTY SET READ AS A UNIVERSAL SET, ARRIVING IN A PERMISSION CHECK.
+          That is the shape, and it is worth naming because it is the same ambiguity
+          that bit four other things on 2026-08-31 in four different disguises: an
+          empty search result meaning "wrong population" or "empty population"; a
+          clean exit meaning "did the work" or "never ran"; a bare False meaning "no
+          need" or "impossible". Each time, two opposite facts shared one
+          representation. FAIL CLOSED is the general answer wherever the ambiguous
+          value grants authority — "I was given no roots" must never resolve to "I
+          may rewrite anything".
+        - 🔴 AN EMPTY roots MEANS NOTHING IS IN SCOPE, never everything. It used to
+          mean the opposite, which made the shim UNBOUNDED on any interpreter started
+          without LUPIN_ROOT: _default_roots() returns () there, so the patch owned the
+          whole filesystem and would rewrite stdlib bytecode. Measured 2026-08-31 —
+          _in_scope( "/usr/lib/python3.13/json/decoder.py", () ) answered True, and a
+          scratch package outside any repo came back checked-hash with converted_count 2.
+          Found in review by Tiberius 👑. A control that owns everything by default owns
+          things nobody agreed to give it, so the empty case now fails CLOSED.
     """
     try:
         resolved = os.path.abspath( source_path )
         if _EXCLUDED_PARTS & set( resolved.split( os.sep ) ): return False
-        if not roots: return True
         return any( resolved.startswith( root.rstrip( os.sep ) + os.sep ) for root in roots )
     except Exception:
         return False
@@ -178,13 +232,20 @@ def install( roots=None ):
 
     Ensures:
         - returns True only when this call newly installed the patch
-        - returns False when already installed, or when the interpreter's import machinery
-          does not match what this module knows how to patch
+        - returns ALREADY_INSTALLED when the patch is already in place
+        - returns UNSUPPORTED_INTERPRETER when the import machinery does not match
+          what this module knows how to patch
+        - ⚠️ NEITHER FAILURE VALUE HAS A TRUTH VALUE — using one in a boolean context
+          raises TypeError naming `is_installed()`. They were ONE value (`False`) until
+          2026-08-31 and this docstring stated the conflation as if it were a feature.
+          Making them merely falsey was the first fix and was still wrong: for a caller
+          asking "is the patch ACTIVE?", ALREADY_INSTALLED is a SUCCESS, so a falsey
+          answer rebuilds the same conflation one level out. Ask the question you mean
         - never raises
     """
     global _installed, _original
 
-    if _installed: return False
+    if _installed: return ALREADY_INSTALLED
 
     try:
         import importlib._bootstrap_external as bootstrap
@@ -193,7 +254,7 @@ def install( roots=None ):
         # patch on SourceLoader is never called — measured, see the module docstring.
         original = target.__dict__[ "_cache_bytecode" ]
     except Exception:
-        return False
+        return UNSUPPORTED_INTERPRETER
 
     scope = tuple( os.path.abspath( r ) for r in ( roots if roots is not None else _default_roots() ) )
 
@@ -212,7 +273,11 @@ def install( roots=None ):
     try:
         target._cache_bytecode = _cache_bytecode
     except Exception:
-        return False
+        # A DIFFERENT moment from the read above — this is the WRITE failing, on a
+        # class that refuses assignment. Both mean "this interpreter cannot be
+        # patched", and this file's own comment records a test that once passed on
+        # the wrong one of the two because both returned a bare False.
+        return UNSUPPORTED_INTERPRETER
 
     _original  = original
     _installed = True

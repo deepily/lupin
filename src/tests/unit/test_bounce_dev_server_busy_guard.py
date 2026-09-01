@@ -96,6 +96,24 @@ def _run( busy_rc=None, warn_rc=0, extra_args=(), pause_secs="0", real_probe_url
         env[ "FAKE_BUSY_RC" ]    = str( busy_rc )
     return subprocess.run(
         [ "bash", _SCRIPT, *extra_args ],
+        # ⚠️ A 30-SECOND WALL-CLOCK CEILING OVER A STEP THAT TAKES ~1.2s ALONE, blown ONCE
+        # on 2026-08-31 by test_idle_probe_proceeds_to_the_bounce inside a full unit tier.
+        # What is measured, and what is NOT:
+        #
+        #   MEASURED  alone immediately afterwards: 3 of 3 passed — 5.34-5.37s for the whole
+        #             file, ~1.16s for that test on its own.
+        #   MEASURED  it is NOT CPU-bound, so "the box was loaded" does not explain it. Re-run
+        #             under systemd-run --scope with CPUQuota at 100 / 25 / 10 / 5%, it passes
+        #             every time at 1.15-1.18s. Starving it does not reproduce the timeout.
+        #   MEASURED  the failing run reached the health poll and sat there — its captured
+        #             stdout ends at "[wait-for-health] polling ... need 3 consecutive OKs".
+        #   NOT KNOWN why. The fakes should make that poll instant. Two samples and no
+        #             mechanism, so this is recorded as UNEXPLAINED — not as flake, and not
+        #             as load, which was the first hypothesis and failed its own test.
+        #
+        # ⇒ Do NOT wave a red here through as load. Re-run it alone; if it fails alone it is
+        # real. Left at 30 rather than raised: nobody has ruled on the right number, and a
+        # ceiling quietly raised to stop a red is a sensor switched off.
         env=env, capture_output=True, text=True, timeout=30,
     )
 
