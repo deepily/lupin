@@ -33,6 +33,7 @@ from lupin_mcp.persona_normalization import persona_slug
 from lupin_mcp import reap_memento
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from cosa.agents.utils.sender_id import detect_project
+from cosa.utils.worktree_venv import provision_worktree_venv
 
 
 # Default ceiling on concurrent reviewers a single manager may spawn. Overridden
@@ -319,6 +320,38 @@ def _write_manifest( path: Path, records: List[ Dict[ str, Any ] ] ) -> bool:
 
 # ── Orchestration ─────────────────────────────────────────────────────────────
 
+def venv_alarm( provisioning ):
+    """
+    A one-line, top-level alarm when a spawn's seat could not be given an interpreter.
+
+    WHY A SEPARATE TOP-LEVEL FIELD rather than leaving the verdict in the nested
+    result: the reap learned this the hard way (row 3b0c5f90). Its per-seat memento
+    verdicts were honest and nested, and managers missed them, because a caller reads
+    the top of a result. A provisioning failure only discoverable by opening a
+    sub-dict is a failure that reports as success.
+
+    Requires:
+        - provisioning is the dict returned by provision_worktree_venv, or None
+
+    Ensures:
+        - returns None when the seat has a usable interpreter, or when there was
+          nothing to provision (no work_dir, no script, or the main checkout) — the
+          field appears only when it means something
+        - returns a single human-readable line naming the target and the reason
+          otherwise
+        - never raises
+
+    Returns:
+        str | None
+    """
+    if not provisioning or provisioning.get( "status" ) != "failed": return None
+    return (
+        f"the spawned seat's tree {provisioning.get( 'target' )} has no usable .venv "
+        f"(exit {provisioning.get( 'exit_code' )}): {provisioning.get( 'detail' )} "
+        f"- it will fail unit tests that a provisioned tree passes"
+    )
+
+
 def _resolve_project_root( project ):
     """
     Resolve a project NAME to its repository root on this host (row 697a85fe).
@@ -575,6 +608,41 @@ def spawn_sessions(
             f"The caller's own repo here is {detect_project()!r}."
         )
 
+    # ── Give the seat a .venv it can actually run the unit tier with (row 9b2abfb7) ──
+    #
+    # `.venv` is gitignored, so `git worktree add` never produces one, and four unit
+    # files shell out to `<PROJECT_ROOT>/.venv/bin/{python,pytest}`. A seat landing in
+    # a venv-less worktree therefore sees failures that are a property of WHERE IT IS
+    # STANDING and not of the branch. Measured on ONE tree at ONE sha (1daf5b1b) with
+    # only the symlink flipped, over the SEVEN unit files known to carry this:
+    # 35 failed without a .venv, 0 failed with one. Say the population out loud — a
+    # bare "35" invites comparison with counts taken over different file sets, and
+    # three such counts already exist for this same defect.
+    #
+    # PLACED HERE, NOT INSIDE `_resolve_project_root`, on purpose. This is the same
+    # moment in the same code path — the resolver has exactly one caller — but keeping
+    # a function named `_resolve_…` free of side effects means the unit tests that call
+    # it directly do not start shelling out to a real script. Ruled by Mr. Radio,
+    # 2026-08-31.
+    #
+    # ⚠️ FAIL OPEN. `provision_worktree_venv` never raises and never blocks: a seat
+    # without a venv is worse off, a spawn that dies because provisioning failed is
+    # worse still. It logs at WARNING on anything it could not finish. A falsy
+    # `work_dir` — an explicit project=None, which inherits the caller's own cwd — is a
+    # deliberate no-op, because this code does not know where that seat will land and
+    # must not guess.
+    #
+    # 🔴 THE RESULT IS CAPTURED AND SURFACED, NOT DISCARDED (Rio, reviewing this
+    # change). Calling this and dropping its answer would make a spawn report success
+    # while the seat it just created cannot run its own test tier — the exact shape
+    # this repo already names: a clean exit is not evidence the work happened. So the
+    # verdict rides back on the payload, and a FAILURE gets a top-level alarm on the
+    # same reasoning as the reap's `memento_alarm` (row 3b0c5f90): a caller reads the
+    # top of a result, not a nested dict, and honest-but-nested is how the reap's
+    # verdicts were missed. `venv_alarm` is None when nothing went wrong, so the line
+    # only appears when it means something.
+    venv_provisioning = provision_worktree_venv( work_dir )
+
     # The DM/collection topic and the tmux SESSION name BOTH key on the manager
     # PERSONA, but with DIFFERENT separators — and they MUST stay separate
     # (Rick one-name mandate 2026-06-22). Coupling them through a single key is
@@ -700,7 +768,9 @@ def spawn_sessions(
         "persona_preference" : persona_preference,
         "requested"          : count,
         "dry_run"            : dry_run,
-        "model"              : model
+        "model"              : model,
+        "venv_provisioning"  : venv_provisioning,
+        "venv_alarm"         : venv_alarm( venv_provisioning )
     }
 
 

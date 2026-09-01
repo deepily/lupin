@@ -85,6 +85,14 @@ DETECTED_BUT_DOES_NOT_BREAK = {
         "125 commits behind, so the run corroborates the MECHANISM rather than this exact "
         "revision; the current revision's independent evidence is the grep (one hit, at 403) "
         "plus the sys.executable spawn.",
+    "test_new_worktrees_come_up_with_an_interpreter.py":
+        "every `.venv/bin/python` it names lives inside a TEMP REPO THE FIXTURE BUILDS — "
+        "`main_checkout` makes a throwaway git repo and plants an executable stub at "
+        "`<tmp>/.venv/bin/python` itself. The paths are therefore properties of the fixture, "
+        "never of the tree running the suite, so the running tree's own `.venv` is irrelevant "
+        "to it. Measured BOTH ways at ee027c8c in two separately-built worktrees, not one "
+        "reused: 6 passed with a `.venv` (lupin-wt-rio-rachel2) and 6 passed without one "
+        "(lupin-wt-rio-novenv, no `.venv` ever created).",
     "test_v2_eligible_routing_denominator.py":
         "does spawn PROJECT_ROOT/.venv/bin/python, but skips first when the pinned baseline "
         "worktree is absent — which it is. Reaching the spawn again in an unprovisioned tree "
