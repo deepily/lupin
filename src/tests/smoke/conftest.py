@@ -45,6 +45,13 @@ PORTS AROUND :7999 — 7998 IS TAKEN, AND IT ANSWERS /health WITH 200
   server has no such route). A /health check answers "is something alive here",
   never "is this the service I meant".
 
+  SCOPE, narrowed by a sweep of this directory rather than left implied: every
+  other smoke test here health-checks its OWN configured base URL, which is
+  correct and cannot hit the wrong service. `test_model_server_smoke.py` targets
+  :7998 deliberately and already distinguishes it from :7999. So this is NOT a
+  latent defect in the existing guards — it bites when a base URL is REPOINTED,
+  which is what a negative arm does, and it is the negative arm that had it.
+
   ⇒ NEVER ASSUME A PORT IS FREE, INCLUDING FOR A NEGATIVE ARM. If a test needs
   an unreachable address — to prove its own venue guard skips rather than
   errors — it must BIND a port and let the bind fail, then use the port it
