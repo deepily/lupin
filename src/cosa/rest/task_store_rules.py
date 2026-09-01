@@ -1934,6 +1934,99 @@ def epic_key_advisory( correlation_key ):
     )
 
 
+# ---------------------------------------------------------------------------
+# Closed-vs-new ratio gate at creation (María's design, planning-is-prompting
+# src/rnd/2026.09.01-closed-vs-new-ratio-gate.md @ 845a34b)
+# ---------------------------------------------------------------------------
+#
+# Rick's DURABLE, MECHANICAL replacement for the ticket moratorium he declared by
+# voice on 2026-09-01: "It's way too easy for you guys to add tickets to the list
+# and way too hard to get them removed. So in order to battle this asymmetry, I'm
+# simply going to declare a moratorium on new tickets."
+#
+# A moratorium depends on everyone remembering. This does not — which is the whole
+# point, and is why anything that makes it easy to switch off defeats it.
+#
+# HIS RULINGS, all six, and every one a real keypress:
+#   Q1  ratio created ÷ closed, rolling window, ALLOW below 1.0
+#   Q2  `done` only — `dropped` is NOT a closure
+#   Q3  warn-only for one week first, then arm
+#   Q4  P0 is EXEMPT, and every use LOGGED
+#   Q5  scope is fleet-wide
+#   Q6  the header label is always shown
+#
+# ⚠️ AND HE HOLDS THE THRESHOLD AS AN OPERATOR DIAL. By voice, later the same day:
+# "I wouldn't worry too much about optimizing this gate member... it is dynamically
+# adjustable on the fly... We're not creating perfection simply something that is
+# good enough." So this is built to be tuned, not tuned to be right.
+
+RATIO_GATE_EXEMPT_PRIORITIES = ( "P0", )
+
+# Warn-only ramp, same shape as the epic-key guard above and for the same reason:
+# a one-week ramp with only a comment on it is a permanent ramp, because prose does
+# not fail a build. `test_flow_ratio_gate.py` goes RED once this date passes while
+# enforcement is still off, so the flip is a forced choice rather than a remembered one.
+RATIO_GATE_ENFORCEMENT_STARTS = "2026-09-08"
+RATIO_GATE_ENFORCEMENT_ACTIVE = False
+
+
+def ratio_gate_advisory( created, closed, priority=None, correlation_key=None ):
+    """
+    Judge one create against the closed-vs-new ratio.
+
+    PURE — no I/O, no clock, no database. The caller supplies the counts and decides
+    what to do with the verdict, which keeps the warn-only ramp a one-line change at
+    the router and makes every case below testable without a store.
+
+    Requires:
+        - created / closed are non-negative ints for the ruled window
+        - priority is the create payload's priority (e.g. "P0"), or None
+        - correlation_key is the payload's key, or None
+
+    Ensures:
+        - returns None when the write is ALLOWED or EXEMPT
+        - otherwise returns a refusal string naming the REAL COUNTS, the gate, and what
+          to do about it — Rick asked for "the appropriate message… success if under 1.0
+          and failure and why", so a bare refusal is not enough
+        - EXEMPTIONS, both returning None before any arithmetic:
+            * priority P0 — a gate that refuses the filing of an outage row is a gate
+              that gets switched off the first Friday it is wrong
+            * the harness mirror's `cc-task:` lane — it writes where no human is present
+              to answer a 422, the same carve-out the epic-key guard makes
+        - `closed == 0` with creations REFUSES (a window where nothing was finished is
+          exactly what the gate is for, and it is the common case on a quiet day);
+          `0/0` ALLOWS (an idle window is not a failing window)
+        - never raises, and never itself rejects — the ROUTER decides, gated on
+          RATIO_GATE_ENFORCEMENT_ACTIVE
+
+    ⚠️ SUCCESS IS SILENT. A confirmation on every ordinary create is noise, and the
+    success signal is the number already sitting in the board header.
+    """
+    key = correlation_key if isinstance( correlation_key, str ) else ""
+    if ( priority or "" ).upper() in RATIO_GATE_EXEMPT_PRIORITIES: return None
+    if key.strip().startswith( MIRROR_KEY_PREFIX ):                return None
+
+    if closed == 0:
+        if created == 0: return None
+        return (
+            f"New tickets are gated: in the last window the fleet created {created} and "
+            f"closed 0. Nothing was finished, so the ratio has no denominator and the gate "
+            f"stays shut. Close or finish something before filing this one. "
+            f"(A P0 is exempt if this genuinely cannot wait.)"
+        )
+
+    ratio = created / closed
+    if ratio < 1.0: return None
+
+    need = created - closed + 1
+    return (
+        f"New tickets are gated: in the last window the fleet created {created} and closed "
+        f"{closed} (ratio {ratio:.2f} — the gate opens below 1.00). Close or finish {need} "
+        f"more row{'s' if need != 1 else ''} before filing this one. "
+        f"(A P0 is exempt if this genuinely cannot wait.)"
+    )
+
+
 def quick_smoke_test():
     """
     Quick smoke test for task_store_rules — exercises every validator at the

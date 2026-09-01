@@ -802,6 +802,39 @@ def create_task(
 
     with get_db() as session:
         repo = TaskRepository( session )
+
+        # Closed-vs-new ratio gate (María's design; Rick's mechanical replacement for the
+        # ticket moratorium). Shares this chokepoint with the epic-key guard above — one
+        # door, so the two cannot be reasoned about separately by mistake.
+        #
+        # WARN-ONLY until RATIO_GATE_ENFORCEMENT_ACTIVE flips, his ruled ramp. Read INSIDE
+        # the session because it needs the counts; evaluated BEFORE create_item so a
+        # refusal writes nothing at all.
+        ratio_counts = repo.count_created_and_closed(
+            since = datetime.now( timezone.utc ) - timedelta( hours=RATIO_DEFAULT_WINDOW_HOURS )
+        )
+        ratio_refusal = rules.ratio_gate_advisory(
+            created         = ratio_counts[ "created" ],
+            closed          = ratio_counts[ "closed" ],
+            priority        = payload.priority,
+            correlation_key = payload.correlation_key,
+        )
+        if ratio_refusal:
+            if rules.RATIO_GATE_ENFORCEMENT_ACTIVE:
+                raise HTTPException( status_code=422, detail=ratio_refusal )
+            print(
+                f"[task WARN] ratio gate on {payload.item_class} create: {ratio_refusal} "
+                f"(WARN-ONLY until {rules.RATIO_GATE_ENFORCEMENT_STARTS}; write NOT blocked)"
+            )
+        elif ( payload.priority or "" ).upper() in rules.RATIO_GATE_EXEMPT_PRIORITIES:
+            # Rick's Q4: P0 is exempt AND every use is LOGGED. The logging is the whole
+            # condition of the exemption — an unlogged escape hatch is just a hole.
+            print(
+                f"[task INFO] ratio-gate P0 EXEMPTION used by {payload.created_by}: "
+                f"{payload.item_class} '{payload.title[ :60 ]}' "
+                f"(window created={ratio_counts[ 'created' ]} closed={ratio_counts[ 'closed' ]})"
+            )
+
         # A blocked MINT can be born stranded exactly like a transition (row 00a6bde2).
         # Inside the transaction, and BEFORE create_item, so a rejected mint writes
         # nothing at all.

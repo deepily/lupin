@@ -101,6 +101,23 @@ def repo( monkeypatch ):
     # branch returns it beside `breakdown`, and a MagicMock there would serialize as
     # a non-JSON object and 500 the route rather than failing an assertion cleanly.
     fake.count_tasks_by_priority.return_value = { }
+    # `count_created_and_closed` must return REAL ints for the same reason as every entry
+    # above (the closed-vs-new ratio gate, 2026-09-01). The gate computes `created / closed`
+    # and compares it to 1.0; a bare MagicMock raises
+    # `'<' not supported between instances of 'MagicMock' and 'float'` and 500s the route —
+    # which is exactly what 22 tests in this file did the moment the gate landed.
+    #
+    # ZERO / ZERO is the honest default, not a convenient one: an idle window is ALLOWED by
+    # ruling, so the gate stays silent and these tests keep testing what they are named for.
+    # A test that wants a refusal sets this explicitly, the same contract as the empty maps
+    # above.
+    fake.count_created_and_closed.return_value = {
+        "created"      : 0,
+        "closed"       : 0,
+        "window_start" : None,
+        "window_end"   : None,
+        "project"      : None,
+    }
 
     @contextmanager
     def _fake_get_db():
