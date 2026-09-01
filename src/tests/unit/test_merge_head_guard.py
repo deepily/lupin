@@ -37,6 +37,8 @@ import pytest
 
 from lupin_cli.claude_code.hooks.lib.merge_head_guard import (
     merge_head_deny_reason,
+    _squash_in_flight,
+    SQUASH_MSG_ARGV,
     build_merge_head_deny_response,
     _guard_disabled,
     _hatch_in_prefix,
@@ -68,10 +70,22 @@ def _recording_reader( sha=LIVE_SHA ):
     return reader
 
 
+def _no_squash( _cwd ):
+    """A tree with no squash merge staged."""
+    return False
+
+
 def _guard( command, **kw ):
-    """Drive the guard over one Bash command, live merge by default."""
+    """
+    Drive the guard over one Bash command, live MERGE_HEAD by default.
+
+    Both readers are stubbed by default. The squash one defaults to False so that
+    a test about MERGE_HEAD is measuring MERGE_HEAD — otherwise a broken first
+    probe would be covered by the second and every test would still pass.
+    """
     kw.setdefault( "enabled", True )
     kw.setdefault( "merge_reader", _recording_reader() )
+    kw.setdefault( "squash_reader", _no_squash )
     return merge_head_deny_reason( "Bash", { "command": command }, **kw )
 
 
@@ -173,7 +187,11 @@ class TestTheRefusalText:
         """
         reason = _guard( "git commit -m x" )
         assert "merge --continue" in reason, "the refusal does not admit what it misses"
-        assert "squash"           in reason, "the refusal does not admit the squash gap"
+        assert "squash" not in reason.split( "WHAT THIS GUARD DOES NOT COVER" )[ 1 ], (
+            "the refusal still lists squash as a gap - Rick ruled it CLOSED on "
+            "2026-08-31, and a stale residual list is worse than none because a "
+            "reader trusts it"
+        )
 
     def test_it_says_that_silence_is_not_evidence( self ):
         """
@@ -670,48 +688,123 @@ class TestTheHeredocChoice:
         assert _guard( self.LINE_START, merge_reader=_no_merge ) is None
 
 
+class TestTheSquashProbe:
+    """
+    THE SECOND PROBE, ruled in by Rick 2026-08-31 ~21:05 EDT after he was shown that
+    a MERGE_HEAD-only guard would not have caught its own founding incident.
+
+    `git merge --squash` stages the whole merge and sets NO MERGE_HEAD, so the first
+    probe is structurally blind to it — and the commit that follows carries ONE
+    parent and loses the lane's ancestry, which is the shape the incident ended in.
+    """
+
+    def test_a_staged_squash_is_refused_even_with_no_MERGE_HEAD( self ):
+        assert _guard(
+            "git commit -m 'lands the lane'", merge_reader=_no_merge, squash_reader=lambda _c: True
+        ) is not None
+
+    def test_neither_probe_firing_allows_the_commit( self ):
+        """THE CONTROL. Two probes give two ways to deny always; this rules both out."""
+        assert _guard(
+            "git commit -m x", merge_reader=_no_merge, squash_reader=_no_squash
+        ) is None
+
+    def test_the_two_states_are_worded_differently( self ):
+        """
+        A squash has no sha to name, and its harm is the LOST ANCESTRY rather than a
+        peer's merge landing under your message. One message for both would make the
+        committer look for a MERGE_HEAD that is not there.
+        """
+        merge  = _guard( "git commit -m x" )
+        squash = _guard( "git commit -m x", merge_reader=_no_merge, squash_reader=lambda _c: True )
+        assert merge != squash
+        assert "MERGE_HEAD" in merge
+        assert "SQUASH"     in squash.upper()
+
+    def test_MERGE_HEAD_is_checked_first_when_both_are_somehow_present( self ):
+        """
+        A sha the committer can look up beats wording that has none. Asserting the
+        ORDER, which no other test can see: both probes firing must give the merge
+        message, not the squash one.
+        """
+        reason = _guard( "git commit -m x", squash_reader=lambda _c: True )
+        assert "MERGE_HEAD" in reason
+
+    def test_the_squash_probe_is_not_consulted_when_a_merge_is_live( self ):
+        """Short-circuit, so the ordinary refusal costs one git read and not two."""
+        calls = []
+        _guard( "git commit -m x", squash_reader=lambda c: calls.append( c ) or True )
+        assert calls == [], "the squash probe ran even though MERGE_HEAD had already answered"
+
+    def test_the_squash_probe_asks_git_for_the_path_and_never_builds_one( self ):
+        """
+        `.git/SQUASH_MSG` would be wrong for the same reason `.git/MERGE_HEAD` is:
+        in a linked worktree `.git` is a FILE. `--git-path` resolves through the
+        worktree's own git dir.
+        """
+        assert SQUASH_MSG_ARGV == ( "git", "rev-parse", "--git-path", "SQUASH_MSG" )
+
+    def test_the_probe_reads_False_outside_a_repo( self, tmp_path ):
+        assert _squash_in_flight( str( tmp_path ) ) is False
+
+    def test_the_probe_reads_False_for_a_missing_directory( self ):
+        assert _squash_in_flight( "/nonexistent/path/for/this/test" ) is False
+
+    def test_a_timeout_reads_as_no_squash( self, monkeypatch ):
+        def slow( *a, **kw ):
+            raise subprocess.TimeoutExpired( cmd="git", timeout=5 )
+
+        monkeypatch.setattr( subprocess, "run", slow )
+        assert _squash_in_flight( "/tmp" ) is False
+
+    def test_an_empty_path_answer_reads_as_no_squash( self, monkeypatch ):
+        class _Done:
+            returncode = 0
+            stdout     = "  \n"
+
+        monkeypatch.setattr( subprocess, "run", lambda *a, **kw: _Done() )
+        assert _squash_in_flight( "/tmp" ) is False
+
+    def test_an_unstattable_path_reads_as_no_squash( self, monkeypatch ):
+        """The isfile call is the last thing that can raise; it must not."""
+        class _Done:
+            returncode = 0
+            stdout     = "/some/path\n"
+
+        monkeypatch.setattr( subprocess, "run", lambda *a, **kw: _Done() )
+        monkeypatch.setattr( os.path, "isfile", lambda _p: ( _ for _ in () ).throw( OSError( "nope" ) ) )
+        assert _squash_in_flight( "/tmp" ) is False
+
+    def test_a_relative_git_path_answer_is_resolved_against_the_cwd( self, monkeypatch, tmp_path ):
+        """`--git-path` answers relative when cwd is inside the repo."""
+        ( tmp_path / ".git" ).mkdir()
+        ( tmp_path / ".git" / "SQUASH_MSG" ).write_text( "squash\n" )
+
+        class _Done:
+            returncode = 0
+            stdout     = ".git/SQUASH_MSG\n"
+
+        monkeypatch.setattr( subprocess, "run", lambda *a, **kw: _Done() )
+        assert _squash_in_flight( str( tmp_path ) ) is True
+
+    def test_a_relative_answer_with_no_cwd_resolves_against_the_process_cwd( self, monkeypatch ):
+        class _Done:
+            returncode = 0
+            stdout     = "definitely/not/here/SQUASH_MSG\n"
+
+        monkeypatch.setattr( subprocess, "run", lambda *a, **kw: _Done() )
+        assert _squash_in_flight( None ) is False
+
+    def test_a_non_zero_exit_reads_as_no_squash( self, monkeypatch ):
+        class _Done:
+            returncode = 128
+            stdout     = ""
+
+        monkeypatch.setattr( subprocess, "run", lambda *a, **kw: _Done() )
+        assert _squash_in_flight( "/tmp" ) is False
+
+
 class TestTheKnownGap:
-
-    def test_a_squash_merge_is_invisible_to_this_guard( self, tmp_path ):
-        """
-        🔴 PINNED AS KNOWN AND ACCEPTED, NOT AS CORRECT.
-
-        `git merge --squash` stages a merge and sets NO MERGE_HEAD, so this guard
-        allows a commit that concludes it — and that is the shape which produces
-        the ONE-PARENT commit the founding incident recorded. SQUASH_MSG is a
-        viable second probe (git clears it on commit, so it cannot linger into a
-        false deny), but widening past MERGE_HEAD is outside this row's ratified
-        scope and is with the manager.
-
-        This test exists so the gap cannot quietly become a surprise. If the scope
-        is widened it will fail, and whoever widens it should delete it.
-        """
-        main = tmp_path / "sq"
-        main.mkdir()
-        _git( "init", "-q", "-b", "trunk", ".", cwd=main )
-        _git( "config", "user.email", "t@t", cwd=main )
-        _git( "config", "user.name", "t", cwd=main )
-        ( main / "f.txt" ).write_text( "base\n" )
-        _git( "add", "f.txt", cwd=main )
-        _git( "commit", "-qm", "base", cwd=main )
-        _git( "checkout", "-q", "-b", "other", cwd=main )
-        ( main / "g.txt" ).write_text( "other\n" )
-        _git( "add", "g.txt", cwd=main )
-        _git( "commit", "-qm", "other", cwd=main )
-        _git( "checkout", "-q", "trunk", cwd=main )
-
-        subprocess.run( [ "git", "merge", "--squash", "other" ], cwd=main, capture_output=True )
-
-        squash_msg = _git( "rev-parse", "--git-path", "SQUASH_MSG", cwd=main ).strip()
-        assert os.path.exists( os.path.join( main, squash_msg ) ), \
-            "no squash is in flight — this test is not measuring what it claims"
-
-        assert _live_merge_head( str( main ) ) is None, \
-            "MERGE_HEAD now sees a squash merge — the gap closed; delete this test"
-        assert merge_head_deny_reason(
-            "Bash", { "command": "git commit -m 'concludes a squash'" },
-            enabled=True, cwd=str( main ),
-        ) is None, "the guard now catches squash merges — the gap closed; delete this test"
 
     def test_git_merge_continue_is_not_covered( self ):
         """

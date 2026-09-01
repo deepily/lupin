@@ -62,17 +62,45 @@ SCOPE, as ratified:
   · ESCAPE HATCH for the seat that STARTED the merge and must finish it.
   · FAIL OPEN when the check itself errors.
 
-⚠️ FOUR RESIDUALS, NAMED RATHER THAN HIDDEN.
+🔴 READ THIS BEFORE THE REST: WHY THERE ARE TWO PROBES AND NOT ONE. Asked by
+mr radio 🦉 on review, 2026-08-31 — WOULD THIS GUARD HAVE STOPPED THE INCIDENT IT
+WAS BUILT FOR? With MERGE_HEAD alone the answer was NO, and that is what got the
+second probe ruled in rather than left as a footnote.
 
-1. A SQUASH MERGE IS INVISIBLE TO THIS CHECK, and it is the shape that produces
-   the one-parent commit the founding incident recorded. Measured 2026-08-31:
-   `git merge --squash` stages the merge, writes SQUASH_MSG, and sets NO
-   MERGE_HEAD — `rev-parse -q --verify MERGE_HEAD` exits 1 while a merge is
-   plainly in flight, and the resulting commit has one parent. SQUASH_MSG would
-   be a viable second probe (git clears it on commit, so it cannot linger into a
-   false deny), but widening the check beyond MERGE_HEAD is not this row's
-   ratified scope. `test_merge_head_guard.py` pins the gap so it cannot drift out
-   of mind, and the question is with the manager.
+Two measurements and one deduction, kept separate so the join can be refused:
+  1. MEASURED in a scratch repo — a `git commit` made while MERGE_HEAD is live
+     ALWAYS records the merge parent, unconditionally. You cannot commit during a
+     merge and come out with one parent.
+  2. MEASURED on the real commit — `b26d31a1` has exactly ONE parent, and the lane
+     tip `4fb745f8` is NOT an ancestor of it. It IS an ancestor of the repair
+     `f3e9b41a`.
+  ⇒ MERGE_HEAD was not live when b26d31a1 was written, so a MERGE_HEAD-only guard
+     would have been silent through the whole event.
+
+THAT LEFT TWO ROUTES TO THE SAME END STATE, and the artifact cannot say which:
+  (a) the content was staged by a `git merge --squash`, which never sets MERGE_HEAD
+  (b) a merge was live EARLIER and was cleared before the commit landed
+Route (a) is now COVERED by the SQUASH_MSG probe (Rick ruled the widening by voice,
+2026-08-31 ~21:05 EDT). Route (b) is not, and cannot be: once MERGE_HEAD is gone
+there is nothing left in the tree to detect.
+
+⇒ SO THE HONEST ANSWER IS STILL NOT A CLEAN YES. The guard now covers one of the
+two routes that end in that shape, and no evidence exists to say which route was
+taken. Anyone tempted to write "this would have prevented the incident" should stop
+at "this covers the squash route to it."
+
+⇒ AND IT IS WORTH ITS PLACE EITHER WAY: the hazard it closes — a staged merge
+concluded by a passing commit — is real, reproducible on demand, and invisible to
+BOTH machine-readable `git status` forms. A control that prevents a mechanism earns
+its keep even where it would not have prevented one particular instance of the
+damage. This paragraph exists so nobody has to guess which way the module leans.
+
+⚠️ THREE LIVE RESIDUALS AND ONE CLOSED, NAMED RATHER THAN HIDDEN.
+
+1. ✅ CLOSED — a squash merge was invisible to a MERGE_HEAD-only check, and is now
+   caught by the SQUASH_MSG probe. Kept in this list rather than deleted, because
+   the reasoning is what justifies the second probe's existence and a future reader
+   deciding to "simplify" back to one check needs to meet it.
 
 2. A PARTIAL COMMIT CANNOT CONSUME A MERGE — git refuses it first. Measured:
    `git commit -m x -- <paths>` during a live merge dies with "fatal: cannot do a
@@ -153,6 +181,29 @@ GIT_TIMEOUT_SECONDS = 5
 # THE ONLY CHECK. Not a path test, not a status parse — see the module docstring
 # for the measurement behind both refusals.
 MERGE_HEAD_ARGV = ( "git", "rev-parse", "-q", "--verify", "MERGE_HEAD" )
+
+# THE SECOND PROBE. `git merge --squash` stages the whole merge and sets NO
+# MERGE_HEAD, so the first probe is blind to it — and the resulting commit has ONE
+# parent and loses the lane's ancestry, which is the shape the founding incident
+# ended in. Rick ruled the widening by voice, 2026-08-31 ~21:05 EDT, after being
+# shown that the MERGE_HEAD-only guard would not have caught its own incident.
+#
+# `--git-path` resolves through the worktree's own git dir, so this is worktree-
+# aware for the same reason `rev-parse --verify` is; never build the path by hand.
+#
+# ⚠️ MEASURED BEFORE SHIPPING, because a file that LINGERS would be a permanent
+# false refusal for every seat that ever abandoned a squash:
+#     after `git merge --squash`   PRESENT   <- the state to catch
+#     after the commit             absent    <- git clears it
+#     after `git reset --hard`     absent    <- the normal abandon path clears it
+#     after an ordinary merge      absent    <- cannot be confused with MERGE_HEAD
+# Both real ways out of a squash clear it, so it cannot strand a seat.
+SQUASH_MSG_ARGV = ( "git", "rev-parse", "--git-path", "SQUASH_MSG" )
+
+# Which in-flight state was found. They need different words: one names a sha the
+# committer can look up, the other has none to name.
+KIND_MERGE  = "merge"
+KIND_SQUASH = "squash"
 
 _INLINE_FLAG_RE = re.compile( rf"\b{_ENV_FLAG}=(?P<value>[^\s;&|]*)" )
 
@@ -294,12 +345,53 @@ def _live_merge_head( cwd=None ) -> Optional[ str ]:
     return done.stdout.strip() or None
 
 
-def _deny_reason_for( merge_sha: str ) -> str:
+def _squash_in_flight( cwd=None ) -> bool:
+    """
+    True iff a `git merge --squash` is staged and unconcluded in <cwd>.
+
+    Requires:
+        - cwd is a directory path, or None for the process cwd
+
+    Ensures:
+        - asks git for the SQUASH_MSG path rather than building one, so it is
+          worktree-aware exactly as the MERGE_HEAD probe is
+        - returns False on any failure — git absent, not a repo, a timeout, a
+          missing directory — every one of which ALLOWS the commit
+        - never raises
+    """
+    try:
+        done = subprocess.run(
+            list( SQUASH_MSG_ARGV ),
+            cwd            = cwd,
+            capture_output = True,
+            text           = True,
+            timeout        = GIT_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        return False
+
+    if done.returncode != 0: return False
+
+    path = done.stdout.strip()
+    if not path: return False
+
+    # --git-path answers relative to the repo when cwd is inside it.
+    if not os.path.isabs( path ):
+        path = os.path.join( cwd or os.getcwd(), path )
+
+    try:
+        return os.path.isfile( path )
+    except Exception:
+        return False
+
+
+def _deny_reason_for( kind: str, merge_sha=None ) -> str:
     """
     Compose the refusal: what is live, what committing would do, how to proceed.
 
     Requires:
-        - merge_sha is the live MERGE_HEAD sha
+        - kind is KIND_MERGE or KIND_SQUASH
+        - merge_sha is the live MERGE_HEAD sha for KIND_MERGE, None for KIND_SQUASH
 
     Ensures:
         - names the sha, so the committer can identify the merge before acting
@@ -311,9 +403,24 @@ def _deny_reason_for( merge_sha: str ) -> str:
           will reasonably assume it covers every way a merge gets concluded. The
           refusal is the only text a seat reads, so the scope belongs in it.
     """
+    if kind == KIND_SQUASH:
+        headline = (
+            "`git commit` is denied: A SQUASH MERGE IS STAGED AND UNCONCLUDED IN THIS TREE "
+            "(SQUASH_MSG is present, and there is no MERGE_HEAD to name).\n"
+            "Committing now LANDS that merge under YOUR message, with ONE parent and none of "
+            "the lane's ancestry — which is exactly the shape the 2026-08-31 incident ended in "
+            "(row f3306404: `b26d31a1`, one parent, ten shas non-ancestors, repaired at "
+            "`f3e9b41a`).\n"
+        )
+    else:
+        headline = (
+            f"`git commit` is denied: A MERGE IS LIVE IN THIS TREE (MERGE_HEAD {merge_sha[ :12 ]}).\n"
+            "Committing now CONCLUDES that merge under YOUR message.\n"
+        )
+
     return (
-        f"`git commit` is denied: A MERGE IS LIVE IN THIS TREE (MERGE_HEAD {merge_sha[ :12 ]}).\n"
-        "Committing now CONCLUDES that merge under YOUR message. A merge is a two-step "
+        headline +
+        "A merge is a two-step "
         "operation over tree-global state — staged by one command, written by the next — "
         "so between those steps it belongs to the tree, not to whoever started it. That "
         "happened on 2026-08-31 (row f3306404): parentage was lost, the lane landed with "
@@ -321,15 +428,14 @@ def _deny_reason_for( merge_sha: str ) -> str:
         "repairing it.\n"
         "DO NOT CHECK `git status --porcelain` — BOTH machine-readable forms show NOTHING "
         "once the conflicts are staged. Use the long `git status`, or "
-        "`git rev-parse -q --verify MERGE_HEAD`.\n"
+        "`git rev-parse -q --verify MERGE_HEAD`, or look for SQUASH_MSG.\n"
         "IF THE MERGE IS YOURS and you mean to conclude it, re-run with:\n"
         "  LUPIN_ALLOW_MERGE_COMMIT=1 git commit ...\n"
         "IF IT IS NOT YOURS, it belongs to another seat mid-operation. Do not abort it and "
         "do not commit around it — ask the owner to finish, or wait. Your own work is safe "
         "where it is; nothing here loses it.\n"
         "WHAT THIS GUARD DOES NOT COVER, so you do not read it as more than it is: "
-        "`git merge --continue` also concludes a merge and is NOT checked, and a "
-        "`git merge --squash` sets no MERGE_HEAD so it is invisible here. Seeing no "
+        "`git merge --continue` also concludes a merge and is NOT checked. Seeing no "
         "refusal is not evidence that no merge is in flight."
     )
 
@@ -338,10 +444,11 @@ def merge_head_deny_reason(
     tool_name,
     tool_input,
     *,
-    enabled      : Optional[ bool ] = None,
-    env          = None,
-    cwd          = None,
-    merge_reader = None,
+    enabled       : Optional[ bool ] = None,
+    env           = None,
+    cwd           = None,
+    merge_reader  = None,
+    squash_reader = None,
 ) -> Optional[ str ]:
     """
     Return a deny-reason string iff a Bash `git commit` would conclude a live merge.
@@ -351,12 +458,15 @@ def merge_head_deny_reason(
         - tool_input is the hook payload's tool_input (dict) whose "command" key
           carries the shell command, when present
         - enabled is None (resolved from env) or injected for testing
-        - merge_reader is None (real git) or injected for testing
+        - merge_reader / squash_reader are None (real git) or injected for testing
 
     Ensures:
         - None unless ALL hold: the guard is enabled, tool_name is Bash, the
           command invokes `git commit` in command position, the hatch prefix is
-          absent, and MERGE_HEAD resolves in the target tree
+          absent, and EITHER MERGE_HEAD resolves in the target tree OR a squash
+          merge is staged there
+        - MERGE_HEAD is checked first: when it resolves, the refusal can name a sha,
+          which is more use to the committer than the squash wording
         - the target tree honours BOTH `cd <path> &&` and `git -C <path>`, composed
           in that order; an unresolvable target falls back to cwd
         - FAIL-OPEN: any unexpected error → None
@@ -378,9 +488,13 @@ def merge_head_deny_reason(
 
         target    = _target_directory( command, match, cwd )
         merge_sha = ( merge_reader or _live_merge_head )( target )
-        if not merge_sha: return None
+        if merge_sha:
+            return _deny_reason_for( KIND_MERGE, merge_sha )
 
-        return _deny_reason_for( merge_sha )
+        if ( squash_reader or _squash_in_flight )( target ):
+            return _deny_reason_for( KIND_SQUASH )
+
+        return None
 
     except Exception:
         # FAIL-OPEN BACKSTOP, and it is EXERCISED rather than asserted: a test
