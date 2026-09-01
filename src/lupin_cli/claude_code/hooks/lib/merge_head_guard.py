@@ -306,6 +306,10 @@ def _deny_reason_for( merge_sha: str ) -> str:
         - names the machine-readable blindness, because the seat's next instinct
           is to check `git status --porcelain` and be reassured by nothing
         - gives the hatch verbatim, one line, copyable
+        - NAMES ITS OWN RESIDUALS. A residual recorded only in a module docstring
+          and a test is invisible to the person who actually meets the guard, who
+          will reasonably assume it covers every way a merge gets concluded. The
+          refusal is the only text a seat reads, so the scope belongs in it.
     """
     return (
         f"`git commit` is denied: A MERGE IS LIVE IN THIS TREE (MERGE_HEAD {merge_sha[ :12 ]}).\n"
@@ -322,7 +326,11 @@ def _deny_reason_for( merge_sha: str ) -> str:
         "  LUPIN_ALLOW_MERGE_COMMIT=1 git commit ...\n"
         "IF IT IS NOT YOURS, it belongs to another seat mid-operation. Do not abort it and "
         "do not commit around it — ask the owner to finish, or wait. Your own work is safe "
-        "where it is; nothing here loses it."
+        "where it is; nothing here loses it.\n"
+        "WHAT THIS GUARD DOES NOT COVER, so you do not read it as more than it is: "
+        "`git merge --continue` also concludes a merge and is NOT checked, and a "
+        "`git merge --squash` sets no MERGE_HEAD so it is invisible here. Seeing no "
+        "refusal is not evidence that no merge is in flight."
     )
 
 

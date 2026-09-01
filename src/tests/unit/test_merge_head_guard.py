@@ -160,6 +160,29 @@ class TestTheRefusalText:
         """
         assert "LUPIN_ALLOW_MERGE_COMMIT=1" in _guard( "git commit -m x" )
 
+    def test_it_names_its_own_residuals( self ):
+        """
+        A RESIDUAL RECORDED ONLY IN A DOCSTRING AND A TEST IS INVISIBLE TO THE
+        PERSON WHO MEETS THE GUARD. The refusal is the only text a seat reads, and a
+        seat that has been refused once will reasonably assume the guard covers
+        every way a merge gets concluded. It does not: `git merge --continue` is not
+        checked and a squash merge sets no MERGE_HEAD at all.
+
+        Raised by mr radio 🦉 on review — "make sure the gap is legible where a seat
+        will meet it, not only in the test."
+        """
+        reason = _guard( "git commit -m x" )
+        assert "merge --continue" in reason, "the refusal does not admit what it misses"
+        assert "squash"           in reason, "the refusal does not admit the squash gap"
+
+    def test_it_says_that_silence_is_not_evidence( self ):
+        """
+        The dangerous reading of a scoped guard is the inverse one: no refusal
+        therefore no merge. That inference is false for both residuals, so the
+        refusal has to deny it in words.
+        """
+        assert "not evidence" in _guard( "git commit -m x" )
+
     def test_it_names_the_incident_row( self ):
         assert "f3306404" in _guard( "git commit -m x" )
 
@@ -549,6 +572,43 @@ class TestAgainstRealGit:
             "Bash", { "command": "git commit -m 'my own work'" },
             enabled=True, cwd=main,
         ) is None
+
+    def test_a_cd_into_a_merge_tree_is_refused_from_a_CLEAN_cwd( self, repo_with_live_merge ):
+        """
+        🔴 THE TEST THAT FAILS IF THE GUARD READS THE PROCESS CWD INSTEAD OF THE
+        COMMAND'S TREE. No injected reader anywhere — real git, real merge, and the
+        two directories deliberately DISAGREE.
+
+        The hook stands in a tree with NO merge; the command cds into the one that
+        has a live merge. A guard that consulted its own cwd sees a clean tree and
+        allows. Only a guard that follows the command's `cd` can refuse here.
+
+        This is the shape the fleet uses for nearly every commit — the Bash tool
+        resets its working directory to the session root on every call — and it is
+        the miss that shipped green at 100% coverage until it was measured against
+        the real hook. Asked for by mr radio 🦉 on review.
+        """
+        main, linked = repo_with_live_merge
+        assert merge_head_deny_reason(
+            "Bash", { "command": f"cd {linked} && git commit -m 'my own work'" },
+            enabled=True, cwd=main,
+        ) is not None, "the guard read its own cwd, not the tree the commit lands in"
+
+    def test_a_cd_into_a_CLEAN_tree_is_allowed_from_a_MERGING_cwd( self, repo_with_live_merge ):
+        """
+        THE INVERSE, and it is the half that makes the pair meaningful. The
+        directories disagree the other way: the hook stands in the tree with the live
+        merge, the command cds into the clean one.
+
+        A guard that ignored the `cd` and read its own cwd would REFUSE here. So the
+        two tests together cannot both pass unless the guard genuinely follows the
+        command — neither alone establishes that.
+        """
+        main, linked = repo_with_live_merge
+        assert merge_head_deny_reason(
+            "Bash", { "command": f"cd {main} && git commit -m 'unrelated work'" },
+            enabled=True, cwd=linked,
+        ) is None, "the guard refused a commit in a tree that has no merge"
 
     def test_the_argv_is_the_plumbing_form_and_not_a_status_parse( self ):
         """
