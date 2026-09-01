@@ -22,6 +22,28 @@ added later, in a deliberate audit of assertions that had never been run against
 a broken arm — a test that has only ever been seen passing is not known to
 discriminate.
 
+⚠️ METHOD DEBT IN THE ARMS ABOVE, NAMED RATHER THAN QUIETLY FIXED: two of them
+mutated files in the SHARED checkout — notifications.js, which two other seats
+were editing at that moment, and websocket_manager.py. CLAUDE.md already says
+never to run a mutation harness in a live tree; the intended form is a detached
+worktree at the sha, so no peer can be reached at all.
+
+Verified afterwards, and it came back clean: both files are byte-identical to
+HEAD, neither mutation string survives anywhere, and the backup taken at 19:07:08
+was itself byte-identical to HEAD because the peer's work had committed at
+19:04:03. So the restore wrote back exactly what git holds.
+
+⚠️ BUT THAT VERIFICATION CANNOT CLOSE THE QUESTION IT LOOKS LIKE IT CLOSES. The
+mutate-and-restore window was ~15 seconds. A peer edit made and clobbered inside
+it leaves the file byte-identical to HEAD — which is precisely what a clean
+round-trip leaves. The two outcomes are indistinguishable after the fact, and no
+evidence exists that would separate them. "I checked and it was clean" is
+therefore weaker than it sounds here.
+
+⇒ The lesson is about the WINDOW, not the check: a restore you verify is not the
+same as a mutation you never exposed anyone to. Take the arm in a detached
+worktree of your own; then there is nothing to verify and nothing to explain.
+
 WHERE THIS FILE LANDED: commit 05eeb53c, titled "the em-dash test was wrong in
 its PREMISE, not just its string". It is not about em-dashes. Pocholo 📣 hit the
 shared-index race — `git add <his one path>` then `git commit -m`, which commits
