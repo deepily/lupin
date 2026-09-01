@@ -132,9 +132,12 @@ class WebSocketManager:
             - Records the session's client type in session_client_types — "mobile"
               iff client_type == "mobile", any other EXPLICIT value ⇒ "web"; an
               ABSENT client_type writes "web" only for an unmapped session_id and
-              never downgrades an established "mobile" entry (the audio-WS
-              connect reuses the queue-WS session id without a marker — F-S6-1,
-              Rachel R1)
+              never downgrades an established "mobile" entry (the MOBILE APP's
+              audio-WS connect reuses the queue-WS session id without a marker —
+              F-S6-1, Rachel R1). This reuse is NOT universal: the web app
+              notifications.js opens its audio socket on a SEPARATE session id,
+              so there it lands as its own "web" entry rather than meeting an
+              existing one.
 
         Raises:
             - Exception if closing old WebSocket connections fails (handled gracefully)

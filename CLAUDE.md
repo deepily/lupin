@@ -476,6 +476,7 @@ nothing in it tells you which.** Four receipts in this file are the same defect.
 | the scoped `--cov` census (§100% COVERAGE MANDATE, *"A SCOPED `--cov` ANSWERS ONE QUESTION"*) | 61 files instead of 73 | twelve never-instrumented files read as **zero coverage** |
 | the `pgrep -f` gate (*"IS ANOTHER SUITE RUNNING?"*) | every process whose **command line mentioned pytest** — including three seats whose briefing merely *discussed* testing | a gate that never opens, on an idle box |
 | a `git grep` for a doctrine claim (2026-08-31) | tracked files only — and `io/post-games/` is **gitignored** | *"nothing on disk"*, from a search that could not see where doctrine lands |
+| a `git grep -- 'src/docs/**/*.md'` (2026-09-01) | **17 of 35 docs — the SUBDIRECTORIES only.** A git pathspec is not shell globstar: `**/*.md` requires an intervening directory, so every file sitting DIRECTLY in `src/docs/` is silently outside it | zero hits, including a sentence the searcher had just read with their own eyes |
 
 **The fourth is the clearest, because it took two people and neither had both halves.** Mr Radio
 caught the wrong population — `git grep` cannot see untracked files. Maya caught that the
@@ -490,6 +491,25 @@ would have signed off on the other's search.**
 
 Receipt: `grep -rl "masked-invariant" io/post-games/` returns 2 hits, so the same search returning
 nothing for another string is now evidence rather than silence.
+
+⚠️ **THE FIFTH ROW IS THE CHEAPEST ONE TO HIT AND THE HARDEST TO SEE — AND ITS POPULATION IS
+PARTIAL, NOT EMPTY, WHICH IS WORSE.** The pathspec *looks* like the glob every shell has taught
+you. Measured 2026-09-01: `git ls-files 'src/docs/**/*.md'` returns **17 files**, while
+`git ls-files 'src/docs/*.md' 'src/docs/**.md'` returns **35**. The eighteen it drops are exactly
+the ones sitting DIRECTLY in `src/docs/`, because `**/` in a git pathspec requires an intervening
+directory. So the search runs, reads two thirds of the corpus, and reports a confident zero.
+
+**A partial population is more dangerous than an empty one**: it returns plausible hits for other
+searches, so nothing ever looks broken. The same regex that returned **0** across that pathspec
+returned **1** when pointed at one of the excluded files directly. **The regex was never wrong.**
+Nothing in git's output says so either — an unmatched pathspec is not an error, it exits 1, which
+is indistinguishable from an honest no-match.
+
+⇒ **Name the population as a COUNT before you trust a zero** — `git ls-files <pathspec> | wc -l`,
+and sanity-check it against what you believe is there. `git grep -- 'src/docs/'` (a plain directory
+prefix) is the form that does what you meant. (Swept 2026-09-01: **no committed script or test uses
+the `**/*` pathspec form** — verified against a planted control line, so that zero is the tree's and
+not the instrument's. This is a hazard for searches you TYPE, which is exactly where it bit.)
 
 ⚠️ **THIS IS NOT ONLY ABOUT SEARCH TOOLS.** It governs every absence-claim: a census, a coverage
 zero-list, *"no rows matched"*, *"no other suite is running"*, *"that persona has no memento"*.

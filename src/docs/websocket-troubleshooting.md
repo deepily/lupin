@@ -154,7 +154,11 @@ If `single_session_per_user` is `True`, connecting a new session closes the prev
 ### Problem: Audio WebSocket Not Receiving Audio
 
 1. **Verify audio WebSocket is connected**: Check `/ws/audio/{session_id}` in Network tab
-2. **Same session ID**: Audio and queue WebSockets must use the same `session_id`
+2. **Check WHICH session id the audio socket is on** — it is not always the queue's.
+   The mobile app and the web multiplexer share one id across both sockets; the web app
+   (`notifications.js`) gives the audio socket its own id and names it in the TTS request.
+   Compare the id in the `/ws/audio/{session_id}` URL against the one the TTS POST sent —
+   those two must match. The queue socket's id need not.
 3. **Audio subscriptions are fixed**: Audio WebSocket always subscribes to `audio_streaming_status`, `audio_streaming_complete`, `sys_ping` — this is not configurable
 4. **Check TTS request**: The TTS HTTP request triggers audio streaming. If no TTS request is sent, no audio events will arrive
 

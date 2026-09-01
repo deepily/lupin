@@ -340,6 +340,21 @@ one shape: an instrument that cannot distinguish the good state from the bad one
 
 **Rick's order, 10:12 EDT**: *"We're declaring a no new tickets moratorium for the entire day or until I lift the moratorium… workers, if you've got issues you're discovering along the way, you're going to have to surface that to your managers who will then track everything in the local to-do files, not the task list."* Everything below arrived by DM and is deliberately NOT a row.
 
+- [ ] 🟡 **SEVEN ROUTERS / 33 ROUTES HAVE NO ROW IN `rest-api-reference.md` — AND THE DOC NEVER PROMISED THEY WOULD, SO THIS NEEDS A RULING RATHER THAN A FIX** (Rio ⚡ `37316fd2`, 2026-09-01). Raised because `tasks` is one of the seven, and `/api/tasks/flow-ratio` is the door that answered **422 in production all evening**. The quick reference could not have helped anyone find it, because it does not carry that router at all.
+  **MEASURED** at `8eca08f7`, routes extracted from each module's AST (decorator path + `APIRouter(prefix=…)`), then matched against the doc's text — **36 modules, 182 routes**. Seven modules have **zero** of their routes present:
+  ```
+  arbiter          3 routes   /api/arbiter/context-pressure, /api/arbiter/fleet-snapshot
+  dm               7 routes   /api/dm/get, /api/dm/length-audit
+  docs_files       3 routes   /api/docs/file, /api/docs/health
+  peer             4 routes   /api/admin/peer-queue-watch/start, .../status
+  speakerphone     1 route    /api/cosa-voice/speakerphone/{session_id}
+  tasks           10 routes   /api/epic-stories, /api/tasks
+  voice_persona    5 routes   /api/cosa-voice/voice-persona/pool, .../sample
+  ```
+  ⚠️ **THE FIRST INSTRUMENT OVERCOUNTED AND ITS NUMBER MUST NOT BE QUOTED.** Searching for the MODULE NAME reported **20 of 36 absent**. That was wrong: the doc organises by URL path, so `v2_ask` and `podcast_generator` read as missing while their routes are plainly there (16 and 9 mentions). **A name-based search over a path-organised document measures the naming convention, not the coverage.** The seven above come from the path-based pass.
+  ⇒ **NOT the same defect as `websocket-architecture.md`, and it must not be treated as one.** That doc claimed *"All methods are documented below"* and was false — a broken promise, mechanically fixable. This one is titled **Quick Reference**, points at `/docs` and `/redoc` for detail, and makes **no completeness claim anywhere** (grepped: zero hits for complete/exhaustive/all-endpoints). CLAUDE.md agrees — *"FastAPI `/docs` and `/redoc` are the authoritative API reference."*
+  ⇒ **So the open question is a scope call for Rick, not a gap to close by fiat:** does the quick reference intend to carry every router (in which case CLAUDE.md's *"New router added → rest-api-reference.md quick-reference table"* touchpoint was missed seven times), or is it a curated subset (in which case there is nothing to fix and the touchpoint line should say *curated*)? **Writing 33 routes into it unasked would be inventing a requirement**, which is why this is a book entry and not a commit.
+
 - [ ] 🔴 **`include_terminal` SILENTLY CHANGES THE QUESTION FROM "WHAT DOES THIS SEAT OWE" TO "WHAT HAS IT EVER HELD" — AND THE SECOND NUMBER READS AS A BURIED WORKER** (Rachel 🕊️ `76d19e19` and Mr Radio 🦉, 2026-08-31 ~04:00). **NEAR-MISS RECEIPT: he had a false-idle bug fully built and was ONE MESSAGE from filing it.** The suspected defect was a key mismatch — that the string a caller passes for `owner_persona` is not the string the store canonicalises to, which would make a busy seat read as idle. **There is no such defect.**
   **MEASURED, same string, same store, one call apart:**
   ```

@@ -42,7 +42,24 @@ The Lupin WebSocket architecture provides real-time bidirectional communication 
 
 ### Dual-Session Design
 
-Every client opens **two** WebSocket connections sharing the same `session_id`:
+Every client opens **two** WebSocket connections. Whether they share one `session_id`
+**depends on the client** — measured 2026-09-01, and the docs previously claimed all three
+shared, which is false:
+
+| Client | Queue id | Audio id |
+|---|---|---|
+| Mobile app (`enhanced_websocket_service.dart:740-741`) | `_sessionId` | the **same** `_sessionId` |
+| Web multiplexer (`multiplexer/boot.ts:623-624`) | `sessionId` | the **same** `sessionId` |
+| Web app (`static/js/notifications.js:2441-2442`) | `notifications_queue_session_id` | **a different id** — its own `/api/get-session-id` fetch under `notifications_audio_session_id` |
+
+The split in `notifications.js` is deliberate, not drift: TTS requests from that client
+carry `audioSessionId` explicitly (`notifications.js:4308`, `4316`, `4368`, `4376`), so its
+audio channel is addressed by its own id. Expect to see a user holding two ids — e.g.
+`foolish goat` on the queue socket and `slow zebra` on the audio socket. `emit_to_user`
+fans out to both, and the audio socket then correctly DECLINES queue events; those
+"not subscribed" lines are the design working, not a subscription bug (row `88347f65`
+cost three seats six hours reading 749 of them as breakage).
+
 
 | Channel | Endpoint | Purpose | Auth |
 |---------|----------|---------|------|
@@ -73,7 +90,7 @@ The `WebSocketManager` bridges COSA's synchronous queue system with FastAPI's as
 | `user_to_email` | `Dict[str, str]` | Debug cache: `user_id` → email |
 | `session_subscriptions` | `Dict[str, List[str]]` | Maps `session_id` → subscribed event names (or `["*"]` for all) |
 | `session_timestamps` | `Dict[str, datetime]` | Connection time per session; used by stale-session cleanup |
-| `session_client_types` | `Dict[str, str]` | F-S6-1 side map: `session_id` → `"mobile"` \| `"web"`. Recorded from the queue-WS `auth_request` `client_type` field (exactly `"mobile"` marks mobile; any other EXPLICIT value ⇒ `"web"`; an ABSENT marker writes `"web"` only for an unmapped session and never downgrades an established `"mobile"` — the audio-WS connect reuses the queue-WS session id without a marker). Read by `has_live_mobile_session(user_id)` — the FCM `ws_wake` trigger input (a wake fires only when the user has no live mobile queue-WS; web sessions never suppress it) |
+| `session_client_types` | `Dict[str, str]` | F-S6-1 side map: `session_id` → `"mobile"` \| `"web"`. Recorded from the queue-WS `auth_request` `client_type` field (exactly `"mobile"` marks mobile; any other EXPLICIT value ⇒ `"web"`; an ABSENT marker writes `"web"` only for an unmapped session and never downgrades an established `"mobile"` — **the mobile app's** audio-WS connect reuses the queue-WS session id without a marker; the web app's audio socket carries its own id and so gets its own entry). Read by `has_live_mobile_session(user_id)` — the FCM `ws_wake` trigger input (a wake fires only when the user has no live mobile queue-WS; web sessions never suppress it) |
 | `available_events` | `set` | Valid event names loaded from `lupin-app.ini` |
 | `main_loop` | `Optional[asyncio.AbstractEventLoop]` | Main event loop reference for thread-safe emission |
 | `single_session_per_user` | `bool` | Policy flag; when `True`, new connections close prior sessions for same user |
@@ -90,7 +107,7 @@ The `WebSocketManager` bridges COSA's synchronous queue system with FastAPI's as
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `connect` | `(websocket, session_id, user_id=None, subscribed_events=None, email=None) -> None` | Registers a WebSocket. Enforces single-session policy if configured. Validates and stores event subscriptions; defaults to `["*"]` |
+| `connect` | `(websocket, session_id, user_id=None, subscribed_events=None, email=None, roles=None, client_type=None) -> None` | Registers a WebSocket. Enforces single-session policy if configured. Validates and stores event subscriptions; defaults to `["*"]`. `roles` sets the admin flag; `client_type` is the F-S6-1 platform marker — see `session_client_types` above for the no-downgrade rule |
 | `disconnect` | `(session_id) -> None` | Removes connection and cleans all associated data: timestamps, subscriptions, user maps |
 | `register_session_user` | `(session_id, user_id) -> None` | Associates a session with a user **before** the WebSocket connects. Used when a TTS HTTP request arrives with auth ahead of the audio WebSocket upgrade |
 
@@ -104,6 +121,10 @@ The `WebSocketManager` bridges COSA's synchronous queue system with FastAPI's as
 | `emit_to_user(user_id, event, data)` | Yes | N/A | Sends to all sessions for a user, respecting subscriptions. Returns `True` if at least one send succeeded |
 | `emit_to_session(session_id, event, data)` | Yes | N/A | Sends to one specific session only. No-ops if session absent |
 | `emit_to_all(event, data)` | Yes | N/A | Alias for `async_emit` |
+| `emit_to_user_and_admins_sync(user_id, event, data)` | No | Yes | **The canonical dual-emit — reach for this first for any queue or job state change** (`job_created`, `job_removed`, `job_paused`, `job_resumed`, `job_state_transition`). Delivers to the owning user AND every admin session, deduplicated so an owner who is also an admin is not sent it twice. Using `emit_to_user_sync` alone for these is what stranded 14 stale job cards in an admin browser (Session `248e740e`) |
+| `emit_to_admins_sync(event, data, exclude_user_id=None)` | No | Yes | Admin-only half of the dual-emit. Note it takes **no** `user_id` — `exclude_user_id` suppresses the copy to one user (that is how the dual-emit avoids sending twice to an owner who is also an admin). Prefer `emit_to_user_and_admins_sync` over calling this and `emit_to_user_sync` separately — forgetting the second call is the `248e740e` defect |
+| `emit_to_session_sync(session_id, event, data)` | No | Yes | Thread-safe wrapper for `emit_to_session`; schedules onto the stored main loop |
+| `emit_to_user_or_listener_sync(user_id, job_id, event, data)` | No | Yes → returns `dict` | **The `or` is misleading — this is a DUAL emit, not a fallback.** Both emits fire independently: the user emit always runs, and `cc-listener-{job_id}` also receives it when that session is live. CC listeners authenticate as a shared service-account user, so `emit_to_user_sync` alone never reaches them. Returns `{"user_delivered": bool, "listener_delivered": bool, ...}` |
 
 **Message envelope** (all emit paths):
 ```json

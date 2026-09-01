@@ -1098,20 +1098,30 @@ class TestTaskListHeaderFlowRatio:
         assert logged_in_page.locator( "#task-list-count" ).text_content() == f"Live: {OPEN_COUNT}"
 
         ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
-        assert "Closed vs New Ratio (24hrs): 0.77" in ratio_text, ratio_text
+        # Updated 2026-09-01 for Rick's shortened header: the visible bar reads
+        # "Gate: 77%", and the long "Closed vs New Ratio (24hrs)" form moved to the
+        # hover text. PERCENT, not hundredths — 0.77 renders as 77%.
+        assert "Gate: 77%" in ratio_text, ratio_text
+        assert "0.77" not in ratio_text, "hundredths leaked into the percent header"
 
-    def test_a_window_with_no_closures_shows_an_em_dash_not_a_zero( self, logged_in_page ):
+    def test_a_window_with_no_closures_shows_infinity_not_a_zero( self, logged_in_page ):
         """
-        ratio:null renders as an em dash.
+        created > 0 with closed == 0 renders ∞, never a number.
 
-        A window in which NOTHING was closed is the worst case. Rendering it as
-        "0.00" would read as the best — which is why the endpoint sends null
-        rather than a sentinel number, and why this is asserted end-to-end and
-        not only in the unit tier.
+        A window in which NOTHING was closed is the worst case. Rendering it as "0%"
+        would read as the BEST, which is why the endpoint sends ratio:null rather than
+        a sentinel number.
+
+        ⚠️ THIS TEST USED TO ASSERT AN EM DASH AND ITS PREMISE WAS WRONG, not just its
+        string. The 2026-09-01 percent rewrite splits what this conflated: nothing
+        closed WITH rows created is ∞ — the honest rendering of a divide-by-zero — while
+        an idle window that created nothing either is an em dash. A big number like 999%
+        would be a lie carrying a number's authority; so would folding both cases into
+        one dash.
 
         Ensures:
-            - the clause shows an em dash
-            - the string "0.00" appears nowhere in the header
+            - the clause shows ∞ for the divide-by-zero case
+            - "0%" and "0.00" appear nowhere
         """
         _route_tasks( logged_in_page, {
             "mode"  : "ok",
@@ -1121,11 +1131,35 @@ class TestTaskListHeaderFlowRatio:
         _goto_notifications( logged_in_page )
 
         logged_in_page.wait_for_function(
-            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( 'Ratio' )"
+            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( 'Gate' )"
+        )
+        ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
+        assert "\u221e" in ratio_text, ratio_text
+        assert "0%" not in ratio_text and "0.00" not in ratio_text, \
+            "an unmeasurable ratio must never render as a number"
+
+    def test_an_idle_window_shows_an_em_dash_not_infinity( self, logged_in_page ):
+        """
+        created == 0 AND closed == 0 is IDLE, and idle is not failing.
+
+        The twin of the test above, and the reason ∞ alone is not enough: a quiet board
+        that filed nothing has no ratio to report, but it has not failed at anything.
+        Showing ∞ there would read as "catastrophically behind" on the calmest possible
+        day.
+        """
+        _route_tasks( logged_in_page, {
+            "mode"  : "ok",
+            "ratio" : { "created": 0, "closed": 0, "ratio": None,
+                        "verdict": "idle", "window_hours": 24 },
+        } )
+        _goto_notifications( logged_in_page )
+
+        logged_in_page.wait_for_function(
+            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( 'Gate' )"
         )
         ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
         assert "\u2014" in ratio_text, ratio_text
-        assert "0.00" not in ratio_text, "an unmeasurable ratio must never render as a number"
+        assert "\u221e" not in ratio_text, "an idle window is not a failing window"
 
 
 class TestTaskListHeaderFlowRatioLive:
@@ -1261,9 +1295,15 @@ class TestTaskListHeaderFlowRatioLive:
         # What must hold whatever the copy says: the window the endpoint just returned
         # appears in the header, and some number does. Both are properties of the payload
         # having travelled, and neither cares how it is spelled.
-        assert str( body[ "window_hours" ] ) in ratio_text, (
-            f"header clause {ratio_text!r} does not carry the window the live endpoint "
-            f"returned ({body['window_hours']}) — the payload did not reach the DOM"
+        # ⚠️ THE WINDOW LEFT THE VISIBLE BAR on 2026-09-01 — Rick's shortening moved the
+        # long "Closed vs New Ratio (Nhrs)" form into the hover text, so asserting it in
+        # textContent would now fail for a reason that has nothing to do with the wire.
+        # Read it where it actually lives; if the title is absent, that IS a finding.
+        long_form = logged_in_page.locator( "#task-list-flow-ratio" ).get_attribute( "title" ) or ""
+        assert str( body[ "window_hours" ] ) in ( ratio_text + long_form ), (
+            f"neither the header clause {ratio_text!r} nor its hover text {long_form!r} "
+            f"carries the window the live endpoint returned ({body['window_hours']}) — "
+            f"the payload did not reach the DOM"
         )
 
         assert ratio_text.strip() and re.search( r"\d", ratio_text ), (
