@@ -82,17 +82,45 @@ later reader "fixes" it to 120 to match the config, the backfill stops
 describing the corpus it was written for — which is the same defect one level
 down.
 
-WHAT THE BACKFILL CANNOT SEPARATE, stated rather than papered over: 655 rows sit
-at exactly 60 with no marker. Every one has a non-empty body, so each is
-consistent with having been trimmed into an EMPTY body (that arm relocates the
-overflow unmarked, because there is nothing for it to be distinguished from).
-None can be shown to be naturally 60. So the clause's false-positive rate is
-UNKNOWN rather than zero, and it is the harmless direction: a false positive
-costs a reader one look at a body with nothing missing.
+WHAT THE BACKFILL CANNOT SEPARATE, stated rather than papered over: 657 rows sit
+at exactly 60 with no marker. Each is consistent with having been trimmed into an
+EMPTY body — that arm relocates the overflow unmarked, because there is nothing
+for it to be distinguished from — so the clause over-reports in the harmless
+direction: a false positive costs a reader one look at a body with nothing missing.
 
-(This paragraph said "the second arm's" while there were two. There is one now,
-and the sentence describes it unchanged — the length arm was always the one this
-uncertainty belonged to.)
+🔴 THE FALSE-POSITIVE RATE IS NOT UNKNOWN. THIS PARAGRAPH SAID "None can be shown
+to be naturally 60" AND THAT WAS WRONG — 14 CAN BE, BY ARITHMETIC RATHER THAN
+TASTE. (The claim was mine, in the first cut of this file. It is corrected here
+rather than quietly deleted, because a docstring that has been wrong once is
+evidence about how carefully the next sentence should be read.)
+
+The predicate: `length( title ) = 60` AND the title ENDS in `)` AND its parens
+BALANCE. A cut at an arbitrary character landing on a paren that closes an opener
+is a coincidence; fourteen of them is not. Measured 2026-08-31 in lupin_db_dev:
+
+    Steward Fleet#6 + Task#7 live-render verify (final MVP gate)
+    REVIEW: arbiter staleness work_owed=false fix (bug 25ba173e)
+    [LUPIN] Plan 1 lane 2: land qa-card-tester impl (12 commits)
+    ... 14 in total
+
+⚠️ THREE LEGS, AND THE THIRD IS WHAT MAKES THE OTHER TWO MEAN ANYTHING:
+
+  1. NONE of the 14 carries the overflow marker — asked with the marker exclusion
+     REMOVED from the WHERE, so the zero is not manufactured by the filter that
+     found them: balanced rows 14, of those with marker 0.
+  2. POSITIVE CONTROL: the same marker test returns 965 rows store-wide. The zero
+     is a real absence, not a search over an empty population.
+  3. ⚠️ "NO MARKER" PROVES NOTHING ON ITS OWN, which is the trap this correction
+     had to walk through rather than around: the empty-body arm files the overflow
+     WITHOUT a marker. So the marker's absence is consistent with a trim. What
+     rules that arm out is the body itself — of the 14, ZERO have a null or blank
+     body, the SHORTEST is 259 characters, and 9 carry newlines. That arm sets
+     `body` to the title's own tail; a 259-character multi-line body is not one.
+
+⇒ So the over-report has a measured FLOOR of 14 rather than an unknown rate, and
+the predicate is reproducible by anyone who doubts it. It changes NO code: those
+14 were always in the harmless direction and still are. What changes is that the
+next reader is handed a number and a query instead of a shrug.
 
 ⚠️ WHAT THE MARKER ARM ACTUALLY MATCHED — TWO CLASSES, NEITHER OF THEM TRIMMED
 ---------------------------------------------------------------------------------
