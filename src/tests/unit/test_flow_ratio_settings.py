@@ -222,10 +222,19 @@ def test_override_path_lands_under_the_fleet_data_root( monkeypatch ):
 
     Every other test replaces `override_path`, so without this one the function that
     decides WHERE fleet state is written would never run in the suite at all.
+
+    ⚠️ THE SUBDIRECTORY IS THE POINT, and this test asserted it away until 2026-09-01.
+    It expected `<root>/flow-ratio-settings.json` — the shape the code then had, which
+    put the host branch one level ABOVE the mount the containers write into. The test
+    ran the real resolver, as its docstring promises, and confirmed the defect rather
+    than catching it. Expecting whatever the code returns is how a test that exercises
+    the right function still endorses the wrong answer.
     """
     monkeypatch.delenv( frs._SETTINGS_DIR_ENV, raising=False )
     monkeypatch.setattr( frs, "fleet_data_root", lambda: "/tmp/does-not-need-to-exist" )
-    assert frs.override_path() == f"/tmp/does-not-need-to-exist/{frs.OVERRIDE_FILENAME}"
+    assert frs.override_path() == (
+        f"/tmp/does-not-need-to-exist/{frs.OVERRIDE_SUBDIR}/{frs.OVERRIDE_FILENAME}"
+    )
 
 
 def test_the_env_var_wins_over_the_fleet_data_root( monkeypatch ):
@@ -265,7 +274,9 @@ def test_an_empty_env_var_falls_through_to_the_fleet_root( monkeypatch ):
     """
     monkeypatch.setenv( frs._SETTINGS_DIR_ENV, "" )
     monkeypatch.setattr( frs, "fleet_data_root", lambda: "/tmp/fell-through" )
-    assert frs.override_path() == f"/tmp/fell-through/{frs.OVERRIDE_FILENAME}"
+    assert frs.override_path() == (
+        f"/tmp/fell-through/{frs.OVERRIDE_SUBDIR}/{frs.OVERRIDE_FILENAME}"
+    )
 
 
 def test_an_unreadable_ini_falls_back_and_reports_it( isolated, monkeypatch, capsys ):

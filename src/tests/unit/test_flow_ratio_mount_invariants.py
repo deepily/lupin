@@ -219,3 +219,56 @@ def test_the_env_key_matches_the_one_the_module_actually_reads():
         f"flow_ratio_settings reads {frs._SETTINGS_DIR_ENV!r} but this file (and "
         f"docker-compose.yml) use {ENV_KEY!r}."
     )
+
+
+# ---------------------------------------------------------------------------
+# HALF FOUR: the host fallback must land in the mount, not one level above it.
+# ---------------------------------------------------------------------------
+
+def test_the_host_fallback_appends_the_same_subdirectory_the_mount_uses( compose ):
+    """
+    The two branches of `override_path()` must name ONE file. For three days they did not.
+
+    MEASURED 2026-09-01, in the running containers and on the host:
+
+        lupin-rest-dev    /var/lupin/flow-ratio/flow-ratio-settings.json
+        lupin-rest-test   /var/lupin/flow-ratio/flow-ratio-settings.json
+        host, BEFORE      <fleet_data_root>/flow-ratio-settings.json      <-- one level up
+        host, AFTER       <fleet_data_root>/flow-ratio/flow-ratio-settings.json
+
+    The mount hands the container `<fleet_data_root>/flow-ratio` as its whole world, so a
+    fallback that stopped at `<fleet_data_root>` named a file no server ever writes —
+    while the module's own docstring claimed "both name the SAME physical directory".
+    `dm.py`, the resolver this was copied from, appends its subdirectory
+    (`fleet_data_root()/dm-corpus`) and is correct; the copy dropped it.
+
+    WHY NOBODY NOTICED: the wrong branch is only reachable from a HOST process, and no
+    host-side caller reads this file yet. `<fleet_data_root>/flow-ratio-settings.json` did
+    not exist, so there was nothing to migrate and nothing to go wrong — until the first
+    host-side reader, which would have read an empty override and silently reported the
+    INI default as the live threshold.
+
+    This test derives the expected subdirectory from the COMPOSE MOUNT rather than
+    hardcoding it, so moving the mount moves the assertion with it. It compares the two
+    branches' RELATIVE tails, which is why the suite's tmp_path redirection of
+    `fleet_data_root()` does not disturb it — the earlier cut of this test compared
+    absolute paths and failed against a pytest tmp dir, measuring the harness.
+    """
+    service    = _service( compose, REST_SERVICES[ 0 ] )
+    value      = _env_value( service, ENV_KEY )
+    mount_leaf = _bind_targets( service )[ value ].rstrip( "/" ).rpartition( "/" )[ 2 ]
+
+    assert frs.OVERRIDE_SUBDIR == mount_leaf, (
+        f"the module appends {frs.OVERRIDE_SUBDIR!r} but the compose mount's host "
+        f"directory is named {mount_leaf!r}. A host-side `override_path()` would land "
+        f"outside the mount, naming a file no server reads or writes."
+    )
+
+    monkeypatched_root = str( frs.fleet_data_root() ).rstrip( "/" )
+    host_path          = frs.override_path()
+
+    assert host_path == os.path.join( monkeypatched_root, mount_leaf, frs.OVERRIDE_FILENAME ), (
+        f"the host fallback resolved to {host_path!r}, which is not "
+        f"<fleet_data_root>/{mount_leaf}/{frs.OVERRIDE_FILENAME}. The env-var branch and "
+        f"the fallback branch name two different files again."
+    )

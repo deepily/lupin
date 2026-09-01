@@ -59,7 +59,9 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
 #
 # `dm.py:365` already solved this and I did not copy it: resolve an env var FIRST — which
 # the containers set, pointing at a bind mount — and fall back to fleet_data_root() only
-# on the host, where it is correct. Both names then reach the SAME physical directory.
+# on the host, where it is correct. Both names then reach the SAME physical directory —
+# which is true only because the fallback appends OVERRIDE_SUBDIR. It did not until
+# 2026-09-01, and the two branches named two different files the whole time.
 #
 # ⚠️ THE MOUNT AND THE ENV VAR RESOLVE AT CONTAINER **CREATE**, so picking them up needs
 # `docker compose up -d --force-recreate`, never a plain restart — a restart reuses the
@@ -81,6 +83,10 @@ FALLBACK_ALLOW_BELOW  = 1.0
 INI_KEY_WINDOW_HOURS = "task flow ratio window hours"
 INI_KEY_ALLOW_BELOW  = "task flow ratio allow below"
 
+# The mount's leaf directory. The host fallback MUST append it: the container is
+# handed `<fleet_data_root>/flow-ratio` as its whole world, so a fallback that stops
+# at `<fleet_data_root>` names a different file than every server writes.
+OVERRIDE_SUBDIR   = "flow-ratio"
 OVERRIDE_FILENAME = "flow-ratio-settings.json"
 
 # Bounds. The window mirrors the endpoint's existing Query( ge=1, le=8760 ) so the API
@@ -107,13 +113,33 @@ def override_path():
           set (the container's mount point — see the note beside _SETTINGS_DIR_ENV)
         - otherwise <fleet_data_root()>/flow-ratio-settings.json, the host-side
           convention hold files and the rest of the fleet's runtime state already use
-        - both name the SAME physical directory; the bind mount is what makes that true
         - does NOT create the file or the directory (reads tolerate absence)
+
+    🔴 THE FALLBACK MUST APPEND `flow-ratio/`, AND FOR THREE DAYS IT DID NOT. Measured
+    2026-09-01 in the running containers and on the host:
+
+        lupin-rest-dev    /var/lupin/flow-ratio/flow-ratio-settings.json
+        lupin-rest-test   /var/lupin/flow-ratio/flow-ratio-settings.json
+        host (before)     <fleet_data_root>/flow-ratio-settings.json        <-- one level up
+        host (after)      <fleet_data_root>/flow-ratio/flow-ratio-settings.json
+
+    The mount hands the container `<fleet_data_root>/flow-ratio` as its whole world, so a
+    fallback stopping at `<fleet_data_root>` named a different file than every server
+    writes — and this block claimed the opposite, that "both name the SAME physical
+    directory". `dm.py`, which this resolver was copied from, gets it right: its fallback
+    is `fleet_data_root()/dm-corpus`, subdirectory included. The subdirectory was dropped
+    in the copy. Adding it back is the whole fix, and the claim is now true.
+
+    Nothing had to be migrated: `<fleet_data_root>/flow-ratio-settings.json` did not
+    exist, because no host-side caller has ever written one. That is also why this sat
+    unnoticed — the wrong path was only ever going to be read by a host process, and
+    there is not one yet.
+
     """
     override_dir = os.environ.get( _SETTINGS_DIR_ENV )
     if override_dir:
         return os.path.join( override_dir, OVERRIDE_FILENAME )
-    return os.path.join( fleet_data_root(), OVERRIDE_FILENAME )
+    return os.path.join( fleet_data_root(), OVERRIDE_SUBDIR, OVERRIDE_FILENAME )
 
 
 def _read_overrides():
