@@ -1065,13 +1065,19 @@ class TestTaskListHeaderFlowRatio:
     THE ONES TO EDIT WHEN THE COPY CHANGES. Deliberate: somebody must own the
     wording, and a mocked test with a fixed payload is the cheap place to own it.
 
-    ⇒ SO IF YOU ARE SHORTENING THE LABEL OR SWITCHING THE VALUE TO PERCENT (Rick,
-    2026-09-01), THIS CLASS IS WHAT GOES RED, AND IT IS A ONE-LINE EDIT EACH:
-        · "Closed vs New Ratio (24hrs): 0.77"  — the label AND the 2dp format
-        · the em-dash assertion                — survives unless the null rendering moves
-    The LIVE class below asserts no copy at all, so it will NOT block you. Change the
-    strings here to whatever you ship; do not weaken them to a substring match, or
-    nothing anywhere pins the wording and a blank label passes every test we have.
+    ⇒ THAT SHORTENING HAS LANDED (Rick, 2026-09-01, commit 3919a1ea). The bar reads
+    "Gate: 77%" and the long "Closed vs New Ratio (24hrs)" form moved to the hover
+    title. The assertions below were updated with it. Change the strings here to
+    whatever you ship; do not weaken them to a substring match, or nothing anywhere
+    pins the wording and a blank label passes every test we have.
+
+    ⚠️ AN ASSERTION IS NOT THE ONLY THING THAT PINS THE COPY. Each test WAITS on the
+    clause before reading it, and that wait names a word too. When the label changed,
+    the assertions here were updated and BOTH waits were left polling for "Ratio" — a
+    word the bar no longer contains. They would not have failed on the assertion; they
+    would have hung until the wait timed out, reporting a timeout rather than the copy
+    change that caused it. Fixed 2026-09-01. If you edit the copy again, grep this file
+    for the OLD word rather than only re-reading the asserts.
     """
 
     def test_header_shows_the_ratio_with_its_window( self, logged_in_page ):
@@ -1083,16 +1089,20 @@ class TestTaskListHeaderFlowRatio:
 
         Ensures:
             - #task-list-count carries the LABELLED live count, not a bare integer
-            - #task-list-flow-ratio carries the ratio to 2dp with its window
-            - the window is present, because the same board reads 0.77 over 24h
-              and 1.10 over 168h — a ratio without its window cannot be checked
+            - #task-list-flow-ratio carries the ratio as a PERCENT — "Gate: 77%",
+              not "0.77" — because the bar and the threshold slider must read in
+              one unit rather than asking the operator to convert in their head
+            - the window is still checkable, but from the HOVER title now: the same
+              board reads 77% over 24h and 110% over 168h, so a ratio without its
+              window cannot be checked, and shortening the bar moved it rather
+              than dropping it
         """
         _route_tasks( logged_in_page, { "mode": "ok" } )
         _goto_notifications( logged_in_page )
 
         logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
         logged_in_page.wait_for_function(
-            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( 'Ratio' )"
+            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( 'Gate' )"
         )
 
         assert logged_in_page.locator( "#task-list-count" ).text_content() == f"Live: {OPEN_COUNT}"
@@ -1280,7 +1290,7 @@ class TestTaskListHeaderFlowRatioLive:
 
         logged_in_page.wait_for_function(
             "() => { const e = document.getElementById( 'task-list-flow-ratio' );"
-            "        return e && e.textContent.includes( 'Ratio' ); }"
+            "        return e && e.textContent.includes( 'Gate' ); }"
         )
         ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
 
