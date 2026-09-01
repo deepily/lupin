@@ -173,6 +173,12 @@ services:
       # -xdf` would take it and `git status` keeps offering it. Same host dir
       # for both servers; rows carry server_port + boot_id to stay separable.
       - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/dm-corpus:/var/lupin/dm-corpus
+      # Flow-ratio operator settings — the window + threshold the board header shows
+      # and the CREATE gate refuses on. OUTSIDE the repo on the host for the same
+      # reason dm-corpus is: `git clean -xdf` lists gitignored files as "would
+      # remove". Both rest services mount the SAME host dir, which is what lets an
+      # operator's slider move on :7999 and be honoured by the gate on :8000.
+      - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/flow-ratio:/var/lupin/flow-ratio
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
       # Without these, 19 unit tests fail in-container with FileNotFoundError
@@ -255,6 +261,14 @@ services:
       # ⚠️ Env + mounts resolve at container CREATE: picking this up needs
       # `docker compose up -d --force-recreate`, never a plain restart.
       LUPIN_DM_CORPUS_DIR: /var/lupin/dm-corpus
+      # Flow-ratio settings dir — points at the bind-mount above, the host's
+      # <projects-data>/lupin/flow-ratio. WITHOUT THIS the module falls back to
+      # fleet_data_root(), which inside the container resolves to /projects-data/lupin
+      # — a path that does not exist and is not writable, so every settings PATCH
+      # answered 500 (measured 2026-09-01, PermissionError [Errno 13]).
+      # ⚠️ Env + mounts resolve at container CREATE: picking this up needs
+      # `docker compose up -d --force-recreate`, never a plain restart.
+      LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
       LUPIN_SERVER_PORT: "7999"
       DB_HOST: lupin-postgres
       # database.py no longer carries a baked-in password default (row baac2474).
@@ -361,6 +375,12 @@ services:
       # -xdf` would take it and `git status` keeps offering it. Same host dir
       # for both servers; rows carry server_port + boot_id to stay separable.
       - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/dm-corpus:/var/lupin/dm-corpus
+      # Flow-ratio operator settings — the window + threshold the board header shows
+      # and the CREATE gate refuses on. OUTSIDE the repo on the host for the same
+      # reason dm-corpus is: `git clean -xdf` lists gitignored files as "would
+      # remove". Both rest services mount the SAME host dir, which is what lets an
+      # operator's slider move on :7999 and be honoured by the gate on :8000.
+      - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/flow-ratio:/var/lupin/flow-ratio
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
       # Without these, 19 unit tests fail in-container with FileNotFoundError
@@ -441,6 +461,14 @@ services:
       # The two servers share ONE corpus; `server_port` + `boot_id` on every row
       # are what keep their traffic tellable apart.
       LUPIN_DM_CORPUS_DIR: /var/lupin/dm-corpus
+      # Flow-ratio settings dir — points at the bind-mount above, the host's
+      # <projects-data>/lupin/flow-ratio. WITHOUT THIS the module falls back to
+      # fleet_data_root(), which inside the container resolves to /projects-data/lupin
+      # — a path that does not exist and is not writable, so every settings PATCH
+      # answered 500 (measured 2026-09-01, PermissionError [Errno 13]).
+      # ⚠️ Env + mounts resolve at container CREATE: picking this up needs
+      # `docker compose up -d --force-recreate`, never a plain restart.
+      LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
       LUPIN_SERVER_PORT: "8000"
       DB_HOST: lupin-postgres
       # database.py no longer carries a baked-in password default (row baac2474).

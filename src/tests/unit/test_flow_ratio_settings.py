@@ -218,13 +218,54 @@ def test_the_write_is_atomic_leaving_no_temp_file_behind( isolated ):
 
 def test_override_path_lands_under_the_fleet_data_root( monkeypatch ):
     """
-    The real (un-monkeypatched) path resolver.
+    The real (un-monkeypatched) path resolver, HOST branch.
 
     Every other test replaces `override_path`, so without this one the function that
     decides WHERE fleet state is written would never run in the suite at all.
     """
+    monkeypatch.delenv( frs._SETTINGS_DIR_ENV, raising=False )
     monkeypatch.setattr( frs, "fleet_data_root", lambda: "/tmp/does-not-need-to-exist" )
     assert frs.override_path() == f"/tmp/does-not-need-to-exist/{frs.OVERRIDE_FILENAME}"
+
+
+def test_the_env_var_wins_over_the_fleet_data_root( monkeypatch ):
+    """
+    CONTAINER branch: $LUPIN_FLOW_RATIO_DIR is resolved FIRST.
+
+    This is not a preference, it is the only thing that makes the feature work in
+    Docker. Measured 2026-09-01 inside lupin-rest-dev, `fleet_data_root()` resolves to
+    `/projects-data/lupin` — a path that does not exist and is not writable — so every
+    settings PATCH answered 500 with PermissionError. The env var, pointed at a bind
+    mount, is what `dm.py` already does for the DM corpus.
+
+    Ensures:
+        - the env var is used when set
+        - the fleet-root resolver is NOT consulted at all in that case, which is the
+          point: on the container it returns an unusable path, so merely preferring the
+          env var while still calling the resolver would leave the failure one refactor
+          away
+    """
+    def _must_not_be_called():
+        raise AssertionError( "fleet_data_root() was consulted despite the env var being set" )
+
+    monkeypatch.setenv( frs._SETTINGS_DIR_ENV, "/var/lupin/flow-ratio" )
+    monkeypatch.setattr( frs, "fleet_data_root", _must_not_be_called )
+
+    assert frs.override_path() == f"/var/lupin/flow-ratio/{frs.OVERRIDE_FILENAME}"
+
+
+def test_an_empty_env_var_falls_through_to_the_fleet_root( monkeypatch ):
+    """
+    An empty string is not a path.
+
+    Docker writes `KEY:` with no value as an empty string rather than leaving it unset,
+    so treating "" as a real directory would put the settings file at `/flow-ratio-...`
+    at the filesystem root. Falsy-check, not a presence-check — same reason `dm.py`
+    writes `if override:` and not `if override is not None:`.
+    """
+    monkeypatch.setenv( frs._SETTINGS_DIR_ENV, "" )
+    monkeypatch.setattr( frs, "fleet_data_root", lambda: "/tmp/fell-through" )
+    assert frs.override_path() == f"/tmp/fell-through/{frs.OVERRIDE_FILENAME}"
 
 
 def test_an_unreadable_ini_falls_back_and_reports_it( isolated, monkeypatch, capsys ):

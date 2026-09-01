@@ -51,6 +51,27 @@ import os
 from cosa.config.configuration_manager import ConfigurationManager
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
 
+# 🔴 THE CONTAINER CANNOT USE fleet_data_root() AND THIS ENV VAR IS WHY.
+# Measured 2026-09-01 inside lupin-rest-dev: the resolver returns `/projects-data/lupin`
+# (its fallback is <repo-parent-parent>/projects-data/<repo>, and the repo is /var/lupin,
+# so the parent-of-parent is `/`), that directory does not exist, and a write raises
+# PermissionError [Errno 13] '/projects-data'. Every PATCH from the UI answered 500.
+#
+# `dm.py:365` already solved this and I did not copy it: resolve an env var FIRST — which
+# the containers set, pointing at a bind mount — and fall back to fleet_data_root() only
+# on the host, where it is correct. Both names then reach the SAME physical directory.
+#
+# ⚠️ THE MOUNT AND THE ENV VAR RESOLVE AT CONTAINER **CREATE**, so picking them up needs
+# `docker compose up -d --force-recreate`, never a plain restart — a restart reuses the
+# old values and the change silently does not land.
+#
+# ⚠️ The container path sits under /var/lupin (the repo mount) while the HOST path is
+# outside the checkout, which is what actually matters: the reason runtime state left the
+# tree is that `git clean -xdf` lists gitignored files as "would remove". The host side is
+# never inside a checkout. dm-corpus is mounted exactly this way; this is not a regression
+# of that rule, and it has been questioned once already — hence this note.
+_SETTINGS_DIR_ENV = "LUPIN_FLOW_RATIO_DIR"
+
 
 # Today's shipped behaviour, used only when the INI key is absent or unreadable. A
 # MIGRATION of the old hardcoded literals, not a new opinion — see the module docstring.
@@ -82,9 +103,16 @@ def override_path():
     The persisted override file.
 
     Ensures:
-        - returns <fleet_data_root()>/flow-ratio-settings.json
+        - returns $LUPIN_FLOW_RATIO_DIR/flow-ratio-settings.json when the variable is
+          set (the container's mount point — see the note beside _SETTINGS_DIR_ENV)
+        - otherwise <fleet_data_root()>/flow-ratio-settings.json, the host-side
+          convention hold files and the rest of the fleet's runtime state already use
+        - both name the SAME physical directory; the bind mount is what makes that true
         - does NOT create the file or the directory (reads tolerate absence)
     """
+    override_dir = os.environ.get( _SETTINGS_DIR_ENV )
+    if override_dir:
+        return os.path.join( override_dir, OVERRIDE_FILENAME )
     return os.path.join( fleet_data_root(), OVERRIDE_FILENAME )
 
 
