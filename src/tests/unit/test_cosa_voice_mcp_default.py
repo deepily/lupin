@@ -962,3 +962,79 @@ class TestAskYesNoValidationFailure:
 
         assert result == "[default used] no"
         assert result != "no"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestTheDocstringDoesNotAdvertiseAfkSafety
+#
+# `workflow/decision-walkthrough.md:96` ends its correction with an instruction:
+# "do not let it creep back in BECAUSE THE TOOL DOCSTRING STILL ADVERTISES IT."
+#
+# That instruction had already failed when it was written. The docstring carried
+# `# With timeout default — useful for unattended / AFK contexts` for months,
+# three copies of the workflow doc went stale downstream of it, and it took a
+# peer reading the file to notice. A rule that depends on remembering is not a
+# control; this is.
+#
+# The claim is FALSE for this verb specifically: a caller-side `default` covers
+# the TIMEOUT path, while the OFFLINE path is decided server-side against a
+# `response_default` that ask_multiple_choice never sends. ask_yes_no plumbs it;
+# this one does not. So an absent user gets a 503 from the FIRST ask whether or
+# not a default was passed — measured 2026-07-26.
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestTheDocstringDoesNotAdvertiseAfkSafety:
+
+    # ⚠️ READ `.description`, NOT `__doc__`. These names are FastMCP `FunctionTool`
+    # wrappers, so `ask_multiple_choice.__doc__` is None and a guard reading it
+    # asserts on an empty string — vacuously green the moment the message changes.
+    # My first cut did exactly that and its own negative control caught it.
+    # `.description` is also the RIGHT surface on the merits: it is the text FastMCP
+    # ships to every client, so it is literally what is advertised to each seat.
+
+    @staticmethod
+    def _advertised( tool ):
+        return tool.description or ""
+
+    def test_ask_multiple_choice_never_calls_itself_unattended_or_afk_safe( self ):
+        """
+        The guard the workflow doc asked for, made mechanical.
+
+        Scoped to THIS verb's own text rather than the whole module, because the
+        module legitimately discusses AFK elsewhere — a module-wide grep would fire
+        on correct text, and a guard nobody can leave green is a guard somebody
+        deletes.
+        """
+        doc = self._advertised( ask_multiple_choice )
+        assert doc, "ask_multiple_choice advertises no description — this guard reads it"
+
+        offenders = [ term for term in ( "AFK", "unattended" ) if term.lower() in doc.lower() ]
+        assert offenders == [ ], (
+            f"ask_multiple_choice advertises {offenders} again. A caller-side `default` "
+            f"covers a TIMEOUT, never an absent user: the offline path is decided "
+            f"server-side against a `response_default` this verb does not send, so an "
+            f"offline user 503s on the FIRST ask regardless. If cosa-voice row eeba4858 "
+            f"has landed and MULTIPLE_CHOICE now plumbs response_default the way YES_NO "
+            f"does, restore the claim DELIBERATELY and delete this test in the same "
+            f"commit — do not reword past it."
+        )
+
+    def test_it_still_says_what_a_default_DOES_cover( self ):
+        """
+        The negative control, and the half that stops the guard above being satisfied
+        by DELETION. Stripping the paragraph would make the first test pass while
+        leaving a caller with no idea what `default` is for.
+        """
+        doc = self._advertised( ask_multiple_choice ).lower()
+        assert "timeout" in doc, "it no longer says a default covers a timeout"
+        assert "503"     in doc, "it no longer names what an absent user actually gets"
+
+    def test_ask_yes_no_is_NOT_held_to_this( self ):
+        """
+        THE SCOPE CONTROL, asserted rather than assumed. The defect is specific to
+        MULTIPLE_CHOICE not plumbing `response_default`; ask_yes_no DOES plumb it, so
+        the same words would not be a false claim there. A guard that cannot say which
+        verb it is about would spread to one where it is wrong.
+        """
+        assert ask_yes_no is not ask_multiple_choice
+        assert self._advertised( ask_yes_no ) != self._advertised( ask_multiple_choice )

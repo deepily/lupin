@@ -2024,7 +2024,14 @@ def ask_multiple_choice(
              "options": [{"label": "Auth"}, {"label": "Caching"}]}
         ])
 
-        # With timeout default — useful for unattended / AFK contexts
+        # With timeout default. ⚠️ IT COVERS A TIMEOUT, NOT AN ABSENT USER.
+        # An offline user gets a 503 from the FIRST ask whether or not you passed
+        # a default, because the offline path is decided server-side against a
+        # `response_default` this verb does not send — ask_yes_no plumbs it, this
+        # one does not. So do NOT reach for this pattern to leave a walkthrough
+        # running with nobody at the desk; it will stop on the first question.
+        # A unit test guards this wording — it forbids the retired term outright,
+        # so state what IS true here rather than negating the old claim.
         result = ask_multiple_choice(
             questions=[{
                 "question":    "Which database should we use?",
