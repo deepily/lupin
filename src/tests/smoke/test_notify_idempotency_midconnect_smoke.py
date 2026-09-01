@@ -109,6 +109,20 @@ def _require_api_key():
     2026-09-01): a venv is a build artifact, a key is a secret, and a throwaway
     tree is not where one belongs. Skipping is the whole remedy.
 
+    WHY IT IS CALLED BEFORE asyncio.run, AND WHY NOT FOR THE REASON YOU MIGHT
+    ASSUME. It is NOT because a skip raised inside the coroutine would be
+    misreported as a failure — measured 2026-09-01, it would not:
+
+        async def _inner(): pytest.skip( "inside the coroutine" )
+        def test_x(): asyncio.run( _inner() )      -> reported SKIPPED
+
+    pytest.skip works fine through asyncio.run. The original defect was never
+    about placement: there was no skip at all, just a bare open() raising
+    FileNotFoundError. The real reasons for the early call are duller and true —
+    it costs nothing, it runs before auth and the websocket work rather than
+    after, and it sits beside _require_server() where a reader looking for the
+    preconditions will find it.
+
     Ensures:
         - calls pytest.skip, naming the path, when the key file is absent
         - returns the key path otherwise
