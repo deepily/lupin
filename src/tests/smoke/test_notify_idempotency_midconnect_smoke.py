@@ -72,6 +72,26 @@ REQ_TIMEOUT = 15                                                  # server can b
 API_KEY_REL = "src/conf/keys/notification-api-claude-code-dev"
 
 
+def _require_server():
+    """
+    Skip when :7999 is unreachable — no instrument, no finding.
+
+    Deliberately narrow: it skips on a CONNECTION-level failure only, never on a
+    bad status or a slow response. A server that answers wrongly is a finding and
+    must still fail; a server that is not there cannot answer at all, and a raw
+    ConnectionError from deep inside the probe reads like a defect in the code
+    under test rather than an absent venue.
+
+    Ensures:
+        - calls pytest.skip when the health endpoint cannot be reached
+        - returns None and lets the test proceed otherwise
+    """
+    try:
+        requests.get( f"{BASE_URL}/health", timeout=REQ_TIMEOUT )
+    except requests.exceptions.ConnectionError as e:
+        pytest.skip( f"venue not available: {BASE_URL} unreachable ({e.__class__.__name__})" )
+
+
 def _credentials():
     """
     Read the shared test credentials.
@@ -219,6 +239,7 @@ def test_a_cached_offline_verdict_is_not_replayed_to_a_connected_user():
         - FAILS when the same key answers `user_not_available` while a fresh key
           to the same live socket answers `queued`
     """
+    _require_server()
     email, password = _credentials()
     token           = _access_token( email, password )
     obs             = asyncio.run( _run_probe( email, token ) )
