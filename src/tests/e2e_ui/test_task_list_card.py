@@ -162,8 +162,29 @@ def _route_tasks( page, state ):
         - mode "ok"          -> 200 { tasks: SEEDED_TASKS, count }
         - mode "unreachable" -> 500 (drives the card's unreachable sentinel)
         - flipping state["mode"] between fetches changes the served response
+        - GET /api/tasks/flow-ratio is answered SEPARATELY with its own shape
+
+    ⚠️ THE GLOB "**/api/tasks*" ALSO MATCHES /api/tasks/flow-ratio. Before
+    2026-09-01 this handler served the row-list body to that request too, so the
+    header's ratio clause silently rendered EMPTY in every e2e run — the fixture
+    could not tell a working ratio from a broken one. Answer the two separately
+    or the assertion below is measuring the fixture.
     """
     def handler( route ):
+        if "/api/tasks/flow-ratio" in route.request.url:
+            if state[ "mode" ] == "unreachable":
+                route.fulfill( status=500, content_type="application/json",
+                               body=json.dumps( { "detail": "store down" } ) )
+                return
+            route.fulfill(
+                status       = 200,
+                content_type = "application/json",
+                body         = json.dumps( state.get( "ratio", {
+                    "created": 10, "closed": 13, "ratio": 0.77,
+                    "verdict": "allow", "window_hours": 24
+                } ) )
+            )
+            return
         if state[ "mode" ] == "unreachable":
             route.fulfill( status=500, content_type="application/json",
                            body=json.dumps( { "detail": "store down" } ) )
@@ -380,7 +401,7 @@ class TestTaskListCardAccordion:
         assert header.get_attribute( "aria-expanded" ) == "false"
         assert "▸" in header.locator( ".task-group-chevron" ).text_content()
         assert kri.locator( ".task-row" ).first.is_visible(), "other owners unaffected"
-        assert logged_in_page.locator( "#task-list-count" ).text_content() == str( OPEN_COUNT )
+        assert logged_in_page.locator( "#task-list-count" ).text_content() == f"Live: {OPEN_COUNT}"
 
         stored = logged_in_page.evaluate( f'JSON.parse( localStorage.getItem( "{ACCORDION_KEY}" ) || "[]" )' )
         assert stored == [ "tiberius" ], f"collapsed owner not persisted; got {stored!r}"
@@ -515,7 +536,7 @@ class TestTaskListCardRows:
         assert "krishna · 1" in joined
         assert "(Unassigned)" in joined
 
-        assert logged_in_page.locator( "#task-list-count" ).text_content() == str( OPEN_COUNT )
+        assert logged_in_page.locator( "#task-list-count" ).text_content() == f"Live: {OPEN_COUNT}"
 
         table_text = logged_in_page.locator( "#task-list-container" ).text_content()
         for task in OPEN_TASKS:
@@ -1018,3 +1039,66 @@ class TestTaskListCardLiveSmoke:
 
         chase_cell = seeded.locator( ".task-col-chase" ).text_content().strip()
         assert chase_cell not in ( "", "—" ), f"expected a formatted chase time, got {chase_cell!r}"
+
+
+class TestTaskListHeaderFlowRatio:
+    """
+    The closed-vs-new ratio in the task-list header (2026-09-01).
+
+    Rick's durable replacement for the ticket moratorium he declared by voice:
+    "It's way too easy for you guys to add tickets to the list and way too hard to
+    get them removed." The gate refuses a create; THIS is the half he can see.
+    """
+
+    def test_header_shows_the_ratio_with_its_window( self, logged_in_page ):
+        """
+        The header renders the ratio AND the window that produced it.
+
+        Requires:
+            - Authenticated session, /api/tasks and /api/tasks/flow-ratio seeded
+
+        Ensures:
+            - #task-list-count carries the LABELLED live count, not a bare integer
+            - #task-list-flow-ratio carries the ratio to 2dp with its window
+            - the window is present, because the same board reads 0.77 over 24h
+              and 1.10 over 168h — a ratio without its window cannot be checked
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+        logged_in_page.wait_for_function(
+            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( 'Ratio' )"
+        )
+
+        assert logged_in_page.locator( "#task-list-count" ).text_content() == f"Live: {OPEN_COUNT}"
+
+        ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
+        assert "Closed vs New Ratio (24hrs): 0.77" in ratio_text, ratio_text
+
+    def test_a_window_with_no_closures_shows_an_em_dash_not_a_zero( self, logged_in_page ):
+        """
+        ratio:null renders as an em dash.
+
+        A window in which NOTHING was closed is the worst case. Rendering it as
+        "0.00" would read as the best — which is why the endpoint sends null
+        rather than a sentinel number, and why this is asserted end-to-end and
+        not only in the unit tier.
+
+        Ensures:
+            - the clause shows an em dash
+            - the string "0.00" appears nowhere in the header
+        """
+        _route_tasks( logged_in_page, {
+            "mode"  : "ok",
+            "ratio" : { "created": 4, "closed": 0, "ratio": None,
+                        "verdict": "refuse", "window_hours": 24 },
+        } )
+        _goto_notifications( logged_in_page )
+
+        logged_in_page.wait_for_function(
+            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( 'Ratio' )"
+        )
+        ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
+        assert "\u2014" in ratio_text, ratio_text
+        assert "0.00" not in ratio_text, "an unmeasurable ratio must never render as a number"

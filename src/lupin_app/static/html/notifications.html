@@ -696,7 +696,10 @@
              fleet-status section structure. Pure observability — NO mutating controls. -->
         <div class="collapsible-section" id="section-task-list">
             <div class="section-header" onclick="toggleSection('task-list-section')">
-                <h3>📋 Task List: <span id="task-list-count">0</span>
+                <h3>📋 Task List · <span id="task-list-count">0</span><span
+                          id="task-list-flow-ratio" class="task-list-flow-ratio"
+                          data-testid="task-list-flow-ratio"
+                          title="Rows created vs closed over the window. Below 1.0 means the board is draining."></span>
                     <span id="task-list-updated" class="task-list-updated"
                           data-testid="task-list-updated"
                           title="Last refreshed (HH:MM:SS, browser timezone)"></span></h3>
