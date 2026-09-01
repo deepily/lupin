@@ -430,6 +430,29 @@ tbody.task-group.collapsed .task-row {
     color: #495057;
 }
 
+/* THE `display: flex` ABOVE BEATS THE UA STYLESHEET'S `[hidden] { display: none }`,
+   so without this companion the `hidden` attribute on #flow-ratio-controls is INERT.
+   Measured in Chromium, not argued from the cascade: setting `root.hidden = true`
+   left `getComputedStyle( root ).display === "flex"` and the cluster still occupying
+   space. That is not cosmetic — it is the whole of what `_paintFlowRatioSettings`
+   relies on to keep an unreadable settings endpoint from showing an operator sliders
+   parked at their HTML defaults, i.e. a threshold the create gate is not using.
+   Same trap, same fix as `.persona-popover-borrowed[hidden]` in persona-modal.css. */
+.flow-ratio-controls[hidden] {
+    display: none;
+}
+
+/* KEEP EACH LABEL WITH ITS OWN SLIDER. The six controls were direct flex children,
+   so `flex-wrap` was free to break between a label and the input it names: measured
+   at a 700px viewport, "Window" sat on row 1 while its slider wrapped to row 2. The
+   pair is the unit that must survive a wrap, not the individual control. */
+.flow-ratio-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
 .flow-ratio-controls label {
     display: inline-flex;
     align-items: baseline;

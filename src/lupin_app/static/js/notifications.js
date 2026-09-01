@@ -9774,13 +9774,16 @@ class NotificationsUI {
         try {
             const response = await this.authedFetch( "/api/tasks/flow-ratio/settings" );
             if ( !response.ok ) {
-                this.log( `Flow ratio settings unavailable (HTTP ${response.status})` );
+                // error(), NOT log(). log() is gated on this.debug, so with debug off a
+                // failure here was silent — and a control that quietly declines to paint
+                // is indistinguishable from a control nobody ever built.
+                this.error( `Flow ratio settings unavailable (HTTP ${response.status})` );
                 return null;
             }
             const body = await response.json();
             return ( body && typeof body === "object" ) ? body : null;
         } catch ( error ) {
-            this.log( `Flow ratio settings fetch failed: ${error}` );
+            this.error( `Flow ratio settings fetch failed: ${error}` );
             return null;
         }
     }
@@ -9813,14 +9816,16 @@ class NotificationsUI {
          *       failure the ratio clause itself had
          *     - The status line names the SOURCE, because a number alone cannot say
          *       whether a saved override is masking the configured default
+         *     - RETURNS whether it painted. The caller retries on false, so this is a
+         *       report of what happened, not a courtesy return value
          */
         const els = this._flowRatioControlEls();
-        if ( !els ) return;
+        if ( !els ) return false;
 
         if ( !settings || !Number.isFinite( settings.allow_below ) ||
              !Number.isFinite( settings.window_hours ) ) {
             els.root.hidden = true;
-            return;
+            return false;
         }
 
         els.root.hidden           = false;
@@ -9832,6 +9837,7 @@ class NotificationsUI {
         const overridden = settings.window_source === "override" ||
                            settings.threshold_source === "override";
         els.status.textContent = overridden ? "saved override" : "from config";
+        return true;
     }
 
     async saveFlowRatioSettings( patch ) {
@@ -9911,21 +9917,60 @@ class NotificationsUI {
 
     initFlowRatioControls() {
         /**
-         * Bind the sliders once, then paint them from the server.
+         * Bind the sliders ONCE, then paint them from the server — retrying the paint
+         * on later ticks until one succeeds.
          *
          * ⚠️ WRITES ON `change`, NOT `input`. `input` fires on every pixel of a drag,
          * which would PATCH dozens of times and move the fleet's create gate through
          * every intermediate value on the way. `input` only updates the label.
          *
+         * THE BIND AND THE PAINT HAVE DIFFERENT LIFETIMES AND USED TO SHARE ONE GUARD.
+         * The method rides the task-list tick, so it is called repeatedly — but the
+         * bound-flag was set before the single paint was even issued, so every later
+         * call returned at the guard and the one paint was the only one there would
+         * ever be. A settings fetch that failed once — a bounce mid-load, an expired
+         * token — left the cluster unpainted with nothing retrying short of a page
+         * reload. Rebinding is not the fix: the `change` listeners PATCH, so binding
+         * twice would double every write the operator makes.
+         *
+         * Repainting STOPS at the first success on purpose. A paint that keeps firing
+         * every 60s would eventually land mid-drag and pull a slider back to the
+         * server's value under the operator's finger; a paint that already worked has
+         * nothing left to retry.
+         *
          * Ensures:
-         *     - Idempotent — a second call rebinds nothing (guarded by a flag)
+         *     - Listeners bind exactly once, however many times this is called
+         *     - A FAILED paint is retried on the next tick
+         *     - A SUCCEEDED paint is never repainted from here
+         *     - At most one settings fetch is in flight at a time
          *     - No-op when the controls are absent (the multiplexer page has no
          *       cluster; this file serves both)
          */
-        if ( this._flowRatioControlsBound ) return;
         const els = this._flowRatioControlEls();
         if ( !els ) return;
-        this._flowRatioControlsBound = true;
+
+        if ( !this._flowRatioControlsBound ) {
+            this._flowRatioControlsBound = true;
+            this._bindFlowRatioControls( els );
+        }
+
+        if ( this._flowRatioSettingsPainted || this._flowRatioPaintInFlight ) return;
+        this._flowRatioPaintInFlight = true;
+        this.fetchFlowRatioSettings()
+            .then( settings => {
+                this._flowRatioSettingsPainted = this._paintFlowRatioSettings( settings );
+            } )
+            .finally( () => { this._flowRatioPaintInFlight = false; } );
+    }
+
+    _bindFlowRatioControls( els ) {
+        /**
+         * Attach the five listeners. Split out of initFlowRatioControls so the
+         * once-only bind and the retrying paint cannot be re-entangled by accident.
+         *
+         * Requires: els is a resolved control set from _flowRatioControlEls()
+         * Ensures:  the caller has already guaranteed this runs at most once
+         */
 
         els.threshold.addEventListener( "input", () => {
             els.thresholdValue.textContent = Number( els.threshold.value ).toFixed( 2 );
@@ -9942,8 +9987,6 @@ class NotificationsUI {
         } );
 
         els.reset.addEventListener( "click", () => this.resetFlowRatioSettings() );
-
-        this.fetchFlowRatioSettings().then( s => this._paintFlowRatioSettings( s ) );
     }
 
     _taskListCountText( openTasks, now ) {

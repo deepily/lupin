@@ -719,25 +719,34 @@
                      there as a bare number. -->
                 <div class="flow-ratio-controls" id="flow-ratio-controls"
                      data-testid="flow-ratio-controls" hidden>
-                    <label for="flow-ratio-threshold">
-                        Gate opens below
-                        <output id="flow-ratio-threshold-value"
-                                data-testid="flow-ratio-threshold-value">—</output>
-                    </label>
-                    <input type="range" id="flow-ratio-threshold"
-                           data-testid="flow-ratio-threshold"
-                           min="0.1" max="3" step="0.05"
-                           title="Ratio the create gate opens below. Higher = more permissive." />
+                    <!-- Each label is wrapped WITH its slider so a wrap cannot separate
+                         them. As bare flex children they could, and did: at a 700px
+                         viewport the "Window" label stayed on row 1 while its slider
+                         dropped to row 2, leaving two labels adjacent and neither one
+                         next to the control it names. -->
+                    <span class="flow-ratio-field">
+                        <label for="flow-ratio-threshold">
+                            Gate opens below
+                            <output id="flow-ratio-threshold-value"
+                                    data-testid="flow-ratio-threshold-value">—</output>
+                        </label>
+                        <input type="range" id="flow-ratio-threshold"
+                               data-testid="flow-ratio-threshold"
+                               min="0.1" max="3" step="0.05"
+                               title="Ratio the create gate opens below. Higher = more permissive." />
+                    </span>
 
-                    <label for="flow-ratio-window">
-                        Window
-                        <output id="flow-ratio-window-value"
-                                data-testid="flow-ratio-window-value">—</output>
-                    </label>
-                    <input type="range" id="flow-ratio-window"
-                           data-testid="flow-ratio-window"
-                           min="1" max="336" step="1"
-                           title="Hours the ratio is counted over. The SAME board can pass at 24h and fail at 168h." />
+                    <span class="flow-ratio-field">
+                        <label for="flow-ratio-window">
+                            Window
+                            <output id="flow-ratio-window-value"
+                                    data-testid="flow-ratio-window-value">—</output>
+                        </label>
+                        <input type="range" id="flow-ratio-window"
+                               data-testid="flow-ratio-window"
+                               min="1" max="336" step="1"
+                               title="Hours the ratio is counted over. The SAME board can pass at 24h and fail at 168h." />
+                    </span>
 
                     <button type="button" id="flow-ratio-reset"
                             data-testid="flow-ratio-reset"
