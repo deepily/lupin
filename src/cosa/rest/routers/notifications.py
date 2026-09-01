@@ -960,22 +960,44 @@ async def notify_user(
         # =================================================================================
         if not response_requested:
 
+            # The DB id minted by a PRIOR attempt under this same idempotency key,
+            # carried forward so a re-evaluated retry reuses the forensic row instead
+            # of minting a second one. None on a first attempt.
+            replay_db_notification_id = None
+
             # ── Idempotency check: skip duplicate push/persist on retries ──
             if idempotency_key:
                 with _idempotency_lock:
                     # Evict expired entries
                     now = time_mod.time()
                     while _idempotency_cache:
-                        oldest_key, ( _, ts ) = next( iter( _idempotency_cache.items() ) )
-                        if now - ts > _IDEMPOTENCY_TTL:
+                        oldest_key, oldest_entry = next( iter( _idempotency_cache.items() ) )
+                        if now - oldest_entry[ 1 ] > _IDEMPOTENCY_TTL:
                             _idempotency_cache.pop( oldest_key )
                         else:
                             break
 
                     if idempotency_key in _idempotency_cache:
-                        cached_response, _ = _idempotency_cache[ idempotency_key ]
-                        print( f"[NOTIFY] Idempotency hit: {idempotency_key} — returning cached response" )
-                        return cached_response
+                        cached_response, _, cached_db_id = _idempotency_cache[ idempotency_key ]
+                        # A `user_not_available` verdict is TRANSIENT, not an outcome.
+                        # notify_user_async retries a non-progress notification precisely
+                        # to catch the 5-10s WebSocket auth window (see its
+                        # calculate_retry_intervals docstring), and replaying a cached
+                        # offline verdict made every one of those retries structurally
+                        # unable to succeed: measured 2026-09-01 14:54:37-42 on :7999,
+                        # four POSTs under key 9653a9f5 where attempt 1 checked
+                        # connectivity and attempts 2-4 logged "Idempotency hit" without
+                        # re-checking anything. Re-evaluate instead, with `persist` forced
+                        # off so the re-attempt cannot mint a second forensic row, and
+                        # reuse the first attempt's DB id so a later live frame still
+                        # carries the persisted row's UUID for mux dedupe.
+                        if cached_response.get( "delivered" ) is False:
+                            print( f"[NOTIFY] Idempotency hit: {idempotency_key} — cached verdict is non-terminal (user offline), re-evaluating delivery" )
+                            replay_db_notification_id = cached_db_id
+                            persist                   = False
+                        else:
+                            print( f"[NOTIFY] Idempotency hit: {idempotency_key} — returning cached response" )
+                            return cached_response
 
             # 1. Persist to PostgreSQL (preserves notification history).
             #    Lever B (messaging plane): run the blocking DB I/O OFF the event loop
@@ -983,10 +1005,12 @@ async def notify_user(
             #    notify path (and every other request sharing the loop) — the FM-7 fix.
             #    persist=False (bug e1bbe011) skips ONLY the DB insert — a delivery-only
             #    re-attempt (arbiter re-announce-on-return) must NOT mint a duplicate
-            #    forensic row on every 300s retry. db_notification_id stays None; all
-            #    downstream logic already tolerates None (push_notification falls back
-            #    to a generated uuid4; the offline/online responses are id-agnostic).
-            db_notification_id = None
+            #    forensic row on every 300s retry. db_notification_id then holds either
+            #    None (a caller-supplied persist=false) or the id a prior attempt under
+            #    this idempotency key already minted; all downstream logic tolerates None
+            #    (push_notification falls back to a generated uuid4; the offline/online
+            #    responses are id-agnostic).
+            db_notification_id = replay_db_notification_id
             if persist:
                 try:
                     db_notification_id = await asyncio.to_thread(
@@ -1080,7 +1104,7 @@ async def notify_user(
                     # Cache for idempotency
                     if idempotency_key:
                         with _idempotency_lock:
-                            _idempotency_cache[ idempotency_key ] = ( response_dict, time_mod.time() )
+                            _idempotency_cache[ idempotency_key ] = ( response_dict, time_mod.time(), db_notification_id )
                             while len( _idempotency_cache ) > _IDEMPOTENCY_MAX:
                                 _idempotency_cache.popitem( last=False )
                     return response_dict
@@ -1114,7 +1138,7 @@ async def notify_user(
                 # Cache for idempotency (retries will get the same response without re-persisting)
                 if idempotency_key:
                     with _idempotency_lock:
-                        _idempotency_cache[ idempotency_key ] = ( response_dict, time_mod.time() )
+                        _idempotency_cache[ idempotency_key ] = ( response_dict, time_mod.time(), db_notification_id )
                         while len( _idempotency_cache ) > _IDEMPOTENCY_MAX:
                             _idempotency_cache.popitem( last=False )
                 return response_dict
@@ -1153,6 +1177,23 @@ async def notify_user(
 
             print( f"[NOTIFY] ✓ Notification queued for {target_user} ({target_system_id}) - {connection_count} connection(s)" )
             print( f"[DIAG-JR] job_id={job_id!r} sender_id={resolved_sender_id!r} msg={message.strip()[:60]!r}" )
+
+            # A RE-EVALUATED RETRY SKIPPED THE PERSIST, SO IT ALSO SKIPPED THE STAMP.
+            # _persist_notification_sync marks the row 'delivered' itself when
+            # is_connected — but only when it runs. On a retry that re-evaluates a
+            # cached offline verdict we force persist off (no duplicate forensic row),
+            # so the row minted by the FIRST, offline attempt would stay marked
+            # undelivered forever even though THIS attempt delivered it. Raised by
+            # Mr Radio 🦉 in review before merge.
+            # Gated on the reused id, NOT on `persist`: a caller-supplied persist=false
+            # (arbiter re-announce, bug e1bbe011) carries no id and is untouched here.
+            if replay_db_notification_id is not None:
+                try:
+                    await asyncio.to_thread(
+                        _update_notification_state_sync, replay_db_notification_id, "delivered"
+                    )
+                except Exception as state_err:
+                    print( f"[NOTIFY] ⚠️ State update to 'delivered' failed (non-fatal): {state_err}" )
             response_dict = {
                 "status"             : "queued",
                 "message"            : f"Notification queued for delivery to {target_user}",
@@ -1169,7 +1210,7 @@ async def notify_user(
             # Cache for idempotency
             if idempotency_key:
                 with _idempotency_lock:
-                    _idempotency_cache[ idempotency_key ] = ( response_dict, time_mod.time() )
+                    _idempotency_cache[ idempotency_key ] = ( response_dict, time_mod.time(), db_notification_id )
                     while len( _idempotency_cache ) > _IDEMPOTENCY_MAX:
                         _idempotency_cache.popitem( last=False )
             return response_dict
