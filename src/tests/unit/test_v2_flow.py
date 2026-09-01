@@ -2012,22 +2012,28 @@ class TestTheFlowAcksAQueuedJob:
         assert spoken == [ "4" ],                        "a finished job spoke something other than its answer"
         assert not any( "New " in line for line in spoken ), "a finished job was acked as if it had just been queued"
 
-    def test_a_queued_replay_is_acked_with_the_ROUTED_command( self, tmp_path, notifier, monkeypatch ):
+    def test_a_queued_replay_SAYS_NOTHING( self, tmp_path, notifier, monkeypatch ):
         """
-        The replay branch queues too, and since 6-pre its label comes from the
-        command the ROUTER chose — which now always ran, because routing happens
-        before the lookup.
+        THE PHANTOM ANNOUNCEMENT (bug 588b2f15). Rick, at the mic:
+        "I'm getting it every time when it should be only replaying the cached
+        answer or the cached code solution."
 
-        This test used to say the opposite ("its label comes from the snapshot's own
-        routing_command — not from the router, which never ran on a cache hit"). That
-        was true of the old order and is false of this one, so the premise is
-        rewritten rather than the assertion patched. The snapshot below carries a
-        DIFFERENT command from the routed one on purpose: reading the row's column
-        would name "todo list" here, and the row's column is the nullable,
-        blank-defaulted one this plan condemns.
+        ⚠️ THIS TEST IS THE INVERSE OF THE ONE IT REPLACES, and that is the point.
+        It used to be `test_a_queued_replay_is_acked_with_the_ROUTED_command` and it
+        asserted "New calendaring job..." — i.e. it required the defect. A replay
+        creates no job, so an ack naming one is a sentence about work that does not
+        exist; measured in the [DIAG-JR] trace as frame 11, with nothing behind it.
 
-        RED ON REVERT: resolve the snapshot's command again and the ack says "New
-        todo list job..." instead.
+        On a queued replay v1 speaks the cached answer itself, so v2 staying silent
+        is what keeps it to one spoken line — the same reason the receptionist case
+        below returns None.
+
+        The old test's OTHER claim is kept rather than dropped: the routed command
+        wins over the snapshot's own. It is asserted through `r["command"]`, which
+        is where it was always observable — the spoken line merely echoed it.
+
+        RED ON REVERT: drop the `path == "replay"` guard from `_spoken_line` and
+        this hears "New calendaring job..." again.
         """
         monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled:
                              FakeSpec( label="calendaring" ) if command == "agent router go to calendar"
@@ -2041,9 +2047,33 @@ class TestTheFlowAcksAQueuedJob:
 
         r = f.ask( "what is on my calendar", **_CTX, speak=True )
 
-        assert self._spoken( notifier ) == [ "New calendaring job..." ]
-        assert r[ "path" ] == "replay"
+        assert self._spoken( notifier ) == [ ],           "a replay announced a job it never created"
+        assert r[ "path" ]    == "replay"
         assert r[ "command" ] == "agent router go to calendar"
+
+    def test_a_replay_THAT_ALREADY_HAS_ITS_ANSWER_still_speaks_it( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE NEGATIVE CONTROL, and it is what keeps the guard from being too wide.
+
+        The silence above is owed to `waiting` — v1 is speaking, so we must not.
+        A replay whose outcome is already `done` has its answer in hand and nobody
+        else is going to say it. Same path, opposite status, opposite answer.
+
+        RED ON REVERT: silence the whole replay path instead of only its waiting
+        arm, and the user asks a cached question and hears nothing at all.
+        """
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( label="math" ) )
+        snap  = _snapshot( routing_command="agent router go to math" )
+        cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+        exe   = FakeExecutor( _outcome( status="done", answer="6", answer_raw="6" ) )
+        f     = _make_flow( tmp_path, cache, FakeRouter( "agent router go to math" ),
+                            FakeExpeditor(), exe, FakePending(), notifier )
+
+        r = f.ask( "what is 3 plus 3", **_CTX, speak=True )
+
+        assert self._spoken( notifier ) == [ "6" ]
+        assert r[ "path" ] == "replay"
 
     def test_a_waiting_outcome_with_no_label_stays_silent( self, tmp_path, notifier, monkeypatch ):
         """
@@ -2651,12 +2681,21 @@ def test_replay_reports_the_routed_command_not_the_snapshots_blank_column( tmp_p
 
     assert r[ "path" ] == "replay"
     assert r[ "command" ] == "agent router go to math", "the replay reported the row's blank column"
-    # The label rides the same fix: a waiting hand-off speaks v1's ack, and the ack
-    # names the agent. Resolved off the blank column there is no label and the user
-    # hears nothing at all.
-    assert notifier.requests, "a waiting replay spoke no acknowledgment"
-    assert "todo" not in notifier.requests[ -1 ].message
-    assert "math" in notifier.requests[ -1 ].message
+
+    # ⚠️ THE SPOKEN ACK IS NO LONGER AN OBSERVATION CHANNEL HERE, and saying so is
+    # better than quietly deleting three assertions. This test used to read the
+    # label out of the ack ("math" in the message, "todo" not in it), which worked
+    # only because a queued replay announced a job. It no longer does — bug
+    # 588b2f15, and the silence is the fix, not a regression.
+    #
+    # The consequence, stated rather than hidden: on a REPLAY the resolved
+    # `agent_label` now has no observable effect at all, because the only thing it
+    # ever fed was that ack. The label's provenance is still pinned where it does
+    # have an effect — the queued AGENT path, in
+    # TestTheFlowAcksAQueuedJob::test_a_queued_agent_is_acked_once_in_v1s_words.
+    # This test keeps the half that is still real: the COMMAND comes from the
+    # router, never from the row's blank column.
+    assert notifier.requests == [ ], "a queued replay announced a job it never created"
 
 
 # ─────────────────────── the log says whose words the verbatim is
@@ -3291,6 +3330,50 @@ class TestTheFlowAsksAboutANearMatch:
         assert r[ "path" ] == "replay"
         assert r[ "route_reason" ] == "near_match_confirmed"
         assert r[ "cache_hit" ] is True
+
+    def test_a_confirmed_near_match_THAT_QUEUES_also_says_nothing( self, tmp_path, notifier, monkeypatch ):
+        """
+        THE OTHER REPLAY BRANCH, MEASURED RATHER THAN ASSUMED (bug 588b2f15).
+
+        María diagnosed the phantom announcement on the EXACT-hit branch and wrote
+        down, honestly, that she had not driven the near-match one: "it calls
+        `_finish` the same way with the same agent_label, so it LOOKS identical —
+        but I have not driven a near match." Looking identical is not a measurement,
+        so here is the measurement.
+
+        Both branches hand `_finish` the same literal path "replay", which is why
+        one guard covers both — but a reader should be able to check that rather
+        than take it, and a future refactor that gives branch 2b its own path label
+        would silently re-open the defect on this arm alone.
+
+        RED ON REVERT: drop the `path == "replay"` guard and a confirmed near match
+        that queues announces "New … job..." for a job it never created.
+        """
+        confirmer = _FakeConfirmer( response_value="yes" )
+        monkeypatch.setattr( flow_mod, "resolve",
+                             lambda command, crud_enabled: FakeSpec( required_args=(), snapshotable=False,
+                                                                     label="todo list" ) )
+        candidate = _snapshot( question="what is on my todo list", id_hash="near-1" )
+        cache     = FakeCache( lookup_result=_lookup( is_replay_hit=False, best_candidate=candidate,
+                                                      best_score=95.0, similarity=95.0, tier="ann" ) )
+        f = AskFlow(
+            cache, FakeRouter(), FakeExpeditor(),
+            FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
+                                    job_id=_SCOPED_JOB_ID ) ),
+            FakePending(),
+            crud_enabled=False, confirmation_threshold=90.0, confirmation_enabled=True,
+            confirmer=confirmer, receptionist_factory=FakeReceptionist, notifier=notifier,
+            trace_dir=str( tmp_path ),
+        )
+
+        r = f.ask( "what's on my todo list", **_CTX, speak=True )
+
+        assert r[ "path" ]         == "replay"
+        assert r[ "route_reason" ] == "near_match_confirmed"   # the branch really was 2b, not 2a
+        assert r[ "status" ]       == "waiting"                # ...and it really did queue
+        assert [ q.message for q in notifier.requests ] == [ ], (
+            "the near-match replay branch announced a job it never created"
+        )
 
     def test_a_confirmed_near_match_that_then_FAILS_still_names_the_row( self, tmp_path, notifier, monkeypatch ):
         """

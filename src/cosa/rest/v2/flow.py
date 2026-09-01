@@ -1398,7 +1398,7 @@ class AskFlow:
         """Stamp first-useful, write back, speak, and emit the terminal result."""
         trace.mark( "t_first_useful" )
         snapshot_id = self._maybe_write_back( trace, question, command, outcome, snapshotable, agent_class_name, ctx )
-        self._speak( trace, self._spoken_line( outcome, agent_label ), outcome.job_id, ctx )
+        self._speak( trace, self._spoken_line( outcome, agent_label, path ), outcome.job_id, ctx )
         return self._emit(
             trace, path=path, status=outcome.status, route_reason=route_reason, answer=outcome.answer,
             answer_raw=outcome.answer_raw, command=command, ctx=ctx, job_id=outcome.job_id,
@@ -1415,7 +1415,7 @@ class AskFlow:
         return f"primary agent failed: {primary_error} | receptionist: {fallback_error}"
 
     @staticmethod
-    def _spoken_line( outcome: Any, agent_label: Optional[ str ] ) -> Optional[ str ]:
+    def _spoken_line( outcome: Any, agent_label: Optional[ str ], path: str ) -> Optional[ str ]:
         """What this exit says out loud: the answer, or v1's ack when the work was queued.
 
         A queued job has no answer yet, so `waiting` speaks the ack INSTEAD of the
@@ -1428,9 +1428,53 @@ class AskFlow:
         (todo_fifo_queue.py:217-220, spoken at :807 and :837). Reproducing that here
         would move queue-owned state into the flow, so it is left for its own
         decision rather than invented.
+
+        🔴 AND IT RETURNS None ON A QUEUED REPLAY, WHICH IS WHY IT TAKES `path`
+        (bug 588b2f15, diagnosed by María 🌸 from Rick's own probe: "I'm getting it
+        every time when it should be only replaying the cached answer").
+
+        This function used to branch on `outcome.status` alone, and a queued replay
+        looks exactly like a queued new job from here: status "waiting", a truthy
+        agent_label. So it announced "New calculator job..." for a request that
+        created no job at all — measured in the [DIAG-JR] trace, frame 11, with no
+        job behind it.
+
+        The information was one frame up the whole time: `_finish` already receives
+        `path`, and never passed it down. It does now.
+
+        ⇒ THIS IS THE SAME CASE AS THE RECEPTIONIST, not a new kind of exception:
+        somebody else is already speaking for this path, so we stay silent. On a
+        queued replay v1 speaks the cached answer itself, as
+        queue.running@lupin.deepily.ai. Without this guard the request gets TWO
+        spoken lines, which breaks the one-line-per-request guarantee the paragraph
+        above asserts — a guarantee that only ever held while v2 was the sole
+        speaker.
+
+        ⚠️ IT COVERS BOTH REPLAY BRANCHES BY CONSTRUCTION, and that answers an
+        open question on the row rather than leaving it. The exact-hit branch and
+        the near-match branch call `_finish` with the SAME literal path "replay",
+        so neither can be fixed without the other. María flagged that she had
+        driven only the exact-hit path; keying on the shared label is what makes
+        the near-match arm covered rather than assumed, and there is a test for it.
+
+        Requires:
+            - outcome carries `status` and `answer`
+            - path is the same literal `_finish` was called with
+
+        Ensures:
+            - status != "waiting" -> outcome.answer, on EVERY path including replay
+              (a replay that already has its answer in hand still speaks it)
+            - status == "waiting" and path == "replay" -> None (v1 speaks it)
+            - status == "waiting" and no agent_label -> None (the receptionist)
+            - otherwise -> the "New <agent> job..." ack
         """
         if outcome.status != "waiting":
             return outcome.answer
+        # A REPLAY CREATED NO JOB, so there is no new job to announce. Ordered ahead
+        # of the label check because a replay always HAS a label — the check below
+        # would never reach it.
+        if path == "replay":
+            return None
         if not agent_label:
             return None
         return STARTING_A_NEW_JOB.format( agent_type=agent_label )
