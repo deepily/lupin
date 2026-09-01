@@ -22,6 +22,38 @@ What this verifies that the unit tests cannot:
 COLOR / class-presence: like the read-only card E2E, the redundancy carriers are
 CLASS names (WCAG 1.4.1), so class assertions are the right check.
 
+🔴 THE PATCH GLOB IS WIDER THAN THE THING IT NAMES — AND `_record_patch` REFUSES
+RATHER THAN FAKES (added 2026-09-01, and DELIBERATELY UNREACHABLE TODAY).
+
+`TASKS_PATCH_ROUTE` is `**/api/tasks/*`, meant for `/api/tasks/<id>`. A task id is
+a single path segment and so is a LITERAL sibling route, so the glob cannot tell
+them apart. Measured with the function `page.route` itself calls
+(`playwright._impl._helper.url_matches`, playwright 1.58.0):
+
+    "**/api/tasks/*"  vs /api/tasks/flow-ratio  -> True
+    "**/api/tasks/*"  vs /api/tasks/events      -> True
+    "**/api/tasks?*"  vs /api/tasks/flow-ratio  -> False   <- positive control
+
+An unguarded handler would answer those GETs `{"ok": true}` with 200 AND push them
+into `recorded["patch"]`, which the assertions in this file read — mocking an
+endpoint nobody meant to mock and corrupting a wire assertion in one move. That is
+the `/api/tasks/flow-ratio` defect exactly: a Playwright test `route.fulfill`-ing
+the call it is nominally proving. That endpoint shipped answering 422 for its
+entire life and the E2E "covering" it faked the broken call.
+
+⚠️ THIS GUARD CANNOT FIRE TODAY, AND THAT IS STATED HERE ON PURPOSE. The
+multiplexer fetches neither literal path — `git grep flow-ratio` over
+`src/lupin_app/static/js/multiplexer/` is empty, against 5 `api/tasks` hits in the
+same corpus as a positive control. It is armed for the day this card gains the
+ratio header. An unreachable branch nobody flags is how the FIRST repair of the
+flow-ratio hole went wrong: its fix sat behind an `if` that no request could
+reach, and the tests around it looked green. So: if you are reading this because
+the 501 fired, the guard did its job — give that path its own `page.route`
+registered AFTER the patch route (Playwright does `self._routes.insert( 0, ... )`,
+so the newest handler is checked first). Do not widen the refusal away.
+
+Audit + every measurement: src/rnd/v0.2.1/2026.09.01-mocked-seam-audit-e2e-ui.md
+
 Venue: :8000 (monopolize, scheduled) — `test_multiplexer_*` E2E batch. Uses
 page.route stubs (no real state mutation) but runs via the manager's :8000
 Playwright batch per the venue rubric. Per CLAUDE.local.md "USER IS NEVER A
@@ -53,6 +85,29 @@ TASKS_LIST_ROUTE  = "**/api/tasks?*"
 TASKS_PATCH_ROUTE = "**/api/tasks/*"
 TASKS_TRANS_ROUTE = "**/api/tasks/*/transition"
 FLEET_ROUTE       = "**/api/arbiter/fleet-state"
+
+# 🔴 TASKS_PATCH_ROUTE IS WIDER THAN THE THING IT NAMES. Measured 2026-09-01 with
+# playwright._impl._helper.url_matches (playwright 1.58.0), the function page.route
+# itself calls:
+#
+#     "**/api/tasks/*"  vs  /api/tasks/flow-ratio   -> True
+#     "**/api/tasks/*"  vs  /api/tasks/events       -> True
+#     "**/api/tasks?*"  vs  /api/tasks/flow-ratio   -> False   (positive control)
+#
+# `<id>` is a single path segment and so is a LITERAL sibling route, so the patch
+# glob cannot tell them apart. Today this is latent — the multiplexer fetches
+# neither path (`git grep flow-ratio` over static/js/multiplexer/ is empty, with a
+# positive control of 5 `api/tasks` hits in the same corpus). The day it gains the
+# ratio header, an unguarded handler would answer that GET `{"ok": true}` with 200
+# AND push it into `recorded["patch"]`, which the assertions below read — faking a
+# live endpoint and corrupting a wire assertion in one move.
+#
+# That is the /api/tasks/flow-ratio defect exactly: a Playwright test that
+# `route.fulfill`s the very call it is nominally proving. So the handler REFUSES a
+# literal sibling rather than serving it — per CLAUDE.md, a step that cannot do
+# the job declines and names what it did not do, instead of returning something
+# the caller will read as success.
+LITERAL_TASK_SIBLINGS = ( "/api/tasks/flow-ratio", "/api/tasks/events" )
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +203,20 @@ def _open_card( page, tasks: dict | None = None ) -> dict:
 
     def _record_patch( route ):
         req = route.request
+        # See LITERAL_TASK_SIBLINGS above. Refuse rather than fake: a 501 naming the
+        # path fails the test loudly, where a silent {"ok": true} would both mock an
+        # endpoint nobody meant to mock and poison recorded["patch"].
+        if any( sib in req.url for sib in LITERAL_TASK_SIBLINGS ):
+            route.fulfill(
+                status       = 501,
+                content_type = "application/json",
+                body         = json.dumps( { "detail":
+                    f"REFUSED: {req.url} is a LITERAL /api/tasks sibling caught by the "
+                    f"'**/api/tasks/*' patch glob, not a task id. This handler will not "
+                    f"fake it. Give that path its own page.route registered AFTER this "
+                    f"one (Playwright checks the newest handler first)." } )
+            )
+            return
         recorded[ "patch" ].append( { "url": req.url, "method": req.method, "body": json.loads( req.post_data or "{}" ) } )
         route.fulfill( status=200, content_type="application/json", body=json.dumps( { "ok": True } ) )
 

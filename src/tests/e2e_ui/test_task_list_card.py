@@ -48,6 +48,7 @@ routing.
 """
 
 import json
+import re
 
 import pytest
 
@@ -162,29 +163,39 @@ def _route_tasks( page, state ):
         - mode "ok"          -> 200 { tasks: SEEDED_TASKS, count }
         - mode "unreachable" -> 500 (drives the card's unreachable sentinel)
         - flipping state["mode"] between fetches changes the served response
-        - GET /api/tasks/flow-ratio is answered SEPARATELY with its own shape
+        - GET /api/tasks/flow-ratio is answered by its OWN route, registered last
 
-    ⚠️ THE GLOB "**/api/tasks*" ALSO MATCHES /api/tasks/flow-ratio. Before
-    2026-09-01 this handler served the row-list body to that request too, so the
-    header's ratio clause silently rendered EMPTY in every e2e run — the fixture
-    could not tell a working ratio from a broken one. Answer the two separately
-    or the assertion below is measuring the fixture.
+    ⚠️ "**/api/tasks*" DOES NOT MATCH /api/tasks/flow-ratio — MEASURED, not read
+    off the glob. Playwright compiles `*` to `[^/]*`, so the trailing star stops
+    at the slash:
+
+        playwright 1.58.0, playwright._impl._helper.url_matches( None, url, glob )
+          "**/api/tasks*"   vs /api/tasks/flow-ratio   -> False
+          "**/api/tasks*"   vs /api/tasks?status=open  -> True   (positive control)
+          "**/api/tasks/*"  vs /api/tasks/flow-ratio   -> True   (positive control)
+
+    An earlier cut of this docstring claimed the opposite and put the flow-ratio
+    body behind an `if` inside this handler, where it was UNREACHABLE: the seed
+    never applied, the request went to the live server, and the two header tests
+    below were asserting fixture numbers against a real board. Hence a SECOND
+    `page.route` on the literal path — registered LAST, because Playwright does
+    `self._routes.insert( 0, ... )` and therefore checks the newest handler first.
     """
-    def handler( route ):
-        if "/api/tasks/flow-ratio" in route.request.url:
-            if state[ "mode" ] == "unreachable":
-                route.fulfill( status=500, content_type="application/json",
-                               body=json.dumps( { "detail": "store down" } ) )
-                return
-            route.fulfill(
-                status       = 200,
-                content_type = "application/json",
-                body         = json.dumps( state.get( "ratio", {
-                    "created": 10, "closed": 13, "ratio": 0.77,
-                    "verdict": "allow", "window_hours": 24
-                } ) )
-            )
+    def flow_ratio_handler( route ):
+        if state[ "mode" ] == "unreachable":
+            route.fulfill( status=500, content_type="application/json",
+                           body=json.dumps( { "detail": "store down" } ) )
             return
+        route.fulfill(
+            status       = 200,
+            content_type = "application/json",
+            body         = json.dumps( state.get( "ratio", {
+                "created": 10, "closed": 13, "ratio": 0.77,
+                "verdict": "allow", "window_hours": 24
+            } ) )
+        )
+
+    def handler( route ):
         if state[ "mode" ] == "unreachable":
             route.fulfill( status=500, content_type="application/json",
                            body=json.dumps( { "detail": "store down" } ) )
@@ -196,6 +207,7 @@ def _route_tasks( page, state ):
         )
 
     page.route( "**/api/tasks*", handler )
+    page.route( "**/api/tasks/flow-ratio*", flow_ratio_handler )   # LAST = checked first
 
 
 def _goto_notifications( page ):
@@ -1102,3 +1114,136 @@ class TestTaskListHeaderFlowRatio:
         ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
         assert "\u2014" in ratio_text, ratio_text
         assert "0.00" not in ratio_text, "an unmeasurable ratio must never render as a number"
+
+
+class TestTaskListHeaderFlowRatioLive:
+    """
+    The ratio header against the REAL endpoint, with NO route mock (2026-09-01).
+
+    WHY THIS CLASS EXISTS. `GET /api/tasks/flow-ratio` shipped registered BELOW
+    `GET /api/tasks/{task_id}`. FastAPI matches in registration order, so the
+    literal path was swallowed by its parameterised sibling and answered 422 for
+    as long as it existed. Three tests were nominally proving that endpoint and
+    all three were blind to it:
+
+      · test_flow_ratio_endpoint.py     calls the handler, so ordering never applies
+      · task_list_panel.test.ts         renders a hand-built payload, no HTTP at all
+      · TestTaskListHeaderFlowRatio     `page.route`s this very path — it faked the
+                                        exact call that was broken
+
+    The client hides the failure BY DESIGN: `fetchFlowRatio` returns null on any
+    non-2xx and `_renderFlowRatio` writes an empty string, so a broken endpoint
+    and a quiet board render identically. Nothing short of driving the real wire
+    can tell them apart, which is why this class mocks nothing.
+
+    ⚠️ IT ASSERTS THE WINDOW AND THE SHAPE, NEVER THE DIGITS. The ratio is live
+    state — the fleet files and closes rows while the suite runs — so an exact
+    number would be flaky for a reason that has nothing to do with the defect.
+    `window_hours` is a server constant and cannot drift.
+    """
+
+    def test_the_app_s_own_fetch_of_the_real_flow_ratio_answers_200( self, logged_in_page ):
+        """
+        The page's OWN request to the real endpoint comes back 200, not 422.
+
+        Requires:
+            - Authenticated session (logged_in_page)
+            - NO page.route anywhere in this test — the wire is the subject
+
+        Ensures:
+            - the browser actually issued GET /api/tasks/flow-ratio (an absent
+              request fails LOUDLY rather than passing vacuously)
+            - it answered 200
+            - a 401 is called out as an AUTH failure, distinct from the 422
+              routing defect — otherwise a broken fixture reads as the bug and
+              this guard reports on the auth layer instead of the route table
+
+        RED ON REVERT: move the `/tasks/flow-ratio` registration in
+        `src/cosa/rest/routers/tasks.py` back below `/tasks/{task_id}` and the
+        observed status becomes 422.
+        """
+        seen: list[ dict ] = []
+
+        def _record( response ):
+            if "/api/tasks/flow-ratio" in response.url:
+                seen.append( { "status": response.status, "url": response.url } )
+
+        logged_in_page.on( "response", _record )
+        _goto_notifications( logged_in_page )
+
+        # The card fetches the ratio on its first tick; wait for the wire, not a
+        # fixed sleep. An empty `seen` here means the request was never issued —
+        # which is a failure of this test's premise and must not read as a pass.
+        logged_in_page.wait_for_function(
+            "() => !!document.getElementById( 'task-list-flow-ratio' )"
+        )
+        logged_in_page.wait_for_timeout( 2000 )
+
+        assert seen, (
+            "the page never requested /api/tasks/flow-ratio — this guard proves "
+            "nothing until it does; check the card mounted and its first tick ran"
+        )
+
+        statuses = [ r[ "status" ] for r in seen ]
+        assert 401 not in statuses, (
+            f"AUTH failed, not routing — statuses {statuses}. This guard is about the "
+            f"route table; a 401 means it never got far enough to measure that."
+        )
+        assert all( s == 200 for s in statuses ), (
+            f"expected every /api/tasks/flow-ratio response to be 200, got {statuses}. "
+            f"422 is the registration-order defect: the literal path parked below "
+            f"/api/tasks/{{task_id}} and was swallowed by it."
+        )
+
+    def test_the_real_payload_reaches_the_rendered_header( self, logged_in_page ):
+        """
+        The clause in the header is the one the LIVE endpoint just produced.
+
+        The status check above proves the endpoint answers. This proves the answer
+        travelled endpoint → fetchFlowRatio → _formatFlowRatio → the DOM, which is
+        the leg no unit or TypeScript test can reach.
+
+        Requires:
+            - Authenticated session, NO route mock
+
+        Ensures:
+            - the live payload carries window_hours (without it the client renders
+              an empty clause and this test would be asserting nothing)
+            - #task-list-flow-ratio is NON-EMPTY and names that same window
+            - it carries a 2dp number or the em dash — never "0.00" standing in for
+              an unmeasurable window
+        """
+        _goto_notifications( logged_in_page )
+
+        payload = logged_in_page.evaluate(
+            """async () => {
+                const r = await window.notificationsUI.authedFetch( "/api/tasks/flow-ratio" );
+                return { status: r.status, body: r.ok ? await r.json() : null };
+            }"""
+        )
+
+        assert payload[ "status" ] == 200, \
+            f"live endpoint answered {payload['status']} — see the status guard above"
+
+        body = payload[ "body" ]
+        assert isinstance( body.get( "window_hours" ), int ), (
+            f"live payload has no integer window_hours ({body!r}); the client renders "
+            f"an EMPTY clause in that case, so the assertion below would pass on a "
+            f"header that shows nothing"
+        )
+
+        logged_in_page.wait_for_function(
+            "() => { const e = document.getElementById( 'task-list-flow-ratio' );"
+            "        return e && e.textContent.includes( 'Ratio' ); }"
+        )
+        ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
+
+        assert f"Closed vs New Ratio ({body['window_hours']}hrs):" in ratio_text, (
+            f"header clause {ratio_text!r} does not name the window the live endpoint "
+            f"returned ({body['window_hours']}h) — the payload did not reach the DOM"
+        )
+
+        tail = ratio_text.split( ":" )[ -1 ].strip()
+        assert tail == "—" or re.fullmatch( r"\d+\.\d{2}", tail ), (
+            f"expected a 2dp ratio or an em dash, got {tail!r}"
+        )
