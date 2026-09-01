@@ -244,10 +244,18 @@ def test_a_cached_offline_verdict_is_not_replayed_to_a_connected_user():
     token           = _access_token( email, password )
     obs             = asyncio.run( _run_probe( email, token ) )
 
-    assert obs[ "offline" ] == ( "user_not_available", False ), (
-        f"precondition not met: the user was already connected at step 1 "
-        f"({obs[ 'offline' ]}) — nothing was cached, so this run cannot discriminate"
-    )
+    # SKIP, not fail. This is an unmet PRECONDITION, not a finding: if another
+    # seat already holds a websocket for the shared test account, step 1 returns
+    # `queued`, nothing is cached, and there is no frozen verdict for step 3 to
+    # replay. Asserting here produced a RED that read like the fix regressing
+    # while saying, in its own message, that the run could not discriminate — a
+    # false red generator on a shared box, and the exact confusion the rest of
+    # this file exists to avoid. Same class as the auth and control checks below.
+    if obs[ "offline" ] != ( "user_not_available", False ):
+        pytest.skip(
+            f"precondition not met: the user was already connected at step 1 "
+            f"({obs[ 'offline' ]}) — nothing was cached, so this run cannot discriminate"
+        )
 
     if obs.get( "auth" ) != "auth_success":
         pytest.skip( f"instrument not proven: websocket auth returned {obs.get( 'auth' )!r}" )
