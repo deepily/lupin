@@ -22,6 +22,8 @@ import pathlib
 import subprocess
 import sys
 
+import pytest
+
 import cosa.utils.util as cu
 
 
@@ -30,16 +32,27 @@ REAL_SHIM = pathlib.Path( cu.get_project_root(), "src", "sitecustomize.py" )
 # A stand-in for `cosa.utils.checked_hash_pyc` that blows up on import, which is
 # the shape of every failure the shim's guard exists for: a bad CPython version,
 # a partial checkout, an ImportError from a moved private API.
-POISON = "raise RuntimeError( 'deliberate failure staged by test_sitecustomize_fails_open' )\n"
+POISON = "raise {exc}( 'deliberate failure staged by test_sitecustomize_fails_open' )\n"
+
+# ⚠️ BOTH BRANCHES OF THE EXCEPTION TREE, and the second one is the whole point.
+# `Exception` covers the ordinary failures (bad CPython version, partial checkout).
+# `KeyboardInterrupt` does NOT derive from it, and an escaping BaseException does
+# not merely skip the patch — CPython reports "Fatal Python error: init_import_site"
+# and the interpreter never starts. Measured 2026-08-31: staged KeyboardInterrupt
+# and SystemExit both exited 1 with that fatal error against an `except Exception`
+# shim, while a staged RuntimeError exited 0 and reached the caller. Raised in
+# review by Rachel 🕊️.
+STAGED_FAILURES = [ "RuntimeError", "KeyboardInterrupt" ]
 
 
-def _stage( tmp_path, poisoned ):
+def _stage( tmp_path, poisoned, exc="RuntimeError" ):
     """
     Build a directory holding the REAL shim and a `cosa.utils.checked_hash_pyc`.
 
     Requires:
         - tmp_path is an empty directory
         - poisoned selects whether that module raises on import
+        - exc names the exception class the staged module raises
 
     Ensures:
         - returns a path suitable as the sole PYTHONPATH entry
@@ -49,14 +62,15 @@ def _stage( tmp_path, poisoned ):
     Raises:
         - None
     """
-    root = tmp_path / ( "poisoned" if poisoned else "healthy" )
+    root = tmp_path / ( f"poisoned-{exc}" if poisoned else "healthy" )
     ( root / "cosa" / "utils" ).mkdir( parents=True )
 
     ( root / "sitecustomize.py" ).write_bytes( REAL_SHIM.read_bytes() )
     ( root / "cosa" / "__init__.py" ).write_text( "" )
     ( root / "cosa" / "utils" / "__init__.py" ).write_text( "" )
     ( root / "cosa" / "utils" / "checked_hash_pyc.py" ).write_text(
-        POISON if poisoned else "def install( loader_cls=None, trace=None ): return True\n"
+        POISON.format( exc=exc ) if poisoned
+        else "def install( loader_cls=None, trace=None ): return True\n"
     )
 
     return root
@@ -87,12 +101,17 @@ def _run( root, code ):
     )
 
 
-def test_a_shim_that_raises_does_not_stop_the_interpreter( tmp_path ):
+@pytest.mark.parametrize( "exc", STAGED_FAILURES )
+def test_a_shim_that_raises_does_not_stop_the_interpreter( tmp_path, exc ):
     """
     THE ASSERTION THAT MATTERS. The staged module raises on import; the
     interpreter must still start, run the caller's code, and exit 0.
+
+    Parametrized across both branches of the exception tree because they fail
+    DIFFERENTLY: an uncaught Exception skips the patch, while an uncaught
+    BaseException aborts interpreter startup entirely.
     """
-    result = _run( _stage( tmp_path, poisoned=True ), "print( 'ALIVE' )" )
+    result = _run( _stage( tmp_path, poisoned=True, exc=exc ), "print( 'ALIVE' )" )
 
     assert result.returncode == 0, (
         f"an interpreter whose shim raised exited {result.returncode} — the shim "
@@ -104,13 +123,14 @@ def test_a_shim_that_raises_does_not_stop_the_interpreter( tmp_path ):
     )
 
 
-def test_the_staged_failure_really_fires( tmp_path ):
+@pytest.mark.parametrize( "exc", STAGED_FAILURES )
+def test_the_staged_failure_really_fires( tmp_path, exc ):
     """
     POSITIVE CONTROL, and without it the test above is worthless: it would pass
     identically against a harness whose poisoned module was never imported at
     all. Importing it directly must raise the staged error.
     """
-    root   = _stage( tmp_path, poisoned=True )
+    root   = _stage( tmp_path, poisoned=True, exc=exc )
     result = _run(
         root,
         "import cosa.utils.checked_hash_pyc"

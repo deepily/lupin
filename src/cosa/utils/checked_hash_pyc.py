@@ -95,15 +95,32 @@ _LEDGER_RELATIVE = "io/pyc-mode-ledger.jsonl"
 
 class _Outcome( str ):
     """
-    A falsey string, so install()'s two non-True outcomes stay distinguishable
-    WITHOUT breaking `if install(): ...` at any existing call site.
+    A string that REFUSES to be a boolean, so the question a caller is really
+    asking has to be asked out loud.
 
-    Subclassing str keeps the value printable and comparable; overriding __bool__
-    keeps it falsey, like the plain False it replaces.
+    ⚠️ IT RAISES RATHER THAN ANSWERING, and that is the whole design. `install()`
+    answers "did THIS call newly install the patch?"; `is_installed()` answers "is
+    the patch active?". For a caller who meant the second, ALREADY_INSTALLED is a
+    SUCCESS — so ANY truthiness answer here is wrong for somebody: False re-runs
+    the old conflation one level out, and True is wrong for the caller who meant
+    the first. Ruled by Mr Radio 🦉 2026-08-31, rejecting a quietly-truthy value
+    as "wrong in a new way".
+
+    Subclassing str keeps the value printable, comparable and usable in a message;
+    only the implicit bool is refused. `install()` still returns a real `True` on
+    the newly-installed path, so `if install():` works there and fails LOUDLY, with
+    the remedy named, on exactly the paths where its meaning was ambiguous.
     """
     __slots__ = ()
 
-    def __bool__( self ): return False
+    def __bool__( self ):
+        raise TypeError(
+            f"install() returned {str( self )!r}, which has no truth value: "
+            f"'did this call install it?' and 'is the patch active?' are different "
+            f"questions and this value answers only the first. Compare it "
+            f"explicitly (is chp.ALREADY_INSTALLED / is chp.UNSUPPORTED_INTERPRETER), "
+            f"or call is_installed() if you meant 'is the patch active?'."
+        )
 
 
 # The two reasons install() does not newly install. BOTH were `False` until
@@ -202,10 +219,12 @@ def install( roots=None ):
         - returns ALREADY_INSTALLED when the patch is already in place
         - returns UNSUPPORTED_INTERPRETER when the import machinery does not match
           what this module knows how to patch
-        - ⚠️ BOTH ARE FALSEY, so `if install(): ...` keeps its old meaning, while a
-          caller that must tell "the patch is in place" from "the patch is impossible"
-          now can. They were ONE value until 2026-08-31, and this docstring stated the
-          conflation as if it were a feature — they are opposite facts
+        - ⚠️ NEITHER FAILURE VALUE HAS A TRUTH VALUE — using one in a boolean context
+          raises TypeError naming `is_installed()`. They were ONE value (`False`) until
+          2026-08-31 and this docstring stated the conflation as if it were a feature.
+          Making them merely falsey was the first fix and was still wrong: for a caller
+          asking "is the patch ACTIVE?", ALREADY_INSTALLED is a SUCCESS, so a falsey
+          answer rebuilds the same conflation one level out. Ask the question you mean
         - never raises
     """
     global _installed, _original

@@ -127,6 +127,56 @@ def test_install_is_idempotent_and_uninstall_restores( clean_install ):
     assert chp.uninstall()          is False    # nothing left to remove
 
 
+@pytest.mark.parametrize( "outcome", [ chp.ALREADY_INSTALLED, chp.UNSUPPORTED_INTERPRETER ] )
+def test_a_non_install_outcome_refuses_to_be_a_boolean_and_names_the_verb_that_answers( outcome ):
+    """
+    🔴 THE CONFLATION GUARD, and it must RAISE rather than pick a side.
+
+    `install()` answers "did THIS call newly install the patch?"; `is_installed()`
+    answers "is the patch ACTIVE?". For a caller who meant the second,
+    ALREADY_INSTALLED is a SUCCESS — so every truthiness answer is wrong for
+    somebody, and a quiet one rebuilds the original defect one level out. Ruled by
+    Mr Radio 🦉 2026-08-31: raise, and name the verb that answers the other question.
+
+    The message is asserted, not just the exception type. A TypeError that does not
+    say what to call instead leaves the caller exactly as stuck as a silent False.
+    """
+    with pytest.raises( TypeError ) as caught:
+        bool( outcome )
+
+    assert "is_installed()" in str( caught.value ), (
+        f"the refusal must name the verb that answers 'is the patch active?', "
+        f"or it tells the caller they are wrong without telling them what is "
+        f"right.\ngot: {caught.value}"
+    )
+    assert str( outcome ) in str( caught.value ), (
+        f"the refusal must name WHICH outcome it refused.\ngot: {caught.value}"
+    )
+
+
+def test_a_non_install_outcome_is_still_a_usable_string():
+    """
+    The other half: only the implicit bool is refused. These values stay printable
+    and comparable, because a value you cannot put in a log message is a worse
+    answer than the False it replaced.
+    """
+    assert str( chp.ALREADY_INSTALLED )       == "already-installed"
+    assert chp.ALREADY_INSTALLED              != chp.UNSUPPORTED_INTERPRETER
+    assert f"{chp.UNSUPPORTED_INTERPRETER}"   == "unsupported-interpreter"
+
+
+def test_the_newly_installed_path_still_returns_a_real_bool( clean_install ):
+    """
+    The refusal must not reach the SUCCESS path. `install()` returns a genuine
+    True when it newly installs, so `if install():` keeps working for the caller
+    whose question really was "did I install it?".
+    """
+    result = chp.install( roots=[] )
+
+    assert result is True
+    assert bool( result ) is True          # must NOT raise on this path
+
+
 def test_install_patches_the_concrete_class_not_the_shadowed_base( clean_install ):
     """
     🔴 THE REGRESSION GUARD FOR THE FIRST CUT'S DEFECT. SourceFileLoader defines its OWN
@@ -442,18 +492,57 @@ def _run( root, code ):
                            cwd=str( root ), capture_output=True, text=True, env=env )
 
 
+def _install_prologue( roots="[]" ):
+    """
+    Build the child-side lines that make the patch's SCOPE explicit.
+
+    ⚠️ THE `uninstall()` IS NOT REDUNDANT, and this is ONE function so there is one
+    place to forget it rather than four. `src/sitecustomize.py` installs the patch at
+    interpreter startup in EVERY process — these children included — using the DEFAULT
+    roots derived from `LUPIN_ROOT`. A child that simply calls `install( roots=... )`
+    therefore gets `ALREADY_INSTALLED` back and silently keeps the INHERITED scope,
+    which does not contain `tmp_path`.
+
+    Measured 2026-08-31 in one child, three ways: with `LUPIN_ROOT` set,
+    `converted_count()` reads 0; with it unset it reads 2; importing the module with no
+    shim on the path installs cleanly and reads 2. That is a test whose result is
+    decided by the ambient environment rather than by the code under test, and it is
+    the same "a no-op and a failure return the same answer" shape this row exists for.
+
+    Requires:
+        - roots is the literal SOURCE TEXT of the roots argument, not a list object
+
+    Ensures:
+        - returns child source leaving the patch installed with exactly `roots` in scope
+        - binds `chp` for the caller's body
+        - asserts the install was this child's own, so an inherited one cannot pass
+
+    Raises:
+        - None
+    """
+    return ( "from cosa.utils import checked_hash_pyc as chp\n"
+             "chp.uninstall()\n"
+             f"assert chp.install( roots={roots} ) is True\n" )
+
+
+def _run_patched( root, body, roots="[]" ):
+    """
+    Run `body` in a child whose patch scope is stated rather than inherited.
+
+    Requires:
+        - body is child source, indented or not
+
+    Ensures:
+        - returns the CompletedProcess from `_run`
+
+    Raises:
+        - None
+    """
+    return _run( root, _install_prologue( roots ) + textwrap.dedent( body ) )
+
+
 def _seed( root, patched ):
-    # ⚠️ `chp.uninstall()` FIRST, and it is not redundant. src/sitecustomize.py
-    # installs the patch at interpreter startup in every process — this child
-    # included — so without it `install()` returns ALREADY_INSTALLED and the
-    # assertion below fails. Uninstalling makes the child's starting state
-    # EXPLICIT rather than inherited from whatever the parent's environment
-    # happened to arrange. Each child is a fresh interpreter, so this is
-    # deterministic, not order-dependent on the parent.
-    prologue = ( "from cosa.utils import checked_hash_pyc as chp; "
-                 "chp.uninstall(); "
-                 "assert chp.install( roots=[] ) is True; " if patched else "" )
-    out = _run( root, f"{prologue}import pkg.victim" )
+    out = _run( root, ( _install_prologue() if patched else "" ) + "import pkg.victim" )
     assert out.returncode == 0, out.stderr
     return root / "pkg" / "__pycache__" / f"victim.cpython-{sys.version_info.major}{sys.version_info.minor}.pyc"
 
@@ -513,9 +602,7 @@ def test_end_to_end_the_control_covers_a_first_time_import_which_is_the_load_bea
 def test_end_to_end_the_control_reports_what_it_actually_converted( tmp_path ):
     """A receipt, not a claim: the install must be able to say how many writes it rewrote."""
     _build_tree( tmp_path )
-    out = _run( tmp_path, """
-        from cosa.utils import checked_hash_pyc as chp
-        chp.install( roots=[] )
+    out = _run_patched( tmp_path, """
         import pkg.victim
         print( chp.converted_count() )
     """ )
@@ -531,11 +618,9 @@ def test_end_to_end_a_failure_inside_the_patch_falls_through_to_stock_behaviour(
     never to a broken interpreter.
     """
     _build_tree( tmp_path )
-    out = _run( tmp_path, """
-        from cosa.utils import checked_hash_pyc as chp
+    out = _run_patched( tmp_path, """
         def _boom( *a, **k ): raise RuntimeError( "sabotage" )
         chp.to_checked_hash = _boom
-        chp.install( roots=[] )
         import pkg.victim
         print( "IMPORT_OK", pkg.victim.answer() )
     """ )
@@ -549,12 +634,10 @@ def test_end_to_end_out_of_scope_writes_are_left_alone( tmp_path ):
     so installing it never silently rewrites vendored or stdlib bytecode.
     """
     _build_tree( tmp_path )
-    out = _run( tmp_path, """
-        from cosa.utils import checked_hash_pyc as chp
-        chp.install( roots=[ "/nonexistent/elsewhere" ] )
+    out = _run_patched( tmp_path, """
         import pkg.victim
         print( chp.converted_count() )
-    """ )
+    """, roots='[ "/nonexistent/elsewhere" ]' )
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "0"
     pyc = tmp_path / "pkg" / "__pycache__" / f"victim.cpython-{sys.version_info.major}{sys.version_info.minor}.pyc"
