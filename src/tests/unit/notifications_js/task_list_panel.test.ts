@@ -1424,10 +1424,10 @@ test( "_formatTaskListCount: non-numeric counts degrade to 0, never NaN", () => 
 // the number, and ratio:null renders as an em dash rather than 0.00.
 // ═══════════════════════════════════════════════════════════════════════════
 
-test( "_formatFlowRatio: prints the ratio to 2dp WITH its window", () => {
+test( "_formatFlowRatio: prints the ratio as a PERCENT, short enough for the bar", () => {
   assert.equal(
     newUI()._formatFlowRatio( { created: 10, closed: 13, ratio: 0.77, window_hours: 24 } ),
-    "Closed vs New Ratio (24hrs): 0.77"
+    "Gate: 77%"
   );
 } );
 
@@ -1438,25 +1438,33 @@ test( "_formatFlowRatio: the WINDOW is not cosmetic — same board, different wi
   // contradiction and are not. A fixture that hard-coded 24 could not see this.
   const ui = newUI();
   assert.equal( ui._formatFlowRatio( { ratio: 0.77, window_hours: 24 } ),
-                "Closed vs New Ratio (24hrs): 0.77" );
+                "Gate: 77%" );
   assert.equal( ui._formatFlowRatio( { ratio: 1.10, window_hours: 168 } ),
-                "Closed vs New Ratio (168hrs): 1.10" );
+                "Gate: 110%" );
 } );
 
-test( "_formatFlowRatio: ratio null → an EM DASH, never 0.00", () => {
-  // closed === 0 means nothing was finished in the window, which is the WORST
-  // case. Rendering it as 0.00 would read as the best. This assertion is the
-  // whole reason the endpoint sends null instead of a sentinel number.
+test( "_formatFlowRatio: nothing closed is INFINITY, never a number", () => {
+  // closed === 0 with rows created means nothing was finished in the window, which
+  // is the WORST case and a DENY. Rendering it as 0% would read as the best, and a
+  // big number like 999% would be a lie carrying a number's authority.
   const text = newUI()._formatFlowRatio( { created: 4, closed: 0, ratio: null, window_hours: 24 } );
-  assert.equal( text, "Closed vs New Ratio (24hrs): \u2014" );
-  assert.ok( !text.includes( "0.00" ), "an unmeasurable ratio must not render as a number" );
+  assert.equal( text, "Gate: \u221e" );
+  assert.ok( !/[0-9]/.test( text ), "an unmeasurable ratio must not render as a number" );
 } );
 
-test( "_formatFlowRatio: 2dp is padded, so 1.1 and 1.10 do not read as different", () => {
+test( "_formatFlowRatio: an IDLE window is an em dash, not infinity", () => {
+  // Nothing created and nothing closed is not a failing window — it is an empty one,
+  // and the gate allows. Distinct from the deny case above, which it would otherwise
+  // render identically to.
+  assert.equal( newUI()._formatFlowRatio( { created: 0, closed: 0, ratio: null, window_hours: 24 } ),
+                "Gate: \u2014" );
+} );
+
+test( "_formatFlowRatio: percents are whole numbers, and above 100% is legal", () => {
   assert.equal( newUI()._formatFlowRatio( { ratio: 1.1, window_hours: 24 } ),
-                "Closed vs New Ratio (24hrs): 1.10" );
+                "Gate: 110%" );
   assert.equal( newUI()._formatFlowRatio( { ratio: 2, window_hours: 24 } ),
-                "Closed vs New Ratio (24hrs): 2.00" );
+                "Gate: 200%" );
 } );
 
 test( "_formatFlowRatio: unusable payloads yield an EMPTY clause, not a zero", () => {
@@ -1471,11 +1479,11 @@ test( "_renderFlowRatio: writes the clause with its leading separator", () => {
   document.body.innerHTML = `<span id="task-list-flow-ratio"></span>`;
   newUI()._renderFlowRatio( { ratio: 0.77, window_hours: 24 } );
   assert.equal( document.getElementById( "task-list-flow-ratio" )!.textContent,
-                " \u00b7 Closed vs New Ratio (24hrs): 0.77" );
+                " \u00b7 Gate: 77%" );
 } );
 
 test( "_renderFlowRatio: an unreachable endpoint CLEARS the clause, leaving no stale number", () => {
-  document.body.innerHTML = `<span id="task-list-flow-ratio"> \u00b7 Closed vs New Ratio (24hrs): 0.77</span>`;
+  document.body.innerHTML = `<span id="task-list-flow-ratio"> \u00b7 Gate: 77%</span>`;
   newUI()._renderFlowRatio( null );
   assert.equal( document.getElementById( "task-list-flow-ratio" )!.textContent, "" );
 } );

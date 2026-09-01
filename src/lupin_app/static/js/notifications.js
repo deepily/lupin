@@ -9700,9 +9700,55 @@ class NotificationsUI {
         if ( !payload || typeof payload !== "object" ) return "";
         const hours = Number.isFinite( payload.window_hours ) ? payload.window_hours : null;
         if ( hours === null ) return "";
-        const label = `Closed vs New Ratio (${hours}hrs):`;
-        if ( !Number.isFinite( payload.ratio ) ) return `${label} \u2014`;
-        return `${label} ${payload.ratio.toFixed( 2 )}`;
+        return `Gate: ${this._flowRatioPercentText( payload )}`;
+    }
+
+    _flowRatioPercentText( payload ) {
+        /**
+         * The ratio as a percentage, or the character that stands in for one.
+         *
+         * PERCENT, NOT HUNDREDTHS. 0.25 and 25% are the same number and only one of
+         * them reads at a glance next to a slider that is also in percent. Above 100%
+         * is legal and expected — it means more filed than closed.
+         *
+         * Ensures:
+         *     - a finite ratio  -> "25%" (rounded, no decimals)
+         *     - nothing closed but rows created -> "\u221e", which is the honest
+         *       rendering of a divide-by-zero. A big number like 999% would be a lie
+         *       carrying a number's authority
+         *     - an idle window (nothing created either) -> "\u2014"
+         *     - Pure; never throws
+         */
+        if ( Number.isFinite( payload.ratio ) ) return `${Math.round( payload.ratio * 100 )}%`;
+        return Number.isFinite( payload.created ) && payload.created > 0 ? "\u221e" : "\u2014";
+    }
+
+    _flowRatioLongForm( payload ) {
+        /** The hover text: the full description the short bar label drops. */
+        if ( !payload || typeof payload !== "object" ) return "";
+        const hours = Number.isFinite( payload.window_hours ) ? payload.window_hours : null;
+        if ( hours === null ) return "";
+        const counts = ( Number.isFinite( payload.created ) && Number.isFinite( payload.closed ) )
+            ? `  \u00b7  ${payload.created} created / ${payload.closed} closed` : "";
+        return `Closed vs New Ratio (${hours}hrs): ${this._flowRatioPercentText( payload )}${counts}`;
+    }
+
+    _flowRatioIsOpen( payload, threshold ) {
+        /**
+         * Would the gate ADMIT a new row right now?
+         *
+         * Tied to the verdict rather than to "low is green", so the colour can never
+         * disagree with the behaviour. The comparison is STRICT — at exactly the
+         * threshold the gate refuses — so exactly-at reads red.
+         *
+         * Ensures: true when it would admit; an unmeasurable ratio is not a refusal
+         */
+        if ( !Number.isFinite( threshold ) ) return true;
+        if ( !payload || !Number.isFinite( payload.ratio ) ) {
+            // \u221e (created but nothing closed) is a deny; an idle window allows.
+            return !( payload && Number.isFinite( payload.created ) && payload.created > 0 );
+        }
+        return payload.ratio < threshold;
     }
 
     async fetchFlowRatio() {
@@ -9750,8 +9796,40 @@ class NotificationsUI {
          */
         const el = document.getElementById( "task-list-flow-ratio" );
         if ( !el ) return;
+        // Kept so a slider drag can recolour without re-fetching. The ratio measures
+        // the last 24h; dragging the threshold moves the comparison line, not it.
+        this._flowRatioPayload = payload;
         const text = this._formatFlowRatio( payload );
         el.textContent = text ? ` \u00b7 ${text}` : "";
+        el.title       = this._flowRatioLongForm( payload );
+        this._paintFlowRatioVerdict();
+    }
+
+    _paintFlowRatioVerdict( provisionalThreshold ) {
+        /**
+         * Colour the clause by the verdict the gate would return RIGHT NOW.
+         *
+         * @param {number} [provisionalThreshold] - a threshold being dragged but not
+         *        committed. When given, the clause is marked provisional.
+         *
+         * A PREVIEW MUST NOT LOOK LIKE STATE. While the slider is uncommitted the
+         * colour is a hypothetical, so it renders with a dashed underline. An operator
+         * who drags, is interrupted, and glances back must not read a setting that is
+         * not in force as though it were.
+         *
+         * Ensures:
+         *     - No-op when the span is absent
+         *     - green when the gate would ADMIT, red when it would REFUSE
+         *     - state rides a CLASS, so colour is never the only carrier
+         */
+        const el = document.getElementById( "task-list-flow-ratio" );
+        if ( !el ) return;
+        const provisional = Number.isFinite( provisionalThreshold );
+        const threshold   = provisional ? provisionalThreshold : this._flowRatioThreshold;
+        const open        = this._flowRatioIsOpen( this._flowRatioPayload, threshold );
+        el.classList.toggle( "flow-ratio-open",    open );
+        el.classList.toggle( "flow-ratio-closed",  !open );
+        el.classList.toggle( "flow-ratio-preview", provisional );
     }
 
     // -----------------------------------------------------------------------
@@ -9829,14 +9907,18 @@ class NotificationsUI {
         }
 
         els.root.hidden           = false;
-        els.threshold.value       = settings.allow_below;
-        els.thresholdValue.textContent = Number( settings.allow_below ).toFixed( 2 );
+        // The slider reads in PERCENT while the gate stores a ratio. Converted here
+        // and nowhere else: one unit on screen, the wire format unchanged.
+        this._flowRatioThreshold  = settings.allow_below;
+        els.threshold.value       = Math.round( settings.allow_below * 100 );
+        els.thresholdValue.textContent = `${Math.round( settings.allow_below * 100 )}%`;
         els.window.value          = settings.window_hours;
         els.windowValue.textContent    = `${settings.window_hours}h`;
 
         const overridden = settings.window_source === "override" ||
                            settings.threshold_source === "override";
         els.status.textContent = overridden ? "saved override" : "from config";
+        this._paintFlowRatioVerdict();
         return true;
     }
 
@@ -9973,10 +10055,13 @@ class NotificationsUI {
          */
 
         els.threshold.addEventListener( "input", () => {
-            els.thresholdValue.textContent = Number( els.threshold.value ).toFixed( 2 );
+            const pct = Number( els.threshold.value );
+            els.thresholdValue.textContent = `${pct}%`;
+            // Live preview: the NUMBER does not move, the VERDICT does.
+            this._paintFlowRatioVerdict( pct / 100 );
         } );
         els.threshold.addEventListener( "change", () => {
-            this.saveFlowRatioSettings( { allow_below: Number( els.threshold.value ) } );
+            this.saveFlowRatioSettings( { allow_below: Number( els.threshold.value ) / 100 } );
         } );
 
         els.window.addEventListener( "input", () => {

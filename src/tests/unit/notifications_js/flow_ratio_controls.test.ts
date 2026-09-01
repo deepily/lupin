@@ -77,7 +77,7 @@ function buildClusterDOM(): void {
       <span class="flow-ratio-field">
         <label for="flow-ratio-threshold">Gate opens below
           <output id="flow-ratio-threshold-value">&mdash;</output></label>
-        <input type="range" id="flow-ratio-threshold" min="0.1" max="3" step="0.05" />
+        <input type="range" id="flow-ratio-threshold" min="10" max="200" step="10" />
       </span>
       <span class="flow-ratio-field">
         <label for="flow-ratio-window">Window
@@ -156,11 +156,13 @@ test( "initFlowRatioControls: the listeners bind ONCE however many ticks run", a
   ui.initFlowRatioControls(); await settle();
   assert.equal( settingsCalls, 3, "each failed tick retried the paint" );
 
-  slider( "flow-ratio-threshold" ).value = "1.5";
+  slider( "flow-ratio-threshold" ).value = "150";
   slider( "flow-ratio-threshold" ).dispatchEvent( new Event( "change" ) );
   await settle();
   assert.equal( patches.length, 1,
     "one operator change must PATCH once — a rebind would multiply the writes" );
+  assert.deepEqual( patches[ 0 ], { allow_below: 1.5 },
+    "the slider shows 150% and the WIRE carries the ratio 1.5 — converting in one place only" );
 } );
 
 test( "initFlowRatioControls: a SUCCEEDED paint is not refetched on later ticks", async () => {
@@ -215,8 +217,9 @@ test( "_paintFlowRatioSettings: a good payload paints, unhides, and returns true
   const ui = newUI();
   assert.equal( ui._paintFlowRatioSettings( GOOD ), true );
   assert.equal( root().hidden, false );
-  assert.equal( slider( "flow-ratio-threshold" ).value, "1" );
-  assert.equal( text( "flow-ratio-threshold-value" ), "1.00" );
+  // PERCENT on screen, ratio on the wire: allow_below 1.0 is a 100% gate.
+  assert.equal( slider( "flow-ratio-threshold" ).value, "100" );
+  assert.equal( text( "flow-ratio-threshold-value" ), "100%" );
   assert.equal( slider( "flow-ratio-window" ).value, "24" );
   assert.equal( text( "flow-ratio-window-value" ), "24h" );
   assert.equal( statusTxt(), "from config" );
@@ -310,7 +313,7 @@ test( "saveFlowRatioSettings: repaints from the SERVER's answer, never from the 
     return fakeResponse( 200, true, { ratio: 0.5, window_hours: 24 } ) as never;
   };
   assert.deepEqual( await ui.saveFlowRatioSettings( { allow_below: 2.5 } ), CLAMPED );
-  assert.equal( text( "flow-ratio-threshold-value" ), "1.75" );
+  assert.equal( text( "flow-ratio-threshold-value" ), "175%" );
   assert.equal( statusTxt(), "saved override" );
 } );
 
@@ -322,7 +325,7 @@ test( "saveFlowRatioSettings: a 403 repaints to the server's real values, so no 
     return fakeResponse( 200, true, GOOD ) as never;
   };
   assert.equal( await ui.saveFlowRatioSettings( { allow_below: 2.5 } ), null );
-  assert.equal( slider( "flow-ratio-threshold" ).value, "1",
+  assert.equal( slider( "flow-ratio-threshold" ).value, "100",
     "the refused value must not be left sitting on the control" );
 } );
 
@@ -404,11 +407,11 @@ test( "the sliders label on `input` and only WRITE on `change`", async () => {
   ui.initFlowRatioControls();
   await settle();
 
-  slider( "flow-ratio-threshold" ).value = "2.25";
+  slider( "flow-ratio-threshold" ).value = "150";
   slider( "flow-ratio-threshold" ).dispatchEvent( new Event( "input" ) );
   slider( "flow-ratio-window" ).value = "168";
   slider( "flow-ratio-window" ).dispatchEvent( new Event( "input" ) );
-  assert.equal( text( "flow-ratio-threshold-value" ), "2.25" );
+  assert.equal( text( "flow-ratio-threshold-value" ), "150%" );
   assert.equal( text( "flow-ratio-window-value" ), "168h" );
   assert.equal( patches, 0, "a drag must not PATCH on every pixel" );
 
@@ -431,4 +434,109 @@ test( "the Reset button is wired to resetFlowRatioSettings", async () => {
   document.getElementById( "flow-ratio-reset" )!.dispatchEvent( new Event( "click" ) );
   await settle();
   assert.equal( deletes, 1 );
+} );
+
+// ---------------------------------------------------------------------------
+// THE GATE VERDICT AS A COLOUR, and the live preview while dragging.
+// Spec: planning-is-prompting src/rnd/2026.09.01-gate-display-compaction.md
+// ---------------------------------------------------------------------------
+
+const clause = (): HTMLElement => document.getElementById( "task-list-flow-ratio" )!;
+
+function paintedUI( threshold: number ): FlowUI {
+  const ui = newUI();
+  ui._flowRatioThreshold = threshold;
+  return ui;
+}
+
+test( "the colour follows the VERDICT, not 'low is green'", () => {
+  const ui = paintedUI( 1.0 );
+  ui._renderFlowRatio( { ratio: 0.25, created: 5, closed: 20, window_hours: 24 } );
+  assert.equal( clause().classList.contains( "flow-ratio-open" ), true, "0.25 < 1.0 admits" );
+  assert.equal( clause().classList.contains( "flow-ratio-closed" ), false );
+
+  ui._renderFlowRatio( { ratio: 1.4, created: 14, closed: 10, window_hours: 24 } );
+  assert.equal( clause().classList.contains( "flow-ratio-closed" ), true, "1.4 >= 1.0 refuses" );
+  assert.equal( clause().classList.contains( "flow-ratio-open" ), false );
+} );
+
+test( "EXACTLY at the threshold reads closed — the comparison is strict", () => {
+  // The case a reader most easily guesses wrong: 100% against a 100% threshold.
+  const ui = paintedUI( 1.0 );
+  ui._renderFlowRatio( { ratio: 1.0, created: 10, closed: 10, window_hours: 24 } );
+  assert.equal( clause().textContent, " · Gate: 100%" );
+  assert.equal( clause().classList.contains( "flow-ratio-closed" ), true,
+    "allow is `ratio < threshold`, so exactly-at is a refusal and must not read green" );
+} );
+
+test( "nothing closed is INFINITY and refuses; an idle window is a dash and admits", () => {
+  const ui = paintedUI( 1.0 );
+  ui._renderFlowRatio( { ratio: null, created: 4, closed: 0, window_hours: 24 } );
+  assert.equal( clause().textContent, " · Gate: ∞" );
+  assert.equal( clause().classList.contains( "flow-ratio-closed" ), true,
+    "a window where nothing was finished is exactly what the gate is for" );
+
+  ui._renderFlowRatio( { ratio: null, created: 0, closed: 0, window_hours: 24 } );
+  assert.equal( clause().textContent, " · Gate: —" );
+  assert.equal( clause().classList.contains( "flow-ratio-open" ), true,
+    "an idle window is not a failing window" );
+} );
+
+test( "the hover carries the long form the short label drops", () => {
+  const ui = paintedUI( 1.0 );
+  ui._renderFlowRatio( { ratio: 0.25, created: 5, closed: 19, window_hours: 24 } );
+  assert.equal( clause().title,
+    "Closed vs New Ratio (24hrs): 25%  ·  5 created / 19 closed",
+    "the counts move to the hover so 200%-on-two-tickets stays checkable" );
+} );
+
+test( "dragging the slider moves the COLOUR, never the number", async () => {
+  const ui = newUI();
+  ui.authedFetch = async () => fakeResponse( 200, true, GOOD ) as never;
+  ui._renderFlowRatio( { ratio: 1.4, created: 14, closed: 10, window_hours: 24 } );
+  ui.initFlowRatioControls();
+  await settle();
+
+  const before = clause().textContent;
+  assert.equal( clause().classList.contains( "flow-ratio-closed" ), true, "1.4 >= 1.0" );
+
+  // Drag the threshold up past the ratio: the gate would now admit.
+  slider( "flow-ratio-threshold" ).value = "200";
+  slider( "flow-ratio-threshold" ).dispatchEvent( new Event( "input" ) );
+  assert.equal( clause().textContent, before,
+    "the ratio measures the last 24h — the slider moves the comparison line, not it" );
+  assert.equal( clause().classList.contains( "flow-ratio-open" ), true,
+    "1.4 < 2.0, so the preview shows the gate opening" );
+} );
+
+test( "an UNCOMMITTED preview is marked, so it cannot be misread as state", async () => {
+  const ui = newUI();
+  ui.authedFetch = async () => fakeResponse( 200, true, GOOD ) as never;
+  ui._renderFlowRatio( { ratio: 1.4, created: 14, closed: 10, window_hours: 24 } );
+  ui.initFlowRatioControls();
+  await settle();
+  assert.equal( clause().classList.contains( "flow-ratio-preview" ), false, "committed to begin with" );
+
+  slider( "flow-ratio-threshold" ).value = "200";
+  slider( "flow-ratio-threshold" ).dispatchEvent( new Event( "input" ) );
+  assert.equal( clause().classList.contains( "flow-ratio-preview" ), true,
+    "while dragging, the colour is a hypothetical and must say so" );
+
+  // Committing the value clears the marker — the preview becomes the state.
+  slider( "flow-ratio-threshold" ).dispatchEvent( new Event( "change" ) );
+  await settle();
+  assert.equal( clause().classList.contains( "flow-ratio-preview" ), false,
+    "a saved value is no longer a preview" );
+} );
+
+test( "_paintFlowRatioVerdict: absent clause is a no-op, not a throw", () => {
+  document.body.replaceChildren();
+  assert.doesNotThrow( () => newUI()._paintFlowRatioVerdict() );
+  assert.doesNotThrow( () => newUI()._paintFlowRatioVerdict( 1.5 ) );
+} );
+
+test( "_flowRatioIsOpen: with no threshold known yet, nothing is accused of refusing", () => {
+  const ui = newUI();
+  assert.equal( ui._flowRatioIsOpen( { ratio: 99 }, undefined ), true,
+    "before settings load there is no line to compare against; do not paint a red verdict" );
 } );

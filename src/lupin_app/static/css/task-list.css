@@ -490,6 +490,23 @@ tbody.task-group.collapsed .task-row {
 
 .flow-ratio-controls button:hover { background: #ede7f6; }
 
+/* THE GATE VERDICT, AS A COLOUR. Green means the gate would ADMIT a new row right
+   now; red means it would REFUSE one. Tied to the verdict rather than to "low is
+   green", so the colour cannot disagree with the behaviour if the comparison ever
+   changes. The comparison is STRICT, so exactly-at-threshold reads red.
+   The clause keeps its full description in a title tooltip, so the colour is a
+   second signal rather than the only one (WCAG 1.4.1). */
+.task-list-flow-ratio.flow-ratio-open   { color: #1b7f3b; }
+.task-list-flow-ratio.flow-ratio-closed { color: #c02b2b; }
+
+/* A PREVIEW MUST NOT LOOK LIKE STATE. While the operator is dragging the threshold
+   the colour is a hypothetical — the dashed underline says the setting shown is not
+   the one in force. It reverts to solid the moment the value is saved. */
+.task-list-flow-ratio.flow-ratio-preview {
+    text-decoration: underline dashed;
+    text-underline-offset: 3px;
+}
+
 /* Provenance / failure line: "saved override" vs "from config", and the admin-only
    refusal. The TEXT is the signal, never a colour alone (WCAG 1.4.1). */
 .flow-ratio-controls-status {
