@@ -40,6 +40,21 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* THE STAMP GETS ITS OWN LINE, LEFT-ALIGNED (Rick, 2026-09-01).
+   It read as "far right" only because it was the last inline thing on the row — there
+   is no float or auto margin pushing it there. Going block puts it on its own line at
+   the h3's left edge, which hands the whole first line back to the counts and the gate
+   verdict. Size and colour are inherited from the rule above, unchanged, as asked.
+
+   ⚠️ SCOPED BY ID ON PURPOSE. `.task-list-updated` is shared — #epic-board-updated
+   wears the same class (notifications.html, the Epic Board header). Rick asked about
+   the task-list bar, so the twin is deliberately left alone rather than changed
+   uninvited; giving it the same treatment is a one-line addition to this selector. */
+#task-list-updated {
+    display: block;
+    margin-left: 0;
+}
+
 /* ---- Table ----
    Status-color custom props (scoped to the table) drive the status-dot + the
    3px row left-accent below. Color is ALWAYS redundant with the status WORD in
