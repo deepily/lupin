@@ -658,6 +658,26 @@ itself had been imported from the main repo.
 A census that skips that step over-reports, in exactly the way the module-name search over
 `rest-api-reference.md` over-reported by counting names instead of paths.
 
+**MEASURED END-TO-END, 2026-09-01 — the pins fix TWO of three, and the third is a new artifact.**
+Same 14 files, same sha, three configurations, failing SETS rather than counts:
+
+| run | failing set |
+|---|---|
+| **main tree** | *(empty)* — 143 passed. The control |
+| worktree, `LUPIN_ROOT` only | `test_flow_ratio_settings.py::test_override_path_lands_under_the_fleet_data_root` · `…::test_an_empty_env_var_falls_through_to_the_fleet_root` · `test_notify_idempotency_midconnect_smoke.py::test_a_cached_offline_verdict_is_not_replayed_to_a_connected_user` |
+| worktree, **all three pinned** | the smoke one only |
+
+⇒ **Pinning `PYTHONPATH` removes both `flow_ratio_settings` failures.** That is the split-import
+graph closing, measured on somebody else's tests rather than on my own arm.
+
+⇒ **The survivor is a FIFTH worktree artifact, and it is a gitignored CREDENTIAL — the
+`cloud-run.env` shape again**: `src/conf/keys/notification-api-claude-code-dev`, matched by
+`.gitignore:71` (`src/conf/keys/**`), present in the main checkout and in no worktree. The smoke
+test resolves it from `LUPIN_ROOT`, so **pinning correctly is what makes it look in your tree and
+fail** — the pin is right, the file is simply not there. ⚠️ It is a **:7999 smoke** test, so it does
+NOT belong in the unit-tier 10/11/43 reconciliation above; that table is a different population and
+must not be inflated with this row. Symlink the file, or subtract this one knowingly.
+
 **RECONCILED 2026-08-30 — a second measurement got 10, and 10 and 11 are the SAME finding.** Rio ⚡
 ran the unit tier at sha `cc336880`, root `/mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-rio-8593bf65`,
 with `LUPIN_ROOT="$PWD"` exported, and measured a gap of **10** — not 11.
