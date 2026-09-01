@@ -939,53 +939,23 @@ TITLE_SOFT_CAP = 60
 TITLE_OVERFLOW_MARKER = "[title overflow — the stored title was trimmed at the cap; the original continues here]"
 
 
-def title_may_be_trimmed( title, cap=TITLE_SOFT_CAP ):
-    """
-    Advisory predicate: does this stored title look like one soft_guard_title cut?
-
-    THE GAP THIS FILLS (row a6cb24e8, 2026-08-31). soft_guard_title relocates the
-    tail into `body` and never loses it — but `_serialize_item_terse` DROPS `body`,
-    and terse is the mandated shape for a board glance. So on the one surface where
-    a reader meets a title alone, the recovered tail is invisible. Worse, the trim
-    leaves no mark: a truncated title simply stops, indistinguishable from a short
-    one, so nothing prompts a reader to go looking for a body they were not sent.
-    Rio ⚡ measured a live P1 whose 60-char title asserts a diagnosis the row's own
-    amendment retracts.
-
-    ⚠️ IT OVER-REPORTS, DELIBERATELY. soft_guard_title trims to EXACTLY cap, so
-    every trimmed title satisfies this — but so does a title that happens to be
-    cap chars long on its own. The failure directions are not symmetric: a false
-    positive costs a reader one look at a body with nothing missing, while a false
-    negative IS the defect. Erring the other way needs a stored flag and a
-    migration, which is worth doing and is not this change.
-
-    ⚠️ NOT A REPLACEMENT FOR THE FIRST-ORDER FIX. This makes the trim VISIBLE; it
-    does not stop the trim. The title still loses its tail, and the qualifier still
-    goes with it. The fixes that would reach that — rejecting an over-cap write,
-    an in-title ellipsis, raising the cap — each collide with a stated ruling or
-    guarantee and are staged for one decision on row 45c4c932.
-
-    Requires:
-        - title is a string (the column is NOT NULL)
-        - cap is a positive int
-
-    Ensures:
-        - returns True iff len( title ) == cap — never raises, never inspects body
-        - True for every title soft_guard_title trimmed, by construction, since
-          that helper trims to exactly cap
-        - False for every title shorter than the cap
-
-    Args:
-        title: The STORED title, as it came back from the store
-        cap: The soft cap the title would have been trimmed to
-
-    Returns:
-        bool — advisory only; nothing is gated on it
-
-    Raises:
-        - None
-    """
-    return len( title ) == cap
+# `title_may_be_trimmed` LIVED HERE AND WAS DELETED 2026-08-31 (bug 769b3574).
+#
+# It answered "was this title cut" with `len( title ) == TITLE_SOFT_CAP` — a
+# re-derivation against whatever the cap currently is, rather than a record of
+# what the write actually did. Measured over all 2,278 rows of lupin_db_dev
+# through the real terse serializer, two arms over one variable: at cap 60 it
+# flagged 1,606 rows, at cap 120 it flagged 1. So the pending cap raise
+# (decision cc6519a6) would have switched the board's trim signal off across the
+# whole existing corpus with nothing failing.
+#
+# The answer now lives on the row: `TaskItem.title_trimmed`, written by both
+# write paths from this module's own `soft_guard_title` third return value, and
+# backfilled by migration 47513717b7e5.
+#
+# ⚠️ DO NOT REINTRODUCE A LENGTH-DERIVED SECOND OPINION. Two answers to one
+# question is the drift this bug was; the guard's return value is the only one
+# that knows whether it cut.
 
 
 def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):

@@ -446,9 +446,12 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
           two projections can never disagree about staleness
         - blocker_terminal is likewise DERIVED and ADVISORY, computed by the same
           predicate as the full shape's, for the same reason
-        - title_trimmed is DERIVED and ADVISORY: True when the title is exactly at
-          the soft cap, which every trimmed title is. It over-reports on a natural
-          cap-length title and never under-reports
+        - title_trimmed is STORED and ADVISORY: it is what soft_guard_title
+          actually did to this row's title on its last write, read straight off the
+          column. It is NOT re-derived from length, so it does not move when the
+          cap moves (bug 769b3574) and it clears when a retitle repairs a title.
+          Backfilled rows may over-report — see migration 47513717b7e5 — which is
+          the harmless direction: one wasted look at a body with nothing missing
     """
     return {
         "id"                : str( item.id ),
@@ -461,7 +464,12 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
         # body_changed_ts, matching _serialize_item — see the note there (54924128).
         "park_reason_stale" : park_reason_is_stale( item.status, item.park_reason_captured_at, item.body_changed_ts ),
         "blocker_terminal"  : blocker_is_terminal( item.status, item.blocked_by, blocker_statuses or { } ),
-        "title_trimmed"     : rules.title_may_be_trimmed( item.title ),
+        # STORED, not re-derived (bug 769b3574). This used to be
+        # `rules.title_may_be_trimmed( item.title )`, which is len(title)==cap
+        # against the CURRENT cap — so raising the cap to 120 would have flipped
+        # 1,606 rows to False, 951 of them provably trimmed. The flag is now a
+        # record of what the write did and is immune to the cap moving.
+        "title_trimmed"     : item.title_trimmed,
     }
 
 
@@ -857,6 +865,11 @@ def create_task(
             source_qid          = payload.source_qid,
             correlation_key     = payload.correlation_key,
             flag_suffix         = flag_marker,
+            # RECORD the trim rather than re-deriving it from length later
+            # (bug 769b3574). The guard's third return value is None exactly
+            # when it did not cut, so this is the guard's own verdict rather
+            # than a second opinion that can drift from it.
+            title_trimmed       = title_guard is not None,
         )
         result = _serialize_item( item )
         result[ "title_guard" ]  = title_guard
@@ -1189,6 +1202,19 @@ def patch_task(
             # is the audit trail lying about what it recorded.
             if title_guard is not None:
                 fields[ "body" ] = guarded_body
+
+            # 🔴 WRITTEN ON EVERY TITLE EDIT, NOT ONLY WHEN THE GUARD FIRES
+            # (bug 769b3574). A row trimmed once and later REPAIRED by a shorter
+            # retitle has a complete title, so False is the correct answer — six
+            # live rows are exactly that case, and the old length-derived flag got
+            # them right only by accident of length. A set-only flag would get them
+            # wrong on purpose, which is the bug I nearly built. Unconditional
+            # assignment is the fix: the flag always describes the title now stored.
+            #
+            # It rides `fields` (post-validation, like `body` above) so apply_patch
+            # writes it through the same equality that composes the audit delta —
+            # the flag and the event can never disagree about whether it moved.
+            fields[ "title_trimmed" ] = title_guard is not None
 
         event = repo.apply_patch(
             item, fields, actor=payload.actor, authority=payload.authority,
