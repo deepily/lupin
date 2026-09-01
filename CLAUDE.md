@@ -676,7 +676,19 @@ graph closing, measured on somebody else's tests rather than on my own arm.
 test resolves it from `LUPIN_ROOT`, so **pinning correctly is what makes it look in your tree and
 fail** — the pin is right, the file is simply not there. ⚠️ It is a **:7999 smoke** test, so it does
 NOT belong in the unit-tier 10/11/43 reconciliation above; that table is a different population and
-must not be inflated with this row. Symlink the file, or subtract this one knowingly.
+must not be inflated with this row.
+
+🔴 **DO NOT SYMLINK ANYTHING UNDER `src/conf/keys/` INTO A WORKTREE — FOR ANY REASON.** (Mr. Radio,
+2026-09-01, overruling the first cut of this very paragraph, which said "symlink the file". That
+advice was wrong and is left visible here rather than quietly deleted, because it is the obvious
+move and the next person will reach for it too.) `src/conf/keys/**` is gitignored to keep secrets in
+exactly one place; a symlink puts a live credential inside a throwaway tree that gets `rm -rf`'d,
+copied, and shared, and the `.venv` symlink precedent makes it look sanctioned. **It is not the same
+case: a venv is a build artifact, a key is a secret.**
+
+⇒ **Subtract this one knowingly instead.** It is the same instruction the unit-tier artifacts already
+carry — *subtract them, do not chase them* — and the right long-term fix is the test skipping when
+the key is absent, not the key being copied to where the test looks.
 
 **RECONCILED 2026-08-30 — a second measurement got 10, and 10 and 11 are the SAME finding.** Rio ⚡
 ran the unit tier at sha `cc336880`, root `/mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-rio-8593bf65`,
