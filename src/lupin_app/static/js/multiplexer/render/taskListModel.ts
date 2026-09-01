@@ -148,9 +148,22 @@ export function taskTitleLabel( task: TaskItem | null | undefined ): string {
 // the two cards render the row identically. Drift accepted per D5/throwaway.)
 // ---------------------------------------------------------------------------
 
-// Client title-truncation cap — IDENTICAL to the server-side store-guard cap
-// (task_store_rules.TITLE_SOFT_CAP = 60, handoff #5 / D4). Backstops LEGACY rows
-// written before the store guard.
+// Client title-truncation cap. It USED to be identical to the server-side store
+// cap (task_store_rules.TITLE_SOFT_CAP, handoff #5 / D4), and that comment stayed
+// here asserting the identity after it stopped being true — which is the exact
+// failure the row that moved the cap was about.
+//
+// 🔴 THEY DIVERGED DELIBERATELY ON 2026-09-01. Rick raised the STORE cap 60 -> 120
+// (bug 6ce252e7). This number stayed at 60 because the two caps answer different
+// questions and always did: the store cap decides what is KEPT, and losing a tail
+// there destroys a qualifier permanently. This one decides how much fits in a
+// fixed-width column, and what it cuts is recoverable in place — the row renders
+// an ellipsis and the full title rides the cell's hover tooltip.
+//
+// ⚠️ SO: DO NOT "RESYNC" THIS TO 120 to restore the old identity. A 120-char cell
+// changes the row layout, and nothing is lost at 60. Whether the column should get
+// wider now that titles may legitimately run to 120 is a UI question for Rick, and
+// it is banked rather than decided here.
 export const TASK_TITLE_TRUNCATE_LEN = 60;
 
 /**

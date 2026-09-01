@@ -204,15 +204,17 @@ def test_create_under_cap_title_guard_is_none( client, repo ):
 def test_create_over_cap_title_trimmed_overflow_to_empty_body( client, repo ):
     # Over-cap title + no body: the SERVER trims the stored title to the cap and
     # moves the overflow into body (non-destructive) BEFORE the repo write.
-    long_title = "T" * 90
+    # Derived from the cap, never a literal — a hardcoded 90 stopped being over-cap
+    # the moment the cap moved 60 -> 120, and would have gone on passing at 201.
+    long_title = "T" * ( tasks.rules.TITLE_SOFT_CAP + 30 )
     repo.create_item.return_value = make_item()
     r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title=long_title ) )
     assert r.status_code == 201
     guard = r.json()[ "title_guard" ]
     assert guard[ "trimmed" ] is True and guard[ "overflow_moved_to_body" ] is True
-    assert guard[ "original_length" ] == 90
+    assert guard[ "original_length" ] == tasks.rules.TITLE_SOFT_CAP + 30
     kwargs = repo.create_item.call_args.kwargs
-    assert kwargs[ "title" ] == "T" * 60 and kwargs[ "body" ] == "T" * 30   # overflow → body
+    assert kwargs[ "title" ] == "T" * tasks.rules.TITLE_SOFT_CAP and kwargs[ "body" ] == "T" * 30   # overflow → body
 
 
 def test_create_over_cap_title_with_body_RELOCATES_overflow( client, repo ):
@@ -220,15 +222,16 @@ def test_create_over_cap_title_with_body_RELOCATES_overflow( client, repo ):
     # which is how a silent data-loss path kept a green test beside it. The
     # overflow now survives ABOVE the pre-existing body, which is preserved whole.
     repo.create_item.return_value = make_item()
-    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title="W" * 80, body="keep me" ) )
+    over_cap = "W" * ( tasks.rules.TITLE_SOFT_CAP + 20 )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title=over_cap, body="keep me" ) )
     assert r.status_code == 201
     guard = r.json()[ "title_guard" ]
     assert guard[ "overflow_moved_to_body" ] is True
     kwargs = repo.create_item.call_args.kwargs
-    assert kwargs[ "title" ] == "W" * 60
+    assert kwargs[ "title" ] == "W" * tasks.rules.TITLE_SOFT_CAP
     assert kwargs[ "body" ].startswith( "keep me" )              # body never clobbered, and still first
     assert "W" * 20 in kwargs[ "body" ]                          # ...and the overflow survived
-    assert kwargs[ "title" ] + "W" * 20 == "W" * 80              # round-trips to the original
+    assert kwargs[ "title" ] + "W" * 20 == over_cap              # round-trips to the original
 
 
 def test_create_rejects_bad_enums_with_all_violations( client, repo ):
@@ -743,7 +746,11 @@ def test_terse_does_not_flag_an_over_cap_LEGACY_row( client, repo ):
     the 333 rows already in the store does, so this pins the answer for a real input
     class that the write path can no longer produce.
     """
-    repo.query_tasks.return_value = [ make_item( title="X" * 90 ) ]
+    # OVER THE CURRENT CAP, derived — a literal 90 was over-cap at 60 and stopped
+    # being over-cap when Rick raised it to 120 (bug 6ce252e7). The fixture would
+    # have gone on passing while no longer posing the question it was written for:
+    # a length-derived answer only reports True on a title that is actually long.
+    repo.query_tasks.return_value = [ make_item( title="X" * ( tasks.rules.TITLE_SOFT_CAP + 30 ) ) ]
     r = client.get( "/api/tasks", params={ "terse": "true" } )
     assert r.status_code == 200
     assert r.json()[ "tasks" ][ 0 ][ "title_trimmed" ] is False
@@ -796,7 +803,7 @@ def _recipe_title_trimmed():
     # so LENGTH is held constant across the pair and only the column differs. Any
     # regression back to a length-derived answer reports True on BOTH and dies on the
     # FALSE arm. Under the old recipe that same regression passed.
-    trimmed, _overflow, advisory = rules.soft_guard_title( "T" * 90, None )
+    trimmed, _overflow, advisory = rules.soft_guard_title( "T" * ( rules.TITLE_SOFT_CAP + 30 ), None )
     assert advisory[ "trimmed" ] is True                    # the title still comes from
     assert len( trimmed ) == rules.TITLE_SOFT_CAP           # the guard, not a literal
     return (
@@ -890,7 +897,11 @@ def test_terse_does_not_flag_an_over_cap_LEGACY_row( client, repo ):
     The mutant that survived the entire existing suite dies on the first fixture that
     hands the predicate an input the suite could not produce.
     """
-    repo.query_tasks.return_value = [ make_item( title="X" * 90 ) ]
+    # OVER THE CURRENT CAP, derived — a literal 90 was over-cap at 60 and stopped
+    # being over-cap when Rick raised it to 120 (bug 6ce252e7). The fixture would
+    # have gone on passing while no longer posing the question it was written for:
+    # a length-derived answer only reports True on a title that is actually long.
+    repo.query_tasks.return_value = [ make_item( title="X" * ( tasks.rules.TITLE_SOFT_CAP + 30 ) ) ]
     r = client.get( "/api/tasks", params={ "terse": "true" } )
     assert r.status_code == 200
     assert r.json()[ "tasks" ][ 0 ][ "title_trimmed" ] is False
@@ -1554,53 +1565,79 @@ def test_patch_happy_path_returns_item_and_event( client, repo ):
 # string was capped at 60 through create and unbounded through PATCH — two write
 # paths, two contradictory contracts, neither announced. The door widened when
 # task_edit (3ac79d1d, 2026-07-21) shipped over PATCH.
+#
+# 🔴 THE TWO DOORS DISAGREE AGAIN AS OF 2026-09-01, AND THAT IS THE RULING
+# (Rick, bug 6ce252e7: "Raise to 120 with a 422 over it."). The cap is one number
+# in one place, as 28fc1fb4 required; what differs is the ANSWER above it — a
+# create trims fail-open, an edit answers 422. The tests below assert the
+# asymmetry deliberately, so nobody re-unifies the doors and calls it a fix.
 # ---------------------------------------------------------------------------
 
-def test_patch_over_cap_title_is_guarded_by_THE_SAME_helper_as_create( client, repo ):
-    # ONE HELPER, BOTH DOORS. An over-cap PATCH title is trimmed to the cap and
-    # its overflow relocated into the body — identical treatment to create, and
-    # reported through the identical `title_guard` advisory.
+def test_patch_over_cap_title_is_REJECTED_where_create_would_trim_it( client, repo ):
+    """
+    Rick's ruling, 2026-09-01 (bug 6ce252e7). This test used to assert the opposite
+    — that an over-cap PATCH title was trimmed by the same helper create uses — and
+    it is reversed here rather than deleted, because the reversal IS the change.
+
+    An over-cap edit now answers 422 naming the ACTUAL LENGTH, and nothing is
+    written: no trim, no relocated overflow, no apply_patch at all.
+    """
     item = make_item( title="old title", body="the existing body" )
     repo.get_by_id_for_update.return_value = item
-    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
-    long_title = "P" * 95
+    long_title = "P" * ( tasks.rules.TITLE_SOFT_CAP + 35 )
 
     r = client.patch( f"/api/tasks/{item.id}", json={ "title": long_title, "actor": "krishna a38ee857" } )
 
-    assert r.status_code == 200
-    guard = r.json()[ "title_guard" ]
-    assert guard == {
-        "trimmed"               : True,
-        "original_length"       : 95,
-        "cap"                   : tasks.rules.TITLE_SOFT_CAP,
-        "overflow_moved_to_body": True,
-        "lost_tail"             : "P" * 35,
-    }
-    fields = repo.apply_patch.call_args.args[ 1 ]
-    assert fields[ "title" ] == "P" * 60
-    assert fields[ "title" ] + "P" * 35 == long_title             # round-trips EXACTLY
-    assert fields[ "body" ].startswith( "the existing body" )     # the row's body, preserved and still first
+    assert r.status_code == 422
+    errors = r.json()[ "detail" ][ "errors" ]
+    # The NUMBER is the point: "too long" without one makes the writer count
+    # characters by hand to find out how much to cut.
+    assert any( str( len( long_title ) ) in e and str( tasks.rules.TITLE_SOFT_CAP ) in e for e in errors )
+    repo.apply_patch.assert_not_called()                          # nothing was written
 
 
-def test_patch_relocates_overflow_into_the_body_THE_PATCH_IS_WRITING( client, repo ):
+def test_patch_at_EXACTLY_the_cap_is_accepted( client, repo ):
     """
-    When one PATCH sets BOTH title and body, the overflow must land in the
-    INCOMING body — not the row's current one. Filing it into text the same call
-    is about to overwrite would be a relocation that loses the thing it saved.
+    THE BOUNDARY, both sides of it. The test above uses cap+35; a rejection at the
+    cap itself would be an off-by-one that the over-cap case cannot see, because
+    both a `>` and a `>=` reject cap+35 identically.
+    """
+    item = make_item( title="old title", body="the existing body" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+    at_cap = "P" * tasks.rules.TITLE_SOFT_CAP
+
+    r = client.patch( f"/api/tasks/{item.id}", json={ "title": at_cap, "actor": "krishna a38ee857" } )
+
+    assert r.status_code == 200
+    fields = repo.apply_patch.call_args.args[ 1 ]
+    assert fields[ "title" ] == at_cap                            # stored whole, not cut
+    assert fields[ "title_trimmed" ] is False
+    assert "body" not in fields                                   # an edit never relocates
+
+
+def test_patch_NEVER_relocates_an_overflow_into_a_body_any_more( client, repo ):
+    """
+    The retired behaviour, asserted as absent.
+
+    This path used to relocate an over-cap title's overflow into the body the PATCH
+    was writing, and a careful test guarded WHICH body it landed in. A rejection
+    removes the whole question: an edit that cannot trim has no overflow to file.
+
+    Driven with a title well over the cap AND a body in the same call — the exact
+    input the old relocation logic existed for — and nothing is written.
     """
     item = make_item( title="old", body="about to be replaced" )
     repo.get_by_id_for_update.return_value = item
-    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
 
     r = client.patch( f"/api/tasks/{item.id}", json={
-        "title": "R" * 70, "body": "the NEW body", "actor": "krishna a38ee857",
+        "title": "R" * ( tasks.rules.TITLE_SOFT_CAP + 10 ),
+        "body" : "the NEW body",
+        "actor": "krishna a38ee857",
     } )
 
-    fields = repo.apply_patch.call_args.args[ 1 ]
-    assert r.status_code == 200
-    assert "R" * 10 in fields[ "body" ]                           # overflow survived...
-    assert fields[ "body" ].startswith( "the NEW body" )          # ...below the INCOMING body
-    assert "about to be replaced" not in fields[ "body" ]         # never the stale one
+    assert r.status_code == 422
+    repo.apply_patch.assert_not_called()                          # not even the body landed
 
 
 def test_patch_under_cap_title_is_a_strict_no_op( client, repo ):
@@ -1643,7 +1680,10 @@ def test_create_STORES_the_trim_verdict_rather_than_leaving_it_to_be_re_derived(
     """
     repo.create_item.return_value = make_item()
 
-    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title="T" * 90 ) )
+    # Derived from the cap, not a literal — the cap moved 60 -> 120 on 2026-09-01
+    # and a hardcoded 90 silently became an UNDER-cap string, flipping this arm to
+    # False while still reading like an over-cap test.
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title="T" * ( tasks.rules.TITLE_SOFT_CAP + 30 ) ) )
     assert r.status_code == 201
     assert repo.create_item.call_args.kwargs[ "title_trimmed" ] is True
 
@@ -1675,21 +1715,25 @@ def test_patch_CLEARS_the_flag_when_a_retitle_repairs_a_trimmed_title( client, r
     assert repo.apply_patch.call_args.args[ 1 ][ "title_trimmed" ] is False
 
 
-def test_patch_SETS_the_flag_when_the_new_title_is_itself_over_cap( client, repo ):
+def test_patch_CANNOT_SET_the_flag_because_an_over_cap_retitle_is_refused( client, repo ):
     """
-    The other direction, and the negative control for the test above: clearing must
-    not be unconditional either. A row that was clean and takes an over-cap retitle
-    comes out flagged.
+    The negative control for the clearing test above, rewritten to the new door.
+
+    It used to assert the other direction — that an over-cap retitle came out
+    FLAGGED — which was the proof that clearing was not unconditional. Under the
+    2026-09-01 ruling an edit can never trim, so `title_trimmed` on this path is
+    always False, and the thing that must not be unconditional is now the ACCEPTANCE:
+    an over-cap retitle is refused and the row keeps the flag it already had.
     """
     item = make_item( title="a short clean title", title_trimmed=False )
     repo.get_by_id_for_update.return_value = item
-    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
 
-    r = client.patch( f"/api/tasks/{item.id}", json={ "title": "Y" * 95, "actor": "pocholo 056e2aeb" } )
+    r = client.patch( f"/api/tasks/{item.id}", json={
+        "title": "Y" * ( tasks.rules.TITLE_SOFT_CAP + 1 ), "actor": "pocholo 056e2aeb",
+    } )
 
-    assert r.status_code == 200
-    assert r.json()[ "title_guard" ][ "trimmed" ] is True
-    assert repo.apply_patch.call_args.args[ 1 ][ "title_trimmed" ] is True
+    assert r.status_code == 422
+    repo.apply_patch.assert_not_called()
 
 
 def test_a_patch_that_does_not_touch_the_title_leaves_the_flag_alone( client, repo ):
@@ -1708,16 +1752,22 @@ def test_a_patch_that_does_not_touch_the_title_leaves_the_flag_alone( client, re
     assert repo.apply_patch.call_args.args[ 1 ] == { "priority": "P1" }   # no title_trimmed key at all
 
 
-def test_create_and_patch_produce_THE_SAME_title_for_the_same_input( client, repo ):
+def test_create_TRIMS_and_patch_REJECTS_the_very_same_over_cap_title( client, repo ):
     """
-    THE CONTRACT-PARITY ASSERTION — the one that would have caught the split.
+    THE ASYMMETRY ASSERTION, and it is the exact inverse of the parity assertion it
+    replaces — recorded that way on purpose.
 
-    The defect was not that either path was wrong in isolation; it was that the
-    two disagreed, silently. This drives the identical over-cap title through
-    BOTH doors and requires the stored title and advisory to match. It goes red
-    the moment one path is changed without the other.
+    The old test drove one over-cap title through both doors and required identical
+    results, because bug 28fc1fb4 was the two doors disagreeing silently. Rick's
+    2026-09-01 ruling makes them disagree deliberately: create trims fail-open
+    because it is unattended and rejecting it loses the filing; edit answers 422
+    because a writer is present and is the only party who knows which half of the
+    string is the qualifier.
+
+    Both arms in ONE test, driven from ONE string, so neither door can be changed
+    without the other's behaviour being restated here.
     """
-    long_title = "S" * 88
+    long_title  = "S" * ( tasks.rules.TITLE_SOFT_CAP + 28 )
     shared_body = "a body on both paths"
 
     repo.create_item.return_value = make_item()
@@ -1725,12 +1775,22 @@ def test_create_and_patch_produce_THE_SAME_title_for_the_same_input( client, rep
 
     item = make_item( body=shared_body )
     repo.get_by_id_for_update.return_value = item
-    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
     patched = client.patch( f"/api/tasks/{item.id}", json={ "title": long_title, "actor": "krishna a38ee857" } )
 
-    assert created.json()[ "title_guard" ] == patched.json()[ "title_guard" ]
-    assert repo.create_item.call_args.kwargs[ "title" ] == repo.apply_patch.call_args.args[ 1 ][ "title" ]
-    assert repo.create_item.call_args.kwargs[ "body" ]  == repo.apply_patch.call_args.args[ 1 ][ "body" ]
+    # CREATE: accepted, trimmed to the cap, overflow relocated, advisory reported.
+    assert created.status_code == 201
+    assert created.json()[ "title_guard" ][ "trimmed" ] is True
+    assert repo.create_item.call_args.kwargs[ "title" ] == long_title[ :tasks.rules.TITLE_SOFT_CAP ]
+
+    # EDIT: refused outright, naming the length. Nothing written.
+    assert patched.status_code == 422
+    assert any( str( len( long_title ) ) in e for e in patched.json()[ "detail" ][ "errors" ] )
+    repo.apply_patch.assert_not_called()
+
+    # AND THE ONE NUMBER IS STILL ONE NUMBER — the doors differ in their ANSWER
+    # above the cap, never in where the cap is. That is what 28fc1fb4 required and
+    # this ruling does not undo.
+    assert len( repo.create_item.call_args.kwargs[ "title" ] ) == tasks.rules.TITLE_SOFT_CAP
 
 
 def test_patch_empty_editable_set_rejected( client, repo ):

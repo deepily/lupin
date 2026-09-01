@@ -189,8 +189,23 @@ def test_a_row_the_REAL_guard_trimmed_lands_at_the_cap_and_is_flagged( monkeypat
     landing exactly on the cap, this test goes red and says so.
     """
     module = _load_migration_module()
-    trimmed_title, new_body, advisory = soft_guard_title( "L" * 140, "a pre-existing body" )
+
+    # 🔴 DRIVEN AT THE MIGRATION'S OWN FROZEN CAP, NOT THE LIVE ONE (2026-09-01).
+    # This called the guard with its default cap, which coupled a backfill over a
+    # HISTORICAL corpus to a number that then moved: Rick raised TITLE_SOFT_CAP
+    # 60 -> 120 (bug 6ce252e7), the guard started returning 120-char titles, and
+    # this test went red against a backfill that is correct and must not change.
+    # The migration's own docstring says so in capitals — 60 names the cap that
+    # trimmed the existing rows, and it must NOT track TITLE_SOFT_CAP.
+    #
+    # The test's actual point survives intact: the row is still seeded from the
+    # guard's RETURN VALUES rather than a hand-built string, so it still goes red
+    # if the trim ever stops landing exactly on whatever cap it was given.
+    trimmed_title, new_body, advisory = soft_guard_title(
+        "L" * ( module.HISTORICAL_CAP + 80 ), "a pre-existing body", cap=module.HISTORICAL_CAP
+    )
     assert advisory[ "trimmed" ] is True
+    assert len( trimmed_title ) == module.HISTORICAL_CAP     # the claim the backfill rests on
     assert TITLE_OVERFLOW_MARKER in new_body
 
     _seed( engine, [ ( "guard_trimmed", trimmed_title, new_body ) ] )

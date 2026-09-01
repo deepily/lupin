@@ -1133,11 +1133,16 @@ def patch_task(
         - 422 when the item is terminal (no edits to closed history)
         - row-locked read (N3 parity) so the terminal check cannot be raced
           by a concurrent ->done/->dropped transition
-        - an over-cap `title` is soft-guarded by the SAME rules.soft_guard_title
-          create uses (bug 28fc1fb4): trimmed to the cap with the overflow
-          relocated into the body being written — never discarded, never a
-          rejection. `title_guard` carries the advisory (None when the title was
-          not touched, exactly as create reports it)
+        - 422 when `title` exceeds rules.TITLE_SOFT_CAP, naming the actual length
+          and the cap (Rick's ruling 2026-09-01, bug 6ce252e7). The EDIT door
+          rejects where the CREATE door trims fail-open: a create is unattended
+          and losing it loses the filing, while an editor is present to shorten
+          the string and is the only party who knows which half is the qualifier
+        - `title_guard` is consequently ALWAYS None on this path — an edit that
+          cannot trim cannot relocate an overflow either. The key stays in the
+          response because it is part of the PATCH contract
+        - `title_trimmed` is written on EVERY title edit and is always False —
+          a retitle that repairs a previously-trimmed row must clear the flag
         - field update + 'patched' event append are atomic (one transaction)
         - returns { item, event, persona_flag, title_guard } serialized
     """
@@ -1178,43 +1183,46 @@ def patch_task(
         if item.status in rules.TERMINAL_STATUSES:
             _reject_if_errors( [ f"item is terminal ('{item.status}') — no edits to closed history" ] )
 
-        # ONE HELPER, BOTH DOORS (bug 28fc1fb4, 2026-07-21). This path used to set
-        # `title` with NO cap, NO guard and NO advisory, while create silently cut
-        # the identical string at 60 — two write paths with two contradictory
-        # contracts, neither announced, and the rules-module comment claiming one
-        # cap "at every layer" was false for as long as both existed. The door
-        # widened when task_edit (3ac79d1d, 2026-07-21) shipped over PATCH.
+        # 🔴 THE EDIT DOOR REJECTS; THE CREATE DOOR TRIMS. Rick's ruling, 2026-09-01
+        # (bug 6ce252e7): "Raise to 120 with a 422 over it."
         #
-        # The overflow relocates into the body the PATCH is actually writing: the
-        # incoming body when this same call sets one, else the row's current body.
-        # Guarding against a body the caller is simultaneously replacing would file
-        # the overflow into text about to be overwritten — a relocation that loses
-        # the thing it just saved.
+        # THIS IS NOT A RETURN OF BUG 28fc1fb4, and the difference is worth stating
+        # because the two look alike from a distance. That bug was the two doors
+        # disagreeing SILENTLY and by accident — capped at 60 through create,
+        # unbounded through PATCH, neither announced. Here they disagree LOUDLY and
+        # on purpose: both read the same TITLE_SOFT_CAP, and above it a create trims
+        # fail-open while an edit answers 422 naming the length.
+        #
+        # The reason is who is standing at each door. A create is unattended — a
+        # hook, the MCP wrapper, an agent filing mid-task — and a rejected create
+        # loses the filing. An edit is somebody retyping a title with their hands on
+        # the keys, and they are the only party who knows which half of the string
+        # is the qualifier. The trim cuts the TAIL, which is exactly where the
+        # qualifier lives.
+        #
+        # A rejection here also means an edit can never trim, so it can never
+        # relocate an overflow into a body either. `title_guard` is therefore always
+        # None on this path — kept in the response because the key is part of the
+        # PATCH contract, and its constancy is now a FACT about the door rather than
+        # an oversight.
         title_guard = None
         if "title" in fields:
-            effective_body = fields[ "body" ] if "body" in fields else item.body
-            fields[ "title" ], guarded_body, title_guard = rules.soft_guard_title(
-                fields[ "title" ], effective_body
-            )
-            # Only write the body back when the guard actually moved something.
-            # An untouched PATCH must not manufacture a body delta in the audit
-            # event — a `patched` row claiming a body change that never happened
-            # is the audit trail lying about what it recorded.
-            if title_guard is not None:
-                fields[ "body" ] = guarded_body
+            _reject_if_errors( rules.validate_edit_title_length( fields[ "title" ] ) )
 
-            # 🔴 WRITTEN ON EVERY TITLE EDIT, NOT ONLY WHEN THE GUARD FIRES
-            # (bug 769b3574). A row trimmed once and later REPAIRED by a shorter
-            # retitle has a complete title, so False is the correct answer — six
-            # live rows are exactly that case, and the old length-derived flag got
-            # them right only by accident of length. A set-only flag would get them
-            # wrong on purpose, which is the bug I nearly built. Unconditional
-            # assignment is the fix: the flag always describes the title now stored.
+            # 🔴 WRITTEN ON EVERY TITLE EDIT (bug 769b3574). A row trimmed once and
+            # later REPAIRED by a shorter retitle has a complete title, so False is
+            # the correct answer — six live rows are exactly that case, and the old
+            # length-derived flag got them right only by accident of length. A
+            # set-only flag would get them wrong on purpose.
             #
-            # It rides `fields` (post-validation, like `body` above) so apply_patch
-            # writes it through the same equality that composes the audit delta —
-            # the flag and the event can never disagree about whether it moved.
-            fields[ "title_trimmed" ] = title_guard is not None
+            # Every title that reaches this line is within the cap (the reject above
+            # is the only other exit), so False is not a shortcut — it is the only
+            # answer an edit can produce now.
+            #
+            # It rides `fields` (post-validation) so apply_patch writes it through
+            # the same equality that composes the audit delta — the flag and the
+            # event can never disagree about whether it moved.
+            fields[ "title_trimmed" ] = False
 
         event = repo.apply_patch(
             item, fields, actor=payload.actor, authority=payload.authority,

@@ -323,9 +323,11 @@ class TaskRepository( BaseRepository[TaskItem] ):
             source_qid          = source_qid,
             correlation_key     = correlation_key,
             # A RECORD of what soft_guard_title did on THIS write, never a
-            # read-time re-derivation from length (bug 769b3574). The router
-            # passes `title_guard is not None`; it defaults False so every
+            # read-time re-derivation from length (bug 769b3574). The CREATE
+            # router passes `title_guard is not None`; it defaults False so every
             # other caller and every test fixture keeps its current shape.
+            # (The EDIT door writes it through apply_patch instead, and always
+            # False since 2026-09-01 — an over-cap edit is a 422, bug 6ce252e7.)
             title_trimmed       = title_trimmed,
         )
         self._append_event( item.id, created_by, f"->{status}", authority, receipt_refs=None, reason=creation_reason )

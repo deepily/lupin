@@ -715,7 +715,10 @@ class TestSoftGuardTitle:
     def test_over_cap_empty_body_moves_overflow_to_body( self ):
         # Over-cap + empty body: title trimmed to cap, overflow lands in body,
         # and trimmed-title + body reconstructs the original (nothing lost).
-        title = "A" * 50 + "B" * 40                              # 90 chars, cap 60
+        # LENGTHS DERIVE FROM THE CAP, never a literal. The cap moved 60 -> 120 on
+        # 2026-09-01 and every hardcoded "90 chars, cap 60" fixture silently became
+        # an UNDER-cap string that tested nothing while still reading as over-cap.
+        title = "A" * rules.TITLE_SOFT_CAP + "B" * 30
         new_title, new_body, advisory = rules.soft_guard_title( title, None )
         assert len( new_title ) == rules.TITLE_SOFT_CAP
         assert new_title == title[ :rules.TITLE_SOFT_CAP ]
@@ -723,7 +726,7 @@ class TestSoftGuardTitle:
         assert new_title + new_body == title                    # round-trips — nothing lost
         assert advisory == {
             "trimmed"               : True,
-            "original_length"       : 90,
+            "original_length"       : rules.TITLE_SOFT_CAP + 30,
             "cap"                   : rules.TITLE_SOFT_CAP,
             "overflow_moved_to_body": True,
             "lost_tail"             : title[ rules.TITLE_SOFT_CAP: ],
@@ -732,7 +735,7 @@ class TestSoftGuardTitle:
     @pytest.mark.parametrize( "blank_body", [ None, "", "   ", "\n\t " ] )
     def test_over_cap_treats_whitespace_only_body_as_empty( self, blank_body ):
         # None AND whitespace-only bodies both count as "empty" → overflow moves.
-        title = "z" * 80
+        title = "z" * ( rules.TITLE_SOFT_CAP + 20 )
         new_title, new_body, advisory = rules.soft_guard_title( title, blank_body )
         assert new_title == title[ :rules.TITLE_SOFT_CAP ]
         assert new_body  == title[ rules.TITLE_SOFT_CAP: ]
@@ -744,7 +747,7 @@ class TestSoftGuardTitle:
         # pinned the silent discard in place and went green on every run. The
         # "ruled tradeoff" it cited forbade CLOBBERING a body; it never licensed
         # deleting the title's remainder, and prepending is not clobbering.
-        title = "Q" * 75
+        title = "Q" * ( rules.TITLE_SOFT_CAP + 15 )
         body  = "important pre-existing detail"
         new_title, new_body, advisory = rules.soft_guard_title( title, body )
 
@@ -755,7 +758,7 @@ class TestSoftGuardTitle:
         assert title[ rules.TITLE_SOFT_CAP: ] in new_body        # the overflow SURVIVED
         assert advisory == {
             "trimmed"               : True,
-            "original_length"       : 75,
+            "original_length"       : rules.TITLE_SOFT_CAP + 15,
             "cap"                   : rules.TITLE_SOFT_CAP,
             "overflow_moved_to_body": True,
             "lost_tail"             : title[ rules.TITLE_SOFT_CAP: ],
@@ -771,7 +774,9 @@ class TestSoftGuardTitle:
         word-wrapped the remainder would satisfy every "the overflow is in there
         somewhere" assertion and fail this one.
         """
-        title = "A standing order that will not fit: route ALL GCP calls through the Mr Radio role"
+        title = ( "A standing order that will not fit: route ALL GCP calls through the "
+                  "Mr Radio role, never through a personal account, and never silently" )
+        assert len( title ) > rules.TITLE_SOFT_CAP            # the fixture's own premise
         body  = "pre-existing body text\nwith a second line"
         new_title, new_body, _ = rules.soft_guard_title( title, body )
 
@@ -788,7 +793,7 @@ class TestSoftGuardTitle:
         the body its opening line, which is the part a reader sees first. Appending
         satisfies the same ruling and keeps it.
         """
-        title = "Q" * 75
+        title = "Q" * ( rules.TITLE_SOFT_CAP + 15 )
         body  = "THE REAL OPENING LINE\nand a second line"
         _new_title, new_body, _advisory = rules.soft_guard_title( title, body )
 
@@ -805,8 +810,8 @@ class TestSoftGuardTitle:
         happened — a readable history rather than a corrupted head.
         """
         body                = "THE REAL OPENING LINE"
-        _t1, after_first, _ = rules.soft_guard_title( "A" * 75, body )
-        _t2, after_second, _ = rules.soft_guard_title( "B" * 75, after_first )
+        _t1, after_first, _ = rules.soft_guard_title( "A" * ( rules.TITLE_SOFT_CAP + 15 ), body )
+        _t2, after_second, _ = rules.soft_guard_title( "B" * ( rules.TITLE_SOFT_CAP + 15 ), after_first )
 
         assert after_second.split( "\n" )[ 0 ] == "THE REAL OPENING LINE"
         assert after_second.count( rules.TITLE_OVERFLOW_MARKER ) == 2   # both kept...
@@ -826,14 +831,28 @@ class TestSoftGuardTitle:
         fail-open ruling and the exact-reconstruction guarantee untouched — which is
         why this half needed no ruling while the cap itself does.
         """
-        # The REAL title of row 675e44f9, verbatim — 106 chars, and the qualifier
-        # "by design" is genuinely inside the cut portion. My first draft of this
-        # test used a 63-char stand-in whose whole tail was "ign", so it could not
-        # have shown the qualifier no matter what the code did: a fixture that
-        # cannot demonstrate the thing its own name claims. Caught by running it.
-        title = ( "[LUPIN] add_synonym() hits the same empty-vector wall — "
-                  "EmbeddingManager returns [] on API error by design" )
-        assert len( title ) == 106                            # the fixture's own premise
+        # ⚠️ THE FIXTURE MOVED WITH THE CAP (Rick, 2026-09-01: 60 -> 120), and the
+        # old one is kept below as the NEGATIVE arm rather than deleted, because
+        # what it now proves is the cap raise doing its job.
+        #
+        # It was row 675e44f9's real title, verbatim, 106 chars, with the qualifier
+        # "by design" falling outside a 60-char cap. At 120 that title is not cut at
+        # all — so a test still driving it would go on passing while measuring
+        # nothing, which is the shape this whole row is about.
+        untrimmed_at_the_new_cap = ( "[LUPIN] add_synonym() hits the same empty-vector wall — "
+                                     "EmbeddingManager returns [] on API error by design" )
+        assert len( untrimmed_at_the_new_cap ) == 106
+        assert rules.soft_guard_title( untrimmed_at_the_new_cap, "a body" )[ 2 ] is None
+
+        # The POSITIVE arm: a real-shaped title long enough to be cut at 120, whose
+        # limiting words ("by design") are genuinely inside the cut portion. An
+        # earlier draft of this test used a stand-in whose whole tail was "ign" — a
+        # fixture that could not demonstrate the thing its own name claims, whatever
+        # the code did. Caught by running it, not by reading it.
+        title = ( "[LUPIN] add_synonym() hits the same empty-vector wall — EmbeddingManager "
+                  "returns an empty list on every API error, and swallows the exception by design" )
+        assert len( title ) > rules.TITLE_SOFT_CAP            # the fixture's own premise
+        assert "by design" not in title[ :rules.TITLE_SOFT_CAP ]   # ...and the qualifier IS in the tail
         _new_title, _new_body, advisory = rules.soft_guard_title( title, "a body" )
 
         assert advisory[ "lost_tail" ] == title[ rules.TITLE_SOFT_CAP: ]
@@ -847,6 +866,66 @@ class TestSoftGuardTitle:
         advisory — so a reader who sees the field knows something was genuinely cut.
         """
         assert rules.soft_guard_title( "a short title", "a body" ) == ( "a short title", "a body", None )
+
+
+class TestValidateEditTitleLength:
+    """
+    The EDIT door's hard cap (Rick, 2026-09-01, bug 6ce252e7: "Raise to 120 with a
+    422 over it."). Its whole reason for existing is that it does NOT agree with
+    soft_guard_title above it — same cap, opposite answer — so the tests assert the
+    disagreement rather than treating it as drift.
+    """
+
+    def test_under_cap_returns_no_errors( self ):
+        assert rules.validate_edit_title_length( "a perfectly ordinary title" ) == [ ]
+
+    def test_EXACTLY_at_cap_is_accepted( self ):
+        # The boundary, and the arm a `>=` would fail. cap+1 below is refused by both
+        # a `>` and a `>=`, so the over-cap case alone cannot see an off-by-one.
+        assert rules.validate_edit_title_length( "x" * rules.TITLE_SOFT_CAP ) == [ ]
+
+    def test_one_over_the_cap_is_refused( self ):
+        errors = rules.validate_edit_title_length( "x" * ( rules.TITLE_SOFT_CAP + 1 ) )
+        assert len( errors ) == 1
+
+    def test_the_error_names_the_ACTUAL_LENGTH_and_the_cap( self ):
+        """
+        THE NUMBERS ARE THE POINT. "title too long" makes the writer count characters
+        by hand to find out how much to cut, which is the same tax the silent trim
+        charged — paid at a different moment.
+
+        Two distinct lengths, because a single case cannot tell a real length from a
+        constant: an implementation hardcoding any one number passes one arm and dies
+        on the other.
+        """
+        for over in ( 7, 61 ):
+            title  = "x" * ( rules.TITLE_SOFT_CAP + over )
+            errors = rules.validate_edit_title_length( title )
+            assert str( len( title ) )            in errors[ 0 ]
+            assert str( rules.TITLE_SOFT_CAP )    in errors[ 0 ]
+
+    def test_an_explicit_cap_argument_overrides_the_module_default( self ):
+        # The seam the router does NOT use, kept honest: a caller-supplied cap must
+        # actually govern, or the parameter is decoration.
+        assert rules.validate_edit_title_length( "x" * 30, cap=40 ) == [ ]
+        assert len( rules.validate_edit_title_length( "x" * 30, cap=20 ) ) == 1
+
+    def test_it_REPORTS_and_never_TRIMS( self ):
+        """
+        The separation of powers between the two doors, asserted where it lives.
+
+        This verb returns strings; soft_guard_title returns a new title. Driving one
+        over-cap string through both must show exactly that difference — and it is
+        what stops a later reader from "unifying" them back into one helper.
+        """
+        title = "x" * ( rules.TITLE_SOFT_CAP + 25 )
+
+        assert rules.validate_edit_title_length( title )                 # the edit door: refuses
+        trimmed, _body, advisory = rules.soft_guard_title( title, None ) # the create door: trims
+        assert len( trimmed ) == rules.TITLE_SOFT_CAP
+        assert advisory[ "trimmed" ] is True
+
+
 
     def test_custom_cap_is_honored( self ):
         # The cap is parameterizable — proves the guard is not hard-wired to 60.

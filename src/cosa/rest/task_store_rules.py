@@ -929,7 +929,21 @@ def validate_create_status( status, blocked_by, next_chase_ts ) -> list:
 # Both write paths now route through soft_guard_title (bug 28fc1fb4). The claim is
 # true again — it is recorded here rather than quietly corrected because a comment
 # that was wrong for months is evidence about how this file gets maintained.
-TITLE_SOFT_CAP = 60
+#
+# 🔴 RAISED 60 -> 120 BY RICK'S RULING, 2026-09-01 (decision cc6519a6, bug 6ce252e7):
+# "Raise to 120 with a 422 over it." The cap moved AND the two doors deliberately
+# stopped agreeing about what happens above it — see validate_edit_title_length.
+#
+# WHY 120, with the population named both times rather than quoted once:
+#   Rio, n=44 (the four newest full-row pages of 1,748): median 76 · p95 106 · max 144.
+#   Maria, whole-board re-measurement, n=960: p95 is 130, and ~7.7% of authored
+#   titles exceed 120.
+# ⇒ Those two do not agree, and the fuller count is the one that survives: at n=960
+# the number 120 sits BELOW p95, so the "between p95 and the max" argument Rio and I
+# both carried does NOT hold on the whole board. 120 is Rick's dial, chosen knowing
+# it refuses roughly one authored title in thirteen — and refusing is now the point
+# on the edit path, where a writer is present to shorten the string.
+TITLE_SOFT_CAP = 120
 
 # The marker the relocated title overflow is filed under when the body is NOT
 # empty (bug 28fc1fb4, 2026-07-21). It is a literal, greppable line rather than
@@ -967,8 +981,15 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
     only show ~60 chars and the store's `body` field (the proper home for
     detail) sits underused. This guard fixes the data at its SOURCE — the one
     server-side write path EVERY caller (MCP wrapper, hook, raw POST) flows
-    through — so a paragraph-title never lands in the store unguarded. It is
-    FAIL-OPEN by ruling: an over-long title is NEVER a rejected write.
+    through — so a paragraph-title never lands in the store unguarded.
+
+    ⚠️ THE FAIL-OPEN RULING IS NOW SCOPED TO CREATE, NOT TO THE STORE (Rick,
+    2026-09-01, bug 6ce252e7). This docstring used to say flatly "an over-long
+    title is NEVER a rejected write", and that sentence outlived the ruling it
+    described. It still holds HERE and on POST /api/tasks: a create is the
+    unattended door — hooks, the MCP wrapper, an agent filing mid-task — and a
+    rejected create loses the filing. The EDIT door now rejects instead, because a
+    writer editing a title is present to shorten it; see validate_edit_title_length.
 
     Requires:
         - title is a non-empty string (the column is NOT NULL; the wire model
@@ -1008,13 +1029,14 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
     head. The marker STRING is deliberately unchanged so the grep-recovery
     property holds for rows written before this.
 
-    ⚠️ WHAT THIS DOES NOT FIX, and nobody should read it as fixing: the trim still
-    silently deletes the TAIL of a title, which is where writers put qualifiers —
+    ⚠️ WHAT THIS STILL DOES NOT FIX, on the create path only: the trim silently
+    deletes the TAIL of a title, which is where writers put qualifiers —
     "…DECLINED", "CONDITIONAL on…", "…by design". Six instances in one night each
-    lost a word whose job was to LIMIT the claim in front of it. The three fixes
-    that would address THAT — reject over-cap writes, mark the trim where readers
-    are, raise the cap — each collide with something this file or its clients
-    already state, so they belong to Rick and not to this change. Row a6cb24e8.
+    lost a word whose job was to LIMIT the claim in front of it. Three fixes were
+    put to Rick and he took all three (bug 6ce252e7): the trim is marked where
+    readers are (`title_trimmed`, in the terse projection), the cap is raised to
+    120, and an over-cap write is rejected — on the EDIT door. Above 120 a create
+    still trims, by ruling, and that is the residue this paragraph now names.
 
     Requires:
         - title is a non-empty string (the column is NOT NULL; the wire model
@@ -1070,6 +1092,45 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
     if body_is_empty:
         return trimmed, overflow, advisory
     return trimmed, f"{body}\n\n{TITLE_OVERFLOW_MARKER}\n{overflow}", advisory
+
+
+def validate_edit_title_length( title, cap=TITLE_SOFT_CAP ):
+    """
+    Reject an over-cap title on the EDIT door (Rick's ruling, 2026-09-01, bug
+    6ce252e7: "Raise to 120 with a 422 over it.").
+
+    THE TWO DOORS DELIBERATELY DISAGREE, and the asymmetry is the ruling rather
+    than the drift bug 28fc1fb4 was. A CREATE is unattended — a hook, the MCP
+    wrapper, an agent filing mid-task — and rejecting it loses the filing, so
+    create still trims fail-open through soft_guard_title. An EDIT is somebody
+    retyping a title with their hands on the keys: they can shorten it, and they
+    are the only party who knows which half of it is the qualifier.
+
+    That is the whole argument the trim bug turned on. A trim cuts the TAIL, and
+    a writer puts the limiting word at the end — "…DECLINED", "CONDITIONAL on…",
+    "(4 receipts)". Row 298af249's stored title ended "DM non-deli", losing the
+    word that named the defect. A flag tells a reader something is missing; a
+    rejection hands the choice back to the only person who can make it well.
+
+    Requires:
+        - title is a string (the wire model already rejects empty / non-string)
+        - cap is a positive int
+
+    Ensures:
+        - len( title ) <= cap -> [] (no error; the caller proceeds untouched)
+        - len( title )  > cap -> a ONE-element list carrying the ACTUAL LENGTH and
+          the cap, because "too long" without a number makes the writer count
+          characters by hand to find out how much to cut
+        - never raises, never mutates, never trims — this verb only reports
+    """
+    if len( title ) <= cap:
+        return [ ]
+    return [
+        f"title is {len( title )} characters and the cap is {cap} — an EDIT rejects "
+        f"an over-cap title rather than trimming it, because the trim cuts the TAIL "
+        f"and the tail is where the qualifier lives. Shorten the title yourself, or "
+        f"move the detail into `body`. (A CREATE still trims fail-open: bug 6ce252e7.)"
+    ]
 
 
 # ---------------------------------------------------------------------------

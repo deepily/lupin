@@ -1434,7 +1434,14 @@ class TaskItem( Base ):
        # WRITTEN BY BOTH WRITE PATHS from `soft_guard_title`'s own third return
        # value, which both sites already had in hand and discarded:
        #     POST  /api/tasks       -> title_guard is not None
-       #     PATCH /api/tasks/{id}  -> title_guard is not None, on EVERY title edit
+       #     PATCH /api/tasks/{id}  -> False, on EVERY title edit
+       #
+       # ⚠️ THE PATCH SIDE CHANGED 2026-09-01 (bug 6ce252e7). It used to write
+       # `title_guard is not None` there too, because an over-cap edit was trimmed
+       # like a create. Rick's ruling makes an over-cap EDIT a 422 instead, so no
+       # title that reaches the write is over the cap and False is the only answer
+       # an edit can produce. The clearing behaviour below is UNCHANGED and is why
+       # the flag is still written on every title edit rather than skipped.
        #
        # ⚠️ THE PATCH PATH MUST CLEAR IT, NOT ONLY SET IT. A row trimmed once and
        # later REPAIRED by a shorter retitle has a complete title, so False is the
