@@ -1832,6 +1832,108 @@ def validate_no_envelope_tail( fields ) -> list:
     return errors
 
 
+# ---------------------------------------------------------------------------
+# Epic-key guard at creation (row 5246bb67)
+# ---------------------------------------------------------------------------
+#
+# RICK RULED THIS TWICE. First on 2026-08-31 ~19:40 EDT (reject on creation,
+# `epic:unassigned` named in the error, warn-only for one week). Then again at
+# ~20:35 EDT with Maya's evidence in front of him, keeping the decision and
+# FIXING THE PREDICATE. The second ruling is the operative one.
+#
+# 🔴 THE PREDICATE IS `startswith("epic:")`, NOT `key != ""`, AND THAT IS THE
+# WHOLE POINT. `correlation_key` has THREE tenants, measured on the live board:
+#
+#     epic:<slug>                          191 rows   the epic layer
+#     cascade-* and other free-form        289 rows   cascade runs, historical
+#     cc-task:<sid>:<n>                     52 rows   the harness mirror, automatic
+#
+# A blank-check is satisfied by all three, so it is INERT on two of the three
+# lanes: a row carrying only an auto-stamped machine key passes the guard while
+# carrying no epic at all, and the board then reads as covered precisely because
+# the check passed. That is the defect this row was filed about, one level up.
+#
+# ⚠️ MAYA'S OBJECTION IS ANSWERED RATHER THAN OVERRIDDEN, and the distinction
+# matters to anyone reading her amendment on the row. She argued a creation guard
+# on a three-tenant field "buys the appearance of a covered field, which on a
+# board people read INSTEAD of reading bodies is worse than the honest gap."
+# That was aimed at a BLANK-check, which cannot discriminate. A startswith check
+# is exactly the discrimination she showed was missing. Her DETECTOR
+# recommendation was not taken; the DEFECT she found was.
+#
+# ⚠️ WHAT HER RECOMMENDATION STILL HOLDS THAT THIS DOES NOT: a detector reads the
+# ROWS, so its stated reach is its actual reach and it covers creation paths
+# nobody enumerated. This covers the doors somebody thought of. Her survey found
+# `repo.create_item` has exactly ONE non-test caller today, so the door list is
+# short — but it is a door list. A fifth creation path would be silent here.
+# Worth revisiting when someone pays for the `epic_key` column migration.
+
+EPIC_KEY_PREFIX     = "epic:"
+EPIC_KEY_UNASSIGNED = "epic:unassigned"
+
+# The harness mirror writes this on a path with NO HUMAN PRESENT to answer a 422.
+# Exempt by ruling, not by oversight — see the enforcement note below.
+MIRROR_KEY_PREFIX = "cc-task:"
+
+# Warn-only ramp. Rick: "Ship it warn-only for one week first so no caller breaks
+# by surprise." Flipping this to True turns the advisory into a 422 at the router.
+#
+# 🔴 THE DATE IS NOT DECORATION — `test_epic_key_guard.py` goes RED once it passes
+# while the mode is still warn-only, so the flip is a forced decision rather than
+# a remembered one. Prose does not fail a build; that lesson is Clayton's, from
+# the xfail(strict=True) pin on e9b78e51, and it is why a ramp with only a comment
+# on it silently becomes permanent.
+EPIC_KEY_ENFORCEMENT_STARTS = "2026-09-08"
+EPIC_KEY_ENFORCEMENT_ACTIVE = False
+
+
+def epic_key_advisory( correlation_key ):
+    """
+    Judge one `correlation_key` against the epic-layer rule (row 5246bb67).
+
+    PURE — no I/O, no clock, no config. The caller decides what to do with the
+    verdict, which is what keeps the warn-only ramp a one-line change at the
+    router rather than a behaviour hidden in here.
+
+    Requires:
+        - correlation_key is a str or None (any other type is treated as absent,
+          because a create payload is client-supplied and a TypeError here would
+          turn a soft advisory into a 500)
+
+    Ensures:
+        - returns None when the row is COMPLIANT or EXEMPT:
+            * a key beginning "epic:" — including the explicit "epic:unassigned"
+            * a key beginning "cc-task:" — the harness mirror lane, exempt by ruling
+        - otherwise returns a non-empty advisory string naming BOTH the offending
+          value and "epic:unassigned" as a legal explicit answer, per the ruling
+        - never raises, and never rejects — rejection is the ROUTER's call, gated
+          on EPIC_KEY_ENFORCEMENT_ACTIVE
+
+    ⚠️ BLANK AND MACHINE-KEYED ARE DIFFERENT FAILURES and the message says which,
+    because "add an epic key" is unhelpful to someone staring at a row that
+    already has a correlation_key on it.
+    """
+    key = correlation_key if isinstance( correlation_key, str ) else None
+    key = ( key or "" ).strip()
+
+    if key.startswith( EPIC_KEY_PREFIX ):   return None
+    if key.startswith( MIRROR_KEY_PREFIX ): return None
+
+    if not key:
+        return (
+            f"no epic key: correlation_key is absent, so this row cannot be grouped on the "
+            f"board and will not appear under any story. Pass correlation_key='{EPIC_KEY_PREFIX}<slug>' "
+            f"naming the story this belongs to — or '{EPIC_KEY_UNASSIGNED}' if it genuinely "
+            f"belongs to none, which is a deliberate answer rather than a blank one."
+        )
+    return (
+        f"correlation_key {key!r} is not an epic key — it does not begin '{EPIC_KEY_PREFIX}'. "
+        f"The field has several tenants and only the '{EPIC_KEY_PREFIX}' one groups the board, "
+        f"so a row carrying this is ungrouped even though the field is populated. Pass "
+        f"'{EPIC_KEY_PREFIX}<slug>', or '{EPIC_KEY_UNASSIGNED}' if it belongs to no story."
+    )
+
+
 def quick_smoke_test():
     """
     Quick smoke test for task_store_rules — exercises every validator at the

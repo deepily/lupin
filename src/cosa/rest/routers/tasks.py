@@ -782,6 +782,24 @@ def create_task(
             f"not in known roster; advisory attached, write NOT blocked"
         )
 
+    # Epic-key guard (row 5246bb67, Rick ruled twice: 2026-08-31 ~19:40 then again
+    # ~20:35 with Maya's evidence, keeping reject-on-creation and FIXING the
+    # predicate to startswith("epic:") with the cc-task: mirror lane exempt).
+    #
+    # WARN-ONLY until EPIC_KEY_ENFORCEMENT_ACTIVE flips — his ramp, so no caller
+    # breaks by surprise. Deliberately placed HERE, beside soft_guard_title and
+    # build_persona_advisory: repo.create_item has exactly one non-test caller, so
+    # this line is the chokepoint every door goes through (MCP task_create, the
+    # hook mirror, a raw POST).
+    epic_advisory = rules.epic_key_advisory( payload.correlation_key )
+    if epic_advisory:
+        if rules.EPIC_KEY_ENFORCEMENT_ACTIVE:
+            raise HTTPException( status_code=422, detail=epic_advisory )
+        print(
+            f"[task WARN] epic-key guard on {payload.item_class} create: {epic_advisory} "
+            f"(WARN-ONLY until {rules.EPIC_KEY_ENFORCEMENT_STARTS}; write NOT blocked)"
+        )
+
     with get_db() as session:
         repo = TaskRepository( session )
         # A blocked MINT can be born stranded exactly like a transition (row 00a6bde2).
