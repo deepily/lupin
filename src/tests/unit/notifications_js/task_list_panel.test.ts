@@ -96,6 +96,11 @@ type TaskUI = Record<string, unknown> & {
   // Live/parked header split (2026-08-28)
   _taskIsParked: ( task: unknown, now?: number ) => boolean;
   _formatTaskListCount: ( live: number, parked: number ) => string;
+  // Closed-vs-new ratio in the header (2026-09-01)
+  _formatFlowRatio: ( payload: unknown ) => string;
+  fetchFlowRatio: () => Promise<unknown>;
+  _renderFlowRatio: ( payload: unknown ) => void;
+  log: ( ...args: unknown[] ) => void;
   _taskListCountText: ( openTasks: unknown, now?: number ) => string;
   _renderTaskListUnreachable: ( container: HTMLElement, countEl: HTMLElement | null ) => void;
   _stampTaskListUpdated: () => void;
@@ -669,7 +674,7 @@ test( "renderTaskList: auth_required → sign-in message, count 0", () => {
   buildPanelDOM();
   ui.renderTaskList( { status: "auth_required" } );
   assert.match( document.getElementById( "task-list-container" )!.innerHTML, /Sign-in required/ );
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "0" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 0" );
 } );
 
 test( "renderTaskList: unreachable with NO prior good fetch → indicator + 'No tasks loaded yet', count 0", () => {
@@ -679,7 +684,7 @@ test( "renderTaskList: unreachable with NO prior good fetch → indicator + 'No 
   const html = document.getElementById( "task-list-container" )!.innerHTML;
   assert.match( html, /Store unreachable/ );
   assert.match( html, /No tasks loaded yet/ );
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "0" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 0" );
 } );
 
 test( "renderTaskList: unreachable AFTER a good fetch → indicator + LAST-KNOWN rows (never blank)", () => {
@@ -693,7 +698,7 @@ test( "renderTaskList: unreachable AFTER a good fetch → indicator + LAST-KNOWN
   const html = document.getElementById( "task-list-container" )!.innerHTML;
   assert.match( html, /Store unreachable/ );
   assert.match( html, /Wire the seam/ );                // last-known row replayed
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "2" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 2" );
 } );
 
 test( "renderTaskList: non-array tasks (defensive) → unreachable branch", () => {
@@ -715,7 +720,7 @@ test( "renderTaskList: all-terminal rows → 'No open tasks', count 0 (terminal 
   buildPanelDOM();
   ui.renderTaskList( { tasks: [ T_DONE ] } );
   assert.match( document.getElementById( "task-list-container" )!.innerHTML, /No open tasks/ );
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "0" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 0" );
 } );
 
 test( "renderTaskList: empty tasks array → 'No open tasks', count 0", () => {
@@ -731,7 +736,7 @@ test( "renderTaskList: populated → grouped table, count = OPEN rows only, stam
   ui.renderTaskList( { tasks: [ T_BLOCKED, T_ACTIVE, T_QUEUED, T_DONE ] } );   // 3 open, 1 done
   const container = document.getElementById( "task-list-container" )!;
   assert.match( container.innerHTML, /task-list-table/ );
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "3" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 3" );
   assert.match( document.getElementById( "task-list-updated" )!.textContent, /updated \d{2}:\d{2}:\d{2}/ );
 } );
 
@@ -740,7 +745,7 @@ test( "renderTaskList: falsy row inside tasks is filtered defensively (isTaskOpe
   buildPanelDOM();
   ui.renderTaskList( { tasks: [ T_BLOCKED, null ] } );   // null row must not throw
   // null → {} → open → counted; table renders
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "2" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 2" );
 } );
 
 test( "renderTaskList: stampUpdated=false skips re-stamping", () => {
@@ -1392,11 +1397,14 @@ test( "_formatTaskListCount: parked present → the three-part disclosure", () =
   assert.equal( newUI()._formatTaskListCount( 3, 5 ), "Live: 3 · Parked: 5 · Total: 8" );
 } );
 
-test( "_formatTaskListCount: zero parked → the BARE number, no noise", () => {
-  // A clean board says "3". Printing "Live: 3 · Parked: 0 · Total: 3" spends the
-  // header on a disclosure with nothing to disclose.
-  assert.equal( newUI()._formatTaskListCount( 3, 0 ), "3" );
-  assert.equal( newUI()._formatTaskListCount( 0, 0 ), "0" );
+test( "_formatTaskListCount: zero parked → labelled, but no parked split", () => {
+  // CHANGED 2026-09-01. This used to assert the BARE number "3". The header now
+  // carries a SECOND number beside it — the closed-vs-new ratio — and a bare
+  // integer next to a bare decimal is two unlabelled quantities the reader has to
+  // tell apart by shape. The parked split stays conditional; only the label went
+  // unconditional.
+  assert.equal( newUI()._formatTaskListCount( 3, 0 ), "Live: 3" );
+  assert.equal( newUI()._formatTaskListCount( 0, 0 ), "Live: 0" );
 } );
 
 test( "_formatTaskListCount: all-parked board still shows the live zero", () => {
@@ -1406,7 +1414,106 @@ test( "_formatTaskListCount: all-parked board still shows the live zero", () => 
 test( "_formatTaskListCount: non-numeric counts degrade to 0, never NaN", () => {
   const ui = newUI();
   assert.equal( ui._formatTaskListCount( undefined as unknown as number, 2 ), "Live: 0 · Parked: 2 · Total: 2" );
-  assert.equal( ui._formatTaskListCount( 2, undefined as unknown as number ), "2" );
+  assert.equal( ui._formatTaskListCount( 2, undefined as unknown as number ), "Live: 2" );
+} );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CLOSED-vs-NEW RATIO IN THE HEADER (2026-09-01). The number is counted in SQL by
+// GET /api/tasks/flow-ratio; the header is a thin consumer of it. Two things the
+// endpoint's own docstring insists on and these tests pin: the WINDOW travels with
+// the number, and ratio:null renders as an em dash rather than 0.00.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test( "_formatFlowRatio: prints the ratio to 2dp WITH its window", () => {
+  assert.equal(
+    newUI()._formatFlowRatio( { created: 10, closed: 13, ratio: 0.77, window_hours: 24 } ),
+    "Closed vs New Ratio (24hrs): 0.77"
+  );
+} );
+
+test( "_formatFlowRatio: the WINDOW is not cosmetic — same board, different window", () => {
+  // The measured pair from the endpoint's docstring. The verdict FLIPS on the
+  // window alone, so a header that showed 0.77 and 1.10 without saying which
+  // window produced each would be showing two numbers that look like a
+  // contradiction and are not. A fixture that hard-coded 24 could not see this.
+  const ui = newUI();
+  assert.equal( ui._formatFlowRatio( { ratio: 0.77, window_hours: 24 } ),
+                "Closed vs New Ratio (24hrs): 0.77" );
+  assert.equal( ui._formatFlowRatio( { ratio: 1.10, window_hours: 168 } ),
+                "Closed vs New Ratio (168hrs): 1.10" );
+} );
+
+test( "_formatFlowRatio: ratio null → an EM DASH, never 0.00", () => {
+  // closed === 0 means nothing was finished in the window, which is the WORST
+  // case. Rendering it as 0.00 would read as the best. This assertion is the
+  // whole reason the endpoint sends null instead of a sentinel number.
+  const text = newUI()._formatFlowRatio( { created: 4, closed: 0, ratio: null, window_hours: 24 } );
+  assert.equal( text, "Closed vs New Ratio (24hrs): \u2014" );
+  assert.ok( !text.includes( "0.00" ), "an unmeasurable ratio must not render as a number" );
+} );
+
+test( "_formatFlowRatio: 2dp is padded, so 1.1 and 1.10 do not read as different", () => {
+  assert.equal( newUI()._formatFlowRatio( { ratio: 1.1, window_hours: 24 } ),
+                "Closed vs New Ratio (24hrs): 1.10" );
+  assert.equal( newUI()._formatFlowRatio( { ratio: 2, window_hours: 24 } ),
+                "Closed vs New Ratio (24hrs): 2.00" );
+} );
+
+test( "_formatFlowRatio: unusable payloads yield an EMPTY clause, not a zero", () => {
+  const ui = newUI();
+  for ( const junk of [ null, undefined, "nope", 42, [], {}, { ratio: 0.5 } ] ) {
+    assert.equal( ui._formatFlowRatio( junk ), "",
+                  `expected an omitted clause for ${JSON.stringify( junk )}` );
+  }
+} );
+
+test( "_renderFlowRatio: writes the clause with its leading separator", () => {
+  document.body.innerHTML = `<span id="task-list-flow-ratio"></span>`;
+  newUI()._renderFlowRatio( { ratio: 0.77, window_hours: 24 } );
+  assert.equal( document.getElementById( "task-list-flow-ratio" )!.textContent,
+                " \u00b7 Closed vs New Ratio (24hrs): 0.77" );
+} );
+
+test( "_renderFlowRatio: an unreachable endpoint CLEARS the clause, leaving no stale number", () => {
+  document.body.innerHTML = `<span id="task-list-flow-ratio"> \u00b7 Closed vs New Ratio (24hrs): 0.77</span>`;
+  newUI()._renderFlowRatio( null );
+  assert.equal( document.getElementById( "task-list-flow-ratio" )!.textContent, "" );
+} );
+
+test( "_renderFlowRatio: absent span is a no-op, not a throw", () => {
+  document.body.innerHTML = ``;
+  assert.doesNotThrow( () => newUI()._renderFlowRatio( { ratio: 0.5, window_hours: 24 } ) );
+} );
+
+test( "fetchFlowRatio: returns the payload on a 2xx", async () => {
+  const ui = newUI();
+  const seen: string[] = [];
+  ui.authedFetch = async ( url: string ) => {
+    seen.push( url );
+    return { ok: true, status: 200, json: async () => ( { ratio: 0.77, window_hours: 24 } ) };
+  };
+  assert.deepEqual( await ui.fetchFlowRatio(), { ratio: 0.77, window_hours: 24 } );
+  assert.deepEqual( seen, [ "/api/tasks/flow-ratio" ] );
+} );
+
+test( "fetchFlowRatio: every failure shape returns null, and none of them throw", async () => {
+  const ui = newUI();
+  ui.log = () => {};
+
+  ui.authedFetch = async () => ( { ok: false, status: 401, json: async () => ( {} ) } );
+  assert.equal( await ui.fetchFlowRatio(), null, "401" );
+
+  ui.authedFetch = async () => ( { ok: false, status: 500, json: async () => ( {} ) } );
+  assert.equal( await ui.fetchFlowRatio(), null, "500" );
+
+  ui.authedFetch = async () => { throw new Error( "network down" ); };
+  assert.equal( await ui.fetchFlowRatio(), null, "network throw" );
+
+  ui.authedFetch = async () => ( { ok: true, status: 200, json: async () => { throw new Error( "bad json" ); } } );
+  assert.equal( await ui.fetchFlowRatio(), null, "unparseable body" );
+
+  ui.authedFetch = async () => ( { ok: true, status: 200, json: async () => "not an object" } );
+  assert.equal( await ui.fetchFlowRatio(), null, "wrong shape" );
 } );
 
 test( "_taskListCountText: splits a mixed board on the park-ACTIVE predicate", () => {
@@ -1433,13 +1540,13 @@ test( "🔴 _taskListCountText: an EXPIRED park counts LIVE, not parked", () => 
 test( "_taskListCountText: a null chase counts LIVE (fail-loud-toward-owed)", () => {
   // A malformed park is visible work — is_owed( "parked", None, now ) is True.
   const ui = newUI();
-  assert.equal( ui._taskListCountText( [ PARKED( { next_chase_ts: null } ) ], NOW_MS ), "1" );
+  assert.equal( ui._taskListCountText( [ PARKED( { next_chase_ts: null } ) ], NOW_MS ), "Live: 1" );
 } );
 
 test( "_taskListCountText: junk argument counts 0 rather than throwing", () => {
   const ui = newUI();
   for ( const junk of [ null, undefined, {}, "nope" ] ) {
-    assert.equal( ui._taskListCountText( junk, NOW_MS ), "0" );
+    assert.equal( ui._taskListCountText( junk, NOW_MS ), "Live: 0" );
   }
 } );
 
@@ -1459,7 +1566,7 @@ test( "renderTaskList: an unparked board keeps the plain single number", () => {
   withFrozenNow( NOW_MS, () => {
     ui.renderTaskList( { tasks: [ T_BLOCKED, T_ACTIVE ], count: 2, total: 2, has_more: false } );
   } );
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "2" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 2" );
 } );
 
 test( "the outage replay uses the SAME split, so the two states can't disagree", () => {
@@ -1637,7 +1744,7 @@ test( "renderTaskList: query_unavailable names the missing FILE and is not an ou
   assert.ok( el, "renders its own distinct state" );
   assert.match( el!.textContent ?? "", /task-list-query\.js/, "names the file an operator must go look for" );
   assert.ok( !document.querySelector( ".task-list-unreachable" ), "does NOT masquerade as a store outage" );
-  assert.equal( document.getElementById( "task-list-count" )!.textContent, "0" );
+  assert.equal( document.getElementById( "task-list-count" )!.textContent, "Live: 0" );
 } );
 
 test( "renderTaskList: query_unavailable does NOT replay last-known rows", () => {

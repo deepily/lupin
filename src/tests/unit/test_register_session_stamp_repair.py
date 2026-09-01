@@ -187,16 +187,16 @@ class TestTheRepairDirection:
 
 class TestWhatTheSecondRunCostsBesidesTheStamp:
     """
-    The class defect, MEASURED HERE BUT NOT FIXED HERE — it is Rick's call on e9b78e51.
+    The class defect, MEASURED HERE AND NOW FIXED — Rick ruled option (d) on e9b78e51
+    (2026-09-01) and the one-line rebind landed at 23804005 the night it was measured.
+    These now assert the WORKING behaviour and pass; the xfail marker is gone.
 
-    🔴 THIS ASSERTS THE BEHAVIOUR WE WANT AND IS MARKED xfail(strict=True), NOT A
-    PASSING TEST THAT ASSERTS THE BUG. My first cut did the latter and Mr. Radio 🦉
-    called it a trap: a green test asserting a defect reads as APPROVED BEHAVIOUR to
-    anyone who did not write it, and the comment saying otherwise is not what a reader
-    checks. Same signal, no trap — `strict=True` means the day Rick's one-line rebind
-    at register_session.py:2061 lands, this XPASSes and pytest turns that into a
-    FAILURE, so whoever lands it is forced back here. It cannot be mistaken for a
-    blessing in the meantime.
+    🔴 WHY THE MARKER EXISTED, kept because the reasoning outlives it. My first cut was
+    a PASSING test asserting the BUG, and Mr. Radio 🦉 called it a trap: a green test
+    asserting a defect reads as APPROVED BEHAVIOUR to anyone who did not write it, and
+    the comment saying otherwise is not what a reader checks. `xfail(strict=True)` gave
+    the same signal without the trap — an XPASS is a FAILURE, so whoever landed the
+    rebind was forced back here to flip these. That is exactly what happened.
 
     `session_topic` is the named production victim: the MCP server writes it via
     set_session_topic, it lives only on the bridge, and it is what the stop-hook

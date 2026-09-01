@@ -161,6 +161,7 @@ class NotificationsUI {
         // Storage keys
         this.QUEUE_SESSION_KEY = 'notifications_queue_session_id';
         this.AUDIO_SESSION_KEY = 'notifications_audio_session_id';
+        this.SESSION_FALLBACK_REASON_KEY = 'notifications_session_fallback_reason';
         this.USER_EMAIL_KEY = 'notifications_user_email';
         this.VERSION_KEY = 'notifications_version';
         this.QUEUE_FILTER_PREF_KEY = 'notifications_filter_preference';  // Filter mode storage
@@ -2212,41 +2213,195 @@ class NotificationsUI {
         }
         
         // Generate new session ID
+        //
+        // Every throw below is TAGGED with an origin before it reaches the catch.
+        // The catch is shared by five distinguishable failures whose causes have
+        // nothing to do with each other, and the old single log line named none
+        // of them — see FALLBACK_ORIGIN for the list.
         try {
-            // Ensure token is valid before API call (auto-refresh if expired)
-            await this.ensureValidToken();
-
-            const response = await fetch( '/api/get-session-id', {
-                method: 'GET',
-                headers: {
-                    'Authorization': this.getAuthHeader()
-                }
-            });
-            
-            if ( response.ok ) {
-                const data = await response.json();
-                const sessionId = data.session_id;
-                
-                if ( !sessionId ) {
-                    throw new Error( 'Session ID not found in response' );
-                }
-                
-                localStorage.setItem( storageKey, sessionId );
-                this.log( `[SESSION] Generated new ${sessionType} session: ${sessionId}` );
-                return sessionId;
-            } else {
-                throw new Error( `HTTP ${response.status}: ${response.statusText}` );
+            // Ensure token is valid before API call (auto-refresh if expired).
+            // This runs BEFORE the fetch, so when it throws no HTTP request is
+            // ever made and the session endpoint is not implicated at all.
+            try {
+                await this.ensureValidToken();
+            } catch ( tokenError ) {
+                throw this.tagSessionIdFailure( tokenError, this.FALLBACK_ORIGIN.TOKEN_REFRESH_FAILED );
             }
-            
+
+            let response;
+            try {
+                response = await fetch( '/api/get-session-id', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': this.getAuthHeader()
+                    }
+                });
+            } catch ( networkError ) {
+                // fetch() rejects only on a transport failure — DNS, refused
+                // connection, a dropped tunnel, CORS. It never rejects on an
+                // HTTP status, so this arm cannot be confused with one.
+                throw this.tagSessionIdFailure( networkError, this.FALLBACK_ORIGIN.NETWORK_UNREACHABLE );
+            }
+
+            if ( !response.ok ) {
+                throw this.tagSessionIdFailure(
+                    new Error( `HTTP ${response.status}: ${response.statusText}` ),
+                    this.FALLBACK_ORIGIN.HTTP_STATUS,
+                    { httpStatus: response.status }
+                );
+            }
+
+            let data;
+            try {
+                data = await response.json();
+            } catch ( parseError ) {
+                // A 200 that is not JSON. The likely author is an intermediary
+                // (proxy, tunnel, captive portal) answering with an HTML page
+                // instead of the endpoint — which is why this is NOT folded in
+                // with the missing-field case below.
+                throw this.tagSessionIdFailure( parseError, this.FALLBACK_ORIGIN.PAYLOAD_NOT_JSON );
+            }
+
+            const sessionId = data.session_id;
+
+            if ( !sessionId ) {
+                throw this.tagSessionIdFailure(
+                    new Error( 'Session ID not found in response' ),
+                    this.FALLBACK_ORIGIN.PAYLOAD_MISSING_FIELD
+                );
+            }
+
+            localStorage.setItem( storageKey, sessionId );
+            this.log( `[SESSION] Generated new ${sessionType} session: ${sessionId}` );
+            return sessionId;
+
         } catch ( error ) {
-            this.error( `Failed to get session ID for ${sessionType}:`, error );
-            
-            // Generate fallback session ID
-            const fallbackId = this.generateFallbackSessionId();
-            localStorage.setItem( storageKey, fallbackId );
-            this.log( `[SESSION] Using fallback ${sessionType} session: ${fallbackId}` );
-            return fallbackId;
+            // `error` is not guaranteed to be an object — a rejected promise can
+            // carry null or a primitive. Hardening, not a live crash: MEASURED
+            // with this guard reverted, the method still returns an id, because
+            // the strict-mode TypeError from tagging a primitive is itself
+            // caught here. What is lost is the DIAGNOSIS — the origin degrades
+            // to 'unclassified' and the TypeError's message replaces the real
+            // cause, which is the one thing this row exists to preserve.
+            const origin = ( error && error.lupinFallbackOrigin ) || this.FALLBACK_ORIGIN.UNCLASSIFIED;
+            return this.useFallbackSessionId( sessionType, storageKey, origin, error );
         }
+    }
+
+    /**
+     * The distinguishable reasons getOrCreateSessionId() can end up on the
+     * fallback. They have different causes and different owners, so the log
+     * line has to name which one fired.
+     */
+    get FALLBACK_ORIGIN() {
+        return {
+            TOKEN_REFRESH_FAILED  : 'token-refresh-failed',
+            NETWORK_UNREACHABLE   : 'network-unreachable',
+            HTTP_STATUS           : 'http-status',
+            PAYLOAD_NOT_JSON      : 'payload-not-json',
+            PAYLOAD_MISSING_FIELD : 'payload-missing-field',
+            UNCLASSIFIED          : 'unclassified'
+        };
+    }
+
+    tagSessionIdFailure( error, origin, detail = {} ) {
+        /**
+         * Stamp an origin onto an error on its way to the shared catch.
+         *
+         * Requires:
+         *     - error is an Error (or anything with settable properties)
+         *     - origin is one of the FALLBACK_ORIGIN values
+         *
+         * Ensures:
+         *     - returns the same error object, carrying lupinFallbackOrigin
+         *     - merges any detail fields onto the error for the log line
+         *
+         * Raises:
+         *     - None
+         */
+        // A primitive cannot carry a property, and assigning one in strict mode
+        // throws. Wrapping keeps the ORIGIN — without this the tagger's own
+        // TypeError becomes the error the catch sees, and the real cause is
+        // gone. Raised by Tiberius in review as hardening; measured as a
+        // diagnosis loss, not a crash.
+        if ( error === null || typeof error !== 'object' ) {
+            const wrapped = new Error( String( error ) );
+            wrapped.lupinFallbackOrigin = origin;
+            Object.assign( wrapped, detail );
+            return wrapped;
+        }
+
+        error.lupinFallbackOrigin = origin;
+        Object.assign( error, detail );
+        return error;
+    }
+
+    useFallbackSessionId( sessionType, storageKey, origin, error ) {
+        /**
+         * Mint, persist and ANNOUNCE a locally-generated session ID.
+         *
+         * A client running on an id the server never issued is a state worth
+         * seeing, so this announces at error level rather than at this.log.
+         * Before the separator fix the degradation announced itself as a 403
+         * reconnect loop; now the socket works, so nothing else will say it.
+         *
+         * The degradation is STICKY: the id is written to localStorage, and the
+         * top of getOrCreateSessionId() returns a stored id without ever asking
+         * the server again. One transient failure therefore pins this browser to
+         * a self-minted id for every later page load, after the cause has
+         * cleared. That is why the reason is persisted alongside the id.
+         *
+         * Requires:
+         *     - storageKey is the localStorage key for this session type
+         *     - origin is one of the FALLBACK_ORIGIN values
+         *
+         * Ensures:
+         *     - returns a session id matching the server's ^[a-z]+ [a-z]+$ format
+         *     - the id and the origin that caused it are both persisted
+         *     - a rejecting localStorage degrades to console output, not a throw,
+         *       for BOTH the session id and the diagnostic record
+         *
+         * Raises:
+         *     - None
+         */
+        const fallbackId = this.generateFallbackSessionId();
+
+        // Both writes are guarded, and the ORDER matters. A full or disabled
+        // localStorage must not turn a degraded session into a thrown error
+        // escaping getOrCreateSessionId() — the caller asked for an id and an
+        // id is available. Guarding only the diagnostic write below and leaving
+        // this one bare would protect the less important of the two.
+        try {
+            localStorage.setItem( storageKey, fallbackId );
+        } catch ( storageError ) {
+            this.error( '[SESSION] Could not persist fallback session id:', storageError );
+        }
+
+        const record = {
+            origin      : origin,
+            sessionType : sessionType,
+            sessionId   : fallbackId,
+            message     : error && error.message ? error.message : String( error ),
+            httpStatus  : error && error.httpStatus ? error.httpStatus : null,
+            at          : new Date().toISOString()
+        };
+
+        try {
+            localStorage.setItem( this.SESSION_FALLBACK_REASON_KEY, JSON.stringify( record ) );
+        } catch ( storageError ) {
+            // A full or disabled localStorage must not turn a diagnostic into
+            // a second failure. The console line below still carries the origin.
+            this.error( '[SESSION] Could not persist fallback reason:', storageError );
+        }
+
+        this.error(
+            `[SESSION] FALLBACK ENGAGED for ${sessionType} — origin=${origin} — ` +
+            `using self-minted id "${fallbackId}" that the server never issued. ` +
+            `Cause: ${record.message}`,
+            record
+        );
+
+        return fallbackId;
     }
     
     generateFallbackSessionId() {
@@ -9495,22 +9650,108 @@ class NotificationsUI {
          * Parked rows are approved-not-now, blocked on nothing, and self-expiring;
          * counting them alongside live work makes the remaining-work figure fiction.
          *
-         * ZERO PARKED PRINTS THE BARE NUMBER. A clean board says "3", not
-         * "Live: 3 · Parked: 0 · Total: 3" — the split is a disclosure that only
-         * earns its space when there is something to disclose.
+         * "LIVE" IS UNCONDITIONAL; THE PARKED SPLIT IS NOT. A clean board says
+         * "Live: 3", not "3" and not "Live: 3 · Parked: 0 · Total: 3". The label is
+         * always carried because this number now sits in a header beside a SECOND
+         * number — the closed-vs-new ratio — and a bare integer next to a bare
+         * decimal is two unlabelled quantities the reader must tell apart by shape.
+         * The parked split stays conditional: it is a disclosure, and it earns its
+         * space only when there is something to disclose.
          *
          * Requires:
          *     - live and parked are non-negative counts (non-numeric tolerated)
          *
          * Ensures:
          *     - parked > 0  → "Live: L · Parked: P · Total: L+P"
-         *     - parked <= 0 → String( live )
+         *     - parked <= 0 → "Live: L"
          *     - Pure: no DOM, no side effects; never throws
          */
         const l = Number.isFinite( live )   ? live   : 0;
         const p = Number.isFinite( parked ) ? parked : 0;
-        if ( p <= 0 ) return String( l );
+        if ( p <= 0 ) return `Live: ${l}`;
         return `Live: ${l} · Parked: ${p} · Total: ${l + p}`;
+    }
+
+    _formatFlowRatio( payload ) {
+        /**
+         * Header text for the closed-vs-new ratio, from GET /api/tasks/flow-ratio.
+         *
+         * THE WINDOW IS PART OF THE NUMBER, so it is printed with it. The same board
+         * measured minutes apart reads 0.77 over 24h and 1.10 over 168h — the verdict
+         * FLIPS on the window alone. A ratio shown without its window is a figure the
+         * reader cannot check, and would be quoted back later as a property of the
+         * board rather than of the question asked.
+         *
+         * AN EM DASH IS NOT A ZERO. The endpoint sends ratio:null when nothing closed
+         * in the window, deliberately, so a consumer cannot accidentally compare it.
+         * Rendering that as "0.00" would invert its meaning — a window in which
+         * nothing was finished is the WORST case, and 0.00 reads as the best.
+         *
+         * Requires:
+         *     - payload is the endpoint body, or null/undefined when unreachable
+         *
+         * Ensures:
+         *     - null/unreachable/bad shape -> "" (the header omits the clause rather
+         *       than showing a number nobody measured)
+         *     - ratio is a number -> "Closed vs New Ratio (Nhrs): R" to 2dp
+         *     - ratio is null     -> "Closed vs New Ratio (Nhrs): \u2014"
+         *     - Pure: no DOM, no fetch, no side effects; never throws
+         */
+        if ( !payload || typeof payload !== "object" ) return "";
+        const hours = Number.isFinite( payload.window_hours ) ? payload.window_hours : null;
+        if ( hours === null ) return "";
+        const label = `Closed vs New Ratio (${hours}hrs):`;
+        if ( !Number.isFinite( payload.ratio ) ) return `${label} \u2014`;
+        return `${label} ${payload.ratio.toFixed( 2 )}`;
+    }
+
+    async fetchFlowRatio() {
+        /**
+         * Fetch the closed-vs-new ratio from GET /api/tasks/flow-ratio.
+         *
+         * NOT MEMOIZED, unlike fetchEpicStories. This one IS live state — it moves
+         * every time anybody files or closes a row — so it rides the existing 60s
+         * task-list tick. It is still a SECOND endpoint rather than a second poll of
+         * the first: the ratio is counted in SQL precisely because a page length is
+         * not a count, so it cannot be derived from the rows already on the client.
+         *
+         * Requires:
+         *     - this.authedFetch is available (handles JWT refresh)
+         *
+         * Ensures:
+         *     - Returns the payload object on 2xx with a well-formed body
+         *     - Returns null on ANY failure (401, non-2xx, network throw, bad JSON),
+         *       which _formatFlowRatio renders as an omitted clause, never a zero
+         *     - Never throws
+         */
+        try {
+            const response = await this.authedFetch( "/api/tasks/flow-ratio" );
+            if ( !response.ok ) {
+                this.log( `Flow ratio unavailable (HTTP ${response.status}) - header omits the ratio` );
+                return null;
+            }
+            const body = await response.json();
+            return ( body && typeof body === "object" ) ? body : null;
+        } catch ( error ) {
+            this.log( `Flow ratio fetch failed: ${error} - header omits the ratio` );
+            return null;
+        }
+    }
+
+    _renderFlowRatio( payload ) {
+        /**
+         * Write the ratio clause into #task-list-flow-ratio.
+         *
+         * Ensures:
+         *     - No-op when the span is absent (the panel renders without it)
+         *     - Empty text when payload is unusable — the header shrinks to the live
+         *       count rather than displaying a stale or invented number
+         *     - Never throws
+         */
+        const el = document.getElementById( "task-list-flow-ratio" );
+        if ( !el ) return;
+        const text = this._formatFlowRatio( payload );
+        el.textContent = text ? ` \u00b7 ${text}` : "";
     }
 
     _taskListCountText( openTasks, now ) {
@@ -9684,7 +9925,7 @@ class NotificationsUI {
 
         if ( composite && composite.status === "auth_required" ) {
             container.innerHTML = `<p class="task-list-message task-list-signin">🔒 Sign-in required.</p>`;
-            if ( countEl ) countEl.textContent = "0";
+            if ( countEl ) countEl.textContent = "Live: 0";
             return;
         }
 
@@ -9696,7 +9937,7 @@ class NotificationsUI {
                 `<p class="task-list-message task-list-query-unavailable">🧩 Task-list query did not load` +
                 ` — /static/js/shared/task-list-query.js is missing or failed to parse.` +
                 ` This is a deploy problem, not a store outage.</p>`;
-            if ( countEl ) countEl.textContent = "0";
+            if ( countEl ) countEl.textContent = "Live: 0";
             return;
         }
 
@@ -9857,7 +10098,7 @@ class NotificationsUI {
             if ( countEl ) countEl.textContent = this._taskListCountText( lastGood );
         } else {
             container.innerHTML = indicator + `<p class="task-list-message task-list-empty">No tasks loaded yet.</p>`;
-            if ( countEl ) countEl.textContent = "0";
+            if ( countEl ) countEl.textContent = "Live: 0";
         }
     }
 
@@ -9900,6 +10141,11 @@ class NotificationsUI {
             // request on the first tick only and never again.
             await this.fetchEpicStories();
             this.renderEpicBoard( composite );
+            // The ratio is counted in SQL, so it cannot come off the rows above.
+            // It rides THIS tick rather than a timer of its own — same reason the
+            // Epic Board shares the composite: two clocks read as a bug the first
+            // time they disagree.
+            this._renderFlowRatio( await this.fetchFlowRatio() );
         } finally {
             this._taskListFetchInFlight = false;
         }

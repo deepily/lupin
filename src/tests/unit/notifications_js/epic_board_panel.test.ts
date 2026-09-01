@@ -742,13 +742,22 @@ test( "the Epic Board never fetches /api/tasks itself — it renders off the sha
   ui.authedFetch = async ( url: string ) => {
     urls.push( url );
     if ( url === "/api/epic-stories" ) return fakeResponse( 200, true, { stories: {}, count: 0 } ) as never;
+    if ( url === "/api/tasks/flow-ratio" ) return fakeResponse( 200, true, { created: 1, closed: 2, ratio: 0.5, window_hours: 24 } ) as never;
     return fakeResponse( 200, true, { tasks: [ R_SEAL_A, R_NO_KEY ], count: 2 } ) as never;
   };
 
   await ui.refreshTaskList();
 
-  const taskUrls = urls.filter( u => u.startsWith( "/api/tasks" ) );
-  assert.equal( taskUrls.length, 1, "ONE fetch fed BOTH panes" );
+  // TIGHTENED 2026-09-01. This filtered on the prefix "/api/tasks", which also
+  // matches every sibling resource under it — so it could not tell "the rows were
+  // polled twice" (the defect it exists to catch) from "a second, different
+  // resource was read once" (not a defect). It now names the row list exactly.
+  const rowUrls = urls.filter( u => u.startsWith( "/api/tasks?" ) );
+  assert.equal( rowUrls.length, 1, "ONE row fetch fed BOTH panes" );
+  // The ratio is a SEPARATE resource — counted in SQL, so it cannot be derived
+  // from the rows above — but it must still ride this one tick, exactly once.
+  assert.equal( urls.filter( u => u === "/api/tasks/flow-ratio" ).length, 1,
+                "the ratio rides the shared tick, and is not polled on a timer of its own" );
   // Both panes actually rendered off it.
   assert.equal( document.getElementById( "epic-board-container" )!.querySelector( "table.epic-board-table" ) !== null, true );
   assert.equal( document.getElementById( "task-list-container" )!.querySelector( "table.task-list-table" ) !== null, true );
@@ -766,6 +775,7 @@ test( "a second refresh re-renders both panes without re-fetching the stories", 
   ui.authedFetch = async ( url: string ) => {
     urls.push( url );
     if ( url === "/api/epic-stories" ) return fakeResponse( 200, true, { stories: {}, count: 0 } ) as never;
+    if ( url === "/api/tasks/flow-ratio" ) return fakeResponse( 200, true, { created: 1, closed: 2, ratio: 0.5, window_hours: 24 } ) as never;
     return fakeResponse( 200, true, { tasks: [ R_SEAL_A ], count: 1 } ) as never;
   };
 
@@ -773,5 +783,10 @@ test( "a second refresh re-renders both panes without re-fetching the stories", 
   await ui.refreshTaskList();
 
   assert.equal( urls.filter( u => u === "/api/epic-stories" ).length, 1 );
-  assert.equal( urls.filter( u => u.startsWith( "/api/tasks" ) ).length, 2 );
+  // Row list: once per refresh. The stories are memoized; the rows are not.
+  assert.equal( urls.filter( u => u.startsWith( "/api/tasks?" ) ).length, 2 );
+  // The ratio is live state, so it re-fetches with the rows — NOT memoized like
+  // the stories. Two refreshes, two reads: that is the intended behaviour, and
+  // asserting it here is what stops someone "optimising" it into a stale number.
+  assert.equal( urls.filter( u => u === "/api/tasks/flow-ratio" ).length, 2 );
 } );

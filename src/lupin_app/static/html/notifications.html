@@ -696,7 +696,10 @@
              fleet-status section structure. Pure observability — NO mutating controls. -->
         <div class="collapsible-section" id="section-task-list">
             <div class="section-header" onclick="toggleSection('task-list-section')">
-                <h3>📋 Task List: <span id="task-list-count">0</span>
+                <h3>📋 Task List · <span id="task-list-count">0</span><span
+                          id="task-list-flow-ratio" class="task-list-flow-ratio"
+                          data-testid="task-list-flow-ratio"
+                          title="Rows created vs closed over the window. Below 1.0 means the board is draining."></span>
                     <span id="task-list-updated" class="task-list-updated"
                           data-testid="task-list-updated"
                           title="Last refreshed (HH:MM:SS, browser timezone)"></span></h3>
@@ -1090,7 +1093,7 @@
     <script type="module" src="/static/js/shared/task-list-query.js?v=20260803c"></script>
     <script type="module" src="/static/js/shared/agent-select.js?v=20260829a"></script>
     <script type="module" src="/static/js/shared/arg-interview.js?v=20260829a"></script>
-    <script src="/static/js/notifications.js?v=20260829a"></script>
+    <script src="/static/js/notifications.js?v=20260901"></script>
     <script src="/static/js/broadcast-panel.js?v=20260619a"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.

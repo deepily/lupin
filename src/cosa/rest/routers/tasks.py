@@ -24,7 +24,7 @@ Canonical design: planning-is-prompting ->
 src/rnd/2026.06.11-unified-task-store-design.md (v0.4, Rick-ruled §3.1).
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Annotated, Optional
 import json
 import os
@@ -790,8 +790,59 @@ def create_task(
             f"not in known roster; advisory attached, write NOT blocked"
         )
 
+    # Epic-key guard (row 5246bb67, Rick ruled twice: 2026-08-31 ~19:40 then again
+    # ~20:35 with Maya's evidence, keeping reject-on-creation and FIXING the
+    # predicate to startswith("epic:") with the cc-task: mirror lane exempt).
+    #
+    # WARN-ONLY until EPIC_KEY_ENFORCEMENT_ACTIVE flips — his ramp, so no caller
+    # breaks by surprise. Deliberately placed HERE, beside soft_guard_title and
+    # build_persona_advisory: repo.create_item has exactly one non-test caller, so
+    # this line is the chokepoint every door goes through (MCP task_create, the
+    # hook mirror, a raw POST).
+    epic_advisory = rules.epic_key_advisory( payload.correlation_key )
+    if epic_advisory:
+        if rules.EPIC_KEY_ENFORCEMENT_ACTIVE:
+            raise HTTPException( status_code=422, detail=epic_advisory )
+        print(
+            f"[task WARN] epic-key guard on {payload.item_class} create: {epic_advisory} "
+            f"(WARN-ONLY until {rules.EPIC_KEY_ENFORCEMENT_STARTS}; write NOT blocked)"
+        )
+
     with get_db() as session:
         repo = TaskRepository( session )
+
+        # Closed-vs-new ratio gate (María's design; Rick's mechanical replacement for the
+        # ticket moratorium). Shares this chokepoint with the epic-key guard above — one
+        # door, so the two cannot be reasoned about separately by mistake.
+        #
+        # WARN-ONLY until RATIO_GATE_ENFORCEMENT_ACTIVE flips, his ruled ramp. Read INSIDE
+        # the session because it needs the counts; evaluated BEFORE create_item so a
+        # refusal writes nothing at all.
+        ratio_counts = repo.count_created_and_closed(
+            since = datetime.now( timezone.utc ) - timedelta( hours=RATIO_DEFAULT_WINDOW_HOURS )
+        )
+        ratio_refusal = rules.ratio_gate_advisory(
+            created         = ratio_counts[ "created" ],
+            closed          = ratio_counts[ "closed" ],
+            priority        = payload.priority,
+            correlation_key = payload.correlation_key,
+        )
+        if ratio_refusal:
+            if rules.RATIO_GATE_ENFORCEMENT_ACTIVE:
+                raise HTTPException( status_code=422, detail=ratio_refusal )
+            print(
+                f"[task WARN] ratio gate on {payload.item_class} create: {ratio_refusal} "
+                f"(WARN-ONLY until {rules.RATIO_GATE_ENFORCEMENT_STARTS}; write NOT blocked)"
+            )
+        elif ( payload.priority or "" ).upper() in rules.RATIO_GATE_EXEMPT_PRIORITIES:
+            # Rick's Q4: P0 is exempt AND every use is LOGGED. The logging is the whole
+            # condition of the exemption — an unlogged escape hatch is just a hole.
+            print(
+                f"[task INFO] ratio-gate P0 EXEMPTION used by {payload.created_by}: "
+                f"{payload.item_class} '{payload.title[ :60 ]}' "
+                f"(window created={ratio_counts[ 'created' ]} closed={ratio_counts[ 'closed' ]})"
+            )
+
         # A blocked MINT can be born stranded exactly like a transition (row 00a6bde2).
         # Inside the transaction, and BEFORE create_item, so a rejected mint writes
         # nothing at all.
@@ -1855,3 +1906,100 @@ def get_epic_stories(
         )
     real_keys = [ key for key in stories.keys() if not key.startswith( "_" ) ]
     return { "stories": stories, "count": len( real_keys ) }
+
+
+# ---------------------------------------------------------------------------
+# Closed-vs-new ratio (María's design, planning-is-prompting
+# src/rnd/2026.09.01-closed-vs-new-ratio-gate.md @ 845a34b)
+# ---------------------------------------------------------------------------
+
+RATIO_DEFAULT_WINDOW_HOURS = 24     # Rick's ruling (Q1). See the window caveat below.
+
+
+@router.get(
+    "/tasks/flow-ratio",
+    summary     = "Closed-vs-new ratio over a rolling window",
+    description = "Returns { created, closed, ratio, verdict, window_hours } counted in "
+                  "SQL. The board's header and the creation gate are both thin consumers "
+                  "of this ONE number, which is what stops them disagreeing with each "
+                  "other. Auth: X-API-Key or Bearer JWT (same guard as /api/tasks)."
+)
+def get_flow_ratio(
+    authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    window_hours          : int = Query( default=RATIO_DEFAULT_WINDOW_HOURS, ge=1, le=8760 ),
+    project               : Optional[ str ] = Query( default=None ),
+):
+    """
+    Serve the closed-vs-new ratio for a rolling window.
+
+    Rick's durable, mechanical replacement for the ticket moratorium he declared by
+    voice on 2026-09-01: "It's way too easy for you guys to add tickets to the list and
+    way too hard to get them removed."
+
+    Requires:
+        - authenticated caller (X-API-Key or Bearer JWT)
+        - window_hours in [ 1, 8760 ]; project is None (fleet-wide, Rick's Q5) or an
+          exact project name
+
+    Ensures:
+        - returns { created, closed, ratio, verdict, window_hours, window_start, project }
+        - `ratio` is created ÷ closed to 2dp, or None when closed == 0 — None rather than
+          a sentinel number, so a consumer cannot accidentally compare it. The header
+          renders None as an em dash
+        - `verdict` is computed HERE, not by each consumer, so the header and the gate
+          cannot drift apart:
+              closed == 0 and created == 0  -> "idle"    an idle window is not a failing
+                                                         window
+              closed == 0 and created  > 0  -> "refuse"  a window where nothing was
+                                                         finished is exactly what the gate
+                                                         is for. This is the COMMON case on
+                                                         a quiet day, not an exotic
+                                                         divide-by-zero
+              ratio < 1.0                   -> "allow"
+              otherwise                     -> "refuse"
+        - counts come from SQL COUNT, never a page length — see
+          TaskRepository.count_created_and_closed for why that is the whole reason this
+          endpoint exists rather than a frontend paging the event stream
+
+    ⚠️ THE WINDOW SIZE CAN FLIP THE VERDICT, which is why it is echoed back rather than
+    assumed. Measured on the live board 2026-09-01, minutes apart:
+
+        24h    created  10 / closed  13    ratio 0.77    allow
+        168h   created 211 / closed 191    ratio 1.10    refuse
+
+    Over a day the fleet closes faster than it files; over a week it does not. 24h is
+    Rick's ruling and it stands — he holds the threshold as an operator dial and tunes it
+    on criteria of his own. Recorded so a consumer showing a number also shows which
+    window produced it.
+
+    ⚠️ `dropped` IS NOT A CLOSURE (Rick's Q2), excluded in the repository. Named again
+    here only so a reader of this endpoint is not surprised that clearing dead rows moves
+    nothing — that exclusion is what stops the gate being defeated by deleting evidence.
+    """
+    since = datetime.now( timezone.utc ) - timedelta( hours=window_hours )
+
+    with get_db() as session:
+        counts = TaskRepository( session ).count_created_and_closed(
+            since   = since,
+            project = project,
+        )
+
+    created = counts[ "created" ]
+    closed  = counts[ "closed" ]
+
+    if closed == 0:
+        ratio   = None
+        verdict = "idle" if created == 0 else "refuse"
+    else:
+        ratio   = round( created / closed, 2 )
+        verdict = "allow" if ratio < 1.0 else "refuse"
+
+    return {
+        "created"      : created,
+        "closed"       : closed,
+        "ratio"        : ratio,
+        "verdict"      : verdict,
+        "window_hours" : window_hours,
+        "window_start" : since.isoformat(),
+        "project"      : project,
+    }

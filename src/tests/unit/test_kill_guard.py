@@ -21,6 +21,7 @@ from lupin_cli.claude_code.hooks.lib.kill_guard import (
     build_kill_deny_response,
     _guard_disabled,
     _default_comm_reader,
+    _hatch_in_prefix,
     _literal_pids,
     _claude_pids_targeted,
     _sweeps_unscoped,
@@ -657,3 +658,152 @@ def test_a_substitution_feeding_a_kill_is_denied( command ):
 def test_a_substitution_that_is_not_a_fleet_listing_is_allowed( command ):
 
     assert _deny( command ) is None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# THE PREFIX BYPASS (row 084adbaf, found 2026-08-31, fixed the same night)
+#
+# Anything sitting between a command slot and the program defeated the WHOLE
+# guard: an env assignment, `env`, `nohup`, `sudo`. All four shapes, not one.
+#
+# ⚠️ EVERY TEST BELOW IS PAIRED WITH ITS OWN POSITIVE CONTROL — the bare form
+# must DENY, or the prefixed form's verdict says nothing about the guard. That
+# is not ceremony: the first probe run at this row used `pkill -f pytest` with
+# no live-seat stub, which the guard allows even bare, and it very nearly got
+# reported clean.
+# ═════════════════════════════════════════════════════════════════════════════
+
+PREFIXES = [ "FOO=1 ", "FOO= ", "sudo ", "env ", "nohup ", "FOO=1 sudo " ]
+
+SHAPES = {
+    "A-literal"  : ( "kill 12345",                _all_claude ),
+    "A-signalled": ( "kill -9 12345",             _all_claude ),
+    "B-incident" : ( INCIDENT_COMMAND,            _no_claude  ),
+    "B-xargs"    : ( "ps -e | grep pytest | awk '{print $1}' | xargs kill", _no_claude ),
+    "D-subst"    : ( "kill $(pgrep -f pytest)",   _no_claude  ),
+}
+
+
+@pytest.mark.parametrize( "shape", sorted( SHAPES ) )
+def test_the_bare_form_of_every_shape_denies( shape ):
+    """
+    THE POSITIVE CONTROL, one per shape, run as its own test so a shape that
+    stops firing is named rather than hidden inside another test's setup.
+    """
+    command, reader = SHAPES[ shape ]
+    assert _deny( command, comm_reader=reader ) is not None, (
+        f"shape {shape} does not deny BARE - this file can no longer say anything "
+        "about that shape, and its prefix tests below are meaningless"
+    )
+
+
+@pytest.mark.parametrize( "shape",  sorted( SHAPES ) )
+@pytest.mark.parametrize( "prefix", PREFIXES )
+def test_no_prefix_lets_any_shape_through( shape, prefix ):
+    """
+    A transparent wrapper or an env assignment runs the SAME program against the
+    SAME processes. Before the fix every cell here was `allow`.
+    """
+    command, reader = SHAPES[ shape ]
+    assert _deny( prefix + command, comm_reader=reader ) is not None, (
+        f"{prefix!r} walked shape {shape} straight past the guard"
+    )
+
+
+def test_the_fix_did_not_buy_a_false_deny():
+    """
+    🔴 THE CONTROL THAT MUST NOT BE SKIPPED — a false deny here blocks legitimate
+    process management for every seat in the fleet.
+
+    Dropping the word boundary rather than pinning the value to a token end would
+    let the greedy assignment backtrack INTO the program name, so a `kill` that is
+    part of an env VALUE would read as a command.
+    """
+    for command in (
+        "FOO=barkill 12345",
+        "MSG=pkill echo hello",
+        "PATTERN=killall true",
+    ):
+        assert _deny( command, comm_reader=_all_claude ) is None, \
+            f"matched a verb inside an env VALUE, not a command: {command!r}"
+
+
+def test_ordinary_prefixed_commands_are_still_allowed():
+    """The everyday forms a seat types, none of which signals anything."""
+    for command in (
+        "FOO=1 ls -la",
+        "sudo systemctl status lupin",
+        "env python3 -m pytest -q",
+        "nohup ./run.sh &",
+        "PYTHONPATH=src python3 -c 'print(1)'",
+    ):
+        assert _deny( command, comm_reader=_all_claude ) is None, \
+            f"an ordinary command was refused: {command!r}"
+
+
+def test_own_children_sweeps_survive_a_prefix():
+    """
+    The sanctioned form the deny message itself recommends. Widening the matcher
+    must not start refusing the remedy it prints.
+    """
+    for command in (
+        "pkill -P $$ -f pytest",
+        "sudo pkill -P $$ -f pytest",
+        "FOO=1 pgrep -P $$ -f pytest | xargs -r kill",
+    ):
+        assert _deny( command, comm_reader=_all_claude ) is None, \
+            f"an own-children sweep was refused: {command!r}"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# THE HATCH — closing the bypass closed the documented instruction with it
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_the_documented_inline_hatch_works():
+    """
+    The deny message ends "re-run with LUPIN_ALLOW_UNSCOPED_KILL=1". Before this
+    row that instruction appeared to work ONLY because the env assignment pushed
+    the program out of command position — indistinguishable from the bypass. Once
+    the bypass closed, the instruction stopped working, so the carve-out is what
+    makes the deny message true rather than accidentally true.
+    """
+    assert _deny( "LUPIN_ALLOW_UNSCOPED_KILL=1 pkill -f pytest", comm_reader=_all_claude ) is None
+
+
+def test_a_falsy_hatch_value_does_not_open_it():
+    """
+    🔴 THE PROOF THAT IT IS NOW A HATCH AND NOT A BYPASS. Before the fix this case
+    ALSO allowed, which is what showed the old "allow" was the matcher failing
+    rather than the hatch working. A hatch that opens on `=0` is not a hatch.
+    """
+    assert _deny( "LUPIN_ALLOW_UNSCOPED_KILL=0 pkill -f pytest", comm_reader=_all_claude ) is not None
+
+
+def test_the_hatch_is_honoured_behind_another_assignment():
+    assert _deny( "FOO=1 LUPIN_ALLOW_UNSCOPED_KILL=1 pkill -f pytest", comm_reader=_all_claude ) is None
+
+
+def test_the_flag_elsewhere_in_the_line_does_not_unlock_a_later_sweep():
+    """Scoped to a command-position prefix, never to the whole line."""
+    assert _deny( "echo LUPIN_ALLOW_UNSCOPED_KILL=1; pkill -f pytest", comm_reader=_all_claude ) is not None
+
+
+def test_a_hatch_quoted_inside_a_heredoc_does_not_unlock():
+    """
+    The carve-out runs AFTER the heredoc strip, so a flag written into a file is
+    data. This module's own test file documents sweeps in heredocs.
+    """
+    command = "cat > note.txt <<'EOF'\nLUPIN_ALLOW_UNSCOPED_KILL=1\nEOF\npkill -f pytest"
+    assert _deny( command, comm_reader=_all_claude ) is not None
+
+
+@pytest.mark.parametrize( "value", [ "1", "true", "on", "yes", "TRUE" ] )
+def test_every_truthy_spelling_opens_the_hatch( value ):
+    assert _deny( f"LUPIN_ALLOW_UNSCOPED_KILL={value} pkill -f pytest", comm_reader=_all_claude ) is None
+
+
+def test_hatch_in_prefix_on_the_empty_and_absent_cases():
+    """The two early returns, exercised rather than assumed."""
+    assert _hatch_in_prefix( "" )               is False
+    assert _hatch_in_prefix( None )             is False
+    assert _hatch_in_prefix( "pkill -f x" )     is False

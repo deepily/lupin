@@ -91,7 +91,12 @@ def test_to_checked_hash_hashes_the_source_it_is_given():
     ( "/repo/other/a.py",               ( "/repo/src", ), False ),
     ( "/repo/src/cosa/.venv/pkg/a.py",  ( "/repo/src", ), False ),
     ( "/repo/x/site-packages/a.py",     (),               False ),
-    ( "/anywhere/a.py",                 (),               True  ),
+    # 🔴 AN EMPTY ROOT SET OWNS NOTHING, and this row used to expect True. That made the
+    # shim UNBOUNDED wherever LUPIN_ROOT was unset, because _default_roots() returns ()
+    # there — it would have rewritten stdlib bytecode. Found in review by Tiberius 👑.
+    ( "/anywhere/a.py",                 (),               False ),
+    ( "/usr/lib/python3.13/json/decoder.py", (),          False ),
+    ( "/usr/lib/python3.13/json/decoder.py", ( "/repo/src", ), False ),
     ( "/repo/src/",                     ( "/repo/src/", ), False ),
 ] )
 def test_in_scope_honours_roots_and_excludes_vendored_trees( path, roots, expected ):
@@ -118,13 +123,63 @@ def test_install_is_idempotent_and_uninstall_restores( clean_install ):
 
     assert chp.install( roots=[] )  is True     # newly installed
     assert chp.is_installed()       is True
-    assert chp.install( roots=[] )  is False    # already installed — not installed twice
+    assert chp.install( roots=[] )  is chp.ALREADY_INSTALLED   # not installed twice
     assert bootstrap.SourceFileLoader.__dict__[ "_cache_bytecode" ] is not before
 
     assert chp.uninstall()          is True
     assert chp.is_installed()       is False
     assert bootstrap.SourceFileLoader.__dict__[ "_cache_bytecode" ] is before
     assert chp.uninstall()          is False    # nothing left to remove
+
+
+@pytest.mark.parametrize( "outcome", [ chp.ALREADY_INSTALLED, chp.UNSUPPORTED_INTERPRETER ] )
+def test_a_non_install_outcome_refuses_to_be_a_boolean_and_names_the_verb_that_answers( outcome ):
+    """
+    🔴 THE CONFLATION GUARD, and it must RAISE rather than pick a side.
+
+    `install()` answers "did THIS call newly install the patch?"; `is_installed()`
+    answers "is the patch ACTIVE?". For a caller who meant the second,
+    ALREADY_INSTALLED is a SUCCESS — so every truthiness answer is wrong for
+    somebody, and a quiet one rebuilds the original defect one level out. Ruled by
+    Mr Radio 🦉 2026-08-31: raise, and name the verb that answers the other question.
+
+    The message is asserted, not just the exception type. A TypeError that does not
+    say what to call instead leaves the caller exactly as stuck as a silent False.
+    """
+    with pytest.raises( TypeError ) as caught:
+        bool( outcome )
+
+    assert "is_installed()" in str( caught.value ), (
+        f"the refusal must name the verb that answers 'is the patch active?', "
+        f"or it tells the caller they are wrong without telling them what is "
+        f"right.\ngot: {caught.value}"
+    )
+    assert str( outcome ) in str( caught.value ), (
+        f"the refusal must name WHICH outcome it refused.\ngot: {caught.value}"
+    )
+
+
+def test_a_non_install_outcome_is_still_a_usable_string():
+    """
+    The other half: only the implicit bool is refused. These values stay printable
+    and comparable, because a value you cannot put in a log message is a worse
+    answer than the False it replaced.
+    """
+    assert str( chp.ALREADY_INSTALLED )       == "already-installed"
+    assert chp.ALREADY_INSTALLED              != chp.UNSUPPORTED_INTERPRETER
+    assert f"{chp.UNSUPPORTED_INTERPRETER}"   == "unsupported-interpreter"
+
+
+def test_the_newly_installed_path_still_returns_a_real_bool( clean_install ):
+    """
+    The refusal must not reach the SUCCESS path. `install()` returns a genuine
+    True when it newly installs, so `if install():` keeps working for the caller
+    whose question really was "did I install it?".
+    """
+    result = chp.install( roots=[] )
+
+    assert result is True
+    assert bool( result ) is True          # must NOT raise on this path
 
 
 def test_install_patches_the_concrete_class_not_the_shadowed_base( clean_install ):
@@ -140,18 +195,18 @@ def test_install_patches_the_concrete_class_not_the_shadowed_base( clean_install
     assert bootstrap.SourceLoader.__dict__[ "_cache_bytecode" ] is base_before
 
 
-def test_install_returns_false_when_the_machinery_is_not_what_it_expects( monkeypatch, clean_install ):
+def test_install_reports_an_unsupported_interpreter_when_the_machinery_differs( monkeypatch, clean_install ):
     import importlib._bootstrap_external as bootstrap
 
     class _Unpatchable:
         __dict__ = {}                       # no _cache_bytecode to capture
 
     monkeypatch.setattr( bootstrap, "SourceFileLoader", _Unpatchable, raising=True )
-    assert chp.install( roots=[] ) is False
+    assert chp.install( roots=[] ) is chp.UNSUPPORTED_INTERPRETER
     assert chp.is_installed()      is False
 
 
-def test_install_returns_false_when_the_patch_cannot_be_applied( monkeypatch, clean_install ):
+def test_install_reports_an_unsupported_interpreter_when_the_patch_cannot_be_applied( monkeypatch, clean_install ):
     """
     The class HAS the method to capture, so install() gets past the lookup, and then the
     assignment itself is refused. An earlier cut of this test declared `__dict__` as a class
@@ -169,7 +224,7 @@ def test_install_returns_false_when_the_patch_cannot_be_applied( monkeypatch, cl
 
     assert "_cache_bytecode" in _Immutable.__dict__, "the lookup must SUCCEED for this test to mean anything"
     monkeypatch.setattr( bootstrap, "SourceFileLoader", _Immutable, raising=True )
-    assert chp.install( roots=[] ) is False
+    assert chp.install( roots=[] ) is chp.UNSUPPORTED_INTERPRETER
     assert chp.is_installed()      is False
 
 
@@ -223,7 +278,10 @@ def patched_write( clean_install ):
 
     bootstrap.SourceFileLoader._cache_bytecode = _spy
     try:
-        chp.install( roots=[] )
+        # NAMES the tree these tests write under. It was `roots=[]`, which used to mean
+        # "everything" and now means "nothing" — see _in_scope, which fails closed since
+        # an unbounded default was found in review.
+        chp.install( roots=[ "/repo/src" ] )
         yield bootstrap.SourceFileLoader.__dict__[ "_cache_bytecode" ], seen
     finally:
         chp.uninstall()
@@ -442,10 +500,59 @@ def _run( root, code ):
                            cwd=str( root ), capture_output=True, text=True, env=env )
 
 
+def _install_prologue( roots ):
+    """
+    Build the child-side lines that make the patch's SCOPE explicit.
+
+    ⚠️ THE `uninstall()` IS NOT REDUNDANT, and this is ONE function so there is one
+    place to forget it rather than four. `src/sitecustomize.py` installs the patch at
+    interpreter startup in EVERY process — these children included — using the DEFAULT
+    roots derived from `LUPIN_ROOT`. A child that simply calls `install( roots=... )`
+    therefore gets `ALREADY_INSTALLED` back and silently keeps the INHERITED scope,
+    which does not contain `tmp_path`.
+
+    Measured 2026-08-31 in one child, three ways: with `LUPIN_ROOT` set,
+    `converted_count()` reads 0; with it unset it reads 2; importing the module with no
+    shim on the path installs cleanly and reads 2. That is a test whose result is
+    decided by the ambient environment rather than by the code under test, and it is
+    the same "a no-op and a failure return the same answer" shape this row exists for.
+
+    Requires:
+        - roots is the literal SOURCE TEXT of the roots argument, not a list object,
+          and it must NAME the tree under test — an empty list now owns NOTHING
+
+    Ensures:
+        - returns child source leaving the patch installed with exactly `roots` in scope
+        - binds `chp` for the caller's body
+        - asserts the install was this child's own, so an inherited one cannot pass
+
+    Raises:
+        - None
+    """
+    return ( "from cosa.utils import checked_hash_pyc as chp\n"
+             "chp.uninstall()\n"
+             f"assert chp.install( roots={roots} ) is True\n" )
+
+
+def _run_patched( root, body, roots=None ):
+    """
+    Run `body` in a child whose patch scope is stated rather than inherited.
+
+    Requires:
+        - body is child source, indented or not
+        - roots defaults to the literal text naming `root` itself
+
+    Ensures:
+        - returns the CompletedProcess from `_run`
+
+    Raises:
+        - None
+    """
+    return _run( root, _install_prologue( roots or f'[ "{root}" ]' ) + textwrap.dedent( body ) )
+
+
 def _seed( root, patched ):
-    prologue = ( "from cosa.utils import checked_hash_pyc as chp; "
-                 "assert chp.install( roots=[] ) is True; " if patched else "" )
-    out = _run( root, f"{prologue}import pkg.victim" )
+    out = _run( root, ( _install_prologue( f'[ "{root}" ]' ) if patched else "" ) + "import pkg.victim" )
     assert out.returncode == 0, out.stderr
     return root / "pkg" / "__pycache__" / f"victim.cpython-{sys.version_info.major}{sys.version_info.minor}.pyc"
 
@@ -505,9 +612,7 @@ def test_end_to_end_the_control_covers_a_first_time_import_which_is_the_load_bea
 def test_end_to_end_the_control_reports_what_it_actually_converted( tmp_path ):
     """A receipt, not a claim: the install must be able to say how many writes it rewrote."""
     _build_tree( tmp_path )
-    out = _run( tmp_path, """
-        from cosa.utils import checked_hash_pyc as chp
-        chp.install( roots=[] )
+    out = _run_patched( tmp_path, """
         import pkg.victim
         print( chp.converted_count() )
     """ )
@@ -523,11 +628,9 @@ def test_end_to_end_a_failure_inside_the_patch_falls_through_to_stock_behaviour(
     never to a broken interpreter.
     """
     _build_tree( tmp_path )
-    out = _run( tmp_path, """
-        from cosa.utils import checked_hash_pyc as chp
+    out = _run_patched( tmp_path, """
         def _boom( *a, **k ): raise RuntimeError( "sabotage" )
         chp.to_checked_hash = _boom
-        chp.install( roots=[] )
         import pkg.victim
         print( "IMPORT_OK", pkg.victim.answer() )
     """ )
@@ -535,20 +638,71 @@ def test_end_to_end_a_failure_inside_the_patch_falls_through_to_stock_behaviour(
     assert "IMPORT_OK 3" in out.stdout
 
 
-def test_end_to_end_out_of_scope_writes_are_left_alone( tmp_path ):
+@pytest.mark.parametrize( "roots_cover_the_tree, expected_count, expected_mode", [
+    ( True,  "2", "checked-hash" ),   # roots NAME this tree -> the write is converted
+    ( False, "0", "timestamp"    ),   # roots name somewhere else -> untouched
+] )
+def test_end_to_end_the_roots_argument_decides_and_an_inherited_scope_cannot_fake_it(
+        tmp_path, roots_cover_the_tree, expected_count, expected_mode ):
     """
-    The control owns repo source, not the world. A root it was not given must be untouched,
+    The control owns repo source, not the world: a root it was not given must be untouched,
     so installing it never silently rewrites vendored or stdlib bytecode.
+
+    THE PAIRING IS THE POINT, and the out-of-scope arm ALONE could not see its own fixture.
+    Measured 2026-08-31 by Tiberius 👑 in review: with only the negative arm, reverting
+    `_install_prologue` to the pre-fix form ( no `uninstall()`, no `is True` ) left the test
+    PASSING. Both scopes exclude `tmp_path` — the explicit `/nonexistent/elsewhere` AND the
+    inherited default `$LUPIN_ROOT/src` — so a child that silently kept the INHERITED scope
+    produced a byte-identical observation. The assertions were correct and blind.
+
+    The positive arm supplies the discrimination: it is the only one whose expected result
+    REQUIRES this child's own roots to have been honoured. Same tree, same child, one variable.
     """
-    _build_tree( tmp_path )
-    out = _run( tmp_path, """
-        from cosa.utils import checked_hash_pyc as chp
-        chp.install( roots=[ "/nonexistent/elsewhere" ] )
+    pkg   = _build_tree( tmp_path )
+    roots = f'[ "{pkg.parent}" ]' if roots_cover_the_tree else '[ "/nonexistent/elsewhere" ]'
+    out   = _run_patched( tmp_path, """
         import pkg.victim
         print( chp.converted_count() )
-    """ )
+    """, roots=roots )
     assert out.returncode == 0, out.stderr
-    assert out.stdout.strip() == "0"
+    assert out.stdout.strip() == expected_count
+    pyc = tmp_path / "pkg" / "__pycache__" / f"victim.cpython-{sys.version_info.major}{sys.version_info.minor}.pyc"
+    assert chp.pyc_mode( str( pyc ) ) == expected_mode
+
+
+def test_end_to_end_a_child_with_no_lupin_root_owns_nothing_rather_than_everything( tmp_path ):
+    """
+    🔴 THE UNBOUNDED-DEFAULT GUARD. `sitecustomize` installs in EVERY interpreter, and
+    `_default_roots()` returns () when LUPIN_ROOT is unset. While an empty root set meant
+    "everything", that shim owned the whole filesystem on any such interpreter — measured
+    2026-08-31, a scratch package outside every repo came back checked-hash with
+    converted_count 2, and _in_scope answered True for a stdlib path. Found in review by
+    Tiberius 👑.
+
+    This runs a REAL child with LUPIN_ROOT stripped, which is the only way to observe it:
+    the shim's scope is decided at that child's startup, before any test framework exists.
+    """
+    _build_tree( tmp_path )
+    env = dict( os.environ )
+    env.pop( "LUPIN_ROOT", None )
+    env[ "PYTHONPATH" ] = f"{tmp_path}{os.pathsep}{Path( chp.__file__ ).parents[ 2 ]}"
+
+    out = subprocess.run(
+        [ sys.executable, "-c", textwrap.dedent( """
+            from cosa.utils import checked_hash_pyc as chp
+            assert chp.is_installed() is True, "the shim did not install — nothing was tested"
+            assert chp._default_roots() == (), "LUPIN_ROOT was not actually stripped"
+            import pkg.victim
+            print( chp.converted_count() )
+        """ ) ],
+        cwd=str( tmp_path ), capture_output=True, text=True, env=env
+    )
+
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "0", (
+        f"a child with no LUPIN_ROOT converted {out.stdout.strip()} writes — its scope is "
+        f"unbounded, and on a real interpreter that reaches stdlib bytecode"
+    )
     pyc = tmp_path / "pkg" / "__pycache__" / f"victim.cpython-{sys.version_info.major}{sys.version_info.minor}.pyc"
     assert chp.pyc_mode( str( pyc ) ) == "timestamp"
 

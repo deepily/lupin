@@ -861,6 +861,7 @@ class WebSocketManager:
         sent_count = 0
         disconnected = []
         orphaned     = []
+        declined     = []
 
         sessions = list( self.user_sessions[ user_id ] )
         for session_id in sessions:
@@ -877,6 +878,7 @@ class WebSocketManager:
                         print( f"[WS] emit_to_user: send_json failed for session {session_id}: {send_err}" )
                         disconnected.append( session_id )
                 else:
+                    declined.append( session_id )
                     if self.debug: print( f"[WS] emit_to_user: session {session_id} not subscribed to {event}" )
             else:
                 print( f"[WS] emit_to_user: session {session_id} not in active_connections (orphaned, cleaning up)" )
@@ -889,6 +891,26 @@ class WebSocketManager:
         # Clean up orphaned sessions (in user_sessions but not in active_connections)
         for session_id in orphaned:
             self.disconnect( session_id )
+
+        # A DECLINE IS ONLY LEGIBLE NEXT TO THE DELIVERIES IT SITS BESIDE.
+        # Before 2026-09-01 this method logged the drop path and said NOTHING on
+        # success, so a user whose two sockets split one-per-transport produced a
+        # stream of loud "not subscribed" lines and total silence on the frames
+        # that DID land. That reads as an outage. It cost three seats six hours on
+        # row 88347f65, chasing a subscription bug in a path that was working:
+        # every one of 749 declines was an AUDIO socket correctly refusing a QUEUE
+        # event, while the queue socket beside it received them.
+        #
+        # So a decline now reports the delivery count in the same line. Emitted
+        # only when something was BOTH delivered and declined — the case that
+        # previously looked like failure. Ungated, because the debug flag being off
+        # is exactly the condition under which the old silence was mistaken for
+        # breakage.
+        if declined and sent_count > 0:
+            print( f"[WS] emit_to_user: {event} to user {user_id} — "
+                   f"delivered={sent_count}, declined={len( declined )} "
+                   f"({', '.join( declined )}) — declines are the subscription "
+                   f"filter working, NOT a delivery failure" )
 
         if sent_count == 0:
             print( f"[WS] emit_to_user: {event} to user {user_id} — sent_count=0 (sessions={len( sessions )})" )

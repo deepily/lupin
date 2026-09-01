@@ -196,7 +196,23 @@ _COMMAND_POSITION = r"(?:^|[;&|(){}\n]|\bthen\b|\bdo\b|\belse\b|\belif\b)"
 # Things that sit between the command slot and the program while still running
 # it: environment assignments (FOO=bar) and transparent wrappers.
 _WRAPPERS = r"(?:env|command|builtin|exec|sudo|nohup|time|nice|stdbuf|xargs)"
-_PREFIXES = rf"(?P<prefix>(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*|{_WRAPPERS})\b)*)"
+# 🔴 AN EMPTY ENV ASSIGNMENT USED TO WALK STRAIGHT PAST THIS (found 2026-08-31 by
+# a merge_head_guard test, measured in BOTH guards). The `\b` sat AFTER the whole
+# alternation, and a word boundary cannot exist between the `=` of `FOO=` and the
+# space that follows - two non-word characters. So the prefix group failed, the
+# match backtracked to zero prefixes, and the anchored program never matched:
+#
+#     FOO=1 git stash pop      DENIED
+#     FOO=  git stash pop      ALLOWED    <-- and `GIT_DIR= git stash pop` with it
+#
+# THE FIX IS A LOOKAHEAD, NOT A DROPPED `\b`. Simply removing the boundary lets the
+# greedy value backtrack INTO the program name, so `FOO=bargit commit` would match
+# a `git` that is part of the value - trading a false allow for a false deny, which
+# is the trade this fleet's guards exist to refuse. `(?=[\s;&|]|$)` pins the value
+# to a real token end instead, so it can neither swallow the program nor give back
+# part of itself. Measured both ways: the empty assignment now matches and
+# `FOO=bargit commit` still does not.
+_PREFIXES = rf"(?P<prefix>(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_WRAPPERS}\b))*)"
 
 # The program itself, allowing any leading path. The bare name is matched by the
 # empty alternative of the path group.

@@ -11,6 +11,7 @@ import os
 import pytest
 
 from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
+    git_commit_match,
     commit_scope_deny_reason,
     build_commit_scope_deny_response,
     _blank_quoted_spans,
@@ -879,3 +880,41 @@ def test_an_ordinary_redirection_does_not_stop_the_review( repo, command ):
         "Bash", { "command": command }, session_id=MY_SESSION, cwd=repo, staged_reader=_reader(),
     ).deny_reason
     assert "src/theirs.py" in reason
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# THE PUBLIC MATCHER, AND THE BYPASS IT USED TO CARRY
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_the_public_matcher_recognises_a_commit_and_ignores_a_non_commit():
+    """
+    `git_commit_match` is public so `merge_head_guard` can ask the same question
+    instead of growing a second regex. If it ever stops answering, that guard goes
+    silent rather than loud, so it is pinned here at its source.
+    """
+    assert git_commit_match( "git commit -m x" ) is not None
+    assert git_commit_match( "git status" )      is None
+    assert git_commit_match( "echo 'git commit'" ) is None
+
+
+def test_the_public_matcher_exposes_the_prefix_and_pre_groups():
+    """Both are load-bearing downstream: the hatch reads one, the -C target the other."""
+    match = git_commit_match( "LUPIN_COMMIT_SCOPE_ACK=1 git -C /tree commit -m x" )
+    assert "LUPIN_COMMIT_SCOPE_ACK=1" in match.group( "prefix" )
+    assert "-C /tree" in match.group( "pre" )
+
+
+def test_an_empty_env_assignment_does_not_hide_a_commit():
+    """
+    `GIT_EDITOR= git commit` went unrecognised. No word boundary exists between
+    the `=` of an empty assignment and the following space, so the prefix group
+    failed and the anchored program never matched. Same one-token defect as
+    stash_guard's, found the same day by a merge_head_guard test.
+    """
+    for command in ( "FOO= git commit -m x", "GIT_EDITOR= git commit", "EDITOR= git commit -am y" ):
+        assert git_commit_match( command ) is not None, f"went unrecognised: {command!r}"
+
+
+def test_the_empty_assignment_fix_did_not_buy_a_false_match():
+    """THE CONTROL: a `git` inside an assignment's VALUE is not a command."""
+    assert git_commit_match( "FOO=bargit commit" ) is None

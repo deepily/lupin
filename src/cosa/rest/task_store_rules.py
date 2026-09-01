@@ -1802,6 +1802,201 @@ def validate_no_envelope_tail( fields ) -> list:
     return errors
 
 
+# ---------------------------------------------------------------------------
+# Epic-key guard at creation (row 5246bb67)
+# ---------------------------------------------------------------------------
+#
+# RICK RULED THIS TWICE. First on 2026-08-31 ~19:40 EDT (reject on creation,
+# `epic:unassigned` named in the error, warn-only for one week). Then again at
+# ~20:35 EDT with Maya's evidence in front of him, keeping the decision and
+# FIXING THE PREDICATE. The second ruling is the operative one.
+#
+# 🔴 THE PREDICATE IS `startswith("epic:")`, NOT `key != ""`, AND THAT IS THE
+# WHOLE POINT. `correlation_key` has THREE tenants, measured on the live board:
+#
+#     epic:<slug>                          191 rows   the epic layer
+#     cascade-* and other free-form        289 rows   cascade runs, historical
+#     cc-task:<sid>:<n>                     52 rows   the harness mirror, automatic
+#
+# A blank-check is satisfied by all three, so it is INERT on two of the three
+# lanes: a row carrying only an auto-stamped machine key passes the guard while
+# carrying no epic at all, and the board then reads as covered precisely because
+# the check passed. That is the defect this row was filed about, one level up.
+#
+# ⚠️ MAYA'S OBJECTION IS ANSWERED RATHER THAN OVERRIDDEN, and the distinction
+# matters to anyone reading her amendment on the row. She argued a creation guard
+# on a three-tenant field "buys the appearance of a covered field, which on a
+# board people read INSTEAD of reading bodies is worse than the honest gap."
+# That was aimed at a BLANK-check, which cannot discriminate. A startswith check
+# is exactly the discrimination she showed was missing. Her DETECTOR
+# recommendation was not taken; the DEFECT she found was.
+#
+# ⚠️ WHAT HER RECOMMENDATION STILL HOLDS THAT THIS DOES NOT: a detector reads the
+# ROWS, so its stated reach is its actual reach and it covers creation paths
+# nobody enumerated. This covers the doors somebody thought of. Her survey found
+# `repo.create_item` has exactly ONE non-test caller today, so the door list is
+# short — but it is a door list. A fifth creation path would be silent here.
+# Worth revisiting when someone pays for the `epic_key` column migration.
+
+EPIC_KEY_PREFIX     = "epic:"
+EPIC_KEY_UNASSIGNED = "epic:unassigned"
+
+# The harness mirror writes this on a path with NO HUMAN PRESENT to answer a 422.
+# Exempt by ruling, not by oversight — see the enforcement note below.
+MIRROR_KEY_PREFIX = "cc-task:"
+
+# Warn-only ramp. Rick: "Ship it warn-only for one week first so no caller breaks
+# by surprise." Flipping this to True turns the advisory into a 422 at the router.
+#
+# 🔴 THE DATE IS NOT DECORATION — `test_epic_key_guard.py` goes RED once it passes
+# while the mode is still warn-only, so the flip is a forced decision rather than
+# a remembered one. Prose does not fail a build; that lesson is Clayton's, from
+# the xfail(strict=True) pin on e9b78e51, and it is why a ramp with only a comment
+# on it silently becomes permanent.
+EPIC_KEY_ENFORCEMENT_STARTS = "2026-09-08"
+EPIC_KEY_ENFORCEMENT_ACTIVE = False
+
+
+def epic_key_advisory( correlation_key ):
+    """
+    Judge one `correlation_key` against the epic-layer rule (row 5246bb67).
+
+    PURE — no I/O, no clock, no config. The caller decides what to do with the
+    verdict, which is what keeps the warn-only ramp a one-line change at the
+    router rather than a behaviour hidden in here.
+
+    Requires:
+        - correlation_key is a str or None (any other type is treated as absent,
+          because a create payload is client-supplied and a TypeError here would
+          turn a soft advisory into a 500)
+
+    Ensures:
+        - returns None when the row is COMPLIANT or EXEMPT:
+            * a key beginning "epic:" — including the explicit "epic:unassigned"
+            * a key beginning "cc-task:" — the harness mirror lane, exempt by ruling
+        - otherwise returns a non-empty advisory string naming BOTH the offending
+          value and "epic:unassigned" as a legal explicit answer, per the ruling
+        - never raises, and never rejects — rejection is the ROUTER's call, gated
+          on EPIC_KEY_ENFORCEMENT_ACTIVE
+
+    ⚠️ BLANK AND MACHINE-KEYED ARE DIFFERENT FAILURES and the message says which,
+    because "add an epic key" is unhelpful to someone staring at a row that
+    already has a correlation_key on it.
+    """
+    key = correlation_key if isinstance( correlation_key, str ) else None
+    key = ( key or "" ).strip()
+
+    if key.startswith( EPIC_KEY_PREFIX ):   return None
+    if key.startswith( MIRROR_KEY_PREFIX ): return None
+
+    if not key:
+        return (
+            f"no epic key: correlation_key is absent, so this row cannot be grouped on the "
+            f"board and will not appear under any story. Pass correlation_key='{EPIC_KEY_PREFIX}<slug>' "
+            f"naming the story this belongs to — or '{EPIC_KEY_UNASSIGNED}' if it genuinely "
+            f"belongs to none, which is a deliberate answer rather than a blank one."
+        )
+    return (
+        f"correlation_key {key!r} is not an epic key — it does not begin '{EPIC_KEY_PREFIX}'. "
+        f"The field has several tenants and only the '{EPIC_KEY_PREFIX}' one groups the board, "
+        f"so a row carrying this is ungrouped even though the field is populated. Pass "
+        f"'{EPIC_KEY_PREFIX}<slug>', or '{EPIC_KEY_UNASSIGNED}' if it belongs to no story."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Closed-vs-new ratio gate at creation (María's design, planning-is-prompting
+# src/rnd/2026.09.01-closed-vs-new-ratio-gate.md @ 845a34b)
+# ---------------------------------------------------------------------------
+#
+# Rick's DURABLE, MECHANICAL replacement for the ticket moratorium he declared by
+# voice on 2026-09-01: "It's way too easy for you guys to add tickets to the list
+# and way too hard to get them removed. So in order to battle this asymmetry, I'm
+# simply going to declare a moratorium on new tickets."
+#
+# A moratorium depends on everyone remembering. This does not — which is the whole
+# point, and is why anything that makes it easy to switch off defeats it.
+#
+# HIS RULINGS, all six, and every one a real keypress:
+#   Q1  ratio created ÷ closed, rolling window, ALLOW below 1.0
+#   Q2  `done` only — `dropped` is NOT a closure
+#   Q3  warn-only for one week first, then arm
+#   Q4  P0 is EXEMPT, and every use LOGGED
+#   Q5  scope is fleet-wide
+#   Q6  the header label is always shown
+#
+# ⚠️ AND HE HOLDS THE THRESHOLD AS AN OPERATOR DIAL. By voice, later the same day:
+# "I wouldn't worry too much about optimizing this gate member... it is dynamically
+# adjustable on the fly... We're not creating perfection simply something that is
+# good enough." So this is built to be tuned, not tuned to be right.
+
+RATIO_GATE_EXEMPT_PRIORITIES = ( "P0", )
+
+# Warn-only ramp, same shape as the epic-key guard above and for the same reason:
+# a one-week ramp with only a comment on it is a permanent ramp, because prose does
+# not fail a build. `test_flow_ratio_gate.py` goes RED once this date passes while
+# enforcement is still off, so the flip is a forced choice rather than a remembered one.
+RATIO_GATE_ENFORCEMENT_STARTS = "2026-09-08"
+RATIO_GATE_ENFORCEMENT_ACTIVE = False
+
+
+def ratio_gate_advisory( created, closed, priority=None, correlation_key=None ):
+    """
+    Judge one create against the closed-vs-new ratio.
+
+    PURE — no I/O, no clock, no database. The caller supplies the counts and decides
+    what to do with the verdict, which keeps the warn-only ramp a one-line change at
+    the router and makes every case below testable without a store.
+
+    Requires:
+        - created / closed are non-negative ints for the ruled window
+        - priority is the create payload's priority (e.g. "P0"), or None
+        - correlation_key is the payload's key, or None
+
+    Ensures:
+        - returns None when the write is ALLOWED or EXEMPT
+        - otherwise returns a refusal string naming the REAL COUNTS, the gate, and what
+          to do about it — Rick asked for "the appropriate message… success if under 1.0
+          and failure and why", so a bare refusal is not enough
+        - EXEMPTIONS, both returning None before any arithmetic:
+            * priority P0 — a gate that refuses the filing of an outage row is a gate
+              that gets switched off the first Friday it is wrong
+            * the harness mirror's `cc-task:` lane — it writes where no human is present
+              to answer a 422, the same carve-out the epic-key guard makes
+        - `closed == 0` with creations REFUSES (a window where nothing was finished is
+          exactly what the gate is for, and it is the common case on a quiet day);
+          `0/0` ALLOWS (an idle window is not a failing window)
+        - never raises, and never itself rejects — the ROUTER decides, gated on
+          RATIO_GATE_ENFORCEMENT_ACTIVE
+
+    ⚠️ SUCCESS IS SILENT. A confirmation on every ordinary create is noise, and the
+    success signal is the number already sitting in the board header.
+    """
+    key = correlation_key if isinstance( correlation_key, str ) else ""
+    if ( priority or "" ).upper() in RATIO_GATE_EXEMPT_PRIORITIES: return None
+    if key.strip().startswith( MIRROR_KEY_PREFIX ):                return None
+
+    if closed == 0:
+        if created == 0: return None
+        return (
+            f"New tickets are gated: in the last window the fleet created {created} and "
+            f"closed 0. Nothing was finished, so the ratio has no denominator and the gate "
+            f"stays shut. Close or finish something before filing this one. "
+            f"(A P0 is exempt if this genuinely cannot wait.)"
+        )
+
+    ratio = created / closed
+    if ratio < 1.0: return None
+
+    need = created - closed + 1
+    return (
+        f"New tickets are gated: in the last window the fleet created {created} and closed "
+        f"{closed} (ratio {ratio:.2f} — the gate opens below 1.00). Close or finish {need} "
+        f"more row{'s' if need != 1 else ''} before filing this one. "
+        f"(A P0 is exempt if this genuinely cannot wait.)"
+    )
+
+
 def quick_smoke_test():
     """
     Quick smoke test for task_store_rules — exercises every validator at the
