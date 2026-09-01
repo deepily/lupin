@@ -1094,6 +1094,127 @@ def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
     return trimmed, f"{body}\n\n{TITLE_OVERFLOW_MARKER}\n{overflow}", advisory
 
 
+# The markers a CLOSED row's title may be prefixed with (Rick's ruling, 2026-09-01,
+# decision 45c4c932: "Prefix only"). A closed row is otherwise immutable — that wall
+# is applied deliberately in three places — and this is the one carve-out.
+#
+# WHY A PREFIX AND NOT AN EDIT. The wall exists so a closed verdict cannot be
+# silently RESTATED. A prefix restates nothing: the original text survives verbatim
+# after the marker, so a reader sees both what the row said and that it no longer
+# stands. It is the same add-never-overwrite rule the store already applies to
+# bodies, which is why it needs no new trust model.
+#
+# WHY IT SITS AT THE FRONT. The head of a title is the only part the cap guarantees
+# survives, so a correction anywhere else is a correction a skimming reader may not
+# see — and a skimming reader is exactly who a false headline misleads.
+#
+# ⚠️ THIS RULING WAITED ON THE CAP, and the dependency was arithmetic rather than
+# taste. At 60, prefixing the live case (`82ec60be`, already AT the cap because
+# that is WHY it needed correcting) pushed 12 more characters off the tail the
+# correction existed to rescue: the remedy ate the thing it was called in to save.
+# At 120 it fits. Pocholo found that; the cap moved first, deliberately.
+TERMINAL_TITLE_PREFIXES = ( "WITHDRAWN", "SUPERSEDED", "CORRECTED" )
+
+
+def validate_terminal_title_prefix( old_title, new_title ):
+    """
+    Decide whether a CLOSED row's proposed new title is a legal correction prefix
+    (Rick's ruling, 2026-09-01, decision 45c4c932: "Prefix only").
+
+    A terminal row refuses `edit` and `transition` and accepts only `amend`, which
+    writes to `body` — and `_serialize_item_terse` DROPS body, so a correction filed
+    there is invisible to every routine board glance. Measured live: `82ec60be` still
+    reads "APPROVED 757820dd + 08fce017" while its body records that the 08fce017
+    approval is WITHDRAWN. The false headline is what every reader sees and the
+    retraction is in the one field nobody is shown.
+
+    This is the narrow carve-out that lets the headline be corrected WITHOUT letting
+    it be rewritten.
+
+    Requires:
+        - old_title is the row's stored title (a non-empty string)
+        - new_title is the proposed replacement (a non-empty string)
+
+    Ensures:
+        - new_title == "<MARKER> — <old_title>" for a marker in
+          TERMINAL_TITLE_PREFIXES -> [] (legal: the original survives VERBATIM)
+        - anything else -> a ONE-element list naming the markers AND showing the
+          exact string that would have been accepted, because "prefix only" without
+          the literal format is a rule the caller has to guess at
+        - the original text is compared byte-for-byte, so a "prefix" that also
+          reworded the tail is REFUSED — that is a rewrite wearing a prefix, and it
+          is precisely what the immutability wall exists to stop
+        - stacking is permitted: a row already prefixed WITHDRAWN may later take
+          SUPERSEDED in front of it, because the previous marker is part of the
+          old title it must reproduce verbatim. Corrections accumulate at the front
+          in the order they happened, which is a readable history
+        - never raises, never mutates
+    """
+    for marker in TERMINAL_TITLE_PREFIXES:
+        if new_title == f"{marker} — {old_title}":
+            return [ ]
+    return [
+        f"a terminal row's title may only be PREFIXED, never rewritten (decision "
+        f"45c4c932). Send exactly one of "
+        f"{', '.join( f'{m} — <the existing title>' for m in TERMINAL_TITLE_PREFIXES )}, "
+        f"with the existing title reproduced verbatim after the marker. The row's "
+        f"current title is: {old_title!r}"
+    ]
+
+
+def validate_terminal_edit_fields( fields, current_title, status ):
+    """
+    Gate a PATCH against a TERMINAL row: refuse everything except a title
+    correction prefix (Rick's ruling, 2026-09-01, decision 45c4c932).
+
+    This replaces a flat "item is terminal — no edits to closed history". The wall
+    is unchanged for every other field; what it stops doing is blocking the ONE
+    change that makes a closed board honest.
+
+    ⚠️ THE FIELD SET IS CHECKED BEFORE THE PREFIX, and the order is load-bearing.
+    A caller who sends a legal prefix AND a priority change must be refused whole,
+    not have the prefix accepted while the priority rides along — a carve-out that
+    leaks other fields is not a carve-out, it is a hole.
+
+    Requires:
+        - fields is the post-validation patch dict (may contain `title_trimmed`,
+          which this verb ignores: the router derives it, no caller can send it)
+        - current_title is the row's stored title
+        - status is the row's terminal status, used only in the message
+
+    Ensures:
+        - no `title` in fields -> refused, naming the status (the old behaviour,
+          unchanged, for a patch that touches only non-title fields)
+        - `title` present ALONGSIDE any other caller-settable field -> refused,
+          NAMING the extra fields rather than silently dropping them
+        - `title` alone, and a legal prefix of current_title -> [] (accepted)
+        - `title` alone, not a legal prefix -> the prefix verb's own message,
+          which shows the exact string that would have been accepted
+        - never raises, never mutates `fields`
+    """
+    # `title_trimmed` is derived by the router from the guard's own verdict, never
+    # sent by a caller (TaskPatchIn forbids it at the wire), so it is not an
+    # "extra field" a caller could be refused for.
+    caller_fields = { k for k in fields if k != "title_trimmed" }
+
+    if "title" not in caller_fields:
+        return [
+            f"item is terminal ('{status}') — no edits to closed history. The ONE "
+            f"exception is a title correction PREFIX "
+            f"({', '.join( TERMINAL_TITLE_PREFIXES )}); see decision 45c4c932."
+        ]
+
+    extras = sorted( caller_fields - { "title" } )
+    if extras:
+        return [
+            f"item is terminal ('{status}') — a closed row accepts ONLY a title "
+            f"correction prefix, and this patch also sets {extras}. Send the title "
+            f"prefix on its own."
+        ]
+
+    return validate_terminal_title_prefix( current_title, fields[ "title" ] )
+
+
 def validate_edit_title_length( title, cap=TITLE_SOFT_CAP ):
     """
     Reject an over-cap title on the EDIT door (Rick's ruling, 2026-09-01, bug

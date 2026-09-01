@@ -1850,6 +1850,98 @@ def test_patch_rejects_terminal_items( client, repo, terminal ):
     repo.apply_patch.assert_not_called()
 
 
+@pytest.mark.parametrize( "terminal", [ "done", "dropped" ] )
+def test_patch_ACCEPTS_a_title_correction_prefix_on_a_terminal_row( client, repo, terminal ):
+    """
+    Rick's ruling, 2026-09-01, decision 45c4c932: "Prefix only."
+
+    The one carve-out in the closed-history wall, driven end to end through the
+    router. The row above this asserts the wall still stands for everything else;
+    this asserts the door actually opens, and BOTH are needed — a wall with no door
+    and a door with no wall are different bugs and one test cannot see both.
+
+    THE LIVE CASE it exists for: `82ec60be` reads "APPROVED 757820dd + 08fce017"
+    while its body records that approval withdrawn, and the terse projection drops
+    body, so every board glance shows the false headline.
+    """
+    old  = "APPROVED 757820dd + 08fce017 — api_keys closed"
+    item = make_item( status=terminal, title=old )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+
+    r = client.patch( f"/api/tasks/{item.id}", json={
+        "title": f"WITHDRAWN — {old}", "actor": "mr radio 0e61abe3",
+    } )
+
+    assert r.status_code == 200
+    fields = repo.apply_patch.call_args.args[ 1 ]
+    assert fields[ "title" ] == f"WITHDRAWN — {old}"
+    assert old in fields[ "title" ]                    # the original survives VERBATIM
+    assert fields[ "title_trimmed" ] is False
+
+
+@pytest.mark.parametrize( "terminal", [ "done", "dropped" ] )
+def test_patch_REFUSES_a_rewrite_dressed_as_a_prefix( client, repo, terminal ):
+    """
+    The negative control, and the one that stops the carve-out becoming a hole. A
+    marker in front of DIFFERENT text is a rewrite, and a rewrite is exactly what
+    closed history forbids.
+    """
+    item = make_item( status=terminal, title="APPROVED 757820dd + 08fce017" )
+    repo.get_by_id_for_update.return_value = item
+
+    r = client.patch( f"/api/tasks/{item.id}", json={
+        "title": "WITHDRAWN — APPROVED 757820dd", "actor": "mr radio 0e61abe3",
+    } )
+
+    assert r.status_code == 422
+    repo.apply_patch.assert_not_called()
+
+
+@pytest.mark.parametrize( "terminal", [ "done", "dropped" ] )
+def test_patch_REFUSES_a_legal_prefix_that_smuggles_another_field( client, repo, terminal ):
+    """
+    🔴 THE HOLE. A carve-out that accepts the prefix and lets a second field ride
+    along is not a carve-out — anyone willing to send a legal title could then edit
+    a closed row's priority, owner or body.
+
+    Refused WHOLE, and nothing is written.
+    """
+    old  = "APPROVED 757820dd + 08fce017"
+    item = make_item( status=terminal, title=old )
+    repo.get_by_id_for_update.return_value = item
+
+    r = client.patch( f"/api/tasks/{item.id}", json={
+        "title": f"WITHDRAWN — {old}", "priority": "P1", "actor": "mr radio 0e61abe3",
+    } )
+
+    assert r.status_code == 422
+    assert any( "priority" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_patch.assert_not_called()
+
+
+def test_patch_STILL_refuses_an_over_cap_prefix_on_a_terminal_row( client, repo ):
+    """
+    The two rulings compose rather than one exempting the other. A prefix that
+    pushes the title past the cap is refused by the SAME 422 an ordinary edit gets
+    (bug 6ce252e7) — otherwise the carve-out would be a way around the cap.
+
+    This is also why the cap had to move first: at 60 a prefix on an already-capped
+    row was arithmetically impossible.
+    """
+    old  = "X" * ( tasks.rules.TITLE_SOFT_CAP - 5 )
+    item = make_item( status="done", title=old )
+    repo.get_by_id_for_update.return_value = item
+
+    r = client.patch( f"/api/tasks/{item.id}", json={
+        "title": f"WITHDRAWN — {old}", "actor": "mr radio 0e61abe3",
+    } )
+
+    assert r.status_code == 422
+    assert any( str( tasks.rules.TITLE_SOFT_CAP ) in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_patch.assert_not_called()
+
+
 def test_patch_422_on_malformed_uuid( client, repo ):
     r = client.patch( "/api/tasks/not-a-uuid", json=_PATCH_BODY )
     assert r.status_code == 422

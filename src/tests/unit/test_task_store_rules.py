@@ -868,6 +868,130 @@ class TestSoftGuardTitle:
         assert rules.soft_guard_title( "a short title", "a body" ) == ( "a short title", "a body", None )
 
 
+class TestTerminalTitlePrefix:
+    """
+    Rick's ruling, 2026-09-01, decision 45c4c932: "Prefix only."
+
+    A closed row refuses `edit` and `transition` and accepts only `amend`, which
+    writes to `body` — and the terse projection DROPS body, so a correction filed
+    there is invisible to every routine board glance. Measured live: `82ec60be`
+    still reads "APPROVED 757820dd + 08fce017" while its own body records that the
+    08fce017 approval is WITHDRAWN.
+
+    The carve-out lets the headline be CORRECTED without letting it be REWRITTEN.
+    """
+
+    OLD = "APPROVED 757820dd + 08fce017 — api_keys closed"
+
+    @pytest.mark.parametrize( "marker", rules.TERMINAL_TITLE_PREFIXES )
+    def test_every_sanctioned_marker_is_accepted( self, marker ):
+        assert rules.validate_terminal_title_prefix( self.OLD, f"{marker} — {self.OLD}" ) == [ ]
+
+    def test_an_unsanctioned_marker_is_refused( self ):
+        # The shape is right and the word is not. Refusing here is what keeps the
+        # carve-out narrow — an open-ended prefix is a rewrite with extra steps.
+        assert rules.validate_terminal_title_prefix( self.OLD, f"REOPENED — {self.OLD}" )
+
+    def test_a_prefix_that_also_REWORDS_the_tail_is_refused( self ):
+        """
+        THE ASSERTION THE WHOLE RULING RESTS ON, and the one a lazy implementation
+        fails: the original must survive BYTE-FOR-BYTE.
+
+        A "prefix" that quietly edits the text after it is a rewrite wearing a
+        prefix, which is precisely what the immutability wall exists to stop.
+        """
+        reworded = "WITHDRAWN — APPROVED 757820dd — api_keys closed"   # 08fce017 dropped
+        assert rules.validate_terminal_title_prefix( self.OLD, reworded )
+
+    def test_a_bare_rewrite_is_refused( self ):
+        assert rules.validate_terminal_title_prefix( self.OLD, "something else entirely" )
+
+    def test_the_unchanged_title_is_refused_too( self ):
+        # A no-op is not a correction. Accepting it would let a caller "edit" a
+        # closed row to prove they can, and leave a patched event saying nothing
+        # happened.
+        assert rules.validate_terminal_title_prefix( self.OLD, self.OLD )
+
+    def test_the_refusal_SHOWS_the_string_that_would_have_worked( self ):
+        """
+        "Prefix only" without the literal format is a rule the caller has to guess
+        at. The message carries both the markers and the row's current title.
+        """
+        errors = rules.validate_terminal_title_prefix( self.OLD, "nope" )
+        assert len( errors ) == 1
+        for marker in rules.TERMINAL_TITLE_PREFIXES:
+            assert marker in errors[ 0 ]
+        assert self.OLD in errors[ 0 ]
+
+    def test_STACKING_is_permitted_and_keeps_the_history_in_order( self ):
+        """
+        A row already marked WITHDRAWN may later take SUPERSEDED in front of it.
+
+        It falls out of the byte-for-byte rule rather than needing its own clause:
+        the previous marker is part of the old title, so reproducing it verbatim is
+        exactly what a second prefix does. Corrections accumulate at the front in
+        the order they happened.
+        """
+        once  = f"WITHDRAWN — {self.OLD}"
+        twice = f"SUPERSEDED — {once}"
+        assert rules.validate_terminal_title_prefix( once, twice ) == [ ]
+        assert twice.index( "SUPERSEDED" ) < twice.index( "WITHDRAWN" )
+
+
+class TestValidateTerminalEditFields:
+    """
+    The router-facing gate: a terminal PATCH is refused unless it is a title prefix
+    and NOTHING ELSE.
+    """
+
+    OLD = "APPROVED 757820dd + 08fce017 — api_keys closed"
+
+    def test_a_lone_legal_prefix_is_accepted( self ):
+        fields = { "title": f"WITHDRAWN — {self.OLD}" }
+        assert rules.validate_terminal_edit_fields( fields, self.OLD, "done" ) == [ ]
+
+    def test_a_patch_with_no_title_is_refused_and_names_the_exception( self ):
+        errors = rules.validate_terminal_edit_fields( { "priority": "P1" }, self.OLD, "done" )
+        assert len( errors ) == 1
+        assert "terminal" in errors[ 0 ] and "dropped" not in errors[ 0 ]
+        assert "WITHDRAWN" in errors[ 0 ]          # tells the caller what IS allowed
+
+    def test_a_legal_prefix_RIDING_ALONGSIDE_another_field_is_refused_WHOLE( self ):
+        """
+        🔴 THE HOLE THIS CLOSES. A carve-out that accepts the prefix and lets a
+        second field ride along is not a carve-out — the immutability wall would be
+        openable by anyone willing to send a legal title with it.
+
+        The extra field is NAMED rather than silently dropped, because a caller who
+        cannot see what was refused will send it again.
+        """
+        fields = { "title": f"WITHDRAWN — {self.OLD}", "priority": "P1" }
+        errors = rules.validate_terminal_edit_fields( fields, self.OLD, "done" )
+        assert len( errors ) == 1
+        assert "priority" in errors[ 0 ]
+
+    def test_title_trimmed_is_NOT_counted_as_a_caller_field( self ):
+        """
+        Scope control. The router derives `title_trimmed` from the guard's own
+        verdict and TaskPatchIn forbids it at the wire, so no caller can send it —
+        counting it as an "extra field" would refuse every legal prefix.
+        """
+        fields = { "title": f"CORRECTED — {self.OLD}", "title_trimmed": False }
+        assert rules.validate_terminal_edit_fields( fields, self.OLD, "done" ) == [ ]
+
+    def test_the_status_is_echoed_so_the_caller_knows_WHICH_wall_it_hit( self ):
+        errors = rules.validate_terminal_edit_fields( { "body": "x" }, self.OLD, "dropped" )
+        assert "dropped" in errors[ 0 ]
+
+    def test_an_illegal_prefix_gets_the_PREFIX_verbs_own_message( self ):
+        # Delegation, asserted: the field gate must not re-word the prefix rule, or
+        # the two can drift into saying different things.
+        fields = { "title": "REOPENED — whatever" }
+        via_gate   = rules.validate_terminal_edit_fields( fields, self.OLD, "done" )
+        via_prefix = rules.validate_terminal_title_prefix( self.OLD, "REOPENED — whatever" )
+        assert via_gate == via_prefix
+
+
 class TestValidateEditTitleLength:
     """
     The EDIT door's hard cap (Rick, 2026-09-01, bug 6ce252e7: "Raise to 120 with a
