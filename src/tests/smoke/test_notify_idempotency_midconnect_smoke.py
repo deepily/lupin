@@ -178,6 +178,18 @@ def _access_token( email, password ):
         json    = { "email": email, "password": password },
         timeout = REQ_TIMEOUT,
     )
+    # DELIBERATELY A HARD ASSERT, NOT A SKIP — the line most likely to be "fixed" by
+    # someone pattern-matching it to the three skips elsewhere in this file. The
+    # distinction is PERSISTENCE, not severity:
+    #   · a peer holding a websocket (step-1 precondition) -> transient, expected on a
+    #     shared box, nobody's defect                                          -> SKIP
+    #   · upgrade refused / control not returning `queued` -> the instrument cannot
+    #     discriminate                                                         -> SKIP
+    #   · login refused -> PERSISTENT env or credential breakage. It will not clear on
+    #     its own, and a skip here means this probe silently stops running forever
+    #     while the suite still reports green                                  -> FAIL
+    # A test that skips itself out of existence is worse than one that fails loudly.
+    # The same reasoning already governs _credentials() raising on unset vars.
     assert resp.status_code == 200, f"login failed: {resp.status_code} {resp.text[ :200 ]}"
     token = resp.json()[ "tokens" ][ "access_token" ]
     assert token, "empty access_token returned"
