@@ -62,7 +62,7 @@ SCOPE, as ratified:
   · ESCAPE HATCH for the seat that STARTED the merge and must finish it.
   · FAIL OPEN when the check itself errors.
 
-⚠️ THREE RESIDUALS, NAMED RATHER THAN HIDDEN.
+⚠️ FOUR RESIDUALS, NAMED RATHER THAN HIDDEN.
 
 1. A SQUASH MERGE IS INVISIBLE TO THIS CHECK, and it is the shape that produces
    the one-parent commit the founding incident recorded. Measured 2026-08-31:
@@ -98,6 +98,16 @@ SCOPE, as ratified:
    behind it. The cost is one hatch prefix for a seat writing prose about
    `git commit` mid-merge, and a test pins the behaviour so it stays a decision
    rather than becoming a surprise.
+
+4. `git merge --continue` ALSO CONCLUDES A MERGE, and this guard does not see it
+   because it is not a `git commit`. Measured: with MERGE_HEAD live, it produces a
+   two-parent merge commit and clears MERGE_HEAD, exactly as a plain commit does.
+   Not covered because Rick ruled on the COMMIT, and because it differs in the one
+   way that matters to the founding incident: it writes git's own default merge
+   message rather than the running seat's, so a peer's merge does not land under
+   somebody else's words. Ownership confusion still applies. Under an accident
+   threat model this is thin — a seat types `git merge --continue` only when it
+   believes it owns a merge, whereas `git commit` is what everyone types all day.
 
 THREAT MODEL — ACCIDENT, NOT EVASION. The matcher is `commit_scope_guard`'s,
 reused rather than re-spelled so there is one answer in the tree to "is this a

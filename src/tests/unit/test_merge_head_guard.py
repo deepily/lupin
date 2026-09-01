@@ -586,3 +586,19 @@ class TestTheKnownGap:
             "Bash", { "command": "git commit -m 'concludes a squash'" },
             enabled=True, cwd=str( main ),
         ) is None, "the guard now catches squash merges — the gap closed; delete this test"
+
+    def test_git_merge_continue_is_not_covered( self ):
+        """
+        PINNED AS KNOWN, LIKE THE SQUASH GAP.
+
+        `git merge --continue` concludes a live merge — measured: two parents,
+        MERGE_HEAD cleared, same as a plain commit. This guard does not see it,
+        because Rick ruled on the COMMIT. It differs in the one way that matters
+        to the founding incident: it writes git's own default merge message, not
+        the running seat's, so a peer's merge does not land under somebody else's
+        words.
+
+        Fails if the scope is ever widened, at which point delete it.
+        """
+        assert _guard( "git merge --continue" ) is None, \
+            "the guard now covers `git merge --continue` — widen the docstring or delete this test"
