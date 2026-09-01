@@ -2122,7 +2122,7 @@ RATIO_GATE_ENFORCEMENT_STARTS = "2026-09-08"
 RATIO_GATE_ENFORCEMENT_ACTIVE = False
 
 
-def ratio_gate_advisory( created, closed, priority=None, correlation_key=None ):
+def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, allow_below=None ):
     """
     Judge one create against the closed-vs-new ratio.
 
@@ -2134,6 +2134,19 @@ def ratio_gate_advisory( created, closed, priority=None, correlation_key=None ):
         - created / closed are non-negative ints for the ruled window
         - priority is the create payload's priority (e.g. "P0"), or None
         - correlation_key is the payload's key, or None
+        - allow_below is the operator's live threshold, or None to read it from
+          cosa.rest.flow_ratio_settings
+
+    🔴 PASS `allow_below` FROM THE ROUTER AND THIS FUNCTION STAYS PURE. It was 1.0
+    hardcoded here AND 1.0 hardcoded in the endpoint's verdict — two copies of one
+    number that the endpoint's docstring promises is computed in one place "so the
+    header and the gate cannot drift apart". Editing one and not the other would have
+    left the board saying "allow" while this refused the create, and nothing anywhere
+    would have reported the disagreement.
+
+    ⚠️ THE None DEFAULT READS A FILE, so it is NOT pure. It exists so an existing caller
+    keeps working, not as the intended path — the router supplies the value. If you are
+    writing a test that cares about purity, pass the threshold.
 
     Ensures:
         - returns None when the write is ALLOWED or EXEMPT
@@ -2158,6 +2171,10 @@ def ratio_gate_advisory( created, closed, priority=None, correlation_key=None ):
     if ( priority or "" ).upper() in RATIO_GATE_EXEMPT_PRIORITIES: return None
     if key.strip().startswith( MIRROR_KEY_PREFIX ):                return None
 
+    if allow_below is None:
+        from cosa.rest import flow_ratio_settings as frs      # local: keeps the module
+        allow_below = frs.get_allow_below()                   # import-time side-effect free
+
     if closed == 0:
         if created == 0: return None
         return (
@@ -2168,12 +2185,24 @@ def ratio_gate_advisory( created, closed, priority=None, correlation_key=None ):
         )
 
     ratio = created / closed
-    if ratio < 1.0: return None
+    if ratio < allow_below: return None
 
-    need = created - closed + 1
+    # How many more closures reach the threshold. The gate opens STRICTLY BELOW it, so
+    # the target is the smallest `c` with created/c < allow_below, i.e.
+    # floor( created / allow_below ) + 1 — the +1 is what covers the exact-boundary case.
+    #
+    # ⚠️ `ceil()` IS WRONG HERE AND LOOKS RIGHT. At created=14, allow_below=1.0 it gives
+    # 14 closures, i.e. 14/14 = 1.00, which REFUSES — the message would have told the
+    # operator to close a number that still leaves the gate shut. Caught by
+    # test_the_refusal_says_how_many_more_to_close, which is why that test exists.
+    #
+    # Generalises the old `created - closed + 1`: at allow_below = 1.0 the two agree
+    # exactly, and this one is also correct for every other threshold.
+    import math
+    need = max( 1, math.floor( created / allow_below ) + 1 - closed )
     return (
         f"New tickets are gated: in the last window the fleet created {created} and closed "
-        f"{closed} (ratio {ratio:.2f} — the gate opens below 1.00). Close or finish {need} "
+        f"{closed} (ratio {ratio:.2f} — the gate opens below {allow_below:.2f}). Close or finish {need} "
         f"more row{'s' if need != 1 else ''} before filing this one. "
         f"(A P0 is exempt if this genuinely cannot wait.)"
     )

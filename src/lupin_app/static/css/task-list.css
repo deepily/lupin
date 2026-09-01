@@ -405,3 +405,72 @@ tbody.task-group.collapsed .task-row {
     text-align: left;
     line-height: 1.5;
 }
+
+/* ---- Operator controls for the ratio gate (2026-09-01) ----
+   The threshold slider moves the number the CREATE gate refuses on, fleet-wide, so
+   this cluster is deliberately quiet but legible — it is a policy control sitting in
+   an observability panel, and should not read as decoration.
+
+   Starts `hidden` in the markup, revealed only once the settings endpoint answers. A
+   slider parked at its HTML default would show the operator a threshold the gate is
+   not using — the same "looks identical whether it works or not" failure that let the
+   ratio endpoint answer 422 unnoticed. */
+.flow-ratio-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin: 0 0 12px 0;
+    padding: 8px 12px;
+    border: 1px solid #e9ecef;
+    border-left: 4px solid #5e35b1;
+    border-radius: 4px;
+    background: #fbfbfd;
+    font-size: 12px;
+    color: #495057;
+}
+
+.flow-ratio-controls label {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.flow-ratio-controls output {
+    min-width: 40px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #ede7f6;
+    color: #4527a0;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+.flow-ratio-controls input[ type="range" ] {
+    width: 140px;
+    accent-color: #5e35b1;
+    vertical-align: middle;
+}
+
+.flow-ratio-controls button {
+    padding: 3px 10px;
+    border: 1px solid #d1c4e9;
+    border-radius: 4px;
+    background: #fff;
+    color: #4527a0;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.flow-ratio-controls button:hover { background: #ede7f6; }
+
+/* Provenance / failure line: "saved override" vs "from config", and the admin-only
+   refusal. The TEXT is the signal, never a colour alone (WCAG 1.4.1). */
+.flow-ratio-controls-status {
+    color: #6c757d;
+    font-size: 11px;
+    font-style: italic;
+}

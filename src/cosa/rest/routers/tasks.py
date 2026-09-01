@@ -25,7 +25,7 @@ src/rnd/2026.06.11-unified-task-store-design.md (v0.4, Rick-ruled §3.1).
 """
 
 from datetime import datetime, timezone, timedelta
-from typing import Annotated, Optional
+from typing import Annotated, Dict, Optional
 import json
 import os
 import uuid
@@ -34,9 +34,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+from cosa.rest.auth_middleware import require_admin
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
 from cosa.rest import task_store_rules as rules
+from cosa.rest import flow_ratio_settings as frs
 from cosa.rest.task_store_owed import blocker_is_terminal, item_blocker_ids, park_reason_is_stale
 from cosa.agents.utils.sender_id import canonicalize_project_name
 import cosa.utils.util as cu
@@ -818,14 +820,19 @@ def create_task(
         # WARN-ONLY until RATIO_GATE_ENFORCEMENT_ACTIVE flips, his ruled ramp. Read INSIDE
         # the session because it needs the counts; evaluated BEFORE create_item so a
         # refusal writes nothing at all.
+        # Both numbers read HERE, at request time, from the one module the header also
+        # reads — so an operator's slider move reaches the gate and the board together.
+        # Reading them once and passing both keeps ratio_gate_advisory pure.
+        ratio_window = frs.get_window_hours()
         ratio_counts = repo.count_created_and_closed(
-            since = datetime.now( timezone.utc ) - timedelta( hours=RATIO_DEFAULT_WINDOW_HOURS )
+            since = datetime.now( timezone.utc ) - timedelta( hours=ratio_window )
         )
         ratio_refusal = rules.ratio_gate_advisory(
             created         = ratio_counts[ "created" ],
             closed          = ratio_counts[ "closed" ],
             priority        = payload.priority,
             correlation_key = payload.correlation_key,
+            allow_below     = frs.get_allow_below(),
         )
         if ratio_refusal:
             if rules.RATIO_GATE_ENFORCEMENT_ACTIVE:
@@ -1813,7 +1820,16 @@ def _resolve_task_ref( repo, task_ref: str ):
 # src/rnd/2026.09.01-closed-vs-new-ratio-gate.md @ 845a34b)
 # ---------------------------------------------------------------------------
 
-RATIO_DEFAULT_WINDOW_HOURS = 24     # Rick's ruling (Q1). See the window caveat below.
+# 🔴 THE WINDOW AND THE THRESHOLD NOW LIVE IN cosa.rest.flow_ratio_settings.
+# Both were hardcoded here (24) and in task_store_rules.py (the literal 1.0), which is
+# two copies of a number this endpoint's own docstring promises is computed in ONE place
+# "so the header and the gate cannot drift apart". They now come from one module, backed
+# by INI defaults and an operator-writable persisted override.
+#
+# ⚠️ DO NOT REINTRODUCE A MODULE-LEVEL CONSTANT FOR EITHER. A constant is read once at
+# import, so a runtime change would not reach a running server — which is the whole
+# reason the operator's slider exists. Call the getters at REQUEST time.
+RATIO_DEFAULT_WINDOW_HOURS = frs.FALLBACK_WINDOW_HOURS   # retained for existing importers
 
 
 @router.get(
@@ -1826,7 +1842,10 @@ RATIO_DEFAULT_WINDOW_HOURS = 24     # Rick's ruling (Q1). See the window caveat 
 )
 def get_flow_ratio(
     authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ],
-    window_hours          : int = Query( default=RATIO_DEFAULT_WINDOW_HOURS, ge=1, le=8760 ),
+    window_hours          : Optional[ int ] = Query( default=None, ge=1, le=8760 ),
+                                          # None = "use the operator's live window".
+                                          # A literal default here would be bound at
+                                          # IMPORT and freeze the boot value forever.
     project               : Optional[ str ] = Query( default=None ),
 ):
     """
@@ -1855,7 +1874,8 @@ def get_flow_ratio(
                                                          is for. This is the COMMON case on
                                                          a quiet day, not an exotic
                                                          divide-by-zero
-              ratio < 1.0                   -> "allow"
+              ratio < allow_below           -> "allow"   the operator's live threshold,
+                                                         echoed back in the payload
               otherwise                     -> "refuse"
         - counts come from SQL COUNT, never a page length — see
           TaskRepository.count_created_and_closed for why that is the whole reason this
@@ -1876,6 +1896,11 @@ def get_flow_ratio(
     here only so a reader of this endpoint is not surprised that clearing dead rows moves
     nothing — that exclusion is what stops the gate being defeated by deleting evidence.
     """
+    # Resolved per-request so an operator move takes effect without a bounce. An
+    # explicit ?window_hours= still wins — the caller asked a specific question.
+    if window_hours is None: window_hours = frs.get_window_hours()
+    allow_below = frs.get_allow_below()
+
     since = datetime.now( timezone.utc ) - timedelta( hours=window_hours )
 
     with get_db() as session:
@@ -1892,7 +1917,7 @@ def get_flow_ratio(
         verdict = "idle" if created == 0 else "refuse"
     else:
         ratio   = round( created / closed, 2 )
-        verdict = "allow" if ratio < 1.0 else "refuse"
+        verdict = "allow" if ratio < allow_below else "refuse"
 
     return {
         "created"      : created,
@@ -1900,9 +1925,154 @@ def get_flow_ratio(
         "ratio"        : ratio,
         "verdict"      : verdict,
         "window_hours" : window_hours,
+        "allow_below"  : allow_below,     # echoed for the same reason window_hours is:
+                                          # a verdict cannot be checked without the
+                                          # threshold that produced it
         "window_start" : since.isoformat(),
         "project"      : project,
     }
+
+
+# ---------------------------------------------------------------------------
+# Operator controls for the ratio: the window and the threshold.
+#
+# 🔴 REGISTERED ABOVE `/tasks/{task_id}` FOR THE SAME REASON `/tasks/flow-ratio` IS.
+# These are 4-segment paths and that route is 3, so it cannot swallow them today — but
+# the habit is the control, not the arithmetic. `test_no_literal_route_is_shadowed_by_a_
+# parameterised_sibling.py` checks the whole route table on every run.
+# ---------------------------------------------------------------------------
+
+class FlowRatioSettingsRequest( BaseModel ):
+    """
+    A PATCH of the operator's ratio controls. Every field is optional.
+
+    ⚠️ OMITTING A FIELD LEAVES IT ALONE — it does not reset it. An operator dragging the
+    threshold slider must not silently revert a window someone else set, so this is a
+    partial update rather than a replace.
+    """
+    model_config = ConfigDict( extra="forbid" )
+
+    window_hours : Optional[ int ]   = Field(
+        default=None, ge=frs.MIN_WINDOW_HOURS, le=frs.MAX_WINDOW_HOURS,
+        description="Rolling window the ratio is counted over, in hours."
+    )
+    allow_below  : Optional[ float ] = Field(
+        default=None, ge=frs.MIN_ALLOW_BELOW, le=frs.MAX_ALLOW_BELOW,
+        description="The gate opens on a ratio STRICTLY BELOW this number."
+    )
+
+
+@router.get(
+    "/tasks/flow-ratio/settings",
+    summary     = "Read the operator's live ratio window + threshold",
+    description = "Returns the live { window_hours, allow_below } and, for each, whether it "
+                  "comes from an operator override or from config. Same auth as /api/tasks."
+)
+def get_flow_ratio_settings(
+    authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ],
+):
+    """
+    Serve the live ratio controls and their provenance.
+
+    Ensures:
+        - returns { window_hours, allow_below, window_source, threshold_source }
+        - the SOURCE fields are included deliberately: a number alone cannot tell an
+          operator whether the INI is in force or is being masked by a saved override,
+          which is the one confusion a two-layer scheme reliably creates
+    """
+    return frs.current_settings()
+
+
+@router.patch(
+    "/tasks/flow-ratio/settings",
+    summary     = "Set the operator's ratio window + threshold",
+    description = "Persists an override for either value. ADMIN ONLY — this moves the "
+                  "threshold the CREATE gate refuses on, fleet-wide, so it is a policy "
+                  "change and not a display preference."
+)
+def patch_flow_ratio_settings(
+    request_body : FlowRatioSettingsRequest,
+    admin_user   : Dict = Depends( require_admin ),
+):
+    """
+    Persist an operator override for the ratio window and/or threshold.
+
+    🔴 ADMIN-GATED ON PURPOSE, AND THIS IS A JUDGEMENT CALL WORTH CHALLENGING. The READ
+    above uses the same guard as the board itself, because anyone who can see the ratio
+    should see the threshold that produced it. The WRITE moves the number that refuses
+    other people's creates, so it is gated harder. If the operator who needs the slider
+    turns out not to hold the admin role, this answers 403 — loudly, and fixable by
+    granting the role. The alternative failure, a quietly open door onto the fleet's
+    gate, is the one you cannot see.
+
+    Requires:
+        - an authenticated ADMIN
+        - at least one of window_hours / allow_below
+
+    Ensures:
+        - a supplied value is persisted so it survives a bounce and is visible to every
+          server sharing this data root; an omitted one is left alone (PATCH, not replace)
+        - returns the LIVE settings after the write, never an echo of the request — the
+          two differ whenever a value clamps, and a UI echoing its own request would then
+          display a number the gate is not using
+        - 422 on a body naming neither field, rather than a silent no-op reported as
+          success
+
+    Raises:
+        - HTTPException 422 when the body changes nothing, or a value is not a number
+        - HTTPException 500 when the override cannot be persisted. NOT swallowed: a
+          slider that reports success while saving nothing is the exact failure this
+          endpoint exists to prevent
+    """
+    if request_body.window_hours is None and request_body.allow_below is None:
+        raise HTTPException(
+            status_code = 422,
+            detail      = "supply window_hours, allow_below, or both — a body naming "
+                          "neither would change nothing, and reporting success for that "
+                          "is how a slider appears to work while doing nothing."
+        )
+
+    try:
+        settings = frs.set_overrides(
+            window_hours = request_body.window_hours,
+            allow_below  = request_body.allow_below,
+        )
+    except ValueError as error:
+        raise HTTPException( status_code=422, detail=str( error ) )
+    except OSError as error:
+        raise HTTPException(
+            status_code = 500,
+            detail      = f"could not persist the ratio settings ({error}). The live values "
+                          f"are UNCHANGED — nothing was applied."
+        )
+
+    print(
+        f"[task] flow-ratio settings set by {admin_user.get( 'email', admin_user )}: "
+        f"window={settings[ 'window_hours' ]}h allow_below={settings[ 'allow_below' ]}"
+    )
+    return settings
+
+
+@router.delete(
+    "/tasks/flow-ratio/settings",
+    summary     = "Clear the operator override, returning to config",
+    description = "Removes the persisted override so the INI defaults govern again. ADMIN ONLY."
+)
+def delete_flow_ratio_settings(
+    admin_user : Dict = Depends( require_admin ),
+):
+    """
+    Drop the persisted override so the INI values govern again.
+
+    Ensures:
+        - clearing an already-clear setting is a no-op, not an error
+        - returns the live settings after the reset, so the caller sees what the INI
+          actually says rather than assuming it matches the shipped fallback
+    """
+    settings = frs.clear_overrides()
+    print( f"[task] flow-ratio override cleared by {admin_user.get( 'email', admin_user )}" )
+    return settings
+
 
 
 @router.get(

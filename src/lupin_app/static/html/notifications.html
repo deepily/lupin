@@ -710,6 +710,42 @@
                 <button class="toggle-button" id="task-list-toggle">▼</button>
             </div>
             <div class="section-content" id="task-list-section">
+                <!-- Operator controls for the ratio gate. These live INSIDE the section
+                     content, not in the header bar: the header's onclick toggles the
+                     section, so a slider up there would collapse the panel on every drag.
+                     Reads GET /api/tasks/flow-ratio/settings, writes PATCH (admin only).
+                     The threshold moves the number the CREATE gate refuses on — it is a
+                     policy control, which is why it names its effect rather than sitting
+                     there as a bare number. -->
+                <div class="flow-ratio-controls" id="flow-ratio-controls"
+                     data-testid="flow-ratio-controls" hidden>
+                    <label for="flow-ratio-threshold">
+                        Gate opens below
+                        <output id="flow-ratio-threshold-value"
+                                data-testid="flow-ratio-threshold-value">—</output>
+                    </label>
+                    <input type="range" id="flow-ratio-threshold"
+                           data-testid="flow-ratio-threshold"
+                           min="0.1" max="3" step="0.05"
+                           title="Ratio the create gate opens below. Higher = more permissive." />
+
+                    <label for="flow-ratio-window">
+                        Window
+                        <output id="flow-ratio-window-value"
+                                data-testid="flow-ratio-window-value">—</output>
+                    </label>
+                    <input type="range" id="flow-ratio-window"
+                           data-testid="flow-ratio-window"
+                           min="1" max="336" step="1"
+                           title="Hours the ratio is counted over. The SAME board can pass at 24h and fail at 168h." />
+
+                    <button type="button" id="flow-ratio-reset"
+                            data-testid="flow-ratio-reset"
+                            title="Drop the saved override and use the configured defaults">Reset</button>
+                    <span id="flow-ratio-controls-status"
+                          data-testid="flow-ratio-controls-status"
+                          class="flow-ratio-controls-status"></span>
+                </div>
                 <div id="task-list-container" data-testid="task-list-container">
                     <!-- rendered owner-grouped table (read-only) -->
                 </div>

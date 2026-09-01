@@ -9754,6 +9754,198 @@ class NotificationsUI {
         el.textContent = text ? ` \u00b7 ${text}` : "";
     }
 
+    // -----------------------------------------------------------------------
+    // Operator controls for the ratio gate (window + threshold).
+    //
+    // THE SLIDERS MOVE THE GATE, NOT THE DISPLAY. `allow_below` is the number the
+    // CREATE gate refuses on, fleet-wide, so a write here changes what other people
+    // can file. That is why the PATCH is admin-only and why a failed write says so
+    // out loud instead of leaving the slider sitting at a value nothing is using.
+    // -----------------------------------------------------------------------
+
+    async fetchFlowRatioSettings() {
+        /**
+         * Read the live { window_hours, allow_below } and their provenance.
+         *
+         * Ensures:
+         *     - Returns the payload on 2xx, else null (same shape as fetchFlowRatio)
+         *     - Never throws
+         */
+        try {
+            const response = await this.authedFetch( "/api/tasks/flow-ratio/settings" );
+            if ( !response.ok ) {
+                this.log( `Flow ratio settings unavailable (HTTP ${response.status})` );
+                return null;
+            }
+            const body = await response.json();
+            return ( body && typeof body === "object" ) ? body : null;
+        } catch ( error ) {
+            this.log( `Flow ratio settings fetch failed: ${error}` );
+            return null;
+        }
+    }
+
+    _flowRatioControlEls() {
+        /** The control cluster, or null when the page does not carry it. */
+        const root = document.getElementById( "flow-ratio-controls" );
+        if ( !root ) return null;
+        return {
+            root,
+            threshold      : document.getElementById( "flow-ratio-threshold" ),
+            thresholdValue : document.getElementById( "flow-ratio-threshold-value" ),
+            window         : document.getElementById( "flow-ratio-window" ),
+            windowValue    : document.getElementById( "flow-ratio-window-value" ),
+            reset          : document.getElementById( "flow-ratio-reset" ),
+            status         : document.getElementById( "flow-ratio-controls-status" )
+        };
+    }
+
+    _paintFlowRatioSettings( settings ) {
+        /**
+         * Move the sliders to `settings` and label them with their provenance.
+         *
+         * Ensures:
+         *     - No-op when the controls are absent
+         *     - The cluster stays HIDDEN when settings is null. An unreadable
+         *       settings endpoint must not leave sliders parked at their HTML
+         *       defaults, which would show the operator a threshold the gate is
+         *       not using — the same "renders identically whether it works or not"
+         *       failure the ratio clause itself had
+         *     - The status line names the SOURCE, because a number alone cannot say
+         *       whether a saved override is masking the configured default
+         */
+        const els = this._flowRatioControlEls();
+        if ( !els ) return;
+
+        if ( !settings || !Number.isFinite( settings.allow_below ) ||
+             !Number.isFinite( settings.window_hours ) ) {
+            els.root.hidden = true;
+            return;
+        }
+
+        els.root.hidden           = false;
+        els.threshold.value       = settings.allow_below;
+        els.thresholdValue.textContent = Number( settings.allow_below ).toFixed( 2 );
+        els.window.value          = settings.window_hours;
+        els.windowValue.textContent    = `${settings.window_hours}h`;
+
+        const overridden = settings.window_source === "override" ||
+                           settings.threshold_source === "override";
+        els.status.textContent = overridden ? "saved override" : "from config";
+    }
+
+    async saveFlowRatioSettings( patch ) {
+        /**
+         * PATCH the operator's ratio settings, then repaint from the SERVER's answer.
+         *
+         * @param {object} patch - { allow_below } and/or { window_hours }
+         *
+         * Ensures:
+         *     - Repaints from the RESPONSE, never from `patch`. The server clamps, so
+         *       echoing the request would leave the slider showing a number the gate
+         *       is not using — which is the whole class of bug this build is about
+         *     - Refreshes the header clause too, since the verdict depends on the
+         *       threshold that just moved
+         *     - A 403 says the write is admin-only rather than failing silently; the
+         *       control then repaints to the server's real values so it never sits at
+         *       a position nothing honours
+         *     - Never throws
+         */
+        const els = this._flowRatioControlEls();
+        try {
+            const response = await this.authedFetch( "/api/tasks/flow-ratio/settings", {
+                method  : "PATCH",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( patch )
+            } );
+            if ( !response.ok ) {
+                if ( els ) {
+                    els.status.textContent = response.status === 403
+                        ? "not saved — admin only"
+                        : `not saved (HTTP ${response.status})`;
+                }
+                this._paintFlowRatioSettings( await this.fetchFlowRatioSettings() );
+                return null;
+            }
+            const settings = await response.json();
+            this._paintFlowRatioSettings( settings );
+            this._renderFlowRatio( await this.fetchFlowRatio() );
+            return settings;
+        } catch ( error ) {
+            this.log( `Flow ratio settings save failed: ${error}` );
+            if ( els ) els.status.textContent = "not saved (network)";
+            return null;
+        }
+    }
+
+    async resetFlowRatioSettings() {
+        /**
+         * DELETE the override so the configured defaults govern again.
+         *
+         * Ensures:
+         *     - Repaints from the server's answer, so the operator sees what config
+         *       actually says rather than assuming it matches the shipped fallback
+         *     - Never throws
+         */
+        try {
+            const response = await this.authedFetch( "/api/tasks/flow-ratio/settings",
+                                                     { method: "DELETE" } );
+            if ( !response.ok ) {
+                const els = this._flowRatioControlEls();
+                if ( els ) {
+                    els.status.textContent = response.status === 403
+                        ? "not reset — admin only"
+                        : `not reset (HTTP ${response.status})`;
+                }
+                return null;
+            }
+            const settings = await response.json();
+            this._paintFlowRatioSettings( settings );
+            this._renderFlowRatio( await this.fetchFlowRatio() );
+            return settings;
+        } catch ( error ) {
+            this.log( `Flow ratio settings reset failed: ${error}` );
+            return null;
+        }
+    }
+
+    initFlowRatioControls() {
+        /**
+         * Bind the sliders once, then paint them from the server.
+         *
+         * ⚠️ WRITES ON `change`, NOT `input`. `input` fires on every pixel of a drag,
+         * which would PATCH dozens of times and move the fleet's create gate through
+         * every intermediate value on the way. `input` only updates the label.
+         *
+         * Ensures:
+         *     - Idempotent — a second call rebinds nothing (guarded by a flag)
+         *     - No-op when the controls are absent (the multiplexer page has no
+         *       cluster; this file serves both)
+         */
+        if ( this._flowRatioControlsBound ) return;
+        const els = this._flowRatioControlEls();
+        if ( !els ) return;
+        this._flowRatioControlsBound = true;
+
+        els.threshold.addEventListener( "input", () => {
+            els.thresholdValue.textContent = Number( els.threshold.value ).toFixed( 2 );
+        } );
+        els.threshold.addEventListener( "change", () => {
+            this.saveFlowRatioSettings( { allow_below: Number( els.threshold.value ) } );
+        } );
+
+        els.window.addEventListener( "input", () => {
+            els.windowValue.textContent = `${els.window.value}h`;
+        } );
+        els.window.addEventListener( "change", () => {
+            this.saveFlowRatioSettings( { window_hours: Number( els.window.value ) } );
+        } );
+
+        els.reset.addEventListener( "click", () => this.resetFlowRatioSettings() );
+
+        this.fetchFlowRatioSettings().then( s => this._paintFlowRatioSettings( s ) );
+    }
+
     _taskListCountText( openTasks, now ) {
         /**
          * Count a set of OPEN rows into the header's live/parked/total text.
@@ -10146,6 +10338,9 @@ class NotificationsUI {
             // Epic Board shares the composite: two clocks read as a bug the first
             // time they disagree.
             this._renderFlowRatio( await this.fetchFlowRatio() );
+            // Bind + paint the operator controls. Idempotent, so riding the
+            // existing tick costs nothing after the first one.
+            this.initFlowRatioControls();
         } finally {
             this._taskListFetchInFlight = false;
         }
