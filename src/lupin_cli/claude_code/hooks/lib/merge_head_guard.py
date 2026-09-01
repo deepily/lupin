@@ -397,13 +397,45 @@ def _deny_reason_for( kind: str, merge_sha=None ) -> str:
         - names the sha, so the committer can identify the merge before acting
         - names the machine-readable blindness, because the seat's next instinct
           is to check `git status --porcelain` and be reassured by nothing
-        - gives the hatch verbatim, one line, copyable
+        - gives a remedy that MATCHES THE STATE. The hatch is right for a merge you
+          mean to conclude and WRONG for a squash that is not yours — using it there
+          lands the squash, which is the damage. A refusal whose instruction causes
+          the harm is worse than none, because it carries authority (Rachel 🕊️, 2026-08-31)
         - NAMES ITS OWN RESIDUALS. A residual recorded only in a module docstring
           and a test is invisible to the person who actually meets the guard, who
           will reasonably assume it covers every way a merge gets concluded. The
           refusal is the only text a seat reads, so the scope belongs in it.
     """
+    # 🔴 THE REMEDY DIFFERS BY STATE, AND OFFERING THE WRONG ONE CAUSES THE HARM.
+    # Found by Rachel 🕊️ on review, 2026-08-31: the squash refusal pointed at the
+    # hatch, and the hatch is exactly what a seat must NOT reach for when the staged
+    # squash is not theirs — using it LANDS the squash under their message, which is
+    # the damage this guard exists to prevent. A refusal whose instruction produces
+    # the harm is worse than no refusal, because it carries authority.
+    #
+    # MEASURED — a plain `git reset` (not --hard) is the safe way out of a squash:
+    #     SQUASH_MSG           PRESENT -> absent
+    #     the seat's own untracked file      kept
+    #     the seat's own tracked edit        kept
+    #     the lane's files       left in the worktree, UNSTAGED
+    # Nothing is lost, which is why it can be recommended without a warning attached.
+    #
+    # ⚠️ The unstaged leftovers matter and the message says so: a later `git add -A`
+    # or `git commit -a` re-captures the lane's files and lands them without ancestry
+    # anyway — the original harm reached by a second route.
     if kind == KIND_SQUASH:
+        remedy = (
+            "IF YOU MEAN TO LAND THIS SQUASH, re-run with:\n"
+            "  LUPIN_ALLOW_MERGE_COMMIT=1 git commit ...\n"
+            "IF IT IS NOT YOURS, OR IS LEFT OVER — you are almost certainly here because you "
+            "wanted to commit your OWN unrelated work — DO NOT use the hatch: it would land "
+            "the squash under your message. Clear it instead:\n"
+            "  git reset            # unstages the squash, keeps every file, drops SQUASH_MSG\n"
+            "Your own changes survive that untouched, staged or not. ⚠️ It leaves the merged "
+            "files in the worktree UNSTAGED, so commit your paths BY NAME afterwards — a later "
+            "`git add -A` or `git commit -a` would sweep them back in and land them without "
+            "ancestry, which is the same damage by another route.\n"
+        )
         headline = (
             "`git commit` is denied: A SQUASH MERGE IS STAGED AND UNCONCLUDED IN THIS TREE "
             "(SQUASH_MSG is present, and there is no MERGE_HEAD to name).\n"
@@ -413,6 +445,14 @@ def _deny_reason_for( kind: str, merge_sha=None ) -> str:
             "`f3e9b41a`).\n"
         )
     else:
+        remedy = (
+            "IF THE MERGE IS YOURS and you mean to conclude it, re-run with:\n"
+            "  LUPIN_ALLOW_MERGE_COMMIT=1 git commit ...\n"
+            "IF IT IS NOT YOURS, it belongs to another seat mid-operation. Do NOT abort it and "
+            "do NOT commit around it — ask the owner to finish, or wait. Unlike a staged squash "
+            "this one is not yours to clear: `git merge --abort` would destroy their conflict "
+            "resolution. Your own work is safe where it is; nothing here loses it.\n"
+        )
         headline = (
             f"`git commit` is denied: A MERGE IS LIVE IN THIS TREE (MERGE_HEAD {merge_sha[ :12 ]}).\n"
             "Committing now CONCLUDES that merge under YOUR message.\n"
@@ -429,11 +469,7 @@ def _deny_reason_for( kind: str, merge_sha=None ) -> str:
         "DO NOT CHECK `git status --porcelain` — BOTH machine-readable forms show NOTHING "
         "once the conflicts are staged. Use the long `git status`, or "
         "`git rev-parse -q --verify MERGE_HEAD`, or look for SQUASH_MSG.\n"
-        "IF THE MERGE IS YOURS and you mean to conclude it, re-run with:\n"
-        "  LUPIN_ALLOW_MERGE_COMMIT=1 git commit ...\n"
-        "IF IT IS NOT YOURS, it belongs to another seat mid-operation. Do not abort it and "
-        "do not commit around it — ask the owner to finish, or wait. Your own work is safe "
-        "where it is; nothing here loses it.\n"
+        + remedy +
         "WHAT THIS GUARD DOES NOT COVER, so you do not read it as more than it is: "
         "`git merge --continue` also concludes a merge and is NOT checked. Seeing no "
         "refusal is not evidence that no merge is in flight."

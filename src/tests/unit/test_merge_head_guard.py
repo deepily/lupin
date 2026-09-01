@@ -174,6 +174,64 @@ class TestTheRefusalText:
         """
         assert "LUPIN_ALLOW_MERGE_COMMIT=1" in _guard( "git commit -m x" )
 
+    def test_the_squash_refusal_does_not_lead_with_the_hatch( self ):
+        """
+        🔴 THE REFUSAL'S INSTRUCTION MUST NOT CAUSE THE HARM IT REFUSES.
+
+        Found by Rachel 🕊️ on review, 2026-08-31. The squash refusal pointed at the
+        escape hatch, and the hatch is exactly what a seat must NOT reach for when
+        the staged squash is not theirs: using it LANDS the squash under their
+        message, which is the damage this guard exists to prevent. A seat meeting
+        this refusal is almost always trying to commit their OWN unrelated work.
+
+        A refusal whose instruction produces the harm is worse than no refusal,
+        because it carries authority.
+        """
+        squash = _guard(
+            "git commit -m 'my own work'", merge_reader=_no_merge, squash_reader=lambda _c: True
+        )
+        assert "git reset" in squash, "the squash refusal does not offer the safe way out"
+        assert "DO NOT use the hatch" in squash, (
+            "the squash refusal does not warn against the hatch - a seat clearing "
+            "somebody else's squash would land it under their own message"
+        )
+
+    def test_the_squash_refusal_warns_that_reset_leaves_the_files_unstaged( self ):
+        """
+        `git reset` clears SQUASH_MSG and keeps every file — MEASURED — but it leaves
+        the lane's files in the worktree UNSTAGED. A later `git add -A` or
+        `git commit -a` sweeps them back in and lands them without ancestry: the same
+        damage reached by a second route. The remedy is only safe with that said.
+        """
+        squash = _guard(
+            "git commit -m x", merge_reader=_no_merge, squash_reader=lambda _c: True
+        )
+        assert "UNSTAGED" in squash
+        assert "BY NAME"  in squash
+
+    def test_the_merge_refusal_does_not_tell_you_to_clear_it( self ):
+        """
+        THE OTHER HALF, and it is why the two states cannot share one remedy. A live
+        MERGE_HEAD is NOT yours to clear — `git merge --abort` destroys the owner's
+        conflict resolution. `git reset` is the right answer for a squash and the
+        wrong one here.
+        """
+        merge = _guard( "git commit -m x" )
+        assert "git reset" not in merge, (
+            "the merge refusal offers the squash remedy - aborting a peer's live "
+            "merge destroys their conflict resolution"
+        )
+        assert "ask the owner to finish" in merge
+
+    def test_the_two_remedies_are_not_the_same_text( self ):
+        """
+        THE CONTROL. Without it, a single shared remedy block passes both tests above
+        by accident as soon as it happens to contain the right words.
+        """
+        merge  = _guard( "git commit -m x" )
+        squash = _guard( "git commit -m x", merge_reader=_no_merge, squash_reader=lambda _c: True )
+        assert merge.split( "IF " )[ 1: ] != squash.split( "IF " )[ 1: ]
+
     def test_it_names_its_own_residuals( self ):
         """
         A RESIDUAL RECORDED ONLY IN A DOCSTRING AND A TEST IS INVISIBLE TO THE
