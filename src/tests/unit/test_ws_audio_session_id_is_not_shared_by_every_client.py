@@ -3,6 +3,25 @@ Guard: the docs must not claim EVERY client shares one session id between its
 queue and audio WebSockets. Two of the three clients do; the live web app does
 not, and the docs said otherwise in three places.
 
+ARMS RUN AGAINST THIS FILE (every assertion proven to discriminate, one sha,
+caches purged between arms, backups by cp — never git checkout, which restores
+HEAD and would have deleted the uncommitted fix):
+
+  | arm                                          | result                        |
+  |----------------------------------------------|-------------------------------|
+  | baseline BEFORE the doc fixes                 | 3 failed / 2 passed           |
+  | architecture.md claim restored                | 1 failed (named) / 4 passed   |
+  | troubleshooting.md claim restored             | 1 failed (named) / 4 passed   |
+  | websocket_manager.py scoping removed          | 1 failed (named) / 4 passed   |
+  | notifications.js unified to ONE session id    | 1 failed (named) / 4 passed   |
+  | audio URL rebuilt from the QUEUE id           | 1 failed (named) / 4 passed   |
+  | restored                                      | 5 passed                      |
+
+Each arm reddens exactly its own named test and nothing else. The last two were
+added later, in a deliberate audit of assertions that had never been run against
+a broken arm — a test that has only ever been seen passing is not known to
+discriminate.
+
 WHERE THIS FILE LANDED: commit 05eeb53c, titled "the em-dash test was wrong in
 its PREMISE, not just its string". It is not about em-dashes. Pocholo 📣 hit the
 shared-index race — `git add <his one path>` then `git commit -m`, which commits

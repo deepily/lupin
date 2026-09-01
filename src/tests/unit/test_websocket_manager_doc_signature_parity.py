@@ -2,6 +2,27 @@
 Guard: websocket-architecture.md says "All methods are documented below". Hold
 it to that, mechanically.
 
+ARMS RUN AGAINST THIS FILE:
+
+  | arm                                          | result                        |
+  |----------------------------------------------|-------------------------------|
+  | baseline (after the fixes)                    | 3 passed                      |
+  | the four emit rows removed                    | 1 failed (named) / 2 passed   |
+  | connect signature reverted, FIRST fixture     | 3 PASSED — BLIND              |
+  | connect signature reverted, fixed fixture     | 1 failed (named) / 2 passed   |
+  | a new undocumented public method added        | 1 failed (named) / 2 passed   |
+  | restored                                      | 3 passed                      |
+
+The third row is why this table exists. The guard passed against the defect it
+was written for, because the parameter names it searched for also appear in the
+row's PROSE — it was reading the explanation and reporting on the signature. The
+fix was to the FIXTURE (read column two only), never to the assertion.
+
+The last row answers a claim that was being made about this guard rather than
+measured: that it stays effective as the class grows. Adding a new public method
+to WebSocketManager does redden it, so the method list really is derived from the
+code and not from a list that will go stale.
+
 WHERE THIS FILE LANDED: commit 05eeb53c, titled "the em-dash test was wrong in
 its PREMISE, not just its string". It is not about em-dashes. Pocholo 📣 hit the
 shared-index race — `git add <his one path>` then `git commit -m`, which commits
