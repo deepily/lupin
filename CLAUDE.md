@@ -640,6 +640,24 @@ half from each, and a green result from it is not evidence about either.
 a guard that holds. I nearly filed two correct, well-built guards — one of which carries its own
 positive control — as blind to the defect they were written for.
 
+**WHO IS ACTUALLY EXPOSED — AND "IMPORTS cosa" IS THE RISK INDICATOR, NOT THE VERDICT.** Of the 14
+test files added on 2026-09-01, **13 import `cosa` or `lupin_app`**. That number is a starting
+point and nothing more, because it does not separate the two ways a test can use an import:
+
+| how the test uses the import | exposed? |
+|---|---|
+| imports a module and asserts on **its behaviour** (builds the app, calls the function) | 🔴 **yes** — it measures the main repo's code |
+| imports only a **path helper**, then reads FILES (`cu.get_project_root()`) | ✅ **no** — the helper reads `LUPIN_ROOT` at CALL time, so it returns your tree |
+
+Both websocket guards in that list are the second kind, and this is **measured, not reasoned**:
+their three mutation arms were run with `LUPIN_ROOT` pinned and `PYTHONPATH` **not** pinned, and
+all three reddened — so the files being read were the worktree's, even while `cosa.utils.util`
+itself had been imported from the main repo.
+
+⇒ **Do not read a bare import list as an exposure list.** Ask what the test does with the import.
+A census that skips that step over-reports, in exactly the way the module-name search over
+`rest-api-reference.md` over-reported by counting names instead of paths.
+
 **RECONCILED 2026-08-30 — a second measurement got 10, and 10 and 11 are the SAME finding.** Rio ⚡
 ran the unit tier at sha `cc336880`, root `/mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-rio-8593bf65`,
 with `LUPIN_ROOT="$PWD"` exported, and measured a gap of **10** — not 11.
