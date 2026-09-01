@@ -689,6 +689,36 @@ _TOUCHED_RE = re.compile( r"^-\s+(?P<ts>[^|]+)\|\s*(?P<path>.+?)\s*$" )
 _ANNOTATED_PATH_RE = re.compile( r"^(?P<bare>\S+)\s+\(.*$" )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# MEASURED AND REJECTED 2026-09-01 (Rio, endorsed by Mr. Radio): DO NOT ADD A
+# WARNING FOR A CLAIMED PATH THAT DOES NOT EXIST.
+#
+# The idea is obvious and it is wrong here, so it is recorded rather than left
+# for the next person to re-derive. A manifest entry naming a path not on disk
+# claims nothing — a typo in your own section reads to this guard exactly like no
+# claim at all, and you are refused with no hint why. Warning on it looks free.
+#
+# It is not. Measured against the live manifest: 29 sections, 349 claims, 270
+# distinct paths.
+#
+#     claims naming nothing on disk ............ 33
+#     of those, actually a defect ..............  1
+#         "(DELETED, V1 excision) 7 scripts + 10 test files + pinned worktree"
+#         — prose in the path field, silently accepted as a claim
+#
+# The other 32 are files legitimately deleted or never merged, sitting in
+# sections from previous days. A control firing 32 times per real case trains
+# people to read past it, at which point it is worse than absent — the same
+# ground on which the stale-section markers were retracted the same evening.
+#
+# THE NARROW VERSION HOLDS, if anyone ever needs it: restricted to sections whose
+# Last Activity is TODAY, the false-positive count is ZERO — five live sections,
+# thirty claims between them, none naming a missing file. Left unbuilt
+# deliberately: nobody has hit that typo, and a control for a defect nobody has
+# had is a maintenance cost with no receipt.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 def _parse_manifest( text: str ) -> dict:
     """
     Map each session id in the manifest to the set of paths its section claims.
