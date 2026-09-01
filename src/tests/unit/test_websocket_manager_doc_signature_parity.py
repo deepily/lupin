@@ -2,6 +2,20 @@
 Guard: websocket-architecture.md says "All methods are documented below". Hold
 it to that, mechanically.
 
+WHERE THIS FILE LANDED: commit 05eeb53c, titled "the em-dash test was wrong in
+its PREMISE, not just its string". It is not about em-dashes. Pocholo 📣 hit the
+shared-index race — `git add <his one path>` then `git commit -m`, which commits
+the whole INDEX, and the index is shared across every seat in this checkout, so a
+peer staging in between rides along. Content intact and unaltered; only the
+authorship and the subject line are wrong. NOT rewritten: 05eeb53c was already an
+ancestor of HEAD with a peer commit on top, and rewriting a shared branch under
+four live seats is strictly worse than a mis-attribution. Description supplied
+separately by the empty commit 1f693a34. ⇒ The commit message will never lead
+anyone here, which is why the sha is written down. The fix for everyone: put a
+pathspec on the COMMIT — `git commit -F msg.txt -- <paths>` — which commits only
+those paths whatever else is staged. "Stage only your own paths" governs what you
+ADD and says nothing about what someone else adds while you type.
+
 WHY. That sentence is a falsifiable universal claim, and on 2026-09-01 it was
 false: FOUR public methods had ZERO mentions anywhere in the doc, and
 `connect`'s documented signature was two parameters short. One of the missing
