@@ -672,6 +672,22 @@ AUTO_INCLUDES     = frozenset( {
 _SECTION_RE = re.compile( r"^##\s+Session:\s*(?P<sid>\S+)\s*$" )
 _TOUCHED_RE = re.compile( r"^-\s+(?P<ts>[^|]+)\|\s*(?P<path>.+?)\s*$" )
 
+# A path followed by a parenthetical NOTE. Manifest sections carry these by
+# long-standing convention — "(merge 1f5d872e — Krishna)", "(DELETED — Rick's
+# ruling)", "(renamed from …)" — and _TOUCHED_RE folds the note INTO the path,
+# so the section claims a string no file will ever equal.
+#
+# Measured 2026-09-01 against the live manifest: 332 claimed paths, 10 of them
+# mis-claimed this way, six in one seat's section. Every one read as claimed by
+# NOBODY, so a commit naming those files was refused with "claimed by no
+# session" — the guard blocking work it should have allowed. The parse never
+# failed; it succeeded and produced a wrong answer, which is why nothing
+# surfaced it.
+#
+# The path is required to be a single non-space token before the " (" so this
+# cannot swallow a genuine path that merely contains a space and a bracket.
+_ANNOTATED_PATH_RE = re.compile( r"^(?P<bare>\S+)\s+\(.*$" )
+
 
 def _parse_manifest( text: str ) -> dict:
     """
@@ -701,7 +717,15 @@ def _parse_manifest( text: str ) -> dict:
 
         touched = _TOUCHED_RE.match( line.strip() )
         if touched:
-            claims[ current ].add( touched.group( "path" ).strip() )
+            path = touched.group( "path" ).strip()
+            claims[ current ].add( path )
+            # Also claim the bare path when a parenthetical note follows it.
+            # Both forms are kept: the raw string preserves today's behaviour
+            # for any real path containing " (", and the bare form is what the
+            # author meant. Claiming the annotated form alone claims nothing.
+            annotated = _ANNOTATED_PATH_RE.match( path )
+            if annotated:
+                claims[ current ].add( annotated.group( "bare" ) )
 
     return claims
 
