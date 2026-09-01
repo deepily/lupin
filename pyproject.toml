@@ -240,6 +240,20 @@ omit   = [
     # prod modules from the 100% mandate: swe_team/test_runner.py, rest/routers/test_suite.py,
     # rest/test_suite_completion_watchdog.py. Those are production code that runs/manages
     # test suites — they must be measured, not omitted by an over-broad filename glob.
+    # ── src/sitecustomize.py (row f313fc2d, 2026-08-31) ──────────────────────────
+    # DECLARED, not silently absent. It already sat outside the frame — `source`
+    # lists src/ SUBDIRECTORIES and this is a top-level file, so it was
+    # never-measured with nothing saying so, which is the failure mode this repo
+    # documents as "absence from a report means never-measured, not zero".
+    # Omitted rather than measured because its one interesting path — the guard
+    # that keeps a failing shim from bricking every interpreter in the repo — is
+    # observable ONLY across a process boundary: `site` imports it before any test
+    # framework exists. That path is PROVEN by subprocess, not skipped:
+    # src/tests/unit/test_sitecustomize_fails_open.py starts real interpreters
+    # with a staged failing module and asserts they still run, with controls both
+    # ways. The logic it calls lives in cosa/utils/checked_hash_pyc.py, which is
+    # inside the frame at 100%.
+    "*/src/sitecustomize.py",
     "*/cosa/agents/*/__main__.py",  # CLI entrypoints — glue, run only via `python -m`
     "*/cosa/training/*",            # GPU + user-run-only; untestable in CI per never-grab-GPU mandate
     # ── Anything outside our own tree (row e2099400 §3a, 2026-08-26) ──────────────

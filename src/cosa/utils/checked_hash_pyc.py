@@ -92,6 +92,27 @@ _EXCLUDED_PARTS = frozenset( ( ".venv", "node_modules", ".git", "__pypackages__"
 
 _LEDGER_RELATIVE = "io/pyc-mode-ledger.jsonl"
 
+
+class _Outcome( str ):
+    """
+    A falsey string, so install()'s two non-True outcomes stay distinguishable
+    WITHOUT breaking `if install(): ...` at any existing call site.
+
+    Subclassing str keeps the value printable and comparable; overriding __bool__
+    keeps it falsey, like the plain False it replaces.
+    """
+    __slots__ = ()
+
+    def __bool__( self ): return False
+
+
+# The two reasons install() does not newly install. BOTH were `False` until
+# 2026-08-31 — one value for "the patch is already in place" and for "this
+# interpreter cannot be patched", which are opposite facts. A caller reading the
+# old False could not tell a working preventer from an impossible one.
+ALREADY_INSTALLED       = _Outcome( "already-installed" )
+UNSUPPORTED_INTERPRETER = _Outcome( "unsupported-interpreter" )
+
 _installed  = False
 _original   = None
 _converted  = 0          # writes this process actually rewrote — the install's own receipt
@@ -178,13 +199,18 @@ def install( roots=None ):
 
     Ensures:
         - returns True only when this call newly installed the patch
-        - returns False when already installed, or when the interpreter's import machinery
-          does not match what this module knows how to patch
+        - returns ALREADY_INSTALLED when the patch is already in place
+        - returns UNSUPPORTED_INTERPRETER when the import machinery does not match
+          what this module knows how to patch
+        - ⚠️ BOTH ARE FALSEY, so `if install(): ...` keeps its old meaning, while a
+          caller that must tell "the patch is in place" from "the patch is impossible"
+          now can. They were ONE value until 2026-08-31, and this docstring stated the
+          conflation as if it were a feature — they are opposite facts
         - never raises
     """
     global _installed, _original
 
-    if _installed: return False
+    if _installed: return ALREADY_INSTALLED
 
     try:
         import importlib._bootstrap_external as bootstrap
@@ -193,7 +219,7 @@ def install( roots=None ):
         # patch on SourceLoader is never called — measured, see the module docstring.
         original = target.__dict__[ "_cache_bytecode" ]
     except Exception:
-        return False
+        return UNSUPPORTED_INTERPRETER
 
     scope = tuple( os.path.abspath( r ) for r in ( roots if roots is not None else _default_roots() ) )
 
@@ -212,7 +238,11 @@ def install( roots=None ):
     try:
         target._cache_bytecode = _cache_bytecode
     except Exception:
-        return False
+        # A DIFFERENT moment from the read above — this is the WRITE failing, on a
+        # class that refuses assignment. Both mean "this interpreter cannot be
+        # patched", and this file's own comment records a test that once passed on
+        # the wrong one of the two because both returned a bare False.
+        return UNSUPPORTED_INTERPRETER
 
     _original  = original
     _installed = True

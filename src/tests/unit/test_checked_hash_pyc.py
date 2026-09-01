@@ -118,7 +118,7 @@ def test_install_is_idempotent_and_uninstall_restores( clean_install ):
 
     assert chp.install( roots=[] )  is True     # newly installed
     assert chp.is_installed()       is True
-    assert chp.install( roots=[] )  is False    # already installed — not installed twice
+    assert chp.install( roots=[] )  is chp.ALREADY_INSTALLED   # not installed twice
     assert bootstrap.SourceFileLoader.__dict__[ "_cache_bytecode" ] is not before
 
     assert chp.uninstall()          is True
@@ -140,18 +140,18 @@ def test_install_patches_the_concrete_class_not_the_shadowed_base( clean_install
     assert bootstrap.SourceLoader.__dict__[ "_cache_bytecode" ] is base_before
 
 
-def test_install_returns_false_when_the_machinery_is_not_what_it_expects( monkeypatch, clean_install ):
+def test_install_reports_an_unsupported_interpreter_when_the_machinery_differs( monkeypatch, clean_install ):
     import importlib._bootstrap_external as bootstrap
 
     class _Unpatchable:
         __dict__ = {}                       # no _cache_bytecode to capture
 
     monkeypatch.setattr( bootstrap, "SourceFileLoader", _Unpatchable, raising=True )
-    assert chp.install( roots=[] ) is False
+    assert chp.install( roots=[] ) is chp.UNSUPPORTED_INTERPRETER
     assert chp.is_installed()      is False
 
 
-def test_install_returns_false_when_the_patch_cannot_be_applied( monkeypatch, clean_install ):
+def test_install_reports_an_unsupported_interpreter_when_the_patch_cannot_be_applied( monkeypatch, clean_install ):
     """
     The class HAS the method to capture, so install() gets past the lookup, and then the
     assignment itself is refused. An earlier cut of this test declared `__dict__` as a class
@@ -169,7 +169,7 @@ def test_install_returns_false_when_the_patch_cannot_be_applied( monkeypatch, cl
 
     assert "_cache_bytecode" in _Immutable.__dict__, "the lookup must SUCCEED for this test to mean anything"
     monkeypatch.setattr( bootstrap, "SourceFileLoader", _Immutable, raising=True )
-    assert chp.install( roots=[] ) is False
+    assert chp.install( roots=[] ) is chp.UNSUPPORTED_INTERPRETER
     assert chp.is_installed()      is False
 
 
@@ -443,7 +443,15 @@ def _run( root, code ):
 
 
 def _seed( root, patched ):
+    # ⚠️ `chp.uninstall()` FIRST, and it is not redundant. src/sitecustomize.py
+    # installs the patch at interpreter startup in every process — this child
+    # included — so without it `install()` returns ALREADY_INSTALLED and the
+    # assertion below fails. Uninstalling makes the child's starting state
+    # EXPLICIT rather than inherited from whatever the parent's environment
+    # happened to arrange. Each child is a fresh interpreter, so this is
+    # deterministic, not order-dependent on the parent.
     prologue = ( "from cosa.utils import checked_hash_pyc as chp; "
+                 "chp.uninstall(); "
                  "assert chp.install( roots=[] ) is True; " if patched else "" )
     out = _run( root, f"{prologue}import pkg.victim" )
     assert out.returncode == 0, out.stderr
