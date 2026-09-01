@@ -24,7 +24,7 @@ Canonical design: planning-is-prompting ->
 src/rnd/2026.06.11-unified-task-store-design.md (v0.4, Rick-ruled §3.1).
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Annotated, Optional
 import json
 import os
@@ -1847,3 +1847,100 @@ def get_epic_stories(
         )
     real_keys = [ key for key in stories.keys() if not key.startswith( "_" ) ]
     return { "stories": stories, "count": len( real_keys ) }
+
+
+# ---------------------------------------------------------------------------
+# Closed-vs-new ratio (María's design, planning-is-prompting
+# src/rnd/2026.09.01-closed-vs-new-ratio-gate.md @ 845a34b)
+# ---------------------------------------------------------------------------
+
+RATIO_DEFAULT_WINDOW_HOURS = 24     # Rick's ruling (Q1). See the window caveat below.
+
+
+@router.get(
+    "/tasks/flow-ratio",
+    summary     = "Closed-vs-new ratio over a rolling window",
+    description = "Returns { created, closed, ratio, verdict, window_hours } counted in "
+                  "SQL. The board's header and the creation gate are both thin consumers "
+                  "of this ONE number, which is what stops them disagreeing with each "
+                  "other. Auth: X-API-Key or Bearer JWT (same guard as /api/tasks)."
+)
+def get_flow_ratio(
+    authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    window_hours          : int = Query( default=RATIO_DEFAULT_WINDOW_HOURS, ge=1, le=8760 ),
+    project               : Optional[ str ] = Query( default=None ),
+):
+    """
+    Serve the closed-vs-new ratio for a rolling window.
+
+    Rick's durable, mechanical replacement for the ticket moratorium he declared by
+    voice on 2026-09-01: "It's way too easy for you guys to add tickets to the list and
+    way too hard to get them removed."
+
+    Requires:
+        - authenticated caller (X-API-Key or Bearer JWT)
+        - window_hours in [ 1, 8760 ]; project is None (fleet-wide, Rick's Q5) or an
+          exact project name
+
+    Ensures:
+        - returns { created, closed, ratio, verdict, window_hours, window_start, project }
+        - `ratio` is created ÷ closed to 2dp, or None when closed == 0 — None rather than
+          a sentinel number, so a consumer cannot accidentally compare it. The header
+          renders None as an em dash
+        - `verdict` is computed HERE, not by each consumer, so the header and the gate
+          cannot drift apart:
+              closed == 0 and created == 0  -> "idle"    an idle window is not a failing
+                                                         window
+              closed == 0 and created  > 0  -> "refuse"  a window where nothing was
+                                                         finished is exactly what the gate
+                                                         is for. This is the COMMON case on
+                                                         a quiet day, not an exotic
+                                                         divide-by-zero
+              ratio < 1.0                   -> "allow"
+              otherwise                     -> "refuse"
+        - counts come from SQL COUNT, never a page length — see
+          TaskRepository.count_created_and_closed for why that is the whole reason this
+          endpoint exists rather than a frontend paging the event stream
+
+    ⚠️ THE WINDOW SIZE CAN FLIP THE VERDICT, which is why it is echoed back rather than
+    assumed. Measured on the live board 2026-09-01, minutes apart:
+
+        24h    created  10 / closed  13    ratio 0.77    allow
+        168h   created 211 / closed 191    ratio 1.10    refuse
+
+    Over a day the fleet closes faster than it files; over a week it does not. 24h is
+    Rick's ruling and it stands — he holds the threshold as an operator dial and tunes it
+    on criteria of his own. Recorded so a consumer showing a number also shows which
+    window produced it.
+
+    ⚠️ `dropped` IS NOT A CLOSURE (Rick's Q2), excluded in the repository. Named again
+    here only so a reader of this endpoint is not surprised that clearing dead rows moves
+    nothing — that exclusion is what stops the gate being defeated by deleting evidence.
+    """
+    since = datetime.now( timezone.utc ) - timedelta( hours=window_hours )
+
+    with get_db() as session:
+        counts = TaskRepository( session ).count_created_and_closed(
+            since   = since,
+            project = project,
+        )
+
+    created = counts[ "created" ]
+    closed  = counts[ "closed" ]
+
+    if closed == 0:
+        ratio   = None
+        verdict = "idle" if created == 0 else "refuse"
+    else:
+        ratio   = round( created / closed, 2 )
+        verdict = "allow" if ratio < 1.0 else "refuse"
+
+    return {
+        "created"      : created,
+        "closed"       : closed,
+        "ratio"        : ratio,
+        "verdict"      : verdict,
+        "window_hours" : window_hours,
+        "window_start" : since.isoformat(),
+        "project"      : project,
+    }
