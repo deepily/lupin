@@ -27,6 +27,41 @@ invocation, not under pytest discovery — without the fixture, pytest
 runs would 503-cascade despite the `--auto-proxy` flag being present.
 See `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/01-design.md`
 §Phase 5 for the design rationale.
+
+PORTS AROUND :7999 — 7998 IS TAKEN, AND IT ANSWERS /health WITH 200
+  Measured 2026-09-01. The three adjacent ports are all occupied, on both the
+  IPv4 and IPv6 stacks:
+
+      7998  lupin-model-server   <- NOT free, and NOT the app
+      7999  lupin-rest-dev       <- the dev venue
+      8000  lupin-rest-test      <- the test venue (maps to 7999 in-container)
+      8001  the arbiter
+
+  The trap is 7998 specifically, and it is sharper than "that port is in use".
+  `GET :7998/health` returns **200** with `{"status":"ready","models_loaded":
+  [...]}` — so a venue guard that decides "is my server up?" by health-checking
+  a port sees a HEALTHY SERVER THAT IS THE WRONG SERVICE, proceeds, and then
+  fails somewhere confusing downstream (`/auth/login` -> 404, because the model
+  server has no such route). A /health check answers "is something alive here",
+  never "is this the service I meant".
+
+  ⇒ NEVER ASSUME A PORT IS FREE, INCLUDING FOR A NEGATIVE ARM. If a test needs
+  an unreachable address — to prove its own venue guard skips rather than
+  errors — it must BIND a port and let the bind fail, then use the port it
+  actually got:
+
+      import socket
+      s = socket.socket()
+      s.bind( ( "127.0.0.1", 0 ) )      # 0 = let the OS pick a free one
+      free_port = s.getsockname()[ 1 ]
+      s.close()
+
+  Receipt for why this is written down: a negative arm was pointed at 7998 on
+  the assumption that a port next to 7999 would be free. It was not. The arm
+  reported a FAILURE that looked like a broken venue guard, and the guard was
+  correct — it declined to skip because something really did answer. An
+  assumed-dead port is the same defect as an assumed-empty population: the
+  wrong result and the right result print the same thing.
 """
 
 import os
