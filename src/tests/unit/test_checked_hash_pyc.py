@@ -91,7 +91,12 @@ def test_to_checked_hash_hashes_the_source_it_is_given():
     ( "/repo/other/a.py",               ( "/repo/src", ), False ),
     ( "/repo/src/cosa/.venv/pkg/a.py",  ( "/repo/src", ), False ),
     ( "/repo/x/site-packages/a.py",     (),               False ),
-    ( "/anywhere/a.py",                 (),               True  ),
+    # 🔴 AN EMPTY ROOT SET OWNS NOTHING, and this row used to expect True. That made the
+    # shim UNBOUNDED wherever LUPIN_ROOT was unset, because _default_roots() returns ()
+    # there — it would have rewritten stdlib bytecode. Found in review by Tiberius 👑.
+    ( "/anywhere/a.py",                 (),               False ),
+    ( "/usr/lib/python3.13/json/decoder.py", (),          False ),
+    ( "/usr/lib/python3.13/json/decoder.py", ( "/repo/src", ), False ),
     ( "/repo/src/",                     ( "/repo/src/", ), False ),
 ] )
 def test_in_scope_honours_roots_and_excludes_vendored_trees( path, roots, expected ):
@@ -273,7 +278,10 @@ def patched_write( clean_install ):
 
     bootstrap.SourceFileLoader._cache_bytecode = _spy
     try:
-        chp.install( roots=[] )
+        # NAMES the tree these tests write under. It was `roots=[]`, which used to mean
+        # "everything" and now means "nothing" — see _in_scope, which fails closed since
+        # an unbounded default was found in review.
+        chp.install( roots=[ "/repo/src" ] )
         yield bootstrap.SourceFileLoader.__dict__[ "_cache_bytecode" ], seen
     finally:
         chp.uninstall()
@@ -492,7 +500,7 @@ def _run( root, code ):
                            cwd=str( root ), capture_output=True, text=True, env=env )
 
 
-def _install_prologue( roots="[]" ):
+def _install_prologue( roots ):
     """
     Build the child-side lines that make the patch's SCOPE explicit.
 
@@ -510,7 +518,8 @@ def _install_prologue( roots="[]" ):
     the same "a no-op and a failure return the same answer" shape this row exists for.
 
     Requires:
-        - roots is the literal SOURCE TEXT of the roots argument, not a list object
+        - roots is the literal SOURCE TEXT of the roots argument, not a list object,
+          and it must NAME the tree under test — an empty list now owns NOTHING
 
     Ensures:
         - returns child source leaving the patch installed with exactly `roots` in scope
@@ -525,12 +534,13 @@ def _install_prologue( roots="[]" ):
              f"assert chp.install( roots={roots} ) is True\n" )
 
 
-def _run_patched( root, body, roots="[]" ):
+def _run_patched( root, body, roots=None ):
     """
     Run `body` in a child whose patch scope is stated rather than inherited.
 
     Requires:
         - body is child source, indented or not
+        - roots defaults to the literal text naming `root` itself
 
     Ensures:
         - returns the CompletedProcess from `_run`
@@ -538,11 +548,11 @@ def _run_patched( root, body, roots="[]" ):
     Raises:
         - None
     """
-    return _run( root, _install_prologue( roots ) + textwrap.dedent( body ) )
+    return _run( root, _install_prologue( roots or f'[ "{root}" ]' ) + textwrap.dedent( body ) )
 
 
 def _seed( root, patched ):
-    out = _run( root, ( _install_prologue() if patched else "" ) + "import pkg.victim" )
+    out = _run( root, ( _install_prologue( f'[ "{root}" ]' ) if patched else "" ) + "import pkg.victim" )
     assert out.returncode == 0, out.stderr
     return root / "pkg" / "__pycache__" / f"victim.cpython-{sys.version_info.major}{sys.version_info.minor}.pyc"
 
@@ -628,18 +638,71 @@ def test_end_to_end_a_failure_inside_the_patch_falls_through_to_stock_behaviour(
     assert "IMPORT_OK 3" in out.stdout
 
 
-def test_end_to_end_out_of_scope_writes_are_left_alone( tmp_path ):
+@pytest.mark.parametrize( "roots_cover_the_tree, expected_count, expected_mode", [
+    ( True,  "2", "checked-hash" ),   # roots NAME this tree -> the write is converted
+    ( False, "0", "timestamp"    ),   # roots name somewhere else -> untouched
+] )
+def test_end_to_end_the_roots_argument_decides_and_an_inherited_scope_cannot_fake_it(
+        tmp_path, roots_cover_the_tree, expected_count, expected_mode ):
     """
-    The control owns repo source, not the world. A root it was not given must be untouched,
+    The control owns repo source, not the world: a root it was not given must be untouched,
     so installing it never silently rewrites vendored or stdlib bytecode.
+
+    THE PAIRING IS THE POINT, and the out-of-scope arm ALONE could not see its own fixture.
+    Measured 2026-08-31 by Tiberius 👑 in review: with only the negative arm, reverting
+    `_install_prologue` to the pre-fix form ( no `uninstall()`, no `is True` ) left the test
+    PASSING. Both scopes exclude `tmp_path` — the explicit `/nonexistent/elsewhere` AND the
+    inherited default `$LUPIN_ROOT/src` — so a child that silently kept the INHERITED scope
+    produced a byte-identical observation. The assertions were correct and blind.
+
+    The positive arm supplies the discrimination: it is the only one whose expected result
+    REQUIRES this child's own roots to have been honoured. Same tree, same child, one variable.
     """
-    _build_tree( tmp_path )
-    out = _run_patched( tmp_path, """
+    pkg   = _build_tree( tmp_path )
+    roots = f'[ "{pkg.parent}" ]' if roots_cover_the_tree else '[ "/nonexistent/elsewhere" ]'
+    out   = _run_patched( tmp_path, """
         import pkg.victim
         print( chp.converted_count() )
-    """, roots='[ "/nonexistent/elsewhere" ]' )
+    """, roots=roots )
     assert out.returncode == 0, out.stderr
-    assert out.stdout.strip() == "0"
+    assert out.stdout.strip() == expected_count
+    pyc = tmp_path / "pkg" / "__pycache__" / f"victim.cpython-{sys.version_info.major}{sys.version_info.minor}.pyc"
+    assert chp.pyc_mode( str( pyc ) ) == expected_mode
+
+
+def test_end_to_end_a_child_with_no_lupin_root_owns_nothing_rather_than_everything( tmp_path ):
+    """
+    🔴 THE UNBOUNDED-DEFAULT GUARD. `sitecustomize` installs in EVERY interpreter, and
+    `_default_roots()` returns () when LUPIN_ROOT is unset. While an empty root set meant
+    "everything", that shim owned the whole filesystem on any such interpreter — measured
+    2026-08-31, a scratch package outside every repo came back checked-hash with
+    converted_count 2, and _in_scope answered True for a stdlib path. Found in review by
+    Tiberius 👑.
+
+    This runs a REAL child with LUPIN_ROOT stripped, which is the only way to observe it:
+    the shim's scope is decided at that child's startup, before any test framework exists.
+    """
+    _build_tree( tmp_path )
+    env = dict( os.environ )
+    env.pop( "LUPIN_ROOT", None )
+    env[ "PYTHONPATH" ] = f"{tmp_path}{os.pathsep}{Path( chp.__file__ ).parents[ 2 ]}"
+
+    out = subprocess.run(
+        [ sys.executable, "-c", textwrap.dedent( """
+            from cosa.utils import checked_hash_pyc as chp
+            assert chp.is_installed() is True, "the shim did not install — nothing was tested"
+            assert chp._default_roots() == (), "LUPIN_ROOT was not actually stripped"
+            import pkg.victim
+            print( chp.converted_count() )
+        """ ) ],
+        cwd=str( tmp_path ), capture_output=True, text=True, env=env
+    )
+
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "0", (
+        f"a child with no LUPIN_ROOT converted {out.stdout.strip()} writes — its scope is "
+        f"unbounded, and on a real interpreter that reaches stdlib bytecode"
+    )
     pyc = tmp_path / "pkg" / "__pycache__" / f"victim.cpython-{sys.version_info.major}{sys.version_info.minor}.pyc"
     assert chp.pyc_mode( str( pyc ) ) == "timestamp"
 

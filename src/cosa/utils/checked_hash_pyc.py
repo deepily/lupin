@@ -192,16 +192,23 @@ def _in_scope( source_path, roots ):
 
     Requires:
         - source_path is a filesystem path string
-        - roots is an iterable of absolute directory paths ( empty = every path is in scope )
+        - roots is an iterable of absolute directory paths
 
     Ensures:
         - returns False for any path under a vendored directory
-        - returns True only when the path sits under one of roots ( or roots is empty )
+        - returns True only when the path sits under one of roots
+        - 🔴 AN EMPTY roots MEANS NOTHING IS IN SCOPE, never everything. It used to
+          mean the opposite, which made the shim UNBOUNDED on any interpreter started
+          without LUPIN_ROOT: _default_roots() returns () there, so the patch owned the
+          whole filesystem and would rewrite stdlib bytecode. Measured 2026-08-31 —
+          _in_scope( "/usr/lib/python3.13/json/decoder.py", () ) answered True, and a
+          scratch package outside any repo came back checked-hash with converted_count 2.
+          Found in review by Tiberius 👑. A control that owns everything by default owns
+          things nobody agreed to give it, so the empty case now fails CLOSED.
     """
     try:
         resolved = os.path.abspath( source_path )
         if _EXCLUDED_PARTS & set( resolved.split( os.sep ) ): return False
-        if not roots: return True
         return any( resolved.startswith( root.rstrip( os.sep ) + os.sep ) for root in roots )
     except Exception:
         return False
