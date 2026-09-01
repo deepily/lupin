@@ -61,6 +61,28 @@ KNOWN_DIVERGENT_MOUNTS = {
     "/var/lupin/dm-corpus": {
         "cloud-gpu" : "2026-08-13 — same.",
     },
+    # ── flow-ratio operator settings: a HOST BOUNDARY, not an oversight ──
+    # NOT copied to cloud-gpu deliberately. The mount source is /mnt/DATA01 on THIS
+    # box; lupin-rest-cloud-gpu runs on the GCP VM and cannot reach it. Copying the
+    # mount across would declare a consistency that physically does not exist — a
+    # slider moved here would silently not govern the gate there, which is the
+    # two-servers-two-values failure one host further out.
+    #
+    # flow_ratio_settings' own docstring supplies the reason verbatim: "SCOPE OF
+    # CONSISTENT: one box, one data root. Every process resolving the same
+    # fleet_data_root() shares the value, so dev and test agree. A second host does
+    # not."
+    #
+    # ⚠️ CONSEQUENCE, so nobody files a bug against the feature: on cloud-gpu the
+    # module falls through to the INI, so that server runs the CONFIGURED DEFAULT and
+    # ignores any operator override. Defensible and probably correct — but if someone
+    # moves the slider and watches the GCP box keep refusing creates at the old
+    # threshold, this is why, and it is working as designed.
+    "/var/lupin/flow-ratio": {
+        "cloud-gpu" : "2026-09-01 — host boundary: the mount source is /mnt/DATA01 on "
+                      "this box and the GCP VM cannot reach it. cloud-gpu falls through "
+                      "to the INI default and ignores operator overrides, by design.",
+    },
     # ── repo-root deploy artifacts the UNIT SUITE asserts about (bug b5b6d252) ──
     # Mounted read-only into dev + test because 19 unit tests read them and were
     # failing in-container with FileNotFoundError while passing on the host.
@@ -180,6 +202,15 @@ KNOWN_DIVERGENT_MOUNTS = {
 KNOWN_DIVERGENT_ENV = {
     "LUPIN_DM_CORPUS_DIR": {
         "cloud-gpu" : "2026-08-13 — same.",
+    },
+    # Pairs with /var/lupin/flow-ratio above — see that entry for the host-boundary
+    # reason and the consequence. The env var without the mount would be WORSE than
+    # neither: it would name a path nothing mounts, so the write would succeed into
+    # container-local scratch and vanish at the next bounce, silently.
+    "LUPIN_FLOW_RATIO_DIR": {
+        "cloud-gpu" : "2026-09-01 — host boundary; see the /var/lupin/flow-ratio mount "
+                      "entry. Setting it without the mount would point at an unmounted "
+                      "path and lose writes silently.",
     },
     "LUPIN_SERVER_PORT": {
         "cloud-gpu" : "2026-08-13 — same.",
