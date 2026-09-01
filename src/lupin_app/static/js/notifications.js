@@ -2276,7 +2276,14 @@ class NotificationsUI {
             return sessionId;
 
         } catch ( error ) {
-            const origin = error.lupinFallbackOrigin || this.FALLBACK_ORIGIN.UNCLASSIFIED;
+            // `error` is not guaranteed to be an object — a rejected promise can
+            // carry null or a primitive. Hardening, not a live crash: MEASURED
+            // with this guard reverted, the method still returns an id, because
+            // the strict-mode TypeError from tagging a primitive is itself
+            // caught here. What is lost is the DIAGNOSIS — the origin degrades
+            // to 'unclassified' and the TypeError's message replaces the real
+            // cause, which is the one thing this row exists to preserve.
+            const origin = ( error && error.lupinFallbackOrigin ) || this.FALLBACK_ORIGIN.UNCLASSIFIED;
             return this.useFallbackSessionId( sessionType, storageKey, origin, error );
         }
     }
@@ -2312,6 +2319,18 @@ class NotificationsUI {
          * Raises:
          *     - None
          */
+        // A primitive cannot carry a property, and assigning one in strict mode
+        // throws. Wrapping keeps the ORIGIN — without this the tagger's own
+        // TypeError becomes the error the catch sees, and the real cause is
+        // gone. Raised by Tiberius in review as hardening; measured as a
+        // diagnosis loss, not a crash.
+        if ( error === null || typeof error !== 'object' ) {
+            const wrapped = new Error( String( error ) );
+            wrapped.lupinFallbackOrigin = origin;
+            Object.assign( wrapped, detail );
+            return wrapped;
+        }
+
         error.lupinFallbackOrigin = origin;
         Object.assign( error, detail );
         return error;
@@ -2339,13 +2358,24 @@ class NotificationsUI {
          * Ensures:
          *     - returns a session id matching the server's ^[a-z]+ [a-z]+$ format
          *     - the id and the origin that caused it are both persisted
-         *     - a rejecting localStorage degrades to console output, not a throw
+         *     - a rejecting localStorage degrades to console output, not a throw,
+         *       for BOTH the session id and the diagnostic record
          *
          * Raises:
          *     - None
          */
         const fallbackId = this.generateFallbackSessionId();
-        localStorage.setItem( storageKey, fallbackId );
+
+        // Both writes are guarded, and the ORDER matters. A full or disabled
+        // localStorage must not turn a degraded session into a thrown error
+        // escaping getOrCreateSessionId() — the caller asked for an id and an
+        // id is available. Guarding only the diagnostic write below and leaving
+        // this one bare would protect the less important of the two.
+        try {
+            localStorage.setItem( storageKey, fallbackId );
+        } catch ( storageError ) {
+            this.error( '[SESSION] Could not persist fallback session id:', storageError );
+        }
 
         const record = {
             origin      : origin,
