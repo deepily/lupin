@@ -92,6 +92,40 @@ def _require_server():
         pytest.skip( f"venue not available: {BASE_URL} unreachable ({e.__class__.__name__})" )
 
 
+def _require_api_key():
+    """
+    Skip when the notification API key is absent — no instrument, no finding.
+
+    Same rule as _require_server above, and it exists for the same reason. The
+    key lives at src/conf/keys/**, which is gitignored, so it is present in the
+    main checkout and in NO worktree. Before this guard the read was a bare
+    open() inside the async probe, and an absent key surfaced as
+    FileNotFoundError — a RED that names asyncio frames and the probe coroutine,
+    pointing a reader at the code under test when the real answer is "this tree
+    has no credential". Measured 2026-09-01 in a worktree at the same sha as a
+    green main tree.
+
+    The key is NOT to be symlinked into a worktree to satisfy this (Mr. Radio,
+    2026-09-01): a venv is a build artifact, a key is a secret, and a throwaway
+    tree is not where one belongs. Skipping is the whole remedy.
+
+    Ensures:
+        - calls pytest.skip, naming the path, when the key file is absent
+        - returns the key path otherwise
+
+    Raises:
+        - None
+    """
+    path = os.path.join( lupin_root, API_KEY_REL )
+    if not os.path.exists( path ):
+        pytest.skip(
+            f"instrument not available: no notification API key at {path} — "
+            f"expected in the main checkout; src/conf/keys/** is gitignored and "
+            f"absent from every worktree. Do NOT symlink it here."
+        )
+    return path
+
+
 def _credentials():
     """
     Read the shared test credentials.
@@ -146,7 +180,7 @@ def _notify( email, idempotency_key ):
     Ensures:
         - returns the server's own `status` and `delivered` fields verbatim
     """
-    api_key = open( os.path.join( lupin_root, API_KEY_REL ) ).read().strip()
+    api_key = open( _require_api_key() ).read().strip()
     resp    = requests.post(
         f"{BASE_URL}/api/notify",
         params  = {
@@ -240,6 +274,7 @@ def test_a_cached_offline_verdict_is_not_replayed_to_a_connected_user():
           to the same live socket answers `queued`
     """
     _require_server()
+    _require_api_key()
     email, password = _credentials()
     token           = _access_token( email, password )
     obs             = asyncio.run( _run_probe( email, token ) )
