@@ -15,6 +15,32 @@ non-admin be refused.
 under `fleet_data_root()`, shared by every process on this box — an un-isolated test
 would move the LIVE fleet create gate.
 
+🔴 WHAT THESE TESTS DO NOT COVER, NAMED HERE SO NOBODY READS A GREEN RUN AS MORE THAN
+IT IS. The feature is proven by TWO legs that meet in the middle and never actually
+touch:
+
+    STORAGE   cross-container, real `override_path()`, no monkeypatch — a write inside
+              lupin-rest-dev lands on the host file and lupin-rest-test reads it back.
+              Bypasses HTTP entirely.
+    AUTH      this file, in-process — `test_the_write_is_admin_only_and_the_read_is_not`
+              drops the override so the REAL dependency runs and watches a non-admin be
+              refused. Bypasses the filesystem entirely (tmp_path).
+
+⇒ THE SEAM NOBODY HAS DRIVEN: a real ADMIN's PATCH, over HTTP, through the live auth
+stack, persisting to the mounted path on a running server. Every test here overrides
+`require_admin`, so no test in this repo has ever watched an admin write SUCCEED — only
+a non-admin fail. The two legs together make that seam very likely to work; they do not
+demonstrate it.
+
+Not covered because no admin credential is available to the fleet: the only admin
+accounts are `admin@lupin.deepily.ai` and Rick's own, and neither password is held here.
+An admin test credential has been requested. Until it exists this gap is REAL and
+stated, not quietly rounded down to "tested".
+
+⚠️ The storage leg also cannot run here at all — it needs both containers up with the
+`LUPIN_FLOW_RATIO_DIR` mount, which resolves at container CREATE. A green unit run says
+nothing about whether that mount was ever applied.
+
 Venue: :7999-eligible — in-process TestClient, no server, no network, tmp_path only.
 """
 
