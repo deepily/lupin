@@ -340,6 +340,18 @@ one shape: an instrument that cannot distinguish the good state from the bad one
 
 **Rick's order, 10:12 EDT**: *"We're declaring a no new tickets moratorium for the entire day or until I lift the moratorium… workers, if you've got issues you're discovering along the way, you're going to have to surface that to your managers who will then track everything in the local to-do files, not the task list."* Everything below arrived by DM and is deliberately NOT a row.
 
+- [ ] 🔴 **`include_terminal` SILENTLY CHANGES THE QUESTION FROM "WHAT DOES THIS SEAT OWE" TO "WHAT HAS IT EVER HELD" — AND THE SECOND NUMBER READS AS A BURIED WORKER** (Rachel 🕊️ `76d19e19` and Mr Radio 🦉, 2026-08-31 ~04:00). **NEAR-MISS RECEIPT: he had a false-idle bug fully built and was ONE MESSAGE from filing it.** The suspected defect was a key mismatch — that the string a caller passes for `owner_persona` is not the string the store canonicalises to, which would make a busy seat read as idle. **There is no such defect.**
+  **MEASURED, same string, same store, one call apart:**
+  ```
+  task_query( owner_persona="rachel", terse=True )                        -> total 0
+  task_query( owner_persona="rachel", terse=True, include_parked=True )   -> total 0
+  task_query( owner_persona="rachel", terse=True, include_terminal=True ) -> total 134
+  ```
+  Both of us passed the identical `"rachel"` — lowercase, no icon, no session suffix. The newest two of the 134 (`d62d4274`, `717ef402`) are **`done`**, closed by me minutes earlier. ⇒ **The 134 is one seat's whole history, not 134 open items**, and 0 is the correct answer to *"is this worker idle?"*.
+  ⚠️ **THE FAILURE RUNS THE OPPOSITE WAY TO THE ONE BEING HUNTED, WHICH IS WHY IT NEARLY GOT FILED.** The hunt was for *busy seat reported idle*; this produces *idle seat reported buried*. **A manager reading the terminal-inclusive count sees a worker drowning in 134 rows and will not re-spin, re-task, or reap it** — the row list grows monotonically for the life of the persona, so the appearance worsens the longer a seat behaves well. **A false-idle guard built on that query would have made every long-lived seat look permanently overloaded.**
+  ⇒ **THE DEFAULT IS THE LIVENESS QUERY AND IT IS CORRECT — do not "fix" it by widening.** `include_terminal=True` is an AUDIT flag: legitimate for *"what has this persona ever held"*, never for *"what is owed"*. Same for `include_parked`. If you widen a liveness query to see more, you have changed the question, not improved the answer.
+  🔗 **This is CLAUDE.md § AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE (under § TESTING VENUES; heading text, not a line number — a line number in a live file is a bet nobody edits above it) arriving from the far side.** There, a `0` was a confident answer to a question you did not ask (the wrong database). Here, a `134` is a confident answer to a question you did not ask — and the zero was the *right* one. ⇒ **The rule generalises past emptiness: ANY count is an answer to the query's exact predicates, and a flag you did not think about is a predicate you did not choose.** Read the filters before reading the number, in both directions.
+
 - [ ] 🔴 **`git status --porcelain` DOES NOT SHOW AN IN-PROGRESS MERGE, SO A COMMIT ON A SHARED BRANCH CAN CONCLUDE SOMEBODY ELSE'S MERGE UNDER YOUR NAME** (Rachel 🕊️ `76d19e19`, 2026-08-31 ~02:53; caught by Mr Radio 🦉, who noticed the merge missing from the branch). **I reported this twice as the benign version — *"two files were already staged in the shared tree"* — and that was my honest reading of the porcelain output and the wrong reading.**
   **WHAT ACTUALLY HAPPENED, from the reflog rather than the status line.** `9dd9f7c1` is logged as **`commit (merge)`** and carries **TWO parents**, `e5d0dbf2` and `4fb745f8`. A merge was live in the shared main tree and my `git commit -F msg` **concluded it under my message and my subject**. My `git reset --soft HEAD~1` then moved to the **FIRST PARENT** and took that merge with it — a soft reset on a shared branch is repo-global in effect, the same family as the `git stash` hazard already in CLAUDE.md. **Nothing was lost**: the content re-landed at `b26d31a1` (481 insertions / 373 deletions) and the original refs still hold it.
   🔴 **REPRODUCED DELIBERATELY, because the whole point is that the two states are INDISTINGUISHABLE in the output I read.** In a throwaway worktree, `git merge --no-commit --no-ff` then `git status --porcelain` prints exactly:
@@ -449,6 +461,31 @@ one shape: an instrument that cannot distinguish the good state from the bad one
 - **`src/tests` is NOT in the coverage `source` list** (Rachel 🕊️). Test-file work is correctness, not coverage. Three rows closed this morning moved the percentage by exactly zero, and that is fine — but nobody should report a guard fix as progress toward 96.
 
 ### Findings banked, not filed
+
+#### A CARRIED TEST KEEPS ITS ASSERTIONS AND SILENTLY LOSES ITS DISCRIMINATION (Rachel 🕊️ `792661b1`, at Mr Radio 🦉's question, 2026-08-31 ~05:15 EDT)
+
+**Banked, not filed** — the fix is a two-line docstring edit already in Pocholo 📣's hands as row `40a13f4e`. What is held here is the mechanism, which is not about that file.
+
+**The question that found it was Mr Radio's, and neither the author nor I asked it**: *does the coverage survive the deletion IN SUBSTANCE, or only the test files?*
+
+A fixture I wrote against `title_may_be_trimmed` was carried onto the branch that DELETES that function and replaces it with a stored column. The file diffs clean. The suite is green. The docstring over it says it now proves something stronger. **Measured at `90f06e9a`, green baseline 474/0, three arms on the serializer:**
+
+| arm | sha | killed by |
+|---|---|---|
+| column -> constant `False` | `340d2c4da2f4` | **only** the crossed-pair COLUMN test |
+| column -> constant `True` | `0fe328662960` | mine **and** the COLUMN test |
+| column -> `len( item.title ) == 60` | `6fe6604d2c5c` | **only** the COLUMN test |
+
+=> **Strictly subsumed** — it fires in one arm of three and is redundant in the one it fires in. And the carried docstring claims it proves the flag is *"not derived from the title's length AT ALL"*, which **a length re-derivation passes straight through**: the 90-character fixture returns `False` because the column says `False`, and `False` again because 90 is not 60. **The right answer and the wrong answer coincide.**
+
+🔴 **THE MECHANISM: A TEST'S DISCRIMINATION IS A PROPERTY OF THE MUTATION SET IT FACES, NOT OF THE TEST.** Against `len( title ) == cap`, that 90-character row was the ONE input separating `==` from `>=` — it is why the test was written. Against a stored column the same row separates nothing. **Nothing in the test changed. What changed was underneath it**, and a carried test passing is evidence about the code it was written for.
+
+=> **When you carry a test across a reimplementation, RE-RUN THE MUTATIONS, NOT THE TEST.** A green carried test is the weakest possible evidence that the concern survived, and it is exactly what gets cited as proof that it did.
+
+=> **And it cannot always be repaired in place.** To catch the length re-derivation the fixture needs a row where length-derived and column-stored DISAGREE — which is precisely the crossed pair the other test already supplies. **Sometimes the honest finding is that your test is now carried, not carrying** — keep it for the narrow thing it still pins, and move the credit to the test that earned it.
+
+⚠️ **Fourth sighting of the blind-fixture shape in two nights, and the first one reached through a DELETION.** The others were fixtures that agreed with themselves from the start; this one discriminated correctly for hours and stopped when the implementation moved. **Same symptom, and no re-reading of the test body can find either** — the defect is in the data both times.
+
 
 #### A SPEECH-ACT GUARD FOR THE DM CONDENSER — and the row that was minted for it, then dropped under the moratorium (Rachel 🕊️ writing, Mr Radio 🦉's ruling, 2026-08-30 ~19:33 EDT)
 

@@ -22,6 +22,55 @@ import pytest
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# DB_PASSWORD for the local-Docker tests (row baac2474)
+# ══════════════════════════════════════════════════════════════════════════════
+# The postgres password used to sit as a plaintext default inside database.py and a
+# dozen other files. It is gone from the tree; the value lives ONLY in the untracked,
+# gitignored .env beside docker-compose.yml — the same file compose already reads for
+# POSTGRES_PASSWORD, so nothing new has to be installed for this to work.
+#
+# A handful of tests really do connect to the local postgres (test_check_schema_at_head,
+# the pgvector fixtures, test_auto_migrate). Without this they get
+# "fe_sendauth: no password supplied" and read as a broken branch rather than a missing
+# env var. An exported DB_PASSWORD always wins; this only fills a blank.
+def _seed_db_password_from_dotenv( root=None ):
+
+    if os.environ.get( "DB_PASSWORD" ): return
+
+    if root is None: root = os.path.dirname( os.path.dirname( os.path.abspath( __file__ ) ) )
+
+    # A worktree has no .env of its own — it is untracked, so it exists only in the main
+    # checkout. In a worktree `.git` is a FILE reading "gitdir: <main>/.git/worktrees/<n>";
+    # that is how we reach the checkout that actually holds it, with no subprocess.
+    candidates = [ os.path.join( root, ".env" ) ]
+    git_marker = os.path.join( root, ".git" )
+    if os.path.isfile( git_marker ):
+        try:
+            gitdir = open( git_marker ).read().split( "gitdir:", 1 )[ 1 ].strip()
+            main   = os.path.dirname( gitdir.split( "/.git/worktrees/" )[ 0 ] + "/.git" )
+            candidates.append( os.path.join( main, ".env" ) )
+        except ( OSError, IndexError ):
+            pass
+
+    dotenv = next( ( c for c in candidates if os.path.isfile( c ) ), None )
+    if dotenv is None: return
+
+    try:
+        with open( dotenv ) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line.startswith( "POSTGRES_PASSWORD=" ): continue
+                value = line.split( "=", 1 )[ 1 ].strip().strip( "\"'" )
+                if value: os.environ[ "DB_PASSWORD" ] = value
+                return
+    except OSError:
+        return
+
+
+_seed_db_password_from_dotenv()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # GUARD: a UNIT test that dials OUT (row 7c84b8b8)
 # ══════════════════════════════════════════════════════════════════════════════
 # A unit test that opens a network connection does not pass or fail on the code — it

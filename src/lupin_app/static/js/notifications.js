@@ -2256,7 +2256,11 @@ class NotificationsUI {
         const adj = adjectives[ Math.floor( Math.random() * adjectives.length ) ];
         const animal = animals[ Math.floor( Math.random() * animals.length ) ];
         
-        return `${adj}_${animal}`;
+        // Single space, NOT underscore: the server validator's browser format is
+        // ^[a-z]+ [a-z]+$ (src/cosa/rest/routers/websocket.py is_valid_session_id).
+        // An underscore matches neither that nor the hyphenated programmatic format,
+        // so every WebSocket handshake 403s and the client reconnect-loops.
+        return `${adj} ${animal}`;
     }
     
     // ========================================

@@ -354,6 +354,34 @@ def _serialize_item( item, blocker_statuses=None ) -> dict:
     }
 
 
+# The terse projection's two halves, declared rather than remembered (row 9dbffefb,
+# 2026-08-31). A DATA field is carried off the row; an ADVISORY field is DERIVED by a
+# predicate at serialize time. The split exists because the two fail differently: a
+# data field that goes wrong is visibly wrong, while an advisory field wired to a
+# constant looks exactly like a correct one that happens to be False.
+#
+# Measured on `title_trimmed` (row f3230576): replacing its predicate call with a bare
+# `False` left all 471 tests green. Its key was asserted; its value was read by nothing.
+# `park_reason_stale` arrived the same way and, until this row, had no True arm anywhere
+# on the terse path either.
+#
+# The test side builds its exact-set key assertion as TERSE_DATA_FIELDS |
+# TERSE_ADVISORY_FIELDS, so a new key cannot join the projection without being
+# classified into one of them, and classifying it advisory demands a two-value recipe
+# on the spot. See test_tasks_router.py :: the advisory-field registry.
+#
+# ⚠️ THE RESIDUAL, NAMED: a genuinely derived field declared as DATA still slips
+# through. A declaration-based guard cannot close that — what it buys is that the
+# mistake is a visible act in the diff rather than an omission nobody had to make.
+TERSE_DATA_FIELDS = frozenset( {
+    "id", "title", "status", "blocked_by", "next_chase_ts", "priority", "project",
+} )
+
+TERSE_ADVISORY_FIELDS = frozenset( {
+    "park_reason_stale", "blocker_terminal", "title_trimmed",
+} )
+
+
 def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
     """
     Serialize a TaskItem to the TERSE projection (§G token win).
