@@ -23,7 +23,33 @@ measured: that it stays effective as the class grows. Adding a new public method
 to WebSocketManager does redden it, so the method list really is derived from the
 code and not from a list that will go stale.
 
-⚠️ METHOD DEBT IN THE ARMS ABOVE, NAMED RATHER THAN QUIETLY FIXED: two of them
+✅ METHOD DEBT DISCHARGED — THE ARMS WERE RE-RUN IN A DETACHED WORKTREE AND
+REPRODUCE EXACTLY. Worktree at `48570d47`, `.venv` symlinked from the main
+checkout (30 of 76 worktrees have none, and the arms command names
+`.venv/bin/python`), `LUPIN_ROOT` and `PYTHON` both pinned so purge-pycache
+cleans the tree you are standing in rather than the main repo, and the fresh
+tree purged-and-reconverted BEFORE the first arm — a new worktree has no pycs at
+all, so its first import writes TIMESTAMP-based ones and a verify on an unused
+tree is vacuous.
+
+  | arm                                          | shared tree | detached worktree |
+  |----------------------------------------------|-------------|-------------------|
+  | notifications.js unified to ONE session id    | 1 failed    | **1 failed, same test** |
+  | audio URL rebuilt from the QUEUE id           | 1 failed    | **1 failed, same test** |
+  | a new undocumented public method added        | 1 failed    | **1 failed, same test** |
+  | connect signature reverted                    | 1 failed    | **1 failed, same test** |
+  | restored                                      | 8 passed    | **8 passed**            |
+
+Worktree `git status` clean at the end.
+
+⚠️ AND NOTE WHICH RESTORE VERB IS CORRECT WHERE — the two rules only look like
+they conflict. `git checkout -- <path>` is the RIGHT way to end an arm in a
+detached worktree, because there is no uncommitted work for it to destroy. In a
+live tree carrying an uncommitted fix it is exactly the wrong verb — it restores
+HEAD and deletes the fix — which is why the arms above used `cp`. **The verb is
+not the rule; the tree is.** Run arms where `git checkout` is safe, and it is.
+
+ORIGINALLY RECORDED AS DEBT, KEPT BECAUSE THE REASONING IS THE LESSON: two of them two of them
 mutated files in the SHARED checkout — notifications.js, which two other seats
 were editing at that moment, and websocket_manager.py. CLAUDE.md already says
 never to run a mutation harness in a live tree; the intended form is a detached
