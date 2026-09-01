@@ -104,6 +104,24 @@ class TestTheVerdict:
         for command in ( "git status", "ls -la", "git merge --abort", "git log -1" ):
             assert _guard( command ) is None, f"{command!r} was refused and is not a commit"
 
+    def test_a_non_commit_never_reaches_the_git_read( self ):
+        """
+        HOT-PATH COST, pinned rather than asserted in a comment.
+
+        This runs inside PreToolUse — before EVERY tool call in EVERY session. If
+        the guard read git before checking whether the command is a commit, every
+        `ls` in the fleet would pay for a subprocess. The match is deliberately
+        first, and this is the only test that can see the ordering: a guard with
+        the two swapped returns the same verdict on every case above.
+        """
+        reader = _recording_reader()
+        for command in ( "ls -la", "git status", "pytest -q", "echo hello" ):
+            _guard( command, merge_reader=reader )
+        assert reader.seen == [], (
+            f"git was read for a non-commit {reader.seen!r} - the match must come "
+            "first or every tool call in the fleet pays for a subprocess"
+        )
+
     def test_a_pathspec_commit_is_refused_too( self ):
         """
         Git itself refuses a partial commit during a merge ("fatal: cannot do a
