@@ -161,6 +161,23 @@ _INLINE_FLAG_RE = re.compile( rf"\b{_ENV_FLAG}=(?P<value>[^\s;&|]*)" )
 # not a directory.
 _DASH_C_RE = re.compile( r"-C\s+(?P<path>[^\s;&|]+)" )
 
+# 🔴 `cd <tree> && git commit` IS THE SHAPE THIS FLEET ACTUALLY USES, and without
+# this the guard checks the wrong tree. MEASURED 2026-08-31 against the real hook,
+# with a live merge in a linked worktree and the hook standing in the main checkout:
+#
+#     git -C <merge tree> commit       DENY     <- -C was already handled
+#     cd <merge tree> && git commit    ALLOWED  <- the miss
+#
+# The Bash tool resets its working directory to the session root on every call, so a
+# seat working in a worktree types `cd <worktree> && git ...` all day and the hook's
+# own cwd is never the tree being committed to. A guard that misses that shape misses
+# nearly every commit in the fleet.
+#
+# `cd` in COMMAND POSITION only, so a `cd` inside an argument is not read as one.
+_CD_RE = re.compile(
+    r"(?:^|[;&|(){}\n]|\bthen\b|\bdo\b|\belse\b)\s*cd\s+(?P<path>[^\s;&|]+)"
+)
+
 
 def _guard_disabled( env=None ) -> bool:
     """
@@ -199,34 +216,51 @@ def _hatch_in_prefix( prefix ) -> bool:
     return found.group( "value" ).strip().strip( "'\"" ).lower() in _TRUE_VALUES
 
 
-def _target_directory( pre, cwd=None ):
+def _target_directory( command, match, cwd=None ):
     """
     The directory whose merge state governs this commit.
 
-    `git -C <path>` moves the whole invocation into another tree, so a commit
-    written that way must be judged against THAT tree rather than the session's.
-    Multiple `-C` options compose left to right, each relative to the last, which
-    is exactly os.path.join's rule — a later absolute path wins outright.
+    Two things move a commit into another tree, and BOTH are common here:
+      · `cd <path> && git commit` — the Bash tool resets its working directory to
+        the session root every call, so a seat working in a worktree types this all
+        day and the hook's cwd is never the tree being committed to
+      · `git -C <path> commit` — moves the whole invocation
+
+    They compose in that order, each relative to the last, which is exactly
+    os.path.join's rule: a later absolute path wins outright.
 
     Requires:
-        - pre is the matcher's pre-subcommand option span, or None
+        - command is the raw Bash command
+        - match is the git_commit_match result for it
         - cwd is the directory the hook is standing in, or None for the process cwd
 
     Ensures:
-        - returns cwd unchanged when the command names no -C
-        - returns the composed target otherwise, resolved against cwd
+        - returns cwd when the command names neither a cd nor a -C
+        - otherwise returns the composed target, resolved against cwd, with ~ expanded
+        - FALLS BACK TO cwd when the composed path is not an existing directory, so a
+          `cd` misread out of a quoted literal checks the session's own tree rather
+          than checking nowhere — the fallback is what makes the loose scan safe
+        - only a `cd` BEFORE the commit counts; one after it has not run yet
         - never raises
 
-    ⚠️ A PRECEDING `cd` IS NOT FOLLOWED. `cd /other && git commit` is judged
-    against this session's tree. That direction errs toward checking the tree the
-    seat is standing in, which is the tree the founding incident happened in.
+    ⚠️ It follows the LAST `cd` before the commit and does not model subshells or
+    conditionals. Under an accident threat model that is the whole job; a misread
+    lands on the existence check above and degrades to today's behaviour.
     """
-    if not pre: return cwd
+    base  = cwd or os.getcwd()
+    parts = []
 
-    parts = _DASH_C_RE.findall( pre )
+    for found in _CD_RE.finditer( command[ :match.start() ] ):
+        path = found.group( "path" )
+        if path != "-":                       # `cd -` is the previous directory, unknowable here
+            parts = [ os.path.expanduser( path ) ]
+
+    parts.extend( _DASH_C_RE.findall( match.group( "pre" ) or "" ) )
+
     if not parts: return cwd
 
-    return os.path.join( cwd or os.getcwd(), *parts )
+    target = os.path.join( base, *parts )
+    return target if os.path.isdir( target ) else cwd
 
 
 def _live_merge_head( cwd=None ) -> Optional[ str ]:
@@ -315,7 +349,8 @@ def merge_head_deny_reason(
         - None unless ALL hold: the guard is enabled, tool_name is Bash, the
           command invokes `git commit` in command position, the hatch prefix is
           absent, and MERGE_HEAD resolves in the target tree
-        - the target tree honours `git -C <path>`; a preceding `cd` is not followed
+        - the target tree honours BOTH `cd <path> &&` and `git -C <path>`, composed
+          in that order; an unresolvable target falls back to cwd
         - FAIL-OPEN: any unexpected error → None
     """
     try:
@@ -333,7 +368,7 @@ def merge_head_deny_reason(
 
         if _hatch_in_prefix( match.group( "prefix" ) ): return None
 
-        target    = _target_directory( match.group( "pre" ), cwd )
+        target    = _target_directory( command, match, cwd )
         merge_sha = ( merge_reader or _live_merge_head )( target )
         if not merge_sha: return None
 

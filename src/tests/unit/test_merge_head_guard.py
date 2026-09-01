@@ -178,47 +178,113 @@ class TestTheRefusalText:
 # ═════════════════════════════════════════════════════════════════════════════
 
 class TestTheTargetTree:
+    """
+    WHICH TREE THE MERGE STATE IS READ FROM, which is the difference between this
+    guard working in this fleet and not.
 
-    def test_a_plain_commit_is_judged_against_the_hook_cwd( self ):
+    MEASURED against the real hook, live merge in a linked worktree, hook standing
+    in the main checkout:
+
+        git -C <merge tree> commit       DENY     - -C was handled from the start
+        cd <merge tree> && git commit    ALLOWED  - the miss, now fixed
+
+    The Bash tool resets its working directory to the session root on every call, so
+    a seat working in a worktree types `cd <worktree> && git ...` all day. A guard
+    that only followed -C would have missed nearly every commit in the fleet while
+    passing every test that used an injected reader.
+
+    ⚠️ These assert on the DIRECTORY THE READER WAS HANDED, never on the verdict. A
+    guard that ignored cd and -C entirely would still deny in most of these cases,
+    so a verdict assertion could not tell the two apart.
+    """
+
+    @pytest.fixture
+    def trees( self, tmp_path ):
+        """Two real directories, because the resolver checks that its target exists."""
+        seat  = tmp_path / "seat";  seat.mkdir()
+        other = tmp_path / "other"; other.mkdir()
+        ( seat / "sub" ).mkdir()
+        return str( seat ), str( other )
+
+    def test_a_plain_commit_is_judged_against_the_hook_cwd( self, trees ):
+        seat, _ = trees
+        reader  = _recording_reader()
+        _guard( "git commit -m x", cwd=seat, merge_reader=reader )
+        assert reader.seen == [ seat ]
+
+    def test_a_leading_cd_retargets_the_check( self, trees ):
+        """THE FLEET'S ACTUAL SHAPE. Without this the guard reads the session tree."""
+        seat, other = trees
         reader = _recording_reader()
-        _guard( "git commit -m x", cwd="/tmp/seat", merge_reader=reader )
-        assert reader.seen == [ "/tmp/seat" ]
+        _guard( f"cd {other} && git commit -m x", cwd=seat, merge_reader=reader )
+        assert reader.seen == [ other ]
 
-    def test_dash_C_retargets_the_check_at_the_named_tree( self ):
+    def test_a_relative_cd_resolves_against_the_hook_cwd( self, trees ):
+        seat, _ = trees
+        reader  = _recording_reader()
+        _guard( "cd sub && git commit -m x", cwd=seat, merge_reader=reader )
+        assert reader.seen == [ os.path.join( seat, "sub" ) ]
+
+    def test_the_last_cd_before_the_commit_wins( self, trees ):
+        seat, other = trees
+        reader = _recording_reader()
+        _guard( f"cd {seat} ; cd {other} && git commit -m x", cwd=seat, merge_reader=reader )
+        assert reader.seen == [ other ]
+
+    def test_a_cd_AFTER_the_commit_does_not_count( self, trees ):
+        """It has not run yet when the commit does."""
+        seat, other = trees
+        reader = _recording_reader()
+        _guard( f"git commit -m x && cd {other}", cwd=seat, merge_reader=reader )
+        assert reader.seen == [ seat ]
+
+    def test_dash_C_retargets_the_check_at_the_named_tree( self, trees ):
+        seat, other = trees
+        reader = _recording_reader()
+        _guard( f"git -C {other} commit -m x", cwd=seat, merge_reader=reader )
+        assert reader.seen == [ other ]
+
+    def test_cd_and_dash_C_compose_with_dash_C_applied_last( self, trees ):
+        """git -C is relative to the directory the shell is already standing in."""
+        seat, other = trees
+        reader = _recording_reader()
+        _guard( f"cd {seat} && git -C {other} commit -m x", cwd=seat, merge_reader=reader )
+        assert reader.seen == [ other ]
+
+    def test_an_unresolvable_target_falls_back_to_the_hook_cwd( self, trees ):
         """
-        `git -C <path> commit` runs in ANOTHER tree, so that tree's merge state is
-        the one that decides. Asserting on the recorded directory, not on the
-        verdict — a guard that ignored -C would still deny here.
+        THE PROPERTY THAT MAKES THE LOOSE `cd` SCAN SAFE. A `cd` misread out of a
+        quoted literal would otherwise send the check at a directory that does not
+        exist, where it reads as NO MERGE and allows. Falling back to cwd degrades
+        to the behaviour before this scan existed instead of losing the check.
         """
-        reader = _recording_reader()
-        _guard( "git -C /other/tree commit -m x", cwd="/tmp/seat", merge_reader=reader )
-        assert reader.seen == [ "/other/tree" ]
+        seat, _ = trees
+        reader  = _recording_reader()
+        _guard( "cd /no/such/directory/anywhere && git commit -m x", cwd=seat, merge_reader=reader )
+        assert reader.seen == [ seat ]
 
-    def test_a_relative_dash_C_resolves_against_the_hook_cwd( self ):
-        reader = _recording_reader()
-        _guard( "git -C sub commit -m x", cwd="/tmp/seat", merge_reader=reader )
-        assert reader.seen == [ os.path.join( "/tmp/seat", "sub" ) ]
+    def test_cd_dash_is_ignored( self, trees ):
+        """`cd -` is the previous directory and is not knowable from the text."""
+        seat, _ = trees
+        reader  = _recording_reader()
+        _guard( "cd - && git commit -m x", cwd=seat, merge_reader=reader )
+        assert reader.seen == [ seat ]
 
-    def test_lowercase_dash_c_is_a_config_override_and_never_a_directory( self ):
+    def test_lowercase_dash_c_is_a_config_override_and_never_a_directory( self, trees ):
         """`-c user.name=x` is not a path. Reading it as one would check nowhere."""
+        seat, _ = trees
+        reader  = _recording_reader()
+        _guard( "git -c user.name=nobody commit -m x", cwd=seat, merge_reader=reader )
+        assert reader.seen == [ seat ]
+
+    def test_a_bare_commit_with_no_cd_and_no_dash_C_passes_cwd_through_unchanged( self ):
+        """
+        Including None, which means "the process cwd" — the resolver must not
+        substitute a value the caller did not give it.
+        """
         reader = _recording_reader()
-        _guard( "git -c user.name=nobody commit -m x", cwd="/tmp/seat", merge_reader=reader )
-        assert reader.seen == [ "/tmp/seat" ]
-
-    def test_target_directory_returns_the_cwd_when_there_is_no_pre_span( self ):
-        assert _target_directory( None, "/tmp/seat" ) == "/tmp/seat"
-        assert _target_directory( "", "/tmp/seat" )   == "/tmp/seat"
-
-    def test_target_directory_returns_the_cwd_when_the_options_name_no_directory( self ):
-        assert _target_directory( " --amend --no-verify", "/tmp/seat" ) == "/tmp/seat"
-
-    def test_repeated_dash_C_composes_and_a_later_absolute_path_wins( self ):
-        """Git applies each -C relative to the last; an absolute one starts over."""
-        assert _target_directory( " -C a -C b", "/tmp/seat" ) == os.path.join( "/tmp/seat", "a", "b" )
-        assert _target_directory( " -C a -C /abs", "/tmp/seat" ) == "/abs"
-
-    def test_target_directory_falls_back_to_the_process_cwd( self ):
-        assert _target_directory( " -C sub", None ) == os.path.join( os.getcwd(), "sub" )
+        _guard( "git commit -m x", cwd=None, merge_reader=reader )
+        assert reader.seen == [ None ]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
