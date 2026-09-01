@@ -120,3 +120,60 @@ def test_the_repo_idiom_this_follows_is_still_present():
     assert ".persona-popover-borrowed[hidden]" in other, (
         "the reference companion rule is gone; this file's premise needs re-checking"
     )
+
+
+# ---------------------------------------------------------------------------
+# The "updated" stamp's own line (Rick, 2026-09-01).
+# ---------------------------------------------------------------------------
+
+def test_the_updated_stamp_gets_its_own_line_left_aligned( css ):
+    """
+    `#task-list-updated` must be block-level with no left margin.
+
+    It used to sit at the far right of the toggle bar — not because anything pushed
+    it there, but because it was the last inline element on the row. Going block puts
+    it on its own line at the h3's left edge and hands the whole first line back to
+    the counts and the gate verdict. Measured in Chromium: the first row went from
+    826px to 493px and the stamp's x matched the h3's own x exactly.
+
+    Both halves matter. `display: block` alone leaves the 8px indent from the base
+    rule, so the stamp would sit one notch in from everything above it.
+    """
+    body = _rule_body( css, "#task-list-updated" )
+    assert body is not None, (
+        "`#task-list-updated` is gone — the stamp is inline again and back on the "
+        "first row, spending ~111px of a bar that had ~27px of slack"
+    )
+    assert re.search( r"display\s*:\s*block", body ), (
+        "the stamp is no longer block-level, so there is no line break before it"
+    )
+    assert re.search( r"margin-left\s*:\s*0", body ), (
+        "`display: block` without `margin-left: 0` leaves the base rule's 8px indent, "
+        "so the stamp sits one notch right of the text it should line up under"
+    )
+
+
+def test_the_stamp_rule_is_scoped_to_the_id_not_the_shared_class( css ):
+    """
+    The ID scoping is a DECISION, not an accident, so it is asserted.
+
+    `.task-list-updated` is shared: `#epic-board-updated` wears the same class in the
+    Epic Board header. Rick asked about the task-list bar only, so the twin is left
+    alone. If someone later moves these declarations onto the class they will change
+    the Epic Board too — which may well be right, but it should be a choice somebody
+    makes rather than a side effect they ship.
+    """
+    shared = _rule_body( css, ".task-list-updated" )
+    assert shared is not None, "the shared base rule is gone"
+    assert not re.search( r"display\s*:\s*block", shared ), (
+        "`display: block` has moved onto the SHARED `.task-list-updated` class, which "
+        "silently restyles #epic-board-updated in the Epic Board header too. If that "
+        "is intended, say so — and update this test — rather than letting it ride along"
+    )
+
+    html = ( Path( cu.get_project_root() ) /
+             "src/lupin_app/static/html/notifications.html" ).read_text( encoding="utf-8" )
+    assert 'id="epic-board-updated" class="task-list-updated"' in html, (
+        "the Epic Board stamp no longer shares this class, so the scoping rationale "
+        "above is stale — re-check whether the ID scoping is still worth keeping"
+    )
