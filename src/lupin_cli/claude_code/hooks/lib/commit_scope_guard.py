@@ -525,6 +525,19 @@ def _pathspec_of( command: str, match ):
         - never raises
     """
     tail = command[ match.end(): ]
+
+    # 🔴 COLLAPSE BACKSLASH-NEWLINE FIRST, OR EVERY MULTI-LINE COMMIT GOES UNREVIEWED.
+    # The newline split below is what keeps the guard reading only the git command and
+    # not whatever follows a `;` or `|`. But a shell line-continuation is a newline the
+    # command OWNS, and splitting there truncated `... -- \` to a dangling backslash,
+    # which `shlex.split` refuses — so the guard answered "quoting does not parse" and
+    # allowed the commit unexamined. Measured 2026-09-01: identical commands parsed
+    # single-line and failed continued, with the continuation as the only variable.
+    #
+    # ⚠️ It failed exactly where it mattered most. A commit naming several paths is the
+    # one a seat writes across continued lines, and it is also the one whose scope is
+    # worth reviewing — so the guard reviewed the easy cases and gave up on the hard ones.
+    tail = re.sub( r"\\\n", " ", tail )
     tail = re.split( r"[;&|\n]", tail, maxsplit=1 )[ 0 ]
 
     try:

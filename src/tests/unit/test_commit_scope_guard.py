@@ -918,3 +918,87 @@ def test_an_empty_env_assignment_does_not_hide_a_commit():
 def test_the_empty_assignment_fix_did_not_buy_a_false_match():
     """THE CONTROL: a `git` inside an assignment's VALUE is not a command."""
     assert git_commit_match( "FOO=bargit commit" ) is None
+
+
+# ---------------------------------------------------------------------------
+# A shell line-continuation is a newline the COMMAND owns (2026-09-01).
+# ---------------------------------------------------------------------------
+
+def test_a_backslash_continuation_does_not_defeat_the_pathspec_reader():
+    """
+    A multi-line `git commit -- <paths>` must be READ, not waved through.
+
+    MEASURED 2026-09-01, with the continuation as the only variable:
+
+        git commit -F m.txt -- src/a.py src/b.py          -> paths read
+        git commit -F m.txt -- \\ <newline> src/a.py ...   -> "quoting does not parse"
+
+    `_pathspec_of` splits the tail at the first `[;&|\\n]` so the guard reads only the
+    git command and not whatever follows a pipe. But a shell line-continuation is a
+    newline the command OWNS: splitting there truncated the tail to `... -- \\`, a
+    dangling backslash that `shlex.split` refuses, so the guard answered "the command's
+    quoting does not parse" and ALLOWED the commit unexamined.
+
+    ⚠️ IT FAILED WHERE IT MATTERED MOST. A commit naming several paths is exactly the one
+    a seat writes across continued lines — and exactly the one whose scope is worth
+    reviewing. The guard reviewed the one-path commits and gave up on the multi-path ones.
+
+    ⚠️ This was not what let `a936601f` through on its own. That commit skipped the
+    foreign-path check for a second, independent reason: the session had no manifest
+    section at all, and `_claims_for_session` returns `mine=None` there, which is the
+    documented FAIL-OPEN signal. Two gaps, either one sufficient. Fixing the parser does
+    nothing for an unregistered session, and registering does nothing for this shape.
+    """
+    single = "git commit -F m.txt -- src/a.py src/b.py"
+    multi  = "git commit -F m.txt -- \\\n  src/a.py \\\n  src/b.py"
+
+    paths_single, why_single = _pathspec_of( single, git_commit_match( single ) )
+    paths_multi,  why_multi  = _pathspec_of( multi,  git_commit_match( multi ) )
+
+    assert why_single is None and paths_single == [ "src/a.py", "src/b.py" ]
+    assert why_multi is None, (
+        f"the continued form was not read: {why_multi!r}. Every multi-path commit written "
+        f"across lines goes unreviewed, which is the set most worth reviewing."
+    )
+    assert paths_multi == paths_single, (
+        f"the continued form read {paths_multi!r} but the identical single-line form read "
+        f"{paths_single!r}; the two must agree — the backslash is layout, not content."
+    )
+
+
+def test_collapsing_continuations_does_not_let_a_pipe_or_semicolon_leak_in():
+    """
+    The negative control the continuation fix could have broken.
+
+    Collapsing `\\<newline>` before the `[;&|\\n]` split must not widen what the guard
+    reads: everything after a pipe or a semicolon belongs to a DIFFERENT command, and
+    swallowing it would let the guard report paths this commit never touches.
+    """
+    for command in (
+        "git commit -F m.txt -- src/a.py | grep src/LEAKED.py",
+        "git commit -F m.txt -- src/a.py ; rm src/LEAKED.py",
+        "git commit -F m.txt -- \\\n  src/a.py | grep src/LEAKED.py",
+    ):
+        paths, why = _pathspec_of( command, git_commit_match( command ) )
+        assert why is None, f"{command!r} became unreadable: {why!r}"
+        assert paths == [ "src/a.py" ], (
+            f"{command!r} read {paths!r} — a path from beyond the command boundary leaked "
+            f"into the set the guard believes this commit carries."
+        )
+
+
+def test_genuinely_broken_quoting_still_gives_up_rather_than_guessing():
+    """
+    The give-up path must survive the fix.
+
+    The guard's whole posture is "allow, and say why" — a guard that refuses honest
+    commits gets switched off. Collapsing continuations must not turn an unparseable
+    command into a confidently-misread one.
+    """
+    command    = 'git commit -F "unclosed -- src/a.py'
+    paths, why = _pathspec_of( command, git_commit_match( command ) )
+
+    assert paths is None and why is not None, (
+        "an unterminated quote was read as a definite path list; the guard must decline "
+        "to guess, because a wrong path set is worse than an admitted unknown."
+    )
