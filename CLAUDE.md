@@ -597,6 +597,49 @@ cd <your-worktree> && LUPIN_ROOT="$PWD" .venv/bin/python -m pytest src/tests/uni
 
 `LUPIN_ROOT="$PWD"` is the one you must not forget — it is inherited from your shell and silently keeps pointing at `/…/lupin`. The other two are unfixable from inside a worktree: **subtract them, do not chase them.**
 
+🔴 **AND `LUPIN_ROOT` ALONE IS NOT ENOUGH — `PYTHONPATH` SPLITS THE IMPORT GRAPH AND GIVES YOU A
+HYBRID APP THAT IS NEITHER TREE.** Measured 2026-09-01 (Rio ⚡). Every seat's shell carries
+`PYTHONPATH=/…/lupin/src`. The unit `conftest.py` inserts `$LUPIN_ROOT/src` at position 0, so
+anything imported **after** conftest runs comes from your worktree — but anything already resolved
+via `PYTHONPATH` **stays** resolved to the main repo, because `sys.modules` is sticky.
+
+**The receipt, from one pytest process in a worktree with `LUPIN_ROOT` correctly pinned:**
+
+```
+main module file : /…/lupin-wt-rio-routeaudit/src/lupin_app/main.py   <- WORKTREE
+tasks module file: /…/lupin/src/cosa/rest/routers/tasks.py            <- MAIN REPO
+```
+
+⇒ **`lupin_app.*` from your tree, `cosa.*` from someone else's.** The assembled app is a mixture
+that exists in no checkout, and nothing in the output says so.
+
+**What it cost, and it is the exact failure this page warns about:** a mutation moving
+`GET /api/tasks/flow-ratio` below `GET /api/tasks/{task_id}` — the defect that answered **422 in
+production all evening** — was applied to the worktree, verified to shadow when imported directly,
+and the two guards written for it reported **6 passed**. They looked blind. They are not: the
+mutation was never under test. Pin `PYTHONPATH` and the same arm gives **2 failed**, each naming
+its own test:
+
+```
+FAILED …test_no_literal_route_is_shadowed_by_a_parameterised_sibling.py::test_no_literal_route_in_the_assembled_app_is_shadowed
+FAILED …test_task_routes_resolve_literal_paths.py::test_a_literal_task_path_reaches_its_own_route[/api/tasks/flow-ratio]
+```
+
+⇒ **Pin all three, always:**
+
+```bash
+cd <worktree> && LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" .venv/bin/python -m pytest src/tests/unit/ -q
+```
+
+⚠️ **THIS ONE IS WORSE THAN THE OTHER WRONG-TREE MEMBERS, because it does not merely answer about
+the wrong tree — it answers about a tree that does not exist.** The verifier and the purge script
+at least describe *some* real checkout. A split import graph reports on a Frankenstein assembled
+half from each, and a green result from it is not evidence about either.
+
+⚠️ **And it points the dangerous way: toward a FALSE GREEN.** A mutation that never lands reads as
+a guard that holds. I nearly filed two correct, well-built guards — one of which carries its own
+positive control — as blind to the defect they were written for.
+
 **RECONCILED 2026-08-30 — a second measurement got 10, and 10 and 11 are the SAME finding.** Rio ⚡
 ran the unit tier at sha `cc336880`, root `/mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-rio-8593bf65`,
 with `LUPIN_ROOT="$PWD"` exported, and measured a gap of **10** — not 11.
