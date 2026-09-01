@@ -103,6 +103,28 @@ def main():
         emit_json( build_kill_deny_response( kill_reason ) )
         sys.exit( 0 )
 
+    # Merge-head guard (row f3306404, Rick's ruling 2026-08-31): a `git commit`
+    # while MERGE_HEAD is live CONCLUDES that merge under the committer's message.
+    # A merge is a two-step operation over TREE-GLOBAL state, so between the stage
+    # and the commit it belongs to the tree rather than to whoever started it —
+    # measured 2026-08-31, parentage lost, the lane landed with one parent, four
+    # seats and an hour to repair. BOTH machine-readable status forms show nothing
+    # once the conflicts are staged, which is why this is plumbing
+    # (`git rev-parse -q --verify MERGE_HEAD`) and not a status parse, and why it
+    # must never be the `.git/MERGE_HEAD` path form — in a linked worktree `.git`
+    # is a FILE, so that path is absent while a merge is live. Runs BEFORE the
+    # commit scope guard: a live merge is the harder stop, and its message is the
+    # one the committer needs first. DEFAULT-ON with a LUPIN_ALLOW_MERGE_COMMIT
+    # hatch for the seat that started the merge and must finish it, and FAIL-OPEN
+    # by contract (the lib returns None on any error), so it cannot break a tool call.
+    from lupin_cli.claude_code.hooks.lib.merge_head_guard import (
+        merge_head_deny_reason, build_merge_head_deny_response,
+    )
+    merge_reason = merge_head_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
+    if merge_reason:
+        emit_json( build_merge_head_deny_response( merge_reason ) )
+        sys.exit( 0 )
+
     # Commit scope guard (2026-08-25): `git commit` writes the WHOLE INDEX, not
     # the files you staged. `git add <paths>` does not clear what is already
     # there, so on a shared tree a peer's staged work commits under your name —

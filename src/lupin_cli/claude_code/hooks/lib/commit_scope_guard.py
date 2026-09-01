@@ -187,7 +187,23 @@ GIT_TIMEOUT_SECONDS = 5
 # but see the threat-model note above for why this one is not exhaustive.
 _COMMAND_POSITION = r"(?:^|[;&|(){}\n]|\bthen\b|\bdo\b|\belse\b|\belif\b)"
 _WRAPPERS         = r"(?:env|command|builtin|exec|sudo|nohup|time|nice|stdbuf)"
-_PREFIXES         = rf"(?P<prefix>(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*|{_WRAPPERS})\b)*)"
+# 🔴 AN EMPTY ENV ASSIGNMENT USED TO WALK STRAIGHT PAST THIS (found 2026-08-31 by
+# a merge_head_guard test, measured in BOTH guards). The `\b` sat AFTER the whole
+# alternation, and a word boundary cannot exist between the `=` of `FOO=` and the
+# space that follows - two non-word characters. So the prefix group failed, the
+# match backtracked to zero prefixes, and the anchored program never matched:
+#
+#     FOO=1 git stash pop      DENIED
+#     FOO=  git stash pop      ALLOWED    <-- and `GIT_DIR= git stash pop` with it
+#
+# THE FIX IS A LOOKAHEAD, NOT A DROPPED `\b`. Simply removing the boundary lets the
+# greedy value backtrack INTO the program name, so `FOO=bargit commit` would match
+# a `git` that is part of the value - trading a false allow for a false deny, which
+# is the trade this fleet's guards exist to refuse. `(?=[\s;&|]|$)` pins the value
+# to a real token end instead, so it can neither swallow the program nor give back
+# part of itself. Measured both ways: the empty assignment now matches and
+# `FOO=bargit commit` still does not.
+_PREFIXES         = rf"(?P<prefix>(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_WRAPPERS}\b))*)"
 _PROGRAM          = r"(?:[\w./~+-]*/)?git"
 
 _GIT_COMMIT_RE = re.compile(
@@ -265,6 +281,32 @@ def _mentions_git_commit( command: str ):
         - never raises
     """
     return _GIT_COMMIT_RE.search( _blank_quoted_spans( command ) )
+
+
+def git_commit_match( command: str ):
+    """
+    THE ONE `git commit` MATCHER IN THIS TREE, made public on purpose.
+
+    `merge_head_guard` sits on the SAME trigger surface — a Bash `git commit` —
+    and asks a different question about it. Giving it its own regex would put two
+    spellings of "is this a git commit" into the tree, and the second one drifts
+    the moment either is fixed. Row f3306404's ruling says to model the new guard
+    on an existing reviewed implementation rather than keep two shapes in sync;
+    that reasoning covers the matcher as much as the enforcement point.
+
+    Requires:
+        - command is a str
+
+    Ensures:
+        - returns the re.Match whose "prefix" group carries any env-assignment
+          prefix and whose "pre" group carries pre-subcommand options, or None
+        - quoted literals cannot manufacture a command position
+        - never raises
+
+    WARNING: it is NOT exhaustive, deliberately — see this module's threat-model
+    note. Every caller must be able to tolerate a miss.
+    """
+    return _mentions_git_commit( command )
 
 
 _HEREDOC_RE = re.compile( r"<<(?P<dash>-?)\s*(?P<q>['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)(?P=q)" )

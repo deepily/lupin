@@ -9,6 +9,7 @@ Tests cover:
     - Phase 4: additionalContext injection from drained messages
 """
 
+import contextlib
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
@@ -288,9 +289,10 @@ GOV    = "lupin_cli.claude_code.hooks.lib.subagent_governance"
 STASH  = "lupin_cli.claude_code.hooks.lib.stash_guard"
 KILL   = "lupin_cli.claude_code.hooks.lib.kill_guard"
 SCOPE  = "lupin_cli.claude_code.hooks.lib.commit_scope_guard"
+MERGE  = "lupin_cli.claude_code.hooks.lib.merge_head_guard"
 
 
-def _run( payload=None, gov=None, stash=None, kill=None,
+def _run( payload=None, gov=None, stash=None, kill=None, merge=None,
           deny_reason=None, notice=None, messages=None, voice_ctx=None ):
     """Drive main() with every guard and collaborator stubbed.
 
@@ -302,28 +304,43 @@ def _run( payload=None, gov=None, stash=None, kill=None,
     verdict = MagicMock( deny_reason=deny_reason, notice=notice )
     emit    = MagicMock()
 
-    with patch( f"{MODULE}.read_hook_input", return_value=payload ), \
-         patch( f"{MODULE}.log_payload" ), \
-         patch( f"{MODULE}.touch_bridge_mtime" ) as touch, \
-         patch( f"{MODULE}.resolve_stable_session_id", return_value="s1" ), \
-         patch( f"{MODULE}.get_claude_session_id", return_value="s1" ), \
-         patch( f"{GOV}.subagent_deny_reason",  return_value=gov ), \
-         patch( f"{GOV}.build_subagent_deny_response", side_effect=lambda r: { "denied": "gov", "reason": r } ), \
-         patch( f"{STASH}.stash_deny_reason",   return_value=stash ), \
-         patch( f"{STASH}.build_stash_deny_response", side_effect=lambda r: { "denied": "stash", "reason": r } ), \
-         patch( f"{KILL}.kill_deny_reason",     return_value=kill ), \
-         patch( f"{KILL}.build_kill_deny_response", side_effect=lambda r: { "denied": "kill", "reason": r } ), \
-         patch( f"{SCOPE}.evaluate_commit_scope", return_value=verdict ), \
-         patch( f"{SCOPE}.build_commit_scope_deny_response", side_effect=lambda r: { "denied": "scope", "reason": r } ), \
-         patch( f"{SCOPE}.build_commit_scope_notice_response", side_effect=lambda n: { "notice": n } ), \
-         patch( f"{MODULE}.drain_and_acknowledge", return_value=messages or [] ) as drain, \
-         patch( f"{MODULE}.format_voice_context", return_value=voice_ctx ), \
-         patch( f"{MODULE}.build_voice_deny_response", side_effect=lambda c, m: { "voice": c } ), \
-         patch( f"{MODULE}.emit_json", emit ):
+    # ExitStack, NOT a nested `with` chain. CPython caps a function at 20
+    # statically nested blocks, and the fifth guard's two patches crossed it —
+    # `SyntaxError: too many statically nested blocks`, which surfaces as a
+    # COLLECTION ERROR rather than a failure, so nothing in the suite runs and no
+    # test says why. A flat stack has no such ceiling and the sixth guard will not
+    # rediscover this.
+    with contextlib.ExitStack() as stack:
+        def _p( *args, **kwargs ):
+            return stack.enter_context( patch( *args, **kwargs ) )
+
+        _p( f"{MODULE}.read_hook_input", return_value=payload )
+        _p( f"{MODULE}.log_payload" )
+        touch = _p( f"{MODULE}.touch_bridge_mtime" )
+        _p( f"{MODULE}.resolve_stable_session_id", return_value="s1" )
+        _p( f"{MODULE}.get_claude_session_id", return_value="s1" )
+
+        _p( f"{GOV}.subagent_deny_reason",  return_value=gov )
+        _p( f"{GOV}.build_subagent_deny_response", side_effect=lambda r: { "denied": "gov", "reason": r } )
+        _p( f"{STASH}.stash_deny_reason",   return_value=stash )
+        _p( f"{STASH}.build_stash_deny_response", side_effect=lambda r: { "denied": "stash", "reason": r } )
+        _p( f"{KILL}.kill_deny_reason",     return_value=kill )
+        _p( f"{KILL}.build_kill_deny_response", side_effect=lambda r: { "denied": "kill", "reason": r } )
+        _p( f"{MERGE}.merge_head_deny_reason", return_value=merge )
+        _p( f"{MERGE}.build_merge_head_deny_response", side_effect=lambda r: { "denied": "merge", "reason": r } )
+        _p( f"{SCOPE}.evaluate_commit_scope", return_value=verdict )
+        _p( f"{SCOPE}.build_commit_scope_deny_response", side_effect=lambda r: { "denied": "scope", "reason": r } )
+        _p( f"{SCOPE}.build_commit_scope_notice_response", side_effect=lambda n: { "notice": n } )
+
+        drain = _p( f"{MODULE}.drain_and_acknowledge", return_value=messages or [] )
+        _p( f"{MODULE}.format_voice_context", return_value=voice_ctx )
+        _p( f"{MODULE}.build_voice_deny_response", side_effect=lambda c, m: { "voice": c } )
+        _p( f"{MODULE}.emit_json", emit )
+
         try:
             ptu.main()
         except SystemExit as exit_:
-            assert exit_.code == 0, "the hook must always exit 0 — a non-zero status is a broken hook, not a deny"
+            assert exit_.code == 0, "the hook must always exit 0 - a non-zero status is a broken hook, not a deny"
     return emit.call_args.args[ 0 ], drain, touch
 
 
@@ -346,6 +363,25 @@ class TestEachGuardDeniesIndependently:
     def test_the_commit_scope_guard_denies( self ):
         out, _, _ = _run( deny_reason="peer files staged" )
         assert out[ "denied" ] == "scope"
+
+    def test_the_merge_head_guard_denies( self ):
+        out, _, _ = _run( merge="a merge is live in this tree" )
+        assert out[ "denied" ] == "merge"
+
+    def test_the_merge_head_guard_is_reached_before_the_commit_scope_guard( self ):
+        """
+        ORDER IS LOAD-BEARING, and this is the only test that can see it.
+
+        Both guards trigger on the same command. A live merge is the harder stop
+        and its message is the one the committer needs first — being told which
+        peer file is staged, while a merge silently waits to be concluded, sends
+        the seat off to fix the wrong thing. Armed together, the merge guard wins.
+        """
+        out, _, _ = _run( merge="a merge is live", deny_reason="peer files staged" )
+        assert out[ "denied" ] == "merge", (
+            "the commit scope guard answered first - a live merge must be refused "
+            "before the index is discussed"
+        )
 
     def test_the_reason_is_carried_into_the_response( self ):
         """A refusal that does not say why is a wall, not a guard."""
