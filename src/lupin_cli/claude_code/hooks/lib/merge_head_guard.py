@@ -157,6 +157,26 @@ SAFETY — this runs inside the hot-path PreToolUse hook, so:
     process environment is ALSO honoured, for a session deliberately exported into
     merge work, but the prefix is what makes the deny message's instruction true.
 
+🔴 HOW THIS MODULE ITSELF WAS LANDED, and why that is not a shortcut. It reached the
+working branch by FAST-FORWARD (`b7af819b`), not by a merge commit, and anyone who
+sees only the linear history will read that as someone skipping the ceremony.
+
+It was the opposite. A `--no-ff` merge happens IN THE SHARED CHECKOUT and leaves
+MERGE_HEAD live there for as long as it takes to write the commit — which is exactly
+the window this module exists to close, and there were peers working in that tree at
+the time. Landing a MERGE_HEAD guard by opening a MERGE_HEAD window would have been
+the shape the whole row is a warning about.
+
+⇒ SO THE ORDER WAS: bring the working branch INTO the lane branch, in the author's
+own worktree where a window harms nobody; verify green there; then fast-forward. The
+shared tree never held a merge in flight for a second, and ancestry is fully
+preserved — all seven commits are ancestors, which is the receipt that matters.
+
+⇒ THE GENERAL RULE, worth more than this one landing: when the thing you are merging
+is a control over merging, prefer the landing that does not exercise the hazard.
+(Written down at mr radio 🦉's instruction — the reasoning had been living in a DM
+and a task-store field, where the next reader would never find it.)
+
 ⚠️ THE FRICTION THIS BUYS, stated so it can be re-measured rather than defended:
 the seat that legitimately concludes its own merge must use the hatch every time.
 That is the ratified trade — the alternative is guessing which seat owns a merge
