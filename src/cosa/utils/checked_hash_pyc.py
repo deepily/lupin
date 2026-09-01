@@ -197,6 +197,15 @@ def _in_scope( source_path, roots ):
     Ensures:
         - returns False for any path under a vendored directory
         - returns True only when the path sits under one of roots
+        - 🔴 AN EMPTY SET READ AS A UNIVERSAL SET, ARRIVING IN A PERMISSION CHECK.
+          That is the shape, and it is worth naming because it is the same ambiguity
+          that bit four other things on 2026-08-31 in four different disguises: an
+          empty search result meaning "wrong population" or "empty population"; a
+          clean exit meaning "did the work" or "never ran"; a bare False meaning "no
+          need" or "impossible". Each time, two opposite facts shared one
+          representation. FAIL CLOSED is the general answer wherever the ambiguous
+          value grants authority — "I was given no roots" must never resolve to "I
+          may rewrite anything".
         - 🔴 AN EMPTY roots MEANS NOTHING IS IN SCOPE, never everything. It used to
           mean the opposite, which made the shim UNBOUNDED on any interpreter started
           without LUPIN_ROOT: _default_roots() returns () there, so the patch owned the
