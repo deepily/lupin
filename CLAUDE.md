@@ -1199,6 +1199,39 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 **`--bg` mandate**: integration, E2E UI, and presentation regression exceed the 10-min Bash timeout — always launch with `--bg` from Claude Code; monitor the matching `/tmp/*-latest.log`. PID-file overlap guards prevent concurrent runs.
 
+### 🔴 THE LINE YOU ADD TO REPORT THE EXIT CODE IS THE LINE THAT DESTROYS IT
+
+Two seats launched background tiers on 2026-09-01 and both were reported as **exit code
+0** over a pytest that had exited **1**. The first reading was that the harness
+mis-reported. It does not — a bash command's status is its LAST command's, and the
+wrapper shape everyone uses ends in something else.
+
+**Measured, one variable per arm:**
+
+| command | wrapper status |
+|---|---|
+| `false` | **1** ✅ |
+| `false; tail -0 /dev/null` | 0 |
+| `false; echo "EXIT=$?"; true` | 0 |
+| **`false; echo "EXIT=$?"`** | **0** 🔴 |
+| **`false; rc=$?; tail …; exit $rc`** | **1** ✅ the fix |
+
+⇒ **The fourth row is the one to look at.** The `echo "EXIT=$?"` added *specifically to
+surface the exit code* is by itself enough to replace it — the diagnostic destroys the
+thing it reports. The log tail is not the culprit and removing it fixes nothing.
+
+⇒ **Capture immediately, re-raise at the end:**
+
+```bash
+pytest src/tests/unit/ -q > /tmp/tier.log 2>&1; rc=$?; tail -20 /tmp/tier.log; exit $rc
+```
+
+⚠️ **And the exit code was never the evidence anyway** — read the summary line
+(`N failed, M passed`) and the `FAILED` lines. This is § *A CLEAN EXIT IS NOT EVIDENCE*
+reached from its other side: there, a tool exits 0 having done nothing; here, a wrapper
+exits 0 over a tool that did the work and failed. **Both hand the caller a green that
+nothing supports**, and in both the fix is to read the tool's own account.
+
 **Coverage**: `pytest --cov=cosa --cov-report=html src/tests/` (Python). See §100% COVERAGE MANDATE for the hard gate.
 
 **Editing a `.py` file inside a test?** Use `tests.helpers.pyc_freshness` (`mutate_source` fixture / `refresh_source`). CPython validates a `.pyc` on the source's **whole-second** mtime **plus size**, so a mutation edit changes neither and the interpreter keeps running the *old* code after you restore the file and read it back — measured twice on 2026-08-29, on `job_state.py` and on the helper's own module (row `d18ce9ef`). ⚠️ `PYTHONDONTWRITEBYTECODE` does **not** fix it; it only stops pycs being *written*. Debugging a red you cannot explain? Run **`src/scripts/purge-pycache.sh`** before concluding anything. 🔴 **NOT a raw `rm -rf __pycache__` — that now RE-OPENS the very hole it used to plug** (row `866f43ce`, §100% COVERAGE MANDATE below): the tree is on checked-hash invalidation, a pyc written where none exists is timestamp-based, so a bare purge silently reverts the tree with nothing in any output saying so. The script purges **and** reconverts, ~3.5s, and **checks it can reconvert BEFORE it deletes anything** — no interpreter means exit 2 with nothing removed. ⚠️ It did not always: until `4119447b` it purged first and discovered the missing interpreter after, on the **35 of 80 worktrees** with no `.venv/bin/python`, leaving the tree exactly as this paragraph forbids. The preflight removes that cause; it does not make a reconvert that fails *midway* impossible, so read the exit code. ⚠️ **The two scripts documented in this paragraph do not share a flag surface**, and the read-only one belongs to the other script: `--verify` is `migrate-pyc-to-checked-hash.sh`'s, while `purge-pycache.sh` takes only `--dry-run` (and `-h`). Naming this because the mix-up actually happened — a seat was told to run `purge-pycache.sh --verify` for a read-only report, which before `3e0c2cdc` would have silently performed a full purge instead. **Neither script resolves its tree from `$LUPIN_ROOT` any more** (`5e7f74e8`): both derive it from their own location, so a `LUPIN_ROOT=…` prefix on either command now does nothing — run the copy that lives in the tree you mean. Detail: `src/tests/README.md` § EDITING A SOURCE FILE INSIDE A TEST, measurement `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
