@@ -9227,6 +9227,83 @@ class NotificationsUI {
         }
     }
 
+    async fetchHoldingArea() {
+        /**
+         * Fetch the HOLDING AREA — rows filed but not yet cleared to start.
+         *
+         * Mirrors `fetchTaskList` exactly, including its four failure states, and
+         * for the same reason: this poll repeats, so collapsing a missing static
+         * asset into "unreachable" would have an operator triaging a deploy defect
+         * as an outage indefinitely.
+         *
+         * ⭐ THE ROWS THIS RETURNS ARE INVISIBLE TO THE BOARD QUERY BY DESIGN.
+         * `not_approved` is in the repository's BOARD_INVISIBLE_STATUSES, so the
+         * two panes show disjoint sets and neither is missing rows the other has.
+         * That is the gate working, not a discrepancy to reconcile.
+         *
+         * Ensures:
+         *     - Returns the parsed { tasks, count, … } body on 2xx
+         *     - Returns { status: "auth_required" } on a hard 401
+         *     - Returns { status: "query_unavailable", tasks: null } when the shared
+         *       query module did not load
+         *     - Returns { status: "unreachable", tasks: null } on any throw or other
+         *       non-2xx (never throws)
+         */
+        try {
+            const query = window.LUPIN_HOLDING_AREA_QUERY;
+            if ( !query ) {
+                this.log( "Holding-area query missing — /static/js/shared/task-list-query.js did not load" );
+                return { status: "query_unavailable", tasks: null };
+            }
+            const response = await this.authedFetch( query );
+            if ( response.status === 401 ) return { status: "auth_required" };
+            if ( !response.ok )            return { status: "unreachable", tasks: null };
+            return await response.json();
+        } catch ( error ) {
+            this.log( `Holding-area fetch failed: ${error}` );
+            return { status: "unreachable", tasks: null };
+        }
+    }
+
+    _groupHeldRowsByFiler( tasks ) {
+        /**
+         * Group held rows BY FILER, which is what the triage session actually needs.
+         *
+         * ⭐ FILER, NOT OWNER — and the two genuinely differ. `created_by` names who
+         * PUT the row in the holding area; `owner_persona` names who would do it if
+         * approved. On the live board they disagree on 3 of 13 rows, which is why
+         * they are two columns and never one merged "who". Triage asks "what did
+         * this person file", so it groups on the filer.
+         *
+         * Requires:
+         *     - tasks is an array of row objects (foreign wire data; any shape)
+         *
+         * Ensures:
+         *     - returns [ { filer, tasks } ], filers sorted alphabetically
+         *     - within a filer, rows sort by priority then title (status is
+         *       uniform here — every row is not_approved — so ranking by it would
+         *       discriminate nothing)
+         *     - a falsy/absent tasks argument yields []
+         *     - Pure: no DOM, no side effects; never throws
+         */
+        const rows = Array.isArray( tasks ) ? tasks : [];
+        const byFiler = new Map();
+        rows.forEach( raw => {
+            const task  = raw || {};
+            const filer = this._taskFilerLabel( task );
+            if ( byFiler.has( filer ) ) byFiler.get( filer ).push( task );
+            else byFiler.set( filer, [ task ] );
+        } );
+        return Array.from( byFiler.keys() ).sort( ( a, b ) => a.localeCompare( b ) ).map( filer => ( {
+            filer,
+            tasks : byFiler.get( filer ).slice().sort( ( a, b ) => {
+                const pr = this._taskPriorityRank( a.priority ) - this._taskPriorityRank( b.priority );
+                if ( pr !== 0 ) return pr;
+                return this._taskTitleLabel( a ).localeCompare( this._taskTitleLabel( b ) );
+            } )
+        } ) );
+    }
+
     isTaskOpenStatus( status ) {
         /**
          * True when a task's status is non-terminal (work still owed). A missing
@@ -9598,6 +9675,44 @@ class NotificationsUI {
         // A non-match leaves `stripped === raw`, which is the deliberate fall-through:
         // render it whole rather than guess where the name stops.
         return stripped.replace( /\b[a-z]/g, c => c.toUpperCase() );
+    }
+
+    _taskTableHeaderRow() {
+        /**
+         * The task table's <thead>, in ONE place.
+         *
+         * ⭐ EXTRACTED BECAUSE A SECOND TABLE NOW USES THE SAME ROWS. The holding
+         * area renders `_renderTaskRow` output, which emits twelve cells; a copy of
+         * this header there would be a second hand-maintained literal free to drift
+         * from the row renderer, and a header that has drifted from its rows
+         * mislabels every column to the right of the drift — silently, because the
+         * table still renders perfectly.
+         *
+         * 🔴 THE COLUMN COUNT IS LOAD-BEARING BEYOND THIS FUNCTION. `_renderTaskRow`
+         * emits an error-stripe row with `colspan="12"`. Add or remove a column here
+         * and that colspan must move with it, or the stripe stops spanning the table.
+         *
+         * Ensures:
+         *     - returns the twelve-column <thead> markup
+         *     - Pure: no DOM access, no side effects (no arguments, constant out)
+         */
+        return `
+            <thead>
+                <tr>
+                    <th class="task-col-id">ID</th>
+                    <th class="task-col-title">Title</th>
+                    <th class="task-col-class">Class</th>
+                    <th class="task-col-status">Status</th>
+                    <th class="task-col-blocked">Blocked by</th>
+                    <th class="task-col-chase">Next chase</th>
+                    <th class="task-col-accountable">Accountable</th>
+                    <th class="task-col-filer">Filed by</th>
+                    <th class="task-col-priority">Priority</th>
+                    <th class="task-col-project">Project</th>
+                    <th class="task-col-detail">Detail</th>
+                    <th class="task-col-actions">Actions</th>
+                </tr>
+            </thead>`;
     }
 
     _renderTaskRow( task, ianaZone ) {
@@ -10530,23 +10645,7 @@ class NotificationsUI {
          */
         const collapsed = collapsedOwners instanceof Set ? collapsedOwners : new Set();
 
-        const headerRow = `
-            <thead>
-                <tr>
-                    <th class="task-col-id">ID</th>
-                    <th class="task-col-title">Title</th>
-                    <th class="task-col-class">Class</th>
-                    <th class="task-col-status">Status</th>
-                    <th class="task-col-blocked">Blocked by</th>
-                    <th class="task-col-chase">Next chase</th>
-                    <th class="task-col-accountable">Accountable</th>
-                    <th class="task-col-filer">Filed by</th>
-                    <th class="task-col-priority">Priority</th>
-                    <th class="task-col-project">Project</th>
-                    <th class="task-col-detail">Detail</th>
-                    <th class="task-col-actions">Actions</th>
-                </tr>
-            </thead>`;
+        const headerRow = this._taskTableHeaderRow();
 
         const body = model.groups.map( group => {
             const ownerKey    = this._taskGroupOwnerKey( group );
@@ -10829,6 +10928,11 @@ class NotificationsUI {
             // Bind + paint the operator controls. Idempotent, so riding the
             // existing tick costs nothing after the first one.
             this.initFlowRatioControls();
+            // The holding area is a SECOND query (not_approved is invisible to the
+            // board's), so it cannot ride the composite the way the epic board does.
+            // It rides the same TICK instead — one clock, two fetches, rather than a
+            // timer of its own: two clocks read as a bug the first time they disagree.
+            await this.refreshHoldingArea();
         } finally {
             this._taskListFetchInFlight = false;
         }
@@ -11014,6 +11118,8 @@ class NotificationsUI {
             else if ( actionBtn.classList.contains( "task-wont-fix-button" ) ) this._handleTaskWontFixClick( actionBtn );
             else if ( actionBtn.classList.contains( "task-demote-button" ) ) this._handleTaskDemoteClick( actionBtn );
             else if ( actionBtn.classList.contains( "task-approve-button" ) ) this._handleTaskApproveClick( actionBtn );
+            else if ( actionBtn.classList.contains( "holding-approve-all" ) ) this._handleHoldingApproveAllClick( actionBtn );
+            else if ( actionBtn.classList.contains( "holding-wont-fix-all" ) ) this._handleHoldingWontFixAllClick( actionBtn );
             return;
         }
 
@@ -11084,6 +11190,241 @@ class NotificationsUI {
         } );
         if ( result.ok ) await this.refreshTaskList();
         else this._renderTaskRowError( taskId, `Park refused: ${result.message}` );
+    }
+
+    renderHoldingArea( composite ) {
+        /**
+         * Paint the holding-area pane: rows filed but not yet cleared to start,
+         * grouped by FILER, each group carrying batch approve / batch won't-fix.
+         *
+         * ⚠️ AN EMPTY HOLDING AREA IS A REAL STATE AND SAYS SO. Rendering nothing
+         * would be indistinguishable from the pane failing to load, and this pane
+         * is expected to be empty most of the time — which is exactly when a silent
+         * blank is most likely to be read as "broken" and least likely to be checked.
+         *
+         * Requires:
+         *     - composite is the fetchHoldingArea result (may carry a status sentinel)
+         *
+         * Ensures:
+         *     - a sentinel status renders its own message, never a blank pane
+         *     - rows render grouped by filer, groups alphabetical
+         *     - the count in the header is the number of HELD rows
+         *     - no-op (never throws) when the container is absent from the page
+         */
+        const container = document.getElementById( "holding-area-container" );
+        if ( !container ) return;
+
+        const countEl = document.getElementById( "holding-area-count" );
+        const sentinels = {
+            auth_required     : "Sign-in required to read the holding area.",
+            query_unavailable : "The shared query module did not load — this is a deploy defect, not an outage.",
+            unreachable       : "Task store unreachable — last known state not shown."
+        };
+        if ( composite && sentinels[ composite.status ] ) {
+            container.innerHTML = `<div class="holding-area-empty">${this.escapeHtml( sentinels[ composite.status ] )}</div>`;
+            if ( countEl ) countEl.textContent = "—";
+            return;
+        }
+
+        const groups = this._groupHeldRowsByFiler( composite && composite.tasks );
+        const total  = groups.reduce( ( n, g ) => n + g.tasks.length, 0 );
+        if ( countEl ) countEl.textContent = String( total );
+
+        if ( total === 0 ) {
+            container.innerHTML = `<div class="holding-area-empty">Nothing waiting on triage.</div>`;
+            return;
+        }
+
+        container.innerHTML = groups.map( g => this._renderHoldingAreaGroup( g.filer, g.tasks ) ).join( "" );
+    }
+
+    _renderHoldingAreaGroup( filer, tasks ) {
+        /**
+         * One filer's held rows: a header bar carrying the batch controls, then the
+         * rows themselves reusing the task-list row renderer.
+         *
+         * 🔴 THE BATCH WON'T-FIX REASON IS PER GROUP, NOT PER ROW, AND THAT IS A
+         * REAL COST STATED PLAINLY. Every row closed by one press gets the SAME
+         * justification. That is honest for the case the batch exists to serve —
+         * "everything this person filed on Tuesday is overtaken" — and dishonest for
+         * a mixed group, where it stamps one reason onto rows that were refused for
+         * different reasons. The per-row control is still there and is the right
+         * tool whenever the reasons differ; this one is deliberately the blunt
+         * instrument, labelled as such in its tooltip.
+         *
+         * ⚠️ BATCH APPROVE CARRIES NO CONFIRM. It is the non-destructive direction —
+         * an over-approved row can be demoted straight back, which is precisely the
+         * transition Rick added for this. Batch won't-fix is terminal and therefore
+         * requires the reason box to be filled before it will fire, which is the
+         * friction a confirm dialog would otherwise provide without blocking the
+         * extension's event loop.
+         *
+         * Requires:
+         *     - filer is the display label; tasks is that filer's held rows
+         *
+         * Ensures:
+         *     - returns escaped HTML for one group
+         *     - the group's controls carry data-filer so the handler can find its rows
+         */
+        const key   = this._escapeTaskAttr( filer );
+        const label = this.escapeHtml( filer );
+        const ianaZone = this.getResolvedTimeZone ? this.getResolvedTimeZone() : undefined;
+
+        const rows = tasks.map( t => this._renderTaskRow( t, ianaZone ) ).join( "" );
+
+        return `
+            <div class="holding-area-group" data-filer="${key}">
+                <div class="holding-area-group-header">
+                    <span class="holding-area-filer">${label}</span>
+                    <span class="holding-area-group-count">${tasks.length}</span>
+                    <button type="button" class="task-action-btn holding-approve-all" data-filer="${key}"
+                            title="Approve every row ${label} filed — reversible, a row approved by mistake can be demoted straight back">Approve all</button>
+                    <button type="button" class="task-action-btn holding-wont-fix-all" data-filer="${key}"
+                            title="Close every row ${label} filed as won't-fix. TERMINAL, and every row gets the SAME reason — use the per-row control when the reasons differ">Won't fix all</button>
+                    <input type="text" class="task-action-input holding-wont-fix-all-reason" data-filer="${key}"
+                           placeholder="one reason, applied to every row below…" aria-label="Batch won't-fix reason">
+                    <span class="holding-area-group-status" data-filer="${key}"></span>
+                </div>
+                <table class="task-list-table holding-area-table">
+                    ${this._taskTableHeaderRow()}
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
+    }
+
+    _heldRowIdsForFiler( filer ) {
+        /**
+         * The full row ids in one filer's group, read off the rendered DOM.
+         *
+         * ⚠️ READ FROM THE DOM, NOT FROM A CACHED ARRAY. The pane repaints on every
+         * poll; a captured list would go stale the moment a peer approved something,
+         * and the batch would then act on ids that had already moved. What is on
+         * screen is what the operator pressed the button about.
+         *
+         * Ensures:
+         *     - returns the data-task-id of every row control in that group
+         *     - returns [] for an unknown filer (never throws)
+         */
+        const group = document.querySelector( `.holding-area-group[data-filer="${CSS.escape( filer )}"]` );
+        if ( !group ) return [];
+        return Array.from( group.querySelectorAll( ".task-approve-button[data-task-id]" ) )
+            .map( b => b.dataset.taskId )
+            .filter( Boolean );
+    }
+
+    _renderHoldingGroupStatus( filer, message ) {
+        /**
+         * Show (or clear) one group's inline status line.
+         *
+         * Ensures:
+         *     - a missing element is a no-op, never a throw (degrade-safe)
+         */
+        const el = document.querySelector( `.holding-area-group-status[data-filer="${CSS.escape( filer )}"]` );
+        if ( el ) el.textContent = message || "";
+    }
+
+    async _applyHoldingBatch( filer, toStatus, extras, verb ) {
+        /**
+         * Apply one transition to every row in a filer's group, then report what
+         * actually happened.
+         *
+         * 🔴 A PARTIAL FAILURE IS REPORTED AS A PARTIAL FAILURE. The obvious
+         * implementation fires N requests, awaits them, and refreshes — which
+         * renders a shorter list and looks like success. If two of eight were
+         * refused, those two are still on screen and nothing says why; the operator
+         * reads the shrunken list as "it worked" and the refusals are invisible.
+         * So this counts both outcomes and keeps the FIRST server message, which is
+         * the one carrying the actor and the allowlist on a 403.
+         *
+         * ⚠️ SEQUENTIAL, NOT Promise.all. The refusals worth reading are
+         * authorization refusals, and firing eight at once against an allowlist
+         * check produces eight identical 403s in a race whose order is not
+         * reproducible. One at a time is slower and its failure report is stable.
+         *
+         * Requires:
+         *     - filer identifies a rendered group; toStatus is the target status
+         *
+         * Ensures:
+         *     - returns { ok, failed, firstError }
+         *     - the group's status line names both counts whenever any row failed
+         *     - refreshes the pane once, after all rows have been attempted
+         */
+        const ids = this._heldRowIdsForFiler( filer );
+        if ( ids.length === 0 ) {
+            this._renderHoldingGroupStatus( filer, "No rows in this group." );
+            return { ok: 0, failed: 0, firstError: null };
+        }
+
+        this._renderHoldingGroupStatus( filer, `${verb} ${ids.length}…` );
+
+        let ok = 0, failed = 0, firstError = null;
+        for ( const id of ids ) {
+            const result = await this._transitionTask( id, toStatus, extras );
+            if ( result.ok ) ok += 1;
+            else {
+                failed += 1;
+                if ( firstError === null ) firstError = result.message;
+            }
+        }
+
+        this._renderHoldingGroupStatus(
+            filer,
+            failed === 0
+                ? `${ok} of ${ids.length} ${verb.toLowerCase()}.`
+                : `${ok} of ${ids.length} ${verb.toLowerCase()} — ${failed} refused. First refusal: ${firstError}`
+        );
+        await this.refreshHoldingArea();
+        return { ok, failed, firstError };
+    }
+
+    async _handleHoldingApproveAllClick( button ) {
+        /**
+         * Batch approve — promote every row this filer put in the holding area.
+         *
+         * No reason field and no confirm: this is the non-destructive direction, and
+         * a row approved by mistake is demoted straight back, which is the exact
+         * transition Rick added for the purpose.
+         */
+        const filer = button.dataset.filer || "";
+        if ( !filer ) return;
+        await this._applyHoldingBatch( filer, "queued", {}, "Approved" );
+    }
+
+    async _handleHoldingWontFixAllClick( button ) {
+        /**
+         * Batch won't-fix — close every row this filer put in the holding area, all
+         * under ONE reason, which the server requires non-blank on each.
+         *
+         * The blank check is enforced here because the alternative is N identical
+         * 422s the operator has to read one at a time to learn a single fact.
+         */
+        const filer = button.dataset.filer || "";
+        if ( !filer ) return;
+        const input  = document.querySelector( `.holding-wont-fix-all-reason[data-filer="${CSS.escape( filer )}"]` );
+        const reason = input && typeof input.value === "string" ? input.value.trim() : "";
+        if ( !reason ) {
+            this._renderHoldingGroupStatus( filer, "A reason is required — it will be applied to every row in this group." );
+            return;
+        }
+        await this._applyHoldingBatch( filer, "wont_fix", { reason }, "Closed" );
+    }
+
+    async refreshHoldingArea() {
+        /**
+         * One holding-area refresh: fetch → render, with the same in-flight debounce
+         * the task list uses so a manual press landing on a poll tick cannot
+         * double-fetch.
+         */
+        if ( this._holdingAreaFetchInFlight ) {
+            this.log( "Holding-area refresh skipped — fetch already in flight (debounce)" );
+            return;
+        }
+        this._holdingAreaFetchInFlight = true;
+        try {
+            this.renderHoldingArea( await this.fetchHoldingArea() );
+        } finally {
+            this._holdingAreaFetchInFlight = false;
+        }
     }
 
     async _handleTaskWontFixClick( button ) {

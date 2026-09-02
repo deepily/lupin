@@ -49,9 +49,39 @@
  */
 export const TASK_LIST_QUERY = "/api/tasks?limit=500&unscoped_audit=true&hide_parked=false&char_budget=0";
 
+/**
+ * The HOLDING-AREA query — rows filed but not yet cleared to start.
+ *
+ * WHY IT IS A SECOND QUERY AND NOT A FLAG ON THE FIRST. `not_approved` sits in
+ * the repository's `BOARD_INVISIBLE_STATUSES` denylist alongside the terminal
+ * statuses, so the board query above cannot see these rows and MUST NOT — the
+ * whole point of the gate is that unapproved work does not appear as live work.
+ * The two panes are showing deliberately disjoint sets, so they ask deliberately
+ * different questions.
+ *
+ * ⭐ `status=not_approved` IS WHAT MAKES THIS WORK, and it is not obvious from
+ * the parameter name. `_apply_owed_filter` applies the invisible-status denylist
+ * only `if not include_terminal and status is None` (task_repository.py:1029-1032),
+ * so naming a status explicitly TAKES THE ROW OUT of the denylist's reach. There
+ * is no `include_not_approved` flag to add and none was needed — asking for the
+ * status by name is the documented door.
+ *
+ * NO `hide_parked` — a held row has never been on the board, so it has never been
+ *   parked. The parameter would be answering a question that cannot arise here.
+ *
+ * NO `include_terminal` — a row that was won't-fixed out of the holding area is
+ *   closed, and the triage list is for rows still awaiting a decision. This is the
+ *   same reasoning the board query uses, applied to a smaller set.
+ *
+ * char_budget=0 — same rationale as above: this is the human's dashboard, where a
+ *   silently truncated list is the defect the byte budget would cause.
+ */
+export const HOLDING_AREA_QUERY = "/api/tasks?limit=500&unscoped_audit=true&status=not_approved&char_budget=0";
+
 // Publish for the classic-script consumer (notifications.js is not a module and
 // cannot import). Read at CALL time there, never at load time, so module
 // execution order cannot matter.
 if ( typeof window !== "undefined" ) {
-    window.LUPIN_TASK_LIST_QUERY = TASK_LIST_QUERY;
+    window.LUPIN_TASK_LIST_QUERY   = TASK_LIST_QUERY;
+    window.LUPIN_HOLDING_AREA_QUERY = HOLDING_AREA_QUERY;
 }

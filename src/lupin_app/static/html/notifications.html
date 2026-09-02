@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="/static/css/notifications.css?v=20260829a">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260619a">
-    <link rel="stylesheet" href="/static/css/task-list.css?v=20260902b">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=20260902c">
     <link rel="stylesheet" href="/static/css/epic-board.css?v=20260829a">
 </head>
 <body>
@@ -776,6 +776,32 @@
             </div>
         </div>
 
+        <!-- Holding Area — rows FILED but not yet cleared to start. Design:
+             src/rnd/2026.09.02-ticket-approval-gate-and-wont-fix.md (Rick's P0).
+
+             Deliberately a SEPARATE pane fed by a SEPARATE query, not a filter on the
+             board above. `not_approved` is in the store's BOARD_INVISIBLE_STATUSES, so
+             the board cannot see these rows and must not — unapproved work appearing as
+             live work is the thing the gate exists to prevent. The two panes show
+             disjoint sets on purpose.
+
+             Grouped by FILER rather than owner: triage asks "what did this person file",
+             and the two fields disagree on roughly a quarter of live rows. -->
+        <div class="collapsible-section" id="section-holding-area">
+            <div class="section-header" onclick="toggleSection('holding-area-section')">
+                <h3>🗂️ Holding Area · <span id="holding-area-count">0</span></h3>
+                <button class="refresh-btn" id="holding-area-refresh"
+                        data-testid="holding-area-refresh-btn"
+                        title="Refresh the holding area">⟳</button>
+                <button class="toggle-button" id="holding-area-toggle">▼</button>
+            </div>
+            <div class="section-content" id="holding-area-section">
+                <div id="holding-area-container" data-testid="holding-area-container">
+                    <!-- rendered filer-grouped table with batch controls -->
+                </div>
+            </div>
+        </div>
+
         <!-- Epic Board Section — the MACRO twin of the Task List above, showing the
              SAME rows grouped by epic (correlation_key) instead of by owner. Plan:
              src/rnd/v0.2.0/2026.08.24-epic-accordion-mini-plan.md.
@@ -1150,10 +1176,10 @@
          A module so the same file can be `import`ed there; it publishes
          window.LUPIN_TASK_LIST_QUERY for the classic script below, which reads
          it at call time (the poll starts well after module execution). -->
-    <script type="module" src="/static/js/shared/task-list-query.js?v=20260803c"></script>
+    <script type="module" src="/static/js/shared/task-list-query.js?v=20260902a"></script>
     <script type="module" src="/static/js/shared/agent-select.js?v=20260829a"></script>
     <script type="module" src="/static/js/shared/arg-interview.js?v=20260829a"></script>
-    <script src="/static/js/notifications.js?v=20260902d"></script>
+    <script src="/static/js/notifications.js?v=20260902e"></script>
     <script src="/static/js/broadcast-panel.js?v=20260619a"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.

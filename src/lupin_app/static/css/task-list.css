@@ -621,3 +621,53 @@ tbody.task-group.collapsed .task-row {
     padding       : 2px 8px 6px;
     border-top    : none;
 }
+
+
+/* ── Holding Area (Rick's P0, row 8af64f5a, 2026-09-02) ────────────────────
+   Rows filed but not yet cleared to start, grouped by filer. Reuses
+   .task-list-table wholesale so a held row and a live row are visibly the SAME
+   row — the difference between them is which pane they are in and what the
+   controls offer, not a second visual language to learn.                     */
+
+.holding-area-group {
+    margin-bottom : 14px;
+}
+
+.holding-area-group-header {
+    display     : flex;
+    flex-wrap   : wrap;
+    gap         : 6px;
+    align-items : center;
+    padding     : 4px 6px;
+    border-left : 3px solid var( --task-not-approved );
+    background  : rgba( 126, 87, 194, 0.07 );
+}
+
+.holding-area-filer {
+    font-weight : 600;
+}
+
+.holding-area-group-count {
+    opacity     : 0.7;
+    font-size   : 0.8rem;
+    margin-right: 8px;
+}
+
+/* The batch status line. Not an error colour: it reports SUCCESS counts as often
+   as refusals, and colouring "8 of 8 approved" red would teach the operator to
+   read a working batch as a failed one. */
+.holding-area-group-status {
+    font-size  : 0.78rem;
+    opacity    : 0.85;
+    margin-left: 4px;
+}
+
+/* An empty holding area is a REAL state and says so in words. A blank pane is
+   indistinguishable from one that failed to load, and this pane is expected to
+   be empty most of the time — exactly when a silent blank is most likely to be
+   misread as broken. */
+.holding-area-empty {
+    padding    : 10px 6px;
+    opacity    : 0.7;
+    font-style : italic;
+}

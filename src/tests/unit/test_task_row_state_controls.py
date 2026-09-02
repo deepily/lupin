@@ -39,6 +39,65 @@ def client_src():
     return CLIENT.read_text( encoding="utf-8" )
 
 
+def strip_js_comments( source ):
+    r"""
+    Return `source` with its comments removed, so an assertion can be made about
+    the CODE rather than about the prose describing it.
+
+    🔴 WHY THIS EXISTS. Three assertions in one sitting passed or failed on a
+    comment instead of on code, and the failure is always the flattering direction
+    — the file "contains" the thing because the docstring explaining it does:
+
+      · `assert "isTerminal" in src` held against `const isTerminal = false;`
+      · `assert "Overtaken by events" in page` held against the HTML comment
+        explaining the option, after the option itself was deleted
+      · `assert "Promise.all" not in src` FAILED against a comment that says
+        "SEQUENTIAL, NOT Promise.all" — the code has never called it
+
+    The pattern is one thing, not three: **a test that reads source cannot tell an
+    implementation from an explanation of an implementation.** Absence assertions
+    are the dangerous half — well-commented code is the most likely to fail them,
+    which punishes exactly the code you want.
+
+    ⚠️ BLOCK COMMENTS NEED DOTALL. `/\*.*?\*/` without it matches nothing across
+    lines, and every docstring here is multi-line — the strip would silently do
+    nothing and every assertion would read the prose it was meant to skip.
+
+    ⚠️ LINE COMMENTS ARE STRIPPED ONLY AT LINE START (after whitespace), never
+    mid-line. A mid-line `//` rule would eat the `//` in every `https://` URL and
+    in the query strings this suite asserts on.
+
+    Requires:
+        - source is the JS text
+
+    Ensures:
+        - block comments and whole-line `//` comments are removed
+        - a `//` inside a string on a code line survives untouched
+        - returns a string of the same line count (comments blanked, not deleted),
+          so a reported offset still points near the right place
+    """
+    without_blocks = re.sub( r"/\*.*?\*/", lambda m: "\n" * m.group( 0 ).count( "\n" ), source, flags=re.DOTALL )
+    return re.sub( r"^\s*//.*$", "", without_blocks, flags=re.MULTILINE )
+
+
+@pytest.fixture( scope="module" )
+def client_code( client_src ):
+    """Ensures: the client asset with every comment stripped — code only."""
+    return strip_js_comments( client_src )
+
+
+def test_the_comment_stripper_actually_strips( client_src, client_code ):
+    """
+    The helper the absence assertions rest on, falsified against the file itself.
+    A stripper that silently returns its input makes every test below vacuous —
+    and a regex without DOTALL does exactly that.
+    """
+    assert len( client_code ) < len( client_src ), "nothing was stripped; the DOTALL flag is the usual cause"
+    assert "SEQUENTIAL, NOT Promise.all" in client_src, "fixture prose moved; this test needs a new witness"
+    assert "SEQUENTIAL, NOT Promise.all" not in client_code, "block comments survived the strip"
+    assert "authedFetch" in client_code, "the stripper ate code, not just comments"
+
+
 # ------------------------------------------------- the controls exist and are wired
 
 def test_actions_column_has_a_header_and_a_cell( client_src ):
@@ -232,7 +291,7 @@ def test_wont_fix_requires_a_reason_because_the_server_does( client_src ):
     assert "A won't-fix reason is required" in client_src
 
 
-def test_terminal_rows_offer_no_controls_at_all( client_src ):
+def test_terminal_rows_offer_no_controls_at_all( client_src, client_code ):
     """
     `done` / `dropped` / `wont_fix` are append-only — `validate_transition` refuses
     every edge out of them. The first cut of the actions cell rendered Drop enabled
@@ -258,7 +317,7 @@ def test_terminal_rows_offer_no_controls_at_all( client_src ):
     # ...and that each control's enabled flag actually READS it.
     for control in ( "task-drop-button", "task-wont-fix-button", "task-demote-button" ):
         assert f'"{control}"' in client_src
-    assert "!isTerminal" in client_src, "no control gates on isTerminal at all"
+    assert "!isTerminal" in client_code, "no control gates on isTerminal at all"
     assert "terminal rows are append-only and have no transitions out" in client_src
 
 
@@ -278,7 +337,7 @@ def test_approve_and_demote_are_never_both_live_on_one_row( client_src ):
     assert "demoteLegal = !isTerminal && !isHeld" in client_src
 
 
-def test_approve_does_not_second_guess_the_server_allowlist( client_src ):
+def test_approve_does_not_second_guess_the_server_allowlist( client_src, client_code ):
     """
     Rick ruled that either a manager or he suffices — "for now" — so the approver
     allowlist is server-side configuration, editable without a deploy. A client-side
@@ -290,7 +349,7 @@ def test_approve_does_not_second_guess_the_server_allowlist( client_src ):
     """
     assert "Approve refused: " in client_src
     for forbidden in ( "isApprover", "approverAllowlist", "APPROVER_ALLOWLIST" ):
-        assert forbidden not in client_src, (
+        assert forbidden not in client_code, (
             f"the client carries {forbidden!r} — a second copy of a provisional server rule"
         )
 
@@ -340,3 +399,211 @@ def test_overtaken_by_events_is_a_reason_and_not_a_fourth_status():
     )
     assert "overtaken_by_events" not in rules.VALID_STATUSES
     assert "overtaken" not in " ".join( rules.VALID_STATUSES ).lower()
+
+
+# ------------------------------------------------- slice 3: the holding-area view
+#
+# `not_approved` rows are invisible to the board query BY DESIGN, so the holding
+# area is a second pane fed by a second query. Most of what can go wrong here is
+# a batch that reports success it did not have.
+
+SHARED_QUERY = REPO_ROOT / "src" / "lupin_app" / "static" / "js" / "shared" / "task-list-query.js"
+
+
+@pytest.fixture( scope="module" )
+def query_src():
+    """Ensures: the shared query module's text. Fails loudly when absent."""
+    assert SHARED_QUERY.is_file(), f"shared query module missing: {SHARED_QUERY}"
+    return SHARED_QUERY.read_text( encoding="utf-8" )
+
+
+def test_held_rows_are_invisible_to_the_board_query( client_src ):
+    """
+    The premise the whole pane rests on. `not_approved` is in the repository's
+    BOARD_INVISIBLE_STATUSES, so the board CANNOT show these rows — which is the
+    gate working, not a discrepancy. If this ever stops being true the second pane
+    is redundant and the board is leaking unapproved work as live work.
+    """
+    assert rules.NOT_APPROVED_STATUS in rules.BOARD_INVISIBLE_STATUSES, (
+        "not_approved is no longer hidden from the board; the board is now showing "
+        "unapproved rows as live work, which is what the gate exists to prevent"
+    )
+
+
+def test_the_holding_query_names_the_status_which_is_what_defeats_the_denylist( query_src ):
+    """
+    🔴 THE NON-OBVIOUS MECHANIC. `_apply_owed_filter` applies the invisible-status
+    denylist only `if not include_terminal and status is None`. So naming the
+    status explicitly is what takes the row OUT of the denylist's reach — there is
+    no `include_not_approved` flag, and adding one would have been the wrong fix.
+
+    Asserted against the repository source rather than remembered, because the
+    whole pane silently returns nothing if that condition changes shape.
+    """
+    repo = ( REPO_ROOT / "src" / "cosa" / "rest" / "db" / "repositories" / "task_repository.py" ).read_text( encoding="utf-8" )
+    assert "if not include_terminal and status is None:" in repo, (
+        "the denylist's bypass condition changed shape; the holding-area query may "
+        "now return an empty pane with no error"
+    )
+    # Asserted on the EXPORTED LITERAL, not on the file: this module explains
+    # `status=not_approved` at length in its own comment, so a source-wide search
+    # stayed green after the query itself was changed to status=queued.
+    assert 'export const HOLDING_AREA_QUERY = "/api/tasks?limit=500&unscoped_audit=true&status=not_approved&char_budget=0";' in query_src, (
+        "the holding query no longer asks for not_approved by name — it will now "
+        "either return the wrong rows or be caught by the invisible-status denylist "
+        "and return none, with no error either way"
+    )
+
+
+def test_the_holding_query_is_not_a_second_hand_maintained_literal( client_src, client_code, query_src ):
+    """
+    Two task-list literals had already drifted once — one carried
+    `include_terminal=true` and silently dropped 671 rows. The holding query lives
+    in the SAME shared module for the same reason, and the client reads it off
+    `window` at call time rather than carrying a fallback string.
+    """
+    assert "LUPIN_HOLDING_AREA_QUERY" in query_src, "the query is not published for the classic-script consumer"
+    assert "window.LUPIN_HOLDING_AREA_QUERY" in client_src, "the client does not read the shared query"
+    assert "/api/tasks?limit=500&unscoped_audit=true&status=not_approved" not in client_code, (
+        "the client carries its own copy of the holding query — the exact duplication "
+        "that let the task-list literals drift"
+    )
+
+
+def test_a_missing_query_module_is_its_own_state_not_an_outage( client_code ):
+    """
+    A 404'd static asset and a downed store are different failures with different
+    remedies, and this poll repeats every 60s. Collapsing them has an operator
+    triaging a deploy defect as an outage indefinitely.
+    """
+    # Counted in CODE, not in the file: both fetchers document this state at length,
+    # so counting the raw source found four "occurrences" of a return that had been
+    # deleted. Proved by changing the holding fetcher's return and watching this stay
+    # green.
+    assert client_code.count( 'return { status: "query_unavailable", tasks: null };' ) == 2, (
+        "the holding-area fetch does not distinguish a missing query module from an "
+        "outage — an operator then triages a deploy defect as an outage, every 60s, "
+        "indefinitely"
+    )
+    assert "Holding-area query missing" in client_code
+
+
+def test_the_batch_reports_partial_failure_instead_of_looking_successful( client_src ):
+    """
+    🔴 THE ONE THAT EARNS ITS KEEP IN THIS SLICE. The obvious batch fires N
+    requests, awaits them and refreshes — rendering a shorter list, which LOOKS
+    like success. Two rows refused out of eight are still on screen with nothing
+    saying why, and the operator reads the shrunken list as "it worked".
+
+    So the batch counts both outcomes and keeps the FIRST server message, which is
+    the one carrying the actor and the allowlist on a 403.
+    """
+    assert "refused. First refusal:" in client_src, "a partial batch failure renders as success"
+    assert "firstError" in client_src
+
+
+def test_the_batch_is_sequential_so_its_failure_report_is_reproducible( client_src, client_code ):
+    """
+    The refusals worth reading here are authorization refusals. Firing eight at
+    once against an allowlist check produces eight identical 403s in a race whose
+    order is not reproducible, so "the first refusal" would name a different row
+    each run. One at a time is slower and its report is stable.
+    """
+    assert "Promise.all" not in client_code.split( "_applyHoldingBatch" )[ 1 ][ :2000 ], (
+        "the holding batch fires concurrently; its first-refusal report is then a race"
+    )
+    assert "for ( const id of ids )" in client_src
+
+
+def test_the_batch_reads_row_ids_from_the_DOM_not_from_a_cached_list( client_code ):
+    """
+    The pane repaints on every 60s poll. A list captured at render time goes stale
+    the moment a peer approves something, and the batch would then act on ids that
+    had already moved. What is on screen is what the operator pressed about.
+    """
+    assert "_heldRowIdsForFiler" in client_code
+    body = client_code.split( "_heldRowIdsForFiler" )[ 1 ][ :1200 ]
+    # The ids must come off the GROUP ELEMENT found in the live DOM. Asserting only
+    # that "querySelectorAll" appears somewhere in the body survives neutering the
+    # element lookup above it, which is how a cached list would actually be
+    # reintroduced.
+    assert "document.querySelector(" in body, "the group element is not looked up in the live DOM"
+    assert "group.querySelectorAll(" in body, "the ids are not read from that group element"
+
+
+def test_batch_wont_fix_requires_its_one_reason_up_front( client_src ):
+    """
+    The server requires a non-blank reason on EACH `->wont_fix`. Without the
+    up-front check the operator gets N identical 422s and has to read them one at a
+    time to learn a single fact.
+    """
+    errors = rules.validate_transition(
+        from_status="not_approved", to_status="wont_fix", authority="user_direct", reason=""
+    )
+    assert any( "reason is REQUIRED" in e for e in errors )
+    assert "A reason is required — it will be applied to every row in this group." in client_src
+
+
+def test_an_empty_holding_area_says_so_in_words( client_src ):
+    """
+    This pane is expected to be empty most of the time, which is exactly when a
+    silent blank is most likely to be read as "broken" and least likely to be
+    checked against anything.
+    """
+    assert "Nothing waiting on triage." in client_src
+
+
+def test_the_table_header_has_one_source_shared_with_the_rows( client_code ):
+    """
+    The holding area renders `_renderTaskRow` output — twelve cells. A second
+    hand-written <thead> there could drift from the row renderer and would then
+    mislabel every column to the right of the drift, silently, because the table
+    still renders perfectly.
+
+    The row's error stripe spans the same twelve columns, so the colspan is part of
+    the same contract.
+    """
+    assert client_code.count( '<th class="task-col-id">ID</th>' ) == 1, (
+        "the table header exists in more than one place and can drift from the rows"
+    )
+    # ...and the holding table must actually CALL it. Asserting the header exists
+    # once stays true when the second table simply stops rendering one — measured:
+    # deleting the call left this test green and the pane headerless.
+    # [-1], not [1]: the FIRST occurrence is the call site in renderHoldingArea, so
+    # [1] slices the caller and finds nothing. The definition is the last one.
+    group_renderer = client_code.split( "_renderHoldingAreaGroup" )[ -1 ][ :2000 ]
+    assert "_taskTableHeaderRow()" in group_renderer, (
+        "the holding-area table renders rows with no header; twelve unlabelled columns"
+    )
+    assert 'colspan="12"' in client_code
+
+
+def test_the_holding_area_rides_the_task_list_tick( client_code ):
+    """
+    Two panes on two timers read as a bug the first time they disagree. The
+    holding area cannot share the board's COMPOSITE (different query), so it shares
+    its TICK instead.
+    """
+    # SCOPED TO refreshTaskList. An unscoped search matched the identical call at the
+    # end of _applyHoldingBatch, so deleting the one on the tick left this green and
+    # the pane only ever refreshed when somebody pressed a batch button — i.e. it
+    # went stale for every reader who was just watching.
+    tick = client_code.split( "async refreshTaskList()" )[ -1 ].split( "startTaskListPolling" )[ 0 ]
+    assert "await this.refreshHoldingArea();" in tick, (
+        "the holding area is not refreshed by the task-list tick; it will only update "
+        "when an operator presses a batch control"
+    )
+    assert "_holdingAreaFetchInFlight" in client_code, "no in-flight debounce; a manual press on a tick double-fetches"
+
+
+def test_the_holding_pane_is_grouped_by_filer_not_owner( client_src, client_code ):
+    """
+    Triage asks "what did this person file". `created_by` and `owner_persona`
+    disagree on 3 of 13 live rows, so grouping on the owner would file roughly a
+    quarter of the rows under the wrong person in the one view whose entire
+    organising principle is who put them there.
+    """
+    assert "_groupHeldRowsByFiler" in client_src
+    grouper = client_code.split( "_groupHeldRowsByFiler" )[ 1 ][ :1600 ]
+    assert "_taskFilerLabel" in grouper
+    assert "owner_persona" not in grouper, "the holding area groups on the owner, not the filer"
