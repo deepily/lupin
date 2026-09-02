@@ -160,8 +160,8 @@ def test_guarded_argv_carries_verbatim_clear_and_token():
 # build_wake_text + build_guarded_clear_argv WAKE path (row 275cb0b9, GAP 1)
 # ---------------------------------------------------------------------------
 def test_build_wake_text_names_memento_and_is_plain_english():
-    txt = sr.build_wake_text( "/data/lupin/.claude-memento.md", "nonce-7", "/data/.wake-proof.marker" )
-    assert "/data/lupin/.claude-memento.md" in txt
+    txt = sr.build_wake_text( "/data/lupin/.claude-memento-cheech.md", "nonce-7", "/data/.wake-proof.marker" )
+    assert "/data/lupin/.claude-memento-cheech.md" in txt
     assert "re-spun" in txt.lower()
     assert "memento" in txt.lower()
     assert "resume" in txt.lower()
@@ -372,7 +372,7 @@ def _write_memento( tmp_path, uuid, ts, *, persona=_SEAT_PERSONA, sid=_SEAT_SID,
     body   = header + "# memento\n" + _REAL_BODY * 4
     record.write_text( body )
 
-    pointer = tmp_path / ".claude-memento.md"
+    pointer = tmp_path / f".claude-memento-{slug}.md"
     pointer.write_text(
         "<!-- MEMENTO POINTER — NOT THE RECORD. Safe to overwrite; it destroys nothing. -->\n"
         f"<!-- current: {record.name} -->\n"
@@ -583,7 +583,7 @@ def test_from_bridge_mints_and_passes_wake_nonce():
         seen.update( k )
         return sr.SelfRespinResult( status="scheduled", reason="ok" )
     sr.self_respin_from_bridge(
-        "/data/.claude-memento.md", "n1",
+        "/data/.claude-memento-cheech.md", "n1",
         identity_fn = lambda: ( "sid-self", "cheech" ),
         pressure_fn = lambda persona: ( "over_budget", 61.0 ),
         perform_fn  = fake_perform,
@@ -864,7 +864,10 @@ def test_the_default_ask_receives_the_persona( tmp_path, monkeypatch ):
     monkeypatch.setattr( sr, "_default_ask",
                          lambda persona: seen.setdefault( "persona", persona ) or "no" )
 
-    mp = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    # The root pointer is per-persona now, so the memento must be written for the SAME
+    # persona perform is called with. Under the retired shared name this matched by
+    # accident of the name, whatever persona the seat carried.
+    mp = _write_memento( tmp_path, "u1", _dt( 20 ), persona="Tiberius" )
     r  = sr.perform_self_respin(
         "sid1", persona="Tiberius", memento_path=mp, memento_nonce="u1",
         pre_clear_status="over_budget", pre_clear_pct=61.0,
@@ -1127,7 +1130,7 @@ def test_slot_gate_is_injectable_and_receives_the_seats_identity( tmp_path ):
 
 def test_default_verify_slot_delegates_to_memento_slot_with_the_root_slot( tmp_path ):
     """The live seam: root slot, and the caller's repo_root passed straight through."""
-    read, pointer = None, str( tmp_path / ".claude-memento.md" )
+    read, pointer = None, str( tmp_path / f".claude-memento-{persona_slug( _SEAT_PERSONA )}.md" )
     _write_memento( tmp_path, "u1", _dt( 20 ) )
     ok, reason = sr._default_verify_slot(
         pointer, repo_root=str( tmp_path ), persona=_SEAT_PERSONA, session_id=_SEAT_SID,
@@ -1142,7 +1145,7 @@ def test_default_verify_slot_resolves_the_repo_root_when_none_is_given( monkeypa
     """repo_root=None ⇒ resolve it live; an unresolvable one reaches the single refusal."""
     monkeypatch.setattr( sr, "resolve_repo_root", lambda: None )
     ok, reason = sr._default_verify_slot(
-        "/anywhere/.claude-memento.md", repo_root=None, persona="cheech",
+        "/anywhere/.claude-memento-cheech.md", repo_root=None, persona="cheech",
         session_id="sid1", now=_dt( 21 ), read_text_fn=lambda p: None,
     )
     assert ok is False

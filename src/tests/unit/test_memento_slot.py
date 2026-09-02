@@ -77,14 +77,15 @@ def _root_slot_fs( repo_root, persona="chloe", sid="5288a6e5", written_at=None )
 # ---------------------------------------------------------------------------
 # Path derivation — both slots, and a refusal on an unknown one
 # ---------------------------------------------------------------------------
-def test_root_slot_pointer_is_the_persona_less_shared_file():
-    # The collision that motivates leg 2: every persona in a repo shares this one file.
-    a = ms.slot_pointer_path( "/repo", "Pocholo 📣", ms.SLOT_ROOT )
-    b = ms.slot_pointer_path( "/repo", "Mr. Radio 🦉", ms.SLOT_ROOT )
-    assert str( a ) == "/repo/.claude-memento.md"
-    assert a == b
-
-
+# The root pointer's derivation is asserted in test_memento_slot_root_pointer_is_per_persona.py,
+# not here. A `test_root_slot_pointer_is_the_persona_less_shared_file` used to sit at this spot
+# and assert both personas resolved to the shared `.claude-memento.md`. That claim retired with
+# commit 73caf656, and its NAME is the retired claim — editing its body to assert the new name
+# would leave a test whose name lies about what it checks, so it was deleted rather than updated.
+# Proven not blind before deleting: restoring the persona-less pointer in slot_pointer_path
+# reddens 4 of that file's 6 tests, all 4 passing at baseline (mutated sha 1d825a72 against
+# f17f07d0; the 2 that stay green cover the io slot and the unknown-slot refusal, which the
+# mutation does not touch).
 def test_io_slot_pointer_is_per_persona():
     p = ms.slot_pointer_path( "/repo", "Mr. Radio 🦉", ms.SLOT_IO )
     assert str( p ) == "/repo/io/mementos/mr-radio.md"
@@ -117,7 +118,7 @@ def test_record_path_refuses_an_unknown_slot():
 
 def test_acceptable_targets_returns_pointer_then_record():
     pointer, record = ms.acceptable_slot_targets( "/repo", "chloe", "5288a6e5" )
-    assert str( pointer ) == "/repo/.claude-memento.md"
+    assert str( pointer ) == "/repo/.claude-memento-chloe.md"
     assert str( record )  == "/repo/.claude-memento-chloe-5288a6e5.md"
 
 
@@ -259,10 +260,21 @@ def test_negative_control_tiberius_wrote_the_bare_mirror_home( tmp_path ):
 
 def test_negative_control_leg2_catches_the_shared_root_pointer_collision( tmp_path ):
     """
-    Leg 1 alone is not enough. The root pointer is PERSONA-LESS, so a seat's record
-    can sit correctly at its own derived path while the pointer a naive reader follows
-    names SOMEBODY ELSE — measured 2026-08-30, Pocholo took `.claude-memento.md` at
-    14:41 and Mr. Radio took it back at 15:20. Leg 1 passes here; leg 2 must not.
+    Leg 1 alone is not enough: a seat's record can sit correctly at its own derived path
+    while the pointer a naive reader follows names SOMEBODY ELSE. Leg 1 passes here; leg 2
+    must not.
+
+    ⚠️ THE PREMISE RETIRED, THE LEG DID NOT — same correction as commit fdbc7938 made to
+    slot_pointer_path's own docstring. This case was originally the CROSS-PERSONA collision:
+    the root pointer was the persona-less `.claude-memento.md`, and on 2026-08-30 Pocholo
+    took it at 14:41 and Mr. Radio took it back at 15:20. Commit 73caf656 made the pointer
+    per-persona, so two personas can no longer contend for one file and that cause is dead.
+    What leg 2 still catches is a pointer naming a record that is not this seat's — now
+    reached temporally, because a persona outlives its sessions. The setup below crosses the
+    pointer by hand to exercise that catch directly.
+
+    ⚠️ This test's NAME still says "shared root pointer collision", which describes the
+    retired cause rather than what it checks. Flagged, not renamed — out of scope here.
     """
     written = _dt( 20 )
     mine    = ms.slot_record_path( tmp_path, "pocholo", "fd1bf2e0" )
