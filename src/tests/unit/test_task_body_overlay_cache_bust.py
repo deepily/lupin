@@ -85,6 +85,7 @@ STATIC        = os.path.join( cu.get_project_root(), "src", "lupin_app", "static
 LEGACY_CSS    = os.path.join( STATIC, "css", "task-list.css" )
 MUX_CSS       = os.path.join( STATIC, "css", "multiplexer", "task-list.css" )
 NOTIF_HTML    = os.path.join( STATIC, "html", "notifications.html" )
+NOTIF_HTML_REL = "src/lupin_app/static/html/notifications.html"
 
 # the versioned <link> in notifications.html: /static/css/task-list.css?v=YYYYMMDD[suffix]
 TOKEN_LINK_RE = re.compile( r"/static/css/task-list\.css\?v=(\d{8})([a-z]?)" )
@@ -345,27 +346,30 @@ def _git_first_parent( sha ):
     return parent if parent else None
 
 
-def _token_at_rev( rev, static_url ):
+def _token_at_rev( rev, static_url, source_rel=NOTIF_HTML_REL ):
     """
-    The `?v=` token notifications.html carried for `static_url` at `rev`.
+    The `?v=` token that `source_rel` carried for `static_url` at `rev`.
 
     Requires:
         - rev names a commit, or "HEAD"
         - static_url is a "/static/..." asset URL
+        - source_rel is the repo-relative path of the file that references it
 
     Ensures:
         - returns the token string (8-digit date plus optional single-letter suffix),
-          or None when the page did not exist at `rev` or did not link that asset
-          with a token there
+          or None when that source did not exist at `rev`, or did not reference the
+          asset with a token there
+        - matches an HTML `href`/`src` attribute OR a JS `import( "..." )`, because
+          the quotes are the only delimiter the two styles share
     """
     done = subprocess.run(
-        [ "git", "show", f"{rev}:src/lupin_app/static/html/notifications.html" ],
+        [ "git", "show", f"{rev}:{source_rel}" ],
         cwd=cu.get_project_root(), capture_output=True, text=True
     )
     if done.returncode != 0: return None
 
     match = re.search(
-        r'(?:href|src)="' + re.escape( static_url ) + r'\?v=(\d{8}[a-z]?)"', done.stdout
+        r'["\']' + re.escape( static_url ) + r'\?v=(\d{8}[a-z]?)["\']', done.stdout
     )
     return match.group( 1 ) if match else None
 
@@ -454,4 +458,187 @@ def test_uncommitted_asset_edit_bumped_its_token( static_url, token_full ):
         f"?v={token_full} — the same token HEAD carries. Bump the token in the same "
         f"edit as the asset: a `?v=` token is part of the browser cache key, so an "
         f"unchanged token means a warm browser serves the OLD file."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Assets referenced from JAVASCRIPT, not from the page
+# ---------------------------------------------------------------------------
+#
+# 🔴 EVERY GUARD ABOVE SCANS ONE .html FILE, AND AN ASSET CAN BE VERSIONED WITHOUT
+# APPEARING IN ONE. notifications.js:2443 does
+#
+#     const mod = await import( "/static/js/ws-channel.js?v=20260503a" );
+#
+# — a dynamic ES-module import carrying its own cache-bust token. No guard here
+# could see it, because none of them read a .js file. Measured 2026-09-02:
+# ws-channel.js last changed 2026-06-19 in 53fef419, so that token was SIX WEEKS
+# stale and nothing in the suite was looking. It is the only case in this file
+# where a returning browser was actually being handed the wrong module.
+#
+# WHY SCANNING ONE PAGE LOOKED SUFFICIENT — the population, named, with a positive
+# control, because an empty search result and a wrong search result print the same
+# thing. Of 42 tracked .html files under src/, EXACTLY ONE carries a `?v=` token
+# (notifications.html), and the search that found that one is the same search that
+# returns nothing for the other 41 — so the page scan really is complete FOR PAGES.
+# The gap was never a missing page. It was a second reference STYLE: 32 tracked .js
+# files under static/, one of which versions an import.
+#
+# ⇒ The guarded population is now "every versioned reference", not "every versioned
+# link on the page". A third style (a CSS `@import`, a token built by string
+# concatenation) would still escape both — which is why the discovery below has its
+# own non-vacuous anchor rather than trusting the regex to keep matching.
+
+JS_IMPORT_RE = re.compile( r'import\(\s*["\'](/static/[^"\']+)\?v=(\d{8}[a-z]?)["\']' )
+
+# The versioned JS imports EXPECTED in the shipped client, same purpose as
+# EXPECTED_VERSIONED_ASSETS: if the regex stops matching, the parametrized tests
+# below collect zero cases and pass VACUOUSLY. Entries are ( source, imported ).
+EXPECTED_JS_IMPORTS = frozenset( {
+    ( "src/lupin_app/static/js/notifications.js", "/static/js/ws-channel.js" ),
+} )
+
+
+def _shipped_js_sources():
+    """
+    Every shipped `.js` file under the static tree, repo-relative, sorted.
+
+    Ensures:
+        - returns POSIX repo-relative paths (what git wants)
+        - reads the DISK, not the index: a new client file is covered before it is
+          committed, which is when a forgotten token is cheapest to fix
+        - skips `vendor/`, which this repo does not version and does not author
+    """
+    root  = cu.get_project_root()
+    js    = os.path.join( STATIC, "js" )
+    found = []
+    for dirpath, dirnames, filenames in os.walk( js ):
+        dirnames[ : ] = [ d for d in dirnames if d != "vendor" ]
+        for name in filenames:
+            if not name.endswith( ".js" ): continue
+            full = os.path.join( dirpath, name )
+            found.append( os.path.relpath( full, root ).replace( os.sep, "/" ) )
+    return sorted( found )
+
+
+def _discover_js_imports():
+    """
+    Every versioned dynamic import across the shipped client JS.
+
+    Ensures:
+        - returns [ ( source_rel, static_url, token_full ), ... ], sorted
+        - token_full keeps its suffix — the within-day signal
+    """
+    out = []
+    for source_rel in _shipped_js_sources():
+        try:
+            text = _read( os.path.join( cu.get_project_root(), source_rel ) )
+        except OSError:
+            continue
+        for match in JS_IMPORT_RE.finditer( text ):
+            out.append( ( source_rel, match.group( 1 ), match.group( 2 ) ) )
+    return sorted( out )
+
+
+_DISCOVERED_JS = _discover_js_imports()
+_JS_IDS        = [ f"{src.rsplit( '/', 1 )[ -1 ]}->{url}" for src, url, _t in _DISCOVERED_JS ]
+
+
+def test_js_import_discovery_is_nonvacuous():
+    """
+    Discovery must find EXACTLY the expected versioned-import set.
+
+    Ensures:
+        - a regex that silently stopped matching fails loudly here rather than
+          greening the three tests below by collecting nothing
+        - a NEW versioned import joining the client must also join this anchor
+    """
+    found = { ( src, url ) for src, url, _t in _DISCOVERED_JS }
+    assert found == EXPECTED_JS_IMPORTS, (
+        f"versioned JS-import discovery drifted from the expected set.\n"
+        f"  missing (expected, not found): {sorted( EXPECTED_JS_IMPORTS - found )}\n"
+        f"  unexpected (found, not listed): {sorted( found - EXPECTED_JS_IMPORTS )}\n"
+        f"A new versioned import must join this anchor, or it rots unwatched — which "
+        f"is exactly how ws-channel.js went six weeks stale."
+    )
+
+
+@pytest.mark.parametrize( "source_rel,static_url,token_full", _DISCOVERED_JS, ids=_JS_IDS )
+def test_js_import_token_not_stale( source_rel, static_url, token_full ):
+    """
+    A dynamically-imported module's token date must be >= that module's last commit
+    date — the same property the page's links carry, applied to the other reference
+    style.
+
+    Requires:
+        - the imported module is tracked by git
+
+    Ensures:
+        - fails when the importing JS pins a token older than the module it imports
+    """
+    repo_rel    = _static_url_to_repo_rel( static_url )
+    commit_date = _git_last_commit_date( repo_rel )
+    assert re.fullmatch( r"\d{8}", commit_date ), \
+        f"could not resolve {repo_rel} git commit date (got {commit_date!r}); is it tracked?"
+
+    assert token_full[ :8 ] >= commit_date, (
+        f"{source_rel} imports {static_url}?v={token_full}, STALE vs that module's "
+        f"last commit {commit_date}. A `?v=` token is part of the browser cache key, "
+        f"so a returning browser re-executes the OLD module while the rest of the "
+        f"page is new. Bump the token in the import to >= {commit_date}.\n"
+        f"⚠️ No guard scanning notifications.html can see this — the reference lives "
+        f"in a .js file."
+    )
+
+
+@pytest.mark.parametrize( "source_rel,static_url,token_full", _DISCOVERED_JS, ids=_JS_IDS )
+def test_js_import_token_followed_its_last_change( source_rel, static_url, token_full ):
+    """
+    The import's token must differ from the one the SAME source carried before the
+    imported module's most recent change — the commit-ordered property, so a
+    same-day slice cannot hide behind an unchanged day.
+
+    Ensures:
+        - the refused value is read out of git at run time; no literal token
+        - skips honestly when the source did not reference the module at that
+          parent, rather than inventing a comparison
+    """
+    repo_rel  = _static_url_to_repo_rel( static_url )
+    asset_sha = _git_last_commit_sha( repo_rel )
+    assert re.fullmatch( r"[0-9a-f]{40}", asset_sha ), \
+        f"could not resolve a last commit for {repo_rel} (got {asset_sha!r}); is it tracked?"
+
+    parent = _git_first_parent( asset_sha )
+    if parent is None:
+        pytest.skip( f"{repo_rel} last changed in a root commit — nothing to compare against" )
+
+    token_before = _token_at_rev( parent, static_url, source_rel )
+    if token_before is None:
+        pytest.skip( f"{source_rel} did not import {static_url} with a token at {parent[ :8 ]}" )
+
+    assert token_full != token_before, (
+        f"{source_rel} imports {static_url}?v={token_full}, the SAME token it carried "
+        f"at {parent[ :8 ]} — before {static_url} last changed in {asset_sha[ :8 ]}. "
+        f"The token did not follow the module."
+    )
+
+
+@pytest.mark.parametrize( "source_rel,static_url,token_full", _DISCOVERED_JS, ids=_JS_IDS )
+def test_uncommitted_js_import_target_bumped_its_token( source_rel, static_url, token_full ):
+    """
+    A dynamically-imported module edited in the WORKING TREE must have its import
+    token bumped in the working tree too.
+
+    Ensures:
+        - skips when the module matches HEAD (nothing uncommitted to guard)
+        - otherwise fails when the token is byte-identical to HEAD's
+    """
+    repo_rel = _static_url_to_repo_rel( static_url )
+    if not _differs_from_head( repo_rel ):
+        pytest.skip( f"{repo_rel} matches HEAD — nothing uncommitted to guard" )
+
+    token_at_head = _token_at_rev( "HEAD", static_url, source_rel )
+    assert token_full != token_at_head, (
+        f"{repo_rel} has uncommitted changes, but {source_rel} still imports it "
+        f"?v={token_full} — the same token HEAD carries. Bump it in the same edit."
     )
