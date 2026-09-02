@@ -583,6 +583,40 @@ not the instrument's. This is a hazard for searches you TYPE, which is exactly w
 zero-list, *"no rows matched"*, *"no other suite is running"*, *"that persona has no memento"*.
 **Absence is the one finding that looks the same whether you did the work or not.**
 
+### 🔴 AND THE MIRROR: A HIT IS NOT A USE — READ WHAT THE MATCH ACTUALLY DOES
+
+The section above governs a result that is EMPTY. This one governs a result that is
+FULL and still wrong: every line the search returned is a real match, and most of them
+are not the thing you were asking about. **A grep finds the NAME. Your question was
+almost always about the USE.**
+
+**Three firings on 2026-09-01, in one evening, by three different people:**
+
+| the search | hits | actual uses |
+|---|---|---|
+| test files naming `CLAUDE.md` | **81** | **8** open and read it — the rest are path strings and docstrings |
+| unit tests naming `epic-stories.json` | 3 | **0** — one `monkeypatch`es `get_project_root()` and builds its own, one is a comment, one is the route string `/api/epic-stories` |
+| guard message builders under `hooks/` | 4 mapped | **9** existed — the map that CLAIMED to be the frontier had never enumerated its own population |
+
+⇒ **The middle row is the instructive one, because the correction ran the wrong way
+first.** A warning was raised that a dirty config would contaminate a running tier; the
+reviewer's own grep found a THIRD file and he began drafting it as a WIDENING of the
+warning. Reading the three files instead reversed it: **none reads the real file, the
+warning was groundless, and the "correction" would have made it worse.** Both parties
+had grepped, and neither had read.
+
+⇒ **The discharge is the same one sentence in both directions:** open the matches and
+ask what the code does with them. This repo already states the rule — *"do not read a
+bare import list as an exposure list"*, in § *A TIER RUN FROM A WORKTREE* — but it is
+written there about imports and worktrees, so nobody reaches for it while typing a
+`grep`. **It is the general rule, and this is where you were standing when you needed
+it.**
+
+⚠️ **The tell is that a NAME travels further than a USE.** A path appears in comments,
+docstrings, route strings, error messages and other tests' prose; the code that opens
+it appears once. So the ratio is lopsided by construction, and a population picked by
+name is wrong by DEFAULT, not by accident.
+
 > 🔴 **THE TWO VENUES ALSO HAVE TWO DATABASES, and a host shell silently reads the wrong one.** Neither container sets `DB_NAME`, so each falls through to its own config block: `lupin-rest-dev` → **`lupin_db_dev`**, `lupin-rest-test` → **`lupin_db_test`**. A host shell inherits the *Development* block, so `PYTHONPATH=src python3` on the host queries **dev** even when the job you are chasing ran on `:8000`.
 >
 > **Measured 2026-08-28**, both directions inside a minute: host/dev returned **205 rows, zero `ts-` rows, nothing newer than the previous day**; the same query inside `lupin-rest-test` returned **4 rows, all same-day**, including the one at issue. The host answer reads exactly like *"test_suite jobs are never persisted"* — which is false, and a correct fix was one message from being retracted on it. **An empty result from the wrong box is not evidence; it is a confident answer to a question you did not ask.**
