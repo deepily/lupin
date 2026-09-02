@@ -71,6 +71,7 @@ import unicodedata
 
 from dataclasses import dataclass
 from enum        import Enum
+from pathlib     import Path
 
 
 # The on-disk receipt filename shape: <RECEIPT_PREFIX><session_id>.json, living
@@ -137,6 +138,19 @@ class WakeAssessment:
     reason       : str
     is_alarm     : bool
     memento_path : "str | None" = None
+
+    # LOCATION, carried as a FIRST-CLASS FIELD for the same reason the holds family
+    # carries it (row 011f1f90): a receipt that is ABSENT and a receipt that is
+    # MISPLACED read identically, because `find_receipt_by_identity` globs ONE
+    # directory non-recursively and anything outside it is simply not seen. So
+    # DEAD_NO_WAKE — "it never came back" — is also what a seat gets when it DID
+    # come back and wrote its receipt to the wrong root. Two failures, one output,
+    # wanting opposite remedies: chase a dead seat, or fix a writer.
+    #
+    # This is EVIDENCE, not a verdict. The list stays empty on every path that does
+    # not look, and populating it changes no verdict and no alarm flag — a reader
+    # who ignores it sees exactly what it saw before.
+    misplaced    : "list | None" = None
 
 
 def _parse_iso( value ):
@@ -465,6 +479,113 @@ def find_receipt_by_identity( base_dir, *, persona=None, tmux_session=None, sinc
 # The verdict — pure
 # ---------------------------------------------------------------------------
 
+def receipt_is_misplaced( path, correct_base_dir ):
+    """
+    Is this receipt file OUTSIDE the directory the check actually reads?
+
+    Mirrors `heartbeat_hold.hold_is_misplaced` deliberately, down to the fail-safe:
+    the two families have the same defect and should not have two different shapes
+    for the reader to learn.
+
+    ⚠️ THE PREDICATE IS ABOUT THE PARENT, NOT ABOUT ANCESTRY, and that is the whole
+    difference from the holds version. `find_receipt_by_identity` globs
+    `<base_dir>/<prefix>*.json` NON-RECURSIVELY, so a receipt one level DEEPER
+    inside the correct root is just as invisible as one in a sibling repo. An
+    ancestry test would call that nested file correctly placed and it would still
+    never be found — a detector agreeing with the defect it exists to catch.
+    Measured: a receipt at <base>/nested/ returns None from the finder exactly as a
+    receipt in a sibling root does.
+
+    Requires:
+        - path is a path-like or string; correct_base_dir is the directory the
+          finder globs, or None when it could not be resolved
+
+    Ensures:
+        - True iff `path`'s immediate parent is not `correct_base_dir`
+        - fail-safe: an unresolvable base dir or path returns False — the detector
+          never OVER-flags a receipt it cannot place, because a false "misplaced"
+          sends a manager to fix a writer that is working
+    """
+    if correct_base_dir is None:
+        return False
+    try:
+        return Path( path ).resolve().parent != Path( correct_base_dir ).resolve()
+    except Exception:
+        return False
+
+
+def find_misplaced_receipts( correct_base_dir, *, persona=None, tmux_session=None,
+                             since=None, search_root=None, glob_fn=None ):
+    """
+    Find receipts for THIS seat that exist but sit where the finder cannot see them.
+
+    This is the counterpart the receipt family never had. It searches RECURSIVELY,
+    which is the only way to observe the thing being detected: the defect IS the
+    non-recursive glob, so a detector that globs the same way is guaranteed to find
+    nothing and report a clean result — the vacuous-green shape.
+
+    Requires:
+        - correct_base_dir is the directory `find_receipt_by_identity` globs
+        - at least one of persona / tmux_session identifies the seat; with both
+          absent NOTHING is returned, matching find_receipt_by_identity's own rule
+          that a blank query must never claim some arbitrary seat's receipt
+        - search_root defaults to the PARENT of correct_base_dir — the zone that
+          holds the sibling roots a receipt actually lands in when it goes astray
+        - since is an aware datetime, or None for no recency floor
+
+    Ensures:
+        - returns a list of {"path", "receipt"} dicts, oldest path first, for every
+          matching receipt whose immediate parent is NOT correct_base_dir
+        - a receipt the finder WOULD have found is never included — this reports
+          only what the existing read is blind to
+        - never raises; an unreadable tree yields []
+    """
+    if not persona and not tmux_session:
+        return []
+    if correct_base_dir is None:
+        return []
+
+    try:
+        base = Path( correct_base_dir ).resolve()
+    except Exception:
+        return []
+
+    root = search_root if search_root is not None else base.parent
+
+    try:
+        if glob_fn is not None:
+            paths = sorted( glob_fn( root ) )
+        else:
+            paths = sorted( glob.glob( os.path.join( str( root ), "**",
+                                                     f"{RECEIPT_PREFIX}*.json" ),
+                                       recursive=True ) )
+    except OSError:                                # pragma: no cover - unreadable tree
+        return []
+
+    found = []
+    for path in paths:
+        if not receipt_is_misplaced( path, base ):
+            continue                               # the existing read already sees it
+        try:
+            with open( path, "r", encoding="utf-8" ) as fh:
+                data = json.load( fh )
+        except ( OSError, json.JSONDecodeError, ValueError ):
+            continue
+        if not isinstance( data, dict ):
+            continue
+        if persona and _norm( data.get( "persona" ) ) != _norm( persona ):
+            continue
+        if tmux_session and _norm( data.get( "tmux_session" ) ) != _norm( tmux_session ):
+            continue
+        if since is not None:
+            booted = _parse_iso( data.get( "booted_at" ) )
+            if booted is None or booted < since:
+                continue
+        found.append( { "path": path, "receipt": data } )
+
+    return found
+
+
 def classify_wake( receipt, *, fired_at, now,
                    deadline_seconds        = DEFAULT_WAKE_DEADLINE_SECONDS,
                    expect_memento          = True,
@@ -675,6 +796,19 @@ def check_respin_wake( *, fired_at, session_id=None, persona=None, tmux_session=
             persona                 = persona,
         )
         if assessment.verdict is not WakeVerdict.PENDING:
+            # THE ONE PLACE THE TWO FAILURES ARE CONFUSABLE. DEAD_NO_WAKE means the
+            # finder saw nothing — which is equally true of a seat that never woke
+            # and of one that woke and wrote its receipt somewhere the finder does
+            # not look. Only here is the extra scan worth its cost, and only here
+            # does it tell the reader something the verdict cannot.
+            #
+            # The verdict and the alarm are left EXACTLY as classify_wake set them.
+            # Deciding what to DO about a misplaced receipt is an operator call, not
+            # this function's; all it does is stop the reader having to guess which
+            # of two failures they are looking at.
+            if assessment.verdict is WakeVerdict.DEAD_NO_WAKE:
+                assessment.misplaced = find_misplaced_receipts(
+                    base, persona=persona, tmux_session=tmux_session, since=fired_at )
             return assessment
         if now >= deadline:
             # classify_wake cannot return PENDING past the deadline, but a clock
