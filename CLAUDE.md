@@ -592,10 +592,26 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 **Before running a tier from a worktree:**
 
 ```bash
-cd <your-worktree> && LUPIN_ROOT="$PWD" .venv/bin/python -m pytest src/tests/unit/ -q
+cd <your-worktree> \
+  && LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" .venv/bin/python -m pytest src/tests/unit/ -q
 ```
 
 `LUPIN_ROOT="$PWD"` is the one you must not forget — it is inherited from your shell and silently keeps pointing at `/…/lupin`. The other two are unfixable from inside a worktree: **subtract them, do not chase them.**
+
+🔴 **PIN BOTH VARIABLES. THIS BLOCK CARRIED ONLY `LUPIN_ROOT` UNTIL 2026-09-01, AND A READER FOLLOWING IT EXACTLY STILL GOT THE SPLIT-IMPORT GRAPH.** `LUPIN_ROOT` decides which tree the code **resolves paths against**; `PYTHONPATH` decides which tree the code is **imported from**. Two variables, two different jobs — and this file already documented the hazard elsewhere in this section, which did not stop the person who wrote this paragraph from re-deriving it from scratch. **The knowledge was present; the REMEDY BLOCK was what people copied.** That is why the fix belongs in the pasted line.
+
+Nothing is installed, so `sys.path` is the whole story: `pip show cosa` reports *Package(s) not found*, there is no `cosa/` in site-packages, and `env -u PYTHONPATH .venv/bin/python -c "import cosa"` raises `ModuleNotFoundError` **in the main checkout as well as a worktree**. Two entries put a `src` on the path, at two different moments, and a module comes from whichever got there first:
+
+| entry | when | governs |
+|---|---|---|
+| `PYTHONPATH` | interpreter startup | anything imported at or before startup |
+| `LUPIN_ROOT`/src, via `src/tests/unit/conftest.py:26-29` | pytest collection | everything imported after |
+
+⚠️ **AND `cosa` IS ALREADY IMPORTED BEFORE PYTEST EXISTS, SO FOR `cosa` THE CONFTEST INSERT IS INERT.** Measured: at interpreter start `'cosa' in sys.modules` is **True** (`cosa`, `cosa.utils`, `cosa.utils.checked_hash_pyc`, per `-X importtime`), and inserting the worktree's `src` at `sys.path[0]` in a fresh interpreter still leaves `cosa.__path__` naming the main repo — the module object already exists. The chain: `site` imports `sitecustomize` **from anywhere on `sys.path`**, `PYTHONPATH` supplies the MAIN repo's `src/sitecustomize.py`, and its line 32 does `from cosa.utils.checked_hash_pyc import install`. `python -S` skips `site` and `cosa` is then absent — which is how the chain was confirmed rather than assumed. A second, later path exists too (`src/conftest.py:122` imports `cosa.utils.unit_network_guard` with no `sys.path` insert before it), but `sitecustomize` gets there first.
+
+⇒ Pin one and not the other and your run's modules come from **two different checkouts — a tree that exists nowhere on disk.**
+
+⚠️ **A SYMLINKED `.venv` IS NOT THE CULPRIT.** Measured, same tree, one variable: `PYTHONPATH` pinned → **66 passed, 0 failed**; unpinned → 1 failed, 65 passed. Two failures first blamed on the symlink were both `PYTHONPATH`. The guidance to symlink the main repo's `.venv` stands unchanged and is correct — the venv supplies no `cosa` at all, so it cannot be the thing choosing your tree.
 
 🔴 **AND `LUPIN_ROOT` ALONE IS NOT ENOUGH — `PYTHONPATH` SPLITS THE IMPORT GRAPH AND GIVES YOU A
 HYBRID APP THAT IS NEITHER TREE.** Measured 2026-09-01 (Rio ⚡). Every seat's shell carries
@@ -763,10 +779,40 @@ verification and left the SELECTION grep-shaped, so the improved instrument stil
 of its own class.** Widen the population before you widen the trust; the honest scope line is *"14
 failures across the files that name it"*, never *"14 failures."*
 
-⇒ **Wiring this symlink into the spawn path is row `9b2abfb7`** (Krishna 🦚, blocked on Rick's word —
-the spawn path is shared infrastructure every future seat inherits). Until it is ruled, symlinking is
-a manual step, and a step that depends on remembering is not installed. **The measurement above is
-what a forgotten step costs: 33 red tests that look like a broken branch.**
+⇒ **Wiring this into the spawn path was row `9b2abfb7`, and it SHIPPED.** Rick ruled yes by voice
+2026-08-31 ~20:08 EDT; Rachel 🕊️ landed it at `ee027c8c`. `cosa/utils/worktree_venv.py` shells out to
+`link-worktree-venv.sh` from both creators — `spawn_sessions` once `work_dir` resolves, and
+`WorktreeContext.__aenter__` once `git worktree add` succeeds. Measured 35 failed → 0 across the seven
+unit files that carry it, one tree, one sha, only the symlink flipped. **The measurement above is what
+the forgotten step cost while it was manual: 33 red tests that look like a broken branch.**
+
+⚠️ **Still manual for a hand-typed `git worktree add`** — provisioning lives in the PYTHON spawn path,
+which is how every `lupin-wt-*` tree on this box came up without one.
+
+🔴 **AND IT CLOSES THE INTERPRETER GAP ONLY — WHICH IS NOT THE IMPORT-GRAPH GAP.** Measured 2026-09-01
+(Krishna 🦚) in a worktree whose `.venv` is a symlink to the main repo's: `cosa` is **not in
+site-packages**, `pip show cosa` reports not found, and none of the four `.pth` files adds `src/`.
+Clearing `PYTHONPATH` gives `ModuleNotFoundError` **in the main checkout too**.
+
+⇒ **So the venv contributes NOTHING to resolving `cosa`, symlinked or built** — *"build a real venv
+instead of symlinking"* is not a remedy for the split import graph, because both forms resolve `cosa`
+through `PYTHONPATH` or not at all. A seat can pass the spawn's `INTERPRETER OK` **and** Rio's
+`venv_alarm` while running the hybrid tree. Those two controls answer different questions and must not
+be read as one.
+
+⇒ **For `cosa` specifically the conftest insert is INERT, and the reason is `sitecustomize` — see the
+remedy block earlier in this section, which carries the full chain.** Recorded here because I got it
+wrong first: I told Pocholo 📣 the trigger was `src/conftest.py:122` and that both pins govern
+different modules. **He had it right and I did not.** `python -S -c "'cosa' in sys.modules"` is
+`False` and without `-S` it is `True` — `site` imports `sitecustomize.py` off `PYTHONPATH`, and its
+line 32 does `from cosa.utils.checked_hash_pyc import install`. That happens **before pytest exists**,
+so `cosa` is already bound when any conftest runs. `src/conftest.py:122` is a real second path but
+never gets there first. **Both pins are still required — they simply do not divide the way I said.**
+
+⚠️ **A fourth untracked thing a worktree lacks — except it is not a file.** Rachel's list below names
+three (`.venv`, `cloud-run.env`, the terraform cache), all provisionable. This one is an inherited
+environment variable pointing every tree at the main repo. **Provisioning cannot fix an env var; only
+pinning at invocation can.**
 
 ⚠️ **AND SUBTRACTING THE ARTIFACTS IS NOT THE WHOLE JOB — CHECK WHETHER THE BRANCH MOVED.** In the
 same reconciliation, 8 of the 9 remaining failures also passed in the main tree, and it would have
@@ -1402,13 +1448,14 @@ that existed when you ran it.
 ⇒ **CONVERT A NEW WORKTREE BEFORE YOU TRUST IT.** Use it once, then purge-and-reconvert, *then*
 verify. A verify on an unused tree is not evidence.
 
-🔴🔴 **BUT PIN `LUPIN_ROOT` FIRST — `purge-pycache.sh` MUTATES THE MAIN REPO FROM INSIDE A WORKTREE.**
-**Found and documented by Pocholo 📣 at ~17:52 EDT** (`TODO.md` § *purges the wrong tree … and prints
-its success banner anyway*); independently re-derived by Rachel 🕊️ five hours later, who then
-**declined the credit and pointed at his entry**. `purge-pycache.sh:32` reads
-`LUPIN_ROOT="${LUPIN_ROOT:-<derived from BASH_SOURCE>}"` — the fallback is right, but **a set variable
-wins**, and every seat's shell has `LUPIN_ROOT` pointing at the MAIN checkout. Line 40 then does
-`find "$LUPIN_ROOT/src"`, and the reconvert it chains to inherits the same resolution.
+🔴🔴 **HISTORICAL — `purge-pycache.sh` USED TO MUTATE THE MAIN REPO FROM INSIDE A WORKTREE. FIXED;
+DO NOT PIN `LUPIN_ROOT` FOR IT ANY MORE.** Kept because the diagnosis below is the durable half and
+the stale remedy is still in people's fingers. **Found and documented by Pocholo 📣 at ~17:52 EDT**
+(`TODO.md` § *purges the wrong tree … and prints its success banner anyway*); independently re-derived
+by Rachel 🕊️ five hours later, who then **declined the credit and pointed at his entry**. The script
+*then* read `LUPIN_ROOT="${LUPIN_ROOT:-<derived from BASH_SOURCE>}"` — the fallback was right, but **a
+set variable wins**, and every seat's shell has `LUPIN_ROOT` pointing at the MAIN checkout. The `find
+"$LUPIN_ROOT/src"` below it, and the reconvert it chains to, inherited that resolution.
 
 ⇒ Run it from a worktree and it purges and reconverts `/…/lupin`, **prints its success banner**, and
 leaves your worktree exactly as poisoned as it found it.
@@ -1416,10 +1463,23 @@ leaves your worktree exactly as poisoned as it found it.
 ⚠️ **THE SUCCESS BANNER IS THE WHOLE PROBLEM** — this is the wrong-tree family's signature: not a
 crash, a **confident verdict about a tree you were not asking about.**
 
-🔴 **PIN BOTH VARIABLES, OR THE STOPGAP ITSELF LEAVES A HALF-DONE TREE.** An earlier cut of this
-paragraph gave only `LUPIN_ROOT="$PWD"`. **Measured — that command purges and then fails to
-reconvert** in a worktree with no `.venv` (30 of 76), because `PYTHON` derives from `LUPIN_ROOT` and
-the worktree has no interpreter at that path:
+🔴 **THE FIX LANDED — `5e7f74e8` (with `0c0d0d15`, `ee91fefc`, `9fbe8f19`). THE TARGET CANNOT BE
+STEERED, AND THE `LUPIN_ROOT` PIN IS NOW A NO-OP.** The paragraph above described a real defect and
+predicted its own expiry; this is the re-cut it asked for. `purge-pycache.sh:48` now derives the root
+from `BASH_SOURCE` **unconditionally**, and the script's own header says `$LUPIN_ROOT IS NOT
+CONSULTED`. Verified 2026-09-01 by reading the shipped script, not by running it.
+
+⇒ **THE ONE WAY TO AIM THIS SCRIPT IS TO RUN THE COPY THAT LIVES IN THE TREE YOU MEAN.** The remedy
+that circulated while this was broken — `LUPIN_ROOT="$PWD" src/scripts/purge-pycache.sh` — still gives
+the right answer, but **for the wrong reason**: the prefix does nothing at all now, and what made it
+correct was that you were standing in the tree whose copy you ran. **Harmless to keep typing;
+misleading to keep believing.** That distinction is the whole point — a reader who believes the prefix
+aims the script will run the MAIN repo's copy from a worktree and purge the main repo, which is the
+exact defect this section exists to prevent, reached by obeying its own stale remedy.
+
+⚠️ **`PYTHON` IS STILL LOAD-BEARING AND THE FIX DOES NOT COVER IT.** It defaults to
+`$LUPIN_ROOT/.venv/bin/python` — now the *script's own* tree — so in a worktree with no `.venv` (Rachel
+🕊️ measured 30 of 76) the **purge half succeeds and the reconvert half exits 2**:
 
 ```
 Purging 1 __pycache__ directories under src/ …
@@ -1429,20 +1489,16 @@ EXIT=2
 ```
 
 The caches are **gone and unreconverted** — precisely the half-done state the script exists to
-prevent, reached by following the documented remedy. Found by Rachel 🕊️.
+prevent. **Read the exit code**, and pin the interpreter when the tree lacks one:
 
 ```bash
-# from a worktree — pin BOTH. Verified exit 0 with the caches reconverted.
-LUPIN_ROOT="$PWD" \
+# from a worktree with no .venv — pin the INTERPRETER only. LUPIN_ROOT is inert here.
 PYTHON="$( dirname "$( git rev-parse --path-format=absolute --git-common-dir )" )/.venv/bin/python" \
   src/scripts/purge-pycache.sh
 ```
 
-⚠️ **`LUPIN_ROOT` and `PYTHON` answer different questions** — *which tree do I clean* versus *what do
-I run `compileall` with*. Pinning only the first repoints the second at a venv that does not exist.
-⇒ **A fix is in review** (rows `f26f7308` / `3ac368b4`) that derives the tree from `BASH_SOURCE`
-unconditionally; **when it lands, the `LUPIN_ROOT` half of this becomes a no-op** and this paragraph
-must be re-cut rather than left standing.
+⚠️ **The two variables answered different questions and only one survives** — *which tree do I clean*
+is now settled by the script's own location; *what do I run `compileall` with* is still yours to pin.
 
 ⇒ **Two harms, and the second is the quiet one.** It reaches into a shared tree other seats are
 working in; and it leaves you **believing you isolated a mutation arm that you did not**. A seat
