@@ -33,9 +33,13 @@ class TestSuiteSubmitRequest( BaseModel ):
     test_types          : str             = Field( "integration,e2e", description="Comma-separated suite types: integration, e2e" )
     pytest_args         : Optional[ str ] = Field( None, description="Extra pytest arguments, shell-style (shlex) parsed — quoting is honored, e.g. '-v -k \"auth or visual\"' reaches pytest as ['-v', '-k', 'auth or visual']. Unbalanced quotes → 400 at submit." )
     dry_run             : bool            = Field( False, description=(
-        "Skip the pytest subprocess — but STILL QUEUE A REAL JOB, and still take the "
-        "monopolize slot. Stated in three tiers, because they are not equally established "
-        "and a reader deciding whether to reach for this should know which is which. "
+        "Skips the pytest subprocess — but STILL QUEUES A REAL JOB and takes the monopolize "
+        "slot for 7.0 SECONDS (measured 2026-09-01, ts-e929149f). That number bounds the "
+        "severity and is the first thing to know: the slot is held for seven seconds, NOT "
+        "for a suite's duration, so this is a naming problem with a small blast radius — a "
+        "nuisance, not a fleet stall. Do not read the detail below as 'dry_run locks the "
+        "box'. Stated in three tiers, because they are not equally established and a reader "
+        "deciding whether to reach for this should know which is which. "
         "(1) FROM THE CODE: the flag is read at EXECUTION time — TestSuiteJob.run_job "
         "dispatches to _execute_dry_run — never at submit, and this endpoint builds the job "
         "and pushes it to the todo queue with monopolize=True unconditionally. A dry run "
