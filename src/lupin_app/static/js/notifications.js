@@ -417,6 +417,7 @@ class NotificationsUI {
         this.EPIC_BLOCKER_OF_INTEREST   = 'rick';                           // the one human the highlight section watches for
         this.EPIC_BOARD_STATE_KEY       = 'lupin.epicBoard.groupState';     // localStorage key: JSON map of group key -> isExpanded CHOICES
         this._epicBoardAccordionWired   = false;                            // event-delegation guard (wire the container listener once)
+        this._holdingAreaControlsWired  = false;                            // event-delegation guard (this pane had NO listener at all)
         this._epicStories               = {};                               // GET /api/epic-stories body, memoized for the page's life
         this._epicStoriesFetched        = false;                            // one-shot guard: hand-edited file, never polled
         // Task-list row redesign (design 2026.06.29): the client title-truncation
@@ -11389,9 +11390,12 @@ class NotificationsUI {
          *     - rows render grouped by filer, groups alphabetical
          *     - the count in the header is the number of HELD rows
          *     - no-op (never throws) when the container is absent from the page
+         *     - the pane's delegated control listener is installed before any paint
          */
         const container = document.getElementById( "holding-area-container" );
         if ( !container ) return;
+
+        this._wireHoldingAreaControls();
 
         const countEl = document.getElementById( "holding-area-count" );
         const sentinels = {
@@ -11481,6 +11485,43 @@ class NotificationsUI {
                     <tbody>${rows}</tbody>
                 </table>
             </div>`;
+    }
+
+    _wireHoldingAreaControls() {
+        /**
+         * Install this pane's single delegated click listener.
+         *
+         * 🔴 THIS PANE HAD NONE AT ALL, AND SO EVERY CONTROL IN IT WAS DEAD — batch
+         * approve, batch won't-fix, and all five per-row controls. Its two sibling panes
+         * each wire one on render (`renderTaskList` -> `_wireTaskListAccordion`,
+         * `renderEpicBoard` -> `_wireEpicBoardAccordion`); `renderHoldingArea` wired
+         * nothing, so the buttons painted and the clicks landed on no handler. The pane
+         * exists for exactly these controls.
+         *
+         * Measured before the fix, on the page's real shape — `#task-list-container` and
+         * `#holding-area-container` are SIBLING sections, not nested — with the handlers
+         * stubbed: all three probes failed on "handler was called = false", never on a
+         * missing button, while the same probe against the task-list pane saw its click
+         * arrive. So this is a MISSING ROUTE, the same class as the epic board's, and not
+         * a lookup picking the wrong copy.
+         *
+         * ⚠️ IT IS NOT AN ACCORDION LISTENER. The two sibling panes group their rows and
+         * route a header click to a collapse toggle; this pane has no accordion, so a
+         * non-control click here is simply ignored rather than falling through to one.
+         *
+         * Ensures:
+         *     - listener attached at most once (guarded by _holdingAreaControlsWired)
+         *     - no-op if the container is absent (degrade-safe)
+         *     - row controls AND batch controls both reach their handlers
+         */
+        if ( this._holdingAreaControlsWired ) return;
+        const container = document.getElementById( "holding-area-container" );
+        if ( !container ) return;
+
+        container.addEventListener( "click", ( e ) => this._handleRowControlClick( e.target ) );
+
+        this._holdingAreaControlsWired = true;
+        this.log( "Holding-area control delegation wired" );
     }
 
     _heldRowIdsForFiler( filer ) {

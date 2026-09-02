@@ -71,6 +71,10 @@ type HoldingUI = Record<string, unknown> & {
     => Promise<{ ok: number; failed: number; firstError: string | null }>;
   _handleTaskWontFixClick: ( button: unknown ) => Promise<void>;
   _handleTaskDropClick: ( button: unknown ) => Promise<void>;
+  _wireHoldingAreaControls: () => void;
+  _handleRowControlClick: ( target: unknown ) => boolean;
+  _renderTaskRow: ( task: Record<string, unknown>, ianaZone?: unknown ) => string;
+  _holdingAreaControlsWired: boolean;
   _handleTaskParkClick: ( button: unknown ) => Promise<void>;
   _controlScope: ( button: unknown ) => ParentNode;
   _rowInputValue: ( taskId: string, cls: string, scope: unknown ) => string;
@@ -93,6 +97,8 @@ function newUI(): HoldingUI {
   ui._taskListLastGoodTasks    = null;
   ui.TASK_TITLE_TRUNCATE_LEN   = 60;
   ui.queueSessionId            = "test-session";
+  ui._holdingAreaControlsWired = false;
+  ui._taskListAccordionWired   = false;
   return ui;
 }
 
@@ -872,4 +878,162 @@ test( "🔴 _controlScope reads the input in the CLICKED row's own cell, not the
   assert.equal( calls.length, 1, "Drop never reached the server" );
   assert.equal( ( calls[ 0 ][ 2 ] as { reason: string } ).reason, "THE SECOND ROW'S TEXT",
     "the handler sent a different row's reason — the scope fell back past `.task-actions`" );
+} );
+
+// ══════ THE PANE ITSELF HAD NO CLICK LISTENER — every control in it was dead ══════
+//
+// 🔴 THE ASYMMETRY IS THE FINDING, not the added listener. `renderTaskList` wires one
+// (`_wireTaskListAccordion`) and `renderEpicBoard` wires one (`_wireEpicBoardAccordion`);
+// `renderHoldingArea` wired NOTHING. All three panes render the same controls, two were
+// wired by hand and the third was simply forgotten — so batch approve, batch won't-fix
+// and all five per-row controls painted correctly and their clicks landed on no handler.
+// This pane exists for exactly those controls.
+//
+// It hid because every control test in the tree calls the handler DIRECTLY. A handler
+// called by name always runs; what these ask instead is whether a real click gets to it.
+//
+// ⚠️ THIS FIX REPAIRS A DEFECT AND ATTRIBUTES NOTHING. It is tempting to read it as the
+// explanation for a dead Won't-fix button reported earlier, and that inference is not
+// available: the server-side measurement behind that report — zero `wont_fix` events
+// store-wide — has MORE THAN ONE SUFFICIENT CAUSE. A lookup collision swallowing the
+// click produces it, and so does a pane with no listener. An observation satisfiable by
+// two mechanisms cannot tell you which one ran, which is the same rule the tests in this
+// file apply to fixtures, arriving on a diagnosis instead. Settling it needs a store fact
+// about which pane the row was in, and that is not a client question.
+
+function realPageDOM(): void {
+  // The page's actual shape: notifications.html has #task-list-container at :774 and
+  // #holding-area-container at :812 as SIBLING sections. A nested fixture would let the
+  // task list's listener catch these clicks and hide the defect entirely.
+  document.body.innerHTML = `
+    <div class="collapsible-section" id="section-task-list">
+      <div class="section-content"><div id="task-list-container"></div></div>
+    </div>
+    <div class="collapsible-section" id="section-holding-area">
+      <div class="section-content" id="holding-area-section">
+        <div id="holding-area-container"></div>
+      </div>
+    </div>`;
+}
+
+const HELD_ROWS = [
+  row( { id: "h1", status: "not_approved" } ),
+  row( { id: "h2", status: "not_approved" } )
+];
+
+function paintedHoldingPane( ui: HoldingUI ): void {
+  realPageDOM();
+  ui._wireTaskListAccordion();                     // the sibling pane wires itself as usual
+  ui.renderHoldingArea( { status: "ok", tasks: HELD_ROWS } );
+}
+
+function clickIt( el: Element | null, what: string ): void {
+  assert.ok( el, `${what} did not render at all — this test cannot speak to wiring` );
+  el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+}
+
+test( "🔴 THROUGH THE CLICK PATH: batch APPROVE-ALL reaches its handler", () => {
+  const ui = newUI();
+  let got: string | null = null;
+  ui._handleHoldingApproveAllClick = async ( b ) => { got = ( b as HTMLElement ).dataset.filer ?? ""; };
+  paintedHoldingPane( ui );
+
+  clickIt( document.querySelector( ".holding-approve-all" ), "batch approve" );
+  assert.ok( got !== null, "batch approve reached no handler — the pane has no click listener" );
+} );
+
+test( "🔴 THROUGH THE CLICK PATH: batch WON'T-FIX-ALL reaches its handler", () => {
+  const ui = newUI();
+  let got: string | null = null;
+  ui._handleHoldingWontFixAllClick = async ( b ) => { got = ( b as HTMLElement ).dataset.filer ?? ""; };
+  paintedHoldingPane( ui );
+
+  clickIt( document.querySelector( ".holding-wont-fix-all" ), "batch won't-fix" );
+  assert.ok( got !== null, "batch won't-fix reached no handler — the pane has no click listener" );
+} );
+
+test( "🔴 THROUGH THE CLICK PATH: a PER-ROW control in this pane reaches its handler", () => {
+  const ui = newUI();
+  let got: string | null = null;
+  ui._handleTaskWontFixClick = async ( b ) => { got = ( b as HTMLElement ).dataset.taskId ?? ""; };
+  paintedHoldingPane( ui );
+
+  clickIt( document.querySelector( "#holding-area-container .task-wont-fix-button" ),
+           "a per-row won't-fix in the holding pane" );
+  assert.equal( got, "h1", "a per-row control in the holding pane reached no handler" );
+} );
+
+test( "the sibling task-list pane still routes its own clicks — the panes do not steal from each other", () => {
+  // Positive control for the three above. Both containers now carry a listener; a click
+  // must reach exactly one handler, from the pane it was made in.
+  const ui = newUI();
+  const reached: string[] = [];
+  ui._handleTaskWontFixClick = async ( b ) => { reached.push( ( b as HTMLElement ).dataset.taskId ?? "" ); };
+  paintedHoldingPane( ui );
+  document.getElementById( "task-list-container" )!.innerHTML =
+    `<table>${ui._renderTaskRow( row( { id: "tl1", status: "not_approved" } ), undefined )}</table>`;
+
+  clickIt( document.querySelector( "#task-list-container .task-wont-fix-button" ), "task-list won't-fix" );
+  assert.deepEqual( reached, [ "tl1" ], "the task-list pane's own click no longer reaches its handler" );
+} );
+
+test( "the pane's listener is installed ONCE, however many times it repaints", () => {
+  // The pane repaints on every poll. An un-guarded wire would stack a listener per paint
+  // and fire the handler N times for one click — N transitions from one press.
+  const ui = newUI();
+  let calls = 0;
+  ui._handleHoldingApproveAllClick = async () => { calls += 1; };
+  paintedHoldingPane( ui );
+  ui.renderHoldingArea( { status: "ok", tasks: HELD_ROWS } );
+  ui.renderHoldingArea( { status: "ok", tasks: HELD_ROWS } );
+
+  clickIt( document.querySelector( ".holding-approve-all" ), "batch approve" );
+  assert.equal( calls, 1, "one press fired the batch handler more than once" );
+} );
+
+test( "🔴 _heldRowIdsForFiler collects ONLY its own group — a batch cannot reach across groups", () => {
+  // The third member of the two-pane-lookup family, and the widest: `_controlScope` and
+  // `_paneScope` each govern ONE row, this governs EVERY row a batch touches. It resolves
+  // via `document.querySelector` on the group, so the group filter is the only thing
+  // keeping one filer's batch off another filer's rows — and dropping it reddened nothing.
+  const ui = newUI();
+  document.body.innerHTML = `
+    <div id="holding-area-container">
+      <div class="holding-area-group" data-filer="alice">
+        <button class="task-action-btn task-approve-button" data-task-id="a1"></button>
+        <button class="task-action-btn task-approve-button" data-task-id="a2"></button>
+      </div>
+      <div class="holding-area-group" data-filer="bob">
+        <button class="task-action-btn task-approve-button" data-task-id="b1"></button>
+      </div>
+    </div>`;
+
+  assert.deepEqual( ui._heldRowIdsForFiler( "alice" ), [ "a1", "a2" ] );
+  assert.deepEqual( ui._heldRowIdsForFiler( "bob" ), [ "b1" ],
+    "bob's batch collected alice's rows — the group scope is gone" );
+  assert.deepEqual( ui._heldRowIdsForFiler( "carol" ), [],
+    "an unknown filer collected rows that are not in its group" );
+} );
+
+test( "🔴 batch APPROVE sends `queued` and batch WON'T-FIX sends `wont_fix`", async () => {
+  // Both verbs were unasserted: a batch acts on every row in a group, so a wrong one is
+  // the whole pane rather than one row.
+  const ui = newUI();
+  const sent: Array<[ string, string ]> = [];
+  ui._transitionTask = async ( id, to ) => { sent.push( [ id, to ] ); return { ok: true }; };
+  ui.refreshHoldingArea = async () => {};
+  document.body.innerHTML = `
+    <div id="holding-area-container">
+      <div class="holding-area-group" data-filer="alice">
+        <button class="task-action-btn task-approve-button" data-task-id="a1"></button>
+        <input class="task-action-input holding-wont-fix-all-reason" data-filer="alice" value="closing the lot">
+      </div>
+    </div>`;
+
+  await ui._handleHoldingApproveAllClick( { dataset: { filer: "alice" } } );
+  assert.deepEqual( sent, [ [ "a1", "queued" ] ], "batch approve sent the wrong transition verb" );
+
+  sent.length = 0;
+  await ui._handleHoldingWontFixAllClick( { dataset: { filer: "alice" } } );
+  assert.deepEqual( sent, [ [ "a1", "wont_fix" ] ], "batch won't-fix sent the wrong transition verb" );
 } );
