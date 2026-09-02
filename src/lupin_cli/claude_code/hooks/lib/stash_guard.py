@@ -21,9 +21,20 @@ commit sha, never the index.
 THE SUBSTITUTES, in the order you should reach for them:
   · TO HOLD WORK — make a WIP COMMIT ON YOUR OWN BRANCH. A stash is a shared
     mutable stack pretending to be a private one; a branch is actually yours.
-  · TO INSPECT AN OLD VERSION — `git checkout <sha> -- <path>`, restore with
-    `git checkout HEAD -- <path>`. Touches nothing shared, races nothing.
-  · A throwaway detached worktree at the old sha also works and is safer still.
+  · TO INSPECT AN OLD VERSION — a THROWAWAY DETACHED WORKTREE at the old sha.
+    Reach for this FIRST; it is the only form that cannot touch anybody's
+    working tree.
+  · The same job by `git checkout <sha> -- <path>` is a LAST RESORT, and only
+    after `cp <path> <path>.bak`. 🔴 THIS BULLET USED TO SAY IT "touches nothing
+    shared, races nothing", WHICH IS FALSE AND WAS THE MOST DANGEROUS SENTENCE
+    IN THIS FILE. A path-level checkout overwrites the WORKING-TREE copy of that
+    path — including a peer's uncommitted work in a shared checkout — and it
+    moves no HEAD, so it leaves NO REFLOG ENTRY and is invisible to forensics.
+    Measured 2026-09-01: four seats in one checkout, and a census of 96,258
+    commands found 73 such restores in the shared tree across 50 sessions.
+    The restore direction (`git checkout HEAD -- <path>`) is the same hazard.
+  · TO UNDO YOUR OWN EDIT — `cp` from a backup YOU took. Not a git restore:
+    only your own copy is guaranteed to hold your own bytes and nobody else's.
 
 SCOPE: only the MUTATING subcommands are denied. `git stash list` and
 `git stash show` are read-only and stay allowed — they are how you inspect the
@@ -323,9 +334,13 @@ def _deny_reason_for( subcommand: Optional[ str ] ) -> str:
         "2026-08-23 (bug 1ebc9be3).\n"
         "USE INSTEAD:\n"
         "  · to HOLD work — a WIP commit on your own branch;\n"
-        "  · to INSPECT an old version — `git checkout <sha> -- <path>`, restore "
-        "with `git checkout HEAD -- <path>`;\n"
-        "  · a throwaway detached worktree at the old sha.\n"
+        "  · to INSPECT an old version — a throwaway detached worktree at that "
+        "sha. Prefer this: it cannot touch anybody's working tree.\n"
+        "  · `git checkout <sha> -- <path>` is a LAST RESORT and only after "
+        "`cp <path> <path>.bak` — it OVERWRITES the working-tree copy, including "
+        "a peer's uncommitted work, and moves no HEAD, so there is no reflog "
+        "entry to recover from.\n"
+        "  · to undo your OWN edit — `cp` from a backup you took yourself.\n"
         "`git stash list` and `git stash show` are read-only and still allowed. "
         "If you own an entry and must clear it, name the COMMIT SHA (never "
         "`stash@{N}` — indices renumber on every drop) and re-run with "
