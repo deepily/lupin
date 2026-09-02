@@ -52,6 +52,9 @@ from lupin_cli.claude_code.hooks.lib.stash_guard import _deny_reason_for
 from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
     git_commit_match, _pathspec_of, _notice_for,
 )
+from lupin_cli.claude_code.hooks.lib.merge_head_guard import (
+    KIND_SQUASH, KIND_MERGE, _deny_reason_for as _merge_head_deny,
+)
 from tests.helpers.guard_remedy import (
     HAZARD_CAVEATS, remedy_commands, remedy_is_readable, remedy_carries_its_caveat,
 )
@@ -120,6 +123,52 @@ def test_the_caveat_check_can_fail():
     assert remedy_carries_its_caveat( unqualified ), (
         "the withdrawn sentence passed the caveat check — the check is measuring "
         "nothing, and every green above is worthless"
+    )
+
+
+# ---------------------------------------------------------------------------
+# merge_head_guard — ONE of its two branches is checkable. The other is not.
+#
+# Rio's reset row (`37fb6c5a`, `r"git\s+reset\b"` with no lookahead) is what made
+# the SQUASH branch testable: before it, this guard returned [] because the table
+# named nothing it recommends. The MERGE branch still does, and is deliberately
+# left uncovered below rather than given a green that measures nothing.
+# ---------------------------------------------------------------------------
+
+def test_the_squash_refusal_qualifies_the_reset_it_recommends():
+    """
+    The squash remedy recommends a bare `git reset`. In a shared checkout that
+    clears the WHOLE index, including a peer's staged work — so the message has to
+    say so, and the table row exists to make that a check rather than a habit.
+    """
+    text    = _merge_head_deny( KIND_SQUASH )
+    matched = [ p for p in HAZARD_CAVEATS if re.search( p, text ) ]
+    assert matched, (
+        "the squash refusal names none of the table's hazards, so the assertion "
+        "below would pass against nothing — the remedy was reworded, or the reset "
+        "row was removed"
+    )
+    missing = remedy_carries_its_caveat( text )
+    assert missing == [], (
+        f"the squash refusal recommends a hazardous operation unqualified: {missing}"
+    )
+
+
+def test_the_merge_branch_is_not_covered_and_this_records_why():
+    """
+    🔴 A DELIBERATE NON-TEST, pinned so the gap is visible rather than forgotten.
+
+    The MERGE branch recommends only the escape hatch and "ask the owner" — it names
+    no operation in the table, so `remedy_carries_its_caveat` returns [] by measuring
+    nothing. Asserting on that would be the vacuous green this whole file exists to
+    refuse. This asserts the VACUITY itself, so the day the branch starts naming a
+    table hazard, this test fails and tells the next reader to write the real one.
+    """
+    text    = _merge_head_deny( KIND_MERGE, "a" * 40 )
+    matched = [ p for p in HAZARD_CAVEATS if re.search( p, text ) ]
+    assert matched == [], (
+        f"the merge branch now names table hazard(s) {matched} — it has become "
+        "checkable, so replace this non-test with a real caveat assertion"
     )
 
 
