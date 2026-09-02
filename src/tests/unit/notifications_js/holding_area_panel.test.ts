@@ -72,6 +72,8 @@ type HoldingUI = Record<string, unknown> & {
   _handleTaskWontFixClick: ( button: unknown ) => Promise<void>;
   _handleTaskDropClick: ( button: unknown ) => Promise<void>;
   _wireHoldingAreaControls: () => void;
+  _captureOperatorState: ( container: unknown ) => unknown;
+  _restoreOperatorState: ( container: unknown, state: unknown ) => void;
   _handleRowControlClick: ( target: unknown ) => boolean;
   _renderTaskRow: ( task: Record<string, unknown>, ianaZone?: unknown ) => string;
   _holdingAreaControlsWired: boolean;
@@ -1106,4 +1108,57 @@ test( "🔴 an EMPTY group says so and calls nobody", async () => {
   assert.deepEqual( out, { ok: 0, failed: 0, firstError: null } );
   assert.match( statusText(), /No rows in this group/,
     "an empty group reported nothing, which reads as a batch that silently did nothing" );
+} );
+
+// ═══════ the repaint destroys operator state HERE TOO — the same defect, second pane ═══════
+//
+// 🔴 THE TASK-LIST FIX CLOSED RICK'S INSTANCE AND LEFT TWO KNOWN LIVE ONES. All three panes
+// repaint by replacing `container.innerHTML`, so all three throw away whatever the operator
+// has typed and not yet submitted. Rick's row happens to render in the task list; nothing
+// about the mechanism is particular to that pane, and a fix that stops at the reported
+// instance is one somebody re-opens the first time an operator types in this one.
+//
+// Same property, stated once for both panes: a repaint landing between typing and clicking
+// changes nothing the operator can see or lose.
+
+test( "🔴 a repaint of THIS pane keeps a typed reason, a shown refusal and a disclosed row", () => {
+  const ui = newUI();
+  document.body.innerHTML = `<div id="holding-area-container"></div>`;
+  ui._holdingAreaControlsWired = false;
+  ui.renderHoldingArea( { status: "ok", tasks: HELD_ROWS } );
+  const container = document.getElementById( "holding-area-container" )!;
+
+  ( container.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value = "not doing this";
+  ( container.querySelector( ".task-disclose-button" ) as HTMLElement )
+    .dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  ui._renderTaskRowError( "h1", "A won't-fix reason is required.", container );
+  assert.equal( ( container.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false );
+
+  ui.renderHoldingArea( { status: "ok", tasks: HELD_ROWS } );          // the poll lands
+
+  assert.equal( ( container.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value,
+    "not doing this", "the repaint wiped a reason the operator had typed and not yet sent" );
+  const stripe = container.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.equal( stripe.hidden, false, "the repaint wiped the refusal — the control now looks dead" );
+  assert.equal( ( container.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false,
+    "the repaint re-collapsed a row the operator had opened" );
+} );
+
+test( "🔴 the BATCH won't-fix reason survives a repaint too", () => {
+  // The batch reason is keyed by FILER, not by task id — a second shape of the same state,
+  // and one whose loss costs a whole group's worth of typing rather than one row's.
+  const ui = newUI();
+  document.body.innerHTML = `<div id="holding-area-container"></div>`;
+  ui._holdingAreaControlsWired = false;
+  ui.renderHoldingArea( { status: "ok", tasks: HELD_ROWS } );
+  const container = document.getElementById( "holding-area-container" )!;
+
+  const box = container.querySelector( ".holding-wont-fix-all-reason" ) as HTMLInputElement;
+  assert.ok( box, "no batch reason box rendered — this test cannot speak" );
+  box.value = "closing the lot";
+
+  ui.renderHoldingArea( { status: "ok", tasks: HELD_ROWS } );
+
+  assert.equal( ( container.querySelector( ".holding-wont-fix-all-reason" ) as HTMLInputElement ).value,
+    "closing the lot", "the repaint wiped a batch reason typed for a whole group" );
 } );

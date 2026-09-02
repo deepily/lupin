@@ -11346,7 +11346,13 @@ class NotificationsUI {
         if ( !container || typeof container.querySelectorAll !== "function" ) return state;
 
         const active = document.activeElement;
-        for ( const el of container.querySelectorAll( ".task-action-input[data-task-id]" ) ) {
+        // ⚠️ TWO KEYING SCHEMES, because the markup has two. Row controls carry
+        // `data-task-id`; the holding area's BATCH reason carries `data-filer` and no task
+        // id at all, so a per-row sweep misses it — and losing that one costs a whole
+        // group's worth of typing rather than one row's.
+        const boxes = [ ...container.querySelectorAll( ".task-action-input[data-task-id]" ),
+                        ...container.querySelectorAll( ".task-action-input[data-filer]" ) ];
+        for ( const el of boxes ) {
             const key = this._operatorInputKey( el );
             if ( !key ) continue;
             state.inputs.push( [ key, el.value ] );
@@ -11421,16 +11427,21 @@ class NotificationsUI {
         /**
          * The identity of one inline input across a repaint: its row plus WHICH box.
          *
-         * A row carries several (a reason and a date on park and demote), so the task id
-         * alone would restore a chase date into a reason field.
+         * A row carries several (a reason and a date on park and demote), so the owner id
+         * alone would restore a chase date into a reason field. And the owner is not always
+         * a row: the holding area's batch reason is keyed by FILER, so the attribute has to
+         * travel with the key or the lookup afterwards searches the wrong one.
          *
          * Ensures:
-         *     - returns "<taskId>\u0000<className>", or null when either half is missing
+         *     - returns "<attr>\u0000<owner>\u0000<className>", or null if any part is missing
          */
-        const taskId = el && el.dataset ? el.dataset.taskId : "";
-        if ( !taskId || !el.className ) return null;
-        const which = String( el.className ).split( /\s+/ ).find( c => c.startsWith( "task-" ) && c !== "task-action-input" );
-        return which ? `${taskId}\u0000${which}` : null;
+        if ( !el || !el.dataset || !el.className ) return null;
+        const owner = el.dataset.taskId || el.dataset.filer || "";
+        if ( !owner ) return null;
+        const attr  = el.dataset.taskId ? "data-task-id" : "data-filer";
+        const which = String( el.className ).split( /\s+/ )
+            .find( c => c !== "task-action-input" && ( c.startsWith( "task-" ) || c.startsWith( "holding-" ) ) );
+        return which ? `${attr}\u0000${owner}\u0000${which}` : null;
     }
 
     _operatorInputByKey( container, key ) {
@@ -11440,12 +11451,11 @@ class NotificationsUI {
          * Ensures:
          *     - returns the element, or null when that row/control is no longer rendered
          */
-        const sep = key.indexOf( "\u0000" );
-        if ( sep < 0 ) return null;
-        const taskId = key.slice( 0, sep );
-        const which  = key.slice( sep + 1 );
+        const parts = key.split( "\u0000" );
+        if ( parts.length !== 3 ) return null;
+        const [ attr, owner, which ] = parts;
         return container.querySelector(
-            `.${which}[data-task-id="${CSS.escape( taskId )}"]` );
+            `.${which}[${attr}="${CSS.escape( owner )}"]` );
     }
 
     _controlScope( button ) {
@@ -11597,7 +11607,9 @@ class NotificationsUI {
             return;
         }
 
+        const holdingState = this._captureOperatorState( container );
         container.innerHTML = truncation + groups.map( g => this._renderHoldingAreaGroup( g.filer, g.tasks ) ).join( "" );
+        this._restoreOperatorState( container, holdingState );
     }
 
     _renderHoldingAreaGroup( filer, tasks ) {
@@ -12661,7 +12673,9 @@ class NotificationsUI {
         const model     = this.groupTasksByEpic( openTasks );
         if ( countEl ) countEl.textContent = String( model.groups.length );
 
+        const epicState = this._captureOperatorState( container );
         container.innerHTML = this.renderEpicBoardTable( model, this.loadEpicGroupState() );
+        this._restoreOperatorState( container, epicState );
 
         if ( stampUpdated ) this._stampEpicBoardUpdated();
     }
