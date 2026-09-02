@@ -1229,6 +1229,38 @@ NAMED test that was PASSING at baseline goes red. Nothing reddens ⇒ present-an
 wants a test. Something reddens ⇒ it was watched all along. **A break list proves UNWATCHED; it
 never proves ABSENT** — and the two want opposite fixes.
 
+### 🔴 A COMPARISON WHOSE TWO SIDES COME FROM ONE SOURCE CANNOT DISAGREE — AND IT LOOKS LIKE A TEST
+
+Measured by Pocholo 📣, 2026-09-02, on a guard he was writing to close the wrong-corpus defect.
+**It is not a blind fixture — it is one step worse, and the difference is worth holding.** A blind
+fixture ignores its input; this one *honours* its input on **both sides at once**, so the two
+sides move together and agree by construction.
+
+**The receipt.** His corpus test compared *the files the walk found* against *the files it
+expected*, and derived **both lists from the same exclusion set**. He added an exclusion expecting
+RED — the standard falsification move, done correctly — and got **GREEN**: the walk shrank, the
+expected list shrank with it, and the two agreed perfectly about **eight files that had just left
+the frame**. The exclusion was real, the change landed, and the test could not see it.
+
+⇒ **He did the right thing and it told him nothing.** That is what makes this worse than a blind
+fixture: falsification is the check that catches blindness, and here **falsification itself came
+back green**. A seat that stops at "I posed a mutation and it behaved" ships this.
+
+🔴 **THE TELL IS STRUCTURAL AND YOU CAN SEE IT WITHOUT RUNNING ANYTHING: trace each side of the
+`==` back to its origin. If they meet, you have a tautology wearing an assertion's clothes.** Ask
+it of every comparison you write — expected-vs-actual, count-vs-count, list-vs-list.
+
+⇒ **Fix by pinning ONE side to something the code under test cannot move**: a literal, a
+committed fixture file, a hand-written count, a number derived from `git ls-files` when the thing
+under test walks the disk. **The expected value must have a different provenance from the actual
+one, or the comparison is an identity.**
+
+⚠️ **AND THE COMPANION RECEIPT, FROM THE SAME FIX**: his corpus walk **missed eleven tracked
+files** — the population defect reproducing *inside the guard written to close it*. Neither
+finding was luck: both surfaced because he stated his denominator and made the corpus
+**self-report on every run**. **A guard that prints how many files it scanned is a guard that can
+be caught being wrong**; one that prints only pass/fail cannot.
+
 ### 🔴 COVERAGE FOLLOWS THE BUTTONS A HUMAN HAPPENED TO PRESS, NOT THE ONES THAT CAN BREAK
 
 Observed by Rio ⚡ 2026-09-02 on the task-list pane, generalised here. Ten mutations against its
