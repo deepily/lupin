@@ -272,3 +272,80 @@ def test_the_host_fallback_appends_the_same_subdirectory_the_mount_uses( compose
         f"<fleet_data_root>/{mount_leaf}/{frs.OVERRIDE_FILENAME}. The env-var branch and "
         f"the fallback branch name two different files again."
     )
+
+
+# 🔴 THE SUBDIRECTORY IS ANCHORED TO THE MOUNT; THE FILENAME WAS ANCHORED TO ITSELF.
+#
+# Found by an independent mutation pass, 2026-09-02 (Tiberius 👑). Two arms against
+# `override_path()`'s two components, run over the whole sixteen-file population:
+#
+#     OVERRIDE_SUBDIR   "flow-ratio" -> "flow_ratio"          KILLED, by the test above
+#     OVERRIDE_FILENAME "flow-ratio-settings.json"
+#                       -> "flow_ratio_settings.json"         SURVIVED everything
+#
+# The guard above is HALF a parity check and the halves are not equally strong. It derives
+# the expected subdirectory from the COMPOSE MOUNT — an independent source that a rename
+# cannot move — and that half is genuinely falsifiable. Its closing assertion then reads
+#
+#     assert host_path == os.path.join( root, mount_leaf, frs.OVERRIDE_FILENAME )
+#
+# and `override_path()` BUILDS host_path out of `OVERRIDE_FILENAME`. Both sides move
+# together, so that clause is true for every possible filename — the same unfalsifiable
+# shape as the fallback-constant assertions in test_flow_ratio_settings.py, in the same
+# feature, found the same night. It is correct about the subdirectory and says nothing
+# about the filename.
+#
+# WHY A FILENAME DRIFT IS NOT HARMLESS, even though reads and writes would agree with each
+# other. The servers already hold a file at the shipped name — measured in both running
+# containers and recorded in the docstring above:
+#
+#     lupin-rest-dev    /var/lupin/flow-ratio/flow-ratio-settings.json
+#     lupin-rest-test   /var/lupin/flow-ratio/flow-ratio-settings.json
+#
+# A rename lands the next deployment on a file that does not exist, so the operator's
+# persisted override silently stops being read and the INI default is reported as the live
+# threshold. That is the SAME failure the subdirectory defect would have produced — an
+# empty override read as an intentional one — reached through the other component. And it
+# is quiet in exactly the same way: nothing errors, a plausible number is displayed.
+#
+# ⇒ The filename has no independent source to derive from — the mount names a DIRECTORY,
+# not a file — so it is pinned by a LITERAL, and the literal is the control. Do NOT rewrite
+# this to reference `frs.OVERRIDE_FILENAME`; that is precisely the defect being closed.
+
+def test_the_override_filename_is_the_one_the_servers_already_hold():
+    """
+    The shipped filename is pinned by a literal, independently of the module constant.
+
+    Ensures:
+        - reddens if OVERRIDE_FILENAME is renamed, which the parity test above cannot do
+          because it compares the constant against a path built from that same constant
+    """
+    assert frs.OVERRIDE_FILENAME == "flow-ratio-settings.json", (
+        "the override filename changed. Both running containers hold "
+        "/var/lupin/flow-ratio/flow-ratio-settings.json; a rename makes the next "
+        "deployment read a file that does not exist and report the INI default as the "
+        "operator's live threshold. If the change is deliberate, migrate the deployed "
+        "files and update this literal — do NOT make this assertion reference "
+        "frs.OVERRIDE_FILENAME, which would make it unfalsifiable again."
+    )
+
+
+def test_the_two_constants_compose_to_the_deployed_path():
+    """
+    `<subdir>/<filename>` is the tail the servers actually use, pinned end to end.
+
+    The test above pins the filename and the parity test pins the subdirectory against the
+    compose mount. This one pins their COMPOSITION, so a change that splits the difference
+    — moving a separator between the two constants, say — cannot pass both while producing
+    a third path.
+
+    Ensures:
+        - the joined tail equals the measured container path's tail, by literal
+    """
+    tail = f"{frs.OVERRIDE_SUBDIR}/{frs.OVERRIDE_FILENAME}"
+    assert tail == "flow-ratio/flow-ratio-settings.json", (
+        f"the module composes {tail!r}, but both rest containers hold "
+        f"/var/lupin/flow-ratio/flow-ratio-settings.json. The mount hands the container "
+        f"that directory as its whole world, so a container reading any other tail reads "
+        f"nothing at all."
+    )
