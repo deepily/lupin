@@ -33,8 +33,18 @@ THE SUBSTITUTES, in the order you should reach for them:
     Measured 2026-09-01: four seats in one checkout, and a census of 96,258
     commands found 73 such restores in the shared tree across 50 sessions.
     The restore direction (`git checkout HEAD -- <path>`) is the same hazard.
-  · TO UNDO YOUR OWN EDIT — `cp` from a backup YOU took. Not a git restore:
-    only your own copy is guaranteed to hold your own bytes and nobody else's.
+  · TO UNDO YOUR OWN EDIT — `cp` from a backup YOU took, IN A WORKTREE OF YOUR
+    OWN. The `cp` fixes only which BYTES come back: your copy holds your edit,
+    where `git checkout HEAD --` holds whatever was committed. 🔴 THE WRITE IS
+    IDENTICAL. A `cp` overwrites the working-tree file exactly as the git form
+    does, so if a peer edited it between your backup and your restore you revert
+    them — silently, no HEAD moved, no reflog. Substituting `cp` narrows the
+    hazard to the window between the two, and does not remove it.
+    ⇒ In a shared checkout the only form with no window at all is a detached
+    worktree, where nobody else can be in the file. Receipt, and it is this
+    file's own author: on 2026-09-02 I ran mutation arms with `cp` restores in a
+    four-seat shared checkout and they came out clean only because the other
+    three happened not to be in those two files.
 
 SCOPE: only the MUTATING subcommands are denied. `git stash list` and
 `git stash show` are read-only and stay allowed — they are how you inspect the
@@ -340,7 +350,10 @@ def _deny_reason_for( subcommand: Optional[ str ] ) -> str:
         "`cp <path> <path>.bak` — it OVERWRITES the working-tree copy, including "
         "a peer's uncommitted work, and moves no HEAD, so there is no reflog "
         "entry to recover from.\n"
-        "  · to undo your OWN edit — `cp` from a backup you took yourself.\n"
+        "  · to undo your OWN edit — `cp` from a backup you took, in a worktree "
+        "of your own. The `cp` fixes only WHICH BYTES come back; the write is "
+        "identical, so it still overwrites a peer's edit made since your backup. "
+        "Only a detached worktree closes that window.\n"
         "`git stash list` and `git stash show` are read-only and still allowed. "
         "If you own an entry and must clear it, name the COMMIT SHA (never "
         "`stash@{N}` — indices renumber on every drop) and re-run with "
