@@ -817,3 +817,134 @@ def test_exactly_the_expected_pages_carry_cache_bust_tokens():
         f"versioning its assets is unwatched the moment it appears — which is exactly "
         f"how a versioned reference outside the scanned corpus goes stale unnoticed."
     )
+
+
+# ---------------------------------------------------------------------------
+# THE REFERENCE STYLES NO GUARD IN THIS FILE CAN FOLLOW
+# ---------------------------------------------------------------------------
+#
+# Everything above follows a `?v=` token that is a LITERAL in the source — an `href`
+# or `src` attribute, or a JS `import( "…?v=…" )`. Two other ways exist to version an
+# asset, and a guard that reads literals cannot follow either:
+#
+#   (a) a CSS `@import url( "other.css?v=…" )` — a stylesheet pulling a stylesheet
+#   (b) a token BUILT at runtime — `"…?v=" + VERSION`, or `` `…?v=${VERSION}` ``
+#
+# Measured 2026-09-02, and BOTH ARE EMPTY TODAY:
+#
+#   CSS `@import`  0 real, across 31 tracked .css files. There is exactly one textual
+#                  hit and it is a COMMENT — proxy-ratify.css:5 says badge classes are
+#                  "shared with proxy-dashboard.css via @import" and the file contains
+#                  no @import at all. A comment describing an implementation that does
+#                  not exist, which is the same trap `strip_js_comments` was written
+#                  for one file over.
+#   built tokens   0, across the 86 client .js/.css/.html files we author (the
+#                  vendored flutter and canvaskit bundles excluded — they carry
+#                  `flutter_service_worker.js?v=${i}`, which is theirs, not ours).
+#
+# 🔴 SO THIS GUARD EXISTS FOR THE DAY THE POPULATION STOPS BEING EMPTY, and its whole
+# risk is that a zero from a broken search is indistinguishable from a zero from a
+# clean corpus. The control is therefore INSIDE the assertion path rather than in a
+# comment: the same regexes are run against planted samples on every run, so a regex
+# that stops matching fails LOUDLY instead of certifying an empty result forever.
+#
+# ⚠️ A THIRD MECHANISM EXISTS AND IS BETTER THAN ALL OF THIS — see
+# multiplexer.html, which resolves a CONTENT-HASHED bundle name from a build manifest
+# at runtime. There is no token to forget because the hash IS the content. It is not
+# guarded here and does not need to be; it is the direction notifications.html should
+# eventually move, and it is named here so the next reader finds it.
+
+# Both forms carry a `?v=` that no literal-scanning guard in this file can resolve.
+UNFOLLOWABLE_REFERENCE_FORMS = (
+    ( "css-@import",   re.compile( r"@import[^;]*\?v=" ) ),
+    ( "built-token",   re.compile( r"""\?v="\s*\+|\?v=\$\{|\+\s*"\?v=""" ) ),
+)
+
+# Third-party bundles we neither author nor version. Same rule as the JS corpus above:
+# every name is a hole, so the list stays tiny and its effect is reported.
+_UNFOLLOWABLE_SCAN_EXCLUDED = ( "/vendor/", "/canvaskit/", "/lupin-mobile-test/" )
+
+
+def _authored_client_files():
+    """
+    The client files THIS repo authors: tracked .js/.css/.html under static, minus the
+    vendored bundles.
+
+    Ensures:
+        - returns POSIX repo-relative paths, sorted
+        - git-derived, so the expected side of the coverage check below never comes
+          from the same walk it is checking
+    """
+    return sorted(
+        f for f in _tracked( "src/lupin_app/static" )
+        if f.endswith( ( ".js", ".css", ".html" ) )
+        and not any( x in f for x in _UNFOLLOWABLE_SCAN_EXCLUDED )
+    )
+
+
+def test_the_unfollowable_reference_regexes_can_find_a_positive():
+    """
+    THE CONTROL THAT MAKES THE ZERO BELOW MEAN SOMETHING.
+
+    Ensures:
+        - each regex matches a planted sample of the form it is meant to catch
+        - each regex does NOT match ordinary versioned markup, so it is not matching
+          everything and calling that success
+
+    An absence claim is the one finding that looks the same whether the work was done
+    or not. Running the same regexes against known positives on every run is the
+    difference between "nothing is there" and "nothing was looked at".
+    """
+    positives = {
+        "css-@import" : '@import url( "/static/css/other.css?v=20260101a" );',
+        "built-token" : 'const u = "/static/js/a.js?v=" + VER; const t = `/x.js?v=${VER}`;',
+    }
+    negative = '<link href="/static/css/task-list.css?v=20260902e">'
+
+    for name, pattern in UNFOLLOWABLE_REFERENCE_FORMS:
+        assert pattern.search( positives[ name ] ), \
+            f"{name} regex no longer matches its own planted positive — the zero below would be meaningless"
+        assert not pattern.search( negative ), \
+            f"{name} regex matches an ordinary literal ?v= link; it would report every page as unfollowable"
+
+
+def test_no_authored_client_file_versions_an_asset_in_an_unfollowable_way():
+    """
+    No client file we author may reference a versioned asset in a form the guards
+    above cannot follow.
+
+    Requires:
+        - the repo is a git checkout
+
+    Ensures:
+        - fails when a CSS `@import` or a runtime-built `?v=` token appears in our own
+          client code, naming the file and the form
+        - prints the corpus size, so a green run reports its own scale
+
+    Neither form is banned in principle — a CSS `@import` is legitimate markup. What
+    is banned is introducing one WITHOUT extending the guards, because a versioned
+    reference that no guard can follow is exactly how `ws-channel.js` sat six weeks
+    stale with a clean suite.
+    """
+    corpus = _authored_client_files()
+    assert corpus, "the authored-client corpus is EMPTY — this guard would pass forever watching nothing"
+
+    hits = []
+    for rel in corpus:
+        try:
+            text = _read( os.path.join( cu.get_project_root(), rel ) )
+        except OSError:
+            continue
+        for name, pattern in UNFOLLOWABLE_REFERENCE_FORMS:
+            for match in pattern.finditer( text ):
+                hits.append( ( rel, name, match.group( 0 )[ :60 ] ) )
+
+    print( f"\n[unfollowable-reference scan] authored client files={len( corpus )}  "
+           f"excluded={list( _UNFOLLOWABLE_SCAN_EXCLUDED )}  hits={len( hits )}" )
+
+    assert not hits, (
+        "a versioned asset is referenced in a form no guard in this file can follow:\n"
+        + "\n".join( f"  {rel}  [{name}]  {snippet}" for rel, name, snippet in hits )
+        + "\nEither use a literal `?v=` attribute/import (which the guards above follow), "
+          "or extend those guards to this form. A reference nothing watches goes stale silently."
+    )
