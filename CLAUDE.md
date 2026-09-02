@@ -1216,6 +1216,44 @@ Same question either way; the whole difference is what the answerer does next.
 ⇒ So neither party should soften the question. **Ask the sharp binary — and when neither box
 fits, name the third state and show the evidence, never tick the closer box and move on.**
 
+⚠️ **AND THE THIRD STATE HAS A SIGNATURE ON GUARDS, WHICH IS WHERE IT IS HARDEST TO SEE** (maria
+🌸 and Mr. Radio 🦉, 2026-09-02, on a report of client-side guards). Asked *"are these three
+blank-reason guards MISSING or merely UNWATCHED?"* — a false pair, and the answer was the third
+state again. **A guard that is present, correct, and untestable-if-wrong reads as PRESENT to a
+code reader and as ABSENT to a mutation run**, so the two instruments disagree and neither is
+malfunctioning. That is § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE* arriving
+on guards rather than on searches.
+
+⇒ **Separate them mechanically, never by reading the guard**: delete it, and watch whether a
+NAMED test that was PASSING at baseline goes red. Nothing reddens ⇒ present-and-unwatched, which
+wants a test. Something reddens ⇒ it was watched all along. **A break list proves UNWATCHED; it
+never proves ABSENT** — and the two want opposite fixes.
+
+### 🔴 COVERAGE FOLLOWS THE BUTTONS A HUMAN HAPPENED TO PRESS, NOT THE ONES THAT CAN BREAK
+
+Observed by Rio ⚡ 2026-09-02 on the task-list pane, generalised here. Ten mutations against its
+controls, whole 484-test tier: **six scored ZERO** — `_controlScope` losing a leg, two controls
+sending the wrong verb, and three blank-reason guards deleted, every one invisible.
+
+**The two that DID redden are Won't-fix and Approve — the two Rick had actually clicked.**
+
+⇒ **The suite had grown along the path of use.** Drop, Park and Demote were unguarded for no
+reason more principled than that nobody had needed them yet, and a coverage percentage cannot
+show you that, because **every one of those controls is fully covered**: the code runs, the lines
+count, and no test could tell you if it ran wrong. This is § *COVERAGE MEASURES WHETHER A LINE
+RAN, NEVER WHETHER THE TEST COULD HAVE NOTICED IT RUNNING WRONG*, with the selection bias named:
+**what got exercised is a history of somebody's clicking, not a survey of the surface.**
+
+⚠️ **It is the same defect as a guard pointed at the wrong corpus** — the stale `?v=` import that
+no guard saw because every guard scanned HTML and the link lived in a `.js` file (same evening,
+same crew). **There the population was chosen by file type; here it is chosen by usage.** Both
+produce a confident green over the part nobody looked at, and in both the guards were *correct*
+— they were simply aimed somewhere else.
+
+⇒ **So enumerate the surface, not the traffic.** For a family of sibling controls, verbs or
+endpoints, ask **how many exist** and **how many are watched**, and say both numbers. A guard
+that cannot state its own denominator is telling you about its corpus, not about your code.
+
 ### 🔴 THERE IS A SECOND VIRTUALENV *INSIDE* `src/`, AND IT IS 92% OF EVERY DISK SWEEP
 
 `src/cosa/.venv` is a full vendored virtualenv living inside the source tree. Measured 2026-08-30:
