@@ -1229,6 +1229,28 @@ NAMED test that was PASSING at baseline goes red. Nothing reddens ⇒ present-an
 wants a test. Something reddens ⇒ it was watched all along. **A break list proves UNWATCHED; it
 never proves ABSENT** — and the two want opposite fixes.
 
+🔴 **AND HERE IS WHY THE THIRD STATE EXISTS AT ALL — THE MECHANISM, NOT THE SYMPTOM** (Rio ⚡,
+2026-09-02, explaining his own blind guard): **a test whose assertion can be satisfied by more
+than one path cannot tell you which path ran.** That is the whole of it, and everything above is
+a consequence.
+
+**His worked case.** Demote had two guards, and its test asserted *"the server was not called"*
+with **both fields left blank**. Either guard alone satisfies that. So deleting one changed
+**nothing observable** — the assertion was true before, true after, and true for a reason the
+test never named. The guard was present and correct; the assertion simply could not see which of
+two sufficient causes produced it.
+
+⇒ **Ask of every assertion: how many different states make this true?** More than one, and the
+test measures their DISJUNCTION, never the member you meant. **Name the path in the assertion** —
+assert the field the guard populates, the branch it takes, the specific refusal it raises — not
+the shared downstream effect that several paths share.
+
+⚠️ **This is the same defect as § *A COMPARISON WHOSE TWO SIDES COME FROM ONE SOURCE*, one level
+in.** There, two sides move together so the comparison cannot fail. Here, two causes converge so
+the assertion cannot discriminate. **Both are an `assert` that is true by construction rather
+than by behaviour**, and neither shows up in a coverage number or an assertion audit.
+
+
 ### 🔴 A COMPARISON WHOSE TWO SIDES COME FROM ONE SOURCE CANNOT DISAGREE — AND IT LOOKS LIKE A TEST
 
 Measured by Pocholo 📣, 2026-09-02, on a guard he was writing to close the wrong-corpus defect.
