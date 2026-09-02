@@ -746,3 +746,47 @@ def test_the_shipped_client_actually_parses():
             f"{asset.name} does not parse — the browser would render a dead page while "
             f"every source-text assertion in this file stayed green:\n{result.stderr}"
         )
+
+
+def test_the_holding_area_cannot_truncate_silently( client_code ):
+    """
+    🔴 MEASURED AGAINST THE LIVE SERVER, not reasoned from symmetry. Called
+    :7999 today with the same endpoint and the same limit the holding query uses:
+
+        status=done  ->  HTTP 200, count 500, total 1912, has_more true
+
+    Exactly 500 of 1,912 rows, and the row-cap overflow raises neither `truncated`
+    nor a `warnings` entry that the client keys on. The holding area asks a
+    status-filtered question of that same endpoint with that same limit, so it
+    inherits the same silence the moment the triage queue passes 500 — which is
+    precisely the state a holding area is supposed to reach if nobody triages it.
+
+    The board already had this banner because silent truncation once cost 671 rows.
+    The second pane shipped without it.
+    """
+    render = function_body( client_code, "renderHoldingArea( composite ) {" )
+    assert "_renderTaskListTruncationBanner(" in render, (
+        "the holding area renders no truncation banner — it will silently show 500 "
+        "of N held rows, and a triage queue is the one list expected to grow"
+    )
+    assert render.count( "truncation +" ) == 2, (
+        "the banner must prefix BOTH the empty branch and the populated one; a "
+        "truncated fetch whose page happens to render empty is the quietest case"
+    )
+
+
+def test_each_pane_measures_itself_against_its_OWN_limit( client_code ):
+    """
+    The full-page trigger compares `count` to the limit the panel ASKED for. With
+    two panes reading two queries, a shared hardcoded limit — or a helper that only
+    ever reads the board's query — makes that trigger wrong for the second pane the
+    moment the two diverge. A guard that cannot fire is the failure this whole
+    mechanism exists to remove, so it must not be reintroduced one pane over.
+    """
+    limit_fn = function_body( client_code, "_taskListQueryLimit( queryString ) {" )
+    assert "queryString" in limit_fn, "the limit helper cannot be asked about a second query"
+    assert "LUPIN_TASK_LIST_QUERY" in limit_fn, "the board fallback was dropped"
+    render = function_body( client_code, "renderHoldingArea( composite ) {" )
+    assert "LUPIN_HOLDING_AREA_QUERY" in render, (
+        "the holding pane measures itself against the BOARD's limit, not its own"
+    )

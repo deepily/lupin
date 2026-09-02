@@ -10741,7 +10741,7 @@ class NotificationsUI {
         if ( stampUpdated ) this._stampTaskListUpdated();
     }
 
-    _renderTaskListTruncationBanner( composite ) {
+    _renderTaskListTruncationBanner( composite, queryString ) {
         /**
          * The LOUD half of the truncation fix. Returns banner HTML when the server
          * says it held rows back, or "" when it did not.
@@ -10807,7 +10807,7 @@ class NotificationsUI {
         // exactly `limit` rows legitimately, which is why this says UNKNOWN and
         // not "truncated". The limit is read off the shared query rather than
         // hardcoded, so raising it there cannot leave a stale 500 here.
-        const limit      = this._taskListQueryLimit();
+        const limit      = this._taskListQueryLimit( queryString );
         const pageIsFull = Number.isFinite( limit ) && Number.isFinite( shown ) && shown === limit;
         const totalUnknown = !Number.isFinite( total );
 
@@ -10836,10 +10836,16 @@ class NotificationsUI {
         return `<p class="task-list-message task-list-truncated">✂️ Board truncated: ${detail}.</p>` + warningLine;
     }
 
-    _taskListQueryLimit() {
+    _taskListQueryLimit( queryString ) {
         /**
-         * The `limit` this panel actually asked for, read off the shared query
-         * constant at call time.
+         * The `limit` a panel actually asked for, read off its query at call time.
+         *
+         * ⚠️ TAKES THE QUERY NOW, because a SECOND panel reads a SECOND query. The
+         * holding area asks a different question with its own `limit`, and having it
+         * silently measure itself against the BOARD's limit would break the full-page
+         * trigger exactly when the two diverge — a guard that cannot fire, which is
+         * the failure this whole mechanism exists to prevent. Omitted, it still falls
+         * back to the board query, so the original call site is unchanged.
          *
          * Parsed rather than hardcoded on purpose: a hardcoded 500 here would
          * silently stop matching the day someone edits the query, and the
@@ -10850,7 +10856,9 @@ class NotificationsUI {
          *     - Returns the numeric limit, or NaN when absent/unparseable
          *     - Pure; never throws on a missing global
          */
-        const query = ( typeof window !== "undefined" && window.LUPIN_TASK_LIST_QUERY ) || "";
+        const query = queryString
+            || ( typeof window !== "undefined" && window.LUPIN_TASK_LIST_QUERY )
+            || "";
         const match = /[?&]limit=(\d+)/.exec( query );
         return match ? Number( match[ 1 ] ) : NaN;
     }
@@ -11230,12 +11238,24 @@ class NotificationsUI {
         const total  = groups.reduce( ( n, g ) => n + g.tasks.length, 0 );
         if ( countEl ) countEl.textContent = String( total );
 
+        // 🔴 THE SAME CAP, AND IT IS NOT SYMMETRY — IT IS MEASURED. Called live
+        // against :7999 today, `status=done` returned EXACTLY 500 of 1,912 matching
+        // rows, silently. The holding area asks a status-filtered question of the
+        // same endpoint with the same limit, so it inherits the same silence the
+        // moment the triage queue passes 500. The banner's own comment says it
+        // best: the defect was never the number, it was the silence, and headroom
+        // expires without telling anyone.
+        const truncation = this._renderTaskListTruncationBanner(
+            composite,
+            ( typeof window !== "undefined" && window.LUPIN_HOLDING_AREA_QUERY ) || ""
+        );
+
         if ( total === 0 ) {
-            container.innerHTML = `<div class="holding-area-empty">Nothing waiting on triage.</div>`;
+            container.innerHTML = truncation + `<div class="holding-area-empty">Nothing waiting on triage.</div>`;
             return;
         }
 
-        container.innerHTML = groups.map( g => this._renderHoldingAreaGroup( g.filer, g.tasks ) ).join( "" );
+        container.innerHTML = truncation + groups.map( g => this._renderHoldingAreaGroup( g.filer, g.tasks ) ).join( "" );
     }
 
     _renderHoldingAreaGroup( filer, tasks ) {
