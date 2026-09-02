@@ -2034,7 +2034,7 @@ exactly what it says.
 | Door | Slot | Pointer | Record |
 |---|---|---|---|
 | `dismiss_sessions` — a manager reaps a seat it **SPAWNED** | `io` | `io/mementos/<persona>.md` | `io/mementos/<persona>-<sid8>.md` |
-| `self_respin` — a manager clears its **OWN** pane | `root` | `.claude-memento.md` (**persona-less**) | `.claude-memento-<persona>-<sid8>.md` |
+| `self_respin` — a manager clears its **OWN** pane | `root` | `.claude-memento-<persona>.md` (**per-persona since 2026-09-02**) | `.claude-memento-<persona>-<sid8>.md` |
 
 **Write with the slot named** — the writer lands record, mirror and pointer in one operation, and
 picking the slot is the whole decision:
@@ -2050,11 +2050,37 @@ a coincidence"*; `reap_memento`'s module docstring is the authority on which doo
 The check is wired, not decorative: `src/lupin_mcp/self_respin_core.py:572` defaults the
 `verify_slot_fn` seam to `_default_verify_slot` and line 597 calls it on the live path.
 
-⚠️ **THE ROOT POINTER IS PERSONA-LESS AND EVERY PERSONA IN THE REPO SHARES IT.** `.claude-memento.md`
-is one file; measured 2026-08-30, Pocholo wrote `--slot root` at 14:41 and took the pointer, Mr.
-Radio wrote at 15:20 and took it back. So your record can sit correctly at its own derived path
-while the pointer a naive reader follows names **somebody else**. That is why the verifier's second
-leg re-reads the pointer's own header `session_id` instead of trusting placement.
+🔴 **THE ROOT POINTER WAS PERSONA-LESS UNTIL 2026-09-02 AND IS NOW PER-PERSONA. THE MEASUREMENT
+BELOW STANDS; THE LAYOUT IT DESCRIBES DOES NOT.** Measured 2026-08-30, when `.claude-memento.md` was
+one file shared by every persona: Pocholo wrote `--slot root` at 14:41 and took the pointer, Mr.
+Radio wrote at 15:20 and took it back. Step 3 (`planning-is-prompting@00fac2b`, Rick's
+authorisation) moved the writer to `.claude-memento-<persona-slug>.md`, so **cross-persona theft of
+the pointer is gone by construction** and the shared file is a frozen leftover nothing refreshes.
+
+⚠️ **THE VERIFIER'S SECOND LEG SURVIVES THE CHANGE, FOR A DIFFERENT REASON THAN IT WAS BUILT FOR —
+AND THAT DISTINCTION IS THE POINT.** It re-reads the pointer's own header `session_id` rather than
+trusting placement. Its original justification was the cross-persona handoff above, which is now
+dead. What keeps it load-bearing is that **a persona outlives its sessions**: `.claude-memento-mr-radio.md`
+written by one session is followed by the NEXT session of the same persona, so a stale pointer still
+names a `session_id` that is not the reader's. ⇒ **A correct conclusion resting on a retired premise
+is not the same as a correct conclusion.** Say which one is holding it up, or the next person to
+retire the premise deletes the leg with it.
+
+🔴 **AND THE PROSE THAT ARGUES FROM THE OLD LAYOUT WAS NOT MOVED WITH THE CODE — FOUR PASSAGES, TWO
+OF THEM IN THE FILE THAT WAS FIXED.** Standing at `73caf656`: `memento_slot.py:33` justifies leg 2
+by the shared pointer, and `:47`'s LAYOUT table still reads `slot=root POINTER .claude-memento.md`
+— **contradicting line 175 of its own file**, which now returns the per-persona name.
+`reap_memento.py:49` and `:134` argue "never the root pointer" from persona-lessness, and that
+module's docstring is what the paragraph above cites as the authority on which door owns which
+slot. **A stale authority is worse than a stale note, because it is the thing other files point
+at.**
+
+⇒ **This is the same defect as the one that produced the fix, one level down.** The re-spin outage
+came from a code READER of a moved name that nobody grepped for; these are PROSE readers of the same
+name, in the same repo, including the file under the author's own cursor. **"Find every reader
+before you move the writer" has to count the sentences that explain the code, not only the lines
+that execute it** — those sentences are what the next person reasons from, and unlike code they fail
+silently forever.
 
 **A refusal here is legible — read it before theorising.** Given the wrong slot it names both
 acceptable targets and the exact remedy command, and it recognises the one plausible wrong
