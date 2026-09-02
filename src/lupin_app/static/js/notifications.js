@@ -418,6 +418,8 @@ class NotificationsUI {
         this.EPIC_BOARD_STATE_KEY       = 'lupin.epicBoard.groupState';     // localStorage key: JSON map of group key -> isExpanded CHOICES
         this._epicBoardAccordionWired   = false;                            // event-delegation guard (wire the container listener once)
         this._holdingAreaControlsWired  = false;                            // event-delegation guard (this pane had NO listener at all)
+        this._taskListPressInFlight     = false;                            // a repaint mid-press replaces the pressed node and eats the click
+        this._taskListPendingComposite  = null;                             // the paint held for the length of that press
         this._epicStories               = {};                               // GET /api/epic-stories body, memoized for the page's life
         this._epicStoriesFetched        = false;                            // one-shot guard: hand-edited file, never polled
         // Task-list row redesign (design 2026.06.29): the client title-truncation
@@ -10806,14 +10808,23 @@ class NotificationsUI {
         this._taskListLastGoodTasks = openTasks;
         if ( countEl ) countEl.textContent = this._taskListCountText( openTasks );
 
+        if ( this._taskListPressInFlight ) {
+            // Held, not dropped: _releaseTaskListPress replays this composite the instant
+            // the operator lets go, so the pane is never more than one press behind.
+            this._taskListPendingComposite = { composite, stampUpdated };
+            return;
+        }
+
         const truncation = this._renderTaskListTruncationBanner( composite );
 
+        const operatorState = this._captureOperatorState( container );
         if ( openTasks.length === 0 ) {
             container.innerHTML = truncation + `<p class="task-list-message task-list-empty">✅ No open tasks.</p>`;
         } else {
             const model = this.groupTasksByOwner( openTasks );
             container.innerHTML = truncation + this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
         }
+        this._restoreOperatorState( container, operatorState );
 
         if ( stampUpdated ) this._stampTaskListUpdated();
     }
@@ -11279,6 +11290,162 @@ class NotificationsUI {
         const root = scope || document;
         const el = root.querySelector( `.${className}[data-task-id="${CSS.escape( taskId )}"]` );
         return el && typeof el.value === "string" ? el.value.trim() : "";
+    }
+
+    _releaseTaskListPress() {
+        /**
+         * The press is over — take any repaint that was held for it.
+         *
+         * Ensures:
+         *     - a held composite is rendered exactly once, then forgotten
+         *     - a release with nothing held is a no-op
+         */
+        this._taskListPressInFlight = false;
+        const held = this._taskListPendingComposite;
+        if ( !held ) return;
+        this._taskListPendingComposite = null;
+        this.renderTaskList( held.composite, held.stampUpdated );
+    }
+
+    _captureOperatorState( container ) {
+        /**
+         * Everything the operator has done in this pane and NOT yet submitted, read off
+         * the markup that is about to be thrown away.
+         *
+         * 🔴 THIS IS RICK'S DEAD BUTTON. Every pane here repaints by replacing
+         * `container.innerHTML` on a 60-second poll, and the operator's half-finished
+         * work lives in that markup. Type a won't-fix reason, let one poll land, then
+         * click: the box the handler reads is EMPTY, the blank-reason guard fires, and no
+         * request ever leaves the browser. The stripe explaining the refusal is wiped by
+         * the NEXT poll, so within a minute there is nothing on screen either. Type,
+         * pause, click, nothing — and no evidence afterwards.
+         *
+         * ⚠️ IT NEEDED NO PANE AND NO ROW IDENTITY, which is why it survived while a
+         * two-pane lookup collision, a pane with no listener, an item_class branch and
+         * the disclosure ellipsis were each examined and ruled out. And it went unseen
+         * because a tester types and clicks in one motion, inside a single interval,
+         * while every test called the handler by name so no poll could run between them.
+         *
+         * THREE KINDS OF STATE, all destroyed by the same assignment:
+         *   · typed input      — the reason/date boxes, keyed by task id and class
+         *   · a shown refusal  — the error stripe, which is the ONLY thing telling the
+         *                        operator why a control did nothing
+         *   · a disclosed row  — re-collapsing takes the form off screen mid-sentence
+         *
+         * ⚠️ AND FOCUS WITH ITS CARET, because restoring the text into a box the operator
+         * is no longer typing in is half a repair: the next keystroke would land nowhere.
+         *
+         * Requires:
+         *     - container is the pane element whose innerHTML is about to be replaced
+         *
+         * Ensures:
+         *     - returns a plain object safe to hand back to _restoreOperatorState
+         *     - never throws on a missing or empty container (degrade-safe)
+         */
+        const state = { inputs: [], stripes: [], disclosed: [], focusKey: null, selStart: 0, selEnd: 0 };
+        if ( !container || typeof container.querySelectorAll !== "function" ) return state;
+
+        const active = document.activeElement;
+        for ( const el of container.querySelectorAll( ".task-action-input[data-task-id]" ) ) {
+            const key = this._operatorInputKey( el );
+            if ( !key ) continue;
+            state.inputs.push( [ key, el.value ] );
+            if ( el === active ) {
+                state.focusKey = key;
+                state.selStart = el.selectionStart === null ? el.value.length : el.selectionStart;
+                state.selEnd   = el.selectionEnd   === null ? el.value.length : el.selectionEnd;
+            }
+        }
+        for ( const el of container.querySelectorAll( ".task-row-error-stripe[data-error-for]" ) ) {
+            if ( el.hidden ) continue;
+            const cell = el.querySelector( "td" );
+            state.stripes.push( [ el.dataset.errorFor, cell ? cell.textContent : "" ] );
+        }
+        for ( const el of container.querySelectorAll( ".task-controls-row[data-controls-for]" ) ) {
+            if ( !el.hidden ) state.disclosed.push( el.dataset.controlsFor );
+        }
+        return state;
+    }
+
+    _restoreOperatorState( container, state ) {
+        /**
+         * Put back what `_captureOperatorState` saved, after the repaint.
+         *
+         * ⚠️ A ROW THAT IS GONE IS LEFT GONE, DELIBERATELY. If the poll returns a board
+         * without that row — somebody else closed it — its saved text has nowhere to go
+         * and re-creating the row to hold it would be worse than losing it. Restoration
+         * is best-effort by construction; the property being kept is that a repaint does
+         * not destroy work on rows that are STILL THERE.
+         *
+         * Ensures:
+         *     - typed values, shown refusals and disclosed rows survive a repaint
+         *     - focus and its selection return to the box the operator was typing in
+         *     - a control that no longer exists is skipped, never a throw
+         */
+        if ( !container || !state || typeof container.querySelector !== "function" ) return;
+
+        for ( const [ key, value ] of state.inputs ) {
+            if ( !value ) continue;
+            const el = this._operatorInputByKey( container, key );
+            if ( el ) el.value = value;
+        }
+        for ( const [ taskId, message ] of state.stripes ) {
+            if ( !message ) continue;
+            this._renderTaskRowError( taskId, message, container );
+        }
+        for ( const taskId of state.disclosed ) {
+            const row = container.querySelector(
+                `.task-controls-row[data-controls-for="${CSS.escape( taskId )}"]` );
+            if ( !row ) continue;
+            row.hidden = false;
+            const toggle = container.querySelector(
+                `.task-disclose-button[data-task-id="${CSS.escape( taskId )}"]` );
+            if ( toggle ) {
+                toggle.setAttribute( "aria-expanded", "true" );
+                toggle.setAttribute( "title", "Hide row controls" );
+            }
+        }
+        if ( state.focusKey ) {
+            const el = this._operatorInputByKey( container, state.focusKey );
+            if ( el && typeof el.focus === "function" ) {
+                el.focus();
+                if ( typeof el.setSelectionRange === "function" ) {
+                    try { el.setSelectionRange( state.selStart, state.selEnd ); }
+                    catch ( e ) { /* input types that refuse a selection range, e.g. date */ }
+                }
+            }
+        }
+    }
+
+    _operatorInputKey( el ) {
+        /**
+         * The identity of one inline input across a repaint: its row plus WHICH box.
+         *
+         * A row carries several (a reason and a date on park and demote), so the task id
+         * alone would restore a chase date into a reason field.
+         *
+         * Ensures:
+         *     - returns "<taskId>\u0000<className>", or null when either half is missing
+         */
+        const taskId = el && el.dataset ? el.dataset.taskId : "";
+        if ( !taskId || !el.className ) return null;
+        const which = String( el.className ).split( /\s+/ ).find( c => c.startsWith( "task-" ) && c !== "task-action-input" );
+        return which ? `${taskId}\u0000${which}` : null;
+    }
+
+    _operatorInputByKey( container, key ) {
+        /**
+         * Find the input a saved key names, inside the freshly painted markup.
+         *
+         * Ensures:
+         *     - returns the element, or null when that row/control is no longer rendered
+         */
+        const sep = key.indexOf( "\u0000" );
+        if ( sep < 0 ) return null;
+        const taskId = key.slice( 0, sep );
+        const which  = key.slice( sep + 1 );
+        return container.querySelector(
+            `.${which}[data-task-id="${CSS.escape( taskId )}"]` );
     }
 
     _controlScope( button ) {
@@ -11880,6 +12047,16 @@ class NotificationsUI {
         if ( !container ) return;
 
         container.addEventListener( "click", ( e ) => this._handleTaskListClick( e.target ) );
+        // A repaint landing BETWEEN a press and its release replaces the pressed node, and
+        // the click then reaches no handler at all — no request, no refusal, nothing. The
+        // window is only as long as a press (~100ms against a 60s poll, roughly one click
+        // in six hundred), which is too rare to explain any one report and not too rare to
+        // happen. Preserving state cannot help here: the node itself is gone. So hold the
+        // paint for the length of the press instead, and take it the moment it ends.
+        container.addEventListener( "mousedown", () => { this._taskListPressInFlight = true; } );
+        for ( const release of [ "mouseup", "mouseleave", "blur" ] ) {
+            container.addEventListener( release, () => this._releaseTaskListPress() );
+        }
         container.addEventListener( "keydown", ( e ) => {
             // Enter / Space activate the focused header OR the focused detail 📄
             // (a11y). " " is the modern key value; "Spacebar" the legacy spelling.
