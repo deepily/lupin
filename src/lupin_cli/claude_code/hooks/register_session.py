@@ -1344,10 +1344,44 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
          actually carries across that boundary, so it is what we match on.
          Newest-mtime breaks the tie when a persona has several.
 
-    Every candidate is confirmed by its `<!-- memento-record: … -->` header
-    before it is accepted. A filename that merely matches is a guess, and a
-    memento is the one artifact a rehydrating seat cannot afford to be wrong
-    about — handing it someone else's state is worse than handing it none.
+    WHAT IS AND IS NOT CONFIRMED, stated plainly because an earlier version of
+    this docstring claimed more than the code does and cost a reviewer an
+    evening. Only STEP 1 requires the `<!-- memento-record: … -->` header.
+    Steps 1.5 and 2 accept a HEADER-LESS file, and that is correct rather than
+    an oversight: real records frequently carry a human heading as their first
+    line instead of a machine header, and the canonical live slot
+    `io/mementos/<slug>.md` is a bare name that often has none at all. Demanding
+    a header at those steps would reject the very file the writers target.
+
+    What IS enforced at every step is PERSONA. `_persona_of` must agree before a
+    candidate is returned, because handing a seat another persona's state stays
+    worse than handing it none. Identity is the invariant here; the header is
+    corroboration where it exists.
+
+    A SLOT POINTER CAN BE RETURNED, AND THAT IS THE INTENDED ANSWER, NOT A BUG.
+    `_names_this_seat` admits `stem == slug`, which is the pointer's shape in
+    both families — `.claude-memento-<persona>.md` at the repo root and
+    `<persona>.md` in an io slot. It has to: step 1.5 depends on that exact
+    acceptance to prefer the live io slot over a historical sibling (row
+    f99bed95). Measured 2026-09-02 by removing `stem == slug` in-process:
+    resolution went `rio.md` -> `rio-ea46bc1a.md`, i.e. straight back to the
+    2.8-day-stale sibling that row exists to prevent. Refusing pointers by shape
+    is WIDER than it looks, not narrower.
+
+    And a returned pointer is not an empty answer. `memento_io.py` writes a
+    pointer as its header PLUS THE WHOLE RECORD BODY, so a seat that resolves one
+    receives its held state. Measured on the live tree the same day:
+    `.claude-memento-mr-radio.md` is 103 lines whose body is byte-identical to
+    the record it names.
+
+    THE ONE REAL COST, so the next reader does not rediscover it as a defect —
+    which is how this paragraph came to be written. A pointer is regenerated
+    when the record is written, so anything APPENDED to the record afterwards is
+    absent from it. On that same live pair the difference was the two-line
+    SELF-RESPIN-NONCE. So pointer fallback is STALE BY AT MOST ONE AMENDMENT, not
+    stateless. It is reached only when no record is readable at all, and in that
+    situation a full mirror missing its last amendment is the best available
+    answer; refusing it would hand the seat nothing.
 
     Requires:
         - stable_session_id is a string (full uuid) or None
@@ -1355,7 +1389,9 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
         - repo_root is a directory path
 
     Ensures:
-        - Returns a confirmed memento path, or None when nothing resolves
+        - Returns a persona-confirmed memento path, or None when nothing
+          resolves. "Confirmed" means the PERSONA agrees; only step 1 also
+          requires the record header (see above)
         - Never returns a record belonging to a different persona
         - Prefers this repo's `io/mementos/<slug>.md` over every sibling once an
           exact session-id match has failed; never prefers the MIRROR's copy of
