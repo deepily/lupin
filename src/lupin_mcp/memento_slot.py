@@ -29,14 +29,28 @@ CHECKED, never the criterion. Both legs below can fail; the old check could not.
   fail a reap can no longer pass a self-respin. It is deliberately NOT a
   reimplementation: a second copy of a predicate is a second thing to drift.
 
-WHY LEG 2 IS NOT REDUNDANT WITH LEG 1, and this is the case that motivated it. The
-root slot's pointer is `.claude-memento.md` — PERSONA-LESS, one file shared by every
-persona in the repo. Measured 2026-08-30: Pocholo wrote `--slot root` at 14:41 and
-his record took the pointer; Mr. Radio wrote at 15:20 and took it back. So a seat's
-record can sit correctly at its own derived path (leg 1 passes) while the pointer a
-naive reader follows names SOMEBODY ELSE. Leg 2 catches exactly that, because the
+WHY LEG 2 IS NOT REDUNDANT WITH LEG 1 — and THE REASON HAS CHANGED, so read this one
+rather than the story you may remember. The case that originally motivated leg 2 was
+cross-persona theft: the root pointer used to be `.claude-memento.md`, PERSONA-LESS,
+one file shared by every seat in the repo. Measured 2026-08-30: Pocholo wrote
+`--slot root` at 14:41 and his record took the pointer; Mr. Radio wrote at 15:20 and
+took it back. That failure is now DEAD BY CONSTRUCTION — `slot_pointer_path` is
+persona-scoped (see its own Ensures, and the LAYOUT table below), so two personas can
+no longer contend for one pointer.
+
+LEG 2 STILL EARNS ITS PLACE, FOR A DIFFERENT REASON: A PERSONA OUTLIVES ITS SESSIONS.
+`.claude-memento-maria.md` is written by one session of María's and then followed by
+the NEXT session of María's, so a stale pointer resolves to a record whose header
+`session_id` is not the reader's. A seat's record can therefore sit correctly at its
+own derived path (leg 1 passes) while the pointer a naive reader follows names an
+EARLIER SESSION OF THE SAME PERSONA. Leg 2 catches exactly that, because the
 pointer's resolved record carries a header `session_id` and it will not be this
-seat's.
+seat's — the same catch as before, against a collision that is now temporal rather
+than cross-persona.
+
+⚠️ FIX THE PREMISE, KEEP THE LEG. A correct conclusion resting on a retired premise is
+how somebody deletes this check next time, having correctly observed that the reason
+its docstring gives no longer happens.
 
 LAYOUT — mirrors `planning-is-prompting → workflow/scripts/memento_io.py`, which is
 the WRITER and the single authority on where a memento goes. This module derives the
@@ -44,8 +58,12 @@ same paths so it can look where the writer puts things; it never writes.
 
     slot=io    POINTER  io/mementos/<persona>.md
                RECORD   io/mementos/<persona>-<sid8>.md
-    slot=root  POINTER  .claude-memento.md
+    slot=root  POINTER  .claude-memento-<persona>.md
                RECORD   .claude-memento-<persona>-<sid8>.md
+
+BOTH POINTERS ARE PERSONA-SCOPED. The legacy shared root name `.claude-memento.md` is
+RETIRED — the writer no longer maintains it, so it can only ever be stale, and there is
+deliberately NO fallback onto it (`slot_pointer_path` raises rather than guess).
 
 WHICH SLOT BELONGS TO WHICH DOOR is settled doctrine, not a choice made here:
 `reap_memento`'s module docstring records it — a reap reads `io` (the manager reaps
