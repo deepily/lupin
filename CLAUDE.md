@@ -1251,6 +1251,32 @@ the assertion cannot discriminate. **Both are an `assert` that is true by constr
 than by behaviour**, and neither shows up in a coverage number or an assertion audit.
 
 
+### 🔴 A WRONG COUNT PUBLISHES A WRONG NUMBER; A WRONG MECHANISM SENDS THE NEXT READER AT INNOCENT CODE
+
+Derived 2026-09-02 when one TODO entry of mine was corrected on **both** at once, so the two costs
+could be compared directly rather than argued about.
+
+| what was wrong | what it costs a reader |
+|---|---|
+| the **count** — 4 disputes where 3 were genuine, one a RETRACTED claim | they quote a number off by one |
+| the **mechanism** — *"the wake re-derives nothing at fire time"*, when it has re-derived since `8bf71a64` | they hunt a defect that is not there, **and find the working code instead** |
+
+⇒ **The second is worse and it is not close.** A wrong number is corrected by a better number. A
+wrong mechanism spends somebody's evening, and it spends it *plausibly* — the reader searches
+exactly where you pointed, finds working code, and must then decide whether the code is fine or
+their reading is. **That cost appears in no count, and it lands on whoever trusted you.**
+
+⇒ **So rank your own verification that way.** When a claim carries both a figure and an
+explanation, **the explanation earns the deeper check** — the figure gets re-derived by the next
+person who needs it, and a mechanism that sounds right is not something anyone thinks to
+re-measure.
+
+⚠️ **AND WHEN YOU CORRECT ONE, SAY WHICH KIND YOU CORRECTED.** *"4 → 3"* reads as a population
+shrinking. In the case above it was not: a retracted member came out **and an unrecorded
+occurrence went in**, from the same seat in the same hour — the floor got *firmer*, not smaller.
+**A bare corrected number teaches the opposite of what was learned, so state the direction, not
+just the delta.**
+
 ### 🔴 A COMPARISON WHOSE TWO SIDES COME FROM ONE SOURCE CANNOT DISAGREE — AND IT LOOKS LIKE A TEST
 
 Measured by Pocholo 📣, 2026-09-02, on a guard he was writing to close the wrong-corpus defect.
