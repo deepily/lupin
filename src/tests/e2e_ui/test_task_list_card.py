@@ -1065,9 +1065,13 @@ class TestTaskListHeaderFlowRatio:
     THE ONES TO EDIT WHEN THE COPY CHANGES. Deliberate: somebody must own the
     wording, and a mocked test with a fixed payload is the cheap place to own it.
 
-    ⇒ THAT SHORTENING HAS LANDED (Rick, 2026-09-01, commit 3919a1ea). The bar reads
-    "Gate: 77%" and the long "Closed vs New Ratio (24hrs)" form moved to the hover
-    title. The assertions below were updated with it. Change the strings here to
+    ⇒ AND IT WAS PARTLY REVERSED THE SAME DAY (Rick, 2026-09-01, second ruling). The
+    shortening at 3919a1ea moved the window and the counts to the hover to make room
+    for the sliders; the sliders then moved down a row, and Rick asked for the counts
+    back on the face of it: "I want you to reinstate that explicit text displayed
+    without having to hover over it." The bar now reads
+    "1d  \u00b7  77%  \u00b7  10 created / 13 closed" \u2014 DAYS, not hours, per the
+    same ruling. The assertions below were updated with it. Change the strings here to
     whatever you ship; do not weaken them to a substring match, or nothing anywhere
     pins the wording and a blank label passes every test we have.
 
@@ -1089,30 +1093,37 @@ class TestTaskListHeaderFlowRatio:
 
         Ensures:
             - #task-list-count carries the LABELLED live count, not a bare integer
-            - #task-list-flow-ratio carries the ratio as a PERCENT — "Gate: 77%",
-              not "0.77" — because the bar and the threshold slider must read in
-              one unit rather than asking the operator to convert in their head
-            - the window is still checkable, but from the HOVER title now: the same
-              board reads 77% over 24h and 110% over 168h, so a ratio without its
-              window cannot be checked, and shortening the bar moved it rather
-              than dropping it
+            - #task-list-flow-ratio carries the ratio as a PERCENT — 77%, not
+              "0.77" — because the bar and the threshold slider must read in one
+              unit rather than asking the operator to convert in their head
+            - the window and the counts are on the FACE of the bar, not the hover.
+              The same board reads 77% over 1d and 110% over 7d, so a ratio without
+              its window cannot be checked — and Rick's ruling is that checking it
+              must not require a hover
+            - the window reads in DAYS. Hours remain the wire format; only the
+              display converts
         """
         _route_tasks( logged_in_page, { "mode": "ok" } )
         _goto_notifications( logged_in_page )
 
         logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
         logged_in_page.wait_for_function(
-            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( 'Gate' )"
+            # The clause no longer carries the word "Gate"; the separator is the stable
+            # thing to wait on across the allow / infinity / idle payloads alike.
+            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( '\u00b7' )"
         )
 
         assert logged_in_page.locator( "#task-list-count" ).text_content() == f"Live: {OPEN_COUNT}"
 
         ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
-        # Updated 2026-09-01 for Rick's shortened header: the visible bar reads
-        # "Gate: 77%", and the long "Closed vs New Ratio (24hrs)" form moved to the
-        # hover text. PERCENT, not hundredths — 0.77 renders as 77%.
-        assert "Gate: 77%" in ratio_text, ratio_text
+        # Updated 2026-09-01 for Rick's SECOND ruling the same day: the counts came
+        # back onto the face of the bar and the window reads in days. window_hours 24
+        # in the seeded payload renders as "1d". PERCENT, not hundredths.
+        assert "1d" in ratio_text, ratio_text
+        assert "77%" in ratio_text, ratio_text
+        assert "10 created / 13 closed" in ratio_text, ratio_text
         assert "0.77" not in ratio_text, "hundredths leaked into the percent header"
+        assert "hrs" not in ratio_text, "the bar reads days; hours are the wire format only"
 
     def test_a_window_with_no_closures_shows_infinity_not_a_zero( self, logged_in_page ):
         """
@@ -1141,7 +1152,9 @@ class TestTaskListHeaderFlowRatio:
         _goto_notifications( logged_in_page )
 
         logged_in_page.wait_for_function(
-            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( 'Gate' )"
+            # The clause no longer carries the word "Gate"; the separator is the stable
+            # thing to wait on across the allow / infinity / idle payloads alike.
+            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( '\u00b7' )"
         )
         ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
         assert "\u221e" in ratio_text, ratio_text
@@ -1165,7 +1178,9 @@ class TestTaskListHeaderFlowRatio:
         _goto_notifications( logged_in_page )
 
         logged_in_page.wait_for_function(
-            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( 'Gate' )"
+            # The clause no longer carries the word "Gate"; the separator is the stable
+            # thing to wait on across the allow / infinity / idle payloads alike.
+            "() => document.getElementById( 'task-list-flow-ratio' ).textContent.includes( '\u00b7' )"
         )
         ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
         assert "\u2014" in ratio_text, ratio_text
@@ -1314,7 +1329,7 @@ class TestTaskListHeaderFlowRatioLive:
 
         logged_in_page.wait_for_function(
             "() => { const e = document.getElementById( 'task-list-flow-ratio' );"
-            "        return e && e.textContent.includes( 'Gate' ); }"
+            "        return e && e.textContent.includes( '\u00b7' ); }"
         )
         ratio_text = logged_in_page.locator( "#task-list-flow-ratio" ).text_content()
 

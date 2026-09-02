@@ -9672,7 +9672,7 @@ class NotificationsUI {
         return `Live: ${l} · Parked: ${p} · Total: ${l + p}`;
     }
 
-    _formatFlowRatio( payload ) {
+    _formatFlowRatio( payload, provisionalDays ) {
         /**
          * Header text for the closed-vs-new ratio, from GET /api/tasks/flow-ratio.
          *
@@ -9693,14 +9693,31 @@ class NotificationsUI {
          * Ensures:
          *     - null/unreachable/bad shape -> "" (the header omits the clause rather
          *       than showing a number nobody measured)
-         *     - ratio is a number -> "Closed vs New Ratio (Nhrs): R" to 2dp
-         *     - ratio is null     -> "Closed vs New Ratio (Nhrs): \u2014"
+         *     - a usable payload -> "7d \u00b7 25% \u00b7 5 created / 19 closed"
+         *     - counts absent     -> the window and percent alone
          *     - Pure: no DOM, no fetch, no side effects; never throws
+         *
+         * ⚠️ THE COUNTS USED TO LIVE ONLY IN THE HOVER. They were moved there to make
+         * room when the sliders shared this row; the sliders now sit a row below, so
+         * Rick asked for them back on the face of it (2026-09-01): "I want you to
+         * reinstate that explicit text displayed without having to hover over it."
+         *
+         * @param {number} [provisionalDays] - a window slider being DRAGGED but not
+         *        committed. The counts describe the COMMITTED window, so quoting them
+         *        beside a different interval would be a lie with a number's authority.
+         *        They are withheld while provisional rather than shown stale.
          */
         if ( !payload || typeof payload !== "object" ) return "";
         const hours = Number.isFinite( payload.window_hours ) ? payload.window_hours : null;
-        if ( hours === null ) return "";
-        return `Gate: ${this._flowRatioPercentText( payload )}`;
+        const provisional = Number.isFinite( provisionalDays );
+        const days        = provisional ? provisionalDays : this._flowRatioWindowDays( hours );
+        if ( days === null ) return "";
+
+        const counts = provisional
+            ? "  \u00b7  recounting\u2026"
+            : ( ( Number.isFinite( payload.created ) && Number.isFinite( payload.closed ) )
+                ? `  \u00b7  ${payload.created} created / ${payload.closed} closed` : "" );
+        return `${days}d  \u00b7  ${this._flowRatioPercentText( payload )}${counts}`;
     }
 
     _flowRatioPercentText( payload ) {
@@ -9723,14 +9740,34 @@ class NotificationsUI {
         return Number.isFinite( payload.created ) && payload.created > 0 ? "\u221e" : "\u2014";
     }
 
+    _flowRatioWindowDays( hours ) {
+        /**
+         * The window in whole DAYS, for display only.
+         *
+         * DAYS ON SCREEN, HOURS ON THE WIRE. The store, the INI key and the API all
+         * speak hours and are unchanged by this — only the two places a human reads
+         * the number convert. Rick's words: nobody cares that a window is 82 hours.
+         *
+         * Rounded to a whole day and floored at 1, so a sub-day window still reads as
+         * a day rather than as "0d", which would look like the window was switched off.
+         *
+         * Ensures:
+         *     - a finite, positive hours -> an integer >= 1
+         *     - anything else -> null, so callers can decline to render
+         *     - Pure; never throws
+         */
+        if ( !Number.isFinite( hours ) || hours <= 0 ) return null;
+        return Math.max( 1, Math.round( hours / 24 ) );
+    }
+
     _flowRatioLongForm( payload ) {
         /** The hover text: the full description the short bar label drops. */
         if ( !payload || typeof payload !== "object" ) return "";
         const hours = Number.isFinite( payload.window_hours ) ? payload.window_hours : null;
         if ( hours === null ) return "";
-        const counts = ( Number.isFinite( payload.created ) && Number.isFinite( payload.closed ) )
-            ? `  \u00b7  ${payload.created} created / ${payload.closed} closed` : "";
-        return `Closed vs New Ratio (${hours}hrs): ${this._flowRatioPercentText( payload )}${counts}`;
+        // Delegates, so the face and the hover can never quote different numbers.
+        const clause = this._formatFlowRatio( payload );
+        return clause ? `Closed vs New Ratio \u2014 ${clause}` : "";
     }
 
     _flowRatioIsOpen( payload, threshold ) {
@@ -9799,10 +9836,32 @@ class NotificationsUI {
         // Kept so a slider drag can recolour without re-fetching. The ratio measures
         // the last 24h; dragging the threshold moves the comparison line, not it.
         this._flowRatioPayload = payload;
-        const text = this._formatFlowRatio( payload );
-        el.textContent = text ? ` \u00b7 ${text}` : "";
-        el.title       = this._flowRatioLongForm( payload );
+        this._paintFlowRatioClause();
         this._paintFlowRatioVerdict();
+    }
+
+    _paintFlowRatioClause( provisionalDays ) {
+        /**
+         * Write the clause into #task-list-flow-ratio from the LAST FETCHED payload.
+         *
+         * Split out of _renderFlowRatio so a window drag can repaint the text without
+         * a fetch — the same shape _paintFlowRatioVerdict already uses for the
+         * threshold. The two stay separate because they answer different questions: the
+         * threshold moves the VERDICT and leaves the counts alone, while the window
+         * moves the COUNTS and cannot know the new ones until the release refetches.
+         *
+         * @param {number} [provisionalDays] - a window being dragged, not committed
+         *
+         * Ensures:
+         *     - No-op when the span is absent
+         *     - Empty text on an unusable payload, never a stale or invented number
+         *     - Never throws
+         */
+        const el = document.getElementById( "task-list-flow-ratio" );
+        if ( !el ) return;
+        const text = this._formatFlowRatio( this._flowRatioPayload, provisionalDays );
+        el.textContent = text ? ` \u00b7 ${text}` : "";
+        el.title       = this._flowRatioLongForm( this._flowRatioPayload );
     }
 
     _paintFlowRatioVerdict( provisionalThreshold ) {
@@ -9912,8 +9971,12 @@ class NotificationsUI {
         this._flowRatioThreshold  = settings.allow_below;
         els.threshold.value       = Math.round( settings.allow_below * 100 );
         els.thresholdValue.textContent = `${Math.round( settings.allow_below * 100 )}%`;
-        els.window.value          = settings.window_hours;
-        els.windowValue.textContent    = `${settings.window_hours}h`;
+        // The slider POSITION is days; the setting stays hours. A saved override that
+        // is not a whole number of days paints at the nearest day, and the next save
+        // normalises it -- which is the point of moving the control to days.
+        const windowDays          = this._flowRatioWindowDays( settings.window_hours );
+        els.window.value          = windowDays;
+        els.windowValue.textContent    = `${windowDays}d`;
 
         const overridden = settings.window_source === "override" ||
                            settings.threshold_source === "override";
@@ -10065,10 +10128,16 @@ class NotificationsUI {
         } );
 
         els.window.addEventListener( "input", () => {
-            els.windowValue.textContent = `${els.window.value}h`;
+            els.windowValue.textContent = `${els.window.value}d`;
+            // Live preview on the header clause too. The interval moves immediately;
+            // the counts go to "recounting" because they belong to the window still in
+            // force, and the release is what fetches the new ones.
+            this._paintFlowRatioClause( Number( els.window.value ) );
         } );
         els.window.addEventListener( "change", () => {
-            this.saveFlowRatioSettings( { window_hours: Number( els.window.value ) } );
+            // x24 HERE and in the paint, nowhere else: the slider is the only thing
+            // that speaks days, so the API keeps taking the hours it always took.
+            this.saveFlowRatioSettings( { window_hours: Number( els.window.value ) * 24 } );
         } );
 
         els.reset.addEventListener( "click", () => this.resetFlowRatioSettings() );

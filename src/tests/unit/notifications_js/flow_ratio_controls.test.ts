@@ -77,12 +77,12 @@ function buildClusterDOM(): void {
       <span class="flow-ratio-field">
         <label for="flow-ratio-threshold">Gate opens below
           <output id="flow-ratio-threshold-value">&mdash;</output></label>
-        <input type="range" id="flow-ratio-threshold" min="10" max="200" step="10" />
+        <input type="range" id="flow-ratio-threshold" min="0" max="200" step="10" />
       </span>
       <span class="flow-ratio-field">
         <label for="flow-ratio-window">Window
           <output id="flow-ratio-window-value">&mdash;</output></label>
-        <input type="range" id="flow-ratio-window" min="1" max="336" step="1" />
+        <input type="range" id="flow-ratio-window" min="1" max="14" step="1" />
       </span>
       <button type="button" id="flow-ratio-reset">Reset</button>
       <span id="flow-ratio-controls-status" class="flow-ratio-controls-status"></span>
@@ -220,8 +220,9 @@ test( "_paintFlowRatioSettings: a good payload paints, unhides, and returns true
   // PERCENT on screen, ratio on the wire: allow_below 1.0 is a 100% gate.
   assert.equal( slider( "flow-ratio-threshold" ).value, "100" );
   assert.equal( text( "flow-ratio-threshold-value" ), "100%" );
-  assert.equal( slider( "flow-ratio-window" ).value, "24" );
-  assert.equal( text( "flow-ratio-window-value" ), "24h" );
+  // DAYS on screen, HOURS on the wire: window_hours 24 is a one-day slider.
+  assert.equal( slider( "flow-ratio-window" ).value, "1" );
+  assert.equal( text( "flow-ratio-window-value" ), "1d" );
   assert.equal( statusTxt(), "from config" );
 } );
 
@@ -409,10 +410,10 @@ test( "the sliders label on `input` and only WRITE on `change`", async () => {
 
   slider( "flow-ratio-threshold" ).value = "150";
   slider( "flow-ratio-threshold" ).dispatchEvent( new Event( "input" ) );
-  slider( "flow-ratio-window" ).value = "168";
+  slider( "flow-ratio-window" ).value = "7";
   slider( "flow-ratio-window" ).dispatchEvent( new Event( "input" ) );
   assert.equal( text( "flow-ratio-threshold-value" ), "150%" );
-  assert.equal( text( "flow-ratio-window-value" ), "168h" );
+  assert.equal( text( "flow-ratio-window-value" ), "7d" );
   assert.equal( patches, 0, "a drag must not PATCH on every pixel" );
 
   slider( "flow-ratio-threshold" ).dispatchEvent( new Event( "change" ) );
@@ -464,7 +465,7 @@ test( "EXACTLY at the threshold reads closed — the comparison is strict", () =
   // The case a reader most easily guesses wrong: 100% against a 100% threshold.
   const ui = paintedUI( 1.0 );
   ui._renderFlowRatio( { ratio: 1.0, created: 10, closed: 10, window_hours: 24 } );
-  assert.equal( clause().textContent, " · Gate: 100%" );
+  assert.equal( clause().textContent, " · 1d  ·  100%  ·  10 created / 10 closed" );
   assert.equal( clause().classList.contains( "flow-ratio-closed" ), true,
     "allow is `ratio < threshold`, so exactly-at is a refusal and must not read green" );
 } );
@@ -472,12 +473,12 @@ test( "EXACTLY at the threshold reads closed — the comparison is strict", () =
 test( "nothing closed is INFINITY and refuses; an idle window is a dash and admits", () => {
   const ui = paintedUI( 1.0 );
   ui._renderFlowRatio( { ratio: null, created: 4, closed: 0, window_hours: 24 } );
-  assert.equal( clause().textContent, " · Gate: ∞" );
+  assert.equal( clause().textContent, " · 1d  ·  ∞  ·  4 created / 0 closed" );
   assert.equal( clause().classList.contains( "flow-ratio-closed" ), true,
     "a window where nothing was finished is exactly what the gate is for" );
 
   ui._renderFlowRatio( { ratio: null, created: 0, closed: 0, window_hours: 24 } );
-  assert.equal( clause().textContent, " · Gate: —" );
+  assert.equal( clause().textContent, " · 1d  ·  —  ·  0 created / 0 closed" );
   assert.equal( clause().classList.contains( "flow-ratio-open" ), true,
     "an idle window is not a failing window" );
 } );
@@ -486,7 +487,7 @@ test( "the hover carries the long form the short label drops", () => {
   const ui = paintedUI( 1.0 );
   ui._renderFlowRatio( { ratio: 0.25, created: 5, closed: 19, window_hours: 24 } );
   assert.equal( clause().title,
-    "Closed vs New Ratio (24hrs): 25%  ·  5 created / 19 closed",
+    "Closed vs New Ratio — 1d  ·  25%  ·  5 created / 19 closed",
     "the counts move to the hover so 200%-on-two-tickets stays checkable" );
 } );
 
@@ -539,4 +540,99 @@ test( "_flowRatioIsOpen: with no threshold known yet, nothing is accused of refu
   const ui = newUI();
   assert.equal( ui._flowRatioIsOpen( { ratio: 99 }, undefined ), true,
     "before settings load there is no line to compare against; do not paint a red verdict" );
+} );
+
+// ── DAYS ON SCREEN, HOURS ON THE WIRE ────────────────────────────────────────
+//
+// Rick, 2026-09-01: "as an end user I don't care about values such as 82 hours".
+// The slider moved to days; the store, the INI key and the PATCH body did not.
+// These tests exist to keep those two facts from drifting apart, because a unit
+// slip here is silent — a slider that PATCHes 7 instead of 168 still paints a
+// plausible number and still goes green on every assertion that only reads the
+// label.
+
+test( "the window slider PATCHES HOURS while it DISPLAYS DAYS", async () => {
+  const ui = newUI();
+  let body: Record<string, unknown> | null = null;
+  ui.authedFetch = async ( url: string, opts?: unknown ) => {
+    const o = ( opts || {} ) as { method?: string; body?: string };
+    if ( o.method === "PATCH" ) body = JSON.parse( o.body as string );
+    return fakeResponse( 200, true, GOOD ) as never;
+  };
+  ui.initFlowRatioControls();
+  await settle();
+
+  slider( "flow-ratio-window" ).value = "7";
+  slider( "flow-ratio-window" ).dispatchEvent( new Event( "change" ) );
+  await settle();
+
+  // THE WHOLE POINT OF THIS TEST IS THE 168. Asserting only that a PATCH happened
+  // would pass just as happily with the raw 7 on the wire, which the server would
+  // clamp to a seven-HOUR window — a change of setting nobody asked for, invisible
+  // on screen because the slider would paint "7d" straight back.
+  assert.deepEqual( body, { window_hours: 168 },
+    "7 days must reach the API as 168 hours" );
+} );
+
+test( "a saved override that is not a whole number of days paints at the nearest day", () => {
+  const ui = newUI();
+  // 82h is Rick's own example of a number no operator wants to read.
+  ui._paintFlowRatioSettings( { ...GOOD, window_hours: 82 } );
+  assert.equal( text( "flow-ratio-window-value" ), "3d" );
+  assert.equal( slider( "flow-ratio-window" ).value, "3" );
+} );
+
+test( "a sub-day window floors at 1d rather than reading as 0d", () => {
+  const ui = newUI();
+  // 0d would look like the window had been switched off. It has not — the gate
+  // still counts over that hour.
+  ui._paintFlowRatioSettings( { ...GOOD, window_hours: 1 } );
+  assert.equal( text( "flow-ratio-window-value" ), "1d" );
+  assert.equal( slider( "flow-ratio-window" ).value, "1" );
+} );
+
+test( "_flowRatioWindowDays declines to render a window it cannot read", () => {
+  const ui = newUI();
+  for ( const bad of [ 0, -24, NaN, Infinity, null, undefined, "168" ] ) {
+    assert.equal( ui._flowRatioWindowDays( bad as never ), null,
+      `${String( bad )} is not a window` );
+  }
+  // The positive control: without it every assertion above would pass on a helper
+  // that returned null for everything.
+  assert.equal( ui._flowRatioWindowDays( 168 ), 7 );
+} );
+
+test( "the hover text names DAYS, not hours", () => {
+  const ui = newUI();
+  const long = ui._flowRatioLongForm(
+    { ratio: 0.25, created: 5, closed: 20, window_hours: 168 } );
+  assert.match( long, /7d/ );
+  assert.match( long, /5 created \/ 20 closed/,
+    "the counts on the face of it are the whole point of Rick's third tweak" );
+  assert.doesNotMatch( long, /hrs/,
+    "the long form was the last place the operator still saw raw hours" );
+} );
+
+test( "the threshold slider can reach 0, and 0 PATCHES as 0 rather than being dropped", async () => {
+  const ui = newUI();
+  let body: Record<string, unknown> | null = null;
+  ui.authedFetch = async ( url: string, opts?: unknown ) => {
+    const o = ( opts || {} ) as { method?: string; body?: string };
+    if ( o.method === "PATCH" ) body = JSON.parse( o.body as string );
+    return fakeResponse( 200, true, GOOD ) as never;
+  };
+  ui.initFlowRatioControls();
+  await settle();
+
+  const el = slider( "flow-ratio-threshold" );
+  el.value = "0";
+  // A slider whose min was still 10 would clamp this back to "10" and the test
+  // would fail here rather than on the PATCH — which is the fixture doing its job.
+  assert.equal( el.value, "0", "min must allow 0" );
+  el.dispatchEvent( new Event( "change" ) );
+  await settle();
+
+  // 0 is falsy. A guard written as `if ( value )` would silently drop it from the
+  // body and leave the gate at whatever it was, with the slider showing 0%.
+  assert.deepEqual( body, { allow_below: 0 } );
 } );

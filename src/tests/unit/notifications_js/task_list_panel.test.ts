@@ -1427,7 +1427,7 @@ test( "_formatTaskListCount: non-numeric counts degrade to 0, never NaN", () => 
 test( "_formatFlowRatio: prints the ratio as a PERCENT, short enough for the bar", () => {
   assert.equal(
     newUI()._formatFlowRatio( { created: 10, closed: 13, ratio: 0.77, window_hours: 24 } ),
-    "Gate: 77%"
+    "1d  \u00b7  77%  \u00b7  10 created / 13 closed"
   );
 } );
 
@@ -1438,9 +1438,9 @@ test( "_formatFlowRatio: the WINDOW is not cosmetic — same board, different wi
   // contradiction and are not. A fixture that hard-coded 24 could not see this.
   const ui = newUI();
   assert.equal( ui._formatFlowRatio( { ratio: 0.77, window_hours: 24 } ),
-                "Gate: 77%" );
+                "1d  \u00b7  77%" );
   assert.equal( ui._formatFlowRatio( { ratio: 1.10, window_hours: 168 } ),
-                "Gate: 110%" );
+                "7d  \u00b7  110%" );
 } );
 
 test( "_formatFlowRatio: nothing closed is INFINITY, never a number", () => {
@@ -1448,8 +1448,15 @@ test( "_formatFlowRatio: nothing closed is INFINITY, never a number", () => {
   // is the WORST case and a DENY. Rendering it as 0% would read as the best, and a
   // big number like 999% would be a lie carrying a number's authority.
   const text = newUI()._formatFlowRatio( { created: 4, closed: 0, ratio: null, window_hours: 24 } );
-  assert.equal( text, "Gate: \u221e" );
-  assert.ok( !/[0-9]/.test( text ), "an unmeasurable ratio must not render as a number" );
+  assert.equal( text, "1d  \u00b7  \u221e  \u00b7  4 created / 0 closed" );
+  // ⚠️ NARROWED, NOT WEAKENED. This read `!/[0-9]/` — no digit anywhere — which was a
+  // correct proxy while the clause was only "Gate: <ratio>". The clause now also carries
+  // the window and the counts, so digits are expected and that form would fail on text
+  // that is entirely right. The INTENT was always that the unmeasurable RATIO must not
+  // acquire a number, so the assertion now says exactly that.
+  assert.ok( !/[0-9]+%/.test( text ),
+             "an unmeasurable ratio must not render as a percentage" );
+  assert.match( text, /\u221e/, "it renders as infinity instead" );
 } );
 
 test( "_formatFlowRatio: an IDLE window is an em dash, not infinity", () => {
@@ -1457,14 +1464,14 @@ test( "_formatFlowRatio: an IDLE window is an em dash, not infinity", () => {
   // and the gate allows. Distinct from the deny case above, which it would otherwise
   // render identically to.
   assert.equal( newUI()._formatFlowRatio( { created: 0, closed: 0, ratio: null, window_hours: 24 } ),
-                "Gate: \u2014" );
+                "1d  \u00b7  \u2014  \u00b7  0 created / 0 closed" );
 } );
 
 test( "_formatFlowRatio: percents are whole numbers, and above 100% is legal", () => {
   assert.equal( newUI()._formatFlowRatio( { ratio: 1.1, window_hours: 24 } ),
-                "Gate: 110%" );
+                "1d  \u00b7  110%" );
   assert.equal( newUI()._formatFlowRatio( { ratio: 2, window_hours: 24 } ),
-                "Gate: 200%" );
+                "1d  \u00b7  200%" );
 } );
 
 test( "_formatFlowRatio: unusable payloads yield an EMPTY clause, not a zero", () => {
@@ -1479,11 +1486,11 @@ test( "_renderFlowRatio: writes the clause with its leading separator", () => {
   document.body.innerHTML = `<span id="task-list-flow-ratio"></span>`;
   newUI()._renderFlowRatio( { ratio: 0.77, window_hours: 24 } );
   assert.equal( document.getElementById( "task-list-flow-ratio" )!.textContent,
-                " \u00b7 Gate: 77%" );
+                " \u00b7 1d  \u00b7  77%" );
 } );
 
 test( "_renderFlowRatio: an unreachable endpoint CLEARS the clause, leaving no stale number", () => {
-  document.body.innerHTML = `<span id="task-list-flow-ratio"> \u00b7 Gate: 77%</span>`;
+  document.body.innerHTML = `<span id="task-list-flow-ratio"> \u00b7 1d  \u00b7  77%</span>`;
   newUI()._renderFlowRatio( null );
   assert.equal( document.getElementById( "task-list-flow-ratio" )!.textContent, "" );
 } );

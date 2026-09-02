@@ -732,8 +732,8 @@
                         </label>
                         <input type="range" id="flow-ratio-threshold"
                                data-testid="flow-ratio-threshold"
-                               min="10" max="200" step="10"
-                               title="Percentage the create gate opens below. Higher = more permissive." />
+                               min="0" max="200" step="10"
+                               title="Percentage the create gate opens below. Higher = more permissive. At 0% nothing is below the threshold, so the gate never opens and every new ticket is refused." />
                     </span>
 
                     <span class="flow-ratio-field">
@@ -742,10 +742,13 @@
                             <output id="flow-ratio-window-value"
                                     data-testid="flow-ratio-window-value">—</output>
                         </label>
+                        <!-- DAYS on screen, HOURS on the wire. The slider is in days because
+                             nobody reasons about a 82-hour window; the conversion is x24 and
+                             lives in the two JS handlers, so the API contract is unchanged. -->
                         <input type="range" id="flow-ratio-window"
                                data-testid="flow-ratio-window"
-                               min="1" max="336" step="1"
-                               title="Hours the ratio is counted over. The SAME board can pass at 24h and fail at 168h." />
+                               min="1" max="14" step="1"
+                               title="Days the ratio is counted over. The SAME board can pass at 1d and fail at 7d." />
                     </span>
 
                     <button type="button" id="flow-ratio-reset"

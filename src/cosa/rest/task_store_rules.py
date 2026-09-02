@@ -2175,6 +2175,33 @@ def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, a
         from cosa.rest import flow_ratio_settings as frs      # local: keeps the module
         allow_below = frs.get_allow_below()                   # import-time side-effect free
 
+    # ⚠️ A ZERO THRESHOLD IS A HARD STOP, AND IT MUST BE HANDLED BEFORE THE ARITHMETIC.
+    # The gate opens STRICTLY BELOW allow_below, and no ratio is below 0 — so 0 means
+    # "refuse every new ticket", which is exactly what the operator asked for when they
+    # dragged the slider to 0% (Rick's ruling 2026-09-01: 0% = gate fully ON).
+    #
+    # It sits ABOVE the `closed == 0` branch on purpose. At 0 an IDLE window must refuse
+    # too: "every new ticket" does not have an exception for a quiet day, and the idle
+    # allowance below exists to stop a quiet window reading as a failing one, which is a
+    # different question from an operator having deliberately shut the gate.
+    #
+    # 🔴 IT ALSO GUARDS A LIVE DIVIDE-BY-ZERO. `MIN_ALLOW_BELOW` is 0.0, so PATCHing
+    # allow_below=0 was already reachable before the slider could reach it, and the
+    # refusal builder below does `math.floor( created / allow_below )` — a
+    # ZeroDivisionError out of a function whose contract says it never raises.
+    # Measured 2026-09-01 at created=14, closed=3, allow_below=0.0.
+    #
+    # There is no "close N more" to offer: no number of closures opens a gate at 0, so
+    # the message names the setting instead of quoting a target that cannot be reached.
+    if allow_below <= 0:
+        return (
+            f"New tickets are gated: the create gate is set to open below 0%, so it is "
+            f"shut for everything. In the last window the fleet created {created} and "
+            f"closed {closed}. Closing more rows will not open it — raise the threshold "
+            f"on the board's gate slider. "
+            f"(A P0 is exempt if this genuinely cannot wait.)"
+        )
+
     if closed == 0:
         if created == 0: return None
         return (
