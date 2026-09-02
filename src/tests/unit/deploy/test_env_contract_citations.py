@@ -162,12 +162,27 @@ def test_every_citation_anchor_is_still_present_in_the_file( var, path, anchor )
     be a line of the file it names.
 
     WHY AN ANCHOR AND NOT A LINE NUMBER (measured 2026-09-01, row 21a084d1's
-    successor). The notes used to cite `<file>:<line>`. Of the twelve commits that
-    have ever touched the two cited compose files, TEN displaced at least one
-    citation — measured as net line delta above the cited line, so a hunk entirely
-    below it counts as harmless. Only 765e7145 and 949cf6e8 were harmless; one
-    commit moved ten citations by +254. An anchor cannot drift: it either matches
-    or it is gone, and "gone" is exactly the thing worth being told.
+    successor). The notes used to cite `<file>:<line>`. Almost every change to those
+    files moved one — measured as net line delta ABOVE the cited line, so a hunk
+    entirely below counts as harmless. One commit moved ten citations by +254.
+
+    🔴 SAY WHICH POPULATION, BECAUSE THERE ARE TWO AND THEY GIVE DIFFERENT NUMBERS:
+
+        11 of 12 FILE-TOUCHES     ( file, commit ) pairs — two shas touch both files
+         9 of 10 DISTINCT COMMITS by sha
+
+    ⚠️ This paragraph first read "of the twelve commits ... TEN displaced", which was
+    wrong twice over and is left named rather than quietly fixed. Twelve is the count
+    of file-touches, not of commits. And the ten was computed over the twelve
+    line-numbers a regex found, when the contract carried SIXTEEN — the four bare
+    continuation citations (`:192`, `:458`, `:302`, `:502`) were outside the
+    measurement, so the figure was a LOWER BOUND presented as a result. Re-measured
+    over all sixteen it is eleven, which makes the case for anchors stronger, not
+    weaker — the correction was worth making anyway, because a number nobody can
+    reproduce is not evidence.
+
+    An anchor cannot drift: it either matches or it is gone, and "gone" is exactly the
+    thing worth being told.
 
     ⚠️ TWO ANCHORS MATCH TWICE, BY DESIGN, AND THAT IS NOT AN AMBIGUITY TO FIX.
     `JWT_SECRET_KEY` and `GH_TOKEN` are set identically in two services of
