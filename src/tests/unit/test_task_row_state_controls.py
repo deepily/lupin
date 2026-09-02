@@ -252,7 +252,7 @@ def test_the_cache_bust_tokens_were_bumped_with_the_assets():
     # What it CAN do is refuse the stale value, so the baseline is bumped alongside
     # the assets every time and a forgotten bump is a red test rather than a browser
     # quietly serving yesterday's file.
-    assert js.group( 1 )  != "20260902e", "js token not bumped past the holding-area slice"
+    assert js.group( 1 )  != "20260902f", "js token not bumped past the epic-board slice"
     assert css.group( 1 ) != "20260902c", "css token not bumped past the holding-area slice"
 
 
@@ -790,3 +790,45 @@ def test_each_pane_measures_itself_against_its_OWN_limit( client_code ):
     assert "LUPIN_HOLDING_AREA_QUERY" in render, (
         "the holding pane measures itself against the BOARD's limit, not its own"
     )
+
+
+def test_demote_stamps_a_triage_by_date_per_ricks_ruling( client_code ):
+    """
+    ⭐ RICK'S RULING, 2026-09-02 — a real keypress, not a timeout default: a held row
+    comes back on a chase the way a parked row does.
+
+    His own demotion feature is why it was needed. Demotion means the holding area
+    fills from BOTH ends — new rows at the front, demoted rows at the back — so with
+    no eviction the gate's own waiting room becomes the unbounded backlog the gate
+    exists to prevent, moved one room over.
+
+    ⚠️ THE STORE DOES NOT EXPIRE HELD ROWS YET, and that is a split of lanes rather
+    than a gap. The read-time predicate is the store half. What matters here is that
+    the client STAMPS the field from the very first demotion, so the predicate lands
+    on rows that already carry a date instead of arriving to a backlog with none.
+    """
+    assert "task-demote-chase" in client_code, "demote collects no triage-by date"
+    handler = function_body( client_code, "_handleTaskDemoteClick( button ) {" )
+    # 🔴 PIN THE GUARD, NOT ITS WORDING. The first cut asserted the error MESSAGE was
+    # present, which survives `if ( false )` — the message sits inside the dead branch,
+    # the requirement is gone, and the test is happy. Measured: I broke the condition
+    # and this stayed green, in a test written after learning that exact lesson twice
+    # today. The message is the symptom; the condition is the control.
+    assert "if ( !chaseDay ) {" in handler, (
+        "the triage-by date is collected but not REQUIRED — a demotion with no date "
+        "puts a row in the holding area that nothing will ever bring back"
+    )
+    assert "A triage-by date is required" in handler
+    assert "next_chase_ts" in handler, "the date is collected but never sent"
+
+
+def test_the_demote_date_is_converted_through_the_browser_zone( client_code ):
+    """
+    The same trap park already documents. `<input type="date">` yields a bare calendar
+    day with no time and no zone; sent as-is it reads as midnight UTC, which lands the
+    chase on the PREVIOUS EVENING for every zone west of Greenwich — i.e. all of ours.
+    A held row would come back a day early, every time, and nothing would look wrong.
+    """
+    handler = function_body( client_code, "_handleTaskDemoteClick( button ) {" )
+    assert "T09:00:00" in handler, "the demote date is not stamped with a local time"
+    assert "toISOString()" in handler, "the demote date is not converted to an instant"

@@ -180,10 +180,16 @@ function buildAccordionDOM( ui: TaskUI ): void {
 
 // ─────────────────────────── isTaskOpenStatus (pure) ───────────────────────────
 
-test( "isTaskOpenStatus: terminal done/dropped → false; everything else (incl. missing) → true", () => {
+test( "isTaskOpenStatus: terminal done/dropped/wont_fix → false; everything else (incl. missing) → true", () => {
   const ui = newUI();
   assert.equal( ui.isTaskOpenStatus( "done" ), false );
   assert.equal( ui.isTaskOpenStatus( "dropped" ), false );
+  // wont_fix joined TERMINAL_STATUSES 2026-09-02. Before that this function knew
+  // only the first two, so every won't-fixed row counted as work still owed.
+  assert.equal( ui.isTaskOpenStatus( "wont_fix" ), false );
+  // not_approved is deliberately NOT terminal — a held row is waiting, not finished.
+  // It is hidden from the board by a server-side denylist, not by this predicate.
+  assert.equal( ui.isTaskOpenStatus( "not_approved" ), true );
   assert.equal( ui.isTaskOpenStatus( "blocked" ), true );
   assert.equal( ui.isTaskOpenStatus( "queued" ), true );
   assert.equal( ui.isTaskOpenStatus( null ), true );
@@ -193,17 +199,28 @@ test( "isTaskOpenStatus: terminal done/dropped → false; everything else (incl.
 
 // ─────────────────────────── _taskStatusRank / _taskPriorityRank (pure) ───────────────────────────
 
-test( "_taskStatusRank: known ranks, missing → 5, unknown → 5", () => {
+// Renumbered in TENS 2026-09-02 to make room for `parked` and `not_approved`, which
+// belong between `queued` and the unknown slot and had nowhere to go on the old
+// 0..7 scale. THE ORDER IS THE CONTRACT; the absolute values are arbitrary, so this
+// asserts the ORDERING rather than re-pinning a fresh set of magic numbers — a test
+// that pins literals has to be rewritten by whoever adds the next status, and that
+// edit is indistinguishable from breaking it.
+test( "_taskStatusRank: orders most-urgent first, unknown between open and terminal", () => {
   const ui = newUI();
-  assert.equal( ui._taskStatusRank( "blocked" ), 0 );
-  assert.equal( ui._taskStatusRank( "in_progress" ), 1 );
-  assert.equal( ui._taskStatusRank( "claimed" ), 2 );
-  assert.equal( ui._taskStatusRank( "review" ), 3 );
-  assert.equal( ui._taskStatusRank( "queued" ), 4 );
-  assert.equal( ui._taskStatusRank( "done" ), 6 );
-  assert.equal( ui._taskStatusRank( "dropped" ), 7 );
-  assert.equal( ui._taskStatusRank( null ), 5 );        // missing
-  assert.equal( ui._taskStatusRank( "bananas" ), 5 );   // unknown
+  const order = [ "blocked", "in_progress", "claimed", "review", "queued",
+                  "parked", "not_approved", "bananas", "done", "dropped", "wont_fix" ];
+  const ranks = order.map( s => ui._taskStatusRank( s ) );
+
+  for ( let i = 1; i < ranks.length; i++ ) {
+    assert.ok( ranks[ i - 1 ] < ranks[ i ],
+      `${order[ i - 1 ]} (${ranks[ i - 1 ]}) must sort before ${order[ i ]} (${ranks[ i ]})` );
+  }
+  // A missing status sorts exactly where an unrecognized one does.
+  assert.equal( ui._taskStatusRank( null ), ui._taskStatusRank( "bananas" ) );
+  // ...and that slot sits below every open status and above every terminal one,
+  // which is the property the "unknown" rank exists for.
+  assert.ok( ui._taskStatusRank( "bananas" ) > ui._taskStatusRank( "not_approved" ) );
+  assert.ok( ui._taskStatusRank( "bananas" ) < ui._taskStatusRank( "done" ) );
 } );
 
 test( "_taskPriorityRank: P<n> → n, missing/non-match → 99", () => {

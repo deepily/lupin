@@ -9903,8 +9903,11 @@ class NotificationsUI {
         const demoteLegal = !isTerminal && !isHeld;
         const demoteBtn   = btn( "task-demote-button", "Demote", demoteLegal,
             isTerminal ? deadReason
-                       : ( isHeld ? "This row is already in the holding area" : "Push this row back into the holding area (reason required)" ) );
-        const demoteIn    = input( "task-demote-reason", "why this goes back to triage…", "Demote reason", demoteLegal );
+                       : ( isHeld ? "This row is already in the holding area" : "Push this row back into the holding area (reason and triage-by date required)" ) );
+        const demoteIn    = demoteLegal
+            ? `<input type="text" class="task-action-input task-demote-reason" data-task-id="${id}" placeholder="why this goes back to triage…" aria-label="Demote reason">` +
+              `<input type="date" class="task-action-input task-demote-chase" data-task-id="${id}" aria-label="Triage-by date">`
+            : "";
 
         // Approve — the holding area's exit. Rick ruled either a manager or he
         // suffices, "for now"; the allowlist is server-side configuration and the
@@ -11481,7 +11484,25 @@ class NotificationsUI {
     async _handleTaskDemoteClick( button ) {
         /**
          * Demote button → push a live row back into the holding area
-         * (`→ not_approved`), reason required, enforced before the call.
+         * (`→ not_approved`), reason AND triage-by date required, both enforced
+         * before the call.
+         *
+         * ⭐ THE DATE IS RICK'S RULING, 2026-09-02 (real keypress, not a timeout
+         * default): a held row comes back on a chase the way a parked row does. The
+         * reasoning is his own demotion feature turned back on itself — demotion
+         * means the holding area fills from BOTH ends, new rows at the front and
+         * demoted rows at the back, so without an eviction the gate's own waiting
+         * room becomes the unbounded backlog the gate exists to prevent, moved one
+         * room over. Bounded, self-expiring silence; never an exit. A permanent kill
+         * has its own visible door in won't-fix.
+         *
+         * ⚠️ THE STORE DOES NOT YET EXPIRE HELD ROWS — that half is Mr Radio's, and
+         * it mirrors `park_is_active()`: expiry computed at READ time, no daemon and
+         * no sweeper. What this control does today is honest without it: it STAMPS a
+         * real `next_chase_ts`, which the row already renders in its Next-chase cell.
+         * So the dates are being recorded correctly from the first demotion, and the
+         * read-time predicate lights up rows that already carry the field rather than
+         * arriving to a backlog of held rows with no date on any of them.
          *
          * 🔴 THE REASON IS ENFORCED HERE AND, AS OF THIS WRITING, *NOT* ON THE
          * SERVER — and that asymmetry is deliberate but must not be silent. The
@@ -11506,13 +11527,26 @@ class NotificationsUI {
          */
         const taskId = button.dataset.taskId || "";
         if ( !taskId ) return;
-        const reason = this._rowInputValue( taskId, "task-demote-reason" );
+        const reason   = this._rowInputValue( taskId, "task-demote-reason" );
+        const chaseDay = this._rowInputValue( taskId, "task-demote-chase" );
         if ( !reason ) {
             this._renderTaskRowError( taskId, "A demote reason is required — say why this goes back to triage, or the next reader cannot tell it from a row that was never approved." );
             return;
         }
+        if ( !chaseDay ) {
+            this._renderTaskRowError( taskId, "A triage-by date is required — a held row is bounded, never indefinite. Use won't-fix to kill it outright." );
+            return;
+        }
+        const chaseTs = new Date( `${chaseDay}T09:00:00` );
+        if ( isNaN( chaseTs.getTime() ) ) {
+            this._renderTaskRowError( taskId, `Triage-by date not understood: ${chaseDay}` );
+            return;
+        }
         this._renderTaskRowError( taskId, "" );
-        const result = await this._transitionTask( taskId, "not_approved", { reason } );
+        const result = await this._transitionTask( taskId, "not_approved", {
+            reason,
+            next_chase_ts : chaseTs.toISOString()
+        } );
         if ( result.ok ) await this.refreshTaskList();
         else this._renderTaskRowError( taskId, `Demote refused: ${result.message}` );
     }
