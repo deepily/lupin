@@ -777,27 +777,31 @@ test( "🔴 the REAL row renderers emit the controls row already hidden", () => 
 // between the two, whatever the test's name says. Every blank-reason case below fills
 // the OTHER field, so exactly one guard can be responsible for the refusal.
 
-function dropRowDOM( id: string, reason = "" ): void {
-  document.body.innerHTML = `
-    <table><tbody>
-      <tr><td class="task-actions">
-        <input class="task-action-input task-drop-reason" data-task-id="${id}" value="${reason}">
-        <button class="task-action-btn task-drop-button" data-task-id="${id}">Drop</button>
-      </td></tr>
-      <tr class="task-row-error-stripe" data-error-for="${id}" hidden><td></td></tr>
-    </tbody></table>`;
+// ═══════ THE SAME ROWS, PAINTED BY THE PAGE AND CLICKED FOR REAL ═══════
+//
+// These fixtures used to hand-build a <table> and call the handler by name. Two things
+// went unchecked that way: whether the REAL row renders these controls at all, and
+// whether a click on one reaches a handler. The second was FALSE for this pane for as
+// long as the pane existed, and no by-name test in the tree could have said so.
+//
+// ⚠️ Drop, Park and Demote are live only from `queued`, and `renderHoldingArea` paints
+// held (`not_approved`) rows, where all three render DISABLED. So these are driven from
+// the TASK-LIST pane. That is not a workaround for the fixture — it is the pane the
+// operator presses them in.
+function paintedTaskList( ui: HoldingUI, tasks: Record<string, unknown>[] ): void {
+  realPageDOM();
+  ui._wireHoldingAreaControls();          // the sibling pane wires itself as usual
+  ui._wireTaskListAccordion();
+  ui.renderTaskList( { status: "ok", tasks } );
 }
 
-function parkRowDOM( id: string, reason = "", chase = "" ): void {
-  document.body.innerHTML = `
-    <table><tbody>
-      <tr><td class="task-actions">
-        <input class="task-action-input task-park-reason" data-task-id="${id}" value="${reason}">
-        <input class="task-action-input task-park-chase"  data-task-id="${id}" value="${chase}">
-        <button class="task-action-btn task-park-button" data-task-id="${id}">Park</button>
-      </td></tr>
-      <tr class="task-row-error-stripe" data-error-for="${id}" hidden><td></td></tr>
-    </tbody></table>`;
+// Fill a rendered input the way the operator would. It asserts the control EXISTS,
+// because a silent `null` here turns a control that never rendered into a passing
+// "the server was not called" — the exact shape of blindness this file is closing.
+function fillRowInput( cls: string, value: string ): void {
+  const el = document.querySelector( `.${ cls }` ) as HTMLInputElement | null;
+  assert.ok( el, `.${ cls } did not render — this test cannot speak to the guard it names` );
+  el!.value = value;
 }
 
 function recordingUI(): { ui: HoldingUI; calls: Array<[ string, string, unknown ]> } {
@@ -805,6 +809,7 @@ function recordingUI(): { ui: HoldingUI; calls: Array<[ string, string, unknown 
   const calls: Array<[ string, string, unknown ]> = [];
   ui._transitionTask = async ( id, to, extras ) => { calls.push( [ id, to, extras ] ); return { ok: true }; };
   ui.refreshTaskList = async () => {};
+  ui.refreshHoldingArea = async () => {};
   return { ui, calls };
 }
 
@@ -820,9 +825,10 @@ test( "🔴 Drop sends `dropped` — the verb is asserted, so a wrong terminal s
   // rather than quietly deleted, because "wrong verb" reads like a store problem and the
   // instinct to file it as one is what has to be corrected.
   const { ui, calls } = recordingUI();
-  dropRowDOM( CTRL_ID, "superseded by the epic board" );
+  paintedTaskList( ui, [ row( { id: CTRL_ID, status: "queued" } ) ] );
+  fillRowInput( "task-drop-reason", "superseded by the epic board" );
 
-  await ui._handleTaskDropClick( document.querySelector( ".task-drop-button" ) );
+  await clickThrough( ui, "_handleTaskDropClick", document.querySelector( ".task-drop-button" ), "Drop" );
   assert.equal( calls.length, 1, "Drop never reached the server" );
   assert.equal( calls[ 0 ][ 1 ], "dropped", "Drop sent the wrong transition verb" );
   assert.equal( ( calls[ 0 ][ 2 ] as { reason: string } ).reason, "superseded by the epic board",
@@ -831,9 +837,9 @@ test( "🔴 Drop sends `dropped` — the verb is asserted, so a wrong terminal s
 
 test( "🔴 Drop refuses a blank reason, tells the operator why, and calls nobody", async () => {
   const { ui, calls } = recordingUI();
-  dropRowDOM( CTRL_ID, "" );
+  paintedTaskList( ui, [ row( { id: CTRL_ID, status: "queued" } ) ] );
 
-  await ui._handleTaskDropClick( document.querySelector( ".task-drop-button" ) );
+  await clickThrough( ui, "_handleTaskDropClick", document.querySelector( ".task-drop-button" ), "Drop" );
   assert.equal( calls.length, 0, "a blank drop reason reached the server" );
   const stripe = document.querySelector( ".task-row-error-stripe" ) as HTMLElement;
   assert.equal( stripe.hidden, false, "the refusal is invisible — the row looks like nothing happened" );
@@ -842,9 +848,11 @@ test( "🔴 Drop refuses a blank reason, tells the operator why, and calls nobod
 
 test( "🔴 Park sends `parked` with the reason AND a real chase instant", async () => {
   const { ui, calls } = recordingUI();
-  parkRowDOM( CTRL_ID, "waiting on Rick's ruling", "2026-09-10" );
+  paintedTaskList( ui, [ row( { id: CTRL_ID, status: "queued" } ) ] );
+  fillRowInput( "task-park-reason", "waiting on Rick's ruling" );
+  fillRowInput( "task-park-chase",  "2026-09-10" );
 
-  await ui._handleTaskParkClick( document.querySelector( ".task-park-button" ) );
+  await clickThrough( ui, "_handleTaskParkClick", document.querySelector( ".task-park-button" ), "Park" );
   assert.equal( calls.length, 1, "Park never reached the server" );
   assert.equal( calls[ 0 ][ 1 ], "parked", "Park sent the wrong transition verb" );
   // NOTE the field name: Park sends `park_reason`, where Drop and Won't-fix send
@@ -864,9 +872,10 @@ test( "🔴 Park refuses a blank REASON specifically — the chase date is fille
   // The discriminating fixture. With both fields blank either guard explains the
   // refusal, so deleting one is invisible; filling the chase leaves exactly one.
   const { ui, calls } = recordingUI();
-  parkRowDOM( CTRL_ID, "", "2026-09-10" );
+  paintedTaskList( ui, [ row( { id: CTRL_ID, status: "queued" } ) ] );
+  fillRowInput( "task-park-chase", "2026-09-10" );
 
-  await ui._handleTaskParkClick( document.querySelector( ".task-park-button" ) );
+  await clickThrough( ui, "_handleTaskParkClick", document.querySelector( ".task-park-button" ), "Park" );
   assert.equal( calls.length, 0, "a blank park reason reached the server" );
   assert.match( ( document.querySelector( ".task-row-error-stripe" ) as HTMLElement ).textContent ?? "",
     /park reason is required/i );
@@ -874,9 +883,10 @@ test( "🔴 Park refuses a blank REASON specifically — the chase date is fille
 
 test( "🔴 Park refuses a blank CHASE DATE specifically — the reason is filled in", async () => {
   const { ui, calls } = recordingUI();
-  parkRowDOM( CTRL_ID, "waiting on Rick's ruling", "" );
+  paintedTaskList( ui, [ row( { id: CTRL_ID, status: "queued" } ) ] );
+  fillRowInput( "task-park-reason", "waiting on Rick's ruling" );
 
-  await ui._handleTaskParkClick( document.querySelector( ".task-park-button" ) );
+  await clickThrough( ui, "_handleTaskParkClick", document.querySelector( ".task-park-button" ), "Park" );
   assert.equal( calls.length, 0, "an unbounded park reached the server" );
   assert.match( ( document.querySelector( ".task-row-error-stripe" ) as HTMLElement ).textContent ?? "",
     /chase date is required/i );
@@ -887,17 +897,10 @@ test( "🔴 Demote refuses a blank REASON specifically — the triage-by date is
   // blank, so its "a blank demote reason reached the server" assertion is satisfied by
   // the CHASE guard and stays green with the reason guard deleted.
   const { ui, calls } = recordingUI();
-  document.body.innerHTML = `
-    <table><tbody>
-      <tr><td class="task-actions">
-        <input class="task-action-input task-demote-reason" data-task-id="${CTRL_ID}" value="">
-        <input class="task-action-input task-demote-chase"  data-task-id="${CTRL_ID}" value="2026-09-10">
-        <button class="task-action-btn task-demote-button" data-task-id="${CTRL_ID}">Demote</button>
-      </td></tr>
-      <tr class="task-row-error-stripe" data-error-for="${CTRL_ID}" hidden><td></td></tr>
-    </tbody></table>`;
+  paintedTaskList( ui, [ row( { id: CTRL_ID, status: "queued" } ) ] );
+  fillRowInput( "task-demote-chase", "2026-09-10" );
 
-  await ui._handleTaskDemoteClick( document.querySelector( ".task-demote-button" ) );
+  await clickThrough( ui, "_handleTaskDemoteClick", document.querySelector( ".task-demote-button" ), "Demote" );
   assert.equal( calls.length, 0, "a blank demote reason reached the server" );
   assert.match( ( document.querySelector( ".task-row-error-stripe" ) as HTMLElement ).textContent ?? "",
     /demote reason is required/i );
@@ -909,8 +912,15 @@ test( "🔴 _controlScope reads the input in the CLICKED row's own cell, not the
   // and the fallback to the enclosing table matches both rows, so the handler sends the
   // OTHER row's text. Both scopes are inside the same table, so `_paneScope` cannot see
   // this and the existing two-pane test does not cover it.
+  //
+  // ⚠️ THE ONE FIXTURE IN THIS BLOCK THAT IS STILL HAND-BUILT, AND WHY. The real render
+  // path cannot paint one task id twice — that is the point of the defect, so the shape
+  // has to be constructed. What it does NOT have to give up is the click path: the rows
+  // are placed INSIDE the real `#task-list-container`, so the click still routes through
+  // the pane's own delegated listener rather than skipping it.
   const { ui, calls } = recordingUI();
-  document.body.innerHTML = `
+  realPageDOM();
+  ( document.getElementById( "task-list-container" ) as HTMLElement ).innerHTML = `
     <table><tbody>
       <tr><td class="task-actions">
         <input class="task-action-input task-drop-reason" data-task-id="${CTRL_ID}" value="THE FIRST ROW'S TEXT">
@@ -922,8 +932,10 @@ test( "🔴 _controlScope reads the input in the CLICKED row's own cell, not the
       </td></tr>
       <tr class="task-row-error-stripe" data-error-for="${CTRL_ID}" hidden><td></td></tr>
     </tbody></table>`;
+  ui._wireHoldingAreaControls();
+  ui._wireTaskListAccordion();
 
-  await ui._handleTaskDropClick( document.getElementById( "second" ) );
+  await clickThrough( ui, "_handleTaskDropClick", document.getElementById( "second" ), "the SECOND row's Drop" );
   assert.equal( calls.length, 1, "Drop never reached the server" );
   assert.equal( ( calls[ 0 ][ 2 ] as { reason: string } ).reason, "THE SECOND ROW'S TEXT",
     "the handler sent a different row's reason — the scope fell back past `.task-actions`" );
