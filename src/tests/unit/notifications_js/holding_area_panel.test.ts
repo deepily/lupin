@@ -577,3 +577,108 @@ test( "🔴 a refusal appears in the pane the operator actually clicked in", asy
     "the refusal was written into the other pane's stripe — from here the button looks dead" );
   assert.match( epicStripe.textContent ?? "", /reason is required/i );
 } );
+
+
+// ═══════════════════════ progressive disclosure — Rick's layout ═══════════════════════
+
+function rowWithDisclosure( ui: HoldingUI, id: string, paneId: string ): string {
+  const task = row( { id, status: "queued" } );
+  return `
+    <table id="${paneId}"><tbody>
+      <tr><td>${ui._disclosureToggle( task )}</td></tr>
+      <tr class="task-controls-row" data-controls-for="${id}" hidden><td>${ui._taskActionsCell( task )}</td></tr>
+      <tr class="task-row-error-stripe" data-error-for="${id}" hidden><td></td></tr>
+    </tbody></table>`;
+}
+
+test( "the controls row is HIDDEN by default and the toggle says so", () => {
+  const ui = newUI();
+  const id = "row-1";
+  document.body.innerHTML = rowWithDisclosure( ui, id, "task-list-table" );
+
+  const controls = document.querySelector( ".task-controls-row" ) as HTMLElement;
+  const toggle   = document.querySelector( ".task-disclose-button" ) as HTMLElement;
+  assert.equal( controls.hidden, true, "the controls row is visible before anyone asked for it" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "false" );
+  // 🔴 aria-expanded, not a CSS class. A disclosure that exists only in styling is
+  // invisible to a keyboard user, who then cannot reach any of these verbs at all.
+  assert.equal( toggle.tagName, "BUTTON", "the disclosure affordance is not focusable" );
+} );
+
+test( "clicking the ellipsis discloses the controls, and clicking again hides them", () => {
+  const ui = newUI();
+  const id = "row-1";
+  document.body.innerHTML = rowWithDisclosure( ui, id, "task-list-table" );
+  const controls = document.querySelector( ".task-controls-row" ) as HTMLElement;
+  const toggle   = document.querySelector( ".task-disclose-button" ) as HTMLElement;
+
+  ui._handleDisclosureToggle( toggle );
+  assert.equal( controls.hidden, false, "the controls did not appear" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "true" );
+  assert.match( toggle.getAttribute( "title" ) ?? "", /Hide/ );
+
+  ui._handleDisclosureToggle( toggle );
+  assert.equal( controls.hidden, true, "the controls did not collapse again" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "false" );
+} );
+
+test( "collapsing clears the error stripe, so a stale refusal cannot outlive its form", () => {
+  const ui = newUI();
+  const id = "row-1";
+  document.body.innerHTML = rowWithDisclosure( ui, id, "task-list-table" );
+  const toggle = document.querySelector( ".task-disclose-button" ) as HTMLElement;
+  const pane   = document.getElementById( "task-list-table" ) as HTMLElement;
+
+  ui._handleDisclosureToggle( toggle );
+  ui._renderTaskRowError( id, "A won't-fix reason is required.", pane );
+  const stripe = document.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.equal( stripe.hidden, false );
+
+  ui._handleDisclosureToggle( toggle );   // collapse
+  assert.equal( stripe.hidden, true,
+    "a refusal is still on screen complaining about a form nobody can see any more" );
+} );
+
+test( "🔴 the ellipsis opens ITS OWN pane's controls, not the other pane's copy", () => {
+  const ui = newUI();
+  const id = "bc77cd79-7acc-4a99-8a27-8fc77d2cc1b3";
+  // The exact shape that made Won't-fix look dead: one row, two panes, one id.
+  document.body.innerHTML =
+    rowWithDisclosure( ui, id, "task-list-table" ) + rowWithDisclosure( ui, id, "epic-board-table" );
+
+  const epic = document.getElementById( "epic-board-table" ) as HTMLElement;
+  const list = document.getElementById( "task-list-table" ) as HTMLElement;
+  ui._handleDisclosureToggle( epic.querySelector( ".task-disclose-button" ) as HTMLElement );
+
+  assert.equal( ( epic.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false,
+    "pressing the epic board's ellipsis opened nothing there" );
+  assert.equal( ( list.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, true,
+    "it opened the OTHER pane's controls — the same defect that made Won't-fix look dead" );
+} );
+
+
+test( "🔴 the REAL row renderers emit the controls row already hidden", () => {
+  // ⚠️ THIS ASSERTS ON _renderTaskRow / _renderEpicRow, NOT ON A HAND-BUILT FIXTURE.
+  // The disclosure tests above construct their own markup with `hidden` written in, so
+  // they cannot see the renderer forgetting it — measured: deleting `hidden` from
+  // _renderTaskRow left all four of them green while every row on the page shipped its
+  // controls expanded, which is the exact layout Rick rejected.
+  //
+  // Same family as the other blind spots today: what the file HOLDS CONSTANT is what it
+  // cannot see. Those tests hold the markup constant; this one varies it by taking the
+  // real thing.
+  const ui = newUI();
+  for ( const render of [ "_renderTaskRow", "_renderEpicRow" ] as const ) {
+    const host = document.createElement( "table" );
+    host.innerHTML = `<tbody>${( ui[ render ] as ( t: unknown ) => string )( row( { id: "r1" } ) )}</tbody>`;
+    const controls = host.querySelector( ".task-controls-row" ) as HTMLElement;
+    assert.ok( controls, `${render} emits no controls row at all` );
+    assert.equal( controls.hidden, true,
+      `${render} ships its controls EXPANDED — the vertical stack of widgets Rick rejected` );
+    assert.ok( host.querySelector( ".task-disclose-button" ), `${render} emits no disclosure affordance` );
+    // The two rows must agree on the id, or the toggle opens nothing.
+    assert.equal( ( host.querySelector( ".task-disclose-button" ) as HTMLElement ).dataset.taskId,
+                  controls.dataset.controlsFor,
+                  `${render}: the toggle and its controls row carry different ids` );
+  }
+} );

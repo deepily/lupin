@@ -9799,9 +9799,73 @@ class NotificationsUI {
                 <td class="task-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
                 <td class="task-col-project">${project}</td>
                 <td class="task-col-detail">${detailCell}</td>
-                <td class="task-col-actions">${this._taskActionsCell( task )}</td>
+                <td class="task-col-actions">${this._disclosureToggle( task )}</td>
             </tr>
+            <tr class="task-controls-row" data-controls-for="${this._escapeTaskAttr( task.id )}" hidden><td colspan="12">${this._taskActionsCell( task )}</td></tr>
             <tr class="task-row-error-stripe" data-error-for="${this._escapeTaskAttr( task.id )}" hidden><td colspan="12"></td></tr>`;
+    }
+
+    _disclosureToggle( task ) {
+        /**
+         * The ellipsis that stands in for a row's controls until they are asked for.
+         *
+         * ⭐ RICK'S SPEC, 2026-09-02, verbatim in shape: an ellipsis right-justified ON
+         * THE TITLE LINE indicating hidden functionality; clicking it discloses the
+         * controls as ONE narrow row spanning the full width of the item; that second
+         * row is NOT displayed by default.
+         *
+         * ⚠️ WHY A VERTICAL STACK WAS WRONG, in his words rather than mine — he did not
+         * want a stack of widgets on every row. Nine controls inline turned a dense,
+         * scannable board into a wall: the thing the board is FOR, seeing many rows at
+         * once, was paid away to make five verbs reachable without a click.
+         *
+         * 🔴 THE TOGGLE IS `aria-expanded`, NOT A STYLE. Screen readers and keyboards get
+         * the state from the attribute; `hidden` on the controls row carries the visual
+         * half. A disclosure that only exists in CSS is invisible to a keyboard user,
+         * who then has no way to reach any of these verbs at all.
+         *
+         * Requires:
+         *     - task carries `id`
+         *
+         * Ensures:
+         *     - returns a button carrying data-task-id, aria-expanded="false", and a title
+         *     - the SAME id its controls row carries, so the handler can pair them
+         */
+        const id = this._escapeTaskAttr( task.id );
+        return `<button type="button" class="task-disclose-button" data-task-id="${id}" `
+             + `aria-expanded="false" title="Show row controls">⋯</button>`;
+    }
+
+    _handleDisclosureToggle( button ) {
+        /**
+         * Show or hide one row's controls, scoped to the pane that was clicked.
+         *
+         * 🔴 SCOPED FOR THE REASON EVERY OTHER LOOKUP HERE IS. A row rendered in both
+         * panes has TWO controls rows carrying the same `data-controls-for`, and an
+         * unscoped query would open the task list's copy when the operator pressed the
+         * epic board's ellipsis — the same class of defect that made Won't-fix look dead
+         * to Rick, and the reason that one took a measurement to find rather than a look.
+         *
+         * ⚠️ COLLAPSING ALSO CLEARS THE ERROR STRIPE. A refusal left visible under a row
+         * whose controls are hidden is a complaint about a form nobody can see, and it
+         * survives the next repaint looking like a fresh failure.
+         *
+         * Ensures:
+         *     - toggles the controls row's `hidden` and the button's `aria-expanded`
+         *     - clears the row's error stripe on collapse
+         *     - a missing controls row is a no-op, never a throw
+         */
+        const taskId = button.dataset.taskId || "";
+        if ( !taskId ) return;
+        const pane = this._paneScope( button );
+        const controls = pane.querySelector( `.task-controls-row[data-controls-for="${CSS.escape( taskId )}"]` );
+        if ( !controls ) return;
+
+        const nowOpen = controls.hidden;
+        controls.hidden = !nowOpen;
+        button.setAttribute( "aria-expanded", String( nowOpen ) );
+        button.setAttribute( "title", nowOpen ? "Hide row controls" : "Show row controls" );
+        if ( !nowOpen ) this._renderTaskRowError( taskId, "", pane );
     }
 
     _taskActionsCell( task ) {
@@ -11131,6 +11195,9 @@ class NotificationsUI {
         // so a control click is never also an accordion toggle. A disabled Park is
         // inert here by virtue of `disabled`, which stops the click reaching us at
         // all; the aria-disabled attribute is for the screen reader, not the guard.
+        const discloseBtn = target.closest ? target.closest( ".task-disclose-button" ) : null;
+        if ( discloseBtn ) { this._handleDisclosureToggle( discloseBtn ); return; }
+
         const actionBtn = target.closest ? target.closest( ".task-action-btn" ) : null;
         if ( actionBtn ) {
             if ( actionBtn.classList.contains( "task-drop-button" ) ) this._handleTaskDropClick( actionBtn );
@@ -12171,8 +12238,9 @@ class NotificationsUI {
                 <td class="epic-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
                 <td class="epic-col-status"><span class="task-status-dot"></span>${statusWord}</td>
                 <td class="epic-col-title" title="${titleAttr}">${titleText}</td>
-                <td class="epic-col-actions">${this._taskActionsCell( task )}</td>
+                <td class="epic-col-actions">${this._disclosureToggle( task )}</td>
             </tr>
+            <tr class="task-controls-row" data-controls-for="${this._escapeTaskAttr( task.id )}" hidden><td colspan="5">${this._taskActionsCell( task )}</td></tr>
             <tr class="task-row-error-stripe" data-error-for="${this._escapeTaskAttr( task.id )}" hidden><td colspan="5"></td></tr>`;
     }
 

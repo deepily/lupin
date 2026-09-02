@@ -682,3 +682,51 @@ tbody.task-group.collapsed .task-row {
     white-space : nowrap;
     text-align  : left;
 }
+
+
+/* ── Progressive disclosure (Rick, 2026-09-02) ─────────────────────────────
+   His spec: an ellipsis right-justified on the title line indicating hidden
+   functionality; clicking it discloses the controls as ONE narrow row spanning
+   the full width of the item; that second row is NOT shown by default.
+
+   The board's job is seeing many rows at once. Nine controls inline on every row
+   paid that away to save a click, which is the trade he rejected.               */
+
+.task-disclose-button {
+    display       : block;
+    margin-left   : auto;          /* right-justified in its cell */
+    padding       : 0 6px;
+    border        : 1px solid transparent;
+    border-radius : 3px;
+    background    : transparent;
+    color         : inherit;
+    font-size     : 1rem;
+    line-height   : 1;
+    letter-spacing: 1px;
+    cursor        : pointer;
+    opacity       : 0.55;
+}
+
+.task-disclose-button:hover,
+.task-disclose-button[aria-expanded="true"] {
+    opacity : 1;
+    border-color : var( --border-color, #444 );
+}
+
+/* The disclosed row. NARROW is the point — it is a control strip, not a panel,
+   so it must not double the height of the row it belongs to. */
+.task-controls-row > td {
+    padding    : 3px 8px 5px;
+    border-top : none;
+    background : rgba( 127, 127, 127, 0.06 );
+}
+
+/* Controls run as ONE line and wrap only when the viewport forces it. */
+.task-controls-row .task-actions {
+    flex-wrap : nowrap;
+    overflow-x: auto;
+}
+
+@media ( max-width: 900px ) {
+    .task-controls-row .task-actions { flex-wrap : wrap; }
+}
