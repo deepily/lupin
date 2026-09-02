@@ -38,10 +38,13 @@ class TestSuiteSubmitRequest( BaseModel ):
         "dispatches to _execute_dry_run), never at submit: this endpoint builds the job "
         "and pushes it to the todo queue with monopolize=True either way. So a dry run "
         "occupies :8000 exactly like a real one, sends its breadcrumb notifications, and "
-        "makes the venue report BUSY — it just runs no tests. Measured 2026-09-01: two "
-        "dry_run probes queued at positions 0 and 1, and venue_idle reported BUSY with a "
-        "dry_run job named as the monopolize holder. Not a free probe; do not reach for "
-        "it to 'just check' a submission while someone else is waiting for the box." ) )
+        "makes the venue report BUSY — it just runs no tests. Measured 2026-09-01 on an "
+        "idle box: monopolize_inflight is True on the FIRST poll after submit, and the "
+        "slot is released 7.0s later. Short, but not free and not instant — and the hold "
+        "is the smaller half. The real cost is that it is an ordinary queue entry: on a "
+        "BUSY box it waits in todo behind whatever is running and then takes the slot when "
+        "it gets there, so 'just checking' a submission can land minutes later on somebody "
+        "else's window. Two such probes are what taught this." ) )
     websocket_id        : Optional[ str ] = Field( None, description="WebSocket session ID for notifications" )
     scheduled_at        : Optional[ str ] = Field( None, description="ISO datetime for deferred execution (None = immediate)" )
     auto_fix_on_failure : Optional[ bool ] = Field( None, description="Per-run override for the TestSuiteCompletionWatchdog. None = use INI default ('test fix expediter auto fix enabled'), True = force-enable TFE auto-dispatch, False = force-disable TFE auto-dispatch for this run only." )
