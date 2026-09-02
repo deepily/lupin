@@ -72,8 +72,11 @@ def provision_worktree_venv( target, debug=False ):
           helper does not know and must not guess at
         - a target with no part-1 script (a foreign repo, an old checkout) is a
           no-op reported as status "script_absent", never an error
-        - the main checkout is a no-op reported as status "main_repo" — the script
-          refuses to replace a real .venv directory with a link to itself
+        - the main checkout is a no-op FOR PROVISIONING, reported as status
+          "main_repo" — the script refuses to replace a real .venv directory with a
+          link to itself — AND logged at WARNING naming the target, because the
+          LOCATION fact riding along with it (this seat is in the shared tree) is
+          not a no-op for whoever is about to work there
         - every other non-zero exit is reported as status "failed" AND logged at
           WARNING naming the target and the exit code
 
@@ -109,7 +112,20 @@ def provision_worktree_venv( target, debug=False ):
                  "target": target, "detail": detail }
 
     if result.returncode == _EXIT_MAIN_REPO:
-        if debug: print( f"[worktree_venv] {target} is the main checkout - nothing to do" )
+        # 🔴 TWO FACTS SHARE THIS EXIT CODE, AND ONLY ONE OF THEM IS BENIGN.
+        # PROVISIONING: nothing to do — the main checkout owns the real .venv, and the
+        # part-1 script is right to refuse to link it to itself. LOCATION: whoever is
+        # about to work here is standing in the tree the whole fleet shares. The second
+        # is operationally significant and used to surface NOWHERE — the script's own
+        # `detail` is a sentence about a venv, so a careful reader read it as one.
+        # Measured 2026-09-02: two workers landed in the main checkout, one wrote to it
+        # during a live 14-minute tier run, and a manager had to decide mid-run whether
+        # to discard the result. Logged at WARNING because a non-debug caller is exactly
+        # who needs to hear it; still a no-op for provisioning, which is what it is.
+        logger.warning(
+            f"[worktree_venv] {target} is the SHARED MAIN CHECKOUT, not an isolated "
+            f"worktree - work here is visible to every other seat on this repo"
+        )
         return { "provisioned": False, "status": "main_repo", "exit_code": _EXIT_MAIN_REPO,
                  "target": target, "detail": detail }
 

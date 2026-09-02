@@ -352,6 +352,41 @@ def venv_alarm( provisioning ):
     )
 
 
+def placement_alarm( provisioning ):
+    """
+    A one-line, top-level alarm when a spawn puts a seat in the SHARED MAIN CHECKOUT.
+
+    WHY THIS IS NOT A CLAUSE INSIDE `venv_alarm`. Exit 3 from the part-1 script carries
+    two facts at once: provisioning has nothing to do (benign, correct), and the seat is
+    standing in the tree the whole fleet shares (not benign). Folding the second into a
+    field named for the venv is the defect this closes, one level up — the only text a
+    caller ever saw was the script's own `detail`, which is a sentence about a venv, so
+    a careful operator read it as one. Measured 2026-09-02: two workers landed in the
+    main checkout and one wrote to it during a live 14-minute tier run. A separate field
+    names the right subject; `venv_alarm` stays about venvs and keeps returning None
+    here, because there is genuinely no venv problem.
+
+    Requires:
+        - provisioning is the dict returned by provision_worktree_venv, or None
+
+    Ensures:
+        - returns None unless the seat landed in the main checkout — the field appears
+          only when it means something, same contract as venv_alarm
+        - returns a single human-readable line naming the tree and saying plainly that
+          it is the shared main checkout, otherwise
+        - never raises
+
+    Returns:
+        str | None
+    """
+    if not provisioning or provisioning.get( "status" ) != "main_repo": return None
+    return (
+        f"the spawned seat landed in {provisioning.get( 'target' )}, which is the "
+        f"SHARED MAIN CHECKOUT and not an isolated worktree - anything it edits or runs "
+        f"there is visible to every other seat on this repo"
+    )
+
+
 def _resolve_project_root( project ):
     """
     Resolve a project NAME to its repository root on this host (row 697a85fe).
@@ -641,6 +676,11 @@ def spawn_sessions(
     # top of a result, not a nested dict, and honest-but-nested is how the reap's
     # verdicts were missed. `venv_alarm` is None when nothing went wrong, so the line
     # only appears when it means something.
+    #
+    # 🔴 AND ONE CALL ANSWERS TWO QUESTIONS, SO IT GETS TWO ALARMS. Exit 3 means
+    # provisioning had nothing to do AND the seat is in the shared main checkout.
+    # `placement_alarm` carries the second, because a field named for the venv is where
+    # that fact went to die — see its docstring for the 2026-09-02 receipt.
     venv_provisioning = provision_worktree_venv( work_dir )
 
     # The DM/collection topic and the tmux SESSION name BOTH key on the manager
@@ -770,7 +810,8 @@ def spawn_sessions(
         "dry_run"            : dry_run,
         "model"              : model,
         "venv_provisioning"  : venv_provisioning,
-        "venv_alarm"         : venv_alarm( venv_provisioning )
+        "venv_alarm"         : venv_alarm( venv_provisioning ),
+        "placement_alarm"    : placement_alarm( venv_provisioning )
     }
 
 
