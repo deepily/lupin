@@ -136,18 +136,43 @@ def slot_pointer_path( repo_root, persona, slot=SELF_RESPIN_SLOT ):
         - repo_root is the seat's own repo root; persona is its persona name
         - slot is SLOT_IO or SLOT_ROOT
 
+    🔴 THE ROOT POINTER IS PER-PERSONA NOW, AND THIS LINE BROKE EVERY SEAT'S RE-SPIN.
+    It returned the persona-LESS `.claude-memento.md` — correct until 2026-09-02, when
+    Step 3 (`planning-is-prompting@00fac2b`, Rick's authorisation) made `memento_io`'s
+    writer produce `.claude-memento-<persona-slug>.md` instead.
+
+    The two `/plan-memento` command documents were moved in that same change, which is
+    the ordering rule row `8f5dc4df` states. THIS READER WAS MISSED — it is in a
+    different repo and nobody grepped for it. The result: `verify_memento_at_slot`
+    checked a file nothing writes any more, it aged past the freshness window, and every
+    `self_respin` aborted with "memento is stale". Found by hitting it, not by review.
+
+    ⚠️ IT FAILED SAFE, WHICH IS WHY IT WAS ONLY EXPENSIVE AND NOT DESTRUCTIVE. The verb
+    refuses rather than clearing into nothing, so no memento was lost — a seat simply
+    could not re-spin. That is the guard inside `self_respin` doing its job against a
+    defect in the code that calls it.
+
+    ⚠️ AND THIS IS NOW A SECOND STATEMENT OF THE WRITER'S LAYOUT, in a repo that cannot
+    import the writer. `memento_io.py` lives in planning-is-prompting and is invoked by
+    path, not imported, so this cannot read the rule from its source. The mitigation is
+    a test that pins this against the writer's ACTUAL OUTPUT rather than against a
+    remembered string — see `test_memento_slot_root_pointer_is_per_persona.py`. A copy
+    with a test that watches it is a copy that cannot drift silently.
+
     Ensures:
         - slot=io   -> <repo_root>/io/mementos/<persona-slug>.md
-        - slot=root -> <repo_root>/.claude-memento.md  (PERSONA-LESS by memento_io's
-          own layout — see the module docstring for why that matters)
+        - slot=root -> <repo_root>/.claude-memento-<persona-slug>.md
         - the slug is accent/punctuation/case-proof via persona_slug
+        - NO fallback to the legacy shared name: the writer no longer maintains it, so
+          it can only ever be stale, and a fallback onto a permanently-stale file is a
+          slower version of the bug this line just caused
 
     Raises:
         - ValueError on an unknown slot — never a silent fallback to one of them
     """
     root = Path( repo_root )
     if slot == SLOT_IO:   return root / "io" / "mementos" / f"{persona_slug( persona )}.md"
-    if slot == SLOT_ROOT: return root / ".claude-memento.md"
+    if slot == SLOT_ROOT: return root / f".claude-memento-{persona_slug( persona )}.md"
     raise ValueError( f"unknown memento slot {slot!r} — expected {SLOT_IO!r} or {SLOT_ROOT!r}" )
 
 
