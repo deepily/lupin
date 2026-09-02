@@ -40,6 +40,15 @@ never "this advice is safe".
 import re
 
 
+# How far from the hazard a caveat still counts, in LINES either side.
+#
+# 2 is not arbitrary and it is not measured-optimal: it is the distance that keeps a
+# caveat on the following line, and the line after it, attached to its command — which
+# is how the guard messages in this repo are actually written. Named rather than
+# inlined so a caller can widen it for a differently-shaped message, and so the
+# BOUNDARY is testable; test_guard_remedy_window_boundary.py exercises both sides.
+CAVEAT_WINDOW_LINES = 2
+
 # operation pattern -> at least one of these words must appear near it.
 # Each entry is a hazard this fleet has measured, not a hazard imagined.
 HAZARD_CAVEATS = {
@@ -109,7 +118,7 @@ def remedy_is_readable( text, parse, prefix, substitutions=None ):
     return broken
 
 
-def remedy_carries_its_caveat( text, hazards=None, window=2 ):
+def remedy_carries_its_caveat( text, hazards=None, window=CAVEAT_WINDOW_LINES ):
     """
     A remedy naming a hazardous operation must carry that hazard's warning nearby.
 
@@ -123,7 +132,8 @@ def remedy_carries_its_caveat( text, hazards=None, window=2 ):
     Ensures:
         - returns the list of ( matched_operation, required_words ) whose caveat words
           do not appear NEAR the hazard, empty when each hazard named is qualified
-        - "near" is a WINDOW around the match — `window` lines either side, default 2 —
+        - "near" is a WINDOW around the match — `window` lines either side, default
+          CAVEAT_WINDOW_LINES —
           so a caveat on the following line still counts and one three paragraphs away
           does not
         - never raises — a message naming no hazard legitimately returns []
