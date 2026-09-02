@@ -252,7 +252,7 @@ def test_the_cache_bust_tokens_were_bumped_with_the_assets():
     # What it CAN do is refuse the stale value, so the baseline is bumped alongside
     # the assets every time and a forgotten bump is a red test rather than a browser
     # quietly serving yesterday's file.
-    assert js.group( 1 )  != "20260902f", "js token not bumped past the epic-board slice"
+    assert js.group( 1 )  != "20260902g", "js token not bumped past the demote-chase slice"
     assert css.group( 1 ) != "20260902c", "css token not bumped past the holding-area slice"
 
 

@@ -9920,16 +9920,25 @@ class NotificationsUI {
         return `<div class="task-actions">${dropBtn}${dropIn}${parkBtn}${parkIn}${wontFixBtn}${wontFixIn}${demoteBtn}${demoteIn}${approveBtn}</div>`;
     }
 
-    _renderTaskRowError( taskId, message ) {
+    _renderTaskRowError( taskId, message, scope ) {
         /**
-         * Show (or clear) the inline error stripe under one row.
+         * Show (or clear) the inline error stripe under one row, IN THE PANE the
+         * operator clicked in.
+         *
+         * 🔴 SCOPED FOR THE REASON `_rowInputValue` IS. A row rendered in both panes has
+         * two stripes carrying the same `data-error-for`, and an unscoped query always
+         * revealed the first. A refusal shown in a pane the operator is not looking at
+         * has not been shown: from where they sit the control simply did nothing, which
+         * is indistinguishable from a broken button and was reported as one.
          *
          * Ensures:
          *     - a non-empty `message` reveals the stripe with that text
          *     - an empty `message` hides it again
+         *     - searches within `scope` when given, else the whole document
          *     - a missing stripe is a no-op, never a throw (degrade-safe)
          */
-        const stripe = document.querySelector( `.task-row-error-stripe[data-error-for="${CSS.escape( taskId )}"]` );
+        const root = scope || document;
+        const stripe = root.querySelector( `.task-row-error-stripe[data-error-for="${CSS.escape( taskId )}"]` );
         if ( !stripe ) return;
         const cell = stripe.querySelector( "td" );
         if ( cell ) cell.textContent = message || "";
@@ -11137,10 +11146,66 @@ class NotificationsUI {
         this._handleTaskAccordionToggle( target );
     }
 
-    _rowInputValue( taskId, className ) {
-        /** Ensures: the trimmed value of one inline action input, or "" when absent. */
-        const el = document.querySelector( `.${className}[data-task-id="${CSS.escape( taskId )}"]` );
+    _rowInputValue( taskId, className, scope ) {
+        /**
+         * The trimmed value of one inline action input, looked up WITHIN THE PANE the
+         * control lives in.
+         *
+         * 🔴 `scope` EXISTS BECAUSE A BARE document.querySelector SHIPPED A DEAD BUTTON.
+         * Since fe8642c7 the epic board renders the same actions cell as the task list,
+         * so a row carrying an epic key appears TWICE in the document with the same
+         * `data-task-id` on both copies. `document.querySelector` returns the FIRST
+         * match — always the task list — so an operator typing a reason on the epic
+         * board had it read from the OTHER pane's empty box, was refused for a blank
+         * reason, and saw the complaint land in a stripe they were not looking at.
+         *
+         * Measured 2026-09-02: Rick pressed Won't-fix on bc77cd79 and nothing happened.
+         * From the far end the row was untouched, the store held zero wont_fix events,
+         * and thirty minutes of server log carried no PATCH to any task row. The request
+         * never left the browser.
+         *
+         * ⇒ THE DUPLICATE ID IS NOT THE BUG TO FIX. Both panes SHOULD offer the control
+         * on the same row — that is the feature. What was wrong is a lookup that ignores
+         * which copy was clicked. Scoping to the button's own container answers "which
+         * one" from the only thing that knows: the element the operator actually hit.
+         *
+         * Requires:
+         *     - scope is an ancestor element of the input, or omitted
+         *
+         * Ensures:
+         *     - searches within `scope` when given, else the whole document (legacy)
+         *     - returns "" for a missing input, never throws
+         */
+        const root = scope || document;
+        const el = root.querySelector( `.${className}[data-task-id="${CSS.escape( taskId )}"]` );
         return el && typeof el.value === "string" ? el.value.trim() : "";
+    }
+
+    _controlScope( button ) {
+        /**
+         * The pane-local container for one action control: its `.task-actions` cell,
+         * falling back to the enclosing table and finally to the document.
+         *
+         * ⚠️ THE FALLBACK CHAIN IS NOT DEFENSIVE PADDING. `.task-actions` is the tight
+         * scope and is right for the inputs, which sit beside their button. The error
+         * STRIPE is a sibling <tr> and therefore outside it, so that one needs the
+         * table. Both are real cases, not a guess about shapes that might exist.
+         *
+         * Ensures:
+         *     - returns the nearest `.task-actions`, else the nearest table, else document
+         *     - tolerates a plain object with no closest() (test doubles) → document
+         */
+        if ( !button || typeof button.closest !== "function" ) return document;
+        return button.closest( ".task-actions" ) || button.closest( "table" ) || document;
+    }
+
+    _paneScope( button ) {
+        /**
+         * The enclosing TABLE for one action control — the scope the error stripe needs,
+         * because the stripe is a sibling row and sits outside `.task-actions`.
+         */
+        if ( !button || typeof button.closest !== "function" ) return document;
+        return button.closest( "table" ) || document;
     }
 
     async _handleTaskDropClick( button ) {
@@ -11155,15 +11220,17 @@ class NotificationsUI {
          */
         const taskId = button.dataset.taskId || "";
         if ( !taskId ) return;
-        const reason = this._rowInputValue( taskId, "task-drop-reason" );
+        const inputScope = this._controlScope( button );
+        const paneScope  = this._paneScope( button );
+        const reason = this._rowInputValue( taskId, "task-drop-reason", inputScope );
         if ( !reason ) {
-            this._renderTaskRowError( taskId, "A drop reason is required." );
+            this._renderTaskRowError( taskId, "A drop reason is required.", paneScope );
             return;
         }
-        this._renderTaskRowError( taskId, "" );
+        this._renderTaskRowError( taskId, "", paneScope );
         const result = await this._transitionTask( taskId, "dropped", { reason } );
         if ( result.ok ) await this.refreshTaskList();
-        else this._renderTaskRowError( taskId, `Drop refused: ${result.message}` );
+        else this._renderTaskRowError( taskId, `Drop refused: ${result.message}`, paneScope );
     }
 
     async _handleTaskParkClick( button ) {
@@ -11179,28 +11246,30 @@ class NotificationsUI {
          */
         const taskId = button.dataset.taskId || "";
         if ( !taskId ) return;
-        const parkReason = this._rowInputValue( taskId, "task-park-reason" );
-        const chaseDay   = this._rowInputValue( taskId, "task-park-chase" );
+        const inputScope = this._controlScope( button );
+        const paneScope  = this._paneScope( button );
+        const parkReason = this._rowInputValue( taskId, "task-park-reason", inputScope );
+        const chaseDay   = this._rowInputValue( taskId, "task-park-chase", inputScope );
         if ( !parkReason ) {
-            this._renderTaskRowError( taskId, "A park reason is required — quote the row's own decisive sentence." );
+            this._renderTaskRowError( taskId, "A park reason is required — quote the row's own decisive sentence.", paneScope );
             return;
         }
         if ( !chaseDay ) {
-            this._renderTaskRowError( taskId, "A chase date is required — a park is bounded, never indefinite." );
+            this._renderTaskRowError( taskId, "A chase date is required — a park is bounded, never indefinite.", paneScope );
             return;
         }
         const chaseTs = new Date( `${chaseDay}T09:00:00` );
         if ( isNaN( chaseTs.getTime() ) ) {
-            this._renderTaskRowError( taskId, `Chase date not understood: ${chaseDay}` );
+            this._renderTaskRowError( taskId, `Chase date not understood: ${chaseDay}`, paneScope );
             return;
         }
-        this._renderTaskRowError( taskId, "" );
+        this._renderTaskRowError( taskId, "", paneScope );
         const result = await this._transitionTask( taskId, "parked", {
             park_reason   : parkReason,
             next_chase_ts : chaseTs.toISOString()
         } );
         if ( result.ok ) await this.refreshTaskList();
-        else this._renderTaskRowError( taskId, `Park refused: ${result.message}` );
+        else this._renderTaskRowError( taskId, `Park refused: ${result.message}`, paneScope );
     }
 
     renderHoldingArea( composite ) {
@@ -11470,15 +11539,17 @@ class NotificationsUI {
          */
         const taskId = button.dataset.taskId || "";
         if ( !taskId ) return;
-        const reason = this._rowInputValue( taskId, "task-wont-fix-reason" );
+        const inputScope = this._controlScope( button );
+        const paneScope  = this._paneScope( button );
+        const reason = this._rowInputValue( taskId, "task-wont-fix-reason", inputScope );
         if ( !reason ) {
-            this._renderTaskRowError( taskId, "A won't-fix reason is required — a refusal carries its justification, exactly as a drop does." );
+            this._renderTaskRowError( taskId, "A won't-fix reason is required — a refusal carries its justification, exactly as a drop does.", paneScope );
             return;
         }
-        this._renderTaskRowError( taskId, "" );
+        this._renderTaskRowError( taskId, "", paneScope );
         const result = await this._transitionTask( taskId, "wont_fix", { reason } );
         if ( result.ok ) await this.refreshTaskList();
-        else this._renderTaskRowError( taskId, `Won't-fix refused: ${result.message}` );
+        else this._renderTaskRowError( taskId, `Won't-fix refused: ${result.message}`, paneScope );
     }
 
     async _handleTaskDemoteClick( button ) {
@@ -11527,28 +11598,30 @@ class NotificationsUI {
          */
         const taskId = button.dataset.taskId || "";
         if ( !taskId ) return;
-        const reason   = this._rowInputValue( taskId, "task-demote-reason" );
-        const chaseDay = this._rowInputValue( taskId, "task-demote-chase" );
+        const inputScope = this._controlScope( button );
+        const paneScope  = this._paneScope( button );
+        const reason   = this._rowInputValue( taskId, "task-demote-reason", inputScope );
+        const chaseDay = this._rowInputValue( taskId, "task-demote-chase", inputScope );
         if ( !reason ) {
-            this._renderTaskRowError( taskId, "A demote reason is required — say why this goes back to triage, or the next reader cannot tell it from a row that was never approved." );
+            this._renderTaskRowError( taskId, "A demote reason is required — say why this goes back to triage, or the next reader cannot tell it from a row that was never approved.", paneScope );
             return;
         }
         if ( !chaseDay ) {
-            this._renderTaskRowError( taskId, "A triage-by date is required — a held row is bounded, never indefinite. Use won't-fix to kill it outright." );
+            this._renderTaskRowError( taskId, "A triage-by date is required — a held row is bounded, never indefinite. Use won't-fix to kill it outright.", paneScope );
             return;
         }
         const chaseTs = new Date( `${chaseDay}T09:00:00` );
         if ( isNaN( chaseTs.getTime() ) ) {
-            this._renderTaskRowError( taskId, `Triage-by date not understood: ${chaseDay}` );
+            this._renderTaskRowError( taskId, `Triage-by date not understood: ${chaseDay}`, paneScope );
             return;
         }
-        this._renderTaskRowError( taskId, "" );
+        this._renderTaskRowError( taskId, "", paneScope );
         const result = await this._transitionTask( taskId, "not_approved", {
             reason,
             next_chase_ts : chaseTs.toISOString()
         } );
         if ( result.ok ) await this.refreshTaskList();
-        else this._renderTaskRowError( taskId, `Demote refused: ${result.message}` );
+        else this._renderTaskRowError( taskId, `Demote refused: ${result.message}`, paneScope );
     }
 
     async _handleTaskApproveClick( button ) {
@@ -11571,10 +11644,12 @@ class NotificationsUI {
          */
         const taskId = button.dataset.taskId || "";
         if ( !taskId ) return;
-        this._renderTaskRowError( taskId, "" );
+        const inputScope = this._controlScope( button );
+        const paneScope  = this._paneScope( button );
+        this._renderTaskRowError( taskId, "", paneScope );
         const result = await this._transitionTask( taskId, "queued" );
         if ( result.ok ) await this.refreshTaskList();
-        else this._renderTaskRowError( taskId, `Approve refused: ${result.message}` );
+        else this._renderTaskRowError( taskId, `Approve refused: ${result.message}`, paneScope );
     }
 
     openTaskBodyOverlay( bodyText, idLabel ) {

@@ -502,3 +502,78 @@ test( "_transitionTask: a network throw is a failure and NEVER propagates", asyn
   assert.equal( out.ok, false, "an unreachable store was reported as success" );
   assert.match( out.message ?? "", /unreachable: connection refused/ );
 } );
+
+
+// ═══════════════ THE DEFECT RICK HIT: two panes, one row, a global querySelector ═══════════════
+//
+// 🔴 REPRODUCTION OF A LIVE BUG, 2026-09-02. Rick clicked Won't-fix on bc77cd79 and nothing happened.
+// Mr Radio measured it from the other end: the row was untouched, there were ZERO wont_fix events in
+// the whole store, and thirty minutes of server log carried no PATCH to any task row. The request
+// never left the browser.
+//
+// THE CAUSE IS MINE, introduced at fe8642c7 when I gave the epic board the same actions cell. From
+// that commit on, a row that carries an epic key renders TWICE — once in the task list, once on the
+// epic board — and `_rowInputValue` / `_renderTaskRowError` both use a bare `document.querySelector`,
+// which returns the FIRST match in the document.
+//
+// So: he types the reason into the pane he is looking at, the handler reads the OTHER pane's empty
+// box, refuses for a blank reason, and writes the complaint into the OTHER pane's error stripe.
+// Nothing happens where he is looking. He reported it as a dead button, which is exactly what it is
+// from where he sat.
+//
+// ⇒ AND THE SILENT-REFUSAL SHAPE IS THE SAME ONE I HAD JUST WRITTEN ABOUT one layer down: he cannot
+//   distinguish "you forgot the reason" from "the control is broken". A guard that refuses without
+//   showing the refusal in the place the operator is looking has not refused, it has vanished.
+
+function twoPanesShowingTheSameRow( ui: HoldingUI, id: string ): void {
+  const task = row( { id, status: "parked" } );
+  document.body.replaceChildren();
+  const host = document.createElement( "div" );
+  // Task list FIRST in document order, epic board second — the real page's order.
+  host.innerHTML = `
+    <table id="task-list-table"><tbody>
+      <tr><td>${ui._taskActionsCell( task )}</td></tr>
+      <tr class="task-row-error-stripe" data-error-for="${id}" hidden><td></td></tr>
+    </tbody></table>
+    <table id="epic-board-table"><tbody>
+      <tr><td>${ui._taskActionsCell( task )}</td></tr>
+      <tr class="task-row-error-stripe" data-error-for="${id}" hidden><td></td></tr>
+    </tbody></table>`;
+  document.body.appendChild( host );
+}
+
+test( "🔴 a reason typed on the EPIC BOARD is the one that gets sent", async () => {
+  const ui = newUI();
+  const id = "bc77cd79-7acc-4a99-8a27-8fc77d2cc1b3";
+  twoPanesShowingTheSameRow( ui, id );
+
+  const calls: Array<[ string, string, unknown ]> = [];
+  ui._transitionTask = async ( i, to, extras ) => { calls.push( [ i, to, extras ] ); return { ok: true }; };
+  ui.refreshTaskList = async () => {};
+
+  // Rick types into the SECOND pane — the one he is looking at — and clicks ITS button.
+  const epic = document.getElementById( "epic-board-table" ) as HTMLElement;
+  ( epic.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value = "fuck no, I will not fix this";
+  await ui._handleTaskWontFixClick( epic.querySelector( ".task-wont-fix-button" ) as HTMLElement );
+
+  assert.equal( calls.length, 1,
+    "the click was swallowed — the handler read the OTHER pane's empty box and refused silently" );
+  assert.equal( ( calls[ 0 ][ 2 ] as { reason: string } ).reason, "fuck no, I will not fix this" );
+} );
+
+test( "🔴 a refusal appears in the pane the operator actually clicked in", async () => {
+  const ui = newUI();
+  const id = "bc77cd79-7acc-4a99-8a27-8fc77d2cc1b3";
+  twoPanesShowingTheSameRow( ui, id );
+  ui._transitionTask = async () => ( { ok: true } );
+  ui.refreshTaskList = async () => {};
+
+  // Both boxes blank: the refusal is legitimate. The question is WHERE it is shown.
+  const epic = document.getElementById( "epic-board-table" ) as HTMLElement;
+  await ui._handleTaskWontFixClick( epic.querySelector( ".task-wont-fix-button" ) as HTMLElement );
+
+  const epicStripe = epic.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.equal( epicStripe.hidden, false,
+    "the refusal was written into the other pane's stripe — from here the button looks dead" );
+  assert.match( epicStripe.textContent ?? "", /reason is required/i );
+} );
