@@ -418,7 +418,7 @@ test( "_renderTaskRow: item_class is slug-sanitized in the class attr (no attrib
   assert.match( html, /task-class-taskonmouseoverx/ );   // stripped to alnum/_/-
 } );
 
-test( "renderTaskListTable: owner group header (owner · count) + Unassigned label, ten columns, colspan 10", () => {
+test( "renderTaskListTable: owner group header (owner · count) + Unassigned label, eleven columns, colspan 11", () => {
   const ui = newUI();
   const model = ui.groupTasksByOwner( [ T_BLOCKED, T_QUEUED, T_ORPHAN ] );
   const html = ui.renderTaskListTable( model, undefined );
@@ -427,10 +427,14 @@ test( "renderTaskListTable: owner group header (owner · count) + Unassigned lab
   assert.match( html, /Krishna · 1/ );
   assert.match( html, /\(Unassigned\)/ );
   assert.match( html, /task-group-unassigned/ );
-  for ( const col of [ "ID", "Title", "Class", "Status", "Blocked by", "Next chase", "Accountable", "Priority", "Project", "Detail" ] ) {
+  for ( const col of [ "ID", "Title", "Class", "Status", "Blocked by", "Next chase", "Accountable", "Filed by", "Priority", "Project", "Detail" ] ) {
     assert.ok( html.includes( col ), `header "${col}" present` );
   }
-  assert.match( html, /colspan="10"/ );                 // augmented 8 → 10 columns
+  // The group-header bar must span EVERY column. A stale colspan does not throw
+  // and does not look broken in a screenshot — the bar simply stops short of the
+  // last column, which is why this is asserted rather than eyeballed.
+  assert.match( html, /colspan="11"/ );                 // 8 → 10 (row redesign) → 11 (Filed by)
+  assert.ok( !/colspan="10"/.test( html ), "a stale colspan leaves the group bar short of the last column" );
   assert.ok( html.indexOf( "Krishna" ) < html.indexOf( "(Unassigned)" ), "Unassigned renders last" );
 } );
 
@@ -989,7 +993,7 @@ test( "renderTaskListTable: collapsed owner → collapsed class + ▸ + aria-exp
   const model = ui.groupTasksByOwner( [ T_BLOCKED, T_QUEUED ] );           // Rio, Krishna
   const html  = ui.renderTaskListTable( model, undefined, new Set( [ "Rio" ] ) );
   assert.match( html, /<tbody class="task-group collapsed" id="task-group-Rio" data-owner="Rio">/ );
-  assert.match( html, /aria-expanded="false"[^>]*>\s*<td colspan="10"><span class="task-group-chevron" aria-hidden="true">▸/ );
+  assert.match( html, /aria-expanded="false"[^>]*>\s*<td colspan="11"><span class="task-group-chevron" aria-hidden="true">▸/ );
   // Krishna (not in the set) stays expanded
   assert.match( html, /<tbody class="task-group" id="task-group-Krishna"/ );
 } );
@@ -1776,3 +1780,78 @@ test( "renderTaskList: query_unavailable does NOT replay last-known rows", () =>
 } );
 
 if ( typeof process !== "undefined" && process.argv.includes( "--run" ) ) { /* node --test entry */ }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FILED-BY COLUMN (2026-09-02). Rick asked by voice for the filer's name on every
+// board row — specifically the ones he was blocking — so a row he wants chased
+// names a person rather than only an id. `created_by` was already populated on
+// every live row; it was invisible only because it was absent from the terse
+// projection the board reads.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test( "_taskFilerLabel: a TWO-WORD persona survives — the split()[0] trap", () => {
+  // 🔴 THE DEFECT THIS EXISTS TO PREVENT. `created_by.split( " " )[ 0 ]` returns
+  // "mr" for "mr radio 0e61abe3". María measured it wrong on 6 of 13 live rows,
+  // and those six are exactly the rows Rick asked about — the naive form fails
+  // hardest precisely where the feature is for.
+  const ui = newUI();
+  assert.equal( ui._taskFilerLabel( { created_by: "mr radio 0e61abe3" } ), "Mr Radio" );
+  assert.equal( ui._taskFilerLabel( { created_by: "Krishna 420f5ec9" } ),  "Krishna" );
+  assert.equal( ui._taskFilerLabel( { created_by: "rio b45d54db" } ),      "Rio" );
+} );
+
+test( "_taskFilerLabel: an unrecognised shape renders WHOLE, never sliced", () => {
+  // A truncated name is a WRONG name wearing a right one's clothes; a full odd
+  // string is visibly odd and sends the reader to the row. So the fall-through
+  // must not guess where the name stops.
+  const ui = newUI();
+  assert.equal( ui._taskFilerLabel( { created_by: "some automated importer" } ),
+                "Some Automated Importer" );
+  assert.equal( ui._taskFilerLabel( { created_by: "mr radio zzzzzzzz" } ),
+                "Mr Radio Zzzzzzzz",
+                "zzzzzzzz is 8 chars but not hex — it is part of the name, not a session id" );
+} );
+
+test( "_taskFilerLabel: absent, blank and whitespace-only all give an em dash", () => {
+  const ui = newUI();
+  for ( const row of [ {}, { created_by: "" }, { created_by: "   " }, { created_by: null } ] ) {
+    assert.equal( ui._taskFilerLabel( row ), "—", `${JSON.stringify( row )} → em dash` );
+  }
+  assert.equal( ui._taskFilerLabel( undefined ), "—" );
+} );
+
+test( "the Filed-by column renders the filer, and it is NOT the owner column", () => {
+  // Filer and owner differ on 3 of 13 live rows, so merging them into one "who"
+  // column misreports the person on roughly a quarter of the board. This asserts
+  // they are carried separately by giving one row a filer the owner is not.
+  const ui = newUI();
+  const html = ui._renderTaskRow( {
+    id: "abcdef12-0000-0000-0000-000000000000",
+    title: "a row filed by someone other than its owner",
+    status: "queued",
+    owner_persona: "maria",
+    accountable_manager: "maria",
+    created_by: "mr radio 0e61abe3",
+    priority: "P2",
+    project: "lupin"
+  }, undefined );
+
+  assert.match( html, /<td class="task-col-filer">Mr Radio<\/td>/ );
+  assert.match( html, /<td class="task-col-accountable">maria<\/td>/,
+    "the accountable column must still carry the manager, not the filer" );
+} );
+
+test( "the Filed-by cell is escaped like every other store-sourced value", () => {
+  // The card writes via innerHTML, so an unescaped cell is an injection point.
+  const ui = newUI();
+  const html = ui._renderTaskRow(
+    { id: "x", title: "t", status: "queued", created_by: '<img src=x onerror=alert(1)> aaaaaaaa' },
+    undefined
+  );
+  assert.ok( !html.includes( "<img src=x" ), "the filer cell rendered raw HTML" );
+  // Case-INSENSITIVE deliberately: display-casing runs after escaping, so the
+  // shipped output is "&lt;Img". A case-sensitive /&lt;img/ fails here on code
+  // that is escaping correctly — which is what it did on first run.
+  assert.match( html, /&lt;img/i );
+  assert.ok( !html.includes( "onerror=alert(1)>" ), "the raw handler survived unescaped" );
+} );

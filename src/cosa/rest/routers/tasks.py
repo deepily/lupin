@@ -377,6 +377,7 @@ def _serialize_item( item, blocker_statuses=None ) -> dict:
 # mistake is a visible act in the diff rather than an omission nobody had to make.
 TERSE_DATA_FIELDS = frozenset( {
     "id", "title", "status", "blocked_by", "next_chase_ts", "priority", "project",
+    "created_by",
 } )
 
 TERSE_ADVISORY_FIELDS = frozenset( {
@@ -463,6 +464,17 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
         "next_chase_ts"     : item.next_chase_ts.isoformat() if item.next_chase_ts is not None else None,
         "priority"          : item.priority,
         "project"           : item.project,
+        # STORED DATA, not advisory. Rick asked by voice 2026-09-02 for the FILER's
+        # name on every board row, and specifically on the ones he was blocking, so
+        # he could follow up with a person rather than a row id. It was already on
+        # every row — populated on 13 of 13 live rows at the time — and invisible
+        # for exactly one reason: it was not in THIS projection, which is what the
+        # board reads. Rendering alone would have produced blanks.
+        #
+        # ⚠️ FILER IS NOT OWNER. They differ on 3 of 13 live rows (María's census,
+        # planning-is-prompting cdae439), so a UI that merges them into one "who"
+        # column reports the wrong person on a quarter of the board.
+        "created_by"        : item.created_by,
         # body_changed_ts, matching _serialize_item — see the note there (54924128).
         "park_reason_stale" : park_reason_is_stale( item.status, item.park_reason_captured_at, item.body_changed_ts ),
         "blocker_terminal"  : blocker_is_terminal( item.status, item.blocked_by, blocker_statuses or { } ),

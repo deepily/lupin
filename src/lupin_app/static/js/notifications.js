@@ -9490,12 +9490,59 @@ class NotificationsUI {
         return body == null || String( body ).trim() === "";
     }
 
+    _taskFilerLabel( task ) {
+        /**
+         * The PERSON who filed this row, from `created_by`, display-cased.
+         *
+         * Rick asked by voice 2026-09-02 for the filer on every board row —
+         * specifically on the ones he was blocking — so a row he wants chased
+         * names somebody rather than only an id.
+         *
+         * 🔴 DO NOT REACH FOR `created_by.split( " " )[ 0 ]`. The stored value is
+         * `<persona> <8-hex session>`, and a persona can be TWO WORDS: "mr radio"
+         * renders as "mr". Measured by María 2026-09-02 (planning-is-prompting
+         * cdae439): wrong on 6 of 13 live rows, and those six are exactly the ones
+         * Rick asked about — the naive implementation fails hardest precisely where
+         * the feature is for.
+         *
+         * ⇒ So this strips a TRAILING SESSION ID rather than keeping a leading word,
+         * and on a non-match returns the WHOLE string untouched. A truncated name is
+         * a WRONG name wearing a right one's clothes; an unexpected format shown in
+         * full is visibly odd and sends the reader to the row.
+         *
+         * Case is display-only. The store holds "Krishna" and "mr radio" both, so
+         * this normalises what the reader SEES without touching what is stored.
+         *
+         * Requires:
+         *     - task is a row object; created_by may be absent
+         *
+         * Ensures:
+         *     - "mr radio 0e61abe3"  -> "Mr Radio"
+         *     - "Krishna 420f5ec9"   -> "Krishna"
+         *     - no trailing session id -> the whole string, display-cased
+         *     - absent/blank -> "—"
+         *     - Pure: no DOM, no side effects
+         */
+        const raw = task && task.created_by ? String( task.created_by ).trim() : "";
+        if ( !raw ) return "—";
+
+        // Anchored at the END. A leading-word rule cannot express a two-word persona.
+        const stripped = raw.replace( /\s+[0-9a-f]{8}$/i, "" ).trim();
+
+        // A non-match leaves `stripped === raw`, which is the deliberate fall-through:
+        // render it whole rather than guess where the name stops.
+        return stripped.replace( /\b[a-z]/g, c => c.toUpperCase() );
+    }
+
     _renderTaskRow( task, ianaZone ) {
         /**
-         * Render a single task row (one <tr>) with TEN columns: ID · Title · Class ·
-         * Status · Blocked by · Next chase · Accountable · Priority · Project ·
-         * Detail. The owner_persona is the GROUP HEADER (not a per-row column), so a
-         * row never repeats its owner.
+         * Render a single task row (one <tr>) with ELEVEN columns: ID · Title ·
+         * Class · Status · Blocked by · Next chase · Accountable · Filed by ·
+         * Priority · Project · Detail. The owner_persona is the GROUP HEADER (not a
+         * per-row column), so a row never repeats its owner.
+         *
+         * ⚠️ FILED-BY IS NOT THE OWNER AND NOT THE ACCOUNTABLE MANAGER. All three
+         * can differ on one row; filer and owner differ on 3 of 13 live rows.
          *
          * Row redesign (design 2026.06.29, AUGMENT ruling): the NEW leftmost ID
          * column carries the 8-char id; the Title cell is truncated to ~60 chars +
@@ -9541,6 +9588,10 @@ class NotificationsUI {
         const accountable = this.escapeHtml( this._taskCellOrDash( task.accountable_manager ) );
         const priority    = this.escapeHtml( this._taskCellOrDash( task.priority ) );
         const project     = this.escapeHtml( this._taskCellOrDash( task.project ) );
+        // FILER, not owner. They differ on 3 of 13 live rows, so these are two
+        // columns and never one merged "who" — a merge misreports the person on
+        // roughly a quarter of the board.
+        const filer       = this.escapeHtml( this._taskFilerLabel( task ) );
 
         const detailCell  = this._taskBodyIsEmpty( task )
             ? `<span class="task-detail-emoji task-detail-empty" aria-disabled="true" title="No detail">📄</span>`
@@ -9563,6 +9614,7 @@ class NotificationsUI {
                 <td class="task-col-blocked">${blocked}</td>
                 <td class="task-col-chase">${chase}</td>
                 <td class="task-col-accountable">${accountable}</td>
+                <td class="task-col-filer">${filer}</td>
                 <td class="task-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
                 <td class="task-col-project">${project}</td>
                 <td class="task-col-detail">${detailCell}</td>
@@ -10217,9 +10269,10 @@ class NotificationsUI {
          * "owner · N" label) followed by that owner's task rows; the Unassigned group
          * renders last.
          *
-         * Ten columns: ID · Title · Class · Status · Blocked by · Next chase ·
-         * Accountable · Priority · Project · Detail (design 2026.06.29 row redesign:
-         * the leading ID column + trailing Detail 📄 column augment the original 8).
+         * Eleven columns: ID · Title · Class · Status · Blocked by · Next chase ·
+         * Accountable · Filed by · Priority · Project · Detail (design 2026.06.29 row
+         * redesign gave the leading ID + trailing Detail 📄; Filed by was added
+         * 2026-09-02 on Rick's voice request).
          *
          * Requires:
          *     - model is the { totalCount, groups } shape from groupTasksByOwner
@@ -10248,6 +10301,7 @@ class NotificationsUI {
                     <th class="task-col-blocked">Blocked by</th>
                     <th class="task-col-chase">Next chase</th>
                     <th class="task-col-accountable">Accountable</th>
+                    <th class="task-col-filer">Filed by</th>
                     <th class="task-col-priority">Priority</th>
                     <th class="task-col-project">Project</th>
                     <th class="task-col-detail">Detail</th>
@@ -10268,7 +10322,7 @@ class NotificationsUI {
 
             const groupHeaderHtml = `
                 <tr class="task-group-header${group.isUnassigned ? " task-group-unassigned" : ""}" role="button" tabindex="0" aria-expanded="${isCollapsed ? "false" : "true"}" aria-controls="${idSlug}">
-                    <td colspan="10">${chevron}${headerLabel}</td>
+                    <td colspan="11">${chevron}${headerLabel}</td>
                 </tr>`;
 
             const rows = group.tasks.map( t => this._renderTaskRow( t, ianaZone ) ).join( "" );
