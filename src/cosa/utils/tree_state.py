@@ -38,11 +38,33 @@ def _git_reader( repo_root ):
           (Rio's audit, 2026-08-26, measured with an injected reader). The caller's
           `except Exception` did contain it, but that net carries `pragma: no cover`,
           so the only thing holding it up was the one line nobody tests.
+        - CROSSES FILESYSTEM BOUNDARIES while discovering the repository, because in
+          the `:8000` test container it must. Every `e2e-*.log` artifact carried
+          `[tree-state] UNKNOWN — cannot read HEAD`, so no E2E result could be tied to
+          a sha at all. The cause is not git and not the repo: `docker-compose.yml`
+          bind-mounts `/var/lupin/src` and `/var/lupin/.git` as SEPARATE mounts, and
+          both callers hand this reader a path under `src/` — conftest passes
+          `/var/lupin/src`, the module entry point passes `/var/lupin/src/cosa/utils`.
+          Discovery walks up, reaches the `/var/lupin/src` mount root, and stops one
+          directory short of the `.git` it was looking for:
+          `fatal: not a git repository (or any parent up to mount point /var/lupin)
+          Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).`
+          Measured in `lupin-rest-test`, one variable: bare -> exit 128, with the flag
+          -> `c7f2e804`, `--show-toplevel` -> `/var/lupin`.
+        - DOES NOT WEAKEN THE WALK-UP HEDGE the module already carries. Crossing a
+          mount can in principle land on some OTHER repository — which is exactly the
+          case `root=` was added for (Rio's audit, 2026-08-26). The reader stays
+          permissive and the LINE stays honest: whatever it finds, it names.
     """
+    # Inherit the caller's environment so a hostile or unusual git config is still the
+    # one the run actually used; add the one variable, rather than building an env from
+    # scratch and silently changing what git reads.
+    env = { **os.environ, "GIT_DISCOVERY_ACROSS_FILESYSTEM" : "1" }
+
     def read( *args ):
         try:
             done = subprocess.run( [ "git", "-C", repo_root, *args ],
-                                   capture_output=True, text=True, timeout=5 )
+                                   capture_output=True, text=True, timeout=5, env=env )
         except ( OSError, subprocess.SubprocessError, UnicodeDecodeError, ValueError ):
             return None
         try:
