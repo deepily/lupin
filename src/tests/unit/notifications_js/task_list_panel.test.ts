@@ -71,6 +71,9 @@ type TaskUI = Record<string, unknown> & {
   _truncateTaskTitle: ( label: unknown ) => string;
   _taskBodyIsEmpty: ( task: unknown ) => boolean;
   _handleTaskListClick: ( target: unknown ) => void;
+  _handleRowControlClick: ( target: unknown ) => boolean;
+  _disclosureToggle: ( task: Record<string, unknown> ) => string;
+  _handleDisclosureToggle: ( button: unknown ) => void;
   openTaskBodyOverlay: ( bodyText: string, idLabel: string ) => void;
   _dismissTaskBodyOverlay: () => void;
   TASK_TITLE_TRUNCATE_LEN: number;
@@ -1871,4 +1874,142 @@ test( "the Filed-by cell is escaped like every other store-sourced value", () =>
   // that is escaping correctly — which is what it did on first run.
   assert.match( html, /&lt;img/i );
   assert.ok( !html.includes( "onerror=alert(1)>" ), "the raw handler survived unescaped" );
+} );
+
+// ═════════════ progressive disclosure — THE RENDERER'S OWN DECISION, and the CLICK PATH ═════════════
+//
+// 🔴 WHY THESE EXIST. Every disclosure test in the tree hand-wrote `hidden` into its
+// own fixture and then asserted `hidden` was there, so the renderer's decision —
+// collapsed or expanded — was supplied by the test rather than observed from the code.
+// And every one of them called `_handleDisclosureToggle` DIRECTLY, so the delegated
+// click path between the button and that handler had no coverage at all.
+//
+// Measured before these were written, six deliberate breaks against 253 tests in the
+// three panel files: task row always expanded → 1 red · epic row always expanded → 1 ·
+// toggle never opens → 2 · never closes → 2 · button lies about aria-expanded → 1 ·
+// ellipsis deleted → 5. Every red landed in holding_area_panel; these 161 tests caught
+// none of them. Two further breaks — DELETING the disclosure route from the click
+// delegation, and dropping its `return` so a disclosure click also toggles the accordion
+// — scored ZERO reds, which is how the dead epic-board controls stayed invisible.
+//
+// So: assert on what the RENDERER emits, and reach it the way an operator does, through
+// a real bubbling click on the wired container.
+
+function paneWithRealRows( ui: TaskUI, ...tasks: Record<string, unknown>[] ): HTMLElement {
+  document.body.replaceChildren();
+  const host = document.createElement( "div" );
+  host.id = "task-list-container";
+  document.body.appendChild( host );
+  ui._taskListAccordionWired = false;
+  ui._wireTaskListAccordion();
+  host.innerHTML = `<table id="task-list-table"><tbody>`
+                 + tasks.map( t => ui._renderTaskRow( t, undefined ) ).join( "" )
+                 + `</tbody></table>`;
+  return host;
+}
+
+function clickIt( el: Element | null ): void {
+  assert.ok( el, "the element to click was not rendered" );
+  el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+}
+
+test( "🔴 _renderTaskRow DECIDES collapsed: its own output carries hidden + aria-expanded=false", () => {
+  // The fixture supplies only the task. Everything asserted here is emitted by the
+  // renderer, so replacing it with a constant cannot leave this green.
+  const ui   = newUI();
+  const host = document.createElement( "table" );
+  host.innerHTML = `<tbody>${ui._renderTaskRow( T_ACTIVE, undefined )}</tbody>`;
+
+  const controls = host.querySelector( ".task-controls-row" ) as HTMLElement;
+  const toggle   = host.querySelector( ".task-disclose-button" ) as HTMLElement;
+  assert.ok( controls, "no controls row emitted at all" );
+  assert.equal( controls.hidden, true,
+    "the renderer shipped the controls EXPANDED — the wall of widgets Rick rejected" );
+  assert.ok( toggle, "no ellipsis emitted, so the controls can never be reached" );
+  assert.equal( toggle.tagName, "BUTTON", "the affordance is not focusable" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "false",
+    "the button announces itself OPEN while its controls are hidden" );
+  assert.equal( toggle.dataset.taskId, controls.dataset.controlsFor,
+    "the toggle and its controls row carry different ids — the toggle opens nothing" );
+} );
+
+test( "🔴 renderTaskListTable: EVERY row ships collapsed, not just the first one", () => {
+  // A per-row assertion cannot see a table path that expands some rows and not others.
+  const ui    = newUI();
+  const model = ui.groupTasksByOwner( [ T_BLOCKED, T_ACTIVE, T_QUEUED, T_ORPHAN ] );
+  const host  = document.createElement( "div" );
+  host.innerHTML = ui.renderTaskListTable( model, undefined, new Set<string>() );
+
+  const controls = Array.from( host.querySelectorAll( ".task-controls-row" ) ) as HTMLElement[];
+  const toggles  = Array.from( host.querySelectorAll( ".task-disclose-button" ) ) as HTMLElement[];
+  assert.equal( controls.length, 4, "one controls row per task row" );
+  assert.equal( toggles.length, 4, "one ellipsis per task row" );
+  assert.deepEqual( controls.map( c => c.hidden ), [ true, true, true, true ] );
+  assert.deepEqual( toggles.map( t => t.getAttribute( "aria-expanded" ) ),
+                    [ "false", "false", "false", "false" ] );
+} );
+
+test( "🔴 THROUGH THE CLICK PATH: a real click on the ellipsis discloses that row's controls", () => {
+  // Not _handleDisclosureToggle( button ). A bubbling MouseEvent at the rendered
+  // button, through the delegated listener the page actually installs — the gap where
+  // deleting the route scored zero reds.
+  const ui   = newUI();
+  const host = paneWithRealRows( ui, T_ACTIVE );
+  const controls = host.querySelector( ".task-controls-row" ) as HTMLElement;
+
+  assert.equal( controls.hidden, true, "precondition: the row starts collapsed" );
+  clickIt( host.querySelector( ".task-disclose-button" ) );
+  assert.equal( controls.hidden, false,
+    "the click never reached the disclosure — the ellipsis is a dead button" );
+  assert.equal( ( host.querySelector( ".task-disclose-button" ) as HTMLElement )
+                  .getAttribute( "aria-expanded" ), "true" );
+} );
+
+test( "🔴 THROUGH THE CLICK PATH: a second click collapses it again", () => {
+  const ui   = newUI();
+  const host = paneWithRealRows( ui, T_ACTIVE );
+  const controls = host.querySelector( ".task-controls-row" ) as HTMLElement;
+  const toggle   = host.querySelector( ".task-disclose-button" ) as HTMLElement;
+
+  clickIt( toggle );
+  clickIt( toggle );
+  assert.equal( controls.hidden, true, "the controls never collapsed again" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "false" );
+} );
+
+test( "🔴 THROUGH THE CLICK PATH: opening one row leaves its neighbours collapsed", () => {
+  const ui   = newUI();
+  const host = paneWithRealRows( ui, T_ACTIVE, T_QUEUED, T_BLOCKED );
+  const controls = Array.from( host.querySelectorAll( ".task-controls-row" ) ) as HTMLElement[];
+  const toggles  = Array.from( host.querySelectorAll( ".task-disclose-button" ) ) as HTMLElement[];
+
+  clickIt( toggles[ 1 ] );
+  assert.deepEqual( controls.map( c => c.hidden ), [ true, false, true ],
+    "the ellipsis opened the wrong row, or opened every row at once" );
+} );
+
+test( "🔴 a disclosure click is CONSUMED — it must not also toggle the owner accordion", () => {
+  // Dropping the `return` after the disclosure branch scored zero reds. One gesture
+  // would then open the row's controls and collapse the group they live in.
+  const ui = newUI();
+  let accordionFired = false;
+  ui._handleTaskAccordionToggle = (): void => { accordionFired = true; };
+  const host = paneWithRealRows( ui, T_ACTIVE );
+
+  clickIt( host.querySelector( ".task-disclose-button" ) );
+  assert.equal( accordionFired, false,
+    "the disclosure click fell through and also toggled the group it lives in" );
+} );
+
+test( "_handleRowControlClick reports whether it CONSUMED the click", () => {
+  // The boolean is the contract both panes route on; a dispatch that always returned
+  // false would swallow nothing and let every control click reach the accordion too.
+  const ui = newUI();
+  ui._handleDisclosureToggle = (): void => {};
+  const host = paneWithRealRows( ui, T_ACTIVE );
+
+  assert.equal( ui._handleRowControlClick( host.querySelector( ".task-disclose-button" ) ), true );
+  assert.equal( ui._handleRowControlClick( host.querySelector( ".task-drop-button" ) ), true );
+  assert.equal( ui._handleRowControlClick( host.querySelector( ".task-col-title" ) ), false,
+    "an ordinary cell click was swallowed as if it were a control" );
 } );
