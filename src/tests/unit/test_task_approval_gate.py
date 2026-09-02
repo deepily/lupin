@@ -414,3 +414,279 @@ def test_the_INI_string_is_read_as_a_boolean_both_ways( isolated, monkeypatch, t
     _write( isolated, approvers=[ "maria" ] )          # file exists, but says nothing about enforcement
     monkeypatch.setattr( approval, "_ini_value", lambda *a, **k: text )
     assert approval.get_enforcement_active() is expected
+
+
+# ---------------------------------------------------------------------------
+# PHASE 4 — NEW TICKETS START IN THE HOLDING AREA
+#
+# The writer, landed LAST on purpose. Ship it before the reader and every create
+# fleet-wide falls into a bin nobody can open — 072ef7e/d4f6c29 in a different
+# costume, and that one cost this fleet two days.
+# ---------------------------------------------------------------------------
+
+def test_the_default_mint_status_is_queued_until_somebody_turns_it_on( isolated ):
+    """
+    Today's behaviour, unchanged, and it is the arm that must hold on an ABSENT
+    config: an unreadable settings file must not silently start burying every
+    seat's filed work behind a human.
+    """
+    assert not isolated.exists()
+    assert approval.default_mint_status() == "queued"
+
+
+def test_the_flag_actually_moves_the_default_both_ways( isolated ):
+    """
+    Both arms, one variable. A getter stuck on either constant satisfies one arm
+    alone — and the OFF arm is the one that proves the flip is real rather than the
+    module simply never having read the file.
+    """
+    _write( isolated, default_to_holding=True )
+    assert approval.default_mint_status() == "not_approved"
+    _write( isolated, default_to_holding=False )
+    assert approval.default_mint_status() == "queued"
+
+
+def test_the_holding_area_status_is_mintable_but_parked_is_not():
+    """
+    `not_approved` joins the mint whitelist; `parked` deliberately does not, and the
+    contrast is the point. Parking is a human ruling EXISTING work not-now, so it
+    needs a park_reason quoting a row that already exists. A holding-area row has no
+    history to quote — being unexamined is its whole content, and it is the state a
+    row is BORN in rather than one it is moved to.
+    """
+    from cosa.rest import task_store_rules as rules
+    assert rules.validate_create_status( "not_approved", None, None ) == [ ]
+    assert rules.validate_create_status( "parked",       None, None ) != [ ]
+    assert rules.validate_create_status( "done",         None, None ) != [ ]
+
+
+def test_an_unreadable_config_leaves_the_default_at_queued( isolated, monkeypatch ):
+    """
+    The safe direction, asserted rather than assumed. This runs on every create, so
+    a raise here 500s the whole write path — and a config failure that silently
+    turned the holding area ON would be the worst possible way to learn about it.
+    """
+    def _boom( *args, **kwargs ): raise RuntimeError( "config is unavailable" )
+    monkeypatch.setattr( approval, "ConfigurationManager", _boom )
+    assert not isolated.exists()
+    assert approval.default_mint_status() == "queued"
+
+
+@pytest.mark.parametrize( "text,expected",
+    [ ( "True", "not_approved" ), ( "on", "not_approved" ), ( "1", "not_approved" ),
+      ( "False", "queued" ), ( "banana", "queued" ), ( "", "queued" ) ] )
+def test_the_INI_string_drives_the_default_both_ways( isolated, monkeypatch, text, expected ):
+    """
+    The INI arm, reached only when the override file names no `default_to_holding`.
+    `banana` is the arm proving this is a membership test and not truthiness on a
+    non-empty string.
+    """
+    _write( isolated, approvers=[ "maria" ] )
+    monkeypatch.setattr( approval, "_ini_value", lambda *a, **k: text )
+    assert approval.default_mint_status() == expected
+
+
+def test_an_EXPLICIT_status_is_distinguishable_from_an_omitted_one():
+    """
+    🔴 THE MECHANISM THE WHOLE PHASE-4 SUBSTITUTION RESTS ON.
+
+    An explicit `status="queued"` and an omitted `status` both arrive at the router
+    as the string `"queued"` — the field default makes them identical by value. So
+    without `model_fields_set` there is no way to honour a caller who deliberately
+    asked for a queued mint: they would be silently redirected into the holding area
+    with no way to say what they meant.
+
+    Asserted on the Pydantic model itself rather than through the endpoint, because
+    this is a property of the model and the router only consumes it. If a future
+    Pydantic upgrade changes `model_fields_set`, this reddens HERE, naming the cause,
+    instead of the substitution quietly starting to override explicit callers.
+    """
+    from cosa.rest.routers.tasks import TaskCreateIn
+
+    common = { "item_class": "task", "title": "t", "created_by": "mr radio dde22022",
+               "project": "lupin" }
+
+    omitted  = TaskCreateIn( **common )
+    explicit = TaskCreateIn( **common, status="queued" )
+
+    # Identical by VALUE — which is exactly why value cannot be the discriminator.
+    assert omitted.status == explicit.status == "queued"
+
+    # ...and distinguishable by INTENT, which is what the router reads.
+    assert "status" not in omitted.model_fields_set
+    assert "status"     in explicit.model_fields_set
+
+
+def test_the_router_substitutes_only_on_an_omitted_status( monkeypatch ):
+    """
+    The substitution itself, exercised the way the router does it, with the flag ON
+    so a `"queued"` result can only come from the explicit-intent branch.
+
+    The negative arm is the load-bearing one: without it, a router that ALWAYS
+    substituted would pass the positive arm perfectly.
+    """
+    from cosa.rest.routers.tasks import TaskCreateIn
+    monkeypatch.setattr( approval, "default_mint_status", lambda: "not_approved" )
+
+    common = { "item_class": "task", "title": "t", "created_by": "mr radio dde22022",
+               "project": "lupin" }
+
+    def _mint( payload ):
+        # the router's two lines, verbatim in shape
+        return ( approval.default_mint_status()
+                 if "status" not in payload.model_fields_set else payload.status )
+
+    assert _mint( TaskCreateIn( **common ) )                    == "not_approved"
+    assert _mint( TaskCreateIn( **common, status="queued" ) )   == "queued"
+    assert _mint( TaskCreateIn( **common, status="blocked" ) )  == "blocked"
+
+
+# ---------------------------------------------------------------------------
+# THE CONFIG KEYS ARE REACHABLE — the twin of a defect María found in her lane
+#
+# 🔴 EVERY OTHER TEST IN THIS FILE EITHER WRITES THE OVERRIDE FILE OR MONKEYPATCHES
+# `_ini_value`. So none of them ever reads `lupin-app.ini`, and a typo in a key name
+# — in the module OR in the INI — is INVISIBLE to all of them: `_ini_value` swallows
+# the miss, returns the fallback, and the suite stays green while the operator's
+# configured value is silently ignored.
+#
+# That is the same shape as the defect María measured on the client side the same
+# day: 34 tests reading `notifications.js` as TEXT all passed while a stray brace
+# would have stopped the browser parsing it at all. A suite can be entirely green
+# about a config nothing loads, exactly as it can be about an app that does not start.
+#
+# ⚠️ These assert the key RESOLVES, never what it resolves TO. The values are an
+# operator's to change without breaking a test — pinning them here would convert
+# Rick's runtime switches back into things that need a code edit, which is the
+# defect this whole module exists to remove.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "key_attr", [ "INI_KEY_APPROVERS", "INI_KEY_ENFORCEMENT", "INI_KEY_DEFAULT_TO_HOLDING" ] )
+def test_each_INI_key_this_module_names_actually_exists_in_the_config( key_attr ):
+    """
+    Reads the REAL config through the REAL ConfigurationManager — the one path no
+    other test in this file takes.
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+
+    key   = getattr( approval, key_attr )
+    value = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get( key, return_type="string" )
+    assert value is not None, (
+        f"{key_attr} names {key!r}, which the config does not resolve. `_ini_value` "
+        f"swallows this and returns the fallback, so the operator's configured value "
+        f"is ignored with nothing failing anywhere."
+    )
+
+
+def test_the_config_probe_can_actually_fail():
+    """
+    THE POSITIVE CONTROL ON THE TEST ABOVE, and it is not decoration: without it, a
+    ConfigurationManager that returned a non-None value for EVERY key — including
+    ones that do not exist — would pass the parametrized test three times over and
+    prove nothing at all.
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+
+    absent = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ).get(
+        "task approval a key that deliberately does not exist", return_type="string"
+    )
+    assert absent is None, (
+        "the config manager answered a key that does not exist — the test above "
+        "cannot distinguish a present key from an absent one and proves nothing"
+    )
+
+
+# ---------------------------------------------------------------------------
+# THE HOLDING AREA IS SELF-EXPIRING
+#
+# 🔨 RICK RULED 2026-09-02, by voice: `not_approved` expires "like a chase on a
+# parked row." Same mechanism — computed at READ time, never written back, no
+# daemon and no sweeper. A sweeper that stops running leaves rows buried forever,
+# silently; a predicate that stops running returns nothing at all, loudly.
+# ---------------------------------------------------------------------------
+
+from datetime import datetime, timedelta, timezone
+
+
+@pytest.fixture
+def clock():
+    return datetime.now( timezone.utc )
+
+
+def _iso( now, **delta ):
+    return ( now + timedelta( **delta ) ).isoformat()
+
+
+def test_a_holding_row_hides_while_its_chase_is_in_the_future( clock ):
+    """The silence the chase buys, and the only arm that returns True."""
+    from cosa.rest.task_store_owed import holding_is_active
+    assert holding_is_active( "not_approved", _iso( clock, hours=4 ), clock ) is True
+
+
+def test_an_EXPIRED_holding_row_stops_hiding_itself( clock ):
+    """
+    THE RULING, and the arm the whole feature exists for. Without it the holding
+    area fills from both ends — new tickets in, demotions back — and nothing ever
+    forces anyone to look at it.
+    """
+    from cosa.rest.task_store_owed import holding_is_active
+    assert holding_is_active( "not_approved", _iso( clock, hours=-4 ), clock ) is False
+
+
+def test_a_chase_nobody_can_read_surfaces_the_row_rather_than_hiding_it( clock ):
+    """
+    FAIL-LOUD-TOWARD-VISIBLE. A row must never hide indefinitely on the strength of
+    a field nobody can parse — that is a permanent silence bought by a typo.
+    """
+    from cosa.rest.task_store_owed import holding_is_active
+    for junk in ( None, "", "not-a-date", 42, [ ] ):
+        assert holding_is_active( "not_approved", junk, clock ) is False, f"{junk!r} bought silence"
+
+
+def test_the_chase_arithmetic_never_touches_a_row_of_another_status( clock ):
+    """
+    Status is checked FIRST. A `parked` row with a live chase must not be reported
+    as an active HOLDING row — the two predicates answer about different statuses
+    and must not overlap, or a parked row would hide twice for one reason.
+    """
+    from cosa.rest.task_store_owed import holding_is_active
+    for status in ( "queued", "in_progress", "blocked", "parked", "review", "done", "wont_fix" ):
+        assert holding_is_active( status, _iso( clock, hours=4 ), clock ) is False
+
+
+def test_the_boundary_matches_parked_EXACTLY_rather_than_by_coincidence( clock ):
+    """
+    Rick said "like a chase on a parked row", so `chase == now` must resolve the same
+    way in both. Asserted as an EQUALITY between the two predicates rather than as a
+    literal False: if the parked boundary is ever re-cut, this reddens instead of the
+    two silently drifting apart.
+    """
+    from cosa.rest.task_store_owed import holding_is_active, park_is_active
+    at_now = clock.isoformat()
+    assert holding_is_active( "not_approved", at_now, clock ) == park_is_active( "parked", at_now, clock )
+
+
+def test_the_python_predicate_and_its_SQL_twin_agree( clock ):
+    """
+    🔴 THE DIVERGENCE THIS MODULE'S LAYOUT EXISTS TO CATCH. Two implementations of one
+    rule, each individually plausible; only their disagreement is wrong, and nothing
+    in either one's output would reveal it.
+
+    Compared as compiled SQL against the parked twin's, since both must have the same
+    SHAPE — a NULL guard, a status test and a `>` comparison. The `isnot( None )` is
+    load-bearing in SQL and NOT redundant: a comparison against NULL yields NULL
+    rather than False, so without it a chase-less row would be neither in the set nor
+    out of it. The Python side reaches the same verdict by a different mechanism,
+    which is exactly why both need testing.
+    """
+    from cosa.rest.task_store_owed import holding_is_active_clause, park_is_active_clause
+    from cosa.rest.postgres_models import TaskItem
+
+    holding = str( holding_is_active_clause( TaskItem, clock ) )
+    parked  = str( park_is_active_clause(  TaskItem, clock ) )
+
+    assert "IS NOT NULL" in holding, "the NULL guard is missing — a chase-less row would be neither in nor out"
+    assert "next_chase_ts >" in holding
+    # Same shape as the predicate it was modelled on: a reader comparing them should
+    # find nothing to compare but the status constant.
+    assert holding.replace( "status_1", "S" ) == parked.replace( "status_1", "S" )

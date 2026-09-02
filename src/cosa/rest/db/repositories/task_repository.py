@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Optional, List
 import uuid
 
-from sqlalchemy import func, select, cast, String
+from sqlalchemy import func, select, cast, String, and_, or_
 from sqlalchemy.orm import Session
 
 from cosa.rest.postgres_models import TaskItem, TaskEvent
@@ -56,7 +56,13 @@ from cosa.rest.task_store_rules import (
 # COUNT(*) seam / the :8001 arbiter), so applying the clause HERE is what makes
 # "three readers, one definition" true rather than aspirational. NEVER re-derive
 # park-expiry locally — import it. Design: src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md
-from cosa.rest.task_store_owed import PARK_STATUS, owed_clause, owed_status_clause
+from cosa.rest.task_store_owed import (
+    NOT_APPROVED_STATUS,
+    PARK_STATUS,
+    holding_is_active_clause,
+    owed_clause,
+    owed_status_clause,
+)
 
 
 class TaskRepository( BaseRepository[TaskItem] ):
@@ -1008,9 +1014,16 @@ class TaskRepository( BaseRepository[TaskItem] ):
               terminal-exclusion default EXACTLY when both are False
             - never mutates the caller's query in place
         """
+        # HOISTED out of the owed/park branch (2026-09-02). It used to be defaulted
+        # only inside that branch, which was correct while `now` was read there and
+        # nowhere else. The holding-area chase made the terminal-exclusion default
+        # read it too, on a path the branch never covers — so a plain un-statused
+        # query arrived with now=None and raised. Defaulting once, up front, is what
+        # makes "read time" mean the same thing on every path through this function.
+        if now is None:
+            now = datetime.now( timezone.utc )
+
         if owed_only or ( hide_parked and status != PARK_STATUS ):
-            if now is None:
-                now = datetime.now( timezone.utc )
             if owed_only and status is None:
                 # owed_status_clause is the CANONICAL one-call admission:
                 # queued U in_progress U (parked AND NOT park-active). Composing
@@ -1023,13 +1036,33 @@ class TaskRepository( BaseRepository[TaskItem] ):
             # rows — correct here precisely because these callers already select
             # the parked status themselves (all-non-terminal / explicit filter).
             if not include_terminal and status is None:
-                query = query.filter( TaskItem.status.notin_( BOARD_INVISIBLE_STATUSES ) )
+                query = query.filter( or_(
+                TaskItem.status.notin_( BOARD_INVISIBLE_STATUSES ),
+                # 🔨 Rick 2026-09-02: the holding area is SELF-EXPIRING. A
+                # `not_approved` row hides only while its triage chase is still
+                # in the future; once it comes due the row stops hiding itself,
+                # which is the whole point of the chase. Terminal rows have no
+                # chase and are unaffected — this widens the visible set for one
+                # status only.
+                and_( TaskItem.status == NOT_APPROVED_STATUS,
+                      ~holding_is_active_clause( TaskItem, now ) ),
+            ) )
             return query.filter( owed_clause( TaskItem, now ) )
         # Terminal-exclusion default: an un-status'd query drops done/dropped unless
         # the caller opts in via include_terminal. An explicit `status` filter (incl.
         # status=done/dropped) governs on its own — no double-filtering.
         if not include_terminal and status is None:
-            query = query.filter( TaskItem.status.notin_( BOARD_INVISIBLE_STATUSES ) )
+            query = query.filter( or_(
+                TaskItem.status.notin_( BOARD_INVISIBLE_STATUSES ),
+                # 🔨 Rick 2026-09-02: the holding area is SELF-EXPIRING. A
+                # `not_approved` row hides only while its triage chase is still
+                # in the future; once it comes due the row stops hiding itself,
+                # which is the whole point of the chase. Terminal rows have no
+                # chase and are unaffected — this widens the visible set for one
+                # status only.
+                and_( TaskItem.status == NOT_APPROVED_STATUS,
+                      ~holding_is_active_clause( TaskItem, now ) ),
+            ) )
         return query
 
     def count_tasks_by_status(

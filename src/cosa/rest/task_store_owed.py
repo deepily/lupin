@@ -202,6 +202,8 @@ assert NOT_APPROVED_STATUS not in TERMINAL_STATUSES, (
 
 __all__ = [
     "PARK_STATUS",
+    "NOT_APPROVED_STATUS",
+    "holding_is_active",
     "PARK_LEGAL_FROM_STATUSES",
     "OWED_BASE_STATUSES",
     "is_park_legal_from",
@@ -459,6 +461,65 @@ def park_reason_is_stale( status, park_reason_captured_at, body_changed_ts ) -> 
 #
 # Self-contained BY DESIGN. Does not call twin (a); shares no helper with it.
 
+def holding_is_active( status, next_chase_ts, now ) -> bool:
+    """
+    True iff the row is in the holding area AND its triage chase has NOT come due.
+
+    🔨 RICK RULED 2026-09-02, by voice: `not_approved` is self-expiring, "like a chase
+    on a parked row." Same mechanism, deliberately — expiry computed at READ time,
+    never written back, no daemon and no sweeper. A sweeper that stops running leaves
+    rows buried forever, silently; a predicate that stops running returns nothing at
+    all, loudly.
+
+    🔴 EXPIRY MAKES A ROW VISIBLE, NOT OWED — AND THAT IS NOT A SOFTENING OF THE
+    RULING. A parked row REJOINS the owed count because it provably CAME from
+    queued/in_progress; that subset relation is what makes re-admission a
+    RESTORATION rather than a widening, and it is asserted at import in this module.
+    A `not_approved` row was NEVER owed by anyone — it has not been admitted to a
+    board. Re-admitting it to the owed set would poke every seat about work nobody
+    approved, which is precisely what the import-time assert below forbids.
+
+    ⇒ So the chase does the job the ruling asks of it by returning the row to the
+    BOARD, where a human sees an untriaged pile that stopped hiding itself. The
+    thing that must not be silent is the row, not the fleet's pokes.
+
+    Requires:
+        - status is a status string
+        - next_chase_ts is an ISO-8601 string, a datetime, or None
+        - now is a datetime (naive treated as UTC)
+
+    Ensures:
+        - non-holding status                      -> False (checked FIRST, so the
+          chase arithmetic never touches an unrelated row)
+        - holding AND next_chase_ts >  now        -> True  (still awaiting triage)
+        - holding AND next_chase_ts == now        -> False (the boundary: the chase
+          has come due, matching park_is_active exactly rather than by coincidence)
+        - holding AND next_chase_ts <  now        -> False (EXPIRED — becomes visible)
+        - holding AND next_chase_ts None/unparsed -> False (fail-loud-toward-VISIBLE:
+          a row whose chase cannot be read must surface, never hide indefinitely on
+          the strength of a field nobody can parse)
+        - never raises
+    """
+    if status != NOT_APPROVED_STATUS:
+        return False
+
+    if isinstance( next_chase_ts, datetime ):
+        chase_ts = next_chase_ts
+    elif isinstance( next_chase_ts, str ):
+        try:
+            chase_ts = datetime.fromisoformat( next_chase_ts.strip().replace( "Z", "+00:00" ) )
+        except ValueError:
+            return False
+    else:
+        return False
+
+    if chase_ts.tzinfo is None:
+        chase_ts = chase_ts.replace( tzinfo=timezone.utc )
+    comparison_now = now.replace( tzinfo=timezone.utc ) if now.tzinfo is None else now
+
+    return chase_ts > comparison_now
+
+
 def park_is_active_clause( model, now ):
     """
     The SQL twin of `park_is_active`: a SQLAlchemy boolean expression true for
@@ -485,6 +546,44 @@ def park_is_active_clause( model, now ):
 
     return and_(
         model.status == PARK_STATUS,
+        model.next_chase_ts.isnot( None ),
+        model.next_chase_ts > comparison_now,
+    )
+
+
+def holding_is_active_clause( model, now ):
+    """
+    The SQLAlchemy twin of `holding_is_active` — the two MUST agree.
+
+    Kept beside `park_is_active_clause` and shaped identically on purpose: the two
+    predicates answer the same question about two different statuses, and a reader
+    comparing them should find nothing to compare. A divergence between a Python
+    predicate and its SQL twin is the defect this module's whole layout exists to
+    make visible, since each is individually plausible and only their disagreement
+    is wrong.
+
+    ⚠️ `isnot( None )` is load-bearing and is NOT redundant beside the `>` comparison:
+    in SQL a comparison against NULL yields NULL, not False, so without it a row with
+    no chase would be neither in the set nor out of it. The Python twin reaches the
+    same answer through its `else: return False` branch — same verdict, different
+    mechanism, which is exactly why both need testing rather than one being derived
+    from the other.
+
+    Requires:
+        - model is the TaskItem class (or a mapped alias)
+        - now is a datetime (naive treated as UTC)
+
+    Ensures:
+        - returns a SQLAlchemy boolean expression, never a Python bool
+        - True for a holding-area row whose chase is still in the future
+        - False for an expired, absent or unparseable chase — the row surfaces
+    """
+    from sqlalchemy import and_
+
+    comparison_now = now.replace( tzinfo=timezone.utc ) if now.tzinfo is None else now
+
+    return and_(
+        model.status == NOT_APPROVED_STATUS,
         model.next_chase_ts.isnot( None ),
         model.next_chase_ts > comparison_now,
     )

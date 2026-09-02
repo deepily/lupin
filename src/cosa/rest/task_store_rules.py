@@ -871,7 +871,18 @@ def compose_drop_marker( dropped, existing_reason=None ) -> Optional[str]:
 # needs park_reason + captured_at and is legal ONLY from queued/in_progress (a
 # human ruling EXISTING work not-now), never at mint. `claimed`/`in_progress`/
 # `review` are transition-only lifecycle states, not mintable.
-CREATE_ALLOWED_STATUSES = ( "queued", "blocked" )
+CREATE_ALLOWED_STATUSES = ( "queued", "blocked", "not_approved" )
+
+# 🔴 `not_approved` JOINED THE MINT WHITELIST FOR PHASE 4 (Rick's P0, 2026-09-02) AND
+# THE ORDER MATTERED. It is the LAST thing to land, after the holding-area view that
+# reads it — this fleet's own rule, learned from 072ef7e/d4f6c29 landing an instruction
+# for a file no code created, which cost two days. Ship the mint before the reader and
+# every submission fleet-wide falls into a bin nobody can open.
+#
+# It is mintable where `parked` is not, and the difference is not arbitrary: parking is
+# a HUMAN ruling EXISTING work not-now, so it needs a park_reason quoting a row that
+# already exists. A holding-area row has no history to quote — being unexamined is its
+# whole content, and it is the state a row is BORN in, not one it is moved to.
 
 def validate_create( item_class: str, gate_class: str, priority: str, authority: str,
                      urgency: str = "normal" ) -> list:

@@ -758,7 +758,23 @@ def create_task(
     # is the value written. A queued mint carries neither field — validate_create_status
     # ignores them, and the repository forces []/None for a non-blocked mint.
     blocked_by = _canon_blocked_by( payload.blocked_by )
-    _reject_if_errors( rules.validate_create_status( payload.status, blocked_by, payload.next_chase_ts ) )
+    # ── PHASE 4: NEW TICKETS START IN THE HOLDING AREA (Rick's P0, 2026-09-02) ──
+    #
+    # Substituted here rather than as a Pydantic field default, because a field
+    # default is evaluated at IMPORT: the flag would freeze at boot and an operator's
+    # flip would need a restart. That is the exact asymmetry Rick objected to in the
+    # ratio gate — the dials he could turn were the ones that changed nothing.
+    #
+    # ONLY when the caller did not name a status. `model_fields_set` is what makes
+    # that distinguishable: an explicit `status="queued"` and an omitted one both
+    # arrive as the string "queued", so without this a caller who deliberately asked
+    # for a queued mint would be silently overridden — and would have no way to say
+    # what they meant. Explicit intent always wins over a default.
+    mint_status = payload.status
+    if "status" not in payload.model_fields_set:
+        mint_status = approval.default_mint_status()
+
+    _reject_if_errors( rules.validate_create_status( mint_status, blocked_by, payload.next_chase_ts ) )
 
     # Manager-only guard for a blocked MINT — scoped ENTIRELY to status=="blocked"
     # (G2): the queued default path never parses created_by, so existing queued
@@ -768,7 +784,12 @@ def create_task(
     # is_manager_figure (G1), fail-CLOSED: a caller whose manager-hood cannot be
     # established (predicate False OR no parseable session id) is REJECTED with 403
     # (authenticated but not authorized — distinct from the 422 validation lane).
-    if payload.status == "blocked":
+    # `mint_status`, not `payload.status` — the two are equivalent TODAY (the
+    # holding-area default never yields "blocked"), and reading the substituted
+    # value is what keeps them equivalent. A future default that could mint blocked
+    # would otherwise route around this guard silently; reading mint_status makes it
+    # refuse instead, which is the safe direction for an authorization check.
+    if mint_status == "blocked":
         session_id = rules.session_id_from_created_by( payload.created_by )
         if session_id is None or not is_manager_figure( session_id ):
             raise HTTPException(
@@ -884,7 +905,7 @@ def create_task(
             gate_class          = payload.gate_class,
             priority            = payload.priority,
             urgency             = payload.urgency,
-            status              = payload.status,
+            status              = mint_status,
             blocked_by          = blocked_by,
             next_chase_ts       = payload.next_chase_ts,
             source_qid          = payload.source_qid,

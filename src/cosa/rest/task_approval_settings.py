@@ -71,7 +71,7 @@ FALLBACK_ENFORCEMENT_ACTIVE = False
 UNCONDITIONAL_APPROVERS = ( "rick", )
 
 # mtime-guarded cache: a read is a stat, not a parse.
-_cache       = { "approvers": None, "enforcement_active": None }
+_cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None }
 _cache_mtime = None
 
 
@@ -112,7 +112,7 @@ def _read_overrides():
         mtime = os.path.getmtime( path )
     except OSError:
         _cache_mtime = None
-        _cache       = { "approvers": None, "enforcement_active": None }
+        _cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None }
         return _cache
 
     if mtime == _cache_mtime:
@@ -126,11 +126,12 @@ def _read_overrides():
         _cache = {
             "approvers"          : body.get( "approvers" ),
             "enforcement_active" : body.get( "enforcement_active" ),
+            "default_to_holding" : body.get( "default_to_holding" ),
         }
         _cache_mtime = mtime
     except Exception as error:
         print( f"[task-approval] override file {path} unusable ({error}) — falling back to config" )
-        _cache       = { "approvers": None, "enforcement_active": None }
+        _cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None }
         _cache_mtime = mtime
 
     return _cache
@@ -279,3 +280,39 @@ def refusal_for_admission( from_status, to_status, actor ):
         f"{sorted( get_approvers() )}. The list is configuration, not code: edit "
         f"`{INI_KEY_APPROVERS}`, or the override file at {override_path()}."
     )
+
+
+INI_KEY_DEFAULT_TO_HOLDING = "task approval new tickets start in holding area"
+
+# ⚠️ FALLBACK IS False, AND THIS ONE IS THE MOST CONSEQUENTIAL FALSE IN THE MODULE.
+# Turning it on redirects EVERY create fleet-wide into a queue somebody must work
+# through by hand. That is a policy Rick turns on when he has watched the holding
+# area work, not a default a deploy imposes on him — and the failure directions are
+# not symmetric: wrong-ON silently buries every seat's filed work behind a human,
+# wrong-OFF just leaves today's behaviour in place, visibly.
+FALLBACK_DEFAULT_TO_HOLDING = False
+
+
+def default_mint_status():
+    """
+    The status a create mints when the caller did not ask for one.
+
+    WHY A FUNCTION AND NOT A FIELD DEFAULT. A Pydantic `Field( default=... )` is
+    evaluated at import, so the flag would be frozen at boot and an operator's flip
+    would need a restart — the exact asymmetry Rick objected to in the ratio gate,
+    where the dials he could turn were the ones that changed nothing. Read at CALL
+    time, a flip lands on the next request.
+
+    Ensures:
+        - returns "not_approved" when the holding-area default is ON
+        - otherwise returns "queued" — today's behaviour, unchanged
+        - never raises; an unreadable config yields "queued"
+    """
+    raw = _read_overrides()[ "default_to_holding" ]
+    if raw is None:
+        raw = _ini_value( INI_KEY_DEFAULT_TO_HOLDING, "string", None )
+        if raw is None: on = FALLBACK_DEFAULT_TO_HOLDING
+        else:           on = str( raw ).strip().lower() in ( "true", "1", "yes", "on" )
+    else:
+        on = bool( raw )
+    return NOT_APPROVED_STATUS if on else "queued"

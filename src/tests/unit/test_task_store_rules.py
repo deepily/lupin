@@ -1219,8 +1219,19 @@ def test_known_persona_keys_overflow_empty_key_skipped( monkeypatch ):
 # validate_create_status · validate_blocked_fields (shared) · session_id_from_created_by
 # ---------------------------------------------------------------------------
 
-def test_create_allowed_statuses_are_exactly_queued_and_blocked():
-    assert rules.CREATE_ALLOWED_STATUSES == ( "queued", "blocked" )
+def test_create_allowed_statuses_are_exactly_queued_blocked_and_not_approved():
+    """
+    🔨 `not_approved` joined the mint whitelist 2026-09-02 on Rick's P0 (row 8af64f5a):
+    a create may now mint straight into the holding area.
+
+    ⚠️ THE PIN IS THE POINT — do not relax this to a membership check. It is an
+    EXACT-EQUALITY assertion so that widening the set is a deliberate act that
+    reddens here and gets read, rather than a status quietly acquiring the right to
+    be minted. `parked` is the case it guards: parking is a human ruling EXISTING
+    work not-now and needs a reason quoting a row that already exists, so it must
+    never become mintable — and nothing but this line says so.
+    """
+    assert rules.CREATE_ALLOWED_STATUSES == ( "queued", "blocked", "not_approved" )
 
 
 def test_validate_create_status_queued_ignores_blocked_fields():
