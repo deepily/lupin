@@ -26,6 +26,8 @@ cannot, so that proof runs on every unit-suite pass — not once, at authoring t
 """
 
 import json
+import os
+import re
 import subprocess
 
 from pathlib import Path
@@ -35,6 +37,7 @@ import pytest
 import cosa.utils.util as cu
 from cosa.repo.gate_reachability import (
     EXCLUDED_PATH_PARTS,
+    SUITE_SCRIPTS_SOURCE,
     find_gate_targets,
     find_stale_allowlist_entries,
     find_test_file_population,
@@ -201,6 +204,11 @@ def _build_synthetic_tree( root: Path ):
         '    "unit" : "src/tests/run-unit-tests.sh",\n'
         '    "all"  : "src/tests/run-all-tests.sh",\n'
         '    "gone" : "src/tests/run-missing.sh",\n'
+        # 🔴 A DIGIT IN THE KEY. Every key here used to be lowercase-only, so the fixture
+        # could not tell a `[a-z_]+` key class from a correct one — the assertions were
+        # right and blind. The real literal carries `e2e` and `v2_eval`, and the narrow
+        # class dropped both.
+        '    "e2e"  : "src/tests/run-e2e-tests.sh",\n'
         "}\n"
     )
 
@@ -230,7 +238,34 @@ def test_read_suite_scripts_extracts_only_shell_values( tmp_path ):
         "src/tests/run-unit-tests.sh",
         "src/tests/run-all-tests.sh",
         "src/tests/run-missing.sh",
+        "src/tests/run-e2e-tests.sh",
     }
+
+
+def test_every_shell_entry_of_the_real_literal_is_extracted():
+    """
+    THE ARM THAT CANNOT GO BLIND ON A FIXTURE. The synthetic tree above is written by this
+    file, so it only ever contains keys somebody here thought to write — which is how a
+    `[a-z_]+` key class survived: every synthetic key was lowercase, and the assertions
+    were correct and unfalsifiable.
+
+    This counts the REAL literal instead. Measured 2026-09-01 before the fix: 13 `.sh`
+    entries present, 11 returned, `e2e` and `v2_eval` dropped for carrying a digit, with
+    nothing in the output saying any were missing.
+
+    ⚠️ The e2e loss was MASKED and that is why it lasted: `find_gate_targets` follows `.sh`
+    references and `run-all-tests.sh` names the e2e runner, so `src/tests/e2e_ui` reached
+    the target set by a second route. The masking holds only while some other seeded runner
+    happens to name the dropped one, which is not a property anybody chose.
+    """
+    root    = Path( os.environ[ "LUPIN_ROOT" ] )
+    source  = ( root / SUITE_SCRIPTS_SOURCE ).read_text( encoding="utf-8" )
+    present = re.findall( r'^\s*"[^"]+"\s*:\s*"(src/[^"]+\.sh)"', source, re.M )
+
+    assert present, "positive control: the literal must hold some .sh entries at all"
+    assert set( present ) == read_suite_scripts( root ), (
+        "every .sh value in the literal must be extracted; missing "
+        f"{sorted( set( present ) - read_suite_scripts( root ) )}" )
 
 
 def test_read_suite_scripts_raises_when_source_absent( tmp_path ):

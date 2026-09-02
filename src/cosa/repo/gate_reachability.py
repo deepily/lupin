@@ -76,7 +76,22 @@ SUITE_SCRIPTS_SOURCE = "src/cosa/agents/test_suite/job.py"
 _PATH_TOKEN_RE = re.compile( r"src/[A-Za-z0-9_./-]+(?![A-Za-z0-9_./*-])" )
 
 # Matches one `"key" : "src/....sh"` entry of the SUITE_SCRIPTS dict literal.
-_SUITE_SCRIPT_RE = re.compile( r"^\s*\"[a-z_]+\"\s*:\s*\"(src/[^\"]+\.sh)\"" )
+#
+# 🔴 THE KEY CLASS CARRIES DIGITS, AND OMITTING THEM DROPPED TWO SUITES SILENTLY.
+# It read `[a-z_]+`, which matches neither `e2e` nor `v2_eval` — so of the 13 `.sh`
+# entries in the literal this returned 11, with nothing in the output saying which two
+# were missing or that any were. Measured 2026-09-01; generalised from the same defect
+# one field over, where `grep -o 'run-span=[a-z-]*'` truncated a sha at its first digit
+# (Tiberius 👑). A lowercase-only class goes blind exactly on the values that carry
+# information — a digit, a capital, a delimiter — while matching cleanly on the quiet
+# default, so it is correct for as long as nobody adds an interesting key.
+#
+# ⚠️ THE E2E LOSS WAS MASKED, WHICH IS WHY IT SURVIVED. `find_gate_targets` seeds from
+# here and then FOLLOWS `.sh` references, and `run-all-tests.sh` names the e2e runner at
+# its line 94 — so `src/tests/e2e_ui` reached the target set by a second route and the
+# census looked complete. The masking is incidental, not designed: it holds only while
+# some other runner in the seed happens to name the dropped one.
+_SUITE_SCRIPT_RE = re.compile( r"^\s*\"[A-Za-z0-9_]+\"\s*:\s*\"(src/[^\"]+\.sh)\"" )
 
 
 def read_suite_scripts( project_root: Path ) -> Set[ str ]:
