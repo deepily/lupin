@@ -1604,8 +1604,23 @@ def validate_transition(
     """
     Validate one state transition against the Phase-1/2 structural rules.
 
-    The full legal-transition graph is Phase-2+ backlog (design §4.1 C-items);
-    enforced here are enum validity + the ratified structural rules only.
+    A RICHER legal-transition graph — which specific edges are MEANINGFUL — is
+    Phase-2+ backlog (design §4.1 C-items). ⚠️ Do NOT read that as "no edge is
+    checked here": the DERIVED `LEGAL_TRANSITIONS` graph IS enforced below, and
+    with it the terminal rule. A `dropped`/`done`/`wont_fix` source has no
+    out-edges at all, so a caller trying to move a closed row is refused by name
+    ("item is terminal … append-only, no transitions out"), and a ->done from a
+    live row must additionally carry a CHECKABLE receipt.
+
+    This wording is disambiguated rather than corrected — the old sentence was
+    true about the RICH graph and read as a statement about ALL edge checking.
+    The cost of that reading is not academic: it invites a caller to assume the
+    store will take any status pair and to build a client-side guard the server
+    already has, or worse, to treat a wrong verb arriving from a UI as data
+    corruption when this function refuses it. Measured 2026-09-02 against a
+    reported client defect sending a Drop button's verb as `done`: refused in
+    BOTH readings — terminal source by the rule above, live source by the
+    ->done receipt gate.
 
     Requires:
         - from_status is the item's CURRENT status (read inside the same DB
