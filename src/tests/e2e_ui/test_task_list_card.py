@@ -1172,6 +1172,30 @@ class TestTaskListHeaderFlowRatio:
         assert "\u221e" not in ratio_text, "an idle window is not a failing window"
 
 
+def _payload_digest( body ):
+    """
+    The fields that decide what the header should say, for an assertion message.
+
+    🔴 WHY THIS EXISTS. This test failed on 2026-09-01 and could not answer for itself:
+    it asserted only `window_hours`, so when a reviewer asked what `ratio`, `created` and
+    `closed` had been, the log did not know — and the run was gone. A live test that does
+    not record the payload it judged forces the next reader to re-run it, by which time
+    the board has moved and the answer is about a different moment.
+
+    Requires:
+        - body is the decoded /api/tasks/flow-ratio payload, or None
+
+    Ensures:
+        - returns a short one-line digest naming ratio / created / closed / verdict
+        - never raises, including on a None or partial body — a diagnostic that can fail
+          takes the real failure's message down with it
+    """
+    if not isinstance( body, dict ):
+        return f"payload={body!r}"
+    fields = ( "ratio", "created", "closed", "verdict", "window_hours" )
+    return " ".join( f"{k}={body.get( k )!r}" for k in fields )
+
+
 class TestTaskListHeaderFlowRatioLive:
     """
     The ratio header against the REAL endpoint, with NO route mock (2026-09-01).
@@ -1313,11 +1337,36 @@ class TestTaskListHeaderFlowRatioLive:
         assert str( body[ "window_hours" ] ) in ( ratio_text + long_form ), (
             f"neither the header clause {ratio_text!r} nor its hover text {long_form!r} "
             f"carries the window the live endpoint returned ({body['window_hours']}) — "
-            f"the payload did not reach the DOM"
+            f"the payload did not reach the DOM. Payload: {_payload_digest( body )}"
         )
 
-        assert ratio_text.strip() and re.search( r"\d", ratio_text ), (
-            f"header clause {ratio_text!r} carries no value at all. A broken endpoint and "
-            f"a quiet board both render empty, which is the whole reason this test drives "
-            f"the real wire instead of a fixture."
-        )
+        # 🔴 AN EM-DASH IS THE CORRECT RENDER FOR AN IDLE WINDOW, AND THIS ASSERTION USED
+        # TO CALL IT A DEFECT. It read `assert ratio_text.strip() and re.search( r"\d", … )`
+        # unconditionally, so it demanded a DIGIT whatever the payload said. Measured
+        # 2026-09-01: `:8000` answers `{"created": 0, "closed": 0, "ratio": null,
+        # "verdict": "idle", "window_hours": 24}` because it runs against `lupin_db_test`,
+        # which is empty — so the header correctly shows " · Gate: —" and this test could
+        # NEVER pass in the venue it is routed to. `:7999`, for contrast, answers
+        # `created 2, closed 17, ratio 0.12, verdict allow` and renders a number.
+        #
+        # The failure message above it already named the ambiguity — "a broken endpoint and
+        # a quiet board both render empty" — and then asserted straight through it. Naming a
+        # trap in the message you print is not the same as handling it in the predicate.
+        #
+        # ⚠️ WHICH BRANCH APPLIES IS DECIDED BY THE PAYLOAD, NOT BY THE VENUE. Keying this
+        # on "is this :8000" would go wrong the first time the test database has rows in it.
+        idle = body.get( "ratio" ) is None and body.get( "created" ) == 0
+
+        if idle:
+            assert "—" in ratio_text or "-" in ratio_text, (
+                f"the live payload is IDLE ({_payload_digest( body )}) so the header must "
+                f"render a dash, and it rendered {ratio_text!r} instead. A number here would "
+                f"mean the client invented one for a window with nothing in it."
+            )
+        else:
+            assert ratio_text.strip() and re.search( r"\d", ratio_text ), (
+                f"header clause {ratio_text!r} carries no value, but the live payload is NOT "
+                f"idle ({_payload_digest( body )}) — it has a ratio and a non-zero created "
+                f"count, so a number was owed and none arrived. This is the case the test "
+                f"exists for: the wire answered and the DOM did not show it."
+            )
