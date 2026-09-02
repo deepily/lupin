@@ -316,3 +316,84 @@ def test_a_non_numeric_value_already_on_disk_falls_back_and_reports_it(
     actual = frs.get_window_hours() if clamp == "window" else frs.get_allow_below()
     assert actual == expected
     assert "is not a" in capsys.readouterr().out
+
+
+# 🔴 THE SHIPPED DEFAULTS, PINNED BY LITERAL — AND WHY A LITERAL IS THE WHOLE POINT.
+#
+# Found by an independent mutation pass, 2026-09-02 (Tiberius 👑). Two arms — 24 -> 48
+# and 1.0 -> 0.0 — SURVIVED the entire sixteen-file population. Not because the fallback
+# path is uncovered; it is covered, and coverage reports these lines green at 100%.
+#
+# The assertions that cover it read:
+#
+#     assert frs.get_window_hours() == frs.FALLBACK_WINDOW_HOURS
+#     assert frs.get_allow_below()  == frs.FALLBACK_ALLOW_BELOW
+#
+# They compare the function's result to THE SAME CONSTANT the function returns. Change
+# the constant and both sides move together, so the comparison is true for every possible
+# value. It is not a weak assertion — it is an UNFALSIFIABLE one, and no amount of reading
+# the test body reveals that, because the test body is correct. Only replacing the source
+# constant and watching nothing redden does.
+#
+# ⇒ These two tests are therefore the ONLY place in the population that holds the shipped
+# numbers to account, and they must never be rewritten to reference `frs.FALLBACK_*`. The
+# literal IS the control: it is written here independently of the source, so the two can
+# disagree — which is the only way a test can notice the source moving.
+#
+# The module docstring above already names these numbers ("the window (24) and the
+# threshold (1.0)"), so the literals below are not a new decision; they are the existing
+# documented contract, finally asserted.
+
+def test_the_shipped_window_default_is_24_hours():
+    """
+    The fallback window is 24, pinned by a literal written independently of the source.
+
+    Ensures:
+        - reddens if FALLBACK_WINDOW_HOURS is changed, which the reference-comparison
+          assertions elsewhere in this module cannot do
+    """
+    assert frs.FALLBACK_WINDOW_HOURS == 24, (
+        "the shipped fallback window changed. This is the documented default named in "
+        "this module's own docstring; if the change is deliberate, update the docstring "
+        "and this literal together — do NOT make this assertion reference "
+        "frs.FALLBACK_WINDOW_HOURS, which would make it unfalsifiable again."
+    )
+
+
+def test_the_shipped_threshold_default_is_one_point_zero():
+    """
+    The fallback threshold is 1.0, pinned by a literal written independently of the source.
+
+    Ensures:
+        - reddens if FALLBACK_ALLOW_BELOW is changed
+        - pins the SEMANTIC boundary too: at exactly 1.0 the gate is closed, because the
+          gate opens on a ratio STRICTLY below the threshold
+    """
+    assert frs.FALLBACK_ALLOW_BELOW == 1.0, (
+        "the shipped fallback threshold changed. 1.0 means 'closing as many as you file'; "
+        "the gate opens strictly BELOW it. Update the docstring and this literal together "
+        "— do NOT make this assertion reference frs.FALLBACK_ALLOW_BELOW."
+    )
+
+
+def test_an_unavailable_config_yields_the_LITERAL_defaults_not_merely_the_constants( monkeypatch, capsys ):
+    """
+    The degraded path returns 24 / 1.0 — the values, not whichever constants are shipped.
+
+    This is `test_an_unreadable_ini_falls_back_and_reports_it` written so it can fail.
+    That test asserts `get_window_hours() == frs.FALLBACK_WINDOW_HOURS`; this one asserts
+    the number an operator would actually see.
+
+    Ensures:
+        - a broken ConfigurationManager degrades to 24 hours and 1.0
+        - the degradation is still reported on stdout, not silent
+    """
+    def _explode( *args, **kwargs ):
+        raise RuntimeError( "config is unavailable" )
+    monkeypatch.setattr( frs, "ConfigurationManager", _explode )
+    monkeypatch.setattr( frs, "_cache", { "window_hours": None, "allow_below": None } )
+    monkeypatch.setattr( frs, "_cache_mtime", None )
+
+    assert frs.get_window_hours() == 24
+    assert frs.get_allow_below()  == 1.0
+    assert "unreadable" in capsys.readouterr().out
