@@ -529,6 +529,18 @@ always does.
 | "the third finding in the output" | the finding's own text or id |
 | "the file I edited earlier" | the path, and the sha or content hash you read |
 | "as of tonight" | the sha, or the wall-clock time of the read |
+| a **PID** you captured earlier (`kill $PID`, a watcher armed on it) | the process's own identity — `readlink /proc/<pid>/cwd`, the command via `comm`, or a pidfile the process itself writes |
+
+⚠️ **A PID IS THE SHARPEST MEMBER OF THIS FAMILY BECAUSE THE OS RECYCLES IT FOR YOU** (sam 🎙️,
+2026-09-02). He armed a watcher on a PID; the process it named had already died, and the watcher
+reported **"finished"** — a confident answer about a process that was gone, and **silence about the
+run he actually cared about, which was still writing.** Reading that as a finished run, he launched
+another, and **two full unit tiers then ran in the same worktree at once**, both writing into one
+tree, for minutes, invisibly.
+
+⇒ **He found it by keying on the thing rather than the number** — `readlink /proc/<pid>/cwd` across
+every process, which named his tree twice. **Identify by a property the thing carries, not by a
+handle you captured when it was true.**
 
 **The tell is mutability, not format.** A line number in a frozen artifact is fine; a line number in
 a live file is a bet that nobody edits above it. `stash@{N}` renumbers when any entry is dropped —
@@ -1245,11 +1257,55 @@ test measures their DISJUNCTION, never the member you meant. **Name the path in 
 assert the field the guard populates, the branch it takes, the specific refusal it raises — not
 the shared downstream effect that several paths share.
 
+🔴 **AND THE CONSTRUCTIVE HALF, WHICH THIS FILE HAD NOT WRITTEN DOWN** (maria 🌸, 2026-09-02):
+**the fix for a multi-cause observable is not a better assertion — it is a SECOND MEASUREMENT that
+kills one branch.** Measured the same evening: *"zero `wont_fix` events store-wide"* could not
+discriminate between a click swallowed by a lookup collision and a pane with no listener. Adding
+one independent reading — that `parked → wont_fix` is a legal edge the validator **accepts**, so
+the server would have taken the write — killed the server branch and converted an ambiguous
+observable into a located one: **the click never became a request.**
+
+⇒ **So when you find an assertion with several sufficient causes, do not go looking for sharper
+words. Go and eliminate a cause.** The rule above tells you the reading is worthless; this tells
+you what to do next.
+
 ⚠️ **This is the same defect as § *A COMPARISON WHOSE TWO SIDES COME FROM ONE SOURCE*, one level
 in.** There, two sides move together so the comparison cannot fail. Here, two causes converge so
 the assertion cannot discriminate. **Both are an `assert` that is true by construction rather
 than by behaviour**, and neither shows up in a coverage number or an assertion audit.
 
+
+### 🔴 WHILE A TIER IS RUNNING, THAT WORKTREE IS READ-ONLY — WHATEVER YOUR REASON FOR TOUCHING IT
+
+**Three receipts in one evening, 2026-09-02, from two seats**, which is why this is a rule and not
+a note about one careless run. In every case the number produced was **about a tree that no longer
+existed**, and in every case the seat threw it away rather than report it.
+
+| seat | what moved | how it was caught |
+|---|---|---|
+| Rachel 🕊️ | her own edits landed mid-baseline | noticed while running |
+| sam 🎙️ | applied a mutation at 17:49:09 while the tier was still writing at 17:49:18 | noticed while running |
+| Rachel 🕊️ again | **two mutation arms editing `session_spawner.py` in place, tier at 27% in the same worktree** | **did NOT notice at the time** |
+
+🔴 **THE THIRD ONE IS THE RULE, AND IT IS HERS: "DO NOT EDIT WHILE A TIER RUNS" IS TOO NARROW,
+BECAUSE IT ONLY CATCHES EDITS YOU RECOGNISE AS EDITS.** A mutation arm *does not feel like
+editing* — **it feels like measuring**, which is exactly how it walked past someone who had
+written a paragraph about this defect minutes earlier.
+
+⇒ **So state it about the TREE and never about your intent**: *while a tier is running, that
+worktree is read-only.* No mutation arm, no "quick" fixture tweak, no thickening a guard, no
+restore of a previous arm. **Your reason for touching it is not an input to the rule** — the run
+cannot tell a measurement from an edit, and neither can the number it produces.
+
+⚠️ **AND THE TWO FAILURE MODES ARE NOT EQUALLY SURVIVABLE.** *"I noticed I was standing in my own
+measurement"* is recoverable — you discard and re-run. *"I did not notice, because the thing
+standing in it was itself a measurement"* is the one that ships, because nothing about it feels
+like the hazard you were watching for. **A rule keyed on intent cannot catch the case where the
+intent is innocent.**
+
+⇒ **The mutation numbers themselves can still stand** — Rachel's M7/M8 came from their own harness
+against its own green baseline, not off the contaminated tier. **Say which instrument each number
+came from**, and a contaminated tier costs you the tier and nothing else.
 
 ### 🔴 A WRONG COUNT PUBLISHES A WRONG NUMBER; A WRONG MECHANISM SENDS THE NEXT READER AT INNOCENT CODE
 
