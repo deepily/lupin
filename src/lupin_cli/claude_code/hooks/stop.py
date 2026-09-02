@@ -1016,11 +1016,30 @@ def _ask_anything_else( session_id, last_assistant_message=None, cwd=None ):
         # and "we have a bug" are the same statement at this site, which is exactly the
         # traffic the fleet's liveness path should be loud about. KEPT ON PURPOSE.
         #
-        # It is not narrowed to specific types because the caller (line ~2524) has NO
-        # guard of its own: a raise here kills the hook process before emit_json runs and
-        # the session's Stop goes unanswered. The narrowing that was available is the one
-        # applied — the catch now names the PHASE and the session instead of emitting a
-        # bare exception string that no reader could act on.
+        # ⚠️ TWO DIFFERENT NARROWINGS GET ASKED FOR HERE, AND ONLY ONE IS ABOUT TYPES.
+        # This note answered the CATCH question and left the BODY question open, so the
+        # request came back on 2026-09-02 phrased as "the try spans ~80 lines, narrow it
+        # to the code that can genuinely throw." Both are refused, for the SAME reason,
+        # and it is worth writing down once so the ask does not return a third time.
+        #
+        # It is not narrowed to specific types because the caller has NO guard of its
+        # own: a raise here kills the hook process before emit_json runs and the
+        # session's Stop goes unanswered. Verified 2026-09-02 rather than assumed --
+        # the sole call site sits at `result = _ask_anything_else( ... )` immediately
+        # above its `emit_json( result )`, outside the nearest enclosing try (which
+        # closes over the idle-settings parse and ends before it).
+        #
+        # And the BODY is not narrowed for the same reason read forwards. The paragraph
+        # above establishes that every callable in it is total, so the only thing that
+        # can raise is OUR OWN GLUE -- which is spread across all 80 lines rather than
+        # concentrated in a few. Wrapping "only the code that can throw" would therefore
+        # mean wrapping nearly all of it anyway, while leaving whatever fell outside able
+        # to kill the process. A backstop that covers most of a function is not a
+        # backstop. THE SPAN IS THE FEATURE: this try exists to guarantee that control
+        # reaches emit_json, and that guarantee is exactly as wide as the code before it.
+        #
+        # ⇒ What WAS narrowed is the only axis that could be: the report. The catch names
+        # the PHASE and the session instead of emitting a bare exception string.
         session_tag = ( session_id or "" )[ :8 ]
         send_tts(
             f"Stop hook defect in {phase} for session {session_tag}: "
