@@ -46,8 +46,11 @@ floor and rejects prior-task staleness.
 
 NO COLLISION WITH self_respin, and NOT for the reason first supposed. This reap
 coordinator reads/asks the `--slot io` slot `io/mementos/<persona-slug>.md`;
-self_respin writes and rehydrates from the `--slot root` slot `.claude-memento.md`
-(memento-management.md §3: io = spawned-worker, root = self-`/clear`). Different
+self_respin writes and rehydrates from the `--slot root` slot
+`.claude-memento-<persona-slug>.md` (memento-management.md §3: io = spawned-worker,
+root = self-`/clear`). BOTH SLOTS ARE PERSONA-SCOPED, and memento_slot is the single
+layout authority for both — the legacy shared root name `.claude-memento.md` is
+retired. Different
 files — a reap never reads what self_respin verifies, and the child answering a
 reap ask never rewrites what self_respin rehydrates from. It is also actor-disjoint:
 self_respin is a manager clearing its OWN pane, while a reap kills sessions a
@@ -131,13 +134,22 @@ def seat_memento_root_record( repo_root, persona_name, seat_sid8 ):
     via Mr. Radio, 2026-08-30, row 8068c65e).
 
     WHY THE RECORD AND NEVER THE ROOT POINTER, which is the whole content of the
-    ruling: `.claude-memento.md` is PERSONA-LESS — one file per repo, shared by every
-    seat in it. Measured 2026-08-30: Pocholo's record took it at 14:41 and Mr. Radio's
-    took it back at 15:20, so it was silently reassigned between seats twice inside
-    forty minutes. Following it on a batch reap resolves EVERY seat to whichever one
-    wrote last, which manufactures the exact failure this row exists for — a memento
-    that parses fine and names the wrong work. The RECORD carries persona AND session
-    in its name, so it identifies whose work it holds; the pointer cannot.
+    ruling. ⚠️ THE RULING'S ORIGINAL PREMISE IS RETIRED AND ITS CONCLUSION IS NOT, so
+    read the current reason rather than the story you may remember. The root pointer
+    USED TO BE `.claude-memento.md`, PERSONA-LESS — one file per repo shared by every
+    seat in it — and it was silently reassigned between seats twice inside forty
+    minutes on 2026-08-30 (Pocholo's record took it at 14:41, Mr. Radio's took it back
+    at 15:20). That cross-persona theft is DEAD BY CONSTRUCTION: the root pointer is
+    `.claude-memento-<persona-slug>.md` now and two personas cannot contend for one.
+
+    WHAT KEEPS THE RULING LOAD-BEARING IS THAT A PERSONA OUTLIVES ITS SESSIONS. A
+    persona-scoped pointer written by one session of Maria's is followed by the NEXT
+    session of Maria's, so on a batch reap it still resolves every seat of that persona
+    to whichever SESSION wrote last — which manufactures the exact failure this row
+    exists for, a memento that parses fine and names the wrong work. The RECORD carries
+    persona AND SESSION in its name, so it identifies whose work it holds and WHEN; the
+    pointer carries only the persona, and so can be right about the session only by
+    luck.
 
     Requires:
         - repo_root is the seat's OWN repo (seat_repo_root), never the host's
@@ -982,8 +994,9 @@ def describe_slot(
           READABLE locations — the io slot, or this seat's root RECORD (row 8068c65e)
           — via the same predicate the reap uses, so this command and the reap can
           never disagree. `slot` then names WHERE it was actually found, which is the
-          fact the caller acts on; the root POINTER is never among them, being
-          persona-less and therefore unable to say whose work it holds
+          fact the caller acts on; the root POINTER is never among them, because it
+          names a PERSONA and not a SESSION — a persona outlives its sessions, so the
+          pointer cannot say WHICH of that persona's sessions wrote what it holds
         - every verdict below "ready" is about the IO slot specifically — whose
           pointer it is, and whether anything sits there at all
         - verdict is "prior_holder" when the slot names a DIFFERENT session, and
