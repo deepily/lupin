@@ -1037,3 +1037,73 @@ test( "🔴 batch APPROVE sends `queued` and batch WON'T-FIX sends `wont_fix`", 
   await ui._handleHoldingWontFixAllClick( { dataset: { filer: "alice" } } );
   assert.deepEqual( sent, [ [ "a1", "wont_fix" ] ], "batch won't-fix sent the wrong transition verb" );
 } );
+
+// ═════════ three more the batch was doing correctly and unwatched ═════════
+//
+// Found by continuing to pose breaks after the obvious ones were covered, rather than
+// stopping when the list I started with was green. Each scored ZERO reds across the whole
+// tier before these; each is behaviour the code already gets right.
+
+function batchDOM( ids: string[], reason = "closing the lot" ): void {
+  document.body.innerHTML = `
+    <div id="holding-area-container">
+      <div class="holding-area-group" data-filer="alice">
+        <span class="holding-area-group-status" data-filer="alice"></span>
+        ${ids.map( i => `<button class="task-action-btn task-approve-button" data-task-id="${i}"></button>` ).join( "" )}
+        <input class="task-action-input holding-wont-fix-all-reason" data-filer="alice" value="${reason}">
+      </div>
+    </div>`;
+}
+
+function statusText(): string {
+  return ( document.querySelector( ".holding-area-group-status" ) as HTMLElement ).textContent ?? "";
+}
+
+test( "🔴 a partial refusal reports the FIRST server message, not the last", async () => {
+  // The docstring is explicit that the first is the one worth keeping — on a 403 it names
+  // the actor and the allowlist, and later rows produce the same refusal with less in it.
+  // Nothing was checking WHICH one survived, so keeping the last read identically.
+  const ui = newUI();
+  let n = 0;
+  ui._transitionTask = async () => {
+    n += 1;
+    if ( n === 1 ) return { ok: false, message: "403: rio is not on the approve allowlist" };
+    if ( n === 2 ) return { ok: false, message: "403: forbidden" };
+    return { ok: true };
+  };
+  ui.refreshHoldingArea = async () => {};
+  batchDOM( [ "a1", "a2", "a3" ] );
+
+  const out = await ui._applyHoldingBatch( "alice", "queued", {}, "Approved" );
+  assert.equal( out.failed, 2 );
+  assert.match( out.firstError ?? "", /not on the approve allowlist/,
+    "the batch kept a later, less informative refusal instead of the first" );
+  assert.match( statusText(), /not on the approve allowlist/ );
+} );
+
+test( "🔴 the batch REFRESHES the pane when it is done", async () => {
+  // Without the refresh the rows it just transitioned stay on screen, so a batch that
+  // fully succeeded looks like a batch that did nothing at all.
+  const ui = newUI();
+  let refreshed = 0;
+  ui._transitionTask = async () => ( { ok: true } );
+  ui.refreshHoldingArea = async () => { refreshed += 1; };
+  batchDOM( [ "a1", "a2" ] );
+
+  await ui._applyHoldingBatch( "alice", "queued", {}, "Approved" );
+  assert.equal( refreshed, 1, "the pane was never repainted — the rows it moved are still on screen" );
+} );
+
+test( "🔴 an EMPTY group says so and calls nobody", async () => {
+  const ui = newUI();
+  let calls = 0;
+  ui._transitionTask = async () => { calls += 1; return { ok: true }; };
+  ui.refreshHoldingArea = async () => {};
+  batchDOM( [] );
+
+  const out = await ui._applyHoldingBatch( "alice", "queued", {}, "Approved" );
+  assert.equal( calls, 0, "an empty group still fired requests" );
+  assert.deepEqual( out, { ok: 0, failed: 0, firstError: null } );
+  assert.match( statusText(), /No rows in this group/,
+    "an empty group reported nothing, which reads as a batch that silently did nothing" );
+} );
