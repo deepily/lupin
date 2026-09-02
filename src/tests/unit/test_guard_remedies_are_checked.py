@@ -48,6 +48,8 @@ Venue: :7999-eligible. Pure string work; no git, no server, no filesystem.
 """
 import re
 
+import pytest
+
 from lupin_cli.claude_code.hooks.lib.stash_guard import _deny_reason_for
 from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
     git_commit_match, _pathspec_of, _notice_for,
@@ -83,26 +85,6 @@ def test_the_stash_deny_qualifies_every_hazard_it_names():
         "the stash deny recommends a hazardous operation without its caveat nearby: "
         f"{missing} — this is the shape of 30ba7976, where `git checkout -- <path>` "
         "was called safe"
-    )
-
-
-def test_the_stash_deny_actually_names_a_table_hazard():
-    """
-    THE VACUITY GUARD for the assertion above — see this module's docstring.
-
-    `remedy_carries_its_caveat` reports only what is MISSING, so its `[]` cannot tell
-    "every hazard is qualified" from "no hazard was named". This asserts the second
-    reading is false, which is the only thing that makes the first one evidence.
-
-    Belongs here rather than in the helper only because the helper is another seat's
-    file and live; when it reports its matches, this moves inside it.
-    """
-    text    = _deny_reason_for( "push" )
-    matched = [ p for p in HAZARD_CAVEATS if re.search( p, text ) ]
-    assert matched, (
-        "the stash deny names none of the table's hazards, so the caveat assertion "
-        "above is passing against nothing — either the deny text was reworded away "
-        f"from {list( HAZARD_CAVEATS )} or the table drifted"
     )
 
 
@@ -154,22 +136,49 @@ def test_the_squash_refusal_qualifies_the_reset_it_recommends():
     )
 
 
-def test_the_merge_branch_is_not_covered_and_this_records_why():
-    """
-    🔴 A DELIBERATE NON-TEST, pinned so the gap is visible rather than forgotten.
+# ---------------------------------------------------------------------------
+# THE COVERAGE FRONTIER - which guard messages the caveat check can actually speak
+# about, pinned as a map so the gaps are visible instead of forgotten.
+#
+# 🔴 THIS IS THE ANTI-VACUITY CONTROL FOR THE WHOLE FILE. A guard whose message
+# names NO table hazard returns [] from `remedy_carries_its_caveat` by measuring
+# nothing, and a test asserting on that [] is green forever while checking nothing.
+# So each message is pinned to whether it is CHECKABLE, and a message crossing that
+# line in EITHER direction fails here and names what to do about it.
+# ---------------------------------------------------------------------------
 
-    The MERGE branch recommends only the escape hatch and "ask the owner" — it names
-    no operation in the table, so `remedy_carries_its_caveat` returns [] by measuring
-    nothing. Asserting on that would be the vacuous green this whole file exists to
-    refuse. This asserts the VACUITY itself, so the day the branch starts naming a
-    table hazard, this test fails and tells the next reader to write the real one.
-    """
-    text    = _merge_head_deny( KIND_MERGE, "a" * 40 )
-    matched = [ p for p in HAZARD_CAVEATS if re.search( p, text ) ]
-    assert matched == [], (
-        f"the merge branch now names table hazard(s) {matched} — it has become "
-        "checkable, so replace this non-test with a real caveat assertion"
-    )
+_MESSAGES = {
+    "stash_guard.deny"          : lambda: _deny_reason_for( "push" ),
+    "merge_head_guard.squash"   : lambda: _merge_head_deny( KIND_SQUASH ),
+    "merge_head_guard.merge"    : lambda: _merge_head_deny( KIND_MERGE, "a" * 40 ),
+    "commit_scope_guard.notice" : lambda: _notice_for( "a reason" ),
+}
+
+# True  = names a table hazard, so a [] from the caveat check is EVIDENCE
+# False = names none, so a [] means NOTHING WAS MEASURED - do not assert on it
+_CHECKABLE = {
+    "stash_guard.deny"          : True,
+    "merge_head_guard.squash"   : True,    # became True on Rio's reset row 37fb6c5a
+    "merge_head_guard.merge"    : False,   # only the hatch and "ask the owner"
+    "commit_scope_guard.notice" : False,   # git diff / git commit name no hazard
+}
+
+
+@pytest.mark.parametrize( "name", sorted( _MESSAGES ) )
+def test_the_caveat_check_can_speak_about_exactly_these_messages( name ):
+    matched = [ p for p in HAZARD_CAVEATS if re.search( p, _MESSAGES[ name ]() ) ]
+    if _CHECKABLE[ name ]:
+        assert matched, (
+            f"{name} no longer names any table hazard, so every caveat assertion "
+            "about it has silently become an assertion about nothing - the message "
+            f"was reworded, or the table lost a row. Table: {list( HAZARD_CAVEATS )}"
+        )
+    else:
+        assert matched == [], (
+            f"{name} now names table hazard(s) {matched} - it has become checkable. "
+            "Flip its entry to True and add a real caveat assertion for it; leaving "
+            "it here would keep a measurable message unmeasured"
+        )
 
 
 # ---------------------------------------------------------------------------
