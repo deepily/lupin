@@ -149,6 +149,27 @@ def _versioned_assets( html_text ):
     return [ ( m.group( 1 ), m.group( 2 ) ) for m in VERSIONED_ASSET_RE.finditer( html_text ) ]
 
 
+def _versioned_assets_full( html_text ):
+    """
+    Discover every versioned asset with its FULL token: [ ( static_url, "YYYYMMDDs" ), ... ].
+
+    Ensures:
+        - identical discovery to `_versioned_assets`, but the token retains its
+          single-letter suffix
+
+    🔴 WHY A SECOND DISCOVERY EXISTS, and it is not duplication. `_versioned_assets`
+    deliberately DROPS the suffix, because the staleness test above compares dates.
+    The two tests below compare tokens for IDENTITY, and a suffix-stripped token
+    compares "20260902" against "20260902j" — unequal on every run, so the
+    assertion can never fail and the guard is blind in the flattering direction.
+    That is not hypothetical: both tests were first written over `_versioned_assets`
+    and went GREEN against a deliberately broken asset. The suffix is the entire
+    within-day signal; a test that asserts identity must read it.
+    """
+    return [ ( m.group( 1 ), m.group( 2 ) + m.group( 3 ) )
+             for m in VERSIONED_ASSET_RE.finditer( html_text ) ]
+
+
 def _read( path ):
     with open( path, encoding="utf-8" ) as fh:
         return fh.read()
@@ -209,6 +230,7 @@ def test_notifications_links_versioned_task_list_css():
 # Discovered ONCE at collection time (after _read is defined) so the freshness test
 # can parametrize over it.
 _DISCOVERED_ASSETS = _versioned_assets( _read( NOTIF_HTML ) )
+_DISCOVERED_FULL   = _versioned_assets_full( _read( NOTIF_HTML ) )
 
 
 def test_versioned_asset_discovery_is_nonvacuous():
@@ -260,4 +282,176 @@ def test_versioned_asset_token_not_stale( static_url, token_date ):
         f"token is part of the cache key: a fresh one is a new key, so the new asset is "
         f"fetched at once; a stale one reuses the old key and lets a warm browser serve "
         f"the OLD asset until its cache entry goes stale on its own."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The token must have FOLLOWED the asset's last change (commit-ordered, derived)
+# ---------------------------------------------------------------------------
+#
+# 🔴 WHY THE DATE COMPARISON ABOVE IS NOT ENOUGH, AND WHAT IT LET THROUGH.
+# `test_versioned_asset_token_not_stale` compares an 8-digit DAY against a commit
+# DAY. This fleet lands several slices a day: on 2026-09-02 alone, notifications.js
+# was changed by 8e0b71af, 2f99adba, 0a53561d, fe8642c7, a1e46d62, b38d2843,
+# cd2ea523 and 9e27a64f. Every one of those has commit date 20260902, so a token
+# reading `20260902g` satisfies `token_date >= commit_date` no matter how many
+# same-day slices shipped behind it. The guard is blind for the whole day — which
+# is the entire window in which the asset is actually being edited.
+#
+# ⚠️ notifications.js was never MISSING from the guarded set — it is in
+# EXPECTED_VERSIONED_ASSETS above. It was watched by an assertion that could not
+# resolve the timescale on which it changes. A guarded asset and a guarded property
+# are different things, and only the second one catches anything.
+#
+# THE DERIVED PROPERTY, with no literal token anywhere in it: let A be the most
+# recent commit that touched the asset. The token the page carries today must
+# DIFFER from the token it carried at A's parent. If it is the same string, the
+# token did not move when the asset moved — the returning browser's cache key is
+# unchanged and it goes on serving the old copy. This is commit-ordered rather than
+# date-compared, so it sees inside a day, and it needs no hand-maintained baseline:
+# the value it refuses is read out of git and out of the shipped page on every run.
+
+def _git_last_commit_sha( repo_rel_path ):
+    """
+    Full sha of the most recent commit that touched repo_rel_path.
+
+    Requires:
+        - repo_rel_path is tracked by git under the project root
+
+    Ensures:
+        - returns a 40-character sha, or "" when the path has no history
+    """
+    return subprocess.run(
+        [ "git", "log", "-1", "--format=%H", "--", repo_rel_path ],
+        cwd=cu.get_project_root(), capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _git_first_parent( sha ):
+    """
+    First parent of `sha`, or None when `sha` is a root commit.
+
+    Requires:
+        - sha names a commit in this repository
+
+    Ensures:
+        - returns a 40-character sha, or None on a root commit (never raises)
+    """
+    done = subprocess.run(
+        [ "git", "rev-parse", "--verify", "--quiet", f"{sha}^1" ],
+        cwd=cu.get_project_root(), capture_output=True, text=True
+    )
+    parent = done.stdout.strip()
+    return parent if parent else None
+
+
+def _token_at_rev( rev, static_url ):
+    """
+    The `?v=` token notifications.html carried for `static_url` at `rev`.
+
+    Requires:
+        - rev names a commit, or "HEAD"
+        - static_url is a "/static/..." asset URL
+
+    Ensures:
+        - returns the token string (8-digit date plus optional single-letter suffix),
+          or None when the page did not exist at `rev` or did not link that asset
+          with a token there
+    """
+    done = subprocess.run(
+        [ "git", "show", f"{rev}:src/lupin_app/static/html/notifications.html" ],
+        cwd=cu.get_project_root(), capture_output=True, text=True
+    )
+    if done.returncode != 0: return None
+
+    match = re.search(
+        r'(?:href|src)="' + re.escape( static_url ) + r'\?v=(\d{8}[a-z]?)"', done.stdout
+    )
+    return match.group( 1 ) if match else None
+
+
+def _differs_from_head( repo_rel_path ):
+    """
+    Whether the working tree's copy of repo_rel_path differs from HEAD.
+
+    Ensures:
+        - True for a staged OR unstaged edit (git diff HEAD covers both)
+    """
+    done = subprocess.run(
+        [ "git", "diff", "--quiet", "HEAD", "--", repo_rel_path ],
+        cwd=cu.get_project_root(), capture_output=True, text=True
+    )
+    return done.returncode != 0
+
+
+@pytest.mark.parametrize( "static_url,token_full",
+                          _DISCOVERED_FULL,
+                          ids=[ url for url, _t in _DISCOVERED_FULL ] )
+def test_versioned_asset_token_followed_its_last_change( static_url, token_full ):
+    """
+    The page's token for an asset must DIFFER from the one it carried immediately
+    before that asset's most recent change — i.e. the bump travelled with the asset.
+
+    Requires:
+        - the asset is tracked by git and linked with a ?v= token
+
+    Ensures:
+        - fails when the token is byte-identical across the asset's last change
+        - the refused value is DERIVED from git at run time; no literal token
+          appears in the assertion and there is no baseline to hand-bump
+    """
+    repo_rel  = _static_url_to_repo_rel( static_url )
+    asset_sha = _git_last_commit_sha( repo_rel )
+    assert re.fullmatch( r"[0-9a-f]{40}", asset_sha ), \
+        f"could not resolve a last commit for {repo_rel} (got {asset_sha!r}); is it tracked?"
+
+    parent = _git_first_parent( asset_sha )
+    if parent is None:
+        pytest.skip( f"{repo_rel} last changed in a root commit — nothing to compare against" )
+
+    token_before = _token_at_rev( parent, static_url )
+    if token_before is None:
+        pytest.skip( f"{static_url} was not linked with a token at {parent[ :8 ]}" )
+
+    assert token_full != token_before, (
+        f"{static_url} last changed in commit {asset_sha[ :8 ]}, but the page still "
+        f"carries ?v={token_full} — the SAME token it carried at {parent[ :8 ]}, "
+        f"BEFORE that change. The token did not follow the asset, so a returning "
+        f"browser's cache key is unchanged and it keeps serving the OLD copy: the "
+        f"change looks landed in git and absent on screen. Bump the suffix.\n"
+        f"⚠️ The date comparison in this file CANNOT catch this — several slices "
+        f"land on one day and every one of them satisfies token_date >= commit_date."
+    )
+
+
+@pytest.mark.parametrize( "static_url,token_full",
+                          _DISCOVERED_FULL,
+                          ids=[ url for url, _t in _DISCOVERED_FULL ] )
+def test_uncommitted_asset_edit_bumped_its_token( static_url, token_full ):
+    """
+    An asset edited in the WORKING TREE must carry a bumped token in the working
+    tree too.
+
+    Requires:
+        - the asset is tracked by git
+
+    Ensures:
+        - skips when the asset matches HEAD (nothing uncommitted to guard)
+        - otherwise fails when the token is byte-identical to HEAD's
+        - the refused value is HEAD's token, read out of git at run time
+
+    The commit-ordered test above can only speak about history, so without this one
+    a forgotten bump stays invisible right up until it is committed — which is after
+    the point where it is cheap to fix.
+    """
+    repo_rel = _static_url_to_repo_rel( static_url )
+    if not _differs_from_head( repo_rel ):
+        pytest.skip( f"{repo_rel} matches HEAD — nothing uncommitted to guard" )
+
+    token_at_head = _token_at_rev( "HEAD", static_url )
+    assert token_full != token_at_head, (
+        f"{repo_rel} has uncommitted changes, but notifications.html still links it "
+        f"?v={token_full} — the same token HEAD carries. Bump the token in the same "
+        f"edit as the asset: a `?v=` token is part of the browser cache key, so an "
+        f"unchanged token means a warm browser serves the OLD file."
     )
