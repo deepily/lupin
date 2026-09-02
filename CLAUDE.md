@@ -2267,6 +2267,36 @@ reaped or self-respun legitimately has one in each slot. They are written by sep
 they agree only where the writer put the same bytes in both — expect the self-respin nonce to
 differ, and do not read that difference as corruption.
 
+## 🔴 A WRONG INSTRUCTION GETS CAUGHT; A WRONG REASSURANCE DISARMS THE READER WHO WOULD HAVE CAUGHT IT
+
+Found by **sam 🎙️** 2026-09-02, sweeping `workflow/memento-management.md` for passages still naming
+the retired shared `.claude-memento.md` pointer as live. He was given the go on **seven** passages,
+re-derived the line numbers rather than trusting his own earlier list, read each hit in context, and
+came back with **eight** — three added, two withdrawn as legitimate records of a *rejected* proposal.
+**His grep found the NAME; the classification needed the USE.** Landed at planning-is-prompting
+`1c80e07`, whose own subject is the finding: *"the doc had two voices."*
+
+**The part worth keeping is which passage turned out to be worst, because it was not on anyone's list.**
+
+| passage | what it does | how it fails |
+|---|---|---|
+| **§ line 22** — *"`<project>/.claude-memento.md` for a self-`/clear`"* | an **instruction** to a dead path | the first person to follow it gets `self_respin` refusing with *"memento is stale"* — **loud, immediate, one reader** |
+| **§3.2** — *"**A naive reader is already correct.** … an inherited "read `.claude-memento.md` and rehydrate" instruction … gets the **current record's full content**, with **zero extra action**"* | a **reassurance** that the dead path still resolves | **nothing fires.** It tells a reader who was about to check that checking is unnecessary — **silent, indefinite, every reader** |
+
+⇒ **The reassurance sat directly above a banner announcing that same pointer was RETIRED.** Two
+voices, adjacent lines, and **the stale half is the half that gives instructions** — which is why a
+document can be *correct somewhere* and still be teaching the wrong thing.
+
+🔴 **SO WHEN YOU RETIRE A NAME, SWEEP FOR TWO POPULATIONS, NOT ONE.** The instructions that USE it
+are the obvious half and the cheap half. The sentences that **vouch for it** — *"this still works",
+"you need not worry", "a naive reader is already correct", "either form is fine"* — are the ones that
+cost you a reader's caution, and they rarely contain the imperative verbs a sweep greps for.
+
+⚠️ **This is § *A HIT IS NOT A USE* pointed at prose instead of code**, and it lands harder here: a
+wrong line of code fails when it runs, while a wrong sentence of reassurance fails by preventing the
+run that would have exposed it. **Grade a doc's passages by what they DISARM, not only by what they
+INSTRUCT.**
+
 ## HISTORY STRUCTURE NOTES
 - **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)
 - **Key Archived Periods**: 
