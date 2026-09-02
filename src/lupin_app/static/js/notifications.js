@@ -9693,8 +9693,8 @@ class NotificationsUI {
          * Ensures:
          *     - null/unreachable/bad shape -> "" (the header omits the clause rather
          *       than showing a number nobody measured)
-         *     - a usable payload -> "7d \u00b7 25% \u00b7 5 created / 19 closed"
-         *     - counts absent     -> the window and percent alone
+         *     - a usable payload -> "5 created / 19 closed  over 7d = 25%"
+         *     - counts absent     -> the window and percent alone, "7d = 25%"
          *     - Pure: no DOM, no fetch, no side effects; never throws
          *
          * ⚠️ THE COUNTS USED TO LIVE ONLY IN THE HOVER. They were moved there to make
@@ -9705,7 +9705,8 @@ class NotificationsUI {
          * @param {number} [provisionalDays] - a window slider being DRAGGED but not
          *        committed. The counts describe the COMMITTED window, so quoting them
          *        beside a different interval would be a lie with a number's authority.
-         *        They are withheld while provisional rather than shown stale.
+         *        They are withheld while provisional rather than shown stale, and so is the
+         *        PERCENT, which is computed from those same counts.
          */
         if ( !payload || typeof payload !== "object" ) return "";
         const hours = Number.isFinite( payload.window_hours ) ? payload.window_hours : null;
@@ -9713,11 +9714,16 @@ class NotificationsUI {
         const days        = provisional ? provisionalDays : this._flowRatioWindowDays( hours );
         if ( days === null ) return "";
 
-        const counts = provisional
-            ? "  \u00b7  recounting\u2026"
-            : ( ( Number.isFinite( payload.created ) && Number.isFinite( payload.closed ) )
-                ? `  \u00b7  ${payload.created} created / ${payload.closed} closed` : "" );
-        return `${days}d  \u00b7  ${this._flowRatioPercentText( payload )}${counts}`;
+        // PROVISIONAL DROPS THE PERCENT TOO, not just the counts. The percent is
+        // computed FROM the committed window's counts, so "over 3d = 12%" while the
+        // slider sits at 3d asserts a figure nobody measured over that interval. The
+        // old word order hid this — "3d \u00b7 12% \u00b7 recounting\u2026" read as three
+        // loose facts; "over 3d = 12%" reads as ONE claim, and that claim is false.
+        if ( provisional ) return `recounting\u2026  over ${days}d`;
+
+        const counts = ( Number.isFinite( payload.created ) && Number.isFinite( payload.closed ) )
+            ? `${payload.created} created / ${payload.closed} closed  over ` : "";
+        return `${counts}${days}d = ${this._flowRatioPercentText( payload )}`;
     }
 
     _flowRatioPercentText( payload ) {

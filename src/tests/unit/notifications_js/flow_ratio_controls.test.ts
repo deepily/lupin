@@ -465,7 +465,7 @@ test( "EXACTLY at the threshold reads closed — the comparison is strict", () =
   // The case a reader most easily guesses wrong: 100% against a 100% threshold.
   const ui = paintedUI( 1.0 );
   ui._renderFlowRatio( { ratio: 1.0, created: 10, closed: 10, window_hours: 24 } );
-  assert.equal( clause().textContent, " · 1d  ·  100%  ·  10 created / 10 closed" );
+  assert.equal( clause().textContent, " · 10 created / 10 closed  over 1d = 100%" );
   assert.equal( clause().classList.contains( "flow-ratio-closed" ), true,
     "allow is `ratio < threshold`, so exactly-at is a refusal and must not read green" );
 } );
@@ -473,12 +473,12 @@ test( "EXACTLY at the threshold reads closed — the comparison is strict", () =
 test( "nothing closed is INFINITY and refuses; an idle window is a dash and admits", () => {
   const ui = paintedUI( 1.0 );
   ui._renderFlowRatio( { ratio: null, created: 4, closed: 0, window_hours: 24 } );
-  assert.equal( clause().textContent, " · 1d  ·  ∞  ·  4 created / 0 closed" );
+  assert.equal( clause().textContent, " · 4 created / 0 closed  over 1d = ∞" );
   assert.equal( clause().classList.contains( "flow-ratio-closed" ), true,
     "a window where nothing was finished is exactly what the gate is for" );
 
   ui._renderFlowRatio( { ratio: null, created: 0, closed: 0, window_hours: 24 } );
-  assert.equal( clause().textContent, " · 1d  ·  —  ·  0 created / 0 closed" );
+  assert.equal( clause().textContent, " · 0 created / 0 closed  over 1d = —" );
   assert.equal( clause().classList.contains( "flow-ratio-open" ), true,
     "an idle window is not a failing window" );
 } );
@@ -487,7 +487,7 @@ test( "the hover carries the long form the short label drops", () => {
   const ui = paintedUI( 1.0 );
   ui._renderFlowRatio( { ratio: 0.25, created: 5, closed: 19, window_hours: 24 } );
   assert.equal( clause().title,
-    "Closed vs New Ratio — 1d  ·  25%  ·  5 created / 19 closed",
+    "Closed vs New Ratio — 5 created / 19 closed  over 1d = 25%",
     "the counts move to the hover so 200%-on-two-tickets stays checkable" );
 } );
 
@@ -528,6 +528,47 @@ test( "an UNCOMMITTED preview is marked, so it cannot be misread as state", asyn
   await settle();
   assert.equal( clause().classList.contains( "flow-ratio-preview" ), false,
     "a saved value is no longer a preview" );
+} );
+
+test( "dragging the WINDOW slider moves the interval in the bar, live", async () => {
+  // Rick asked this directly (2026-09-02): does the accordion bar's interval follow
+  // the slider as it moves? It does, and this pins it — the `input` handler repaints
+  // the clause with the provisional day count, so the interval is never one commit
+  // behind the control the reader is holding.
+  const ui = newUI();
+  ui.authedFetch = async () => fakeResponse( 200, true, GOOD ) as never;
+  ui._renderFlowRatio( { ratio: 0.12, created: 2, closed: 17, window_hours: 24 } );
+  ui.initFlowRatioControls();
+  await settle();
+  assert.equal( clause().textContent, " · 2 created / 17 closed  over 1d = 12%",
+    "committed: the full sentence Rick specified" );
+
+  slider( "flow-ratio-window" ).value = "7";
+  slider( "flow-ratio-window" ).dispatchEvent( new Event( "input" ) );
+  assert.match( clause().textContent as string, /over 7d/,
+    "the interval follows the slider immediately — 1d must not survive a drag to 7d" );
+} );
+
+test( "a dragged window withholds BOTH the counts and the percent", async () => {
+  // The counts describe the COMMITTED window, and the percent is computed from those
+  // same counts — so neither may be quoted beside an interval nobody measured over.
+  // The old word order made this survivable ("3d · 12% · recounting…" read as three
+  // loose facts). The new order welds them into one sentence, so a stale percent
+  // would now assert something false rather than merely sit next to it.
+  const ui = newUI();
+  ui.authedFetch = async () => fakeResponse( 200, true, GOOD ) as never;
+  ui._renderFlowRatio( { ratio: 0.12, created: 2, closed: 17, window_hours: 24 } );
+  ui.initFlowRatioControls();
+  await settle();
+
+  slider( "flow-ratio-window" ).value = "7";
+  slider( "flow-ratio-window" ).dispatchEvent( new Event( "input" ) );
+  const text = clause().textContent as string;
+  assert.equal( text, " · recounting\u2026  over 7d" );
+  assert.ok( !/%/.test( text ),
+    "a percent measured over 1d must not be printed as if measured over 7d" );
+  assert.ok( !/created|closed/.test( text ),
+    "likewise the counts it was computed from" );
 } );
 
 test( "_paintFlowRatioVerdict: absent clause is a no-op, not a throw", () => {
