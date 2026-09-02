@@ -135,6 +135,41 @@ def test_a_ref_that_cannot_be_walked_reports_unknown_and_names_the_ref():
     assert "origin/wip-branch" in line, "the failing ref must be named"
 
 
+def test_a_partial_mount_reads_as_deletions_and_the_line_splits_them_out():
+    """
+    THE CONTAINER CASE, measured before it was written. At sha `198216f3` the host
+    reported `tracked-dirty=2` and `lupin-rest-test` reported `tracked-dirty=127` — same
+    commit, same `.git`. 125 of the difference are ` D`: `.claude/` (65), `history/`
+    (39) and most of the repo root, none of which `docker-compose.yml` bind-mounts. Git
+    correctly calls a tracked file with nothing on disk deleted; a reader sees "127
+    tracked files modified" and concludes the tree is heavily edited when two are.
+
+    Splitting the field makes the two readings RECONCILE — 127 minus 125 is the host's
+    2 — without the line claiming to know why the files are absent, which git cannot
+    tell it.
+    """
+    mapping = dict( HEALTHY )
+    mapping[ ( "status", "--porcelain" ) ] = (
+        " M src/a.py\n"                       # a real edit
+        "?? scratch.txt\n"                    # untracked: counted by neither field
+        " D .claude/commands/plan-about.md\n" # absent because unmounted
+        " D history/2026-08-history.md\n"
+        "D  README.md\n"                      # staged deletion — the index column
+    )
+    line = tree_state_line( git_for( mapping ) )
+    assert "tracked-dirty=4" in line, "untracked scratch must still be excluded"
+    assert "deleted=3" in line, "both porcelain columns count — ' D' and 'D  '"
+
+
+def test_the_deleted_field_is_printed_even_when_it_is_zero():
+    """
+    A field that appears only when non-zero is indistinguishable from one that was never
+    computed — this module's own failure shape, and the reason `_run_span` states
+    `unmoved` rather than staying quiet.
+    """
+    assert "deleted=0" in tree_state_line( git_for( HEALTHY ) )
+
+
 def test_unreadable_dirt_is_reported_as_unknown_not_as_clean():
     """`dirty=?` and `tracked-dirty=0` are different claims; collapsing them lies."""
     mapping = dict( HEALTHY )

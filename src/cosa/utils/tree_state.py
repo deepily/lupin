@@ -199,6 +199,23 @@ def tree_state_line( git, start_sha=None ):
         - reports dirty separately from behind: a clean tree 88 commits back and a
           dirty tree at the tip are different claims, and both invalidate a quoted
           figure in different ways
+        - SPLITS `deleted=` OUT OF THE DIRTY COUNT, because inside a container almost
+          all of it is neither dirt nor deletion. Measured 2026-09-01 at sha c7f2e804:
+          the host reported `tracked-dirty=1`, `lupin-rest-test` reported
+          `tracked-dirty=126` on THE SAME COMMIT AND THE SAME `.git`. 125 of those 126
+          are ` D` — `.claude/` (65), `history/` (39), `README.md`, `CLAUDE.md` and the
+          rest of the repo root, none of which `docker-compose.yml` bind-mounts. Git
+          sees a tracked file with nothing on disk and correctly calls it deleted; a
+          reader sees "126 tracked files modified" and concludes the tree is heavily
+          edited when exactly one is. The remaining 1 is the real one and it MATCHES
+          the host — so the two readings reconcile once the field is split
+        - NAMES THE COMPOSITION AND CLAIMS NOTHING ABOUT THE CAUSE. Git cannot tell an
+          un-mounted file from one somebody really deleted, so this does not guess:
+          `deleted=125` is a shape no human working tree has, and a reader recognises a
+          partial mount from it without the line having to assert one
+        - PRINTS `deleted=0` RATHER THAN OMITTING IT, on the same reasoning `_run_span`
+          states `unmoved`: a field that appears only when non-zero is indistinguishable
+          from a field that was never computed, which is this module's own failure shape
         - performs NO network access: `@{upstream}` reads the last-fetched ref, so a
           run stays offline and cannot hang on a remote
 
@@ -241,11 +258,11 @@ def _tree_state_line( git, start_sha=None ):
 
     ref = git( "rev-parse", "--abbrev-ref", "@{upstream}" ) or _primary_branch( git )
     dirty = git( "status", "--porcelain" )
-    tracked_dirty = (
-        len( [ l for l in dirty.splitlines() if l and not l.startswith( "??" ) ] )
-        if dirty is not None else None
-    )
-    dirty_txt = "dirty=?" if tracked_dirty is None else f"tracked-dirty={tracked_dirty}"
+    tracked   = [ l for l in dirty.splitlines() if l and not l.startswith( "??" ) ] if dirty is not None else None
+    tracked_dirty = None if tracked is None else len( tracked )
+    deleted       = None if tracked is None else len( [ l for l in tracked if "D" in l[ :2 ] ] )
+    dirty_txt = ( "dirty=?" if tracked_dirty is None
+                  else f"tracked-dirty={tracked_dirty} deleted={deleted}" )
 
     if not ref:
         return ( f"[tree-state] sha={sha} root={root} branch={branch} {dirty_txt} "
