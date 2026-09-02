@@ -489,6 +489,11 @@ def test_uncommitted_asset_edit_bumped_its_token( static_url, token_full ):
 # concatenation) would still escape both — which is why the discovery below has its
 # own non-vacuous anchor rather than trusting the regex to keep matching.
 
+# Third-party bundles this repo neither authors nor versions. EVERY NAME HERE IS A
+# HOLE IN THE CORPUS, so the set is pinned by a test below: widening it is a
+# deliberate edit in two places, never a quiet one in this line.
+_JS_CORPUS_EXCLUDED_DIRS = frozenset( { "vendor", "canvaskit" } )
+
 JS_IMPORT_RE = re.compile( r'import\(\s*["\'](/static/[^"\']+)\?v=(\d{8}[a-z]?)["\']' )
 
 # The versioned JS imports EXPECTED in the shipped client, same purpose as
@@ -507,13 +512,19 @@ def _shipped_js_sources():
         - returns POSIX repo-relative paths (what git wants)
         - reads the DISK, not the index: a new client file is covered before it is
           committed, which is when a forgotten token is cheapest to fix
-        - skips `vendor/`, which this repo does not version and does not author
+        - walks the WHOLE static tree, not `static/js/`
+
+    🔴 IT WALKED `static/js/` ONLY IN ITS FIRST CUT AND MISSED 11 TRACKED FILES —
+    the same population defect this file was written to fix, one level down and in
+    my own code. They live under `static/html/admin/js/`,
+    `static/html/auth/admin/js/` and `static/html/auth/js/`. None versions an import
+    TODAY, which is exactly why it would have gone unnoticed: a corpus gap costs
+    nothing until something moves into it.
     """
     root  = cu.get_project_root()
-    js    = os.path.join( STATIC, "js" )
     found = []
-    for dirpath, dirnames, filenames in os.walk( js ):
-        dirnames[ : ] = [ d for d in dirnames if d != "vendor" ]
+    for dirpath, dirnames, filenames in os.walk( STATIC ):
+        dirnames[ : ] = [ d for d in dirnames if d not in _JS_CORPUS_EXCLUDED_DIRS ]
         for name in filenames:
             if not name.endswith( ".js" ): continue
             full = os.path.join( dirpath, name )
@@ -641,4 +652,168 @@ def test_uncommitted_js_import_target_bumped_its_token( source_rel, static_url, 
     assert token_full != token_at_head, (
         f"{repo_rel} has uncommitted changes, but {source_rel} still imports it "
         f"?v={token_full} — the same token HEAD carries. Bump it in the same edit."
+    )
+
+
+# ---------------------------------------------------------------------------
+# THE CORPUS ITSELF — enumerated, reported, and asserted
+# ---------------------------------------------------------------------------
+#
+# 🔴 THIS WAS A POPULATION DEFECT, NOT A LOGIC DEFECT (Mr Radio 🦉's framing, and it
+# is the sharper one). The page guards above were never WRONG. They were pointed at
+# a corpus of one file, and they answered correctly about it for six weeks while
+# ws-channel.js rotted just outside the frame.
+#
+# ⇒ A GUARD THAT SILENTLY SCANS ONE FILE AND A GUARD THAT SCANS FORTY-TWO LOOK
+# IDENTICAL WHEN BOTH ARE GREEN. Nothing in a passing run says how much was looked
+# at, so a corpus that quietly shrinks — a moved directory, a walk that stops
+# matching, an exclusion that grows teeth — becomes a guard that passes forever
+# while watching nothing.
+#
+# 🔴 AND THE FIRST CUT OF THIS BLOCK COULD NOT SEE THE EXCLUSION CASE, because it
+# derived BOTH SIDES of its comparison from `_JS_CORPUS_EXCLUDED_DIRS`. Adding
+# "shared" to that set shrank the walk AND the expected list together, so they
+# agreed perfectly and the guard stayed green while eight files left the frame.
+# Measured, not reasoned: the break was run and it passed. ⇒ THE EXPECTED SIDE OF
+# A COVERAGE COMPARISON MUST NOT BE DERIVED FROM THE THING BEING CHECKED. The
+# exclusion set is PINNED by its own test instead, so widening it is a deliberate
+# edit in two places rather than a quiet one in a single line.
+
+def _tracked( pathspec ):
+    """
+    Repo-relative paths git tracks under `pathspec`, sorted.
+
+    Requires:
+        - pathspec is a git pathspec
+
+    Ensures:
+        - returns POSIX repo-relative paths
+
+    ⚠️ A git pathspec is NOT shell globstar: `dir/**/*.md` requires an intervening
+    directory and silently drops files sitting directly in `dir`. Callers here pass
+    a plain directory prefix for that reason.
+    """
+    out = subprocess.run(
+        [ "git", "ls-files", "--", pathspec ],
+        cwd=cu.get_project_root(), capture_output=True, text=True, check=True
+    ).stdout.split()
+    return sorted( out )
+
+
+def _html_corpus():
+    """
+    EVERY tracked `.html` file under `src/`, repo-relative, sorted.
+
+    Ensures:
+        - the same population the defect-finding measurement used, so the figure
+          asserted here and the figure in that measurement are the same figure
+
+    ⚠️ 42 AND 32 ARE BOTH CORRECT — reconciled, not adjudicated. 42 is every tracked
+    `.html` under `src/`; 32 is the subset in `static/html/` plus `templates/`. The
+    ten between them are `static/lupin-mobile-test/`, four `src/rnd/` reports, two
+    `src/templates/` and four `src/tests/` fixtures. This guard takes the WIDER one:
+    a page that starts versioning assets is unwatched wherever it lives, and the
+    narrower corpus is a place for it to hide. Same for JavaScript — 27 tracked
+    under `static/` outside the excluded bundles, against the 16 a `static/js/`-only
+    walk saw, and those eleven were the finding.
+    """
+    return sorted( h for h in _tracked( "src" ) if h.endswith( ".html" ) )
+
+
+def test_the_js_corpus_exclusions_are_pinned():
+    """
+    The excluded-directory set is pinned, because it is the one input that can
+    shrink the corpus without any comparison noticing.
+
+    Ensures:
+        - fails when a directory is added to `_JS_CORPUS_EXCLUDED_DIRS`
+
+    This is a POLICY pin, not a moving baseline: it changes when someone decides a
+    directory is third-party, which is rare and deliberate — unlike the per-slice
+    token baseline this file exists to replace, which had to be hand-bumped every
+    time anyone shipped and was therefore the defect it was written to catch.
+    """
+    assert _JS_CORPUS_EXCLUDED_DIRS == frozenset( { "vendor", "canvaskit" } ), (
+        f"the JS corpus exclusions changed to {sorted( _JS_CORPUS_EXCLUDED_DIRS )}.\n"
+        f"Every excluded directory is a hole these guards cannot see into. Widen it "
+        f"only for a genuinely third-party bundle this repo does not author, and say "
+        f"so here — a corpus that narrows quietly is a guard that goes green by "
+        f"looking away."
+    )
+
+
+def test_the_guarded_corpus_is_enumerated_and_nonempty():
+    """
+    The corpus these guards scan must be enumerated, non-empty, and no smaller than
+    what git tracks — and the counts must be visible in the run's output.
+
+    Requires:
+        - the repo is a git checkout
+
+    Ensures:
+        - fails when either corpus is empty (a guard watching nothing)
+        - fails when the JS walk stops covering a tracked file outside the pinned
+          exclusions — the expected side comes from git, NOT from the exclusion set
+        - fails when a file already known to carry tokens is outside the corpus
+          (the positive control: a search that cannot return a hit cannot be trusted
+          when it returns a miss)
+        - prints both counts, so a green run reports its own scale
+    """
+    html_corpus = _html_corpus()
+    js_corpus   = _shipped_js_sources()
+
+    # THE EXPECTED SIDE IS GIT'S, NOT THE WALK'S. Deriving it from
+    # _JS_CORPUS_EXCLUDED_DIRS is what made the first cut of this test blind.
+    tracked_js  = [ j for j in _tracked( "src/lupin_app/static" ) if j.endswith( ".js" ) ]
+    excluded    = [ j for j in tracked_js if "/vendor/" in j or "/canvaskit/" in j ]
+    expected_js = [ j for j in tracked_js if j not in set( excluded ) ]
+
+    print( f"\n[cache-bust corpus] html={len( html_corpus )} scanned  "
+           f"js={len( js_corpus )} scanned of {len( tracked_js )} tracked "
+           f"({len( excluded )} excluded: {sorted( _JS_CORPUS_EXCLUDED_DIRS )})  "
+           f"versioned-page-links={len( _DISCOVERED_ASSETS )}  "
+           f"versioned-js-imports={len( _DISCOVERED_JS )}" )
+
+    assert html_corpus, "the HTML corpus is EMPTY — these guards would pass forever watching nothing"
+    assert js_corpus,   "the JS corpus is EMPTY — the import guards would pass forever watching nothing"
+
+    missing = sorted( set( expected_js ) - set( js_corpus ) )
+    assert not missing, (
+        f"the JS walk no longer covers {len( missing )} file(s) git tracks outside the "
+        f"pinned exclusions: {missing[ :5 ]}. A corpus that narrows quietly is a guard "
+        f"that goes green by looking away."
+    )
+
+    assert NOTIF_HTML_REL in html_corpus, \
+        f"{NOTIF_HTML_REL} is OUTSIDE the enumerated HTML corpus — the page guards are scanning something else"
+    for source_rel, _url in EXPECTED_JS_IMPORTS:
+        assert source_rel in js_corpus, \
+            f"{source_rel} carries a versioned import but is OUTSIDE the enumerated JS corpus"
+
+
+def test_exactly_the_expected_pages_carry_cache_bust_tokens():
+    """
+    Across the WHOLE tracked HTML corpus, exactly the expected pages carry `?v=`
+    tokens.
+
+    Requires:
+        - the repo is a git checkout
+
+    Ensures:
+        - fails when a NEW page starts versioning assets, because every page guard
+          above reads one file and would never look at it
+        - fails when the known page STOPS carrying tokens (the search going blind)
+
+    This is the assertion form of the measurement that found the defect. Written as
+    a comment it informs; written here it holds.
+    """
+    tokened = sorted(
+        h for h in _html_corpus()
+        if VERSIONED_ASSET_RE.search( _read( os.path.join( cu.get_project_root(), h ) ) )
+    )
+    assert tokened == [ NOTIF_HTML_REL ], (
+        f"the set of token-carrying pages changed: {tokened}\n"
+        f"Every page guard in this file reads ONLY {NOTIF_HTML_REL}. A second page "
+        f"versioning its assets is unwatched the moment it appears — which is exactly "
+        f"how a versioned reference outside the scanned corpus goes stale unnoticed."
     )
