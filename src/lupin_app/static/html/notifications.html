@@ -48,6 +48,19 @@
         <button class="toolbar-btn active" data-section="section-fleet-status" data-testid="fleet-status-toolbar-btn" title="Fleet Status">🛰️</button>
         <button class="toolbar-btn active" data-section="section-task-list" data-testid="task-list-toolbar-btn" title="Task List">🗒️</button>
         <button class="toolbar-btn active" data-section="section-epic-board" data-testid="epic-board-toolbar-btn" title="Epic Board">🗂️</button>
+        <!-- Holding Area toggle. Rick by voice, 2026-09-02: "we need a toggle button in the
+             Notifications Client Toolbar that hides and unhides the holding area, it needs its
+             own toggle button."
+
+             Declarative on purpose — `data-section` is all toggleSectionVisibility needs, and it
+             already persists the choice to localStorage and dims the button. Wiring a bespoke
+             handler here would be a second implementation of a mechanism that works, and it would
+             be the one that forgets to persist.
+
+             ⚠️ SITS BESIDE THE EPIC BOARD, NOT BESIDE THE TASK LIST. The two accordion buttons
+             following are task-list ACTIONS carrying no data-section; dropping this between them
+             would read as a third accordion control. -->
+        <button class="toolbar-btn active" data-section="section-holding-area" data-testid="holding-area-toolbar-btn" title="Holding Area">🗃️</button>
         <!-- Task-list per-persona accordion controls (2026-06-17). DISTINCT class
              (task-accordion-btn, NOT toolbar-btn) + NO data-section so the
              section-visibility click dispatcher ignores them — these are actions
@@ -1179,7 +1192,7 @@
     <script type="module" src="/static/js/shared/task-list-query.js?v=20260902a"></script>
     <script type="module" src="/static/js/shared/agent-select.js?v=20260829a"></script>
     <script type="module" src="/static/js/shared/arg-interview.js?v=20260829a"></script>
-    <script src="/static/js/notifications.js?v=20260902i"></script>
+    <script src="/static/js/notifications.js?v=20260902j"></script>
     <script src="/static/js/broadcast-panel.js?v=20260619a"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.

@@ -832,3 +832,41 @@ def test_the_demote_date_is_converted_through_the_browser_zone( client_code ):
     handler = function_body( client_code, "_handleTaskDemoteClick( button ) {" )
     assert "T09:00:00" in handler, "the demote date is not stamped with a local time"
     assert "toISOString()" in handler, "the demote date is not converted to an instant"
+
+
+def test_the_holding_area_has_its_own_toolbar_toggle():
+    """
+    ⭐ RICK BY VOICE, 2026-09-02: "we need a toggle button in the Notifications Client
+    Toolbar that hides and unhides the holding area, it needs its own toggle button."
+
+    🔴 THE PAIRING IS THE WHOLE THING, AND EITHER HALF ALONE LOOKS FINE. The dispatcher
+    is `toggleSectionVisibility( sectionId )`, which looks the section up by ID and the
+    button up by `data-section`. A button whose `data-section` names no section logs
+    "Section not found" to a console nobody is tailing and does nothing on screen; a
+    section with no button can never be reopened once hidden. Both halves render
+    perfectly in either broken state.
+    """
+    page = PAGE.read_text( encoding="utf-8" )
+    assert 'data-section="section-holding-area"' in page, "the toolbar has no holding-area toggle"
+    assert 'id="section-holding-area"'           in page, "the toggle names a section that does not exist"
+    assert 'data-testid="holding-area-toolbar-btn"' in page, "the toggle is not addressable from a test"
+
+
+def test_the_toggle_uses_the_shared_dispatcher_rather_than_a_second_implementation( client_code ):
+    """
+    `toggleSectionVisibility` already persists the choice to localStorage, dims the
+    button, and scrolls the section into view. A bespoke handler for this one section
+    would be a second implementation of a working mechanism — and it would be the one
+    that forgets to persist, so the pane silently reappears on every reload.
+
+    The button is therefore DECLARATIVE: `class="toolbar-btn"` + `data-section`, and no
+    holding-area-specific branch anywhere in the dispatcher.
+    """
+    page = PAGE.read_text( encoding="utf-8" )
+    assert re.search( r'class="toolbar-btn[^"]*"[^>]*data-section="section-holding-area"', page ), (
+        "the holding-area toggle is not a toolbar-btn, so the section dispatcher ignores it"
+    )
+    body = function_body( client_code, "toggleSectionVisibility( sectionId ) {" )
+    assert "section-holding-area" not in body, (
+        "the dispatcher carries a holding-area special case — the toggle should need none"
+    )
