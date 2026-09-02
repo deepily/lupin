@@ -19,6 +19,8 @@ learning it from a failure.
 """
 
 import re
+import shutil
+import subprocess
 
 from pathlib import Path
 
@@ -710,3 +712,37 @@ def test_the_epic_colspans_moved_with_the_new_column( client_code ):
     assert epic.count( 'colspan="5"' ) >= 3, (
         "expected the error stripe, the group header and the story row to span 5 columns"
     )
+
+
+# ------------------------------------------------- the check the other 34 cannot make
+
+
+def test_the_shipped_client_actually_parses():
+    """
+    🔴 EVERY OTHER TEST IN THIS FILE READS THE CLIENT AS TEXT AND NONE OF THEM RUNS
+    IT. A stray brace, a bad template literal, a duplicate `const` — the file would
+    still contain every string these tests search for, all 34 would pass, and the
+    browser would fail to parse the script and render a dead page. The suite would
+    be entirely green about an application that does not start.
+
+    That is not a hypothetical gap in careful work; it is the STRUCTURAL limit of
+    asserting on source text, and it applies hardest to a 22,000-line file edited by
+    string replacement, which is exactly how this slice was built.
+
+    ⚠️ A SKIP HERE IS A REAL RESULT, NOT A PASS. If node is missing the check did not
+    happen, and the message says so rather than letting an absent tool read as a
+    clean bill of health.
+    """
+    node = shutil.which( "node" )
+    if node is None:
+        pytest.skip( "node not on PATH — THE PARSE CHECK DID NOT RUN; the other tests cannot cover this" )
+
+    for asset in ( CLIENT, SHARED_QUERY ):
+        result = subprocess.run(
+            [ node, "--check", str( asset ) ],
+            capture_output=True, text=True, timeout=60
+        )
+        assert result.returncode == 0, (
+            f"{asset.name} does not parse — the browser would render a dead page while "
+            f"every source-text assertion in this file stayed green:\n{result.stderr}"
+        )
