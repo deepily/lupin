@@ -582,18 +582,16 @@ test( "_transitionTask: a network throw is a failure and NEVER propagates", asyn
 function twoPanesShowingTheSameRow( ui: HoldingUI, id: string ): void {
   const task = row( { id, status: "parked" } );
   document.body.replaceChildren();
-  const host = document.createElement( "div" );
-  // Task list FIRST in document order, epic board second — the real page's order.
-  host.innerHTML = `
-    <table id="task-list-table"><tbody>
-      <tr><td>${ui._taskActionsCell( task )}</td></tr>
-      <tr class="task-row-error-stripe" data-error-for="${id}" hidden><td></td></tr>
-    </tbody></table>
-    <table id="epic-board-table"><tbody>
+  // Task list FIRST in document order, epic board second — the real page's order, and
+  // each table now sits inside its OWN pane container, wired the way the page wires it.
+  // The row itself must stay hand-built: the whole point is one id in two panes, which
+  // no render call can produce.
+  const cell = ( tableId: string ) => `
+    <table id="${tableId}"><tbody>
       <tr><td>${ui._taskActionsCell( task )}</td></tr>
       <tr class="task-row-error-stripe" data-error-for="${id}" hidden><td></td></tr>
     </tbody></table>`;
-  document.body.appendChild( host );
+  acrossRealPanes( ui, cell( "task-list-table" ), cell( "epic-board-table" ) );
 }
 
 test( "🔴 a reason typed on the EPIC BOARD is the one that gets sent", async () => {
@@ -608,7 +606,8 @@ test( "🔴 a reason typed on the EPIC BOARD is the one that gets sent", async (
   // Rick types into the SECOND pane — the one he is looking at — and clicks ITS button.
   const epic = document.getElementById( "epic-board-table" ) as HTMLElement;
   ( epic.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value = "fuck no, I will not fix this";
-  await ui._handleTaskWontFixClick( epic.querySelector( ".task-wont-fix-button" ) as HTMLElement );
+  await clickThrough( ui, "_handleTaskWontFixClick", epic.querySelector( ".task-wont-fix-button" ),
+    "the EPIC BOARD's Won't fix" );
 
   assert.equal( calls.length, 1,
     "the click was swallowed — the handler read the OTHER pane's empty box and refused silently" );
@@ -624,7 +623,8 @@ test( "🔴 a refusal appears in the pane the operator actually clicked in", asy
 
   // Both boxes blank: the refusal is legitimate. The question is WHERE it is shown.
   const epic = document.getElementById( "epic-board-table" ) as HTMLElement;
-  await ui._handleTaskWontFixClick( epic.querySelector( ".task-wont-fix-button" ) as HTMLElement );
+  await clickThrough( ui, "_handleTaskWontFixClick", epic.querySelector( ".task-wont-fix-button" ),
+    "the EPIC BOARD's Won't fix" );
 
   const epicStripe = epic.querySelector( ".task-row-error-stripe" ) as HTMLElement;
   assert.equal( epicStripe.hidden, false,
@@ -648,7 +648,7 @@ function rowWithDisclosure( ui: HoldingUI, id: string, paneId: string ): string 
 test( "the controls row is HIDDEN by default and the toggle says so", () => {
   const ui = newUI();
   const id = "row-1";
-  document.body.innerHTML = rowWithDisclosure( ui, id, "task-list-table" );
+  acrossRealPanes( ui, rowWithDisclosure( ui, id, "task-list-table" ), "" );
 
   const controls = document.querySelector( ".task-controls-row" ) as HTMLElement;
   const toggle   = document.querySelector( ".task-disclose-button" ) as HTMLElement;
@@ -659,50 +659,51 @@ test( "the controls row is HIDDEN by default and the toggle says so", () => {
   assert.equal( toggle.tagName, "BUTTON", "the disclosure affordance is not focusable" );
 } );
 
-test( "clicking the ellipsis discloses the controls, and clicking again hides them", () => {
+test( "clicking the ellipsis discloses the controls, and clicking again hides them", async () => {
   const ui = newUI();
   const id = "row-1";
-  document.body.innerHTML = rowWithDisclosure( ui, id, "task-list-table" );
+  acrossRealPanes( ui, rowWithDisclosure( ui, id, "task-list-table" ), "" );
   const controls = document.querySelector( ".task-controls-row" ) as HTMLElement;
   const toggle   = document.querySelector( ".task-disclose-button" ) as HTMLElement;
 
-  ui._handleDisclosureToggle( toggle );
+  await clickThrough( ui, "_handleDisclosureToggle", toggle, "the disclosure ellipsis" );
   assert.equal( controls.hidden, false, "the controls did not appear" );
   assert.equal( toggle.getAttribute( "aria-expanded" ), "true" );
   assert.match( toggle.getAttribute( "title" ) ?? "", /Hide/ );
 
-  ui._handleDisclosureToggle( toggle );
+  await clickThrough( ui, "_handleDisclosureToggle", toggle, "the disclosure ellipsis" );
   assert.equal( controls.hidden, true, "the controls did not collapse again" );
   assert.equal( toggle.getAttribute( "aria-expanded" ), "false" );
 } );
 
-test( "collapsing clears the error stripe, so a stale refusal cannot outlive its form", () => {
+test( "collapsing clears the error stripe, so a stale refusal cannot outlive its form", async () => {
   const ui = newUI();
   const id = "row-1";
-  document.body.innerHTML = rowWithDisclosure( ui, id, "task-list-table" );
+  acrossRealPanes( ui, rowWithDisclosure( ui, id, "task-list-table" ), "" );
   const toggle = document.querySelector( ".task-disclose-button" ) as HTMLElement;
   const pane   = document.getElementById( "task-list-table" ) as HTMLElement;
 
-  ui._handleDisclosureToggle( toggle );
+  await clickThrough( ui, "_handleDisclosureToggle", toggle, "the disclosure ellipsis" );
   ui._renderTaskRowError( id, "A won't-fix reason is required.", pane );
   const stripe = document.querySelector( ".task-row-error-stripe" ) as HTMLElement;
   assert.equal( stripe.hidden, false );
 
-  ui._handleDisclosureToggle( toggle );   // collapse
+  await clickThrough( ui, "_handleDisclosureToggle", toggle, "the disclosure ellipsis" );   // collapse
   assert.equal( stripe.hidden, true,
     "a refusal is still on screen complaining about a form nobody can see any more" );
 } );
 
-test( "🔴 the ellipsis opens ITS OWN pane's controls, not the other pane's copy", () => {
+test( "🔴 the ellipsis opens ITS OWN pane's controls, not the other pane's copy", async () => {
   const ui = newUI();
   const id = "bc77cd79-7acc-4a99-8a27-8fc77d2cc1b3";
   // The exact shape that made Won't-fix look dead: one row, two panes, one id.
-  document.body.innerHTML =
-    rowWithDisclosure( ui, id, "task-list-table" ) + rowWithDisclosure( ui, id, "epic-board-table" );
+  acrossRealPanes( ui, rowWithDisclosure( ui, id, "task-list-table" ),
+                       rowWithDisclosure( ui, id, "epic-board-table" ) );
 
   const epic = document.getElementById( "epic-board-table" ) as HTMLElement;
   const list = document.getElementById( "task-list-table" ) as HTMLElement;
-  ui._handleDisclosureToggle( epic.querySelector( ".task-disclose-button" ) as HTMLElement );
+  await clickThrough( ui, "_handleDisclosureToggle", epic.querySelector( ".task-disclose-button" ),
+    "the EPIC BOARD's disclosure ellipsis" );
 
   assert.equal( ( epic.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false,
     "pressing the epic board's ellipsis opened nothing there" );
@@ -958,9 +959,15 @@ test( "🔴 _controlScope reads the input in the CLICKED row's own cell, not the
 // about which pane the row was in, and that is not a client question.
 
 function realPageDOM(): void {
-  // The page's actual shape: notifications.html has #task-list-container at :774 and
-  // #holding-area-container at :812 as SIBLING sections. A nested fixture would let the
-  // task list's listener catch these clicks and hide the defect entirely.
+  // The page's actual shape: notifications.html has #task-list-container at :774,
+  // #holding-area-container at :812 and #epic-board-container at :845, all THREE as
+  // SIBLING sections. A nested fixture would let one pane's listener catch another
+  // pane's clicks and hide the defect entirely.
+  //
+  // ⚠️ THE EPIC BOARD IS HERE BECAUSE THE SAME ROW APPEARS IN TWO PANES AT ONCE, which
+  // is the shape that made Won't-fix look dead. A two-pane fixture cannot ask whether
+  // the epic board's own listener routes its own clicks; a three-pane one can, and the
+  // page has three.
   document.body.innerHTML = `
     <div class="collapsible-section" id="section-task-list">
       <div class="section-content"><div id="task-list-container"></div></div>
@@ -969,7 +976,25 @@ function realPageDOM(): void {
       <div class="section-content" id="holding-area-section">
         <div id="holding-area-container"></div>
       </div>
+    </div>
+    <div class="collapsible-section" id="section-epic-board">
+      <div class="section-content"><div id="epic-board-container"></div></div>
     </div>`;
+}
+
+// Put a hand-built fixture INSIDE the real panes and wire all three, so a click routes
+// through the pane's own delegated listener instead of skipping it.
+//
+// ⚠️ USED ONLY WHERE THE REAL RENDER PATH CANNOT PAINT THE SHAPE — one task id showing
+// in two panes at once. Everywhere else, paint the real row. Hand-building is a cost
+// paid for a specific reason here, not the default.
+function acrossRealPanes( ui: HoldingUI, listHTML: string, epicHTML: string ): void {
+  realPageDOM();
+  ( document.getElementById( "task-list-container" )  as HTMLElement ).innerHTML = listHTML;
+  ( document.getElementById( "epic-board-container" ) as HTMLElement ).innerHTML = epicHTML;
+  ui._wireTaskListAccordion();
+  ui._wireHoldingAreaControls();
+  ui._wireEpicBoardAccordion();
 }
 
 const HELD_ROWS = [
@@ -1078,19 +1103,24 @@ test( "🔴 batch APPROVE sends `queued` and batch WON'T-FIX sends `wont_fix`", 
   const sent: Array<[ string, string ]> = [];
   ui._transitionTask = async ( id, to ) => { sent.push( [ id, to ] ); return { ok: true }; };
   ui.refreshHoldingArea = async () => {};
-  document.body.innerHTML = `
-    <div id="holding-area-container">
-      <div class="holding-area-group" data-filer="alice">
-        <button class="task-action-btn task-approve-button" data-task-id="a1"></button>
-        <input class="task-action-input holding-wont-fix-all-reason" data-filer="alice" value="closing the lot">
-      </div>
-    </div>`;
+  // The pane PAINTS its own group, its own batch buttons and its own reason box. The
+  // previous cut hand-built a `#holding-area-container` and passed the handler a
+  // `{ dataset: { filer } }`, so a batch button that stopped rendering — or stopped
+  // carrying `data-filer`, or stopped being reachable — left both verbs asserted
+  // against a control the operator could not press.
+  paintedWith( ui, {
+    status: "ok",
+    tasks: [ row( { id: "a1", status: "not_approved", created_by: "alice 11111111" } ) ]
+  } );
+  fillRowInput( "holding-wont-fix-all-reason", "closing the lot" );
 
-  await ui._handleHoldingApproveAllClick( { dataset: { filer: "alice" } } );
+  await clickThrough( ui, "_handleHoldingApproveAllClick",
+    document.querySelector( '.holding-approve-all[data-filer="Alice"]' ), "batch approve for Alice" );
   assert.deepEqual( sent, [ [ "a1", "queued" ] ], "batch approve sent the wrong transition verb" );
 
   sent.length = 0;
-  await ui._handleHoldingWontFixAllClick( { dataset: { filer: "alice" } } );
+  await clickThrough( ui, "_handleHoldingWontFixAllClick",
+    document.querySelector( '.holding-wont-fix-all[data-filer="Alice"]' ), "batch won't-fix for Alice" );
   assert.deepEqual( sent, [ [ "a1", "wont_fix" ] ], "batch won't-fix sent the wrong transition verb" );
 } );
 
