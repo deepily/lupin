@@ -226,16 +226,14 @@ test( "won't-fix will not call the server on a blank reason, and sends it verbat
   ui.refreshTaskList = async () => {};
 
   const id = "aaaaaaaa-1111-2222-3333-444444444444";
-  document.body.innerHTML = `
-    <input class="task-action-input task-wont-fix-reason" data-task-id="${id}" value="">
-    <table><tr class="task-row-error-stripe" data-error-for="${id}" hidden><td></td></tr></table>`;
-  const button = { dataset: { taskId: id } };
+  paintedTaskList( ui, [ row( { id, status: "queued" } ) ] );
+  const button = document.querySelector( ".task-wont-fix-button" );
 
-  await ui._handleTaskWontFixClick( button );
+  await clickThrough( ui, "_handleTaskWontFixClick", button, "Won't fix" );
   assert.equal( calls.length, 0, "a blank won't-fix reason reached the server" );
 
-  ( document.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value = "fuck no, I will not fix this";
-  await ui._handleTaskWontFixClick( button );
+  fillRowInput( "task-wont-fix-reason", "fuck no, I will not fix this" );
+  await clickThrough( ui, "_handleTaskWontFixClick", button, "Won't fix" );
   assert.equal( calls.length, 1 );
   assert.equal( calls[ 0 ][ 1 ], "wont_fix" );
   assert.equal( ( calls[ 0 ][ 2 ] as { reason: string } ).reason, "fuck no, I will not fix this" );
@@ -248,24 +246,19 @@ test( "demote requires BOTH a reason and a triage-by date, and stamps a real ins
   ui.refreshTaskList = async () => {};
 
   const id = "aaaaaaaa-1111-2222-3333-444444444444";
-  document.body.innerHTML = `
-    <input class="task-action-input task-demote-reason" data-task-id="${id}" value="">
-    <input class="task-action-input task-demote-chase"  data-task-id="${id}" value="">
-    <table><tr class="task-row-error-stripe" data-error-for="${id}" hidden><td></td></tr></table>`;
-  const button = { dataset: { taskId: id } };
-  const reason = document.querySelector( ".task-demote-reason" ) as HTMLInputElement;
-  const chase  = document.querySelector( ".task-demote-chase" )  as HTMLInputElement;
+  paintedTaskList( ui, [ row( { id, status: "queued" } ) ] );
+  const button = document.querySelector( ".task-demote-button" );
 
-  await ui._handleTaskDemoteClick( button );
+  await clickThrough( ui, "_handleTaskDemoteClick", button, "Demote" );
   assert.equal( calls.length, 0, "a blank demote reason reached the server" );
 
-  reason.value = "overtaken by the holding-area work";
-  await ui._handleTaskDemoteClick( button );
+  fillRowInput( "task-demote-reason", "overtaken by the holding-area work" );
+  await clickThrough( ui, "_handleTaskDemoteClick", button, "Demote" );
   assert.equal( calls.length, 0,
     "a demotion with NO triage-by date reached the server — that row would never come back" );
 
-  chase.value = "2026-09-10";
-  await ui._handleTaskDemoteClick( button );
+  fillRowInput( "task-demote-chase", "2026-09-10" );
+  await clickThrough( ui, "_handleTaskDemoteClick", button, "Demote" );
   assert.equal( calls.length, 1 );
   const extras = calls[ 0 ][ 2 ] as { reason: string; next_chase_ts: string };
   assert.equal( calls[ 0 ][ 1 ], "not_approved" );
@@ -288,9 +281,12 @@ test( "approve sends the promotion and never invents an allowlist check of its o
   ui._transitionTask = async ( id, to, extras ) => { calls.push( [ id, to, extras ] ); return { ok: true }; };
   ui.refreshTaskList = async () => {};
 
+  // ⚠️ APPROVE IS DRIVEN FROM THE HOLDING PANE, not the task list. It renders enabled
+  // ONLY on a `not_approved` row, and that is the pane held rows live in — so this is
+  // the one place a real click on a real Approve button can happen at all.
   const id = "aaaaaaaa-1111-2222-3333-444444444444";
-  document.body.innerHTML = `<table><tr class="task-row-error-stripe" data-error-for="${id}" hidden><td></td></tr></table>`;
-  await ui._handleTaskApproveClick( { dataset: { taskId: id } } );
+  paintedWith( ui, { status: "ok", tasks: [ row( { id, status: "not_approved" } ) ] } );
+  await clickThrough( ui, "_handleTaskApproveClick", document.querySelector( ".task-approve-button" ), "Approve" );
 
   assert.equal( calls.length, 1, "approve did not fire — the client is gating on a rule of its own" );
   assert.equal( calls[ 0 ][ 1 ], "queued" );
@@ -303,11 +299,10 @@ test( "a refused transition shows the SERVER'S words, not a client paraphrase", 
   ui.refreshTaskList = async () => {};
 
   const id = "aaaaaaaa-1111-2222-3333-444444444444";
-  document.body.innerHTML = `
-    <input class="task-action-input task-wont-fix-reason" data-task-id="${id}" value="because">
-    <table><tr class="task-row-error-stripe" data-error-for="${id}" hidden><td></td></tr></table>`;
+  paintedTaskList( ui, [ row( { id, status: "queued" } ) ] );
+  fillRowInput( "task-wont-fix-reason", "because" );
 
-  await ui._handleTaskWontFixClick( { dataset: { taskId: id } } );
+  await clickThrough( ui, "_handleTaskWontFixClick", document.querySelector( ".task-wont-fix-button" ), "Won't fix" );
   const stripe = document.querySelector( `.task-row-error-stripe[data-error-for="${id}"]` ) as HTMLElement;
   assert.equal( stripe.hidden, false, "the refusal is invisible — the row looks like nothing happened" );
   assert.ok( ( stripe.textContent ?? "" ).includes( serverWords ),
