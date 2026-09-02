@@ -257,6 +257,14 @@ def test_an_unreadable_bridge_still_sends_a_wake_that_says_so( tmp_path ):
     typed = [ l for l in log.read_text().splitlines() if "-l --" in l ]
     wakes = [ l for l in typed if "SELF-RESPIN-WAKE-PROOF" in l ]
     assert wakes, f"no wake was typed; tmux saw: {typed}"
-    assert sr._PRE_CLEAR_SID_UNAVAILABLE in wakes[ 0 ], \
-        "an unreadable bridge must yield the named UNAVAILABLE value, never an empty id"
+    # 🔴 ASSERT THE SUBSTITUTION SITE, NOT THE STRING. The first cut of this test was
+    # `sr._PRE_CLEAR_SID_UNAVAILABLE in wakes[0]`, and it was BLIND: the wake TEMPLATE
+    # already contains that literal in its closing sentence ("if the id above reads
+    # (unavailable) …"), so the assertion held whatever the chain substituted. Deleting
+    # the fallback entirely left it GREEN. Expected and actual met inside the template —
+    # a tautology wearing an assertion's clothes. The contiguous phrase below occurs
+    # ONLY where the substitution lands.
+    assert f"was session {sr._PRE_CLEAR_SID_UNAVAILABLE}" in wakes[ 0 ], \
+        "an unreadable bridge must yield the named UNAVAILABLE value AT THE SUBSTITUTION " \
+        "SITE, never an empty id that renders as 'was session .'"
     assert sr._PRE_CLEAR_SID_SENTINEL not in wakes[ 0 ]
