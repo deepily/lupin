@@ -63,6 +63,18 @@ HAZARD_CAVEATS = {
     # correction to his own correction (92445956). It fixes WHICH BYTES come back; the
     # write is identical, so it still reverts a peer's edit made since your backup.
     r"\bcp\s+[^\n]*\.bak": ( "since", "peer", "still reverts", "backup is" ),
+
+    # Clears the index. In this shared checkout that reaches a PEER'S staged work, and
+    # merge_head_guard's squash remedy recommends a bare one while warning only that the
+    # leftovers get re-swept by `git add -A`.
+    #
+    # ⚠️ NO LOOKAHEAD, DELIBERATELY. My first cut excluded `--hard`, on the reasoning
+    # that the hard case is obviously destructive and already known. Tiberius 👑 and
+    # Mr. Radio 🦉 both read it the other way and they are right: `--soft` clears staged
+    # paths too, so an exclusion aimed at `--hard` lets the quieter form through
+    # unqualified — and a floor that skips the variant people actually reach for is not
+    # a floor. Every spelling of `git reset` names the index; every one wants the caveat.
+    r"git\s+reset\b": ( "index", "peer", "staged", "re-stage" ),
 }
 
 
