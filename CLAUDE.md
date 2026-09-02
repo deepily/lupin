@@ -567,6 +567,60 @@ the root set, the wall-clock time — because without them a reading is not wron
 goes stale. ⇒ *Coordinates make your reading checkable. Content-names make your pointer durable.*
 Say what you measured **and** name what you mean.
 
+## 🔴 A TWO-FILE INVOCATION CANNOT TELL YOU WHICH FILE THE RESULT CAME FROM
+
+Rio ⚡'s line, 2026-09-02, found on his own run after two other seats had spent a measurement each
+chasing it. **pytest's summary reports a UNION and every reader hears one file.**
+
+**The receipt.** Three seats ran the same cache-bust guard at one sha and got two different answers
+— **4 passed / 5 skipped** twice, **4 passed / 6 skipped** once. The guard **discovers its own
+corpus** from the page rather than carrying a list, so a corpus that changes size at a fixed sha
+looks exactly like a discovery reading something other than the sha. That is a real and alarming
+shape, and it is what everyone went to investigate.
+
+⇒ **There was no sixth asset.** He had passed **both** guard files to pytest in one invocation. The
+extra skip came from the OTHER file, and `40 deselected` was on screen the whole time saying so.
+
+| what the summary line says | what it means |
+|---|---|
+| `4 passed, 6 skipped` | across **every file in the invocation**, summed |
+| — | it does **not** say which file, and nothing in it hints that more than one was collected |
+
+⇒ **Report a per-file result from a per-file run.** When you quote a count to another seat, quote
+the invocation with it — or pass one file. A number lifted out of a multi-file run is a fact about
+a set the reader cannot see.
+
+⚠️ **THE COST LANDED ON THE PEOPLE WHO DID EVERYTHING ELSE RIGHT.** Both other seats reasoned
+carefully from a number that was never about the file they were reasoning about — and one of them,
+chasing it, produced the second half of this entry.
+
+### 🔴 AND ITS COMPANION: A REAL MECHANISM AIMED AT THE WRONG TEST IS STILL A WRONG ANSWER
+
+Mr. Radio 🦉, same evening, same thread, and the more expensive of the two errors.
+
+Asked to explain that count, I read the guard and found something true: its third arm gates on
+`_differs_from_head()`, so it **runs when an asset is dirty and skips when it is clean** — a
+property of the working tree, not of the sha. I sent it as the explanation.
+
+**It was true, it was confirmed by experiment, and it was about a DIFFERENT ARM.** The count in
+question came from `followed_its_last_change`, which is insensitive to all of it — measured across
+three tree states, one variable at a time: clean **4/5**, page dirty **4/5**, asset dirty **4/5**,
+corpus **9** in every one (printed, not inferred from pass/skip counts).
+
+| I established | I never checked |
+|---|---|
+| the mechanism is real | that it reaches the test whose numbers were the question |
+
+⇒ **This is § *THE OVERCLAIM HIDES IN THE JOIN* arriving from the inside.** I had measured both ends
+— a real mechanism, a real discrepancy — and welded them without measuring the link. ⚠️ **And it is
+worse than a wrong count, by this file's own ranking**: a wrong number gets re-derived by the next
+reader, while **a wrong mechanism sends them into innocent code.** Here it sent a peer to build a
+three-state experiment on the wrong variable.
+
+⇒ **Before you offer a mechanism for someone else's number, ask which test produced that number and
+whether your mechanism can reach it.** A mechanism that is true of the file is not thereby true of
+the assertion.
+
 ## 🔴 `run-span=unmoved` KEYS ON THE SHA, AND THE READER HEARS "THE TREE WAS CLEAN"
 
 María 🌸, 2026-09-02, catching a tier this reviewer had already named by its sha. **The instrument
