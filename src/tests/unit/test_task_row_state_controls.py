@@ -80,6 +80,50 @@ def strip_js_comments( source ):
     return re.sub( r"^\s*//.*$", "", without_blocks, flags=re.MULTILINE )
 
 
+def function_body( code, signature, until=None ):
+    """
+    Slice one function's body out of the client source by its EXACT signature.
+
+    🔴 DO NOT SLICE ON THE BARE FUNCTION NAME. `split( name )[ 1 ]` and
+    `split( name )[ -1 ]` are each right exactly half the time and neither is
+    right twice: whether the definition or a call site comes first depends on
+    where the caller happens to sit in the file. Both mistakes were made in this
+    suite within one sitting — `[ 1 ]` sliced the caller for a function defined
+    below its use, then `[ -1 ]` sliced past the definition for one defined above
+    it. Both failures LOOK like the code is missing the thing being asserted.
+
+    The signature is unambiguous: a call site never carries the parameter list and
+    the opening brace.
+
+    Requires:
+        - signature appears exactly once in `code` (asserted, not assumed)
+
+    ⚠️ THE END OF THE SLICE MATTERS AS MUCH AS THE START. A fixed character window
+    overruns into whatever method happens to sit below, and then an ABSENCE
+    assertion fails on the neighbour's code — measured here: the filer-grouping
+    check read on into `_taskOwnerLabel` and reported that the holding area groups
+    by owner. So the default end is the NEXT method definition, not a byte count.
+
+    Requires:
+        - signature appears exactly once in `code` (asserted, not assumed)
+
+    Ensures:
+        - returns the text from the signature to `until`, or to the next
+          four-space-indented method definition, whichever was asked for
+        - never silently includes a neighbouring function
+    """
+    assert code.count( signature ) == 1, (
+        f"{signature!r} appears {code.count( signature )} times — the slice would be ambiguous"
+    )
+    body = code.split( signature )[ 1 ]
+    if until:
+        return body.split( until )[ 0 ]
+    # Next sibling method: a newline, exactly four spaces, a name, an open paren.
+    # `async ` is matched too, or an async neighbour would not terminate the slice.
+    nxt = re.search( r"\n    (?:async )?[A-Za-z_$][\w$]*\s*\(", body )
+    return body[ :nxt.start() ] if nxt else body
+
+
 @pytest.fixture( scope="module" )
 def client_code( client_src ):
     """Ensures: the client asset with every comment stripped — code only."""
@@ -196,8 +240,18 @@ def test_the_cache_bust_tokens_were_bumped_with_the_assets():
     css  = re.search( r"task-list\.css\?v=(\w+)", page )
     assert js  is not None, "notifications.js is not versioned on the page"
     assert css is not None, "task-list.css is not versioned on the page"
-    assert js.group( 1 )  != "20260902c", "js token not bumped past the drop/park slice"
-    assert css.group( 1 ) != "20260902a", "css token not bumped past the drop/park slice"
+    # ⚠️ THIS GUARD IS PER-SLICE AND ITS BASELINE MUST MOVE WITH IT. Pinned against
+    # the PREVIOUS slice's tokens, it goes green the moment they are bumped once and
+    # then says nothing about the slices after — which is exactly what happened: the
+    # epic-board change shipped with the holding-area token still in place, and this
+    # test was happy because that token was not the drop/park one.
+    #
+    # A static test cannot know whether an asset changed since the token was set.
+    # What it CAN do is refuse the stale value, so the baseline is bumped alongside
+    # the assets every time and a forgotten bump is a red test rather than a browser
+    # quietly serving yesterday's file.
+    assert js.group( 1 )  != "20260902e", "js token not bumped past the holding-area slice"
+    assert css.group( 1 ) != "20260902c", "css token not bumped past the holding-area slice"
 
 
 # ------------------------------------------------- slice 2: won't-fix · demote · approve
@@ -509,7 +563,7 @@ def test_the_batch_is_sequential_so_its_failure_report_is_reproducible( client_s
     order is not reproducible, so "the first refusal" would name a different row
     each run. One at a time is slower and its report is stable.
     """
-    assert "Promise.all" not in client_code.split( "_applyHoldingBatch" )[ 1 ][ :2000 ], (
+    assert "Promise.all" not in function_body( client_code, "_applyHoldingBatch( filer, toStatus, extras, verb ) {" ), (
         "the holding batch fires concurrently; its first-refusal report is then a race"
     )
     assert "for ( const id of ids )" in client_src
@@ -522,7 +576,7 @@ def test_the_batch_reads_row_ids_from_the_DOM_not_from_a_cached_list( client_cod
     had already moved. What is on screen is what the operator pressed about.
     """
     assert "_heldRowIdsForFiler" in client_code
-    body = client_code.split( "_heldRowIdsForFiler" )[ 1 ][ :1200 ]
+    body = function_body( client_code, "_heldRowIdsForFiler( filer ) {" )
     # The ids must come off the GROUP ELEMENT found in the live DOM. Asserting only
     # that "querySelectorAll" appears somewhere in the body survives neutering the
     # element lookup above it, which is how a cached list would actually be
@@ -569,9 +623,7 @@ def test_the_table_header_has_one_source_shared_with_the_rows( client_code ):
     # ...and the holding table must actually CALL it. Asserting the header exists
     # once stays true when the second table simply stops rendering one — measured:
     # deleting the call left this test green and the pane headerless.
-    # [-1], not [1]: the FIRST occurrence is the call site in renderHoldingArea, so
-    # [1] slices the caller and finds nothing. The definition is the last one.
-    group_renderer = client_code.split( "_renderHoldingAreaGroup" )[ -1 ][ :2000 ]
+    group_renderer = function_body( client_code, "_renderHoldingAreaGroup( filer, tasks ) {" )
     assert "_taskTableHeaderRow()" in group_renderer, (
         "the holding-area table renders rows with no header; twelve unlabelled columns"
     )
@@ -604,6 +656,57 @@ def test_the_holding_pane_is_grouped_by_filer_not_owner( client_src, client_code
     organising principle is who put them there.
     """
     assert "_groupHeldRowsByFiler" in client_src
-    grouper = client_code.split( "_groupHeldRowsByFiler" )[ 1 ][ :1600 ]
+    grouper = function_body( client_code, "_groupHeldRowsByFiler( tasks ) {" )
     assert "_taskFilerLabel" in grouper
     assert "owner_persona" not in grouper, "the holding area groups on the owner, not the filer"
+
+
+# ------------------------------------------------- the epic board acts, it does not only report
+
+
+def test_the_epic_board_carries_the_same_controls( client_code ):
+    """
+    Rick's order named three panes, not two: "the UI toggles and controls that I
+    need to manage the holding area along with the epic board along with the task
+    list". The epic row was read-only, so a row noticed here had to be found again
+    in the pane above before anything could be done about it.
+
+    The narrowness rule for this pane is about not duplicating INFORMATION. A
+    control is not information.
+    """
+    assert 'th class="epic-col-actions"' in client_code, "the epic board has no Actions header"
+    assert 'td class="epic-col-actions"' in client_code, "the epic board has no Actions cell"
+
+
+def test_the_epic_board_reuses_the_shared_actions_cell( client_code ):
+    """
+    🔴 THE PROPERTY THAT MATTERS, not the presence of buttons. `_taskActionsCell`
+    carries every legality rule — park's legal-from set, the terminal lockout, the
+    approve/demote mutual exclusion. A hand-rolled copy in the epic renderer would
+    be a second place for all of those to drift out of step with the server, and
+    the drift would surface as 422s on one pane and not the other.
+    """
+    epic_row = function_body( client_code, "_renderEpicRow( task ) {" )
+    assert "this._taskActionsCell( task )" in epic_row, (
+        "the epic board builds its own controls instead of reusing the shared cell"
+    )
+    for rolled_by_hand in ( "task-drop-button", "task-park-button", "task-wont-fix-button" ):
+        assert rolled_by_hand not in epic_row, (
+            f"the epic renderer emits {rolled_by_hand} directly — a second copy of the legality rules"
+        )
+
+
+def test_the_epic_colspans_moved_with_the_new_column( client_code ):
+    """
+    A group header, a story row and an error stripe all span the epic table. Add a
+    column and leave a colspan behind and the table still renders perfectly — it
+    just stops spanning, which reads as a styling quirk rather than as the missed
+    edit it is. Same coupling the twelve-column task table documents.
+    """
+    epic = function_body( client_code, "_renderEpicRow( task ) {", until="renderEpicBoard(" )
+    assert 'colspan="4"' not in epic, (
+        "an epic-table colspan still says 4 after the Actions column was added"
+    )
+    assert epic.count( 'colspan="5"' ) >= 3, (
+        "expected the error stripe, the group header and the story row to span 5 columns"
+    )

@@ -671,3 +671,14 @@ tbody.task-group.collapsed .task-row {
     opacity    : 0.7;
     font-style : italic;
 }
+
+
+/* Epic-board Actions column. Rick asked for controls on this pane too — "the UI
+   toggles and controls that I need to manage the holding area along with the epic
+   board along with the task list" — so the macro view acts as well as reports.
+   Same cell as the task list, never a second implementation. */
+.epic-board-table .epic-col-actions,
+.epic-board-table th.epic-col-actions {
+    white-space : nowrap;
+    text-align  : left;
+}

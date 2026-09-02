@@ -12001,6 +12001,18 @@ class NotificationsUI {
          * that is precisely what the pane above is for — repeating it here would
          * make the macro view a worse copy of the micro one (plan §6).
          *
+         * ⭐ ACTIONS ARE THE ONE EXCEPTION TO THAT NARROWNESS, and it is Rick's own
+         * wording that makes it one: he asked for "the UI toggles and controls that
+         * I need to manage the holding area along with the epic board along with the
+         * task list". Reading a row here and having to go find it in the pane above
+         * to act on it is the friction he was describing. The narrowness rule is
+         * about not duplicating INFORMATION; a control is not information.
+         *
+         * 🔴 IT IS THE SAME CELL, not a second implementation. `_taskActionsCell`
+         * carries every legality rule — park's legal-from set, the terminal lockout,
+         * the approve/demote mutual exclusion — and a hand-rolled copy here would be
+         * a second place for those to drift out of step with the server.
+         *
          * EVERY store-sourced value is escapeHtml'd (this card writes via
          * innerHTML, so it must escape explicitly).
          *
@@ -12011,6 +12023,8 @@ class NotificationsUI {
          *     - the <tr> carries a `task-status-*` class; the Priority cell carries
          *       a `task-prio-*` heat class when recognized
          *     - Title is truncated with the FULL title on a hover-tooltip
+         *     - an Actions cell renders the SHARED per-row controls
+         *     - an error stripe follows, spanning all FIVE columns
          *     - Pure: no DOM access, no side effects (object in → string out)
          */
         const statusWord  = this.escapeHtml( task.status || "unknown" );
@@ -12028,7 +12042,9 @@ class NotificationsUI {
                 <td class="epic-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
                 <td class="epic-col-status"><span class="task-status-dot"></span>${statusWord}</td>
                 <td class="epic-col-title" title="${titleAttr}">${titleText}</td>
-            </tr>`;
+                <td class="epic-col-actions">${this._taskActionsCell( task )}</td>
+            </tr>
+            <tr class="task-row-error-stripe" data-error-for="${this._escapeTaskAttr( task.id )}" hidden><td colspan="5"></td></tr>`;
     }
 
     _renderEpicGroup( epicKey, headerLabel, tasks, state, extraClass, storyText ) {
@@ -12058,13 +12074,13 @@ class NotificationsUI {
 
         const groupHeaderHtml = `
             <tr class="epic-group-header${extraClass ? " " + extraClass + "-header" : ""}" role="button" tabindex="0" aria-expanded="${isCollapsed ? "false" : "true"}" aria-controls="${idSlug}">
-                <td colspan="4">${chevron}<span class="epic-group-label">${headerLabel}</span><span class="epic-group-count">${tasks.length}</span></td>
+                <td colspan="5">${chevron}<span class="epic-group-label">${headerLabel}</span><span class="epic-group-count">${tasks.length}</span></td>
             </tr>`;
 
         // The story rides INSIDE the group, so opening an epic answers "what is
         // this?" in the same gesture that reveals its rows.
         const storyHtml = storyText
-            ? `<tr class="epic-story-row"><td colspan="4">${this.escapeHtml( storyText )}</td></tr>`
+            ? `<tr class="epic-story-row"><td colspan="5">${this.escapeHtml( storyText )}</td></tr>`
             : "";
 
         const rows = tasks.map( t => this._renderEpicRow( t ) ).join( "" );
@@ -12103,6 +12119,7 @@ class NotificationsUI {
                     <th class="epic-col-priority">P</th>
                     <th class="epic-col-status">Status</th>
                     <th class="epic-col-title">Title</th>
+                    <th class="epic-col-actions">Actions</th>
                 </tr>
             </thead>`;
 
