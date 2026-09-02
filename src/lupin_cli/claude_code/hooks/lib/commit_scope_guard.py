@@ -174,8 +174,13 @@ def _notice_for( why: str ) -> str:
         "This commit was allowed unexamined. The guard gives up rather than refuse an "
         "honest commit on a guess. If it names paths, check them yourself:\n"
         "  git diff -- <paths you named>\n"
-        "A commit whose message rides a heredoc is the common case; `git commit -F <file>` "
-        "parses cleanly and gets reviewed."
+        "A commit whose message rides a heredoc is the common case. The shape that gets "
+        "reviewed writes the message FIRST and keeps the heredoc OFF the commit line:\n"
+        "  cat > msg.txt <<'EOF' ... EOF\n"
+        "  git commit -F msg.txt -- <paths>\n"
+        "`-F <file>` ALONE is not enough — measured 2026-09-01, `git commit -F msg.txt -- "
+        "<paths> <<'EOF'` is still unreviewed. It is the ATTACHMENT that defeats the parse, "
+        "not where the message comes from."
     )
 
 
