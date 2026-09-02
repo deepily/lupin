@@ -109,7 +109,7 @@ def remedy_is_readable( text, parse, prefix, substitutions=None ):
     return broken
 
 
-def remedy_carries_its_caveat( text, hazards=None ):
+def remedy_carries_its_caveat( text, hazards=None, window=2 ):
     """
     A remedy naming a hazardous operation must carry that hazard's warning nearby.
 
@@ -121,19 +121,40 @@ def remedy_carries_its_caveat( text, hazards=None ):
         - text is the rendered message
 
     Ensures:
-        - returns the list of ( matched_operation, required_words ) that appear WITHOUT
-          any of their caveat words anywhere in the message, empty when each hazard
-          named is also qualified
-        - the search is over the WHOLE message, not the line: a caveat one line below
-          its command still reaches the reader
+        - returns the list of ( matched_operation, required_words ) whose caveat words
+          do not appear NEAR the hazard, empty when each hazard named is qualified
+        - "near" is a WINDOW around the match — `window` lines either side, default 2 —
+          so a caveat on the following line still counts and one three paragraphs away
+          does not
         - never raises — a message naming no hazard legitimately returns []
+
+    🔴 THE WINDOW IS THE WHOLE POINT, AND THE FIRST CUT DID NOT HAVE IT. Searching the
+    WHOLE message was written as deliberate ("a caveat one line below still reaches the
+    reader") and it is too loose: a caveat word occurring anywhere passes the row, so a
+    green said "these words are present somewhere", not "this command is qualified".
+    Mr. Radio 🦉 named the mode; measured 2026-09-01 on a message whose `git checkout`
+    remedy was entirely unqualified while the word "overwrite" appeared three
+    paragraphs above about an unrelated queue — it PASSED. It fails now.
+
+    ⚠️ A window is a heuristic, not a proof of association. It can still be fooled by a
+    caveat that happens to sit near an unrelated hazard. It narrows the false positive;
+    it does not close it, and this docstring says so rather than letting a green be read
+    as more than it is.
     """
     table   = HAZARD_CAVEATS if hazards is None else hazards
-    lowered = text.lower()
+    lines   = text.splitlines()
     missing = []
     for pattern, caveats in table.items():
-        if not re.search( pattern, text ):
+        hits = [ i for i, line in enumerate( lines ) if re.search( pattern, line ) ]
+        if not hits:
             continue
-        if not any( word in lowered for word in caveats ):
+        # Qualified iff SOME occurrence carries its caveat nearby. One unqualified
+        # mention alongside a qualified one is not the failure this looks for; a
+        # hazard named ONLY without its caveat is.
+        for i in hits:
+            near = " ".join( lines[ max( 0, i - window ) : i + window + 1 ] ).lower()
+            if any( word in near for word in caveats ):
+                break
+        else:
             missing.append( ( pattern, caveats ) )
     return missing
