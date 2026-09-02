@@ -450,8 +450,16 @@ def test_the_env_line_prints_even_when_the_network_guard_is_disarmed( monkeypatc
     """
     THE CASE THIS EXISTS FOR. With the mode off the guard's own report returns early and
     says nothing, so a disarmed run and an armed run with zero dials looked identical.
+
+    ⚠️ RELAXED FROM A FULL-LINE EQUALITY 2026-09-01, when `imports=` joined the line. The
+    equality was incidental to what this test is named for — it pinned the whole line while
+    asserting a claim about ONE field. The two ends are still pinned exactly, so a change to
+    either rendering still reddens here; what is no longer pinned is that nothing may ever be
+    added between them, which was never this test's business.
     """
-    assert _env_line( monkeypatch, None ) == "[test-env] network=off (defaulted) coverage-file=UNSET"
+    line = _env_line( monkeypatch, None )
+    assert line.startswith( "[test-env] network=off (defaulted) " )
+    assert line.endswith( " coverage-file=UNSET" )
 
 
 def test_a_defaulted_mode_is_not_reported_as_a_chosen_one( monkeypatch ):

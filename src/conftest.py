@@ -320,6 +320,12 @@ def pytest_runtest_setup( item ):
 #
 # `_coarse_age` comes along because it has three call sites, not one: the fetch age, the
 # coverage-file age, and the module itself.
+# The import-origin verdict lives beside tree_state for the same reason tree_state left this
+# file: a diagnostic defined inline in the conftest is reachable by the pytest tiers and by
+# nothing else, and it cannot be unit-tested without importing a conftest — which has already
+# gone wrong here once, when a test imported `src/tests/unit/conftest.py` (the NEAREST one)
+# and measured the wrong module.
+from cosa.utils.import_origin import import_origin_field
 from cosa.utils.tree_state import (
     _coarse_age,
     _fetch_age,
@@ -459,7 +465,34 @@ def pytest_terminal_summary( terminalreporter, exitstatus, config ):
         coverage_txt = f"{cov_path} (fresh)"
     else:
         coverage_txt = f"{cov_path} (pre-existing, {cov_age}-ago)"
-    terminalreporter.write_line( f"[test-env] network={mode_txt} coverage-file={coverage_txt}" )
+    # THIRD: which CHECKOUT this run's code was imported from. `[tree-state]` above answers
+    # for the directory you are STANDING in; this answers for the code Python actually
+    # LOADED, and on this fleet those are routinely two different trees. Measured 2026-09-01
+    # (Rio ⚡): with `LUPIN_ROOT` pinned and `PYTHONPATH` inherited, a worktree run took
+    # `lupin_app` from the worktree and `cosa` from the main repo, and two guards written for
+    # a real defect reported `6 passed` against a mutation that was never loaded.
+    #
+    # ⚠️ READ FROM `sys.modules`, NEVER IMPORTED. Importing here would CREATE the resolution
+    # this claims to observe, and would also drag `lupin_app.main` — the whole application —
+    # into every tier that never touches it. A module absent from `sys.modules` is reported
+    # as "not loaded by this run", which is the honest claim: a fact about the run.
+    #
+    # The two names are the pair that actually split. `cosa.utils.tree_state` is certain to
+    # be present (this file imports it); `lupin_app.bootstrap_helpers` is the cheap end of
+    # the application and is simply absent on tiers that do not touch it — reported, not
+    # guessed at.
+    # ⚠️ INSERTED IN THE MIDDLE, NOT APPENDED, and that is a deliberate cheap choice rather
+    # than an aesthetic one. Four existing tests assert this line ENDS WITH its coverage
+    # field — a real pin on how that field renders. Appending would have forced all four to
+    # be loosened from `endswith` to `in`, trading somebody else's strong assertions for my
+    # convenience. Placing the new field ahead of `coverage-file=` leaves every one of them
+    # untouched and true.
+    imports_txt = import_origin_field(
+        [ ( "cosa",      sys.modules.get( "cosa.utils.tree_state" ),       2 ),
+          ( "lupin_app", sys.modules.get( "lupin_app.bootstrap_helpers" ), 1 ) ],
+        os.environ.get( "LUPIN_ROOT" ) )
+    terminalreporter.write_line(
+        f"[test-env] network={mode_txt} {imports_txt} coverage-file={coverage_txt}" )
 
     if _NETWORK_MODE not in ( "count", "block" ):
         return
