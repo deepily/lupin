@@ -382,9 +382,50 @@ test( "the batch reads ids off the LIVE DOM, so it can never act on a stale list
   assert.deepEqual( ui._heldRowIdsForFiler( "Nobody" ), [], "an unknown filer must yield nothing, not throw" );
 } );
 
+// ═════════ DRIVING THE CLICK PATH WHILE STILL ASSERTING BEHAVIOUR ═════════
+//
+// 🔴 Rio's click-path tests prove the pane is WIRED, by stubbing the handler and
+// asserting it was reached. The behaviour tests call the handler BY NAME. Each half is
+// blind to the other's defect: a by-name test passes against a pane whose control is
+// unreachable — which is how Rick's dead button survived five people looking at it.
+//
+// ⚠️ By-name testing did not CAUSE the missing listener. It caused it to go UNSEEN
+// (Rio's correction, and it is the honest framing): detection, not causation.
+//
+// `clickThrough` collapses the two. It dispatches a REAL MouseEvent on a REAL element,
+// asserts a handler was actually reached, and hands back that handler's own promise so
+// the test can await it and go on asserting what it DID. Delete the pane's listener and
+// every test using this reddens at the "reached NO handler" line — the wiring assertion
+// is not a separate test to remember, it sits ON THE PATH to the behaviour assertion.
+async function clickThrough(
+  ui: HoldingUI, method: string, el: Element | null, what: string
+): Promise<void> {
+  assert.ok( el, `${ what } did not render at all — this test cannot speak to wiring` );
+
+  const target   = ui as unknown as Record<string, ( b: unknown ) => unknown >;
+  const original = target[ method ];
+  let   ran: unknown = null;
+  target[ method ] = ( b: unknown ) => { ran = original.call( ui, b ); return ran; };
+  el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target[ method ] = original;
+
+  assert.ok( ran !== null,
+    `${ what } reached NO handler — the pane has no click listener for it, so the ` +
+    `control is dead on screen however correct the handler is` );
+  await ran;
+}
+
+
+function paintedWith( ui: HoldingUI, payload: Record<string, unknown> ): void {
+  realPageDOM();
+  ui._wireTaskListAccordion();
+  ui.renderHoldingArea( payload );
+}
+
+
 test( "🔴 a PARTIALLY refused batch reports the failure instead of looking successful", async () => {
   const ui = newUI();
-  ui.renderHoldingArea( {
+  paintedWith( ui, {
     tasks: [ row( { id: "ok-1", status: "not_approved", created_by: "krishna 420f5ec9" } ),
              row( { id: "no-2", status: "not_approved", created_by: "krishna 420f5ec9" } ),
              row( { id: "ok-3", status: "not_approved", created_by: "krishna 420f5ec9" } ) ],
@@ -408,7 +449,7 @@ test( "🔴 a PARTIALLY refused batch reports the failure instead of looking suc
 
 test( "batch won't-fix will not fire without its one reason", async () => {
   const ui = newUI();
-  ui.renderHoldingArea( {
+  paintedWith( ui, {
     tasks: [ row( { id: "x", status: "not_approved", created_by: "krishna 420f5ec9" } ) ],
     count: 1, total: 1, has_more: false
   } );
@@ -416,13 +457,19 @@ test( "batch won't-fix will not fire without its one reason", async () => {
   ui._transitionTask = async () => { called++; return { ok: true }; };
   ui.refreshHoldingArea = async () => {};
 
-  await ui._handleHoldingWontFixAllClick( { dataset: { filer: "Krishna" } } );
+  // THROUGH THE CLICK PATH. The previous cut called the handler with a HAND-BUILT
+  // `{ dataset: { filer: "Krishna" } }`, so it could not speak to whether the real
+  // button exists, carries `data-filer`, or is reachable at all — three ways this
+  // control can be dead on screen while the test stays green. The filer now comes off
+  // the rendered element, because the element is what gets clicked.
+  const batchButton = document.querySelector( '.holding-wont-fix-all[data-filer="Krishna"]' );
+  await clickThrough( ui, "_handleHoldingWontFixAllClick", batchButton, "batch won't-fix for Krishna" );
   assert.equal( called, 0, "a blank batch reason reached the server, N times over" );
   const line = document.querySelector( '.holding-area-group-status[data-filer="Krishna"]' ) as HTMLElement;
   assert.match( line.textContent ?? "", /reason is required/i );
 
   ( document.querySelector( '.holding-wont-fix-all-reason[data-filer="Krishna"]' ) as HTMLInputElement ).value = "overtaken";
-  await ui._handleHoldingWontFixAllClick( { dataset: { filer: "Krishna" } } );
+  await clickThrough( ui, "_handleHoldingWontFixAllClick", batchButton, "batch won't-fix for Krishna" );
   assert.equal( called, 1 );
 } );
 
