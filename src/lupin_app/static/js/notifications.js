@@ -9618,7 +9618,116 @@ class NotificationsUI {
                 <td class="task-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
                 <td class="task-col-project">${project}</td>
                 <td class="task-col-detail">${detailCell}</td>
-            </tr>`;
+                <td class="task-col-actions">${this._taskActionsCell( task )}</td>
+            </tr>
+            <tr class="task-row-error-stripe" data-error-for="${this._escapeTaskAttr( task.id )}" hidden><td colspan="12"></td></tr>`;
+    }
+
+    _taskActionsCell( task ) {
+        /**
+         * The per-row state controls: Drop and Park, each with the input its
+         * transition REQUIRES, rendered inline rather than behind a modal.
+         *
+         * The pattern is ported, not invented — the multiplexer's
+         * `render/templates/taskListTable.ts` already settled it (inline row input,
+         * their Q4 ruling), and this row already carries a working delegated
+         * control to copy: the `.task-detail-emoji` span at the Detail cell, with
+         * its `aria-disabled` twin for the inert case.
+         *
+         * 🔴 PARK IS DISABLED WHERE THE SERVER WOULD REFUSE IT. `PARK_LEGAL_FROM_STATUSES`
+         * is ( "queued", "in_progress" ), so a park button on a blocked/review/claimed
+         * row produces a 422 the operator cannot act on. Rendering it disabled with the
+         * reason in the tooltip teaches the rule at the point of use instead of after
+         * the failure.
+         *
+         * ⚠️ THE PARK PLACEHOLDER ASKS FOR A QUOTE ON PURPOSE. `park_reason` must carry
+         * the row's OWN decisive sentence, not a paraphrase — that quote is what lets
+         * the next reader refute the park row-by-row instead of re-deriving the board.
+         * A bare "reason…" placeholder produces paraphrases.
+         *
+         * Requires:
+         *     - task is a row object carrying `id` and `status`
+         *
+         * Ensures:
+         *     - returns escaped HTML for the actions cell
+         *     - Drop renders enabled for every row (any status may be dropped)
+         *     - Park renders enabled ONLY from queued / in_progress, and carries
+         *       aria-disabled plus an explanatory title otherwise
+         */
+        const id         = this._escapeTaskAttr( task.id );
+        const status     = ( task.status || "" ).toLowerCase();
+        const parkLegal  = status === "queued" || status === "in_progress";
+
+        const dropBtn = `<button type="button" class="task-action-btn task-drop-button" data-task-id="${id}" title="Drop this row (reason required)">Drop</button>`;
+        const dropIn  = `<input type="text" class="task-action-input task-drop-reason" data-task-id="${id}" placeholder="drop reason…" aria-label="Drop reason">`;
+
+        const parkBtn = parkLegal
+            ? `<button type="button" class="task-action-btn task-park-button" data-task-id="${id}" title="Park until the chase date (reason required)">Park</button>`
+            : `<button type="button" class="task-action-btn task-park-button task-action-disabled" aria-disabled="true" disabled title="Park is legal only from queued or in progress — this row is ${this._escapeTaskAttr( status || "unknown" )}">Park</button>`;
+        const parkIn  = parkLegal
+            ? `<input type="text" class="task-action-input task-park-reason" data-task-id="${id}" placeholder="quote the sentence that decided this…" aria-label="Park reason">` +
+              `<input type="date" class="task-action-input task-park-chase" data-task-id="${id}" aria-label="Chase date">`
+            : "";
+
+        return `<div class="task-actions">${dropBtn}${dropIn}${parkBtn}${parkIn}</div>`;
+    }
+
+    _renderTaskRowError( taskId, message ) {
+        /**
+         * Show (or clear) the inline error stripe under one row.
+         *
+         * Ensures:
+         *     - a non-empty `message` reveals the stripe with that text
+         *     - an empty `message` hides it again
+         *     - a missing stripe is a no-op, never a throw (degrade-safe)
+         */
+        const stripe = document.querySelector( `.task-row-error-stripe[data-error-for="${CSS.escape( taskId )}"]` );
+        if ( !stripe ) return;
+        const cell = stripe.querySelector( "td" );
+        if ( cell ) cell.textContent = message || "";
+        stripe.hidden = !message;
+    }
+
+    async _transitionTask( taskId, toStatus, extras = {} ) {
+        /**
+         * POST one state change to /api/tasks/{id}/transition.
+         *
+         * ⚠️ THE SERVER IS THE AUTHORITY AND THIS DOES NOT SECOND-GUESS IT. Structural
+         * rules (receipts on ->done, reason on ->dropped, park_reason + next_chase_ts
+         * on ->parked, terminal states) live in `task_store_rules.validate_transition`.
+         * The client pre-checks only what it can tell the operator FASTER — a blank
+         * required field — and otherwise surfaces the server's own words verbatim.
+         *
+         * Requires:
+         *     - taskId is a full row id; toStatus is a valid status string
+         *     - extras carries the transition-specific fields (reason / park_reason /
+         *       next_chase_ts)
+         *
+         * Ensures:
+         *     - returns { ok: true } on 2xx
+         *     - returns { ok: false, message } on any failure, never throws
+         */
+        try {
+            const response = await this.authedFetch( `/api/tasks/${encodeURIComponent( taskId )}/transition`, {
+                method  : "POST",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( {
+                    to_status : toStatus,
+                    actor     : `operator ${this.queueSessionId || "browser"}`,
+                    authority : "user_direct",
+                    ...extras
+                } )
+            } );
+            if ( response.ok ) return { ok: true };
+            let detail = `${response.status}`;
+            try {
+                const body = await response.json();
+                if ( body && body.detail ) detail = typeof body.detail === "string" ? body.detail : JSON.stringify( body.detail );
+            } catch ( e ) { /* non-JSON error body — the status alone is the message */ }
+            return { ok: false, message: detail };
+        } catch ( e ) {
+            return { ok: false, message: `unreachable: ${e && e.message ? e.message : e}` };
+        }
     }
 
     _taskIsParked( task, now ) {
@@ -10305,6 +10414,7 @@ class NotificationsUI {
                     <th class="task-col-priority">Priority</th>
                     <th class="task-col-project">Project</th>
                     <th class="task-col-detail">Detail</th>
+                    <th class="task-col-actions">Actions</th>
                 </tr>
             </thead>`;
 
@@ -10762,7 +10872,85 @@ class NotificationsUI {
             }
             return;   // a detail-emoji click is never also an accordion toggle
         }
+
+        // STATE CONTROLS — same shape as the detail emoji above: match, act, RETURN,
+        // so a control click is never also an accordion toggle. A disabled Park is
+        // inert here by virtue of `disabled`, which stops the click reaching us at
+        // all; the aria-disabled attribute is for the screen reader, not the guard.
+        const actionBtn = target.closest ? target.closest( ".task-action-btn" ) : null;
+        if ( actionBtn ) {
+            if ( actionBtn.classList.contains( "task-drop-button" ) ) this._handleTaskDropClick( actionBtn );
+            else if ( actionBtn.classList.contains( "task-park-button" ) ) this._handleTaskParkClick( actionBtn );
+            return;
+        }
+
         this._handleTaskAccordionToggle( target );
+    }
+
+    _rowInputValue( taskId, className ) {
+        /** Ensures: the trimmed value of one inline action input, or "" when absent. */
+        const el = document.querySelector( `.${className}[data-task-id="${CSS.escape( taskId )}"]` );
+        return el && typeof el.value === "string" ? el.value.trim() : "";
+    }
+
+    async _handleTaskDropClick( button ) {
+        /**
+         * Drop button → read the sibling reason input, enforce non-blank BEFORE any
+         * API call, then transition and refresh.
+         *
+         * ⚠️ THE BLANK CHECK IS A COURTESY, NOT THE CONTROL. `validate_transition`
+         * rejects a blank `->dropped` reason server-side regardless; checking here
+         * only saves the operator a round-trip and gives a message next to the field
+         * they must fix.
+         */
+        const taskId = button.dataset.taskId || "";
+        if ( !taskId ) return;
+        const reason = this._rowInputValue( taskId, "task-drop-reason" );
+        if ( !reason ) {
+            this._renderTaskRowError( taskId, "A drop reason is required." );
+            return;
+        }
+        this._renderTaskRowError( taskId, "" );
+        const result = await this._transitionTask( taskId, "dropped", { reason } );
+        if ( result.ok ) await this.refreshTaskList();
+        else this._renderTaskRowError( taskId, `Drop refused: ${result.message}` );
+    }
+
+    async _handleTaskParkClick( button ) {
+        /**
+         * Park button → reason AND chase date, both required, enforced before the call.
+         *
+         * ⚠️ THE DATE INPUT YIELDS A LOCAL CALENDAR DAY, AND THE SERVER WANTS AN
+         * INSTANT. `<input type="date">` gives "YYYY-MM-DD" with no time and no zone,
+         * so this stamps 09:00 LOCAL and converts through the browser's own zone
+         * rather than pasting the bare date and letting it be read as midnight UTC —
+         * which would land the chase on the previous evening for anyone west of
+         * Greenwich, i.e. everyone here.
+         */
+        const taskId = button.dataset.taskId || "";
+        if ( !taskId ) return;
+        const parkReason = this._rowInputValue( taskId, "task-park-reason" );
+        const chaseDay   = this._rowInputValue( taskId, "task-park-chase" );
+        if ( !parkReason ) {
+            this._renderTaskRowError( taskId, "A park reason is required — quote the row's own decisive sentence." );
+            return;
+        }
+        if ( !chaseDay ) {
+            this._renderTaskRowError( taskId, "A chase date is required — a park is bounded, never indefinite." );
+            return;
+        }
+        const chaseTs = new Date( `${chaseDay}T09:00:00` );
+        if ( isNaN( chaseTs.getTime() ) ) {
+            this._renderTaskRowError( taskId, `Chase date not understood: ${chaseDay}` );
+            return;
+        }
+        this._renderTaskRowError( taskId, "" );
+        const result = await this._transitionTask( taskId, "parked", {
+            park_reason   : parkReason,
+            next_chase_ts : chaseTs.toISOString()
+        } );
+        if ( result.ok ) await this.refreshTaskList();
+        else this._renderTaskRowError( taskId, `Park refused: ${result.message}` );
     }
 
     openTaskBodyOverlay( bodyText, idLabel ) {

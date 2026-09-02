@@ -548,3 +548,63 @@ tbody.task-group.collapsed .task-row {
     font-size: 11px;
     font-style: italic;
 }
+
+/* ── Per-row state controls (Rick's P0, row 8af64f5a, 2026-09-02) ──────────
+   Inline in the row rather than behind a modal — the pattern the multiplexer
+   settled in render/templates/taskListTable.ts. Drop is legal from any status;
+   Park is rendered disabled where PARK_LEGAL_FROM_STATUSES would refuse it, so
+   the rule is visible at the point of use instead of arriving as a 422.        */
+
+.task-list-table .task-col-actions,
+.task-list-table th.task-col-actions {
+    white-space : nowrap;
+    text-align  : left;
+}
+
+.task-actions {
+    display     : flex;
+    flex-wrap   : wrap;
+    gap         : 4px;
+    align-items : center;
+}
+
+.task-action-btn {
+    font-size     : 0.78rem;
+    padding       : 2px 8px;
+    border        : 1px solid var( --border-color, #444 );
+    border-radius : 3px;
+    background    : transparent;
+    color         : inherit;
+    cursor        : pointer;
+}
+
+.task-action-btn:hover:not( .task-action-disabled ) {
+    background : var( --hover-bg, rgba( 255, 255, 255, 0.08 ) );
+}
+
+/* Dimmed IN PLACE rather than removed — the same ruling the empty detail emoji
+   follows. A control that vanishes teaches nothing; a disabled one with a title
+   says why it is unavailable. */
+.task-action-disabled {
+    opacity : 0.35;
+    cursor  : not-allowed;
+}
+
+.task-action-input {
+    font-size     : 0.78rem;
+    padding       : 2px 6px;
+    border        : 1px solid var( --border-color, #444 );
+    border-radius : 3px;
+    background    : transparent;
+    color         : inherit;
+    max-width     : 190px;
+}
+
+/* The error stripe is a real row so it lands directly under its own row and
+   scrolls with it; hidden via the `hidden` attribute, never display:none in JS. */
+.task-row-error-stripe td {
+    color         : var( --error-color, #e06c75 );
+    font-size     : 0.78rem;
+    padding       : 2px 8px 6px;
+    border-top    : none;
+}
