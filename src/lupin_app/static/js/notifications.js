@@ -9229,19 +9229,33 @@ class NotificationsUI {
 
     isTaskOpenStatus( status ) {
         /**
-         * True when a task's status is non-terminal (work still owed). Terminal
-         * statuses are "done" / "dropped"; a missing status defaults to OPEN
-         * (degrade-safe — a row with no status is never silently hidden).
+         * True when a task's status is non-terminal (work still owed). A missing
+         * status defaults to OPEN (degrade-safe — a row with no status is never
+         * silently hidden).
+         *
+         * 🔴 `wont_fix` IS TERMINAL AND WAS MISSING HERE. The store's
+         * `TERMINAL_STATUSES` is ( "done", "dropped", "wont_fix" ); this function
+         * knew only the first two, so every won't-fixed row counted as work still
+         * owed. A refusal that keeps showing up as owed work is the exact thing the
+         * status was added to stop, and the dashboard would have reported it wrong
+         * from the moment the first row was closed that way.
+         *
+         * ⚠️ `not_approved` IS DELIBERATELY OPEN. It is not terminal — the store's
+         * own comment says adding it to the terminal set would tell every reader
+         * that a row in the holding area is finished, which is the opposite of the
+         * truth. It is hidden from the board by a different mechanism
+         * (`BOARD_INVISIBLE_STATUSES`), applied server-side, not by this predicate.
          *
          * Requires:
          *     - status is a string, or null/undefined
          *
          * Ensures:
-         *     - falsy → true; "done"/"dropped" → false; anything else → true
+         *     - falsy → true; "done"/"dropped"/"wont_fix" → false; anything else → true
+         *     - "not_approved" → true (waiting on triage is still owed)
          *     - Pure: no DOM, no side effects
          */
         if ( !status ) return true;
-        return status !== "done" && status !== "dropped";
+        return status !== "done" && status !== "dropped" && status !== "wont_fix";
     }
 
     _taskStatusRank( status ) {
@@ -9250,15 +9264,46 @@ class NotificationsUI {
          * An unknown/typo'd status sorts BETWEEN open and terminal so it never
          * hides above genuinely-blocked work.
          *
+         * ⚠️ NUMBERED IN TENS, AND THE GAPS ARE THE POINT. The first cut used
+         * 0..7 with no room between them, so adding `not_approved` — which belongs
+         * after `queued` and before the unknown slot — had nowhere to go without
+         * either a fractional rank or renumbering under a test that pinned every
+         * literal. Tens leave nine slots between each pair, and the store's status
+         * vocabulary has grown twice this week alone. Only the ORDER is behavior;
+         * the absolute numbers are arbitrary and are asserted as an ordering, not
+         * as a set of magic values.
+         *
+         * `parked` sits just after `queued`, ahead of `not_approved`: a parked row is
+         * approved work a human deferred, while a held row has not been cleared to
+         * start at all. `not_approved` follows it: it is genuinely open work
+         * (see isTaskOpenStatus) that nobody has been cleared to start, so it
+         * outranks a typo but never outranks a row somebody could pick up today.
+         * `wont_fix` sits last among terminals — a refusal is the coldest row on
+         * the board.
+         *
          * Ensures:
-         *     - blocked 0 · in_progress 1 · claimed 2 · review 3 · queued 4 ·
-         *       done 6 · dropped 7; unknown/missing → 5
+         *     - blocked 0 · in_progress 10 · claimed 20 · review 30 · queued 40 ·
+         *       parked 50 · not_approved 60 · done 80 · dropped 90 · wont_fix 100;
+         *       unknown/missing → 70
+         *     - EVERY status in the store's VALID_STATUSES has a rank
+         *     - the ORDER, not the literals, is the contract
          *     - Pure: no DOM, no side effects
          */
-        const ranks = { blocked: 0, in_progress: 1, claimed: 2, review: 3, queued: 4, done: 6, dropped: 7 };
-        if ( !status ) return 5;
+        const ranks = {
+            blocked      :   0,
+            in_progress  :  10,
+            claimed      :  20,
+            review       :  30,
+            queued       :  40,
+            parked       :  50,
+            not_approved :  60,
+            done         :  80,
+            dropped      :  90,
+            wont_fix     : 100
+        };
+        if ( !status ) return 70;
         const rank = ranks[ status ];
-        return rank === undefined ? 5 : rank;
+        return rank === undefined ? 70 : rank;
     }
 
     _taskPriorityRank( priority ) {
@@ -9317,9 +9362,27 @@ class NotificationsUI {
          * trimmed lowercase status. Color is ALWAYS redundant with the status WORD
          * in the Status cell (WCAG 1.4.1).
          *
+         * ⚠️ `wont_fix` AND `not_approved` GET THEIR OWN CLASSES, NOT `unknown`.
+         * Falling through to the unknown grey would render a deliberate refusal and
+         * a row awaiting triage identically to a typo'd status — three different
+         * situations, one colour, and the operator cannot tell which they are
+         * looking at. `wont_fix` reads as terminal; `not_approved` reads as
+         * waiting, deliberately NOT as terminal.
+         *
+         * ⚠️ `parked` WAS MISSING HERE TOO, AND HAD BEEN ALL ALONG — found by
+         * enumerating the store's VALID_STATUSES in a test rather than by reading
+         * this list and trusting it. A parked row was carrying the unknown grey and
+         * leaning entirely on its dimming and badge to say what it was, while the
+         * status dot and the row's left-edge accent — the two things the eye reaches
+         * first — said "unrecognized". Nobody had noticed because the dimming reads
+         * as intentional, so the row looked deliberate and was mislabelled.
+         *
          * Ensures:
          *     - blocked→…-blocked · in_progress/claimed→…-active · review→…-review ·
-         *       queued→…-queued · done→…-done · dropped→…-dropped
+         *       queued→…-queued · parked→…-parked · not_approved→…-not-approved ·
+         *       done→…-done · dropped→…-dropped · wont_fix→…-wont-fix
+         *     - EVERY status in the store's VALID_STATUSES has a branch; one added
+         *       server-side reddens a test instead of shipping as grey
          *     - anything else (empty/unrecognized/non-string) → task-status-unknown
          *     - Pure: no DOM, no side effects
          */
@@ -9328,8 +9391,11 @@ class NotificationsUI {
         if ( word === "in_progress" || word === "claimed" ) return "task-status-active";
         if ( word === "review" )                            return "task-status-review";
         if ( word === "queued" )                            return "task-status-queued";
+        if ( word === "parked" )                            return "task-status-parked";
+        if ( word === "not_approved" )                      return "task-status-not-approved";
         if ( word === "done" )                              return "task-status-done";
         if ( word === "dropped" )                           return "task-status-dropped";
+        if ( word === "wont_fix" )                          return "task-status-wont-fix";
         return "task-status-unknown";
     }
 
@@ -9625,8 +9691,9 @@ class NotificationsUI {
 
     _taskActionsCell( task ) {
         /**
-         * The per-row state controls: Drop and Park, each with the input its
-         * transition REQUIRES, rendered inline rather than behind a modal.
+         * The per-row state controls: Drop, Park, Won't-fix, Demote and Approve,
+         * each with the input its transition REQUIRES, rendered inline rather than
+         * behind a modal.
          *
          * The pattern is ported, not invented — the multiplexer's
          * `render/templates/taskListTable.ts` already settled it (inline row input,
@@ -9634,11 +9701,26 @@ class NotificationsUI {
          * control to copy: the `.task-detail-emoji` span at the Detail cell, with
          * its `aria-disabled` twin for the inert case.
          *
+         * 🔴 A TERMINAL ROW OFFERS NOTHING. `done` / `dropped` / `wont_fix` are
+         * append-only — `validate_transition` refuses every edge out of them with
+         * "item is terminal". The first cut of this cell rendered Drop enabled for
+         * every row including those, so the one status that had just been made
+         * terminal was also the one the board invited you to act on. Terminal rows
+         * now render every control disabled, with the reason in the tooltip.
+         *
          * 🔴 PARK IS DISABLED WHERE THE SERVER WOULD REFUSE IT. `PARK_LEGAL_FROM_STATUSES`
          * is ( "queued", "in_progress" ), so a park button on a blocked/review/claimed
          * row produces a 422 the operator cannot act on. Rendering it disabled with the
          * reason in the tooltip teaches the rule at the point of use instead of after
          * the failure.
+         *
+         * ⚠️ APPROVE AND DEMOTE ARE OPPOSITE ENDS OF ONE DOOR, so exactly one of
+         * them is ever live on a given row. Approve is the holding area's exit
+         * (`not_approved → queued`) and appears on nothing else; Demote is its
+         * entrance (`queued/… → not_approved`) and is meaningless on a row already
+         * sitting in there. Rendering both live would offer the operator a move
+         * that is a no-op in one direction — which the store rejects as a no-op
+         * edge, i.e. as a failure rather than as nothing happening.
          *
          * ⚠️ THE PARK PLACEHOLDER ASKS FOR A QUOTE ON PURPOSE. `park_reason` must carry
          * the row's OWN decisive sentence, not a paraphrase — that quote is what lets
@@ -9650,26 +9732,74 @@ class NotificationsUI {
          *
          * Ensures:
          *     - returns escaped HTML for the actions cell
-         *     - Drop renders enabled for every row (any status may be dropped)
-         *     - Park renders enabled ONLY from queued / in_progress, and carries
-         *       aria-disabled plus an explanatory title otherwise
+         *     - a terminal row (done/dropped/wont_fix) renders EVERY control disabled
+         *     - Drop renders enabled for every non-terminal row
+         *     - Park renders enabled ONLY from queued / in_progress
+         *     - Won't-fix renders enabled on every non-terminal row, with a reason input
+         *     - Approve renders enabled ONLY on a not_approved row
+         *     - Demote renders enabled on every non-terminal row EXCEPT not_approved
+         *     - every disabled control carries aria-disabled plus an explanatory title
          */
-        const id         = this._escapeTaskAttr( task.id );
-        const status     = ( task.status || "" ).toLowerCase();
-        const parkLegal  = status === "queued" || status === "in_progress";
+        const id          = this._escapeTaskAttr( task.id );
+        const status      = ( task.status || "" ).toLowerCase();
+        const isTerminal  = !this.isTaskOpenStatus( status );
+        const isHeld      = status === "not_approved";
+        const parkLegal   = !isTerminal && ( status === "queued" || status === "in_progress" );
+        const deadReason  = `This row is ${this._escapeTaskAttr( status || "unknown" )} — terminal rows are append-only and have no transitions out`;
 
-        const dropBtn = `<button type="button" class="task-action-btn task-drop-button" data-task-id="${id}" title="Drop this row (reason required)">Drop</button>`;
-        const dropIn  = `<input type="text" class="task-action-input task-drop-reason" data-task-id="${id}" placeholder="drop reason…" aria-label="Drop reason">`;
+        const btn = ( cls, label, enabled, title ) => enabled
+            ? `<button type="button" class="task-action-btn ${cls}" data-task-id="${id}" title="${title}">${label}</button>`
+            : `<button type="button" class="task-action-btn ${cls} task-action-disabled" aria-disabled="true" disabled title="${title}">${label}</button>`;
 
-        const parkBtn = parkLegal
-            ? `<button type="button" class="task-action-btn task-park-button" data-task-id="${id}" title="Park until the chase date (reason required)">Park</button>`
-            : `<button type="button" class="task-action-btn task-park-button task-action-disabled" aria-disabled="true" disabled title="Park is legal only from queued or in progress — this row is ${this._escapeTaskAttr( status || "unknown" )}">Park</button>`;
+        const input = ( cls, placeholder, label, enabled ) => enabled
+            ? `<input type="text" class="task-action-input ${cls}" data-task-id="${id}" placeholder="${placeholder}" aria-label="${label}">`
+            : "";
+
+        // Drop — legal from any non-terminal status, reason required. The datalist
+        // offers "overtaken by events" because Rick named it as a REASON and not as
+        // a fourth status (design amendment 6): the phrase belongs in this field,
+        // and a suggestion is how you say that without inventing a status for it.
+        const dropBtn = btn( "task-drop-button", "Drop", !isTerminal,
+            isTerminal ? deadReason : "Drop this row (reason required)" );
+        const dropIn  = !isTerminal
+            ? `<input type="text" class="task-action-input task-drop-reason" data-task-id="${id}" placeholder="drop reason…" aria-label="Drop reason" list="task-drop-reason-suggestions">`
+            : "";
+
+        const parkBtn = btn( "task-park-button", "Park", parkLegal,
+            isTerminal ? deadReason
+                       : `Park is legal only from queued or in progress — this row is ${this._escapeTaskAttr( status || "unknown" )}` );
         const parkIn  = parkLegal
             ? `<input type="text" class="task-action-input task-park-reason" data-task-id="${id}" placeholder="quote the sentence that decided this…" aria-label="Park reason">` +
               `<input type="date" class="task-action-input task-park-chase" data-task-id="${id}" aria-label="Chase date">`
             : "";
 
-        return `<div class="task-actions">${dropBtn}${dropIn}${parkBtn}${parkIn}</div>`;
+        // Won't-fix — terminal, and carries the SAME reason obligation as dropped.
+        // The receipt gate fires only on ->done, so a won't-fix has no commit behind
+        // it; the reason is the only thing standing between a deliberate refusal and
+        // work that simply got forgotten, and the two read identically without it.
+        const wontFixBtn = btn( "task-wont-fix-button", "Won't fix", !isTerminal,
+            isTerminal ? deadReason : "Close this row as won't-fix (reason required) — terminal" );
+        const wontFixIn  = input( "task-wont-fix-reason", "why this will not be done…", "Won't-fix reason", !isTerminal );
+
+        // Demote — Rick added this one unasked: "I can go from approved to
+        // not-approved, which pushes it back into the holding area." It is the
+        // REVERSIBLE sibling of won't-fix, and having both is what makes a hard
+        // delete unnecessary: one kills, one returns the row to triage.
+        const demoteLegal = !isTerminal && !isHeld;
+        const demoteBtn   = btn( "task-demote-button", "Demote", demoteLegal,
+            isTerminal ? deadReason
+                       : ( isHeld ? "This row is already in the holding area" : "Push this row back into the holding area (reason required)" ) );
+        const demoteIn    = input( "task-demote-reason", "why this goes back to triage…", "Demote reason", demoteLegal );
+
+        // Approve — the holding area's exit. Rick ruled either a manager or he
+        // suffices, "for now"; the allowlist is server-side configuration and the
+        // refusal is a 403 naming the actor, so this button does not try to guess
+        // who is pressing it. It offers the move and reports what the server said.
+        const approveBtn = btn( "task-approve-button", "Approve", isHeld,
+            isTerminal ? deadReason
+                       : ( isHeld ? "Approve this row onto the live board (queued)" : "Approve applies only to a row in the holding area" ) );
+
+        return `<div class="task-actions">${dropBtn}${dropIn}${parkBtn}${parkIn}${wontFixBtn}${wontFixIn}${demoteBtn}${demoteIn}${approveBtn}</div>`;
     }
 
     _renderTaskRowError( taskId, message ) {
@@ -10881,6 +11011,9 @@ class NotificationsUI {
         if ( actionBtn ) {
             if ( actionBtn.classList.contains( "task-drop-button" ) ) this._handleTaskDropClick( actionBtn );
             else if ( actionBtn.classList.contains( "task-park-button" ) ) this._handleTaskParkClick( actionBtn );
+            else if ( actionBtn.classList.contains( "task-wont-fix-button" ) ) this._handleTaskWontFixClick( actionBtn );
+            else if ( actionBtn.classList.contains( "task-demote-button" ) ) this._handleTaskDemoteClick( actionBtn );
+            else if ( actionBtn.classList.contains( "task-approve-button" ) ) this._handleTaskApproveClick( actionBtn );
             return;
         }
 
@@ -10951,6 +11084,102 @@ class NotificationsUI {
         } );
         if ( result.ok ) await this.refreshTaskList();
         else this._renderTaskRowError( taskId, `Park refused: ${result.message}` );
+    }
+
+    async _handleTaskWontFixClick( button ) {
+        /**
+         * Won't-fix button → read the sibling reason input, enforce non-blank BEFORE
+         * any API call, then transition and refresh.
+         *
+         * ⚠️ THE BLANK CHECK IS A COURTESY, NOT THE CONTROL. `validate_transition`
+         * rejects a blank `->wont_fix` reason server-side regardless — the same rule
+         * `->dropped` has carried since C12, and for the same stated reason: a
+         * refusal whose justification is not written down is indistinguishable from
+         * the work being forgotten. Checking here only saves a round-trip and puts
+         * the message beside the field the operator has to fix.
+         *
+         * ⚠️ THIS IS TERMINAL AND THE BUTTON SAYS SO IN ITS TOOLTIP, but there is no
+         * confirm() dialog. Browser modals block the extension's event loop, and the
+         * reversible sibling is one button to the left — Demote returns a row to
+         * triage without killing it, which is the affordance a confirm would be
+         * standing in for.
+         */
+        const taskId = button.dataset.taskId || "";
+        if ( !taskId ) return;
+        const reason = this._rowInputValue( taskId, "task-wont-fix-reason" );
+        if ( !reason ) {
+            this._renderTaskRowError( taskId, "A won't-fix reason is required — a refusal carries its justification, exactly as a drop does." );
+            return;
+        }
+        this._renderTaskRowError( taskId, "" );
+        const result = await this._transitionTask( taskId, "wont_fix", { reason } );
+        if ( result.ok ) await this.refreshTaskList();
+        else this._renderTaskRowError( taskId, `Won't-fix refused: ${result.message}` );
+    }
+
+    async _handleTaskDemoteClick( button ) {
+        /**
+         * Demote button → push a live row back into the holding area
+         * (`→ not_approved`), reason required, enforced before the call.
+         *
+         * 🔴 THE REASON IS ENFORCED HERE AND, AS OF THIS WRITING, *NOT* ON THE
+         * SERVER — and that asymmetry is deliberate but must not be silent. The
+         * design (amendment 5) says demotion "needs its own legality entry and its
+         * own reason", and the argument is the same one that already carried
+         * `dropped` and `wont_fix`: a row that reappears in the holding area with
+         * no note reads exactly like a row that was never approved in the first
+         * place, and the person triaging it cannot tell which. `validate_transition`
+         * does not yet require it, so a client that skipped the check would post a
+         * blank and the store would take it.
+         *
+         * ⇒ A CLIENT-ONLY RULE IS NOT ENFORCEMENT — anything posting straight to
+         * the API bypasses it. `test_demote_reason_is_client_only_until_the_server_
+         * catches_up` pins the gap and goes RED the moment the server adds the rule,
+         * so this comment cannot quietly outlive the situation it describes.
+         *
+         * ⚠️ DEMOTION MUST NOT RE-COUNT AS A CREATE. `created_ts` is immutable and
+         * the ratio window rolls it off, so a re-promoted row does not mint a second
+         * creation event — but that is a property of the store, not of this button,
+         * and it is the thing to check first if the flow ratio ever starts
+         * double-counting a ticket that went round the loop twice.
+         */
+        const taskId = button.dataset.taskId || "";
+        if ( !taskId ) return;
+        const reason = this._rowInputValue( taskId, "task-demote-reason" );
+        if ( !reason ) {
+            this._renderTaskRowError( taskId, "A demote reason is required — say why this goes back to triage, or the next reader cannot tell it from a row that was never approved." );
+            return;
+        }
+        this._renderTaskRowError( taskId, "" );
+        const result = await this._transitionTask( taskId, "not_approved", { reason } );
+        if ( result.ok ) await this.refreshTaskList();
+        else this._renderTaskRowError( taskId, `Demote refused: ${result.message}` );
+    }
+
+    async _handleTaskApproveClick( button ) {
+        /**
+         * Approve button → promote a held row onto the live board
+         * (`not_approved → queued`). No required field: promotion is the one move
+         * in this cell that adds work rather than refusing it, and nothing needs
+         * justifying to let filed work proceed.
+         *
+         * 🔴 THE AUTHORIZATION CHECK IS THE SERVER'S AND THIS DOES NOT IMITATE IT.
+         * Rick ruled that either a manager or he suffices — "for now" — so the
+         * allowlist is server-side configuration, editable without a deploy, and a
+         * non-approver gets a 403 naming the actor, the current allowlist, and both
+         * ways to change it. A client-side guess at who is pressing the button
+         * would be a second copy of a rule that is explicitly provisional, and it
+         * would refuse people the server would have allowed.
+         *
+         * ⇒ So the refusal is SURFACED, not pre-empted: `_transitionTask` returns
+         * the server's own words and the error stripe prints them verbatim.
+         */
+        const taskId = button.dataset.taskId || "";
+        if ( !taskId ) return;
+        this._renderTaskRowError( taskId, "" );
+        const result = await this._transitionTask( taskId, "queued" );
+        if ( result.ok ) await this.refreshTaskList();
+        else this._renderTaskRowError( taskId, `Approve refused: ${result.message}` );
     }
 
     openTaskBodyOverlay( bodyText, idLabel ) {

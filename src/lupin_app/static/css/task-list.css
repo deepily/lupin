@@ -67,6 +67,13 @@
     --task-done:    #9e9e9e;  /* grey   — terminal: done            */
     --task-dropped: #bdbdbd;  /* l.grey — terminal: dropped         */
     --task-unknown: #bdbdbd;  /* l.grey — unrecognized status       */
+    /* Two statuses added 2026-09-02 (Rick's P0, row 8af64f5a). Each gets its OWN
+       colour rather than falling through to the unknown grey: a deliberate refusal,
+       a row awaiting triage, and a typo are three different situations, and one
+       grey for all three tells the operator nothing about which they are seeing. */
+    --task-parked:       #26a69a;  /* teal   — deferred by a human, bounded, NOT terminal */
+    --task-not-approved: #7e57c2;  /* violet — held in the triage area, NOT terminal */
+    --task-wont-fix:     #6d4c41;  /* brown  — terminal: refused on purpose          */
 
     width: 100%;
     border-collapse: collapse;
@@ -327,6 +334,9 @@ tbody.task-group.collapsed .task-row {
 .task-status-queued  .task-status-dot { background: var( --task-queued ); }
 .task-status-done    .task-status-dot { background: var( --task-done ); }
 .task-status-dropped .task-status-dot { background: var( --task-dropped ); }
+.task-status-parked       .task-status-dot { background: var( --task-parked ); }
+.task-status-not-approved .task-status-dot { background: var( --task-not-approved ); }
+.task-status-wont-fix     .task-status-dot { background: var( --task-wont-fix ); }
 .task-status-unknown .task-status-dot { background: var( --task-unknown ); }
 
 /* ---- Parked rows (2026-07-22) ------------------------------------------------
@@ -367,6 +377,9 @@ tbody.task-group.collapsed .task-row {
 .task-row.task-status-queued  td:first-child { box-shadow: inset 3px 0 0 var( --task-queued ); }
 .task-row.task-status-done    td:first-child { box-shadow: inset 3px 0 0 var( --task-done ); }
 .task-row.task-status-dropped td:first-child { box-shadow: inset 3px 0 0 var( --task-dropped ); }
+.task-row.task-status-parked       td:first-child { box-shadow: inset 3px 0 0 var( --task-parked ); }
+.task-row.task-status-not-approved td:first-child { box-shadow: inset 3px 0 0 var( --task-not-approved ); }
+.task-row.task-status-wont-fix     td:first-child { box-shadow: inset 3px 0 0 var( --task-wont-fix ); }
 .task-row.task-status-unknown td:first-child { box-shadow: inset 3px 0 0 var( --task-unknown ); }
 
 /* Blocked rows: subtle red wash so owed-and-waiting work stands out */

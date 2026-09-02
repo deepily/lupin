@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="/static/css/notifications.css?v=20260829a">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260619a">
-    <link rel="stylesheet" href="/static/css/task-list.css?v=20260902a">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=20260902b">
     <link rel="stylesheet" href="/static/css/epic-board.css?v=20260829a">
 </head>
 <body>
@@ -759,8 +759,20 @@
                           class="flow-ratio-controls-status"></span>
                 </div>
                 <div id="task-list-container" data-testid="task-list-container">
-                    <!-- rendered owner-grouped table (read-only) -->
+                    <!-- rendered owner-grouped table, with per-row state controls -->
                 </div>
+                <!-- Drop-reason suggestions. "Overtaken by events" is a REASON and
+                     deliberately not a fourth status (design 2026.09.02, amendment 6):
+                     a status has to be legal-from somewhere, ranked, coloured and
+                     counted, and this phrase needs none of that — it needs to be easy
+                     to type. One datalist serves every row; the rows reference it by
+                     id, so it lives here rather than being re-emitted per row. -->
+                <datalist id="task-drop-reason-suggestions">
+                    <option value="Overtaken by events"></option>
+                    <option value="Duplicate of an existing row"></option>
+                    <option value="Filed against the wrong repo"></option>
+                    <option value="No longer reproducible"></option>
+                </datalist>
             </div>
         </div>
 
@@ -1141,7 +1153,7 @@
     <script type="module" src="/static/js/shared/task-list-query.js?v=20260803c"></script>
     <script type="module" src="/static/js/shared/agent-select.js?v=20260829a"></script>
     <script type="module" src="/static/js/shared/arg-interview.js?v=20260829a"></script>
-    <script src="/static/js/notifications.js?v=20260902c"></script>
+    <script src="/static/js/notifications.js?v=20260902d"></script>
     <script src="/static/js/broadcast-panel.js?v=20260619a"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.
