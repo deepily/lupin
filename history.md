@@ -8,6 +8,20 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.01 (evening) - Session 37316fd2 (Rio ⚡, worker 3 of 3 for Mr. Radio 🦉) | The audio socket never reused the queue session id, and a worktree test run was importing two trees at once
+
+**INDEX 3 — doc-vs-code drift, resolved in favour of the CODE.** Mr. Radio measured two session ids under one user ('foolish goat' on the queue socket, 'slow zebra' on the audio one) and asked which was right. Three clients, two behaviours: lupin-mobile (`enhanced_websocket_service.dart:740-741`) and the web multiplexer (`boot.ts:623-624`) build both sockets from one id; the web app (`notifications.js:2441-2442`) keeps two, deliberately — its TTS requests carry `audioSessionId` explicitly. `git log -S AUDIO_SESSION_KEY` returns only the squash import, so nothing changed; the docs were over-general from the start. Fixed `websocket-architecture.md` (×2), `websocket-troubleshooting.md` — which told a debugger to unify ids the live client keeps apart — and the `connect()` docstring, which had dropped the scope its own inline comment kept. The `.py` change is AST-identical to HEAD with docstrings stripped.
+
+**Second finding, next door**: `websocket-architecture.md` claimed *"All methods are documented below"* and four public methods had zero mentions — including `emit_to_user_and_admins_sync`, the one its own docstring calls canonical and whose absence is the `248e740e` stale-job-card defect. `connect`'s signature was missing `roles` and `client_type`, the F-S6-1 marker the same document describes two tables higher. Both now held by a mechanical AST-vs-doc guard.
+
+**A worktree pytest run splits the import graph** (`e2eb1306`). Every seat's shell carries `PYTHONPATH=/…/lupin/src`; `conftest` inserts `$LUPIN_ROOT/src` at position 0, and `sys.modules` is sticky — so `lupin_app` loads from your worktree while `cosa` loads from the main repo. The assembled app is a mixture that exists in no checkout. Cost: a faithful reproduction of the shipped `/api/tasks/flow-ratio` 422 defect reported **6 passed**, and two correct guards were minutes from being filed as blind. Pin `PYTHONPATH` too and the same arm gives 2 failed, each naming its own test. Remedy and the three-pin command are in CLAUDE.md beside the other worktree traps.
+
+**Manifest parser fix** (`a37d1b71`): a trailing note — `(merge 27f993b9 — maya)` — was folded INTO the path, so the section claimed a string no file equals and the file read as claimed by nobody. The parse never failed; it succeeded and produced a wrong answer. 9 files recovered across the live manifest. A follow-on control was **measured and rejected** at 32 false positives per real case and recorded at the parser (`2ca2e1dd`) so nobody re-derives it.
+
+**Also**: the git pathspec trap (`'src/docs/**/*.md'` reaches 17 of 35 files — the subdirectories only, because `**/` requires an intervening directory) added as the fifth receipt in the empty-result table; a missing gitignored credential now SKIPs naming its path instead of failing with an asyncio traceback; and the no-symlink ruling on `src/conf/keys/**` — a venv is a build artifact, a key is a secret.
+
+**Files**: `websocket_manager.py` · `websocket-architecture.md` · `websocket-troubleshooting.md` · `commit_scope_guard.py` · `test_notify_idempotency_midconnect_smoke.py` · two new websocket guards · `test_commit_scope_guard_annotated_paths.py` · `CLAUDE.md` · `TODO.md`
+
 ### 2026.08.31 (evening) - Session 1a265076 (Rio ⚡, author #1 for Mr. Radio 🦉; review Tiberius 👑 · Rachel 🕊️) | The checked-hash control went live, and every defect in it was an empty value read as permission
 
 1. **Row `f313fc2d` needed WIRING, not building.** The mechanical control was built on 08-30 by `3688a47b` (row `9b5b97de`) and **nothing called it** — its own R&D banner says the module is inert pending Rick's placement ruling. Rick ruled placement 3+4 (patch prevents, verifier detects), and `src/sitecustomize.py` IS that placement. Merged `184ea9cb`.
