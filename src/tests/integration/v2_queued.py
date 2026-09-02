@@ -82,6 +82,31 @@ def assert_handed_off( response_body, expect_cache_hit=None, expect_path=None ):
 
 DRAIN_UNOBSERVABLE = "done-queue drain unobservable under monopolize on :8000 (row ce29cd20)"
 
+# A SECOND REASON, FOR THE ONE TEST THAT NEEDS A REPLAY RATHER THAN JUST A DRAIN.
+#
+# `DRAIN_UNOBSERVABLE` above is exactly right for a test whose only obstacle is the
+# monopolized consumer — test_v2_resume_live.py's parked/resume test asserts
+# `expect_path="agent"` throughout and needs nothing else, so it keeps that reason.
+#
+# The write-back round trip needs MORE than a free consumer, and saying only "drain" was
+# a promise the test could not keep. Its second ask expects `path="replay"`, which
+# `_may_serve` (v2/flow.py step 9b) serves only when `answer_is_correct is True` — and
+# nothing in that test ever confirms the answer. So on a box whose consumer IS free, the
+# first job would run, the row would be written UNCONFIRMED, the guard would refuse the
+# second ask, and the test would fail on `path="agent"` rather than XPASS.
+#
+# Why that mattered enough to fix a string: a strict xfail's reason is what the next
+# person reads before taking the mark off, and this one named the necessary half as if it
+# were the whole condition. Tiffany found it, and asked that BOTH causes be named.
+# Row 734bd1bf carries the measurement; the confirmed/unconfirmed pair in
+# test_v2_ask_serves_a_confirmed_row.py is what established the second cause is real.
+REPLAY_NEEDS_DRAIN_AND_CONFIRMATION = (
+    "two blockers, both live: (1) done-queue drain unobservable under monopolize on :8000 "
+    "(row ce29cd20), and (2) this test never confirms its answer, so the step-9b read guard "
+    "refuses the replay even once a consumer is free (row 734bd1bf). A free consumer alone "
+    "does NOT make this pass."
+)
+
 # The bodies behind that mark are xfail(strict=True), NOT skip — Cheech's ruling, and it is
 # the difference between a claim that is parked and one that is abandoned. A strict xfail
 # still RUNS, so the day the box gains a consumer that is not the test itself, it XPASSes

@@ -20,8 +20,19 @@ the queue, and the queue actually has it under the id the API returned. The drai
 and the replay are marked xfail(strict=True) here by name and pinned a tier down —
 `src/tests/unit/test_write_back_lands_before_the_job_is_done.py` drives the
 ordering the round trip rested on. This is a real loss of coverage, not a
-relabelling: nothing on :8000 now proves the shipped app replays a row it wrote.
-Restoring it needs a consumer that is not the test itself.
+relabelling: nothing on :8000 proves the shipped app replays a row IT WROTE, in
+the full cold→warm cycle. Restoring THAT needs a consumer which is not the test
+itself, AND a confirmation of the written row — see the xfail's own reason below,
+which used to name only the first and promised an XPASS it could not deliver.
+
+⚠️ PART of the lost ground has since been retaken, and the distinction is worth
+keeping straight rather than reading this file as the last word.
+`test_v2_ask_serves_a_confirmed_row.py` proves on :8000 that a CONFIRMED row is
+served as a tier-1 replay — seeded through `V2Cache.write_back()`, the same writer
+the flow uses, so the row's shape is the shipped one. What it deliberately does
+NOT cover is the cycle this file owns: an agent actually RUNNING and its answer
+coming back through the queue. A seeded row and a drained one are different
+claims, and only the second one needs the consumer.
 
 Fail-first (approach A, intrinsic — no shared-config toggle): the FIRST call on a
 unique cold question MUST be a MISS (cache_hit False, path agent). With write-back
@@ -41,8 +52,8 @@ import pytest
 import requests
 
 from tests.integration.v2_queued import (
-    DRAIN_UNOBSERVABLE, DRAIN_XFAIL_TIMEOUT, assert_handed_off, assert_queued_in_todo,
-    drop_from_todo, snapshot_id_for_question, wait_for_done,
+    DRAIN_XFAIL_TIMEOUT, REPLAY_NEEDS_DRAIN_AND_CONFIRMATION, assert_handed_off,
+    assert_queued_in_todo, drop_from_todo, snapshot_id_for_question, wait_for_done,
 )
 
 
@@ -137,16 +148,36 @@ def test_v2_ask_hands_a_cold_question_to_the_queue( auth_headers ):
         _cleanup_snapshot( snapshot_id_for_question( question ) )
 
 
-@pytest.mark.xfail( reason=DRAIN_UNOBSERVABLE, strict=True )
+@pytest.mark.xfail( reason=REPLAY_NEEDS_DRAIN_AND_CONFIRMATION, strict=True )
 def test_v2_ask_write_back_round_trip_replays_second_identical_request( auth_headers ):
     """First ask queues, runs and writes back (cold miss); the second identical ask replays it.
 
     🔴 STRICT XFAIL, NOT SKIP, AND NOT DELETED. This is the only end-to-end proof that the
     shipped app writes a row and then serves it; nothing else covers it. Strict xfail keeps
-    it RUNNING: the day the box gains a consumer which is not the test itself — a :7999
-    probe, a second server, a suite that does not monopolize — it XPASSes and the gate goes
-    RED, and somebody comes and takes the mark off. A skip would sit quiet forever, which is
-    how a blocked claim turns into an unmade one without anybody deciding to drop it.
+    it RUNNING, so a blocked claim cannot quietly turn into an unmade one — which is what a
+    skip would do.
+
+    🔴 TWO THINGS BLOCK IT, AND THIS DOCSTRING USED TO NAME ONLY ONE. It said it would XPASS
+    "the day the box gains a consumer which is not the test itself." It would not, and a
+    reader acting on that sentence would take the mark off and get a red they could not
+    explain. A free consumer is NECESSARY and NOT SUFFICIENT:
+
+      1. THE DRAIN. Under monopolize the suite is itself the consumer, so the first job
+         never runs and no row is ever written. This is the half the old reason named.
+      2. THE READ GUARD. The second ask expects `path="replay"`, and `_may_serve`
+         (v2/flow.py, step 9b) serves a row only when `answer_is_correct is True`. Nothing
+         in this test ever confirms the answer — grep it: no `answer_is_correct`, no
+         confirmation step. So even with a free consumer, the row lands UNCONFIRMED, the
+         guard refuses, and the response comes back `path="agent"`.
+
+    ⇒ To make this XPASS honestly, a free consumer must be paired with a confirmation of
+    the written row between the two asks. Found by Tiffany while working row 734bd1bf; the
+    second cause is not theory — `test_v2_ask_serves_a_confirmed_row.py` drives the
+    confirmed and unconfirmed cases side by side and gets `replay` and `agent` respectively.
+
+    THE CLAIM IS STILL WORTH KEEPING AS AN XFAIL. Its subject is the cold→warm round trip
+    THROUGH THE QUEUE, which is genuinely drain-blocked; the seeded-row test proves a
+    confirmed row is served, which is a narrower claim and does not replace this one.
 
     Its waits are bounded well under the usual ladder (DRAIN_XFAIL_TIMEOUT) — a body that
     runs every gate costs every gate. Everything else below is the original test, unchanged.
