@@ -53,6 +53,11 @@ import pytest
 from lupin_cli.claude_code.hooks.lib.stash_guard import _deny_reason_for
 from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
     git_commit_match, _pathspec_of, _notice_for,
+    _deny_reason_for as _commit_scope_deny,
+    SCOPE_INDEX, SCOPE_DASH_A, SCOPE_PATHSPEC,
+)
+from lupin_cli.claude_code.hooks.lib.kill_guard import (
+    _deny_reason_for as _kill_deny,
 )
 from lupin_cli.claude_code.hooks.lib.merge_head_guard import (
     KIND_SQUASH, KIND_MERGE, _deny_reason_for as _merge_head_deny,
@@ -147,20 +152,51 @@ def test_the_squash_refusal_qualifies_the_reset_it_recommends():
 # line in EITHER direction fails here and names what to do about it.
 # ---------------------------------------------------------------------------
 
+# 🔴 THE POPULATION IS ENUMERATED, NOT ASSUMED. The first cut of this map held four
+# entries and CLAIMED to be the frontier; a census of
+# `hooks/**` for `_deny_reason_for` / `_notice_for` found NINE, including
+# commit_scope_guard's actual DENY — only its allow-with-notice path had been mapped.
+# A map that names its own gaps while silently missing five messages is the very
+# defect it exists to catch, so the census command is recorded here to be re-run:
+#
+#   grep -rn "^def _deny_reason_for\|^def _notice_for" \
+#       src/lupin_cli/claude_code/hooks/ --include=*.py | grep -v __pycache__
+#
+# ⚠️ ONE KNOWN EXCLUSION, named rather than left silent:
+# `subagent_governance.subagent_deny_reason` is a RESOLVER, not a message builder —
+# it needs live session state to return anything and composes no indented remedy.
+# It is out of this map's scope; if it grows a remedy, it belongs here.
+_PEER    = "src/peer.py"
+_FOREIGN = { _PEER: "abcd1234" }
+
 _MESSAGES = {
-    "stash_guard.deny"          : lambda: _deny_reason_for( "push" ),
-    "merge_head_guard.squash"   : lambda: _merge_head_deny( KIND_SQUASH ),
-    "merge_head_guard.merge"    : lambda: _merge_head_deny( KIND_MERGE, "a" * 40 ),
-    "commit_scope_guard.notice" : lambda: _notice_for( "a reason" ),
+    "stash_guard.deny"                : lambda: _deny_reason_for( "push" ),
+    "merge_head_guard.squash"         : lambda: _merge_head_deny( KIND_SQUASH ),
+    "merge_head_guard.merge"          : lambda: _merge_head_deny( KIND_MERGE, "a" * 40 ),
+    "commit_scope_guard.notice"       : lambda: _notice_for( "a reason" ),
+    "commit_scope_guard.deny.index"   : lambda: _commit_scope_deny( _FOREIGN, [], [ _PEER ], scope=SCOPE_INDEX ),
+    "commit_scope_guard.deny.dash_a"  : lambda: _commit_scope_deny( _FOREIGN, [], [ _PEER ], scope=SCOPE_DASH_A ),
+    "commit_scope_guard.deny.pathspec": lambda: _commit_scope_deny( _FOREIGN, [], [ _PEER ], scope=SCOPE_PATHSPEC ),
+    "kill_guard.deny.pids"            : lambda: _kill_deny( [ "123" ] ),
+    "kill_guard.deny.sweep"           : lambda: _kill_deny( [] ),
 }
 
 # True  = names a table hazard, so a [] from the caveat check is EVIDENCE
 # False = names none, so a [] means NOTHING WAS MEASURED - do not assert on it
+#
+# Seven of nine are False today. That ratio is the honest state of this check, and
+# it is worth seeing: the caveat table is a floor built from three measured incidents,
+# so most guard messages recommend operations nobody has been burned by yet.
 _CHECKABLE = {
-    "stash_guard.deny"          : True,
-    "merge_head_guard.squash"   : True,    # became True on Rio's reset row 37fb6c5a
-    "merge_head_guard.merge"    : False,   # only the hatch and "ask the owner"
-    "commit_scope_guard.notice" : False,   # git diff / git commit name no hazard
+    "stash_guard.deny"                : True,
+    "merge_head_guard.squash"         : True,    # became True on Rio's reset row 37fb6c5a
+    "merge_head_guard.merge"          : False,   # only the hatch and "ask the owner"
+    "commit_scope_guard.notice"       : False,   # git diff / git commit name no hazard
+    "commit_scope_guard.deny.index"   : False,   # git restore --staged is path-scoped
+    "commit_scope_guard.deny.dash_a"  : False,   # "drop -a and commit by name"
+    "commit_scope_guard.deny.pathspec": False,   # "drop it from the paths you name"
+    "kill_guard.deny.pids"            : False,   # every substitute is own-children scoped
+    "kill_guard.deny.sweep"           : False,   # same three substitutes
 }
 
 
