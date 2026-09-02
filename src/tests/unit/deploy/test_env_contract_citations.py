@@ -69,9 +69,17 @@ _FILENAMES = "|".join( re.escape( k ) for k in sorted( COMPOSE_ALIASES, key=len,
 # SILENTLY DROPPED both GH_TOKEN citations: the note names `docker-compose.yml`
 # with no attached number, so the file-anchor never got set and `:204, :312` were
 # never checked. The count assertion below still read 11 and looked healthy.
-CITATION = re.compile(
-    r"\b(?P<file>" + _FILENAMES + r")(?::(?P<lines>\d+(?:,\d+)*))?"
-    r"|(?<![\w.]):(?P<bare>\d+)\b"
+# ONE left-to-right scan, so an anchor attaches to whichever file the note named
+# most recently — whether or not it sits immediately after the filename. Requiring
+# adjacency is what the first cut of this rewrite did, and it SILENTLY DROPPED both
+# GH_TOKEN citations: that note reads "in the LOCAL docker-compose.yml only «...»",
+# and the word "only" was enough to break the attachment. The count assertion read
+# 13 and looked healthy. That is the SAME defect the line-number parser had,
+# re-derived in a new notation — which is why the instrument check below is an
+# assertion against a different counting method, not a number someone eyeballs.
+ANCHOR = re.compile(
+    r"\b(?P<file>" + _FILENAMES + r")"
+    r"|\u00ab(?P<anchor>[^\u00bb]+)\u00bb"
 )
 
 
@@ -98,29 +106,21 @@ def _contract_rows():
 
 def _citations( name, note ):
     """
-    Extract ( var_name, compose_path, line_no ) for every in-repo citation.
+    Extract ( var_name, compose_path, anchor_text ) for every in-repo citation.
 
     Ensures:
-        - named citations resolve through COMPOSE_ALIASES
-        - a BARE `:N` is attributed to the LAST file named earlier in the note,
-          and only when N is within that file's length — this is what keeps
-          `:7998` (a port) and `:0` (a GPU index) out of the result set
-        - off-repo citations (cloud-gpu.env) are not returned
+        - EVERY «...» group attaches to the LAST file named earlier in the note,
+          so one row can cite two lines of the same file without repeating its
+          name, and prose may sit between the filename and its anchor
+        - off-repo citations (cloud-gpu.env) carry no guillemets and are not returned
     """
     out       = []
     last_file = None
-    for m in CITATION.finditer( note ):
+    for m in ANCHOR.finditer( note ):
         if m.group( "file" ):
             last_file = LUPIN_ROOT / COMPOSE_ALIASES[ m.group( "file" ) ]
-            if m.group( "lines" ):
-                for n in m.group( "lines" ).split( "," ):
-                    out.append( ( name, last_file, int( n ) ) )
         elif last_file is not None:
-            n = int( m.group( "bare" ) )
-            # The range guard is what keeps `:7998` (a port in the
-            # LUPIN_MODEL_SERVER_URL note) from being claimed as a line number.
-            if 1 <= n <= len( last_file.read_text().splitlines() ):
-                out.append( ( name, last_file, n ) )
+            out.append( ( name, last_file, m.group( "anchor" ) ) )
     return out
 
 
@@ -132,38 +132,81 @@ def test_the_scan_FOUND_citations_to_check():
     The instrument before the reading. A regex that matched nothing would make
     every parametrised case below disappear and the file report green.
     """
-    assert len( ALL_CITATIONS ) >= 10, f"only {len(ALL_CITATIONS)} citations found — the scan is not reaching the notes"
+    assert len( ALL_CITATIONS ) >= 14, f"only {len(ALL_CITATIONS)} citations found — the scan is not reaching the notes"
 
 
-def test_a_PORT_is_not_mistaken_for_a_line_citation():
+def test_a_PORT_is_not_mistaken_for_a_citation():
     """
-    The control, and it is exercised: `LUPIN_MODEL_SERVER_URL`'s note names
-    `cloud-gpu.yml:193` and then carries a `:7998` port inside a URL. Without the
-    range guard the scanner would claim cloud-gpu.yml has a line 7998 and the
-    suite would be measuring noise.
+    The control, and it is exercised: `LUPIN_MODEL_SERVER_URL`'s note carries a
+    `:7998` port inside a URL. Under the old line-number format that token had to
+    be range-guarded out by hand. An anchor citation is delimited, so a bare
+    `:7998` cannot be claimed as one — this asserts that property rather than
+    assuming the format bought it.
 
     Asserted against the note that actually contains it, not against the corpus
     at large — an absence proves nothing if the token was never in range.
     """
     note = next( n for name, n in _contract_rows() if name == "LUPIN_MODEL_SERVER_URL" )
     assert ":7998" in note, "the note this control depends on no longer contains a port — the control is now vacuous"
-    assert 7998 not in { n for _, _, n in _citations( "LUPIN_MODEL_SERVER_URL", note ) }
+    assert all( ":7998" not in a for _, _, a in _citations( "LUPIN_MODEL_SERVER_URL", note ) )
 
 
 @pytest.mark.parametrize(
-    "var,path,line",
+    "var,path,anchor",
     ALL_CITATIONS,
-    ids=[ f"{v}@{p.name}:{n}" for v, p, n in ALL_CITATIONS ],
+    ids=[ f"{v}@{p.name}" for v, p, _ in ALL_CITATIONS ],
 )
-def test_every_citation_lands_on_a_line_naming_its_variable( var, path, line ):
+def test_every_citation_anchor_is_still_present_in_the_file( var, path, anchor ):
     """
-    A citation is a claim. It must point at a line that mentions the variable it
-    is offered as evidence for.
+    A citation is a claim, and the anchor is the claim's own words. It must still
+    be a line of the file it names.
+
+    WHY AN ANCHOR AND NOT A LINE NUMBER (measured 2026-09-01, row 21a084d1's
+    successor). The notes used to cite `<file>:<line>`. Of the twelve commits that
+    have ever touched the two cited compose files, TEN displaced at least one
+    citation — measured as net line delta above the cited line, so a hunk entirely
+    below it counts as harmless. Only 765e7145 and 949cf6e8 were harmless; one
+    commit moved ten citations by +254. An anchor cannot drift: it either matches
+    or it is gone, and "gone" is exactly the thing worth being told.
+
+    ⚠️ TWO ANCHORS MATCH TWICE, BY DESIGN, AND THAT IS NOT AN AMBIGUITY TO FIX.
+    `JWT_SECRET_KEY` and `GH_TOKEN` are set identically in two services of
+    docker-compose.yml, and the contract cites both occurrences. Under the old
+    format that was two line numbers (`:257, :458` and `:302, :502`); under this
+    one it is a single anchor that lands twice. So this asserts the anchor is
+    PRESENT, never that it is unique — a uniqueness assertion would fail on a
+    correct contract. Ten of the twelve remaining anchors do match exactly once.
+
+    ⚠️ It asserts the citation LANDS, not that the note's prose is true. A line
+    that carries the anchor but is quoted for the wrong reason still passes here.
     """
-    lines = path.read_text().splitlines()
-    assert 1 <= line <= len( lines ), f"{path.name} has {len(lines)} lines; the note cites :{line}"
-    text = lines[ line - 1 ]
-    assert var in text, (
-        f"{var}'s note cites {path.name}:{line}, but that line does not mention {var}.\n"
-        f"  cited line: {text.strip()!r}"
+    assert var in anchor, (
+        f"{var}'s anchor does not mention {var}, so it cannot be evidence for this row.\n"
+        f"  anchor: {anchor!r}"
+    )
+    stripped = [ l.strip() for l in path.read_text().splitlines() ]
+    assert anchor in stripped, (
+        f"{var}'s note anchors on a line of {path.name} that is no longer there.\n"
+        f"  anchor: {anchor!r}\n"
+        f"  Re-read the file and update the anchor in src/conf/env-contract.tsv."
+    )
+
+
+def test_the_scan_CLAIMS_every_anchor_written_into_the_contract():
+    """
+    The instrument check, as an assertion rather than a number to eyeball.
+
+    A «...» group in a note is somebody writing a citation. If the scanner claims
+    fewer of them than the file contains, a citation is going unchecked and the
+    suite still reports green — which is how the old line-number parser lost both
+    GH_TOKEN citations, and how the first cut of THIS parser lost them again by
+    requiring the anchor to sit next to the filename.
+
+    Counting the raw groups is deliberately a DIFFERENT method from the one under
+    test: a scan that agrees with itself proves nothing.
+    """
+    raw = sum( note.count( "«" ) for _, note in _contract_rows() )
+    assert raw == len( ALL_CITATIONS ), (
+        f"the contract carries {raw} anchors but the scan claimed {len(ALL_CITATIONS)}.\n"
+        f"  An anchor the scan cannot see is a citation nothing checks."
     )
