@@ -25,7 +25,7 @@ string-matching test misses — if two origins carry the same value, which makes
 them indistinguishable at the log line no matter how distinctly they are named.
 
 ⚠️ READ THE SHIPPED ASSET, DO NOT RESTATE IT. Same reasoning as
-test_browser_fallback_session_id_is_server_valid.py: a test that hardcodes the
+test_browser_invents_no_session_id.py: a test that hardcodes the
 origin strings measures what this file wrote, not what the browser ships.
 """
 import re
@@ -141,8 +141,16 @@ def test_every_throw_in_the_session_id_try_names_its_origin():
     The regression itself: a throw that reaches the shared catch untagged is a
     failure whose cause the log line cannot report.
     """
-    body   = _strip_line_comments( _method_body( _source(), _GET_OR_CREATE ) )
-    throws = re.findall( r"\bthrow\s+(\S+)", body )
+    body = _strip_line_comments( _method_body( _source(), _GET_OR_CREATE ) )
+
+    # ⚠️ SCOPE THE SCAN TO THE TRY, NOT THE WHOLE METHOD. Since the 2026-09-02
+    # ruling the CATCH ends in a throw of its own — the re-raise that replaced
+    # the fallback — and that throw carries an origin it was HANDED rather than
+    # one it tags. Scanning the whole body counts it as an untagged ingress and
+    # reddens on correct code. The property under test is about throws on their
+    # way INTO the shared catch, so the try block is the honest population.
+    try_block = body[ : body.rindex( "} catch (" ) ]
+    throws    = re.findall( r"\bthrow\s+(\S+)", try_block )
 
     untagged = [ t for t in throws if "tagSessionIdFailure" not in t ]
 
@@ -207,18 +215,19 @@ def test_each_declared_origin_is_actually_reachable():
     )
 
 
-def test_the_fallback_announces_at_error_level():
+def test_the_failure_announces_at_error_level():
     """
-    A working socket on an id the server never issued is the state this row
-    exists to make visible. Logging it at this.log leaves it invisible at the
-    default log level, which is how the condition went unnoticed.
+    Since Rick's 2026-09-02 ruling the browser no longer invents an id, so the
+    state to make visible is the FAILURE itself. Logging it at this.log leaves
+    it invisible at the default log level, which is how the original condition
+    went unnoticed for a day.
     """
-    body = _method_body( _source(), r"^    useFallbackSessionId\(" )
+    body = _method_body( _source(), r"^    failSessionIdAcquisition\(" )
 
     assert "this.error(" in body, (
-        "useFallbackSessionId does not announce via this.error(). A client "
-        "running on a self-minted session id must be visible without raising "
-        "the log level."
+        "failSessionIdAcquisition does not announce via this.error(). A browser "
+        "that cannot obtain a session id must be visible without raising the "
+        "log level."
     )
 
 
@@ -379,12 +388,22 @@ def test_a_refusing_localstorage_does_not_escape_as_a_throw():
     """
     refusal = _drive()[ "storageRefusal" ]
 
-    assert refusal[ "threw" ] is False, (
-        f"a refusing localStorage propagated out of getOrCreateSessionId: "
-        f"{refusal.get( 'error' )}. The caller asked for a session id and one "
-        f"was available — a storage failure must not deny it."
+    # ⚠️ THE PROPERTY FLIPPED WITH THE RULING AND IS STILL WORTH GUARDING.
+    # Before 2026-09-02 the guard bought "does not throw", because an id was
+    # available and a storage failure must not deny it. Now the method throws by
+    # design, so "does not throw" would be the wrong assertion — what the guard
+    # buys today is that the thrown error carries the REAL CAUSE rather than the
+    # storage error that happened on the way out. A caller told "QuotaExceeded"
+    # would chase the wrong thing entirely.
+    assert refusal[ "threw" ] is True, (
+        "a refusing localStorage suppressed the failure. Since the fallback was "
+        "removed, being unable to obtain a session id must reach the caller."
     )
-    assert refusal[ "id" ], "no session id was returned when localStorage refused every write"
+    assert "network-unreachable" in refusal[ "message" ], (
+        f"the thrown error reports {refusal[ 'message' ]!r}, which does not name "
+        f"the real cause. A storage refusal must not overwrite the diagnosis — "
+        f"that is the whole reason the diagnostic write is guarded."
+    )
 
 
 def test_a_non_object_throw_still_reports_its_real_origin():
@@ -417,9 +436,12 @@ def test_a_non_object_throw_still_reports_its_real_origin():
         f"was replaced by its own TypeError."
     )
 
-    # The crash guarantee is asserted too, but it holds in BOTH arms — it is
-    # not what the guards buy, and recording that keeps the next reader from
-    # crediting them with it.
-    assert all( r[ "threw" ] is False for r in rows ), (
-        "a non-object throw escaped getOrCreateSessionId entirely."
+    # Since the ruling every arm throws BY DESIGN, so "it threw" is no longer
+    # evidence of anything and asserting it would be a change detector. What
+    # still matters is the ORIGIN above: a primitive reaching the catch must not
+    # degrade the diagnosis to 'unclassified'. Recording the flip so the next
+    # reader does not credit these guards with a crash guarantee they no longer
+    # buy — that property moved to the assertion above it.
+    assert all( r[ "threw" ] is True for r in rows ), (
+        "a non-object throw was swallowed instead of reaching the caller."
     )

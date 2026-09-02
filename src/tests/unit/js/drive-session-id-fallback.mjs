@@ -51,8 +51,7 @@ const Harness = eval( `(class Harness { ${ [
     slice( /^    async getOrCreateSessionId\(/gm ),
     slice( /^    get FALLBACK_ORIGIN\(\)/gm ),
     slice( /^    tagSessionIdFailure\(/gm ),
-    slice( /^    useFallbackSessionId\(/gm ),
-    slice( /^    generateFallbackSessionId\(\)/gm )
+    slice( /^    failSessionIdAcquisition\(/gm )
 ].join( '\n' ) } })` );
 
 function makeStore() {
@@ -104,9 +103,15 @@ for ( const [ label, condition ] of Object.entries( CONDITIONS ) ) {
     global.localStorage = makeStore();
     condition( instance );
 
-    const id     = await instance.getOrCreateSessionId( 'queue' );
+    // Since Rick's 2026-09-02 ruling the method THROWS rather than minting an
+    // id. A condition that returns is a regression, so `threw` is recorded and
+    // asserted rather than assumed — a driver that only reads the record would
+    // pass identically if the fallback came back.
+    let threw = false, id = null;
+    try { id = await instance.getOrCreateSessionId( 'queue' ); }
+    catch ( failure ) { threw = true; }
     const record = JSON.parse( global.localStorage.getItem( 'reason' ) );
-    results.push( { label, origin: record.origin, id, message: record.message } );
+    results.push( { label, origin: record.origin, id, threw, message: record.message } );
 }
 
 // Control: the server answers normally. Nothing may be recorded — a fallback
@@ -133,9 +138,9 @@ global.fetch = async () => { throw new TypeError( 'Failed to fetch' ); };
 
 let storageRefusal;
 try {
-    storageRefusal = { threw: false, id: await refusing.getOrCreateSessionId( 'queue' ) };
+    storageRefusal = { threw: false, id: await refusing.getOrCreateSessionId( 'queue' ), message: null };
 } catch ( error ) {
-    storageRefusal = { threw: true, id: null, error: String( error ) };
+    storageRefusal = { threw: true, id: null, message: String( error && error.message || error ) };
 }
 
 // A rejection carrying a NON-OBJECT. `error` is not guaranteed to be an Error:
@@ -149,13 +154,11 @@ for ( const thrown of [ null, undefined, 'a string', 42 ] ) {
     global.localStorage = makeStore();
     global.fetch        = async () => { throw thrown; };
 
-    try {
-        const id     = await instance.getOrCreateSessionId( 'queue' );
-        const record = JSON.parse( global.localStorage.getItem( 'reason' ) );
-        nonObjectThrows.push( { thrown: String( thrown ), threw: false, id, origin: record.origin } );
-    } catch ( error ) {
-        nonObjectThrows.push( { thrown: String( thrown ), threw: true, id: null, error: String( error ) } );
-    }
+    let threw = false, id = null;
+    try { id = await instance.getOrCreateSessionId( 'queue' ); }
+    catch ( error ) { threw = true; }
+    const record = JSON.parse( global.localStorage.getItem( 'reason' ) );
+    nonObjectThrows.push( { thrown: String( thrown ), threw, id, origin: record.origin } );
 }
 
 console.log( JSON.stringify( {

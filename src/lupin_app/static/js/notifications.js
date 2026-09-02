@@ -2284,7 +2284,7 @@ class NotificationsUI {
             // to 'unclassified' and the TypeError's message replaces the real
             // cause, which is the one thing this row exists to preserve.
             const origin = ( error && error.lupinFallbackOrigin ) || this.FALLBACK_ORIGIN.UNCLASSIFIED;
-            return this.useFallbackSessionId( sessionType, storageKey, origin, error );
+            throw this.failSessionIdAcquisition( sessionType, origin, error );
         }
     }
 
@@ -2336,51 +2336,52 @@ class NotificationsUI {
         return error;
     }
 
-    useFallbackSessionId( sessionType, storageKey, origin, error ) {
+    failSessionIdAcquisition( sessionType, origin, error ) {
         /**
-         * Mint, persist and ANNOUNCE a locally-generated session ID.
+         * Record WHY the session id could not be obtained, announce it, and
+         * return the error for the caller to throw.
          *
-         * A client running on an id the server never issued is a state worth
-         * seeing, so this announces at error level rather than at this.log.
-         * Before the separator fix the degradation announced itself as a 403
-         * reconnect loop; now the socket works, so nothing else will say it.
+         * 🔨 RICK RULED 2026-09-02 (row a501a714, option A): the browser no
+         * longer invents a session id when the server will not give it one.
+         * What used to happen here — mint a two-word id, persist it, carry on —
+         * is gone. Three measured reasons, all on that row:
+         *   · a self-minted id was the ONLY source of id collisions. Server ids
+         *     come from TwoWordIdGenerator, which holds a uniqueness set; the
+         *     fallback drew from 100 names with no uniqueness check, 50 of them
+         *     inside the server's own space. A collision was probed to OVERWRITE
+         *     active_connections[id] and cross-route one user's notifications to
+         *     another user's socket.
+         *   · it PERSISTED, so one transient failure pinned that browser to a
+         *     self-minted id for every later page load — a transient fault with
+         *     a permanent symptom.
+         *   · the condition it existed to survive is exactly where a loud
+         *     failure costs less than a quiet wrong answer.
          *
-         * The degradation is STICKY: the id is written to localStorage, and the
-         * top of getOrCreateSessionId() returns a stored id without ever asking
-         * the server again. One transient failure therefore pins this browser to
-         * a self-minted id for every later page load, after the cause has
-         * cleared. That is why the reason is persisted alongside the id.
+         * WHAT IS KEPT, deliberately: the origin tagging and the persisted
+         * reason record. Removing the fallback without them would trade a quiet
+         * wrong answer for a loud UNEXPLAINED one, and the origin is the whole
+         * diagnostic value of what shipped before this.
+         *
+         * The caller (connectWebSockets) already catches and surfaces via the
+         * circuit-breaker banner, so the throw lands where a loud failure should.
          *
          * Requires:
-         *     - storageKey is the localStorage key for this session type
+         *     - sessionType is 'queue' or 'audio'
          *     - origin is one of the FALLBACK_ORIGIN values
          *
          * Ensures:
-         *     - returns a session id matching the server's ^[a-z]+ [a-z]+$ format
-         *     - the id and the origin that caused it are both persisted
-         *     - a rejecting localStorage degrades to console output, not a throw,
-         *       for BOTH the session id and the diagnostic record
+         *     - returns an Error carrying the origin; it does NOT throw it
+         *     - the reason is persisted so it survives the browser being closed
+         *     - a rejecting localStorage degrades to console output, not a throw:
+         *       a full or disabled store must not replace the real cause with a
+         *       storage error on its way out
          *
          * Raises:
-         *     - None
+         *     - None — the caller throws the returned Error
          */
-        const fallbackId = this.generateFallbackSessionId();
-
-        // Both writes are guarded, and the ORDER matters. A full or disabled
-        // localStorage must not turn a degraded session into a thrown error
-        // escaping getOrCreateSessionId() — the caller asked for an id and an
-        // id is available. Guarding only the diagnostic write below and leaving
-        // this one bare would protect the less important of the two.
-        try {
-            localStorage.setItem( storageKey, fallbackId );
-        } catch ( storageError ) {
-            this.error( '[SESSION] Could not persist fallback session id:', storageError );
-        }
-
         const record = {
             origin      : origin,
             sessionType : sessionType,
-            sessionId   : fallbackId,
             message     : error && error.message ? error.message : String( error ),
             httpStatus  : error && error.httpStatus ? error.httpStatus : null,
             at          : new Date().toISOString()
@@ -2389,35 +2390,25 @@ class NotificationsUI {
         try {
             localStorage.setItem( this.SESSION_FALLBACK_REASON_KEY, JSON.stringify( record ) );
         } catch ( storageError ) {
-            // A full or disabled localStorage must not turn a diagnostic into
-            // a second failure. The console line below still carries the origin.
-            this.error( '[SESSION] Could not persist fallback reason:', storageError );
+            this.error( '[SESSION] Could not persist session-id failure reason:', storageError );
         }
 
         this.error(
-            `[SESSION] FALLBACK ENGAGED for ${sessionType} — origin=${origin} — ` +
-            `using self-minted id "${fallbackId}" that the server never issued. ` +
+            `[SESSION] COULD NOT OBTAIN a ${sessionType} session id — origin=${origin}. ` +
+            `The browser no longer invents one: an id the server never issued can ` +
+            `collide with a real session and cross-route notifications. ` +
             `Cause: ${record.message}`,
             record
         );
 
-        return fallbackId;
+        const failure = new Error(
+            `Could not obtain a ${sessionType} session id (${origin}): ${record.message}`
+        );
+        failure.lupinFallbackOrigin = origin;
+        failure.sessionType         = sessionType;
+        return failure;
     }
-    
-    generateFallbackSessionId() {
-        const adjectives = [ 'wise', 'clever', 'swift', 'bright', 'keen', 'bold', 'calm', 'cool', 'fair', 'fine' ];
-        const animals = [ 'penguin', 'dolphin', 'eagle', 'tiger', 'wolf', 'bear', 'lion', 'hawk', 'fox', 'owl' ];
-        
-        const adj = adjectives[ Math.floor( Math.random() * adjectives.length ) ];
-        const animal = animals[ Math.floor( Math.random() * animals.length ) ];
-        
-        // Single space, NOT underscore: the server validator's browser format is
-        // ^[a-z]+ [a-z]+$ (src/cosa/rest/routers/websocket.py is_valid_session_id).
-        // An underscore matches neither that nor the hyphenated programmatic format,
-        // so every WebSocket handshake 403s and the client reconnect-loops.
-        return `${adj} ${animal}`;
-    }
-    
+
     // ========================================
     // WEBSOCKET CONNECTIONS
     // ========================================
