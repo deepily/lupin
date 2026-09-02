@@ -413,3 +413,92 @@ test( "batch won't-fix will not fire without its one reason", async () => {
   await ui._handleHoldingWontFixAllClick( { dataset: { filer: "Krishna" } } );
   assert.equal( called, 1 );
 } );
+
+
+// ═══════════════════════ _transitionTask ITSELF, which nothing was watching ═══════════════════════
+//
+// 🔴 FOUND BY MR RADIO'S BLAST-RADIUS CRITERION, applied to my own suite rather than agreed with.
+// The question is not "was the mutation caught" but "how MANY tests saw it" — one red where you
+// expected several means most of the suite was never looking. Measured across both tiers:
+//
+//     the actions cell renders nothing        → 8 red   (JS)
+//     the holding pane paints nothing         → 4 red   (JS) + 1 (Python)
+//     _transitionTask always returns { ok }   → 0 red   ← EVERYTHING
+//
+// Zero. Every test above stubs `_transitionTask`, which is correct for testing the handlers but left
+// the one function that actually talks to the server completely unwatched. Had it swallowed a 403 and
+// returned success, every test in this file and all 39 in the Python tier would have stayed green
+// while every refusal on screen rendered as a silent success — the row would simply not change and
+// nothing anywhere would say why.
+//
+// So these stub `authedFetch` instead and drive the real thing.
+
+function uiWithFetch( impl: ( url: string, init: Record<string, unknown> ) => unknown ): HoldingUI {
+  const ui = newUI();
+  ui.authedFetch = async ( url: string, init: Record<string, unknown> ) => impl( url, init );
+  return ui;
+}
+
+test( "_transitionTask: a 2xx is success, and the request carries what the server requires", async () => {
+  let seenUrl = "", seenBody: Record<string, unknown> = {};
+  const ui = uiWithFetch( ( url, init ) => {
+    seenUrl  = url;
+    seenBody = JSON.parse( String( ( init as { body: string } ).body ) );
+    return { ok: true, status: 200 };
+  } );
+
+  const out = await ui._transitionTask( "abc-123", "wont_fix", { reason: "no" } );
+  assert.deepEqual( out, { ok: true } );
+  assert.equal( seenUrl, "/api/tasks/abc-123/transition" );
+  assert.equal( seenBody.to_status, "wont_fix" );
+  assert.equal( seenBody.reason, "no" );
+  assert.equal( seenBody.authority, "user_direct" );
+  assert.ok( String( seenBody.actor ).startsWith( "operator " ), "the transition is not attributed to an operator" );
+} );
+
+test( "_transitionTask: a row id is URL-ENCODED, so an odd id cannot reshape the path", async () => {
+  let seenUrl = "";
+  const ui = uiWithFetch( ( url ) => { seenUrl = url; return { ok: true, status: 200 }; } );
+  await ui._transitionTask( "a/b?c=d", "queued" );
+  assert.equal( seenUrl, "/api/tasks/a%2Fb%3Fc%3Dd/transition" );
+} );
+
+test( "🔴 _transitionTask: a REFUSAL is a failure and carries the server's own detail", async () => {
+  const detail = "403: actor 'maria' is not in approvers ['rick']; edit lupin-app.ini or ask an approver";
+  const ui = uiWithFetch( () => ( {
+    ok: false, status: 403, json: async () => ( { detail } )
+  } ) );
+
+  const out = await ui._transitionTask( "abc", "wont_fix", { reason: "x" } );
+  assert.equal( out.ok, false, "a 403 was reported as success — every refusal would render as a silent no-op" );
+  assert.equal( out.message, detail, "the server's detail was dropped, losing the actor and the allowlist" );
+} );
+
+test( "_transitionTask: a structured (non-string) detail survives instead of becoming [object Object]", async () => {
+  // FastAPI validation errors arrive as a LIST of objects. Interpolated naively they
+  // render as "[object Object]", which tells the operator nothing at all.
+  const ui = uiWithFetch( () => ( {
+    ok: false, status: 422,
+    json: async () => ( { detail: [ { loc: [ "body", "reason" ], msg: "field required" } ] } )
+  } ) );
+  const out = await ui._transitionTask( "abc", "wont_fix" );
+  assert.equal( out.ok, false );
+  assert.ok( !out.message?.includes( "[object Object]" ), "a structured 422 renders as [object Object]" );
+  assert.match( out.message ?? "", /field required/ );
+} );
+
+test( "_transitionTask: a non-JSON error body still fails, with the status as the message", async () => {
+  const ui = uiWithFetch( () => ( {
+    ok: false, status: 502, json: async () => { throw new Error( "not json" ); }
+  } ) );
+  const out = await ui._transitionTask( "abc", "queued" );
+  assert.equal( out.ok, false, "an HTML gateway error page was read as success" );
+  assert.equal( out.message, "502" );
+} );
+
+test( "_transitionTask: a network throw is a failure and NEVER propagates", async () => {
+  const ui = uiWithFetch( () => { throw new Error( "connection refused" ); } );
+  const out = await ui._transitionTask( "abc", "queued" );
+  assert.equal( out.ok, false, "an unreachable store was reported as success" );
+  assert.match( out.message ?? "", /unreachable: connection refused/ );
+} );
