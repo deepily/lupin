@@ -95,6 +95,12 @@ def import_origin_field( modules, lupin_root ):
         - SAYS WHICH MODULES IT COULD NOT LOCATE, rather than silently judging on the rest.
           A verdict reached over a subset, presented as a verdict over the whole, is the
           narrowed-population defect this repo documents at length
+        - NEVER SAYS `same-tree` OFF A SINGLE MODULE. One module cannot agree with anything,
+          so a split is UNDETECTABLE from a sample of one and the verdict says so
+          (`single-module …`) rather than borrowing a word that means agreement. The tail
+          already named the absent module, but a reader skims the verdict and not the
+          parenthetical — which is how this field committed, in its first shipped form, the
+          exact defect it was written to catch
         - COMPARES REAL PATHS, so a worktree reached through a symlink does not read as
           foreign. A false alarm here is expensive: it trains readers to ignore the field
 
@@ -120,13 +126,32 @@ def import_origin_field( modules, lupin_root ):
         return ( f"imports=⚠️ SPLIT ACROSS {len( roots )} CHECKOUTS — {where}. "
                  f"This run assembled code that exists in no single tree{tail}" )
 
-    # One checkout. The only remaining question is whether it is the one the run meant.
-    only = roots[ 0 ]
+    # One checkout among what was LOCATED. Two questions remain, and they are separate:
+    # is it the tree the run meant, and was a split even DETECTABLE from this sample?
+    #
+    # 🔴 ONE MODULE CANNOT AGREE WITH ANYTHING (Rio ⚡, correcting the shipped ada5b1c1 —
+    # the second time on this module he caught the verdict claiming more than the evidence).
+    # `same-tree` asserts that the modules agree. With a single module located there is no
+    # agreement to assert: a split is UNDETECTABLE from a sample of one, and the word said
+    # otherwise. The tail did disclose the missing module, but a reader skims the verdict and
+    # not the parenthetical — which is this repo's own narrowed-population defect, committed
+    # by the very field written to prevent it. Measured: every cosa-tier run (8,813 tests,
+    # `lupin_app` never loaded) printed `same-tree` off one module.
+    only     = roots[ 0 ]
+    agreeing = len( located ) > 1
+    seen     = ", ".join( sorted( located ) )
+
     if not lupin_root:
         return f"imports=one-tree {only} (LUPIN_ROOT is not set, so nothing to compare against){tail}"
 
     wanted = os.path.realpath( os.path.join( lupin_root, "src" ) )
     if only == wanted:
-        return f"imports=same-tree{tail}"
-    return ( f"imports=⚠️ {only} — coherent but NOT $LUPIN_ROOT ({wanted}); "
-             f"this run measured another checkout{tail}" )
+        if agreeing: return f"imports=same-tree{tail}"
+        return ( f"imports=single-module {seen} in $LUPIN_ROOT — a split cannot be detected "
+                 f"from one module{tail}" )
+
+    if agreeing:
+        return ( f"imports=⚠️ {only} — coherent but NOT $LUPIN_ROOT ({wanted}); "
+                 f"this run measured another checkout{tail}" )
+    return ( f"imports=⚠️ {only} — NOT $LUPIN_ROOT ({wanted}); only {seen} was observed, "
+             f"so a split cannot be ruled out either{tail}" )

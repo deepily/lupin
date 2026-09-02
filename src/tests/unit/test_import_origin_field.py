@@ -82,15 +82,45 @@ def test_a_symlinked_root_is_not_reported_as_a_foreign_tree( tmp_path ):
     assert import_origin_field( modules, str( link ) ) == "imports=same-tree"
 
 
-def test_an_unlocatable_module_is_named_and_does_not_silently_shrink_the_verdict():
+def test_one_located_module_is_never_called_same_tree():
     """
-    A verdict reached over a subset, presented as a verdict over the whole, is the
-    narrowed-population defect this repo documents at length. The survivors are still judged —
-    but the reader is told the judgement did not cover everything.
+    🔴 THE DEFECT RIO CAUGHT IN THE SHIPPED VERSION (ada5b1c1), and this test used to assert
+    it. The first cut returned `same-tree` here and this arm PINNED that, so the suite
+    endorsed the overclaim rather than merely missing it.
+
+    `same-tree` asserts the modules AGREE. One module cannot agree with anything — a split is
+    undetectable from a sample of one. The tail did name the absent module, but a reader skims
+    the verdict and not the parenthetical, which is precisely the narrowed-population defect
+    this field exists to catch. It was live on every cosa-tier run: 8,813 tests, `lupin_app`
+    never loaded, `same-tree` printed off a single module.
     """
     field = import_origin_field( [ _cosa( WT ), ( "lupin_app", None, 1 ) ], WT )
-    assert field.startswith( "imports=same-tree" ), "the located module is still judged"
+    assert "same-tree" not in field, "one module cannot agree with anything"
+    assert "single-module cosa in $LUPIN_ROOT" in field, "it still says what it DID find"
+    assert "a split cannot be detected from one module" in field, "and what it could not rule out"
     assert "could not locate lupin_app: not loaded by this run" in field
+
+
+def test_one_located_module_in_a_foreign_tree_does_not_claim_coherence_either():
+    """
+    The same overclaim wearing the other polarity. `coherent but NOT $LUPIN_ROOT` says the
+    modules agree with each other while disagreeing with the root — a two-module finding.
+    From one module, only the disagreement is established.
+    """
+    field = import_origin_field( [ _cosa( MAIN ), ( "lupin_app", None, 1 ) ], WT )
+    assert "coherent" not in field, "coherence is a claim about two modules"
+    assert f"⚠️ {MAIN}/src" in field
+    assert "only cosa was observed" in field
+    assert "a split cannot be ruled out either" in field
+
+
+def test_two_agreeing_modules_still_earn_the_word_same_tree():
+    """
+    The control for the two tests above — without it they would pass on a field that had
+    simply deleted `same-tree` altogether, which would be a different overclaim in reverse:
+    refusing to state agreement that WAS established.
+    """
+    assert import_origin_field( [ _lupin_app( WT ), _cosa( WT ) ], WT ) == "imports=same-tree"
 
 
 def test_a_module_without_a_dunder_file_is_a_distinct_reason_from_an_absent_one():
@@ -146,7 +176,16 @@ def test_the_real_modules_in_this_very_run_resolve_to_one_tree():
     THE LIVE ARM. Every test above drives fakes; this one asks the question of the actual
     interpreter running it, so the depths encoded at the call site are checked against the real
     layout rather than against my belief about it.
+
+    ⚠️ IT PASSES BOTH REAL MODULES, and that is not incidental. Its first cut passed `cosa`
+    alone and asserted `same-tree` — so the ONE test aimed at reality was also the test that
+    hard-coded the single-module overclaim Rio caught. The two depths differ (2 for
+    `cosa/utils/x.py`, 1 for `lupin_app/x.py`), and only a live arm can catch one of them
+    being wrong; a fake proves nothing about the real layout.
     """
     import cosa.utils.import_origin as real_cosa
-    field = import_origin_field( [ ( "cosa", real_cosa, 2 ) ], os.environ.get( "LUPIN_ROOT" ) )
+    import lupin_app.bootstrap_helpers as real_app
+    field = import_origin_field(
+        [ ( "cosa", real_cosa, 2 ), ( "lupin_app", real_app, 1 ) ],
+        os.environ.get( "LUPIN_ROOT" ) )
     assert field == "imports=same-tree", f"this run is not standing where it thinks: {field}"
