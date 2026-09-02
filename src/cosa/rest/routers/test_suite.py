@@ -34,17 +34,25 @@ class TestSuiteSubmitRequest( BaseModel ):
     pytest_args         : Optional[ str ] = Field( None, description="Extra pytest arguments, shell-style (shlex) parsed — quoting is honored, e.g. '-v -k \"auth or visual\"' reaches pytest as ['-v', '-k', 'auth or visual']. Unbalanced quotes → 400 at submit." )
     dry_run             : bool            = Field( False, description=(
         "Skip the pytest subprocess — but STILL QUEUE A REAL JOB, and still take the "
-        "monopolize slot. The flag is read at EXECUTION time (TestSuiteJob.run_job "
-        "dispatches to _execute_dry_run), never at submit: this endpoint builds the job "
-        "and pushes it to the todo queue with monopolize=True either way. So a dry run "
-        "occupies :8000 exactly like a real one, sends its breadcrumb notifications, and "
-        "makes the venue report BUSY — it just runs no tests. Measured 2026-09-01 on an "
-        "idle box: monopolize_inflight is True on the FIRST poll after submit, and the "
-        "slot is released 7.0s later. Short, but not free and not instant — and the hold "
-        "is the smaller half. The real cost is that it is an ordinary queue entry: on a "
-        "BUSY box it waits in todo behind whatever is running and then takes the slot when "
-        "it gets there, so 'just checking' a submission can land minutes later on somebody "
-        "else's window. Two such probes are what taught this." ) )
+        "monopolize slot. Stated in three tiers, because they are not equally established "
+        "and a reader deciding whether to reach for this should know which is which. "
+        "(1) FROM THE CODE: the flag is read at EXECUTION time — TestSuiteJob.run_job "
+        "dispatches to _execute_dry_run — never at submit, and this endpoint builds the job "
+        "and pushes it to the todo queue with monopolize=True unconditionally. A dry run "
+        "therefore sends its breadcrumb notifications and skips only pytest. "
+        "(2) MEASURED 2026-09-01: on an idle box monopolize_inflight is True on the FIRST "
+        "poll after submit and the slot is released 7.0s later (ts-e929149f, /api/busy "
+        "polled twice a second); and two probes submitted back to back came back at queue "
+        "positions 0 and 1 (ts-6e3dd580, ts-64cf95e5), the second later named as the "
+        "monopolize holder — so a dry run demonstrably waited behind another job and then "
+        "took the slot. "
+        "(3) FOLLOWS FROM (1) AND (2), NOT SEPARATELY OBSERVED: on a busy box it waits in "
+        "todo behind a long REAL suite the same way, so 'just checking' a submission can "
+        "land minutes later inside somebody else's window. The queue is one FIFO with one "
+        "monopolize slot and does not distinguish the two job kinds, but nobody has watched "
+        "that variant — treat it as mechanism, not as a measurement. "
+        "⇒ 7 seconds is the part you can see; the wait in front of it is the part you "
+        "cannot. Not dangerous, and not free." ) )
     websocket_id        : Optional[ str ] = Field( None, description="WebSocket session ID for notifications" )
     scheduled_at        : Optional[ str ] = Field( None, description="ISO datetime for deferred execution (None = immediate)" )
     auto_fix_on_failure : Optional[ bool ] = Field( None, description="Per-run override for the TestSuiteCompletionWatchdog. None = use INI default ('test fix expediter auto fix enabled'), True = force-enable TFE auto-dispatch, False = force-disable TFE auto-dispatch for this run only." )
