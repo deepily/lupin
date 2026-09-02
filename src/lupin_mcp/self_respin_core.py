@@ -258,6 +258,25 @@ def verify_memento_content( content, nonce_uuid, now, *, cycle_window_seconds=DE
 # ---------------------------------------------------------------------------
 # (c) The guarded, fire-point-consuming injector argv — pure
 # ---------------------------------------------------------------------------
+# The token the WAKE TEXT carries in place of the pre-clear session id. The text is
+# composed in Python at SCHEDULE time, but the id it must quote is only knowable at
+# FIRE time — so the composer emits this sentinel and the detached chain substitutes
+# the id it captured a moment before sending the /clear. Substitution is a bash
+# parameter expansion, not a subshell: the wake is arbitrary prose and must never be
+# re-parsed by a shell.
+_PRE_CLEAR_SID_SENTINEL = "__PRE_CLEAR_SESSION_ID__"
+
+# What the chain says when the bridge could not be read at fire time. The wake must
+# still be sendable — a seat with no id to compare is told so, and told what to do
+# instead, rather than being handed an empty string that reads like a real answer.
+_PRE_CLEAR_SID_UNAVAILABLE = "(unavailable)"
+
+# Seconds to let the rehydrated session settle after the readiness gate opens, before
+# the wake is typed. See the race note in build_guarded_clear_argv's Ensures — this
+# NARROWS a race, it does not close one.
+DEFAULT_SETTLE_SECONDS = 0.75
+
+
 def build_wake_text( memento_path, wake_nonce, wake_proof_path ):
     """
     Ensures:
@@ -289,14 +308,19 @@ def build_wake_text( memento_path, wake_nonce, wake_proof_path ):
     amount of disk-side evidence can.
     """
     return (
-        f"A /clear was fired at this pane and the bridge then reported a new session, so you "
-        f"were PROBABLY just re-spun as the same seat — but only you can confirm it. Check: do you "
-        f"remember the work of this session, or is your context near-empty and this the first you "
-        f"have seen of it? IF you rehydrated, write {wake_proof_path} containing exactly this line: "
-        f"{_WAKE_PROOF_NONCE_LINE} {wake_nonce} — then read your memento at {memento_path} and resume "
-        f"your board. IF YOU DID NOT — you still hold the session in memory — write NO proof; instead "
-        f"put the evidence in {_DISPUTE_PREFIX}<your-full-session-id>.md and tell your manager the "
-        f"wake fired without a clear."
+        f"A /clear was fired at this pane. DO NOT ANSWER THIS FROM MEMORY — a seat that "
+        f"cleared and then re-read its own record is indistinguishable from a seat that "
+        f"never cleared, so introspection returns the WRONG answer and returns it "
+        f"confidently. Use the id instead: call get_session_info() and read "
+        f"claude_code.session_id. Immediately before the clear was sent, this pane was "
+        f"session {_PRE_CLEAR_SID_SENTINEL}. IF YOURS DIFFERS, the clear landed and you are "
+        f"the rehydrated seat: write {wake_proof_path} containing exactly this line: "
+        f"{_WAKE_PROOF_NONCE_LINE} {wake_nonce} — then read your memento at {memento_path} "
+        f"and resume your board. IF YOURS IS THE SAME, no clear landed: write NO proof, put "
+        f"the evidence in {_DISPUTE_PREFIX}<your-full-session-id>.md and tell your manager. "
+        f"If the id above reads {_PRE_CLEAR_SID_UNAVAILABLE}, the bridge was unreadable when "
+        f"the wake fired — compare your transcript chain under ~/.claude/projects instead, "
+        f"and say in your answer which instrument you used."
     )
 
 
@@ -305,6 +329,7 @@ def build_guarded_clear_argv(
     *, wake_text=None, bridge_path=None, keys_sent_path=None,
     ready_timeout_polls=DEFAULT_READY_TIMEOUT_POLLS,
     poll_interval_seconds=DEFAULT_POLL_INTERVAL_SECONDS,
+    settle_seconds=DEFAULT_SETTLE_SECONDS,
 ):
     """
     Build the detached Popen argv that types `text` into a pane AFTER consuming a
@@ -406,6 +431,16 @@ def build_guarded_clear_argv(
         'sleep "$1" || exit 0\n'
         'rm "$4" || exit 0\n'
         f's0=$({_sid})\n'
+        # The pre-clear session id VALUE, peeled off the matched line with two bash
+        # parameter expansions (no subshell, no eval). This is what the wake quotes so
+        # the woken seat can COMPARE rather than INTROSPECT.
+        # `q` holds a bare double quote so the two expansions below need no backslash
+        # escaping — a `\\"` inside ${...} reads as an opening quote to bash and breaks
+        # the whole script (measured: `unexpected EOF while looking for matching '\"'`).
+        'q=\'"\'\n'
+        's0t=${s0%"$q"}\n'
+        's0v=${s0t##*"$q"}\n'
+        f'[ -n "$s0v" ] || s0v="{_PRE_CLEAR_SID_UNAVAILABLE}"\n'
         'tmux send-keys -t "$2" -l -- "$3" || exit 0\n'
         'sleep 0.25\n'
         'tmux send-keys -t "$2" Enter || exit 0\n'
@@ -421,7 +456,18 @@ def build_guarded_clear_argv(
         '  fi\n'
         '  sleep "$8"\n'
         'done\n'
-        'tmux send-keys -t "$2" -l -- "$5"\n'
+        # SETTLE. The gate opens the instant the bridge reports a new session_id, which
+        # is SessionStart — the new session may not yet be accepting input. Measured
+        # 2026-09-02 on session 4bc5167d: the wake was QUEUED at 21:13:15.663, 0.165s
+        # BEFORE the clear's own local-command record at 21:13:15.828. The outcome was
+        # correct and it was a RACE, not a guarantee. This pause narrows the window; it
+        # does not close it, and a correct result from a race is exactly what stops being
+        # correct under load.
+        'sleep "${10}"\n'
+        # Substitute the fire-time id into the wake. `${5//a/b}` is a bash expansion, so
+        # the prose is never re-parsed by a shell.
+        f'w=${{5//{_PRE_CLEAR_SID_SENTINEL}/$s0v}}\n'
+        'tmux send-keys -t "$2" -l -- "$w"\n'
         'sleep 0.25\n'
         'tmux send-keys -t "$2" Enter\n'
     )
@@ -435,7 +481,8 @@ def build_guarded_clear_argv(
              bridge_path,                     # $6  (readiness oracle: mtime must change)
              str( ready_timeout_polls ),      # $7  (bounded poll count)
              str( poll_interval_seconds ),    # $8  (seconds between polls)
-             keys_sent_path or "" ]           # $9  (send stamp; mtime IS the timestamp)
+             keys_sent_path or "",            # $9  (send stamp; mtime IS the timestamp)
+             str( settle_seconds ) ]          # ${10} (settle after the gate — narrows the race)
 
 
 # ---------------------------------------------------------------------------
