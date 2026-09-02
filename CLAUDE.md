@@ -567,6 +567,58 @@ the root set, the wall-clock time — because without them a reading is not wron
 goes stale. ⇒ *Coordinates make your reading checkable. Content-names make your pointer durable.*
 Say what you measured **and** name what you mean.
 
+## 🔴 `run-span=unmoved` KEYS ON THE SHA, AND THE READER HEARS "THE TREE WAS CLEAN"
+
+María 🌸, 2026-09-02, catching a tier this reviewer had already named by its sha. **The instrument
+is honest. Two fields sit on one line, they answer different questions, and a reader in a hurry
+collapses them into a third claim that neither one makes.**
+
+```
+[tree-state] sha=94ca3a0d … tracked-dirty=1 deleted=0 run-span=unmoved
+                            ^^^^^^^^^^^^^^^           ^^^^^^^^^^^^^^^^
+                            something is              nothing moved
+                            UNCOMMITTED               DURING the run
+```
+
+| field | the question it answers | the question it does NOT |
+|---|---|---|
+| `run-span=unmoved` | did the tree change **while the tier ran**? | was the tree **equal to the sha**? |
+| `tracked-dirty=1` | is anything **uncommitted**? | **which file**, and do the tests read it? |
+
+⇒ **Neither field claims the run measured the named commit, and together they still do not.** A tree
+can be perfectly stable for two days and perfectly different from its sha the whole time — which is
+what happened: `src/conf/epic-stories.json` carried **24 uncommitted insertions** dated 2026-08-31,
+last committed at `8bf71a64` on **August 3**, and **five test files read it**.
+
+🔴 **THE RECEIPT IS THAT `tracked-dirty=1` PRINTED ON BOTH RUNS AND NOBODY READ IT — INCLUDING THE
+PERSON WRITING THIS.** Two tiers that evening, `d6d44307` and `94ca3a0d`, both carried it, both were
+reported by sha, and I had seen the file in `git status` before firing and dismissed it as
+"app-written, not mine." **The warning was in the log, in the field beside the one I quoted.** It
+took a peer going and *reading the file* to turn a flag into a fact.
+
+⚠️ **The finding is SMALLER than it first looked, and its author is the one who shrank it.** María's
+first message said the log would be silent about the dirty tree; she withdrew that within the hour —
+*"I would rather shrink my own finding than let you act on the bigger version."* **The gap is not
+silence, it is that `tracked-dirty=1` does not name WHICH file**, and an unnamed count is the easiest
+thing in a log to wave at. ⇒ **Print the paths, not just the count** — a flag a reader must go
+investigate to act on is a flag most readers will not act on.
+
+⇒ **So this is mostly a rule about REPORTING, not instrumentation**: name a run by **what it
+measured**, never by the sha you asked for — `94ca3a0d + 24 uncommitted lines in epic-stories.json`,
+not `94ca3a0d`. The longer name costs six words and is the only one that is true.
+
+⚠️ **AND A DIRTY TREE IS NOT AUTOMATICALLY A KILL — RULE IT, DO NOT REFLEX IT.** Here the run stood,
+for a stated mechanism rather than for convenience: the file was a **two-day-old constant**, so it
+was byte-identical across both tiers, and **the DELTA between them was exactly the merges** — which
+is what a merge gate actually needs. Re-firing would have cost fourteen minutes *and* produced a
+tree no earlier measurement matched, destroying the comparability that made the greens mean
+anything. **What stayed genuinely unmeasured — said out loud rather than dissolved — is the
+COMMITTED tree, which no tier that night ever ran.**
+
+⇒ Same family as § *A COORDINATE IS NOT A REFERENCE*, one level in: there a **pointer** goes stale
+between the writing and the acting. Here **nothing is stale at all** — every field is current and
+correct, and the error is entirely in the sentence the reader assembles from them.
+
 ## TESTING VENUES
 
 **MANDATE**: Every automated test runs on exactly one of two servers. Pick by rubric, never by habit.
