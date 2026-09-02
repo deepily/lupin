@@ -316,3 +316,101 @@ def test_dropped_is_NOT_approver_gated( isolated ):
     """
     _write( isolated, approvers=[ "maria" ], enforcement_active=True )
     assert approval.refusal_for_admission( "queued", "dropped", "somebody else 9999" ) is None
+
+
+# ---------------------------------------------------------------------------
+# THE PATHS THE TESTS ABOVE CANNOT REACH
+#
+# Every test above monkeypatches `override_path`, which is the right isolation and
+# means the REAL resolver never runs in any of them. Same for the tolerance arms:
+# a suite that only ever feeds well-formed input proves nothing about what happens
+# to malformed input, and those arms are the ones that decide whether a bad config
+# degrades or takes the board down.
+# ---------------------------------------------------------------------------
+
+def test_the_env_var_branch_of_the_real_resolver( monkeypatch, tmp_path ):
+    """
+    The container's branch. `LUPIN_FLOW_RATIO_DIR` is set in `lupin-rest-dev` and
+    `lupin-rest-test`, so this is the path that actually runs in production — and
+    the one no other test in this file touches, because they all replace the
+    resolver wholesale.
+    """
+    monkeypatch.setenv( approval._SETTINGS_DIR_ENV, str( tmp_path ) )
+    assert approval.override_path() == str( tmp_path / approval.OVERRIDE_FILENAME )
+
+
+def test_the_host_fallback_appends_the_mount_subdirectory( monkeypatch ):
+    """
+    🔴 THE SUBDIRECTORY IS NOT DECORATION. `flow_ratio_settings` shipped this exact
+    fallback WITHOUT `OVERRIDE_SUBDIR` for three days: the container is handed
+    `<fleet_data_root>/flow-ratio` as its whole world, so a fallback stopping at
+    `<fleet_data_root>` names a DIFFERENT file than every server writes — and the
+    two branches then disagree silently, because each is individually plausible.
+
+    Asserted as a relationship between the two branches rather than a literal path,
+    so it stays true wherever the data root moves.
+    """
+    monkeypatch.delenv( approval._SETTINGS_DIR_ENV, raising=False )
+    path = approval.override_path()
+    assert path.endswith( os.path.join( approval.OVERRIDE_SUBDIR, approval.OVERRIDE_FILENAME ) )
+
+    # ...and it is the SAME file the env-var branch names, which is the whole claim.
+    monkeypatch.setenv( approval._SETTINGS_DIR_ENV, os.path.dirname( path ) )
+    assert approval.override_path() == path
+
+
+def test_a_json_file_holding_something_other_than_an_object_is_tolerated( isolated, capsys ):
+    """
+    Valid JSON, wrong shape — `[1, 2, 3]` parses fine and has no `.get`. Distinct
+    from the corrupt-file case above: that one fails in the parser, this one fails
+    after it, and only the second would raise an AttributeError deep in a getter.
+    """
+    isolated.write_text( "[1, 2, 3]" )
+    approval._cache_mtime = None
+    assert approval.get_enforcement_active() is False
+    assert "expected a JSON object" in capsys.readouterr().out
+
+
+def test_an_unreadable_config_manager_falls_back_rather_than_raising( isolated, monkeypatch ):
+    """
+    `_ini_value` swallows anything the ConfigurationManager throws. Untested, that
+    `except` is the classic never-exercised safety net — and this module is imported
+    by the transition endpoint, so an exception here 500s a live write path.
+    """
+    def _boom( *args, **kwargs ): raise RuntimeError( "config is unavailable" )
+    monkeypatch.setattr( approval, "ConfigurationManager", _boom )
+
+    assert not isolated.exists()                       # no override -> INI is consulted
+    assert approval.get_enforcement_active() is False  # the fallback, not a raise
+    assert approval.get_approvers() == frozenset( approval.UNCONDITIONAL_APPROVERS )
+
+
+def test_junk_entries_in_the_approver_list_are_skipped_not_fatal( isolated ):
+    """
+    An operator hand-editing JSON produces blanks, nulls and stray types. Each is
+    skipped individually — the LIST must survive one bad entry, or a typo silently
+    empties the allowlist down to Rick and nobody can tell why.
+    """
+    _write( isolated, approvers=[ "maria", "", "   ", None, 42, [ "nested" ], "cheech" ] )
+    approvers = approval.get_approvers()
+    assert "maria"  in approvers
+    assert "cheech" in approvers                       # the entry AFTER the junk still lands
+    assert "rick"   in approvers
+    assert len( approvers ) == 3                       # and nothing else crept in
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [ ( "True", True ), ( "true", True ), ( "1", True ), ( "yes", True ), ( "on", True ),
+      ( "False", False ), ( "no", False ), ( "", False ), ( "banana", False ) ],
+)
+def test_the_INI_string_is_read_as_a_boolean_both_ways( isolated, monkeypatch, text, expected ):
+    """
+    The INI path, reached only when the override file names no `enforcement_active`.
+    Both truthy and falsy arms, because a parser stuck on either constant satisfies
+    a one-sided test — and `banana` is the arm that proves it is a MEMBERSHIP test
+    rather than a truthiness test on a non-empty string.
+    """
+    _write( isolated, approvers=[ "maria" ] )          # file exists, but says nothing about enforcement
+    monkeypatch.setattr( approval, "_ini_value", lambda *a, **k: text )
+    assert approval.get_enforcement_active() is expected
