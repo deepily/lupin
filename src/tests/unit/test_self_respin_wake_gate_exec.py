@@ -152,3 +152,119 @@ def test_wake_does_NOT_fire_on_a_bare_mtime_touch( tmp_path ):
     assert "/clear" in log                                    # the clear WAS typed
     assert "READ YOUR MEMENTO AND RESUME" not in log          # the wake was NOT typed
     assert "not proven" in stderr
+
+
+# ---------------------------------------------------------------------------
+# The pre-clear session id is SUBSTITUTED INTO the wake at fire time
+# ---------------------------------------------------------------------------
+#
+# 🔴 WHY THIS MUST BE AN EXECUTION TEST. The substitution is a bash parameter
+# expansion inside the detached chain. A string-match on the script proves the
+# expansion was WRITTEN, never that it RUNS — and it did not, on the first cut: an
+# escaped `\"` inside `${s0%\"}` reads as an opening quote to bash and the whole
+# script died with `unexpected EOF while looking for matching '"'`. The chain exited
+# 2, no wake was typed, and every string-match assertion in the sibling suite would
+# have passed. Only running it found that.
+
+def _sub_probe_tmux_dir( tmp_path, bridge, post_id ):
+    """A fake `tmux` that logs its args and, on the FIRST Enter, rewrites the bridge
+    with `post_id` — what SessionStart does after a real /clear."""
+    d   = tmp_path / "subbin"
+    d.mkdir()
+    log = tmp_path / "sub-tmux.log"
+    ( d / "tmux" ).write_text(
+        "#!/bin/bash\n"
+        f'printf "%s\\n" "$*" >> "{log}"\n'
+        f'if [[ "$*" == *Enter* ]] && [ ! -f "{tmp_path}/.did" ]; then\n'
+        f'  : > "{tmp_path}/.did"\n'
+        f'  printf \'{{\\n  "session_id": "{post_id}",\\n  "stable_session_id": "stable-1"\\n}}\\n\' > "{bridge}"\n'
+        "fi\n"
+        "exit 0\n"
+    )
+    ( d / "tmux" ).chmod( 0o755 )
+    return d, log
+
+
+def test_the_typed_wake_carries_the_PRE_clear_session_id( tmp_path ):
+    """
+    Run the REAL chain and read what the pane was actually handed.
+
+    Requires:
+        - bash and a writable tmp dir
+
+    Ensures:
+        - the sentinel does NOT survive into the typed wake (it was substituted)
+        - the typed wake quotes the id the bridge held BEFORE the clear
+        - it does NOT quote the post-clear id — quoting that would make the seat's
+          comparison trivially equal and the instrument would always say "no clear"
+    """
+    pre    = "00249b1e-25c1-478a-8579-b134fb77e354"
+    post   = "4bc5167d-7f02-456c-b66c-c6d868a9b2f0"
+    bridge = tmp_path / "bridge.json"
+    bridge.write_text( f'{{\n  "session_id": "{pre}",\n  "stable_session_id": "stable-1"\n}}\n' )
+    token  = tmp_path / "fire.token"
+    token.write_text( "x" )
+
+    bindir, log = _sub_probe_tmux_dir( tmp_path, bridge, post )
+    wake = sr.build_wake_text( "/m/memento.md", "NONCE-123", "/m/proof.marker" )
+    argv = sr.build_guarded_clear_argv(
+        "seat-pane", str( token ), 0, wake_text=wake, bridge_path=str( bridge ),
+        poll_interval_seconds=0.05, ready_timeout_polls=40, settle_seconds=0.05 )
+
+    env = dict( os.environ, PATH=f"{bindir}{os.pathsep}{os.environ[ 'PATH' ]}" )
+    run = subprocess.run( argv, env=env, capture_output=True, text=True, timeout=60 )
+    assert run.returncode == 0, f"chain failed rc={run.returncode}: {run.stderr[ :400 ]}"
+
+    typed = [ l for l in log.read_text().splitlines() if "-l --" in l ]
+    wakes = [ l for l in typed if "SELF-RESPIN-WAKE-PROOF" in l ]
+    assert wakes, f"no wake was typed; tmux saw: {typed}"
+    got = wakes[ 0 ]
+
+    assert sr._PRE_CLEAR_SID_SENTINEL not in got, \
+        "the sentinel survived into the typed wake — the substitution did not run"
+    assert pre  in got, "the typed wake does not quote the PRE-clear session id"
+    assert post not in got, \
+        "the typed wake quotes the POST-clear id; the seat's comparison would always say 'same'"
+
+
+def test_an_unreadable_bridge_still_sends_a_wake_that_says_so( tmp_path ):
+    """
+    When the bridge cannot be read at fire time there is no id to quote. The chain must
+    substitute the explicit UNAVAILABLE marker rather than an empty string.
+
+    Ensures:
+        - an empty id never reaches the seat as if it were an answer
+
+    An empty substitution would render as `this pane was session .` — which reads like a
+    real, if odd, statement, and a seat comparing against it concludes "differs" every
+    time. A named unavailable value is the difference between a missing reading and a
+    confident wrong one.
+    """
+    bridge = tmp_path / "absent.json"          # deliberately never created
+    token  = tmp_path / "fire2.token"
+    token.write_text( "x" )
+    post   = "4bc5167d-7f02-456c-b66c-c6d868a9b2f0"
+
+    bindir, log = _sub_probe_tmux_dir( tmp_path, bridge, post )
+    wake = sr.build_wake_text( "/m/memento.md", "NONCE-9", "/m/proof.marker" )
+    argv = sr.build_guarded_clear_argv(
+        "seat-pane", str( token ), 0, wake_text=wake, bridge_path=str( bridge ),
+        poll_interval_seconds=0.05, ready_timeout_polls=40, settle_seconds=0.05 )
+
+    env = dict( os.environ, PATH=f"{bindir}{os.pathsep}{os.environ[ 'PATH' ]}" )
+    subprocess.run( argv, env=env, capture_output=True, text=True, timeout=60 )
+
+    typed = [ l for l in log.read_text().splitlines() if "-l --" in l ]
+    wakes = [ l for l in typed if "SELF-RESPIN-WAKE-PROOF" in l ]
+    assert wakes, f"no wake was typed; tmux saw: {typed}"
+    # 🔴 ASSERT THE SUBSTITUTION SITE, NOT THE STRING. The first cut of this test was
+    # `sr._PRE_CLEAR_SID_UNAVAILABLE in wakes[0]`, and it was BLIND: the wake TEMPLATE
+    # already contains that literal in its closing sentence ("if the id above reads
+    # (unavailable) …"), so the assertion held whatever the chain substituted. Deleting
+    # the fallback entirely left it GREEN. Expected and actual met inside the template —
+    # a tautology wearing an assertion's clothes. The contiguous phrase below occurs
+    # ONLY where the substitution lands.
+    assert f"was session {sr._PRE_CLEAR_SID_UNAVAILABLE}" in wakes[ 0 ], \
+        "an unreadable bridge must yield the named UNAVAILABLE value AT THE SUBSTITUTION " \
+        "SITE, never an empty id that renders as 'was session .'"
+    assert sr._PRE_CLEAR_SID_SENTINEL not in wakes[ 0 ]

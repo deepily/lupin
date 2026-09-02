@@ -162,7 +162,7 @@ def test_guarded_argv_carries_verbatim_clear_and_token():
 def test_build_wake_text_names_memento_and_is_plain_english():
     txt = sr.build_wake_text( "/data/lupin/.claude-memento-cheech.md", "nonce-7", "/data/.wake-proof.marker" )
     assert "/data/lupin/.claude-memento-cheech.md" in txt
-    assert "re-spun" in txt.lower()
+    assert "rehydrated" in txt.lower()
     assert "memento" in txt.lower()
     assert "resume" in txt.lower()
     # consumer-proof instruction: the seat must write the nonce-echoing proof line
@@ -175,24 +175,69 @@ def test_build_wake_text_asks_instead_of_asserting_the_rehydrate():
     """
     Bug e88ebfae. The wake is composed from the SCHEDULING artifact, so it can prove a
     clear was scheduled and its token consumed — never that the pane actually reset.
-    It must therefore ASK the seat, and must not tell it in the second person that it
-    rehydrated at low context.
+    It must therefore leave the verdict to the seat, and must not tell it in the second
+    person that it rehydrated at low context.
     """
     txt = sr.build_wake_text( "/m/memento.md", "nonce-7", "/p/proof.marker" ).lower()
-
-    # It hedges rather than asserts.
-    assert "probably" in txt
-    assert "only you can confirm" in txt
 
     # The exact false claims the disputed run received are gone.
     assert "you just self-re-spun" not in txt
     assert "you typed /clear into your own pane" not in txt
     assert "rehydrated as the same seat at low context" not in txt
 
-    # It names the check that separates the two cases, and both branches.
-    assert "remember the work of this session" in txt
-    assert "if you rehydrated" in txt
-    assert "if you did not" in txt
+    # Both branches are named, and each says what to write.
+    assert "if yours differs" in txt
+    assert "if yours is the same" in txt
+
+
+def test_the_wake_never_asks_the_seat_what_it_remembers():
+    """
+    🔴 THE INSTRUMENT THE WAKE HANDS THE SEAT MUST NOT BE ITS OWN MEMORY (2026-09-02).
+
+    The e88ebfae fix stopped the wake ASSERTING the rehydrate and made it ask "do you
+    remember the work of this session". That question CANNOT return the right answer,
+    and the reason is structural rather than bad luck: it detects a MISSING memory and
+    cannot detect a RESTORED one. A seat that cleared and then re-read its own record
+    has no absence to find, so it answers "I remember" — confidently, and wrongly.
+
+    Measured twice, on the SAME seat, one day apart (2026-09-01 and 2026-09-02). The
+    second time the seat had READ that limit, QUOTED it in its own dispute file, and
+    still ruled the wrong way. Transcripts settled it: the session chain
+    611e3c47 -> 00249b1e -> 4bc5167d, an empty `local-command-stdout` at 21:13:15.828
+    which is the /clear signature, and the wake nonce three times in the POST-clear
+    transcript against zero in the pre-clear one. The clear had landed.
+
+    ⇒ So the question is removed rather than reworded. Knowing a rule is not applying
+    it, and an instrument that needs the reader to remember its own limit is not an
+    instrument. What replaces it is a COMPARISON against an artifact the seat cannot
+    author — see the test below.
+    """
+    txt = sr.build_wake_text( "/m/memento.md", "nonce-7", "/p/proof.marker" ).lower()
+    for banned in ( "do you remember", "remember the work", "is your context near-empty",
+                    "first you have seen of it" ):
+        assert banned not in txt, f"the wake still asks the seat to introspect: {banned!r}"
+
+
+def test_the_wake_hands_the_seat_an_oracle_it_cannot_author():
+    """
+    The replacement instrument: the wake quotes the session id the pane carried
+    IMMEDIATELY BEFORE the clear, and tells the seat to compare it against its own
+    `claude_code.session_id`. Both sides come from the bridge, which is written by the
+    SessionStart hook — a different actor from the seat, so the seat cannot move either
+    side of the comparison to suit its belief.
+
+    The id is unknowable when the text is composed (the clear has not been sent yet), so
+    the composer emits a sentinel and the detached chain substitutes the value it
+    captured at fire time. This test pins the sentinel's presence; the EXECUTION test in
+    test_self_respin_wake_gate_exec.py proves the substitution actually happens.
+    """
+    txt = sr.build_wake_text( "/m/memento.md", "nonce-7", "/p/proof.marker" )
+    assert sr._PRE_CLEAR_SID_SENTINEL in txt, \
+        "the wake must carry the pre-clear-session-id sentinel for the chain to substitute"
+    assert "get_session_info" in txt
+    assert "claude_code.session_id" in txt
+    # and it must degrade rather than hand the seat an empty string that reads like an answer
+    assert sr._PRE_CLEAR_SID_UNAVAILABLE in txt
 
 
 def test_build_wake_text_routes_a_disputed_wake_to_a_file_not_a_proof():
@@ -227,10 +272,11 @@ def test_guarded_argv_wake_path_gates_on_bridge_session_id_not_send_keys_exit():
     assert '"session_id"' in script                  # the bridge's session_id is the oracle
     assert '[ "$s" != "$s0" ]' in script             # value-change compare
     assert 'rm "$4" || exit 0' in script             # one-shot guard preserved
-    assert 'send-keys -t "$2" -l -- "$5"' in script  # literal (-l) wake keystroke
+    assert 'send-keys -t "$2" -l -- "$w"' in script  # literal (-l) wake keystroke
     assert "exit 3" in script                        # loud, bounded give-up on timeout
-    # the wake is typed AFTER the readiness gate, never before it
-    assert script.index( 's0=$(' ) < script.index( '-l -- "$5"' )
+    # the wake is typed AFTER the readiness gate, never before it. `$w` is `$5` with the
+    # fire-time session id substituted in — the wake is no longer typed verbatim.
+    assert script.index( 's0=$(' ) < script.index( '-l -- "$w"' )
 
 
 def test_wake_gate_does_not_key_on_mtime():

@@ -229,31 +229,31 @@ def test_the_chase_date_is_converted_through_the_browser_zone( client_src ):
 
 
 # ------------------------------------------------- the asset actually reaches the browser
-
-def test_the_cache_bust_tokens_were_bumped_with_the_assets():
-    """
-    A `?v=` token is part of the browser's cache KEY. Ship a changed asset behind an
-    unchanged token and a returning browser serves the OLD copy — the change looks
-    landed in git and absent on screen, which is the least diagnosable failure of
-    the set (row a501a714 hit exactly this).
-    """
-    page = PAGE.read_text( encoding="utf-8" )
-    js   = re.search( r"notifications\.js\?v=(\w+)", page )
-    css  = re.search( r"task-list\.css\?v=(\w+)", page )
-    assert js  is not None, "notifications.js is not versioned on the page"
-    assert css is not None, "task-list.css is not versioned on the page"
-    # ⚠️ THIS GUARD IS PER-SLICE AND ITS BASELINE MUST MOVE WITH IT. Pinned against
-    # the PREVIOUS slice's tokens, it goes green the moment they are bumped once and
-    # then says nothing about the slices after — which is exactly what happened: the
-    # epic-board change shipped with the holding-area token still in place, and this
-    # test was happy because that token was not the drop/park one.
-    #
-    # A static test cannot know whether an asset changed since the token was set.
-    # What it CAN do is refuse the stale value, so the baseline is bumped alongside
-    # the assets every time and a forgotten bump is a red test rather than a browser
-    # quietly serving yesterday's file.
-    assert js.group( 1 )  != "20260902g", "js token not bumped past the demote-chase slice"
-    assert css.group( 1 ) != "20260902c", "css token not bumped past the holding-area slice"
+#
+# 🔴 THE LITERAL CACHE-BUST GUARD THAT LIVED HERE IS DELETED, AND ITS PROPERTY IS NOW
+# GUARDED DERIVED. `test_the_cache_bust_tokens_were_bumped_with_the_assets` asserted
+# only that the two tokens were not equal to two hard-coded strings ("20260902g",
+# "20260902c"). That goes green the moment they are bumped once and says nothing
+# about every slice after — a baseline that must be hand-bumped each slice is the
+# same defect it was written to catch, one level up.
+#
+# Replaced by two derived guards in
+# `src/tests/unit/test_task_body_overlay_cache_bust.py`, over EVERY versioned asset
+# on the page rather than these two:
+#
+#   test_versioned_asset_token_followed_its_last_change  — the token today must
+#     differ from the one the page carried at the parent of the asset's last commit
+#   test_uncommitted_asset_edit_bumped_its_token         — an asset dirty against
+#     HEAD must carry a token that is also different from HEAD's
+#
+# Both read their expected value out of git at run time; no literal token appears in
+# either assertion. Both were falsified before this deletion (breaks A-D): editing
+# notifications.js without bumping its token reddens exactly one named case, and
+# reverting the token to its pre-9e27a64f value reddens the commit-ordered case
+# while the pre-existing DATE comparison stays GREEN — which is the whole reason a
+# second guard was needed. That date test compares an 8-digit day against a commit
+# day, and eleven commits touched notifications.js on 2026-09-02, so it cannot see
+# inside the window the asset is actually edited in.
 
 
 # ------------------------------------------------- slice 2: won't-fix · demote · approve
