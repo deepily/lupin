@@ -1731,6 +1731,24 @@ are invisible to a careful re-read of the test body.
 anchor matched EXACTLY once, and the on-disk sha CHANGED — plus a restore control at the end that is
 actually READ, since `git checkout` cannot restore an untracked file (row `c0a829a3`).
 
+🔴 **AND `cp` FROM YOUR OWN BACKUP CARRIES THE SAME RACE AS THE `git checkout` YOU WERE TOLD TO
+AVOID — IN A SHARED TREE, SWAPPING THE COMMAND KEEPS THE HAZARD.** Krishna 🦚, 2026-09-01, on his own
+arm. The `git checkout` ban exists because a path-level restore silently reverts a peer's uncommitted
+work to HEAD. A `cp` restore reverts it to **your backup** instead, which is better only in that your
+backup already contained whatever the peer had written **before** you took it. **Anything they write
+between your backup and your restore is reverted just the same, and leaves no reflog entry either.**
+
+⇒ **The window is the mechanism, not the command.** Mine was ~90 seconds and the check afterwards
+came back clean — 69 insertions, **0 deletions**, so nothing committed was lost, and two peers
+confirmed no intersection. ⚠️ **But "no known loss" is not a control**: a clobbered *uncommitted*
+edit is invisible to git, so that check can only ever exonerate the committed half.
+
+⇒ **So the remedy is not a shorter window or more care — it is not mutating in the shared tree at
+all.** Check the sha out into a **detached worktree of your own** (this file already says so one
+section down, for a peer's tree; it applies to the MAIN tree too, which is where the whole fleet is
+standing). That removes the race by construction rather than shrinking it, and it is the same
+"a rule that depends on remembering is not installed" doctrine this page applies everywhere else.
+
 ### 🔴 "I REPAIRED A FIXTURE" IS NOT "I PROVED THE REPAIR DISCRIMINATES" — TWO ARMS, ONE SHA
 
 Ratified fleet-wide by Mr. Radio 🦉, 2026-08-30, after three seats produced it independently in
