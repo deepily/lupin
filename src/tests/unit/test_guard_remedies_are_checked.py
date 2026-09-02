@@ -22,17 +22,38 @@ is the same output whether the check did its job or looked at nothing, so each
 predicate is also pointed at a message that MUST fail it. Without those, a green here
 would only prove the assertions run.
 
+🔴 AND THE TWO PREDICATES ARE ASYMMETRIC ABOUT THAT, WHICH IS A DEFECT IN THE HELPER,
+NOT IN ITS CALLERS (Mr. Radio 🦉 and Rio ⚡, independently, 2026-09-01).
+`remedy_is_readable` REFUSES a vacuous pass — it asserts it found a command matching
+its prefix, so an empty result can only mean "every remedy parsed".
+`remedy_carries_its_caveat` returns only what is MISSING, never what it MATCHED, so
+its `[]` collapses two opposite facts:
+
+    every hazard it named is qualified          <- the pass we want
+    the message named no table hazard at all    <- measured nothing
+
+Measured this turn: `kill_guard` and `merge_head_guard` both recommend indented
+commands and both return `[]` from the SECOND kind. A test on either today would be
+green by measuring nothing.
+
+⇒ Until the helper reports its matches, the vacuity guard belongs to the CALLER, and
+`test_the_stash_deny_actually_names_a_table_hazard` below is it. It is not decoration
+either: delete it and `test_the_stash_deny_qualifies_every_hazard_it_names` silently
+becomes an assertion about nothing the moment the deny text is reworded.
+
 ⚠️ GREEN MEANS "carries the caveats we know to demand", never "this advice is safe" —
 the hazard table is a floor and says so in its own docstring.
 
 Venue: :7999-eligible. Pure string work; no git, no server, no filesystem.
 """
+import re
+
 from lupin_cli.claude_code.hooks.lib.stash_guard import _deny_reason_for
 from lupin_cli.claude_code.hooks.lib.commit_scope_guard import (
     git_commit_match, _pathspec_of, _notice_for,
 )
 from tests.helpers.guard_remedy import (
-    remedy_commands, remedy_is_readable, remedy_carries_its_caveat,
+    HAZARD_CAVEATS, remedy_commands, remedy_is_readable, remedy_carries_its_caveat,
 )
 
 
@@ -59,6 +80,26 @@ def test_the_stash_deny_qualifies_every_hazard_it_names():
         "the stash deny recommends a hazardous operation without its caveat nearby: "
         f"{missing} — this is the shape of 30ba7976, where `git checkout -- <path>` "
         "was called safe"
+    )
+
+
+def test_the_stash_deny_actually_names_a_table_hazard():
+    """
+    THE VACUITY GUARD for the assertion above — see this module's docstring.
+
+    `remedy_carries_its_caveat` reports only what is MISSING, so its `[]` cannot tell
+    "every hazard is qualified" from "no hazard was named". This asserts the second
+    reading is false, which is the only thing that makes the first one evidence.
+
+    Belongs here rather than in the helper only because the helper is another seat's
+    file and live; when it reports its matches, this moves inside it.
+    """
+    text    = _deny_reason_for( "push" )
+    matched = [ p for p in HAZARD_CAVEATS if re.search( p, text ) ]
+    assert matched, (
+        "the stash deny names none of the table's hazards, so the caveat assertion "
+        "above is passing against nothing — either the deny text was reworded away "
+        f"from {list( HAZARD_CAVEATS )} or the table drifted"
     )
 
 
