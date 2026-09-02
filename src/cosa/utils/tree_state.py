@@ -156,6 +156,22 @@ def _run_span( start_sha, end_sha ):
           as "nothing to report". `unmoved` is a measurement; silence is not
         - does not repeat the sha in the unmoved case — `sha=` already carries it, and
           by definition it equals the start
+
+    🔴 READING THIS FIELD: THE VALUE SPACE IS NOT ONE CHARACTER CLASS, AND A NAIVE PATTERN
+    FAILS ONLY IN THE CASE THE FIELD EXISTS FOR. Three of the four values are lowercase
+    words; the fourth is `<sha>..<sha>`, which contains digits. Measured 2026-09-01
+    (Tiberius 👑): `grep -o 'run-span=[a-z-]*'` over a real tier truncated
+    `run-span=0768a8b2..ec0bf947` at the `0`, so the field READ AS ABSENT — and it was
+    reported as a silent failure of this module before the regex was checked.
+
+    ⇒ **The asymmetry is the whole hazard**: a pattern tuned while the tree is still
+    reports `unmoved` perfectly, forever, and goes blind at exactly the moment the tree
+    moves. It is the same shape as the second-run trap and the narrowed-population rule —
+    an instrument returning a plausible partial answer with nothing saying so.
+
+    ⇒ Match to end-of-field, e.g. `grep -o 'run-span=[^ ]*'`, or read the whole line. This
+    is a note to READERS rather than a defect here: no emitted value can protect a pattern
+    that assumes a narrower alphabet than the field promises.
     """
     if start_sha is None:              return ""
     if start_sha == START_SHA_UNKNOWN: return " run-span=UNKNOWN — the start sha could not be read"
