@@ -67,6 +67,11 @@ type EpicUI = Record<string, unknown> & {
   _stampEpicBoardUpdated: () => void;
   _applyEpicGroupCollapseState: ( tbody: HTMLElement, isCollapsed: boolean ) => void;
   _handleEpicAccordionToggle: ( target: unknown ) => void;
+  _handleEpicBoardClick: ( target: unknown ) => void;
+  _handleRowControlClick: ( target: unknown ) => boolean;
+  _disclosureToggle: ( task: Row ) => string;
+  _handleDisclosureToggle: ( button: unknown ) => void;
+  _handleTaskDropClick: ( button: unknown ) => void;
   _wireEpicBoardAccordion: () => void;
   _epicKeysInDom: () => string[];
   collapseAllEpics: () => void;
@@ -789,4 +794,119 @@ test( "a second refresh re-renders both panes without re-fetching the stories", 
   // the stories. Two refreshes, two reads: that is the intended behaviour, and
   // asserting it here is what stops someone "optimising" it into a stale number.
   assert.equal( urls.filter( u => u === "/api/tasks/flow-ratio" ).length, 2 );
+} );
+
+// ═════════ progressive disclosure on the EPIC BOARD — the renderer, and the CLICK PATH ═════════
+//
+// 🔴 THE EPIC BOARD'S ROW CONTROLS WERE DEAD, AND NOTHING SAW IT. `_renderEpicRow`
+// emits the ellipsis and the nine controls behind it, but this pane's only click
+// listener went straight to `_handleEpicAccordionToggle`, which returns unless the
+// click landed in a group header. So on this board the ellipsis opened nothing and
+// Drop / Park / Won't-fix / Demote / Approve did nothing — no error, no console line,
+// the controls simply were not wired.
+//
+// ⚠️ THIS IS A MISSING ROUTE, NOT THE `_paneScope` LOOKUP DEFECT OF cd2ea523, and the
+// two look identical from the outside. Told apart by measurement: with the handlers
+// stubbed and ONE pane in the DOM — no second `data-task-id` for a lookup to pick
+// wrongly — the handlers were never invoked at all, while the same probe against the
+// task-list pane saw its click arrive. A wrong lookup happens INSIDE a handler that
+// runs; nothing ran here.
+//
+// It stayed invisible because every disclosure test in the tree called the toggle
+// method directly. Measured: deleting the disclosure route from the delegation reddened
+// 0 of 253 tests. These reach the buttons the way an operator does.
+
+function epicPaneWithRealRows( ui: EpicUI, ...tasks: Row[] ): HTMLElement {
+  document.body.replaceChildren();
+  const host = document.createElement( "div" );
+  host.id = "epic-board-container";
+  document.body.appendChild( host );
+  ui._epicBoardAccordionWired = false;
+  ui._wireEpicBoardAccordion();
+  host.innerHTML = `<table id="epic-board-table"><tbody class="epic-group" data-epic="epic:seal">`
+                 + tasks.map( t => ui._renderEpicRow( t ) ).join( "" )
+                 + `</tbody></table>`;
+  return host;
+}
+
+function clickIt( el: Element | null ): void {
+  assert.ok( el, "the element to click was not rendered" );
+  el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+}
+
+test( "🔴 _renderEpicRow DECIDES collapsed: its own output carries hidden + aria-expanded=false", () => {
+  const ui   = newUI();
+  const host = document.createElement( "table" );
+  host.innerHTML = `<tbody>${ui._renderEpicRow( R_SEAL_A )}</tbody>`;
+
+  const controls = host.querySelector( ".task-controls-row" ) as HTMLElement;
+  const toggle   = host.querySelector( ".task-disclose-button" ) as HTMLElement;
+  assert.ok( controls, "no controls row emitted at all" );
+  assert.equal( controls.hidden, true,
+    "the epic renderer shipped its controls EXPANDED — the layout Rick rejected" );
+  assert.ok( toggle, "no ellipsis emitted, so the controls can never be reached" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "false" );
+  assert.equal( toggle.dataset.taskId, controls.dataset.controlsFor,
+    "the toggle and its controls row carry different ids — the toggle opens nothing" );
+} );
+
+test( "🔴 renderEpicBoardTable: EVERY epic row ships collapsed", () => {
+  const ui    = newUI();
+  const model = ui.groupTasksByEpic( [ R_SEAL_A, R_SEAL_B, R_SEAL_C ] );
+  const host  = document.createElement( "div" );
+  host.innerHTML = ui.renderEpicBoardTable( model, {} );
+
+  const controls = Array.from( host.querySelectorAll( ".task-controls-row" ) ) as HTMLElement[];
+  assert.ok( controls.length >= 3, "the table emitted fewer controls rows than task rows" );
+  assert.ok( controls.every( c => c.hidden ), "at least one epic row shipped expanded" );
+} );
+
+test( "🔴 THROUGH THE CLICK PATH: the epic board's ellipsis is WIRED", () => {
+  // This is the defect itself. Before the shared dispatch, this click reached nothing.
+  const ui   = newUI();
+  const host = epicPaneWithRealRows( ui, R_SEAL_A );
+  const controls = host.querySelector( ".task-controls-row" ) as HTMLElement;
+
+  assert.equal( controls.hidden, true, "precondition: the row starts collapsed" );
+  clickIt( host.querySelector( ".task-disclose-button" ) );
+  assert.equal( controls.hidden, false,
+    "the epic board's ellipsis is dead — the click reached no handler" );
+} );
+
+test( "🔴 THROUGH THE CLICK PATH: the epic board's row ACTION buttons are WIRED", () => {
+  // The ellipsis alone is half a fix: disclosing controls that do nothing is worse
+  // than not disclosing them, because now the operator watches them fail silently.
+  const ui = newUI();
+  let dropped = false;
+  ui._handleTaskDropClick = (): void => { dropped = true; };
+  const host = epicPaneWithRealRows( ui, R_SEAL_A );
+
+  clickIt( host.querySelector( ".task-drop-button" ) );
+  assert.equal( dropped, true, "Drop on the epic board reached no handler" );
+} );
+
+test( "🔴 a control click on the epic board does NOT also toggle its group", () => {
+  const ui = newUI();
+  let accordionFired = false;
+  ui._handleEpicAccordionToggle = (): void => { accordionFired = true; };
+  const host = epicPaneWithRealRows( ui, R_SEAL_A );
+
+  clickIt( host.querySelector( ".task-disclose-button" ) );
+  assert.equal( accordionFired, false,
+    "one gesture opened the row's controls and collapsed the group they live in" );
+} );
+
+test( "the epic group header still toggles — the new route did not swallow it", () => {
+  // The positive control for the test above. A dispatch that consumed everything would
+  // make that assertion pass while breaking the accordion this pane is built around.
+  const ui = newUI();
+  let toggledWith: unknown = null;
+  ui._handleEpicAccordionToggle = ( t: unknown ): void => { toggledWith = t; };
+  const host = epicPaneWithRealRows( ui, R_SEAL_A );
+  const header = document.createElement( "tr" );
+  header.className = "epic-group-header";
+  host.querySelector( "tbody" )!.appendChild( header );
+
+  clickIt( header );
+  assert.ok( toggledWith, "a header click no longer reaches the accordion" );
 } );

@@ -11195,10 +11195,42 @@ class NotificationsUI {
         // so a control click is never also an accordion toggle. A disabled Park is
         // inert here by virtue of `disabled`, which stops the click reaching us at
         // all; the aria-disabled attribute is for the screen reader, not the guard.
-        const discloseBtn = target.closest ? target.closest( ".task-disclose-button" ) : null;
-        if ( discloseBtn ) { this._handleDisclosureToggle( discloseBtn ); return; }
+        if ( this._handleRowControlClick( target ) ) return;
 
-        const actionBtn = target.closest ? target.closest( ".task-action-btn" ) : null;
+        this._handleTaskAccordionToggle( target );
+    }
+
+    _handleRowControlClick( target ) {
+        /**
+         * The row-control dispatch SHARED by both panes that render these rows.
+         *
+         * 🔴 IT IS SHARED BECAUSE IT WAS NOT, AND THE EPIC BOARD PAID FOR IT. Both
+         * `_renderTaskRow` and `_renderEpicRow` emit the ellipsis and the nine controls
+         * behind it, but only the task list's container ever routed a click to them —
+         * the epic board's only listener went straight to its accordion handler, which
+         * returns unless the click landed in a group header. So on the epic board the
+         * ellipsis opened nothing and Drop / Park / Won't-fix / Demote / Approve did
+         * nothing, with no error anywhere: the controls RENDERED, they just were not
+         * WIRED.
+         *
+         * ⚠️ THIS IS A MISSING ROUTE, NOT THE `_paneScope` LOOKUP DEFECT OF cd2ea523,
+         * and the two are easy to confuse because both end in a control that does
+         * nothing. Measured with the handlers stubbed and ONE pane in the DOM, so there
+         * was no second `data-task-id` for a lookup to pick wrongly: the handlers were
+         * never invoked at all. `_paneScope` runs inside a handler that never ran.
+         *
+         * Requires:
+         *     - target is the clicked DOM node (or a descendant of a control)
+         *
+         * Ensures:
+         *     - returns true when the click was CONSUMED by a row control, so the
+         *       caller returns instead of also firing its accordion toggle
+         *     - returns false for anything else, leaving the caller's own routing intact
+         */
+        const discloseBtn = target && target.closest ? target.closest( ".task-disclose-button" ) : null;
+        if ( discloseBtn ) { this._handleDisclosureToggle( discloseBtn ); return true; }
+
+        const actionBtn = target && target.closest ? target.closest( ".task-action-btn" ) : null;
         if ( actionBtn ) {
             if ( actionBtn.classList.contains( "task-drop-button" ) ) this._handleTaskDropClick( actionBtn );
             else if ( actionBtn.classList.contains( "task-park-button" ) ) this._handleTaskParkClick( actionBtn );
@@ -11207,10 +11239,10 @@ class NotificationsUI {
             else if ( actionBtn.classList.contains( "task-approve-button" ) ) this._handleTaskApproveClick( actionBtn );
             else if ( actionBtn.classList.contains( "holding-approve-all" ) ) this._handleHoldingApproveAllClick( actionBtn );
             else if ( actionBtn.classList.contains( "holding-wont-fix-all" ) ) this._handleHoldingWontFixAllClick( actionBtn );
-            return;
+            return true;
         }
 
-        this._handleTaskAccordionToggle( target );
+        return false;
     }
 
     _rowInputValue( taskId, className, scope ) {
@@ -12471,6 +12503,33 @@ class NotificationsUI {
         this._applyEpicGroupCollapseState( tbody, isCollapsed );
     }
 
+    _handleEpicBoardClick( target ) {
+        /**
+         * The epic board's delegated click entry point: row controls first, then the
+         * group accordion.
+         *
+         * ⚠️ THE ORDER IS THE WHOLE POINT, and it is the order the task list already
+         * used. A control click that fell through to the accordion would open the row's
+         * form and collapse the group it lives in, in one gesture.
+         *
+         * Keyboard activation is deliberately NOT routed here: the controls are real
+         * `<button>` elements, which a BROWSER activates on Enter/Space by dispatching
+         * a click, so they arrive through the click listener above. The keydown
+         * listener stays on the header, a `<tr>`, which gets no such courtesy.
+         *
+         * ⚠️ THAT LAST CLAIM IS ABOUT BROWSERS AND IS NOT COVERED BY THIS TIER. Measured:
+         * happy-dom does NOT synthesize a click from a dispatched Enter keydown (0 clicks),
+         * so no unit test here can observe it, and none pretends to. If keyboard reach
+         * for these controls needs a guard, it belongs in the Playwright E2E suite.
+         *
+         * Ensures:
+         *     - a row control consumes the click and the accordion does not also fire
+         *     - anything else falls through to _handleEpicAccordionToggle unchanged
+         */
+        if ( this._handleRowControlClick( target ) ) return;
+        this._handleEpicAccordionToggle( target );
+    }
+
     _wireEpicBoardAccordion() {
         /**
          * Install the single delegated click+keyboard listener for the epic
@@ -12485,7 +12544,7 @@ class NotificationsUI {
         const container = document.getElementById( "epic-board-container" );
         if ( !container ) return;
 
-        container.addEventListener( "click", ( e ) => this._handleEpicAccordionToggle( e.target ) );
+        container.addEventListener( "click", ( e ) => this._handleEpicBoardClick( e.target ) );
         container.addEventListener( "keydown", ( e ) => {
             // " " is the modern key value; "Spacebar" the legacy spelling.
             if ( e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar" ) return;
