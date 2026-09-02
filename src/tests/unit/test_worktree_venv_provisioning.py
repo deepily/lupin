@@ -102,25 +102,25 @@ class TestTheTargetIsActuallyPassedToTheScript:
 
 class TestOutcomesThatAreNotSuccess:
 
-    def test_the_main_checkout_is_a_no_op_not_a_failure( self, tmp_path, caplog ):
+    def test_the_main_checkout_is_a_no_op_for_provisioning_not_a_failure( self, tmp_path ):
         """
         Exit 3 is the script refusing to link the main repo to itself. That is the
-        correct answer, so it must not be reported as a failure and must not log a
-        warning — a warning on every ordinary main-repo spawn is noise that trains
-        readers to ignore the channel.
+        correct answer, so it must not be reported as a provisioning failure.
+
+        🔴 THIS TEST USED TO ALSO ASSERT `caplog.records == []`, ON THE REASONING THAT
+        "a warning on every ordinary main-repo spawn is noise that trains readers to
+        ignore the channel." That reasoning was about the wrong subject and the
+        assertion is reversed as of 2026-09-02 — see
+        `test_a_main_tree_placement_is_announced_at_spawn_time.py`, and the two workers
+        who landed in the shared tree with nothing anywhere saying so. Exit 3 carries a
+        second fact that is not ordinary; the noise argument still holds for the venv
+        verdict, which is why `venv_alarm` still returns None here.
         """
         tree   = _make_tree( tmp_path / "main", exit_code=3, stdout_line="REFUSING:" )
-        with caplog.at_level( "WARNING" ):
-            result = provision_worktree_venv( tree )
+        result = provision_worktree_venv( tree )
         assert result[ "status" ]      == "main_repo"
         assert result[ "provisioned" ] is False
         assert result[ "exit_code" ]   == 3
-        assert caplog.records == []
-
-    def test_the_main_repo_no_op_is_reported_in_debug( self, tmp_path, capsys ):
-        tree = _make_tree( tmp_path / "main", exit_code=3 )
-        provision_worktree_venv( tree, debug=True )
-        assert "main checkout" in capsys.readouterr().out
 
     def test_a_successful_provision_is_reported_in_debug( self, tmp_path, capsys ):
         tree = _make_tree( tmp_path / "wt", stdout_line="Linked:" )
