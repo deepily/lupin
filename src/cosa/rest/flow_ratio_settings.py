@@ -80,8 +80,24 @@ _SETTINGS_DIR_ENV = "LUPIN_FLOW_RATIO_DIR"
 FALLBACK_WINDOW_HOURS = 24
 FALLBACK_ALLOW_BELOW  = 1.0
 
+# 🔨 RICK, 2026-09-02, on being shown that enforcement was a Python constant:
+# "Why is this not included as a configuration instead of a constant in the Python
+# code file? Put it where it belongs!"
+#
+# He is right, and the reason is not tidiness. The window and the threshold were
+# ALREADY operator-adjustable here — he can move a slider and the gate follows within
+# one request. Enforcement, the one setting that decides whether any of that has teeth,
+# needed a code edit and a deploy. So the dial he could turn was the one that changed
+# nothing, and the switch that mattered was the one he could not reach.
+#
+# ⚠️ FALLBACK IS False, DELIBERATELY. An absent config must not silently start 422ing
+# every create — that is the direction where being wrong is loud and destructive. An
+# operator turning it ON is an explicit act; the code failing open is the safe default.
+FALLBACK_ENFORCEMENT_ACTIVE = False
+
 INI_KEY_WINDOW_HOURS = "task flow ratio window hours"
 INI_KEY_ALLOW_BELOW  = "task flow ratio allow below"
+INI_KEY_ENFORCEMENT  = "task flow ratio enforcement active"
 
 # The mount's leaf directory. The host fallback MUST append it: the container is
 # handed `<fleet_data_root>/flow-ratio` as its whole world, so a fallback that stops
@@ -149,7 +165,8 @@ def _read_overrides():
     Load the persisted overrides, re-parsing only when the file's mtime has moved.
 
     Ensures:
-        - returns a dict with keys "window_hours" / "allow_below", each a value or None
+        - returns a dict with keys "window_hours" / "allow_below" /
+          "enforcement_active", each a value or None
         - a MISSING file is the ordinary no-override case and returns both None
         - a CORRUPT file is REPORTED on stdout and treated as no-override. It does not
           raise: a bad settings file must not take the board's header down, and silence
@@ -162,7 +179,7 @@ def _read_overrides():
         mtime = os.path.getmtime( path )
     except OSError:
         _cache_mtime = None
-        _cache       = { "window_hours": None, "allow_below": None }
+        _cache       = { "window_hours": None, "allow_below": None, "enforcement_active": None }
         return _cache
 
     if mtime == _cache_mtime:
@@ -174,13 +191,14 @@ def _read_overrides():
         if not isinstance( body, dict ):
             raise ValueError( f"expected a JSON object, got {type( body ).__name__}" )
         _cache = {
-            "window_hours" : body.get( "window_hours" ),
-            "allow_below"  : body.get( "allow_below" ),
+            "window_hours"       : body.get( "window_hours" ),
+            "allow_below"        : body.get( "allow_below" ),
+            "enforcement_active" : body.get( "enforcement_active" ),
         }
         _cache_mtime = mtime
     except Exception as error:
         print( f"[flow-ratio] override file {path} unusable ({error}) — falling back to config" )
-        _cache       = { "window_hours": None, "allow_below": None }
+        _cache       = { "window_hours": None, "allow_below": None, "enforcement_active": None }
         _cache_mtime = mtime
 
     return _cache
@@ -254,13 +272,43 @@ def get_allow_below():
                              FALLBACK_ALLOW_BELOW )
 
 
-def set_overrides( window_hours=None, allow_below=None ):
+def get_enforcement_active():
+    """
+    Does the ratio gate actually REFUSE a create, or only warn about it?
+
+    This is the switch that decides whether the window and the threshold have teeth.
+    It lives here, beside them, because Rick asked for it here (2026-09-02) — and the
+    asymmetry he objected to was real: the two numbers were live-adjustable while the
+    one that made them matter needed a code edit and a deploy.
+
+    Ensures:
+        - persisted override, else INI, else FALLBACK_ENFORCEMENT_ACTIVE
+        - always a bool — an unparseable value falls back rather than raising, because
+          the caller is on the create path and must not 500 over a settings file
+        - the FALLBACK IS False: an absent or broken config warns, it does not start
+          refusing every create. Failing open is the safe direction here; failing closed
+          would take the board's write path down over a missing file.
+    """
+    stored = _read_overrides()[ "enforcement_active" ]
+    if stored is not None:
+        return bool( stored )
+    # ⚠️ "boolean", NOT "bool". ConfigurationManager._get_typed_value tests
+    # `return_type == "boolean"` exactly and RAISES on anything else — and
+    # `_ini_value` catches that and returns the fallback. So "bool" here would not
+    # error: it would silently report enforcement OFF forever, whatever the INI said.
+    # (`src/cosa/rest/email_service.py:148,207` passes "bool" for `smtp use tls` and
+    # is presumably taking its default the same way — noted, not fixed here.)
+    return bool( _ini_value( INI_KEY_ENFORCEMENT, "boolean", FALLBACK_ENFORCEMENT_ACTIVE ) )
+
+
+def set_overrides( window_hours=None, allow_below=None, enforcement_active=None ):
     """
     Persist a runtime override for either value, or both.
 
     Requires:
         - window_hours is None (leave unchanged) or coercible to int
         - allow_below is None (leave unchanged) or coercible to float
+        - enforcement_active is None (leave unchanged) or a bool
 
     Ensures:
         - a supplied value is validated, clamped into range, and written to
@@ -297,6 +345,14 @@ def set_overrides( window_hours=None, allow_below=None ):
         except ( TypeError, ValueError ):
             raise ValueError( f"allow_below must be a number, got {allow_below!r}" )
         current[ "allow_below" ] = max( MIN_ALLOW_BELOW, min( MAX_ALLOW_BELOW, allow_below ) )
+
+    if enforcement_active is not None:
+        # No clamp and no coercion from a string: "false" is truthy in Python, and an
+        # operator who typed it would get enforcement switched ON while being told it
+        # was off. A bool is demanded rather than guessed at.
+        if not isinstance( enforcement_active, bool ):
+            raise ValueError( f"enforcement_active must be a bool, got {enforcement_active!r}" )
+        current[ "enforcement_active" ] = enforcement_active
 
     _write_overrides( current )
     return current_settings()
@@ -361,8 +417,10 @@ def current_settings():
     """
     stored = _read_overrides()
     return {
-        "window_hours"     : get_window_hours(),
-        "allow_below"      : get_allow_below(),
-        "window_source"    : "override" if stored[ "window_hours" ] is not None else "config",
-        "threshold_source" : "override" if stored[ "allow_below"  ] is not None else "config",
+        "window_hours"       : get_window_hours(),
+        "allow_below"        : get_allow_below(),
+        "enforcement_active" : get_enforcement_active(),
+        "window_source"      : "override" if stored[ "window_hours" ]       is not None else "config",
+        "threshold_source"   : "override" if stored[ "allow_below"  ]       is not None else "config",
+        "enforcement_source" : "override" if stored[ "enforcement_active" ] is not None else "config",
     }

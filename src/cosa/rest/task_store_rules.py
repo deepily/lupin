@@ -2119,7 +2119,16 @@ RATIO_GATE_EXEMPT_PRIORITIES = ( "P0", )
 # not fail a build. `test_flow_ratio_gate.py` goes RED once this date passes while
 # enforcement is still off, so the flip is a forced choice rather than a remembered one.
 RATIO_GATE_ENFORCEMENT_STARTS = "2026-09-08"
-RATIO_GATE_ENFORCEMENT_ACTIVE = False
+
+# 🔨 `RATIO_GATE_ENFORCEMENT_ACTIVE` USED TO LIVE HERE AND IS GONE — Rick, 2026-09-02:
+# "Why is this not included as a configuration instead of a constant in the Python code
+# file? Put it where it belongs!" It is now the INI key `task flow ratio enforcement
+# active`, read through `cosa.rest.flow_ratio_settings.get_enforcement_active()` beside
+# the window and the threshold, which were already operator-adjustable at runtime.
+#
+# ⚠️ DO NOT REINTRODUCE IT. Two sources for one switch is exactly the drift this file
+# already warns about for `allow_below` — the board saying "allow" while the gate
+# refuses, and nothing reporting the disagreement. A test pins its absence.
 
 
 def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, allow_below=None ):

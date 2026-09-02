@@ -105,7 +105,17 @@ def test_get_reports_the_live_pair_and_its_provenance( client, isolated ):
     being masked by a saved override — the one confusion a two-layer scheme creates.
     """
     body = client.get( SETTINGS_PATH ).json()
-    assert set( body ) == { "window_hours", "allow_below", "window_source", "threshold_source" }
+    # Widened 2026-09-02 for `enforcement_active` — Rick moved the gate's enforcement
+    # switch out of a Python constant into this same settings layer, so the endpoint
+    # reports THREE values and three provenances rather than two and two.
+    #
+    # Kept as an EXACT set rather than relaxed to a subset: that is what makes a field
+    # joining this payload a deliberate act with a diff, and it is the assertion that
+    # caught this very change.
+    assert set( body ) == {
+        "window_hours", "allow_below", "enforcement_active",
+        "window_source", "threshold_source", "enforcement_source",
+    }
     assert body[ "window_source" ]    == "config"
     assert body[ "threshold_source" ] == "config"
 

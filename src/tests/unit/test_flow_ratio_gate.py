@@ -200,9 +200,49 @@ def test_success_is_silent():
 # The ramp
 # --------------------------------------------------------------------------------------
 
-def test_the_gate_ships_warn_only():
-    """Rick's Q3. Expected to be EDITED when it arms, so the flip is a visible diff."""
-    assert rules.RATIO_GATE_ENFORCEMENT_ACTIVE is False
+def test_enforcement_is_a_SETTING_and_not_a_code_constant():
+    """
+    🔨 RICK, 2026-09-02: "Why is this not included as a configuration instead of a
+    constant in the Python code file? Put it where it belongs!"
+
+    REPLACES `test_the_gate_ships_warn_only`, which asserted a module constant that no
+    longer exists — that assertion would now be a change detector for a thing that
+    decides nothing.
+
+    ⚠️ THE ASYMMETRY HE OBJECTED TO WAS REAL. The window and threshold were ALREADY
+    operator-adjustable at runtime; enforcement — the switch deciding whether either had
+    teeth — needed a code edit and a deploy. The dials he could turn changed nothing.
+    """
+    from cosa.rest import flow_ratio_settings as frs
+
+    assert hasattr( frs, "get_enforcement_active" ), (
+        "enforcement must be readable from flow_ratio_settings beside the window and the "
+        "threshold — that co-location IS the fix Rick asked for."
+    )
+    assert not hasattr( rules, "RATIO_GATE_ENFORCEMENT_ACTIVE" ), (
+        "the module constant is back. Two sources for one switch is how the board and "
+        "the gate come to disagree — the same drift this file already warns about for "
+        "allow_below."
+    )
+
+
+def test_the_enforcement_fallback_fails_OPEN_not_closed( monkeypatch ):
+    """
+    An absent or unreadable config must WARN, never start refusing every create.
+
+    Failing closed would take the board's whole write path down over a missing settings
+    file. Asserted rather than trusted to the comment beside it: a default nobody
+    exercises is a default nobody knows the value of.
+    """
+    from cosa.rest import flow_ratio_settings as frs
+
+    monkeypatch.setattr( frs, "_read_overrides",
+                         lambda: { "window_hours": None, "allow_below": None,
+                                   "enforcement_active": None } )
+    monkeypatch.setattr( frs, "_ini_value", lambda key, return_type, fallback: fallback )
+
+    assert frs.get_enforcement_active() is False
+    assert frs.FALLBACK_ENFORCEMENT_ACTIVE is False
 
 
 def test_the_warn_only_window_has_not_silently_become_permanent():
@@ -215,7 +255,8 @@ def test_the_warn_only_window_has_not_silently_become_permanent():
 
     ⚠️ The failure is not "you are late", it is "the week is up, choose."
     """
-    if rules.RATIO_GATE_ENFORCEMENT_ACTIVE: return
+    from cosa.rest import flow_ratio_settings as frs
+    if frs.get_enforcement_active(): return
 
     starts = datetime.date.fromisoformat( rules.RATIO_GATE_ENFORCEMENT_STARTS )
     today  = datetime.date.today()
@@ -223,7 +264,7 @@ def test_the_warn_only_window_has_not_silently_become_permanent():
     assert today < starts, (
         f"the ratio gate's warn-only ramp ended {starts} and nothing changed (today {today}).\n"
         f"Rick ruled warn-only for ONE WEEK, not indefinitely. Choose:\n"
-        f"  (a) RATIO_GATE_ENFORCEMENT_ACTIVE = True — creates start getting 422s\n"
+        f"  (a) set 'task flow ratio enforcement active = True' — creates start getting 422s\n"
         f"  (b) move RATIO_GATE_ENFORCEMENT_STARTS out, with the reason in the commit\n"
         f"Doing neither is how a ramp becomes permanent."
     )

@@ -846,12 +846,17 @@ def create_task(
             correlation_key = payload.correlation_key,
             allow_below     = frs.get_allow_below(),
         )
+        # 🔨 ENFORCEMENT IS A SETTING, NOT A CONSTANT (Rick, 2026-09-02). It used to read
+        # `rules.RATIO_GATE_ENFORCEMENT_ACTIVE` — a module-level literal needing a code
+        # edit and a deploy — while the window and threshold two lines up were already
+        # live-adjustable. Read HERE at request time from the same module, so all three
+        # move together and an operator's change reaches the gate on the next create.
         if ratio_refusal:
-            if rules.RATIO_GATE_ENFORCEMENT_ACTIVE:
+            if frs.get_enforcement_active():
                 raise HTTPException( status_code=422, detail=ratio_refusal )
             print(
                 f"[task WARN] ratio gate on {payload.item_class} create: {ratio_refusal} "
-                f"(WARN-ONLY until {rules.RATIO_GATE_ENFORCEMENT_STARTS}; write NOT blocked)"
+                f"(enforcement OFF — set 'task flow ratio enforcement active'; write NOT blocked)"
             )
         elif ( payload.priority or "" ).upper() in rules.RATIO_GATE_EXEMPT_PRIORITIES:
             # Rick's Q4: P0 is exempt AND every use is LOGGED. The logging is the whole
