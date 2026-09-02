@@ -103,6 +103,14 @@ Max-plan usage has rolling-window limits. Batch bounded jobs running during Rick
 
 ⚠️ **CORRECTED AGAIN 2026-08-20 (Rick's ruling). The 08-17 correction replaced hours the box was OFF with hours it is usually NOT UP YET — same failure, one step smaller.** It named **7:30 AM** as the start, derived from a single boot at 07:17 on Aug 6. **Measured across the 12 morning boots since Aug 4** — `08:52 · 09:27 · 07:17 · 09:14 · 09:52 · 09:56 · 09:20 · 10:52 · 09:48 · 09:03 · 09:17 · 09:43` — the **median is 09:24 and eleven of twelve are after 08:52**. A job placed at 7:30 sits dead ~1.5–2.5h on almost every day.
 
+✅ **RE-CONFIRMED 2026-09-02 (Mr. Radio 🦉, row `10b1cbe5`) ON A SAMPLE 5.7× LARGER, FROM A DIFFERENT INSTRUMENT — THE WINDOW HOLDS AND IS NO LONGER RESTING ON SIXTEEN DAYS.** `journalctl --list-boots` gives **91 morning boots spanning 2026-04-14 → 09-02**: **median 09:34**, earliest 07:17, latest 12:54, **80 of 91 after 09:00**. Against the 16-boot sample below (median 09:45) the two agree to eleven minutes across four and a half months, so the fourth measurement of this rule is the second that did not move it.
+
+⚠️ **AND IT ADDS ONE FIGURE THE SMALL SAMPLE COULD NOT SEE: only 26 of 91 boots are after 10:00.** So the box is usually up BEFORE the optimal window opens — 10 AM is conservative, which is the safe direction, and there is no case for moving it earlier off this data.
+
+⚠️ **THE MID-DAY RESTART IS NOT AN ANECDOTE EITHER: 18 boots in the 109 are after 13:00**, spread across every month. "Optimal" still means *most likely up*, never *guaranteed up* — a long job must tolerate a restart.
+
+🔨 **RICK RULED 2026-08-31 ~20:08 EDT, by voice: the boot window is a REAL CONSTRAINT, not a record of his habit.** Schedule batch work around it. That ruling settled a question open since 08-20 (row `10b1cbe5`); this stamp exists so the next reader knows the figures were re-checked rather than inherited.
+
 ⚠️ **RE-MEASURED 2026-08-30 (Krishna 🦚, row 9078a035 · commit 2df3aefb). THE WINDOW HOLDS; THE FIGURES BELOW ARE NOW OPTIMISTIC — AND THIS IS AN UPDATE, NOT A CONTRADICTION.** Taking `last -x reboot | head -20` afresh gives **16 morning boots** spanning Aug 10–30: `09:27 · 10:15 · 09:35 · 09:27 · 11:58 · 11:01 · 09:53 · 09:19 · 09:43 · 09:17 · 09:03 · 09:48 · 10:52 · 09:20 · 09:56 · 09:52` — **median 09:45, earliest 09:03, latest 11:58**, shutdowns clustering 22:26–00:20.
 
 **The two samples RECONCILE rather than disagree**, which is the only reason to trust either: the 08-20 list starts Aug 4 and includes the 07:17 outlier from Aug 6 that sits outside this window; this list adds six newer days and no boot in it is before 09:03. **The distribution moved later — median 09:24 → 09:45 — so 10 AM – 1 PM is more right than when it was written, not less.** What is now stale is the **9 AM** boundary in the DEAD row and the "well past 8:52 AM" phrasing: on this sample the box is usually still down at 9:30, and on two of sixteen days past 11:00. Read the dead window as ending at **10 AM**.
@@ -112,8 +120,26 @@ Max-plan usage has rolling-window limits. Batch bounded jobs running during Rick
 🔴 **DO NOT TRUST THIS TABLE EITHER — RE-DERIVE IT.** This rule has now been wrong twice, both times because someone generalised from too few boots. **Measure before you schedule:**
 
 ```bash
-last -x reboot | head -20      # read the morning boot times yourself
+journalctl --list-boots --no-pager | tail -30   # the DURABLE instrument — read it yourself
+last -x reboot | head -20                       # ⚠️ SHORT MEMORY — see the warning below
 ```
+
+🔴 **`last -x reboot` IS THE COMMAND THIS RULE HAS ALWAYS PRESCRIBED, AND ON 2026-09-02 IT
+RETURNED EXACTLY ONE BOOT.** `wtmp` had rotated the previous day, so `last` reported
+`wtmp begins Tue Sep 1` and a single line. Nothing about that output says it is a
+one-day window — it is a correct answer to a question about a file, read as an answer
+about a machine. A reader following this section's own instruction on that morning would
+have re-derived the window from **n=1**.
+
+⇒ **`journalctl --list-boots` is the durable instrument** and is what the figures below now
+come from: 109 boots reaching back to April against `wtmp`'s one day. The rotated file is
+still readable (`last -x -f /var/log/wtmp.1 reboot`) but you have to know to ask, which is
+the same trap one level down.
+
+⇒ **This is this file's own "name the population" rule firing on this file's own remedy.**
+An empty-or-tiny result and a real one print in the same format, and the only defence is
+to state the sample size beside the median — which is why every figure in this section
+carries its `n`.
 
 **The constraint is the box, not just Rick's sleep:**
 
