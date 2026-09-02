@@ -4680,7 +4680,8 @@ def task_query(
 
     Args:
         owner_persona: Filter by who owes the work
-        status: Filter by status (queued | in_progress | blocked | done | dropped)
+        status: Filter by status (not_approved | queued | claimed | in_progress |
+            blocked | parked | review | done | dropped | wont_fix)
         gate_class: Filter by gate (none | operator)
         urgency: Filter by operator-gate urgency tier (urgent | normal | low)
         accountable_manager: Filter by chasing manager

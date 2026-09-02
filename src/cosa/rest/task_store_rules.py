@@ -35,8 +35,8 @@ from lupin_mcp.persona_normalization import canonical_persona_key
 # Enums (design §2.1) — plain tuples, app-validated (house style: no PG ENUM)
 # ---------------------------------------------------------------------------
 
-VALID_STATUSES         = ( "queued", "claimed", "in_progress", "blocked", "parked", "review", "done", "dropped" )
-TERMINAL_STATUSES      = ( "done", "dropped" )
+VALID_STATUSES         = ( "not_approved", "queued", "claimed", "in_progress", "blocked", "parked", "review", "done", "dropped", "wont_fix" )
+TERMINAL_STATUSES      = ( "done", "dropped", "wont_fix" )
 VALID_ITEM_CLASSES     = ( "task", "decision", "review_request", "bug", "gate" )
 
 # The deliberate-hold status (2026-07-19). A row is `parked` when a HUMAN ruled it
@@ -75,6 +75,36 @@ PARK_LEGAL_FROM_STATUSES = ( "queued", "in_progress" )
 # self-healing arm was also the only one with no staleness oracle — six rows sat
 # unsatisfiable for up to eight days before two seats found them by hand.
 BLOCKED_STATUS           = "blocked"
+
+# ── THE HOLDING AREA (Rick's P0, 2026-09-02) ────────────────────────────────────
+#
+# Two words, deliberately asymmetric, because they answer different questions and
+# borrowing one shape for the other breaks a live reader.
+#
+# `wont_fix` is TERMINAL. A row nobody will act on, closed on purpose rather than
+# left to rot in the owed count. Terminal membership is not a convenience here —
+# it is what hides the row from EVERY denylist reader in one edit (the two
+# `TERMINAL_STATUSES.notin_` filters in task_repository), gives it no out-edges
+# through the derived LEGAL_TRANSITIONS graph, and keeps `blocker_is_terminal`
+# honest: a row blocked on a won't-fix row IS unblocked, because nothing further
+# is coming.
+WONT_FIX_STATUS          = "wont_fix"
+
+# `not_approved` is NOT terminal, and must never be added to TERMINAL_STATUSES to
+# borrow its hiding. Doing so would tell `blocker_is_terminal` that a row waiting
+# on an unapproved row is free to proceed — the exact opposite of the truth — and
+# would break the rejoin logic, which reads terminality as "no further movement".
+# An unapproved row's whole point is that it is WAITING for movement.
+#
+# It is a PRE-queued state: filed, not yet admitted to anyone's board.
+NOT_APPROVED_STATUS      = "not_approved"
+
+# The board-invisibility set — what an un-status'd query drops. TERMINAL plus the
+# holding area, and it exists precisely BECAUSE the two have different reasons to
+# be invisible: terminal rows are finished, `not_approved` rows have not started.
+# Kept as its own name so a future reader cannot mistake "hidden from the board"
+# for "terminal", which is the confusion the paragraph above exists to prevent.
+BOARD_INVISIBLE_STATUSES = TERMINAL_STATUSES + ( NOT_APPROVED_STATUS, )
 VALID_GATE_CLASSES     = ( "none", "manager", "operator" )
 VALID_PRIORITIES       = ( "P0", "P1", "P2", "P3" )
 # proactive-manager A2 (fcb5dbc0): operator-gate TIME-SENSITIVITY, distinct from the
@@ -1616,7 +1646,7 @@ def validate_transition(
     # rejects the no-op — behavior-preserving. The receipt / blocked / dropped
     # payload rules below are PREPENDED-to, never replaced.
     if from_status in TERMINAL_STATUSES:
-        errors.append( f"item is terminal ('{from_status}') — done/dropped are append-only, no transitions out" )
+        errors.append( f"item is terminal ('{from_status}') — {'/'.join( TERMINAL_STATUSES )} are append-only, no transitions out" )
     elif to_status not in LEGAL_TRANSITIONS[ from_status ] and not is_blocker_repoint(
         from_status, to_status, blocked_by, next_chase_ts, current_blocked_by, current_next_chase_ts
     ) and not is_park_refresh( from_status, to_status, park_reason, next_chase_ts ):
@@ -1644,6 +1674,17 @@ def validate_transition(
         errors.extend( validate_blocked_fields( blocked_by, next_chase_ts ) )
     if to_status == "dropped" and ( not isinstance( reason, str ) or not reason.strip() ):
         errors.append( "reason is REQUIRED (non-blank) when transitioning to 'dropped' (C12 — the escape hatch carries its justification)" )
+    # `wont_fix` carries the SAME obligation as `dropped`, for the same reason and
+    # not by analogy: both are a refusal to do filed work, and a refusal whose
+    # justification is not written down is indistinguishable from the work being
+    # forgotten. The receipt gate above deliberately does NOT fire here
+    # (`to_status == "done"` only) — a won't-fix has no commit to cite, which is
+    # exactly why the reason is the only thing standing behind it.
+    if to_status == WONT_FIX_STATUS and ( not isinstance( reason, str ) or not reason.strip() ):
+        errors.append(
+            f"reason is REQUIRED (non-blank) when transitioning to '{WONT_FIX_STATUS}' — "
+            "a refusal carries its justification, exactly as 'dropped' does"
+        )
     if to_status == PARK_STATUS:
         errors.extend( validate_park( from_status, next_chase_ts, park_reason ) )
 

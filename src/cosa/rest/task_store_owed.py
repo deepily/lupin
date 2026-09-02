@@ -104,10 +104,12 @@ from datetime import datetime, timezone
 
 from cosa.rest.task_store_rules import (
     BLOCKED_STATUS,
+    NOT_APPROVED_STATUS,
     PARK_LEGAL_FROM_STATUSES,
     PARK_STATUS,
     TERMINAL_STATUSES,
     VALID_STATUSES,
+    WONT_FIX_STATUS,
     is_park_legal_from,
 )
 
@@ -156,6 +158,46 @@ assert set( PARK_LEGAL_FROM_STATUSES ) <= set( OWED_BASE_STATUSES ), (
     f"the Stop hook and arbiter count, not restore it. Either narrow "
     f"PARK_LEGAL_FROM_STATUSES or deliberately re-cut OWED_BASE_STATUSES and "
     f"the AC11 no-drift guard together."
+)
+
+# ── THE HOLDING AREA MUST NOT BE OWED (Rick's P0, 2026-09-02) ────────────────
+#
+# Same shape as the assertion above, and here for the same reason its comment
+# gives: a silent widening "would fail nothing". `not_approved` is a row nobody
+# has admitted to a board yet. If it ever entered the owed base set, the Stop
+# hook and the arbiter would start poking every seat about work that has not
+# been approved to exist — and no test would notice, because both twins would
+# still agree with each other.
+#
+# `wont_fix` gets the same guard for the mirror reason: it is TERMINAL, and a
+# terminal status in the owed set would poke the fleet about finished work
+# forever. It is asserted rather than assumed because terminality is declared in
+# ANOTHER module, so a future re-cut of TERMINAL_STATUSES cannot quietly drag it
+# in here.
+#
+# DISJOINTNESS, not subset — the relation this proof needs. Neither word may
+# appear in the owed base set under any narrowing or widening of either tuple.
+assert NOT_APPROVED_STATUS not in OWED_BASE_STATUSES, (
+    f"'{NOT_APPROVED_STATUS}' entered OWED_BASE_STATUSES {OWED_BASE_STATUSES} — the "
+    f"holding area would become owed work, and the Stop hook and arbiter would poke "
+    f"every seat about rows nobody has approved. Nothing else would fail: both twins "
+    f"would still agree with each other."
+)
+assert WONT_FIX_STATUS not in OWED_BASE_STATUSES, (
+    f"'{WONT_FIX_STATUS}' entered OWED_BASE_STATUSES {OWED_BASE_STATUSES} — a TERMINAL "
+    f"status in the owed set pokes the fleet about finished work forever. Terminality "
+    f"is declared in task_store_rules, so this is asserted here rather than assumed."
+)
+assert WONT_FIX_STATUS in TERMINAL_STATUSES, (
+    f"'{WONT_FIX_STATUS}' left TERMINAL_STATUSES {TERMINAL_STATUSES} — terminal "
+    f"membership is what hides it from every denylist reader and what makes "
+    f"blocker_is_terminal correct for a row blocked on a won't-fix row. Removing it "
+    f"re-opens both at once, silently."
+)
+assert NOT_APPROVED_STATUS not in TERMINAL_STATUSES, (
+    f"'{NOT_APPROVED_STATUS}' entered TERMINAL_STATUSES {TERMINAL_STATUSES} — it is "
+    f"PRE-queued, not finished. Terminality would tell blocker_is_terminal that a row "
+    f"waiting on an unapproved row may proceed, which is the opposite of the truth."
 )
 
 __all__ = [
@@ -856,7 +898,12 @@ def quick_smoke_test():
         print( "✓ a row amended after its quote was frozen is STALE; equal is NOT" )
 
         print( "Testing staleness is status-gated (AC5)..." )
-        for other in ( "queued", "in_progress", "blocked", "claimed", "review", "done", "dropped" ):
+        # DERIVED from VALID_STATUSES, not hand-listed. A literal tuple here silently
+        # stops covering every status added after it was written — and this assertion's
+        # whole job is "no NON-parked status ever reports stale", a claim about the set
+        # as a whole. It was a literal until 2026-09-02, when `not_approved` and
+        # `wont_fix` landed and it would have gone on passing while checking neither.
+        for other in ( st for st in VALID_STATUSES if st != PARK_STATUS ):
             assert park_reason_is_stale( other, captured, amended ) is False
         print( "✓ no non-parked status ever reports stale, whatever the timestamps say" )
 

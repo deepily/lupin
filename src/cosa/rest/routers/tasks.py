@@ -39,6 +39,7 @@ from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
 from cosa.rest import task_store_rules as rules
 from cosa.rest import flow_ratio_settings as frs
+from cosa.rest import task_approval_settings as approval
 from cosa.rest.task_store_owed import blocker_is_terminal, item_blocker_ids, park_reason_is_stale
 from cosa.agents.utils.sender_id import canonicalize_project_name
 import cosa.utils.util as cu
@@ -970,6 +971,32 @@ def transition_task(
         # the committed ones — a blocker going terminal concurrently cannot slip a
         # stranded edge past this the way a read-then-write would.
         _reject_unsatisfiable_blockers( repo, blocked_by )
+
+        # ── THE HOLDING-AREA APPROVAL GATE (Rick's P0, 2026-09-02) ──────────────
+        #
+        # Admission OUT of `not_approved` onto a board is the one transition that
+        # turns a filed row into somebody's owed work. Rick: "either a manager or
+        # him, for now" — so the allowlist is CONFIGURATION, editable without a
+        # deploy, exactly as he corrected the ratio gate's flag the same day.
+        #
+        # It runs AFTER the structural rules on purpose: a caller with a malformed
+        # payload should be told the payload is malformed, not that they lack
+        # permission to send a malformed payload. Shape first, policy second — the
+        # same ordering the blocker gate above is placed by.
+        #
+        # 🔴 POLICY CONTROL, NOT A SECURITY BOUNDARY. `payload.actor` is
+        # caller-DECLARED and every seat carries the same fleet credential, so this
+        # refuses an honest non-approver and cannot stop a dishonest one. The
+        # authenticated user id is stamped alongside, so a false claim is
+        # attributable afterwards — accountability, not prevention. Written here
+        # rather than left for a future reader to infer authorization from the 403.
+        approval_refusal = approval.refusal_for_admission(
+            from_status = item.status,
+            to_status   = payload.to_status,
+            actor       = payload.actor,
+        )
+        if approval_refusal is not None:
+            raise HTTPException( status_code=403, detail=approval_refusal )
 
         event = repo.apply_transition(
             item          = item,

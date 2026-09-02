@@ -42,6 +42,7 @@ from cosa.rest.db.repositories.base import BaseRepository
 CREATED_TRANSITION_LIKE = "->%"
 CLOSED_TRANSITION_LIKE  = "%->done"
 from cosa.rest.task_store_rules import (
+    BOARD_INVISIBLE_STATUSES,
     TERMINAL_STATUSES,
     UNSCOPED_QUERY_THRESHOLD,
     UnscopedQueryError,
@@ -1022,13 +1023,13 @@ class TaskRepository( BaseRepository[TaskItem] ):
             # rows — correct here precisely because these callers already select
             # the parked status themselves (all-non-terminal / explicit filter).
             if not include_terminal and status is None:
-                query = query.filter( TaskItem.status.notin_( TERMINAL_STATUSES ) )
+                query = query.filter( TaskItem.status.notin_( BOARD_INVISIBLE_STATUSES ) )
             return query.filter( owed_clause( TaskItem, now ) )
         # Terminal-exclusion default: an un-status'd query drops done/dropped unless
         # the caller opts in via include_terminal. An explicit `status` filter (incl.
         # status=done/dropped) governs on its own — no double-filtering.
         if not include_terminal and status is None:
-            query = query.filter( TaskItem.status.notin_( TERMINAL_STATUSES ) )
+            query = query.filter( TaskItem.status.notin_( BOARD_INVISIBLE_STATUSES ) )
         return query
 
     def count_tasks_by_status(
