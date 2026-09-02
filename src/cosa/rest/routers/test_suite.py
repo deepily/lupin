@@ -32,7 +32,16 @@ class TestSuiteSubmitRequest( BaseModel ):
     """Request body for submitting a test suite job."""
     test_types          : str             = Field( "integration,e2e", description="Comma-separated suite types: integration, e2e" )
     pytest_args         : Optional[ str ] = Field( None, description="Extra pytest arguments, shell-style (shlex) parsed — quoting is honored, e.g. '-v -k \"auth or visual\"' reaches pytest as ['-v', '-k', 'auth or visual']. Unbalanced quotes → 400 at submit." )
-    dry_run             : bool            = Field( False, description="Simulate execution without running tests" )
+    dry_run             : bool            = Field( False, description=(
+        "Skip the pytest subprocess — but STILL QUEUE A REAL JOB, and still take the "
+        "monopolize slot. The flag is read at EXECUTION time (TestSuiteJob.run_job "
+        "dispatches to _execute_dry_run), never at submit: this endpoint builds the job "
+        "and pushes it to the todo queue with monopolize=True either way. So a dry run "
+        "occupies :8000 exactly like a real one, sends its breadcrumb notifications, and "
+        "makes the venue report BUSY — it just runs no tests. Measured 2026-09-01: two "
+        "dry_run probes queued at positions 0 and 1, and venue_idle reported BUSY with a "
+        "dry_run job named as the monopolize holder. Not a free probe; do not reach for "
+        "it to 'just check' a submission while someone else is waiting for the box." ) )
     websocket_id        : Optional[ str ] = Field( None, description="WebSocket session ID for notifications" )
     scheduled_at        : Optional[ str ] = Field( None, description="ISO datetime for deferred execution (None = immediate)" )
     auto_fix_on_failure : Optional[ bool ] = Field( None, description="Per-run override for the TestSuiteCompletionWatchdog. None = use INI default ('test fix expediter auto fix enabled'), True = force-enable TFE auto-dispatch, False = force-disable TFE auto-dispatch for this run only." )
