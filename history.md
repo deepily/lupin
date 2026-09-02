@@ -8,6 +8,54 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.01 (late) - Session 0e61abe3 (Mr. Radio 🦉, manager; rehydrated after /clear) | Four wrong numbers in one evening, and only one of them was caught by a person
+
+**Managed four seats through end-of-session; the durable output is a defect class, not a feature.** Every finding below is the same shape — *the failure and the success print the same thing* — and it fired four times in ninety minutes across three people.
+
+1. **I sent Rick at a remediation that was already done** (`68106100`). I told him twice to run `./backup.sh --write` on `projects/lupin-mobile` to restore a wiped mirror, quoting "0 deletions, 788 creates" from an amendment stamped 21:28. A `--write` had landed at ~21:42. I repeated a figure without re-running the command that produced it; the live dry run says **0 created / 0 deleted / 2 transferred**.
+2. **And my confirming arithmetic would have BACKED THE ERROR UP.** I sized the gap by subtracting the **six** excluded directories the row happens to name from a 22,789-file tree — the exclude file carries **41** entries. That manufactures a ~15,000-file phantom loss. Krishna 🦚 built the identical six-directory filter independently and got 16,820 vs 577, one message from filing it. **rsync's own account, having applied all 41 rules, beat both hand-rolled counts.**
+3. **⇒ Correlated error is not corroboration, and Krishna's is the cut to keep.** I first wrote this up as "we caught each other — the crew working." False, and the flattering reading: neither of us found it by reading the other's work. **Two people using the same method are one measurement taken twice**, and it *feels* like validation precisely because it arrived separately — separateness being the thing people check for. Only a different INSTRUMENT validates. ⚠️ And note the direction: both wrong numbers **agreed** with the row's existing five-figure story. A wrong number that contradicts a record gets challenged; one that confirms it gets absorbed.
+4. **Neither memento slot is a superset of the other** (`ba4c4d3b`). I told Krishna a ~6k gap between his root and io records was "expected, not drift — the nonce alone would differ." Wrong, and wrong in the direction that tells a peer to **stop looking**: root held 2 entries / 199 lines, io held 3 / 322, and io carried a whole evening root never had. **The slots ACCUMULATE SEPARATELY**, so the verb picks what a successor knows — `self_respin` reads root, `dismiss_sessions` reads io. He then measured it fleet-wide: 18 keys in both slots, **root larger in 7 of 18**, so the divergence is universal rather than benign. Every worker was sent the measured reason with the both-slots instruction.
+5. **A fabricated endpoint, laundered by arithmetic — volunteered against himself by Krishna.** He revised a gap from 37s to 45s; I refused it because 45 reconciles with no stamp pair (every pairwise gap among the four amendments is 36.3 / 57.0 / 20.7). **My refusal was right and my diagnosis was charitable and wrong**: it was not a mis-measurement. He had no stamp for one endpoint, typed `03:41:00.000000` into his script as a placeholder, and it printed **`45.2s`** beside the genuine `97.2` and `57.5` — identical format, nothing marking one input as invented. ⇒ **A placeholder is indistinguishable from a real value once it has been through arithmetic**; the subtraction launders it and six significant figures finish the job. The rule is not *avoid placeholders* — a computation over an invented input must say so in its output or refuse. His fix is the structural one: **pass identifiers, not values**, so a missing id is a lookup failure that stops the run.
+6. **Three UI decisions owed by Rick, recorded rather than re-fired** (`bc77cd79` → blocked on `user:rick`, chase 09-02 10:30 EDT). Two were asked and timed out twice; the third — María's colourblind glyph — was **never asked**, which looks identical on a board and behaves oppositely. ⚠️ **I fired the second ask on a presence nobody observed**: a `notify` refusal reading *"a user-initiated voice message takes precedence"* is triggered by inbound peer DMs, not by the user. Seen four times.
+
+**Checkpoint**: no source commits of my own — manager seat. **Push done** (Rick's word, broadcast `68fdff5b`): `7d17fb1e..983854a9`, 120 commits, branch level with origin, verified 0/0 after. **Backup done**: dry-run first (183 deletions, all directories, zero regular files), then `--write` — **211 created, 0 deleted, 294 files, 8.59 GB, exit 0**. Row `68106100` closed by Krishna with receipts; `ba4c4d3b` carries five amendments and two open items neither of us touched (does the writer offer to sync both slots; is the divergence normal across personas). No rows created — ticket moratorium. `src/conf/epic-stories.json` dirty since before this session and **not mine** — independently confirmed by Krishna, Tiberius and Rio.
+**Files**: `history.md` (this entry + Tiberius's, which was sitting in a scratchpad and would have died with his seat)
+
+### Tiberius 👑 (session `d203e90a`) — the guard-remedy defect class, closed and pinned
+
+**A guard's refusal is tested; its remedy was executable advice nothing checked.** Two hook
+guards shipped a message recommending the very hazard the guard exists to prevent (Tiberius
+`30ba7976`/`92445956`, Rio `9350649d`). Rio built the shared predicates; Mr Radio ruled one
+test serving both guards beats two. It now serves all nine guard messages.
+
+1. **`src/tests/unit/test_guard_remedies_are_checked.py`** (15 tests) wires
+   `tests/helpers/guard_remedy.py` to every `_deny_reason_for` / `_notice_for` in `hooks/`.
+   Each guard gets the predicate matching what its message CLAIMS — `remedy_carries_its_caveat`
+   where it claims safety, `remedy_is_readable` where it claims reviewability — plus negative
+   controls, because an empty result is the same output whether the check worked or looked at
+   nothing.
+2. **The coverage frontier is pinned as a map**, 2 checkable / 7 vacuous. A `[]` from the caveat
+   check means either "every hazard qualified" or "no hazard was named"; only the map separates
+   them. A message crossing that line in either direction fails and says what to do.
+3. **My own map was the defect it exists to catch** — it claimed to BE the frontier with 4 of 9
+   entries, missing `commit_scope_guard`'s actual deny in all three scope shapes. Census
+   command now lives in the file (`f71ed629`).
+4. **Two CLAUDE.md sections, both measured**: a wrapper's exit code is its LAST command's, so
+   the `echo "EXIT=$?"` added to REPORT it is what destroys it — `rc=$?` then `exit $rc`
+   (`0768a8b2`); and **a hit is not a use**, the mirror of the empty-result rule, after the same
+   mention-vs-read error fired three times in one evening across three people (`ba657856`).
+5. **One retraction, mine**: I reported `run-span=` as blank and called it a silent failure in
+   Pocholo's tool. My `grep -o '…[a-z-]*'` had truncated the sha at its first digit. His tool
+   was always correct; the asymmetry became his `1136e0a7` and his write-up
+   `src/rnd/v0.2.1/2026.09.02-a-narrow-character-class-truncates-where-it-should-refuse.md`.
+
+**Checkpoint**: 7 commits — `985076a7` `19259d43` `db7af80e` `2393fdce` `f71ed629` `0768a8b2`
+`ba657856`, each staged by explicit path and `git show --stat`-checked. Unit tier at
+`ec0bf947`: 2 failed / 21,666 passed, both the held `test_secret_scan` reds. No rows created
+(ticket moratorium); two peer-owned follow-ups named in my memento, not filed.
+**Files**: `src/tests/unit/test_guard_remedies_are_checked.py` · `CLAUDE.md`
+
 ### 2026.09.01 (late) - Session b45d54db (Rio ⚡ re-spun into the same seat, worker for Mr. Radio 🦉; spec Tiffany 💍) | A confirmed cached row is served — proven by the arm that shows an unconfirmed one is not
 
 1. **Row `734bd1bf` (AC-G3) closed after two days blocked, and the observable was reachable the whole time.** The AC wants `path="replay"` / `route_reason="exact_hit"` off `/api/v2/ask`; both fields have always been in the §8 response body. Rick's 08-30 probe was run through the web Q&A UI, which does not surface them — so *"the guard refused it"* and *"it was served and lost in delivery"* stayed indistinguishable, and the row accumulated two server-side blockers that were never the problem. New file `test_v2_ask_serves_a_confirmed_row.py`, green on `:8000` (`ts-fee0022f`, 2/0/0). Tiffany transitioned the row.
