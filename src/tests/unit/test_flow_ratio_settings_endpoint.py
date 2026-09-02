@@ -148,6 +148,7 @@ def test_a_body_naming_neither_field_is_refused( client, isolated ):
     { "allow_below"  : -1       },     # negative
     { "nonsense"     : 1        },     # unknown field — extra="forbid"
     { "allow_below"  : "banana" },     # not a number
+    { "allow_below"  : 1_000_001 },    # above the ceiling — a LITERAL, see below
 ] )
 def test_an_unusable_body_is_refused_at_the_door( client, isolated, body ):
     """
@@ -261,3 +262,40 @@ class _NullSession:
 
 def _null_session():
     return _NullSession()
+
+
+def test_a_threshold_well_inside_the_ceiling_is_ACCEPTED( client, isolated ):
+    """
+    The upper clamp on `allow_below` was asserted NOWHERE, and lowering it from
+    1000.0 to 10.0 left all fourteen tests in this file green (audit 2026-09-01,
+    src/rnd/v0.2.1/2026.09.01-guard-audit-sixteen-files-run-against-broken-arms.md).
+    Every value the file exercised — 1.4, 1.25, 0.8, 1.9, 1.0, -1, "banana" — sits
+    below 10, so nothing could tell the two ceilings apart.
+
+    🔴 THE DISCRIMINATING CASE IS AN ACCEPTANCE, NOT ANOTHER REFUSAL. Lowering the
+    ceiling makes values in (new, old] newly REFUSED, so only a case asserting one is
+    still ACCEPTED can see it. A second refusal case above the old ceiling stays
+    refused under both and is blind by construction — which is the same reason the
+    refusal case added above is written as the LITERAL 1_000_001 and not as
+    `frs.MAX_ALLOW_BELOW + 1`: a bound derived from the constant moves WITH the
+    constant, and the test would follow the defect rather than catch it.
+
+    MEASURED, NOT ARGUED — two arms, ONE mutated state (MAX_ALLOW_BELOW 1000.0 -> 10.0),
+    the only variable being how the two new cases are written:
+
+        LITERAL   (500.0 and 1_000_001)                 -> 1 failed, 15 passed
+                                                           and the failure NAMES this test
+        DERIVED   (MAX/2 and MAX + 1)                    -> 16 passed — BLIND
+
+    The derived variant moves with the constant, so it reports the mutated ceiling as
+    correct. Neither arm alone would have shown that: a lone red proves only that a
+    test can fail.
+    """
+    assert 500.0 < frs.MAX_ALLOW_BELOW, (
+        "this case must sit INSIDE the ceiling or it stops testing what it says"
+    )
+    response = client.patch( SETTINGS_PATH, json={ "allow_below" : 500.0 } )
+    assert response.status_code == 200, (
+        f"a threshold well inside the ceiling was refused: {response.text}"
+    )
+    assert response.json()[ "allow_below" ] == 500.0
