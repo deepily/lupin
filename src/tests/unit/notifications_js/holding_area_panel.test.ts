@@ -70,6 +70,10 @@ type HoldingUI = Record<string, unknown> & {
   _applyHoldingBatch: ( filer: string, toStatus: string, extras: unknown, verb: string )
     => Promise<{ ok: number; failed: number; firstError: string | null }>;
   _handleTaskWontFixClick: ( button: unknown ) => Promise<void>;
+  _handleTaskDropClick: ( button: unknown ) => Promise<void>;
+  _handleTaskParkClick: ( button: unknown ) => Promise<void>;
+  _controlScope: ( button: unknown ) => ParentNode;
+  _rowInputValue: ( taskId: string, cls: string, scope: unknown ) => string;
   _handleTaskDemoteClick: ( button: unknown ) => Promise<void>;
   _handleTaskApproveClick: ( button: unknown ) => Promise<void>;
   _handleHoldingWontFixAllClick: ( button: unknown ) => Promise<void>;
@@ -681,4 +685,191 @@ test( "🔴 the REAL row renderers emit the controls row already hidden", () => 
                   controls.dataset.controlsFor,
                   `${render}: the toggle and its controls row carry different ids` );
   }
+} );
+
+// ═══════════ Drop · Park · Demote — the three controls NOBODY HAS CLICKED YET ═══════════
+//
+// 🔴 THE COVERAGE HERE TRACKED WHICH BUTTONS A HUMAN HAPPENED TO PRESS, NOT WHICH ONES
+// CAN BREAK. Won't-fix and Approve have guards because Rick hit them; Drop and Park had
+// no test anywhere that drove their handler at all, and Demote had one whose first
+// assertion could not see the guard it was named for.
+//
+// Measured across the whole 484-test notifications_js tier, one deliberate break each:
+//
+//   Drop sends the wrong verb (dropped -> done)      0 red
+//   Drop's blank-reason guard deleted                0 red
+//   Park sends the wrong verb (parked -> dropped)    0 red
+//   Park's blank-reason guard deleted                0 red
+//   Demote's blank-reason guard deleted              0 red
+//   _controlScope drops its tight `.task-actions` leg 0 red
+//
+// ⚠️ "MISSING OR MERELY UNWATCHED" IS A FALSE PAIR — THERE IS A THIRD STATE, AND IT IS
+// THE ONE THESE CONTROLS WERE IN: PRESENT, CORRECT, AND UNTESTABLE-IF-WRONG. Read in the
+// source before writing a line of this: Drop checks its reason, Park checks reason +
+// chase + date-parse, Demote checks reason + chase + date-parse. Every one of them was
+// right. What was absent was any test that could have noticed if it weren't.
+//
+// ⇒ So these are GREEN on today's client and redden only under mutation, and that is the
+// expected result rather than a weak one. A test that went red on arrival would have been
+// evidence of a live defect — a different finding with a different owner. Which state you
+// are in is settled by deleting the guard and watching a NAMED test that was passing at
+// baseline go red; each of the seven below does exactly that, one test per break.
+//
+// 🔴 AND WHY DEMOTE'S EXISTING TEST COULD NOT SEE ITS OWN GUARD: it leaves BOTH the
+// reason and the chase blank, then asserts the server was not called. Either guard alone
+// satisfies that, so deleting the reason check changes nothing observable — the chase
+// check catches the same case and the assertion passes. The fixture cannot discriminate
+// between the two, whatever the test's name says. Every blank-reason case below fills
+// the OTHER field, so exactly one guard can be responsible for the refusal.
+
+function dropRowDOM( id: string, reason = "" ): void {
+  document.body.innerHTML = `
+    <table><tbody>
+      <tr><td class="task-actions">
+        <input class="task-action-input task-drop-reason" data-task-id="${id}" value="${reason}">
+        <button class="task-action-btn task-drop-button" data-task-id="${id}">Drop</button>
+      </td></tr>
+      <tr class="task-row-error-stripe" data-error-for="${id}" hidden><td></td></tr>
+    </tbody></table>`;
+}
+
+function parkRowDOM( id: string, reason = "", chase = "" ): void {
+  document.body.innerHTML = `
+    <table><tbody>
+      <tr><td class="task-actions">
+        <input class="task-action-input task-park-reason" data-task-id="${id}" value="${reason}">
+        <input class="task-action-input task-park-chase"  data-task-id="${id}" value="${chase}">
+        <button class="task-action-btn task-park-button" data-task-id="${id}">Park</button>
+      </td></tr>
+      <tr class="task-row-error-stripe" data-error-for="${id}" hidden><td></td></tr>
+    </tbody></table>`;
+}
+
+function recordingUI(): { ui: HoldingUI; calls: Array<[ string, string, unknown ]> } {
+  const ui = newUI();
+  const calls: Array<[ string, string, unknown ]> = [];
+  ui._transitionTask = async ( id, to, extras ) => { calls.push( [ id, to, extras ] ); return { ok: true }; };
+  ui.refreshTaskList = async () => {};
+  return { ui, calls };
+}
+
+const CTRL_ID = "aaaaaaaa-1111-2222-3333-444444444444";
+
+test( "🔴 Drop sends `dropped` — the verb is asserted, so a wrong terminal state cannot ship", async () => {
+  // ⚠️ THIS IS UI CORRECTNESS, NOT DATA INTEGRITY, and the first cut of this comment had
+  // it wrong. It claimed `dropped` -> `done` would write the wrong terminal state to the
+  // store. It would not: the server refuses it twice over — `validate_transition` gives
+  // done/dropped/wont_fix no out-edges at all, and a live row reaching `->done` must
+  // carry a CHECKABLE receipt (a real commit/qid/test_run), which a button does not have.
+  // The button would simply fail in a way the operator could not explain. Left visible
+  // rather than quietly deleted, because "wrong verb" reads like a store problem and the
+  // instinct to file it as one is what has to be corrected.
+  const { ui, calls } = recordingUI();
+  dropRowDOM( CTRL_ID, "superseded by the epic board" );
+
+  await ui._handleTaskDropClick( document.querySelector( ".task-drop-button" ) );
+  assert.equal( calls.length, 1, "Drop never reached the server" );
+  assert.equal( calls[ 0 ][ 1 ], "dropped", "Drop sent the wrong transition verb" );
+  assert.equal( ( calls[ 0 ][ 2 ] as { reason: string } ).reason, "superseded by the epic board",
+    "the typed reason is not what got sent" );
+} );
+
+test( "🔴 Drop refuses a blank reason, tells the operator why, and calls nobody", async () => {
+  const { ui, calls } = recordingUI();
+  dropRowDOM( CTRL_ID, "" );
+
+  await ui._handleTaskDropClick( document.querySelector( ".task-drop-button" ) );
+  assert.equal( calls.length, 0, "a blank drop reason reached the server" );
+  const stripe = document.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.equal( stripe.hidden, false, "the refusal is invisible — the row looks like nothing happened" );
+  assert.match( stripe.textContent ?? "", /reason is required/i );
+} );
+
+test( "🔴 Park sends `parked` with the reason AND a real chase instant", async () => {
+  const { ui, calls } = recordingUI();
+  parkRowDOM( CTRL_ID, "waiting on Rick's ruling", "2026-09-10" );
+
+  await ui._handleTaskParkClick( document.querySelector( ".task-park-button" ) );
+  assert.equal( calls.length, 1, "Park never reached the server" );
+  assert.equal( calls[ 0 ][ 1 ], "parked", "Park sent the wrong transition verb" );
+  // NOTE the field name: Park sends `park_reason`, where Drop and Won't-fix send
+  // `reason`. Asserting `reason` here passes `undefined === undefined` against a handler
+  // that sends nothing at all, so the specific name is the assertion.
+  const extras = calls[ 0 ][ 2 ] as { park_reason: string; next_chase_ts: string };
+  assert.equal( extras.park_reason, "waiting on Rick's ruling" );
+  // Same local-day trap the demote test already guards: a bare "YYYY-MM-DD" read as
+  // midnight UTC lands the chase on the previous evening for everyone west of Greenwich.
+  const sent = new Date( extras.next_chase_ts );
+  assert.ok( sent.getTime() > new Date( "2026-09-10" ).getTime(),
+    `chase ${extras.next_chase_ts} is not later than bare-midnight-UTC — the local stamp is gone` );
+  assert.equal( sent.getDate(), 10, "the chase landed on the wrong calendar day locally" );
+} );
+
+test( "🔴 Park refuses a blank REASON specifically — the chase date is filled in", async () => {
+  // The discriminating fixture. With both fields blank either guard explains the
+  // refusal, so deleting one is invisible; filling the chase leaves exactly one.
+  const { ui, calls } = recordingUI();
+  parkRowDOM( CTRL_ID, "", "2026-09-10" );
+
+  await ui._handleTaskParkClick( document.querySelector( ".task-park-button" ) );
+  assert.equal( calls.length, 0, "a blank park reason reached the server" );
+  assert.match( ( document.querySelector( ".task-row-error-stripe" ) as HTMLElement ).textContent ?? "",
+    /park reason is required/i );
+} );
+
+test( "🔴 Park refuses a blank CHASE DATE specifically — the reason is filled in", async () => {
+  const { ui, calls } = recordingUI();
+  parkRowDOM( CTRL_ID, "waiting on Rick's ruling", "" );
+
+  await ui._handleTaskParkClick( document.querySelector( ".task-park-button" ) );
+  assert.equal( calls.length, 0, "an unbounded park reached the server" );
+  assert.match( ( document.querySelector( ".task-row-error-stripe" ) as HTMLElement ).textContent ?? "",
+    /chase date is required/i );
+} );
+
+test( "🔴 Demote refuses a blank REASON specifically — the triage-by date is filled in", async () => {
+  // The gap in the existing demote test, named and closed. That one leaves both fields
+  // blank, so its "a blank demote reason reached the server" assertion is satisfied by
+  // the CHASE guard and stays green with the reason guard deleted.
+  const { ui, calls } = recordingUI();
+  document.body.innerHTML = `
+    <table><tbody>
+      <tr><td class="task-actions">
+        <input class="task-action-input task-demote-reason" data-task-id="${CTRL_ID}" value="">
+        <input class="task-action-input task-demote-chase"  data-task-id="${CTRL_ID}" value="2026-09-10">
+        <button class="task-action-btn task-demote-button" data-task-id="${CTRL_ID}">Demote</button>
+      </td></tr>
+      <tr class="task-row-error-stripe" data-error-for="${CTRL_ID}" hidden><td></td></tr>
+    </tbody></table>`;
+
+  await ui._handleTaskDemoteClick( document.querySelector( ".task-demote-button" ) );
+  assert.equal( calls.length, 0, "a blank demote reason reached the server" );
+  assert.match( ( document.querySelector( ".task-row-error-stripe" ) as HTMLElement ).textContent ?? "",
+    /demote reason is required/i );
+} );
+
+test( "🔴 _controlScope reads the input in the CLICKED row's own cell, not the first match", async () => {
+  // This is the cd2ea523 defect one level tighter: not two panes, two ROWS IN ONE TABLE
+  // carrying the same task id. `.task-actions` is the leg that separates them — drop it
+  // and the fallback to the enclosing table matches both rows, so the handler sends the
+  // OTHER row's text. Both scopes are inside the same table, so `_paneScope` cannot see
+  // this and the existing two-pane test does not cover it.
+  const { ui, calls } = recordingUI();
+  document.body.innerHTML = `
+    <table><tbody>
+      <tr><td class="task-actions">
+        <input class="task-action-input task-drop-reason" data-task-id="${CTRL_ID}" value="THE FIRST ROW'S TEXT">
+        <button class="task-action-btn task-drop-button" data-task-id="${CTRL_ID}" id="first">Drop</button>
+      </td></tr>
+      <tr><td class="task-actions">
+        <input class="task-action-input task-drop-reason" data-task-id="${CTRL_ID}" value="THE SECOND ROW'S TEXT">
+        <button class="task-action-btn task-drop-button" data-task-id="${CTRL_ID}" id="second">Drop</button>
+      </td></tr>
+      <tr class="task-row-error-stripe" data-error-for="${CTRL_ID}" hidden><td></td></tr>
+    </tbody></table>`;
+
+  await ui._handleTaskDropClick( document.getElementById( "second" ) );
+  assert.equal( calls.length, 1, "Drop never reached the server" );
+  assert.equal( ( calls[ 0 ][ 2 ] as { reason: string } ).reason, "THE SECOND ROW'S TEXT",
+    "the handler sent a different row's reason — the scope fell back past `.task-actions`" );
 } );
