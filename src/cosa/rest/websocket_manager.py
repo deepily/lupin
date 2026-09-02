@@ -203,6 +203,35 @@ class WebSocketManager:
             valid_events = [e for e in subscribed_events if e == "*" or e in self.available_events]
             self.session_subscriptions[session_id] = valid_events
             print( f"[WS] Session {session_id} ({session_type}) subscribed to: {valid_events}" )
+
+            # An ASKING client that validates to NOTHING is stored as [] — and the send
+            # path's `.get( session_id, ["*"] )` permissive default never fires, because
+            # the key EXISTS. So every frame is dropped while auth reports success.
+            #
+            # The asymmetry is real and deliberate-looking but nobody chose it: a client
+            # asking for NOTHING gets ["*"] (everything, the else-branch below); a client
+            # asking only for names the server does not publish gets [] (nothing). Asking
+            # wrongly is punished harder than not asking.
+            #
+            # Storing [] is defensible — the client asked for nothing this server has.
+            # Storing it SILENTLY is not: the line above prints an empty list that reads
+            # like any other subscription line. Row 88347f65 spent five mechanisms and
+            # four seats in the wrong layer because a drop path logged and a success path
+            # did not. UNGATED, for the same reason as e73331c5 — the debug flag being off
+            # is exactly the condition under which this goes unread.
+            rejected = [ e for e in subscribed_events if e not in valid_events ]
+            if rejected and not valid_events:
+                print(
+                    f"[WS] ⚠️ Session {session_id} ({session_type}) validated to ZERO events — "
+                    f"EVERY frame to it will be dropped. Requested-but-unknown: {rejected}. "
+                    f"Server publishes {len( self.available_events )} events "
+                    f"(lupin-app.ini 'websocket available events')."
+                )
+            elif rejected:
+                print(
+                    f"[WS] ⚠️ Session {session_id} ({session_type}) requested "
+                    f"{len( rejected )} unknown event(s), dropped from its subscription: {rejected}"
+                )
         else:
             # Default: subscribe to all events
             self.session_subscriptions[session_id] = ["*"]
