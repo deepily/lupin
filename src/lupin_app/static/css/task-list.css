@@ -224,10 +224,29 @@ tbody.task-group.collapsed .task-row {
 }
 
 /* ---- Body overlay (design 2026.06.29 / D2 — shows the task-store `body`) ---- */
+/* 🔴 THE INTENDED ORDER, SO THE NEXT PERSON RAISING A VALUE KNOWS WHAT THEY COMPETE WITH:
+ *
+ *     .lupin-nav ............................. 9999   lupin-nav.css:18, fixed 56px top bar
+ *     THIS OVERLAY, and every modal .......... 10000  must sit ABOVE the nav
+ *     a modal's own nested layer ............. 10001  broadcast/notification stack tops out here
+ *
+ * A modal BELOW the nav is not a modal. This rule read `z-index: 1000` until 2026-09-01, so
+ * the nav painted over the backdrop and swallowed clicks meant for it — measured, not
+ * theorised: playwright retried a backdrop click 60 times across 30s and every single retry
+ * reported `<div class="lupin-nav-inner"> from <nav id="lupin-nav"> subtree intercepts
+ * pointer events`.
+ *
+ * ⚠️ THE FAILING TEST WAS THE SMALLER HALF. The part that reaches a person is that the nav's
+ * LINKS stayed clickable through an open modal — an overlay that does not trap interaction is
+ * not modal, whatever it looks like.
+ *
+ * 10000 is not a new opinion; it is this app's existing convention for anything that must beat
+ * the nav — broadcast-panel.css:179 and notifications.css:1821, 2836, 2949, 4309 all use
+ * 10000/10001. This rule was the outlier. ⇒ If you raise the nav above 9999, these move too. */
 .task-body-overlay {
     position: fixed;
     inset: 0;
-    z-index: 1000;
+    z-index: 10000;
     display: flex;
     align-items: center;
     justify-content: center;
