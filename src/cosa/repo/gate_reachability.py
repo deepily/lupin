@@ -86,11 +86,24 @@ _PATH_TOKEN_RE = re.compile( r"src/[A-Za-z0-9_./-]+(?![A-Za-z0-9_./*-])" )
 # information — a digit, a capital, a delimiter — while matching cleanly on the quiet
 # default, so it is correct for as long as nobody adds an interesting key.
 #
-# ⚠️ THE E2E LOSS WAS MASKED, WHICH IS WHY IT SURVIVED. `find_gate_targets` seeds from
-# here and then FOLLOWS `.sh` references, and `run-all-tests.sh` names the e2e runner at
-# its line 94 — so `src/tests/e2e_ui` reached the target set by a second route and the
-# census looked complete. The masking is incidental, not designed: it holds only while
-# some other runner in the seed happens to name the dropped one.
+# ⚠️ THE TWO DROPPED KEYS BEHAVED DIFFERENTLY, AND ONLY ONE WAS MASKED. `find_gate_targets`
+# seeds from here and then FOLLOWS `.sh` references, so `run-all-tests.sh` naming the e2e
+# runner at its line 94 put `src/tests/e2e_ui` back in the target set by a second route.
+# NOTHING names `run-v2-eval.sh` — the only hits are its own header comments, which the
+# walker skips — so that one was not masked at all.
+#
+# MEASURED, one variable, rather than left as a hedge (2026-09-01). The first version of
+# this note said the loss was masked and that no wrong census had been measured, which was
+# honest about what I had checked and not about what was true. Flipping only the character
+# class:
+#
+#     find_gate_targets            11 -> 12 targets, recovering `src/scripts/v2_eval.py`
+#     find_unreferenced_test_files 50 -> 50, no file's verdict moved in either direction
+#
+# ⇒ So the TARGET POPULATION really was short by one, while the census VERDICT was not
+# affected: the recovered path is a script, and reachability verdicts are about test files.
+# Both halves are worth stating. "Latent" and "actively wrong" are different claims, and
+# the only way to tell which you have is to run it both ways.
 _SUITE_SCRIPT_RE = re.compile( r"^\s*\"[A-Za-z0-9_]+\"\s*:\s*\"(src/[^\"]+\.sh)\"" )
 
 
