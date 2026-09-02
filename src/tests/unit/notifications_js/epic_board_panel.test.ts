@@ -68,6 +68,10 @@ type EpicUI = Record<string, unknown> & {
   _applyEpicGroupCollapseState: ( tbody: HTMLElement, isCollapsed: boolean ) => void;
   _handleEpicAccordionToggle: ( target: unknown ) => void;
   _handleEpicBoardClick: ( target: unknown ) => void;
+  _captureOperatorState: ( container: unknown ) => unknown;
+  _restoreOperatorState: ( container: unknown, state: unknown ) => void;
+  _handleDisclosureToggle: ( button: unknown ) => void;
+  loadEpicGroupState: () => Record<string, boolean>;
   _handleRowControlClick: ( target: unknown ) => boolean;
   _disclosureToggle: ( task: Row ) => string;
   _handleDisclosureToggle: ( button: unknown ) => void;
@@ -909,4 +913,37 @@ test( "the epic group header still toggles — the new route did not swallow it"
 
   clickIt( header );
   assert.ok( toggledWith, "a header click no longer reaches the accordion" );
+} );
+
+// ═══════ the repaint destroys operator state HERE TOO — the same defect, third pane ═══════
+//
+// 🔴 All three panes repaint by replacing `container.innerHTML`. The task-list fix closed
+// the instance Rick reported; this pane renders the SAME controls off the same shared
+// composite and loses the same work. A fix that stops at the reported pane is one somebody
+// re-opens the first time an operator types here.
+
+test( "🔴 a repaint of the epic board keeps a typed reason, a shown refusal and a disclosed row", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const model = ui.groupTasksByEpic( [ R_SEAL_A ] );
+  const container = document.getElementById( "epic-board-container" )!;
+  ui._epicBoardAccordionWired = false;
+  ui._wireEpicBoardAccordion();
+  container.innerHTML = ui.renderEpicBoardTable( model, ui.loadEpicGroupState() );
+
+  const box = container.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement;
+  assert.ok( box, "no reason box rendered on the epic board — this test cannot speak" );
+  box.value = "not doing this";
+  ui._handleDisclosureToggle( container.querySelector( ".task-disclose-button" ) );
+  ui._renderTaskRowError( R_SEAL_A.id as string, "A won't-fix reason is required.", container );
+  assert.equal( ( container.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false );
+
+  ui.renderEpicBoard( { status: "ok", tasks: [ R_SEAL_A ] }, false );      // the poll lands
+
+  assert.equal( ( container.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value,
+    "not doing this", "the repaint wiped a reason the operator had typed and not yet sent" );
+  assert.equal( ( container.querySelector( ".task-row-error-stripe" ) as HTMLElement ).hidden, false,
+    "the repaint wiped the refusal — the control now looks dead" );
+  assert.equal( ( container.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false,
+    "the repaint re-collapsed a row the operator had opened" );
 } );

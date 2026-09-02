@@ -15,7 +15,7 @@
 //   npx c8 --include='src/lupin_app/static/js/notifications.js' --reporter=text \
 //       npx tsx --test src/tests/unit/notifications_js/task_list_panel.test.ts
 
-import { test, before, beforeEach } from "node:test";
+import { test, before, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -72,6 +72,15 @@ type TaskUI = Record<string, unknown> & {
   _taskBodyIsEmpty: ( task: unknown ) => boolean;
   _handleTaskListClick: ( target: unknown ) => void;
   _handleRowControlClick: ( target: unknown ) => boolean;
+  _handleTaskWontFixClick: ( button: unknown ) => Promise<void>;
+  _transitionTask: ( id: string, to: string, extras?: unknown ) => Promise<{ ok: boolean; message?: string }>;
+  startTaskListPolling: () => void;
+  fetchEpicStories: () => Promise<unknown>;
+  renderEpicBoard: ( composite: unknown ) => void;
+  renderHoldingArea: ( composite: unknown ) => void;
+  refreshHoldingArea: () => Promise<void>;
+  _epicBoardAccordionWired: boolean;
+  _holdingAreaControlsWired: boolean;
   _disclosureToggle: ( task: Record<string, unknown> ) => string;
   _handleDisclosureToggle: ( button: unknown ) => void;
   openTaskBodyOverlay: ( bodyText: string, idLabel: string ) => void;
@@ -2012,4 +2021,227 @@ test( "_handleRowControlClick reports whether it CONSUMED the click", () => {
   assert.equal( ui._handleRowControlClick( host.querySelector( ".task-drop-button" ) ), true );
   assert.equal( ui._handleRowControlClick( host.querySelector( ".task-col-title" ) ), false,
     "an ordinary cell click was swallowed as if it were a control" );
+} );
+
+// ═════ THE POLL REPAINT DESTROYS OPERATOR STATE — Rick's dead Won't-fix button ═════
+//
+// 🔴 THE CAUSE, and it needed no pane and no row identity. `renderTaskList` repaints by
+// replacing `container.innerHTML` every 60 seconds. Everything the operator has done and
+// not yet submitted lives in that markup. So:
+//
+//   type a reason -> a poll lands -> the box is EMPTY -> click -> the blank-reason guard
+//   fires -> NO REQUEST LEAVES THE BROWSER
+//
+// and the refusal stripe explaining it is wiped by the NEXT poll, so within a minute
+// there is nothing left on screen to see. Type, pause, click, nothing — and no evidence
+// afterwards. That is the whole report.
+//
+// ⚠️ WHY EVERY EARLIER CANDIDATE DIED AND THIS ONE DID NOT. A two-pane lookup collision, a
+// pane with no click listener, an item_class branch, the disclosure ellipsis — each was a
+// real thing and none of them fit a row that renders once, in the one wired pane, with the
+// controls enabled. This needs none of that.
+//
+// ⚠️ AND WHY NOBODY COULD REPRODUCE IT: a tester types and clicks in one motion, inside a
+// single poll interval. Every existing test is worse than that — it calls the handler by
+// name, so no poll can run between the typing and the click at all. The path that could
+// not be reached was the path the operator used.
+//
+// A SECOND, RARER WINDOW ON THE SAME MECHANISM is measured and kept deliberately: a
+// repaint landing between mousedown and mouseup detaches the pressed node, and the click
+// then reaches no handler — 0 requests, no stripe, one variable, reproduced. A press is
+// ~100ms against a 60s poll, so roughly one click in six hundred. Too rare to explain one
+// report; NOT too rare to happen to somebody. It is closed by the same fix, and the last
+// test here is what says so rather than leaving a reader to assume it.
+
+function pollUI(): { ui: TaskUI; sent: Array<Record<string, unknown>> } {
+  const sent: Array<Record<string, unknown>> = [];
+  const ui = newUI();
+  // 🔴 ALWAYS CLEAR THE INTERVAL. A failing assertion skips any stop() written at the end
+  // of the test body, and the surviving 25ms interval hangs the entire file — so the first
+  // real red here looked like a broken harness rather than a caught defect.
+  livePolls.push( ui );
+  ui.TASK_LIST_POLL_INTERVAL_MS = 25;               // the 60s poll, driven fast
+  ui.taskListPollIntervalHandle = null;
+  ui.fetchTaskList      = async () => ( { status: "ok", tasks: [ T_PARKED_GATE ] } ) as never;
+  ui.fetchEpicStories   = async () => ( {} );
+  ui.renderEpicBoard    = () => {};
+  ui.renderHoldingArea  = () => {};
+  ui.fetchFlowRatio     = async () => null;
+  ui._renderFlowRatio   = () => {};
+  ui.refreshHoldingArea = async () => {};
+  ui.refreshTaskList    = NotificationsUIProto().refreshTaskList;
+  ui.authedFetch = ( async ( url: string, opts: Record<string, unknown> ) => {
+    sent.push( { url, method: opts && opts.method } );
+    return { ok: true, status: 200, json: async () => ( {} ) };
+  } ) as never;
+  return { ui, sent };
+}
+
+function NotificationsUIProto(): Record<string, ( ...a: unknown[] ) => never > {
+  return ( ( globalThis as Record<string, unknown> ).NotificationsUI as { prototype: object } ).prototype as never;
+}
+
+// Rick's row: parked, gate, no epic key — renders ONCE, in the one wired pane.
+const T_PARKED_GATE = { id: "bc77cd79", title: "Rick's row", status: "parked",
+                        item_class: "gate", correlation_key: null, created_by: "rick",
+                        priority: "P0", project: "lupin", owner_persona: "rick",
+                        accountable_manager: "maria" };
+
+function bootPollPane(): void {
+  document.body.innerHTML = `
+    <div id="section-task-list"><h3><span id="task-list-count">0</span>
+      <span id="task-list-updated"></span></h3><div id="task-list-container"></div></div>`;
+}
+function pollPane(): HTMLElement { return document.getElementById( "task-list-container" )!; }
+function reasonBox(): HTMLInputElement {
+  return pollPane().querySelector( ".task-wont-fix-reason" ) as HTMLInputElement;
+}
+function wontFixBtn(): HTMLElement {
+  return pollPane().querySelector( ".task-wont-fix-button" ) as HTMLElement;
+}
+function shownStripe(): HTMLElement | null {
+  const s = pollPane().querySelector( ".task-row-error-stripe" ) as HTMLElement | null;
+  return s && !s.hidden ? s : null;
+}
+const tick = ( ms: number ): Promise<void> => new Promise( r => setTimeout( r, ms ) );
+
+const livePolls: TaskUI[] = [];
+afterEach( () => { while ( livePolls.length ) livePolls.pop()!.stopTaskListPolling(); } );
+
+test( "ARM A — type and click FAST, inside one poll interval: the request goes", async () => {
+  // The control, and the reason this defect went unseen: this is how every tester does it.
+  const { ui, sent } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+
+  reasonBox().value = "not doing this";
+  wontFixBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  await tick( 15 );
+  ui.stopTaskListPolling();
+
+  assert.equal( sent.length, 1, "the ordinary path does not reach the network — probe is broken" );
+  assert.match( String( sent[ 0 ].url ), /\/api\/tasks\/bc77cd79\/transition/ );
+} );
+
+test( "🔴 ARM B — type, let ONE POLL land, then click: the typed reason must survive", async () => {
+  // RED before the fix. The repaint replaces the markup the operator typed into, so the
+  // handler reads an empty box, refuses, and nothing leaves the browser.
+  const { ui, sent } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+
+  reasonBox().value = "not doing this";
+  await tick( 60 );                                  // the operator reads on; a poll lands
+  assert.equal( reasonBox().value, "not doing this",
+    "a poll repaint wiped a reason the operator had typed and not yet submitted" );
+
+  wontFixBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  await tick( 15 );
+  ui.stopTaskListPolling();
+  assert.equal( sent.length, 1, "the click sent nothing — the reason was gone by the time it ran" );
+} );
+
+test( "🔴 a refusal stripe must SURVIVE a poll — a refusal nobody sees did not happen", async () => {
+  // RED before the fix, and not optional: fixing the input alone leaves the explanation
+  // transient, which is the same silent-refusal shape one layer along.
+  const { ui } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+
+  wontFixBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );   // blank reason
+  await tick( 10 );
+  assert.ok( shownStripe(), "precondition: the refusal is on screen" );
+  const before = shownStripe()!.textContent ?? "";
+
+  await tick( 60 );                                  // one poll later
+  ui.stopTaskListPolling();
+  const after = shownStripe();
+  assert.ok( after, "the poll wiped the refusal — the operator sees a control that did nothing" );
+  assert.equal( after!.textContent, before, "the refusal survived but its text changed" );
+} );
+
+test( "🔴 a DISCLOSED row must stay open across a poll", async () => {
+  // The same mechanism on the third piece of operator state. A repaint that re-collapses
+  // the row takes the reason box off screen mid-sentence, which is how the wiped input
+  // gets noticed as "the form vanished" rather than as a dead button.
+  const { ui } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+
+  ( pollPane().querySelector( ".task-disclose-button" ) as HTMLElement )
+    .dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  const controls = () => pollPane().querySelector( ".task-controls-row" ) as HTMLElement;
+  assert.equal( controls().hidden, false, "precondition: the row is disclosed" );
+
+  await tick( 60 );
+  ui.stopTaskListPolling();
+  assert.equal( controls().hidden, false,
+    "the poll re-collapsed a row the operator had opened" );
+} );
+
+test( "🔴 the RARE window too: a repaint between press and click must not swallow the click", async () => {
+  // ~100ms of press against a 60s poll is about one click in six hundred — too rare to
+  // explain one report, not too rare to happen. Kept because demoting a finding is not
+  // the same as dropping it.
+  const { ui, sent } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+
+  const btn = wontFixBtn();
+  reasonBox().value = "not doing this";
+  btn.dispatchEvent( new window.MouseEvent( "mousedown", { bubbles: true } ) );
+  await tick( 60 );                                  // the poll lands mid-press
+  // In a browser the click's target is the nearest common ancestor of the mousedown and
+  // mouseup nodes, so with the pressed node replaced it lands on the container. Both
+  // readings are dispatched, because which one a browser picks is not measurable here.
+  btn.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  pollPane().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  await tick( 15 );
+  ui.stopTaskListPolling();
+
+  assert.equal( sent.length, 1, "a repaint during the press swallowed the click entirely" );
+} );
+
+test( "🔴 a paint HELD for a press is replayed the moment the press ends", async () => {
+  // Found by mutating my own fix: dropping the replay reddened NOTHING. Holding the paint
+  // is only safe because it is a delay — a hold that never replays is a pane frozen on
+  // stale rows until the next poll, which is a worse defect than the one it prevents.
+  const { ui } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+  ui.stopTaskListPolling();
+
+  const before = pollPane().innerHTML;
+  wontFixBtn().dispatchEvent( new window.MouseEvent( "mousedown", { bubbles: true } ) );
+  ui.renderTaskList( { status: "ok", tasks: [ { ...T_PARKED_GATE, title: "renamed by a peer" } ] } );
+  assert.equal( pollPane().innerHTML, before, "precondition: the paint is held during the press" );
+
+  wontFixBtn().dispatchEvent( new window.MouseEvent( "mouseup", { bubbles: true } ) );
+  assert.match( pollPane().textContent ?? "", /renamed by a peer/,
+    "the held paint was dropped, not delayed — the pane is frozen on stale rows" );
+} );
+
+test( "🔴 each box is restored into ITS OWN field, not merely into the right row", async () => {
+  // A row carries several inputs — park takes a reason AND a chase date. Keying the saved
+  // value on the task id alone would put the reason text into the date box.
+  const { ui } = pollUI();
+  bootPollPane();
+  ui.startTaskListPolling();
+  await tick( 40 );
+
+  ( pollPane().querySelector( ".task-drop-reason" ) as HTMLInputElement ).value = "DROP TEXT";
+  ( pollPane().querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value = "WONT-FIX TEXT";
+  await tick( 60 );
+  ui.stopTaskListPolling();
+
+  assert.equal( ( pollPane().querySelector( ".task-drop-reason" ) as HTMLInputElement ).value,
+                "DROP TEXT", "the drop box came back with another control's text" );
+  assert.equal( ( pollPane().querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value,
+                "WONT-FIX TEXT", "the won't-fix box came back with another control's text" );
 } );
