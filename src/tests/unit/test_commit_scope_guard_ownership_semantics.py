@@ -163,3 +163,50 @@ def test_an_unregistered_session_still_fails_open( tmp_path ):
     mine, _ = _claims_for_session( "dddddddd", cwd=str( tmp_path ) )
     assert mine is None
     assert _verdict( tmp_path, CONTESTED, session="dddddddd" ) == "ALLOW"
+
+
+# ---------------------------------------------------------------------------
+# The id shape every real session has, and no case above used.
+# ---------------------------------------------------------------------------
+
+MY_FULL_SESSION = f"{MINE}-3aaa-430d-a53f-f88385ee00cf"
+
+
+def test_a_full_session_uuid_still_owns_its_EIGHT_CHAR_sections_claims( tmp_path ):
+    """
+    Every case above passes `MINE` — an id byte-identical to the manifest heading.
+    A REAL session never does: `get_session_info()` hands out a full UUID and the
+    manifest heading carries its first eight characters, so the live comparison is
+    always the ASYMMETRIC one, `session_id.startswith( sid )`.
+
+    🔴 THE FIXTURES SAT EXACTLY ON THE BOUNDARY THEY WERE TESTING. With equal ids
+    `session_id.startswith( sid )` and `sid.startswith( session_id )` are BOTH true,
+    so `or` and `and` are indistinguishable and the suite cannot tell them apart.
+
+    Measured 2026-09-01 with `or` mutated to `and` in the foreign-claim loop:
+
+        exact 8-char id   others = { theirs: bbbbbbbb }                unchanged
+        FULL UUID         others = { theirs: bbbbbbbb, MINE: aaaaaaaa } own file, foreign
+        the whole file                                                 6 passed. BLIND.
+
+    Under that mutation a session's OWN file is reported as claimed by another
+    section — a false refusal on every commit the fleet makes. This case is the one
+    that sees it: it fails on the mutant and passes on the real code.
+
+    Asserted on `_claims_for_session` directly rather than through a verdict, because
+    the verdict collapses both halves into one word and the split between `mine` and
+    `others` is the thing under test.
+    """
+    ( tmp_path / ".claude-session.md" ).write_text( _manifest() )
+
+    mine, others = _claims_for_session( MY_FULL_SESSION, cwd=str( tmp_path ) )
+
+    assert MY_FULL_SESSION != MINE, (
+        "this case must use an id LONGER than the heading, or it repeats the cases above"
+    )
+    assert mine == { MY_FILE }, f"a full uuid did not claim its own section: {mine}"
+    assert MY_FILE not in others, (
+        f"the session\'s OWN file is reported as claimed by {others.get( MY_FILE )!r} — "
+        f"a foreign-claim refusal on the committer\'s own work"
+    )
+    assert others == { CONTESTED : DEAD }

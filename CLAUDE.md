@@ -327,6 +327,74 @@ find . -name ".git" -type d | grep -v "^./.git$"
 - Manage as independent project
 - Has own git history and workflows
 
+## 🔴 THE COMMIT SCOPE GUARD REVIEWS THE `git commit` LINE — A HEREDOC *ON* THAT LINE MAKES IT GIVE UP
+
+The guard reads which paths a commit names and checks them against your section of
+`.claude-session.md`. It refuses to guess: hand it a command it cannot parse and it
+**allows the commit** with `⚠️ Commit scope guard: NOT REVIEWED — <why>`. That notice
+is easy to walk past, and the commit lands unexamined.
+
+**Measured 2026-09-01** against the guard's own `git_commit_match` + `_pathspec_of`,
+one variable at a time. The `reviewed` rows are the positive control — without them a
+`BYPASSED` would only prove the probe always says bypass:
+
+| command shape | |
+|---|---|
+| `cat > msg.txt <<'EOF' … EOF ; git commit -F msg.txt -- <paths>` | ✅ **reviewed** — this is the mandated pattern |
+| … the same, `&&` joined | ✅ reviewed |
+| … the same, plus `2>&1 \| tail -3` | ✅ reviewed |
+| … whose heredoc **body** contains the words `git commit -F x -- evil.py` | ✅ reviewed |
+| `git commit -F msg.txt -- <paths>` | ✅ reviewed |
+| `git commit -F /dev/stdin -- <paths>` (no heredoc) | ✅ reviewed |
+| `git commit -F <(printf m) -- <paths>` | ✅ reviewed |
+| `printf m \| git commit -F - -- <paths>` | ✅ reviewed |
+| `git commit -F /dev/stdin -- <paths> <<'EOF' … EOF` | 🔴 **BYPASSED** |
+| `git commit -F msg.txt -- <paths> <<'EOF' … EOF` | 🔴 **BYPASSED** |
+| `git commit -F - -- <paths> <<'EOF' … EOF` | 🔴 **BYPASSED** |
+| `git commit -F /dev/stdin -- <paths> <<< 'body'` | 🔴 **BYPASSED** |
+
+⇒ **The rule is about ATTACHMENT, not about heredocs.** A heredoc in a *preceding*
+command is fine — write the message file with one and commit cleanly, exactly as the
+session-end workflow already prescribes. What goes unreviewed is feeding the message
+**to the commit itself** through a heredoc or here-string on that line.
+
+**The mechanism says why, and it predicts the table without running it.**
+`_pathspec_of` reads only `command[ match.end(): ]` — the tail *after* the `git commit`
+match — then splits at the first `;`, `&`, `|` or newline. A preceding heredoc is not
+in that tail and can never reach the check. What *is* in the tail meets
+`_strip_heredoc_bodies`, which removes the heredoc **body** and leaves the operator; the
+surviving `<<` then trips `_without_redirections`, which returns "not sure" rather than
+risk misreading the paths.
+
+⚠️ **This is a deliberate refusal, not a parsing bug**, and the same design this page
+asks for everywhere: a step that cannot finish declines and says what it did not do.
+The gap is only that its output *looks* like success. If you see NOT REVIEWED, either
+re-run in the reviewed shape or check the commit yourself with `git show --stat <sha>`
+— and say which you did.
+
+**Pinned by a test, so a change to any of this is visible rather than silent**:
+`src/tests/unit/test_commit_scope_guard_heredoc_attachment.py` — both directions, plus
+a controlled pair whose only variable is where the heredoc sits. It pins TODAY'S
+behaviour and does not assert the give-up is correct; whether it should fire when the
+pathspec already parses cleanly is an open ruling.
+
+⚠️ **Do not restate this as "no heredocs near a commit."** That phrasing was written
+and withdrawn the same evening: read literally it bans the mandated pattern, and a
+reader following it would abandon a workflow that works. **An ambiguous rule fails the
+way an ambiguous pointer fails** — say *attached to the `git commit` invocation*, which
+has one reading.
+
+---
+
+### Spawn-brief line (the short form, for a brief that cannot carry the table)
+
+- **Commit with `git commit -F <file> -- <paths>`.** Write the message file first (a
+  heredoc there is fine). **Never attach a heredoc or here-string to the `git commit`
+  line itself** — `-F /dev/stdin <<EOF`, `-F - <<EOF`, `<<< 'body'` — the scope guard
+  cannot parse those, prints `NOT REVIEWED`, and lets the commit through unexamined.
+
+---
+
 ## 🔴 A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED
 
 **Five instances in one evening, 2026-08-30, in five different tools.** Written as one rule because
