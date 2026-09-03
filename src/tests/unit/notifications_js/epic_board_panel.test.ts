@@ -947,3 +947,41 @@ test( "🔴 a repaint of the epic board keeps a typed reason, a shown refusal an
   assert.equal( ( container.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false,
     "the repaint re-collapsed a row the operator had opened" );
 } );
+
+// ══════ collapsing an epic group must CLOSE the controls disclosed inside it ══════
+//
+// 🔴 Rick's own words name this pane: "if you close the epic-group-header it should
+// definitely hide the displayed task-actions". Collapse is a CSS class on the tbody and
+// the controls row carries its own `hidden`; the two were independent.
+
+test( "🔴 collapsing an epic group closes any controls disclosed inside it", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const host = document.getElementById( "epic-board-container" )!;
+  ui._epicBoardAccordionWired = false;
+  ui._wireEpicBoardAccordion();
+  host.innerHTML = ui.renderEpicBoardTable( ui.groupTasksByEpic( [ R_SEAL_A ] ), {} );
+
+  // ⚠️ THIS GROUP RENDERS ALREADY COLLAPSED, so the operator's first header click EXPANDS
+  // it. Writing the test as disclose-then-click-once measured an expansion and reported the
+  // fix as broken — the test was wrong, not the code. Expand first, then follow the real
+  // sequence: open a row, then collapse the group around it.
+  const header = host.querySelector( ".epic-group-header" ) as HTMLElement;
+  assert.ok( ( host.querySelector( "tbody.epic-group" ) as HTMLElement ).classList.contains( "collapsed" ),
+    "precondition: this group renders collapsed" );
+  header.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  assert.ok( !( host.querySelector( "tbody.epic-group" ) as HTMLElement ).classList.contains( "collapsed" ),
+    "precondition: the first header click expands it" );
+
+  const toggle = host.querySelector( ".task-disclose-button" ) as HTMLElement;
+  toggle.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  assert.equal( ( host.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false,
+    "precondition: the row is disclosed" );
+
+  header.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );   // collapse
+
+  assert.equal( ( host.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, true,
+    "the epic group collapsed with its controls still on screen" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "false",
+    "the ellipsis still claims the row is open inside a collapsed group" );
+} );
