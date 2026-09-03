@@ -46,6 +46,45 @@ def _write( target, **body ):
     approval._cache_mtime = None
 
 
+@pytest.fixture
+def ini_flags_absent( monkeypatch ):
+    """
+    Make the two approval FLAG keys read as ABSENT from the shipped INI.
+
+    🔴 WHY THIS EXISTS, AND WHY IT IS NOT THE OVERRIDE FIXTURE. `isolated` moves the
+    OVERRIDE file into tmp_path, which is the whole isolation these tests used to
+    need — because with no override the getters fell through to an INI that shipped
+    `False`, and False was the answer they wanted. On 2026-09-02 Rick turned both
+    flags ON (`f3870751`), the shipped INI became the live value, and five tests went
+    red having never asserted anything about an override at all. **They were passing
+    on a config the repository ships, not on a fixture they controlled.**
+
+    ⚠️ IT CANNOT BE DONE THROUGH THE OVERRIDE FILE. `_read_overrides` returns
+    "no override" for a MISSING file and, deliberately, also for a CORRUPT one — both
+    then fall through to `_ini_value`, and only an absent INI key reaches the hard
+    fallback. Three of the five arms are precisely the missing-or-corrupt cases, so
+    pinning through that file would make the pin and the subject under test the same
+    object.
+
+    ⚠️ AND IT PINS TWO KEYS, NOT THE READER. `get_approvers` also goes through
+    `_ini_value`, and blanking that would silently change what `is_approver` answers
+    in tests that never asked for it. Only the two flags are intercepted; everything
+    else reaches the real reader.
+
+    Ensures:
+        - `_ini_value` returns None for the enforcement and holding-default keys
+        - every other key reaches the real reader unchanged
+    """
+    real  = approval._ini_value
+    flags = ( approval.INI_KEY_ENFORCEMENT, approval.INI_KEY_DEFAULT_TO_HOLDING )
+
+    def pinned( key, return_type, fallback ):
+        if key in flags: return None
+        return real( key, return_type, fallback )
+
+    monkeypatch.setattr( approval, "_ini_value", pinned )
+
+
 def test_the_isolation_actually_isolates( isolated ):
     """
     THE GUARD ON EVERY OTHER TEST IN THIS FILE, so it runs first.
@@ -134,25 +173,73 @@ def test_matching_is_canonical_so_casing_and_accents_do_not_decide_access( isola
 # Failing OPEN, deliberately
 # ---------------------------------------------------------------------------
 
-def test_a_missing_override_file_does_not_enforce( isolated ):
+def test_a_missing_override_file_does_not_enforce( isolated, ini_flags_absent ):
     """
     The fallback is False on purpose: a gate that fails CLOSED on a missing file
     takes the board down for everyone with no obvious cause. Being wrong in this
     direction is loud and recoverable; the other direction is silent and total.
+
+    🔴 READ THE SCOPE BEFORE TRUSTING THIS TEST — IT IS NARROWER THAN ITS NAME.
+    With both sources absent this proves `FALLBACK_ENFORCEMENT_ACTIVE` is False and
+    is reached. It no longer says anything about PRODUCTION: since `f3870751` the
+    shipped INI says True, so a missing override file now ENFORCES. The docstring
+    above argues a deliberate fail-OPEN and the code no longer has that property.
+
+    ⚠️ NOT REPAIRED HERE, DELIBERATELY. Rachel found it; the fix is a rename plus a
+    new arm with both sources absent, and whether the fail-open promise still stands
+    is Rick's call, not a repair to fold into a pinning pass. Mr Radio is putting it
+    to him. Pinned as-is and flagged.
     """
     assert not isolated.exists()
     assert approval.get_enforcement_active() is False
 
 
-def test_a_corrupt_override_file_is_reported_and_does_not_raise( isolated, capsys ):
+def test_a_corrupt_override_file_is_reported_and_does_not_raise( isolated, ini_flags_absent, capsys ):
     """
     A bad settings file must not take the board down — and must not be SILENT
     either, or an operator's write looks disregarded with no clue why.
     """
     isolated.write_text( "{ this is not json" )
+    # Written directly rather than through `_write`, so the mtime reset that helper
+    # performs has to be done by hand here. `_read_overrides` serves its cache when
+    # the file's whole-second mtime has not moved, so without this the read can be
+    # answered from a previous test's parse.
     approval._cache_mtime = None
     assert approval.get_enforcement_active() is False
     assert "[task-approval]" in capsys.readouterr().out
+
+
+def test_a_file_that_exists_but_cannot_be_OPENED_is_survived_too( isolated, ini_flags_absent, capsys ):
+    """
+    The unreadable case the corrupt-file arm does not reach: the path EXISTS, so the
+    mtime probe succeeds, and `open()` fails anyway.
+
+    🔴 WHY THIS IS A SEPARATE ARM AND NOT A VARIANT OF THE CORRUPT ONE. `_read_overrides`
+    guards two different calls with one `except Exception`. The corrupt arm exercises the
+    JSON half, and every exception it can raise is a `ValueError` — so narrowing the
+    handler to `except ValueError` is invisible to it. `open()` raises `OSError`, which
+    that narrowing does NOT catch, and the failure then propagates out of
+    `get_enforcement_active` and takes the board down: exactly what this module's prose
+    forbids, "a bad settings file must not take the board down".
+
+    ⚠️ MEASURED, not reasoned: a mutation narrowing the handler to `except ValueError`
+    survived the whole file (0 red) before this arm existed. It is not an equivalent
+    mutant — it is a real defect for which no arm supplied the right input. Found by Mr
+    Radio reading the source after I had recorded it as equivalent; my reading was true
+    of the inputs under test and false of the property.
+
+    A directory at the file's path is the cheapest deterministic way to get there — and
+    it is a real operator shape, not a contrivance: `getmtime` succeeds on it and `open()`
+    raises `IsADirectoryError`.
+    """
+    isolated.mkdir()
+    approval._cache_mtime = None
+    assert isolated.exists(), "the arm needs the path to EXIST — otherwise it is the missing-file case"
+    assert approval.get_enforcement_active() is False
+    assert "[task-approval]" in capsys.readouterr().out, (
+        "an unopenable settings file is swallowed silently — an operator's write looks "
+        "disregarded with no clue why"
+    )
 
 
 def test_a_non_list_approvers_value_is_ignored_rather_than_raising( isolated ):
@@ -359,7 +446,7 @@ def test_the_host_fallback_appends_the_mount_subdirectory( monkeypatch ):
     assert approval.override_path() == path
 
 
-def test_a_json_file_holding_something_other_than_an_object_is_tolerated( isolated, capsys ):
+def test_a_json_file_holding_something_other_than_an_object_is_tolerated( isolated, ini_flags_absent, capsys ):
     """
     Valid JSON, wrong shape — `[1, 2, 3]` parses fine and has no `.get`. Distinct
     from the corrupt-file case above: that one fails in the parser, this one fails
@@ -424,11 +511,16 @@ def test_the_INI_string_is_read_as_a_boolean_both_ways( isolated, monkeypatch, t
 # costume, and that one cost this fleet two days.
 # ---------------------------------------------------------------------------
 
-def test_the_default_mint_status_is_queued_until_somebody_turns_it_on( isolated ):
+def test_the_default_mint_status_is_queued_until_somebody_turns_it_on( isolated, ini_flags_absent ):
     """
-    Today's behaviour, unchanged, and it is the arm that must hold on an ABSENT
-    config: an unreadable settings file must not silently start burying every
-    seat's filed work behind a human.
+    The arm that must hold on an ABSENT config: an unreadable settings file must not
+    silently start burying every seat's filed work behind a human.
+
+    ⚠️ "Today's behaviour, unchanged" is no longer true of the running system and the
+    line has been removed rather than left to mislead. Since `f3870751` the shipped
+    INI turns the holding default ON, so a real create mints `not_approved`. What
+    this arm asserts is the FALLBACK, with both sources absent — which is what its
+    name has always meant and what it silently stopped testing when the INI moved.
     """
     assert not isolated.exists()
     assert approval.default_mint_status() == "queued"

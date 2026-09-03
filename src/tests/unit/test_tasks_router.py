@@ -30,6 +30,7 @@ if _src_path not in sys.path:
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.routers import tasks
 from cosa.rest import task_store_rules as rules
+from cosa.rest import task_approval_settings as approval
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 
 NOW = datetime( 2026, 6, 12, 0, 0, tzinfo=timezone.utc )
@@ -345,6 +346,18 @@ def test_create_queued_default_never_consults_manager_guard( client, repo, monke
     # create — even one whose created_by has NO parseable session id — must NOT
     # touch the guard, or existing queued HTTP callers regress. Prove it by making
     # is_manager_figure EXPLODE if consulted.
+    #
+    # ⚠️ AND THE DEFAULT MINT STATUS IS PINNED, because since `f3870751` the shipped
+    # INI turns the holding-area default ON and a plain create mints `not_approved`.
+    # Pinned at the INI layer rather than by stubbing `default_mint_status`, so the
+    # assertion below still travels the real router -> settings path; stubbing the
+    # getter would leave this test unable to see that path break.
+    real_ini = approval._ini_value
+    monkeypatch.setattr( approval, "_ini_value",
+        lambda key, return_type, fallback:
+            None if key == approval.INI_KEY_DEFAULT_TO_HOLDING
+                 else real_ini( key, return_type, fallback ) )
+
     def _boom( sid ):
         raise AssertionError( "manager guard consulted on the queued default path" )
     monkeypatch.setattr( tasks, "is_manager_figure", _boom )
