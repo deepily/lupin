@@ -2499,6 +2499,48 @@ wrong line of code fails when it runs, while a wrong sentence of reassurance fai
 run that would have exposed it. **Grade a doc's passages by what they DISARM, not only by what they
 INSTRUCT.**
 
+## 🔴 A ROW BODY IS A PLAN, AND A STALE MEASUREMENT IS MORE PERSUASIVE THAN A STALE OPINION
+
+María 🌸's finding, 2026-09-02, and the largest of that evening. **A row body is written BEFORE
+the work and is never revised as the work lands.** So a detailed body slowly becomes a to-do list
+of finished things — and it reads as authoritative **because** it is detailed.
+
+**The receipt is Rick's own P0, `8af64f5a`, which was wrong three times in ten minutes** and wrong
+in the same direction every time: claiming as outstanding work that was already built. Its own
+**"MEASURED GAP"** block is the worst of it — it states that `notifications.js` is **22,474 lines**
+and **"calls NO transition endpoint."** Re-measured at `8319ead2`:
+
+| the body's measured claim | what the file does |
+|---|---|
+| 22,474 lines | **23,781** |
+| calls no transition endpoint | **POSTs `/api/tasks/{id}/transition` at line 10035** |
+
+⇒ **Two managers independently concluded that P0 was untouched while it was substantially
+complete.** Neither of us was careless: we read a block explicitly labelled as a measurement, with
+a line count and a named absence in it, and a measurement is the thing you are supposed to be able
+to trust.
+
+🔴 **THAT IS THE MECHANISM, AND IT IS WHY THIS IS WORSE THAN ORDINARY STALENESS.** A stale
+*opinion* announces itself as a judgement and invites a second look. A stale *measurement* carries
+a number, a file and a line, and every reader treats those as checkable facts rather than as claims
+needing a date. **The precision is what disarms you** — the same defect as § *A WRONG INSTRUCTION
+GETS CAUGHT; A WRONG REASSURANCE DISARMS THE READER*, one level up: there a sentence vouches for a
+dead path, here a figure vouches for a dead reading.
+
+⇒ **Two obligations, and neither is "keep the body up to date" — that is a habit, and a habit is
+not a control:**
+
+1. **STAMP EVERY FIGURE IN A ROW BODY WITH THE SHA AND THE MOMENT IT WAS TAKEN.** *"22,474 lines @
+   `8bf71a64`, 2026-08-31"* is still true a week later; a bare `22,474` becomes false without ever
+   changing. This is § *A COORDINATE IS NOT A REFERENCE* applied to your own numbers.
+2. **RE-MEASURE BEFORE YOU ACT ON A BODY'S MEASUREMENT — never before you merely read it.** The
+   check is cheap (`wc -l`, one `grep`) and it is the only thing standing between a detailed plan
+   and a manager's evening.
+
+⚠️ **AND READ A ROW BODY FOR WHAT IT IS: THE PLAN AS OF ITS WRITING, NOT A STATUS.** The status
+lives in the transitions and the receipts. A body that reads like a status is the most convincing
+wrong answer on the board, because nothing about it looks stale.
+
 ## HISTORY STRUCTURE NOTES
 - **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)
 - **Key Archived Periods**: 
