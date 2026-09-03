@@ -1024,7 +1024,12 @@ test("a successful submit clears a stripe left by an earlier refusal", () => {
   assert.ok(root.querySelector(".task-row-error-stripe"));
   reasonBox(root).value = "now with a reason";
   clickSubmit(root);
-  assert.equal(root.querySelector(".task-row-error-stripe"), null,
+  // A COUNT, NOT THE NODE. When this assertion FAILS the stripe is still there, so a
+  // node-valued actual hands node:assert a happy-dom element to deep-inspect — the walk
+  // goes element -> ownerDocument -> defaultView -> the whole Window graph and never
+  // terminates, killing the run at ~2.5 GB/s (rows f5768ee4 / 32c58572). The failure
+  // path is the only path that matters here, and it was the lethal one.
+  assert.equal(root.querySelectorAll(".task-row-error-stripe").length, 0,
     "an empty message must CLEAR the stripe, not paint a wordless one");
 });
 
