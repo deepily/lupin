@@ -1168,6 +1168,52 @@ claim until you have seen it.
 
 ⚠️ **Related, same family** — the collected-test-id diff. Some test ids bake an **absolute path** into a parametrize id, so diffing collected ids between two worktrees shows the same test as one removal plus one addition. A raw diff read `+225 / −4` and looked like the merges had deleted four tests; they had not. Compare **counts** as well as ids, and treat the agreement of the two as the check.
 
+### 🔴 AND TWO WORKTREE ARTIFACTS THE TIER CANNOT SEE — DO NOT ADD THESE TO THE 10/11
+
+The reconciliation above counts **tier failures**. These two are the same family — present in the
+main checkout, absent from every worktree, gitignored — but **neither one reddens a test**, so
+folding them into that count would corrupt a number this page spent three measurements stabilising.
+
+| what | rule | what it does instead of failing |
+|---|---|---|
+| `src/lupin_app/static/dist/` — **75 files** in the main checkout, **0 tracked** | `.gitignore:194` | an asset census run in a worktree reports live files as **missing** |
+| `<repo-root>/.env`, where the host sets `JWT_SECRET_KEY` | `.gitignore:77` | **`import lupin_app.main` REFUSES** — `jwt_service.py:35` raises at import when the var is unset |
+
+🔴 **THE FIRST IS THE WORST-BEHAVED MEMBER OF THE FAMILY, BECAUSE IT PRODUCES A FALSE *FACT* RATHER
+THAN A FALSE *RED*.** Measured 2026-09-02 (Rachel 🕊️): a census of every asset the shells link
+reported `parity-harness.js` as a dead 404. The file is **26,015 bytes on disk and the live server
+answers 200**. Her classifier had **no logic defect** — it answered correctly about the tree it ran
+in, and she reported that answer as a fact about the application.
+
+⇒ **A red gets investigated. A fact gets written into a docstring** — which is where this one was
+heading, one merge away, as the stated reason for a test skip.
+
+⚠️ **AND IT FIRED THREE TIMES IN ONE EVENING, ON THREE PEOPLE, THE LAST TWO AFTER READING THE FIRST.**
+Rachel's worktree census; then a reviewer's `git check-ignore` sweep that found nothing because the
+file is not the variable (below); then María 🌸's own count of `dist/` returning **2 against 75**,
+with `parity-harness.js` reported "No such file" — **a shallow `ls` on a directory whose contents sit
+one level down in `dist/multiplexer/`.** She was *"one `ls` away from telling you your numbers did not
+reproduce."* ⇒ **A query that cannot reach the thing reports its absence as a fact**, and knowing the
+rule protects you far less than you would expect: she had read Rachel's instance ten minutes earlier.
+
+🔴 **THE SECOND EXPLAINS WHY NOBODY HIT IT BEFORE: THE TIER IS IMMUNE AND THE ASSEMBLED APP IS NOT**
+(sam 🎙️). `src/cosa/tests/conftest.py` does `os.environ.setdefault( "JWT_SECRET_KEY", … )` at
+**collection time**, with a comment forbidding its conversion into a fixture — *"fixtures run at
+execution time, after the collection-time import that needs it."* So **every worktree tier passes**,
+and only something importing `lupin_app.main` **directly** — an end-to-end probe, the assembled-app
+check this page keeps asking for — refuses.
+
+⇒ Say that caveat wherever this is listed, **or the next reader will ask why 21,800 passing tests
+never noticed.**
+
+⚠️ **AND NOTE HOW IT WAS FOUND, BECAUSE THE OBVIOUS SEARCH FAILS.** A sweep for files naming
+`JWT_SECRET_KEY` returns **nothing** — the code reads a **process environment variable**, and `.env`
+is merely where this host happens to set it. **Nothing in the repo connects the two.** A sweep for the
+KEY finds the reader; a sweep for the FILE finds `.env` only if you already suspect it. ⇒ **The
+question that works is not "where is this configured" but "what does the main checkout have that a
+worktree does not"** — the same question the `cloud-run.env` row answers, asked in the one direction
+that does not require knowing the answer first.
+
 ### 🔴 "IS ANOTHER SUITE RUNNING?" — MATCH `comm`, NEVER THE COMMAND LINE
 
 Before taking the box for a tier, seats check whether anyone else is mid-run. **Measured 2026-08-29, both wrong answers on the same box within minutes:**
