@@ -1368,15 +1368,27 @@ arithmetic; the third is somebody deciding what counts as a cache. Say which you
 
 🔴 **AND THE ONE IT FOUND IS A FOURTH SPECIES, NOT A FOURTH INSTANCE — A WEAKENED CHECK THAT
 REPORTS SUCCESS.** `src/tests/websocket_smoke/config/baselines/latest_baseline.json` is gitignored
-with **0 tracked files in that directory**, and it is READ at `run-websocket-smoke-tests.sh:302`
-and `smoke_test_runner.py:1156`. It is also **guarded**:
+with **0 tracked files in that directory**. It is READ at `smoke_test_runner.py:1190-1194`
+— `smoke_test_runner.py:1156` is the SAVE path and was cited here as a read, which it is not —
+and reported on at `run-websocket-smoke-tests.sh:302`. Both are **guarded**:
 
 ```bash
 if [ -f "$baseline_file" ]; then  log_info    "Compared against baseline from: $baseline_time"
 else                              log_warning "No baseline file found - comparison may not have been possible"
 ```
 
-⇒ So in a worktree that suite **RUNS, PASSES, and silently did less.** Set it beside the three
+🔴 **AND THE SCOPE IS NARROWER THAN THIS PARAGRAPH FIRST CLAIMED. I went to falsify my own
+finding after it merged, and it did not survive intact.** The comparison is **not part of a default
+run**: it happens only under `--post-polish`, the one mode that adds `--compare-baseline`
+(`run-websocket-smoke-tests.sh:407`, dispatched at `:427`). **A plain worktree run never attempts a
+comparison, so it degrades nothing.** The first draft said the suite runs, passes and silently did
+less, full stop — that welded a real missing file to a real guarded read without checking whether
+the path executes, which is § *THE OVERCLAIM HIDES IN THE JOIN* committed inside the section
+reporting it.
+
+⇒ **What survives is still a fourth species, and it is worth the narrower claim: under
+`--post-polish` in a worktree the comparison returns `{"status": "no_baseline"}`, logs a WARN, and
+the run REPORTS SUCCESS.** Set that beside the three
 above and the ranking is uncomfortable:
 
 | species | what it does | who investigates |
