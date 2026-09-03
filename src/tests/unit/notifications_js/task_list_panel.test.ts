@@ -72,7 +72,7 @@ type TaskUI = Record<string, unknown> & {
   _taskBodyIsEmpty: ( task: unknown ) => boolean;
   _handleTaskListClick: ( target: unknown ) => void;
   _handleRowControlClick: ( target: unknown ) => boolean;
-  _handleTaskWontFixClick: ( button: unknown ) => Promise<void>;
+  _handleTaskSubmitClick: ( button: unknown ) => Promise<void>;
   _transitionTask: ( id: string, to: string, extras?: unknown ) => Promise<{ ok: boolean; message?: string }>;
   startTaskListPolling: () => void;
   fetchEpicStories: () => Promise<unknown>;
@@ -189,6 +189,51 @@ function buildAccordionDOM( ui: TaskUI ): void {
   document.getElementById( "task-list-container" )!.innerHTML =
     ui.renderTaskListTable( model, undefined, ui.loadCollapsedTaskOwners() );
 }
+
+// ══════════ WIRING THE PANE, BECAUSE THE FIXTURES ABOVE DO NOT ══════════
+//
+// 🔴 `buildPanelDOM` and `buildAccordionDOM` paint a container and stop. So every test
+// that called `_handleTaskListClick` or `_handleTaskAccordionToggle` BY NAME was
+// measuring a correct handler against a container carrying no listener at all — the
+// same shape that let a dead Won't-fix button survive five people looking at it.
+//
+// ⚠️ THIS FILE IS NOT AS BLIND AS `podcast_overlay` WAS, and the difference is worth
+// keeping straight. Measured 2026-09-02: delete every click listener in
+// notifications.js and this file goes 175/0 -> 166 pass / 9 fail, because it already
+// carries nine real click-path tests. The by-name sites are gaps in a watched file,
+// not a file with a watched denominator of zero.
+function wirePane( ui: TaskUI ): void {
+  ui._taskListAccordionWired = false;
+  ui._wireTaskListAccordion();
+}
+
+// Dispatch a real bubbling click and assert a handler was REACHED; the caller then goes
+// on asserting what the click DID.
+//
+// 🔴 THE REACHED-CHECK IS WHY THE NO-OP CASES MEAN ANYTHING. "Nothing happened" is
+// satisfied by a handler that correctly declined AND by no listener existing — two
+// sufficient causes for one observation. Proving the handler ran kills the second, and
+// the check sits ON THE PATH, so a conversion cannot quietly skip it.
+//
+// ⚠️ It is deliberately NOT used on the `{}` / detached-element tests below. Those pass
+// something that is not in any pane, on purpose, to pin the handler's own defensive
+// guard — a click cannot carry a non-element, and forcing one would delete the thing
+// they test rather than strengthen it.
+function clickThrough( ui: TaskUI, method: string, el: Element | null, what: string ): void {
+  assert.ok( el, `${ what } did not render at all — this test cannot speak to wiring` );
+
+  const target   = ui as unknown as Record<string, ( t: unknown ) => unknown >;
+  const original = target[ method ];
+  let   reached  = false;
+  target[ method ] = ( t: unknown ) => { reached = true; return original.call( ui, t ); };
+  el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target[ method ] = original;
+
+  assert.ok( reached,
+    `${ what } reached NO handler — the pane has no click listener for it, so the ` +
+    `control is dead on screen however correct the handler is` );
+}
+
 
 // ─────────────────────────── isTaskOpenStatus (pure) ───────────────────────────
 
@@ -540,6 +585,10 @@ test( "_renderTaskRow: array blocked_by — typed ref, kind-less ref, and raw en
   assert.match( html, /raw-str/ );          // non-object entry → String(b)
 } );
 
+// ⚠️ STAYS BY-NAME, DELIBERATELY. A click cannot carry a `{}` — the dispatcher requires
+// an element — so there is no click path to drive here. What this pins is the handler's
+// own tolerance of a target with no `.closest`, and routing it through a real event
+// would delete the case rather than strengthen it.
 test( "_handleTaskListClick: a target lacking .closest is safely ignored (defensive guard)", () => {
   const ui = newUI();
   buildPanelDOM();
@@ -553,12 +602,22 @@ test( "_handleTaskListClick: a LIVE 📄 with NO dataset opens overlay with empt
   const emoji = document.createElement( "span" );
   emoji.className = "task-detail-emoji";    // live (not dimmed) but carries no data-task-* attrs
   document.getElementById( "task-list-container" )!.appendChild( emoji );
-  ui._handleTaskListClick( emoji );
-  const overlay = document.getElementById( "task-body-overlay" )!;
-  assert.ok( overlay, "overlay opened even with no dataset" );
-  assert.equal( overlay.querySelector( ".task-body-overlay-body" )!.textContent, "" );
-  assert.match( overlay.querySelector( ".task-body-overlay-header" )!.textContent!, /Task detail/ );
-  ui._dismissTaskBodyOverlay();
+  wirePane( ui );
+  // ⚠️ `finally`, not a trailing call. The overlay installs a listener on `document`
+  // itself, which only `_dismissTaskBodyOverlay` takes off again — so a dismiss placed
+  // after the assertions is skipped on exactly the run that matters, the break arm, and
+  // the leaked listener then hangs a later test in this file rather than failing it.
+  // Measured 2026-09-02: the whole file stopped terminating under the break until the
+  // cleanup was moved onto the failure path.
+  try {
+    clickThrough( ui, "_handleTaskListClick", emoji, "a live 📄 with no dataset" );
+    const overlay = document.getElementById( "task-body-overlay" )!;
+    assert.ok( overlay, "overlay opened even with no dataset" );
+    assert.equal( overlay.querySelector( ".task-body-overlay-body" )!.textContent, "" );
+    assert.match( overlay.querySelector( ".task-body-overlay-header" )!.textContent!, /Task detail/ );
+  } finally {
+    ui._dismissTaskBodyOverlay();
+  }
 } );
 
 test( "_handleTaskListClick: clicking a LIVE 📄 opens the body overlay", () => {
@@ -567,12 +626,18 @@ test( "_handleTaskListClick: clicking a LIVE 📄 opens the body overlay", () =>
   const container = document.getElementById( "task-list-container" )!;
   container.innerHTML = ui._renderTaskRow( { id: "abcd1234", title: "t", status: "queued", body: "overlay body text" }, undefined );
   const emoji = container.querySelector( ".task-detail-emoji" )!;
-  ui._handleTaskListClick( emoji );
-  const overlay = document.getElementById( "task-body-overlay" );
-  assert.ok( overlay, "overlay opened" );
-  assert.match( overlay!.querySelector( ".task-body-overlay-body" )!.textContent!, /overlay body text/ );
-  assert.match( overlay!.querySelector( ".task-body-overlay-header" )!.textContent!, /abcd1234/ );
-  ui._dismissTaskBodyOverlay();
+  wirePane( ui );
+  // `finally` for the same reason as the test above: the overlay's `document` keydown
+  // listener outlives a thrown assertion and the cleanup has to be on that path.
+  try {
+    clickThrough( ui, "_handleTaskListClick", emoji, "a live 📄" );
+    const overlay = document.getElementById( "task-body-overlay" );
+    assert.ok( overlay, "overlay opened" );
+    assert.match( overlay!.querySelector( ".task-body-overlay-body" )!.textContent!, /overlay body text/ );
+    assert.match( overlay!.querySelector( ".task-body-overlay-header" )!.textContent!, /abcd1234/ );
+  } finally {
+    ui._dismissTaskBodyOverlay();
+  }
 } );
 
 test( "_handleTaskListClick: a DIMMED 📄 is inert — no overlay, no accordion toggle", () => {
@@ -583,8 +648,9 @@ test( "_handleTaskListClick: a DIMMED 📄 is inert — no overlay, no accordion
   const dimmed = document.createElement( "span" );
   dimmed.className = "task-detail-emoji task-detail-empty";
   container.appendChild( dimmed );
+  wirePane( ui );
   const before = container.innerHTML;
-  ui._handleTaskListClick( dimmed );
+  clickThrough( ui, "_handleTaskListClick", dimmed, "a DIMMED 📄" );
   assert.ok( document.getElementById( "task-body-overlay" ) === null, "no overlay for dimmed emoji" );
   assert.equal( container.innerHTML, before, "no accordion toggle for dimmed emoji" );
 } );
@@ -595,7 +661,8 @@ test( "_handleTaskListClick: a non-emoji target delegates to the accordion toggl
   const header = document.querySelector( ".task-group-header" ) as HTMLElement;
   const tbody  = header.closest( "tbody.task-group" ) as HTMLElement;
   assert.ok( !tbody.classList.contains( "collapsed" ) );
-  ui._handleTaskListClick( header );
+  wirePane( ui );
+  clickThrough( ui, "_handleTaskListClick", header, "a group header" );
   assert.ok( tbody.classList.contains( "collapsed" ), "non-emoji click toggled the group (delegation intact)" );
 } );
 
@@ -1140,12 +1207,28 @@ test( "_applyTaskGroupCollapseState: header without a chevron span → no throw 
 
 // ─────────────── toggle handler ───────────────
 
+// ⚠️ STAYS BY-NAME — same reason as the `_handleTaskListClick` guard above: `{}` is not
+// an element and cannot be clicked.
 test( "_handleTaskAccordionToggle: target lacking .closest → no-op (defensive)", () => {
   const ui = newUI();
   ui._handleTaskAccordionToggle( {} );                 // {}.closest is undefined → return, no throw
   assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
 } );
 
+// ⚠️ STAYS BY-NAME FOR NOW, AND THIS IS AN OPEN ITEM RATHER THAN A DECISION.
+// Converting this test and its "header inside a group" sibling to the click path makes
+// the WHOLE FILE stop terminating under the listener break — not fail, HANG, with test
+// 104 ("delegation: a real click on a header toggles its group") as the boundary, and
+// that is a plain synchronous test which cannot hang on its own. Bisected: revert these
+// two and the same break arm reports 162 pass / 13 fail in seconds.
+//
+// Two hypotheses were posed and both MEASURED WRONG — the body overlay's `document`
+// keydown listener surviving a thrown assertion, and `wirePane` re-installing listeners
+// by resetting the wired guard. Neither changed the hang.
+//
+// ⇒ The mechanism is UNEXPLAINED, and a conversion whose break arm cannot be READ has no
+// evidence behind it. Left by-name deliberately until someone can say why — which is a
+// different reason from the `{}` guards below, where there is simply no click to drive.
 test( "_handleTaskAccordionToggle: target with no header ancestor → no-op", () => {
   const ui = newUI();
   buildAccordionDOM( ui );
@@ -1154,6 +1237,10 @@ test( "_handleTaskAccordionToggle: target with no header ancestor → no-op", ()
   assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
 } );
 
+// ⚠️ STAYS BY-NAME, and this one is the interesting case. The header is deliberately
+// OUTSIDE any pane — that is the condition under test — so a click on it cannot reach
+// the container's listener by construction. Converting it would silently turn a test
+// about a detached header into a test about an unwired pane.
 test( "_handleTaskAccordionToggle: header detached from any tbody.task-group → no-op", () => {
   const ui = newUI();
   const tr = document.createElement( "tr" );
@@ -2010,6 +2097,11 @@ test( "🔴 a disclosure click is CONSUMED — it must not also toggle the owner
     "the disclosure click fell through and also toggled the group it lives in" );
 } );
 
+// ⚠️ STAYS BY-NAME. The subject here is the RETURN VALUE, and a dispatched event throws
+// it away — `_handleTaskListClick` is the only thing that reads it. The click-path half
+// of this contract is already the test directly above, which drives a real click and
+// asserts the accordion did NOT also fire; converting this one would duplicate that and
+// lose the direct check on the boolean both panes route on.
 test( "_handleRowControlClick reports whether it CONSUMED the click", () => {
   // The boolean is the contract both panes route on; a dispatch that always returned
   // false would swallow nothing and let every control click reach the accordion too.
@@ -2018,7 +2110,7 @@ test( "_handleRowControlClick reports whether it CONSUMED the click", () => {
   const host = paneWithRealRows( ui, T_ACTIVE );
 
   assert.equal( ui._handleRowControlClick( host.querySelector( ".task-disclose-button" ) ), true );
-  assert.equal( ui._handleRowControlClick( host.querySelector( ".task-drop-button" ) ), true );
+  assert.equal( ui._handleRowControlClick( host.querySelector( ".task-submit-button" ) ), true );
   assert.equal( ui._handleRowControlClick( host.querySelector( ".task-col-title" ) ), false,
     "an ordinary cell click was swallowed as if it were a control" );
 } );
@@ -2093,11 +2185,26 @@ function bootPollPane(): void {
       <span id="task-list-updated"></span></h3><div id="task-list-container"></div></div>`;
 }
 function pollPane(): HTMLElement { return document.getElementById( "task-list-container" )!; }
+// Rick's redesign (46a3078c): five per-verb boxes became ONE `.task-reason-input`, and
+// five per-verb buttons became ONE `.task-submit-button`. The polling tests below ask
+// what a repaint does to what the operator typed, which is the same question whichever
+// box it was typed into — so only the selector moves.
 function reasonBox(): HTMLInputElement {
-  return pollPane().querySelector( ".task-wont-fix-reason" ) as HTMLInputElement;
+  return pollPane().querySelector( ".task-reason-input" ) as HTMLInputElement;
 }
-function wontFixBtn(): HTMLElement {
-  return pollPane().querySelector( ".task-wont-fix-button" ) as HTMLElement;
+function submitBtn(): HTMLElement {
+  return pollPane().querySelector( ".task-submit-button" ) as HTMLElement;
+}
+
+// Choose the verb the way the operator does. `.task-chase-input` does not exist until
+// this fires — `_handleVerbSelectChange` builds it off the pane's change listener — so
+// assigning `.value` would leave a page state nobody can reach.
+function selectVerb( scope: ParentNode, verb: string ): HTMLSelectElement {
+  const sel = scope.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+  assert.ok( sel, "the row renders no verb select at all — this test cannot speak to the control it names" );
+  sel.value = verb;
+  sel.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  return sel;
 }
 function shownStripe(): HTMLElement | null {
   const s = pollPane().querySelector( ".task-row-error-stripe" ) as HTMLElement | null;
@@ -2115,8 +2222,21 @@ test( "ARM A — type and click FAST, inside one poll interval: the request goes
   ui.startTaskListPolling();
   await tick( 40 );
 
+  // The verb used to be named by WHICH button you pressed; one Submit serves five now,
+  // so choosing it is an explicit step. Skipping it does not merely change the verb — it
+  // makes the submit refuse with "no verb chosen", a DIFFERENT guard wearing the same
+  // red, which is how a re-point lands green on the wrong thing.
+  //
+  // 🔴 AND IT IS `drop`, NOT `wont_fix`, FOR A REASON THAT IS NOT COSMETIC. The redesign
+  // put a two-press confirm on TERMINAL verbs: the first Submit on won't-fix arms the
+  // button ("Confirm won't-fix") and returns WITHOUT sending. These tests are about what
+  // a poll repaint does to text the operator typed — one press, one request — so they
+  // use a non-terminal verb and keep that shape verbatim. Pressing twice here would fold
+  // an untested confirm gate into a test about repaints, and a test that measures two
+  // things tells you which one broke exactly never.
+  selectVerb( pollPane(), "drop" );
   reasonBox().value = "not doing this";
-  wontFixBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  submitBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
   await tick( 15 );
   ui.stopTaskListPolling();
 
@@ -2132,12 +2252,13 @@ test( "🔴 ARM B — type, let ONE POLL land, then click: the typed reason must
   ui.startTaskListPolling();
   await tick( 40 );
 
+  selectVerb( pollPane(), "drop" );
   reasonBox().value = "not doing this";
   await tick( 60 );                                  // the operator reads on; a poll lands
   assert.equal( reasonBox().value, "not doing this",
     "a poll repaint wiped a reason the operator had typed and not yet submitted" );
 
-  wontFixBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  submitBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
   await tick( 15 );
   ui.stopTaskListPolling();
   assert.equal( sent.length, 1, "the click sent nothing — the reason was gone by the time it ran" );
@@ -2151,7 +2272,8 @@ test( "🔴 a refusal stripe must SURVIVE a poll — a refusal nobody sees did n
   ui.startTaskListPolling();
   await tick( 40 );
 
-  wontFixBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );   // blank reason
+  selectVerb( pollPane(), "drop" );
+  submitBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );   // blank reason
   await tick( 10 );
   assert.ok( shownStripe(), "precondition: the refusal is on screen" );
   const before = shownStripe()!.textContent ?? "";
@@ -2192,7 +2314,8 @@ test( "🔴 the RARE window too: a repaint between press and click must not swal
   ui.startTaskListPolling();
   await tick( 40 );
 
-  const btn = wontFixBtn();
+  selectVerb( pollPane(), "drop" );
+  const btn = submitBtn();
   reasonBox().value = "not doing this";
   btn.dispatchEvent( new window.MouseEvent( "mousedown", { bubbles: true } ) );
   await tick( 60 );                                  // the poll lands mid-press
@@ -2217,12 +2340,17 @@ test( "🔴 a paint HELD for a press is replayed the moment the press ends", asy
   await tick( 40 );
   ui.stopTaskListPolling();
 
+  // ⚠️ THE VERB IS CHOSEN BEFORE THE SNAPSHOT, and the order is load-bearing. Choosing
+  // one rewrites the row's placeholder and can add the date field, so a `before` taken
+  // first differs from the live markup immediately and the "paint is held" precondition
+  // fails for a reason that has nothing to do with holding paints.
+  selectVerb( pollPane(), "drop" );
   const before = pollPane().innerHTML;
-  wontFixBtn().dispatchEvent( new window.MouseEvent( "mousedown", { bubbles: true } ) );
+  submitBtn().dispatchEvent( new window.MouseEvent( "mousedown", { bubbles: true } ) );
   ui.renderTaskList( { status: "ok", tasks: [ { ...T_PARKED_GATE, title: "renamed by a peer" } ] } );
   assert.equal( pollPane().innerHTML, before, "precondition: the paint is held during the press" );
 
-  wontFixBtn().dispatchEvent( new window.MouseEvent( "mouseup", { bubbles: true } ) );
+  submitBtn().dispatchEvent( new window.MouseEvent( "mouseup", { bubbles: true } ) );
   assert.match( pollPane().textContent ?? "", /renamed by a peer/,
     "the held paint was dropped, not delayed — the pane is frozen on stale rows" );
 } );
@@ -2230,20 +2358,32 @@ test( "🔴 a paint HELD for a press is replayed the moment the press ends", asy
 test( "🔴 each box is restored into ITS OWN field, not merely into the right row", async () => {
   // A row carries several inputs — park takes a reason AND a chase date. Keying the saved
   // value on the task id alone would put the reason text into the date box.
+  //
+  // 🔴 THE FIXTURE MOVED AND THE PROPERTY DID NOT. This used to prove the point with the
+  // drop box and the won't-fix box, two of five reason fields on one row; the redesign
+  // leaves one shared reason box, so that pair no longer exists to tell apart. The
+  // property is still exactly what the comment above already named — park's reason AND
+  // its chase date — so it is now proved with those two. They are a STRONGER pair than
+  // the old one: different element types and different names, where the old two were
+  // both text inputs.
   const { ui } = pollUI();
   bootPollPane();
   ui.startTaskListPolling();
   await tick( 40 );
 
-  ( pollPane().querySelector( ".task-drop-reason" ) as HTMLInputElement ).value = "DROP TEXT";
-  ( pollPane().querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value = "WONT-FIX TEXT";
+  // Park is what puts two different fields on one row, so it is the verb this test needs.
+  selectVerb( pollPane(), "park" );
+  ( pollPane().querySelector( ".task-reason-input" ) as HTMLInputElement ).value = "REASON TEXT";
+  const chase = pollPane().querySelector( ".task-chase-input" ) as HTMLInputElement | null;
+  assert.ok( chase, "park rendered no chase date — this test cannot speak to per-field restore" );
+  chase!.value = "2026-09-09";
   await tick( 60 );
   ui.stopTaskListPolling();
 
-  assert.equal( ( pollPane().querySelector( ".task-drop-reason" ) as HTMLInputElement ).value,
-                "DROP TEXT", "the drop box came back with another control's text" );
-  assert.equal( ( pollPane().querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value,
-                "WONT-FIX TEXT", "the won't-fix box came back with another control's text" );
+  assert.equal( ( pollPane().querySelector( ".task-reason-input" ) as HTMLInputElement ).value,
+                "REASON TEXT", "the reason box came back with another control's text" );
+  assert.equal( ( pollPane().querySelector( ".task-chase-input" ) as HTMLInputElement ).value,
+                "2026-09-09", "the chase box came back with another control's text" );
 } );
 
 // ══════ collapsing a group must CLOSE the controls disclosed inside it ══════

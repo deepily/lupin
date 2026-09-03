@@ -75,7 +75,7 @@ type EpicUI = Record<string, unknown> & {
   _handleRowControlClick: ( target: unknown ) => boolean;
   _disclosureToggle: ( task: Row ) => string;
   _handleDisclosureToggle: ( button: unknown ) => void;
-  _handleTaskDropClick: ( button: unknown ) => void;
+  _handleTaskSubmitClick: ( button: unknown ) => void;
   _wireEpicBoardAccordion: () => void;
   _epicKeysInDom: () => string[];
   collapseAllEpics: () => void;
@@ -123,6 +123,56 @@ function buildPanelDOM(): void {
 
 function fakeResponse( status: number, ok: boolean, jsonBody: unknown ): unknown {
   return { status, ok, json: async () => jsonBody };
+}
+
+// ══════════ WIRING THE PANE, BECAUSE `buildPanelDOM` DOES NOT ══════════
+//
+// 🔴 It paints `#epic-board-container` and stops. So the tests below that called
+// `_handleEpicAccordionToggle` or `_handleDisclosureToggle` BY NAME were measuring a
+// correct handler against a pane with no listener on it — a control can be dead on
+// screen and the test still green.
+//
+// ⚠️ THIS FILE IS NOT AS BLIND AS `podcast_overlay` WAS. Measured 2026-09-02: delete
+// every click listener in notifications.js and it goes 70/0 -> 66 pass / 4 fail,
+// because it already carries four real click-path tests. These are gaps in a watched
+// file, which wants different framing from a watched denominator of zero.
+// ⚠️ IT DOES NOT RESET `_epicBoardAccordionWired`, AND THAT MATTERS. `renderEpicBoard`
+// already wires the pane, so forcing a re-wire installs a SECOND listener and one click
+// then fires the handler TWICE — which toggles the group open and straight back shut.
+// Measured on the way in: three of these tests failed with "expected false, actual true"
+// against a perfectly correct page, because the fixture was double-firing. The method's
+// own wired-once guard is the thing to lean on, not to defeat.
+//
+// ⚠️ AND IT DELIBERATELY DIVERGES FROM `task_list_panel.test.ts`, WHICH STILL RESETS.
+// Harmonising the two looked obviously right and was tried; measured, it re-introduced
+// that file's non-terminating break arm, while the resetting form leaves it readable at
+// 162 pass / 13 fail. So the two helpers differ ON PURPOSE — evidence-led, not drift —
+// and it is a third fact pointing at the same unexplained interaction over there.
+// Noted, not chased: see the open-item note beside that file's accordion tests.
+function wirePane( ui: EpicUI ): void {
+  ui._wireEpicBoardAccordion();
+}
+
+// Dispatch a real bubbling click and assert a handler was REACHED; the caller then goes
+// on asserting what the click DID.
+//
+// 🔴 THE REACHED-CHECK IS WHAT MAKES THE NO-OP CASES MEAN ANYTHING. "Nothing happened"
+// is satisfied by a handler that correctly declined AND by no listener existing — two
+// sufficient causes for one observation. Proving the handler ran kills the second, and
+// the check sits ON THE PATH, so a conversion cannot quietly skip it.
+function clickThrough( ui: EpicUI, method: string, el: Element | null, what: string ): void {
+  assert.ok( el, `${ what } did not render at all — this test cannot speak to wiring` );
+
+  const target   = ui as unknown as Record<string, ( t: unknown ) => unknown >;
+  const original = target[ method ];
+  let   reached  = false;
+  target[ method ] = ( t: unknown ) => { reached = true; return original.call( ui, t ); };
+  el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target[ method ] = original;
+
+  assert.ok( reached,
+    `${ what } reached NO handler — the pane has no click listener for it, so the ` +
+    `control is dead on screen however correct the handler is` );
 }
 
 // Representative rows. Note R_NO_KEY and R_WRONG_KEY: the no-correlation_key path
@@ -567,7 +617,8 @@ test( "clicking a group header toggles it in place and persists the choice", () 
   assert.ok( tbody.classList.contains( "collapsed" ), "epics start collapsed" );
 
   const header = tbody.querySelector( ".epic-group-header" ) as HTMLElement;
-  ui._handleEpicAccordionToggle( header );
+  wirePane( ui );
+  clickThrough( ui, "_handleEpicAccordionToggle", header, "the seal-the-test-tier group header" );
   assert.equal( tbody.classList.contains( "collapsed" ), false );
   assert.equal( header.getAttribute( "aria-expanded" ), "true" );
   assert.equal( tbody.querySelector( ".epic-group-chevron" )!.textContent, "▾" );
@@ -579,7 +630,8 @@ test( "clicking a descendant of the header (the chevron) still toggles the group
   buildAccordionDOM( ui );
   const tbody   = document.querySelector( 'tbody.epic-group[data-epic="epic:seal-the-test-tier"]' ) as HTMLElement;
   const chevron = tbody.querySelector( ".epic-group-chevron" ) as HTMLElement;
-  ui._handleEpicAccordionToggle( chevron );
+  wirePane( ui );
+  clickThrough( ui, "_handleEpicAccordionToggle", chevron, "the group chevron" );
   assert.equal( tbody.classList.contains( "collapsed" ), false );
 } );
 
@@ -587,7 +639,12 @@ test( "a click outside any header is a no-op", () => {
   const ui = newUI();
   buildAccordionDOM( ui );
   const before = document.getElementById( "epic-board-container" )!.innerHTML;
-  ui._handleEpicAccordionToggle( document.querySelector( ".epic-row" ) );
+  wirePane( ui );
+  clickThrough( ui, "_handleEpicAccordionToggle", document.querySelector( ".epic-row" ),
+    "an ordinary epic row" );
+  // ⚠️ `null` and `{}` STAY BY-NAME. Neither is an element, so there is no click to
+  // drive; what they pin is the handler's own tolerance of a junk target, and routing
+  // them through a real event would delete the case rather than strengthen it.
   ui._handleEpicAccordionToggle( null );
   ui._handleEpicAccordionToggle( {} );
   assert.equal( document.getElementById( "epic-board-container" )!.innerHTML, before );
@@ -633,7 +690,9 @@ test( "the collapse choice survives a re-render — the reload requirement, end 
   const ui = newUI();
   buildAccordionDOM( ui );
   const tbody  = document.querySelector( 'tbody.epic-group[data-epic="epic:seal-the-test-tier"]' ) as HTMLElement;
-  ui._handleEpicAccordionToggle( tbody.querySelector( ".epic-group-header" ) );
+  wirePane( ui );
+  clickThrough( ui, "_handleEpicAccordionToggle", tbody.querySelector( ".epic-group-header" ),
+    "the seal-the-test-tier group header" );
 
   // A brand-new instance rendering into a brand-new DOM, reading only storage.
   const reborn = newUI();
@@ -833,6 +892,26 @@ function epicPaneWithRealRows( ui: EpicUI, ...tasks: Row[] ): HTMLElement {
   return host;
 }
 
+// Rick's redesign (46a3078c) collapsed five per-verb buttons and five boxes into ONE
+// select, ONE reason field and ONE Submit. Reaching a control therefore has an extra
+// step now: choose the verb, THEN fill, THEN submit.
+//
+// 🔴 A REAL `change`, NOT AN ASSIGNMENT. `.task-chase-input` does not exist until
+// `_handleVerbSelectChange` builds it, reached through the pane's own change listener.
+// Setting `.value` alone leaves a page state no operator can produce — which is the
+// same defect class these tests were written to remove, one level in.
+//
+// Idiom taken verbatim from Rio's `row_control_redesign.test.ts`, which took
+// `clickThrough` from mine; keeping them identical is what lets either file be read by
+// someone who knows the other.
+function selectVerb( scope: ParentNode, verb: string ): HTMLSelectElement {
+  const sel = scope.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+  assert.ok( sel, "the row renders no verb select at all — this test cannot speak to the control it names" );
+  sel.value = verb;
+  sel.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  return sel;
+}
+
 function clickIt( el: Element | null ): void {
   assert.ok( el, "the element to click was not rendered" );
   el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
@@ -881,12 +960,16 @@ test( "🔴 THROUGH THE CLICK PATH: the epic board's row ACTION buttons are WIRE
   // The ellipsis alone is half a fix: disclosing controls that do nothing is worse
   // than not disclosing them, because now the operator watches them fail silently.
   const ui = newUI();
-  let dropped = false;
-  ui._handleTaskDropClick = (): void => { dropped = true; };
+  let submitted = false;
+  ui._handleTaskSubmitClick = (): void => { submitted = true; };
   const host = epicPaneWithRealRows( ui, R_SEAL_A );
 
-  clickIt( host.querySelector( ".task-drop-button" ) );
-  assert.equal( dropped, true, "Drop on the epic board reached no handler" );
+  // Same question as before the redesign — does a row action control on THIS pane reach
+  // its handler — asked of the control that now carries every verb. Drop used to have a
+  // button of its own; it is an option on the select today.
+  selectVerb( host, "drop" );
+  clickIt( host.querySelector( ".task-submit-button" ) );
+  assert.equal( submitted, true, "Submit on the epic board reached no handler" );
 } );
 
 test( "🔴 a control click on the epic board does NOT also toggle its group", () => {
@@ -931,16 +1014,17 @@ test( "🔴 a repaint of the epic board keeps a typed reason, a shown refusal an
   ui._wireEpicBoardAccordion();
   container.innerHTML = ui.renderEpicBoardTable( model, ui.loadEpicGroupState() );
 
-  const box = container.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement;
+  const box = container.querySelector( ".task-reason-input" ) as HTMLInputElement;
   assert.ok( box, "no reason box rendered on the epic board — this test cannot speak" );
   box.value = "not doing this";
-  ui._handleDisclosureToggle( container.querySelector( ".task-disclose-button" ) );
+  clickThrough( ui, "_handleDisclosureToggle", container.querySelector( ".task-disclose-button" ),
+    "the epic board's disclosure ellipsis" );
   ui._renderTaskRowError( R_SEAL_A.id as string, "A won't-fix reason is required.", container );
   assert.equal( ( container.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false );
 
   ui.renderEpicBoard( { status: "ok", tasks: [ R_SEAL_A ] }, false );      // the poll lands
 
-  assert.equal( ( container.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value,
+  assert.equal( ( container.querySelector( ".task-reason-input" ) as HTMLInputElement ).value,
     "not doing this", "the repaint wiped a reason the operator had typed and not yet sent" );
   assert.equal( ( container.querySelector( ".task-row-error-stripe" ) as HTMLElement ).hidden, false,
     "the repaint wiped the refusal — the control now looks dead" );

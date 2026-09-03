@@ -81,7 +81,8 @@ type HoldingUI = Record<string, unknown> & {
   _controlScope: ( button: unknown ) => ParentNode;
   _rowInputValue: ( taskId: string, cls: string, scope: unknown ) => string;
   _handleTaskDemoteClick: ( button: unknown ) => Promise<void>;
-  _handleTaskApproveClick: ( button: unknown ) => Promise<void>;
+  _handleTaskSubmitClick: ( button: unknown ) => Promise<void>;
+  _handleVerbSelectChange: ( select: unknown ) => void;
   _handleHoldingWontFixAllClick: ( button: unknown ) => Promise<void>;
   _transitionTask: ( id: string, to: string, extras?: unknown ) => Promise<{ ok: boolean; message?: string }>;
   refreshTaskList: () => Promise<void>;
@@ -137,34 +138,53 @@ test( "a terminal row renders every control disabled — not merely described as
     const host = document.createElement( "div" );
     host.innerHTML = ui._taskActionsCell( row( { status } ) );
 
-    const buttons = Array.from( host.querySelectorAll( "button" ) );
-    assert.ok( buttons.length > 0, `${status}: no controls rendered at all` );
-    for ( const b of buttons ) {
-      assert.equal( ( b as HTMLButtonElement ).disabled, true,
-        `${status}: "${b.textContent}" is clickable on a terminal row the server refuses outright` );
-      assert.equal( b.getAttribute( "aria-disabled" ), "true", `${status}: "${b.textContent}" has no aria-disabled` );
+    // Five buttons became one select and one Submit (46a3078c), so "every control" is
+    // now three things rather than five. The claim is unchanged: nothing on a terminal
+    // row is operable, because the server refuses every edge out of one.
+    const select = host.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+    const submit = host.querySelector( ".task-submit-button" ) as HTMLButtonElement;
+    assert.ok( select && submit, `${status}: no controls rendered at all` );
+    assert.equal( select.disabled, true, `${status}: the verb select is operable on a terminal row` );
+    assert.equal( submit.disabled, true, `${status}: Submit is clickable on a terminal row the server refuses outright` );
+    assert.equal( submit.getAttribute( "aria-disabled" ), "true", `${status}: Submit has no aria-disabled` );
+
+    // 🔴 AND EVERY OPTION, not only the select. A disabled select with live options is
+    // one attribute away from being operable again, and the option labels are where a
+    // terminal row now states its reason — an `<option>` has nowhere to show a tooltip.
+    const verbs = Array.from( host.querySelectorAll( 'option[value]:not([value=""])' ) ) as HTMLOptionElement[];
+    assert.ok( verbs.length > 0, `${status}: the select offers no verbs at all` );
+    for ( const o of verbs ) {
+      assert.equal( o.disabled, true, `${status}: "${o.textContent}" is selectable on a terminal row` );
     }
-    // ...and no inputs, because there is nothing to fill in for a move that cannot happen.
-    assert.equal( host.querySelectorAll( "input" ).length, 0,
-      `${status}: renders inputs for an impossible transition` );
+
+    // ...and the reason box is dead too, because there is nothing to fill in for a move
+    // that cannot happen. It renders now rather than being omitted — one shared field
+    // cannot come and go per verb — so the claim moves from ABSENT to DISABLED.
+    const reason = host.querySelector( ".task-reason-input" ) as HTMLInputElement;
+    assert.ok( reason, `${status}: no reason field rendered at all` );
+    assert.equal( reason.disabled, true, `${status}: offers a reason box for an impossible transition` );
   }
 } );
 
 test( "park is enabled ONLY from queued / in_progress, and says why when it is not", () => {
   const ui = newUI();
+  // Park is an OPTION now, not a button of its own. ⚠️ And the reason moved with it: a
+  // button carried its rule in `title`, and an `<option>` has nowhere to show a tooltip,
+  // so the rule is in the option's own LABEL. Asserting `title` here would pass against
+  // an option that never says anything, which is the defect this test exists to catch.
   const parkOf = ( status: string ) => {
     const host = document.createElement( "div" );
     host.innerHTML = ui._taskActionsCell( row( { status } ) );
-    return host.querySelector( ".task-park-button" ) as HTMLButtonElement;
+    return host.querySelector( '.task-verb-select option[value="park"]' ) as HTMLOptionElement;
   };
   for ( const status of [ "queued", "in_progress" ] ) {
     assert.equal( parkOf( status ).disabled, false, `park should be live from ${status}` );
   }
   for ( const status of [ "blocked", "review", "claimed", "parked", "not_approved" ] ) {
-    const b = parkOf( status );
-    assert.equal( b.disabled, true, `park is offered from ${status}, which the server refuses with a 422` );
-    assert.match( b.getAttribute( "title" ) ?? "", /queued or in progress/,
-      `${status}: the disabled park button does not teach the rule` );
+    const o = parkOf( status );
+    assert.equal( o.disabled, true, `park is offered from ${status}, which the server refuses with a 422` );
+    assert.match( o.textContent ?? "", /queued or in progress/,
+      `${status}: the greyed park option does not teach the rule` );
   }
 } );
 
@@ -173,8 +193,8 @@ test( "approve and demote are never both live on the same row", () => {
   for ( const status of [ "queued", "in_progress", "blocked", "review", "parked", "not_approved" ] ) {
     const host = document.createElement( "div" );
     host.innerHTML = ui._taskActionsCell( row( { status } ) );
-    const approve = host.querySelector( ".task-approve-button" ) as HTMLButtonElement;
-    const demote  = host.querySelector( ".task-demote-button" )  as HTMLButtonElement;
+    const approve = host.querySelector( '.task-verb-select option[value="approve"]' ) as HTMLOptionElement;
+    const demote  = host.querySelector( '.task-verb-select option[value="demote"]' )  as HTMLOptionElement;
 
     assert.equal( !approve.disabled && !demote.disabled, false,
       `${status}: approve and demote both live — one of them is a no-op edge the store rejects` );
@@ -194,10 +214,21 @@ test( "won't-fix and demote each render the input their transition REQUIRES", ()
   const host = document.createElement( "div" );
   host.innerHTML = ui._taskActionsCell( row( { status: "queued" } ) );
 
-  assert.ok( host.querySelector( ".task-wont-fix-reason" ), "won't-fix has no reason input" );
-  assert.ok( host.querySelector( ".task-demote-reason" ),   "demote has no reason input" );
+  // ONE shared reason box serves every verb that needs one, so the claim is no longer
+  // "each verb has its own field" — it is that the field a transition REQUIRES is
+  // reachable. The reason box is unconditional; the date is built when the verb that
+  // needs it is chosen, which is why this asks through `_handleVerbSelectChange` rather
+  // than reading markup that never carried a date until somebody picked demote.
+  assert.ok( host.querySelector( ".task-reason-input" ), "no reason input rendered at all" );
+  assert.equal( host.querySelector( ".task-chase-input" ), null,
+    "a date box is rendered before any verb asked for one" );
+
+  const sel = host.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+  sel.value = "demote";
+  ui._handleVerbSelectChange( sel );
+
   // Rick's ruling 2026-09-02: a held row comes back on a chase, like a parked one.
-  const chase = host.querySelector( ".task-demote-chase" ) as HTMLInputElement;
+  const chase = host.querySelector( ".task-chase-input" ) as HTMLInputElement;
   assert.ok( chase, "demote collects no triage-by date" );
   assert.equal( chase.type, "date", "the triage-by input is not a date picker" );
 } );
@@ -227,13 +258,12 @@ test( "won't-fix will not call the server on a blank reason, and sends it verbat
 
   const id = "aaaaaaaa-1111-2222-3333-444444444444";
   paintedTaskList( ui, [ row( { id, status: "queued" } ) ] );
-  const button = document.querySelector( ".task-wont-fix-button" );
 
-  await clickThrough( ui, "_handleTaskWontFixClick", button, "Won't fix" );
+  await submitTerminalVerb( ui, "wont_fix", document, "Won't fix" );
   assert.equal( calls.length, 0, "a blank won't-fix reason reached the server" );
 
-  fillRowInput( "task-wont-fix-reason", "fuck no, I will not fix this" );
-  await clickThrough( ui, "_handleTaskWontFixClick", button, "Won't fix" );
+  fillRowInput( "task-reason-input", "fuck no, I will not fix this" );
+  await submitTerminalVerb( ui, "wont_fix", document, "Won't fix" );
   assert.equal( calls.length, 1 );
   assert.equal( calls[ 0 ][ 1 ], "wont_fix" );
   assert.equal( ( calls[ 0 ][ 2 ] as { reason: string } ).reason, "fuck no, I will not fix this" );
@@ -247,18 +277,17 @@ test( "demote requires BOTH a reason and a triage-by date, and stamps a real ins
 
   const id = "aaaaaaaa-1111-2222-3333-444444444444";
   paintedTaskList( ui, [ row( { id, status: "queued" } ) ] );
-  const button = document.querySelector( ".task-demote-button" );
 
-  await clickThrough( ui, "_handleTaskDemoteClick", button, "Demote" );
+  await submitVerb( ui, "demote", document, "Demote" );
   assert.equal( calls.length, 0, "a blank demote reason reached the server" );
 
-  fillRowInput( "task-demote-reason", "overtaken by the holding-area work" );
-  await clickThrough( ui, "_handleTaskDemoteClick", button, "Demote" );
+  fillRowInput( "task-reason-input", "overtaken by the holding-area work" );
+  await submitVerb( ui, "demote", document, "Demote" );
   assert.equal( calls.length, 0,
     "a demotion with NO triage-by date reached the server — that row would never come back" );
 
-  fillRowInput( "task-demote-chase", "2026-09-10" );
-  await clickThrough( ui, "_handleTaskDemoteClick", button, "Demote" );
+  fillRowInput( "task-chase-input", "2026-09-10" );
+  await submitVerb( ui, "demote", document, "Demote" );
   assert.equal( calls.length, 1 );
   const extras = calls[ 0 ][ 2 ] as { reason: string; next_chase_ts: string };
   assert.equal( calls[ 0 ][ 1 ], "not_approved" );
@@ -286,7 +315,7 @@ test( "approve sends the promotion and never invents an allowlist check of its o
   // the one place a real click on a real Approve button can happen at all.
   const id = "aaaaaaaa-1111-2222-3333-444444444444";
   paintedWith( ui, { status: "ok", tasks: [ row( { id, status: "not_approved" } ) ] } );
-  await clickThrough( ui, "_handleTaskApproveClick", document.querySelector( ".task-approve-button" ), "Approve" );
+  await submitVerb( ui, "approve", document, "Approve" );
 
   assert.equal( calls.length, 1, "approve did not fire — the client is gating on a rule of its own" );
   assert.equal( calls[ 0 ][ 1 ], "queued" );
@@ -300,9 +329,9 @@ test( "a refused transition shows the SERVER'S words, not a client paraphrase", 
 
   const id = "aaaaaaaa-1111-2222-3333-444444444444";
   paintedTaskList( ui, [ row( { id, status: "queued" } ) ] );
-  fillRowInput( "task-wont-fix-reason", "because" );
+  fillRowInput( "task-reason-input", "because" );
 
-  await clickThrough( ui, "_handleTaskWontFixClick", document.querySelector( ".task-wont-fix-button" ), "Won't fix" );
+  await submitTerminalVerb( ui, "wont_fix", document, "Won't fix" );
   const stripe = document.querySelector( `.task-row-error-stripe[data-error-for="${id}"]` ) as HTMLElement;
   assert.equal( stripe.hidden, false, "the refusal is invisible — the row looks like nothing happened" );
   assert.ok( ( stripe.textContent ?? "" ).includes( serverWords ),
@@ -410,6 +439,43 @@ async function clickThrough(
   await ran;
 }
 
+
+// ══════════ THE REDESIGN: FIVE BUTTONS BECAME ONE SELECT AND ONE SUBMIT ══════════
+//
+// Rick's ruling, built by Rio at 46a3078c. "Press Drop" is now "choose drop, then press
+// Submit", so reaching a control has one more step than it did.
+//
+// 🔴 THE VERB IS CHOSEN INSIDE THIS HELPER, ON THE PATH TO THE CLICK — the same reason
+// `clickThrough` asserts the handler was reached rather than leaving it to a separate
+// line. Submitting with no verb chosen does not send the wrong thing, it refuses with
+// "no verb chosen", and that red is INDISTINGUISHABLE from the blank-reason red these
+// tests are about. A step on the path cannot be forgotten; a step beside it can.
+//
+// ⚠️ AND A REAL `change`, NEVER AN ASSIGNMENT. `.task-chase-input` does not exist until
+// `_handleVerbSelectChange` builds it off the pane's own change listener, so setting
+// `.value` alone leaves a page state no operator can produce.
+function chooseVerb( scope: ParentNode, verb: string, what = "the row" ): HTMLSelectElement {
+  const sel = scope.querySelector( ".task-verb-select" ) as HTMLSelectElement | null;
+  assert.ok( sel, `${ what }: the row renders no verb select at all — this test cannot speak to the control it names` );
+  sel!.value = verb;
+  sel!.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  return sel!;
+}
+
+async function submitVerb( ui: HoldingUI, verb: string, scope: ParentNode, what: string ): Promise<void> {
+  chooseVerb( scope, verb, what );
+  await clickThrough( ui, "_handleTaskSubmitClick", scope.querySelector( ".task-submit-button" ), what );
+}
+
+// Won't-fix is TERMINAL, and the redesign gave terminal verbs a two-press confirm: the
+// first Submit arms the button and sends nothing. Two presses IS what the operator does
+// now, so a test about won't-fix reaching the server has to do both — the alternative,
+// switching to a non-terminal verb, would stop testing won't-fix.
+async function submitTerminalVerb( ui: HoldingUI, verb: string, scope: ParentNode, what: string ): Promise<void> {
+  await submitVerb( ui, verb, scope, `${ what } (arming press)` );
+  await clickThrough( ui, "_handleTaskSubmitClick", scope.querySelector( ".task-submit-button" ),
+    `${ what } (confirming press)` );
+}
 
 function paintedWith( ui: HoldingUI, payload: Record<string, unknown> ): void {
   realPageDOM();
@@ -605,9 +671,8 @@ test( "🔴 a reason typed on the EPIC BOARD is the one that gets sent", async (
 
   // Rick types into the SECOND pane — the one he is looking at — and clicks ITS button.
   const epic = document.getElementById( "epic-board-table" ) as HTMLElement;
-  ( epic.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value = "fuck no, I will not fix this";
-  await clickThrough( ui, "_handleTaskWontFixClick", epic.querySelector( ".task-wont-fix-button" ),
-    "the EPIC BOARD's Won't fix" );
+  ( epic.querySelector( ".task-reason-input" ) as HTMLInputElement ).value = "fuck no, I will not fix this";
+  await submitTerminalVerb( ui, "wont_fix", epic, "the EPIC BOARD's Won't fix" );
 
   assert.equal( calls.length, 1,
     "the click was swallowed — the handler read the OTHER pane's empty box and refused silently" );
@@ -623,8 +688,7 @@ test( "🔴 a refusal appears in the pane the operator actually clicked in", asy
 
   // Both boxes blank: the refusal is legitimate. The question is WHERE it is shown.
   const epic = document.getElementById( "epic-board-table" ) as HTMLElement;
-  await clickThrough( ui, "_handleTaskWontFixClick", epic.querySelector( ".task-wont-fix-button" ),
-    "the EPIC BOARD's Won't fix" );
+  await submitTerminalVerb( ui, "wont_fix", epic, "the EPIC BOARD's Won't fix" );
 
   const epicStripe = epic.querySelector( ".task-row-error-stripe" ) as HTMLElement;
   assert.equal( epicStripe.hidden, false,
@@ -822,9 +886,9 @@ test( "🔴 Drop sends `dropped` — the verb is asserted, so a wrong terminal s
   // instinct to file it as one is what has to be corrected.
   const { ui, calls } = recordingUI();
   paintedTaskList( ui, [ row( { id: CTRL_ID, status: "queued" } ) ] );
-  fillRowInput( "task-drop-reason", "superseded by the epic board" );
+  fillRowInput( "task-reason-input", "superseded by the epic board" );
 
-  await clickThrough( ui, "_handleTaskDropClick", document.querySelector( ".task-drop-button" ), "Drop" );
+  await submitVerb( ui, "drop", document, "Drop" );
   assert.equal( calls.length, 1, "Drop never reached the server" );
   assert.equal( calls[ 0 ][ 1 ], "dropped", "Drop sent the wrong transition verb" );
   assert.equal( ( calls[ 0 ][ 2 ] as { reason: string } ).reason, "superseded by the epic board",
@@ -835,7 +899,7 @@ test( "🔴 Drop refuses a blank reason, tells the operator why, and calls nobod
   const { ui, calls } = recordingUI();
   paintedTaskList( ui, [ row( { id: CTRL_ID, status: "queued" } ) ] );
 
-  await clickThrough( ui, "_handleTaskDropClick", document.querySelector( ".task-drop-button" ), "Drop" );
+  await submitVerb( ui, "drop", document, "Drop" );
   assert.equal( calls.length, 0, "a blank drop reason reached the server" );
   const stripe = document.querySelector( ".task-row-error-stripe" ) as HTMLElement;
   assert.equal( stripe.hidden, false, "the refusal is invisible — the row looks like nothing happened" );
@@ -845,10 +909,14 @@ test( "🔴 Drop refuses a blank reason, tells the operator why, and calls nobod
 test( "🔴 Park sends `parked` with the reason AND a real chase instant", async () => {
   const { ui, calls } = recordingUI();
   paintedTaskList( ui, [ row( { id: CTRL_ID, status: "queued" } ) ] );
-  fillRowInput( "task-park-reason", "waiting on Rick's ruling" );
-  fillRowInput( "task-park-chase",  "2026-09-10" );
+  // ⚠️ THE VERB COMES FIRST, and it is not style. `.task-chase-input` is built by
+  // `_handleVerbSelectChange`, so filling before choosing writes into a field that does
+  // not exist yet — and the fixture says so loudly rather than passing.
+  chooseVerb( document, "park", "Park" );
+  fillRowInput( "task-reason-input", "waiting on Rick's ruling" );
+  fillRowInput( "task-chase-input",  "2026-09-10" );
 
-  await clickThrough( ui, "_handleTaskParkClick", document.querySelector( ".task-park-button" ), "Park" );
+  await submitVerb( ui, "park", document, "Park" );
   assert.equal( calls.length, 1, "Park never reached the server" );
   assert.equal( calls[ 0 ][ 1 ], "parked", "Park sent the wrong transition verb" );
   // NOTE the field name: Park sends `park_reason`, where Drop and Won't-fix send
@@ -869,9 +937,10 @@ test( "🔴 Park refuses a blank REASON specifically — the chase date is fille
   // refusal, so deleting one is invisible; filling the chase leaves exactly one.
   const { ui, calls } = recordingUI();
   paintedTaskList( ui, [ row( { id: CTRL_ID, status: "queued" } ) ] );
-  fillRowInput( "task-park-chase", "2026-09-10" );
+  chooseVerb( document, "park", "Park" );
+  fillRowInput( "task-chase-input", "2026-09-10" );
 
-  await clickThrough( ui, "_handleTaskParkClick", document.querySelector( ".task-park-button" ), "Park" );
+  await submitVerb( ui, "park", document, "Park" );
   assert.equal( calls.length, 0, "a blank park reason reached the server" );
   assert.match( ( document.querySelector( ".task-row-error-stripe" ) as HTMLElement ).textContent ?? "",
     /park reason is required/i );
@@ -880,9 +949,9 @@ test( "🔴 Park refuses a blank REASON specifically — the chase date is fille
 test( "🔴 Park refuses a blank CHASE DATE specifically — the reason is filled in", async () => {
   const { ui, calls } = recordingUI();
   paintedTaskList( ui, [ row( { id: CTRL_ID, status: "queued" } ) ] );
-  fillRowInput( "task-park-reason", "waiting on Rick's ruling" );
+  fillRowInput( "task-reason-input", "waiting on Rick's ruling" );
 
-  await clickThrough( ui, "_handleTaskParkClick", document.querySelector( ".task-park-button" ), "Park" );
+  await submitVerb( ui, "park", document, "Park" );
   assert.equal( calls.length, 0, "an unbounded park reached the server" );
   assert.match( ( document.querySelector( ".task-row-error-stripe" ) as HTMLElement ).textContent ?? "",
     /chase date is required/i );
@@ -894,9 +963,10 @@ test( "🔴 Demote refuses a blank REASON specifically — the triage-by date is
   // the CHASE guard and stays green with the reason guard deleted.
   const { ui, calls } = recordingUI();
   paintedTaskList( ui, [ row( { id: CTRL_ID, status: "queued" } ) ] );
-  fillRowInput( "task-demote-chase", "2026-09-10" );
+  chooseVerb( document, "demote", "Demote" );
+  fillRowInput( "task-chase-input", "2026-09-10" );
 
-  await clickThrough( ui, "_handleTaskDemoteClick", document.querySelector( ".task-demote-button" ), "Demote" );
+  await submitVerb( ui, "demote", document, "Demote" );
   assert.equal( calls.length, 0, "a blank demote reason reached the server" );
   assert.match( ( document.querySelector( ".task-row-error-stripe" ) as HTMLElement ).textContent ?? "",
     /demote reason is required/i );
@@ -919,19 +989,26 @@ test( "🔴 _controlScope reads the input in the CLICKED row's own cell, not the
   ( document.getElementById( "task-list-container" ) as HTMLElement ).innerHTML = `
     <table><tbody>
       <tr><td class="task-actions">
-        <input class="task-action-input task-drop-reason" data-task-id="${CTRL_ID}" value="THE FIRST ROW'S TEXT">
-        <button class="task-action-btn task-drop-button" data-task-id="${CTRL_ID}" id="first">Drop</button>
+        <select class="task-verb-select" data-task-id="${CTRL_ID}"><option value="drop" selected>Drop</option></select>
+        <input class="task-action-input task-reason-input" data-task-id="${CTRL_ID}" value="THE FIRST ROW'S TEXT">
+        <button class="task-action-btn task-submit-button" data-task-id="${CTRL_ID}" id="first">Submit</button>
       </td></tr>
       <tr><td class="task-actions">
-        <input class="task-action-input task-drop-reason" data-task-id="${CTRL_ID}" value="THE SECOND ROW'S TEXT">
-        <button class="task-action-btn task-drop-button" data-task-id="${CTRL_ID}" id="second">Drop</button>
+        <select class="task-verb-select" data-task-id="${CTRL_ID}"><option value="drop" selected>Drop</option></select>
+        <input class="task-action-input task-reason-input" data-task-id="${CTRL_ID}" value="THE SECOND ROW'S TEXT">
+        <button class="task-action-btn task-submit-button" data-task-id="${CTRL_ID}" id="second">Submit</button>
       </td></tr>
       <tr class="task-row-error-stripe" data-error-for="${CTRL_ID}" hidden><td></td></tr>
     </tbody></table>`;
   ui._wireHoldingAreaControls();
   ui._wireTaskListAccordion();
 
-  await clickThrough( ui, "_handleTaskDropClick", document.getElementById( "second" ), "the SECOND row's Drop" );
+  // ⚠️ SCOPED TO THE SECOND ROW'S OWN CELL, and that is the entire test. A
+  // `document`-wide lookup finds the FIRST Submit, which sends the first row's text and
+  // reports exactly the failure this test was written to detect — a fixture defect
+  // wearing the costume of the defect under test. Caught by that assertion firing.
+  const secondCell = document.getElementById( "second" )!.closest( ".task-actions" )!;
+  await submitVerb( ui, "drop", secondCell, "the SECOND row's Submit" );
   assert.equal( calls.length, 1, "Drop never reached the server" );
   assert.equal( ( calls[ 0 ][ 2 ] as { reason: string } ).reason, "THE SECOND ROW'S TEXT",
     "the handler sent a different row's reason — the scope fell back past `.task-actions`" );
@@ -1036,11 +1113,11 @@ test( "🔴 THROUGH THE CLICK PATH: batch WON'T-FIX-ALL reaches its handler", ()
 test( "🔴 THROUGH THE CLICK PATH: a PER-ROW control in this pane reaches its handler", () => {
   const ui = newUI();
   let got: string | null = null;
-  ui._handleTaskWontFixClick = async ( b ) => { got = ( b as HTMLElement ).dataset.taskId ?? ""; };
+  ui._handleTaskSubmitClick = async ( b ) => { got = ( b as HTMLElement ).dataset.taskId ?? ""; };
   paintedHoldingPane( ui );
 
-  clickIt( document.querySelector( "#holding-area-container .task-wont-fix-button" ),
-           "a per-row won't-fix in the holding pane" );
+  clickIt( document.querySelector( "#holding-area-container .task-submit-button" ),
+           "a per-row Submit in the holding pane" );
   assert.equal( got, "h1", "a per-row control in the holding pane reached no handler" );
 } );
 
@@ -1049,12 +1126,12 @@ test( "the sibling task-list pane still routes its own clicks — the panes do n
   // must reach exactly one handler, from the pane it was made in.
   const ui = newUI();
   const reached: string[] = [];
-  ui._handleTaskWontFixClick = async ( b ) => { reached.push( ( b as HTMLElement ).dataset.taskId ?? "" ); };
+  ui._handleTaskSubmitClick = async ( b ) => { reached.push( ( b as HTMLElement ).dataset.taskId ?? "" ); };
   paintedHoldingPane( ui );
   document.getElementById( "task-list-container" )!.innerHTML =
     `<table>${ui._renderTaskRow( row( { id: "tl1", status: "not_approved" } ), undefined )}</table>`;
 
-  clickIt( document.querySelector( "#task-list-container .task-wont-fix-button" ), "task-list won't-fix" );
+  clickIt( document.querySelector( "#task-list-container .task-submit-button" ), "the task-list pane's Submit" );
   assert.deepEqual( reached, [ "tl1" ], "the task-list pane's own click no longer reaches its handler" );
 } );
 
@@ -1081,11 +1158,11 @@ test( "🔴 _heldRowIdsForFiler collects ONLY its own group — a batch cannot r
   document.body.innerHTML = `
     <div id="holding-area-container">
       <div class="holding-area-group" data-filer="alice">
-        <button class="task-action-btn task-approve-button" data-task-id="a1"></button>
-        <button class="task-action-btn task-approve-button" data-task-id="a2"></button>
+        <select class="task-verb-select" data-task-id="a1"><option value="approve">Approve</option></select>
+        <select class="task-verb-select" data-task-id="a2"><option value="approve">Approve</option></select>
       </div>
       <div class="holding-area-group" data-filer="bob">
-        <button class="task-action-btn task-approve-button" data-task-id="b1"></button>
+        <select class="task-verb-select" data-task-id="b1"><option value="approve">Approve</option></select>
       </div>
     </div>`;
 
@@ -1135,7 +1212,7 @@ function batchDOM( ids: string[], reason = "closing the lot" ): void {
     <div id="holding-area-container">
       <div class="holding-area-group" data-filer="alice">
         <span class="holding-area-group-status" data-filer="alice"></span>
-        ${ids.map( i => `<button class="task-action-btn task-approve-button" data-task-id="${i}"></button>` ).join( "" )}
+        ${ids.map( i => `<select class="task-verb-select" data-task-id="${i}"><option value="approve">Approve</option></select>` ).join( "" )}
         <input class="task-action-input holding-wont-fix-all-reason" data-filer="alice" value="${reason}">
       </div>
     </div>`;
@@ -1212,7 +1289,7 @@ test( "🔴 a repaint of THIS pane keeps a typed reason, a shown refusal and a d
   ui.renderHoldingArea( { status: "ok", tasks: HELD_ROWS } );
   const container = document.getElementById( "holding-area-container" )!;
 
-  ( container.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value = "not doing this";
+  ( container.querySelector( ".task-reason-input" ) as HTMLInputElement ).value = "not doing this";
   ( container.querySelector( ".task-disclose-button" ) as HTMLElement )
     .dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
   ui._renderTaskRowError( "h1", "A won't-fix reason is required.", container );
@@ -1220,7 +1297,7 @@ test( "🔴 a repaint of THIS pane keeps a typed reason, a shown refusal and a d
 
   ui.renderHoldingArea( { status: "ok", tasks: HELD_ROWS } );          // the poll lands
 
-  assert.equal( ( container.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value,
+  assert.equal( ( container.querySelector( ".task-reason-input" ) as HTMLInputElement ).value,
     "not doing this", "the repaint wiped a reason the operator had typed and not yet sent" );
   const stripe = container.querySelector( ".task-row-error-stripe" ) as HTMLElement;
   assert.equal( stripe.hidden, false, "the repaint wiped the refusal — the control now looks dead" );
