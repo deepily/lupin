@@ -43,20 +43,42 @@ from lupin_app.versioned_static import VersionedStaticFiles
 
 
 STATIC_DIR = Path( __file__ ).resolve().parents[ 2 ] / "lupin_app" / "static"
-SHELL      = STATIC_DIR / "html" / "notifications.html"
+SHELLS     = sorted( ( STATIC_DIR / "html" ).glob( "*.html" ) )
 
 
 def _linked_versioned_assets():
     """
-    Every `/static/...?v=...` URL the shell links — the corpus, read from the page.
+    Every `/static/...?v=...` URL any shell links — the versioned corpus.
 
     Ensures:
-        - returns a sorted list of (path, query) pairs, deduplicated
+        - returns a sorted list of (path, query) pairs, deduplicated across shells
         - discovers from the HTML rather than from a list kept in this file
     """
-    html  = SHELL.read_text( encoding="utf-8" )
-    found = re.findall( r'(?:src|href)="(/static/[^"?]+)\?(v=[^"]+)"', html )
+    found = []
+    for shell in SHELLS:
+        found += re.findall( r'(?:src|href)="(/static/[^"?]+)\?(v=[^"]+)"',
+                             shell.read_text( encoding="utf-8" ) )
     return sorted( set( found ) )
+
+
+def _every_linked_asset():
+    """
+    Every `/static/...` URL any shell links, tokened or not, with its query string.
+
+    ⚠️ THIS IS THE CORPUS THAT MATTERS AND IT IS SIX TIMES THE OTHER ONE. Measured
+    2026-09-02: 54 links across 7 shells, of which only 9 carry a `?v=` — and all 9 are
+    on ONE page. The other six shells version nothing at all, so they never had a busting
+    mechanism to have a hole in; before this policy they were relying on nothing.
+
+    Ensures:
+        - returns a sorted list of (path, query) pairs — query is "" when absent
+        - spans every shell, so a new page is covered the day it is added
+    """
+    found = []
+    for shell in SHELLS:
+        found += re.findall( r'(?:src|href)="(/static/[^"?]+)(\?[^"]*)?"',
+                             shell.read_text( encoding="utf-8" ) )
+    return sorted( { ( path, q or "" ) for path, q in found } )
 
 
 @pytest.fixture
@@ -87,6 +109,44 @@ def test_every_versioned_asset_the_page_links_is_served_with_a_freshness_directi
         assert r.status_code == 200, f"{path} is linked by the shell and does not serve"
         if not r.headers.get( "cache-control" ): missing.append( path )
     assert missing == [], f"linked with ?v= and served with no cache-control: {missing}"
+
+
+def test_no_asset_any_shell_links_is_served_without_a_policy( client ):
+    """
+    THE WIDE CLAIM, and the honest measure of what this change did. The versioned guard
+    above covers 9 assets on one page; this covers all 54 links across all 7 shells.
+    Measured before the fix: 53 of the 53 that serve came back with NO cache-control.
+
+    ⚠️ IT ADDS NO MUTATION-DETECTION POWER OVER THE VERSIONED GUARD, and pretending
+    otherwise would be padding. One mount serves every one of these, so no edit can make
+    one shell's assets differ from another's — anything that breaks these breaks those.
+    What it adds is REACH: the file's claim now matches the fix's actual scope, and a
+    seventh shell added tomorrow is covered on the day someone links from it.
+
+    ⚠️ A LINK THAT 404s IS SKIPPED RATHER THAN FAILED. Whether a shell links a file that
+    does not exist is a real question and a different one; folding it in here would make
+    a caching guard go red for a missing asset and teach the next reader to distrust it.
+    (One such link exists today: parity-harness.html → /static/dist/multiplexer/
+    parity-harness.js. Named, not swallowed.)
+    """
+    missing = []
+    for path, query in _every_linked_asset():
+        r = client.get( f"{path}{query}" )
+        if r.status_code != 200: continue
+        if not r.headers.get( "cache-control" ): missing.append( path )
+    assert missing == [], f"linked by a shell and served with no cache-control: {missing}"
+
+
+def test_the_wide_corpus_is_wider_than_the_versioned_one( client ):
+    """
+    THE POSITIVE CONTROL FOR THE WIDENING ITSELF. If the two discoveries returned the same
+    set, the test above would be the versioned one wearing a longer name — and a reader
+    would credit it with reach it did not have.
+    """
+    wide, versioned = _every_linked_asset(), _linked_versioned_assets()
+    assert len( wide ) > len( versioned ) * 2, \
+        f"the wide corpus ({len( wide )}) is not meaningfully wider than the versioned one ({len( versioned )})"
+    assert any( q == "" for _, q in wide ), "no un-tokened asset was discovered - the regex has stopped matching"
 
 
 def test_a_versioned_url_is_cacheable_because_the_token_makes_it_immutable( client ):

@@ -29,6 +29,18 @@ belongs.
 ⚠️ THIS IS A SERVING POLICY, NOT A FIX FOR ANY ONE ASSET. The hole was never about a file
 somebody was looking at; it was a policy absent everywhere, so a per-file remedy would have
 left the other eight exactly as they were.
+
+🔴 AND "THE OTHER EIGHT" UNDERSTATES IT BY SIX TIMES — MEASURED ACROSS EVERY SHELL, NOT THE
+ONE THE INCIDENT HAPPENED ON. 54 asset links across 7 shells, 53 of which serve. Before this
+policy: 53 of 53 with no cache directive. After: 0 with none — 44 revalidating, 9 immutable.
+
+⇒ SO THE `?v=` SCHEME IS NOT THE SUBJECT, IT IS ONE PAGE'S CORNER OF IT. `notifications.html`
+is the ONLY shell that versions anything; the other six — multiplexer (23 assets), dev-tools,
+document-viewer, landing, parity-harness, audio-player — link 44 assets with no token at all.
+They never had a busting mechanism to have a hole in. They were relying on nothing, and the
+`no-cache` half of this policy is what they get instead. That is the larger half of the
+change and it is easy to miss, because the bug that surfaced it happened on the one page
+where a token scheme already existed.
 """
 
 from starlette.staticfiles import StaticFiles
