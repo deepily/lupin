@@ -2245,3 +2245,38 @@ test( "🔴 each box is restored into ITS OWN field, not merely into the right r
   assert.equal( ( pollPane().querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value,
                 "WONT-FIX TEXT", "the won't-fix box came back with another control's text" );
 } );
+
+// ══════ collapsing a group must CLOSE the controls disclosed inside it ══════
+//
+// 🔴 Rick, 2026-09-02: "if you close the epic-group-header it should definitely hide the
+// displayed task-actions… even when the containing parent group header is scrolled back
+// up, it does not hide the displayed task action."
+//
+// Collapse is a CSS class on the tbody; the controls row carries its own `hidden`. The two
+// were independent, so a group could be collapsed with a disclosed row still showing —
+// and, worse, re-expanding brought back a form the operator had not asked for, with the
+// ellipsis still claiming aria-expanded="true" for a row nobody could see.
+
+test( "🔴 collapsing an owner group closes any controls disclosed inside it", () => {
+  const ui = newUI();
+  document.body.replaceChildren();
+  const host = document.createElement( "div" );
+  host.id = "task-list-container";
+  document.body.appendChild( host );
+  ui._taskListAccordionWired = false;
+  ui._wireTaskListAccordion();
+  host.innerHTML = ui.renderTaskListTable( ui.groupTasksByOwner( [ T_ACTIVE ] ), undefined, new Set<string>() );
+
+  const toggle = host.querySelector( ".task-disclose-button" ) as HTMLElement;
+  toggle.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  assert.equal( ( host.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false,
+    "precondition: the row is disclosed" );
+
+  ( host.querySelector( ".task-group-header" ) as HTMLElement )
+    .dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+
+  assert.equal( ( host.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, true,
+    "the group collapsed with its controls still on screen" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "false",
+    "the ellipsis still claims the row is open inside a collapsed group" );
+} );

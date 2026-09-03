@@ -11137,6 +11137,48 @@ class NotificationsUI {
         return isCollapsed;
     }
 
+    _closeDisclosedRowsIn( scope ) {
+        /**
+         * Close every controls row disclosed inside a group that is being collapsed.
+         *
+         * 🔴 RICK, 2026-09-02: "if you close the epic-group-header it should definitely
+         * hide the displayed task-actions… even when the containing parent group header is
+         * scrolled back up, it does not hide the displayed task action."
+         *
+         * ⚠️ COLLAPSE AND DISCLOSURE WERE INDEPENDENT STATES. A group collapses by a CSS
+         * class on its tbody; a controls row hides by its own `hidden` attribute. Nothing
+         * connected them, so a group could be collapsed with a form still on screen — and
+         * re-expanding brought that form back unasked, with the ellipsis still reporting
+         * `aria-expanded="true"` for a row nobody could see.
+         *
+         * ⚠️ IT CLEARS THE ERROR STRIPE TOO, for the reason `_handleDisclosureToggle`
+         * does: a refusal left under a form that is no longer visible is a complaint about
+         * something the operator cannot look at, and it survives the next repaint reading
+         * like a fresh failure.
+         *
+         * Requires:
+         *     - scope is the group element being collapsed
+         *
+         * Ensures:
+         *     - every disclosed controls row inside it is hidden
+         *     - each matching toggle returns to aria-expanded="false" and its Show title
+         *     - a group with nothing disclosed is a no-op, never a throw
+         */
+        if ( !scope || typeof scope.querySelectorAll !== "function" ) return;
+        for ( const row of scope.querySelectorAll( ".task-controls-row[data-controls-for]" ) ) {
+            if ( row.hidden ) continue;
+            row.hidden = true;
+            const taskId = row.dataset.controlsFor;
+            const toggle = scope.querySelector(
+                `.task-disclose-button[data-task-id="${CSS.escape( taskId )}"]` );
+            if ( toggle ) {
+                toggle.setAttribute( "aria-expanded", "false" );
+                toggle.setAttribute( "title", "Show row controls" );
+            }
+            this._renderTaskRowError( taskId, "", scope );
+        }
+    }
+
     _applyTaskGroupCollapseState( tbody, isCollapsed ) {
         /**
          * Reflect a group's collapsed state into its already-rendered DOM (class +
@@ -11151,6 +11193,7 @@ class NotificationsUI {
          *     - the header's aria-expanded + chevron reflect the new state
          */
         tbody.classList.toggle( "collapsed", isCollapsed );
+        if ( isCollapsed ) this._closeDisclosedRowsIn( tbody );
         const header = tbody.querySelector( ".task-group-header" );
         if ( header ) {
             header.setAttribute( "aria-expanded", String( !isCollapsed ) );
@@ -12707,6 +12750,7 @@ class NotificationsUI {
          *     - the header's aria-expanded + chevron reflect the new state
          */
         tbody.classList.toggle( "collapsed", isCollapsed );
+        if ( isCollapsed ) this._closeDisclosedRowsIn( tbody );
         const header = tbody.querySelector( ".epic-group-header" );
         if ( header ) {
             header.setAttribute( "aria-expanded", String( !isCollapsed ) );
