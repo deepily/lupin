@@ -125,6 +125,49 @@ function fakeResponse( status: number, ok: boolean, jsonBody: unknown ): unknown
   return { status, ok, json: async () => jsonBody };
 }
 
+// ══════════ WIRING THE PANE, BECAUSE `buildPanelDOM` DOES NOT ══════════
+//
+// 🔴 It paints `#epic-board-container` and stops. So the tests below that called
+// `_handleEpicAccordionToggle` or `_handleDisclosureToggle` BY NAME were measuring a
+// correct handler against a pane with no listener on it — a control can be dead on
+// screen and the test still green.
+//
+// ⚠️ THIS FILE IS NOT AS BLIND AS `podcast_overlay` WAS. Measured 2026-09-02: delete
+// every click listener in notifications.js and it goes 70/0 -> 66 pass / 4 fail,
+// because it already carries four real click-path tests. These are gaps in a watched
+// file, which wants different framing from a watched denominator of zero.
+// ⚠️ IT DOES NOT RESET `_epicBoardAccordionWired`, AND THAT MATTERS. `renderEpicBoard`
+// already wires the pane, so forcing a re-wire installs a SECOND listener and one click
+// then fires the handler TWICE — which toggles the group open and straight back shut.
+// Measured on the way in: three of these tests failed with "expected false, actual true"
+// against a perfectly correct page, because the fixture was double-firing. The method's
+// own wired-once guard is the thing to lean on, not to defeat.
+function wirePane( ui: EpicUI ): void {
+  ui._wireEpicBoardAccordion();
+}
+
+// Dispatch a real bubbling click and assert a handler was REACHED; the caller then goes
+// on asserting what the click DID.
+//
+// 🔴 THE REACHED-CHECK IS WHAT MAKES THE NO-OP CASES MEAN ANYTHING. "Nothing happened"
+// is satisfied by a handler that correctly declined AND by no listener existing — two
+// sufficient causes for one observation. Proving the handler ran kills the second, and
+// the check sits ON THE PATH, so a conversion cannot quietly skip it.
+function clickThrough( ui: EpicUI, method: string, el: Element | null, what: string ): void {
+  assert.ok( el, `${ what } did not render at all — this test cannot speak to wiring` );
+
+  const target   = ui as unknown as Record<string, ( t: unknown ) => unknown >;
+  const original = target[ method ];
+  let   reached  = false;
+  target[ method ] = ( t: unknown ) => { reached = true; return original.call( ui, t ); };
+  el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target[ method ] = original;
+
+  assert.ok( reached,
+    `${ what } reached NO handler — the pane has no click listener for it, so the ` +
+    `control is dead on screen however correct the handler is` );
+}
+
 // Representative rows. Note R_NO_KEY and R_WRONG_KEY: the no-correlation_key path
 // the plan's DoD calls out by name, in BOTH its shapes.
 const R_SEAL_A   = { id: "aaaaaaaa1", title: "Block the network", status: "blocked",
@@ -567,7 +610,8 @@ test( "clicking a group header toggles it in place and persists the choice", () 
   assert.ok( tbody.classList.contains( "collapsed" ), "epics start collapsed" );
 
   const header = tbody.querySelector( ".epic-group-header" ) as HTMLElement;
-  ui._handleEpicAccordionToggle( header );
+  wirePane( ui );
+  clickThrough( ui, "_handleEpicAccordionToggle", header, "the seal-the-test-tier group header" );
   assert.equal( tbody.classList.contains( "collapsed" ), false );
   assert.equal( header.getAttribute( "aria-expanded" ), "true" );
   assert.equal( tbody.querySelector( ".epic-group-chevron" )!.textContent, "▾" );
@@ -579,7 +623,8 @@ test( "clicking a descendant of the header (the chevron) still toggles the group
   buildAccordionDOM( ui );
   const tbody   = document.querySelector( 'tbody.epic-group[data-epic="epic:seal-the-test-tier"]' ) as HTMLElement;
   const chevron = tbody.querySelector( ".epic-group-chevron" ) as HTMLElement;
-  ui._handleEpicAccordionToggle( chevron );
+  wirePane( ui );
+  clickThrough( ui, "_handleEpicAccordionToggle", chevron, "the group chevron" );
   assert.equal( tbody.classList.contains( "collapsed" ), false );
 } );
 
@@ -587,7 +632,12 @@ test( "a click outside any header is a no-op", () => {
   const ui = newUI();
   buildAccordionDOM( ui );
   const before = document.getElementById( "epic-board-container" )!.innerHTML;
-  ui._handleEpicAccordionToggle( document.querySelector( ".epic-row" ) );
+  wirePane( ui );
+  clickThrough( ui, "_handleEpicAccordionToggle", document.querySelector( ".epic-row" ),
+    "an ordinary epic row" );
+  // ⚠️ `null` and `{}` STAY BY-NAME. Neither is an element, so there is no click to
+  // drive; what they pin is the handler's own tolerance of a junk target, and routing
+  // them through a real event would delete the case rather than strengthen it.
   ui._handleEpicAccordionToggle( null );
   ui._handleEpicAccordionToggle( {} );
   assert.equal( document.getElementById( "epic-board-container" )!.innerHTML, before );
@@ -633,7 +683,9 @@ test( "the collapse choice survives a re-render — the reload requirement, end 
   const ui = newUI();
   buildAccordionDOM( ui );
   const tbody  = document.querySelector( 'tbody.epic-group[data-epic="epic:seal-the-test-tier"]' ) as HTMLElement;
-  ui._handleEpicAccordionToggle( tbody.querySelector( ".epic-group-header" ) );
+  wirePane( ui );
+  clickThrough( ui, "_handleEpicAccordionToggle", tbody.querySelector( ".epic-group-header" ),
+    "the seal-the-test-tier group header" );
 
   // A brand-new instance rendering into a brand-new DOM, reading only storage.
   const reborn = newUI();
@@ -934,7 +986,8 @@ test( "🔴 a repaint of the epic board keeps a typed reason, a shown refusal an
   const box = container.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement;
   assert.ok( box, "no reason box rendered on the epic board — this test cannot speak" );
   box.value = "not doing this";
-  ui._handleDisclosureToggle( container.querySelector( ".task-disclose-button" ) );
+  clickThrough( ui, "_handleDisclosureToggle", container.querySelector( ".task-disclose-button" ),
+    "the epic board's disclosure ellipsis" );
   ui._renderTaskRowError( R_SEAL_A.id as string, "A won't-fix reason is required.", container );
   assert.equal( ( container.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false );
 
