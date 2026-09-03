@@ -610,7 +610,7 @@ what broke.
 ⚠️ **RELATED, SEPARATELY OWNED, AND DELIBERATELY NOT FOLDED IN HERE.** Two other checks disagreed
 with their subjects the same evening — Sam 🎙️'s route guard matching on a **shorter key** than the
 router's (path where Starlette uses path AND method), and María 🌸's `dist/` count from a **shallower
-scope** than the tree (§ *TWO WORKTREE ARTIFACTS THE TIER CANNOT SEE*). They rhyme with this and they
+scope** than the tree (§ *THE WORKTREE ARTIFACTS THE TIER CANNOT SEE*). They rhyme with this and they
 are not this. **Sharing an evening is not sharing a finding** — Mr. Radio 🦉's ruling, and Sam
 declined the pairing himself before it was put to him: *"a forced pair is worse than one clean
 example."* Each is filed under the person who measured it, in their own words. **A rule assembled
@@ -1287,10 +1287,10 @@ claim until you have seen it.
 
 ⚠️ **Related, same family** — the collected-test-id diff. Some test ids bake an **absolute path** into a parametrize id, so diffing collected ids between two worktrees shows the same test as one removal plus one addition. A raw diff read `+225 / −4` and looked like the merges had deleted four tests; they had not. Compare **counts** as well as ids, and treat the agreement of the two as the check.
 
-### 🔴 AND TWO WORKTREE ARTIFACTS THE TIER CANNOT SEE — DO NOT ADD THESE TO THE 10/11
+### 🔴 AND THE WORKTREE ARTIFACTS THE TIER CANNOT SEE — DO NOT ADD THESE TO THE 10/11
 
-The reconciliation above counts **tier failures**. These two are the same family — present in the
-main checkout, absent from every worktree, gitignored — but **neither one reddens a test**, so
+The reconciliation above counts **tier failures**. These are the same family — present in the
+main checkout, absent from every worktree, gitignored — but **none of them reddens a test in that tier**, so
 folding them into that count would corrupt a number this page spent three measurements stabilising.
 
 | what | rule | what it does instead of failing |
@@ -1344,6 +1344,66 @@ KEY finds the reader; a sweep for the FILE finds `.env` only if you already susp
 question that works is not "where is this configured" but "what does the main checkout have that a
 worktree does not"** — the same question the `cloud-run.env` row answers, asked in the one direction
 that does not require knowing the answer first.
+
+🔴 **AND THAT QUESTION HAS A MECHANICAL ANSWER — STOP EXTENDING THIS LIST ONE INJURY AT A TIME**
+(sam 🎙️, 2026-09-02, read-only census at `9efefb5c`). Every artifact above was found by somebody
+being bitten by it. They did not have to be. **A fresh worktree contains exactly the tracked files
+at that sha ⇒ everything git does not track is, BY CONSTRUCTION, exactly what a worktree lacks.**
+The set is computable, not discoverable:
+
+```bash
+git ls-files --others --ignored --exclude-standard --directory
+```
+
+| stage | count |
+|---|---|
+| ignored entries in the main checkout | **383,038** |
+| after dropping caches, vendored trees, ephemera and logs | **154** |
+| config-, credential- or state-shaped | **33** |
+| already documented here | 7 |
+| **undocumented AND actually reached by code** | **1** |
+
+⇒ **The filter is where the judgement lives, and it is the only place.** The first two steps are
+arithmetic; the third is somebody deciding what counts as a cache. Say which you are quoting.
+
+🔴 **AND THE ONE IT FOUND IS A FOURTH SPECIES, NOT A FOURTH INSTANCE — A WEAKENED CHECK THAT
+REPORTS SUCCESS.** `src/tests/websocket_smoke/config/baselines/latest_baseline.json` is gitignored
+with **0 tracked files in that directory**, and it is READ at `run-websocket-smoke-tests.sh:302`
+and `smoke_test_runner.py:1156`. It is also **guarded**:
+
+```bash
+if [ -f "$baseline_file" ]; then  log_info    "Compared against baseline from: $baseline_time"
+else                              log_warning "No baseline file found - comparison may not have been possible"
+```
+
+⇒ So in a worktree that suite **RUNS, PASSES, and silently did less.** Set it beside the three
+above and the ranking is uncomfortable:
+
+| species | what it does | who investigates |
+|---|---|---|
+| a **RED** (`cloud-run.env`) | 9 failures naming the missing variable | everyone |
+| a **REFUSAL** (`.env` / `JWT_SECRET_KEY`) | the import raises | everyone |
+| a **FALSE FACT** (`static/dist/`) | reports a live file as dead | whoever doubts it |
+| 🔴 a **WEAKENED CHECK** (this one) | **passes, having compared nothing** | **nobody** |
+
+**The other three send someone to look. This one does not.** And it is a `:7999` suite — the venue
+people genuinely do run from a worktree — so the exposure is ordinary rather than exotic.
+
+⚠️ **AND THE CANDIDATE THAT LOOKED STRONGEST DISSOLVED ON INSPECTION — recorded so nobody re-files
+it.** `src/conf/long-term-memory/lupin-auth.db` is gitignored, absent from every worktree, and
+carries **8 references in `src/`, 5 of them in tests**. That reads like a live exposure. Every one
+is a `tmp_path` or a mocked config: `test_create_api_keys_table.py:48/133/139` build their own,
+`test_sqlite_database.py:48/59` feed a mock a string and assert on the string, the rest is README
+prose. **Nothing opens the real file**, and the same holds for `lupin-notifications.db`. This is
+§ *A HIT IS NOT A USE* firing on the census built to close this family — **the enumeration is
+arithmetic, the classification still requires reading the call sites.**
+
+⚠️ **TWO LIMITS, and they are what make the 33 usable rather than quotable:**
+- **Nobody has been shown to have taken a reduced websocket result as a pass.** The exposure is
+  demonstrated; a victim is not. Hazard, not incident.
+- **The 154 is a judgement, not a measured population.** A different notion of "cache" gives a
+  different denominator, and the 33 is not claimed to be exhaustive of everything a worktree lacks
+  that matters.
 
 ### 🔴 "IS ANOTHER SUITE RUNNING?" — MATCH `comm`, NEVER THE COMMAND LINE
 
