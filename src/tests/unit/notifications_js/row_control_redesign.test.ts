@@ -749,3 +749,38 @@ test( "🔴 the batch collects only rows the batch verb is LEGAL on", () => {
   assert.deepEqual( ui._heldRowIdsForFiler( "alice" ), [ "held-1" ],
     "the batch reaches rows Approve is not legal on — it would post a no-op edge the store rejects as a failure" );
 } );
+
+
+test( "🔴 a REFUSED click disarms — the arming does not outlive the refusal", async () => {
+  const ui   = newUI();
+  const host = paneWithCell( ui, row( { status: "queued" } ) );
+  const calls: string[] = [];
+  ui._transitionTask = async ( _i, to ) => { calls.push( to ); return { ok: true }; };
+  ui.refreshTaskList = async () => {};
+
+  const box = host.querySelector( ".task-reason-input" ) as HTMLInputElement;
+  const btn = host.querySelector( ".task-submit-button" ) as HTMLButtonElement;
+
+  selectVerb( host, "wont_fix" );
+  box.value = "not doing it";
+  await clickThrough( ui, "_handleTaskSubmitClick", btn, "the arming click" );
+  assert.equal( ( btn.textContent ?? "" ).trim(), "Confirm won't-fix", "precondition: the button armed" );
+
+  // The operator changes their mind about the wording and clears the box, then clicks.
+  box.value = "";
+  await clickThrough( ui, "_handleTaskSubmitClick", btn, "a click refused for a blank reason" );
+  assert.equal( calls.length, 0, "a blank reason was posted" );
+
+  // 🔴 THE ARMING MUST NOT SURVIVE THE REFUSAL. Left standing, the button still reads
+  // "Confirm won't-fix" — so when they retype the reason, their very next click closes
+  // the row on a confirmation they never successfully gave. The click that armed it was
+  // itself refused; an arming earned by a rejected submission is not an arming.
+  assert.equal( ( btn.textContent ?? "" ).trim(), "Submit",
+    "the refusal left the button armed — the next click closes the row with no second step" );
+
+  box.value = "not doing it after all";
+  await clickThrough( ui, "_handleTaskSubmitClick", btn, "the re-arming click" );
+  assert.equal( calls.length, 0,
+    "one click closed the row — the operator was never asked to confirm" );
+  assert.equal( ( btn.textContent ?? "" ).trim(), "Confirm won't-fix" );
+} );
