@@ -157,10 +157,35 @@ def test_drop_and_park_are_dispatched_from_the_delegated_handler( client_src ):
     The row has ONE delegated click handler. A control that renders but is not
     reachable from it is a button that does nothing — which looks identical to a
     working button until it is pressed.
+
+    ⚠️ RE-POINTED at 46a3078c — the CLAIM is unchanged, the SHAPE it lives in moved.
+    Drop and Park stopped being buttons with a handler each and became options on one
+    select, posted by one Submit. A verb still has to be RENDERED, the click still has
+    to be ROUTED, and the route still has to reach something that knows what the verb
+    MEANS. Those were one assertion each when there was a handler per verb; they are
+    three now because the merge split them across three places.
+
+    🔴 THE HANDLER-NAME CHECK DID NOT SURVIVE AS A NAME CHECK, AND IT SHOULD NOT HAVE.
+    `"_handleTaskDropClick" in client_src` asserted that a verb had somewhere to go.
+    After the merge every verb goes to the SAME place, so the name is no longer what
+    distinguishes drop from park — the `_verbNeeds` table row is. Pinning the shared
+    handler's name for both verbs would pass identically whether or not drop exists.
     """
-    assert "_handleTaskDropClick" in client_src
-    assert "_handleTaskParkClick" in client_src
+    for verb, label, status in ( ( "drop", "Drop", "dropped" ), ( "park", "Park", "parked" ) ):
+        assert f'option( "{verb}", "{label}"' in client_src, (
+            f"{verb} is never rendered as a verb the operator can choose"
+        )
+        assert re.search( rf'{verb}\s*:\s*{{ status: "{status}"', client_src ), (
+            f"{verb} renders as an option but no _verbNeeds row says what it posts — "
+            f"the operator can choose it and Submit refuses with 'Choose an action first'"
+        )
+    # The delegated entry point, unchanged by the merge: still ONE closest() match.
     assert 'target.closest( ".task-action-btn" )' in client_src
+    # ...and the one route that now carries every verb.
+    assert 'classList.contains( "task-submit-button" )' in client_src, (
+        "the shared Submit is rendered but the delegated handler never dispatches it — "
+        "every verb at once is a button that does nothing"
+    )
 
 
 def test_the_transition_endpoint_is_actually_called( client_src ):
@@ -317,16 +342,30 @@ def test_the_three_new_controls_are_rendered_and_dispatched( client_src ):
     is a button that does nothing — which looks identical to a working button until
     it is pressed.
     """
-    for cls, handler in (
-        ( "task-wont-fix-button", "_handleTaskWontFixClick" ),
-        ( "task-demote-button",   "_handleTaskDemoteClick" ),
-        ( "task-approve-button",  "_handleTaskApproveClick" ),
+    # ⚠️ RE-POINTED at 46a3078c. Three buttons with three handlers became three
+    # options on one select behind one Submit. Every assertion below is the same
+    # question asked of the new shape: is it rendered, does something know what it
+    # means, and does a click reach that something.
+    for verb, label, status in (
+        ( "wont_fix", "Won\'t fix", "wont_fix" ),
+        ( "demote",   "Demote",     "not_approved" ),
+        ( "approve",  "Approve",    "queued" ),
     ):
-        assert cls in client_src,     f"{cls} is never rendered"
-        assert handler in client_src, f"{handler} is never defined"
-        assert f'classList.contains( "{cls}" )' in client_src, (
-            f"{cls} renders but the delegated handler never dispatches it"
+        assert f'option( "{verb}", "{label}"' in client_src, f"{verb} is never rendered"
+        assert re.search( rf'{verb}\s*:\s*{{ status: "{status}"', client_src ), (
+            f"{verb} has no _verbNeeds row — nothing knows what it posts"
         )
+    # ONE dispatch now serves all three, so this is asserted once rather than per verb.
+    # 🔴 AND THE VERB MUST BE READ OFF THE SELECT INSIDE THAT HANDLER, or the shared
+    # route reaches a handler that cannot tell the three apart — which is a dispatch
+    # that exists and still does nothing, the exact defect this test is named for.
+    assert 'classList.contains( "task-submit-button" )' in client_src, (
+        "the shared Submit renders but the delegated handler never dispatches it"
+    )
+    assert 'const verb  = select ? select.value : "";' in client_src, (
+        "the shared handler does not read the chosen verb — one route to one action "
+        "is five controls merged into one that only ever does the same thing"
+    )
 
 
 def test_wont_fix_requires_a_reason_because_the_server_does( client_src ):
@@ -370,11 +409,33 @@ def test_terminal_rows_offer_no_controls_at_all( client_src, client_code ):
         "isTerminal is no longer derived from the open-status predicate — a constant "
         "or a rewritten derivation here reopens every control on a terminal row"
     )
-    # ...and that each control's enabled flag actually READS it.
-    for control in ( "task-drop-button", "task-wont-fix-button", "task-demote-button" ):
-        assert f'"{control}"' in client_src
+    # ...and that each verb's enabled flag actually READS it.
+    # ⚠️ RE-POINTED at 46a3078c: the three buttons became options, so the thing that
+    # carries the gate is the option's `enabled` argument rather than a button class.
+    for verb, gate in ( ( "drop", "!isTerminal" ), ( "wont_fix", "!isTerminal" ),
+                        ( "demote", "demoteLegal" ) ):
+        assert re.search( rf'option\( "{verb}", "[^"]+",\s*{re.escape( gate )}', client_src ), (
+            f"the {verb} option no longer gates on {gate} — it is offered on a row the "
+            f"server refuses outright"
+        )
+    assert re.search( r"demoteLegal = !isTerminal", client_src ), (
+        "demoteLegal no longer derives from isTerminal — the demote gate is now a "
+        "second, independent rule that can drift from the terminal one"
+    )
     assert "!isTerminal" in client_code, "no control gates on isTerminal at all"
     assert "terminal rows are append-only and have no transitions out" in client_src
+    # 🔴 AND THE SELECT, THE BOX AND SUBMIT THEMSELVES — NOT ONLY THE OPTIONS. Rio's
+    # TypeScript twin found this by a SURVIVING MUTATION: deleting the terminal
+    # `disabled` from the three controls reddened nothing, because with every option
+    # greyed Submit refuses with "Choose an action first" and the row is not exploitable.
+    # Present, correct, and untestable-if-wrong — which is a third state, not a pass.
+    assert 'const off = isTerminal ?' in client_src, (
+        "the select / reason box / Submit are no longer disabled on a terminal row; "
+        "the greyed options alone leave three live controls on an append-only row"
+    )
+    assert 'disabled aria-disabled="true"' in client_src, (
+        "the terminal controls are disabled for the mouse and not for a screen reader"
+    )
 
 
 def test_approve_and_demote_are_never_both_live_on_one_row( client_src ):
@@ -403,7 +464,18 @@ def test_approve_does_not_second_guess_the_server_allowlist( client_src, client_
     So approve sends the transition and SURFACES the refusal rather than pre-empting
     it: no allowlist, no persona check, no is-approver branch in the client.
     """
-    assert "Approve refused: " in client_src
+    # ⚠️ RE-POINTED at 46a3078c. The literal "Approve refused: " was built by the
+    # approve handler; the five handlers became one, so the stripe is now composed from
+    # the verb's own label. Same claim: the client SHOWS the server's refusal rather
+    # than pre-empting it — and it still names the verb, so a refusal on a busy board
+    # says which action was refused.
+    assert 'refused: ${result.message}' in client_src, (
+        "the client no longer surfaces the server's own refusal message verbatim"
+    )
+    assert 'approve: "Approve"' in client_src, (
+        "approve has no label for the refusal stripe — a refusal that cannot name its "
+        "verb is a refusal the operator cannot act on"
+    )
     for forbidden in ( "isApprover", "approverAllowlist", "APPROVER_ALLOWLIST" ):
         assert forbidden not in client_code, (
             f"the client carries {forbidden!r} — a second copy of a provisional server rule"
@@ -807,14 +879,23 @@ def test_demote_stamps_a_triage_by_date_per_ricks_ruling( client_code ):
     the client STAMPS the field from the very first demotion, so the predicate lands
     on rows that already carry a date instead of arriving to a backlog with none.
     """
-    assert "task-demote-chase" in client_code, "demote collects no triage-by date"
-    handler = function_body( client_code, "_handleTaskDemoteClick( button ) {" )
+    # ⚠️ RE-POINTED at 46a3078c. The per-verb `task-demote-chase` box became ONE
+    # `task-chase-input`, built by _handleVerbSelectChange for whichever verb asks for a
+    # date. So "demote collects a date" is now two facts, not one: the shared box exists,
+    # AND demote is a verb that requires it.
+    assert "task-chase-input" in client_code, "no row control collects a date at all"
+    assert re.search( r'demote\s*:\s*{ status: "not_approved",\s*reason: true,\s*date: true',
+                      client_code ), (
+        "demote no longer requires a date — a demotion with no chase puts a row in the "
+        "holding area that nothing will ever bring back"
+    )
+    handler = function_body( client_code, "_handleTaskSubmitClick( button ) {" )
     # 🔴 PIN THE GUARD, NOT ITS WORDING. The first cut asserted the error MESSAGE was
     # present, which survives `if ( false )` — the message sits inside the dead branch,
     # the requirement is gone, and the test is happy. Measured: I broke the condition
     # and this stayed green, in a test written after learning that exact lesson twice
     # today. The message is the symptom; the condition is the control.
-    assert "if ( !chaseDay ) {" in handler, (
+    assert "if ( needs.date && !chaseDay ) {" in handler, (
         "the triage-by date is collected but not REQUIRED — a demotion with no date "
         "puts a row in the holding area that nothing will ever bring back"
     )
@@ -829,7 +910,7 @@ def test_the_demote_date_is_converted_through_the_browser_zone( client_code ):
     chase on the PREVIOUS EVENING for every zone west of Greenwich — i.e. all of ours.
     A held row would come back a day early, every time, and nothing would look wrong.
     """
-    handler = function_body( client_code, "_handleTaskDemoteClick( button ) {" )
+    handler = function_body( client_code, "_handleTaskSubmitClick( button ) {" )
     assert "T09:00:00" in handler, "the demote date is not stamped with a local time"
     assert "toISOString()" in handler, "the demote date is not converted to an instant"
 
