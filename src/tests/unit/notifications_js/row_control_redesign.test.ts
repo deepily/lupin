@@ -784,3 +784,119 @@ test( "🔴 a REFUSED click disarms — the arming does not outlive the refusal"
     "one click closed the row — the operator was never asked to confirm" );
   assert.equal( ( btn.textContent ?? "" ).trim(), "Confirm won't-fix" );
 } );
+
+
+test( "🔴 a terminal row disables the SELECT and the BUTTON, not only the options", () => {
+  const ui = newUI();
+  // 🔴 FOUND BY A SURVIVING MUTATION, not by reading the code. Deleting the terminal
+  // `disabled` from the select and the button reddened NOTHING: the sibling test asserts
+  // every OPTION is greyed, and with no selectable verb Submit refuses with "Choose an
+  // action first" — so the row is not exploitable and looks entirely alive. Present,
+  // correct, and untestable-if-wrong.
+  //
+  // ⚠️ AND THE CELL'S OWN DOCSTRING PROMISES IT — "a terminal row renders every option
+  // disabled, plus a disabled select/button". An Ensures clause nothing checks is a
+  // claim, not a contract.
+  for ( const status of [ "done", "dropped", "wont_fix" ] ) {
+    const host = paneWithCell( ui, row( { status } ) );
+    const sel  = host.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+    const btn  = host.querySelector( ".task-submit-button" ) as HTMLButtonElement;
+    const box  = host.querySelector( ".task-reason-input" ) as HTMLInputElement;
+
+    assert.equal( sel.disabled, true, `a ${status} row offers a live verb select` );
+    assert.equal( btn.disabled, true, `a ${status} row offers a live Submit` );
+    assert.equal( box.disabled, true, `a ${status} row offers a live reason box` );
+    // The ARIA half is what a screen reader announces; `disabled` alone tells the mouse
+    // and nobody else, which is the same split the greyed options carry.
+    assert.equal( sel.getAttribute( "aria-disabled" ), "true" );
+    assert.equal( btn.getAttribute( "aria-disabled" ), "true" );
+  }
+
+  // Negative control: the same three controls are LIVE on an open row, so this test
+  // cannot pass by asserting a property every row happens to have.
+  const open = paneWithCell( ui, row( { status: "queued" } ) );
+  assert.equal( ( open.querySelector( ".task-verb-select" ) as HTMLSelectElement ).disabled, false );
+  assert.equal( ( open.querySelector( ".task-submit-button" ) as HTMLButtonElement ).disabled, false );
+} );
+
+
+test( "🔴 each verb's blank-reason refusal names ITS OWN obligation", async () => {
+  const ui = newUI();
+  // 🔴 SECOND SURVIVING MUTATION, and it is the shape Pocholo names: my blank-reason
+  // test asserted /reason/i on the stripe — a downstream effect FOUR different paths
+  // satisfy. Collapsing all five complaints into "A reason is required." reddened
+  // nothing, because that string matches /reason/i too. An assertion satisfied by more
+  // than one path cannot tell you which path ran.
+  //
+  // ⚠️ AND THE COLLAPSE IS NOT COSMETIC. Park needs a QUOTE of the row's own decisive
+  // sentence, demote needs to say why a row goes back to triage, won't-fix is a refusal
+  // whose justification is the only thing separating it from work that got forgotten.
+  // A generic complaint is true of all four and teaches none of them — which is the
+  // whole reason merging the CONTROLS was the ask and merging what they MEAN was not.
+  const expected: Array<[ string, RegExp ]> = [
+    [ "drop",     /^A drop reason is required\./ ],
+    [ "park",     /quote the row's own decisive sentence/ ],
+    [ "demote",   /goes back to triage/ ],
+    [ "wont_fix", /a refusal carries its justification/ ]
+  ];
+
+  const seen: string[] = [];
+  for ( const [ verb, pattern ] of expected ) {
+    const host = paneWithCell( ui, row( { status: "queued" } ) );
+    ui._transitionTask = async () => ( { ok: true } );
+    ui.refreshTaskList = async () => {};
+
+    // Order is load-bearing: choose the verb FIRST, then leave only the reason blank.
+    // Submit before a verb is chosen and the refusal comes from "no verb chosen" — a
+    // different guard wearing the same red, and the test would pass without the reason
+    // check existing at all.
+    selectVerb( host, verb );
+    const date = host.querySelector( ".task-chase-input" ) as HTMLInputElement | null;
+    if ( date ) date.value = "2026-09-09";
+
+    await clickThrough( ui, "_handleTaskSubmitClick",
+      host.querySelector( ".task-submit-button" ), `Submit for ${verb} with a blank reason` );
+
+    const text = ( host.querySelector( ".task-row-error-stripe" ) as HTMLElement ).textContent ?? "";
+    assert.match( text, pattern, `${verb}'s refusal does not name its own obligation` );
+    seen.push( text );
+  }
+
+  // And they must be FOUR DIFFERENT sentences, not four that merely each match once.
+  assert.equal( new Set( seen ).size, 4,
+    `the verbs share a complaint: ${JSON.stringify( seen )}` );
+} );
+
+
+test( "🔴 the no-verb refusal is not confusable with a blank-reason refusal", async () => {
+  const ui = newUI();
+  // 🔴 THIS GUARD IS FOR THE NEXT PERSON'S FIXTURES, NOT MINE. Pocholo's three
+  // discriminating tests each fill the OTHER field so exactly one guard can be
+  // responsible for the red. Behind one select that only holds if the two refusals stay
+  // TELLABLE APART: let the no-verb message start saying "reason" and a test that meant
+  // to exercise the blank-reason guard goes green off the no-verb guard instead — the
+  // same red, a different cause, and nothing in the output says which.
+  //
+  // Found by a surviving mutation that my own suite was safe from and his would not be.
+  // A guard that only protects the tests already written is worth less than one that
+  // protects the tests about to be.
+  const host = paneWithCell( ui, row( { status: "queued" } ) );
+  const calls: string[] = [];
+  ui._transitionTask = async ( _i, to ) => { calls.push( to ); return { ok: true }; };
+  ui.refreshTaskList = async () => {};
+
+  await clickThrough( ui, "_handleTaskSubmitClick",
+    host.querySelector( ".task-submit-button" ), "Submit with nothing chosen" );
+
+  const noVerb = ( host.querySelector( ".task-row-error-stripe" ) as HTMLElement ).textContent ?? "";
+  assert.equal( calls.length, 0 );
+  assert.match( noVerb, /choose an action/i, "the no-verb refusal does not say what is missing" );
+
+  // The two refusals must not be mistakable for one another IN EITHER DIRECTION.
+  assert.doesNotMatch( noVerb, /reason is required/i,
+    "the no-verb refusal claims a reason is missing — a blank-reason test can now pass off this guard" );
+  for ( const verb of [ "drop", "park", "demote", "wont_fix" ] ) {
+    assert.doesNotMatch( ui._verbReasonComplaint( verb ), /choose an action/i,
+      `${verb}'s reason complaint tells the operator to choose an action they already chose` );
+  }
+} );
