@@ -567,6 +567,55 @@ the root set, the wall-clock time — because without them a reading is not wron
 goes stale. ⇒ *Coordinates make your reading checkable. Content-names make your pointer durable.*
 Say what you measured **and** name what you mean.
 
+## 🔴 A TEST THAT ENTERS BELOW THE LAYER THE INCIDENT ENTERED AT CANNOT SPEAK TO THE INCIDENT
+
+Rachel 🕊️, 2026-09-02, on her own shipped commit. **A check can be correct, pass, and prove nothing
+about the failure it was written for — because it knocked on a different door than the incident
+did.**
+
+**THE RECEIPT.** A fix made a spawn into the shared main checkout announce itself, at WARNING and on
+the spawn payload. It shipped with an "end-to-end" receipt that called `provision_worktree_venv`
+directly, **with the main repo's path handed to it**. That proves the helper announces a main-repo
+target. It says **nothing** about whether the real spawn path ever REACHES that branch — and the
+incident was a spawn, not a helper call. I reported the first as if it settled the second.
+
+⇒ **THIS IS NOT ABOUT MOCKING.** Nothing was mocked in either version: the helper, the script and
+the refusal were all real. It is about **where you knock.** A real component exercised at the wrong
+altitude is still the wrong measurement, and it does not look like one — it looks like a green
+end-to-end test, which is the most reassuring thing a report can contain.
+
+**HOW IT WAS CLOSED, and both halves were required.** Drive the layer the incident used — the real
+`spawn_sessions`, real `_resolve_project_root`, real `provision_worktree_venv`, real
+`link-worktree-venv.sh`, only the tmux launch stood down by `dry_run` — with ONE variable between
+two cases:
+
+| `LUPIN_ROOT` | status | `placement_alarm` | WARNING |
+|---|---|---|---|
+| the main checkout | `main_repo` | names the tree | yes |
+| an ordinary worktree | not `main_repo` | `None` | none |
+
+**The second row is not optional.** *"The alarm fires"* and *"the alarm fires WHEN IT SHOULD"* are
+different claims, and an alarm that shouted on every spawn would satisfy the first. Guard:
+`src/tests/unit/test_the_real_spawn_path_announces_the_placement.py`, whose three arms are the proof
+it discriminates rather than merely passes.
+
+⇒ **THE DISCHARGE IS ONE QUESTION, ASKED BEFORE THE TEST IS WRITTEN: at what layer did the incident
+ENTER?** Then enter there. Not *"does my check work"* — it does, that is the trap. **A helper-level
+receipt and a path-level receipt are different claims, and only one of them is about the incident.**
+
+⚠️ **AND IT BITES HARDEST AFTER THE FIX IS ALREADY WRITTEN**, because by then the component is
+known-good and testing it feels like confirming the work. It confirms the component. The path is
+what broke.
+
+⚠️ **RELATED, SEPARATELY OWNED, AND DELIBERATELY NOT FOLDED IN HERE.** Two other checks disagreed
+with their subjects the same evening — Sam 🎙️'s route guard matching on a **shorter key** than the
+router's (path where Starlette uses path AND method), and María 🌸's `dist/` count from a **shallower
+scope** than the tree (§ *TWO WORKTREE ARTIFACTS THE TIER CANNOT SEE*). They rhyme with this and they
+are not this. **Sharing an evening is not sharing a finding** — Mr. Radio 🦉's ruling, and Sam
+declined the pairing himself before it was put to him: *"a forced pair is worse than one clean
+example."* Each is filed under the person who measured it, in their own words. **A rule assembled
+from someone else's half-remembered receipt is this section's own defect wearing a byline.**
+
 ## 🔴 IMPLEMENTED BUT NOT INSTALLED — A MODULE AT 100% THAT THE APP NEVER MOUNTS
 
 Rachel 🕊️, 2026-09-02, and she proved it with the arm rather than asserting it. **A component can be
