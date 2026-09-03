@@ -75,7 +75,9 @@ type EpicUI = Record<string, unknown> & {
   _handleRowControlClick: ( target: unknown ) => boolean;
   _disclosureToggle: ( task: Row ) => string;
   _handleDisclosureToggle: ( button: unknown ) => void;
-  _handleTaskSubmitClick: ( button: unknown ) => void;
+  _handleTaskSubmitClick: ( button: unknown ) => unknown;
+  _renderTaskRowError: ( id: string, message: string, scope?: unknown ) => void;
+  _transitionTask: ( id: string, to: string, extras?: unknown ) => Promise<{ ok: boolean; message?: string }>;
   _wireEpicBoardAccordion: () => void;
   _epicKeysInDom: () => string[];
   collapseAllEpics: () => void;
@@ -1068,4 +1070,124 @@ test( "🔴 collapsing an epic group closes any controls disclosed inside it", (
     "the epic group collapsed with its controls still on screen" );
   assert.equal( toggle.getAttribute( "aria-expanded" ), "false",
     "the ellipsis still claims the row is open inside a collapsed group" );
+} );
+
+
+// ══════ THE BLANK-REASON GUARD, WATCHED FROM THIS PANE — the gap these arms close ══════
+//
+// 🔴 MEASURED, NOT SUSPECTED. Deleting the blank-reason guard in the merged submit path
+// (`if ( needs.reason && !reason )`) killed 4 tests in row_control_redesign.test.ts, 5 in
+// holding_area_panel.test.ts, 1 of 176 in task_list_panel.test.ts — and ZERO here. Ten
+// kills is a comfortable-looking total that concealed the real shape: two of the three
+// panes barely watched a refusal whose whole point is being verb-specific.
+//
+// ⚠️ AND THE PANE REACHES IT. Verb legality in `_taskActionsCell` is computed from the
+// ROW'S STATUS ALONE — `drop` is legal on any open row and requires a reason — and this
+// pane renders off the SAME composite as the task list with no status filter of its own.
+// Queried live 2026-09-03: both epic rows on the board were non-terminal with Drop legal.
+// So this is not a hypothetical path being covered for symmetry.
+//
+// ⇒ The arms below are written to REDDEN when that guard is deleted. That was checked by
+// deleting it, not assumed — a test whose failure has never been observed is a claim.
+
+async function submitOnEpic(
+  ui: EpicUI, verb: string, scope: ParentNode, what: string
+): Promise<void> {
+  // The verb is chosen ON THE PATH to the click, for the same reason `clickThrough`
+  // asserts the handler was reached: submitting with nothing chosen refuses with "no
+  // verb chosen", and THAT red is indistinguishable from the blank-reason red these
+  // tests exist to observe. A step on the path cannot be skipped by accident.
+  const sel = scope.querySelector( ".task-verb-select" ) as HTMLSelectElement | null;
+  assert.ok( sel, `${ what }: no verb select rendered — this test cannot speak to the control it names` );
+  sel!.value = verb;
+  sel!.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+
+  const button = scope.querySelector( ".task-submit-button" );
+  assert.ok( button, `${ what }: no Submit button rendered` );
+
+  const target   = ui as unknown as Record<string, ( b: unknown ) => unknown >;
+  const original = target._handleTaskSubmitClick;
+  let   ran: unknown = null;
+  target._handleTaskSubmitClick = ( b: unknown ) => { ran = original.call( ui, b ); return ran; };
+  button!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target._handleTaskSubmitClick = original;
+
+  assert.ok( ran !== null,
+    `${ what } reached NO handler — this pane has no click listener for Submit, so the ` +
+    `control is dead on screen however correct the guard is` );
+  await ran;
+}
+
+function paintedEpicRow( ui: EpicUI, row: Row ): HTMLElement {
+  buildPanelDOM();
+  const model = ui.groupTasksByEpic( [ row ] );
+  const container = document.getElementById( "epic-board-container" )!;
+  ui._epicBoardAccordionWired = false;
+  ui._wireEpicBoardAccordion();
+  container.innerHTML = ui.renderEpicBoardTable( model, ui.loadEpicGroupState() );
+  return container;
+}
+
+test( "🔴 EPIC BOARD: a blank-reason Drop is refused and NOTHING reaches the server", async () => {
+  const ui = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );          // queued → Drop is legal
+
+  const calls: unknown[] = [];
+  ui._transitionTask = async ( id, to, extras ) => { calls.push( [ id, to, extras ] ); return { ok: true }; };
+
+  await submitOnEpic( ui, "drop", container, "Drop with an empty reason on the epic board" );
+
+  assert.equal( calls.length, 0,
+    "a Drop with no reason reached the server from the epic board — the client-side guard " +
+    "is the only thing standing between an empty reason and a dropped row" );
+
+  const stripe = container.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.ok( stripe && !stripe.hidden,
+    "the Drop was refused but the operator was told nothing — a control that declines in " +
+    "silence reads as broken, which is how a refusal turns into a bug report" );
+  assert.match( ( stripe.textContent || "" ), /drop reason is required/i,
+    "the refusal did not name Drop's own obligation — the merged control shares one box " +
+    "and must not share one complaint" );
+} );
+
+test( "EPIC BOARD: the SAME Drop WITH a reason does reach the server", async () => {
+  // POSITIVE CONTROL. Without it the test above passes just as well on a pane where
+  // submitting never works at all, which is the failure it is least able to notice.
+  const ui = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );
+
+  const calls: [ string, string, Record<string, unknown> ][] = [];
+  ui._transitionTask = async ( id, to, extras ) => {
+    calls.push( [ id, to, extras as Record<string, unknown> ] ); return { ok: true };
+  };
+
+  const box = container.querySelector( ".task-reason-input" ) as HTMLInputElement;
+  assert.ok( box, "no reason box rendered on the epic board" );
+  box.value = "overtaken by events";
+
+  await submitOnEpic( ui, "drop", container, "Drop with a reason on the epic board" );
+
+  assert.equal( calls.length, 1, "a Drop carrying a reason did not reach the server" );
+  assert.equal( calls[ 0 ][ 0 ], R_SEAL_B.id );
+  assert.equal( calls[ 0 ][ 1 ], "dropped" );
+  assert.equal( calls[ 0 ][ 2 ].reason, "overtaken by events",
+    "the operator's words did not travel verbatim" );
+} );
+
+test( "🔴 EPIC BOARD: Park's blank-reason refusal names PARK's obligation, not a generic one", async () => {
+  // The second verb, because one verb passing proves the guard fires and not that it
+  // discriminates. Park's complaint asks for a QUOTE; Drop's does not.
+  const ui = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );
+
+  const calls: unknown[] = [];
+  ui._transitionTask = async ( id, to, extras ) => { calls.push( [ id, to, extras ] ); return { ok: true }; };
+
+  await submitOnEpic( ui, "park", container, "Park with an empty reason on the epic board" );
+
+  assert.equal( calls.length, 0, "a Park with no reason reached the server from the epic board" );
+  const stripe = container.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.match( ( stripe.textContent || "" ), /park reason is required/i,
+    "Park was refused with someone else's complaint — the quote requirement is the whole " +
+    "reason park_reason exists, and a generic refusal teaches none of it" );
 } );
