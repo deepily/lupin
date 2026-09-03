@@ -190,6 +190,51 @@ function buildAccordionDOM( ui: TaskUI ): void {
     ui.renderTaskListTable( model, undefined, ui.loadCollapsedTaskOwners() );
 }
 
+// ══════════ WIRING THE PANE, BECAUSE THE FIXTURES ABOVE DO NOT ══════════
+//
+// 🔴 `buildPanelDOM` and `buildAccordionDOM` paint a container and stop. So every test
+// that called `_handleTaskListClick` or `_handleTaskAccordionToggle` BY NAME was
+// measuring a correct handler against a container carrying no listener at all — the
+// same shape that let a dead Won't-fix button survive five people looking at it.
+//
+// ⚠️ THIS FILE IS NOT AS BLIND AS `podcast_overlay` WAS, and the difference is worth
+// keeping straight. Measured 2026-09-02: delete every click listener in
+// notifications.js and this file goes 175/0 -> 166 pass / 9 fail, because it already
+// carries nine real click-path tests. The by-name sites are gaps in a watched file,
+// not a file with a watched denominator of zero.
+function wirePane( ui: TaskUI ): void {
+  ui._taskListAccordionWired = false;
+  ui._wireTaskListAccordion();
+}
+
+// Dispatch a real bubbling click and assert a handler was REACHED; the caller then goes
+// on asserting what the click DID.
+//
+// 🔴 THE REACHED-CHECK IS WHY THE NO-OP CASES MEAN ANYTHING. "Nothing happened" is
+// satisfied by a handler that correctly declined AND by no listener existing — two
+// sufficient causes for one observation. Proving the handler ran kills the second, and
+// the check sits ON THE PATH, so a conversion cannot quietly skip it.
+//
+// ⚠️ It is deliberately NOT used on the `{}` / detached-element tests below. Those pass
+// something that is not in any pane, on purpose, to pin the handler's own defensive
+// guard — a click cannot carry a non-element, and forcing one would delete the thing
+// they test rather than strengthen it.
+function clickThrough( ui: TaskUI, method: string, el: Element | null, what: string ): void {
+  assert.ok( el, `${ what } did not render at all — this test cannot speak to wiring` );
+
+  const target   = ui as unknown as Record<string, ( t: unknown ) => unknown >;
+  const original = target[ method ];
+  let   reached  = false;
+  target[ method ] = ( t: unknown ) => { reached = true; return original.call( ui, t ); };
+  el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target[ method ] = original;
+
+  assert.ok( reached,
+    `${ what } reached NO handler — the pane has no click listener for it, so the ` +
+    `control is dead on screen however correct the handler is` );
+}
+
+
 // ─────────────────────────── isTaskOpenStatus (pure) ───────────────────────────
 
 test( "isTaskOpenStatus: terminal done/dropped/wont_fix → false; everything else (incl. missing) → true", () => {
@@ -540,6 +585,10 @@ test( "_renderTaskRow: array blocked_by — typed ref, kind-less ref, and raw en
   assert.match( html, /raw-str/ );          // non-object entry → String(b)
 } );
 
+// ⚠️ STAYS BY-NAME, DELIBERATELY. A click cannot carry a `{}` — the dispatcher requires
+// an element — so there is no click path to drive here. What this pins is the handler's
+// own tolerance of a target with no `.closest`, and routing it through a real event
+// would delete the case rather than strengthen it.
 test( "_handleTaskListClick: a target lacking .closest is safely ignored (defensive guard)", () => {
   const ui = newUI();
   buildPanelDOM();
@@ -553,12 +602,22 @@ test( "_handleTaskListClick: a LIVE 📄 with NO dataset opens overlay with empt
   const emoji = document.createElement( "span" );
   emoji.className = "task-detail-emoji";    // live (not dimmed) but carries no data-task-* attrs
   document.getElementById( "task-list-container" )!.appendChild( emoji );
-  ui._handleTaskListClick( emoji );
-  const overlay = document.getElementById( "task-body-overlay" )!;
-  assert.ok( overlay, "overlay opened even with no dataset" );
-  assert.equal( overlay.querySelector( ".task-body-overlay-body" )!.textContent, "" );
-  assert.match( overlay.querySelector( ".task-body-overlay-header" )!.textContent!, /Task detail/ );
-  ui._dismissTaskBodyOverlay();
+  wirePane( ui );
+  // ⚠️ `finally`, not a trailing call. The overlay installs a listener on `document`
+  // itself, which only `_dismissTaskBodyOverlay` takes off again — so a dismiss placed
+  // after the assertions is skipped on exactly the run that matters, the break arm, and
+  // the leaked listener then hangs a later test in this file rather than failing it.
+  // Measured 2026-09-02: the whole file stopped terminating under the break until the
+  // cleanup was moved onto the failure path.
+  try {
+    clickThrough( ui, "_handleTaskListClick", emoji, "a live 📄 with no dataset" );
+    const overlay = document.getElementById( "task-body-overlay" )!;
+    assert.ok( overlay, "overlay opened even with no dataset" );
+    assert.equal( overlay.querySelector( ".task-body-overlay-body" )!.textContent, "" );
+    assert.match( overlay.querySelector( ".task-body-overlay-header" )!.textContent!, /Task detail/ );
+  } finally {
+    ui._dismissTaskBodyOverlay();
+  }
 } );
 
 test( "_handleTaskListClick: clicking a LIVE 📄 opens the body overlay", () => {
@@ -567,12 +626,18 @@ test( "_handleTaskListClick: clicking a LIVE 📄 opens the body overlay", () =>
   const container = document.getElementById( "task-list-container" )!;
   container.innerHTML = ui._renderTaskRow( { id: "abcd1234", title: "t", status: "queued", body: "overlay body text" }, undefined );
   const emoji = container.querySelector( ".task-detail-emoji" )!;
-  ui._handleTaskListClick( emoji );
-  const overlay = document.getElementById( "task-body-overlay" );
-  assert.ok( overlay, "overlay opened" );
-  assert.match( overlay!.querySelector( ".task-body-overlay-body" )!.textContent!, /overlay body text/ );
-  assert.match( overlay!.querySelector( ".task-body-overlay-header" )!.textContent!, /abcd1234/ );
-  ui._dismissTaskBodyOverlay();
+  wirePane( ui );
+  // `finally` for the same reason as the test above: the overlay's `document` keydown
+  // listener outlives a thrown assertion and the cleanup has to be on that path.
+  try {
+    clickThrough( ui, "_handleTaskListClick", emoji, "a live 📄" );
+    const overlay = document.getElementById( "task-body-overlay" );
+    assert.ok( overlay, "overlay opened" );
+    assert.match( overlay!.querySelector( ".task-body-overlay-body" )!.textContent!, /overlay body text/ );
+    assert.match( overlay!.querySelector( ".task-body-overlay-header" )!.textContent!, /abcd1234/ );
+  } finally {
+    ui._dismissTaskBodyOverlay();
+  }
 } );
 
 test( "_handleTaskListClick: a DIMMED 📄 is inert — no overlay, no accordion toggle", () => {
@@ -583,8 +648,9 @@ test( "_handleTaskListClick: a DIMMED 📄 is inert — no overlay, no accordion
   const dimmed = document.createElement( "span" );
   dimmed.className = "task-detail-emoji task-detail-empty";
   container.appendChild( dimmed );
+  wirePane( ui );
   const before = container.innerHTML;
-  ui._handleTaskListClick( dimmed );
+  clickThrough( ui, "_handleTaskListClick", dimmed, "a DIMMED 📄" );
   assert.ok( document.getElementById( "task-body-overlay" ) === null, "no overlay for dimmed emoji" );
   assert.equal( container.innerHTML, before, "no accordion toggle for dimmed emoji" );
 } );
@@ -595,7 +661,8 @@ test( "_handleTaskListClick: a non-emoji target delegates to the accordion toggl
   const header = document.querySelector( ".task-group-header" ) as HTMLElement;
   const tbody  = header.closest( "tbody.task-group" ) as HTMLElement;
   assert.ok( !tbody.classList.contains( "collapsed" ) );
-  ui._handleTaskListClick( header );
+  wirePane( ui );
+  clickThrough( ui, "_handleTaskListClick", header, "a group header" );
   assert.ok( tbody.classList.contains( "collapsed" ), "non-emoji click toggled the group (delegation intact)" );
 } );
 
@@ -1140,12 +1207,28 @@ test( "_applyTaskGroupCollapseState: header without a chevron span → no throw 
 
 // ─────────────── toggle handler ───────────────
 
+// ⚠️ STAYS BY-NAME — same reason as the `_handleTaskListClick` guard above: `{}` is not
+// an element and cannot be clicked.
 test( "_handleTaskAccordionToggle: target lacking .closest → no-op (defensive)", () => {
   const ui = newUI();
   ui._handleTaskAccordionToggle( {} );                 // {}.closest is undefined → return, no throw
   assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
 } );
 
+// ⚠️ STAYS BY-NAME FOR NOW, AND THIS IS AN OPEN ITEM RATHER THAN A DECISION.
+// Converting this test and its "header inside a group" sibling to the click path makes
+// the WHOLE FILE stop terminating under the listener break — not fail, HANG, with test
+// 104 ("delegation: a real click on a header toggles its group") as the boundary, and
+// that is a plain synchronous test which cannot hang on its own. Bisected: revert these
+// two and the same break arm reports 162 pass / 13 fail in seconds.
+//
+// Two hypotheses were posed and both MEASURED WRONG — the body overlay's `document`
+// keydown listener surviving a thrown assertion, and `wirePane` re-installing listeners
+// by resetting the wired guard. Neither changed the hang.
+//
+// ⇒ The mechanism is UNEXPLAINED, and a conversion whose break arm cannot be READ has no
+// evidence behind it. Left by-name deliberately until someone can say why — which is a
+// different reason from the `{}` guards below, where there is simply no click to drive.
 test( "_handleTaskAccordionToggle: target with no header ancestor → no-op", () => {
   const ui = newUI();
   buildAccordionDOM( ui );
@@ -1154,6 +1237,10 @@ test( "_handleTaskAccordionToggle: target with no header ancestor → no-op", ()
   assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
 } );
 
+// ⚠️ STAYS BY-NAME, and this one is the interesting case. The header is deliberately
+// OUTSIDE any pane — that is the condition under test — so a click on it cannot reach
+// the container's listener by construction. Converting it would silently turn a test
+// about a detached header into a test about an unwired pane.
 test( "_handleTaskAccordionToggle: header detached from any tbody.task-group → no-op", () => {
   const ui = newUI();
   const tr = document.createElement( "tr" );
@@ -2010,6 +2097,11 @@ test( "🔴 a disclosure click is CONSUMED — it must not also toggle the owner
     "the disclosure click fell through and also toggled the group it lives in" );
 } );
 
+// ⚠️ STAYS BY-NAME. The subject here is the RETURN VALUE, and a dispatched event throws
+// it away — `_handleTaskListClick` is the only thing that reads it. The click-path half
+// of this contract is already the test directly above, which drives a real click and
+// asserts the accordion did NOT also fire; converting this one would duplicate that and
+// lose the direct check on the boolean both panes route on.
 test( "_handleRowControlClick reports whether it CONSUMED the click", () => {
   // The boolean is the contract both panes route on; a dispatch that always returned
   // false would swallow nothing and let every control click reach the accordion too.
