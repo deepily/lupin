@@ -173,24 +173,72 @@ def test_matching_is_canonical_so_casing_and_accents_do_not_decide_access( isola
 # Failing OPEN, deliberately
 # ---------------------------------------------------------------------------
 
-def test_a_missing_override_file_does_not_enforce( isolated, ini_flags_absent ):
+def test_with_BOTH_sources_absent_the_hard_fallback_opens_the_gate( isolated, ini_flags_absent ):
     """
-    The fallback is False on purpose: a gate that fails CLOSED on a missing file
-    takes the board down for everyone with no obvious cause. Being wrong in this
-    direction is loud and recoverable; the other direction is silent and total.
+    No override file AND no INI key: `FALLBACK_ENFORCEMENT_ACTIVE` is reached, and it
+    is False. This is the total-lockout case, and it is the one place a fail-OPEN is
+    still deliberate — if BOTH sources of truth have vanished, the gate must not be
+    the thing that stops everybody admitting and closing rows, because a gate that
+    fails closed with no readable config takes the board down with no obvious cause.
 
-    🔴 READ THE SCOPE BEFORE TRUSTING THIS TEST — IT IS NARROWER THAN ITS NAME.
-    With both sources absent this proves `FALLBACK_ENFORCEMENT_ACTIVE` is False and
-    is reached. It no longer says anything about PRODUCTION: since `f3870751` the
-    shipped INI says True, so a missing override file now ENFORCES. The docstring
-    above argues a deliberate fail-OPEN and the code no longer has that property.
+    🔴 THIS TEST WAS NAMED `test_a_missing_override_file_does_not_enforce` AND THE
+    NAME WAS A LIE AFTER `f3870751`. It never exercised a missing override file
+    against the shipped config — `ini_flags_absent` blanks the INI too, so both
+    sources were gone. Once Rick turned the flags on, "a missing override file does
+    not enforce" became false in production while this test went on passing, because
+    what it actually proves is narrower than what it was called. Renamed to say what
+    it measures. The missing-override-with-config-present case is the test below,
+    which did not exist.
 
-    ⚠️ NOT REPAIRED HERE, DELIBERATELY. Rachel found it; the fix is a rename plus a
-    new arm with both sources absent, and whether the fail-open promise still stands
-    is Rick's call, not a repair to fold into a pinning pass. Mr Radio is putting it
-    to him. Pinned as-is and flagged.
+    ⇒ A test name is read far more often than a test body, and a name that overstates
+    its scope is a false FACT rather than a false red — it gets quoted, not
+    investigated.
     """
     assert not isolated.exists()
+    assert approval.get_enforcement_active() is False
+
+
+def test_a_missing_override_file_DEFERS_TO_THE_SHIPPED_CONFIG_and_so_enforces( isolated, monkeypatch ):
+    """
+    Override file absent, shipped INI says True: the gate ENFORCES.
+
+    🔨 RICK RULED THIS 2026-09-03, by keypress (answered=true, default_used=false),
+    on a two-option ask: keep it ON. His words for the option he took were that the
+    config file is the authority and a missing override defers to it. So this is the
+    intended behaviour, not a side effect anybody is tolerating.
+
+    ⚠️ IT AROSE AS A SIDE EFFECT ALL THE SAME, AND THAT IS WORTH KEEPING. He was
+    asked "both flags on?" on 2026-09-02 and said yes; nobody asked him what should
+    happen when the override file goes missing. Flipping the INI changed that answer
+    from open to closed silently. Rachel found the contradiction between the old
+    test's prose and the code; Pocholo pinned it AS-IS and refused to repair it,
+    because repairing it either way would have ratified a behaviour change no human
+    had chosen. That refusal is why this test says "ruled" and not "assumed".
+
+    ⇒ Turning a feature on can decide a second question that was never put to the
+    operator. The tell is a docstring that argues for behaviour the code no longer
+    has.
+    """
+    real = approval._ini_value
+
+    def ini_says_enforcement_on( key, return_type, fallback ):
+        if key == approval.INI_KEY_ENFORCEMENT: return "True"
+        return real( key, return_type, fallback )
+
+    monkeypatch.setattr( approval, "_ini_value", ini_says_enforcement_on )
+
+    assert not isolated.exists(), "the override file must be absent — that is the subject"
+    assert approval.get_enforcement_active() is True
+
+    # NEGATIVE CONTROL, so a pass here cannot come from the monkeypatch being ignored
+    # or from the module answering True unconditionally: same missing file, INI now
+    # says off, and the answer must flip.
+    def ini_says_enforcement_off( key, return_type, fallback ):
+        if key == approval.INI_KEY_ENFORCEMENT: return "False"
+        return real( key, return_type, fallback )
+
+    monkeypatch.setattr( approval, "_ini_value", ini_says_enforcement_off )
+    approval._cache_mtime = None
     assert approval.get_enforcement_active() is False
 
 
