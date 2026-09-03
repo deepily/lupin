@@ -3158,7 +3158,52 @@ def spawn_sessions(
     return result
 
 
-def _arm_respin_wake_watch( spawn_result, manager_persona, fired_at ):   # pragma: no cover - thin live-boundary glue; arm_watches_for_spawn is covered directly
+def _data_root_of_spawn_record( record ):
+    """
+    The data root belonging to the SEAT a spawn record describes.
+
+    Rick ruled 2026-09-03: a seat's data is keyed on the seat's OWN repo, everywhere.
+    The boot-receipt writer already does this — register_session calls
+    `fleet_data_root( repo_root )` with the spawned seat's root. The wake READER did
+    not: it fell through to `fleet_data_root()` with no argument, which resolves the
+    FIRING MANAGER's ambient LUPIN_ROOT. The two agree whenever manager and worker
+    share a repo, which is nearly always, so the disagreement only surfaces on a
+    cross-repo spawn — and then the finder globs a directory the receipt was never
+    written to and reports DEAD_NO_WAKE for a seat that came back fine.
+
+    ⚠️ THIS LIVES HERE, NOT IN THE ARBITER MODULE, AND THAT IS DELIBERATE.
+    `_resolve_project_root` lives in session_spawner, whose import transitively pulls
+    requests / urllib3 / certifi / charset_normalizer / idna / websockets. The :8001
+    arbiter runs on a deliberately light venv where a missing import kills a worker
+    thread while /health still answers 200. This process already has all of it.
+
+    Requires:
+        - record is one entry from spawn_sessions' `spawned` list, or any mapping
+
+    Ensures:
+        - returns the seat's data root as a string, or None when the record names no
+          project, the name resolves to no repo on this host, or anything raises
+        - None is the CALLER'S signal to keep the ambient default — never an error,
+          because a resolver that cannot answer must not cost the watch
+        - a worktree root collapses to its parent checkout's data root, because
+          `fleet_data_root` does that itself (measured: a lupin worktree and the
+          lupin checkout both resolve to projects-data/lupin)
+    """
+    try:
+        project = ( record or {} ).get( "project" )
+        if not project:
+            return None
+        from lupin_mcp.session_spawner import _resolve_project_root
+        from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
+        repo_root = _resolve_project_root( project )
+        if not repo_root:
+            return None
+        return str( fleet_data_root( repo_root ) )
+    except Exception:
+        return None
+
+
+def _arm_respin_wake_watch( spawn_result, manager_persona, fired_at ):
     """Start the post-re-spin wake watches, shouting at the firing manager by DM.
 
     `fired_at` is passed in rather than read here: it must be stamped BEFORE the
@@ -3168,8 +3213,9 @@ def _arm_respin_wake_watch( spawn_result, manager_persona, fired_at ):   # pragm
         from cosa.agents.heartbeat_arbiter.respin_wake_check import arm_watches_for_spawn
         arm_watches_for_spawn(
             spawn_result,
-            alert_fn  = lambda message: _dm_send_fn( recipient=manager_persona, body=message ),
-            fired_at  = fired_at,
+            alert_fn     = lambda message: _dm_send_fn( recipient=manager_persona, body=message ),
+            fired_at     = fired_at,
+            base_dir_for = _data_root_of_spawn_record,
         )
     except Exception as e:
         logger.warning( f"[spawn] re-spin wake watch not armed: {e}" )

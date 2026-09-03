@@ -876,7 +876,8 @@ def start_wake_watch( *, alert_fn, fired_at, thread_factory=None, **kwargs ):
     return thread
 
 
-def arm_watches_for_spawn( spawn_result, *, alert_fn, fired_at, start_fn=None, **kwargs ):
+def arm_watches_for_spawn( spawn_result, *, alert_fn, fired_at, start_fn=None,
+                           base_dir_for=None, **kwargs ):
     """
     Arm one wake watch per seat a re-spin spawn actually launched.
 
@@ -884,6 +885,17 @@ def arm_watches_for_spawn( spawn_result, *, alert_fn, fired_at, start_fn=None, *
         - spawn_result is the dict session_spawner.spawn_sessions returned
         - alert_fn is the shout rail; fired_at is an aware datetime
         - start_fn is an injected start_wake_watch stand-in, or None
+        - base_dir_for is an injected callable taking ONE spawn record and
+          returning that seat's data root, or None to keep today's behaviour
+
+    ⚠️ THE RESOLVER IS INJECTED, NOT IMPORTED, AND THAT IS THE WHOLE POINT.
+    Resolving a project NAME to a repo root lives in `lupin_mcp.session_spawner`,
+    and importing that here would drag requests / urllib3 / certifi / websockets
+    into a module the :8001 arbiter loads on a deliberately LIGHT venv — where a
+    missing import kills a worker THREAD while the process stays `active` and
+    /health still answers 200 (measured 2026-08-08, invisible for two days). This
+    module keeps even `fleet_data_root` behind a function-local import for the
+    same reason. So the CALLER resolves and this leaf only forwards.
 
     Ensures:
         - arms a watch ONLY for records whose status is "spawned" — a record that
@@ -891,6 +903,15 @@ def arm_watches_for_spawn( spawn_result, *, alert_fn, fired_at, start_fn=None, *
           top of it would report the same thing twice under a different name
         - watches on the tmux session_name, which is the only identity that
           survives dismiss-then-spawn (the successor mints its own session id)
+        - each watch reads the SEAT'S OWN data root when base_dir_for supplies
+          one — the boot-receipt WRITER already keys on the spawned seat's repo
+          (register_session, `fleet_data_root( repo_root )`), so a reader keyed on
+          the firing manager's ambient LUPIN_ROOT looks in the wrong directory for
+          any cross-repo spawn and reports DEAD_NO_WAKE for a seat that woke fine
+        - a base_dir_for that returns None, or raises, leaves that record on the
+          ambient default: a resolver failure must never cost the watch itself
+        - an explicit base_dir in kwargs WINS over base_dir_for — a caller naming
+          one directory outright is not overridden by a per-record guess
         - returns the list of started watch handles
         - a spawn_result of the wrong shape arms nothing rather than raising
     """
@@ -907,8 +928,16 @@ def arm_watches_for_spawn( spawn_result, *, alert_fn, fired_at, start_fn=None, *
         name = record.get( "session_name" )
         if not name:
             continue
+        per_record = dict( kwargs )
+        if base_dir_for is not None and "base_dir" not in per_record:
+            try:
+                resolved = base_dir_for( record )
+            except Exception:
+                resolved = None          # a resolver failure must not cost the watch
+            if resolved:
+                per_record[ "base_dir" ] = resolved
         started.append( starter( alert_fn=alert_fn, fired_at=fired_at,
-                                 tmux_session=name, **kwargs ) )
+                                 tmux_session=name, **per_record ) )
     return started
 
 
