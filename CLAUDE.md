@@ -610,7 +610,7 @@ what broke.
 ⚠️ **RELATED, SEPARATELY OWNED, AND DELIBERATELY NOT FOLDED IN HERE.** Two other checks disagreed
 with their subjects the same evening — Sam 🎙️'s route guard matching on a **shorter key** than the
 router's (path where Starlette uses path AND method), and María 🌸's `dist/` count from a **shallower
-scope** than the tree (§ *TWO WORKTREE ARTIFACTS THE TIER CANNOT SEE*). They rhyme with this and they
+scope** than the tree (§ *THE WORKTREE ARTIFACTS THE TIER CANNOT SEE*). They rhyme with this and they
 are not this. **Sharing an evening is not sharing a finding** — Mr. Radio 🦉's ruling, and Sam
 declined the pairing himself before it was put to him: *"a forced pair is worse than one clean
 example."* Each is filed under the person who measured it, in their own words. **A rule assembled
@@ -1287,10 +1287,10 @@ claim until you have seen it.
 
 ⚠️ **Related, same family** — the collected-test-id diff. Some test ids bake an **absolute path** into a parametrize id, so diffing collected ids between two worktrees shows the same test as one removal plus one addition. A raw diff read `+225 / −4` and looked like the merges had deleted four tests; they had not. Compare **counts** as well as ids, and treat the agreement of the two as the check.
 
-### 🔴 AND TWO WORKTREE ARTIFACTS THE TIER CANNOT SEE — DO NOT ADD THESE TO THE 10/11
+### 🔴 AND THE WORKTREE ARTIFACTS THE TIER CANNOT SEE — DO NOT ADD THESE TO THE 10/11
 
-The reconciliation above counts **tier failures**. These two are the same family — present in the
-main checkout, absent from every worktree, gitignored — but **neither one reddens a test**, so
+The reconciliation above counts **tier failures**. These are the same family — present in the
+main checkout, absent from every worktree, gitignored — but **none of them reddens a test in that tier**, so
 folding them into that count would corrupt a number this page spent three measurements stabilising.
 
 | what | rule | what it does instead of failing |
