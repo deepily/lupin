@@ -30,6 +30,13 @@ import {
   type TaskListComposite,
 } from "./taskListModel";
 import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
+import {
+  transitionExtras,
+  verbDateComplaint,
+  verbLabel,
+  verbNeeds,
+  verbReasonComplaint,
+} from "./taskVerbs";
 import { renderTaskListTable } from "./templates/taskListTable";
 import { loadCollapsedOwners, saveCollapsedOwners, toggleCollapsedOwner } from "./taskListCollapse";
 import {
@@ -44,7 +51,7 @@ export interface TaskListStoreLike {
   // Phase 2 — optimistic write surface (priority/owner edit + drop). Both return
   // a `{ restoreState, done }` handle the renderer drives (JobsPaneRenderer flow).
   patchTask( id: string, fields: TaskPatchFields ): TaskMutation;
-  dropTask( id: string, reason: string ): TaskMutation;
+  transitionTask( id: string, toStatus: string, extras: Record<string, string> ): TaskMutation;
 }
 
 // The fleet store the owner-reassignment roster is sourced from (Phase 2 — the
@@ -338,9 +345,9 @@ class TaskListRendererImpl implements TaskListRenderer {
       }
       return;   // a detail-emoji click is never also a drop/accordion action
     }
-    const dropButton = ( target as Element ).closest( ".task-drop-button" );
-    if ( dropButton !== null ) {
-      this.handleDropClick( dropButton );
+    const submitButton = ( target as Element ).closest( ".task-submit-button" );
+    if ( submitButton !== null ) {
+      this.handleSubmitClick( submitButton as HTMLButtonElement );
       return;
     }
     // ID cell click-to-copy (F1 2026.07.01): a real-id cell copies its FULL uuid.
@@ -360,6 +367,9 @@ class TaskListRendererImpl implements TaskListRenderer {
    * server row carried no id) is a defensive no-op.
    */
   private handleControlChange( target: EventTarget | null ): void {
+    const verbSelect = ( target as Element ).closest<HTMLSelectElement>( "select.task-verb-select" );
+    if ( verbSelect !== null ) { this.handleVerbSelectChange( verbSelect ); return; }
+
     const select = ( target as Element ).closest<HTMLSelectElement>(
       "select.task-priority-select, select.task-owner-select",
     );
@@ -375,24 +385,150 @@ class TaskListRendererImpl implements TaskListRenderer {
   }
 
   /**
-   * Drop-button click → read the sibling inline reason input, enforce the
-   * non-blank reason the `→dropped` transition requires (inline error stripe
-   * when blank — no api call), then optimistic drop.
+   * A verb was chosen (or un-chosen) → re-shape the row's other two controls to
+   * suit it.
+   *
+   * Three things move, and each of them is a different obligation the five verbs
+   * used to carry separately:
+   *   · the reason placeholder, so each verb still states its own ask;
+   *   · the reason field's DISABLED state — Approve takes no input, and a live
+   *     box beside a verb that discards its contents invites a justification
+   *     nothing will ever read;
+   *   · the date input, inserted only for the verbs that require one.
+   *
+   * 🔴 AND IT DISARMS SUBMIT. Won't-fix arms the button for a second click. An
+   * armed button surviving a change of verb is worse than no arming at all: the
+   * operator switches to Drop, clicks once expecting the usual single click, and
+   * that click is swallowed by a confirmation for a verb they have left.
+   *
+   * Ensures:
+   *   - the reason input is disabled iff the chosen verb takes no reason, and is
+   *     cleared when disabled
+   *   - a date input exists iff the verb requires one, labelled for THAT verb
+   *   - Submit is returned to its unarmed label and state
    */
-  private handleDropClick( dropButton: Element ): void {
-    const row = dropButton.closest<HTMLElement>( ".task-row" );
-    /* c8 ignore next */ // defensive: the drop button only ever lives inside a .task-row per the template invariant.
+  private handleVerbSelectChange( select: HTMLSelectElement ): void {
+    const cell = select.closest<HTMLElement>( ".task-col-actions" );
+    /* c8 ignore next */ // defensive: the verb select only ever lives inside the actions cell per the template invariant.
+    if ( cell === null ) return;
+
+    const id    = select.dataset.taskId ?? "";
+    const needs = verbNeeds( select.value );
+    const box   = cell.querySelector<HTMLInputElement>( ".task-reason-input" );
+    const btn   = cell.querySelector<HTMLButtonElement>( ".task-submit-button" );
+
+    if ( box !== null ) {
+      box.disabled    = needs !== null && !needs.reason;
+      box.placeholder = needs !== null ? needs.placeholder : "reason…";
+      if ( box.disabled ) box.value = "";
+    }
+
+    const existing = cell.querySelector<HTMLInputElement>( ".task-chase-input" );
+    if ( needs !== null && needs.date ) {
+      const date = existing ?? document.createElement( "input" );
+      date.type      = "date";
+      date.className = "task-action-input task-chase-input";
+      date.dataset.taskId = id;
+      date.setAttribute( "aria-label", needs.dateLabel );
+      date.setAttribute( "title", needs.dateLabel );
+      if ( existing === null ) cell.insertBefore( date, btn );
+    } else if ( existing !== null ) {
+      existing.remove();
+    }
+
+    this.disarmSubmit( btn );
+  }
+
+  /**
+   * Submit click → read the row's chosen verb, enforce what that verb requires,
+   * then transition.
+   *
+   * ⚠️ Won't-fix takes TWO clicks and the confirmation is IN THE PAGE, on the
+   * button's own label — Rick's ruling. A browser `confirm()` blocks the
+   * extension's event loop, so the one control that closes a row for good cannot
+   * be the one that freezes the board.
+   *
+   * Ensures:
+   *   - no verb chosen → a stripe saying so, no api call
+   *   - a required reason or date missing → that verb's OWN complaint, no api call
+   *   - every refusal disarms Submit first, so a rejected confirm cannot be
+   *     inherited by the next click
+   *   - a terminal verb's FIRST click arms rather than submits
+   *   - the posted body carries the verb's own extras (park under `park_reason`)
+   */
+  private handleSubmitClick( button: HTMLButtonElement ): void {
+    const row = button.closest<HTMLElement>( ".task-row" );
+    /* c8 ignore next */ // defensive: Submit only ever lives inside a .task-row per the template invariant.
     if ( row === null ) return;
     const id = this.rowId( row );
-    if ( id === "" ) return;   // defensive: idless row cannot be dropped
-    const input  = row.querySelector<HTMLInputElement>( ".task-drop-reason" );
-    /* c8 ignore next */ // defensive: renderActionsCell always renders a `.task-drop-reason` input in every row, so `input` is never null and `.value` is always a string — the `?? ""` guards a template-invariant violation that cannot occur.
-    const reason = ( input?.value ?? "" ).trim();
-    if ( reason === "" ) {
-      this.renderRowError( id, "A drop reason is required." );
+    if ( id === "" ) return;   // defensive: an idless row cannot be transitioned
+
+    const select = row.querySelector<HTMLSelectElement>( ".task-verb-select" );
+    const needs  = verbNeeds( select?.value ?? "" );
+    if ( needs === null ) {
+      this.disarmSubmit( button );
+      this.renderRowError( id, "Choose an action first — the row does not know what you want done." );
       return;
     }
-    this.commitMutation( `${id}:drop`, id, () => this.stores.taskList.dropTask( id, reason ) );
+    const verb = select!.value;
+
+    const reason   = ( row.querySelector<HTMLInputElement>( ".task-reason-input" )?.value ?? "" ).trim();
+    const chaseDay = ( row.querySelector<HTMLInputElement>( ".task-chase-input" )?.value ?? "" ).trim();
+
+    if ( needs.reason && reason === "" ) {
+      this.disarmSubmit( button );
+      this.renderRowError( id, verbReasonComplaint( verb ) );
+      return;
+    }
+    if ( needs.date && chaseDay === "" ) {
+      this.disarmSubmit( button );
+      this.renderRowError( id, verbDateComplaint( verb ) );
+      return;
+    }
+
+    // ⚠️ THE DATE INPUT YIELDS A LOCAL CALENDAR DAY AND THE SERVER WANTS AN
+    // INSTANT. `<input type="date">` gives "YYYY-MM-DD" with no time and no zone,
+    // so this stamps 09:00 LOCAL and converts through the browser's own zone
+    // rather than pasting the bare date and letting it be read as midnight UTC —
+    // which lands the chase on the previous evening for anyone west of
+    // Greenwich, i.e. everyone here.
+    let chaseIso: string | null = null;
+    if ( needs.date ) {
+      const parsed = new Date( `${chaseDay}T09:00:00` );
+      if ( isNaN( parsed.getTime() ) ) {
+        this.disarmSubmit( button );
+        this.renderRowError( id, `Date not understood: ${chaseDay}` );
+        return;
+      }
+      chaseIso = parsed.toISOString();
+    }
+
+    if ( needs.terminal && button.dataset.armed !== "1" ) {
+      button.dataset.armed = "1";
+      button.classList.add( "task-submit-armed" );
+      button.textContent = `Confirm ${verbLabel( verb ).toLowerCase()}`;
+      this.renderRowError( id, "" );
+      return;
+    }
+
+    const extras = transitionExtras( verb, reason, chaseIso );
+    this.renderRowError( id, "" );
+    this.disarmSubmit( button );
+    this.commitMutation( `${id}:${verb}`, id, () => this.stores.taskList.transitionTask( id, needs.status, extras ) );
+  }
+
+  /**
+   * Return Submit to its resting state: one click, one action.
+   *
+   * Ensures: no-op on a missing button; the armed flag is cleared and the label
+   * reads "Submit" again.
+   */
+  private disarmSubmit( button: HTMLButtonElement | null ): void {
+    /* c8 ignore next */ // defensive: every actions cell renders a Submit per the template invariant.
+    if ( button === null ) return;
+    delete button.dataset.armed;
+    button.classList.remove( "task-submit-armed" );
+    button.textContent = "Submit";
   }
 
   /**
@@ -467,7 +603,8 @@ class TaskListRendererImpl implements TaskListRenderer {
   }
 
   /**
-   * Append an inline error stripe to the row for `id`. After a `restoreState()`
+   * Append an inline error stripe to the row for `id`, or CLEAR the row's stripe
+   * when `message` is empty. After a `restoreState()`
    * the store's synchronous re-emit has already repainted the table, so this
    * targets the freshly-rendered row (the dataset lookup sidesteps id-escape
    * concerns). A no-matching-row lookup is a benign no-op.
@@ -483,6 +620,12 @@ class TaskListRendererImpl implements TaskListRenderer {
     if ( target === null ) return;
     const existing = target.querySelector( ".task-row-error-stripe" );
     if ( existing !== null ) existing.remove();   // replace any prior stripe (no stacking)
+    // An EMPTY message CLEARS rather than paints. The submit path uses it to wipe
+    // a previous refusal before acting, and a stripe carrying no text is still a
+    // stripe: it survives in the DOM, matches every `.task-row-error-stripe`
+    // selector a test or a stylesheet reaches for, and reads as an error that
+    // says nothing.
+    if ( message === "" ) return;
     const stripe = document.createElement( "td" );
     stripe.className = "task-row-error-stripe";
     stripe.setAttribute( "role", "alert" );

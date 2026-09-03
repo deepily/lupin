@@ -78,7 +78,7 @@ export interface TaskListModel {
 // ---------------------------------------------------------------------------
 
 // Terminal statuses — work no longer owed. Everything else is "open".
-const TERMINAL_STATUSES: ReadonlySet<string> = new Set( [ "done", "dropped" ] );
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set( [ "done", "dropped", "wont_fix" ] );
 
 // Sort rank: most-urgent / most-active first, terminal last. Unknown → between
 // open and terminal so a typo'd status never hides above blocked work.

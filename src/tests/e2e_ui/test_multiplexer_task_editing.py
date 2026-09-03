@@ -252,8 +252,16 @@ def test_actions_column_and_controls_render( page ):
     row = _row( page, "t1" )
     assert row.locator( ".task-priority-select" ).count() == 1
     assert row.locator( ".task-owner-select" ).count() == 1
-    assert row.locator( ".task-drop-reason" ).count() == 1
-    assert row.locator( ".task-drop-button" ).count() == 1
+    # Row-control conversion 2026.09.02 — the single Drop button became one
+    # select carrying all five verbs, one shared reason field and one Submit.
+    assert row.locator( ".task-verb-select" ).count() == 1
+    assert row.locator( ".task-reason-input" ).count() == 1
+    assert row.locator( ".task-submit-button" ).count() == 1
+    # A placeholder plus the five verbs — greyed when illegal, never removed.
+    assert row.locator( ".task-verb-select option" ).count() == 6
+    assert row.locator( ".task-submit-button" ).text_content() == "Submit"
+    # No date box until a verb asks for one.
+    assert row.locator( ".task-chase-input" ).count() == 0
     # Current priority pre-selected.
     assert row.locator( ".task-priority-select" ).input_value() == "P2"
 
@@ -305,14 +313,15 @@ def test_owner_reassign_fires_patch_owner_persona( page ):
 
 
 # ---------------------------------------------------------------------------
-# Drop-with-reason → transition→dropped
+# Choose a verb → transition. Drop is one of five now, not the only one.
 # ---------------------------------------------------------------------------
 
 def test_drop_with_reason_fires_transition_dropped( page ):
     recorded = _open_card( page )
     row = _row( page, "t1" )
-    row.locator( ".task-drop-reason" ).fill( "superseded by rewrite" )
-    row.locator( ".task-drop-button" ).click()
+    row.locator( ".task-verb-select" ).select_option( "drop" )
+    row.locator( ".task-reason-input" ).fill( "superseded by rewrite" )
+    row.locator( ".task-submit-button" ).click()
     page.wait_for_timeout( 300 )
 
     assert len( recorded[ "transition" ] ) == 1, "exactly one transition fired"
@@ -331,8 +340,9 @@ def test_drop_with_reason_fires_transition_dropped( page ):
 def test_drop_blank_reason_shows_inline_error_and_fires_no_request( page ):
     recorded = _open_card( page )
     row = _row( page, "t1" )
-    # Leave the reason blank → click Drop.
-    row.locator( ".task-drop-button" ).click()
+    # Choose Drop, leave the reason blank, press Submit.
+    row.locator( ".task-verb-select" ).select_option( "drop" )
+    row.locator( ".task-submit-button" ).click()
     page.wait_for_timeout( 200 )
 
     # No transition fired; inline error stripe surfaced; row still present.
@@ -508,3 +518,69 @@ def test_id_cell_copied_flash_does_not_reflow_row( page ):
     page.wait_for_selector( "td.task-col-id.task-id-copied", timeout=2000 )
     width_after = row.bounding_box()[ "width" ]
     assert width_after == width_before, f"row reflowed on copy: { width_before } → { width_after }"
+
+
+# ---------------------------------------------------------------------------
+# Row-control conversion 2026.09.02 — the four ADDED verbs.
+#
+# UNVERIFIED AT WRITE TIME. This file is a :8000 e2e suite and could not be run
+# from the worktree where the conversion was built; the three cases above were
+# re-pointed and these two are new, both against markup proven by the unit tier
+# (src/tests/unit/multiplexer/render/task_row_control.test.ts, 15 tests, and
+# task_list_renderer.test.ts, 67). Say so rather than let a green elsewhere read
+# as a green here.
+# ---------------------------------------------------------------------------
+
+def test_park_posts_park_reason_and_a_chase_instant( page ):
+    """Park's reason rides `park_reason`, never the generic `reason` key.
+
+    Ensures:
+        - one transition fires, to_status=parked
+        - the body carries park_reason and next_chase_ts
+        - the body carries NO `reason` key — a park filed under the generic key
+          lands with no decisive sentence attached
+    """
+    recorded = _open_card( page )
+    row = _row( page, "t1" )
+    row.locator( ".task-verb-select" ).select_option( "park" )
+    # The date box is inserted BY the verb change, so it exists only now.
+    assert row.locator( ".task-chase-input" ).count() == 1
+    row.locator( ".task-reason-input" ).fill( "the sentence that decided this" )
+    row.locator( ".task-chase-input" ).fill( "2026-09-10" )
+    row.locator( ".task-submit-button" ).click()
+    page.wait_for_timeout( 300 )
+
+    assert len( recorded[ "transition" ] ) == 1, "exactly one transition fired"
+    body = recorded[ "transition" ][ 0 ][ "body" ]
+    assert body[ "to_status" ] == "parked"
+    assert body[ "park_reason" ] == "the sentence that decided this"
+    assert "reason" not in body
+    assert body[ "next_chase_ts" ].startswith( "2026-09-10" )
+
+
+def test_wont_fix_takes_two_clicks_in_the_page( page ):
+    """Won't-fix arms on the first click and posts on the second.
+
+    The confirmation is on the button's own label, never a browser confirm() — a
+    modal blocks the extension's event loop, so the one control that closes a row
+    for good must not be the one that freezes the board.
+
+    Ensures:
+        - the first click posts nothing and relabels the button
+        - the second click posts to_status=wont_fix with the reason
+    """
+    recorded = _open_card( page )
+    row = _row( page, "t1" )
+    row.locator( ".task-verb-select" ).select_option( "wont_fix" )
+    row.locator( ".task-reason-input" ).fill( "will not be done" )
+
+    row.locator( ".task-submit-button" ).click()
+    page.wait_for_timeout( 200 )
+    assert len( recorded[ "transition" ] ) == 0, "the first click must not transition"
+    assert "confirm" in row.locator( ".task-submit-button" ).text_content().lower()
+
+    row.locator( ".task-submit-button" ).click()
+    page.wait_for_timeout( 300 )
+    assert len( recorded[ "transition" ] ) == 1
+    assert recorded[ "transition" ][ 0 ][ "body" ][ "to_status" ] == "wont_fix"
+    assert recorded[ "transition" ][ 0 ][ "body" ][ "reason" ] == "will not be done"

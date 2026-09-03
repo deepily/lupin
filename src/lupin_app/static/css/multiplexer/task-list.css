@@ -444,34 +444,92 @@ tbody.task-group.collapsed .task-row {
 .task-list-table .task-priority-select.task-prio-mid  { border-color: #f57f17; }
 .task-list-table .task-priority-select.task-prio-low  { border-color: #2e7d32; }
 
-.task-list-table .task-drop-reason {
+/* Row-control conversion 2026.09.02 — the one-select row control replaces the
+   single Drop button. `.task-drop-reason` / `.task-drop-button` are retired.
+   Every control keeps the same 20px fixed box and integer line-height as the
+   priority/owner selects, because that is what makes the row height
+   deterministic (it is what killed the 169↔170 ±1px visual-snapshot flap). A
+   date box appears and disappears with the verb, so it must not change the row
+   height when it does. */
+.task-list-table .task-verb-select {
     font-size: 11px;
-    line-height: 14px;      /* integer line-height + fixed box → deterministic row height (kills 169↔170 ±1px flap) */
+    line-height: 14px;
+    height: 20px;
+    box-sizing: border-box;
+    padding: 2px 4px;
+    max-width: 170px;       /* a greyed option carries its reason in its own label */
+    margin-right: 4px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background: #fff;
+    vertical-align: middle;
+}
+
+/* A greyed option states WHY it cannot be chosen, in its own label. The class is
+   what greys it; `disabled` alone tells the mouse and nobody else. */
+.task-list-table .task-verb-select option.task-action-disabled {
+    color: #9aa0a6;
+    font-style: italic;
+}
+
+.task-list-table .task-action-input {
+    font-size: 11px;
+    line-height: 14px;
     height: 20px;
     box-sizing: border-box;
     padding: 2px 6px;
-    width: 110px;
     margin-right: 4px;
     border: 1px solid #ced4da;
     border-radius: 4px;
     vertical-align: middle;
 }
 
-.task-list-table .task-drop-button {
+.task-list-table .task-reason-input { width: 150px; }
+.task-list-table .task-chase-input  { width: 120px; }
+
+/* A disabled reason box (Approve takes none) must READ as inert rather than as
+   an empty box the operator failed to fill in. */
+.task-list-table .task-action-input:disabled {
+    background: #f1f3f5;
+    color: #9aa0a6;
+    cursor: not-allowed;
+}
+
+.task-list-table .task-action-btn {
     font-size: 11px;
-    line-height: 14px;      /* integer line-height + fixed box → deterministic row height (kills 169↔170 ±1px flap) */
+    line-height: 14px;
     height: 20px;
     box-sizing: border-box;
     padding: 2px 8px;
-    border: 1px solid #f5c6cb;
+    border: 1px solid #ced4da;
     border-radius: 4px;
-    background: #f8d7da;
-    color: #721c24;
+    background: #f8f9fa;
+    color: #212529;
     cursor: pointer;
     vertical-align: middle;
 }
 
-.task-list-table .task-drop-button:hover {
+.task-list-table .task-action-btn:hover:not(:disabled) {
+    background: #e9ecef;
+}
+
+.task-list-table .task-action-btn:disabled,
+.task-list-table .task-verb-select:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* ARMED — won't-fix's second click. The colour change is redundant with the
+   label, which already reads "Confirm won't fix" (WCAG 1.4.1), so the state is
+   legible without relying on the red. */
+.task-list-table .task-submit-button.task-submit-armed {
+    border-color: #f5c6cb;
+    background: #f8d7da;
+    color: #721c24;
+    font-weight: 600;
+}
+
+.task-list-table .task-submit-button.task-submit-armed:hover:not(:disabled) {
     background: #f1b0b7;
 }
 
