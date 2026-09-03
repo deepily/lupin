@@ -1297,6 +1297,18 @@ folding them into that count would corrupt a number this page spent three measur
 |---|---|---|
 | `src/lupin_app/static/dist/` — **75 files** in the main checkout, **0 tracked** | `.gitignore:194` | an asset census run in a worktree reports live files as **missing** |
 | `<repo-root>/.env`, where the host sets `JWT_SECRET_KEY` | `.gitignore:77` | **`import lupin_app.main` REFUSES** — `jwt_service.py:35` raises at import when the var is unset |
+| `<repo-root>/node_modules/` — **215 entries** in the main checkout, **0 tracked** | `.gitignore:193` | a TypeScript run dies with `Cannot find package 'tsx'` — which reads as a broken test, not a missing tree |
+
+🔴 **AND THE THIRD ONE IS PROVISIONED BY NOTHING AT ALL** (sam 🎙️, 2026-09-02, who nearly filed his
+own environment as a broken test). `link-worktree-venv.sh` supplies the `.venv` from both spawn
+creators — **and neither it nor anything else supplies `node_modules`.** So a worktree that CAN run
+the Python tier still cannot run a single TypeScript file, and the failure names a package rather
+than a tree.
+
+⇒ **`INTERPRETER OK` from the spawn path says nothing about the JS side.** Symlink `node_modules`
+from the main checkout the way the venv is symlinked — a link IN your tree pointing AT the main
+one, which writes nothing to the shared checkout. ⚠️ It then shows as `?? node_modules` in your
+worktree; that is your symlink, not content, and a path-scoped commit excludes it by construction.
 
 🔴 **THE FIRST IS THE WORST-BEHAVED MEMBER OF THE FAMILY, BECAUSE IT PRODUCES A FALSE *FACT* RATHER
 THAN A FALSE *RED*.** Measured 2026-09-02 (Rachel 🕊️): a census of every asset the shells link
