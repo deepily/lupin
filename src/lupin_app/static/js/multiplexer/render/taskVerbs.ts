@@ -194,6 +194,7 @@ export function verbLegality( status: string | null | undefined ): ReadonlyArray
  *   - park's reason lands under `park_reason`; every other verb's under `reason`
  *   - a verb that takes a date contributes `next_chase_ts`
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the multi-line exported function-declaration line; every internal branch is exercised.
 export function transitionExtras(
   verb     : string,
   reason   : string,

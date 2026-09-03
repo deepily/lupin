@@ -412,7 +412,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     /* c8 ignore next */ // defensive: the verb select only ever lives inside the actions cell per the template invariant.
     if ( cell === null ) return;
 
-    const id    = select.dataset.taskId ?? "";
+    const id    = this.taskIdOf( select );
     const needs = verbNeeds( select.value );
     const box   = cell.querySelector<HTMLInputElement>( ".task-reason-input" );
     const btn   = cell.querySelector<HTMLButtonElement>( ".task-submit-button" );
@@ -464,16 +464,18 @@ class TaskListRendererImpl implements TaskListRenderer {
     if ( id === "" ) return;   // defensive: an idless row cannot be transitioned
 
     const select = row.querySelector<HTMLSelectElement>( ".task-verb-select" );
-    const needs  = verbNeeds( select?.value ?? "" );
+    /* c8 ignore next */ // defensive: Submit only ever renders in a cell that also renders the verb select.
+    if ( select === null ) return;
+    const verb  = select.value;
+    const needs = verbNeeds( verb );
     if ( needs === null ) {
       this.disarmSubmit( button );
       this.renderRowError( id, "Choose an action first — the row does not know what you want done." );
       return;
     }
-    const verb = select!.value;
 
-    const reason   = ( row.querySelector<HTMLInputElement>( ".task-reason-input" )?.value ?? "" ).trim();
-    const chaseDay = ( row.querySelector<HTMLInputElement>( ".task-chase-input" )?.value ?? "" ).trim();
+    const reason   = this.rowInputValue( row, "task-reason-input" );
+    const chaseDay = this.rowInputValue( row, "task-chase-input" );
 
     if ( needs.reason && reason === "" ) {
       this.disarmSubmit( button );
@@ -515,6 +517,19 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.renderRowError( id, "" );
     this.disarmSubmit( button );
     this.commitMutation( `${id}:${verb}`, id, () => this.stores.taskList.transitionTask( id, needs.status, extras ) );
+  }
+
+  /**
+   * Read one of a row's action inputs, trimmed, or "" when it is not rendered.
+   *
+   * Both outcomes are ordinary rather than defensive: the reason box is always
+   * present, and the date box exists only while a verb that needs a date is
+   * chosen — so a missing `.task-chase-input` is the normal state for the other
+   * three verbs, not a template violation.
+   */
+  private rowInputValue( row: HTMLElement, className: string ): string {
+    const el = row.querySelector<HTMLInputElement>( `.${className}` );
+    return el === null ? "" : el.value.trim();
   }
 
   /**
