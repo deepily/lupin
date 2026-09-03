@@ -647,6 +647,88 @@ class SessionIdUnavailable( RuntimeError ):
     """
 
 
+# ── The retry budget, and the words the operator actually reads ───────────────
+#
+# 🔴 BOTH OF THESE ARE Rick's P0 OF 2026-09-03 (store row f6a43e37), and the
+# SECOND one is the half he actually experienced. Ten alerts reached him in
+# fourteen minutes saying "MCP server failed … Restart Claude Code to fix".
+# Measured against Claude Code's own per-session logs
+# (~/.cache/claude-cli-nodejs/<project>/mcp-logs-cosa-voice/): every managed
+# cosa-voice server in every project connected successfully across that whole
+# window, with zero errors, disconnects or restarts.
+#
+# So the alarm was TRUE — something really could not resolve a session identity
+# — and its LABEL was FALSE. It named a component that had not failed and
+# prescribed a restart that could not have fixed anything. Noise is ignorable;
+# a false instruction is acted on, which is why the words are a defect and not
+# a presentation detail.
+#
+# ⚠️ THE FIX IS NOT SUPPRESSION. A process that genuinely has no session bridge
+# must still alert, because sending traffic under a wrong identity is worse than
+# a loud alarm. What changed is that resolution is RETRIED first, every attempt
+# is LOGGED, and the operator is told ONCE, in words that name the mechanism.
+#
+# Worst case added latency on the failing path only: SESSION_RESOLVE_ATTEMPTS
+# waits of at most SESSION_RESOLVE_ATTEMPT_SECONDS, plus linear backoff between
+# them. The succeeding path is unchanged — the Event is already set by import-time
+# phase 1, so `wait` returns instantly and no retry is ever entered.
+SESSION_RESOLVE_ATTEMPTS         = 3
+SESSION_RESOLVE_ATTEMPT_SECONDS  = 3.0
+SESSION_RESOLVE_BACKOFF_SECONDS  = 1.0
+
+# NO ACTION IS PRESCRIBED, DELIBERATELY. There is nothing the operator can do
+# about another process's identity resolution, and inventing an instruction is
+# exactly what made the old text harmful. It says what failed, what was NOT done
+# as a result, and where to look if it persists.
+_SESSION_IDENTITY_ALERT_TEXT = (
+    "cosa-voice could not resolve a Claude Code session identity for one process, "
+    f"after {SESSION_RESOLVE_ATTEMPTS} attempts. Nothing was sent under a wrong "
+    "identity. No action is needed if a session was starting or clearing just then. "
+    "If this repeats, the session bridge directory is where to look — the MCP "
+    "servers themselves are unaffected."
+)
+
+
+def _reattempt_session_resolution( timeout ):
+    """
+    Re-run phase-1 resolution IN THE CALLER'S THREAD, once.
+
+    ⚠️ RE-RUNS RESOLUTION RATHER THAN RE-WAITING ON THE EVENT, and the distinction
+    is the whole reason this exists. `_session_ready` is set in a `finally` on every
+    path, success or failure, so once a resolution has failed the Event is set
+    FOREVER and waiting on it again returns instantly with the same bad answer.
+    A retry that only waited would be a no-op wearing a loop's clothing.
+
+    Requires:
+        - `timeout` is the per-attempt budget in seconds
+
+    Ensures:
+        - returns True and leaves SESSION_ID / SENDER_ID naming the resolved seat
+        - returns False on any failure, having logged it, and never raises
+        - clears `_session_failed` only on success, so a later caller sees the truth
+    """
+    global SESSION_ID, SENDER_ID, _session_failed
+
+    try:
+        real_id = wait_for_session_id( timeout=timeout, poll_interval=1.0 )
+    except Exception as e:
+        logger.warning( f"Session identity resolution attempt failed: {e}" )
+        return False
+
+    if not real_id:
+        logger.warning( "Session identity resolution attempt returned nothing" )
+        return False
+
+    suffix = real_id[ :8 ]
+    if suffix != SESSION_ID:
+        SESSION_ID = suffix
+        SENDER_ID  = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
+
+    _session_failed = False
+    _session_ready.set()
+    return True
+
+
 def _die_no_session_id():
     """
     Send error notification, then hard-exit ON THE SERVER or raise off it.
@@ -678,8 +760,7 @@ def _die_no_session_id():
 
     try:
         request = AsyncNotificationRequest(
-            message           = "MCP server failed: Claude Code session ID not found. "
-                                "No session bridge file detected. Restart Claude Code to fix.",
+            message           = _SESSION_IDENTITY_ALERT_TEXT,
             notification_type = NotificationType.ALERT,
             priority          = NotificationPriority( "high" ),
             sender_id         = error_sender
@@ -736,11 +817,23 @@ def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
         - SessionIdUnavailable (via _die_no_session_id) when resolution failed and
           this process is not the MCP server
     """
-    if not _session_ready.wait( timeout=timeout ):
-        _die_no_session_id()
+    if _session_ready.wait( timeout=timeout ) and not _session_failed:
+        return SENDER_ID
 
-    if _session_failed:
-        _die_no_session_id()
+    # ⚠️ UNRESOLVED IS NOT YET AN EMERGENCY. Retry before telling a human, and
+    # LOG every attempt — a change that stopped alerting and also stopped logging
+    # would hide the process that genuinely has no bridge rather than fix it.
+    for attempt in range( 1, SESSION_RESOLVE_ATTEMPTS + 1 ):
+        logger.warning(
+            f"Session identity unresolved — retry {attempt}/{SESSION_RESOLVE_ATTEMPTS}"
+        )
+        if _reattempt_session_resolution( SESSION_RESOLVE_ATTEMPT_SECONDS ):
+            logger.info( f"Session identity resolved on retry {attempt}" )
+            return SENDER_ID
+        time.sleep( SESSION_RESOLVE_BACKOFF_SECONDS * attempt )
+
+    # Every attempt failed. NOW it is the operator's business — once.
+    _die_no_session_id()
 
     return SENDER_ID
 
