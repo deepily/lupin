@@ -204,5 +204,8 @@ test( "a row that LEAVES the board takes its unsaved priority with it, without t
 
   poll( [] );   // somebody closed it
 
-  assert.equal( controls().select, null, "the row is gone, so its select is gone" );
+  // Boolean, not the node: a failing `assert.equal( element, null )` makes node:assert
+  // stringify a happy-dom element and walk its circular parent chain, killing the run
+  // with SIGKILL and `0 passed` instead of naming this test.
+  assert.equal( controls().select !== null, false, "the row is gone, so its select is gone" );
 } );
