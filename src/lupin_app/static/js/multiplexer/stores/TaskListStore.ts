@@ -14,7 +14,7 @@
 import type { EventBus } from "../shared/EventBus";
 import type { StoreTaskListChangedPayload } from "../shared/types";
 import type { TaskItem, TaskListComposite } from "../render/taskListModel";
-import { deriveTaskActor } from "../render/taskListModel";
+import { deriveTaskActor, isOpenStatus } from "../render/taskListModel";
 import { TASK_LIST_QUERY } from "../../shared/task-list-query.js";
 
 // Narrowed ApiClient surface. The production ApiClient.get throws ApiError
@@ -39,7 +39,7 @@ export interface TaskPatchFields {
   owner_persona? : string | null;
 }
 
-// The optimistic-mutation handle returned by patchTask/dropTask — mirrors the
+// The optimistic-mutation handle returned by patchTask/transitionTask — mirrors the
 // `{ restoreState }` rollback contract of JobStore.delete, plus a `done` promise
 // the renderer awaits to drive the JobsPaneRenderer-style success / 404-as-
 // success / rollback-on-error flow. `done` resolves on a 2xx and rejects with
@@ -88,12 +88,19 @@ export interface TaskListStore {
    */
   patchTask( id: string, fields: TaskPatchFields ): TaskMutation;
   /**
-   * Phase 2 — optimistically DROP a task (D3 — `transition`→`dropped`, preserving
-   * the append-only audit trail) with a non-blank `reason` (server requires it).
-   * The cached row is removed from the open view + emitted; `restoreState`
-   * re-inserts it. Same no-op semantics as patchTask on a miss.
+   * Optimistically TRANSITION a task to `toStatus` (preserving the append-only
+   * audit trail), carrying whatever extra body fields that verb requires —
+   * `reason` / `park_reason` / `next_chase_ts`, built by `taskVerbs.transitionExtras`.
+   *
+   * 🔴 THE ROW LEAVES THE OPEN VIEW ONLY WHEN THE VERB REALLY CLOSES IT. Drop and
+   * won't-fix end the row, so removing it optimistically is what the operator
+   * expects to see. Park, demote and approve do NOT: those rows stay owed under a
+   * different status, and removing them would tell the operator their work had
+   * vanished. For those the cached row's status is updated in place instead.
+   *
+   * Same no-op semantics as patchTask on a miss (no cached composite / unknown id).
    */
-  dropTask( id: string, reason: string ): TaskMutation;
+  transitionTask( id: string, toStatus: string, extras: Record<string, string> ): TaskMutation;
   /** Test/cleanup helper. */
   disposeForTesting(): void;
 }
@@ -197,17 +204,23 @@ class TaskListStoreImpl implements TaskListStore {
     return { restoreState: this.makeRestorer( snapshot ), done };
   }
 
-  dropTask( id: string, reason: string ): TaskMutation {
+  transitionTask( id: string, toStatus: string, extras: Record<string, string> ): TaskMutation {
     const tasks = this.openTasksOrNull();
     if ( tasks === null ) return NOOP_MUTATION();
     const idx = tasks.findIndex( ( t ) => t.id === id );
     if ( idx < 0 ) return NOOP_MUTATION();
 
     const snapshot = tasks.slice();
-    tasks.splice( idx, 1 );                   // optimistic removal from the open view
+    if ( isOpenStatus( toStatus ) ) {
+      // Still owed, under a new status — update in place. Removing it would tell
+      // the operator their parked/demoted/approved row had disappeared.
+      tasks[ idx ] = { ...tasks[ idx ], status: toStatus };
+    } else {
+      tasks.splice( idx, 1 );                 // closed for good — leaves the open view
+    }
     this.emitChanged( false );
 
-    const body = { to_status: "dropped", reason, actor: this.actor(), authority: "user_direct" };
+    const body = { to_status: toStatus, ...extras, actor: this.actor(), authority: "user_direct" };
     const done = this.api.post<unknown>( `/api/tasks/${id}/transition`, body ).then( () => undefined );
     return { restoreState: this.makeRestorer( snapshot ), done };
   }

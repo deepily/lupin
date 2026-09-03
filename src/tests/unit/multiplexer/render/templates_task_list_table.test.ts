@@ -312,14 +312,21 @@ test("renderTaskRow: default reassignTargets ([]) → unassigned shows placehold
   assert.equal(sel?.options[0]?.value, "");
 });
 
-test("renderTaskRow: Actions cell — inline drop reason input + Drop button", () => {
+test("renderTaskRow: Actions cell — one verb select, shared reason input, Submit", () => {
+  // Re-pointed from the single-verb Drop control (row-control conversion
+  // 2026.09.02). The exhaustive option/legality sweeps live in
+  // task_row_control.test.ts; this keeps the template file's own claim that the
+  // Actions cell renders the three controls at all.
   const tr = renderTaskRow({ id: "x", title: "t", status: "queued" }, undefined);
-  const input = tr.querySelector<HTMLInputElement>(".task-drop-reason");
-  const btn   = tr.querySelector<HTMLButtonElement>(".task-drop-button");
+  const sel   = tr.querySelector<HTMLSelectElement>(".task-verb-select");
+  const input = tr.querySelector<HTMLInputElement>(".task-reason-input");
+  const btn   = tr.querySelector<HTMLButtonElement>(".task-submit-button");
+  assert.ok(sel, "verb select rendered");
+  assert.equal(sel!.options.length, 6, "a placeholder plus five verbs");
   assert.equal(input?.type, "text");
-  assert.equal(input?.getAttribute("placeholder"), "drop reason…");
+  assert.equal(input?.getAttribute("placeholder"), "reason…");
   assert.equal(btn?.type, "button");
-  assert.equal(btn?.textContent, "Drop");
+  assert.equal(btn?.textContent, "Submit");
 });
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ import {
   type TaskListModel,
 } from "../taskListModel";
 import { ownerKeyForGroup, taskGroupIdSlug } from "../taskListCollapse";
+import { verbLegality } from "../taskVerbs";
 
 // Eleven columns post-row-redesign: ID + the eight read-only data columns +
 // Detail (📄 body overlay) + the Actions column (priority select · owner-reassign
@@ -104,7 +105,7 @@ function renderDetailCell( task: TaskItem ): HTMLTableCellElement {
  * createElement + textContent/setAttribute — NO innerHTML (table-section parse
  * safety + safe-write for store-sourced persona/priority strings). The controls
  * carry NO inline listeners: TaskListRenderer delegates `change` (selects) and
- * `click` (drop button) at the persistent container, surviving every re-render.
+ * `click` (Submit) at the persistent container, surviving every re-render.
  *
  * Ensures:
  *   - `.task-priority-select` — P0–P3 options (EDITABLE_PRIORITIES), current
@@ -113,8 +114,8 @@ function renderDetailCell( task: TaskItem ): HTMLTableCellElement {
  *     'Sam' overflow persona — Q5); the current owner is pre-selected (prepended
  *     if not already a target so the select reflects reality); an unassigned task
  *     leads with a disabled "(unassigned)" placeholder
- *   - `.task-drop-reason` text input + `.task-drop-button` — the inline
- *     drop-with-reason affordance (Q4: inline row input, not a modal)
+ *   - `.task-verb-select` + `.task-reason-input` + `.task-submit-button` — the
+ *     one-select row control (2026.09.02), replacing the single Drop button
  */
 function renderActionsCell( task: TaskItem, reassignTargets: ReadonlyArray<string> ): HTMLTableCellElement {
   const cell = document.createElement( "td" );
@@ -162,23 +163,93 @@ function renderActionsCell( task: TaskItem, reassignTargets: ReadonlyArray<strin
   }
   cell.appendChild( ownerSelect );
 
-  // Drop-with-reason: inline reason input + Drop button (Q4 — inline row input,
-  // not a modal). The renderer reads the sibling input's value on click and
-  // enforces the non-blank reason the `→dropped` transition requires.
-  const reasonInput = document.createElement( "input" );
-  reasonInput.type = "text";
-  reasonInput.className = "task-drop-reason";
-  reasonInput.setAttribute( "placeholder", "drop reason…" );
-  reasonInput.setAttribute( "aria-label", "Drop reason" );
-  cell.appendChild( reasonInput );
-
-  const dropBtn = document.createElement( "button" );
-  dropBtn.type = "button";
-  dropBtn.className = "task-drop-button";
-  dropBtn.textContent = "Drop";
-  cell.appendChild( dropBtn );
+  // The one-select row control (2026.09.02). What stood here was a single verb —
+  // a bare "drop reason…" box and a Drop button — because Drop was the only
+  // transition this card had ever offered. Rick's ruling brings the other four
+  // with it: one select carrying all five verbs, one shared reason field, one
+  // Submit. The date input is NOT built here; the renderer inserts it on the
+  // verb change, for the two verbs that ask for a date, so a row shows a date
+  // box only when a date is the thing being asked for.
+  cell.appendChild( renderVerbControl( task ) );
 
   return cell;
+}
+
+/**
+ * Build the verb select + shared reason input + Submit, given the row's status.
+ *
+ * The legality lives in `taskVerbs.verbLegality` and NOT here. Two derivations
+ * of one rule agree until the day they do not, and the day they do not the cell
+ * offers a move the server refuses — which reads to the operator as the board
+ * being broken rather than as the move being illegal.
+ *
+ * Requires:
+ *   - task carries `id` (possibly absent) and `status` (possibly absent)
+ * Ensures:
+ *   - returns a fragment of exactly three controls, each carrying `data-task-id`
+ *   - the select leads with an un-chosen "Choose an action…" placeholder, then
+ *     the five verbs in `TASK_VERBS` order — greyed, never removed, when illegal
+ *   - a greyed option carries the reason in its OWN label plus `aria-disabled`
+ *     and `task-action-disabled` (a disabled <option> has no tooltip to put it in)
+ *   - a terminal row disables the select, the reason box and Submit themselves
+ */
+function renderVerbControl( task: TaskItem ): DocumentFragment {
+  const frag = document.createDocumentFragment();
+  const id   = task.id ?? "";
+  const legality = verbLegality( task.status );
+  // A row is terminal exactly when nothing is legal on it. Derived from the same
+  // table the options are, rather than re-asking the status a second time.
+  const isTerminal = legality.every( ( e ) => !e.enabled );
+
+  const select = document.createElement( "select" );
+  select.className = "task-verb-select";
+  select.setAttribute( "aria-label", "Action" );
+  select.dataset.taskId = id;
+
+  const placeholder = document.createElement( "option" );
+  placeholder.value = "";
+  placeholder.textContent = "Choose an action…";
+  placeholder.selected = true;
+  select.appendChild( placeholder );
+
+  for ( const entry of legality ) {
+    const opt = document.createElement( "option" );
+    opt.value = entry.verb;
+    if ( entry.enabled ) {
+      opt.textContent = entry.label;
+    } else {
+      opt.textContent = `${entry.label} — ${entry.why}`;
+      opt.disabled = true;
+      opt.className = "task-action-disabled";
+      opt.setAttribute( "aria-disabled", "true" );
+    }
+    select.appendChild( opt );
+  }
+  frag.appendChild( select );
+
+  const reasonInput = document.createElement( "input" );
+  reasonInput.type = "text";
+  reasonInput.className = "task-action-input task-reason-input";
+  reasonInput.setAttribute( "placeholder", "reason…" );
+  reasonInput.setAttribute( "aria-label", "Reason" );
+  reasonInput.dataset.taskId = id;
+  frag.appendChild( reasonInput );
+
+  const submitBtn = document.createElement( "button" );
+  submitBtn.type = "button";
+  submitBtn.className = "task-action-btn task-submit-button";
+  submitBtn.textContent = "Submit";
+  submitBtn.dataset.taskId = id;
+  frag.appendChild( submitBtn );
+
+  if ( isTerminal ) {
+    for ( const el of [ select, reasonInput, submitBtn ] ) {
+      el.disabled = true;
+      el.setAttribute( "aria-disabled", "true" );
+    }
+  }
+
+  return frag;
 }
 
 /**

@@ -292,7 +292,7 @@ test("stopPolling: clears an active interval; no-op when inactive", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Phase 2 — patchTask / dropTask (optimistic + rollback)
+// Phase 2 — patchTask / transitionTask (optimistic + rollback)
 // ---------------------------------------------------------------------------
 
 interface Deferred { resolve: () => void; reject: (e: unknown) => void; }
@@ -418,11 +418,11 @@ test("patchTask: no cached composite (pre-poll) → no-op", () => {
   return done;  // resolved
 });
 
-test("dropTask: optimistic removal from open view + transition body (to_status/reason/actor/authority)", async () => {
+test("transitionTask: a CLOSING verb removes the row from the open view + posts to_status/extras/actor/authority", async () => {
   const mut = makeMutateApi(seedComposite());
   const { store, events } = await primedStore(mut, () => "rick@x.com");
 
-  const { done } = store.dropTask("t1", "superseded");
+  const { done } = store.transitionTask("t1", "dropped", { reason: "superseded" });
   // Optimistic: t1 removed from the cached tasks; emit fired.
   assert.deepEqual(store.composite()?.tasks?.map(t => t.id), ["t2"]);
   assert.deepEqual(events, [{ stampUpdated: false }]);
@@ -435,11 +435,11 @@ test("dropTask: optimistic removal from open view + transition body (to_status/r
   assert.deepEqual(store.composite()?.tasks?.map(t => t.id), ["t2"]);
 });
 
-test("dropTask: restoreState re-inserts the removed task", async () => {
+test("transitionTask: restoreState re-inserts the removed task", async () => {
   const mut = makeMutateApi(seedComposite());
   const { store } = await primedStore(mut, () => "rick@x.com");
 
-  const { restoreState, done } = store.dropTask("t1", "oops");
+  const { restoreState, done } = store.transitionTask("t1", "dropped", { reason: "oops" });
   assert.deepEqual(store.composite()?.tasks?.map(t => t.id), ["t2"]);
 
   mut.settlePost(false, new Error("500"));
@@ -448,21 +448,96 @@ test("dropTask: restoreState re-inserts the removed task", async () => {
   assert.deepEqual(store.composite()?.tasks?.map(t => t.id), ["t1", "t2"]);
 });
 
-test("dropTask: unknown id → no-op (no api call)", async () => {
+test("transitionTask: unknown id → no-op (no api call)", async () => {
   const mut = makeMutateApi(seedComposite());
   const { store } = await primedStore(mut, () => "rick@x.com");
-  const { restoreState, done } = store.dropTask("nope", "reason");
+  const { restoreState, done } = store.transitionTask("nope", "dropped", { reason: "r" });
   assert.equal(mut.postCalls.length, 0);
   assert.doesNotThrow(() => restoreState());
   await done;
 });
 
-test("dropTask: no cached composite (pre-poll) → no-op", () => {
+test("transitionTask: no cached composite (pre-poll) → no-op", () => {
   const mut = makeMutateApi(seedComposite());
   const { bus } = makeBus();
   const store = createTaskListStore({ bus, api: mut.api, endpoint: ENDPOINT, nowFn, actorProvider: () => "rick@x.com" });
   // No refresh() → lastComposite is null.
-  const { done } = store.dropTask("t1", "reason");
+  const { done } = store.transitionTask("t1", "dropped", { reason: "r" });
   assert.equal(mut.postCalls.length, 0);
   return done;   // resolved
+});
+
+// ---------------------------------------------------------------------------
+// Row-control conversion 2026.09.02 — transitionTask now carries five verbs, and
+// only two of them close a row. The open/closed split is the behaviour dropTask
+// never had to have, because Drop was the only verb it could ever be asked for.
+// ---------------------------------------------------------------------------
+
+test("transitionTask: an OPEN verb keeps the row and re-stamps its status in place", async () => {
+  // Park, demote and approve leave the row owed. Removing it would tell the
+  // operator their work had vanished, which is the opposite of what a park means.
+  const OPEN_VERBS: ReadonlyArray<[string, string]> = [
+    [ "parked", "park" ], [ "not_approved", "demote" ], [ "queued", "approve" ],
+  ];
+  assert.equal(OPEN_VERBS.length, 3,
+    `three of the five verbs leave a row open; ${OPEN_VERBS.length} under test`);
+  let checked = 0;
+  for (const [toStatus, verb] of OPEN_VERBS) {
+    const mut = makeMutateApi(seedComposite());
+    const { store } = await primedStore(mut, () => "rick@x.com");
+    const { done } = store.transitionTask("t1", toStatus, {});
+    assert.deepEqual(store.composite()?.tasks?.map(t => t.id), ["t1", "t2"],
+      `${verb}: the row left the open view`);
+    assert.equal(store.composite()?.tasks?.find(t => t.id === "t1")?.status, toStatus,
+      `${verb}: the row kept its old status`);
+    mut.settlePost(true);
+    await done;
+    checked += 1;
+  }
+  assert.equal(checked, 3, `checked ${checked} of ${OPEN_VERBS.length} open verbs`);
+});
+
+test("transitionTask: a CLOSING verb removes the row — both of them", async () => {
+  const CLOSING: ReadonlyArray<string> = [ "dropped", "wont_fix" ];
+  assert.equal(CLOSING.length, 2, `two of the five verbs close a row; ${CLOSING.length} under test`);
+  let checked = 0;
+  for (const toStatus of CLOSING) {
+    const mut = makeMutateApi(seedComposite());
+    const { store } = await primedStore(mut, () => "rick@x.com");
+    const { done } = store.transitionTask("t1", toStatus, { reason: "r" });
+    assert.deepEqual(store.composite()?.tasks?.map(t => t.id), ["t2"], `${toStatus}: the row stayed`);
+    mut.settlePost(true);
+    await done;
+    checked += 1;
+  }
+  assert.equal(checked, 2, `checked ${checked} of ${CLOSING.length} closing verbs`);
+});
+
+test("transitionTask: the extras ride the body VERBATIM — park_reason is not rewritten", async () => {
+  // The store must not have a second opinion about which key a reason goes under.
+  // taskVerbs.transitionExtras decides; this posts what it is handed.
+  const mut = makeMutateApi(seedComposite());
+  const { store } = await primedStore(mut, () => "rick@x.com");
+  store.transitionTask("t1", "parked", { park_reason: "the decisive sentence", next_chase_ts: "2026-09-10T13:00:00.000Z" });
+  assert.equal(mut.postCalls.length, 1);
+  assert.deepEqual(mut.postCalls[0]!.body, {
+    to_status     : "parked",
+    park_reason   : "the decisive sentence",
+    next_chase_ts : "2026-09-10T13:00:00.000Z",
+    actor         : "rick@x.com (multiplexer)",
+    authority     : "user_direct",
+  });
+  assert.ok(!("reason" in (mut.postCalls[0]!.body as Record<string, unknown>)),
+    "a park filed under the generic key lands with no decisive sentence attached");
+  mut.settlePost(true);
+});
+
+test("transitionTask: an empty extras object posts to_status plus the audit fields only", async () => {
+  const mut = makeMutateApi(seedComposite());
+  const { store } = await primedStore(mut, () => "rick@x.com");
+  store.transitionTask("t1", "queued", {});
+  assert.deepEqual(mut.postCalls[0]!.body, {
+    to_status: "queued", actor: "rick@x.com (multiplexer)", authority: "user_direct",
+  });
+  mut.settlePost(true);
 });
