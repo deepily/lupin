@@ -567,6 +567,56 @@ the root set, the wall-clock time — because without them a reading is not wron
 goes stale. ⇒ *Coordinates make your reading checkable. Content-names make your pointer durable.*
 Say what you measured **and** name what you mean.
 
+## 🔴 IMPLEMENTED BUT NOT INSTALLED — A MODULE AT 100% THAT THE APP NEVER MOUNTS
+
+Rachel 🕊️, 2026-09-02, and she proved it with the arm rather than asserting it. **A component can be
+complete, correct, fully covered and entirely absent from the running system, and every test that
+builds the component itself stays green.** Coverage cannot see it; the class of test that can is the
+one people skip as ceremony.
+
+**The case.** `/static/` was served with no `cache-control` at all — 9 of 9 versioned assets, token
+or no token, measured against the live mount. The fix is a `VersionedStaticFiles` class plus **one
+line** at `src/lupin_app/main.py:1375`, which is the app's ONLY static mount (verified: two hits in
+the file, the import and the mount).
+
+⇒ **Every test that instantiates `VersionedStaticFiles` itself passes whether or not `main.py` ever
+mounts it.** So a revert of that single line leaves the module at 100%, its own suite green, and the
+server handing out exactly the headers the bug was about.
+
+**The mutation arms, and note which one carries the finding** — baseline 0 failing, restore control 7
+passed:
+
+| arm | what it breaks | new reds |
+|---|---|---|
+| **C1** | **revert the mount to plain `StaticFiles`** | **2 — and NOTHING ELSE catches it** |
+| C2 | one policy for every URL | 3 |
+| C3 | cache the un-tokened URL hard | 3 |
+| C4 | `max-age` too short | 1 |
+| C5 | token detection inverted | 3 |
+
+⇒ **C1 is the whole argument.** The two tests that catch it `import lupin_app.main` and interrogate
+**the app object it assembles** — the route table, not the source text. Without them the revert is
+invisible to a suite that is otherwise thorough.
+
+🔴 **SO ASK, OF ANY NEW COMPONENT: does a test drive the ASSEMBLED APP, or only the class?** A suite
+made entirely of the second kind reports on a component; it says nothing about the product. **This is
+§ *A HIT IS NOT A USE* moved from search to wiring** — there, a name appears without the code using
+it; here, code exists without the app reaching it.
+
+⚠️ **AND TWO PRACTICES FROM THE SAME PASS, both worth copying.**
+- **The corpus guard discovers its nine assets FROM THE PAGE and carries a positive control asserting
+  it found at least five** — because *an empty discovery passes every per-item assertion in the loop*.
+  A loop over nothing is green. (Same defect as § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES*.)
+- **She named C4 as her thinnest arm rather than padding the count** — a short `max-age` is a
+  degradation, not a broken policy. **A 5-of-5 that quietly includes a weak arm is how a kill count
+  stops meaning anything.**
+
+⚠️ **Two policies, not one, and the reason generalises past headers**: a tokened URL names ONE
+revision so it can never need to change (`immutable`), while an un-tokened URL must serve tomorrow's
+bytes (`no-cache`). **Applying either rule everywhere re-creates the other's bug** — and caching the
+un-tokened path hard is the same stale-asset trap one level down, which is the defect that produced
+this work.
+
 ## 🔴 A TWO-FILE INVOCATION CANNOT TELL YOU WHICH FILE THE RESULT CAME FROM
 
 Rio ⚡'s line, 2026-09-02, found on his own run after two other seats had spent a measurement each
