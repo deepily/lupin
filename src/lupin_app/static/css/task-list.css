@@ -595,6 +595,29 @@ tbody.task-group.collapsed .task-row {
     background : var( --hover-bg, rgba( 255, 255, 255, 0.08 ) );
 }
 
+/* 🔴 RICK'S "PERMANENTLY DISABLED" BUTTON. It was never stuck — it had no LOOK.
+   Measured in his browser 2026-09-03: an enabled `.task-priority-update` and a disabled
+   one returned identical computed style — opacity 1 on both, same background, same
+   colour, and `cursor: pointer` on BOTH. The button flips its `disabled` property
+   correctly on every change; nothing on screen ever said so.
+
+   ⚠️ THAT IS WHY THE TESTS AND THE OPERATOR DISAGREED AND BOTH WERE RIGHT. Every guard
+   reads `button.disabled` and watches it flip. He reads pixels, and they never moved.
+   A state nobody can see is not a control — it is something the software knows and the
+   person using it does not.
+
+   The omission is visible in this file's own neighbours: `.task-action-input:disabled`
+   and `.task-verb-select:disabled` both got a disabled style. The two siblings in that
+   same cell were dressed and the button was not — and the button is the one control
+   whose entire job is to say "not yet", then "now you can".
+
+   `cursor` matters as much as the dimming: a `pointer` on a dead button invites the
+   click that does nothing, which is exactly the interaction he reported. */
+.task-action-btn:disabled {
+    opacity : 0.35;
+    cursor  : not-allowed;
+}
+
 /* Dimmed IN PLACE rather than removed — the same ruling the empty detail emoji
    follows. A control that vanishes teaches nothing; a disabled one with a title
    says why it is unavailable. */
