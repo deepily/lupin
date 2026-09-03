@@ -313,7 +313,11 @@ def build_wake_text( memento_path, wake_nonce, wake_proof_path ):
         f"never cleared, so introspection returns the WRONG answer and returns it "
         f"confidently. Use the id instead: call get_session_info() and read "
         f"claude_code.session_id. Immediately before the clear was sent, this pane was "
-        f"session {_PRE_CLEAR_SID_SENTINEL}. IF YOURS DIFFERS, the clear landed and you are "
+        f"session {_PRE_CLEAR_SID_SENTINEL}. COMPARE THE FIELD NAMED, NOT THE FIELD WHOSE "
+        f"VALUE MATCHES: get_session_info() also returns claude_code.stable_session_id, which "
+        f"no clear ever changes — on a pane's FIRST clear it holds this exact value, so it WILL "
+        f"match and proves nothing. Only claude_code.session_id can answer this. "
+        f"IF YOURS DIFFERS, the clear landed and you are "
         f"the rehydrated seat: write {wake_proof_path} containing exactly this line: "
         f"{_WAKE_PROOF_NONCE_LINE} {wake_nonce} — then read your memento at {memento_path} "
         f"and resume your board. IF YOURS IS THE SAME, no clear landed: write NO proof, put "
@@ -665,7 +669,7 @@ def perform_self_respin(
     # readiness gate; if the bridge can't be resolved we fall back to a plain clear
     # (still a valid re-spin — the seat is left for the observer to wake/alarm). The
     # wake TEXT (not the injector) carries the proof instruction: proof is CONSUMER-side.
-    base            = base_dir if base_dir is not None else _resolve_base_dir()
+    base            = base_dir if base_dir is not None else _resolve_base_dir( repo_root )
     bridge_path     = resolve_bridge_path_fn( session_id ) if wake_nonce else None
     do_wake         = bool( wake_nonce and bridge_path )
     wake_proof_path = os.path.join( base, f"{_WAKE_PROOF_PREFIX}{session_id}.marker" ) if do_wake else None
@@ -775,9 +779,38 @@ def _readback_ok( read_text_fn, marker_path, session_id ):
         return False
 
 
-def _resolve_base_dir():   # pragma: no cover - live fleet_data_root read (tests pass base_dir)
+def _resolve_base_dir( repo_root=None ):
+    """
+    The fleet data root THIS seat's marker belongs in — keyed on the seat's OWN repo.
+
+    Rick ruled 2026-09-03 (row db56ac6d) that a seat's data keys on the seat's own repo
+    everywhere. This used to call fleet_data_root() with NO argument, which resolves the
+    AMBIENT root — cu.get_project_root(), i.e. the LUPIN_ROOT env var, identical for every
+    process on this box. So every seat wrote its marker under `lupin` whatever repo it was
+    sitting in. Measured by Mr. Radio 2026-09-02 and recorded on row db56ac6d, NOT by this
+    author: 69 markers under lupin and 0 under any other root, one of them naming a
+    planning-is-prompting memento in its own payload while sitting in lupin's directory.
+    Re-derive rather than quote — a census is a fact about the day it was taken.
+
+    Requires:
+        - repo_root is the seat's own repo root, or None to resolve it live from the
+          process cwd (self_respin runs IN the seat's own process, so cwd is the seat)
+
+    Ensures:
+        - returns str( fleet_data_root( <the seat's repo root> ) ). A worktree collapses to
+          its parent checkout inside fleet_data_root, so a seat working in a worktree still
+          writes where the fleet reads.
+        - an UNRESOLVABLE root (no git, or git answers blank) degrades to fleet_data_root()'s
+          ambient default — precisely the value this function returned before the ruling, so
+          a box that cannot answer is no worse off than it is today. With the DEFAULT slot
+          gate this branch is unreachable: verify_memento_at_slot( repo_root=None ) refuses
+          — run, not read — before the base is ever computed. An injected gate could reach
+          it, which is why the fallback exists rather than an assert.
+        - never raises
+    """
     from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
-    return str( fleet_data_root() )
+    root = repo_root if repo_root is not None else resolve_repo_root()
+    return str( fleet_data_root( root ) )
 
 
 def self_respin_from_bridge(

@@ -121,6 +121,24 @@ function renderActionsCell( task: TaskItem, reassignTargets: ReadonlyArray<strin
   const cell = document.createElement( "td" );
   cell.className = "task-col-actions";
 
+  // 🔴 `.task-priority-select` NAMES TWO DIFFERENT CONTROLS IN THIS PRODUCT, AND THEY
+  // HAVE OPPOSITE SEMANTICS. This one — the multiplexer's — has NO Update button and
+  // COMMITS ON CHANGE: `TaskListRenderer.handleControlChange` patches the row the moment
+  // the value moves. The classic notifications page (`notifications.js`, symbol
+  // `_priorityCell`) paints the same class name beside a `.task-priority-update` button
+  // that stays disabled until the value differs from `data-original`, and patches only
+  // on the click.
+  //
+  // ⚠️ SO A GUARD WRITTEN AGAINST ONE SAYS NOTHING ABOUT THE OTHER, and it will not look
+  // wrong: the selector matches in both, the test goes green, and the renderer you meant
+  // was never exercised. Measured 2026-09-03 while chasing a report of a dead Update
+  // button — the built multiplexer bundle carries `task-priority-select` and carries
+  // neither `task-priority-update` nor `.task-actions`, so a search for the class alone
+  // cannot tell you which control it found. Name the renderer in the test, not just the
+  // class.
+  //
+  // Guard: src/tests/unit/notifications_js/two_renderers_one_class_name.test.ts
+  //
   // Priority select (P0–P3). The heat class makes the current urgency legible
   // even before the user opens the dropdown (color is redundant with the text).
   const prioSelect = document.createElement( "select" );

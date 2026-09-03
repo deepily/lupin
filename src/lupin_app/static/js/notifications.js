@@ -10001,6 +10001,21 @@ class NotificationsUI {
          *     - an unrecognized stored priority is shown as an extra selected option
          *       rather than silently re-labelling the row as something it is not
          */
+        // 🔴 `.task-priority-select` NAMES TWO DIFFERENT CONTROLS IN THIS PRODUCT, AND THEY
+        // HAVE OPPOSITE SEMANTICS. This one — the classic page's — pairs the select with a
+        // `.task-priority-update` button that stays disabled until the value differs from
+        // `data-original`, and PATCHes only on the click. The multiplexer paints the same
+        // class name (`static/js/multiplexer/render/templates/taskListTable.ts`, symbol
+        // `renderActionsCell`) with NO Update button at all, and COMMITS ON CHANGE.
+        //
+        // ⚠️ SO A GUARD WRITTEN AGAINST ONE SAYS NOTHING ABOUT THE OTHER, and it will not
+        // look wrong: the selector matches in both, the test goes green, and the renderer
+        // you meant was never exercised. Measured 2026-09-03 while chasing a report of a
+        // dead Update button — the multiplexer bundle carries `task-priority-select` and
+        // carries neither `task-priority-update` nor `.task-actions`. Name the renderer in
+        // the test, not just the class.
+        //
+        // Guard: src/tests/unit/notifications_js/two_renderers_one_class_name.test.ts
         const id       = this._escapeTaskAttr( task.id );
         const current  = ( task.priority || "" ).trim();
         const known    = [ "P0", "P1", "P2", "P3" ];

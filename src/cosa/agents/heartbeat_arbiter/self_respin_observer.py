@@ -518,30 +518,74 @@ def classify_marker( marker, pressure_record, *, now, wake_proof_nonce=None, wak
 # ---------------------------------------------------------------------------
 # Disk read — glob markers under a base dir (fleet_data_root by default)
 # ---------------------------------------------------------------------------
-def read_markers( base_dir=None ):
+def _marker_patterns( base_dir ):
     """
-    Read every self-re-spin marker under `base_dir`, skipping unreadable ones.
+    The glob patterns a fleet-wide marker sweep has to cover.
+
+    WHY THIS EXISTS RATHER THAN A SINGLE `_resolve_base_dir` (Rick's keying ruling,
+    row db56ac6d). A marker is written under the SEAT's own repo data root. A sweep
+    that globs one directory therefore sees only the seats that happen to share the
+    observer's ambient LUPIN_ROOT, and every other seat's marker is invisible — not
+    late, not malformed, ABSENT. This reader cannot be handed a repo the way the
+    boot-receipt finder can, because it takes no seat: it asks about EVERYBODY at
+    once. So the fix is not "pass it the repo", it is "sweep every repo".
+
+    🔴 EXACTLY ONE LEVEL DOWN, AND THIS IS MEASURED, NOT TIDINESS. A data root is a
+    DIRECT child of the parent, so `<parent>/*/` IS the shape of the thing. The
+    obvious alternative — a recursive `**` sweep, copied from
+    `respin_wake_check.find_misplaced_receipts` — was run against the live tree on
+    2026-09-03 and returned 82 markers where the single-root read returns 71. The
+    extra 11 live in `projects-data/lupin/self-respin-archive-pre-f7c5e349/`:
+    retired markers deliberately parked OUT of the observer's way. A recursive sweep
+    resurrects them — the observer re-classifies all 11 and the janitor, which
+    deletes any RETURNED marker past its TTL, deletes them for good.
+
+    ⇒ SO THE TWO SWEEPS DIFFER ON PURPOSE, and the difference is what each one is
+    FOR. `find_misplaced_receipts` is a DETECTOR whose whole job is to find files
+    OUTSIDE the writer's shape, so recursive is correct there and its docstring says
+    so. This is a READER of live markers, so it must match the writer's shape
+    exactly. Copying the pattern across would have been the same mistake the work
+    order for this change already made once — carrying a mechanism checked for one
+    family into another it was never checked for.
 
     Requires:
-        - base_dir is a directory path or None (None ⇒ fleet_data_root(), lazily)
+        - base_dir is a directory path or None
 
     Ensures:
-        - returns a list of parsed marker dicts (may be empty)
+        - an EXPLICIT base_dir ⇒ that one directory's pattern and nothing else.
+          Tests and explicit callers still mean what they say, so no existing caller
+          changes behaviour.
+        - None ⇒ `<parent of the ambient root>/*/<prefix>*.json` — every repo root
+          under the parent, the ambient root included, at one level and no deeper
+        - a DEGENERATE parent (the ambient root has no parent, or its parent is the
+          filesystem root) falls back to the ambient root alone — a sweep must never
+          widen toward the filesystem root
+        - never raises
+    """
+    if base_dir is not None:
+        return [ os.path.join( str( base_dir ), f"{MARKER_PREFIX}*.json" ) ]
+    ambient = os.path.normpath( _resolve_base_dir( None ) )
+    parent  = os.path.dirname( ambient )
+    if not parent or parent == ambient or parent == os.sep:
+        return [ os.path.join( ambient, f"{MARKER_PREFIX}*.json" ) ]
+    return [ os.path.join( parent, "*", f"{MARKER_PREFIX}*.json" ) ]
+
+
+def read_markers( base_dir=None ):
+    """
+    Read every self-re-spin marker the sweep covers, skipping unreadable ones.
+
+    Requires:
+        - base_dir is a directory path or None (None ⇒ every repo root under the
+          parent of fleet_data_root(), resolved lazily — see _marker_scan_roots)
+
+    Ensures:
+        - returns a list of parsed marker dicts (may be empty), ordered by path
         - a missing directory ⇒ [] (not an error — nothing has fired)
         - a malformed / unreadable marker file is skipped, never propagated
         - never raises
     """
-    base = _resolve_base_dir( base_dir )
-    results = []
-    for path in sorted( glob.glob( os.path.join( base, f"{MARKER_PREFIX}*.json" ) ) ):
-        try:
-            with open( path, "r" ) as f:
-                obj = json.load( f )
-        except ( OSError, ValueError ):
-            continue
-        if isinstance( obj, dict ):
-            results.append( obj )
-    return results
+    return [ marker for _path, marker in _read_markers_with_paths( base_dir ) ]
 
 
 def _resolve_base_dir( base_dir ):
@@ -705,21 +749,25 @@ def observe_fleet_self_respin( *, base_dir=None, now=None, fetch_pressure=None )
     if fetch_pressure is None:
         fetch_pressure = _fetch_live_pressure
 
-    markers = read_markers( base_dir )
-    if not markers:
+    pairs = _read_markers_with_paths( base_dir )
+    if not pairs:
         return []
 
-    base     = _resolve_base_dir( base_dir )
     section  = fetch_pressure() or {}
     by_id    = _pressure_by_id( section )
 
-    def _classify( m ):
+    def _classify( path, m ):
+        # The marker's OWN directory, not the observer's ambient root. self_respin_core
+        # writes the marker, the wake proof and the send stamp into ONE directory, so a
+        # marker found under a sibling repo root has its sidecars there too — reading
+        # them from the ambient root would report every cross-repo seat as unproven.
+        base = os.path.dirname( path )
         nonce, proof_at = read_wake_proof( base, m.get( "session_id" ) )
         return classify_marker(
             with_keys_sent( m, base ), by_id.get( m.get( "session_id" ) ), now=now,
             wake_proof_nonce=nonce, wake_proof_at=proof_at,
         )
-    return [ _classify( m ) for m in markers ]
+    return [ _classify( p, m ) for p, m in pairs ]
 
 
 # ---------------------------------------------------------------------------
@@ -745,9 +793,11 @@ def _read_markers_with_paths( base_dir=None ):
         - a missing directory ⇒ [] ; an unreadable/malformed file is skipped
         - never raises
     """
-    base    = _resolve_base_dir( base_dir )
+    paths = []
+    for pattern in _marker_patterns( base_dir ):
+        paths.extend( glob.glob( pattern ) )
     results = []
-    for path in sorted( glob.glob( os.path.join( base, f"{MARKER_PREFIX}*.json" ) ) ):
+    for path in sorted( set( paths ) ):
         try:
             with open( path, "r" ) as f:
                 obj = json.load( f )
@@ -800,12 +850,15 @@ def sweep_returned_markers( *, base_dir=None, now=None, fetch_pressure=None,
     if not pairs:
         return []
 
-    base     = _resolve_base_dir( base_dir )
     section  = fetch_pressure() or {}
     by_id    = _pressure_by_id( section )
 
     swept = []
     for path, marker in pairs:
+        # the marker's own root — see observe_fleet_self_respin. The janitor deletes the
+        # sidecars too, so reading them from anywhere else would leave a cross-repo
+        # seat's proof and send stamp behind after its marker was swept.
+        base = os.path.dirname( path )
         nonce, proof_at = read_wake_proof( base, marker.get( "session_id" ) )
         assessment = classify_marker(
             with_keys_sent( marker, base ), by_id.get( marker.get( "session_id" ) ), now=now,
@@ -910,14 +963,14 @@ def collect_respin_samples( *, base_dir=None, now=None, fetch_pressure=None ):
     if fetch_pressure is None:
         fetch_pressure = _fetch_live_pressure
 
-    markers = read_markers( base_dir )
-    if not markers:
+    pairs = _read_markers_with_paths( base_dir )
+    if not pairs:
         return []
 
-    base    = _resolve_base_dir( base_dir )
     by_id   = _pressure_by_id( fetch_pressure() or {} )
 
-    def _sample( m ):
+    def _sample( path, m ):
+        base            = os.path.dirname( path )   # the marker's own root — see observe_fleet_self_respin
         record          = by_id.get( m.get( "session_id" ) )
         nonce, proof_at = read_wake_proof( base, m.get( "session_id" ) )
         # merged FIRST so the sample and the assessment describe the same marker —
@@ -929,7 +982,7 @@ def collect_respin_samples( *, base_dir=None, now=None, fetch_pressure=None ):
         )
         return build_respin_sample( merged, record, assessment, now )
 
-    return [ _sample( m ) for m in markers ]
+    return [ _sample( p, m ) for p, m in pairs ]
 
 
 def append_respin_samples( samples, base_dir=None ):
@@ -939,6 +992,15 @@ def append_respin_samples( samples, base_dir=None ):
     Requires:
         - samples is a list of JSON-serializable dicts (build_respin_sample shape)
         - base_dir is a directory path or None (None ⇒ fleet_data_root())
+
+    ⚠️ THIS ONE STAYS AMBIENT ON PURPOSE, and it is the one base_dir seam on this
+    module that Rick's keying ruling does NOT move (row db56ac6d). The ruling is
+    about a SEAT's data — a marker, a receipt, a hold — which belongs under the
+    seat's own repo. This file is not a seat's data: it is the OBSERVER's own
+    fleet-wide instrument log, one writer, one reader, no seat. Splitting it per
+    repo would fragment a single time series into N of them and hand its future
+    readers the very multi-root sweep this change exists to remove from the marker
+    path. The markers are read from every root; the samples are written to one.
 
     Ensures:
         - appends one JSON line per sample to <base>/RESPIN_SAMPLES_FILENAME
