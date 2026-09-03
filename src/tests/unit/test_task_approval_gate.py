@@ -690,3 +690,84 @@ def test_the_python_predicate_and_its_SQL_twin_agree( clock ):
     # Same shape as the predicate it was modelled on: a reader comparing them should
     # find nothing to compare but the status constant.
     assert holding.replace( "status_1", "S" ) == parked.replace( "status_1", "S" )
+
+
+# ---------------------------------------------------------------------------
+# THE GRANDFATHER QUESTION — the P0's last genuinely-open item (row 8af64f5a)
+#
+# The P0 body says Phase 4 should "grandfather the 13 live rows to approved". The
+# word appears nowhere in the tree, and the audit that found that stopped there:
+# it MAY be unnecessary by construction, and that was explicitly NOT established.
+#
+# These two tests establish it, and they are written so a later change that MAKES
+# a grandfather step necessary reddens instead of passing quietly:
+#
+#   1. there is no status to grandfather TO, and
+#   2. the flip's one effect is reachable only from a CREATE, so it cannot touch
+#      a row that already exists.
+#
+# ⚠️ Both are readings of THIS tree. Neither says a grandfather step is unnecessary
+# in general — they say the two things that would make one necessary here are absent.
+# ---------------------------------------------------------------------------
+
+def test_there_is_no_approved_status_to_grandfather_rows_to():
+    """
+    The P0's "grandfather the 13 live rows to approved" names an operation with no
+    target: the store has `not_approved` and no `approved`.
+
+    The positive control is load-bearing — without it a renamed or emptied
+    VALID_STATUSES would satisfy the negative assertion perfectly.
+    """
+    from cosa.rest import task_store_rules as rules
+
+    assert "not_approved" in rules.VALID_STATUSES          # positive control
+    assert "approved" not in rules.VALID_STATUSES
+
+    # And nothing a row can already hold is hidden by the holding-area vocabulary:
+    # BOARD_INVISIBLE is the terminal set plus not_approved, so a queued /
+    # in_progress / blocked / parked / claimed / review row stays exactly as visible
+    # after the flip as before it.
+    pre_existing = set( rules.VALID_STATUSES ) - set( rules.TERMINAL_STATUSES ) - { "not_approved" }
+    assert pre_existing, "the sweep found no pre-existing statuses — the corpus is empty, not clean"
+    assert pre_existing.isdisjoint( set( rules.BOARD_INVISIBLE_STATUSES ) )
+
+
+def test_the_holding_default_can_only_reach_a_create_never_an_existing_row():
+    """
+    `default_mint_status()` is the whole of the flip. It is called from exactly one
+    place — inside `create_task` — so flipping the flag cannot reach a stored row.
+
+    Corpus is git-derived (tracked, non-test `.py` under src/) so the count is a fact
+    about the repository rather than about whatever is lying in this working tree.
+    The definition site is asserted separately as the positive control: without it, a
+    search that matched nothing at all would pass.
+    """
+    import subprocess
+
+    from cosa.rest import task_approval_settings as approval
+
+    root  = subprocess.run( [ "git", "rev-parse", "--show-toplevel" ],
+                            capture_output=True, text=True, check=True ).stdout.strip()
+    # 🔴 A PLAIN DIRECTORY PREFIX, NEVER "src/**/*.py" — a git pathspec is not shell
+    # globstar: `**/` requires an intervening directory, so that form silently drops
+    # every file sitting directly in `src/` and returns a confident partial answer.
+    hits  = subprocess.run( [ "git", "grep", "-l", "default_mint_status", "--", "src/" ],
+                            cwd=root, capture_output=True, text=True ).stdout.split()
+    files = { h for h in hits
+              if h.endswith( ".py" ) and "/tests/" not in h
+              and not h.rsplit( "/", 1 )[ -1 ].startswith( "test_" ) }
+
+    assert "src/cosa/rest/task_approval_settings.py" in files, \
+        "the definition site is missing — the search found nothing, which is not the same as no callers"
+    assert files == { "src/cosa/rest/task_approval_settings.py",
+                      "src/cosa/rest/routers/tasks.py" }, \
+        f"a new reader of the holding default appeared: {sorted( files )}"
+
+    # ...and the one caller substitutes ONLY when the payload named no status, so a
+    # status that already exists on a row is never the thing being defaulted.
+    from cosa.rest.routers.tasks import TaskCreateIn
+    common = { "item_class": "task", "title": "t", "created_by": "mr radio dde22022",
+               "project": "lupin" }
+    assert "status" not in TaskCreateIn( **common ).model_fields_set
+    assert "status"     in TaskCreateIn( **common, status="queued" ).model_fields_set
+    assert approval.default_mint_status() in ( "queued", "not_approved" )
