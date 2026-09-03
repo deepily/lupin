@@ -11552,7 +11552,7 @@ class NotificationsUI {
          *     - returns a plain object safe to hand back to _restoreOperatorState
          *     - never throws on a missing or empty container (degrade-safe)
          */
-        const state = { inputs: [], selects: [], stripes: [], disclosed: [], focusKey: null, selStart: 0, selEnd: 0 };
+        const state = { inputs: [], selects: [], priorities: [], stripes: [], disclosed: [], focusKey: null, selStart: 0, selEnd: 0 };
         if ( !container || typeof container.querySelectorAll !== "function" ) return state;
 
         const active = document.activeElement;
@@ -11579,6 +11579,24 @@ class NotificationsUI {
         // make that refusal look wrong.
         for ( const el of container.querySelectorAll( ".task-verb-select[data-task-id]" ) ) {
             if ( el.value ) state.selects.push( [ el.dataset.taskId, el.value ] );
+        }
+        // 🔴 RICK'S SECOND DEAD BUTTON, AND THE SAME ASSIGNMENT KILLED IT. He reported the
+        // priority Update as "permanently disabled — no change in value re-enables it".
+        // The control works when you call it; what it could not survive was a POLL LANDING
+        // BETWEEN the choice and the click. Choose P2, wait one tick, and the repaint puts
+        // the row's stored priority back and the button back to `disabled`. From his side
+        // that is a button that never works, with nothing left on screen to show why.
+        //
+        // ⚠️ ONLY A PENDING EDIT IS CARRIED — a select still showing the row's own value is
+        // deliberately NOT captured. Restoring an untouched select would re-assert a stale
+        // value over a row somebody else has since re-prioritized, which would light Update
+        // over an edit this operator never made. `data-original` is what makes "pending"
+        // decidable, and it is re-rendered with the row, so it is always the fresh truth.
+        for ( const el of container.querySelectorAll( ".task-priority-select[data-task-id]" ) ) {
+            const chosen = ( el.value || "" ).trim();
+            if ( chosen && chosen !== ( el.dataset.original || "" ) ) {
+                state.priorities.push( [ el.dataset.taskId, chosen ] );
+            }
         }
         for ( const el of container.querySelectorAll( ".task-row-error-stripe[data-error-for]" ) ) {
             if ( el.hidden ) continue;
@@ -11618,6 +11636,24 @@ class NotificationsUI {
             if ( !sel ) continue;
             sel.value = verb;
             this._handleVerbSelectChange( sel );
+        }
+        // ⚠️ THE VALUE GOES BACK FIRST AND THE BUTTON IS RECOMPUTED SECOND, NEVER FORCED.
+        // Restoring the value alone is half a repair — the fresh markup renders Update
+        // `disabled`, so the operator would get their choice back above a button they still
+        // cannot press. And forcing it ENABLED would be wrong the other way: if the board
+        // caught up to the chosen value while the poll was in flight, there is nothing left
+        // to submit. Handing the saved value to the same change handler the operator's own
+        // keystroke uses is what makes both cases come out right without a second rule.
+        //
+        // A saved value with no matching option is left alone: assigning it would set the
+        // select to "" and light a button over a value the click handler then refuses.
+        for ( const [ taskId, priority ] of state.priorities ) {
+            const sel = container.querySelector(
+                `.task-priority-select[data-task-id="${CSS.escape( taskId )}"]` );
+            if ( !sel ) continue;
+            if ( !sel.querySelector( `option[value="${CSS.escape( priority )}"]` ) ) continue;
+            sel.value = priority;
+            this._handlePrioritySelectChange( sel );
         }
         for ( const [ key, value ] of state.inputs ) {
             if ( !value ) continue;
