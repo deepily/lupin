@@ -220,7 +220,7 @@ test( "won't-fix and demote each render the input their transition REQUIRES", ()
   // needs it is chosen, which is why this asks through `_handleVerbSelectChange` rather
   // than reading markup that never carried a date until somebody picked demote.
   assert.ok( host.querySelector( ".task-reason-input" ), "no reason input rendered at all" );
-  assert.equal( host.querySelector( ".task-chase-input" ), null,
+  assert.equal( host.querySelectorAll( ".task-chase-input" ).length, 0,
     "a date box is rendered before any verb asked for one" );
 
   const sel = host.querySelector( ".task-verb-select" ) as HTMLSelectElement;
