@@ -811,6 +811,76 @@ docstrings, route strings, error messages and other tests' prose; the code that 
 it appears once. So the ratio is lopsided by construction, and a population picked by
 name is wrong by DEFAULT, not by accident.
 
+### 🔴 YOUR MATCH KEY IS SHORTER THAN THE ROUTER'S KEY, AND THE MOST BELIEVABLE WRONG ANSWER NAMES THE ROUTE YOU WERE HUNTING
+
+sam 🎙️, 2026-09-02. Measured at `8319ead2`, main checkout, `LUPIN_ROOT` and `PYTHONPATH` both
+pinned, `PYTHONDONTWRITEBYTECODE=1`, 199 `Route` objects in the assembled app.
+
+I wrote a check to find literal routes shadowed by an earlier parameterised sibling — the defect
+behind `/api/tasks/flow-ratio` answering **422** all evening. **It reported seven. All seven were
+false, and one of them was `/api/tasks/flow-ratio`.**
+
+| arm | predicate | result |
+|---|---|---|
+| A | `par.path_regex.match( lit.path )` | **7 shadowed** |
+| B | `par.path_regex.match( lit.path ) and ( lit.methods & par.methods )` | **0** |
+
+**Starlette matches on path AND method.** A method mismatch is `Match.PARTIAL` — not a match, and
+not a stop: the router keeps looking and takes the next route. My key was the path. Its key is the
+pair.
+
+**Four of the seven are plain method mismatches** — no overlap at all, so nothing further is needed
+to dismiss them:
+
+| literal | its method | the sibling's |
+|---|---|---|
+| `/admin/users/batch-delete` | POST | GET, DELETE |
+| `/api/notifications/generate-gist` | POST | GET |
+| `/api/websocket-sessions/single-session-policy` | PUT | GET, DELETE |
+| `/api/cosa-voice/voice-persona/sample` | POST | GET |
+
+🔴 **THE OTHER THREE ARE THE CENTRE OF THIS SECTION, AND `flow-ratio` IS WHY IT IS WRITTEN AT ALL:
+`/api/tasks/{task_id}` IS REGISTERED TWICE.** Measured, in registration order:
+
+```
+idx 176  /api/tasks/{task_id}   PATCH   patch_task
+idx 178  /api/tasks/events      GET     query_event_stream
+idx 179  /api/tasks/flow-ratio  GET     get_flow_ratio
+idx 183  /api/tasks/{task_id}   GET     get_task
+```
+
+⇒ The path-only arm compared `flow-ratio` against the **PATCH** twin at 176, which is genuinely
+earlier — so the hit is arithmetically correct and semantically meaningless. **The GET twin, the
+only one that could ever shadow it, is at 183 — after.**
+
+**The discriminating reading, which is what settles it rather than the method table**: ask the
+assembled app.
+
+```
+GET /api/tasks/flow-ratio  ->  resolves to  get_flow_ratio          # its own route
+/api/tasks/{task_id} on that same scope  ->  Match.PARTIAL          # the PATCH object
+```
+
+⇒ **So the order is ALREADY CORRECT at this sha and there is no shadow here to find.** My check was
+hunting a defect that had been fixed, and answered by naming the exact route I was hunting — which
+is the property that makes this worth a section. **A wrong answer that names your suspect does not
+read as a wrong answer. It reads as a confirmation.**
+
+⚠️ **SCOPE, AND DO NOT WIDEN IT: this establishes that a path-only check over-reports IN THIS APP AT
+THIS SHA. It does NOT establish that path-only checks over-report in general.** A same-method pair
+registered in the wrong order **is** a real shadow, and **both** arms catch it — arm B is a
+narrowing of arm A, never a replacement for it. A reader who takes away *"path-only checks
+over-report"* will disable a check that works.
+
+⚠️ **AND THE SECOND CAVEAT, WHICH IS THE TRANSFERABLE HALF**: the rule is not about routers. **It is
+that a check and the thing it checks can agree on the field and disagree on the KEY** — and the key
+is the part nobody states out loud, so both look correct. Ask of any check you write: *what does the
+real system match on, and is my predicate the whole of it or a prefix?*
+
+⇒ Related but NOT the same as § *A HIT IS NOT A USE* — there every match is real and merely
+irrelevant. **Here the matches are computed, and wrong.** The population was right; the predicate
+was short.
+
 > 🔴 **THE TWO VENUES ALSO HAVE TWO DATABASES, and a host shell silently reads the wrong one.** Neither container sets `DB_NAME`, so each falls through to its own config block: `lupin-rest-dev` → **`lupin_db_dev`**, `lupin-rest-test` → **`lupin_db_test`**. A host shell inherits the *Development* block, so `PYTHONPATH=src python3` on the host queries **dev** even when the job you are chasing ran on `:8000`.
 >
 > **Measured 2026-08-28**, both directions inside a minute: host/dev returned **205 rows, zero `ts-` rows, nothing newer than the previous day**; the same query inside `lupin-rest-test` returned **4 rows, all same-day**, including the one at issue. The host answer reads exactly like *"test_suite jobs are never persisted"* — which is false, and a correct fix was one message from being retracted on it. **An empty result from the wrong box is not evidence; it is a confident answer to a question you did not ask.**
