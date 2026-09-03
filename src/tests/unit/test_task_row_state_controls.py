@@ -132,6 +132,72 @@ def client_code( client_src ):
     return strip_js_comments( client_src )
 
 
+# ─────────────────────────────── the corpora, and their sizes ───────────────────
+#
+# 🔴 WHY THESE EXIST. Every assertion in this file used to be a substring check over
+# the WHOLE client asset, which cannot tell where a string SITS — in the rendered
+# markup, in a handler, in a lookup table, in a comment, or in code nothing calls.
+# Measured at 9efefb5c: replacing the actions cell's entire returned markup with an
+# empty `<div class="task-actions"></div>` — every row on the board losing its select,
+# its reason box and its Submit — left **40 of 40 green**. The strings all still
+# existed somewhere; none of them was being RENDERED.
+#
+# ⚠️ AND THE COUNTS ARE NOT DECORATION. A guard that says "I found 5 verbs in the cell"
+# fails when a verb is relocated OUT of the cell; a guard that says "park appears in
+# the file" does not. The number is what converts a presence check into a locate.
+#
+# WHERE THESE NUMBERS COME FROM: measured off the tree at 9efefb5c, not chosen. Five
+# option definitions in `_taskActionsCell`, five rows in `_verbNeeds`, four entries in
+# `_verbReasonComplaint`, three controls in the cell's returned markup. The complaint
+# table is FOUR because approve is the one verb that takes no reason — the asymmetry is
+# pinned below rather than smoothed over, since a fifth complaint would mean approve had
+# quietly grown an obligation the server does not have.
+VERBS                  = ( "park", "drop", "demote", "wont_fix", "approve" )
+VERBS_NEEDING_A_REASON = ( "park", "drop", "demote", "wont_fix" )
+ROW_CONTROLS           = ( "task-verb-select", "task-reason-input", "task-submit-button" )
+
+
+@pytest.fixture( scope="module" )
+def actions_cell( client_code ):
+    """
+    The body of `_taskActionsCell` alone — the ONE function that renders a row's
+    controls.
+
+    Requires:
+        - the cell is locatable and non-trivial (asserted here, so a slice that
+          silently came back empty fails ONCE and loudly rather than making every
+          per-item loop below pass vacuously)
+
+    Ensures:
+        - returns only the cell's own text, never a neighbour's
+    """
+    cell = function_body( client_code, "_taskActionsCell( task ) {" )
+    assert len( cell ) > 500, (
+        f"the actions cell sliced to {len( cell )} chars — too small to be the real cell. "
+        f"Every count below would then be measuring an empty corpus, which passes every "
+        f"loop it is asked about."
+    )
+    return cell
+
+
+@pytest.fixture( scope="module" )
+def actions_markup( actions_cell ):
+    """
+    The template literal the cell RETURNS — what actually reaches the page.
+
+    🔴 THIS IS THE SLICE THAT CATCHES A RELOCATION. The options are computed above it;
+    only what is inside this return is rendered. A cell that builds five options and
+    returns an empty div passes every check made against the cell as a whole.
+    """
+    marker = 'return `<div class="task-actions">'
+    start  = actions_cell.find( marker )
+    assert start != -1, (
+        "the actions cell no longer returns a `.task-actions` container — either the "
+        "markup moved out of the cell, or the cell stopped rendering anything at all"
+    )
+    return actions_cell[ start: ]
+
+
 def test_the_comment_stripper_actually_strips( client_src, client_code ):
     """
     The helper the absence assertions rest on, falsified against the file itself.
@@ -152,7 +218,7 @@ def test_actions_column_has_a_header_and_a_cell( client_src ):
     assert 'td class="task-col-actions"' in client_src
 
 
-def test_drop_and_park_are_dispatched_from_the_delegated_handler( client_src ):
+def test_drop_and_park_are_dispatched_from_the_delegated_handler( client_src, actions_cell ):
     """
     The row has ONE delegated click handler. A control that renders but is not
     reachable from it is a button that does nothing — which looks identical to a
@@ -171,8 +237,11 @@ def test_drop_and_park_are_dispatched_from_the_delegated_handler( client_src ):
     distinguishes drop from park — the `_verbNeeds` table row is. Pinning the shared
     handler's name for both verbs would pass identically whether or not drop exists.
     """
+    # ⚠️ SCOPED TO THE CELL, not the file. `option( "drop", "Drop"` appearing SOMEWHERE
+    # is satisfied by a line the cell computes and throws away; appearing in the cell is
+    # the claim this test's name makes.
     for verb, label, status in ( ( "drop", "Drop", "dropped" ), ( "park", "Park", "parked" ) ):
-        assert f'option( "{verb}", "{label}"' in client_src, (
+        assert f'option( "{verb}", "{label}"' in actions_cell, (
             f"{verb} is never rendered as a verb the operator can choose"
         )
         assert re.search( rf'{verb}\s*:\s*{{ status: "{status}"', client_src ), (
@@ -200,7 +269,7 @@ def test_the_transition_endpoint_is_actually_called( client_src ):
 
 # ------------------------------------------------- the server's rules, mirrored honestly
 
-def test_park_is_disabled_where_the_server_would_refuse( client_src ):
+def test_park_is_disabled_where_the_server_would_refuse( client_src, actions_cell ):
     """
     THE ONE THAT EARNS ITS KEEP. Park is legal ONLY from the statuses the store
     names, and the client must not offer it elsewhere.
@@ -213,12 +282,15 @@ def test_park_is_disabled_where_the_server_would_refuse( client_src ):
     assert legal == { "queued", "in_progress" }, (
         f"the park-legal set moved to {legal}; the client's gate must move with it"
     )
+    # ⚠️ SCOPED TO THE CELL. `status === "queued"` appears in handlers and predicates
+    # all over this asset, so the whole-file form of this loop passed on strings that had
+    # nothing to do with the park gate.
     for status in sorted( legal ):
-        assert f'status === "{status}"' in client_src, (
+        assert f'status === "{status}"' in actions_cell, (
             f"client does not enable park from {status!r}, which the server permits"
         )
-    assert "task-action-disabled" in client_src
-    assert 'aria-disabled="true"' in client_src
+    assert "task-action-disabled" in actions_cell
+    assert 'aria-disabled="true"' in actions_cell
 
 
 def test_both_required_reasons_are_checked_before_the_call( client_src ):
@@ -336,7 +408,7 @@ def test_every_store_status_has_a_client_colour( client_src ):
         )
 
 
-def test_the_three_new_controls_are_rendered_and_dispatched( client_src ):
+def test_the_three_new_controls_are_rendered_and_dispatched( client_src, actions_cell ):
     """
     A control that renders but is unreachable from the ONE delegated click handler
     is a button that does nothing — which looks identical to a working button until
@@ -351,7 +423,7 @@ def test_the_three_new_controls_are_rendered_and_dispatched( client_src ):
         ( "demote",   "Demote",     "not_approved" ),
         ( "approve",  "Approve",    "queued" ),
     ):
-        assert f'option( "{verb}", "{label}"' in client_src, f"{verb} is never rendered"
+        assert f'option( "{verb}", "{label}"' in actions_cell, f"{verb} is never rendered"
         assert re.search( rf'{verb}\s*:\s*{{ status: "{status}"', client_src ), (
             f"{verb} has no _verbNeeds row — nothing knows what it posts"
         )
@@ -386,7 +458,7 @@ def test_wont_fix_requires_a_reason_because_the_server_does( client_src ):
     assert "A won't-fix reason is required" in client_src
 
 
-def test_terminal_rows_offer_no_controls_at_all( client_src, client_code ):
+def test_terminal_rows_offer_no_controls_at_all( client_src, client_code, actions_cell, actions_markup ):
     """
     `done` / `dropped` / `wont_fix` are append-only — `validate_transition` refuses
     every edge out of them. The first cut of the actions cell rendered Drop enabled
@@ -414,7 +486,7 @@ def test_terminal_rows_offer_no_controls_at_all( client_src, client_code ):
     # carries the gate is the option's `enabled` argument rather than a button class.
     for verb, gate in ( ( "drop", "!isTerminal" ), ( "wont_fix", "!isTerminal" ),
                         ( "demote", "demoteLegal" ) ):
-        assert re.search( rf'option\( "{verb}", "[^"]+",\s*{re.escape( gate )}', client_src ), (
+        assert re.search( rf'option\( "{verb}", "[^"]+",\s*{re.escape( gate )}', actions_cell ), (
             f"the {verb} option no longer gates on {gate} — it is offered on a row the "
             f"server refuses outright"
         )
@@ -429,16 +501,103 @@ def test_terminal_rows_offer_no_controls_at_all( client_src, client_code ):
     # `disabled` from the three controls reddened nothing, because with every option
     # greyed Submit refuses with "Choose an action first" and the row is not exploitable.
     # Present, correct, and untestable-if-wrong — which is a third state, not a pass.
-    assert 'const off = isTerminal ?' in client_src, (
+    assert 'const off = isTerminal ?' in actions_cell, (
         "the select / reason box / Submit are no longer disabled on a terminal row; "
         "the greyed options alone leave three live controls on an append-only row"
     )
-    assert 'disabled aria-disabled="true"' in client_src, (
+    assert 'disabled aria-disabled="true"' in actions_cell, (
         "the terminal controls are disabled for the mouse and not for a screen reader"
+    )
+    # ...and `off` has to be INTERPOLATED into all three controls, not merely computed.
+    # Counted, because "off appears in the markup" is true of one control as easily as
+    # of three, and one live Submit on an append-only row is the whole defect.
+    assert actions_markup.count( "${off}" ) == 3, (
+        f"the terminal-disable flag reaches {actions_markup.count( '${off}' )} of 3 "
+        f"controls — the rest stay live on a row the server refuses outright"
     )
 
 
-def test_approve_and_demote_are_never_both_live_on_one_row( client_src ):
+def test_the_cell_RENDERS_the_controls_it_computes( actions_markup ):
+    """
+    🔴 THE GUARD THE WHOLE FILE WAS MISSING, AND THE ARM THAT PROVES IT. At 9efefb5c I
+    replaced this cell's returned markup with an empty `<div class="task-actions"></div>`
+    — no select, no reason box, no Submit, on every row of every pane — and the suite
+    reported **40 passed**. Not two reds, not one. Zero.
+
+    Nothing was wrong with the assertions. They asked whether strings EXISTED, and the
+    strings still existed: `task-verb-select` in a querySelector, `option( "park"` in the
+    lines above the return, `task-submit-button` in the delegated dispatcher. Deleting
+    every control from the page moved none of them.
+
+    ⇒ So this asks the only question that separates a rendered control from a mentioned
+    one: is it inside what the cell RETURNS, and is the computed option list actually
+    interpolated into it.
+
+    Ensures:
+        - all three row controls appear in the returned markup, counted not merely found
+        - the computed `options` string reaches the markup rather than being discarded
+    """
+    found = [ c for c in ROW_CONTROLS if f"task-action-input {c}" in actions_markup
+                                      or f'class="{c}"' in actions_markup
+                                      or f"task-action-btn {c}" in actions_markup ]
+    assert len( found ) == len( ROW_CONTROLS ), (
+        f"the cell returns {len( found )} of {len( ROW_CONTROLS )} row controls "
+        f"({found}) — the missing ones are computed and never rendered"
+    )
+    # 🔴 THE INTERPOLATION IS THE OTHER HALF. Five options built and not placed into the
+    # select is the same defect one level in: the verbs exist, the operator cannot reach
+    # them, and every count taken over the cell as a whole still reads five.
+    assert "${options}" in actions_markup, (
+        "the option list is built and never interpolated into the select — the row "
+        "renders a chooser with nothing to choose"
+    )
+
+
+def test_every_verb_has_a_row_in_EVERY_table_that_governs_it( actions_cell, client_code ):
+    """
+    Three tables govern a verb and they are in three different functions: the cell says
+    it can be CHOSEN, `_verbNeeds` says what it POSTS, `_verbReasonComplaint` says what it
+    COMPLAINS when its reason is blank. A verb present in one and absent from another is
+    a control the operator can select and that then refuses, or refuses without saying why.
+
+    ⚠️ THE EXPECTED SETS ARE LITERALS, DELIBERATELY. Comparing the cell's verbs against
+    `_verbNeeds`' verbs would be two sides of one `==` that both move when the client
+    moves — a tautology that cannot fail. `VERBS` is written out by hand, so one side of
+    every comparison here is something the client cannot edit.
+
+    Ensures:
+        - each corpus is located and counted before any per-verb claim is made
+        - the reason-complaint table stays one SHORT, and approve is the one missing
+    """
+    options   = re.findall( r'option\( "(\w+)"', actions_cell )
+    needs     = function_body( client_code, "_verbNeeds( verb ) {" )
+    posted    = re.findall( r'^\s*(\w+)\s*:\s*\{ status:', needs, re.M )
+    complaint = function_body( client_code, "_verbReasonComplaint( verb ) {" )
+    griped    = re.findall( r'^\s*(\w+)\s*:\s*"', complaint, re.M )
+
+    # POSITIVE CONTROLS FIRST — an empty corpus satisfies every set comparison below by
+    # being a subset of nothing, so each one has to prove it found something at all.
+    assert len( options ) >= len( VERBS ), (
+        f"the cell defines {len( options )} options, expected at least {len( VERBS )}: {options}"
+    )
+    assert len( posted ) >= len( VERBS ), (
+        f"_verbNeeds holds {len( posted )} rows, expected at least {len( VERBS )}: {posted}"
+    )
+    assert len( griped ) >= len( VERBS_NEEDING_A_REASON ), (
+        f"_verbReasonComplaint holds {len( griped )} entries, expected at least "
+        f"{len( VERBS_NEEDING_A_REASON )}: {griped}"
+    )
+
+    assert set( options ) == set( VERBS ), f"the cell offers {sorted( set( options ) )}"
+    assert set( posted )  == set( VERBS ), f"_verbNeeds covers {sorted( set( posted ) )}"
+    assert set( griped )  == set( VERBS_NEEDING_A_REASON ), (
+        f"_verbReasonComplaint covers {sorted( set( griped ) )} — five complaints would "
+        f"mean approve had grown a reason requirement the server does not have; three "
+        f"would mean a verb refuses a blank reason without saying which obligation it is"
+    )
+
+
+def test_approve_and_demote_are_never_both_live_on_one_row( client_src, actions_cell ):
     """
     Approve is the holding area's EXIT (`not_approved -> queued`); Demote is its
     ENTRANCE. Offering both on one row hands the operator a move that is a no-op in
@@ -449,9 +608,14 @@ def test_approve_and_demote_are_never_both_live_on_one_row( client_src ):
         from_status="not_approved", to_status="not_approved", authority="user_direct"
     )
     assert errors, "a no-op edge is no longer refused; the mutual-exclusion gate loses its reason"
-    assert 'status === "not_approved"' in client_src, "the client never computes the held case"
-    assert "isHeld" in client_src
-    assert "demoteLegal = !isTerminal && !isHeld" in client_src
+    assert 'status === "not_approved"' in actions_cell, "the client never computes the held case"
+    assert "isHeld" in actions_cell
+    assert "demoteLegal = !isTerminal && !isHeld" in actions_cell
+    # Counted: approve is live on exactly the held case and demote on its complement.
+    assert actions_cell.count( 'option( "approve", "Approve", isHeld' ) == 1, (
+        "approve is no longer gated on isHeld alone — the exclusion has a second rule "
+        "that can drift from demote's"
+    )
 
 
 def test_approve_does_not_second_guess_the_server_allowlist( client_src, client_code ):
