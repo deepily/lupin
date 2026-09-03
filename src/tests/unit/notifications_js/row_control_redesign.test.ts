@@ -52,6 +52,9 @@ type RowUI = Record<string, unknown> & {
   _wireHoldingAreaControls: () => void;
   _wireEpicBoardAccordion: () => void;
   _transitionTask: ( id: string, to: string, extras?: unknown ) => Promise<{ ok: boolean; message?: string }>;
+  _patchTaskFields: ( id: string, patch: Record<string, unknown> ) => Promise<{ ok: boolean; message?: string }>;
+  _handlePriorityUpdateClick: ( button: unknown ) => Promise<void>;
+  refreshTaskList: () => Promise<void>;
   refreshTaskList: () => Promise<void>;
   refreshHoldingArea: () => Promise<void>;
 };
@@ -191,14 +194,28 @@ test( "the row renders ONE reason field, not one per verb", () => {
   }
 } );
 
-test( "the one action button reads Submit", () => {
+test( "the one VERB button reads Submit, and the priority Update sits beside it", () => {
   const ui   = newUI();
   const host = paneWithCell( ui, row( { status: "queued" } ) );
 
-  const buttons = host.querySelectorAll( "button.task-action-btn" );
-  assert.equal( buttons.length, 1, "the row does not carry exactly one action button" );
+  // ⚠️ THIS TEST USED TO ASSERT "exactly one action button", FULL STOP, and that count
+  // was right until Rick asked for a priority control on 2026-09-03. The property it was
+  // really holding is that the FIVE VERBS collapsed to ONE Submit — not that a row may
+  // never carry a second, unrelated control. Widening it to "one or more" would have
+  // thrown that away; naming both buttons keeps it exact and now covers the new one too.
+  const submits = host.querySelectorAll( "button.task-submit-button" );
+  assert.equal( submits.length, 1, "the row does not carry exactly one verb-submitting button" );
   // Rick: "It's probably submit right? That sounds better than go."
-  assert.equal( ( buttons[ 0 ].textContent ?? "" ).trim(), "Submit" );
+  assert.equal( ( submits[ 0 ].textContent ?? "" ).trim(), "Submit" );
+
+  const updates = host.querySelectorAll( "button.task-priority-update" );
+  assert.equal( updates.length, 1, "the row does not carry exactly one priority Update button" );
+  assert.equal( ( updates[ 0 ].textContent ?? "" ).trim(), "Update" );
+
+  // And nothing else. A third button appearing without a test naming it is how the
+  // five-button cell grew in the first place.
+  assert.equal( host.querySelectorAll( "button.task-action-btn" ).length, 2,
+    "the row carries an action button that no test names" );
 } );
 
 
@@ -510,10 +527,14 @@ test( "every non-terminal row renders the SAME controls whatever its status", ()
     shapes.add( [
       host.querySelectorAll( ".task-verb-select" ).length,
       host.querySelectorAll( ".task-reason-input" ).length,
+      // The priority select joined the tuple when Rick's third pair landed. Counting the
+      // buttons without counting IT would let the new control appear on some statuses
+      // and not others — the exact inconsistency this test exists to catch.
+      host.querySelectorAll( ".task-priority-select" ).length,
       host.querySelectorAll( "button.task-action-btn" ).length
     ].join( "/" ) );
   }
-  assert.deepEqual( Array.from( shapes ), [ "1/1/1" ],
+  assert.deepEqual( Array.from( shapes ), [ "1/1/1/2" ],
     `rows of different statuses render different control shapes: ${Array.from( shapes ).join( " vs " )}` );
 } );
 
@@ -967,4 +988,164 @@ test( "approve and demote are never both live on the same row", () => {
       assert.equal( demote.disabled,  false, `${status}: demote is unavailable on a live row` );
     }
   }
+} );
+
+
+// ═══════ RICK'S THIRD PAIR: the priority select and its Update button ═══════
+//
+// Asked for by voice 2026-09-03: "a list box with all of the priorities and an update
+// button… obviously I would want the list box to reflect the current priority before I
+// actually update it, and the update button would only be enabled if I had chosen a
+// different value to update."
+//
+// 🔴 THREE CLAIMS IN ONE SENTENCE, AND THEY FAIL DIFFERENTLY. The select showing the
+// wrong current value misreports the row. Update enabled on an unchanged value sends a
+// no-op write. Update DISABLED on a changed value is a dead control. Each arm below
+// takes one, because a single "it works" test passes while two of the three are broken.
+
+function priorityBits( host: HTMLElement ): { sel: HTMLSelectElement; btn: HTMLButtonElement } {
+  const sel = host.querySelector( ".task-priority-select" ) as HTMLSelectElement | null;
+  const btn = host.querySelector( "button.task-priority-update" ) as HTMLButtonElement | null;
+  assert.ok( sel, "no priority select rendered — this test cannot speak to the control it names" );
+  assert.ok( btn, "no priority Update button rendered" );
+  return { sel: sel!, btn: btn! };
+}
+
+function choosePriority( host: HTMLElement, value: string ): HTMLSelectElement {
+  // A REAL `change`, never an assignment — the enable/disable runs off the pane's own
+  // delegated change listener, so setting `.value` alone produces a page state no
+  // operator can reach and a button whose state nothing has updated.
+  const { sel } = priorityBits( host );
+  sel.value = value;
+  sel.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  return sel;
+}
+
+test( "🔴 the priority select OPENS on the row's current priority", () => {
+  for ( const priority of [ "P0", "P1", "P2", "P3" ] ) {
+    const ui   = newUI();
+    const host = paneWithCell( ui, row( { status: "queued", priority } ) );
+    const { sel } = priorityBits( host );
+
+    // ⚠️ ASSERTED ON THE `selected` ATTRIBUTE, NOT ON `.value`, AND THE REASON IS A
+    // FIXTURE LIMIT RATHER THAN A PREFERENCE. Measured in this environment while writing
+    // these arms: after `innerHTML` is rewritten, happy-dom does not re-sync
+    // `selectedIndex` — it read -1 for a P0 row and stayed at 1 for both a P1 and a P2
+    // row, so `.value` returned P1 for a select whose markup plainly carried
+    // `<option value="P2" selected>`. `.value` was CORRECT for P0 and P1 by coincidence
+    // and wrong for P2, which is the worst shape a fixture can have: right often enough
+    // to be trusted. A real browser honours `selected` at parse; the attribute is both
+    // what we render and what the browser reads, so it is the honest thing to assert.
+    const marked = sel.querySelector( "option[selected]" ) as HTMLOptionElement | null;
+    assert.ok( marked, `a ${ priority } row marked NO option as selected — the select opens on ` +
+      `whatever happens to be first, which misreports every row that is not P0` );
+    assert.equal( marked!.value, priority,
+      `a ${ priority } row opened its priority select on ${ marked!.value } — a control that ` +
+      `misreports the current value is worse than one that offers nothing` );
+  }
+} );
+
+test( "🔴 Update starts DISABLED — nothing has been chosen yet", () => {
+  const ui   = newUI();
+  const host = paneWithCell( ui, row( { status: "queued", priority: "P2" } ) );
+  const { btn } = priorityBits( host );
+  assert.equal( btn.disabled, true, "Update was live before the operator changed anything" );
+  assert.equal( btn.getAttribute( "aria-disabled" ), "true",
+    "the button is inert to the mouse and announces itself as available to a screen reader" );
+} );
+
+test( "🔴 Update ENABLES on a different value and DISABLES again on the way back", () => {
+  const ui   = newUI();
+  const host = paneWithCell( ui, row( { status: "queued", priority: "P2" } ) );
+  const { btn } = priorityBits( host );
+
+  choosePriority( host, "P0" );
+  assert.equal( btn.disabled, false, "a changed priority left Update dead — the control cannot be used at all" );
+
+  // The return trip is the arm that catches a one-way latch, which is what a naive
+  // "enable on change" gives you: the value is back where it started and the button
+  // still offers to write it.
+  choosePriority( host, "P2" );
+  assert.equal( btn.disabled, true,
+    "choosing the ORIGINAL priority again left Update enabled — it now offers a write that changes nothing" );
+} );
+
+test( "🔴 THROUGH THE CLICK PATH: Update PATCHes the chosen priority, and only that", async () => {
+  const ui   = newUI();
+  const host = paneWithCell( ui, row( { id: "abc123", status: "queued", priority: "P3" } ) );
+
+  const patches: [ string, Record<string, unknown> ][] = [];
+  ui._patchTaskFields = async ( id, patch ) => { patches.push( [ id, patch ] ); return { ok: true }; };
+  ui.refreshTaskList  = async () => {};
+
+  choosePriority( host, "P1" );
+
+  const { btn } = priorityBits( host );
+  const target   = ui as unknown as Record<string, ( b: unknown ) => unknown >;
+  const original = target._handlePriorityUpdateClick;
+  let   ran: unknown = null;
+  target._handlePriorityUpdateClick = ( b: unknown ) => { ran = original.call( ui, b ); return ran; };
+  btn.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target._handlePriorityUpdateClick = original;
+
+  assert.ok( ran !== null,
+    "the Update button reached NO handler — the pane routes clicks for Submit but not for " +
+    "this one, so the control is dead on screen however correct the handler is" );
+  await ran;
+
+  assert.equal( patches.length, 1, "Update did not reach the field seam" );
+  assert.equal( patches[ 0 ][ 0 ], "abc123" );
+  assert.deepEqual( patches[ 0 ][ 1 ], { priority: "P1" },
+    "the PATCH carried something other than the one field the operator changed" );
+} );
+
+test( "🔴 an UNCHANGED priority sends nothing, even if the button is forced live", async () => {
+  // `disabled` is a DOM attribute anything can clear — a stale repaint, a stray script,
+  // a curious operator with devtools. The guard that matters is the one on the path to
+  // the request, so this arm clears the attribute deliberately and asserts silence.
+  const ui   = newUI();
+  const host = paneWithCell( ui, row( { id: "abc123", status: "queued", priority: "P2" } ) );
+
+  let called = 0;
+  ui._patchTaskFields = async () => { called++; return { ok: true }; };
+  ui.refreshTaskList  = async () => {};
+
+  const { sel, btn } = priorityBits( host );
+  // Set `.value` EXPLICITLY to the row's own priority before forcing the button live.
+  // An assignment is the one operation happy-dom tracks reliably here (see the
+  // selected-attribute note above), so this pins the select to "unchanged" rather than
+  // leaving the arm at the mercy of a `selectedIndex` the fixture never synced — which
+  // would make it pass or fail on which priority the row happened to carry.
+  sel.value = "P2";
+  btn.disabled = false;                       // force it live behind the guard's back
+  await ui._handlePriorityUpdateClick( btn );
+
+  assert.equal( called, 0,
+    "an unchanged priority reached the server — the button's disabled attribute was the " +
+    "only thing stopping a write that changes nothing" );
+} );
+
+test( "a REFUSED priority update shows the server's own words on the row", async () => {
+  const ui   = newUI();
+  const host = paneWithCell( ui, row( { id: "abc123", status: "queued", priority: "P2" } ) );
+
+  ui._patchTaskFields = async () => ( { ok: false, message: "priority 'P9' must be one of ('P0', 'P1', 'P2', 'P3')" } );
+  ui.refreshTaskList  = async () => { assert.fail( "the board was refreshed after a REFUSED update" ); };
+
+  choosePriority( host, "P0" );
+  const { btn } = priorityBits( host );
+  await ui._handlePriorityUpdateClick( btn );
+
+  const stripe = host.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.ok( stripe && !stripe.hidden, "the refusal was silent — the control reads as broken" );
+  assert.match( ( stripe.textContent || "" ), /must be one of/,
+    "the operator got a paraphrase instead of the server's own words" );
+} );
+
+test( "a TERMINAL row's priority control is disabled like every other control in the cell", () => {
+  const ui   = newUI();
+  const host = paneWithCell( ui, row( { status: "done", priority: "P1" } ) );
+  const { sel, btn } = priorityBits( host );
+  assert.equal( sel.disabled, true, "a closed row still offers to be re-prioritized" );
+  assert.equal( btn.disabled, true );
 } );

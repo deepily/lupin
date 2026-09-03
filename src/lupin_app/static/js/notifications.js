@@ -9967,7 +9967,153 @@ class NotificationsUI {
                    `<input type="text" class="task-action-input task-reason-input" data-task-id="${id}" ` +
                           `placeholder="reason…" aria-label="Reason"${off}>` +
                    `<button type="button" class="task-action-btn task-submit-button" data-task-id="${id}"${off}>Submit</button>` +
+                   this._priorityCell( task ) +
                `</div>`;
+    }
+
+    _priorityCell( task ) {
+        /**
+         * Rick's third pair, far right: the row's priority and one Update button.
+         *
+         * 🔴 IT IS A SECOND, INDEPENDENT CONTROL SHARING ONE CELL — not a sixth verb.
+         * A priority edit is a field PATCH; the five verbs are transitions through the
+         * store's oracle, and the server refuses `priority` on the transition seam and
+         * `status` on the PATCH seam (routers/tasks.py, `extra="forbid"`). Folding this
+         * into the verb select would have put two different endpoints behind one
+         * control, and the operator would have had no way to tell which one refused.
+         *
+         * ⚠️ UPDATE STARTS DISABLED AND STAYS DISABLED UNTIL THE VALUE MOVES. Rick's
+         * own condition: "the update button would only be enabled if I had chosen a
+         * different value to update." The comparison is against `data-original`, the
+         * priority the row was PAINTED with — never against whatever the select happens
+         * to show — so choosing P2, then choosing P1 back again, correctly disables it.
+         *
+         * ⚠️ A TERMINAL ROW GETS THE SELECT DISABLED like every other control here.
+         * Re-prioritizing a closed row is not illegal at the store, but a control that
+         * offers it on a dead row invites an edit that changes nothing anyone reads.
+         *
+         * Requires:
+         *     - task carries `id`; `priority` may be absent (an unset row is legal)
+         *
+         * Ensures:
+         *     - the select shows the row's CURRENT priority as selected
+         *     - Update renders disabled, and carries the original for the change handler
+         *     - an unrecognized stored priority is shown as an extra selected option
+         *       rather than silently re-labelling the row as something it is not
+         */
+        const id       = this._escapeTaskAttr( task.id );
+        const current  = ( task.priority || "" ).trim();
+        const known    = [ "P0", "P1", "P2", "P3" ];
+        const isTerminal = !this.isTaskOpenStatus( task.status );
+        const off      = isTerminal ? ` disabled aria-disabled="true"` : "";
+
+        // An unknown value gets its own option rather than being dropped. Dropping it
+        // would leave the select showing P0 for a row that is not P0 — a control that
+        // MISREPORTS the current state is worse than one that admits an odd value.
+        const values = known.includes( current ) || !current ? known : [ current, ...known ];
+        const options = values.map( v =>
+            `<option value="${this._escapeTaskAttr( v )}"${v === current ? " selected" : ""}>${this.escapeHtml( v )}</option>`
+        ).join( "" );
+
+        return `<select class="task-priority-select" data-task-id="${id}" ` +
+                      `data-original="${this._escapeTaskAttr( current )}" aria-label="Priority"${off}>` +
+                   `${current ? "" : `<option value="" selected>—</option>`}${options}` +
+               `</select>` +
+               `<button type="button" class="task-action-btn task-priority-update" data-task-id="${id}" ` +
+                       `disabled aria-disabled="true" title="Choose a different priority to enable">Update</button>`;
+    }
+
+    _handlePrioritySelectChange( select ) {
+        /**
+         * Enable Update only when the chosen priority DIFFERS from the painted one.
+         *
+         * ⚠️ AGAINST `data-original`, NOT AGAINST A REMEMBERED VALUE. The row repaints
+         * on every poll tick, so any state held outside the DOM is gone within seconds;
+         * the original has to travel ON the element that survives the repaint.
+         *
+         * Ensures:
+         *     - Update is enabled iff the select's value differs from data-original
+         *     - `aria-disabled` and the tooltip track `disabled`, so the reason a
+         *       control is inert is announced and not merely rendered
+         *     - never throws on a detached or malformed row
+         */
+        if ( !select || !select.closest ) return;
+        const cell   = select.closest( ".task-actions" );
+        const button = cell ? cell.querySelector( ".task-priority-update" ) : null;
+        if ( !button ) return;
+
+        const moved = ( select.value || "" ) !== ( select.dataset.original || "" );
+        button.disabled = !moved;
+        button.setAttribute( "aria-disabled", moved ? "false" : "true" );
+        button.setAttribute( "title", moved
+            ? `Set priority to ${select.value}`
+            : "Choose a different priority to enable" );
+    }
+
+    async _handlePriorityUpdateClick( button ) {
+        /**
+         * PATCH the row's priority, then let the next poll repaint it.
+         *
+         * 🔴 RE-CHECKED HERE, NOT TRUSTED FROM THE BUTTON'S STATE. `disabled` is a DOM
+         * attribute anyone can clear, and a repaint that raced the operator could leave
+         * it enabled against a value that no longer differs. The guard that matters is
+         * the one on the path to the request.
+         *
+         * Ensures:
+         *     - a no-op when the value has not moved (no request, no stripe)
+         *     - the server's own words reach the operator's row stripe on a refusal
+         *     - the board is refreshed on success, so the row shows what the server
+         *       stored rather than what the operator asked for
+         */
+        const taskId = button && button.dataset ? button.dataset.taskId : null;
+        if ( !taskId ) return;
+        const scope  = this._paneScope( button );
+        const cell   = button.closest ? button.closest( ".task-actions" ) : null;
+        const select = cell ? cell.querySelector( ".task-priority-select" ) : null;
+        if ( !select ) return;
+
+        const chosen = ( select.value || "" ).trim();
+        if ( !chosen || chosen === ( select.dataset.original || "" ) ) return;
+
+        const result = await this._patchTaskFields( taskId, { priority: chosen } );
+        if ( result.ok ) await this.refreshTaskList();
+        else this._renderTaskRowError( taskId, `Priority update refused: ${result.message}`, scope );
+    }
+
+    async _patchTaskFields( taskId, patch ) {
+        /**
+         * PATCH one or more editable FIELDS on a row — the field seam, not the oracle.
+         *
+         * ⚠️ A DIFFERENT ENDPOINT FROM `_transitionTask` ON PURPOSE, and the server
+         * enforces the split: the PATCH model sets `extra="forbid"` and deliberately
+         * omits `status`, `park_reason` and `correlation_key` so a field edit can never
+         * bypass `validate_transition`. Mirroring that split here keeps the client from
+         * being the place where the two seams blur.
+         *
+         * Ensures:
+         *     - returns { ok: true } on 2xx
+         *     - returns { ok: false, message } on any failure, never throws
+         */
+        try {
+            const response = await this.authedFetch( `/api/tasks/${encodeURIComponent( taskId )}`, {
+                method  : "PATCH",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( {
+                    actor     : `operator ${this.queueSessionId || "browser"}`,
+                    authority : "user_direct",
+                    ...patch
+                } )
+            } );
+            if ( response.ok ) return { ok: true };
+            let detail = `${response.status}`;
+            try {
+                const body = await response.json();
+                if ( body && body.detail ) detail = typeof body.detail === "string" ? body.detail : JSON.stringify( body.detail );
+            } catch ( e ) { /* non-JSON error body — the status alone is the message */ }
+            return { ok: false, message: detail };
+        } catch ( e ) {
+            return { ok: false, message: `unreachable: ${e && e.message ? e.message : e}` };
+        }
     }
 
     _verbNeeds( verb ) {
@@ -11312,6 +11458,7 @@ class NotificationsUI {
             // which is what let a sixth verb be added with its own button and its own
             // box, five times over, without anyone seeing the shape it was making.
             if ( actionBtn.classList.contains( "task-submit-button" ) ) this._handleTaskSubmitClick( actionBtn );
+            else if ( actionBtn.classList.contains( "task-priority-update" ) ) this._handlePriorityUpdateClick( actionBtn );
             else if ( actionBtn.classList.contains( "holding-approve-all" ) ) this._handleHoldingApproveAllClick( actionBtn );
             else if ( actionBtn.classList.contains( "holding-wont-fix-all" ) ) this._handleHoldingWontFixAllClick( actionBtn );
             return true;
@@ -11590,6 +11737,12 @@ class NotificationsUI {
         container.addEventListener( "change", ( e ) => {
             const sel = e.target && e.target.closest ? e.target.closest( ".task-verb-select" ) : null;
             if ( sel ) this._handleVerbSelectChange( sel );
+            // The priority select rides the SAME delegated listener rather than getting
+            // its own. Three panes each wire themselves by hand and were missing a click
+            // listener entirely as recently as last night — a second listener here would
+            // be a fourth thing to forget in three places.
+            const prio = e.target && e.target.closest ? e.target.closest( ".task-priority-select" ) : null;
+            if ( prio ) this._handlePrioritySelectChange( prio );
         } );
     }
 
