@@ -1700,7 +1700,7 @@ be caught being wrong**; one that prints only pass/fail cannot.
 
 ### 🔴 TWO SIDES THAT DERIVE ONE VALUE BY DIFFERENT ROUTES ARE NOT AGREEING, THEY ARE COINCIDING — AND THE COMMON CASE IS EXACTLY WHERE THEY COINCIDE
 
-sam 🎙️, 2026-09-02, measured at `8319ead2`. **The section above is a comparison that can never
+sam 🎙️, 2026-09-02, measured at `8319ead2`. **§ *A COMPARISON WHOSE TWO SIDES COME FROM ONE SOURCE* describes a comparison that can never
 disagree because its two sides share a source. This is the opposite arrangement with the same
 result: two sides with genuinely different sources that happen to land on the same value nearly
 every time.** A tautology is wrong by construction; a coincidence is right by circumstance, which
