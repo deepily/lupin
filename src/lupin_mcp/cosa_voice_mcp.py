@@ -3110,7 +3110,7 @@ def _data_root_of_spawn_record( record ):
         return None
 
 
-def _arm_respin_wake_watch( spawn_result, manager_persona, fired_at ):   # pragma: no cover - thin live-boundary glue; arm_watches_for_spawn is covered directly
+def _arm_respin_wake_watch( spawn_result, manager_persona, fired_at ):
     """Start the post-re-spin wake watches, shouting at the firing manager by DM.
 
     `fired_at` is passed in rather than read here: it must be stamped BEFORE the
