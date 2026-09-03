@@ -142,6 +142,13 @@ function fakeResponse( status: number, ok: boolean, jsonBody: unknown ): unknown
 // Measured on the way in: three of these tests failed with "expected false, actual true"
 // against a perfectly correct page, because the fixture was double-firing. The method's
 // own wired-once guard is the thing to lean on, not to defeat.
+//
+// ⚠️ AND IT DELIBERATELY DIVERGES FROM `task_list_panel.test.ts`, WHICH STILL RESETS.
+// Harmonising the two looked obviously right and was tried; measured, it re-introduced
+// that file's non-terminating break arm, while the resetting form leaves it readable at
+// 162 pass / 13 fail. So the two helpers differ ON PURPOSE — evidence-led, not drift —
+// and it is a third fact pointing at the same unexplained interaction over there.
+// Noted, not chased: see the open-item note beside that file's accordion tests.
 function wirePane( ui: EpicUI ): void {
   ui._wireEpicBoardAccordion();
 }
