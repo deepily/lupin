@@ -55,5 +55,29 @@
   "epic:board-visibility": {
     "title": "Rick can see his own board",
     "story": "The task store held every fact Rick needed and surfaced none of them where he actually looks — so the board gets a fixed URL, a link from the Lupin Dev Tools page, and a generated-at stamp in his own timezone rather than UTC."
+  },
+  "epic:coverage-100-mandate": {
+    "title": "The 100% coverage mandate",
+    "story": "Rick's highest-priority item: take files off the 29-file zero set until the number is real, and independently prove the merged tree is green rather than trusting the manager who merged it."
+  },
+  "epic:quick-ask-ship": {
+    "title": "Ship Quick Ask push-to-talk",
+    "story": "The lupin-mobile push-to-talk screen — two implementer seats building four sections against one gated plan, with a reviewer attacking each diff as it lands."
+  },
+  "epic:park-reason-fidelity": {
+    "title": "park_reason survives the write",
+    "story": "park_reason was corrupted on write, and both original specimens were destroyed when their rows left `parked` — leaving `parked` clears the field by design — so the reproduction had to be manufactured."
+  },
+  "epic:title-cap-and-trim": {
+    "title": "A task title that survives being stored",
+    "story": "The store trims titles at 60 characters and the trim preferentially eats the qualifier — the word at the end that LIMITED the claim in front of it. Five of the six rows here open their own bodies with a title-overflow banner, so the epic about trimmed titles is built out of trimmed titles."
+  },
+  "epic:fleet-infra": {
+    "title": "The machinery the fleet runs on",
+    "story": "Boxes, backups, and the hooks guarding our own commits — a wiped DATA02 backup, a FastAPI server that will not start on the GCP VM, and a guard that would stop a commit landing on top of a live merge."
+  },
+  "epic:doc-hygiene": {
+    "title": "Documents that still tell the truth",
+    "story": "Canonical docs drift from the copies sessions actually boot with, and a decisions queue accumulates claims nobody re-checks. Reconcile what is written against what is on disk, and tag the backlog by horizon so the archive question has evidence to work from."
   }
 }
