@@ -1686,6 +1686,66 @@ finding was luck: both surfaced because he stated his denominator and made the c
 **self-report on every run**. **A guard that prints how many files it scanned is a guard that can
 be caught being wrong**; one that prints only pass/fail cannot.
 
+### 🔴 TWO SIDES THAT DERIVE ONE VALUE BY DIFFERENT ROUTES ARE NOT AGREEING, THEY ARE COINCIDING — AND THE COMMON CASE IS EXACTLY WHERE THEY COINCIDE
+
+sam 🎙️, 2026-09-02, measured at `8319ead2`. **The section above is a comparison that can never
+disagree because its two sides share a source. This is the opposite arrangement with the same
+result: two sides with genuinely different sources that happen to land on the same value nearly
+every time.** A tautology is wrong by construction; a coincidence is right by circumstance, which
+is harder to see and fails later.
+
+**The case.** Two halves of the fleet's re-spin machinery answer the same question — *which repo's
+data directory does this seat use?* — by two unrelated routes:
+
+| | derives the root from | citation |
+|---|---|---|
+| **writer** (the boot receipt) | the **spawned seat's** repo | `register_session.py:1604` → `fleet_data_root( repo_root )` |
+| **reader** (the wake watch) | the **firing manager's** ambient `LUPIN_ROOT` | `cosa_voice_mcp.py:3076` passes no `base_dir` → `respin_wake_check.py:777` → `:300-302` → `fleet_data_root()` no-arg → `heartbeat_hold.py:221` → `cu.get_project_root()` |
+
+⇒ **They match whenever the manager and the worker are in the same repo, which is nearly always.**
+Not by design and not by a shared constant — the two values simply coincide. Every test of the
+normal case passes, and passes for a reason neither side states.
+
+**What made it visible was a population with an empty complement**, not a failing test:
+
+| data root | boot receipts | self-respin markers |
+|---|---|---|
+| lupin | 170 | 69 |
+| lupin-mobile | 3 | **0** |
+| planning-is-prompting | 12 | **0** |
+
+⇒ Receipts distribute per repo; markers are **69 of 69** under one. And the zero carries its own
+positive control — **the same directories that hold non-lupin receipts hold zero markers**, so the
+instrument demonstrably reaches them. The mechanism confirms the census rather than being inferred
+from it: `self_respin_core.py:778-780` also calls `fleet_data_root()` with no argument, and a live
+read of the one non-lupin process on the box (MCP pid 313899) shows `cwd=/…/planning-is-prompting`
+with **`LUPIN_ROOT=/…/lupin`**.
+
+🔴 **AND HERE IS WHY A COINCIDENCE IS WORSE THAN A PLAIN DEFECT: THE OBVIOUS FIX BREAKS THE HALF
+THAT WORKS.** The natural repair is to repoint the reader at the seat's own repo. That is right for
+receipts. **For the markers it converts the coincidence into a defect in the other direction** — the
+writer is the ambient one there, so a reader keyed on the seat's repo would stop finding markers it
+finds today. **You cannot fix one side of a coincidence. You have to decide the rule and apply it to
+every side at once.**
+
+⇒ **So the question that finds this is not "do the two sides agree?" — they do, that is the
+problem.** It is **"what would make them differ, and has that ever happened?"** Then go and look
+there. Here the differing condition is a cross-repo spawn, the population is small, and nobody had
+ever queried it.
+
+⚠️ **THE TELL IS TWO DERIVATIONS, NOT TWO VALUES.** Whenever one fact is computed independently in
+two places, write down what each one keys on. If the keys are different, the agreement you observe
+is a fact about your inputs, never about your code — and the day the inputs diverge is the day you
+find out.
+
+⚠️ **WHAT THIS DOES NOT ESTABLISH, and the limits are the reason it is worth reading:**
+- **No cross-repo spawn was run.** This is read from source plus one live environment read, not an
+  end-to-end reproduction of the failure.
+- **`LUPIN_ROOT` was read from ONE non-lupin process.** It is the only one on the box, so that is a
+  sample of one against a population of one — not a survey.
+- **Whether anything ever consumed those non-lupin receipts by another path is unknown.** What was
+  established is what *this* reader does, nothing about other readers.
+
 ### 🔴 COVERAGE FOLLOWS THE BUTTONS A HUMAN HAPPENED TO PRESS, NOT THE ONES THAT CAN BREAK
 
 Observed by Rio ⚡ 2026-09-02 on the task-list pane, generalised here. Ten mutations against its
