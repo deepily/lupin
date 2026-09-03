@@ -31,8 +31,15 @@ somebody was looking at; it was a policy absent everywhere, so a per-file remedy
 left the other eight exactly as they were.
 
 🔴 AND "THE OTHER EIGHT" UNDERSTATES IT BY SIX TIMES — MEASURED ACROSS EVERY SHELL, NOT THE
-ONE THE INCIDENT HAPPENED ON. 54 asset links across 7 shells, 53 of which serve. Before this
-policy: 53 of 53 with no cache directive. After: 0 with none — 44 revalidating, 9 immutable.
+ONE THE INCIDENT HAPPENED ON. 54 asset links across 7 shells, ALL 54 serving. Before this
+policy: 54 of 54 with no cache directive. After: 0 with none — 45 revalidating, 9 immutable.
+
+⚠️ THOSE FIGURES ARE FROM THE MAIN CHECKOUT, AND THE TREE IS PART OF THE MEASUREMENT. An
+earlier cut of this note said 53 of 53, because the census ran in a WORKTREE and
+`src/lupin_app/static/dist/` is gitignored (.gitignore line 194) — 75 files in the main
+checkout, 0 in every worktree. One shell links into it, so one asset read as unservable and
+a live file got written up as a dead link. State the tree with the count, or the next reader
+inherits a fact about somebody's checkout dressed as a fact about the app.
 
 ⇒ SO THE `?v=` SCHEME IS NOT THE SUBJECT, IT IS ONE PAGE'S CORNER OF IT. `notifications.html`
 is the ONLY shell that versions anything; the other six — multiplexer (23 assets), dev-tools,

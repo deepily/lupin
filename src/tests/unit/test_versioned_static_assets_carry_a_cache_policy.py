@@ -66,9 +66,11 @@ def _every_linked_asset():
     Every `/static/...` URL any shell links, tokened or not, with its query string.
 
     ⚠️ THIS IS THE CORPUS THAT MATTERS AND IT IS SIX TIMES THE OTHER ONE. Measured
-    2026-09-02: 54 links across 7 shells, of which only 9 carry a `?v=` — and all 9 are
-    on ONE page. The other six shells version nothing at all, so they never had a busting
-    mechanism to have a hole in; before this policy they were relying on nothing.
+    2026-09-02 in the MAIN CHECKOUT, which is the only tree where the gitignored build
+    output under `static/dist/` exists: 54 links across 7 shells, ALL 54 serving, of which
+    only 9 carry a `?v=` — and all 9 are on ONE page. The other six shells version nothing
+    at all, so they never had a busting mechanism to have a hole in; before this policy
+    they were relying on nothing.
 
     Ensures:
         - returns a sorted list of (path, query) pairs — query is "" when absent
@@ -123,18 +125,31 @@ def test_no_asset_any_shell_links_is_served_without_a_policy( client ):
     What it adds is REACH: the file's claim now matches the fix's actual scope, and a
     seventh shell added tomorrow is covered on the day someone links from it.
 
-    ⚠️ A LINK THAT 404s IS SKIPPED RATHER THAN FAILED. Whether a shell links a file that
-    does not exist is a real question and a different one; folding it in here would make
-    a caching guard go red for a missing asset and teach the next reader to distrust it.
-    (One such link exists today: parity-harness.html → /static/dist/multiplexer/
-    parity-harness.js. Named, not swallowed.)
+    🔴 A NON-200 IS SKIPPED, AND THE SKIP IS COUNTED AND ASSERTED ON — because an earlier
+    cut of this test skipped silently and I published a false fact out of it. It reported
+    `parity-harness.js` as a dead link on the strength of a census run IN A WORKTREE, where
+    `src/lupin_app/static/dist/` does not exist: that directory is gitignored (.gitignore
+    line 194), so it holds 75 files in the main checkout and 0 in every worktree. The file
+    serves fine — 26,015 bytes, HTTP 200. The check had no logic defect at all; it answered
+    correctly about the tree it ran in, and I reported the answer as a fact about the app.
+
+    ⇒ SO THE SKIP NOW CARRIES A CEILING RATHER THAN BEING UNBOUNDED. Some shells legitimately
+    link build output that a fresh checkout has not produced, so a hard failure would redden
+    this file for an environment difference. But an UNCOUNTED skip is how a whole corpus can
+    quietly empty out and still pass, so the count is asserted: if more than a handful go
+    missing, this is measuring a tree rather than a policy and it says so.
     """
-    missing = []
+    checked, skipped, missing = 0, [], []
     for path, query in _every_linked_asset():
         r = client.get( f"{path}{query}" )
-        if r.status_code != 200: continue
+        if r.status_code != 200: skipped.append( path ); continue
+        checked += 1
         if not r.headers.get( "cache-control" ): missing.append( path )
     assert missing == [], f"linked by a shell and served with no cache-control: {missing}"
+
+    # THE POSITIVE CONTROL THE FIRST CUT LACKED. Without it every assertion above is
+    # satisfied by a corpus that served nothing at all.
+    assert checked >= 40, f"only {checked} of {len( _every_linked_asset() )} assets served - skipped: {skipped}"
 
 
 def test_the_wide_corpus_is_wider_than_the_versioned_one( client ):
