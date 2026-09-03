@@ -245,3 +245,14 @@ src/rnd/**/live-runs/*.jsonl
 # it AND dirties this repo. The fix belongs in the resolver; this pattern only
 # stops the debris from reaching a commit in the meantime.
 projects-data/
+
+# Tier run logs and coverage-gate scratch, at the repo root (Rachel, 2026-09-02).
+# Ten of these were sitting untracked at session end and NOTHING ignored them:
+# `git check-ignore` returned nothing for either pattern. A bulk `git add -A`
+# would have swept ten run logs into a commit, and the only thing preventing
+# that was the fleet's selective-staging habit — which is a rule that depends on
+# remembering, and this repo's own position is that such a rule is not a control.
+# These are run artifacts by construction: named for the sha they measured, and
+# meaningless once that sha is no longer the tip.
+.tier-*.log
+.coverage-gate-*
