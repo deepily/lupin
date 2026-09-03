@@ -900,3 +900,71 @@ test( "🔴 the no-verb refusal is not confusable with a blank-reason refusal", 
       `${verb}'s reason complaint tells the operator to choose an action they already chose` );
   }
 } );
+
+
+// ═══════════════ carried from holding_area_panel, and WHY these two ═══════════════
+//
+// 🔴 THESE ARE POCHOLO'S, MOVED RATHER THAN REWRITTEN — his assertions and his failure
+// messages, verbatim; only the fixture helpers are this file's. They are here because a
+// mutation pass said so, not because two files looked similar.
+//
+// Nine arms at 038c019d against BOTH files, green baseline first (29/0 and 48/0). Every
+// GLOBAL break reddened both files — the reassuring answer that would have let either
+// side be deleted. The narrow breaks are what decided it:
+//
+//   P5  park wrongly offered on `review` ALONE ...... mine SILENT, his REDDENS
+//   P6  demote wrongly greyed on `review` ALONE ..... mine SILENT, his REDDENS
+//   P7  a LEGAL verb's label gains an explanation ... mine REDDENS, his SILENT
+//
+// ⇒ The load-bearing part is the STATUS ENUMERATION: his park test exercises five illegal
+// statuses to my one, and his conjunction test four to my two. Deleting his four would
+// have lost measured coverage while every global arm said it was safe.
+//
+// ⚠️ His terminal-row and date tests are NOT carried, and that is a measurement too, not
+// an omission. A narrow break isolating a single terminal status (`wont_fix` alone)
+// reddens BOTH files — they exercise the same three statuses. He is REDUNDANT there, not
+// weaker, which is a different claim from "mine asserts more" and reads identically in
+// prose. Richness and guarding are not the same property.
+
+test( "park is enabled ONLY from queued / in_progress, and says why when it is not", () => {
+  const ui = newUI();
+  // Park is an OPTION now, not a button of its own. ⚠️ And the reason moved with it: a
+  // button carried its rule in `title`, and an `<option>` has nowhere to show a tooltip,
+  // so the rule is in the option's own LABEL. Asserting `title` here would pass against
+  // an option that never says anything, which is the defect this test exists to catch.
+  const parkOf = ( status: string ) => {
+    const host = document.createElement( "div" );
+    host.innerHTML = ui._taskActionsCell( row( { status } ) );
+    return host.querySelector( '.task-verb-select option[value="park"]' ) as HTMLOptionElement;
+  };
+  for ( const status of [ "queued", "in_progress" ] ) {
+    assert.equal( parkOf( status ).disabled, false, `park should be live from ${status}` );
+  }
+  for ( const status of [ "blocked", "review", "claimed", "parked", "not_approved" ] ) {
+    const o = parkOf( status );
+    assert.equal( o.disabled, true, `park is offered from ${status}, which the server refuses with a 422` );
+    assert.match( o.textContent ?? "", /queued or in progress/,
+      `${status}: the greyed park option does not teach the rule` );
+  }
+} );
+
+test( "approve and demote are never both live on the same row", () => {
+  const ui = newUI();
+  for ( const status of [ "queued", "in_progress", "blocked", "review", "parked", "not_approved" ] ) {
+    const host = document.createElement( "div" );
+    host.innerHTML = ui._taskActionsCell( row( { status } ) );
+    const approve = host.querySelector( '.task-verb-select option[value="approve"]' ) as HTMLOptionElement;
+    const demote  = host.querySelector( '.task-verb-select option[value="demote"]' )  as HTMLOptionElement;
+
+    assert.equal( !approve.disabled && !demote.disabled, false,
+      `${status}: approve and demote both live — one of them is a no-op edge the store rejects` );
+
+    if ( status === "not_approved" ) {
+      assert.equal( approve.disabled, false, "approve must be live on a held row — it is the holding area's only exit" );
+      assert.equal( demote.disabled,  true,  "demote is offered on a row already in the holding area" );
+    } else {
+      assert.equal( approve.disabled, true,  `${status}: approve is offered on a row that is not held` );
+      assert.equal( demote.disabled,  false, `${status}: demote is unavailable on a live row` );
+    }
+  }
+} );
