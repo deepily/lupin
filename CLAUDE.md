@@ -2557,48 +2557,52 @@ fixtures, **20 redden on the break and 12 do not** — the 12 assert on rendered
 click. He said so. **"All 32 guard the route" was available, unfalsifiable, and would have made the
 whole number worthless.**
 
-### 🔴 A COMPLETE-LOOKING NUMBER CARRIES NO MARKER SAYING WHAT IT WAS COMPLETE *ABOUT*
+### 🔴 A FINDING FILED AS A STATE, WITH NO OWNER, READS AS CLOSED — AND ACCEPTING IT WITHOUT MINTING A ROW IS DEFERRAL WEARING ACCEPTANCE'S CLOTHES
 
-María 🌸, 2026-09-02, on her own merge gate. **`542 tests, 542 pass, 0 fail` was true.** It was true
-about **TypeScript**. She quoted it as the verification for a merge whose blast radius included a
-**Python** guard, and no part of that number could have seen it.
+Rio ⚡ and María 🌸, 2026-09-02, both halves reproduced independently. **Six tests went red in a
+merge, sat for hours, and surfaced as a merge-gate failure — and at no point was anybody unaware of
+them.** That is what makes this worth a section: nothing was hidden, nothing was missed, and the
+work still went unowned.
 
-**The case.** Rio's control redesign rewrote `notifications.js`, `notifications.html` and
-`task-list.css`. Pocholo re-pointed **32 fixtures**, all `.test.ts`. She verified independently — at
-a sha, in a detached worktree, not on either worker's report — and got 542/542 across the whole
-`notifications_js` directory.
+**Measured per sha, counting the handler the guard slices out of the client source against the count
+the guard expects:**
 
-⇒ **`src/tests/unit/test_task_row_state_controls.py` reads `notifications.js` and
-`notifications.html` AS TEXT** — `REPO_ROOT = Path( __file__ ).resolve().parents[3]`, reads at lines
-41, 447, 849, 865. **It is a reader of the very source the redesign rewrote, and it is invisible to
-every JS-scoped suite that exists.** Six of its tests were red at the merge.
+| sha | `js_defines` | `test_expects` | |
+|---|---|---|---|
+| `8319ead2` | 1 | 2 | **GREEN** — the guard existed and passed |
+| `d49a6ba6` | **0** | 2 | 🔴 **RED, born here** — *"Five buttons and five boxes become one select, one field and one Submit"* |
+| `46a3078c` | 0 | 2 | unchanged |
+| `038c019d` | 0 | 2 | unchanged |
 
-🔴 **THIS IS NOT THE WRONG-POPULATION DEFECT, AND THE DIFFERENCE IS THE WHOLE POINT.** § *AN EMPTY
-RESULT IS TWO DIFFERENT FAILURES* and § *A HIT IS NOT A USE* both describe a search pointed at the
-wrong corpus. **Here the corpus was right and the number was correct.** What was missing is the
-BOUNDARY: nothing in `542/542` says *"…of the TypeScript tests"*, so a reader supplies the scope
-they were hoping for, and the person most likely to do that is the one who ran it.
+⇒ **The author reported them AT that sha** — *"6 red / 34 pass, all six pinning old names"* — a
+correct and complete classification. **The reviewer read it, accepted it in writing, and merged.**
+Then it sat, until an unrelated tier turned it into a gate failure hours later.
 
-⇒ **SO STATE THE SCOPE IN THE SAME BREATH AS THE NUMBER, ALWAYS** — *"542/542 across
-`notifications_js`"*, never *"542/542"*. Six words, and they convert a claim about a suite into a
-claim about a suite, which is all it ever was.
+🔴 **THE TWO HALVES, AND EACH IS SUFFICIENT ON ITS OWN:**
+- **Filed as a STATE**, a finding is a fact about the tree — true, durable, and addressed to nobody.
+  **A fact does not appear on anyone's board.**
+- **ACCEPTED without a row**, the acknowledgement discharges the obligation to *respond* and creates
+  none to *act*. ⇒ *"Acceptance without an owner is deferral wearing acceptance's clothes."*
 
-⇒ **AND WHEN A CHANGE CROSSES A LANGUAGE BOUNDARY, ASK WHO ELSE READS THE FILE.** A rewritten `.js`
-is not only exercised by `.test.ts` — it can be asserted against as **text** by a guard in another
-language, another directory, another tier. **Grep the filename across the whole tree before you call
-a rewrite verified**, because the readers that a scoped suite cannot see are exactly the ones that
-will not appear in its total.
+⇒ **SO A RED YOU ACCEPT IS A ROW YOU OWE.** Not a note, not a DM, not a line in a merge report — an
+item with an owner and a status, minted at the moment you accept it. **If a finding is real enough
+to accept, it is real enough to carry a name.**
 
-⚠️ **THE CREDIT AND THE COST BELONG TOGETHER.** She verified independently, in a clean tree, at a
-named sha, **and she stated her scope when she quoted the number** — which is the only reason the
-gap was findable by anyone else at all. **A verification with a stated scope and a gap in it is
-strictly better than one with an unstated scope and no gap visible.** The lesson is to widen the
-scope, never to stop stating it.
+⚠️ **THE TELL IS THAT EVERY INDIVIDUAL STEP LOOKS DILIGENT.** The author measured. The reviewer
+read. Both were right about the facts. **What is missing has no step of its own**, which is why it
+never fails a checklist — the gap sits between *classified* and *owned*, and neither artifact points
+at it.
 
-## TEST CREDENTIALS
-
-**CRITICAL**: Never hardcode test credentials. Always use environment variables.
-
+⚠️ **AND HOW THIS ENTRY WAS CORRECTED, because that is a receipt too.** It first published a
+different account: *a scoped green (542/542, TypeScript-only) could not see a Python guard reading
+the same source as text.* **That is not what happened.** The red was not invisible to a narrow
+suite — it had already been read and accepted, and the guard file existed and passed one sha
+earlier. The reviewer retracted her own account within minutes, per-sha, after the author corrected
+her, and did so while it was already committed under her name.
+⇒ **The scoped-boundary rule may well be true; it has no receipt in this incident, so it is not
+recorded here.** A rule welded to the wrong evidence is worse than no rule — it sends the next
+reader to defend a suite's scope when the real defect was that nobody owned a red everybody knew
+about.
 ### Required Environment Variables
 
 ```bash
