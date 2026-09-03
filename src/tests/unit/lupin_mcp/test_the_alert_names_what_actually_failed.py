@@ -61,7 +61,7 @@ def _never_resolves( monkeypatch ):
     """Every resolution attempt fails. The condition the storm was made of."""
     def _boom( **_kwargs ):
         raise RuntimeError( "no session bridge file for this process" )
-    monkeypatch.setattr( cv, "wait_for_session_id", _boom )
+    monkeypatch.setattr( cv, "wait_for_session_id_with_source", _boom )
 
 
 def _capture_alert( monkeypatch ):
@@ -82,7 +82,7 @@ class TestItRetriesBeforeItAlerts:
         # corrects itself in seconds became something he was told to act on.
         _never_resolves( monkeypatch )
         attempts = []
-        monkeypatch.setattr( cv, "wait_for_session_id",
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source",
                              lambda **k: attempts.append( 1 ) or ( _ for _ in () ).throw( RuntimeError( "no bridge" ) ) )
         died = []
         monkeypatch.setattr( cv, "_die_no_session_id", lambda: died.append( True ) )
@@ -102,8 +102,8 @@ class TestItRetriesBeforeItAlerts:
             calls[ "n" ] += 1
             if calls[ "n" ] < 2:
                 raise RuntimeError( "no bridge yet" )
-            return "bbbbbbbb-1111-2222"
-        monkeypatch.setattr( cv, "wait_for_session_id", _second_time_lucky )
+            return ( "bbbbbbbb-1111-2222", "ppid" )
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source", _second_time_lucky )
         monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "source": "session_file" } )
         monkeypatch.setattr( cv, "CANONICAL_PROJECT", "lupin", raising=False )
         died = []

@@ -81,6 +81,8 @@ from cosa.utils.notification_utils import (
 from cosa.agents.utils.sender_id import detect_project as _detect_project_shared
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, wait_for_session_id, get_session_metadata as _get_cc_metadata,
+    get_claude_session_id_with_source, wait_for_session_id_with_source,
+    SOURCE_CWD_FALLBACK, DEFINITIVE_SOURCES,
     clear_cached_session_id, _find_session_file, _read_session_file,
     get_speakerphone, set_speakerphone
 )
@@ -383,7 +385,12 @@ signal.signal( signal.SIGTERM, _handle_sigterm )
 
 PROJECT           = _get_project()
 CANONICAL_PROJECT = _resolve_canonical_project( PROJECT )  # Config-mapped identity for sender_id
-SESSION_ID        = get_claude_session_id()[:8]  # 8-char hex from session bridge (env > file > fallback)
+_boot_session_id, SESSION_ID_SOURCE = get_claude_session_id_with_source()
+SESSION_ID        = _boot_session_id[ :8 ]  # 8-char hex from session bridge (env > file > fallback)
+# ⚠️ SESSION_ID_SOURCE TRAVELS WITH SESSION_ID AND MUST BE UPDATED WHEREVER IT IS.
+# It is the whole of the fix: a `cwd_fallback` id is a live colleague's, adopted because
+# we share a checkout with them, and nothing else on this box can tell that from a real
+# match. Every reassignment of SESSION_ID below sets this in the same statement.
 SENDER_ID         = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
 SERVER_URL        = _get_server_url()
 
@@ -484,7 +491,7 @@ def _watch_bridge_for_changes( stop_event=None, poll_interval=2.0, max_iteration
           must never end the watch
         - does not raise
     """
-    global SESSION_ID, SENDER_ID
+    global SESSION_ID, SENDER_ID, SESSION_ID_SOURCE
 
     last_mtime      = 0.0
     last_session_id = SESSION_ID
@@ -510,7 +517,7 @@ def _watch_bridge_for_changes( stop_event=None, poll_interval=2.0, max_iteration
             if result is None:
                 continue
 
-            bridge_path, _source = result
+            bridge_path, resolution_source = result
 
             # Check if file was modified
             try:
@@ -530,10 +537,11 @@ def _watch_bridge_for_changes( stop_event=None, poll_interval=2.0, max_iteration
 
             new_suffix = file_id[:8]
             if new_suffix != last_session_id:
-                old_sender      = SENDER_ID
-                SESSION_ID      = new_suffix
-                SENDER_ID       = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
-                last_session_id = new_suffix
+                old_sender        = SENDER_ID
+                SESSION_ID        = new_suffix
+                SESSION_ID_SOURCE = resolution_source
+                SENDER_ID         = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
+                last_session_id   = new_suffix
                 logger.info(
                     f"Session ID changed: {old_sender} -> {SENDER_ID} "
                     f"(context clear detected)"
@@ -562,18 +570,29 @@ def _session_watcher_thread():
         - sets `_session_failed` when resolution raised
         - RETURNS once resolution is done — it no longer watches
     """
-    global SESSION_ID, SENDER_ID, _session_failed
+    global SESSION_ID, SENDER_ID, SESSION_ID_SOURCE, _session_failed
 
     # ── Phase 1: Initial resolution ─────────────────────────────────────
     try:
-        real_id    = wait_for_session_id( timeout=10.0, poll_interval=1.0 )
-        new_suffix = real_id[:8]
+        real_id, resolution_source = wait_for_session_id_with_source( timeout=10.0, poll_interval=1.0 )
+        new_suffix        = real_id[:8]
+        SESSION_ID_SOURCE = resolution_source
 
         if new_suffix != SESSION_ID:
             old_sender = SENDER_ID
             SESSION_ID = new_suffix
             SENDER_ID  = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
             logger.info( f"Session ID upgraded: {old_sender} -> {SENDER_ID}" )
+
+        # ⚠️ A BORROWED IDENTITY IS NOT A FAILURE AND MUST NOT BE ALERTED AS ONE — it is a
+        # colleague's, adopted because we share their checkout. Log it loudly; the refusal
+        # at the write verbs is what actually stops it reaching anyone's board.
+        if resolution_source == SOURCE_CWD_FALLBACK:
+            logger.warning(
+                f"Session identity was GUESSED from the working directory, not this "
+                f"process tree — sender_id={SENDER_ID} may name another seat. "
+                f"Identity-bearing writes will be refused."
+            )
 
         # Verify we got a real session ID, not the fallback
         meta = _get_cc_metadata()
@@ -707,10 +726,10 @@ def _reattempt_session_resolution( timeout ):
         - returns False on any failure, having logged it, and never raises
         - clears `_session_failed` only on success, so a later caller sees the truth
     """
-    global SESSION_ID, SENDER_ID, _session_failed
+    global SESSION_ID, SENDER_ID, SESSION_ID_SOURCE, _session_failed
 
     try:
-        real_id = wait_for_session_id( timeout=timeout, poll_interval=1.0 )
+        real_id, resolution_source = wait_for_session_id_with_source( timeout=timeout, poll_interval=1.0 )
     except Exception as e:
         logger.warning( f"Session identity resolution attempt failed: {e}" )
         return False
@@ -719,7 +738,8 @@ def _reattempt_session_resolution( timeout ):
         logger.warning( "Session identity resolution attempt returned nothing" )
         return False
 
-    suffix = real_id[ :8 ]
+    suffix            = real_id[ :8 ]
+    SESSION_ID_SOURCE = resolution_source
     if suffix != SESSION_ID:
         SESSION_ID = suffix
         SENDER_ID  = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
@@ -794,6 +814,94 @@ def _die_no_session_id():
     sys.stderr.flush()
 
     os._exit( 1 )
+
+
+def _refuse_borrowed_identity( verb: str, source: Optional[ str ] = None ) -> Optional[ dict ]:
+    """
+    Refuse an identity-bearing write when this seat's identity was GUESSED.
+
+    🔴 WHY THIS EXISTS. `session_bridge` tier 4 resolves a session by matching the recorded
+    working directory of every live bridge. On this fleet every seat shares one checkout, so
+    that filter excludes nobody and the tier returns whichever colleague touched their bridge
+    most recently. The process does not fail — it succeeds AS SOMEBODY ELSE, and a row written
+    then lands on their board under their name with nothing anywhere saying otherwise.
+
+    The tier is kept on purpose (María's ruling, 2026-09-03): deleting it turns a wrong-seat
+    into a fail-to-resolve, and a false "your session is broken" is what cost Rick an
+    afternoon. So the tier still answers, and THIS is what stops the answer being acted on.
+
+    ⚠️ SCOPE IS DELIBERATELY NARROW — WRITES THAT CARRY AN IDENTITY, NOTHING ELSE. `notify`
+    and the `commons_read` family are untouched: a notification from the wrong pane is noise,
+    while a task row or a DM from the wrong seat is a durable misattribution. Refusing the
+    alert path would also silence the very warning that says the identity is borrowed.
+
+    ⚠️ AND `generated_fallback` IS ALLOWED THROUGH, WHICH LOOKS WRONG UNTIL YOU NAME THE
+    DIFFERENCE. An invented id belongs to no one, so a write under it is orphaned and
+    visibly odd. A borrowed id belongs to a real colleague. Only the second one files your
+    work under somebody else's name, and only the second one is refused here.
+
+    Requires:
+        - verb is the caller's tool name, used verbatim in the refusal text
+
+    Ensures:
+        - Returns None for every definitive source, and for the generated fallback
+        - Returns an error dict ONLY for SOURCE_CWD_FALLBACK
+        - Never raises; never writes anything
+
+    Args:
+        verb:   name of the calling tool, e.g. "task_create"
+        source: resolution source to judge; defaults to this process's live SESSION_ID_SOURCE
+
+    Returns:
+        dict or None: an error dict the verb should return unchanged, or None to proceed
+    """
+    effective = SESSION_ID_SOURCE if source is None else source
+    if effective != SOURCE_CWD_FALLBACK:
+        return None
+
+    return {
+        "status" : "error",
+        "reason" : "borrowed_identity",
+        "detail" : (
+            f"{verb} refused: this process's session identity was GUESSED from the working "
+            f"directory, not resolved from its own process tree. It currently reads as "
+            f"'{SENDER_ID}', which on a shared checkout is most likely a colleague's seat. "
+            f"Writing would file this work under their name. Set CLAUDE_SESSION_ID, or run "
+            f"from a process whose parent is the Claude Code session you mean."
+        ),
+        "resolution_source" : effective,
+        "sender_id"         : SENDER_ID,
+    }
+
+
+def _session_info_payload( cc_meta: dict ) -> dict:
+    """
+    Build the `claude_code` block of `get_session_info`, carrying HOW the id was resolved.
+
+    `get_session_metadata` has computed `resolution_source` all along and this boundary
+    dropped it, reporting only the coarse "session_file" — which is true of a definitive
+    PPID match and of a borrowed guess alike. A field computed and then discarded at the
+    boundary is the same defect the bare accessors had, one layer up.
+
+    Requires:
+        - cc_meta is the dict returned by session_bridge.get_session_metadata()
+
+    Ensures:
+        - Always returns the four keys, never raises on a missing one
+        - resolution_source is "unknown" rather than absent when the metadata lacks it
+
+    Args:
+        cc_meta: session bridge metadata
+
+    Returns:
+        dict: the claude_code block
+    """
+    return {
+        "session_id"        : cc_meta.get( "session_id", "" ),
+        "stable_session_id" : cc_meta.get( "stable_session_id", "" ),
+        "source"            : cc_meta.get( "source", "unknown" ),
+        "resolution_source" : cc_meta.get( "resolution_source", "unknown" ),
+    }
 
 
 def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
@@ -2602,11 +2710,7 @@ def get_session_info() -> dict:
     # Include CC session bridge metadata when available
     try:
         cc_meta = _get_cc_metadata()
-        info[ "claude_code" ] = {
-            "session_id"        : cc_meta.get( "session_id", "" ),
-            "stable_session_id" : cc_meta.get( "stable_session_id", "" ),
-            "source"            : cc_meta.get( "source", "unknown" )
-        }
+        info[ "claude_code" ] = _session_info_payload( cc_meta )
         # Read speakerphone_on from the same bridge metadata
         info[ "speakerphone_on" ] = bool( cc_meta.get( "speakerphone_on", False ) )
         # voice_persona stamped into the bridge by register_session.py Phase 4.5;
@@ -2664,6 +2768,9 @@ def self_respin( memento_path: str, memento_nonce: str, delay_seconds: int = 20,
         - makes NO task-store calls (the observer owns done-state; this seat is
           cleared before it could mark its own row)
     """
+    refusal = _refuse_borrowed_identity( "self_respin" )
+    if refusal is not None: return refusal
+
     from dataclasses import asdict
     from lupin_mcp.self_respin_core import self_respin_from_bridge, _live_own_pressure, resolve_own_identity
 
@@ -3300,6 +3407,9 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
         dict: { dismissed:[{session_name, status}], remaining, memento_alarm,
                 memento_outcomes, retained_owner_personas, retained_unmatched, ... }
     """
+    refusal = _refuse_borrowed_identity( "dismiss_sessions" )
+    if refusal is not None: return refusal
+
     import functools
     import cosa.utils.util as cu
     from lupin_mcp import session_spawner, reap_memento
@@ -4082,6 +4192,9 @@ def _dm_send_fn(
     They are deliberately NOT the same value; comparing one to the other will
     not match. (`dm_list`'s `session_id` filter accepts either — it normalizes.)
     """
+    refusal = _refuse_borrowed_identity( "dm_send" )
+    if refusal is not None: return refusal
+
     persona = _commons_persona_fields()
     return _dm_send_impl(
         recipient            = recipient,
@@ -4606,6 +4719,9 @@ def task_create(
     `created_by` is NOT a parameter — it is stamped from the session bridge
     ("<persona> <session id>"), the same identity lane as commons_post.
     """
+    refusal = _refuse_borrowed_identity( "task_create" )
+    if refusal is not None: return refusal
+
     return task_create_impl(
         api_base_url        = _get_server_url(),
         api_key             = _mcp_outbound_api_key(),
@@ -4699,6 +4815,9 @@ def task_transition(
 
     `actor` is NOT a parameter — bridge-stamped like task_create's created_by.
     """
+    refusal = _refuse_borrowed_identity( "task_transition" )
+    if refusal is not None: return refusal
+
     return task_transition_impl(
         api_base_url  = _get_server_url(),
         api_key       = _mcp_outbound_api_key(),
@@ -4957,6 +5076,9 @@ def task_correlate(
 
     `actor` is NOT a parameter — bridge-stamped like task_transition's actor.
     """
+    refusal = _refuse_borrowed_identity( "task_correlate" )
+    if refusal is not None: return refusal
+
     return task_correlate_impl(
         api_base_url    = _get_server_url(),
         api_key         = _mcp_outbound_api_key(),
@@ -5019,6 +5141,9 @@ def task_reassign(
     (anti-impersonation; the manager-relay handoff is auditable to the real
     session that issued it).
     """
+    refusal = _refuse_borrowed_identity( "task_reassign" )
+    if refusal is not None: return refusal
+
     if not ( reason and reason.strip() ):
         return { "status": "error", "reason": "empty_reason",
                  "detail": "task_reassign requires a non-empty reason (the manager's justification for the handoff)" }
@@ -5089,6 +5214,9 @@ def task_amend(
     `actor` is NOT a parameter — bridge-stamped like task_transition's actor
     (anti-impersonation; the amendment is auditable to the real session).
     """
+    refusal = _refuse_borrowed_identity( "task_amend" )
+    if refusal is not None: return refusal
+
     return task_amend_impl(
         api_base_url = _get_server_url(),
         api_key      = _mcp_outbound_api_key(),
@@ -5160,6 +5288,9 @@ def task_edit(
     `actor` is NOT a parameter — bridge-stamped like task_transition's actor
     (anti-impersonation; stamped LAST, so an `updates` "actor" key cannot shadow it).
     """
+    refusal = _refuse_borrowed_identity( "task_edit" )
+    if refusal is not None: return refusal
+
     if not isinstance( updates, dict ) or not updates:
         return { "status": "error", "reason": "empty_updates",
                  "detail": "task_edit requires a non-empty `updates` dict of {field: value} (the fields to overwrite)" }

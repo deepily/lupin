@@ -165,12 +165,32 @@ def atomic_write_json( path, data ):
 
 # Cache to avoid repeated file reads
 _cached_session_id: Optional[str] = None
+# The source `_cached_session_id` was resolved under. Only definitive sources are
+# ever cached, so this is never SOURCE_CWD_FALLBACK — a guess is re-resolved every call.
+_cached_session_source: Optional[str] = None
 _fallback_session_id: str = uuid.uuid4().hex[:8]
 
 # Resolution source constants
+#
+# 🔴 THESE ARE NOT DECORATION — `cwd_fallback` MEANS "THIS MIGHT BE SOMEBODY ELSE".
+# Tiers 2 and 3 identify a session by its own process tree and cannot name another seat.
+# Tier 4 identifies it by working directory, and on this fleet every seat shares one
+# checkout, so the filter excludes nobody: it returns whichever colleague touched their
+# bridge last. The tier is KEPT deliberately (María's ruling, 2026-09-03) — removing it
+# turns a wrong-seat into a fail-to-resolve — so the source is how a caller tells the two
+# apart. `get_claude_session_id_with_source` / `wait_for_session_id_with_source` are the
+# doors that carry it; the bare twins remain byte-for-byte compatible for every existing
+# caller.
 SOURCE_PPID         = "ppid"
 SOURCE_GRANDPARENT  = "grandparent"
 SOURCE_CWD_FALLBACK = "cwd_fallback"
+SOURCE_ENV          = "env"                 # CLAUDE_SESSION_ID — definitive, set by the host
+SOURCE_GENERATED    = "generated_fallback"  # invented here; wrong, but nobody else's
+
+# The sources a caller may act on as ITS OWN identity. A generated fallback is wrong and
+# harmless — it names no real seat. A cwd_fallback is wrong and harmful — it names a
+# colleague, so work filed under it lands on their board.
+DEFINITIVE_SOURCES = ( SOURCE_ENV, SOURCE_PPID, SOURCE_GRANDPARENT )
 
 
 def canonical_persona_key( name ) -> str:
@@ -300,8 +320,9 @@ def clear_cached_session_id():
         - _cached_session_id is set to None
         - Next call to get_claude_session_id() will re-read from file
     """
-    global _cached_session_id
-    _cached_session_id = None
+    global _cached_session_id, _cached_session_source
+    _cached_session_id     = None
+    _cached_session_source = None
 
 
 def _find_session_file() -> Optional[ Tuple[ Path, str ] ]:
@@ -427,16 +448,43 @@ def get_claude_session_id() -> str:
     Returns:
         str: Session ID (8-char hex fallback, or full ID from Claude Code)
     """
-    global _cached_session_id
+    return get_claude_session_id_with_source()[ 0 ]
+
+
+def get_claude_session_id_with_source() -> Tuple[ str, str ]:
+    """
+    Get the Claude Code session_id AND how it was reached.
+
+    🔴 THE POINT OF THIS FUNCTION. `_find_session_file` computes a `source` and treats
+    `cwd_fallback` as untrustworthy enough to refuse the cache — then `get_claude_session_id`
+    returns a bare `str` and the distinction is gone. A guess and a certainty reached the
+    caller in the same shape, so nothing downstream could refuse one and accept the other.
+    This door keeps them apart; the bare twin above is unchanged for every existing caller.
+
+    Requires:
+        - nothing
+
+    Ensures:
+        - Always returns a ( str, str ) pair — never None, never a bare id
+        - source is one of SOURCE_ENV / SOURCE_PPID / SOURCE_GRANDPARENT /
+          SOURCE_CWD_FALLBACK / SOURCE_GENERATED — never empty
+        - Caches definitive matches only; a cwd_fallback is re-resolved every call
+        - A cached value reports the source it was cached under
+
+    Returns:
+        Tuple[ str, str ]: ( session_id, resolution_source )
+    """
+    global _cached_session_id, _cached_session_source
 
     if _cached_session_id:
-        return _cached_session_id
+        return ( _cached_session_id, _cached_session_source )
 
     # Tier 1: Environment variable (future-proof)
     env_id = os.getenv( "CLAUDE_SESSION_ID" )
     if env_id:
-        _cached_session_id = env_id
-        return env_id
+        _cached_session_id     = env_id
+        _cached_session_source = SOURCE_ENV
+        return ( env_id, SOURCE_ENV )
 
     # Tier 2: Session file from hook
     result = _find_session_file()
@@ -446,11 +494,12 @@ def get_claude_session_id() -> str:
         if file_id:
             # Only cache definitive matches — CWD fallback is a guess
             if source != SOURCE_CWD_FALLBACK:
-                _cached_session_id = file_id
-            return file_id
+                _cached_session_id     = file_id
+                _cached_session_source = source
+            return ( file_id, source )
 
     # Tier 3: Fallback
-    return _fallback_session_id
+    return ( _fallback_session_id, SOURCE_GENERATED )
 
 
 def resolve_stable_session_id( transient_id: str ) -> str:
@@ -518,13 +567,42 @@ def wait_for_session_id( timeout: float = 10.0, poll_interval: float = 0.5 ) -> 
     Returns:
         str: Real session ID if found within timeout, else fallback
     """
-    global _cached_session_id
+    return wait_for_session_id_with_source( timeout=timeout, poll_interval=poll_interval )[ 0 ]
+
+
+def wait_for_session_id_with_source( timeout: float = 10.0, poll_interval: float = 0.5 ) -> Tuple[ str, str ]:
+    """
+    Wait for the real Claude Code session_id, and report how it was reached.
+
+    This is the door the MCP server's session watcher uses. A source exposed only on the
+    non-blocking twin would leave the server exactly as blind as before, which is why both
+    doors carry it rather than one.
+
+    Requires:
+        - timeout is a positive float
+        - poll_interval is a positive float less than timeout
+
+    Ensures:
+        - Always returns a ( str, str ) pair
+        - source is never empty; SOURCE_GENERATED when the timeout expires
+        - Caches definitive matches only — a cwd_fallback is never cached
+        - Bypasses the cache on entry, exactly as the bare twin always has
+
+    Args:
+        timeout: Max seconds to wait (default 10)
+        poll_interval: Seconds between file checks (default 0.5)
+
+    Returns:
+        Tuple[ str, str ]: ( session_id, resolution_source )
+    """
+    global _cached_session_id, _cached_session_source
 
     # Always check env var first (no polling needed)
     env_id = os.getenv( "CLAUDE_SESSION_ID" )
     if env_id:
-        _cached_session_id = env_id
-        return env_id
+        _cached_session_id     = env_id
+        _cached_session_source = SOURCE_ENV
+        return ( env_id, SOURCE_ENV )
 
     # Poll for session file — bypass cache for fresh resolution
     deadline = time.monotonic() + timeout
@@ -535,11 +613,12 @@ def wait_for_session_id( timeout: float = 10.0, poll_interval: float = 0.5 ) -> 
             file_id = _read_session_file( session_file )
             if file_id:
                 if source != SOURCE_CWD_FALLBACK:
-                    _cached_session_id = file_id
-                return file_id
+                    _cached_session_id     = file_id
+                    _cached_session_source = source
+                return ( file_id, source )
         time.sleep( poll_interval )
 
-    return _fallback_session_id
+    return ( _fallback_session_id, SOURCE_GENERATED )
 
 
 def _resolve_project_from_bridge_cwd() -> Optional[str]:

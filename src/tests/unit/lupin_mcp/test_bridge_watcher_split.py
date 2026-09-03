@@ -356,10 +356,24 @@ class TestPhaseOneDoesNotWatch:
     two turn it into a red.
     """
 
+    # ⚠️ THE STUB BELOW IS ISOLATION, NOT THE SUBJECT — AND THAT IS WHY IT CAN GO
+    # INERT WITHOUT ANYTHING TURNING RED. Both tests in this class assert CONTROL
+    # FLOW (the watcher is not called; the gate opens in a `finally` on every path),
+    # so neither depends on what the stub hands back. Measured 2026-09-03: when the
+    # production call moved from `wait_for_session_id` to `wait_for_session_id_with_source`
+    # these two stayed 23 passed while the stub named a symbol nobody called any more —
+    # so for that whole window they were resolving against the LIVE BRIDGES ON THE BOX.
+    # Not wrong, and not isolated either: they would then pass or fail on whether a
+    # machine happened to have a session running.
+    #
+    # ⇒ IF YOU RENAME WHAT `_session_watcher_thread` CALLS, RE-POINT THIS STUB. Nothing
+    # here will tell you. The check is to make the stub RAISE and confirm these two still
+    # pass — they should — and then confirm the sibling files' stubs redden, which is
+    # where a live stub is actually observable.
     def test_phase_one_returns_instead_of_watching( self, restore_globals ):
         import time as _t
         with patch.multiple( m,
-                             wait_for_session_id=lambda **k: "cccccccc-rest",
+                             wait_for_session_id_with_source=lambda **k: ( "cccccccc-rest", "ppid" ),
                              _get_cc_metadata=lambda: { "source": "session_file" },
                              _get_sender_id=lambda proj, sid: "s",
                              _watch_bridge_for_changes=lambda *a, **k: pytest.fail(
@@ -380,7 +394,7 @@ class TestPhaseOneDoesNotWatch:
         this.
         """
         with patch.multiple( m,
-                             wait_for_session_id=lambda **k: ( _ for _ in () ).throw(
+                             wait_for_session_id_with_source=lambda **k: ( _ for _ in () ).throw(
                                  RuntimeError( "no bridge" ) ),
                              _watch_bridge_for_changes=lambda *a, **k: None ):
             m._session_ready = threading.Event()

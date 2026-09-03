@@ -92,7 +92,7 @@ class TestWatcherInitialResolution:
     """
 
     def test_a_resolved_id_upgrades_both_the_session_and_the_sender( self, monkeypatch, caplog ):
-        monkeypatch.setattr( cv, "wait_for_session_id", lambda **k: "bbbbbbbb-1111-2222" )
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source", lambda **k: ( "bbbbbbbb-1111-2222", "ppid" ) )
         monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "source": "session_file" } )
         monkeypatch.setattr( cv, "CANONICAL_PROJECT", "lupin", raising=False )
         with caplog.at_level( "INFO", logger=cv.logger.name ):
@@ -109,7 +109,7 @@ class TestWatcherInitialResolution:
         it are attributed to a project rather than a session. The warning is the
         only signal that the roster will not show this seat.
         """
-        monkeypatch.setattr( cv, "wait_for_session_id", lambda **k: "aaaaaaaa-x" )
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source", lambda **k: ( "aaaaaaaa-x", "ppid" ) )
         monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "source": "fallback" } )
         with caplog.at_level( "WARNING", logger=cv.logger.name ):
             cv._session_watcher_thread()
@@ -125,7 +125,7 @@ class TestWatcherInitialResolution:
         """
         def boom( **k ):
             raise RuntimeError( "no bridge ever appeared" )
-        monkeypatch.setattr( cv, "wait_for_session_id", boom )
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source", boom )
         with caplog.at_level( "CRITICAL", logger=cv.logger.name ):
             cv._session_watcher_thread()
 
@@ -139,7 +139,7 @@ class TestWatcherInitialResolution:
 class TestWatcherMonitoringLoop:
 
     def _phase1_ok( self, monkeypatch ):
-        monkeypatch.setattr( cv, "wait_for_session_id", lambda **k: "aaaaaaaa-x" )
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source", lambda **k: ( "aaaaaaaa-x", "ppid" ) )
         monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "source": "session_file" } )
         monkeypatch.setattr( cv, "clear_cached_session_id", lambda: None )
         monkeypatch.setattr( cv, "CANONICAL_PROJECT", "lupin", raising=False )
@@ -316,7 +316,7 @@ class TestWaitForSenderId:
         # bridges on the box, and pass or fail on whether a machine happened to have
         # a session running — the exit path is the claim, not the environment.
         called = []
-        monkeypatch.setattr( cv, "wait_for_session_id",
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source",
                              lambda **k: ( _ for _ in () ).throw( RuntimeError( "no bridge" ) ) )
         monkeypatch.setattr( cv.time, "sleep", lambda *a, **k: None )
         monkeypatch.setattr( cv, "_die_no_session_id", lambda: called.append( True ) )
@@ -329,7 +329,7 @@ class TestWaitForSenderId:
         called = []
         # Same reason as the test above: the retry now stands between the failed
         # resolution and the alert, so it is stubbed to keep failing.
-        monkeypatch.setattr( cv, "wait_for_session_id",
+        monkeypatch.setattr( cv, "wait_for_session_id_with_source",
                              lambda **k: ( _ for _ in () ).throw( RuntimeError( "no bridge" ) ) )
         monkeypatch.setattr( cv.time, "sleep", lambda *a, **k: None )
         monkeypatch.setattr( cv, "_die_no_session_id", lambda: called.append( True ) )
