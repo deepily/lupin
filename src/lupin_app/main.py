@@ -4,6 +4,7 @@ from logging import debug
 from fastapi import FastAPI, Request, Query, HTTPException, File, UploadFile, WebSocket, WebSocketDisconnect, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from lupin_app.versioned_static import VersionedStaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from datetime import datetime
@@ -1372,7 +1373,13 @@ app.include_router(v2_ask.router)   # /api/v2/ask — CJ Flow v2 unified ask end
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
+# VersionedStaticFiles, not StaticFiles: the plain mount set NO Cache-Control at all, so
+# every `?v=` token this repo has ever bumped could still be served from a browser's
+# heuristic cache. The SPA shell revalidates (pages.py sets no-cache) but the assets it
+# links did not, which made the whole busting scheme depend on a step nothing enforced.
+# Measured 2026-09-02: 9 of the 9 assets notifications.html links with ?v= came back with
+# no cache-control. See src/lupin_app/versioned_static.py for why the policy is two rules.
+app.mount("/static", VersionedStaticFiles(directory=static_dir), name="static")
 
 async def load_stt_model():
     """
