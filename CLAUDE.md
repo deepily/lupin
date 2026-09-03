@@ -1607,6 +1607,36 @@ in.** There, two sides move together so the comparison cannot fail. Here, two ca
 the assertion cannot discriminate. **Both are an `assert` that is true by construction rather
 than by behaviour**, and neither shows up in a coverage number or an assertion audit.
 
+🔴 **AND A SECOND RECEIPT, IN PRODUCTION CODE, WHERE ONE TEST CARRIED *TWO* SUFFICIENT CAUSES —
+SO FIXING THE ONE YOU SPOT LEAVES IT BLIND** (Rachel 🕊️, 2026-09-02). The approval gate's wiring
+check, `test_the_gate_is_wired_into_the_transition_door_at_all`, has been reporting on a gate it
+never touches. **Measured**: delete the gate's call site — `routers/tasks.py:1014-1020`, the
+`refusal_for_admission` call and its 403, inside `transition_task` — and the whole unit tier comes
+back with a **byte-identical failing set**, 18 failed / 21,819 passed both arms, sha
+`83839149a659` → `cf07112aac90`, anchor 1x, restore verified.
+
+**Its two legs go blind for DIFFERENT reasons, and that is the part this section did not yet say:**
+
+| the leg | why it cannot see a wiring revert |
+|---|---|
+| `tasks_router.approval is approval` | the module is **also** used at `tasks.py:775` for `default_mint_status` — so the import survives a full revert. Two sufficient causes, one assertion |
+| a **PATCH** task route is mounted | the transition door is **POST** `/tasks/{task_id}/transition`. The PATCH routes it finds are the edit door and the flow-ratio door — **it is checking a different door** |
+
+⇒ **A reader who notices either one and fixes it still has a blind test**, because the other leg
+keeps the whole test green on its own. The first leg is this section's multi-cause defect; the
+second is § *YOUR MATCH KEY IS SHORTER THAN THE ROUTER'S KEY* — **two different failures wearing
+one green check**, and neither is visible from re-reading the assertions.
+
+⇒ **So count the SUFFICIENT CAUSES PER LEG, not per test.** A test with two legs can have two
+independent reasons to be unfalsifiable, and a single fix reads like a repair while changing
+nothing about what the test can observe.
+
+**Closed the way this section prescribes — a second measurement, at the layer the incident enters
+at**: five tests driving the real handler over HTTP (`test_the_transition_door_calls_the_approval_gate.py`,
+landed `8b79dc55`). Proven, two arms off ONE mutated sha: the old suite **SURVIVED** across 21,837
+tests; the new guard **KILLED** it by two named tests **while its other three stayed green** — so
+it discriminates rather than merely reddening.
+
 
 ### 🔴 WHILE A TIER IS RUNNING, THAT WORKTREE IS READ-ONLY — WHATEVER YOUR REASON FOR TOUCHING IT
 
