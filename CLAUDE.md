@@ -2430,6 +2430,99 @@ DISAGREEMENT, never to manufacture a confirmation.**
 Full derivation, with what each claim does NOT establish:
 `src/rnd/v0.2.1/2026.08.30-two-harnesses-one-file-cross-reproduced-shas.md`.
 
+### 🔴 A BREAK THAT DESTROYS ITS OWN SUBJECT REPORTS ZERO PASSED — AND ZERO PASSED IS THE MOST FLATTERING NUMBER A MUTATION ARM CAN RETURN
+
+Pocholo 📣, 2026-09-02, on his own arm, caught before he banked it. **He deleted a dispatch line to
+prove 32 re-pointed fixtures still guarded the route. The deletion left a dangling `else if`, the
+file stopped parsing, and all three suites reported `0 passed`:**
+
+```
+holding_area   0 / 48        task_list   0 / 176        epic_board   0 / 71
+```
+
+⇒ **295 tests, every one of them "reddened", and the mutation measured nothing at all.** A
+`SyntaxError` takes the whole file out, so no test ran — and a suite that never runs looks exactly
+like a suite that unanimously caught you.
+
+🔴 **HE CAUGHT IT BECAUSE THE NUMBER WAS TOO GOOD, NOT BECAUSE ANYTHING WARNED HIM.** Nothing in the
+output says *the file did not parse*. The runner reports a count, the count is the best possible
+count, and a seat looking for confirmation that its arm landed has just been handed it.
+
+⚠️ **THIS IS THE NO-OP BREAK ARRIVING FROM THE OPPOSITE DIRECTION.** A no-op break changes nothing
+and reports SURVIVED — flattering to the *code*. A subject-destroying break runs nothing and reports
+killed-everywhere — flattering to the *test suite*. **Both hand you the answer you were hoping for,
+and neither carries a warning.**
+
+⇒ **SO PUT A CEILING ON A KILL COUNT, NOT ONLY A FLOOR ON IT.** A break aimed at one dispatch line
+should redden the tests that reach that line — not every test in the file, and never every test in
+three files. **A kill count at or near 100% of the corpus is a syntax error until proven otherwise.**
+The cheap discharge: check the suite still COLLECTS — compare the RUN count against the baseline's,
+not just the failure count.
+
+⚠️ **And note which number discriminates.** `0 passed / 48 failed` and `0 passed / 0 failed` are
+different worlds and both begin `0 passed`. **Read the denominator.**
+
+### 🔴 A FIXTURE DEFECT CAN WEAR THE COSTUME OF THE DEFECT UNDER TEST
+
+Same pass, same author — and this one was caught by the suite rather than by him.
+
+His bulk rewrite lost scope on `_controlScope`'s two-rows-one-id case: the new selector was
+document-wide, so it found the **first** Submit on the page and sent the **first row's** text, which
+is *precisely the failure that test exists to detect*. The test failed. It was right to fail. **And
+what it was reporting was his fixture, not the code under test.**
+
+⇒ **The wrong reading was available and comfortable: "my re-pointed fixture reddens ⇒ I have found a
+defect in the implementation."** He had every reason to publish it as a finding about a peer's code.
+**A weaker test — one asserting on rendered shape without clicking — would have let him.**
+
+⚠️ **THE TELL IS THAT THE SYMPTOM MATCHES THE TEST'S OWN NAME TOO WELL.** When a fixture change
+produces exactly the failure a test was written for, suspect the FIXTURE first: you have just
+introduced a second cause for one observable, and § *UNGUARDED IS A THIRD STATE* says an assertion
+satisfied by more than one path cannot tell you which one fired.
+
+⚠️ **AND THE HONEST ARM SPLIT IS WHY THE REST OF THE PASS IS BELIEVABLE**: of the 32 re-pointed
+fixtures, **20 redden on the break and 12 do not** — the 12 assert on rendered shape and never
+click. He said so. **"All 32 guard the route" was available, unfalsifiable, and would have made the
+whole number worthless.**
+
+### 🔴 A COMPLETE-LOOKING NUMBER CARRIES NO MARKER SAYING WHAT IT WAS COMPLETE *ABOUT*
+
+María 🌸, 2026-09-02, on her own merge gate. **`542 tests, 542 pass, 0 fail` was true.** It was true
+about **TypeScript**. She quoted it as the verification for a merge whose blast radius included a
+**Python** guard, and no part of that number could have seen it.
+
+**The case.** Rio's control redesign rewrote `notifications.js`, `notifications.html` and
+`task-list.css`. Pocholo re-pointed **32 fixtures**, all `.test.ts`. She verified independently — at
+a sha, in a detached worktree, not on either worker's report — and got 542/542 across the whole
+`notifications_js` directory.
+
+⇒ **`src/tests/unit/test_task_row_state_controls.py` reads `notifications.js` and
+`notifications.html` AS TEXT** — `REPO_ROOT = Path( __file__ ).resolve().parents[3]`, reads at lines
+41, 447, 849, 865. **It is a reader of the very source the redesign rewrote, and it is invisible to
+every JS-scoped suite that exists.** Six of its tests were red at the merge.
+
+🔴 **THIS IS NOT THE WRONG-POPULATION DEFECT, AND THE DIFFERENCE IS THE WHOLE POINT.** § *AN EMPTY
+RESULT IS TWO DIFFERENT FAILURES* and § *A HIT IS NOT A USE* both describe a search pointed at the
+wrong corpus. **Here the corpus was right and the number was correct.** What was missing is the
+BOUNDARY: nothing in `542/542` says *"…of the TypeScript tests"*, so a reader supplies the scope
+they were hoping for, and the person most likely to do that is the one who ran it.
+
+⇒ **SO STATE THE SCOPE IN THE SAME BREATH AS THE NUMBER, ALWAYS** — *"542/542 across
+`notifications_js`"*, never *"542/542"*. Six words, and they convert a claim about a suite into a
+claim about a suite, which is all it ever was.
+
+⇒ **AND WHEN A CHANGE CROSSES A LANGUAGE BOUNDARY, ASK WHO ELSE READS THE FILE.** A rewritten `.js`
+is not only exercised by `.test.ts` — it can be asserted against as **text** by a guard in another
+language, another directory, another tier. **Grep the filename across the whole tree before you call
+a rewrite verified**, because the readers that a scoped suite cannot see are exactly the ones that
+will not appear in its total.
+
+⚠️ **THE CREDIT AND THE COST BELONG TOGETHER.** She verified independently, in a clean tree, at a
+named sha, **and she stated her scope when she quoted the number** — which is the only reason the
+gap was findable by anyone else at all. **A verification with a stated scope and a gap in it is
+strictly better than one with an unstated scope and no gap visible.** The lesson is to widen the
+scope, never to stop stating it.
+
 ## TEST CREDENTIALS
 
 **CRITICAL**: Never hardcode test credentials. Always use environment variables.
