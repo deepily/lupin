@@ -9873,118 +9873,138 @@ class NotificationsUI {
 
     _taskActionsCell( task ) {
         /**
-         * The per-row state controls: Drop, Park, Won't-fix, Demote and Approve,
-         * each with the input its transition REQUIRES, rendered inline rather than
-         * behind a modal.
+         * The per-row state controls: ONE verb select, ONE reason field, ONE Submit.
          *
-         * The pattern is ported, not invented — the multiplexer's
-         * `render/templates/taskListTable.ts` already settled it (inline row input,
-         * their Q4 ruling), and this row already carries a working delegated
-         * control to copy: the `.task-detail-emoji` span at the Detail cell, with
-         * its `aria-disabled` twin for the inert case.
+         * 🔴 RICK'S RULING, 2026-09-02, in his own words: "you literally repeated similar
+         * functionality in drop park and demote with three different buttons and three
+         * different text fields. You need to overload those actions and need to be
+         * consistent from row to row."
+         *
+         * The cell this replaces grew one verb at a time — Drop, then Park, then
+         * Won't-fix, then Demote, then Approve — each arriving with its own button and
+         * its own input, each correct against `validate_transition` on its own. Nobody
+         * looked at all five together until he did. Five buttons and five text boxes for
+         * five moves that differ only in which word gets posted to one endpoint.
+         *
+         * ⚠️ THE CONSISTENCY IS THE FEATURE, not a side effect of the tidy-up. The old
+         * cell rendered a different NUMBER of controls per status — park's two inputs
+         * appeared and vanished, demote's date came and went — so no two rows lined up
+         * and the eye had to re-find the control it wanted on every line. Every
+         * non-terminal row now renders exactly one select, one field and one button.
+         *
+         * 🔴 A GREYED OPTION CARRIES ITS REASON IN ITS OWN LABEL. The five buttons put
+         * their legality in `title`, and an `<option>` has nowhere to show a tooltip —
+         * so the explanation moves INTO the label rather than being quietly dropped in
+         * the move. "Park — only from queued or in progress" teaches the rule at the
+         * point of use, which is the whole reason the disabled state existed.
          *
          * 🔴 A TERMINAL ROW OFFERS NOTHING. `done` / `dropped` / `wont_fix` are
-         * append-only — `validate_transition` refuses every edge out of them with
-         * "item is terminal". The first cut of this cell rendered Drop enabled for
-         * every row including those, so the one status that had just been made
-         * terminal was also the one the board invited you to act on. Terminal rows
-         * now render every control disabled, with the reason in the tooltip.
+         * append-only — `validate_transition` refuses every edge out of them. Every
+         * option is greyed and says so, and the select and Submit are disabled too.
          *
-         * 🔴 PARK IS DISABLED WHERE THE SERVER WOULD REFUSE IT. `PARK_LEGAL_FROM_STATUSES`
-         * is ( "queued", "in_progress" ), so a park button on a blocked/review/claimed
-         * row produces a 422 the operator cannot act on. Rendering it disabled with the
-         * reason in the tooltip teaches the rule at the point of use instead of after
-         * the failure.
+         * ⚠️ APPROVE AND DEMOTE ARE OPPOSITE ENDS OF ONE DOOR, so exactly one of them is
+         * ever live on a given row. Approve is the holding area's exit
+         * (`not_approved → queued`); Demote is its entrance. Offering both hands the
+         * operator a move that is a no-op in one direction, which the store rejects as
+         * a failure rather than as nothing happening.
          *
-         * ⚠️ APPROVE AND DEMOTE ARE OPPOSITE ENDS OF ONE DOOR, so exactly one of
-         * them is ever live on a given row. Approve is the holding area's exit
-         * (`not_approved → queued`) and appears on nothing else; Demote is its
-         * entrance (`queued/… → not_approved`) and is meaningless on a row already
-         * sitting in there. Rendering both live would offer the operator a move
-         * that is a no-op in one direction — which the store rejects as a no-op
-         * edge, i.e. as a failure rather than as nothing happening.
-         *
-         * ⚠️ THE PARK PLACEHOLDER ASKS FOR A QUOTE ON PURPOSE. `park_reason` must carry
-         * the row's OWN decisive sentence, not a paraphrase — that quote is what lets
-         * the next reader refute the park row-by-row instead of re-deriving the board.
-         * A bare "reason…" placeholder produces paraphrases.
+         * ⚠️ THE REASON FIELD'S PLACEHOLDER FOLLOWS THE VERB, and Park's still asks for a
+         * QUOTE on purpose: `park_reason` must carry the row's OWN decisive sentence,
+         * because that quote is what lets the next reader refute the park row-by-row
+         * instead of re-deriving the board. One shared box would otherwise flatten five
+         * different obligations into one bare "reason…".
          *
          * Requires:
          *     - task is a row object carrying `id` and `status`
          *
          * Ensures:
-         *     - returns escaped HTML for the actions cell
-         *     - a terminal row (done/dropped/wont_fix) renders EVERY control disabled
-         *     - Drop renders enabled for every non-terminal row
-         *     - Park renders enabled ONLY from queued / in_progress
-         *     - Won't-fix renders enabled on every non-terminal row, with a reason input
-         *     - Approve renders enabled ONLY on a not_approved row
-         *     - Demote renders enabled on every non-terminal row EXCEPT not_approved
-         *     - every disabled control carries aria-disabled plus an explanatory title
+         *     - returns escaped HTML: one verb select, one reason input, one Submit
+         *     - the same three controls render for EVERY non-terminal status
+         *     - the five verbs appear in a fixed order: park, drop, demote, wont_fix, approve
+         *     - an illegal verb renders as a DISABLED option whose label says why
+         *     - a terminal row renders every option disabled, plus a disabled select/button
+         *     - Park is enabled ONLY from queued / in_progress
+         *     - Approve is enabled ONLY on a not_approved row; Demote on every other
+         *       non-terminal row
+         *     - the date input is NOT in this markup — it is inserted by the verb-change
+         *       handler for the verbs that need one, so a row shows a date box only when
+         *       a date is the thing being asked for
          */
         const id          = this._escapeTaskAttr( task.id );
         const status      = ( task.status || "" ).toLowerCase();
         const isTerminal  = !this.isTaskOpenStatus( status );
         const isHeld      = status === "not_approved";
         const parkLegal   = !isTerminal && ( status === "queued" || status === "in_progress" );
-        const deadReason  = `This row is ${this._escapeTaskAttr( status || "unknown" )} — terminal rows are append-only and have no transitions out`;
-
-        const btn = ( cls, label, enabled, title ) => enabled
-            ? `<button type="button" class="task-action-btn ${cls}" data-task-id="${id}" title="${title}">${label}</button>`
-            : `<button type="button" class="task-action-btn ${cls} task-action-disabled" aria-disabled="true" disabled title="${title}">${label}</button>`;
-
-        const input = ( cls, placeholder, label, enabled ) => enabled
-            ? `<input type="text" class="task-action-input ${cls}" data-task-id="${id}" placeholder="${placeholder}" aria-label="${label}">`
-            : "";
-
-        // Drop — legal from any non-terminal status, reason required. The datalist
-        // offers "overtaken by events" because Rick named it as a REASON and not as
-        // a fourth status (design amendment 6): the phrase belongs in this field,
-        // and a suggestion is how you say that without inventing a status for it.
-        const dropBtn = btn( "task-drop-button", "Drop", !isTerminal,
-            isTerminal ? deadReason : "Drop this row (reason required)" );
-        const dropIn  = !isTerminal
-            ? `<input type="text" class="task-action-input task-drop-reason" data-task-id="${id}" placeholder="drop reason…" aria-label="Drop reason" list="task-drop-reason-suggestions">`
-            : "";
-
-        const parkBtn = btn( "task-park-button", "Park", parkLegal,
-            isTerminal ? deadReason
-                       : `Park is legal only from queued or in progress — this row is ${this._escapeTaskAttr( status || "unknown" )}` );
-        const parkIn  = parkLegal
-            ? `<input type="text" class="task-action-input task-park-reason" data-task-id="${id}" placeholder="quote the sentence that decided this…" aria-label="Park reason">` +
-              `<input type="date" class="task-action-input task-park-chase" data-task-id="${id}" aria-label="Chase date">`
-            : "";
-
-        // Won't-fix — terminal, and carries the SAME reason obligation as dropped.
-        // The receipt gate fires only on ->done, so a won't-fix has no commit behind
-        // it; the reason is the only thing standing between a deliberate refusal and
-        // work that simply got forgotten, and the two read identically without it.
-        const wontFixBtn = btn( "task-wont-fix-button", "Won't fix", !isTerminal,
-            isTerminal ? deadReason : "Close this row as won't-fix (reason required) — terminal" );
-        const wontFixIn  = input( "task-wont-fix-reason", "why this will not be done…", "Won't-fix reason", !isTerminal );
-
-        // Demote — Rick added this one unasked: "I can go from approved to
-        // not-approved, which pushes it back into the holding area." It is the
-        // REVERSIBLE sibling of won't-fix, and having both is what makes a hard
-        // delete unnecessary: one kills, one returns the row to triage.
         const demoteLegal = !isTerminal && !isHeld;
-        const demoteBtn   = btn( "task-demote-button", "Demote", demoteLegal,
-            isTerminal ? deadReason
-                       : ( isHeld ? "This row is already in the holding area" : "Push this row back into the holding area (reason and triage-by date required)" ) );
-        const demoteIn    = demoteLegal
-            ? `<input type="text" class="task-action-input task-demote-reason" data-task-id="${id}" placeholder="why this goes back to triage…" aria-label="Demote reason">` +
-              `<input type="date" class="task-action-input task-demote-chase" data-task-id="${id}" aria-label="Triage-by date">`
-            : "";
+        const shown       = this._escapeTaskAttr( status || "unknown" );
+        const deadReason  = `this row is ${shown}; terminal rows are append-only and have no transitions out`;
 
-        // Approve — the holding area's exit. Rick ruled either a manager or he
-        // suffices, "for now"; the allowlist is server-side configuration and the
-        // refusal is a 403 naming the actor, so this button does not try to guess
-        // who is pressing it. It offers the move and reports what the server said.
-        const approveBtn = btn( "task-approve-button", "Approve", isHeld,
-            isTerminal ? deadReason
-                       : ( isHeld ? "Approve this row onto the live board (queued)" : "Approve applies only to a row in the holding area" ) );
+        // A disabled option keeps `task-action-disabled` and `aria-disabled` from the
+        // buttons it replaces: the class is what the stylesheet greys, and the ARIA
+        // attribute is what a screen reader announces. `disabled` alone tells the mouse
+        // and nobody else.
+        const option = ( value, label, enabled, why ) => enabled
+            ? `<option value="${value}">${label}</option>`
+            : `<option value="${value}" disabled class="task-action-disabled" aria-disabled="true">${label} — ${why}</option>`;
 
-        return `<div class="task-actions">${dropBtn}${dropIn}${parkBtn}${parkIn}${wontFixBtn}${wontFixIn}${demoteBtn}${demoteIn}${approveBtn}</div>`;
+        const options = [
+            option( "park", "Park", parkLegal,
+                    isTerminal ? deadReason : "only from queued or in progress" ),
+            option( "drop", "Drop", !isTerminal, deadReason ),
+            option( "demote", "Demote", demoteLegal,
+                    isTerminal ? deadReason : "this row is already in the holding area" ),
+            option( "wont_fix", "Won't fix", !isTerminal, deadReason ),
+            option( "approve", "Approve", isHeld,
+                    isTerminal ? deadReason : "only a row in the holding area can be approved" )
+        ].join( "" );
+
+        const off = isTerminal ? ` disabled aria-disabled="true"` : "";
+
+        return `<div class="task-actions">` +
+                   `<select class="task-verb-select" data-task-id="${id}" aria-label="Action"${off}>` +
+                       `<option value="" selected>Choose an action…</option>${options}` +
+                   `</select>` +
+                   `<input type="text" class="task-action-input task-reason-input" data-task-id="${id}" ` +
+                          `placeholder="reason…" aria-label="Reason"${off}>` +
+                   `<button type="button" class="task-action-btn task-submit-button" data-task-id="${id}"${off}>Submit</button>` +
+               `</div>`;
+    }
+
+    _verbNeeds( verb ) {
+        /**
+         * What one verb asks the operator for, and what it posts.
+         *
+         * 🔴 THIS TABLE IS THE POINT OF THE REDESIGN. Five verbs used to be five
+         * buttons because each carried a different obligation; the obligations did not
+         * go away when the buttons did, they moved here. One place now says what every
+         * verb requires, which is the thing that was impossible to read when it was
+         * spread across five render branches and five handlers.
+         *
+         * ⚠️ `dateLabel` IS AN ANSWER TO A QUESTION RICK ASKED, not a caption. He said
+         * "I really have no idea what the date chooser is for" — and a control whose
+         * purpose the operator cannot infer is a defect in the CONTROL. So the label
+         * says what the date DOES ("Chase me again on") rather than naming the field
+         * the server stores it in ("Chase date").
+         *
+         * Ensures:
+         *     - returns null for an unknown verb
+         *     - returns { status, reason, date, dateLabel, placeholder, terminal } otherwise
+         */
+        const TABLE = {
+            park     : { status: "parked",       reason: true,  date: true,
+                         dateLabel: "Chase me again on",
+                         placeholder: "quote the sentence that decided this…", terminal: false },
+            drop     : { status: "dropped",      reason: true,  date: false, dateLabel: "",
+                         placeholder: "why this is being dropped…", terminal: false },
+            demote   : { status: "not_approved", reason: true,  date: true,
+                         dateLabel: "Triage this by",
+                         placeholder: "why this goes back to triage…", terminal: false },
+            wont_fix : { status: "wont_fix",     reason: true,  date: false, dateLabel: "",
+                         placeholder: "why this will not be done…", terminal: true },
+            approve  : { status: "queued",       reason: false, date: false, dateLabel: "",
+                         placeholder: "Approve needs no reason", terminal: false }
+        };
+        return TABLE[ verb ] || null;
     }
 
     _renderTaskRowError( taskId, message, scope ) {
@@ -11287,11 +11307,11 @@ class NotificationsUI {
 
         const actionBtn = target && target.closest ? target.closest( ".task-action-btn" ) : null;
         if ( actionBtn ) {
-            if ( actionBtn.classList.contains( "task-drop-button" ) ) this._handleTaskDropClick( actionBtn );
-            else if ( actionBtn.classList.contains( "task-park-button" ) ) this._handleTaskParkClick( actionBtn );
-            else if ( actionBtn.classList.contains( "task-wont-fix-button" ) ) this._handleTaskWontFixClick( actionBtn );
-            else if ( actionBtn.classList.contains( "task-demote-button" ) ) this._handleTaskDemoteClick( actionBtn );
-            else if ( actionBtn.classList.contains( "task-approve-button" ) ) this._handleTaskApproveClick( actionBtn );
+            // ONE row control now, not five. The verb lives on the select and is read
+            // inside the handler, so the dispatcher no longer needs a branch per verb —
+            // which is what let a sixth verb be added with its own button and its own
+            // box, five times over, without anyone seeing the shape it was making.
+            if ( actionBtn.classList.contains( "task-submit-button" ) ) this._handleTaskSubmitClick( actionBtn );
             else if ( actionBtn.classList.contains( "holding-approve-all" ) ) this._handleHoldingApproveAllClick( actionBtn );
             else if ( actionBtn.classList.contains( "holding-wont-fix-all" ) ) this._handleHoldingWontFixAllClick( actionBtn );
             return true;
@@ -11385,7 +11405,7 @@ class NotificationsUI {
          *     - returns a plain object safe to hand back to _restoreOperatorState
          *     - never throws on a missing or empty container (degrade-safe)
          */
-        const state = { inputs: [], stripes: [], disclosed: [], focusKey: null, selStart: 0, selEnd: 0 };
+        const state = { inputs: [], selects: [], stripes: [], disclosed: [], focusKey: null, selStart: 0, selEnd: 0 };
         if ( !container || typeof container.querySelectorAll !== "function" ) return state;
 
         const active = document.activeElement;
@@ -11404,6 +11424,14 @@ class NotificationsUI {
                 state.selStart = el.selectionStart === null ? el.value.length : el.selectionStart;
                 state.selEnd   = el.selectionEnd   === null ? el.value.length : el.selectionEnd;
             }
+        }
+        // 🔴 THE CHOSEN VERB IS THE PIECE THE REDESIGN ADDED, and it is destroyed by the
+        // same assignment as the typed text. Restoring the reason without the verb is
+        // half a repair: the select falls back to "Choose an action…", the operator's
+        // next click is refused for having chosen nothing, and the words still on screen
+        // make that refusal look wrong.
+        for ( const el of container.querySelectorAll( ".task-verb-select[data-task-id]" ) ) {
+            if ( el.value ) state.selects.push( [ el.dataset.taskId, el.value ] );
         }
         for ( const el of container.querySelectorAll( ".task-row-error-stripe[data-error-for]" ) ) {
             if ( el.hidden ) continue;
@@ -11433,6 +11461,17 @@ class NotificationsUI {
          */
         if ( !container || !state || typeof container.querySelector !== "function" ) return;
 
+        // ⚠️ THE VERB GOES BACK FIRST, AND THE ORDER IS LOAD-BEARING. Park and Demote's
+        // date box exists only because their verb is chosen — the change handler builds
+        // it — so restoring text before the verb would look for a field that has not
+        // been created yet and silently drop the date.
+        for ( const [ taskId, verb ] of state.selects ) {
+            const sel = container.querySelector(
+                `.task-verb-select[data-task-id="${CSS.escape( taskId )}"]` );
+            if ( !sel ) continue;
+            sel.value = verb;
+            this._handleVerbSelectChange( sel );
+        }
         for ( const [ key, value ] of state.inputs ) {
             if ( !value ) continue;
             const el = this._operatorInputByKey( container, key );
@@ -11528,69 +11567,239 @@ class NotificationsUI {
         return button.closest( "table" ) || document;
     }
 
-    async _handleTaskDropClick( button ) {
+    _wireVerbSelects( container ) {
         /**
-         * Drop button → read the sibling reason input, enforce non-blank BEFORE any
-         * API call, then transition and refresh.
+         * One delegated `change` listener so the row's fields follow the chosen verb.
          *
-         * ⚠️ THE BLANK CHECK IS A COURTESY, NOT THE CONTROL. `validate_transition`
-         * rejects a blank `->dropped` reason server-side regardless; checking here
-         * only saves the operator a round-trip and gives a message next to the field
-         * they must fix.
+         * 🔴 A SEPARATE LISTENER FROM THE CLICK ONE, AND IT HAS TO BE. A select fires
+         * `change`, not `click`, when the value moves by keyboard — and a keyboard user
+         * who never generates a click would otherwise get a row whose reason box still
+         * carries the previous verb's placeholder and whose date input never appears.
+         *
+         * ⚠️ WIRED FROM EACH PANE'S OWN SETUP because the three panes each wire
+         * themselves by hand. That is a known weak seam — three panes were missing a
+         * CLICK listener as recently as last night, and every row control on them was
+         * dead — so this is one function called three times rather than three copies
+         * that can drift apart.
+         *
+         * Ensures:
+         *     - no-op on a missing container
+         *     - a change on any `.task-verb-select` inside it reaches the verb handler
          */
-        const taskId = button.dataset.taskId || "";
-        if ( !taskId ) return;
-        const inputScope = this._controlScope( button );
-        const paneScope  = this._paneScope( button );
-        const reason = this._rowInputValue( taskId, "task-drop-reason", inputScope );
-        if ( !reason ) {
-            this._renderTaskRowError( taskId, "A drop reason is required.", paneScope );
-            return;
-        }
-        this._renderTaskRowError( taskId, "", paneScope );
-        const result = await this._transitionTask( taskId, "dropped", { reason } );
-        if ( result.ok ) await this.refreshTaskList();
-        else this._renderTaskRowError( taskId, `Drop refused: ${result.message}`, paneScope );
+        if ( !container ) return;
+        container.addEventListener( "change", ( e ) => {
+            const sel = e.target && e.target.closest ? e.target.closest( ".task-verb-select" ) : null;
+            if ( sel ) this._handleVerbSelectChange( sel );
+        } );
     }
 
-    async _handleTaskParkClick( button ) {
+    _handleVerbSelectChange( select ) {
         /**
-         * Park button → reason AND chase date, both required, enforced before the call.
+         * The chosen verb decides what the row asks for. One select, so the FIELDS have
+         * to follow it — otherwise the merge would be five controls hidden behind one
+         * label rather than one control that means five things.
          *
-         * ⚠️ THE DATE INPUT YIELDS A LOCAL CALENDAR DAY, AND THE SERVER WANTS AN
-         * INSTANT. `<input type="date">` gives "YYYY-MM-DD" with no time and no zone,
-         * so this stamps 09:00 LOCAL and converts through the browser's own zone
-         * rather than pasting the bare date and letting it be read as midnight UTC —
-         * which would land the chase on the previous evening for anyone west of
-         * Greenwich, i.e. everyone here.
+         * Three things move:
+         *   · the reason placeholder, so each verb still states its own obligation;
+         *   · the reason field's DISABLED state — Rick: "the field disables for
+         *     approved". Approve takes no input, and a live box beside a verb that
+         *     discards its contents invites a justification nothing will ever read;
+         *   · the date input, inserted only for the verbs that require one.
+         *
+         * 🔴 AND IT DISARMS SUBMIT. Won't-fix arms the button for a second click; an
+         * armed button surviving a change of verb is worse than no arming at all,
+         * because the operator switches to Drop, clicks once expecting the usual single
+         * click, and that click is swallowed by a confirmation for a verb they left.
+         *
+         * Ensures:
+         *     - no-op when the select or its cell cannot be resolved
+         *     - the reason input is disabled iff the verb takes no reason
+         *     - a date input exists iff the verb requires one, labelled for THAT verb
+         *     - Submit is returned to its unarmed label and state
+         */
+        if ( !select || typeof select.closest !== "function" ) return;
+        const cell = select.closest( ".task-actions" );
+        if ( !cell ) return;
+
+        const id    = select.dataset.taskId || "";
+        const needs = this._verbNeeds( select.value );
+        const box   = cell.querySelector( ".task-reason-input" );
+        const btn   = cell.querySelector( ".task-submit-button" );
+
+        if ( box ) {
+            box.disabled    = !!needs && !needs.reason;
+            box.placeholder = needs ? needs.placeholder : "reason…";
+            if ( box.disabled ) box.value = "";
+        }
+
+        const existing = cell.querySelector( ".task-chase-input" );
+        if ( needs && needs.date ) {
+            const date = existing || document.createElement( "input" );
+            date.type      = "date";
+            date.className = "task-action-input task-chase-input";
+            date.dataset.taskId = id;
+            date.setAttribute( "aria-label", needs.dateLabel );
+            date.setAttribute( "title", needs.dateLabel );
+            if ( !existing ) cell.insertBefore( date, btn || null );
+        } else if ( existing ) {
+            existing.remove();
+        }
+
+        this._disarmSubmit( btn );
+    }
+
+    _disarmSubmit( button ) {
+        /**
+         * Return Submit to its resting state: one click, one action.
+         *
+         * Ensures:
+         *     - no-op on a missing button
+         *     - the armed flag is cleared and the label reads "Submit"
+         */
+        if ( !button ) return;
+        delete button.dataset.armed;
+        button.classList.remove( "task-submit-armed" );
+        button.textContent = "Submit";
+    }
+
+    async _handleTaskSubmitClick( button ) {
+        /**
+         * The ONE door. Read the verb off the select, check what that verb requires,
+         * then post it — five moves through one control instead of five controls.
+         *
+         * ⚠️ THE BLANK CHECKS ARE A COURTESY, NOT THE CONTROL. `validate_transition`
+         * rejects a blank `->dropped` / `->wont_fix` reason and a park with no
+         * `next_chase_ts` server-side regardless. Checking here only saves a round-trip
+         * and puts the message beside the field the operator has to fix.
+         *
+         * 🔴 WON'T-FIX TAKES TWO CLICKS, AND THE REASON IS THE REDESIGN ITSELF. The old
+         * cell had NO confirmation — measured before this change: eleven `confirm(`
+         * calls in the file, none of them in these handlers. What stood in for one was
+         * written in the comment at the old won't-fix handler: "the reversible sibling
+         * is one button to the left", meaning Demote. Once five verbs share one Submit
+         * there IS no button to the left, so that safeguard stops existing at exactly
+         * the moment the terminal verb moves behind a shared control. The risk did not
+         * merely survive the merge, it grew.
+         *
+         * ⇒ So the step is a second CLICK IN THE PAGE, not a browser `confirm()` —
+         * Rick's ruling. It is a real extra step, and it keeps the standing objection
+         * to modals intact: a browser dialog blocks the event loop, and this page is
+         * driven by an extension that cannot afford that.
+         *
+         * ⚠️ THE BLANK CHECK RUNS BEFORE THE ARMING, deliberately. Arm first and the
+         * operator's second click — the one they believe IS the confirmation — lands on
+         * a refusal for an empty field instead, so the confirmation they gave was never
+         * asked for and the row sits one more click from closing than they think.
+         *
+         * Ensures:
+         *     - no-op without a task id
+         *     - refuses in words, in the operator's own pane, when no verb is chosen
+         *     - refuses a blank reason / missing date before any network call
+         *     - a terminal verb arms on the first click and posts on the second
+         *     - every other verb posts on the first click
+         *     - the row list is refreshed on success; the server's own words are shown
+         *       verbatim on refusal
          */
         const taskId = button.dataset.taskId || "";
         if ( !taskId ) return;
         const inputScope = this._controlScope( button );
         const paneScope  = this._paneScope( button );
-        const parkReason = this._rowInputValue( taskId, "task-park-reason", inputScope );
-        const chaseDay   = this._rowInputValue( taskId, "task-park-chase", inputScope );
-        if ( !parkReason ) {
-            this._renderTaskRowError( taskId, "A park reason is required — quote the row's own decisive sentence.", paneScope );
+
+        const select = inputScope.querySelector
+            ? inputScope.querySelector( `.task-verb-select[data-task-id="${CSS.escape( taskId )}"]` )
+            : null;
+        const verb  = select ? select.value : "";
+        const needs = this._verbNeeds( verb );
+        if ( !needs ) {
+            this._disarmSubmit( button );
+            this._renderTaskRowError( taskId, "Choose an action first — the row does not know what you want done.", paneScope );
             return;
         }
-        if ( !chaseDay ) {
-            this._renderTaskRowError( taskId, "A chase date is required — a park is bounded, never indefinite.", paneScope );
+
+        const reason   = this._rowInputValue( taskId, "task-reason-input", inputScope );
+        const chaseDay = this._rowInputValue( taskId, "task-chase-input", inputScope );
+
+        if ( needs.reason && !reason ) {
+            this._disarmSubmit( button );
+            this._renderTaskRowError( taskId, this._verbReasonComplaint( verb ), paneScope );
             return;
         }
-        const chaseTs = new Date( `${chaseDay}T09:00:00` );
-        if ( isNaN( chaseTs.getTime() ) ) {
-            this._renderTaskRowError( taskId, `Chase date not understood: ${chaseDay}`, paneScope );
+        if ( needs.date && !chaseDay ) {
+            this._disarmSubmit( button );
+            this._renderTaskRowError( taskId, verb === "park"
+                ? "A chase date is required — a park is bounded, never indefinite."
+                : "A triage-by date is required — a held row is bounded, never indefinite. Use won't-fix to kill it outright.", paneScope );
             return;
         }
+
+        // ⚠️ THE DATE INPUT YIELDS A LOCAL CALENDAR DAY AND THE SERVER WANTS AN INSTANT.
+        // `<input type="date">` gives "YYYY-MM-DD" with no time and no zone, so this
+        // stamps 09:00 LOCAL and converts through the browser's own zone rather than
+        // pasting the bare date and letting it be read as midnight UTC — which lands the
+        // chase on the previous evening for anyone west of Greenwich, i.e. everyone here.
+        let chaseTs = null;
+        if ( needs.date ) {
+            chaseTs = new Date( `${chaseDay}T09:00:00` );
+            if ( isNaN( chaseTs.getTime() ) ) {
+                this._disarmSubmit( button );
+                this._renderTaskRowError( taskId, `Date not understood: ${chaseDay}`, paneScope );
+                return;
+            }
+        }
+
+        if ( needs.terminal && button.dataset.armed !== "1" ) {
+            button.dataset.armed = "1";
+            button.classList.add( "task-submit-armed" );
+            button.textContent = "Confirm won't-fix";
+            this._renderTaskRowError( taskId, "", paneScope );
+            return;
+        }
+
+        const extras = {};
+        if ( needs.reason ) extras[ verb === "park" ? "park_reason" : "reason" ] = reason;
+        if ( needs.date )   extras.next_chase_ts = chaseTs.toISOString();
+
         this._renderTaskRowError( taskId, "", paneScope );
-        const result = await this._transitionTask( taskId, "parked", {
-            park_reason   : parkReason,
-            next_chase_ts : chaseTs.toISOString()
-        } );
+        this._disarmSubmit( button );
+        const result = await this._transitionTask( taskId, needs.status, extras );
         if ( result.ok ) await this.refreshTaskList();
-        else this._renderTaskRowError( taskId, `Park refused: ${result.message}`, paneScope );
+        else this._renderTaskRowError( taskId, `${this._verbLabel( verb )} refused: ${result.message}`, paneScope );
     }
+
+    _verbReasonComplaint( verb ) {
+        /**
+         * The refusal each verb earns when its reason is blank.
+         *
+         * ⚠️ FIVE VERBS SHARE ONE BOX AND MUST NOT SHARE ONE COMPLAINT. "A reason is
+         * required" would be true of four of them and would teach none of them: park
+         * needs a QUOTE, demote needs to say why a row goes back to triage, and
+         * won't-fix is a refusal whose justification is the only thing distinguishing
+         * it from work that got forgotten. Merging the controls was the ask; merging
+         * what they mean was not.
+         *
+         * Ensures:
+         *     - returns a verb-specific sentence, never a generic one
+         */
+        const COMPLAINTS = {
+            drop     : "A drop reason is required.",
+            park     : "A park reason is required — quote the row's own decisive sentence.",
+            demote   : "A demote reason is required — say why this goes back to triage, or the next reader cannot tell it from a row that was never approved.",
+            wont_fix : "A won't-fix reason is required — a refusal carries its justification, exactly as a drop does."
+        };
+        return COMPLAINTS[ verb ] || "A reason is required.";
+    }
+
+    _verbLabel( verb ) {
+        /**
+         * The human name of a verb, for a refusal stripe.
+         *
+         * Ensures: returns the verb itself when unknown, never undefined.
+         */
+        const LABELS = { drop: "Drop", park: "Park", demote: "Demote",
+                         wont_fix: "Won't-fix", approve: "Approve" };
+        return LABELS[ verb ] || verb;
+    }
+
 
     renderHoldingArea( composite ) {
         /**
@@ -11741,6 +11950,7 @@ class NotificationsUI {
         if ( !container ) return;
 
         container.addEventListener( "click", ( e ) => this._handleRowControlClick( e.target ) );
+        this._wireVerbSelects( container );
 
         this._holdingAreaControlsWired = true;
         this.log( "Holding-area control delegation wired" );
@@ -11761,7 +11971,24 @@ class NotificationsUI {
          */
         const group = document.querySelector( `.holding-area-group[data-filer="${CSS.escape( filer )}"]` );
         if ( !group ) return [];
-        return Array.from( group.querySelectorAll( ".task-approve-button[data-task-id]" ) )
+        // 🔴 READ OFF THE VERB SELECT, WHICH EVERY ROW HAS. This used to key on
+        // `.task-approve-button`, and when the five per-verb buttons merged into one
+        // Submit that selector matched NOTHING — so the batch would have reported
+        // success over zero rows. A "which rows are here" lookup must key on a control
+        // that is present on every row unconditionally, never on one that renders only
+        // when a particular verb happens to be legal.
+        // 🔴 ONLY THE ROWS APPROVE IS LEGAL ON, which is what the old selector meant
+        // without ever saying so: `.task-approve-button[data-task-id]` matched enabled
+        // buttons only, because the DISABLED form was rendered with no data-task-id.
+        // Every row now carries a select, so the group scope alone would widen the batch
+        // to rows it was never reaching — and today that is invisible, since this pane is
+        // fed a held-rows-only query. Asking the option is the same question the old
+        // markup was answering by accident.
+        return Array.from( group.querySelectorAll( ".task-verb-select[data-task-id]" ) )
+            .filter( sel => {
+                const approve = sel.querySelector( 'option[value="approve"]' );
+                return !!approve && !approve.disabled;
+            } )
             .map( b => b.dataset.taskId )
             .filter( Boolean );
     }
@@ -11881,139 +12108,6 @@ class NotificationsUI {
         }
     }
 
-    async _handleTaskWontFixClick( button ) {
-        /**
-         * Won't-fix button → read the sibling reason input, enforce non-blank BEFORE
-         * any API call, then transition and refresh.
-         *
-         * ⚠️ THE BLANK CHECK IS A COURTESY, NOT THE CONTROL. `validate_transition`
-         * rejects a blank `->wont_fix` reason server-side regardless — the same rule
-         * `->dropped` has carried since C12, and for the same stated reason: a
-         * refusal whose justification is not written down is indistinguishable from
-         * the work being forgotten. Checking here only saves a round-trip and puts
-         * the message beside the field the operator has to fix.
-         *
-         * ⚠️ THIS IS TERMINAL AND THE BUTTON SAYS SO IN ITS TOOLTIP, but there is no
-         * confirm() dialog. Browser modals block the extension's event loop, and the
-         * reversible sibling is one button to the left — Demote returns a row to
-         * triage without killing it, which is the affordance a confirm would be
-         * standing in for.
-         */
-        const taskId = button.dataset.taskId || "";
-        if ( !taskId ) return;
-        const inputScope = this._controlScope( button );
-        const paneScope  = this._paneScope( button );
-        const reason = this._rowInputValue( taskId, "task-wont-fix-reason", inputScope );
-        if ( !reason ) {
-            this._renderTaskRowError( taskId, "A won't-fix reason is required — a refusal carries its justification, exactly as a drop does.", paneScope );
-            return;
-        }
-        this._renderTaskRowError( taskId, "", paneScope );
-        const result = await this._transitionTask( taskId, "wont_fix", { reason } );
-        if ( result.ok ) await this.refreshTaskList();
-        else this._renderTaskRowError( taskId, `Won't-fix refused: ${result.message}`, paneScope );
-    }
-
-    async _handleTaskDemoteClick( button ) {
-        /**
-         * Demote button → push a live row back into the holding area
-         * (`→ not_approved`), reason AND triage-by date required, both enforced
-         * before the call.
-         *
-         * ⭐ THE DATE IS RICK'S RULING, 2026-09-02 (real keypress, not a timeout
-         * default): a held row comes back on a chase the way a parked row does. The
-         * reasoning is his own demotion feature turned back on itself — demotion
-         * means the holding area fills from BOTH ends, new rows at the front and
-         * demoted rows at the back, so without an eviction the gate's own waiting
-         * room becomes the unbounded backlog the gate exists to prevent, moved one
-         * room over. Bounded, self-expiring silence; never an exit. A permanent kill
-         * has its own visible door in won't-fix.
-         *
-         * ⚠️ THE STORE DOES NOT YET EXPIRE HELD ROWS — that half is Mr Radio's, and
-         * it mirrors `park_is_active()`: expiry computed at READ time, no daemon and
-         * no sweeper. What this control does today is honest without it: it STAMPS a
-         * real `next_chase_ts`, which the row already renders in its Next-chase cell.
-         * So the dates are being recorded correctly from the first demotion, and the
-         * read-time predicate lights up rows that already carry the field rather than
-         * arriving to a backlog of held rows with no date on any of them.
-         *
-         * 🔴 THE REASON IS ENFORCED HERE AND, AS OF THIS WRITING, *NOT* ON THE
-         * SERVER — and that asymmetry is deliberate but must not be silent. The
-         * design (amendment 5) says demotion "needs its own legality entry and its
-         * own reason", and the argument is the same one that already carried
-         * `dropped` and `wont_fix`: a row that reappears in the holding area with
-         * no note reads exactly like a row that was never approved in the first
-         * place, and the person triaging it cannot tell which. `validate_transition`
-         * does not yet require it, so a client that skipped the check would post a
-         * blank and the store would take it.
-         *
-         * ⇒ A CLIENT-ONLY RULE IS NOT ENFORCEMENT — anything posting straight to
-         * the API bypasses it. `test_demote_reason_is_client_only_until_the_server_
-         * catches_up` pins the gap and goes RED the moment the server adds the rule,
-         * so this comment cannot quietly outlive the situation it describes.
-         *
-         * ⚠️ DEMOTION MUST NOT RE-COUNT AS A CREATE. `created_ts` is immutable and
-         * the ratio window rolls it off, so a re-promoted row does not mint a second
-         * creation event — but that is a property of the store, not of this button,
-         * and it is the thing to check first if the flow ratio ever starts
-         * double-counting a ticket that went round the loop twice.
-         */
-        const taskId = button.dataset.taskId || "";
-        if ( !taskId ) return;
-        const inputScope = this._controlScope( button );
-        const paneScope  = this._paneScope( button );
-        const reason   = this._rowInputValue( taskId, "task-demote-reason", inputScope );
-        const chaseDay = this._rowInputValue( taskId, "task-demote-chase", inputScope );
-        if ( !reason ) {
-            this._renderTaskRowError( taskId, "A demote reason is required — say why this goes back to triage, or the next reader cannot tell it from a row that was never approved.", paneScope );
-            return;
-        }
-        if ( !chaseDay ) {
-            this._renderTaskRowError( taskId, "A triage-by date is required — a held row is bounded, never indefinite. Use won't-fix to kill it outright.", paneScope );
-            return;
-        }
-        const chaseTs = new Date( `${chaseDay}T09:00:00` );
-        if ( isNaN( chaseTs.getTime() ) ) {
-            this._renderTaskRowError( taskId, `Triage-by date not understood: ${chaseDay}`, paneScope );
-            return;
-        }
-        this._renderTaskRowError( taskId, "", paneScope );
-        const result = await this._transitionTask( taskId, "not_approved", {
-            reason,
-            next_chase_ts : chaseTs.toISOString()
-        } );
-        if ( result.ok ) await this.refreshTaskList();
-        else this._renderTaskRowError( taskId, `Demote refused: ${result.message}`, paneScope );
-    }
-
-    async _handleTaskApproveClick( button ) {
-        /**
-         * Approve button → promote a held row onto the live board
-         * (`not_approved → queued`). No required field: promotion is the one move
-         * in this cell that adds work rather than refusing it, and nothing needs
-         * justifying to let filed work proceed.
-         *
-         * 🔴 THE AUTHORIZATION CHECK IS THE SERVER'S AND THIS DOES NOT IMITATE IT.
-         * Rick ruled that either a manager or he suffices — "for now" — so the
-         * allowlist is server-side configuration, editable without a deploy, and a
-         * non-approver gets a 403 naming the actor, the current allowlist, and both
-         * ways to change it. A client-side guess at who is pressing the button
-         * would be a second copy of a rule that is explicitly provisional, and it
-         * would refuse people the server would have allowed.
-         *
-         * ⇒ So the refusal is SURFACED, not pre-empted: `_transitionTask` returns
-         * the server's own words and the error stripe prints them verbatim.
-         */
-        const taskId = button.dataset.taskId || "";
-        if ( !taskId ) return;
-        const inputScope = this._controlScope( button );
-        const paneScope  = this._paneScope( button );
-        this._renderTaskRowError( taskId, "", paneScope );
-        const result = await this._transitionTask( taskId, "queued" );
-        if ( result.ok ) await this.refreshTaskList();
-        else this._renderTaskRowError( taskId, `Approve refused: ${result.message}`, paneScope );
-    }
-
     openTaskBodyOverlay( bodyText, idLabel ) {
         /**
          * Show a small dismissible overlay rendering the task-store `body` (design
@@ -12102,6 +12196,7 @@ class NotificationsUI {
         if ( !container ) return;
 
         container.addEventListener( "click", ( e ) => this._handleTaskListClick( e.target ) );
+        this._wireVerbSelects( container );
         // A repaint landing BETWEEN a press and its release replaces the pressed node, and
         // the click then reaches no handler at all — no request, no refusal, nothing. The
         // window is only as long as a press (~100ms against a 60s poll, roughly one click
@@ -12821,6 +12916,7 @@ class NotificationsUI {
         if ( !container ) return;
 
         container.addEventListener( "click", ( e ) => this._handleEpicBoardClick( e.target ) );
+        this._wireVerbSelects( container );
         container.addEventListener( "keydown", ( e ) => {
             // " " is the modern key value; "Spacebar" the legacy spelling.
             if ( e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar" ) return;
