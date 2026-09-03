@@ -74,6 +74,8 @@ type TaskUI = Record<string, unknown> & {
   _handleRowControlClick: ( target: unknown ) => boolean;
   _handleTaskSubmitClick: ( button: unknown ) => Promise<void>;
   _transitionTask: ( id: string, to: string, extras?: unknown ) => Promise<{ ok: boolean; message?: string }>;
+  _patchTaskFields: ( id: string, patch: Record<string, unknown> ) => Promise<{ ok: boolean; message?: string }>;
+  _handlePriorityUpdateClick: ( button: unknown ) => Promise<void>;
   startTaskListPolling: () => void;
   fetchEpicStories: () => Promise<unknown>;
   renderEpicBoard: ( composite: unknown ) => void;
@@ -2419,4 +2421,134 @@ test( "🔴 collapsing an owner group closes any controls disclosed inside it", 
     "the group collapsed with its controls still on screen" );
   assert.equal( toggle.getAttribute( "aria-expanded" ), "false",
     "the ellipsis still claims the row is open inside a collapsed group" );
+} );
+
+
+// ═══════ RICK'S PRIORITY PAIR, WATCHED FROM THE TASK LIST ITSELF ═══════
+//
+// The control landed at e2c353fc in `_taskActionsCell`, the one cell all three panes share,
+// and was falsified there with seven arms. 🔴 A SHARED-CELL SUITE CANNOT SAY WHETHER THIS
+// PANE ROUTES THE CLICK, and this file has the receipt: when María deleted the blank-reason
+// guard this morning and counted kills PER FILE, this one scored **1 of 176** — technically
+// watched, and close enough to blind that the number was doing no work.
+//
+// Re-measured for the priority control before writing a line, three of her four mutations —
+// the option losing `selected`, Update rendering permanently live, the click route deleted.
+// Each killed exactly one arm in `row_control_redesign.test.ts` and **zero here**. Not
+// "barely watched" this time; not watched at all.
+//
+// So these go through `renderTaskList`, which paints AND installs this pane's own listener,
+// rather than `_renderTaskRow` or `_taskActionsCell` called by hand. Same reason `wirePane`
+// exists above: a correct handler measured against a container carrying no listener is the
+// shape that let a dead Won't-fix button survive five people looking at it.
+
+function taskPriorityBits( scope: ParentNode ): { sel: HTMLSelectElement; btn: HTMLButtonElement } {
+  const sel = scope.querySelector( ".task-priority-select" ) as HTMLSelectElement | null;
+  const btn = scope.querySelector( "button.task-priority-update" ) as HTMLButtonElement | null;
+  assert.ok( sel, "the task list painted no priority select — this test cannot speak to the control it names" );
+  assert.ok( btn, "the task list painted no priority Update button" );
+  return { sel: sel!, btn: btn! };
+}
+
+// A REAL `change`, never a bare assignment: the enable rule runs off the delegated change
+// listener this pane wires for itself, so an assignment alone leaves a page state no
+// operator can reach — and an arm that would pass against a pane that wired nothing.
+function chooseTaskPriority( scope: ParentNode, value: string ): HTMLSelectElement {
+  const { sel } = taskPriorityBits( scope );
+  sel.value = value;
+  sel.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  return sel;
+}
+
+// The real render path — `renderTaskList` paints the rows AND calls
+// `_wireTaskListAccordion` itself, so nothing here hand-installs the listener under test.
+function paintedTaskPane( ui: TaskUI, over: Record<string, unknown> = {} ): HTMLElement {
+  buildPanelDOM();
+  ui._taskListAccordionWired = false;
+  ui.renderTaskList( { status: "ok", tasks: [ {
+    id: "prio-1", title: "A row Rick wants re-prioritized", status: "queued",
+    item_class: "task", owner_persona: "pocholo", priority: "P2", project: "lupin", ...over
+  } ] } );
+  return document.getElementById( "task-list-container" )!;
+}
+
+
+test( "🔴 TASK LIST: the priority select opens on the row's OWN current priority", () => {
+  for ( const priority of [ "P0", "P1", "P2", "P3" ] ) {
+    const ui      = newUI();
+    const pane    = paintedTaskPane( ui, { priority } );
+    const { sel } = taskPriorityBits( pane );
+
+    // ⚠️ THE `selected` ATTRIBUTE, NOT `.value`. Measured by María on the shared arms:
+    // after `innerHTML` is rewritten happy-dom does not re-sync `selectedIndex`, so
+    // `.value` read P1 for a select whose markup carried `<option value="P2" selected>` —
+    // correct for P0 and P1 by coincidence, which is the worst shape a fixture can have.
+    // A browser honours `selected` at parse; it is what we render and what it reads.
+    const marked = sel.querySelector( "option[selected]" ) as HTMLOptionElement | null;
+    assert.ok( marked, `a ${ priority } row marked NO option selected — the select opens on whatever ` +
+      `happens to be first, misreporting every row that is not P0` );
+    assert.equal( marked!.value, priority,
+      `a ${ priority } row opened its priority select on ${ marked!.value } — a control that ` +
+      `MISREPORTS the current value is worse than one that offers nothing` );
+  }
+} );
+
+test( "🔴 TASK LIST: Update renders DISABLED, and says so to a screen reader", () => {
+  const ui      = newUI();
+  const pane    = paintedTaskPane( ui );
+  const { btn } = taskPriorityBits( pane );
+
+  assert.equal( btn.disabled, true,
+    "Update was live on a freshly painted row — it offers a write before anything was chosen" );
+  assert.equal( btn.getAttribute( "aria-disabled" ), "true",
+    "the button is inert to the mouse and announces itself as available to a screen reader" );
+} );
+
+test( "🔴 TASK LIST: a real change enables Update, and the return trip kills it again", () => {
+  const ui      = newUI();
+  const pane    = paintedTaskPane( ui );                       // painted P2
+  const { btn } = taskPriorityBits( pane );
+
+  chooseTaskPriority( pane, "P0" );
+  assert.equal( btn.disabled, false,
+    "a changed priority left Update dead on the task list — either the rule is wrong or this pane " +
+    "never wired the change listener the rule runs off" );
+
+  chooseTaskPriority( pane, "P2" );
+  assert.equal( btn.disabled, true,
+    "choosing the ORIGINAL priority again left Update enabled — it now offers a write that changes nothing" );
+} );
+
+test( "🔴 TASK LIST: a real bubbling click on Update reaches the handler and PATCHes", async () => {
+  const ui   = newUI();
+  const pane = paintedTaskPane( ui, { id: "prio-1", priority: "P3" } );
+
+  const patches: [ string, Record<string, unknown> ][] = [];
+  ui._patchTaskFields = async ( id, patch ) => { patches.push( [ id, patch ] ); return { ok: true }; };
+  ui.refreshTaskList  = async () => {};
+
+  chooseTaskPriority( pane, "P1" );
+
+  // This file's `clickThrough` is synchronous and drops the handler's promise; the priority
+  // handler is async, so the promise is captured here and awaited. The reached-check is the
+  // point of both forms: it kills the second sufficient cause for a later "nothing was
+  // PATCHed" reading — that no listener exists at all.
+  const button   = pane.querySelector( "button.task-priority-update" );
+  assert.ok( button, "no priority Update button rendered" );
+  const target   = ui as unknown as Record<string, ( b: unknown ) => unknown >;
+  const original = target._handlePriorityUpdateClick;
+  let   ran: unknown = null;
+  target._handlePriorityUpdateClick = ( b: unknown ) => { ran = original.call( ui, b ); return ran; };
+  button!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target._handlePriorityUpdateClick = original;
+
+  assert.ok( ran !== null,
+    "the task list's priority Update reached NO handler — this pane has no click listener for it, " +
+    "so the control is dead on screen however correct the handler is" );
+  await ran;
+
+  assert.equal( patches.length, 1, "Update reached the handler but not the field seam" );
+  assert.equal( patches[ 0 ][ 0 ], "prio-1" );
+  assert.deepEqual( patches[ 0 ][ 1 ], { priority: "P1" },
+    "the PATCH carried something other than the one field the operator changed" );
 } );

@@ -85,6 +85,8 @@ type HoldingUI = Record<string, unknown> & {
   _handleVerbSelectChange: ( select: unknown ) => void;
   _handleHoldingWontFixAllClick: ( button: unknown ) => Promise<void>;
   _transitionTask: ( id: string, to: string, extras?: unknown ) => Promise<{ ok: boolean; message?: string }>;
+  _patchTaskFields: ( id: string, patch: Record<string, unknown> ) => Promise<{ ok: boolean; message?: string }>;
+  _handlePriorityUpdateClick: ( button: unknown ) => Promise<void>;
   refreshTaskList: () => Promise<void>;
   refreshHoldingArea: () => Promise<void>;
 };
@@ -1221,4 +1223,131 @@ test( "🔴 the BATCH won't-fix reason survives a repaint too", () => {
 
   assert.equal( ( container.querySelector( ".holding-wont-fix-all-reason" ) as HTMLInputElement ).value,
     "closing the lot", "the repaint wiped a batch reason typed for a whole group" );
+} );
+
+
+// ═══════ RICK'S PRIORITY PAIR, WATCHED FROM THE HOLDING PANE ITSELF ═══════
+//
+// The control landed at e2c353fc in `_taskActionsCell`, which all three panes share, and
+// was falsified there with seven arms. 🔴 THAT IS EXACTLY THE POSITION THE BLANK-REASON
+// GUARD WAS IN THIS MORNING, and it is why these arms exist. María deleted that guard and
+// counted the kills PER FILE: redesign 4, holding 5, task list 1 of 176, epic board ZERO.
+// A ten-kill total read as "watched" and hid that two of three panes could not see it.
+//
+// Measured here before writing a line, same method, three mutations against the priority
+// control — the option losing `selected`, Update rendering permanently live, and the click
+// route deleted. Each killed exactly one arm in `row_control_redesign.test.ts` and **zero**
+// in this file, in `task_list_panel` and in `epic_board_panel`. The shared suite is not the
+// problem; it is that nothing downstream of it was looking.
+//
+// So these drive the HOLDING PANE'S OWN render and the HOLDING PANE'S OWN listeners. A row
+// painted by `renderHoldingArea` into `#holding-area-container`, reached through the
+// listener `renderHoldingArea` installs for itself — never `_taskActionsCell` called by
+// hand, which is what the shared suite already covers and cannot speak to this pane.
+
+function heldPriorityBits( scope: ParentNode ): { sel: HTMLSelectElement; btn: HTMLButtonElement } {
+  const sel = scope.querySelector( ".task-priority-select" ) as HTMLSelectElement | null;
+  const btn = scope.querySelector( "button.task-priority-update" ) as HTMLButtonElement | null;
+  assert.ok( sel, "the holding pane painted no priority select — this test cannot speak to the control it names" );
+  assert.ok( btn, "the holding pane painted no priority Update button" );
+  return { sel: sel!, btn: btn! };
+}
+
+// A REAL `change`, never a bare assignment. The enable/disable rule runs off the delegated
+// change listener this pane installs for itself, so setting `.value` alone leaves a page
+// state no operator can reach and a button nothing has updated — which would make the arm
+// below pass against a pane with no change listener at all.
+function chooseHeldPriority( scope: ParentNode, value: string ): HTMLSelectElement {
+  const { sel } = heldPriorityBits( scope );
+  sel.value = value;
+  sel.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  return sel;
+}
+
+function heldPane(): HTMLElement {
+  return document.getElementById( "holding-area-container" )!;
+}
+
+function paintedHeldRow( ui: HoldingUI, over: Record<string, unknown> = {} ): HTMLElement {
+  paintedWith( ui, {
+    tasks: [ row( { id: "held-1", status: "not_approved", created_by: "krishna 420f5ec9", ...over } ) ],
+    count: 1, total: 1, has_more: false
+  } );
+  return heldPane();
+}
+
+
+test( "🔴 HOLDING PANE: the priority select opens on the row's OWN current priority", () => {
+  for ( const priority of [ "P0", "P1", "P2", "P3" ] ) {
+    const ui   = newUI();
+    const pane = paintedHeldRow( ui, { priority } );
+    const { sel } = heldPriorityBits( pane );
+
+    // ⚠️ THE `selected` ATTRIBUTE, NOT `.value`, AND IT IS A FIXTURE LIMIT RATHER THAN A
+    // PREFERENCE. Measured by María while building the shared arms and re-confirmed here:
+    // after `innerHTML` is rewritten happy-dom does not re-sync `selectedIndex`, so
+    // `.value` returned P1 for a select whose markup plainly carried
+    // `<option value="P2" selected>`. It was right for P0 and P1 by coincidence — right
+    // often enough to be trusted, which is the worst shape a fixture can have. A real
+    // browser honours `selected` at parse; the attribute is both what we render and what
+    // the browser reads, so it is the honest thing to assert.
+    const marked = sel.querySelector( "option[selected]" ) as HTMLOptionElement | null;
+    assert.ok( marked, `a ${ priority } held row marked NO option selected — the select opens on ` +
+      `whatever happens to be first, misreporting every row that is not P0` );
+    assert.equal( marked!.value, priority,
+      `a ${ priority } held row opened its priority select on ${ marked!.value } — a control that ` +
+      `MISREPORTS the current value is worse than one that offers nothing` );
+  }
+} );
+
+test( "🔴 HOLDING PANE: Update renders DISABLED, and says so to a screen reader", () => {
+  const ui   = newUI();
+  const pane = paintedHeldRow( ui, { priority: "P2" } );
+  const { btn } = heldPriorityBits( pane );
+
+  assert.equal( btn.disabled, true,
+    "Update was live on a freshly painted held row — it offers a write before anything was chosen" );
+  assert.equal( btn.getAttribute( "aria-disabled" ), "true",
+    "the button is inert to the mouse and announces itself as available to a screen reader" );
+} );
+
+test( "🔴 HOLDING PANE: a real change enables Update, and the return trip kills it again", () => {
+  const ui   = newUI();
+  const pane = paintedHeldRow( ui, { priority: "P2" } );
+  const { btn } = heldPriorityBits( pane );
+
+  chooseHeldPriority( pane, "P0" );
+  assert.equal( btn.disabled, false,
+    "a changed priority left Update dead on the holding pane — either the rule is wrong or this " +
+    "pane never wired the change listener the rule runs off" );
+
+  // The return trip is the arm that catches a one-way latch, which is what a naive
+  // "enable on change" gives you: the value is back where it started and the button still
+  // offers to write it.
+  chooseHeldPriority( pane, "P2" );
+  assert.equal( btn.disabled, true,
+    "choosing the ORIGINAL priority again left Update enabled — it now offers a write that changes nothing" );
+} );
+
+test( "🔴 HOLDING PANE: a real bubbling click on Update reaches the handler and PATCHes", async () => {
+  const ui   = newUI();
+  const pane = paintedHeldRow( ui, { id: "held-1", priority: "P3" } );
+
+  const patches: [ string, Record<string, unknown> ][] = [];
+  ui._patchTaskFields    = async ( id, patch ) => { patches.push( [ id, patch ] ); return { ok: true }; };
+  ui.refreshTaskList     = async () => {};
+  ui.refreshHoldingArea  = async () => {};
+
+  chooseHeldPriority( pane, "P1" );
+
+  // `clickThrough` is this file's own idiom and the reason a "nothing happened" reading
+  // would mean anything: it proves a handler was REACHED, killing the second sufficient
+  // cause for silence — that the pane has no click listener for this control at all.
+  await clickThrough( ui, "_handlePriorityUpdateClick",
+    pane.querySelector( "button.task-priority-update" ), "the holding pane's priority Update" );
+
+  assert.equal( patches.length, 1, "Update reached the handler but not the field seam" );
+  assert.equal( patches[ 0 ][ 0 ], "held-1" );
+  assert.deepEqual( patches[ 0 ][ 1 ], { priority: "P1" },
+    "the PATCH carried something other than the one field the operator changed" );
 } );

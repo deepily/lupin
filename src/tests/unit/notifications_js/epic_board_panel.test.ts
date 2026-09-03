@@ -78,6 +78,8 @@ type EpicUI = Record<string, unknown> & {
   _handleTaskSubmitClick: ( button: unknown ) => unknown;
   _renderTaskRowError: ( id: string, message: string, scope?: unknown ) => void;
   _transitionTask: ( id: string, to: string, extras?: unknown ) => Promise<{ ok: boolean; message?: string }>;
+  _patchTaskFields: ( id: string, patch: Record<string, unknown> ) => Promise<{ ok: boolean; message?: string }>;
+  _handlePriorityUpdateClick: ( button: unknown ) => Promise<void>;
   _wireEpicBoardAccordion: () => void;
   _epicKeysInDom: () => string[];
   collapseAllEpics: () => void;
@@ -1190,4 +1192,130 @@ test( "🔴 EPIC BOARD: Park's blank-reason refusal names PARK's obligation, not
   assert.match( ( stripe.textContent || "" ), /park reason is required/i,
     "Park was refused with someone else's complaint — the quote requirement is the whole " +
     "reason park_reason exists, and a generic refusal teaches none of it" );
+} );
+
+
+// ═══════ RICK'S PRIORITY PAIR, WATCHED FROM THE EPIC BOARD ITSELF ═══════
+//
+// The control landed at e2c353fc in `_taskActionsCell` — one cell shared by all three
+// panes — and was falsified there with seven arms. 🔴 THIS PANE IS WHY THAT IS NOT ENOUGH.
+// When María deleted the blank-reason guard this morning and counted kills PER FILE, the
+// epic board scored **ZERO** while the shared suite scored four; a comfortable ten-kill
+// total hid a pane that could not see the guard at all.
+//
+// Re-measured for the priority control before writing a line, three mutations — the option
+// losing `selected`, Update rendering permanently live, the click route deleted. Each
+// killed exactly one arm in `row_control_redesign.test.ts` and **zero here**. Same
+// position, same pane, and this time before an operator found it rather than after.
+//
+// So these paint through `renderEpicBoardTable` and reach the control through the listener
+// `_wireEpicBoardAccordion` installs — never `_renderEpicRow` or `_taskActionsCell` called
+// by hand, which is what the shared suite already covers and what cannot speak to whether
+// THIS pane routes a click.
+
+const R_PRIORITY = { id: "prio-1", title: "A row Rick wants re-prioritized", status: "queued",
+                     correlation_key: "epic:seal-the-test-tier", priority: "P2" };
+
+function epicPriorityBits( scope: ParentNode ): { sel: HTMLSelectElement; btn: HTMLButtonElement } {
+  const sel = scope.querySelector( ".task-priority-select" ) as HTMLSelectElement | null;
+  const btn = scope.querySelector( "button.task-priority-update" ) as HTMLButtonElement | null;
+  assert.ok( sel, "the epic board painted no priority select — this test cannot speak to the control it names" );
+  assert.ok( btn, "the epic board painted no priority Update button" );
+  return { sel: sel!, btn: btn! };
+}
+
+// A REAL `change`, never a bare assignment — for the same reason `selectVerb` above uses
+// one. The enable rule runs off the delegated change listener this pane wires for itself,
+// so an assignment alone would leave the arm passing against a pane that wired nothing.
+function chooseEpicPriority( scope: ParentNode, value: string ): HTMLSelectElement {
+  const { sel } = epicPriorityBits( scope );
+  sel.value = value;
+  sel.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  return sel;
+}
+
+// The file's `clickThrough` is synchronous and drops the handler's promise; the priority
+// handler is async, so this is `submitOnEpic`'s shape — capture what the handler returned,
+// assert it was REACHED, then await it. The reached-check is what makes a later "nothing
+// was PATCHed" reading mean anything rather than being satisfied by no listener existing.
+async function clickEpicUpdate( ui: EpicUI, scope: ParentNode, what: string ): Promise<void> {
+  const button = scope.querySelector( "button.task-priority-update" );
+  assert.ok( button, `${ what }: no priority Update button rendered` );
+
+  const target   = ui as unknown as Record<string, ( b: unknown ) => unknown >;
+  const original = target._handlePriorityUpdateClick;
+  let   ran: unknown = null;
+  target._handlePriorityUpdateClick = ( b: unknown ) => { ran = original.call( ui, b ); return ran; };
+  button!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target._handlePriorityUpdateClick = original;
+
+  assert.ok( ran !== null,
+    `${ what } reached NO handler — the epic board has no click listener for this control, so it ` +
+    `is dead on screen however correct the handler is` );
+  await ran;
+}
+
+
+test( "🔴 EPIC BOARD: the priority select opens on the row's OWN current priority", () => {
+  for ( const priority of [ "P0", "P1", "P2", "P3" ] ) {
+    const ui        = newUI();
+    const container = paintedEpicRow( ui, { ...R_PRIORITY, priority } );
+    const { sel }   = epicPriorityBits( container );
+
+    // ⚠️ THE `selected` ATTRIBUTE, NOT `.value`. Measured by María on the shared arms and
+    // taken as given here: after `innerHTML` is rewritten happy-dom does not re-sync
+    // `selectedIndex`, so `.value` returned P1 for a select whose markup carried
+    // `<option value="P2" selected>` — correct for P0 and P1 by coincidence, which is the
+    // worst shape a fixture can have. A browser honours `selected` at parse; it is both
+    // what we render and what the browser reads.
+    const marked = sel.querySelector( "option[selected]" ) as HTMLOptionElement | null;
+    assert.ok( marked, `a ${ priority } epic row marked NO option selected — the select opens on ` +
+      `whatever happens to be first, misreporting every row that is not P0` );
+    assert.equal( marked!.value, priority,
+      `a ${ priority } epic row opened its priority select on ${ marked!.value } — a control that ` +
+      `MISREPORTS the current value is worse than one that offers nothing` );
+  }
+} );
+
+test( "🔴 EPIC BOARD: Update renders DISABLED, and says so to a screen reader", () => {
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_PRIORITY );
+  const { btn }   = epicPriorityBits( container );
+
+  assert.equal( btn.disabled, true,
+    "Update was live on a freshly painted epic row — it offers a write before anything was chosen" );
+  assert.equal( btn.getAttribute( "aria-disabled" ), "true",
+    "the button is inert to the mouse and announces itself as available to a screen reader" );
+} );
+
+test( "🔴 EPIC BOARD: a real change enables Update, and the return trip kills it again", () => {
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_PRIORITY );          // painted P2
+  const { btn }   = epicPriorityBits( container );
+
+  chooseEpicPriority( container, "P0" );
+  assert.equal( btn.disabled, false,
+    "a changed priority left Update dead on the epic board — either the rule is wrong or this pane " +
+    "never wired the change listener the rule runs off" );
+
+  chooseEpicPriority( container, "P2" );
+  assert.equal( btn.disabled, true,
+    "choosing the ORIGINAL priority again left Update enabled — it now offers a write that changes nothing" );
+} );
+
+test( "🔴 EPIC BOARD: a real bubbling click on Update reaches the handler and PATCHes", async () => {
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, { ...R_PRIORITY, id: "prio-1", priority: "P3" } );
+
+  const patches: [ string, Record<string, unknown> ][] = [];
+  ui._patchTaskFields = async ( id, patch ) => { patches.push( [ id, patch ] ); return { ok: true }; };
+  ui.refreshTaskList  = async () => {};
+
+  chooseEpicPriority( container, "P1" );
+  await clickEpicUpdate( ui, container, "the epic board's priority Update" );
+
+  assert.equal( patches.length, 1, "Update reached the handler but not the field seam" );
+  assert.equal( patches[ 0 ][ 0 ], "prio-1" );
+  assert.deepEqual( patches[ 0 ][ 1 ], { priority: "P1" },
+    "the PATCH carried something other than the one field the operator changed" );
 } );
