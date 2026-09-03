@@ -72,7 +72,7 @@ type TaskUI = Record<string, unknown> & {
   _taskBodyIsEmpty: ( task: unknown ) => boolean;
   _handleTaskListClick: ( target: unknown ) => void;
   _handleRowControlClick: ( target: unknown ) => boolean;
-  _handleTaskWontFixClick: ( button: unknown ) => Promise<void>;
+  _handleTaskSubmitClick: ( button: unknown ) => Promise<void>;
   _transitionTask: ( id: string, to: string, extras?: unknown ) => Promise<{ ok: boolean; message?: string }>;
   startTaskListPolling: () => void;
   fetchEpicStories: () => Promise<unknown>;
@@ -2110,7 +2110,7 @@ test( "_handleRowControlClick reports whether it CONSUMED the click", () => {
   const host = paneWithRealRows( ui, T_ACTIVE );
 
   assert.equal( ui._handleRowControlClick( host.querySelector( ".task-disclose-button" ) ), true );
-  assert.equal( ui._handleRowControlClick( host.querySelector( ".task-drop-button" ) ), true );
+  assert.equal( ui._handleRowControlClick( host.querySelector( ".task-submit-button" ) ), true );
   assert.equal( ui._handleRowControlClick( host.querySelector( ".task-col-title" ) ), false,
     "an ordinary cell click was swallowed as if it were a control" );
 } );
@@ -2185,11 +2185,26 @@ function bootPollPane(): void {
       <span id="task-list-updated"></span></h3><div id="task-list-container"></div></div>`;
 }
 function pollPane(): HTMLElement { return document.getElementById( "task-list-container" )!; }
+// Rick's redesign (46a3078c): five per-verb boxes became ONE `.task-reason-input`, and
+// five per-verb buttons became ONE `.task-submit-button`. The polling tests below ask
+// what a repaint does to what the operator typed, which is the same question whichever
+// box it was typed into — so only the selector moves.
 function reasonBox(): HTMLInputElement {
-  return pollPane().querySelector( ".task-wont-fix-reason" ) as HTMLInputElement;
+  return pollPane().querySelector( ".task-reason-input" ) as HTMLInputElement;
 }
-function wontFixBtn(): HTMLElement {
-  return pollPane().querySelector( ".task-wont-fix-button" ) as HTMLElement;
+function submitBtn(): HTMLElement {
+  return pollPane().querySelector( ".task-submit-button" ) as HTMLElement;
+}
+
+// Choose the verb the way the operator does. `.task-chase-input` does not exist until
+// this fires — `_handleVerbSelectChange` builds it off the pane's change listener — so
+// assigning `.value` would leave a page state nobody can reach.
+function selectVerb( scope: ParentNode, verb: string ): HTMLSelectElement {
+  const sel = scope.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+  assert.ok( sel, "the row renders no verb select at all — this test cannot speak to the control it names" );
+  sel.value = verb;
+  sel.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  return sel;
 }
 function shownStripe(): HTMLElement | null {
   const s = pollPane().querySelector( ".task-row-error-stripe" ) as HTMLElement | null;
@@ -2207,8 +2222,21 @@ test( "ARM A — type and click FAST, inside one poll interval: the request goes
   ui.startTaskListPolling();
   await tick( 40 );
 
+  // The verb used to be named by WHICH button you pressed; one Submit serves five now,
+  // so choosing it is an explicit step. Skipping it does not merely change the verb — it
+  // makes the submit refuse with "no verb chosen", a DIFFERENT guard wearing the same
+  // red, which is how a re-point lands green on the wrong thing.
+  //
+  // 🔴 AND IT IS `drop`, NOT `wont_fix`, FOR A REASON THAT IS NOT COSMETIC. The redesign
+  // put a two-press confirm on TERMINAL verbs: the first Submit on won't-fix arms the
+  // button ("Confirm won't-fix") and returns WITHOUT sending. These tests are about what
+  // a poll repaint does to text the operator typed — one press, one request — so they
+  // use a non-terminal verb and keep that shape verbatim. Pressing twice here would fold
+  // an untested confirm gate into a test about repaints, and a test that measures two
+  // things tells you which one broke exactly never.
+  selectVerb( pollPane(), "drop" );
   reasonBox().value = "not doing this";
-  wontFixBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  submitBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
   await tick( 15 );
   ui.stopTaskListPolling();
 
@@ -2224,12 +2252,13 @@ test( "🔴 ARM B — type, let ONE POLL land, then click: the typed reason must
   ui.startTaskListPolling();
   await tick( 40 );
 
+  selectVerb( pollPane(), "drop" );
   reasonBox().value = "not doing this";
   await tick( 60 );                                  // the operator reads on; a poll lands
   assert.equal( reasonBox().value, "not doing this",
     "a poll repaint wiped a reason the operator had typed and not yet submitted" );
 
-  wontFixBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  submitBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
   await tick( 15 );
   ui.stopTaskListPolling();
   assert.equal( sent.length, 1, "the click sent nothing — the reason was gone by the time it ran" );
@@ -2243,7 +2272,8 @@ test( "🔴 a refusal stripe must SURVIVE a poll — a refusal nobody sees did n
   ui.startTaskListPolling();
   await tick( 40 );
 
-  wontFixBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );   // blank reason
+  selectVerb( pollPane(), "drop" );
+  submitBtn().dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );   // blank reason
   await tick( 10 );
   assert.ok( shownStripe(), "precondition: the refusal is on screen" );
   const before = shownStripe()!.textContent ?? "";
@@ -2284,7 +2314,8 @@ test( "🔴 the RARE window too: a repaint between press and click must not swal
   ui.startTaskListPolling();
   await tick( 40 );
 
-  const btn = wontFixBtn();
+  selectVerb( pollPane(), "drop" );
+  const btn = submitBtn();
   reasonBox().value = "not doing this";
   btn.dispatchEvent( new window.MouseEvent( "mousedown", { bubbles: true } ) );
   await tick( 60 );                                  // the poll lands mid-press
@@ -2309,12 +2340,17 @@ test( "🔴 a paint HELD for a press is replayed the moment the press ends", asy
   await tick( 40 );
   ui.stopTaskListPolling();
 
+  // ⚠️ THE VERB IS CHOSEN BEFORE THE SNAPSHOT, and the order is load-bearing. Choosing
+  // one rewrites the row's placeholder and can add the date field, so a `before` taken
+  // first differs from the live markup immediately and the "paint is held" precondition
+  // fails for a reason that has nothing to do with holding paints.
+  selectVerb( pollPane(), "drop" );
   const before = pollPane().innerHTML;
-  wontFixBtn().dispatchEvent( new window.MouseEvent( "mousedown", { bubbles: true } ) );
+  submitBtn().dispatchEvent( new window.MouseEvent( "mousedown", { bubbles: true } ) );
   ui.renderTaskList( { status: "ok", tasks: [ { ...T_PARKED_GATE, title: "renamed by a peer" } ] } );
   assert.equal( pollPane().innerHTML, before, "precondition: the paint is held during the press" );
 
-  wontFixBtn().dispatchEvent( new window.MouseEvent( "mouseup", { bubbles: true } ) );
+  submitBtn().dispatchEvent( new window.MouseEvent( "mouseup", { bubbles: true } ) );
   assert.match( pollPane().textContent ?? "", /renamed by a peer/,
     "the held paint was dropped, not delayed — the pane is frozen on stale rows" );
 } );
@@ -2322,20 +2358,32 @@ test( "🔴 a paint HELD for a press is replayed the moment the press ends", asy
 test( "🔴 each box is restored into ITS OWN field, not merely into the right row", async () => {
   // A row carries several inputs — park takes a reason AND a chase date. Keying the saved
   // value on the task id alone would put the reason text into the date box.
+  //
+  // 🔴 THE FIXTURE MOVED AND THE PROPERTY DID NOT. This used to prove the point with the
+  // drop box and the won't-fix box, two of five reason fields on one row; the redesign
+  // leaves one shared reason box, so that pair no longer exists to tell apart. The
+  // property is still exactly what the comment above already named — park's reason AND
+  // its chase date — so it is now proved with those two. They are a STRONGER pair than
+  // the old one: different element types and different names, where the old two were
+  // both text inputs.
   const { ui } = pollUI();
   bootPollPane();
   ui.startTaskListPolling();
   await tick( 40 );
 
-  ( pollPane().querySelector( ".task-drop-reason" ) as HTMLInputElement ).value = "DROP TEXT";
-  ( pollPane().querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value = "WONT-FIX TEXT";
+  // Park is what puts two different fields on one row, so it is the verb this test needs.
+  selectVerb( pollPane(), "park" );
+  ( pollPane().querySelector( ".task-reason-input" ) as HTMLInputElement ).value = "REASON TEXT";
+  const chase = pollPane().querySelector( ".task-chase-input" ) as HTMLInputElement | null;
+  assert.ok( chase, "park rendered no chase date — this test cannot speak to per-field restore" );
+  chase!.value = "2026-09-09";
   await tick( 60 );
   ui.stopTaskListPolling();
 
-  assert.equal( ( pollPane().querySelector( ".task-drop-reason" ) as HTMLInputElement ).value,
-                "DROP TEXT", "the drop box came back with another control's text" );
-  assert.equal( ( pollPane().querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value,
-                "WONT-FIX TEXT", "the won't-fix box came back with another control's text" );
+  assert.equal( ( pollPane().querySelector( ".task-reason-input" ) as HTMLInputElement ).value,
+                "REASON TEXT", "the reason box came back with another control's text" );
+  assert.equal( ( pollPane().querySelector( ".task-chase-input" ) as HTMLInputElement ).value,
+                "2026-09-09", "the chase box came back with another control's text" );
 } );
 
 // ══════ collapsing a group must CLOSE the controls disclosed inside it ══════

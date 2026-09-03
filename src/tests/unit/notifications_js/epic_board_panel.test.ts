@@ -75,7 +75,7 @@ type EpicUI = Record<string, unknown> & {
   _handleRowControlClick: ( target: unknown ) => boolean;
   _disclosureToggle: ( task: Row ) => string;
   _handleDisclosureToggle: ( button: unknown ) => void;
-  _handleTaskDropClick: ( button: unknown ) => void;
+  _handleTaskSubmitClick: ( button: unknown ) => void;
   _wireEpicBoardAccordion: () => void;
   _epicKeysInDom: () => string[];
   collapseAllEpics: () => void;
@@ -892,6 +892,26 @@ function epicPaneWithRealRows( ui: EpicUI, ...tasks: Row[] ): HTMLElement {
   return host;
 }
 
+// Rick's redesign (46a3078c) collapsed five per-verb buttons and five boxes into ONE
+// select, ONE reason field and ONE Submit. Reaching a control therefore has an extra
+// step now: choose the verb, THEN fill, THEN submit.
+//
+// 🔴 A REAL `change`, NOT AN ASSIGNMENT. `.task-chase-input` does not exist until
+// `_handleVerbSelectChange` builds it, reached through the pane's own change listener.
+// Setting `.value` alone leaves a page state no operator can produce — which is the
+// same defect class these tests were written to remove, one level in.
+//
+// Idiom taken verbatim from Rio's `row_control_redesign.test.ts`, which took
+// `clickThrough` from mine; keeping them identical is what lets either file be read by
+// someone who knows the other.
+function selectVerb( scope: ParentNode, verb: string ): HTMLSelectElement {
+  const sel = scope.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+  assert.ok( sel, "the row renders no verb select at all — this test cannot speak to the control it names" );
+  sel.value = verb;
+  sel.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  return sel;
+}
+
 function clickIt( el: Element | null ): void {
   assert.ok( el, "the element to click was not rendered" );
   el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
@@ -940,12 +960,16 @@ test( "🔴 THROUGH THE CLICK PATH: the epic board's row ACTION buttons are WIRE
   // The ellipsis alone is half a fix: disclosing controls that do nothing is worse
   // than not disclosing them, because now the operator watches them fail silently.
   const ui = newUI();
-  let dropped = false;
-  ui._handleTaskDropClick = (): void => { dropped = true; };
+  let submitted = false;
+  ui._handleTaskSubmitClick = (): void => { submitted = true; };
   const host = epicPaneWithRealRows( ui, R_SEAL_A );
 
-  clickIt( host.querySelector( ".task-drop-button" ) );
-  assert.equal( dropped, true, "Drop on the epic board reached no handler" );
+  // Same question as before the redesign — does a row action control on THIS pane reach
+  // its handler — asked of the control that now carries every verb. Drop used to have a
+  // button of its own; it is an option on the select today.
+  selectVerb( host, "drop" );
+  clickIt( host.querySelector( ".task-submit-button" ) );
+  assert.equal( submitted, true, "Submit on the epic board reached no handler" );
 } );
 
 test( "🔴 a control click on the epic board does NOT also toggle its group", () => {
@@ -990,7 +1014,7 @@ test( "🔴 a repaint of the epic board keeps a typed reason, a shown refusal an
   ui._wireEpicBoardAccordion();
   container.innerHTML = ui.renderEpicBoardTable( model, ui.loadEpicGroupState() );
 
-  const box = container.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement;
+  const box = container.querySelector( ".task-reason-input" ) as HTMLInputElement;
   assert.ok( box, "no reason box rendered on the epic board — this test cannot speak" );
   box.value = "not doing this";
   clickThrough( ui, "_handleDisclosureToggle", container.querySelector( ".task-disclose-button" ),
@@ -1000,7 +1024,7 @@ test( "🔴 a repaint of the epic board keeps a typed reason, a shown refusal an
 
   ui.renderEpicBoard( { status: "ok", tasks: [ R_SEAL_A ] }, false );      // the poll lands
 
-  assert.equal( ( container.querySelector( ".task-wont-fix-reason" ) as HTMLInputElement ).value,
+  assert.equal( ( container.querySelector( ".task-reason-input" ) as HTMLInputElement ).value,
     "not doing this", "the repaint wiped a reason the operator had typed and not yet sent" );
   assert.equal( ( container.querySelector( ".task-row-error-stripe" ) as HTMLElement ).hidden, false,
     "the repaint wiped the refusal — the control now looks dead" );
