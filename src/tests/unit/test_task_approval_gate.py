@@ -209,6 +209,39 @@ def test_a_corrupt_override_file_is_reported_and_does_not_raise( isolated, ini_f
     assert "[task-approval]" in capsys.readouterr().out
 
 
+def test_a_file_that_exists_but_cannot_be_OPENED_is_survived_too( isolated, ini_flags_absent, capsys ):
+    """
+    The unreadable case the corrupt-file arm does not reach: the path EXISTS, so the
+    mtime probe succeeds, and `open()` fails anyway.
+
+    🔴 WHY THIS IS A SEPARATE ARM AND NOT A VARIANT OF THE CORRUPT ONE. `_read_overrides`
+    guards two different calls with one `except Exception`. The corrupt arm exercises the
+    JSON half, and every exception it can raise is a `ValueError` — so narrowing the
+    handler to `except ValueError` is invisible to it. `open()` raises `OSError`, which
+    that narrowing does NOT catch, and the failure then propagates out of
+    `get_enforcement_active` and takes the board down: exactly what this module's prose
+    forbids, "a bad settings file must not take the board down".
+
+    ⚠️ MEASURED, not reasoned: a mutation narrowing the handler to `except ValueError`
+    survived the whole file (0 red) before this arm existed. It is not an equivalent
+    mutant — it is a real defect for which no arm supplied the right input. Found by Mr
+    Radio reading the source after I had recorded it as equivalent; my reading was true
+    of the inputs under test and false of the property.
+
+    A directory at the file's path is the cheapest deterministic way to get there — and
+    it is a real operator shape, not a contrivance: `getmtime` succeeds on it and `open()`
+    raises `IsADirectoryError`.
+    """
+    isolated.mkdir()
+    approval._cache_mtime = None
+    assert isolated.exists(), "the arm needs the path to EXIST — otherwise it is the missing-file case"
+    assert approval.get_enforcement_active() is False
+    assert "[task-approval]" in capsys.readouterr().out, (
+        "an unopenable settings file is swallowed silently — an operator's write looks "
+        "disregarded with no clue why"
+    )
+
+
 def test_a_non_list_approvers_value_is_ignored_rather_than_raising( isolated ):
     """
     An operator typing a string where a list belongs must not 500 the transition
