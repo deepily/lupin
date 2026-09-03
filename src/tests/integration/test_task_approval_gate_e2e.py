@@ -35,6 +35,7 @@ from contextlib import contextmanager
 
 import pytest
 from fastapi import FastAPI
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -243,4 +244,112 @@ def test_an_ordinary_transition_is_NOT_gated( client, live_config ):
     assert r.status_code == 200, (
         f"a non-approver was refused an ORDINARY transition ({r.status_code}: {r.text}) — "
         f"the gate is over-broad and the board is closed to everyone but approvers"
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# THE HOLDING AREA IS A GATE, AND A GATE THAT LEAKS INTO THE BOARD IS NOT A GATE
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# P0 46799ba3, reported by Rick 2026-09-03: ticket 0ab1a095 appeared in BOTH the
+# holding area and the live queue. One row, one status — so no pane was rendering a
+# duplicate; the BOARD QUERY ITSELF returned it, measured against the live server.
+#
+# 🔴 THE MECHANISM, and it is not a missing filter. `_apply_owed_filter` excludes
+# BOARD_INVISIBLE_STATUSES and then deliberately RE-ADMITS
+# `and_( status == NOT_APPROVED_STATUS, ~holding_is_active_clause( ... ) )` — Rick's
+# 2026-09-02 self-expiry ruling: a held row hides only while its triage chase is
+# still in the future. `holding_is_active_clause` requires `next_chase_ts IS NOT NULL
+# AND > now`, so a row with NO chase is "not actively holding" and comes straight back
+# onto the board.
+#
+# ⚠️ AND NOTHING SETS A CHASE WHEN A ROW IS MINTED INTO HOLDING — on create,
+# `next_chase_ts` comes only from the payload and defaults to None. So this is not one
+# unlucky row: EVERY held row is born chase-less, and the gate is inert by construction.
+#
+# ⚠️ WHY THESE ARMS LIVE HERE AND NOT IN THE UNIT SUITE. `test_tasks_router.py` covers
+# this endpoint well and CANNOT see this defect: it mocks the repository and asserts
+# which flags reach it. The bug is in the SQL predicate BELOW that mock. These arms
+# drive the real filter against a real session, which is the layer the incident
+# entered at.
+#
+# ⚠️ AND THE PAIR IS THE POINT — one variable, nothing else. A single chase-less arm
+# would also pass against a board query that had simply stopped returning anything.
+
+def _board( client ):
+    """The board query the dashboard actually polls — see shared/task-list-query.js."""
+    r = client.get( "/api/tasks?limit=500&unscoped_audit=true&hide_parked=false&char_budget=0" )
+    assert r.status_code == 200, f"{r.status_code}: {r.text}"
+    payload = r.json()
+    return payload.get( "tasks", payload if isinstance( payload, list ) else [] )
+
+
+def _holding( client ):
+    r = client.get( "/api/tasks?limit=500&unscoped_audit=true&status=not_approved&char_budget=0" )
+    assert r.status_code == 200, f"{r.status_code}: {r.text}"
+    payload = r.json()
+    return payload.get( "tasks", payload if isinstance( payload, list ) else [] )
+
+
+def test_a_held_row_with_NO_triage_chase_stays_OFF_the_live_board( client ):
+    """
+    🔴 RICK'S ROW, REDUCED TO ITS ONE VARIABLE. This is the arm that was RED when the
+    P0 was filed, and it is the whole finding: a held row carrying no chase was being
+    served to the board, so unapproved work appeared where people look for approved
+    work and could be started by someone who never saw the gate.
+    """
+    held = _create_row( client, status="not_approved", title="held, NO chase" )
+
+    board_ids = { t[ "id" ] for t in _board( client ) }
+
+    assert held[ "id" ] not in board_ids, (
+        f"a not_approved row with no triage chase was returned by the BOARD query. "
+        f"The holding area is the gate for all new work; a board that shows held rows "
+        f"presents unapproved work as live work."
+    )
+
+
+def test_the_same_held_row_IS_in_the_holding_area( client ):
+    """
+    POSITIVE CONTROL, and the arm above is unreadable without it. 'Absent from the
+    board' is satisfied perfectly by a row that was never stored, by a broken query,
+    and by a fix that hides held rows everywhere — which would lose them.
+    """
+    held = _create_row( client, status="not_approved", title="held, NO chase" )
+
+    holding_ids = { t[ "id" ] for t in _holding( client ) }
+
+    assert held[ "id" ] in holding_ids, (
+        "the held row is missing from the HOLDING AREA — it has not been gated, it has "
+        "been lost, which is worse than the defect this file is about"
+    )
+
+
+def test_a_held_row_WITH_A_FUTURE_CHASE_is_also_off_the_board( client ):
+    """
+    THE SECOND MEMBER OF THE PAIR — the same assertion with the one variable flipped.
+
+    This arm ALREADY PASSED before the fix, and saying so is the point: it is what
+    proves the filter was never broken. The re-admission branch works exactly as
+    designed whenever a chase exists; what was missing was any chase at all.
+    """
+    future = ( datetime.now( timezone.utc ) + timedelta( days=3 ) ).isoformat()
+    held   = _create_row( client, status="not_approved", title="held, FUTURE chase",
+                          next_chase_ts=future )
+
+    assert held[ "id" ] not in { t[ "id" ] for t in _board( client ) }
+    assert held[ "id" ] in     { t[ "id" ] for t in _holding( client ) }
+
+
+def test_an_ORDINARY_queued_row_IS_on_the_board( client ):
+    """
+    🔴 THE ARM THAT MAKES THE OTHER THREE MEAN ANYTHING. Every assertion above is
+    'not on the board', and a board query returning nothing at all satisfies all of
+    them. This one fails if the fix hides more than it should.
+    """
+    ordinary = _create_row( client, status="queued", title="ordinary queued row" )
+
+    assert ordinary[ "id" ] in { t[ "id" ] for t in _board( client ) }, (
+        "an ordinary queued row vanished from the board — the holding filter is now "
+        "excluding work that was never held"
     )

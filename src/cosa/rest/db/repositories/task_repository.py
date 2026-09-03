@@ -1045,6 +1045,17 @@ class TaskRepository( BaseRepository[TaskItem] ):
                 # chase and are unaffected — this widens the visible set for one
                 # status only.
                 and_( TaskItem.status == NOT_APPROVED_STATUS,
+                      # 🔴 `isnot( None )` ADDED 2026-09-03 (P0 46799ba3, Rick). Without
+                      # it a held row carrying NO chase at all was re-admitted here, and
+                      # NOTHING sets a chase when a row is minted into holding — so every
+                      # held row was born chase-less and came straight back onto the
+                      # board. The gate was inert by construction, not for one row.
+                      #
+                      # Rick's self-expiry ruling is UNCHANGED and is what the next line
+                      # still implements: a held row hides until its triage chase comes
+                      # due. This conjunct only says that COMING DUE REQUIRES A DUE DATE.
+                      # A row with no chase has no expiry to reach, so it keeps holding.
+                      TaskItem.next_chase_ts.isnot( None ),
                       ~holding_is_active_clause( TaskItem, now ) ),
             ) )
             return query.filter( owed_clause( TaskItem, now ) )
@@ -1061,6 +1072,17 @@ class TaskRepository( BaseRepository[TaskItem] ):
                 # chase and are unaffected — this widens the visible set for one
                 # status only.
                 and_( TaskItem.status == NOT_APPROVED_STATUS,
+                      # 🔴 `isnot( None )` ADDED 2026-09-03 (P0 46799ba3, Rick). Without
+                      # it a held row carrying NO chase at all was re-admitted here, and
+                      # NOTHING sets a chase when a row is minted into holding — so every
+                      # held row was born chase-less and came straight back onto the
+                      # board. The gate was inert by construction, not for one row.
+                      #
+                      # Rick's self-expiry ruling is UNCHANGED and is what the next line
+                      # still implements: a held row hides until its triage chase comes
+                      # due. This conjunct only says that COMING DUE REQUIRES A DUE DATE.
+                      # A row with no chase has no expiry to reach, so it keeps holding.
+                      TaskItem.next_chase_ts.isnot( None ),
                       ~holding_is_active_clause( TaskItem, now ) ),
             ) )
         return query
