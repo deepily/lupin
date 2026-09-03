@@ -45,6 +45,7 @@ type OverlayUI = Record<string, unknown> & {
   _handleEmbeddedAudioClick: ( ev: unknown ) => void;
   _showPodcastOverlay: ( audioUrl: string, title: string ) => HTMLElement;
   _dismissPodcastOverlay: () => void;
+  _initMasterDetailLayout: () => void;
 };
 
 function newUI(): OverlayUI {
@@ -72,6 +73,65 @@ function anchor( href: string | null, text = "" ): HTMLAnchorElement {
   a.textContent = text;
   document.body.appendChild( a );
   return a;
+}
+
+// ══════════ THE LISTENER THIS WHOLE FILE COULD NOT SEE ══════════
+//
+// 🔴 EVERY TEST HERE USED TO PASS AGAINST A PAGE CARRYING NO AUDIO LISTENER AT ALL.
+// Measured 2026-09-02: delete all four click listeners in notifications.js and this
+// file still reports 19 pass / 0 fail. Not "six blind sites out of nineteen watched" —
+// nineteen tests and a watched denominator of ZERO. A green run proved nothing.
+//
+// ⚠️ AND IT IS NOT THE FIXTURE-SHAPE DEFECT the holding-area pane had, so its repair
+// does not transfer. There is no container to paint: the interceptor is installed on
+// `document` itself (notifications.js:14942), inside `_initMasterDetailLayout`, whose
+// ONLY caller is the constructor at :549. These tests build the UI with
+// `Object.create( prototype )` — which skips the constructor by design, so the harness
+// can drive one method at a time — so the wiring method never ran. A synthetic
+// `{ target, preventDefault }` handed straight to the handler cannot notice that.
+//
+// ⇒ So the repair is to RUN THE WIRING and dispatch a real event.
+//
+// ⚠️ WIRED ONCE FOR THE FILE, ON PURPOSE. A `document` listener cannot be undone by
+// re-rendering and `_initMasterDetailLayout` carries no wired-once guard of its own, so
+// calling it per test would stack N listeners on one shared document and fire the
+// handler N times per click. The tests assert on document state and on the event, never
+// on per-instance fields, so one wired instance serves them all.
+//
+// ⚠️ `_layoutMode` IS LEFT UNSET, ALSO ON PURPOSE. The same method installs a sibling
+// doc-link interceptor that bails unless the mode is "horizontal" — leaving it unset
+// keeps that one inert, so the `/app/docs?path=` test still measures the audio route
+// rather than its neighbour. The audio handler has no such guard, which is the fact
+// that makes this safe rather than a lucky arrangement.
+let WIRED: OverlayUI;
+
+before( () => {
+  WIRED = newUI();
+  WIRED._initMasterDetailLayout();
+} );
+
+// Dispatch a REAL MouseEvent, assert a handler was REACHED, and hand back the REAL
+// event so the caller can read `defaultPrevented` — the browser's own flag rather than
+// a boolean the fixture set for itself.
+//
+// 🔴 THE REACHED-CHECK IS WHAT MAKES THE NEGATIVE CASES MEAN ANYTHING. "The click was
+// not intercepted" is satisfied by a handler that correctly declined AND by no handler
+// existing — two sufficient causes for one observation, so `defaultPrevented === false`
+// alone cannot tell a working guard from a dead page. Proving the handler RAN kills the
+// second cause, and it sits on the path: you cannot get the event back without it.
+function clickThroughDocument( el: Element, what: string ): MouseEvent {
+  const target   = WIRED as unknown as Record<string, ( e: unknown ) => unknown >;
+  const original = target._handleEmbeddedAudioClick;
+  let   reached  = false;
+  target._handleEmbeddedAudioClick = ( e ) => { reached = true; return original.call( WIRED, e ); };
+  const ev = new window.MouseEvent( "click", { bubbles: true, cancelable: true } );
+  el.dispatchEvent( ev );
+  target._handleEmbeddedAudioClick = original;
+
+  assert.ok( reached,
+    `${ what } reached NO handler — nothing on the page listens for this click, so the ` +
+    `link is un-intercepted in the browser however correct the handler is` );
+  return ev;
 }
 
 beforeEach( () => { document.body.replaceChildren(); } );
@@ -175,22 +235,18 @@ test( "_dismissPodcastOverlay is a no-op when no overlay is open", () => {
 
 // ── _handleEmbeddedAudioClick (routing branches) ──────────────────────────────
 test( "click on an embed=1 audio link opens the overlay and prevents default", () => {
-  const ui = newUI();
   const a  = anchor( "/app/audio?path=io/podcasts/x.mp3&embed=1", "Play Here" );
-  const ev = clickEvent( a );
-  ui._handleEmbeddedAudioClick( ev );
-  assert.equal( ev.prevented, true, "navigation suppressed" );
+  const ev = clickThroughDocument( a, "an embed=1 audio link" );
+  assert.equal( ev.defaultPrevented, true, "navigation suppressed" );
   const el = document.getElementById( "podcast-overlay" );
   assert.ok( el, "overlay opened" );
   assert.equal( el!.querySelector( ".podcast-overlay-title" )!.textContent, "Play Here", "title from link text" );
 } );
 
 test( "click on a PLAIN audio link is left alone — no overlay, no preventDefault (opens a new tab)", () => {
-  const ui = newUI();
   const a  = anchor( "/app/audio?path=io/podcasts/x.mp3", "Listen" );
-  const ev = clickEvent( a );
-  ui._handleEmbeddedAudioClick( ev );
-  assert.equal( ev.prevented, false, "plain link NOT intercepted" );
+  const ev = clickThroughDocument( a, "a plain audio link" );
+  assert.equal( ev.defaultPrevented, false, "plain link NOT intercepted" );
   assert.ok( document.getElementById( "podcast-overlay" ) === null, "no overlay for the plain link" );
 } );
 
@@ -198,9 +254,8 @@ test( "click with no anchor in the ancestry is ignored", () => {
   const ui = newUI();
   const div = document.createElement( "div" );
   document.body.appendChild( div );
-  const ev = clickEvent( div );
-  ui._handleEmbeddedAudioClick( ev );
-  assert.equal( ev.prevented, false );
+  const ev = clickThroughDocument( div, "a click with no anchor above it" );
+  assert.equal( ev.defaultPrevented, false );
   assert.ok( document.getElementById( "podcast-overlay" ) === null );
 } );
 
@@ -214,26 +269,21 @@ test( "click that originates inside the reading-pane iframe is ignored", () => {
   frame.appendChild( a );
   pane.appendChild( frame );
   document.body.appendChild( pane );
-  const ev = clickEvent( a );
-  ui._handleEmbeddedAudioClick( ev );
-  assert.equal( ev.prevented, false, "iframe-internal click bailed" );
+  const ev = clickThroughDocument( a, "a click inside the reading-pane iframe" );
+  assert.equal( ev.defaultPrevented, false, "iframe-internal click bailed" );
   assert.ok( document.getElementById( "podcast-overlay" ) === null );
 } );
 
 test( "click on a non-audio link is ignored", () => {
-  const ui = newUI();
   const a  = anchor( "/app/docs?path=x.md", "Doc" );
-  const ev = clickEvent( a );
-  ui._handleEmbeddedAudioClick( ev );
-  assert.equal( ev.prevented, false );
+  const ev = clickThroughDocument( a, "a non-audio link" );
+  assert.equal( ev.defaultPrevented, false );
   assert.ok( document.getElementById( "podcast-overlay" ) === null );
 } );
 
 test( "embed link routing survives an absolute loopback-host prefix (normalized first)", () => {
-  const ui = newUI();
   const a  = anchor( "http://localhost:7999/app/audio?path=x.mp3&embed=1", "Play Here" );
-  const ev = clickEvent( a );
-  ui._handleEmbeddedAudioClick( ev );
-  assert.equal( ev.prevented, true, "absolute-form embed link still intercepted after normalization" );
+  const ev = clickThroughDocument( a, "an absolute-form embed=1 link" );
+  assert.equal( ev.defaultPrevented, true, "absolute-form embed link still intercepted after normalization" );
   assert.ok( document.getElementById( "podcast-overlay" ), "overlay opened for absolute-form link" );
 } );
