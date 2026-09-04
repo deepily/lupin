@@ -254,21 +254,23 @@ def test_the_header_and_the_visible_line_walk_one_schema( client_code ):
             f"hand-written list, which is free to drift from the other one"
         )
 
-    # The fields are read from the client, not restated here: a list in this file
-    # would be a SECOND declaration of Rick's ruling, and the drift between the two
-    # would be the very defect this test is named for. ROW_SCHEMA's own membership is
-    # pinned to literals in the TypeScript guard's test 5b.
-    schema  = function_body( client_code, "const ROW_SCHEMA = {", until="const ROW_FIELD_LABELS" )
-    fields  = re.findall( r'"([a-z0-9]+)"', schema )
-    assert len( fields ) >= 5, f"ROW_SCHEMA parsed as {fields!r}; this guard cannot see the fields it must check"
-
-    for field in fields:
-        for tag in ( "th", "td" ):
-            assert f'<{tag} class="task-col-{field}"' not in client_code, (
-                f'a hand-written <{tag} class="task-col-{field}"> is back in the client. '
-                f"Both lines are supposed to be built by walking ROW_SCHEMA; a literal "
-                f"beside the walk is a second source that can drift out of step with it."
-            )
+    # 🔴 ONE SIDE OF THIS COMPARISON IS A HAND-WRITTEN NUMBER, ON PURPOSE.
+    # The first cut derived the field names FROM ROW_SCHEMA and then asserted about the
+    # client — two sides out of one source, which agrees with the code forever. MEASURED,
+    # not reasoned: an arm that hand-wrote `<th class="task-col-owner">` into the header
+    # SURVIVED, because `owner` is not in ROW_SCHEMA and so was not in the list the test
+    # built to look for. A column left behind after its field leaves the schema is
+    # EXACTLY the drift this test is named for, and the derived form could not see it.
+    #
+    # So the expectation is a literal 1, which the client cannot move: each builder may
+    # hand-write exactly ONE column, and the assertion below names which one it must be.
+    for name, body, tag in ( ( "header", header, "th" ), ( "row", row, "td" ) ):
+        written = re.findall( rf'<{tag} class="task-col-([a-z0-9-]+)"', body )
+        assert written == [ "disclose" ], (
+            f"the {name} hand-writes {written!r}; the only column either builder may write "
+            f"by hand is the disclosure toggle. Everything else must come from the "
+            f"ROW_SCHEMA walk, or it is a second source free to drift from the other line."
+        )
 
     # The toggle is the deliberate exception — it names a control, not a field, so it
     # is not in ROW_SCHEMA and IS written by hand. It still needs both halves: a
