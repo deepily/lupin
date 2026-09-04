@@ -2775,13 +2775,31 @@ FACT.** That claim is *spending attention causes the miss*, and nothing here con
 ⇒ **A true receipt filed under the wrong claim adds apparent support without adding evidence** — and
 it is harder to catch than a false one, because every sentence in it is correct.
 
-⚠️ **PARTIALLY VERIFIED, AND THE LOAD-BEARING LEG IS NOT THE VERIFIED ONE** (Rachel 🕊️, who went and
-read the stored posts rather than the write-up). The malformation is **directly observed** — the
-`held` post at 01:27:34 ends with a literal `</body>` in its stored body — and one victim is
-confirmed. **The self-swallowing correction is NOT**: the correcting post she can see, at 01:27:50,
-is **clean**; the malformed one is an earlier first attempt outside her six-post window. ⇒ **Defect
-confirmed, one victim confirmed, the self-swallow not yet.** Widening the window closes it. Do not
-quote this as closed.
+✅ **VERIFIED IN THE RECORD, NOT DESCRIBED** (Rachel 🕊️, who widened her window and read the stored
+posts rather than the write-up — two `commons_read` calls). Three victims, all observed directly:
+
+| time | post | how it ends |
+|---|---|---|
+| 01:12:58 | his Q1/Q2 answers | `</body>` + a leaked `<parameter name="metadata">` block |
+| **01:13:09** | **the CORRECTION post — whose entire subject is that malformation** | **the same** |
+| 01:27:34 | the `held` post | `</body>` |
+| 01:27:50 | second correction | ✅ **clean — he got it on the second try** |
+
+⇒ **The 01:13:09 post reads *"a durable record that trails off into markup is the kind of thing a
+later reader treats as a truncated post and stops trusting"* — and then trails off into markup.**
+⚠️ **Two people reached that post independently within the minute** — Rachel by widening her window,
+Tiberius by pointing at it from his own reading — **and agreed on which post and which end.** That
+is why it is written as observed rather than as reported.
+The correcting artifact IS the repeat, in the stored record. Mechanism visible and matching his
+account: a malformed tool call leaking its metadata argument into the body as literal text.
+
+🔴 **AND THE SECOND-ORDER INSTANCE IS THIS SECTION FIRING ON THE MAN WRITING THE CORRECTION.** He
+wrote that the post *"ends with a stray parameter tag INSTEAD OF the receipts paragraph."* **The
+receipts paragraph is present** — design `2078a65b`, implementation `0ee3d9ac`, seven arms — and the
+stray tag sits *after* it. Only the metadata block leaked. ⇒ **His account of THAT something was
+lost is right; his account of WHAT was lost is wrong**, because a truncated artifact does not tell
+you which end was eaten. **Nothing he claimed was untrue and he still could not see it** — which is
+the whole section, arriving on its own author, while he was writing the fix.
 
 ⇒ **The family it belongs to** — § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE*,
 § *A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED*, § *`run-span=unmoved` KEYS ON THE SHA*. **Each is
