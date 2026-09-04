@@ -1496,7 +1496,8 @@ def dismiss_sessions(
     reconcile_items_fn : Optional[ Callable ] = None,
     respin_personas    : Optional[ List[ str ] ] = None,
     memento_coord_fn   : Optional[ Callable ] = None,
-    memento_recheck_fn : Optional[ Callable ] = None
+    memento_recheck_fn : Optional[ Callable ] = None,
+    force_kill         : bool = False
 ) -> Dict[ str, Any ]:
     """
     Reap reviewer sessions this manager spawned: kill their tmux sessions and
@@ -1611,7 +1612,53 @@ def dismiss_sessions(
                                              f"({error.__class__.__name__}: {error}) — reap proceeded "
                                              f"WITHOUT verified mementos" ) }
 
+    # THE SECOND LOOK, MOVED AHEAD OF THE KILL (row ee3d3c82, on top of row f94ab580).
+    # It used to run AFTER the kill. That was right for its original job — upgrading a
+    # seat whose file landed during teardown — and WRONG the moment anything wants to
+    # ACT on the verdict, for a reason Mr. Radio named: a re-check after the kill is
+    # measuring a seat that can no longer write, so it cannot tell "never wrote" from
+    # "killed before it could". The kill destroys the evidence the check needs.
+    #
+    # The coordinator above judged at ASK TIME and its verdict is a SNAPSHOT, never a
+    # settled finding: row f94ab580 measured two of four alarmed seats holding complete,
+    # self-named mementos SECONDS after their 45s window expired, one of which DM'd
+    # "ready for re-spin" after it had already been killed and logged unproven. So the
+    # verdict the kill consults must be the RE-CHECKED one, not the ask-time one.
+    #
+    # This can only UPGRADE a seat that re-proves itself on the same identity-checking
+    # predicate — an absent memento stays absent, a prior holder's file stays a prior
+    # holder's file. FAIL-SAFE: a raising re-check NEVER breaks the reap and NEVER
+    # discards the honest verdicts it was given.
+    if memento_recheck_fn is not None:
+        try:
+            memento_outcomes = memento_recheck_fn( memento_outcomes, identities )
+        except Exception as error:
+            memento_outcomes = dict( memento_outcomes )
+            memento_outcomes[ "_recheck_error" ] = ( f"pre-kill memento re-check raised "
+                                                     f"({error.__class__.__name__}: {error}) — the "
+                                                     f"verdicts below are as of ASK TIME and a seat "
+                                                     f"that wrote during teardown may be misreported" )
+
+    # THE CONDITIONAL (row ee3d3c82). The verdict has always been computed, surfaced in
+    # `memento_alarm` below, and never ACTED on: the loop was `for name in targets:`,
+    # unconditional. self_respin refuses when it cannot prove a memento; this is the reap
+    # doing the same. It DISCRIMINATES — only the verdicts where the seat's OWN work is
+    # not provably on disk withhold. `unproven_present` (this seat's own file, a gate
+    # failed) is deliberately NOT one: see reap_memento.WITHHOLD_KILL / PROCEED_KILL.
+    # FAIL-SAFE: a re-check that RAISED leaves only ask-time verdicts, which row
+    # f94ab580 measured are a snapshot and not a settled finding. Withholding the
+    # whole fleet on a crashed instrument is the wrong direction — proceed, loudly.
+    _recheck_ok = "_recheck_error" not in memento_outcomes
+    withheld    = ( {} if ( force_kill or not _recheck_ok )
+                    else reap_memento.seats_to_withhold( memento_outcomes ) )
     for name in targets:
+        if name in withheld:
+            dismissed.append( {
+                "session_name" : name,
+                "status"       : "withheld_no_memento",
+                "verdict"      : withheld[ name ]
+            } )
+            continue
         result = runner( [ "tmux", "kill-session", "-t", name ] )
         ok     = getattr( result, "returncode", 1 ) == 0
         dismissed.append( {
@@ -1619,27 +1666,12 @@ def dismiss_sessions(
             "status"       : "killed" if ok else "already_gone"
         } )
 
-    # POST-KILL RE-CHECK (row f94ab580) — the ONE second look, before the alarm is
-    # composed. The coordinator above judged at ASK TIME; the kill is the moment a
-    # seat's chance to write ends, so a seat mid-write when the ask window expired
-    # was GUARANTEED to be reported as having failed. Measured on a four-seat reap:
-    # two of the four alarmed seats had a complete, self-named memento on disk
-    # seconds later, and one of them DM'd "ready for re-spin" after it was already
-    # killed and logged unproven. This can only UPGRADE a seat that re-proves itself
-    # on the same identity-checking predicate — an absent memento stays absent and a
-    # prior holder's file stays a prior holder's file. FAIL-SAFE: a raising re-check
-    # NEVER breaks the reap and NEVER discards the honest verdicts it was given.
-    if memento_recheck_fn is not None:
-        try:
-            memento_outcomes = memento_recheck_fn( memento_outcomes, identities )
-        except Exception as error:
-            memento_outcomes = dict( memento_outcomes )
-            memento_outcomes[ "_recheck_error" ] = ( f"post-kill memento re-check raised "
-                                                     f"({error.__class__.__name__}: {error}) — the "
-                                                     f"verdicts below are as of ASK TIME and a seat "
-                                                     f"that wrote during teardown may be misreported" )
+    # Everything below must act on the seats actually KILLED, never on the ones asked
+    # for — a withheld seat is still ALIVE, so it keeps its manifest row and its bridge.
+    targets = [ name for name in targets if name not in withheld ]
 
-    reaped_names = { d[ "session_name" ] for d in dismissed }
+    reaped_names = { d[ "session_name" ] for d in dismissed
+                     if d[ "status" ] != "withheld_no_memento" }
     remaining    = [ r for r in records if r[ "session_name" ] not in reaped_names ]
 
     if remaining:
@@ -1776,6 +1808,7 @@ def dismiss_sessions(
         # dict, and the reap reports success around them either way. None when nothing
         # was lost, so the line only appears when it means something.
         "memento_alarm"      : reap_memento.memento_alarm( memento_outcomes ),
+        "withhold_notice"    : reap_memento.withhold_notice( withheld ),
         "memento_outcomes"   : memento_outcomes,
         "remaining"          : [ r[ "session_name" ] for r in remaining ],
         "bridges_deleted"    : bridges_deleted,

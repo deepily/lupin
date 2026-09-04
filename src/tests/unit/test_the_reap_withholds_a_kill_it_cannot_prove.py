@@ -7,24 +7,15 @@ composing `memento_alarm` afterwards — so the seat was already dead by the tim
 could read the sentence naming what it lost. María 🌸 lost a worker's whole hour to
 that shape on 2026-09-03.
 
-🔴 SCOPE — READ THIS BEFORE TRUSTING THE FILE. These tests cover the PURE PREDICATE
-ONLY. The predicate is NOT WIRED into `dismiss_sessions`, deliberately, and the row's
-done-means item 4 (drive the real reap) is therefore NOT satisfied.
+🔴 THE SECOND LOOK NOW RUNS BEFORE THE KILL, AND THE KILL CONSULTS IT. The re-check
+was moved ahead of the kill rather than a new one being built: a re-check AFTER the
+kill measures a seat that can no longer write, so it cannot tell "never wrote" from
+"killed before it could" — the kill destroys the evidence the check needs.
 
-WHY: wiring it on the ASK-TIME verdict breaks row f94ab580's post-kill re-check, and
-that is measured, not feared — the wired version reddened
-`test_with_the_recheck_the_reap_alarms_only_on_the_two_real_losses` and
-`test_a_raising_recheck_never_breaks_the_reap_and_is_surfaced`, taking that suite's
-alarm from 2 seats to 4, against a baseline of 0 failures. The reason is the whole
-problem: `prior_holder_present` at ASK TIME is frequently a RACE, not a loss — the
-slot legitimately holds the prior holder's file while the seat writes — and THE KILL
-IS WHAT STOPS THE SEAT WRITING, which is why the re-check runs after it. Withholding
-the kill on an ask-time verdict removes the very event the upgrade depends on.
-
-⇒ ALL THREE WITHHOLD VERDICTS ARE ASK-TIME VERDICTS THE RE-CHECK EXISTS TO UPGRADE.
-  So the gate cannot be built at that point in the sequence at all. It needs a
-  second look BEFORE the kill for withhold candidates — a design change to a measured
-  row that is not mine to make unilaterally.
+WHY NOT THE ASK-TIME VERDICT: it is a SNAPSHOT, not a settled finding. Row f94ab580
+measured two of four alarmed seats holding complete, self-named mementos SECONDS after
+their 45s window expired — one DM'd "ready for re-spin" after it had been killed and
+logged unproven. Gating on that verdict withholds seats that were about to succeed.
 
 AND IT MUST DISCRIMINATE. A gate that withheld on anything short of "verified" would
 block safe reaps and get switched off within a day. `unproven_present` — THIS seat's
@@ -96,3 +87,136 @@ def test_the_notice_names_every_seat_and_the_way_out():
     assert "b (timeout_no_memento)"   in text
     assert text.index( "a (" ) < text.index( "b (" )   # sorted: same reap reads the same twice
     assert "accept the loss" in text                   # the way out is stated, not implied
+
+
+# ── 🔴 THE REAL REAP. The incident was a reap, so these enter there ──────────
+#
+# A receipt that calls `seats_to_withhold` with a hand-picked dict proves the
+# predicate computes. It says NOTHING about whether `dismiss_sessions` REACHES it —
+# and for the whole life of this defect the verdict WAS computed and never reached.
+# These arms drive the real function; only tmux is stood down.
+
+from lupin_mcp import session_spawner
+
+
+class _Ok:
+    returncode = 0
+    stdout     = ""
+    stderr     = ""
+
+
+def _drive_reap( tmp_path, coordinator_returns, **kw ):
+    killed = []
+
+    def runner( argv, **kwargs ):
+        killed.append( argv[ -1 ] )
+        return _Ok()
+
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    # A REAL manifest record. An empty manifest makes everything downstream of
+    # `reaped_names` unobservable — which is exactly how mutation M3 (counting a
+    # withheld seat as reaped) survived a suite that otherwise looked thorough.
+    session_spawner._write_manifest(
+        session_spawner._manifest_path( "mgr-session", session_dir ),
+        [ { "session_name": "worker-1", "session_id": "sid-worker-1" } ] )
+
+    result = session_spawner.dismiss_sessions(
+        "mgr-session",
+        session_names    = [ "worker-1" ],
+        runner           = runner,
+        session_dir      = session_dir,
+        memento_coord_fn = lambda identities: coordinator_returns,
+        **kw
+    )
+    return result, killed
+
+
+def test_the_real_reap_withholds_when_the_slot_holds_another_seats_file( tmp_path ):
+    result, killed = _drive_reap( tmp_path, { "worker-1": { "status": "prior_holder_present" } } )
+
+    assert killed == [], "tmux kill-session ran on a seat whose work is not on disk"
+    assert result[ "dismissed" ][ 0 ][ "status" ]  == "withheld_no_memento"
+    assert result[ "dismissed" ][ 0 ][ "verdict" ] == "prior_holder_present"
+    assert "KILL WITHHELD" in ( result[ "withhold_notice" ] or "" )
+
+
+def test_the_real_reap_still_kills_a_verified_seat( tmp_path ):
+    # THE CONTROL. Without it, a gate that withheld EVERY seat satisfies the arm above
+    # and takes the whole fleet's reaps down.
+    result, killed = _drive_reap( tmp_path, { "worker-1": { "status": "verified" } } )
+
+    assert killed == [ "worker-1" ]
+    assert result[ "dismissed" ][ 0 ][ "status" ] == "killed"
+    assert result[ "withhold_notice" ] is None
+
+
+def test_the_real_reap_still_kills_on_unproven_present( tmp_path ):
+    # The DISCRIMINATING control: the seat's OWN file is at the slot with a failed
+    # gate. Loud, recoverable, and explicitly not a refusal.
+    _, killed = _drive_reap( tmp_path, { "worker-1": { "status": "unproven_present" } } )
+    assert killed == [ "worker-1" ]
+
+
+def test_force_kill_keeps_an_unresponsive_seat_reapable( tmp_path ):
+    # Without this escape the gate manufactures a class of immortal seat, and
+    # CLAUDE.md is explicit that a non-responsive worker is reaped and replaced.
+    _, killed = _drive_reap(
+        tmp_path, { "worker-1": { "status": "prior_holder_present" } }, force_kill=True
+    )
+    assert killed == [ "worker-1" ]
+
+
+def test_a_raising_recheck_does_not_withhold_the_whole_fleet( tmp_path ):
+    # FAIL-SAFE. A crashed instrument leaves only ask-time verdicts, which row
+    # f94ab580 measured are a snapshot and not a settled finding. Withholding on that
+    # is the wrong direction — proceed, loudly.
+    def boom( outcomes, identities ):
+        raise RuntimeError( "recheck exploded" )
+
+    result, killed = _drive_reap(
+        tmp_path, { "worker-1": { "status": "prior_holder_present" } }, memento_recheck_fn=boom
+    )
+    assert killed == [ "worker-1" ]
+    assert "recheck exploded" in result[ "memento_outcomes" ][ "_recheck_error" ]
+
+
+def test_a_withheld_seat_is_never_counted_as_reaped( tmp_path ):
+    # A withheld seat is STILL ALIVE. Leaking it into `reaped_names` drops it from the
+    # manifest and unlinks its bridge WHILE IT IS STILL RUNNING — worse than the bug
+    # this row is about, and silent.
+    #
+    # 🔴 ASSERT THE MANIFEST, NOT JUST THE RETURN VALUE. The `dismissed` list alone
+    # cannot see this: mutation M3 removed the withheld-exclusion from `reaped_names`
+    # and the whole 254-test suite stayed GREEN, because nothing looked at what the
+    # reap left behind.
+    result, _ = _drive_reap( tmp_path, { "worker-1": { "status": "prior_holder_present" } } )
+    assert [ d for d in result[ "dismissed" ] if d[ "status" ] == "killed" ] == []
+    assert result[ "remaining" ] == [ "worker-1" ], (
+        "a withheld seat must stay in the manifest — it was never killed" )
+
+
+def test_a_killed_seat_does_leave_the_manifest( tmp_path ):
+    # THE CONTROL for the assertion above. Without it, a `remaining` that always
+    # listed every seat would satisfy it.
+    result, _ = _drive_reap( tmp_path, { "worker-1": { "status": "verified" } } )
+    assert result[ "remaining" ] == []
+
+
+def test_a_reap_with_no_coordinator_is_unchanged( tmp_path ):
+    # The default path must behave exactly as before — the gate must not alter reaps
+    # that never asked for a memento.
+    killed = []
+
+    def runner( argv, **kwargs ):
+        killed.append( argv[ -1 ] )
+        return _Ok()
+
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    ( session_dir / "manifest.json" ).write_text( "[]" )
+
+    result = session_spawner.dismiss_sessions(
+        "mgr-session", session_names=[ "worker-1" ], runner=runner, session_dir=session_dir )
+    assert killed == [ "worker-1" ]
+    assert result[ "withhold_notice" ] is None
