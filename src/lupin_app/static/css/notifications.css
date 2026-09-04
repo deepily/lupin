@@ -5807,3 +5807,82 @@ body[data-layout-mode="horizontal"] .container {
     color: #721c24;
     border: 1px solid #f5c6cb;
 }
+
+/* ── THE FLEET-SIZE DIAL ────────────────────────────────────────────────────
+   Sits at the TOP OF THE SECTION CONTENT, above the table. Not in the header
+   bar: that bar's onclick toggles the section, so a range input there collapses
+   the panel on every drag — the constraint the ratio-gate controls paid for. */
+.fleet-size-cap-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin: 0 0 12px 0;
+    padding: 8px 12px;
+    border: 1px solid #e9ecef;
+    border-left: 4px solid #5e35b1;
+    border-radius: 4px;
+    background: #fbfbfd;
+    font-size: 12px;
+    color: #495057;
+}
+
+/* THE `display: flex` ABOVE BEATS THE UA STYLESHEET'S `[hidden] { display: none }`,
+   so without this companion the `hidden` attribute is INERT. Measured on the
+   flow-ratio cluster in Chromium and carried here rather than re-derived: setting
+   `root.hidden = true` left `display` computing to `flex` and the cluster still
+   occupying space. That is not cosmetic — it is the whole of what
+   `_paintFleetSizeCap` relies on to keep an unreadable endpoint from showing a cap
+   the spawn path is not enforcing. */
+.fleet-size-cap-controls[hidden] {
+    display: none;
+}
+
+/* Keep the label with its own slider: as bare flex children a wrap can separate
+   them, which is what happened to the ratio controls at a 700px viewport. */
+.fleet-size-cap-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.fleet-size-cap-controls label {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.fleet-size-cap-controls output {
+    min-width: 48px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #ede7f6;
+    color: #4527a0;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+.fleet-size-cap-controls input[ type="range" ] {
+    width: 140px;
+    accent-color: #5e35b1;
+    vertical-align: middle;
+}
+
+/* A DISABLED CONTROL MUST LOOK DISABLED. It reports the cap rather than setting it,
+   and the status line beside it says so in TEXT — never a colour or an opacity
+   alone (WCAG 1.4.1), which is why this rule is a second signal and not the only
+   one. */
+.fleet-size-cap-controls input[ type="range" ]:disabled {
+    cursor: not-allowed;
+    opacity: 0.75;
+}
+
+.fleet-size-cap-status {
+    color: #6c757d;
+    font-size: 11px;
+    font-style: italic;
+}

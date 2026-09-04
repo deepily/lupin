@@ -9157,6 +9157,105 @@ class NotificationsUI {
         el.textContent = `updated ${this._formatFleetTimestamp( new Date(), ianaZone )}`;
     }
 
+    // ========================================
+    // THE FLEET-SIZE DIAL — the cap the spawn path enforces, and its configured ceiling
+    // ========================================
+
+    async fetchFleetSizeCap() {
+        /**
+         * Read { cap, ceiling } from GET /api/arbiter/fleet-size-cap.
+         *
+         * Ensures:
+         *     - Returns the parsed body on 2xx, null on any non-2xx or throw
+         *     - Reports a failure via error(), NOT log(): log() is gated on this.debug,
+         *       so with debug off a control that quietly declines to paint is
+         *       indistinguishable from one nobody ever built
+         *     - Never throws
+         */
+        try {
+            const response = await this.authedFetch( "/api/arbiter/fleet-size-cap" );
+            if ( !response.ok ) {
+                this.error( `Fleet size cap unavailable (HTTP ${response.status})` );
+                return null;
+            }
+            const body = await response.json();
+            return ( body && typeof body === "object" ) ? body : null;
+        } catch ( error ) {
+            this.error( `Fleet size cap fetch failed: ${error}` );
+            return null;
+        }
+    }
+
+    _fleetSizeCapEls() {
+        /** The dial cluster, or null when the page does not carry it. */
+        const root = document.getElementById( "fleet-size-cap-controls" );
+        if ( !root ) return null;
+        return {
+            root,
+            slider : document.getElementById( "fleet-size-cap" ),
+            value  : document.getElementById( "fleet-size-cap-value" ),
+            status : document.getElementById( "fleet-size-cap-status" )
+        };
+    }
+
+    _paintFleetSizeCap( payload ) {
+        /**
+         * Move the dial to `payload.cap` and set its span to `payload.ceiling`.
+         *
+         * Ensures:
+         *     - No-op returning false when the cluster is absent
+         *     - The cluster stays HIDDEN when the payload is unusable. A control parked
+         *       at its HTML defaults would show a cap the spawn path is not enforcing —
+         *       the same "renders identically whether it works or not" failure the ratio
+         *       clause had, and the reason that one is hidden until it has real numbers
+         *     - `max` comes from payload.ceiling ON EVERY PAINT and is NEVER clamped to
+         *       anything else. See below
+         *     - RETURNS whether it painted, so a caller can tell a real paint from a
+         *       silent decline
+         *
+         * 🔴 THE CEILING IS THE KEY'S VALUE, VERBATIM. `cc session fleet size cap
+         * maximum` ships at 18 and Rick ruled it must stay tweakable in configuration.
+         * Trimming the displayed max to the persona-pool size, the live session count or
+         * any other number would make the dial disagree with the key — and a dial
+         * silently trimmed below what the operator typed cannot be told apart from a key
+         * that was ignored.
+         *
+         * ⚠️ AND IT IS READ AT CALL TIME, not baked into the HTML. The markup carries no
+         * `max` attribute at all, so a paint that never runs leaves the control hidden
+         * rather than showing a stale ceiling from a previous release.
+         */
+        const els = this._fleetSizeCapEls();
+        if ( !els ) return false;
+
+        const cap     = payload ? payload.cap     : undefined;
+        const ceiling = payload ? payload.ceiling : undefined;
+        if ( !Number.isFinite( cap ) || !Number.isFinite( ceiling ) ) {
+            els.root.hidden = true;
+            return false;
+        }
+
+        els.root.hidden        = false;
+        els.slider.min         = "1";
+        els.slider.max         = String( ceiling );
+        els.slider.value       = String( cap );
+        els.value.textContent  = `${cap} / ${ceiling}`;
+        // The status line says what the control DOES NOT do, because a slider that
+        // reports rather than sets is the one thing an operator cannot see by looking.
+        els.status.textContent = "read-only — set `cc session fleet size cap`";
+        return true;
+    }
+
+    async refreshFleetSizeCap() {
+        /**
+         * Fetch the dial's numbers and paint them.
+         *
+         * Ensures:
+         *     - Returns whatever _paintFleetSizeCap reported
+         *     - Never throws (both halves are already fail-soft)
+         */
+        return this._paintFleetSizeCap( await this.fetchFleetSizeCap() );
+    }
+
     async refreshFleetStatus() {
         /**
          * Orchestrate one fleet-status refresh: fetch → render. Shared by the 60s
@@ -9175,6 +9274,10 @@ class NotificationsUI {
         try {
             const composite = await this.fetchFleetState();
             this.renderFleetStatus( composite );
+            // The dial rides the SAME refresh as the table it sits above — the ⟳ button
+            // and the 60s tick both reach it — so the cap on screen and the fleet on
+            // screen are read at the same moment rather than drifting apart.
+            await this.refreshFleetSizeCap();
         } finally {
             this._fleetStatusFetchInFlight = false;
         }

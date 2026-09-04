@@ -222,3 +222,58 @@ async def get_context_pressure(
         }
     section = result.get( "context_pressure" ) if isinstance( result, dict ) else None
     return section if section is not None else { "status": "awaiting", "personas": { } }
+
+
+@router.get(
+    "/arbiter/fleet-size-cap",
+    summary     = "The fleet-size dial: the live cap and the configured ceiling",
+    description = "Read-only. Returns { cap, ceiling } computed AT CALL TIME from the "
+                  "configuration manager, so the operator control renders 1..ceiling "
+                  "against the number the spawn path is actually enforcing. "
+                  "Auth: X-API-Key or Bearer JWT — the same guard as the fleet pane, "
+                  "because anyone who can see the fleet should see the cap governing it."
+)
+async def get_fleet_size_cap(
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+):
+    """
+    Serve the fleet-size dial's two numbers, read fresh on every call.
+
+    Requires:
+        - authenticated caller (X-API-Key or Bearer JWT)
+
+    Ensures:
+        - returns { cap, ceiling } from resolve_fleet_cap / resolve_fleet_ceiling
+        - reads the configuration manager LAZILY, inside the handler, so the values
+          move when the INI moves rather than being frozen at import
+        - `ceiling` is `cc session fleet size cap maximum` and is NEVER clamped to
+          anything else — see below
+        - never raises: an unreadable config falls back to the module defaults, the
+          same fail-soft the spawn path uses, so the pane degrades to a number rather
+          than to an error
+
+    🔴 THE CEILING IS SERVED VERBATIM AND IS DELIBERATELY NOT CLAMPED — not to the
+    persona pool, not to the live session count, not to anything. Rick ruled the maximum
+    must be configurable so he can tweak it over time; a dial silently trimmed below the
+    number he typed cannot be told apart from a key that was ignored. The control shows
+    what the key says.
+
+    ⚠️ READ-ONLY, AND THAT IS THE SCOPE LINE RATHER THAN AN OVERSIGHT. Writing the cap
+    from here would need a persisted override that `resolve_fleet_cap` consults, and that
+    resolver is enforced in the HOST MCP process while this handler runs in a container —
+    so the write needs shared storage (a compose mount and an env var) and a change to
+    the resolver. Both are outside this pass. The control therefore REPORTS the cap and
+    says so on its face; it does not offer a drag that would change nothing.
+    """
+    from cosa.rest.dependencies.config import get_config_manager
+    from lupin_mcp import fleet_size_cap
+
+    try:
+        config_mgr = get_config_manager()
+    except Exception:
+        config_mgr = None
+
+    return {
+        "cap"     : fleet_size_cap.resolve_fleet_cap( config_mgr ),
+        "ceiling" : fleet_size_cap.resolve_fleet_ceiling( config_mgr ),
+    }
