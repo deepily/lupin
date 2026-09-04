@@ -171,6 +171,7 @@ def _the_promotion_ask_never_leaves_this_process( monkeypatch ):
         # one". A fake without it cannot represent a failed ask at all, which is why a
         # broken ask was recorded as Rick's keypress for as long as it was.
         exit_code      = 0
+        status         = "responded"
 
     def _answered_in_process( request, **kwargs ):
         return _Answer()

@@ -281,6 +281,36 @@ def promotion_ask_kwargs( actor, task_id, title ):
     }
 
 
+# 🔴 THE FOUR STATUSES THAT MEAN A HUMAN WAS ACTUALLY REACHED (row 96d2341c).
+#
+# ENUMERATED FROM THE CLIENT, NOT GUESSED — `notify_user_sync` returns eleven distinct
+# statuses. Seven of them mean the ask never got in front of anybody: connection_error,
+# request_timeout, request_exception, unexpected_exception, stream_error, unknown_event,
+# error. These four are the ones where it did.
+#
+# ⚠️ AN ALLOWLIST, NOT A DENYLIST, AND THAT IS THE WHOLE SAFETY OF IT. A status added to
+# the client later is UNKNOWN to this list and therefore refuses. A denylist would let it
+# through and stamp Rick's name on it — the failure would arrive silently and on the side
+# that matters.
+#
+# ⚠️ AND IT IS KEYED ON STATUS RATHER THAN ON exit_code, WHICH WAS THIS FIX'S OWN FIRST
+# ANSWER AND WAS WRONG. `request_timeout` is a TRANSPORT timeout carrying exit_code 2, so
+# an exit-code rule let it through and the row then read "rick-approved (timed-out
+# default)" — describing a wait at Rick's end that never happened, for a card he never
+# saw. Maria caught the wording. The set below is what makes the wording true rather than
+# adding a third label to explain a case that should simply refuse.
+#
+# ⚠️ `offline` AND `expired` STAY IN, deliberately. Those are an ABSENT Rick, and his
+# standing rule is that his absence must not become a blocker — they allow, stamped as a
+# default rather than as his keypress.
+REACHED_A_HUMAN = frozenset( {
+    "responded",            # a human answered
+    "expired",              # the card sat in front of him and timed out, default supplied
+    "expired_no_default",   # ditto, with no default to supply
+    "offline",              # he was not there to receive it; the default stands
+} )
+
+
 def _default_ask( **kwargs ):
     """
     Fire the ask on the human surface and return an AskOutcome.
@@ -335,7 +365,7 @@ def _default_ask( **kwargs ):
     # ⚠️ (b) IS THE LOAD-BEARING HALF. Refusing on an error is the visible fix; the
     # attribution is the one the gate's own comment forbids — "the one thing this gate
     # must never do is put Rick's name on a decision he did not make".
-    if response.exit_code == 1:
+    if response.status not in REACHED_A_HUMAN:
         raise RuntimeError(
             f"the ask never reached a human: status={response.status!r}, "
             f"exit_code={response.exit_code}"
