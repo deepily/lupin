@@ -658,11 +658,55 @@ def _resolve_project_from_bridge_cwd() -> Optional[str]:
         if not bridge_cwd:
             return None
 
-        from cosa.agents.utils.sender_id import _PROJECT_ALIASES
+        from cosa.agents.utils.sender_id import (
+            _PROJECT_ALIASES,
+            _worktree_owner_basename,
+            _dangling_gitlink_owner_basename,
+        )
 
         candidate = Path( bridge_cwd ).resolve()
         for parent in [ candidate, *candidate.parents ]:
-            if ( parent / ".git" ).exists():
+            git_entry = parent / ".git"
+            if git_entry.exists():
+                # 🔴 WORKTREE-AWARE, MIRRORING detect_project() — row 6597cea9.
+                # `.git` is a FILE in a worktree AND in a submodule, and
+                # `.exists()` is True for both, so the bare walk above stopped at
+                # the worktree root and took its DIRECTORY name. A seat in
+                # /…/lupin-wt-cc-author-maria-4 then emitted
+                # `claude.code@lupin-wt-cc-author-maria-4.deepily.ai#950b26f1`
+                # while every other emitter used `…@lupin.deepily.ai#950b26f1` —
+                # SAME session hash, two project segments, and the focus bar
+                # (keyed on sender_id, correctly) rendered one seat as two rows.
+                # Rick reported it for five workers, every one of them in a
+                # worktree.
+                #
+                # ⚠️ THE DOCSTRING ABOVE ALREADY CLAIMED THIS. It says this helper
+                # "matches detect_project() semantics exactly, just sourced from
+                # the bridge instead of live cwd" — true when written, false the
+                # day the gitlink branch was added to detect_project() (the
+                # 2026-06-11 dangling-gitlink incident) and not mirrored here. A
+                # reader trusting that sentence had no reason to look, which is
+                # why it took a report from the operator to find.
+                #
+                # ⚠️ AND IT IS NOT A CANONICALISATION GAP. ~/.lupin/config maps
+                # [lupin], [plan], [lupin-mobile] and carries no [lupin-wt-*]
+                # section, and the canonicaliser returns an unmapped name
+                # unchanged — so reaching for it would have changed nothing.
+                #
+                # The submodule/worktree disambiguation is git's own
+                # (`--git-common-dir`), inside the shared helper; a submodule
+                # still answers with its own basename, which is what keeps
+                # src/cosa resolving to "cosa".
+                if git_entry.is_file():
+                    owner = _worktree_owner_basename( parent )
+                    if owner is None:
+                        # Live git could not answer — the worktree's admin dir
+                        # was deleted while the directory survived. Parse the
+                        # gitlink's `gitdir:` target statically rather than
+                        # degrading to this directory's own name.
+                        owner = _dangling_gitlink_owner_basename( git_entry )
+                    if owner is not None:
+                        return _PROJECT_ALIASES.get( owner, owner )
                 name = parent.name.lower()
                 return _PROJECT_ALIASES.get( name, name )
         # No .git ancestor — fall back to the basename so callers always
