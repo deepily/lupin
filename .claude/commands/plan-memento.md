@@ -13,7 +13,7 @@ Captures the session's cognitive / role state so a post-`/clear` (or re-spawned)
 > ### ⛔ YOU DO NOT WRITE THE FILE. THE SCRIPT WRITES THE FILE.
 > ### ⛔ YOU DO NOT EDIT THE FILE. THE SCRIPT AMENDS THE FILE.
 >
-> **You assemble the CONTENT. `workflow/scripts/memento_io.py` decides every PATH and performs every WRITE** — the immutable record, the out-of-repo mirror, and the pointer, in **one call**, or it fails loud. To amend a record afterwards, **`memento_io.py amend`** — which appends, re-mirrors and re-points in one call.
+> **You assemble the CONTENT. `workflow/scripts/memento_io.py` decides every PATH and performs every WRITE** — the immutable record, the out-of-repo mirror, and the pointer, in **one call**, or it fails loud. To amend a record afterwards, **`python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py amend`** — which appends, re-mirrors and re-points in one call.
 >
 > **NEVER hand-`Write` a memento, and NEVER hand-`Edit` one.** Not `io/mementos/<persona>.md`, not `.claude-memento.md`, not anywhere. `Write` is the exact keystroke that destroyed two irreplaceable records on 2026-07-13. **Two rules are DELETED here, and both were bugs written as guidance:** *"overwrite the slot, archive the predecessor first"* (Sam had it written down and destroyed a record anyway) and *"need to amend? use `Edit`"* (it handed you a raw tool and asked you to **remember** to re-sync the mirror — it drifted the mirror the first time its own author followed it).
 >
@@ -51,7 +51,7 @@ python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write \
 ### Mode 2: `load`
 
 1. **Read the pointer** — `io/mementos/<persona-slug>.md` (worker) or, for a self-`/clear`, **`.claude-memento-<persona-slug>.md`**. If that is absent, read **your own RECORD** (`.claude-memento-<persona-slug>-<sid8>.md`) — **not** the shared `.claude-memento.md`, which is now legacy and frozen. The pointer **carries the current record's full content**, so a plain `Read` is already correct — but WHICH pointer is now a choice, and the two bullets below are that choice.
-   - 🔴 **IF YOU FALL BACK TO `.claude-memento.md`, CHECK ITS HEADER `session_id` IS YOURS BEFORE YOU TRUST A WORD OF IT.** That file is ONE per repo shared by every persona, so it may hold **somebody else's memento**. Measured 2026-08-31: the pointer changed hands **four times in 37 minutes** and the author of the evidence document was locked out of `self_respin` while writing it. Measured 2026-09-02: `memento_io.py resolve --slot root` returns the same one persona's file for **every** `--persona` asked, including a persona that does not exist — the flag is honoured on the `io` slot and **inert** on root. When the header is not yours, read **your own RECORD** directly: `.claude-memento-<persona-slug>-<sid8>.md`.
+   - 🔴 **IF YOU FALL BACK TO `.claude-memento.md`, CHECK ITS HEADER `session_id` IS YOURS BEFORE YOU TRUST A WORD OF IT.** That file is ONE per repo shared by every persona, so it may hold **somebody else's memento**. Measured 2026-08-31: the pointer changed hands **four times in 37 minutes** and the author of the evidence document was locked out of `self_respin` while writing it. Measured 2026-09-02: `python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py resolve --slot root` returns the same one persona's file for **every** `--persona` asked, including a persona that does not exist — the flag is honoured on the `io` slot and **inert** on root. When the header is not yours, read **your own RECORD** directly: `.claude-memento-<persona-slug>-<sid8>.md`.
    - 🔴 **THE WRITER HAS LANDED — `.claude-memento.md` IS NOW LEGACY, AND IT DRIFTS FURTHER EVERY TIME ANYBODY WRITES A MEMENTO.** Both halves of Rick's 2026-09-02 ruling are in: `memento_io.py`'s `pointer_rel_path` returns `.claude-memento-<persona-slug>.md` on the root slot (verified by running `regenerate-pointer`), so **the per-persona pointer is the only thing written from here on**. The shared file is a leftover frozen at whatever the last seat wrote before the change, and nothing will ever refresh it.
    - ⚠️ **SO WHEN YOUR PER-PERSONA POINTER IS ABSENT, READ YOUR OWN RECORD — do NOT fall back to the shared file.** `.claude-memento-<persona-slug>-<sid8>.md` is unambiguous; `.claude-memento.md` is somebody else's session, permanently. **The measured reason is that a present-but-WRONG preferred file is worse than a missing one**: two stale lupin per-persona pointers resolved cleanly to a memento two sessions old, because the preferred branch found a file, so the fallback never fired and the header check never ran. A file that exists is not a file that is yours.
 2. Validate the 9-element contract is satisfied; flag any missing elements.
@@ -59,14 +59,14 @@ python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write \
 4. Confirm rehydration via `notify()`, naming the rehydrated role + first action.
 5. **Discard nothing.** The record is immutable and stays; the pointer is refreshed by the next write. **The old "discard or archive after rehydration" step is DELETED — that step WAS the bug.**
 
-*(If the pointer is missing or names a record that isn't there: `memento_io.py regenerate-pointer --persona <p> --slot <io|root>`. A pointer is derived, so losing one costs nothing.)*
+*(If the pointer is missing or names a record that isn't there: `python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py regenerate-pointer --persona <p> --slot <io|root>`. A pointer is derived, so losing one costs nothing.)*
 
 ### Mode 3: `check`
 
-1. `memento_io.py resolve --persona <p> --slot <io|root>` — prints the current record's path.
+1. `python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py resolve --persona <p> --slot <io|root>` — prints the current record's path.
 2. Report: when written, by whom (persona + session_id), for what role, age — all four are on **line 1** of the record, so this needs no guessing.
 3. Report whether it satisfies the 9-element contract.
-4. `memento_io.py verify` — audit whether every memento in the repo is mirrored out-of-repo, byte-for-byte. **An unmirrored memento is one `git clean -xdf` from gone.**
+4. `python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py verify` — audit whether every memento in the repo is mirrored out-of-repo, byte-for-byte. **An unmirrored memento is one `git clean -xdf` from gone.**
 
 ---
 
