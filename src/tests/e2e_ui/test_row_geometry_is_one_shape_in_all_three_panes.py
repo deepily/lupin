@@ -55,8 +55,16 @@ before measuring, assert `document.contains`, clear the fixed nav, report
 SKIPPED as SKIPPED, and refuse a verdict when nothing was judgeable.
 
 PROVEN, NOT ASSERTED — two mutation arms plus a restore control, 2026-09-04.
-Baseline `cf722c8a` (working tip), run on :8000, tree-state sha `5087b139`,
-`tracked-dirty=0`. Every arm mutated the SERVED stylesheet by Playwright
+Baseline `5087b139`, run on :8000, `tracked-dirty=0`.
+
+🔴 THAT SHA IS A CORRECTION. The first cut of this block said "baseline
+`cf722c8a`, tree-state sha `5087b139`" — reading the runner's own
+`[tree-state] sha=` field as something other than the commit it names.
+`cf722c8a` was HEAD when the session STARTED; two commits landed underneath
+while the guard was being written, and `5087b139` is this file's own parent,
+so every arm above measured `5087b139`. Both numbers were on my screen and I
+named the one I remembered instead of the one that ran. Left visible rather
+than quietly swapped, because a run is named by what it MEASURED. Every arm mutated the SERVED stylesheet by Playwright
 route-interception rather than on disk: `task-list.css` belongs to Pocholo and
 this is the shared main checkout, so an in-place edit would race a live peer.
 
@@ -79,6 +87,20 @@ panes move together and nothing breaks — while the harness reports `hits == 1,
 applied = True`. A break that repairs its own damage is indistinguishable from a
 weak guard. The real break is SPLITTING the pair, which is what "a pane-scoped
 rule is a second schema" means in the file.
+
+⚠️ ARMS 2 AND 3 CARRY NO MUTATION PROOF, said here rather than left for a
+reader to infer from a table that lists only two arms. C0/M1/M2 establish that
+arms 1 and 4 discriminate. Arm 2 (no horizontal scroll) and arm 3 (toggle
+reachable) are UNGUARDED-BY-MUTATION: they pass today, they are aimed at
+defects that really happened, and nobody has yet deleted a fix and watched them
+go red. Present-and-correct is not the same as watched.
+
+⚠️ AND ARM 3's `hitIsToggle` IS INHERITED FROM A CHECK MEASURED NOT TO
+DISCRIMINATE. In `test_holding_area_per_row_editor.py` the equivalent
+`hitsSelf` came back TRUE in BOTH arms of the 108px incident; `insidePane` is
+what caught it. `hitIsToggle` is kept because it guards a DIFFERENT regression
+— an overlay covering a correctly-placed control — and is named as the thin
+half rather than left to inflate the count.
 
 Requires:
     - Test server on the :8000 venue with Testing config
