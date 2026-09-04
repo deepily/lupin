@@ -1503,16 +1503,34 @@ folding them into that count would corrupt a number this page spent three measur
 | `<repo-root>/.env`, where the host sets `JWT_SECRET_KEY` | `.gitignore:77` | **`import lupin_app.main` REFUSES** — `jwt_service.py:35` raises at import when the var is unset |
 | `<repo-root>/node_modules/` — **215 entries** in the main checkout, **0 tracked** | `.gitignore:193` | a TypeScript run dies with `Cannot find package 'tsx'` — which reads as a broken test, not a missing tree |
 
-🔴 **AND THE THIRD ONE IS PROVISIONED BY NOTHING AT ALL** (sam 🎙️, 2026-09-02, who nearly filed his
-own environment as a broken test). `link-worktree-venv.sh` supplies the `.venv` from both spawn
-creators — **and neither it nor anything else supplies `node_modules`.** So a worktree that CAN run
-the Python tier still cannot run a single TypeScript file, and the failure names a package rather
-than a tree.
+🔴 **THE THIRD ONE WAS PROVISIONED BY NOTHING AT ALL** (sam 🎙️, 2026-09-02, who nearly filed his
+own environment as a broken test). `link-worktree-venv.sh` supplied the `.venv` from both spawn
+creators and **neither it nor anything else supplied `node_modules`**, so a worktree that could run
+the Python tier still could not run a single TypeScript file — and the failure named a package
+rather than a tree.
 
-⇒ **`INTERPRETER OK` from the spawn path says nothing about the JS side.** Symlink `node_modules`
-from the main checkout the way the venv is symlinked — a link IN your tree pointing AT the main
-one, which writes nothing to the shared checkout. ⚠️ It then shows as `?? node_modules` in your
-worktree; that is your symlink, not content, and a path-scoped commit excludes it by construction.
+✅ **CLOSED 2026-09-04, row `dde8b87a` — `src/scripts/link-worktree-artifacts.sh` now borrows
+`node_modules` AND `src/scripts/cloud-run.env`, called from both spawn creators beside the venv
+call.** So a freshly SPAWNED worktree is tier-capable on both sides, and the spawn payload carries
+an `artifact_alarm` when it is not. ⚠️ **Provisioning still lives in the PYTHON spawn path only, so
+a hand-typed `git worktree add` still gets nothing** — run the script yourself in that tree. Guard:
+`src/tests/unit/test_the_real_spawn_path_provisions_a_tier_capable_tree.py`, which drives the real
+`spawn_sessions` into a real worktree and asserts the link ON DISK; unwire the call site and its two
+named tests go red (measured, both directions, restore sha-verified).
+
+⇒ **`INTERPRETER OK` and a TIER-CAPABLE TREE are still different claims** — that is the durable half
+and it is why the two provisioners are two fields rather than one. ⚠️ The borrowed links show as
+`?? node_modules` in your worktree; that is your link, not content, and a path-scoped commit
+excludes it by construction.
+
+🔴 **AND THE SECOND MEMBER IS DELIBERATELY NOT PROVISIONED, WHICH IS NOT AN OVERSIGHT TO FIX.** The
+repo-root `.env` carries `JWT_SECRET_KEY` **and `POSTGRES_PASSWORD`** — Mr. Radio's 2026-09-01
+ruling on `src/conf/keys/**` governs it for the same reason: a venv is a build artifact, a key is a
+secret, and a symlink puts a live credential in a tree that gets `rm -rf`'d. What changed instead is
+the REFUSAL: `jwt_service` now appends a sentence naming the worktree you are standing in and the
+main checkout that has the file, so the failure stops reading as a setting you forgot. The borrow
+list's deny side is pinned by a test with a hand-written forbidden list, so smuggling a key onto it
+reddens `test_no_borrowed_path_is_a_secret_or_a_build_output`.
 
 🔴 **THE FIRST IS THE WORST-BEHAVED MEMBER OF THE FAMILY, BECAUSE IT PRODUCES A FALSE *FACT* RATHER
 THAN A FALSE *RED*.** Measured 2026-09-02 (Rachel 🕊️): a census of every asset the shells link

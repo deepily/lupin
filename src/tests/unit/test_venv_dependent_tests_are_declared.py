@@ -93,6 +93,14 @@ DETECTED_BUT_DOES_NOT_BREAK = {
         "to it. Measured BOTH ways at ee027c8c in two separately-built worktrees, not one "
         "reused: 6 passed with a `.venv` (lupin-wt-rio-rachel2) and 6 passed without one "
         "(lupin-wt-rio-novenv, no `.venv` ever created).",
+    "test_new_worktrees_come_up_tier_capable.py":
+        "same shape as `test_new_worktrees_come_up_with_an_interpreter.py` and for the same "
+        "reason: the one `.venv/bin/python` it names is planted BY THE FIXTURE inside a "
+        "throwaway git repo (`_init_main_checkout` writes an executable stub there), so the "
+        "path is a property of the temp tree it builds and never of the tree running the "
+        "suite. Measured BOTH ways at b78c7651 in this worktree, the `.venv` symlink moved "
+        "aside and restored between the two runs, the second driven by the main checkout's "
+        "interpreter: 14 passed with a `.venv`, 14 passed without.",
     "test_v2_eligible_routing_denominator.py":
         "does spawn PROJECT_ROOT/.venv/bin/python, but skips first when the pinned baseline "
         "worktree is absent — which it is. Reaching the spawn again in an unprovisioned tree "

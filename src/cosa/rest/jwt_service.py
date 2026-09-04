@@ -32,13 +32,101 @@ config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 #
 # Unset now fails here, before the module finishes importing, so a missing secret is a boot
 # failure rather than tokens signed with a value anyone can read. Row adce3547.
-SECRET_KEY = os.getenv( "JWT_SECRET_KEY" )
-if not SECRET_KEY:
-    raise ValueError(
+def _missing_tree_hint( here=None ):
+    """
+    Name the missing TREE when the refusal above is really a worktree-provisioning gap.
+
+    THE DEFECT THIS ADDRESSES (row dde8b87a). The repo-root `.env` is gitignored, so it
+    is present in the main checkout and absent from EVERY worktree. It carries
+    JWT_SECRET_KEY, so `import lupin_app.main` REFUSES at import inside a worktree — and
+    the refusal names a missing VARIABLE, which reads as a configuration mistake the
+    reader made. It is not: it is a file that `git worktree add` could not have produced.
+
+    🔴 THE FILE IS NOT PROVISIONED AND MUST NOT BE. It also carries POSTGRES_PASSWORD.
+    A venv is a build artifact; this is a secret, and the ruling on `src/conf/keys/**`
+    (Mr. Radio, 2026-09-01) is the same ruling. So the remedy for this member is a
+    message that tells the truth about WHY the variable is absent, not a symlink.
+
+    ⚠️ NO SUBPROCESS, NO CONFIG, NO `LUPIN_ROOT`. This runs during a module import that
+    is already failing; anything that can itself fail would replace a clear refusal with
+    an obscure one. The repo root comes from this file's own location — the tree that is
+    actually running — and a worktree announces itself by having a `.git` FILE rather
+    than a directory, whose `gitdir:` line names the main checkout.
+
+    Requires:
+        - here is a repo root path, or None to use this file's own tree. The parameter
+          exists so the branches below can be driven against real temporary trees; the
+          import-time caller never passes it
+
+    Ensures:
+        - returns a sentence naming this tree and the main checkout when this is a
+          worktree whose `.env` is absent while the main checkout has one
+        - returns "" in every other case, including any error — a hint that cannot be
+          computed must never turn a legible refusal into a traceback
+        - never raises
+
+    Returns:
+        str
+    """
+    try:
+        if here is None:
+            here = os.path.abspath( os.path.join( os.path.dirname( __file__ ), "..", "..", ".." ) )
+        if os.path.exists( os.path.join( here, ".env" ) ): return ""
+
+        git_marker = os.path.join( here, ".git" )
+        if not os.path.isfile( git_marker ): return ""          # main checkout, or no repo
+
+        with open( git_marker ) as f: marker = f.read().strip()
+        if not marker.startswith( "gitdir:" ): return ""
+        # ".../<main>/.git/worktrees/<name>" -> "<main>"
+        gitdir = marker.split( ":", 1 )[ 1 ].strip()
+        main   = os.path.dirname( os.path.dirname( os.path.dirname( gitdir ) ) )
+        if not os.path.exists( os.path.join( main, ".env" ) ): return ""
+
+        return (
+            f" THIS IS A MISSING TREE, NOT A MISSING SETTING: you are in the worktree {here}, "
+            f"which has no .env because .env is gitignored and `git worktree add` cannot produce one. "
+            f"The main checkout {main} has one. It is NOT provisioned into worktrees on purpose — it "
+            f"also carries POSTGRES_PASSWORD, and a secret is not a build artifact. Export "
+            f"JWT_SECRET_KEY into this shell instead, or run from the main checkout."
+        )
+    except Exception:
+        return ""
+
+
+def _missing_secret_message( here=None ):
+    """
+    The whole refusal text: the standing advice, plus the missing-tree hint when one
+    applies.
+
+    ⚠️ IT IS A FUNCTION SO THE COMPOSITION CAN BE TESTED. The `raise` below runs at
+    module-import time and only when the variable is unset, so under a tier that always
+    sets it the line is unreachable — and a test that exercised `_missing_tree_hint`
+    alone would pass whether or not the hint ever reaches a reader. A component can be
+    correct, covered, and never wired in.
+
+    Requires:
+        - here is a repo root path, or None to use this file's own tree
+
+    Ensures:
+        - always contains the standing advice, in every tree
+        - contains the missing-tree hint iff `_missing_tree_hint` produces one
+        - never raises
+
+    Returns:
+        str
+    """
+    return (
         "JWT_SECRET_KEY environment variable must be set — there is no default signing secret. "
         "Set it in the untracked .env / host env file (never a tracked one); generate a value with "
         "python -c \"import secrets; print( secrets.token_urlsafe( 32 ) )\"."
+        + _missing_tree_hint( here )
     )
+
+
+SECRET_KEY = os.getenv( "JWT_SECRET_KEY" )
+if not SECRET_KEY:
+    raise ValueError( _missing_secret_message() )
 
 ALGORITHM                     = config_mgr.get( "jwt algorithm", "HS256" )
 ACCESS_TOKEN_EXPIRE_MINUTES   = config_mgr.get( "jwt access token expire minutes", 30, return_type="int" )
