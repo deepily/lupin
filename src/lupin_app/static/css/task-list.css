@@ -174,6 +174,37 @@ tbody.task-group.collapsed .task-row {
     vertical-align: middle;
 }
 
+/* ---- The id cell is a one-click copy — Rick's row dbb4c187 ----------------
+   ⚠️ DELIBERATELY NOT SCOPED TO `.task-list-table`. The rule directly below is,
+   and the epic board's table is `.epic-board-table`, so the id column's own
+   monospace and colour never reach that pane — the pane-scoped drift this file
+   has now recorded three times. A copy affordance that appears in two panes of
+   three would be the fourth. */
+.task-id-copy {
+    cursor        : pointer;
+    border-radius : 3px;
+    padding       : 0 2px;
+}
+
+.task-id-copy:hover,
+.task-id-copy:focus-visible {
+    background : rgba( 127, 127, 127, 0.14 );
+}
+
+/* Confirmation via `::after` rather than by replacing the label: the cell keeps
+   its width, and if the timer that clears this never fires, nothing has been
+   destroyed. A copy with no feedback is indistinguishable from a dead click. */
+.task-id-copied::after {
+    content     : " ✓";
+    color       : var( --task-done, #2f9e44 );
+    font-weight : 600;
+}
+
+.task-id-copy-failed::after {
+    content : " ✗";
+    color   : var( --error-color, #e06c75 );
+}
+
 /* ---- ID column (design 2026.06.29 row redesign — leftmost) ----
    The compact 8-char row identifier: monospace + tabular nums, no wrap. */
 .task-list-table .task-col-id,
@@ -774,10 +805,47 @@ tbody.task-group.collapsed .task-row {
     overflow : visible;
 }
 
+/* 🔴 `width: max-content` WAS WHY LINE 3 STOPPED SHORT OF THE RIGHT EDGE — Rick's
+   P1, row 5f982bbd: "not expanding fully to the rightmost edge of the table layout
+   area ... stopping before the priority column in all contexts."
+
+   MEASURED OPEN in the real browser at b78c7651, pane 916px, a row disclosed in
+   each pane:
+
+       pane            line 3 box   last field ends   short by   reason input
+       task list        200..1080         990.0         90.0px      175px
+       holding area     200..1080         973.0        107.0px      175px
+       epic board     201.5..1080         991.5         88.5px      175px
+
+   THE COLSPAN WAS NEVER THE DEFECT, and that was the first hypothesis. Every pane
+   has SIX header cells and the disclosed `<td>` declares `colspan="6"`; its box
+   measures 182..1098, identical to the table's own. The SPAN is complete — what
+   stopped short is the CONTENT inside it.
+
+   ⚠️ THE STOP LANDS AT THE PRIORITY COLUMN BY COINCIDENCE, NOT BY RULE. The
+   priority header runs 967..1047 and the strip ended at 973 / 990 / 991.5 — three
+   different numbers, because each is the strip's own max-content width and the
+   three panes render different button labels. A rule would have stopped all three
+   at one x. That it lands near the priority column is what the eye reports; it is
+   not what the code does.
+
+   `max-content` sizes this strip to its contents, so there is no free space in it
+   for anything to grow into — and `.task-reason-input` declares `flex: 1 1 260px`
+   and rendered at 175px, SHRUNK 85px BELOW ITS OWN BASIS while 90px of the line sat
+   empty to its right. `getComputedStyle` reported `flex-grow: 1` throughout: the
+   declaration was correct and never reached the surface, which is the shape counted
+   at 035105e2.
+
+   The `max-content` was written for the era above, where a 1065px table overflowed a
+   916px pane and the strip had to be pinned narrow. That overflow is gone — measured
+   here, `scrollWidth == clientWidth == 916` in all three panes — so sizing to the box
+   costs nothing and is what lets the reason field take the room it already asked for.
+   The sticky pin is left in place: inert without overflow, and its removal is not
+   this fix. */
 .task-controls-row .task-actions {
     position  : sticky;
     left      : 0;
-    width     : max-content;
+    width     : 100%;
     max-width : 100%;
 }
 
@@ -1206,6 +1274,47 @@ tbody.task-group.collapsed .task-row {
    detail. */
 .task-disclosed-line .task-disclosed-field.task-col-detail {
     flex-shrink: 0;
+}
+
+/* 🔴 THE LAST FIELD ON LINE 3 TAKES THE REST OF THE LINE — Rick's P1, row 5f982bbd.
+   `.task-disclosed-field` is `flex: 0 1 auto`, so every field is sized by its own
+   content and line 3 ended wherever the actions strip happened to end. Growing the
+   actions field is what carries line 3 to the row's right edge; the strip inside it
+   is `width: 100%` (see the block above), so the room arrives at
+   `.task-reason-input`, which has been asking for it with `flex: 1 1 260px` all
+   along.
+
+   ⚠️ LINE 2 IS DELIBERATELY NOT GIVEN THIS. Its last field (`project`) ends at 718
+   against the same 1080 line box — shorter than line 3 ever was — and Rick did not
+   report it, because `--fields` carries a dashed `border-bottom` across the whole
+   line box and already reads as full width. Line 3 has no such rule, so its content
+   IS its visible extent. Stretching line 2's chips as well would space five labelled
+   values across 880px for no reason anybody asked for. */
+.task-disclosed-line--actions .task-disclosed-field.task-col-actions {
+    flex: 1 1 auto;
+}
+
+/* 🔴 THE FIELD IS NOT THE LAST LINK, AND STOPPING AT IT SHIPS AN INVISIBLE FIX.
+   Measured with the rule above in place and this one absent: the actions FIELD
+   reached 1080 in all three panes — 0.0px short, the assertion satisfied — while
+   `.task-actions` stayed at 665px ending at 990, byte-identical to the defect. The
+   box reached the right edge and NOTHING ON SCREEN MOVED.
+
+   The chain has four links and the middle one is a plain `<span>`:
+
+       .task-disclosed-field.task-col-actions   flex item of the line   grows (above)
+       .task-disclosed-value                    flex item of the field  <- THIS
+       .task-actions                            width: 100% of the span
+       .task-reason-input                       flex: 1 1 260px         absorbs it
+
+   `.task-disclosed-value` is `flex: 0 1 auto`, so it sized to its content and
+   `width: 100%` on the strip inside it resolved against that same content width —
+   100% of 665 is 665, and the growth stopped one element above where it was needed.
+   `min-width: 0` because the span is `overflow: hidden`, and a flex item's automatic
+   minimum would otherwise floor it at its content size. */
+.task-disclosed-line--actions .task-col-actions .task-disclosed-value {
+    flex      : 1 1 auto;
+    min-width : 0;
 }
 
 .task-disclosed-label {

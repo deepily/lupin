@@ -827,3 +827,289 @@ class TestTheDisclosedRowsWearTheSameSkinAsTheirRow:
                                  f"against row 1's {r[ 'row1Bg' ]!r} — Rick's \"they are darker\"" )
 
         assert not problems, "Disclosed-row skin:\n  " + "\n  ".join( problems )
+
+
+# ---------------------------------------------------------------------------
+# ARM 5 — LINE 3 REACHES THE ROW'S RIGHT EDGE
+# ---------------------------------------------------------------------------
+
+# Measure how far line 3's content actually gets, against line 3's own box.
+#
+# 🔴 THREE BOXES, NOT ONE, AND THE FIRST TWO ALONE PASS OVER AN INVISIBLE FIX.
+# Measured on the way to this fix: adding `flex: 1 1 auto` to the actions FIELD
+# carried the field to 1080 — 0.0px short, every field-level assertion satisfied
+# — while `.task-actions` inside it stayed at 665px ending at 990, byte-identical
+# to the defect. The box reached the right edge and nothing on screen moved. So
+# the strip is measured too, and the reason input's width is reported alongside
+# because it is the only thing that visibly consumes the room.
+#
+# Against line 3's OWN right edge rather than the table's: `.task-disclosed` is
+# inset 18px by its padding, line 2 sits at the same 1080, and pinning a padding
+# value here would make this arm fail for a reason that is not the defect.
+_LINE3_RIGHT_EDGE_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    if ( !pane ) return { found: false, why: "pane missing" };
+    const table = pane.querySelector( "table" );
+    if ( !table ) return { found: false, why: "table missing" };
+    const open = [ ...pane.querySelectorAll( ".task-controls-row" ) ].filter( r => !r.hidden );
+    if ( !open.length ) return { found: false, why: "no disclosed row is open" };
+
+    const td   = open[ 0 ].querySelector( "td" );
+    const line = open[ 0 ].querySelector( ".task-disclosed-line--actions" );
+    if ( !td || !line ) return { found: false, why: "no action line on the disclosed row" };
+
+    const fields = [ ...line.querySelectorAll( ".task-disclosed-field" ) ];
+    if ( !fields.length ) return { found: false, why: "line 3 has no fields" };
+    const strip  = line.querySelector( ".task-actions" );
+    const reason = line.querySelector( ".task-reason-input" );
+
+    const R = e => +e.getBoundingClientRect().right.toFixed( 1 );
+    const L = e => +e.getBoundingClientRect().left.toFixed( 1 );
+    const l2  = open[ 0 ].querySelector( ".task-disclosed-line--fields" );
+    const l2f = l2 ? l2.querySelector( ".task-disclosed-field" ) : null;
+
+    return {
+        found       : true,
+        headerCells : table.querySelectorAll( "thead tr th" ).length,
+        colspan     : parseInt( td.getAttribute( "colspan" ), 10 ),
+        tdRight     : R( td ),
+        tableRight  : R( table ),
+        tableLeft   : L( table ),
+        lineLeft    : L( line ),
+        lineRight   : R( line ),
+        firstFieldL : L( fields[ 0 ] ),
+        lastFieldR  : R( fields[ fields.length - 1 ] ),
+        line2FirstL : l2f ? L( l2f ) : null,
+        line2Right  : l2  ? R( l2 )  : null,
+        stripR      : strip ? R( strip ) : null,
+        reasonWidth : reason ? +reason.getBoundingClientRect().width.toFixed( 1 ) : null
+    };
+}
+"""
+
+
+class TestLine3ReachesTheRowsRightEdge:
+    """
+    Rick's P1, row 5f982bbd — "not expanding fully to the rightmost edge of the
+    table layout area ... stopping before the priority column in all contexts."
+
+    🔴 THE FOUR ARMS ABOVE ALL PASSED THROUGH THIS DEFECT. Arm 4a measures line
+    3's detail field WIDTH, its icon's OVERLAP with the actions block, and the
+    CLICK — and not one of them asks how far the line gets. A line whose content
+    stops 90px short satisfies every one of them.
+
+    MEASURED BEFORE THE FIX, at b78c7651, pane 916px, a row open in each pane:
+
+        pane            line 3 box   content ends at   short by   reason input
+        task list        200..1080        990.0          90.0px      175px
+        holding area     200..1080        973.0         107.0px      175px
+        epic board     201.5..1080        991.5          88.5px      175px
+
+    ⚠️ THE COLSPAN WAS THE FIRST HYPOTHESIS AND IT WAS WRONG, which is why this
+    arm checks it rather than assuming either way: six header cells and
+    `colspan="6"` in all three panes, the `<td>` box identical to the table's.
+    The span was complete and the CONTENT inside it stopped short. Three
+    different stop positions across three panes is the tell — a short span would
+    have stopped all three at one column boundary.
+    """
+
+    def test_line_3_content_reaches_the_lines_right_edge_in_every_pane( self, logged_in_page ):
+        """
+        The last field on line 3, and the control strip inside it, both reach the
+        line's own right edge.
+
+        ⚠️ THE STRIP IS THE HALF THAT CATCHES AN INVISIBLE FIX. Growing the field
+        alone satisfies `lastFieldR` while the strip stays where the defect left
+        it, and the page looks exactly as Rick reported it.
+        """
+        page = _seeded_page( logged_in_page )
+        _open_every_pane( page )
+
+        problems = []
+        for name, container, _ in PANES:
+            r = page.evaluate( _LINE3_RIGHT_EDGE_JS, container )
+            if not r[ "found" ]:
+                problems.append( f"{name}: {r.get( 'why' )}" )
+                continue
+
+            if r[ "colspan" ] != r[ "headerCells" ]:
+                problems.append( f"{name}: the disclosed cell spans {r[ 'colspan' ]} of "
+                                 f"{r[ 'headerCells' ]} header columns" )
+            if abs( r[ "tdRight" ] - r[ "tableRight" ] ) > 1:
+                problems.append( f"{name}: the disclosed cell ends at {r[ 'tdRight' ]} against "
+                                 f"the table's {r[ 'tableRight' ]}" )
+
+            # Both insets are measured from the TABLE's box, never from the line's.
+            # Anchoring to the line alone leaves the RULER unasserted: a colspan or
+            # padding drift moves the line box and its content together and this arm
+            # stays green over a table that has stopped spanning.
+            leftInset  = r[ "firstFieldL" ] - r[ "tableLeft" ]
+            rightInset = r[ "tableRight" ]  - r[ "lastFieldR" ]
+
+            if rightInset - leftInset > 1:
+                problems.append( f"{name}: line 3's content is inset {leftInset:.1f}px from the "
+                                 f"table's left and {rightInset:.1f}px from its right — it stops "
+                                 f"{rightInset - leftInset:.1f}px short of where its own left edge "
+                                 f"says it should reach. Rick's report" )
+
+            if r[ "stripR" ] is None:
+                problems.append( f"{name}: no .task-actions strip on line 3 — nothing to measure" )
+            else:
+                stripInset = r[ "tableRight" ] - r[ "stripR" ]
+                if stripInset - leftInset > 1:
+                    problems.append( f"{name}: the control strip is inset {stripInset:.1f}px from the "
+                                     f"table's right against line 3's own {leftInset:.1f}px on the "
+                                     f"left. The field box can reach the edge while the strip does "
+                                     f"not, and THAT fix changes nothing on screen (reason input "
+                                     f"{r[ 'reasonWidth' ]}px)" )
+
+            # Line 2 is the sibling that was never reported broken, so it is the
+            # standing answer to "how far should a disclosed line reach?". Asserting
+            # the two AGREE is what makes this arm about the block rather than about
+            # one line's arithmetic with itself.
+            if r[ "line2Right" ] is not None and r[ "line2FirstL" ] is not None:
+                l2Left  = r[ "line2FirstL" ] - r[ "tableLeft" ]
+                if abs( l2Left - leftInset ) > 1:
+                    problems.append( f"{name}: line 2 starts {l2Left:.1f}px inside the table and "
+                                     f"line 3 starts {leftInset:.1f}px — the two disclosed lines "
+                                     f"no longer share one left edge" )
+
+        assert not problems, "Line 3 right edge:\n  " + "\n  ".join( problems )
+
+
+# ---------------------------------------------------------------------------
+# ARM 6 — ONE CLICK ON THE ID CELL PUTS THE FULL ID ON THE CLIPBOARD
+# ---------------------------------------------------------------------------
+
+# Click the id cell and report what the CLIPBOARD holds, plus whether the row
+# toggled. Both halves are required and neither implies the other.
+#
+# 🔴 THE CELL SHOWS 8 CHARS AND THE VERBS TAKE 36. `_taskIdLabel` slices the id
+# for the column's width, so a handler reading the cell's TEXT returns something
+# that looks like an id and fails at the paste — in whatever tool Rick pasted it
+# into, not here. The seeded ids are full uuids precisely so this arm can tell a
+# 36-char answer from an 8-char one; a fixture with short ids could not.
+#
+# ⚠️ AND THE ROW MUST NOT ALSO TOGGLE. The id cell sits in a row whose click
+# already opens the disclosure. Copy-AND-toggle is not what was asked for and is
+# invisible in the source — only a driven click shows it, which is why this arm
+# records the disclosure's state either side of the click.
+_ID_COPY_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    if ( !pane ) return { found: false, why: "pane missing" };
+    const cell = pane.querySelector( ".task-id-copy" );
+    if ( !cell ) return { found: false, why: "no id-copy cell rendered" };
+
+    const row  = cell.closest( "tr" );
+    const ctl  = row ? row.nextElementSibling : null;
+    const wasOpen = !!( ctl && ctl.classList.contains( "task-controls-row" ) && !ctl.hidden );
+
+    cell.scrollIntoView( { block: "center", inline: "nearest" } );
+    const r  = cell.getBoundingClientRect();
+    const cx = ( r.left + r.right ) / 2, cy = ( r.top + r.bottom ) / 2;
+    const clear = cy > 60 && cy < window.innerHeight - 10;
+    const hit = clear ? document.elementFromPoint( cx, cy ) : null;
+
+    return {
+        found      : true,
+        declared   : cell.dataset.taskFullId || "",
+        rendered   : cell.textContent.trim(),
+        wasOpen    : wasOpen,
+        judgeable  : clear,
+        hitIsCell  : clear ? !!( hit && hit.closest && hit.closest( ".task-id-copy" ) ) : null
+    };
+}
+"""
+
+_ID_CLICK_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    const cell = pane.querySelector( ".task-id-copy" );
+    if ( !cell ) return false;
+    cell.dispatchEvent( new MouseEvent( "click", { bubbles: true } ) );
+    return true;
+}
+"""
+
+_ID_AFTER_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    const cell = pane.querySelector( ".task-id-copy" );
+    const row  = cell ? cell.closest( "tr" ) : null;
+    const ctl  = row ? row.nextElementSibling : null;
+    return {
+        isOpen    : !!( ctl && ctl.classList.contains( "task-controls-row" ) && !ctl.hidden ),
+        copyState : cell ? ( cell.dataset.copyState || "" ) : ""
+    };
+}
+"""
+
+
+class TestClickingTheIdCellCopiesTheFullId:
+    """
+    Rick's row dbb4c187, by voice: "I want the ID to be copy upon click ... I
+    literally have to double click, copy. Want it to be 1 click."
+
+    🔴 THE ARM READS THE CLIPBOARD, NOT THE HANDLER. A test that asserts the
+    handler was called, or that a data attribute carries the id, passes over a
+    `navigator.clipboard` that refused — and a refused copy is exactly the
+    failure Rick would experience as a dead click. The context is granted
+    clipboard permissions so the real write can be read back.
+
+    ⚠️ ALL THREE PANES, BECAUSE THE PANE THAT MISSES OUT IS THE POINT. One
+    emitter feeds task list, holding area and epic board, and the last two
+    behaviours added to this row (the detail 📄's handler, the accent bar)
+    each shipped live in one pane and inert in the others.
+    """
+
+    def test_one_click_on_the_id_cell_copies_the_full_id_and_does_not_toggle_the_row( self, logged_in_page ):
+        page = _seeded_page( logged_in_page )
+        page.context.grant_permissions( [ "clipboard-read", "clipboard-write" ] )
+
+        problems = []
+        for name, container, _ in PANES:
+            before = page.evaluate( _ID_COPY_JS, container )
+            if not before[ "found" ]:
+                problems.append( f"{name}: {before.get( 'why' )}" )
+                continue
+
+            full = before[ "declared" ]
+            if len( full ) != 36:
+                problems.append( f"{name}: the cell declares {full!r} ({len( full )} chars) as the "
+                                 f"full id — the store's verbs take 36" )
+            if len( before[ "rendered" ] ) >= 36:
+                problems.append( f"{name}: the cell RENDERS {before[ 'rendered' ]!r} — this arm cannot "
+                                 f"tell a full-id copy from a text copy when the two are the same" )
+            if not before[ "judgeable" ]:
+                problems.append( f"{name}: the id cell could not be brought clear of the fixed nav, "
+                                 f"so its reachability was NOT JUDGED — refusing to report a pass" )
+            elif not before[ "hitIsCell" ]:
+                problems.append( f"{name}: something else answers a click at the id cell's centre" )
+
+            page.evaluate( "() => navigator.clipboard.writeText( 'SENTINEL-NOT-AN-ID' )" )
+            if not page.evaluate( _ID_CLICK_JS, container ):
+                problems.append( f"{name}: no id cell to click" )
+                continue
+            page.wait_for_timeout( 250 )
+
+            got   = page.evaluate( "() => navigator.clipboard.readText()" )
+            after = page.evaluate( _ID_AFTER_JS, container )
+
+            if got == "SENTINEL-NOT-AN-ID":
+                problems.append( f"{name}: the click left the sentinel on the clipboard — the id "
+                                 f"cell is rendered and reaches no handler at all" )
+            elif got != full:
+                problems.append( f"{name}: the clipboard holds {got!r} against the declared "
+                                 f"{full!r} — a copy that fails at the paste" )
+
+            if after[ "copyState" ] != "copied":
+                problems.append( f"{name}: the cell reports copy state {after[ 'copyState' ]!r} — "
+                                 f"a copy with no confirmation reads as a dead click" )
+            if after[ "isOpen" ] != before[ "wasOpen" ]:
+                problems.append( f"{name}: the click ALSO toggled the row's disclosure "
+                                 f"({before[ 'wasOpen' ]} -> {after[ 'isOpen' ]}) — it copied and "
+                                 f"opened on one click" )
+
+        assert not problems, "Id-cell copy:\n  " + "\n  ".join( problems )
