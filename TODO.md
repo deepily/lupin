@@ -137,6 +137,34 @@ slot:   /mnt/DATA01/.../lupin-wt-cc-author-mr-radio-1/io/mementos/cheech.md
 
 **DONE MEANS**: the reap resolves the io slot to the main checkout the way `memento_io` does, proven by a guard that reaps a seat whose memento is at the real slot and asserts the verdict is `verified` rather than `timeout_no_memento` — **run BOTH ways**, so the guard is shown to discriminate rather than merely to pass.
 
+## 🔴 FINDING 2026-09-04 (Mr. Radio 🦉 `21dff055`) — THE FLEET CAP DOES NOT BIND ON ANY SEAT WHOSE MCP SUBPROCESS PREDATES `23bb0124`, AND MY FIRST DIAGNOSIS WAS WRONG
+
+**HELD OUT OF THE STORE** — same ticket gate, same refusal, same reason as the finding above. Not a P0.
+
+**THE OBSERVATION.** A dry-run 9th seat at 8/8 was **ALLOWED**. My first reading was *the dial I closed `331c8852` on governs nothing* — the row's own history makes that the obvious suspicion, since `resolve_fleet_cap` shipped at `93f167e4` with zero production callers. **That reading was wrong and it is the reason this entry exists.**
+
+**THREE ARMS, ONE VARIABLE:**
+
+| arm | `default_fleet_gate( 1 )` |
+|---|---|
+| fresh process, `LUPIN_ROOT` set | ✅ **REFUSES** — *"cap is 8 and the fleet is already running 8 (3 managers, 5 workers). Requested 1; 0 seats free."* |
+| fresh process, `LUPIN_ROOT` **unset** | `None` — the documented fail-open |
+| fresh process, the live MCP's **exact env AND cwd** (`cwd=lupin-mobile`) | ✅ **REFUSES** — so cwd is not the variable |
+
+⇒ **THE CAUSE IS PROCESS AGE AND IT IS ARITHMETIC.** The gate reached the spawn path on the working branch at **`23bb0124`, 14:13**. My cosa-voice subprocess is **pid 12203, started 11:09:09**. `11:09 < 14:13`, so my door imported `session_spawner.py` before the gate was in it.
+
+**cosa-voice is registered `stdio`, so staleness is a property of the SUBPROCESS, never of the fleet.** Of nine live subprocesses, **eight predate 14:13**; the exception is `pid 1123922` (14:34), a seat spawned after the merge, whose door **does** enforce it.
+
+⚠️ **I DID NOT NEED FAIL-OPEN TO EXPLAIN THIS AND AM NOT CLAIMING IT FIRED.** It was my second hypothesis, it is real in arm 2, and process age accounts for the whole observation without it. **Two mechanisms that both predict an allowed spawn are still two mechanisms** — naming the wrong one would have sent the next reader into `default_fleet_gate`'s exception handler, which is working exactly as designed.
+
+⇒ **THE CODE IS CORRECT AND THE CLOSURE OF `331c8852` STANDS FOR THE CODE.** What is NOT true is that the cap binds *today* on the seats already running. This is CLAUDE.md's own *"a saved file is not a served file"* — written about `:7999` and `LUPIN_RELOAD`, arriving here on an **stdio MCP subprocess**, where nobody thinks to look because there is no server to bounce.
+
+🔴 **AND THE HAZARD IS THAT THE FAILURE IS SILENT AND POINTS THE FLATTERING WAY.** An over-cap spawn **succeeds**. Nothing warns, nothing logs a bypass, and the manager who did it reads a normal roster entry. **A safety control that has stopped binding looks exactly like a safety control with nothing to refuse.**
+
+**WHAT I DID ABOUT IT, recorded because the alternative was available and tempting:** I was at 8/8 with unhomed work and a tick telling me to staff up. **A 9th seat would have gone through.** I did not take it — spawning through a four-hour-stale door is evasion of Rick's cap, not staffing under it. The P2 was blocked with a chase instead.
+
+**DONE MEANS**: either the gate reads its policy at CALL time from a source a long-running process cannot go stale against, or the spawn path refuses when it cannot prove its own freshness — and a guard that goes red when a stale door lets a spawn through, run both ways so it is shown to discriminate.
+
 ## 📚 DECISIONS LOG 2026-09-03 — post-game of the seat-and-repo-resolution run (Mr. Radio 🦉 `2424de1c`)
 
 Retro: `io/post-games/2026.09.03-seat-and-repo-resolution-post-game.md` (gitignored corpus; registered in its index).
