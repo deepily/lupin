@@ -276,6 +276,50 @@ async def require_api_key_or_jwt(
     )
 
 
+async def authenticated_account_email(
+    authorization: Annotated[str | None, Header()] = None
+) -> str | None:
+    """
+    The login-account email on the caller's access token, or None.
+
+    WHAT THIS IS FOR, AND WHY IT IS SEPARATE FROM `require_api_key_or_jwt`. That
+    dependency answers "may this caller in at all" and returns a user UUID. Some gates
+    need a second, different fact: WHO the caller is as a person, in the vocabulary the
+    gate's configuration speaks. The holding-area approver gate is the first — see
+    `cosa.rest.task_approval_settings` and row 9d3a975e, where a browser holding a
+    perfectly valid token could not approve anything because nothing ever asked it.
+
+    🔴 IT AUTHENTICATES NOTHING AND MUST NEVER BE THE ONLY DEPENDENCY ON A ROUTE. Pair
+    it with `require_api_key_or_jwt`, which is what rejects an absent or bad credential.
+    This returns None rather than raising, precisely so a route that also accepts API
+    keys (which carry no account) keeps working — a raise here would 401 every CLI
+    caller on a route that had merely become account-AWARE.
+
+    ⚠️ IT DOES NOT TRUST THE STRING IT WAS GIVEN. The signature and expiry are checked
+    by `decode_and_validate_token`, so an unsigned or expired token yields None, not an
+    email. Returning the claim unverified would hand any caller an approver identity for
+    the price of base64.
+
+    Requires:
+        - authorization is the raw Authorization header, or None
+
+    Ensures:
+        - returns the token's `email` claim when the header carries a Bearer access
+          token whose SIGNATURE and EXPIRY both validate
+        - returns None for: no header, a non-Bearer scheme, an API-key caller, a token
+          that fails validation, and a valid token carrying no email claim
+        - never raises
+    """
+    if not authorization or not authorization.startswith( "Bearer " ): return None
+    try:
+        from cosa.rest.jwt_service import decode_and_validate_token
+        payload = decode_and_validate_token( authorization[ 7: ], expected_type="access" )
+    except Exception:
+        return None
+    email = payload.get( "email" )
+    return email if isinstance( email, str ) and email.strip() else None
+
+
 def quick_smoke_test():
     """
     Quick smoke test for API key authentication middleware.
