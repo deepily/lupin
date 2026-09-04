@@ -290,6 +290,7 @@ services:
       #   src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
       LUPIN_MODEL_SERVER_URL: ${LUPIN_MODEL_SERVER_URL:-http://lupin-model-server:7998}
       LUPIN_MODEL_SERVER_API_KEY_FILE: /var/lupin/src/conf/keys/lupin-model-server-auth
+      LUPIN_DEV_EMAIL: ricardo.felipe.ruiz@gmail.com
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
       # Mirrors the test container — enables proxy-integration tests when
