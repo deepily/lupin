@@ -322,11 +322,15 @@ def _dirty_paths( tracked ):
 
     deletions = [ l for l in tracked if "D" in l[ :2 ] ]
     edits     = [ l for l in tracked if "D" not in l[ :2 ] ]
-    ordered   = [ path_of( l ) for l in edits + deletions ]
 
-    shown     = ordered[ :DIRTY_PATH_CAP ]
-    remainder = len( ordered ) - len( shown )
-    if remainder: shown.append( f"+{remainder}-more" )
+    # THE CAP BELONGS TO THE EDITS WHENEVER THERE ARE ANY. With no edits, the deletions
+    # are all there is to report and they take the slots themselves.
+    named     = edits if edits else deletions
+    shown     = [ path_of( l ) for l in named[ :DIRTY_PATH_CAP ] ]
+
+    remainder = len( named ) - len( shown )
+    if remainder:                shown.append( f"+{remainder}-more" )
+    if edits and deletions:      shown.append( f"+{len( deletions )}-deleted" )
     return ",".join( shown )
 
 
