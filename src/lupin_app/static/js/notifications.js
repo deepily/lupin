@@ -13442,10 +13442,27 @@ class NotificationsUI {
          * rewritten into after three copies of one behaviour shipped live in one pane
          * and inert in two (row 17393c56). The same three call sites carry this one.
          *
-         * ⚠️ IT MUST RETURN TRUE SO THE CLICK STOPS HERE. The id cell sits inside a
-         * row whose click already toggles the disclosure; falling through would copy
-         * AND toggle on one click, which is not what he asked for and is invisible in
-         * the source — only a driven click shows it.
+         * ⚠️ IT RETURNS TRUE SO THE CLICK STOPS HERE — DEFENSIVELY, AND THE ORIGINAL
+         * REASON GIVEN FOR IT WAS FALSE. 046d9f52's message and this docstring both said
+         * "the id cell sits inside a row whose click already toggles the disclosure;
+         * falling through would copy AND toggle on one click". MEASURED FALSE (Rachel,
+         * reviewing 2026-09-04): the handler was changed to `return false` so the click
+         * falls through, and the row did not toggle in ANY pane. Against a positive
+         * control that proves the instrument can see one — `.task-disclose-button` moves
+         * a pane's open-disclosure count 0 -> 1 in all three — a click on the id cell,
+         * the status cell or the title cell moved NOTHING, and no group collapsed either.
+         *
+         * ⇒ A ROW'S DISCLOSURE IS TOGGLED ONLY BY `.task-disclose-button`, via
+         * `_handleRowControlClick`. Everything else falls through to
+         * `_handleTaskAccordionToggle`, which returns unless the click landed in a group
+         * header. So there is no copy-AND-toggle to prevent TODAY.
+         *
+         * KEEP THE `return true` ANYWAY. It is cheap insurance against a future change
+         * that makes rows click-to-toggle, and the guard test's "did not also toggle"
+         * clause is correct and should stay — it is simply UNWATCHED, because there is
+         * nothing there to watch. What is corrected here is the REASON, not the code: a
+         * future reader who deletes this line to test the stated consequence will find no
+         * consequence and conclude the guard was pointless.
          *
          * ⚠️ IT COPIES `data-task-full-id`, NEVER THE CELL'S TEXT. The column renders
          * `_taskIdLabel`'s 8-char slice; the store's verbs take 36. A handler reading
