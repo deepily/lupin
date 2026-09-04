@@ -35,6 +35,7 @@ from lupin_mcp import reap_memento
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.worktree_venv import provision_worktree_venv
+from cosa.utils.worktree_artifacts import provision_worktree_artifacts
 from cosa.utils.seat_worktree  import provision_seat_worktree, drift_disclosure
 
 
@@ -354,6 +355,47 @@ def venv_alarm( provisioning ):
     )
 
 
+def artifact_alarm( provisioning ):
+    """
+    A one-line, top-level alarm when a seat's tree did not get its borrowed artifacts.
+
+    WHY THIS IS NOT A CLAUSE INSIDE `venv_alarm` (row dde8b87a). The two answer
+    different questions and they failed independently for months: a tree can have a
+    perfectly good interpreter and still be unable to run a single `.test.ts`. Folding
+    them together would put two claims behind one field, and the whole point of this row
+    is that `INTERPRETER OK` was read as a claim about the tree when it was only ever a
+    claim about the interpreter.
+
+    ⚠️ SOURCE_ABSENT IS NOT AN ALARM. A main checkout that never ran `npm install` has
+    nothing to lend; that is the operator's business and not a provisioning failure.
+    Alarming on it would make this fire on every spawn on a fresh box, and an alarm that
+    fires always is an alarm nobody reads.
+
+    Requires:
+        - provisioning is the dict returned by provision_worktree_artifacts, or None
+
+    Ensures:
+        - returns None when there is nothing wrong, or when there was nothing to
+          provision (no work_dir, no script, or the main checkout) — the field appears
+          only when it means something, same contract as venv_alarm
+        - returns a single human-readable line naming the target, the exit code and the
+          artifacts that did not land otherwise
+        - never raises
+
+    Returns:
+        str | None
+    """
+    if not provisioning or provisioning.get( "status" ) != "failed": return None
+    artifacts = provisioning.get( "artifacts" ) or {}
+    unlanded  = sorted( rel for rel, outcome in artifacts.items() if outcome == "REFUSED" )
+    named     = ", ".join( unlanded ) if unlanded else "nothing reported"
+    return (
+        f"the spawned seat's tree {provisioning.get( 'target' )} did not get its "
+        f"borrowed artifacts ({named}, exit {provisioning.get( 'exit_code' )}) "
+        f"- a TypeScript run there will die naming a package, not a tree"
+    )
+
+
 def placement_alarm( provisioning ):
     """
     A one-line, top-level alarm when a spawn puts a seat in the SHARED MAIN CHECKOUT.
@@ -412,7 +454,9 @@ def _alarming_seat( seat_verdicts ):
         - never raises
     """
     for verdict in seat_verdicts:
-        if venv_alarm( verdict.get( "venv" ) ) or placement_alarm( verdict.get( "venv" ) ):
+        if ( venv_alarm( verdict.get( "venv" ) )
+             or placement_alarm( verdict.get( "venv" ) )
+             or artifact_alarm( verdict.get( "artifacts" ) ) ):
             return verdict
     return seat_verdicts[ 0 ] if seat_verdicts else None
 
@@ -927,6 +971,37 @@ def spawn_sessions(
         # new tree without an interpreter — 35 unit failures that are a property of
         # where the seat is standing, not of its branch.
         seat_venv = provision_worktree_venv( seat_work_dir )
+
+        # ── And the rest of the untracked tree the seat needs (row dde8b87a) ──────
+        #
+        # 🔴 `INTERPRETER OK` AND A TIER-CAPABLE TREE ARE DIFFERENT CLAIMS, and until
+        # this line the spawn path only ever made the first. Measured 2026-09-04: a
+        # freshly spawned worktree had `.venv` and no `node_modules`, so every
+        # `.test.ts` in it died with `Cannot find package 'tsx'` — a failure naming a
+        # PACKAGE rather than a tree, which is why it reads as a broken test. The seat
+        # was one report away from a false green.
+        #
+        # ⚠️ FAIL OPEN, same as the venv call above and for the same reason: a seat
+        # missing `node_modules` is worse off, a spawn that dies because provisioning
+        # failed is worse still. The verdict rides back on the payload and a failure
+        # gets a top-level alarm, because a spawn reporting success over a seat that
+        # cannot run its own tier is the exact shape this repo already names — a clean
+        # exit is not evidence the work happened.
+        # 🔴 A DRY RUN PROVISIONS NOTHING, AND THIS IS THE SAME RULING THE SEAT-WORKTREE
+        # CALL ABOVE ALREADY CARRIES — I had to learn it a second time. The venv call is
+        # not gated because it is a no-op in every tree that already has a `.venv`; THIS
+        # one creates real symlinks, so an ungated version has the unit tier writing into
+        # whatever tree it runs in. Measured 2026-09-04 on this very change:
+        # `test_the_real_spawn_path_announces_the_placement` drives the REAL spawn path
+        # with LUPIN_ROOT naming the tree under test, so one tier run silently linked
+        # `node_modules` and `src/scripts/cloud-run.env` into my own worktree — and NINE
+        # cloud-run.env failures vanished from that run's own failing set, part-way
+        # through it. A tier whose result depends on which test ran first is not a
+        # measurement.
+        seat_artifacts = ( provision_worktree_artifacts( seat_work_dir ) if not dry_run
+                           else { "provisioned": False, "status": "dry_run", "exit_code": None,
+                                  "target": seat_work_dir, "detail": "dry run - nothing borrowed",
+                                  "artifacts": {} } )
         merged       = { "role": role, "manager_session_id": manager_session_id, "index": n }
         merged.update( tokens or {} )
         rendered     = render_task_prompt( task_prompt, merged, seed_memento )
@@ -978,6 +1053,8 @@ def spawn_sessions(
             "worktree_status"     : seat_provisioning[ "status" ],
             "placement_alarm"     : placement_alarm( seat_venv ),
             "venv_alarm"          : venv_alarm( seat_venv ),
+            "artifact_provisioning" : seat_artifacts,
+            "artifact_alarm"        : artifact_alarm( seat_artifacts ),
             # The DISCLOSURE half of the ruling. None when the tree is level with the
             # main checkout, so the line appears only when it means something — the
             # row's own diagnosis was that the problem was never drift but UNSTATED
@@ -1005,6 +1082,7 @@ def spawn_sessions(
         seat_verdicts.append( { "session_name" : session_name,
                                 "work_dir"     : seat_work_dir,
                                 "venv"         : seat_venv,
+                                "artifacts"    : seat_artifacts,
                                 "worktree"     : seat_provisioning } )
         spawned.append( row )
 
@@ -1032,14 +1110,16 @@ def spawn_sessions(
         # that is the ruling landing, not the check going quiet: the seat is no longer
         # in the shared checkout for it to complain about. `seat_worktrees` is where a
         # caller looks to see WHERE each seat actually went.
-        # ONE SEAT DESCRIBES ALL THREE. `_alarming_seat` picks the seat a reader needs
-        # to look at — the first one with a problem, else the first one — so the verdict
-        # and the two alarms can never be about different seats. `alarming_seat` names
+        # ONE SEAT DESCRIBES THEM ALL. `_alarming_seat` picks the seat a reader needs
+        # to look at — the first one with a problem, else the first one — so the verdicts
+        # and the alarms can never be about different seats. `alarming_seat` names
         # it, because a summary that does not say WHICH seat it is about sends the
         # reader to `seat_worktrees` to guess.
         "venv_provisioning"  : ( _alarming_seat( seat_verdicts ) or {} ).get( "venv" ),
         "venv_alarm"         : venv_alarm( ( _alarming_seat( seat_verdicts ) or {} ).get( "venv" ) ),
         "placement_alarm"    : placement_alarm( ( _alarming_seat( seat_verdicts ) or {} ).get( "venv" ) ),
+        "artifact_provisioning" : ( _alarming_seat( seat_verdicts ) or {} ).get( "artifacts" ),
+        "artifact_alarm"     : artifact_alarm( ( _alarming_seat( seat_verdicts ) or {} ).get( "artifacts" ) ),
         "alarming_seat"      : ( _alarming_seat( seat_verdicts ) or {} ).get( "session_name" ),
         "seat_worktrees"     : [ { "session_name" : v[ "session_name" ],
                                    "work_dir"     : v[ "work_dir" ],
