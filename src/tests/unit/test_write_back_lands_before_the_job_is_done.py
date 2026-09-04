@@ -68,7 +68,7 @@ def _queue():
     queue._agentic_futures_lock = threading.RLock()
 
     queue._notify                      = MagicMock()
-    queue._fire_correctness_check_async = MagicMock()
+    queue._confirm_correctness = MagicMock()
     queue.delete_by_id_hash            = MagicMock()
 
     return queue, recorder
