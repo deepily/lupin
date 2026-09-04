@@ -1112,3 +1112,112 @@ def main( argv=None ):   # pragma: no cover - thin argv/stdout boundary over tes
 if __name__ == "__main__":   # pragma: no cover - process entry point
     import sys
     sys.exit( main() )
+
+
+# ── The withhold predicate (pure) — row ee3d3c82 ──────────────────────────────
+#
+# THE DEFECT THIS CLOSES. `memento_alarm` above is honest and LOUD, and it is
+# composed at `session_spawner.py:1738` — AFTER the kill loop at :1574. So the seat
+# is already dead by the time anybody reads the sentence naming what it lost. The
+# coordinator runs BEFORE the kill (row 0a36d83d fixed the race) but its verdict has
+# never GATED the kill: the loop is `for name in targets:`, unconditional, and even
+# the coordination-raised branch says in its own words "reap proceeded WITHOUT
+# verified mementos".
+#
+# ⇒ self_respin REFUSES when it cannot prove a memento. The reap only NARRATES.
+#   This is the predicate that lets the reap refuse too.
+#
+# 🔴 IT MUST DISCRIMINATE, AND THE EXISTING VOCABULARY ALREADY SAYS HOW. The
+#   four-way split (row 48b5f19e / 3b0c5f90) was built so a manager could tell
+#   recovery actions apart WITHOUT opening the file. Collapsing it back into
+#   "anything that isn't verified" would throw away the distinction those rows paid
+#   for, and would withhold reaps that are perfectly safe.
+
+#: Verdicts where THE SEAT'S OWN WORK IS NOT PROVABLY ON DISK. Killing here destroys
+#: something nobody can recover, so the reap withholds the kill and says so.
+WITHHOLD_KILL = (
+    "prior_holder_present",   # ANOTHER session's file is at the slot; this seat's is not there
+    "unparseable_present",    # a file is there but nothing proves it is this seat's
+    "timeout_no_memento",     # asked, and nothing ever appeared
+)
+
+#: Verdicts that must NOT withhold, each for its own stated reason. This tuple is the
+#: negative half of the rule and is as load-bearing as the positive half — a predicate
+#: that withheld on these would block safe reaps and get itself switched off.
+PROCEED_KILL = (
+    "verified",         # proven this seat's, fresh, complete
+    "written",          # appeared after the ask, before the re-check — proven, just late
+    "not_requested",    # the manager never asked for a memento; nothing to protect
+    "unproven_present", # THIS SEAT'S OWN file IS at the slot; a freshness/size gate failed.
+                        # The work exists and is recoverable by hand, so this is a WARNING
+                        # case, not a refusal — row ee3d3c82 names it explicitly.
+    "skipped",          # the slot could not be derived at all (no persona/session)…
+    "skipped_no_cwd",   # …or no cwd. Nothing to read, so a second look proves nothing and
+                        # withholding would block the reap for a reason unrelated to safety.
+)
+
+
+def seats_to_withhold( outcomes ):
+    """
+    Name the seats whose kill must be WITHHELD because their work is not provably saved.
+
+    Pure: no I/O, no clock, no filesystem.
+
+    Requires:
+        - outcomes maps seat name -> a `coordinate_mementos` outcome dict; the reserved
+          `_error` / `_recheck_error` keys (coordination failures, not seats) are tolerated
+
+    Ensures:
+        - returns a dict of seat name -> its withholding status, for every seat whose
+          status is in WITHHOLD_KILL
+        - returns {} when every seat is safe to kill — the quiet case stays quiet, so a
+          non-empty result means something
+        - NEVER withholds on a status in PROCEED_KILL, and in particular never on
+          `unproven_present`: that is THIS SEAT'S OWN file with a gate failure, which is
+          a warning, not a loss
+        - ignores the reserved underscore keys rather than treating a coordination error
+          as a seat to protect — a raising coordinator is surfaced by its own field
+        - an UNKNOWN status does NOT withhold. A predicate that withheld on anything it
+          did not recognise would turn every future vocabulary addition into a fleet-wide
+          reap outage, and this repo has measured that the vocabulary DOES drift
+        - never raises
+    """
+    if not outcomes:
+        return {}
+
+    withheld = {}
+    for name, outcome in outcomes.items():
+        if name.startswith( "_" ):
+            continue
+        status = ( outcome or {} ).get( "status" )
+        if status in WITHHOLD_KILL:
+            withheld[ name ] = status
+    return withheld
+
+
+def withhold_notice( withheld ):
+    """
+    One sentence for the TOP of the reap result, naming every seat NOT killed and why.
+
+    A withheld kill that the caller has to go looking for is the same defect as the
+    alarm this row was raised about — see `memento_alarm`'s own docstring: "a verdict
+    nobody reads is the same as no verdict."
+
+    Requires:
+        - withheld is the dict returned by `seats_to_withhold`
+
+    Ensures:
+        - returns None when nothing was withheld
+        - otherwise returns a single string naming each withheld seat and its verdict,
+          sorted by seat name so the same reap reads the same way twice, and naming the
+          override explicitly so a manager is never stuck
+        - never raises
+    """
+    if not withheld:
+        return None
+    named = ", ".join( f"{name} ({withheld[ name ]})" for name in sorted( withheld ) )
+    return (
+        f"KILL WITHHELD for {len( withheld )} seat(s) — their work is not provably on disk: "
+        f"{named}. Re-ask them for a memento before reaping, or reap knowingly and "
+        f"accept the loss."
+    )
