@@ -1036,7 +1036,11 @@ def transition_task(
         event = repo.apply_transition(
             item          = item,
             to_status     = payload.to_status,
-            actor         = payload.actor,
+            # THE GATE READ THE TOKEN; THE LEDGER DID NOT. Door 1 (row 9d3a975e) let
+            # Rick through on his authenticated account and then recorded the click
+            # under "operator foolish goat" — the very string the gate had just
+            # declined to trust. The same helper the edit door uses closes it.
+            actor         = recorded_actor( payload.actor, account_email ),
             authority     = payload.authority,
             receipt_refs  = payload.receipt_refs,
             next_chase_ts = payload.next_chase_ts,

@@ -233,6 +233,62 @@ def test_the_edit_door_still_refuses_nobody( repo, settings ):
     called.assert_called_once()
 
 
+def test_the_TRANSITION_door_records_a_person_too( repo, settings ):
+    """
+    🔴 THE GATE READ THE TOKEN; THE LEDGER DID NOT.
+
+    Door 1 (row 9d3a975e) let Rick through on his authenticated account and then wrote
+    the event under "operator foolish goat" — the exact string the gate had just
+    declined to trust. Two doors, one defect, and the second half was invisible because
+    an approval that SUCCEEDS produces no error for anyone to chase.
+
+    ⚠️ Added after measuring that the whole approval + router + guard suite — 285 tests
+    — went green with the transition door still recording the goat. A fix nothing
+    reddens for is a fix nobody will notice reverting.
+    """
+    item = _item( status="not_approved" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_transition.return_value = TaskEvent(
+        id=1, item_id=item.id, ts=NOW, actor="x",
+        transition="not_approved->queued", receipt_refs=None, authority="user_direct",
+    )
+    repo.apply_transition.reset_mock()
+
+    r = _client( OPERATOR_EMAIL ).post(
+        f"/api/tasks/{item.id}/transition",
+        json={ "to_status": "queued", "actor": "operator foolish goat",
+               "authority": "user_direct" } )
+
+    assert r.status_code == 200, r.text
+    written = repo.apply_transition.call_args.kwargs.get( "actor" )
+    assert written == "maria (operator foolish goat)", (
+        f"the transition door recorded {written!r} — an approval that passed on the "
+        f"authenticated account is still attributed to a per-session string"
+    )
+
+
+def test_a_SEAT_transition_is_recorded_exactly_as_it_declared( repo, settings ):
+    """
+    The negative control for the door above. One variable — whether there is a login
+    account. Without it, a change that rewrote every transition actor unconditionally
+    would pass, and every seat's audit history would be rewritten by a bug fix.
+    """
+    item = _item( status="queued" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_transition.return_value = TaskEvent(
+        id=1, item_id=item.id, ts=NOW, actor="x",
+        transition="queued->in_progress", receipt_refs=None, authority="standing",
+    )
+    repo.apply_transition.reset_mock()
+
+    r = _client( None ).post(
+        f"/api/tasks/{item.id}/transition",
+        json={ "to_status": "in_progress", "actor": SEAT_ACTOR, "authority": "standing" } )
+
+    assert r.status_code == 200, r.text
+    assert repo.apply_transition.call_args.kwargs.get( "actor" ) == SEAT_ACTOR
+
+
 # ───────────────────────────── the helper's own edges ────────────────────────
 
 
