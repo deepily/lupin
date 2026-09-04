@@ -213,3 +213,84 @@ def test_the_timeout_dial_cannot_skip_the_ask():
         ask_fn=lambda **kw: ( fired.append( kw ), gate.AskOutcome( answer="yes", default_used=True ) )[ 1 ] )
     assert len( fired ) == 1
     assert result.allowed is True
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# THE TWO ARMS FOR MAYA'S REVIEW FINDINGS (2026-09-03, at 47cff912).
+#
+# Both are BEHAVIOUR CHANGES, so neither is covered by anything above and both
+# need their own arm. She found the third — the import defect — and her own guard
+# covers that one; it deliberately does not inject `ask_fn`, which is the whole
+# reason it could see what 25 injected tests could not.
+# ──────────────────────────────────────────────────────────────────────────────
+
+def test_an_ask_that_BLOWS_UP_is_a_refusal_not_a_500():
+    """
+    The docstring used to promise "never raises" and the function raised.
+
+    That is how the import defect reached a caller as a 500 rather than as a
+    refusal: any exception from `ask_fn` propagated through the door untouched. A
+    promotion that fails with a stack trace tells the manager nothing about what
+    to do, and tells nobody at all that Rick was never asked.
+
+    🔨 IT REFUSES RATHER THAN ALLOWS, and that is the arguable half. An ABSENT
+    Rick must not be a blocker — that is the timed-out default, and it still
+    allows. A BROKEN ask is a different claim: not "he did not answer" but "we do
+    not know whether he was asked". The gate must not open widest when it knows
+    least.
+    """
+    def _explodes( **kw ):
+        raise ModuleNotFoundError( "No module named 'lupin_cli.notifications.models'" )
+
+    result = gate.approval_for_promotion(
+        session_id="m", actor="María", task_id="t-99", title="x",
+        is_manager_fn=lambda sid, **kw: True, ask_fn=_explodes )
+
+    assert result.allowed is False
+    assert "ModuleNotFoundError" in result.refusal, result.refusal
+    assert "t-99" in result.refusal
+    # The three causes must not read alike — a broken ask is neither a permissions
+    # problem nor a no from Rick, and a manager chasing the wrong one loses an hour.
+    assert "NOT a permissions problem" in result.refusal
+    assert "NOT a no from Rick"        in result.refusal
+
+
+def test_an_UNRECOGNISED_answer_is_never_recorded_as_ricks_keypress():
+    """
+    Maya flagged this as HARDENING rather than a defect, and it is filed that way:
+    she did not establish that a YES_NO response can carry anything but yes or no,
+    and neither did I. Nobody has shown this can happen.
+
+    What made it worth closing anyway is not the allowing, it is the ATTRIBUTION.
+    The old code allowed every answer that did not start with "no" AND stamped it
+    `rick-approved (keypress)` — so a malformed or empty response would have gone
+    onto the row as Rick's own keypress. The one thing this gate must never do is
+    put his name on a decision he did not make.
+
+    ⚠️ THE TIMED-OUT DEFAULT IS EXPLICITLY NOT AFFECTED, and the last case is what
+    proves it: a default still allows, and is still stamped as a default rather
+    than as a keypress. Closing this must not turn an absent Rick into a blocker.
+    """
+    def _answers( text, default_used=False ):
+        return gate.approval_for_promotion(
+            session_id="m", actor="María", task_id="t-42", title="x",
+            is_manager_fn=lambda sid, **kw: True,
+            ask_fn=lambda **kw: gate.AskOutcome( answer=text, default_used=default_used ) )
+
+    for junk in [ "", "   ", "maybe", "y", "sure", "affirmative" ]:
+        r = _answers( junk )
+        assert r.allowed is False, f"{junk!r} was allowed"
+        assert "not recognised" in r.refusal, r.refusal
+        assert r.authority_suffix() == "", f"{junk!r} still produced an authority stamp"
+
+    yes = _answers( "yes" )
+    assert yes.allowed is True
+    assert yes.approval_source == gate.APPROVAL_KEYPRESS
+
+    # The negative control, and the reason it is here: a rule that refused an
+    # unrecognised answer WITHOUT this exemption would silently make an absent
+    # Rick a blocker, which is the one thing his standing ruling forbids.
+    timed_out = _answers( "yes", default_used=True )
+    assert timed_out.allowed is True
+    assert timed_out.approval_source == gate.APPROVAL_DEFAULT
+    assert "default" in timed_out.authority_suffix()

@@ -238,7 +238,7 @@ def promotion_ask_kwargs( actor, task_id, title ):
     }
 
 
-def _default_ask( **kwargs ):   # pragma: no cover - live notification boundary (tests inject ask_fn)
+def _default_ask( **kwargs ):
     """
     Fire the ask on the human surface and return an AskOutcome.
 
@@ -252,7 +252,7 @@ def _default_ask( **kwargs ):   # pragma: no cover - live notification boundary 
     is the established path, not a new one.
     """
     from lupin_cli.notifications.notify_user_sync import notify_user_sync
-    from lupin_cli.notifications.models import (
+    from lupin_cli.notifications.notification_models import (
         NotificationRequest, NotificationType, NotificationPriority, ResponseType
     )
 
@@ -292,24 +292,71 @@ def approval_for_promotion( session_id, actor, task_id, title,
         - returns a PromotionApproval
         - a non-manager is refused and NO ask is fired
         - a manager ALWAYS causes the ask to fire — there is no branch that skips it
-        - a real "no" refuses; anything else allows (the default is "yes")
+        - a real "no" refuses; an UNRECOGNISED answer refuses; only yes allows
         - approval_source distinguishes a keypress from a timed-out default
-        - never raises
+        - never raises: an ask that BLOWS UP is caught and becomes a refusal, and
+          the refusal names the exception rather than swallowing it
     """
     refusal = manager_refusal( session_id, actor, is_manager_fn=is_manager_fn )
     if refusal is not None:
         return PromotionApproval( allowed=False, refusal=refusal )
 
-    outcome = ask_fn( **promotion_ask_kwargs( actor, task_id, title ) )
+    # 🔴 THE ASK IS WRAPPED BECAUSE IT REACHES A LIVE SERVICE, AND THIS DOCSTRING
+    # USED TO PROMISE "never raises" WHILE RAISING. Found by Maya in adversarial
+    # review at `47cff912`: `_default_ask` imported `lupin_cli.notifications.models`
+    # and the module is `notification_models`, so calling this with its REAL default
+    # raised ModuleNotFoundError straight through the door as a 500 — and Rick was
+    # never asked. Three things hid it at once: the import sits INSIDE the function
+    # so startup stayed clean, `_default_ask` carried `pragma: no cover` so the
+    # coverage gate could not see it, and every test injected `ask_fn` so the default
+    # never ran. The import is fixed and the pragma is gone; this is the belt.
+    #
+    # 🔨 IT REFUSES RATHER THAN ALLOWS, which is a decision and not an obvious one.
+    # Rick's standing rule is that an ABSENT Rick must not become a blocker — that is
+    # what the timed-out default is for, and it still allows. A BROKEN ask is a
+    # different thing: not "Rick did not answer" but "we do not know whether he was
+    # even asked". Maria's fail-closed ruling on an unreadable bridge governs here
+    # for the reason she gave then — the gate must not open widest exactly when it
+    # knows least.
+    try:
+        outcome = ask_fn( **promotion_ask_kwargs( actor, task_id, title ) )
+    except Exception as e:
+        return PromotionApproval(
+            allowed = False,
+            refusal = (
+                f"Could not ask Rick about promoting '{task_id}' out of the holding "
+                f"area, so the promotion is refused rather than assumed: "
+                f"{type( e ).__name__}: {e}. This is NOT a permissions problem and "
+                f"NOT a no from Rick — the ask itself failed to reach him."
+            ),
+        )
+
+    answer = ( outcome.answer or "" ).strip().lower()
 
     # A "no" only counts as a veto when a HUMAN said it. A default-"no" cannot
     # occur (the default is "yes"), but reading the flag rather than the word
     # keeps that true if the default is ever changed.
-    said_no = outcome.answer.strip().lower().startswith( "no" ) and not outcome.default_used
-    if said_no:
+    if answer.startswith( "no" ) and not outcome.default_used:
         return PromotionApproval(
             allowed = False,
             refusal = f"Rick answered no to promoting '{task_id}' out of the holding area.",
+        )
+
+    # ⚠️ HARDENING, RAISED BY MAYA AND FLAGGED BY HER AS HARDENING RATHER THAN A
+    # DEFECT — she did not establish that a YES_NO response can carry anything but
+    # yes or no, and neither have I. The old code allowed EVERY answer not starting
+    # with "no" AND stamped it "rick-approved (keypress)", so a malformed or empty
+    # response would have been recorded on the row as Rick's own keypress. That is
+    # the part worth closing: not the allowing, but the ATTRIBUTION. The one thing
+    # this gate must never do is put Rick's name on a decision he did not make.
+    if not outcome.default_used and not answer.startswith( "yes" ):
+        return PromotionApproval(
+            allowed = False,
+            refusal = (
+                f"The answer to the promotion ask for '{task_id}' was not recognised "
+                f"as yes or no ({outcome.answer!r}), so it is refused rather than "
+                f"recorded as Rick's approval."
+            ),
         )
 
     return PromotionApproval(
