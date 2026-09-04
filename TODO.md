@@ -128,6 +128,22 @@ slot:   /mnt/DATA01/.../lupin-wt-cc-author-mr-radio-1/io/mementos/cheech.md
 <!-- memento-record: persona=cheech session_id=fc5c7aff written_at=2026-09-04T14:30:28-04:00 slot=io -->
 ```
 
+🔴 **MECHANISM CORRECTED 2026-09-04 15:20 — MY FIRST EXPLANATION WAS WRONG AND IT IS THE MORE EXPENSIVE HALF TO GET WRONG.** I wrote that *"`memento_io` resolves the io slot to the MAIN CHECKOUT — the same collapse-to-parent that `fleet_data_root()` does."* **There is no collapse-to-parent.** `memento_io.py` takes `--repo`, and **`--repo` defaults to CWD**. It writes wherever it is run from.
+
+**The receipt that broke my version**, measured when a third seat wrote one: Cheech `8047f2a2` produced a memento in the **worktree** (`…/lupin-wt-cc-author-mr-radio-1/io/mementos/`, 15:18) **and** in the main checkout (15:17) — a directory my finding said the writer never uses.
+
+| seat | where the writer put it | worktree slot exists? | reap verdict |
+|---|---|---|---|
+| Cheech `fc5c7aff` | main only | **no** | `timeout_no_memento` — **false** |
+| Rachel `aee594c8` | main only | **no** | `timeout_no_memento` — **false** |
+| Cheech `8047f2a2` | **both** | **yes** | not reaped |
+
+⇒ **THE TRUE SHAPE IS TWO DERIVATIONS OF ONE PATH, NOT A WRITER/READER CONSTANT.** The **writer** resolves from `--repo`/cwd; the **reap** resolves from the seat's worktree. They **agree** when the seat runs `memento_io` from its own worktree and **diverge** when it runs from the main checkout. Both reaped seats had written from main, which is why both reaps missed — and a seat that happens to write from its worktree would have been found, with nothing about the run telling anyone why.
+
+⚠️ **SO THE SYMPTOM AND THE COUNT IN THIS SECTION STAND UNCHANGED — n=2, both verdicts false, both files real.** What is withdrawn is only my account of WHY. **A wrong count gets re-derived by the next reader; a wrong mechanism sends them into innocent code** — here, into `fleet_data_root()`, which has nothing to do with this.
+
+⇒ **AND IT SHARPENS THE FIX.** *"Make the reap look in the main checkout"* — my original `DONE MEANS` — would be **wrong**, because the writer does not always put it there. The two sides must derive the path the SAME way, from a single source, and the interim control is unchanged: **verify on disk before calling the verb, never after.**
+
 ⇒ **THE DIRECTORY THE REAP LOOKED IN DOES NOT EXIST AT ALL** — `ls` on the worktree path returns *No such file or directory*. `memento_io` resolves the io slot to the **MAIN CHECKOUT**, the same collapse-to-parent that `fleet_data_root()` does. **The writer was right and the reader was not.**
 
 🔴 **WHY THIS IS WORSE THAN A MISSING FILE.** `timeout_no_memento` is the verb's own name for **ABSENT AND UNRECOVERABLE** — its contract says so, and it is the one verdict a manager is told not to hunt behind. A manager who trusts it discards the seat's context and spawns blank. Here that would have thrown away **23,554 bytes and five amendments** from a seat whose memento was written, verified, mirrored and pointed correctly.
