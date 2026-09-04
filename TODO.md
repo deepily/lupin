@@ -208,6 +208,45 @@ and let each session stage its own, or make session-end run the SAME conflict pr
 auto-include that it runs on a manifest file. *"Check whether a peer touched CLAUDE.md before
 staging it"* is a habit, and this fleet's own doctrine is that a habit is not a control.
 
+**H5 — THE COMMIT SCOPE GUARD IS BLIND IN `planning-is-prompting`, TWO WAYS, AND ONE MASKS THE
+OTHER. Owner: Mr. Radio 🦉. Measured 2026-09-03, both arms, one variable each.**
+Hit while committing this run's candidate doctrine doc into that repo. `commit_scope_guard.py` in
+`src/lupin_cli/claude_code/hooks/lib/`.
+
+**(a) A cross-repo commit is judged against the SESSION's manifest, not the TARGET repo's.**
+`_claims_for_session( session_id, cwd )` opens `.claude-session.md` relative to `cwd`, and for a
+`cd <other repo> && git commit …` that `cwd` is the session's tree. Measured:
+
+| `cwd` handed to the guard | `mine` | verdict on a file that exists only in the other repo |
+|---|---|---|
+| `…/lupin` | a real set, without the path | 🔴 **DENY** — *"claimed by no session"* |
+| `…/planning-is-prompting` | `None` | ✅ fail-open, allow |
+
+The denial I received matches the **lupin** row exactly. ⇒ It refused a file it was reading the
+wrong manifest for, and the message names an ownership fact it had no way to know.
+
+**(b) That repo's manifest parses to ZERO sections, so the guard treats it as absent.**
+`_SECTION_RE` is `^##\s+Session:\s*(?P<sid>\S+)\s*$` — it requires a **bare** header. **Every**
+section in `planning-is-prompting/.claude-session.md` carries a parenthetical
+(`## Session: bae40467 (Krishna 🦚 — …)`), so `_parse_manifest` returns `{}` — verified by running
+the parser over the real file: `SIDS: []`. **Not one seat's section — all of them.**
+
+🔴 **AND THE ORDER MATTERS, WHICH IS THE PART WORTH KEEPING.** (b) is currently **masked** by (a):
+the guard never reads that manifest, so its unparseability costs nothing today. **Fix (a) alone and
+every commit in that repo silently becomes unguarded** — `mine is None` is the documented fail-open
+signal, and a manifest that parses to nothing is indistinguishable from a repo with no discipline
+at all. ⇒ **Fix them together, or fix (b) first.** This is the repo's own *empty result is two
+failures wearing one face*, sitting inside the guard built to enforce its sibling rule.
+⚠️ My section there is now written with a **bare** header and a comment saying why, so it will parse
+once (a) is closed; the others are untouched and still will not.
+
+⚠️ **A third thing, observed rather than diagnosed** — the guard is a `PreToolUse` hook over the
+whole Bash call, so a denied `write the files && git add && git commit` loses **the writes too**,
+not just the commit. Twice I found a file I believed I had just written was absent. The refusal is
+correct and total, which is the right shape; what is missing is that its message describes only the
+commit. **Do not bundle file writes into the same call as a `git commit`.**
+
+
 
 ## 📚 DECISIONS LOG 2026-08-30 night — post-game of the 8-seat crew run (Mr. Radio 🦉 `93a8751c`)
 
