@@ -16,6 +16,11 @@ Bearer JWT, the canonical machine-or-human credential, C2):
     - GET  /api/arbiter/context-pressure — read-only per-persona context-headroom
       service: PULLS :8001/state and returns JUST the `context_pressure` section
       (persona-keyed budget-headroom map, design 2026.06.09 Decisions 1-5).
+    - GET  /api/arbiter/fleet-size-cap — the fleet-size dial: the enforced cap, the
+      configured ceiling, and the live manager/worker split occupying it.
+    - PUT  /api/arbiter/fleet-size-cap — SET the cap. Writes through to the
+      configuration FILE and returns what it re-read from disk, never an echo of the
+      request (Rick: "those values are serialized and reused the next time").
     - GET  /api/arbiter/fleet-snapshot — LEGACY v2.1: read the cached snapshot.
     - POST /api/arbiter/fleet-snapshot — LEGACY v2.1: the in-process arbiter
       PUSHES its latest snapshot here (updates the server singleton directly).
@@ -222,3 +227,217 @@ async def get_context_pressure(
         }
     section = result.get( "context_pressure" ) if isinstance( result, dict ) else None
     return section if section is not None else { "status": "awaiting", "personas": { } }
+
+
+class FleetSizeCapIn( BaseModel ):
+    """
+    Body for PUT /api/arbiter/fleet-size-cap — the one number the operator is setting.
+
+    `ge=1` is declared here rather than hand-rolled in the handler, so a nonsense
+    value is refused by Pydantic with a 422 naming the field. The UPPER bound is NOT
+    declared here and cannot be: the ceiling is `cc session fleet size cap maximum`,
+    read at call time, so the handler checks it against the live key.
+    """
+    cap : int = Field( ge=1, description="The fleet-wide session cap to persist." )
+
+
+def _live_fleet_counts():
+    """
+    The manager/worker split, counted the SAME way the spawn gate counts it.
+
+    Ensures:
+        - returns a fleet_size_cap.census() dict, or None when the fleet cannot be read
+        - never raises
+
+    🔴 IT USES THE GATE'S OWN CENSUS AND CLASSIFIER ON PURPOSE. A pane that counted
+    the fleet by a second route would agree with the gate on every ordinary day and
+    disagree on exactly the day somebody needed it — an operator would read "6 of 8"
+    while the spawn path refused at 8. One derivation, or the two silently coincide
+    until they do not.
+    """
+    try:
+        from lupin_cli.claude_code.hooks.lib.session_bridge import (
+            find_active_voice_persona_sessions )
+        from lupin_cli.claude_code.hooks.lib.manager_figure import is_manager_figure
+        from lupin_mcp import fleet_size_cap
+        return fleet_size_cap.census( find_active_voice_persona_sessions(), is_manager_figure )
+    except Exception:
+        return None
+
+
+def _fleet_size_cap_payload():
+    """
+    The dial's whole state: what is enforced, what the ceiling is, who is occupying it.
+
+    Ensures:
+        - returns { cap, ceiling, live } where `live` is the census dict or None
+        - `cap` prefers the value ON DISK over the cached configuration singleton
+        - never raises
+    """
+    from cosa.rest.dependencies.config import get_config_manager
+    from lupin_mcp import fleet_size_cap
+
+    try:
+        config_mgr = get_config_manager()
+    except Exception:
+        config_mgr = None
+
+    return {
+        "cap"     : fleet_size_cap.resolve_fleet_cap(
+                        config_mgr, disk_fn=fleet_size_cap.default_disk_cap_reader ),
+        "ceiling" : fleet_size_cap.resolve_fleet_ceiling( config_mgr ),
+        "live"    : _safe_live_counts(),
+    }
+
+
+def _safe_live_counts():
+    """`_live_fleet_counts` with a second belt, so a patched-or-broken census costs the
+    SPLIT and never the cap. The pane degrades to a number, never to an error."""
+    try:
+        return _live_fleet_counts()
+    except Exception:
+        return None
+
+
+@router.get(
+    "/arbiter/fleet-size-cap",
+    summary     = "The fleet-size dial: the live cap and the configured ceiling",
+    description = "Read-only. Returns { cap, ceiling } computed AT CALL TIME from the "
+                  "configuration manager, so the operator control renders 1..ceiling "
+                  "against the number the spawn path is actually enforcing. "
+                  "Auth: X-API-Key or Bearer JWT — the same guard as the fleet pane, "
+                  "because anyone who can see the fleet should see the cap governing it."
+)
+async def get_fleet_size_cap(
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+):
+    """
+    Serve the fleet-size dial's two numbers, read fresh on every call.
+
+    Requires:
+        - authenticated caller (X-API-Key or Bearer JWT)
+
+    Ensures:
+        - returns { cap, ceiling } from resolve_fleet_cap / resolve_fleet_ceiling
+        - reads the configuration manager LAZILY, inside the handler, so the values
+          move when the INI moves rather than being frozen at import
+        - `ceiling` is `cc session fleet size cap maximum` and is NEVER clamped to
+          anything else — see below
+        - never raises: an unreadable config falls back to the module defaults, the
+          same fail-soft the spawn path uses, so the pane degrades to a number rather
+          than to an error
+
+    🔴 THE CEILING IS SERVED VERBATIM AND IS DELIBERATELY NOT CLAMPED — not to the
+    persona pool, not to the live session count, not to anything. Rick ruled the maximum
+    must be configurable so he can tweak it over time; a dial silently trimmed below the
+    number he typed cannot be told apart from a key that was ignored. The control shows
+    what the key says.
+
+    🔨 IT IS NO LONGER READ-ONLY — CORRECTED 2026-09-04, AND THE OLD CLAIM IS NAMED
+    RATHER THAN DELETED BECAUSE HALF OF IT WAS RIGHT. This docstring used to say a write
+    "needs shared storage (a compose mount and an env var) and a change to the resolver".
+
+    · THE STORAGE HALF WAS WRONG, and it was reasoned rather than measured. `docker
+      inspect lupin-rest-dev` reports the checkout's `src` bind-mounted at
+      `/var/lupin/src` with `rw=true`, and the host MCP process carries
+      `LUPIN_ROOT=<the checkout>` with the same `Lupin: Development` block. Container
+      and host already read and write ONE file. No compose change, no env var, no
+      recreate.
+    · THE RESOLVER HALF WAS RIGHT. `ConfigurationManager` is a process-lifetime
+      singleton with no reload, so a write would have reached the file while the
+      long-running MCP kept its boot-time cap. `resolve_fleet_cap` now takes a `disk_fn`
+      and prefers the value on disk — see PUT below.
+
+    ⚠️ `live` MAY BE None. A census that cannot be taken costs the SPLIT, never the cap:
+    the pane degrades to a number rather than to an error.
+    """
+    return _fleet_size_cap_payload()
+
+
+@router.put(
+    "/arbiter/fleet-size-cap",
+    summary     = "Set the fleet-size cap — writes through to configuration and persists",
+    description = "Writes `cc session fleet size cap` to the configuration FILE and "
+                  "returns what it ACTUALLY PERSISTED, re-read from disk. Refuses a "
+                  "value outside 1..`cc session fleet size cap maximum`. "
+                  "Auth: X-API-Key or Bearer JWT — the same guard as the GET."
+)
+async def put_fleet_size_cap(
+    body                  : FleetSizeCapIn,
+    authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ]
+):
+    """
+    Persist the operator's new fleet cap and report what the file now says.
+
+    Requires:
+        - authenticated caller (X-API-Key or Bearer JWT)
+        - body.cap >= 1 (enforced by the model, not here)
+
+    Ensures:
+        - a cap above the live ceiling is REFUSED with 422 naming both numbers
+        - on success the value is written to the configuration FILE, not only to
+          the in-process singleton, and survives a restart
+        - the in-process configuration manager is updated too, so this container's
+          own next GET agrees with the disk instead of serving its boot-time value
+        - RETURNS { cap, ceiling, live } built by re-reading the file — the `cap`
+          in the response is what the FILE says, never what the request said
+        - a refusal by the INI writer (key absent, or defined twice) surfaces as a
+          409 carrying the writer's own message verbatim
+
+    🔴 THE RESPONSE IS A RE-READ AND NOT AN ECHO, AND THAT IS THE POINT OF THE
+    ENDPOINT. An echo makes the response unfalsifiable: it looks identical whether
+    the write reached the disk, landed in a section nobody reads, or never happened.
+    The client repaints the dial from this body, so an echo would move the slider to
+    a number the spawn path is not enforcing — which is a dial that appears to work
+    and governs nothing, the exact defect this endpoint exists to close.
+
+    ⚠️ THE 409 IS A REFUSAL, NOT A CRASH. `locate_key` declines when the key is
+    absent or defined twice, and its message names every line it found. Passing that
+    through verbatim is what lets an operator fix the file; swallowing it and
+    returning the old cap would report a successful no-op.
+    """
+    from fastapi import HTTPException
+    from cosa.rest.dependencies.config import get_config_manager
+    from lupin_mcp import fleet_size_cap
+    from lupin_mcp import fleet_cap_ini_io
+
+    try:
+        config_mgr = get_config_manager()
+    except Exception:
+        config_mgr = None
+
+    ceiling = fleet_size_cap.resolve_fleet_ceiling( config_mgr )
+    if body.cap > ceiling:
+        raise HTTPException(
+            status_code = 422,
+            detail      = f"Refusing to set the fleet cap to {body.cap}: the configured "
+                          f"ceiling is {ceiling} (`{fleet_size_cap.FLEET_CEILING_KEY}`). "
+                          f"Nothing was written. Raise that key first if {body.cap} is "
+                          f"really what you want — it is deliberately not clamped here, "
+                          f"because a value silently trimmed to {ceiling} cannot be told "
+                          f"apart from a request that was ignored."
+        )
+
+    try:
+        persisted = fleet_cap_ini_io.write_int_to_disk(
+            fleet_size_cap.config_file_path(), fleet_size_cap.FLEET_CAP_KEY, body.cap )
+    except ( fleet_cap_ini_io.KeyNotFound, fleet_cap_ini_io.KeyDefinedTwice ) as refusal:
+        raise HTTPException( status_code=409, detail=str( refusal ) )
+    except OSError as failure:
+        raise HTTPException(
+            status_code = 500,
+            detail      = f"The fleet cap could not be written to the configuration "
+                          f"file: {failure}. Nothing is guaranteed to have changed; "
+                          f"read GET /api/arbiter/fleet-size-cap to see what it says now."
+        )
+
+    # Keep THIS process's cached singleton in step with the file it just wrote.
+    # Without it the container would serve its boot-time cap from the very next GET
+    # while the disk carried the new one — two numbers, one dial.
+    if config_mgr is not None:
+        try:
+            config_mgr.set_config( fleet_size_cap.FLEET_CAP_KEY, persisted )
+        except Exception:
+            pass                      # the FILE is the source of truth; this is a cache
+
+    return _fleet_size_cap_payload()

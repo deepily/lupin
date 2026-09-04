@@ -1227,6 +1227,31 @@ class NotificationsUI {
             const elapsed = ( performance.now() - startTime ).toFixed( 1 );
             this.log( `✓ Token valid (checked in ${elapsed}ms)` );
         }
+
+        // 🔴 ONE TOKEN OF RECORD FOR THE PAGE. Row 20775ec5, and this is the SOURCE of
+        // the broadcast 401 rather than its symptom.
+        //
+        // This method decides on `this.authToken`, an IN-MEMORY field, and only ever
+        // touched localStorage as a side effect of an actual refresh. So the fast path
+        // above — the common one — could return happily while the stored token said
+        // something else entirely, and nothing on the page would ever reconcile them.
+        //
+        // MEASURED 2026-09-04 in Rick's own browser: with the stored token blanked and
+        // the in-memory one still live, `authedFetch` returned 200 and left
+        // `localStorage.lupin_access_token` at length 0. Every OTHER reader of that key
+        // — the broadcast panel, `lupin-nav.js`'s logged-in indicator — then reads a
+        // value the page itself has already superseded, and Rick sees "logged in" and a
+        // 401 at the same instant, both readings truthful about different tokens.
+        //
+        // ⚠️ THE PANEL'S OWN FIX IS NOT THIS FIX. Routing the broadcast panel through
+        // `authedFetch` (broadcast-panel.js, row 20775ec5) removes THAT panel as an
+        // independent reader. It does nothing for the next one somebody writes, which
+        // is why this row's DONE MEANS calls a panel-only change "the symptom".
+        // Reconciling here makes the store authoritative for everyone.
+        if ( this.authToken && localStorage.getItem( "lupin_access_token" ) !== this.authToken ) {
+            localStorage.setItem( "lupin_access_token", this.authToken );
+            this.log( "Reconciled stored access token with the in-memory one (row 20775ec5)" );
+        }
     }
 
     async authedFetch( url, options = {} ) {
@@ -9157,6 +9182,201 @@ class NotificationsUI {
         el.textContent = `updated ${this._formatFleetTimestamp( new Date(), ianaZone )}`;
     }
 
+    // ========================================
+    // THE FLEET-SIZE DIAL — the cap the spawn path enforces, and its configured ceiling
+    // ========================================
+
+    async fetchFleetSizeCap() {
+        /**
+         * Read { cap, ceiling } from GET /api/arbiter/fleet-size-cap.
+         *
+         * Ensures:
+         *     - Returns the parsed body on 2xx, null on any non-2xx or throw
+         *     - Reports a failure via error(), NOT log(): log() is gated on this.debug,
+         *       so with debug off a control that quietly declines to paint is
+         *       indistinguishable from one nobody ever built
+         *     - Never throws
+         */
+        try {
+            const response = await this.authedFetch( "/api/arbiter/fleet-size-cap" );
+            if ( !response.ok ) {
+                this.error( `Fleet size cap unavailable (HTTP ${response.status})` );
+                return null;
+            }
+            const body = await response.json();
+            return ( body && typeof body === "object" ) ? body : null;
+        } catch ( error ) {
+            this.error( `Fleet size cap fetch failed: ${error}` );
+            return null;
+        }
+    }
+
+    _fleetSizeCapEls() {
+        /** The dial cluster, or null when the page does not carry it. */
+        const root = document.getElementById( "fleet-size-cap-controls" );
+        if ( !root ) return null;
+        return {
+            root,
+            slider : document.getElementById( "fleet-size-cap" ),
+            value  : document.getElementById( "fleet-size-cap-value" ),
+            status : document.getElementById( "fleet-size-cap-status" )
+        };
+    }
+
+    _paintFleetSizeCap( payload ) {
+        /**
+         * Move the dial to `payload.cap` and set its span to `payload.ceiling`.
+         *
+         * Ensures:
+         *     - No-op returning false when the cluster is absent
+         *     - The cluster stays HIDDEN when the payload is unusable. A control parked
+         *       at its HTML defaults would show a cap the spawn path is not enforcing —
+         *       the same "renders identically whether it works or not" failure the ratio
+         *       clause had, and the reason that one is hidden until it has real numbers
+         *     - `max` comes from payload.ceiling ON EVERY PAINT and is NEVER clamped to
+         *       anything else. See below
+         *     - RETURNS whether it painted, so a caller can tell a real paint from a
+         *       silent decline
+         *
+         * 🔴 THE CEILING IS THE KEY'S VALUE, VERBATIM. `cc session fleet size cap
+         * maximum` ships at 18 and Rick ruled it must stay tweakable in configuration.
+         * Trimming the displayed max to the persona-pool size, the live session count or
+         * any other number would make the dial disagree with the key — and a dial
+         * silently trimmed below what the operator typed cannot be told apart from a key
+         * that was ignored.
+         *
+         * ⚠️ AND IT IS READ AT CALL TIME, not baked into the HTML. The markup carries no
+         * `max` attribute at all, so a paint that never runs leaves the control hidden
+         * rather than showing a stale ceiling from a previous release.
+         */
+        const els = this._fleetSizeCapEls();
+        if ( !els ) return false;
+
+        const cap     = payload ? payload.cap     : undefined;
+        const ceiling = payload ? payload.ceiling : undefined;
+        if ( !Number.isFinite( cap ) || !Number.isFinite( ceiling ) ) {
+            els.root.hidden = true;
+            return false;
+        }
+
+        els.root.hidden        = false;
+        els.slider.min         = "1";
+        els.slider.max         = String( ceiling );
+        els.slider.value       = String( cap );
+        els.value.textContent  = `${cap} / ${ceiling}`;
+        els.slider.disabled    = false;
+
+        // The status line reports WHO is occupying the cap, because the number that
+        // matters when you are about to move this dial is how much headroom is left —
+        // and "every session counts, managers included" is Rick's ruling, not a detail.
+        const live = payload.live;
+        els.status.textContent = ( live && Number.isFinite( live.total ) )
+            ? `${live.total} live — ${live.managers} manager(s), ${live.workers} worker(s)`
+            : "";
+
+        // Bind here rather than at construction: the cluster is painted from a fetch, so
+        // there is no earlier moment at which the element is known to exist. The binder
+        // is idempotent, which is what makes calling it on every paint safe.
+        this._wireFleetSizeCap();
+        return true;
+    }
+
+    async refreshFleetSizeCap() {
+        /**
+         * Fetch the dial's numbers and paint them.
+         *
+         * Ensures:
+         *     - Returns whatever _paintFleetSizeCap reported
+         *     - Never throws (both halves are already fail-soft)
+         */
+        return this._paintFleetSizeCap( await this.fetchFleetSizeCap() );
+    }
+
+    async setFleetSizeCap( cap ) {
+        /**
+         * PUT the new cap and return what the SERVER SAYS IT PERSISTED.
+         *
+         * Ensures:
+         *     - Returns the parsed body on 2xx, null on any non-2xx or throw
+         *     - Reports a refusal via error() carrying the server's own `detail`,
+         *       because the server refuses for reasons the operator can act on —
+         *       a cap above the ceiling, a key defined twice — and swallowing that
+         *       text turns a fixable configuration problem into a dead slider
+         *     - Never throws
+         *
+         * 🔴 THE RETURN IS THE SERVER'S RE-READ OF THE FILE, NOT THE VALUE SENT.
+         * The caller repaints from it, so a dial that drifted from what was actually
+         * persisted corrects itself on the next paint instead of showing a number the
+         * spawn path is not enforcing.
+         */
+        try {
+            const response = await this.authedFetch( "/api/arbiter/fleet-size-cap", {
+                method  : "PUT",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( { cap } )
+            } );
+            if ( !response.ok ) {
+                let detail = `HTTP ${response.status}`;
+                try {
+                    const body = await response.json();
+                    if ( body && body.detail ) detail = body.detail;
+                } catch ( ignored ) { /* a non-JSON error body keeps the status line */ }
+                this.error( `Fleet cap not saved: ${detail}` );
+                return null;
+            }
+            const body = await response.json();
+            return ( body && typeof body === "object" ) ? body : null;
+        } catch ( error ) {
+            this.error( `Fleet cap save failed: ${error}` );
+            return null;
+        }
+    }
+
+    _wireFleetSizeCap() {
+        /**
+         * Bind the dial's handlers ONCE.
+         *
+         * Ensures:
+         *     - No-op returning false when the cluster is absent
+         *     - Binds at most once, however many times it is called: the paint runs on
+         *       every fleet refresh, and a listener added per refresh would fire the
+         *       PUT once per refresh that had happened
+         *     - `input` only moves the READOUT — it never writes
+         *     - `change` writes, then repaints from the server's response
+         *
+         * 🔴 THE WRITE IS ON `change`, NOT `input`, AND THAT IS THE WHOLE BINDING.
+         * A range input fires `input` continuously while the handle is moving — a drag
+         * from 4 to 18 would fire fourteen PUTs, each one a file write, and the fleet
+         * cap would briefly be every number in between. `change` fires once, on release.
+         */
+        const els = this._fleetSizeCapEls();
+        if ( !els || !els.slider ) return false;
+        if ( els.slider.dataset.wired === "true" ) return false;
+
+        els.slider.addEventListener( "input", () => {
+            // Readout only. No network, no persistence — see the ruling above.
+            if ( els.value ) els.value.textContent = `${els.slider.value} / ${els.slider.max}`;
+        } );
+
+        els.slider.addEventListener( "change", async () => {
+            const requested = Number( els.slider.value );
+            els.slider.disabled = true;
+            if ( els.status ) els.status.textContent = `saving ${requested}…`;
+            const persisted = await this.setFleetSizeCap( requested );
+            els.slider.disabled = false;
+            // Repaint from the SERVER's answer whether it succeeded or not. On a
+            // refusal `persisted` is null and this re-reads the live state, so the
+            // handle snaps back to the cap that is actually enforced rather than
+            // sitting at a number the operator never got.
+            if ( persisted ) this._paintFleetSizeCap( persisted );
+            else             await this.refreshFleetSizeCap();
+        } );
+
+        els.slider.dataset.wired = "true";
+        return true;
+    }
+
+
     async refreshFleetStatus() {
         /**
          * Orchestrate one fleet-status refresh: fetch → render. Shared by the 60s
@@ -9175,6 +9395,10 @@ class NotificationsUI {
         try {
             const composite = await this.fetchFleetState();
             this.renderFleetStatus( composite );
+            // The dial rides the SAME refresh as the table it sits above — the ⟳ button
+            // and the 60s tick both reach it — so the cap on screen and the fleet on
+            // screen are read at the same moment rather than drifting apart.
+            await this.refreshFleetSizeCap();
         } finally {
             this._fleetStatusFetchInFlight = false;
         }
@@ -9817,7 +10041,18 @@ class NotificationsUI {
         const prioClass   = this._taskPriorityClass( task.priority );
 
         return {
-            id          : { html: this.escapeHtml( this._taskIdLabel( task ) ), cls: "" },
+            // 🔴 THE CELL SHOWS 8 CHARS AND THE CLIPBOARD GETS 36 — Rick, row dbb4c187:
+            // "I want the ID to be copy upon click ... I literally have to double click,
+            // copy. Want it to be 1 click." He pastes these into DMs and into store
+            // verbs, and `task_get` takes the FULL uuid. `_taskIdLabel` slices to 8 for
+            // the column's width, so copying the RENDERED TEXT would hand back a string
+            // that looks right and fails at the paste — silently, and only in the tool
+            // he pasted it into. The full id therefore rides on `data-task-full-id` and
+            // the handler reads THAT, never the label.
+            id          : { html: `<span class="task-id-copy" role="button" tabindex="0" `
+                                + `title="Click to copy the full id" `
+                                + `data-task-full-id="${this._escapeTaskAttr( task && task.id != null ? String( task.id ) : "" )}">`
+                                + `${this.escapeHtml( this._taskIdLabel( task ) )}</span>`, cls: "" },
             // 🔴 THE SPAN IS LOAD-BEARING, NOT DECORATION — DO NOT UNWRAP IT.
             //
             // A `-webkit-line-clamp` / `max-height` on the CELL is inert; on a span inside
@@ -10671,7 +10906,15 @@ class NotificationsUI {
         const el = document.getElementById( "task-list-flow-ratio" );
         if ( !el ) return;
         const text = this._formatFlowRatio( this._flowRatioPayload, provisionalDays );
-        el.textContent = text ? ` \u00b7 ${text}` : "";
+        // 🔨 "Gate: " IS RICK'S, 2026-09-03 BY VOICE, AND IT IS A LABEL NOT A DECORATION.
+        // The header read `Holding Area · 1 · 22 created / 37 closed over 3d = 59%` — a
+        // ratio floating with nothing saying what it governs, so a reader sees numbers
+        // and no indication they are the CREATION gate. Say what the thing IS before you
+        // say what it reads.
+        //
+        // ⚠️ IT GOES ONLY ON THE SHORT FORM. The hover already opens "Closed vs New
+        // Ratio — ", which names it in full; prefixing there would say it twice.
+        el.textContent = text ? ` \u00b7 Gate: ${text}` : "";
         el.title       = this._flowRatioLongForm( this._flowRatioPayload );
     }
 
@@ -11567,6 +11810,7 @@ class NotificationsUI {
          *       toggles the group (the dim-in-place ruling #3)
          *     - otherwise → delegate to the accordion toggle (unchanged behavior)
          */
+        if ( this._handleTaskIdCopyClick( target ) ) return;    // never also a row toggle
         if ( this._handleDetailEmojiClick( target ) ) return;   // never also an accordion toggle
 
         // STATE CONTROLS — same shape as the detail emoji above: match, act, RETURN,
@@ -12332,6 +12576,7 @@ class NotificationsUI {
         container.addEventListener( "click", ( e ) => {
             // The detail 📄 first: this pane wired row controls ONLY, so the icon
             // rendered and reached no handler at all (Rick's P0, row 17393c56).
+            if ( this._handleTaskIdCopyClick( e.target ) ) return;
             if ( this._handleDetailEmojiClick( e.target ) ) return;
             this._handleRowControlClick( e.target );
         } );
@@ -13313,6 +13558,101 @@ class NotificationsUI {
         return true;
     }
 
+    _handleTaskIdCopyClick( target ) {
+        /**
+         * Click the id cell, get the FULL id on the clipboard. Rick's row dbb4c187.
+         *
+         * 🔴 ONE BRANCH, THREE DISPATCHERS — the shape `_handleDetailEmojiClick` was
+         * rewritten into after three copies of one behaviour shipped live in one pane
+         * and inert in two (row 17393c56). The same three call sites carry this one.
+         *
+         * ⚠️ IT RETURNS TRUE SO THE CLICK STOPS HERE — DEFENSIVELY, AND THE ORIGINAL
+         * REASON GIVEN FOR IT WAS FALSE. 046d9f52's message and this docstring both said
+         * "the id cell sits inside a row whose click already toggles the disclosure;
+         * falling through would copy AND toggle on one click". MEASURED FALSE (Rachel,
+         * reviewing 2026-09-04): the handler was changed to `return false` so the click
+         * falls through, and the row did not toggle in ANY pane. Against a positive
+         * control that proves the instrument can see one — `.task-disclose-button` moves
+         * a pane's open-disclosure count 0 -> 1 in all three — a click on the id cell,
+         * the status cell or the title cell moved NOTHING, and no group collapsed either.
+         *
+         * ⇒ A ROW'S DISCLOSURE IS TOGGLED ONLY BY `.task-disclose-button`, via
+         * `_handleRowControlClick`. Everything else falls through to
+         * `_handleTaskAccordionToggle`, which returns unless the click landed in a group
+         * header. So there is no copy-AND-toggle to prevent TODAY.
+         *
+         * KEEP THE `return true` ANYWAY. It is cheap insurance against a future change
+         * that makes rows click-to-toggle, and the guard test's "did not also toggle"
+         * clause is correct and should stay — it is simply UNWATCHED, because there is
+         * nothing there to watch. What is corrected here is the REASON, not the code: a
+         * future reader who deletes this line to test the stated consequence will find no
+         * consequence and conclude the guard was pointless.
+         *
+         * ⚠️ IT COPIES `data-task-full-id`, NEVER THE CELL'S TEXT. The column renders
+         * `_taskIdLabel`'s 8-char slice; the store's verbs take 36. A handler reading
+         * `textContent` returns something that looks like an id and fails at the paste.
+         *
+         * ⚠️ CONFIRMATION IS REQUIRED, NOT DECORATION — a copy with no feedback is
+         * indistinguishable from a dead click. `task-id-copied` is added and removed on
+         * a timer; it paints a tick via `::after` rather than replacing the label, so
+         * the cell does not change width and nothing is destroyed if the timer never
+         * fires.
+         *
+         * ⚠️ `navigator.clipboard` IS UNAVAILABLE ON AN INSECURE ORIGIN. localhost is a
+         * secure context so :7999 and :8000 are fine; served over plain http to another
+         * host it is absent, and the cell then shows `task-id-copy-failed` rather than
+         * reporting a success that did not happen.
+         *
+         * Requires:
+         *     - target is the clicked element (or any descendant of the id span)
+         *
+         * Ensures:
+         *     - returns true iff the click was an id-cell click and is now HANDLED
+         *     - the FULL id reaches the clipboard; an empty id copies nothing but
+         *       still returns true, so it never falls through to a row toggle
+         *     - returns false for anything else, leaving the caller's dispatch intact
+         */
+        const cell = target && target.closest ? target.closest( ".task-id-copy" ) : null;
+        if ( !cell ) return false;
+
+        const full = cell.dataset.taskFullId || "";
+        if ( full ) this._copyTaskIdToClipboard( cell, full );
+        return true;
+    }
+
+    _copyTaskIdToClipboard( cell, full ) {
+        /**
+         * Write one id to the clipboard and say on the cell whether it landed.
+         *
+         * Split out from the dispatch branch so the branch stays synchronous: a
+         * dispatcher that awaited would hand its caller a promise where every other
+         * branch hands it a boolean.
+         *
+         * Ensures:
+         *     - `task-id-copied` on success, `task-id-copy-failed` on refusal or on a
+         *       missing `navigator.clipboard`, either cleared after the timeout
+         *     - never throws into the click dispatcher
+         */
+        const mark = ok => {
+            cell.classList.remove( "task-id-copied", "task-id-copy-failed" );
+            cell.classList.add( ok ? "task-id-copied" : "task-id-copy-failed" );
+            cell.dataset.copyState = ok ? "copied" : "failed";
+            setTimeout( () => {
+                cell.classList.remove( "task-id-copied", "task-id-copy-failed" );
+            }, 1200 );
+        };
+
+        const clip = ( typeof navigator !== "undefined" && navigator.clipboard )
+            ? navigator.clipboard : null;
+        if ( !clip || typeof clip.writeText !== "function" ) { mark( false ); return; }
+
+        try {
+            Promise.resolve( clip.writeText( full ) ).then( () => mark( true ), () => mark( false ) );
+        } catch ( e ) {
+            mark( false );
+        }
+    }
+
     _handleEpicBoardClick( target ) {
         /**
          * The epic board's delegated click entry point: row controls first, then the
@@ -13336,6 +13676,8 @@ class NotificationsUI {
          *     - a row control consumes the click and the accordion does not also fire
          *     - anything else falls through to _handleEpicAccordionToggle unchanged
          */
+        if ( this._handleTaskIdCopyClick( target ) ) return;
+
         if ( this._handleDetailEmojiClick( target ) ) return;
 
         if ( this._handleRowControlClick( target ) ) return;

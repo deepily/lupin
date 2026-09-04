@@ -11,11 +11,11 @@
          this slice (monolith de-duplication is a later, separately-verified pass).
          See src/rnd/v0.1.9/2026.06.19-multiplexer-layout-parity-methodology/. -->
     <link rel="stylesheet" href="/static/css/shared/notifications-surface.css">
-    <link rel="stylesheet" href="/static/css/notifications.css?v=20260829a">
+    <link rel="stylesheet" href="/static/css/notifications.css?v=20260904b">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260619a">
-    <link rel="stylesheet" href="/static/css/task-list.css?v=20260903j">
-    <link rel="stylesheet" href="/static/css/epic-board.css?v=20260829a">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=20260904b">
+    <link rel="stylesheet" href="/static/css/epic-board.css?v=20260904a">
 </head>
 <body>
     <!-- Master-detail two-pane shell (2026-05-21 — see
@@ -697,6 +697,59 @@
                 <button class="toggle-button" id="fleet-status-toggle">▼</button>
             </div>
             <div class="section-content" id="fleet-status-section">
+                <!-- THE FLEET-SIZE DIAL. Rick's placement, by voice 2026-09-03: "the fleet
+                     accordion header".
+
+                     ⚠️ IT LIVES IN THE SECTION CONTENT, NOT THE HEADER BAR, and that is the
+                     whole reason this comment exists. The bar's onclick is
+                     toggleSection('fleet-status-section'), so a range input up there
+                     collapses the panel on every drag. The ratio-gate controls hit exactly
+                     this and paid for it once; "header" here means the TOP OF THE SECTION,
+                     which is where this is.
+
+                     🔴 THERE IS NO `max` ATTRIBUTE HERE ON PURPOSE. The ceiling is
+                     `cc session fleet size cap maximum` (shipping 18) and it must stay
+                     tweakable, so the control reads it from GET /api/arbiter/fleet-size-cap
+                     at call time. A number written here would be a second source of truth
+                     that silently disagrees with the key the spawn path enforces — which is
+                     the exact failure the configurable-maximum ruling was made to prevent.
+
+                     🔨 IT WRITES — CORRECTED 2026-09-04. This control shipped DISABLED, and
+                     the comment here said the write needed "shared storage and a change to
+                     the resolver". The first half was reasoned rather than measured and is
+                     WRONG: `docker inspect lupin-rest-dev` reports the checkout's `src`
+                     bind-mounted at `/var/lupin/src` with `rw=true`, so the container and
+                     the host MCP process already read and write ONE file. No compose
+                     change, no env var, no recreate. The second half was right — the
+                     resolver did need to stop trusting a cached singleton, and now reads
+                     the key fresh from that file at call time.
+
+                     ⇒ Rick asked for a thermostat and the read-only version was a
+                     thermometer. It is a thermostat now: PUT /api/arbiter/fleet-size-cap
+                     persists to the configuration file and returns what it re-read from
+                     disk, and the spawn path sees the new number without a restart.
+
+                     ⚠️ IT IS NOT `disabled` AND HAS NO `value` EITHER. Both are painted
+                     from the server. A control parked at HTML defaults renders identically
+                     whether it works or not — which is why the cluster stays `hidden` until
+                     a real payload arrives. -->
+                <div class="fleet-size-cap-controls" id="fleet-size-cap-controls"
+                     data-testid="fleet-size-cap-controls" hidden>
+                    <span class="fleet-size-cap-field">
+                        <label for="fleet-size-cap">
+                            Fleet cap
+                            <output id="fleet-size-cap-value"
+                                    data-testid="fleet-size-cap-value">—</output>
+                        </label>
+                        <input type="range" id="fleet-size-cap"
+                               data-testid="fleet-size-cap"
+                               min="1" step="1"
+                               title="The fleet-wide session cap the spawn path enforces — EVERY session counts, managers included. Over cap refuses new spawns and reaps nobody. Drag and release to set it: the value is written to `cc session fleet size cap` in the configuration file and survives a restart. The slider's maximum is `cc session fleet size cap maximum`." />
+                    </span>
+                    <span id="fleet-size-cap-status"
+                          data-testid="fleet-size-cap-status"
+                          class="fleet-size-cap-status"></span>
+                </div>
                 <div id="fleet-status-container" data-testid="fleet-status-container">
                     <!-- rendered grouped table (read-only) -->
                 </div>
@@ -1211,8 +1264,30 @@
     <script type="module" src="/static/js/shared/task-list-query.js?v=20260902a"></script>
     <script type="module" src="/static/js/shared/agent-select.js?v=20260829a"></script>
     <script type="module" src="/static/js/shared/arg-interview.js?v=20260829a"></script>
-    <script src="/static/js/notifications.js?v=20260904a"></script>
-    <script src="/static/js/broadcast-panel.js?v=20260619a"></script>
+    <!-- 🔴 CACHE TOKENS PICKED BY THE MERGER, BY HAND, 2026-09-04 (john) — per the
+         standing ruling in 0da963f4: this value belongs to whoever merges, not to
+         either author, because two authors both bumping it is what produced that
+         ruling. Neither side of this conflict was correct to take verbatim:
+           HEAD  notifications.js 20260904a · broadcast-panel.js 20260619a
+           2c53e125  notifications.js 20260904d · broadcast-panel.js 20260904d
+         ⚠️ THE TWO FILES GET DIFFERENT TREATMENT, AND THE DIFFERENCE IS MEASURED
+         RATHER THAN ASSUMED — `git hash-object` on the MERGED tree against both
+         parents, not "this merge touched some JS so bump everything":
+           notifications.js   merged 356dec05 · served bf089ba5 · HEAD 8f389a0b
+                              ⇒ differs from BOTH parents, so the token MUST move
+                                past the served one: 20260904d -> 20260904e.
+           broadcast-panel.js merged 1e1eb585 · served 1e1eb585  (IDENTICAL)
+                              ⇒ the merge changed nothing, so the token MUST NOT
+                                move. A bump on an unchanged file is a false signal:
+                                it busts every client's cache for no new bytes, and
+                                it teaches the next reader that the token tracks
+                                merges rather than content.
+         The predecessor merger's warning still stands and is why HEAD was not taken:
+         its broadcast-panel token was 20260619a against a file last committed
+         20260904 — shipping the broadcast-401 fix behind an unmoved key, the exact
+         failure reproduced and fixed at 48d16579. -->
+    <script src="/static/js/notifications.js?v=20260904e"></script>
+    <script src="/static/js/broadcast-panel.js?v=20260904d"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.
         // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md

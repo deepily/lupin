@@ -471,7 +471,19 @@ test( "_renderTaskRow: status class on <tr>, status dot, six cells, and the move
   const ui = newUI();
   const html = ui._renderTaskRow( T_BLOCKED, "America/New_York" );
   assert.match( html, /<tr class="task-row task-status-blocked">/ );
-  assert.match( html, /<td class="task-col-id">t1<\/td>/ );
+  // UPDATED 2026-09-04: this asserted a BARE `<td class="task-col-id">t1</td>`, which
+  // 046d9f52 ("Click the id cell, get the FULL id") made false — the id now rides a
+  // click-to-copy <span> inside that cell. The old form was a TEXT match against markup
+  // that had deliberately changed, so it read as a broken renderer rather than as a
+  // stale assertion. The CLAIM is unchanged; only how it is read is.
+  //
+  // ⚠️ And it is widened rather than merely repaired: nothing in this file watched the
+  // copy affordance at all, so the cell could have rendered the id with no way to copy
+  // it and every test here would have stayed green.
+  const idCell = rowsOfHtml( html )[ 0 ].querySelector( "td.task-col-id" )!;
+  assert.equal( idCell.textContent, "t1", "the id cell still shows the id" );
+  assert.equal( idCell.querySelector( ".task-id-copy" )!.getAttribute( "data-task-full-id" ), "t1",
+                "...and it is the click-to-copy affordance, carrying the FULL id" );
   assert.match( html, /<td class="task-col-status"><span class="task-status-dot"><\/span>blocked<\/td>/ );
   assert.match( html, /Wire the seam/ );
   assert.match( html, /task-col-priority task-prio-high/ );   // P1 → high tint
@@ -604,8 +616,21 @@ test( "_renderTaskRow: the FULL title renders in the cell, and still rides the t
   const ui = newUI();
   const longTitle = "Z".repeat( 90 );
   const html = ui._renderTaskRow( { id: "abcdef12", title: longTitle, status: "queued" }, undefined );
-  assert.match( html, /<td class="task-col-id">abcdef12<\/td>/ );
-  const cell = rowsOfHtml( html )[ 0 ].querySelector( "td.task-col-title" )!;
+  // UPDATED 2026-09-04, same cause as the shape test above: 046d9f52 put the id inside
+  // a click-to-copy <span>, so the bare-<td> text match stopped describing the markup.
+  //
+  // ⚠️ THIS ONE IS A PREAMBLE, NOT THE SUBJECT — the test is about the FULL title — and
+  // that is exactly why it is worth keeping rather than deleting. An assertion ahead of
+  // the subject is the one that decides whether the subject is ever REACHED: assertions
+  // run in sequence, so while this line was red the three title assertions below it were
+  // carried, not exercised. Removing it would have been the tidy-looking move and would
+  // have quietly widened, not narrowed, what this file can fail to notice.
+  const row = rowsOfHtml( html )[ 0 ];
+  const idCell = row.querySelector( "td.task-col-id" )!;
+  assert.equal( idCell.textContent, "abcdef12", "the id cell still shows the id" );
+  assert.equal( idCell.querySelector( ".task-id-copy" )!.getAttribute( "data-task-full-id" ), "abcdef12",
+                "...carried on the copy affordance, which is where the FULL id lives" );
+  const cell = row.querySelector( "td.task-col-title" )!;
   assert.equal( cell.textContent, longTitle, "the cell carries the whole title — no cap, no ellipsis" );
   assert.ok( !cell.textContent!.includes( "…" ), "no ellipsis in the markup; overflow is the CSS clamp's job" );
   assert.equal( cell.getAttribute( "title" ), longTitle, "full title still rides the tooltip attr" );
@@ -1664,8 +1689,11 @@ test( "_formatFlowRatio: unusable payloads yield an EMPTY clause, not a zero", (
 test( "_renderFlowRatio: writes the clause with its leading separator", () => {
   document.body.innerHTML = `<span id="task-list-flow-ratio"></span>`;
   newUI()._renderFlowRatio( { ratio: 0.77, window_hours: 24 } );
+  // "Gate: " is Rick's label, 2026-09-03 — the ratio floated in the header with
+  // nothing saying what it governs. It rides the SHORT form only; the hover already
+  // opens "Closed vs New Ratio — " and would say it twice.
   assert.equal( document.getElementById( "task-list-flow-ratio" )!.textContent,
-                " \u00b7 1d = 77%" );
+                " \u00b7 Gate: 1d = 77%" );
 } );
 
 test( "_renderFlowRatio: an unreachable endpoint CLEARS the clause, leaving no stale number", () => {

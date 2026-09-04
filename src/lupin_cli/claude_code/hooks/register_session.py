@@ -368,22 +368,35 @@ def _spawn_listener_locked( session_id, session_data, session_file, accepted_ids
 
         listener_pid = proc.pid
 
-        # Brief liveness check — detect immediate crashes (e.g., missing credentials)
+        # Brief liveness check — detect immediate crashes (e.g., missing credentials).
+        #
+        # 🔴 proc.poll(), NOT os.kill( listener_pid, 0 ). This hook never wait()s the
+        # child, so a listener that has ALREADY EXITED is a ZOMBIE — still in the
+        # process table, and `os.kill( pid, 0 )` SUCCEEDS on it. Measured 2026-09-04:
+        # Popen( [ "/bin/true" ], start_new_session=True ), sleep 0.3, then
+        # os.kill( pid, 0 ) returns cleanly while poll() reports returncode 0.
+        #
+        # What the blind check cost: on 2026-09-04 a worktree seat's listener exited 1
+        # during credential resolution ~0.1s in; the check said ALIVE, the dead PID was
+        # written to the bridge, and the seat ran DEAF for two minutes while the roster
+        # reported it healthy. The centralized log carried 32 such deaths. A monitor
+        # that cannot fail is worse than no monitor: it converts a loud death into a
+        # silent one. See src/tests/unit/test_listener_spawn_liveness_sees_a_zombie.py.
         time.sleep( 0.3 )
-        try:
-            os.kill( listener_pid, 0 )
-        except ProcessLookupError:
+        exit_code = proc.poll()
+        if exit_code is not None:
             # Listener died immediately — read stderr for diagnostics
             stderr_file.close()
             try:
                 with open( stderr_path, "r" ) as f:
                     stderr_contents = f.read().strip()
                 if stderr_contents:
-                    print( f"[SessionStart] WARNING: Listener died immediately. stderr:\n{stderr_contents}", file=sys.stderr )
+                    print( f"[SessionStart] WARNING: Listener died immediately (exit {exit_code}). stderr:\n{stderr_contents}", file=sys.stderr )
                 else:
-                    print( f"[SessionStart] WARNING: Listener (PID {listener_pid}) died immediately with no stderr output", file=sys.stderr )
+                    print( f"[SessionStart] WARNING: Listener (PID {listener_pid}) died immediately (exit {exit_code}) with no stderr output — "
+                           f"check the centralized log {centralized_path} for an unprefixed startup failure", file=sys.stderr )
             except OSError:
-                print( f"[SessionStart] WARNING: Listener (PID {listener_pid}) died immediately, could not read stderr", file=sys.stderr )
+                print( f"[SessionStart] WARNING: Listener (PID {listener_pid}) died immediately (exit {exit_code}), could not read stderr", file=sys.stderr )
             return None
 
         # Record listener PID in session bridge file for SessionEnd cleanup

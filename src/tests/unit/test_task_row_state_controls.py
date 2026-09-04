@@ -212,10 +212,72 @@ def test_the_comment_stripper_actually_strips( client_src, client_code ):
 
 # ------------------------------------------------- the controls exist and are wired
 
-def test_actions_column_has_a_header_and_a_cell( client_src ):
-    """A cell with no header silently shifts every column right of it."""
-    assert 'th class="task-col-actions"' in client_src
-    assert 'td class="task-col-actions"' in client_src
+def test_the_header_and_the_visible_line_walk_one_schema( client_code ):
+    """
+    A cell with no header silently shifts every column right of it.
+
+    ⚠️ RE-POINTED at 23bb0124 — THE CLAIM IS UNCHANGED, THE THING THAT GUARANTEES IT
+    MOVED. This test used to read `th class="task-col-actions"` and
+    `td class="task-col-actions"`. Both are gone, for two independent reasons, and
+    only the first of them is about actions:
+
+      · actions left ROW_SCHEMA.line1 for .line3, so it is no longer a COLUMN at all
+        — it is a field behind the disclosure, and a `<th>` for it would be wrong.
+      · the header and the cells are no longer hand-written. `_rowTableHeaderRow`
+        and `_renderRow` both `.map()` over ROW_SCHEMA.line1, so a header that has
+        drifted from its rows is not a defect that is caught — it is one that cannot
+        be expressed.
+
+    🔴 SO THE LITERALS WERE NOT THE PROPERTY, THEY WERE ONE ERA'S EVIDENCE FOR IT.
+    Re-asserting `task-col-actions` would restore a column Rick's line-3 ruling
+    deliberately removed, and updating the literals to whatever the file now says
+    would agree with the code forever — including the day the code is wrong.
+
+    What is asserted instead is the guarantee itself: NEITHER builder may hand-write
+    a column. The one exception is the disclosure toggle, which is not a field, and
+    it must appear in BOTH — a control cell with no header shifts the columns exactly
+    the way a field cell with no header does.
+
+    ⚠️ SCOPE. This is a text guard on a JS asset; it cannot render. What the header
+    and the rows PRODUCE is compared cell-for-cell in
+    `notifications_js/the_row_is_one_shape_in_all_three_panes.test.ts` — tests 1, 4
+    and 5 — which loads this same file into a VM and runs it. That tier drives the
+    ROWS in all three panes and never calls either header builder, so the header half
+    of this contract is guarded HERE and nowhere else.
+    """
+    header = function_body( client_code, "_rowTableHeaderRow() {" )
+    row    = function_body( client_code, "_renderRow( task, ianaZone, opts ) {" )
+
+    for name, body in ( ( "header", header ), ( "row", row ) ):
+        assert "this.ROW_SCHEMA.line1" in body and ".map(" in body, (
+            f"the {name} no longer walks ROW_SCHEMA.line1 — it has gone back to a "
+            f"hand-written list, which is free to drift from the other one"
+        )
+
+    # 🔴 ONE SIDE OF THIS COMPARISON IS A HAND-WRITTEN NUMBER, ON PURPOSE.
+    # The first cut derived the field names FROM ROW_SCHEMA and then asserted about the
+    # client — two sides out of one source, which agrees with the code forever. MEASURED,
+    # not reasoned: an arm that hand-wrote `<th class="task-col-owner">` into the header
+    # SURVIVED, because `owner` is not in ROW_SCHEMA and so was not in the list the test
+    # built to look for. A column left behind after its field leaves the schema is
+    # EXACTLY the drift this test is named for, and the derived form could not see it.
+    #
+    # So the expectation is a literal 1, which the client cannot move: each builder may
+    # hand-write exactly ONE column, and the assertion below names which one it must be.
+    for name, body, tag in ( ( "header", header, "th" ), ( "row", row, "td" ) ):
+        written = re.findall( rf'<{tag} class="task-col-([a-z0-9-]+)"', body )
+        assert written == [ "disclose" ], (
+            f"the {name} hand-writes {written!r}; the only column either builder may write "
+            f"by hand is the disclosure toggle. Everything else must come from the "
+            f"ROW_SCHEMA walk, or it is a second source free to drift from the other line."
+        )
+
+    # The toggle is the deliberate exception — it names a control, not a field, so it
+    # is not in ROW_SCHEMA and IS written by hand. It still needs both halves: a
+    # trailing cell with no trailing header shifts nothing visibly and misaligns the
+    # whole line, which is the failure this test has always been about.
+    assert '<th class="task-col-disclose"' in header, "the disclosure column has a cell but no header"
+    assert '<td class="task-col-disclose"' in row,    "the disclosure column has a header but no cell"
 
 
 def test_drop_and_park_are_dispatched_from_the_delegated_handler( client_src, actions_cell ):
@@ -847,25 +909,58 @@ def test_an_empty_holding_area_says_so_in_words( client_src ):
 
 def test_the_table_header_has_one_source_shared_with_the_rows( client_code ):
     """
-    The holding area renders `_renderTaskRow` output — twelve cells. A second
-    hand-written <thead> there could drift from the row renderer and would then
-    mislabel every column to the right of the drift, silently, because the table
-    still renders perfectly.
+    The holding area renders `_renderTaskRow` output. A second hand-written <thead>
+    there could drift from the row renderer and would then mislabel every column to
+    the right of the drift, silently, because the table still renders perfectly.
 
-    The row's error stripe spans the same twelve columns, so the colspan is part of
-    the same contract.
+    The row's disclosed line and error stripe span the same columns, so the colspan
+    is part of the same contract.
+
+    ⚠️ RE-POINTED at 23bb0124 — TWO LEGS MOVED, THE MIDDLE ONE DID NOT. This used to
+    count `<th class="task-col-id">ID</th>` and require `colspan="12"`. Both literals
+    are gone because both are now DERIVED: the header maps over ROW_SCHEMA.line1, and
+    every colspan in the three panes reads `_rowWidth()`.
+
+    🔴 AND THAT IS WHY NEITHER LITERAL COMES BACK IN AN UPDATED FORM. `colspan="6"`
+    would be today's right answer and tomorrow's stale one — the exact defect the
+    derivation removed, re-introduced by the test that exists to prevent it. What is
+    pinned instead is that the count is not written down at all.
+
+    The middle leg is untouched and still earns its place: the header existing once
+    stays true when a table simply stops rendering one.
     """
-    assert client_code.count( '<th class="task-col-id">ID</th>' ) == 1, (
-        "the table header exists in more than one place and can drift from the rows"
+    theads = [ block for block in re.findall( r"<thead>.*?</thead>", client_code, re.DOTALL )
+                     if "task-col-" in block ]
+    assert len( theads ) == 1, (
+        f"{len( theads )} row-table headers exist in the client; there must be exactly one "
+        f"source or they can drift from each other and from the rows. (The fleet table's "
+        f"own <thead> is a different table with fleet-col-* columns and is not counted.)"
     )
     # ...and the holding table must actually CALL it. Asserting the header exists
     # once stays true when the second table simply stops rendering one — measured:
     # deleting the call left this test green and the pane headerless.
     group_renderer = function_body( client_code, "_renderHoldingAreaGroup( filer, tasks ) {" )
     assert "_taskTableHeaderRow()" in group_renderer, (
-        "the holding-area table renders rows with no header; twelve unlabelled columns"
+        "the holding-area table renders rows with no header; unlabelled columns"
     )
-    assert 'colspan="12"' in client_code
+
+    # The spanning rows must take their width from the same place the header takes
+    # its columns. A literal here renders perfectly while it is wrong, which is the
+    # whole reason it is worth a test.
+    row = function_body( client_code, "_renderRow( task, ianaZone, opts ) {" )
+    assert "this._rowWidth()" in row, "the row renderer no longer derives its span width"
+    for scope_name, signature in (
+        ( "the shared row renderer",    "_renderRow( task, ianaZone, opts ) {" ),
+        ( "the holding-area group",     "_renderHoldingAreaGroup( filer, tasks ) {" ),
+        ( "the epic group renderer",    "_renderEpicGroup( epicKey, headerLabel, tasks, state, extraClass, storyText ) {" ),
+    ):
+        body    = function_body( client_code, signature )
+        literal = re.search( r'colspan="\d+"', body )
+        assert literal is None, (
+            f'{scope_name} carries a literal {literal.group( 0 ) if literal else ""} — '
+            f"every span in these panes must read _rowWidth(), or it silently stops "
+            f"spanning the day a column is added and the table still renders perfectly"
+        )
 
 
 def test_the_holding_area_rides_the_task_list_tick( client_code ):
@@ -902,20 +997,6 @@ def test_the_holding_pane_is_grouped_by_filer_not_owner( client_src, client_code
 # ------------------------------------------------- the epic board acts, it does not only report
 
 
-def test_the_epic_board_carries_the_same_controls( client_code ):
-    """
-    Rick's order named three panes, not two: "the UI toggles and controls that I
-    need to manage the holding area along with the epic board along with the task
-    list". The epic row was read-only, so a row noticed here had to be found again
-    in the pane above before anything could be done about it.
-
-    The narrowness rule for this pane is about not duplicating INFORMATION. A
-    control is not information.
-    """
-    assert 'th class="epic-col-actions"' in client_code, "the epic board has no Actions header"
-    assert 'td class="epic-col-actions"' in client_code, "the epic board has no Actions cell"
-
-
 def test_the_epic_board_reuses_the_shared_actions_cell( client_code ):
     """
     🔴 THE PROPERTY THAT MATTERS, not the presence of buttons. `_taskActionsCell`
@@ -923,31 +1004,61 @@ def test_the_epic_board_reuses_the_shared_actions_cell( client_code ):
     approve/demote mutual exclusion. A hand-rolled copy in the epic renderer would
     be a second place for all of those to drift out of step with the server, and
     the drift would surface as 422s on one pane and not the other.
+
+    ⚠️ RE-POINTED at 23bb0124 — THE CLAIM SURVIVED A CHANGE THAT MADE IT STRONGER.
+    This used to read `this._taskActionsCell( task )` inside `_renderEpicRow`. The
+    epic renderer no longer calls it, and no longer builds a row at all: it delegates
+    to `_renderRow`, the single implementation all three panes share. So the shared
+    cell is reached TRANSITIVELY, and asserting the old direct call would now demand
+    a second call site — the duplication this test exists to forbid.
+
+    🔴 AND WHY THIS IS NOT A TAUTOLOGY UPDATED TO MATCH THE FILE. Two other guards
+    already prove the epic pane and the task list agree, by RUNNING them:
+    `the_row_is_one_shape_in_all_three_panes.test.ts` test 4 diffs their visible line
+    cell-for-cell, and test 6 requires every line-3 field — actions among them — to
+    be present behind the disclosure in every pane. Neither can see a SECOND copy
+    that happens to render the same class names, which is exactly the drift-prone
+    shape this is about. That gap is what is asserted here.
     """
     epic_row = function_body( client_code, "_renderEpicRow( task ) {" )
-    assert "this._taskActionsCell( task )" in epic_row, (
-        "the epic board builds its own controls instead of reusing the shared cell"
+    assert "this._renderRow(" in epic_row, (
+        "the epic board no longer delegates to the shared row renderer — whatever it "
+        "builds instead is a second copy of every rule the shared row carries"
     )
-    for rolled_by_hand in ( "task-drop-button", "task-park-button", "task-wont-fix-button" ):
-        assert rolled_by_hand not in epic_row, (
-            f"the epic renderer emits {rolled_by_hand} directly — a second copy of the legality rules"
+    for markup in ( "<tr", "<td", "<th" ):
+        assert markup not in epic_row, (
+            f"the epic renderer emits {markup} of its own; the whole point of the "
+            f"delegation is that this pane contributes no markup to drift"
         )
 
+    # ONE call site, derived rather than named: any hand-rolled cell in any pane has
+    # to reach the shared builder to inherit its rules, and the moment two callers
+    # exist the rules have two places to be applied differently.
+    assert client_code.count( "this._taskActionsCell(" ) == 1, (
+        f"_taskActionsCell has {client_code.count( 'this._taskActionsCell(' )} call sites; "
+        f"one pane is building its controls somewhere other than the shared row"
+    )
 
-def test_the_epic_colspans_moved_with_the_new_column( client_code ):
-    """
-    A group header, a story row and an error stripe all span the epic table. Add a
-    column and leave a colspan behind and the table still renders perfectly — it
-    just stops spanning, which reads as a styling quirk rather than as the missed
-    edit it is. Same coupling the twelve-column task table documents.
-    """
-    epic = function_body( client_code, "_renderEpicRow( task ) {", until="renderEpicBoard(" )
-    assert 'colspan="4"' not in epic, (
-        "an epic-table colspan still says 4 after the Actions column was added"
-    )
-    assert epic.count( 'colspan="5"' ) >= 3, (
-        "expected the error stripe, the group header and the story row to span 5 columns"
-    )
+
+# ⚠️ TWO TESTS WERE RETIRED HERE at 23bb0124, and where their claims went:
+#
+#   · test_the_epic_board_carries_the_same_controls  — asserted `epic-col-actions`
+#     header and cell. The epic board no longer has columns of its own at all; it
+#     renders `_renderRow` output, so its controls are the task list's controls by
+#     construction. The claim ("this pane acts, it does not only report") is driven
+#     rather than grepped by the_row_is_one_shape_in_all_three_panes.test.ts test 6,
+#     which requires the actions field behind the disclosure IN EVERY PANE.
+#
+#   · test_the_epic_colspans_moved_with_the_new_column — asserted `colspan="5"` at
+#     least three times and no `colspan="4"`. Every colspan in the three panes now
+#     reads `_rowWidth()`. Test 7 of that same TypeScript guard is strictly stronger
+#     than either literal: it renders each pane and compares each spanning row's
+#     colspan against the number of cells actually emitted, so a literal that is
+#     merely CORRECT today would still fail the day it stops matching. A literal
+#     re-pinned here could not.
+#
+# They are named rather than deleted silently because "this test disappeared" and
+# "this test's claim disappeared" are different facts, and only the first is true.
 
 
 # ------------------------------------------------- the check the other 34 cannot make

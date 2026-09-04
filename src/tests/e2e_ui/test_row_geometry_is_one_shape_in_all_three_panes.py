@@ -827,3 +827,439 @@ class TestTheDisclosedRowsWearTheSameSkinAsTheirRow:
                                  f"against row 1's {r[ 'row1Bg' ]!r} — Rick's \"they are darker\"" )
 
         assert not problems, "Disclosed-row skin:\n  " + "\n  ".join( problems )
+
+
+# ---------------------------------------------------------------------------
+# ARM 5 — LINE 3 REACHES THE ROW'S RIGHT EDGE
+# ---------------------------------------------------------------------------
+
+# Measure how far line 3's content actually gets, against line 3's own box.
+#
+# 🔴 THREE BOXES, NOT ONE, AND THE FIRST TWO ALONE PASS OVER AN INVISIBLE FIX.
+# Measured on the way to this fix: adding `flex: 1 1 auto` to the actions FIELD
+# carried the field to 1080 — 0.0px short, every field-level assertion satisfied
+# — while `.task-actions` inside it stayed at 665px ending at 990, byte-identical
+# to the defect. The box reached the right edge and nothing on screen moved. So
+# the strip is measured too, and the reason input's width is reported alongside
+# because it is the only thing that visibly consumes the room.
+#
+# Against line 3's OWN right edge rather than the table's: `.task-disclosed` is
+# inset 18px by its padding, line 2 sits at the same 1080, and pinning a padding
+# value here would make this arm fail for a reason that is not the defect.
+_LINE3_RIGHT_EDGE_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    if ( !pane ) return { found: false, why: "pane missing" };
+    const table = pane.querySelector( "table" );
+    if ( !table ) return { found: false, why: "table missing" };
+    const open = [ ...pane.querySelectorAll( ".task-controls-row" ) ].filter( r => !r.hidden );
+    if ( !open.length ) return { found: false, why: "no disclosed row is open" };
+
+    const td   = open[ 0 ].querySelector( "td" );
+    const line = open[ 0 ].querySelector( ".task-disclosed-line--actions" );
+    if ( !td || !line ) return { found: false, why: "no action line on the disclosed row" };
+
+    const fields = [ ...line.querySelectorAll( ".task-disclosed-field" ) ];
+    if ( !fields.length ) return { found: false, why: "line 3 has no fields" };
+    const strip  = line.querySelector( ".task-actions" );
+    const reason = line.querySelector( ".task-reason-input" );
+
+    const R = e => +e.getBoundingClientRect().right.toFixed( 1 );
+    const L = e => +e.getBoundingClientRect().left.toFixed( 1 );
+    const l2  = open[ 0 ].querySelector( ".task-disclosed-line--fields" );
+    const l2f = l2 ? l2.querySelector( ".task-disclosed-field" ) : null;
+
+    return {
+        found       : true,
+        headerCells : table.querySelectorAll( "thead tr th" ).length,
+        colspan     : parseInt( td.getAttribute( "colspan" ), 10 ),
+        tdRight     : R( td ),
+        tableRight  : R( table ),
+        tableLeft   : L( table ),
+        lineLeft    : L( line ),
+        lineRight   : R( line ),
+        firstFieldL : L( fields[ 0 ] ),
+        lastFieldR  : R( fields[ fields.length - 1 ] ),
+        line2FirstL : l2f ? L( l2f ) : null,
+        line2Right  : l2  ? R( l2 )  : null,
+        stripR      : strip ? R( strip ) : null,
+        reasonWidth : reason ? +reason.getBoundingClientRect().width.toFixed( 1 ) : null
+    };
+}
+"""
+
+
+# The widest right-hand gutter line 3 may leave against the TABLE's own box. A LITERAL on
+# purpose: its provenance has to be independent of every stylesheet value this arm measures,
+# and 24 leaves headroom for an ordinary padding tweak while sitting far below the 88-125px
+# the defect actually measured. Measured today: 18.0px in all three panes.
+_LINE3_MAX_RIGHT_GUTTER_PX = 24
+
+
+class TestLine3ReachesTheRowsRightEdge:
+    """
+    Rick's P1, row 5f982bbd — "not expanding fully to the rightmost edge of the
+    table layout area ... stopping before the priority column in all contexts."
+
+    🔴 THE FOUR ARMS ABOVE ALL PASSED THROUGH THIS DEFECT. Arm 4a measures line
+    3's detail field WIDTH, its icon's OVERLAP with the actions block, and the
+    CLICK — and not one of them asks how far the line gets. A line whose content
+    stops 90px short satisfies every one of them.
+
+    MEASURED BEFORE THE FIX, at b78c7651, pane 916px, a row open in each pane:
+
+        pane            line 3 box   content ends at   short by   reason input
+        task list        200..1080        990.0          90.0px      175px
+        holding area     200..1080        973.0         107.0px      175px
+        epic board     201.5..1080        991.5          88.5px      175px
+
+    ⚠️ THE COLSPAN WAS THE FIRST HYPOTHESIS AND IT WAS WRONG, which is why this
+    arm checks it rather than assuming either way: six header cells and
+    `colspan="6"` in all three panes, the `<td>` box identical to the table's.
+    The span was complete and the CONTENT inside it stopped short. Three
+    different stop positions across three panes is the tell — a short span would
+    have stopped all three at one column boundary.
+    """
+
+    def test_line_3_content_reaches_the_lines_right_edge_in_every_pane( self, logged_in_page ):
+        """
+        The last field on line 3, and the control strip inside it, both reach the
+        line's own right edge.
+
+        ⚠️ THE STRIP IS THE HALF THAT CATCHES AN INVISIBLE FIX. Growing the field
+        alone satisfies `lastFieldR` while the strip stays where the defect left
+        it, and the page looks exactly as Rick reported it.
+        """
+        page = _seeded_page( logged_in_page )
+        _open_every_pane( page )
+
+        problems = []
+        for name, container, _ in PANES:
+            r = page.evaluate( _LINE3_RIGHT_EDGE_JS, container )
+            if not r[ "found" ]:
+                problems.append( f"{name}: {r.get( 'why' )}" )
+                continue
+
+            if r[ "colspan" ] != r[ "headerCells" ]:
+                problems.append( f"{name}: the disclosed cell spans {r[ 'colspan' ]} of "
+                                 f"{r[ 'headerCells' ]} header columns" )
+            if abs( r[ "tdRight" ] - r[ "tableRight" ] ) > 1:
+                problems.append( f"{name}: the disclosed cell ends at {r[ 'tdRight' ]} against "
+                                 f"the table's {r[ 'tableRight' ]}" )
+
+            # Both insets are measured from the TABLE's box, never from the line's.
+            #
+            # 🔴 CORRECTED 2026-09-04 (Rachel 🕊️, reviewing). The first cut of this comment
+            # claimed table-anchoring defeats "a colspan or padding drift". THE COLSPAN HALF
+            # IS TRUE and is carried by the two explicit clauses above — `colspan ==
+            # headerCells` and `tdRight ~= tableRight`. THE PADDING HALF WAS FALSE, and the
+            # clause below is what closes it.
+            #
+            # MEASURED, arm MPAD: `.task-disclosed` padding 10px -> 40px. Line 3 then ends at
+            # 1050 instead of 1080 — 48px short of the table's 1098, in ALL THREE PANES, which
+            # is Rick's own reported symptom — and this file reported 10 passed. The symmetry
+            # comparison below asks whether the two insets AGREE WITH EACH OTHER and never
+            # whether either has a PARTICULAR VALUE, so anything moving both edges inward
+            # equally is invisible to it: two sides that move together cannot disagree.
+            leftInset  = r[ "firstFieldL" ] - r[ "tableLeft" ]
+            rightInset = r[ "tableRight" ]  - r[ "lastFieldR" ]
+
+            if rightInset - leftInset > 1:
+                problems.append( f"{name}: line 3's content is inset {leftInset:.1f}px from the "
+                                 f"table's left and {rightInset:.1f}px from its right — it stops "
+                                 f"{rightInset - leftInset:.1f}px short of where its own left edge "
+                                 f"says it should reach. Rick's report" )
+
+            # 🔴 THE CLAUSE THAT SURVIVES A PADDING DRIFT. One side of this comparison must
+            # come from somewhere the stylesheet cannot reach, or the two move together and
+            # the assertion is an identity wearing an assertion's clothes.
+            #
+            # ⚠️ AND `getComputedStyle` IS NOT THAT SOMEWHERE — this is the version I wrote
+            # first and threw away. Deriving the expectation from the td's and
+            # `.task-disclosed`'s own computed padding gives `8 + 40 == 48` under MPAD and
+            # passes exactly as before, because the expectation drifts with the thing it is
+            # meant to catch. It reads like two provenances and is one.
+            #
+            # ⚠️ IT IS A CEILING, NOT AN EQUALITY, and deliberately so. Pinning the exact
+            # padding would redden this arm for a design tweak that is not the defect — which
+            # is the objection the original comment correctly raised against a literal. A
+            # ceiling states the REQUIREMENT instead: line 3 must REACH the row's right edge,
+            # and a gutter wider than this is not a gutter, it is the defect. Today's inset is
+            # 18.0px in all three panes; 108 / 125 / 107 is what the defect measured.
+            if rightInset > _LINE3_MAX_RIGHT_GUTTER_PX:
+                problems.append( f"{name}: line 3 stops {rightInset:.1f}px short of the table's right "
+                                 f"edge, past the {_LINE3_MAX_RIGHT_GUTTER_PX}px this row allows. It "
+                                 f"does not reach the edge — Rick's report, row 5f982bbd. A drift that "
+                                 f"moves BOTH insets equally satisfies the symmetry check above and is "
+                                 f"caught only here (left inset {leftInset:.1f}px)" )
+
+            if r[ "stripR" ] is None:
+                problems.append( f"{name}: no .task-actions strip on line 3 — nothing to measure" )
+            else:
+                stripInset = r[ "tableRight" ] - r[ "stripR" ]
+                if stripInset - leftInset > 1:
+                    problems.append( f"{name}: the control strip is inset {stripInset:.1f}px from the "
+                                     f"table's right against line 3's own {leftInset:.1f}px on the "
+                                     f"left. The field box can reach the edge while the strip does "
+                                     f"not, and THAT fix changes nothing on screen (reason input "
+                                     f"{r[ 'reasonWidth' ]}px)" )
+
+            # Line 2 is the sibling that was never reported broken, so it is the
+            # standing answer to "how far should a disclosed line reach?". Asserting
+            # the two AGREE is what makes this arm about the block rather than about
+            # one line's arithmetic with itself.
+            if r[ "line2Right" ] is not None and r[ "line2FirstL" ] is not None:
+                l2Left  = r[ "line2FirstL" ] - r[ "tableLeft" ]
+                if abs( l2Left - leftInset ) > 1:
+                    problems.append( f"{name}: line 2 starts {l2Left:.1f}px inside the table and "
+                                     f"line 3 starts {leftInset:.1f}px — the two disclosed lines "
+                                     f"no longer share one left edge" )
+
+        assert not problems, "Line 3 right edge:\n  " + "\n  ".join( problems )
+
+
+# ---------------------------------------------------------------------------
+# ARM 6 — ONE CLICK ON THE ID CELL PUTS THE FULL ID ON THE CLIPBOARD
+# ---------------------------------------------------------------------------
+
+# Click the id cell and report what the CLIPBOARD holds, plus whether the row
+# toggled. Both halves are required and neither implies the other.
+#
+# 🔴 THE CELL SHOWS 8 CHARS AND THE VERBS TAKE 36. `_taskIdLabel` slices the id
+# for the column's width, so a handler reading the cell's TEXT returns something
+# that looks like an id and fails at the paste — in whatever tool Rick pasted it
+# into, not here. The seeded ids are full uuids precisely so this arm can tell a
+# 36-char answer from an 8-char one; a fixture with short ids could not.
+#
+# ⚠️ AND THE ROW MUST NOT ALSO TOGGLE. The id cell sits in a row whose click
+# already opens the disclosure. Copy-AND-toggle is not what was asked for and is
+# invisible in the source — only a driven click shows it, which is why this arm
+# records the disclosure's state either side of the click.
+_ID_COPY_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    if ( !pane ) return { found: false, why: "pane missing" };
+    const cell = pane.querySelector( ".task-id-copy" );
+    if ( !cell ) return { found: false, why: "no id-copy cell rendered" };
+
+    const row  = cell.closest( "tr" );
+    const ctl  = row ? row.nextElementSibling : null;
+    const wasOpen = !!( ctl && ctl.classList.contains( "task-controls-row" ) && !ctl.hidden );
+
+    cell.scrollIntoView( { block: "center", inline: "nearest" } );
+    const r  = cell.getBoundingClientRect();
+    const cx = ( r.left + r.right ) / 2, cy = ( r.top + r.bottom ) / 2;
+    const clear = cy > 60 && cy < window.innerHeight - 10;
+    const hit = clear ? document.elementFromPoint( cx, cy ) : null;
+
+    return {
+        found      : true,
+        declared   : cell.dataset.taskFullId || "",
+        rendered   : cell.textContent.trim(),
+        wasOpen    : wasOpen,
+        judgeable  : clear,
+        hitIsCell  : clear ? !!( hit && hit.closest && hit.closest( ".task-id-copy" ) ) : null
+    };
+}
+"""
+
+_ID_CLICK_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    const cell = pane.querySelector( ".task-id-copy" );
+    if ( !cell ) return false;
+    cell.dispatchEvent( new MouseEvent( "click", { bubbles: true } ) );
+    return true;
+}
+"""
+
+_ID_AFTER_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    const cell = pane.querySelector( ".task-id-copy" );
+    const row  = cell ? cell.closest( "tr" ) : null;
+    const ctl  = row ? row.nextElementSibling : null;
+    return {
+        isOpen    : !!( ctl && ctl.classList.contains( "task-controls-row" ) && !ctl.hidden ),
+        copyState : cell ? ( cell.dataset.copyState || "" ) : ""
+    };
+}
+"""
+
+
+class TestClickingTheIdCellCopiesTheFullId:
+    """
+    Rick's row dbb4c187, by voice: "I want the ID to be copy upon click ... I
+    literally have to double click, copy. Want it to be 1 click."
+
+    🔴 THE ARM READS THE CLIPBOARD, NOT THE HANDLER. A test that asserts the
+    handler was called, or that a data attribute carries the id, passes over a
+    `navigator.clipboard` that refused — and a refused copy is exactly the
+    failure Rick would experience as a dead click. The context is granted
+    clipboard permissions so the real write can be read back.
+
+    ⚠️ ALL THREE PANES, BECAUSE THE PANE THAT MISSES OUT IS THE POINT. One
+    emitter feeds task list, holding area and epic board, and the last two
+    behaviours added to this row (the detail 📄's handler, the accent bar)
+    each shipped live in one pane and inert in the others.
+    """
+
+    def test_one_click_on_the_id_cell_copies_the_full_id_and_does_not_toggle_the_row( self, logged_in_page ):
+        page = _seeded_page( logged_in_page )
+        page.context.grant_permissions( [ "clipboard-read", "clipboard-write" ] )
+
+        problems = []
+        for name, container, _ in PANES:
+            before = page.evaluate( _ID_COPY_JS, container )
+            if not before[ "found" ]:
+                problems.append( f"{name}: {before.get( 'why' )}" )
+                continue
+
+            full = before[ "declared" ]
+            if len( full ) != 36:
+                problems.append( f"{name}: the cell declares {full!r} ({len( full )} chars) as the "
+                                 f"full id — the store's verbs take 36" )
+            if len( before[ "rendered" ] ) >= 36:
+                problems.append( f"{name}: the cell RENDERS {before[ 'rendered' ]!r} — this arm cannot "
+                                 f"tell a full-id copy from a text copy when the two are the same" )
+            if not before[ "judgeable" ]:
+                problems.append( f"{name}: the id cell could not be brought clear of the fixed nav, "
+                                 f"so its reachability was NOT JUDGED — refusing to report a pass" )
+            elif not before[ "hitIsCell" ]:
+                problems.append( f"{name}: something else answers a click at the id cell's centre" )
+
+            page.evaluate( "() => navigator.clipboard.writeText( 'SENTINEL-NOT-AN-ID' )" )
+            if not page.evaluate( _ID_CLICK_JS, container ):
+                problems.append( f"{name}: no id cell to click" )
+                continue
+            page.wait_for_timeout( 250 )
+
+            got   = page.evaluate( "() => navigator.clipboard.readText()" )
+            after = page.evaluate( _ID_AFTER_JS, container )
+
+            if got == "SENTINEL-NOT-AN-ID":
+                problems.append( f"{name}: the click left the sentinel on the clipboard — the id "
+                                 f"cell is rendered and reaches no handler at all" )
+            elif got != full:
+                problems.append( f"{name}: the clipboard holds {got!r} against the declared "
+                                 f"{full!r} — a copy that fails at the paste" )
+
+            if after[ "copyState" ] != "copied":
+                problems.append( f"{name}: the cell reports copy state {after[ 'copyState' ]!r} — "
+                                 f"a copy with no confirmation reads as a dead click" )
+            if after[ "isOpen" ] != before[ "wasOpen" ]:
+                problems.append( f"{name}: the click ALSO toggled the row's disclosure "
+                                 f"({before[ 'wasOpen' ]} -> {after[ 'isOpen' ]}) — it copied and "
+                                 f"opened on one click" )
+
+        assert not problems, "Id-cell copy:\n  " + "\n  ".join( problems )
+
+
+# ---------------------------------------------------------------------------
+# ARM 7 — NO CELL BORDER SILENTLY SHRINKS A PANE'S COLUMN GRID
+# ---------------------------------------------------------------------------
+
+_GRID_JS = """
+( container ) => {
+    const pane  = document.querySelector( container );
+    if ( !pane ) return { found: false, why: "pane missing" };
+    const table = pane.querySelector( "table" );
+    if ( !table ) return { found: false, why: "table missing" };
+
+    const W = e => +e.getBoundingClientRect().width.toFixed( 2 );
+    const L = e => +e.getBoundingClientRect().left.toFixed( 2 );
+
+    const ths = [ ...table.querySelectorAll( "thead tr th" ) ];
+    let sum = 0; ths.forEach( h => sum += W( h ) );
+
+    // Every cell and row-group, not just the first row. The offending element was a
+    // GROUP HEADER cell, and a probe that read row 1 reported a clean table.
+    const offenders = [];
+    table.querySelectorAll( "tr, td, th, tbody, thead" ).forEach( e => {
+        const s = getComputedStyle( e );
+        if ( ( parseFloat( s.borderLeftWidth  ) || 0 ) > 0 ||
+             ( parseFloat( s.borderRightWidth ) || 0 ) > 0 )
+            offenders.push( e.tagName + "." + ( e.className || "" ) +
+                            " (left " + s.borderLeftWidth + ", right " + s.borderRightWidth + ")" );
+    } );
+
+    const thead = table.querySelector( "thead" );
+    return {
+        found      : true,
+        headerCells: ths.length,
+        tableW     : W( table ),
+        thSum      : +sum.toFixed( 2 ),
+        tableLeft  : L( table ),
+        theadLeft  : thead ? L( thead ) : null,
+        offenders  : offenders
+    };
+}
+"""
+
+
+class TestNoCellBorderShrinksTheColumnGrid:
+    """
+    🔴 THE EPIC BOARD'S SIX COLUMNS WERE EACH NARROWER THAN THE SAME COLUMN NEXT DOOR,
+    AND ARM 1 WAS GREEN OVER IT. Measured at 23bb0124, pane 916px:
+
+        pane            header cells SUM   table w   delta
+        task list             916.00        916.00    0.00
+        holding area          916.00        916.00    0.00
+        epic board            914.51        916.00    1.49
+
+    `.epic-group-drift-header td` carried `border-left: 3px`. A border PARTICIPATES IN
+    LAYOUT, and under `border-collapse: collapse` the table resolves ONE collapsed border
+    per edge across every row — so a single 3px border ANYWHERE in the table put half of
+    it inside the table's own border box and inset `<thead>`, `<tbody>`, every row and
+    every column. The other two panes draw the identical 3px accent with
+    `box-shadow: inset` (`task-list.css:527`), which does not.
+
+    ⚠️ THIS ARM DELIBERATELY DOES NOT COMPARE INSETS ACROSS PANES, and that is the whole
+    design decision. `.epic-group-drift-header` / `.epic-group-on-rick-header` are
+    CONDITIONAL classes — no drift group rendered, no offset — so a cross-pane equality
+    assertion passes or fails depending on which epic groups the fixture happens to
+    contain. It would be flaky by construction and would read as a layout regression when
+    it was really a data change. What is asserted instead is the invariant that holds in
+    every pane on every board: A TABLE'S COLUMNS FILL ITS TABLE.
+
+    ⚠️ AND IT SCANS EVERY CELL, NOT ROW 1. The first probe for this defect read the first
+    row of each pane, found `borderLeftWidth: 0px` everywhere, and very nearly reported
+    "not the accent". The offending element was a group-header cell further down. A
+    population chosen by where you expect the defect cannot find it anywhere else.
+    """
+
+    def test_every_panes_columns_fill_its_own_table( self, logged_in_page ):
+        page = _seeded_page( logged_in_page )
+        _open_every_pane( page )
+
+        problems = []
+        for name, container, _ in PANES:
+            r = page.evaluate( _GRID_JS, container )
+            if not r[ "found" ]:
+                problems.append( f"{name}: {r.get( 'why' )}" )
+                continue
+
+            # Positive control against an empty scan: a table with no header cells would
+            # satisfy every assertion below by vacuum, and a sum of nothing is 0.
+            if r[ "headerCells" ] < 6:
+                problems.append( f"{name}: found only {r[ 'headerCells' ]} header cells — this arm "
+                                 f"did not measure the grid it claims to" )
+                continue
+
+            if abs( r[ "tableW" ] - r[ "thSum" ] ) > 1:
+                problems.append( f"{name}: the six columns sum to {r[ 'thSum' ]}px inside a "
+                                 f"{r[ 'tableW' ]}px table — {r[ 'tableW' ] - r[ 'thSum' ]:.2f}px of the "
+                                 f"grid is missing, so every column here is narrower than the same "
+                                 f"column in the other panes" )
+
+            if r[ "theadLeft" ] is not None and abs( r[ "theadLeft" ] - r[ "tableLeft" ] ) > 1:
+                problems.append( f"{name}: <thead> starts at {r[ 'theadLeft' ]} against the table's "
+                                 f"{r[ 'tableLeft' ]} — the row-group box is inset inside its own table" )
+
+            if r[ "offenders" ]:
+                problems.append( f"{name}: a cell or row-group carries a LAYOUT-PARTICIPATING border, "
+                                 f"which under border-collapse shrinks the whole grid: "
+                                 + "; ".join( r[ "offenders" ] ) +
+                                 ". Draw the accent with `box-shadow: inset` as task-list.css:527 does" )
+
+        assert not problems, "Column grid:\n  " + "\n  ".join( problems )

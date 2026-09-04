@@ -74,6 +74,21 @@ awk '/^\| defect \| owner/{t=1} t && NF==0{t=0} t && !/^\|.*\|$/{print FILENAME"
 | Four PROSE readers of the moved root-pointer name, left behind by `73caf656` | maria 🌸 | 2026-09-02 ~17:30 | 🔴 **found by Mr Radio 🦉 reviewing her fix at her request.** The code fix is complete — `slot_pointer_path` was the only executing reader. What was missed is the prose that ARGUES from the old layout: `memento_slot.py:33` justifies leg 2 by the shared pointer, and `:47`'s LAYOUT table still reads `slot=root POINTER .claude-memento.md`, **contradicting line 175 of its own file**; `reap_memento.py:49` and `:134` argue "never the root pointer" from persona-lessness, and CLAUDE.md cites that docstring as the authority on which door owns which slot. ⇒ **Her own rule one level down — a reader is any sentence the next person reasons from, not only a line that executes.** CLAUDE.md:2037/2053 and `lupin-app-splainer.ini:416` were the same staleness and are **already fixed by Mr Radio 🦉** (his file, his adjacent clause). ⚠️ Leg 2 still earns its place, for a DIFFERENT reason than it was built for: a persona outlives its sessions, so a stale same-persona pointer still names a foreign `session_id`. **Fix the premise, keep the leg.** |
 | A worker spawned into the MAIN checkout is announced only as a venv script's no-op | Mr Radio 🦉 | 2026-09-02 ~17:35 | 🔴 **maria 🌸's disclosure; the diagnosis is hers, the row is mine because I offered to take it so she could stay on the prose.** She read `REFUSING: <target> is the MAIN repo, which owns the real .venv` as a venv message. **SHE WAS RIGHT — IT IS ONE**, and my first framing to her ("a location refusal worded like an environment complaint") was wrong: `link-worktree-venv.sh:91` is correctly refusing to symlink the main repo's venv to itself, and its subject is the venv. ⇒ **The defect is a MISSING signal, not a badly-worded one.** `worktree_venv.py:111` maps that exit to `status: "main_repo"` under the comment *"is the main checkout - nothing to do"* — true of PROVISIONING, and the only place the LOCATION fact ever surfaces. It prints under `if debug:` and is not even a warning, so by default a spawn into the shared tree is **silent**. ⚠️ Same family as this file's *empty result is two failures wearing one face*, mirrored: **a benign no-op and an operationally significant placement print the same thing**, and here the code's own comment endorses the benign reading. Cost tonight: two workers in the main tree, one of which wrote to it during a live tier. **Fix names the placement at spawn time; do NOT touch the script — it is correct.** |
 | **H6 — the worktree tax is provisioned by nothing** (`node_modules`, root `.env` carrying `JWT_SECRET_KEY`, `src/scripts/cloud-run.env`) | 🔴 **UNASSIGNED — needs an owner** | 2026-09-03 ~23:05 | Named by Tiberius 👑 when closing `9d654899` as *"the largest thing this row leaves open"*; he correctly did not absorb it. **Three registers, no single guard**: a missing package that reads as a broken test, an import that refuses outright, nine unit failures naming an unset variable. ⚠️ **The unit tier is IMMUNE to the JWT one** — `src/cosa/tests/conftest.py` does an `os.environ.setdefault` at collection time — so 21,800 passing tests never notice and only something importing the assembled app refuses; **say that caveat wherever this is quoted**. Fix has a shape already: provision at spawn in the Python creators, same as `link-worktree-venv.sh`. 🔴 **Do NOT symlink anything under `src/conf/keys/`** — a venv is a build artifact, a key is a secret. Detail: TODO.md § HELD OUT OF THE STORE, H6. **The ticket-ratio gate refused the row; this line IS the assignment surface until it opens.** |
+| Row `5f982bbd` — line 3 stops short of the right edge in all three panes (P1, Rick's own report) | Pocholo 📣 implements; Rachel 🕊️ reviews | 2026-09-04 ~11:36 | 🔄 in flight — un-parked when its chase expired. ⚠️ **The row's own colspan hypothesis is REFUTED**: Rachel measured at `b78c7651` that line 3 has no colspan of its own, the containing `<td>` already spans all six columns, and the stop is INSIDE the cell — a flex row of two `inline-flex` fields. Go at the flex layer. **Venue correction, mine**: the line-3 arms live in `src/tests/e2e_ui/`, a Playwright :8000 suite — my brief pinned both seats to `src/tests/unit/`, which cannot see the new arm |
+| Row `dbb4c187` — click the ID cell, get the full id on the clipboard, all three panes (P2, Rick by voice) | Pocholo 📣 | 2026-09-04 ~11:40 | ⏸️ **QUEUED BEHIND `5f982bbd`, deliberately.** Same file, same emitter, same panes — a second seat in `notifications.js` in parallel is the two-suites-one-file collision this table exists to stop, so it is sequenced to one owner rather than staffed to two |
+| Row `331c8852` — fleet-cap slider, the one outstanding piece of Rick's cap order (P1) | Krishna 🦚 implements; Tiberius 👑 reviews | 2026-09-04 ~11:36 | 🔄 in flight — unblocked on **Rick's ruling by ask at ~11:35**, discharging María 🌸's hold by its own stated condition. 🔴 **Branch from `9c3c7cb3` on `wt-pocholo-fleet18`, NOT the working branch** — verified by me at 11:36, still NOT an ancestor of HEAD, so three built-and-green parts live there and nowhere else. Scope is the slider ONLY; "pool to 18" is dead scope |
+| The 19.5px — epic board's grid off by 1.5px from a layout-participating border (`epic-board.css:168`), conditional on the data; fix by box-shadow + a CROSS-PANE arm whose fixture carries the triggering classes | Rachel 🕊️ | 2026-09-04 ~14:31 | 🔄 in flight — she LOCATED it, mechanism named, not just measured. Lives on row `5f982bbd` (its guard); do NOT mint a new row, the ticket gate is refusing at ratio 1.14 |
+| False toggle claim — `046d9f52`'s message AND `_handleTaskIdCopyClick`'s docstring both state as fact that a row click toggles disclosure; measured false, only `.task-disclose-button` does | Rachel 🕊️ | 2026-09-04 ~14:47 | 🔄 in flight — reassigned off Cheech at his re-spin; durable text deserves a seat with headroom. The commit message cannot be rewritten, so the docstring is the artifact that reaches future readers |
+| Five stale text assertions in `test_task_row_state_controls.py` pinning `task-col-actions` / `colspan="5"` against `d6b3d819`'s deliberate removal | Cheech 🌿 (successor `8047f2a2`) | 2026-09-04 ~14:47 | 🔄 in flight — John `950b26f1` baselined them as PRE-EXISTING via `git show HEAD:` restore, byte-identical logs, and routed them here. ⚠️ Do NOT just make them pass: an assertion re-pointed at whatever the file now says is a tautology |
+| `test_task_body_overlay_cache_bust` — `/static/css/notifications.css` token did not follow its last change | Cheech 🌿 (successor `8047f2a2`) | 2026-09-04 ~14:47 | 🔄 in flight — likely a one-line `?v=` bump, but the guard discovers its own corpus and its skip counts misread easily across a multi-file invocation |
+| Reap resolves the io memento slot to the WORKTREE, reports a live memento as `timeout_no_memento` | Mr. Radio 🦉 | 2026-09-04 ~14:50 | ⛔ **HELD OUT OF THE STORE** — ticket gate refused at 422 (ratio 1.14, opens below 1.10, close 7 more). Not a P0 and I will not inflate one to clear a gate. Full finding below under 🔴 FINDING 2026-09-04 |
+| epic-board.css `?v=` stamp not bumped with Rachel's `6cbcbdb9` — the bump MUST descend from her commit or the guard still fails | Cheech 🌿 | 2026-09-04 ~15:04 | ⏳ waiting on `6cbcbdb9` to merge. **Row text supplied by Cheech, written here by me — the mandate says the MANAGER writes the line, and I had asked him to draft it, which handed my own obligation back to him. He declined and grepped first.** The debt is MINE: Rachel did not bump it because I told her not to, to avoid a collision that then did not materialise |
+| Cache-bust guard does not report its own denominator — a raw skip count from `test_task_body_overlay_cache_bust.py` is uninterpretable | Cheech 🌿 | 2026-09-04 ~15:09 | 🔄 in flight — **gate-refused at ratio 1.14, not inflated to P0.** The file has SIX parametrized functions each with its own skip conditions, so a ONE-FILE run is already a sum ACROSS FUNCTIONS. I told him to "confirm you ran one file" citing the multi-FILE trap; right in general, wrong for this file. A guard that prints how many assets it discovered can be caught being wrong; one printing only pass/fail cannot |
+| Review all six held commits — Rachel's `b0fb7668` `2a3e88a0` `6cbcbdb9` and Cheech's tip `6f6e42ef` | Rachel 🕊️ (successor `0228ce36`) | 2026-09-04 ~15:06 | 🔄 in flight — **none of the six is independently reviewed and the predecessor is author-AND-reviewer of her own GCP fix.** That is the gate short by one, so I spawned rather than merge on my own say-so. Seat freed by her own reap; cap untouched |
+| The 19.5px epic-board grid — **DONE** | Rachel 🕊️ (`aee594c8`) | 2026-09-04 ~14:31 | ✅ `6cbcbdb9` — *"One 3px border on one group-header cell made every epic column narrower than its twin"*, +37 CSS and a **110-line guard**. ⚠️ **She built the cross-pane guard I told her to SKIP and she was right to** — I read 47.4% as too tight; she knew her own window better than my sensor did |
+| False toggle claim in `_handleTaskIdCopyClick` — **DONE** | Rachel 🕊️ (`aee594c8`) | 2026-09-04 ~14:47 | ✅ `2a3e88a0` — and it **exceeded the brief**: I asked her to correct a false claim, she found the handler stops the click for a GOOD reason and the stated reason was simply the wrong one |
+| GCP comment fix on sam's orphaned H6 branch — **DONE** | Rachel 🕊️ (`aee594c8`) | 2026-09-04 ~14:39 | ✅ `b0fb7668` — *"A comment naming the variable is a reference to it, and the scan does not read comments differently"*. 🔴 **I blocked `dde8b87a` on Rick as "orphaned, no author" SEVEN MINUTES AFTER she fixed it** — I checked whether sam was alive and concluded the work was abandoned. A missing author is not a missing fix |
+| Five stale row-control assertions + cache-bust stamp — **DONE** | Cheech 🌿 (`8047f2a2`) | 2026-09-04 ~14:47 | ✅ `2391b602` `d5066a54` `6f6e42ef` — **zero new failures, six fixed**, and the two-tree reconciliation closes exactly: 8−6=2, 2+10=12, all ten worktree artifacts named and both missing inputs verified absent-here/present-in-main |
 
 🔴 **THE ASSIGNEE'S RULE — AND IT HAS NO CAVEAT.** If you HOLD an assignment and find no line for it here, you have found a **missing line, which is the signal**, and the fix is to tell Mr Radio 🦉 so he writes it. You know your own assignment; incompleteness of this table is never a reason to leave your own row unwritten. **Work that turns up with no entry here was either never assigned or assigned without being recorded, and both are worth
 stopping for.** (Rachel 🕊️,
@@ -92,6 +107,99 @@ state; the row now says so. Three merges from before the seed were added at the 
 one seat's DM record** — still a snapshot of what he holds rather than a read of any system, so the caveat stands. The caveat does NOT reach the
 assignee's rule above, and it is not a licence to skip the check — a miss means *ask*, not *proceed quietly*. Verify anything here that a decision rests on — the merge shas are
 `git merge-base --is-ancestor`-checkable and were checked; the assignment times are from DM timestamps.
+
+## 🔴 FINDING 2026-09-04 (Mr. Radio 🦉 `21dff055`, predicted by Cheech 🌿 `fc5c7aff`) — THE REAP RESOLVES THE io MEMENTO SLOT TO THE **WORKTREE**, AND REPORTS A LIVE MEMENTO AS `timeout_no_memento`
+
+**HELD OUT OF THE STORE, NOT DROPPED.** The ticket gate refused it at 422 — *"created 209, closed 183, ratio 1.14, opens below 1.10, close 7 more."* A P0 is exempt and **this is not a P0**; inflating it to clear a gate is the move Rachel 🕊️ refused an hour earlier and I am not taking it either. Filed here so it is durable, and it wants a row the moment the gate opens.
+
+**MEASURED** on a live reap of `cc-author-mr-radio-1` (Cheech, session `fc5c7aff`) at 14:33 EDT. The seat had ACKed ready-for-re-spin with a verified memento. The reap killed it and returned a verdict that is false in the most expensive direction:
+
+```
+status: timeout_no_memento
+reason: "asked, no fresh+complete memento within 45s (parked / slow / declined);
+         at ask time: no memento at slot"
+slot:   /mnt/DATA01/.../lupin-wt-cc-author-mr-radio-1/io/mementos/cheech.md
+```
+
+**WHAT IS ACTUALLY ON DISK**, verified by hand rather than taken on either party's word:
+
+```
+/mnt/DATA01/.../lupin/io/mementos/cheech-fc5c7aff.md   23,554 bytes   sha256 643aea06
+<!-- memento-record: persona=cheech session_id=fc5c7aff written_at=2026-09-04T14:30:28-04:00 slot=io -->
+```
+
+🔴 **MECHANISM CORRECTED 2026-09-04 15:20 — MY FIRST EXPLANATION WAS WRONG AND IT IS THE MORE EXPENSIVE HALF TO GET WRONG.** I wrote that *"`memento_io` resolves the io slot to the MAIN CHECKOUT — the same collapse-to-parent that `fleet_data_root()` does."* **There is no collapse-to-parent.** `memento_io.py` takes `--repo`, and **`--repo` defaults to CWD**. It writes wherever it is run from.
+
+**The receipt that broke my version**, measured when a third seat wrote one: Cheech `8047f2a2` produced a memento in the **worktree** (`…/lupin-wt-cc-author-mr-radio-1/io/mementos/`, 15:18) **and** in the main checkout (15:17) — a directory my finding said the writer never uses.
+
+| seat | where the writer put it | worktree slot exists? | reap verdict |
+|---|---|---|---|
+| Cheech `fc5c7aff` | main only | **no** | `timeout_no_memento` — **false** |
+| Rachel `aee594c8` | main only | **no** | `timeout_no_memento` — **false** |
+| Cheech `8047f2a2` | **both** | **yes** | not reaped |
+
+⇒ **THE TRUE SHAPE IS TWO DERIVATIONS OF ONE PATH, NOT A WRITER/READER CONSTANT.** The **writer** resolves from `--repo`/cwd; the **reap** resolves from the seat's worktree. They **agree** when the seat runs `memento_io` from its own worktree and **diverge** when it runs from the main checkout. Both reaped seats had written from main, which is why both reaps missed — and a seat that happens to write from its worktree would have been found, with nothing about the run telling anyone why.
+
+⚠️ **SO THE SYMPTOM AND THE COUNT IN THIS SECTION STAND UNCHANGED — n=2, both verdicts false, both files real.** What is withdrawn is only my account of WHY. **A wrong count gets re-derived by the next reader; a wrong mechanism sends them into innocent code** — here, into `fleet_data_root()`, which has nothing to do with this.
+
+⇒ **AND IT SHARPENS THE FIX.** *"Make the reap look in the main checkout"* — my original `DONE MEANS` — would be **wrong**, because the writer does not always put it there. The two sides must derive the path the SAME way, from a single source, and the interim control is unchanged: **verify on disk before calling the verb, never after.**
+
+⇒ **THE DIRECTORY THE REAP LOOKED IN DOES NOT EXIST AT ALL** — `ls` on the worktree path returns *No such file or directory*. `memento_io` resolves the io slot to the **MAIN CHECKOUT**, the same collapse-to-parent that `fleet_data_root()` does. **The writer was right and the reader was not.**
+
+🔴 **WHY THIS IS WORSE THAN A MISSING FILE.** `timeout_no_memento` is the verb's own name for **ABSENT AND UNRECOVERABLE** — its contract says so, and it is the one verdict a manager is told not to hunt behind. A manager who trusts it discards the seat's context and spawns blank. Here that would have thrown away **23,554 bytes and five amendments** from a seat whose memento was written, verified, mirrored and pointed correctly.
+
+⇒ **THE VERDICT TABLE HAS FOUR SHAPES AND NEEDS A FIFTH.** `prior_holder_present` (someone else's file) · `unproven_present` (yours, a gate failed) · `unparseable_present` (no header) · `timeout_no_memento` (absent). **None of them is *the verb looked in the wrong tree*** — and that case currently lands on the one verdict that means **stop looking**.
+
+⚠️ **WHO CAUGHT IT, AND THE TIMING IS THE POINT.** Cheech predicted it in a DM that arrived **the same second the reap fired**: *"you named a path inside MY WORKTREE; nothing is there; `memento_io` resolves the io slot to the MAIN checkout; check the verdict field."* He flagged the neighbouring `prior_holder_present` hazard unprompted as well. **The seat being reaped was the only one who knew where its own file was**, and by the time he could say so the verb had already answered.
+
+**SAME FAMILY, ALREADY IN CLAUDE.md** — `purge-pycache.sh` purging the main repo from inside a worktree while printing its success banner; `migrate-pyc-to-checked-hash.sh --verify` scanning `$LUPIN_ROOT/src` and certifying a tree you are not standing in. **This is the third member and the first that reports a FAILURE about the wrong tree rather than a success** — which is why nobody would have grepped for it. The family's known signature is a false green, and this one is a false red.
+
+⚠️ **A SECOND DEFECT FROM THE SAME OPERATION, DELIBERATELY NOT FOLDED IN.** The successor spawned with `seed_memento` pointing at the real record still booted **`SEED_NOT_CONSUMED`**. Whether it shares a cause with the above is **UNKNOWN and I am not asserting it does** — two defects in one operation are two defects until something links them. The wake check's own warning is the durable half: **a seed-less seat reads as IDLE rather than broken, so nothing else alarms on it.**
+
+⚠️ **AND ONE DISCREPANCY I HAVE NOT RESOLVED, STATED RATHER THAN SMOOTHED.** Record 23,554 bytes at sha `643aea06`; pointer `cheech.md` 23,914 at sha `5591db83`. The writer reported them equal. A 360-byte gap is consistent with a prepended pointer header and **I have not opened both to confirm it.**
+
+🔴 **SECOND RECEIPT, 82 MINUTES LATER, DIFFERENT PERSONA, DIFFERENT WORKTREE — IT REPRODUCES ON EVERY REAP.** Rachel 🕊️ (`aee594c8`), reaped 15:02. Same verdict, same shape:
+
+```
+status: timeout_no_memento
+slot:   /mnt/DATA01/.../lupin-wt-cc-reviewer-mr-radio-1/io/mementos/rachel.md   <- does not exist
+actual: /mnt/DATA01/.../lupin/io/mementos/rachel-aee594c8.md                    <- 38,504 bytes
+        header: session_id=aee594c8 written_at=2026-09-04T15:00:06-04:00 slot=io
+```
+
+⇒ **n=2 on two personas and two worktrees, so this is not one seat's accident.** And **both seats predicted it unprompted** — Cheech named the worktree-vs-main-checkout resolution before his reap fired, Rachel named it after hers. The people being reaped are the only ones who know where their own file is, and the verb answers before they can say so.
+
+✅ **AND THIS TIME IT COST NOTHING, WHICH IS THE POINT.** I verified the file on disk — path, size, header session id, and slot — BEFORE calling `dismiss_sessions`, precisely because of the first receipt. **The false verdict arrived into a decision that had already been made on evidence.** That is the interim control until the verb is fixed: never let this verdict be the thing you act on.
+
+**DONE MEANS**: the reap resolves the io slot to the main checkout the way `memento_io` does, proven by a guard that reaps a seat whose memento is at the real slot and asserts the verdict is `verified` rather than `timeout_no_memento` — **run BOTH ways**, so the guard is shown to discriminate rather than merely to pass.
+
+## 🔴 FINDING 2026-09-04 (Mr. Radio 🦉 `21dff055`) — THE FLEET CAP DOES NOT BIND ON ANY SEAT WHOSE MCP SUBPROCESS PREDATES `23bb0124`, AND MY FIRST DIAGNOSIS WAS WRONG
+
+**HELD OUT OF THE STORE** — same ticket gate, same refusal, same reason as the finding above. Not a P0.
+
+**THE OBSERVATION.** A dry-run 9th seat at 8/8 was **ALLOWED**. My first reading was *the dial I closed `331c8852` on governs nothing* — the row's own history makes that the obvious suspicion, since `resolve_fleet_cap` shipped at `93f167e4` with zero production callers. **That reading was wrong and it is the reason this entry exists.**
+
+**THREE ARMS, ONE VARIABLE:**
+
+| arm | `default_fleet_gate( 1 )` |
+|---|---|
+| fresh process, `LUPIN_ROOT` set | ✅ **REFUSES** — *"cap is 8 and the fleet is already running 8 (3 managers, 5 workers). Requested 1; 0 seats free."* |
+| fresh process, `LUPIN_ROOT` **unset** | `None` — the documented fail-open |
+| fresh process, the live MCP's **exact env AND cwd** (`cwd=lupin-mobile`) | ✅ **REFUSES** — so cwd is not the variable |
+
+⇒ **THE CAUSE IS PROCESS AGE AND IT IS ARITHMETIC.** The gate reached the spawn path on the working branch at **`23bb0124`, 14:13**. My cosa-voice subprocess is **pid 12203, started 11:09:09**. `11:09 < 14:13`, so my door imported `session_spawner.py` before the gate was in it.
+
+**cosa-voice is registered `stdio`, so staleness is a property of the SUBPROCESS, never of the fleet.** Of nine live subprocesses, **eight predate 14:13**; the exception is `pid 1123922` (14:34), a seat spawned after the merge, whose door **does** enforce it.
+
+⚠️ **I DID NOT NEED FAIL-OPEN TO EXPLAIN THIS AND AM NOT CLAIMING IT FIRED.** It was my second hypothesis, it is real in arm 2, and process age accounts for the whole observation without it. **Two mechanisms that both predict an allowed spawn are still two mechanisms** — naming the wrong one would have sent the next reader into `default_fleet_gate`'s exception handler, which is working exactly as designed.
+
+⇒ **THE CODE IS CORRECT AND THE CLOSURE OF `331c8852` STANDS FOR THE CODE.** What is NOT true is that the cap binds *today* on the seats already running. This is CLAUDE.md's own *"a saved file is not a served file"* — written about `:7999` and `LUPIN_RELOAD`, arriving here on an **stdio MCP subprocess**, where nobody thinks to look because there is no server to bounce.
+
+🔴 **AND THE HAZARD IS THAT THE FAILURE IS SILENT AND POINTS THE FLATTERING WAY.** An over-cap spawn **succeeds**. Nothing warns, nothing logs a bypass, and the manager who did it reads a normal roster entry. **A safety control that has stopped binding looks exactly like a safety control with nothing to refuse.**
+
+**WHAT I DID ABOUT IT, recorded because the alternative was available and tempting:** I was at 8/8 with unhomed work and a tick telling me to staff up. **A 9th seat would have gone through.** I did not take it — spawning through a four-hour-stale door is evasion of Rick's cap, not staffing under it. The P2 was blocked with a chase instead.
+
+**DONE MEANS**: either the gate reads its policy at CALL time from a source a long-running process cannot go stale against, or the spawn path refuses when it cannot prove its own freshness — and a guard that goes red when a stale door lets a spawn through, run both ways so it is shown to discriminate.
 
 ## 📚 DECISIONS LOG 2026-09-03 — post-game of the seat-and-repo-resolution run (Mr. Radio 🦉 `2424de1c`)
 

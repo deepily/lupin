@@ -115,3 +115,61 @@ def _isolate_fleet_data_root( tmp_path, monkeypatch ):
 # proves no store class accepts a location parameter at all, so a new offender
 # fails there loudly instead of needing to be remembered here.
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture( autouse=True )
+def _isolate_session_bridge_dir( tmp_path, monkeypatch ):
+    """
+    Point the session-bridge scan at a per-test tmp dir, so no unit test's result
+    depends on how many Claude sessions happen to be alive on the box.
+
+    🔴 WHY (measured 2026-09-04, and it is the fourth sibling of the three above).
+    The fleet cap landed on the spawn path, and `default_fleet_gate`'s default census
+    is `find_active_voice_persona_sessions()` — which globs
+    `session_bridge.SESSION_DIR` for live bridges. So `spawn_sessions` became a
+    function of the OPERATOR'S MACHINE. On a quiet box the tier was green; with a crew
+    up, **53 unit tests failed** with
+
+        ValueError: FLEET CAP REFUSED THIS SPAWN — the cap is 8 and the fleet is
+        already running 8 (3 manager(s), 5 worker(s))
+
+    and not one of them is a cap test. They are spawn-MECHANICS tests — model
+    threading, work-dir resolution, venv provisioning, placement alarms — that now
+    pass or fail on how busy the fleet is. A tier whose result moves when nothing in
+    the tree moved cannot say anything about the tree.
+
+    ⚠️ THIS ISOLATES THE WORLD, IT DOES NOT STUB THE GATE. `default_fleet_gate` still
+    runs for real: it reads the real config, calls the real `census()`, and does the
+    real arithmetic — against an EMPTY fleet, which is deterministic. Replacing the
+    gate with a lambda would have been easier and would have left its only live path
+    unexercised, which is the defect that produced this gate's own guard file.
+
+    A test that wants a POPULATED fleet says so explicitly — it plants bridges in the
+    tmp dir, or injects `fleet_gate_fn` / `census_fn`. The cap's own guards do exactly
+    that, so the enforcement behaviour is still pinned; what is removed here is only
+    the ambient reading nobody asked for.
+
+    Rick's standing ruling on decision 2b20a6d6 (2026-07-27) is the same one the three
+    fixtures above cite: no test touches a live data store. A bridge directory holding
+    every live seat on the box is a live data store.
+
+    ⚠️ MONKEYPATCHED BY NAME rather than via `LUPIN_HOOK_SESSIONS_DIR`, and the reason
+    is in `sessions_dir`'s own docstring: `session_bridge.SESSION_DIR` is an
+    IMPORT-TIME constant derived from that function, so setting the env var after the
+    module is imported does not move it. The module keeps its patchable name precisely
+    for this case, and ~200 existing tests already use it — a test that patches it
+    itself simply wins, because monkeypatch applies in order.
+
+    🔴 IT DELIBERATELY DOES NOT CREATE THE DIRECTORY, and that is not laziness.
+    `find_active_sessions` returns [] for a directory that does not exist, so an absent
+    path is already an empty fleet. Creating one costs something real: `tmp_path` is
+    shared with the test itself, and `test_bridge_dir_guard.py` fingerprints that very
+    directory and asserts it contains ONLY what the test planted. A `mkdir` here put
+    `session-bridges/` into its result and reddened it — an isolation fixture
+    manufacturing a failure in the guard that watches for stray files. Measured, then
+    fixed at the cause rather than by excluding the name.
+    """
+    from lupin_cli.claude_code.hooks.lib import session_bridge
+
+    monkeypatch.setattr( session_bridge, "SESSION_DIR",
+                         tmp_path / "session-bridges-that-do-not-exist", raising=False )

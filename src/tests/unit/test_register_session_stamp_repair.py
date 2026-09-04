@@ -77,6 +77,7 @@ def _run_session_start( monkeypatch, seam, persona_name="Tiffany" ):
 
     class _FakeProc:
         pid = __import__( "os" ).getpid()
+        def poll( self ): return None   # still running — the spawn hook reads poll(), not os.kill
     _real_popen = module.subprocess.Popen
     def _popen( cmd, *a, **k ):
         if ( isinstance( cmd, list ) and len( cmd ) > 2

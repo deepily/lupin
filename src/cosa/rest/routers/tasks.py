@@ -33,7 +33,8 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
+from cosa.rest.task_actor_identity import recorded_actor
 from cosa.rest.auth_middleware import require_admin
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
@@ -733,7 +734,11 @@ def _blocked_mint_denial_detail( reason: str ) -> str:
 )
 def create_task(
     payload: TaskCreateIn,
-    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # ATTRIBUTION (row: authenticated_user_id bound 12x, read 0x). This door WRITES,
+    # so the ledger has to name whoever actually stood at it. Same helper as the other
+    # write doors — one mechanism, never a second identity scheme.
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
 ):
     """
     Create a task item.
@@ -923,7 +928,7 @@ def create_task(
             item_class          = payload.item_class,
             title               = guarded_title,
             project             = _canon_project( payload.project ),
-            created_by          = payload.created_by,
+            created_by          = recorded_actor( payload.created_by, account_email ),
             authority           = payload.authority,
             body                = guarded_body,
             owner_persona       = owner_persona,
@@ -960,7 +965,12 @@ def create_task(
 def transition_task(
     task_id: uuid.UUID,
     payload: TaskTransitionIn,
-    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # The approver gate's SECOND door (row 9d3a975e). `require_api_key_or_jwt` above
+    # returns a user UUID, which the gate's configuration cannot speak about; this is
+    # the same caller's login email, or None for an API-key caller. It authenticates
+    # nothing on its own — the dependency above is what refuses a bad credential.
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
 ):
     """
     Apply a state transition to an item.
@@ -1031,16 +1041,24 @@ def transition_task(
         # permission to send a malformed payload. Shape first, policy second — the
         # same ordering the blocker gate above is placed by.
         #
-        # 🔴 POLICY CONTROL, NOT A SECURITY BOUNDARY. `payload.actor` is
-        # caller-DECLARED and every seat carries the same fleet credential, so this
-        # refuses an honest non-approver and cannot stop a dishonest one. The
-        # authenticated user id is stamped alongside, so a false claim is
-        # attributable afterwards — accountability, not prevention. Written here
-        # rather than left for a future reader to infer authorization from the 403.
+        # 🔴 TWO DOORS OF DIFFERENT STRENGTH, AND THE DIFFERENCE IS WORTH KNOWING.
+        # `payload.actor` is caller-DECLARED and every seat carries the same fleet
+        # credential, so THAT door refuses an honest non-approver and cannot stop a
+        # dishonest one — policy control, not a security boundary. `account_email`
+        # comes off a signature-validated access token and is not something a caller
+        # can type. Reading the 403 as "authorization failed" is right for the second
+        # door and an overclaim for the first.
+        #
+        # ⚠️ THE SECOND DOOR IS WHY THIS ENDPOINT WORKS FROM A BROWSER AT ALL (row
+        # 9d3a975e). The client's actor is minted per websocket session — "operator
+        # foolish goat" — so no allowlist entry could ever match it, and Rick could
+        # not approve his own board. The endpoint had resolved his identity the whole
+        # time; nothing had ever handed it to the gate.
         approval_refusal = approval.refusal_for_admission(
-            from_status = item.status,
-            to_status   = payload.to_status,
-            actor       = payload.actor,
+            from_status   = item.status,
+            to_status     = payload.to_status,
+            actor         = payload.actor,
+            account_email = account_email,
         )
         if approval_refusal is not None:
             raise HTTPException( status_code=403, detail=approval_refusal )
@@ -1076,11 +1094,17 @@ def transition_task(
         if ( approval.get_enforcement_active()
              and item.status == approval.NOT_APPROVED_STATUS
              and payload.to_status != approval.NOT_APPROVED_STATUS ):
+            # 🔴 THE ACCOUNT REACHES BOTH DOORS, NOT JUST THE FIRST (row 998c7529).
+            # Handing it only to the approver allowlist is what left Rick refused by
+            # THIS gate after that one had already let him through: a browser resolves
+            # no session id, so the manager-figure leg saw nothing to resolve. Same
+            # fact, both doors, resolved once.
             promotion_approval = promotion_gate.approval_for_promotion(
-                session_id = rules.session_id_from_created_by( payload.actor ),
-                actor      = payload.actor,
-                task_id    = task_id,
-                title      = item.title,
+                session_id      = rules.session_id_from_created_by( payload.actor ),
+                actor           = payload.actor,
+                task_id         = task_id,
+                title           = item.title,
+                account_persona = approval.approver_persona_for_account( account_email ),
             )
             if not promotion_approval.allowed:
                 raise HTTPException( status_code=403, detail=promotion_approval.refusal )
@@ -1089,19 +1113,63 @@ def transition_task(
         # identical on the row, or nobody can later tell which promotions he actually
         # blessed. The suffix rides on `authority`, which is the field that already
         # means "the authority for this transition" — and his answer IS that authority.
+        # 🔴 THE PROSE GOES IN `reason`, NOT IN `authority`. This block used to read
+        # `transition_authority = f"{payload.authority} · {…authority_suffix()}"`, which
+        # put a descriptive sentence into a String(32) enum column while leaving `reason`
+        # — Text, unbounded — NULL. Measured: EVERY combination overflows, 58 to 65
+        # characters, not merely the one row that surfaced it.
+        #
+        # AND THE CONCATENATION HAPPENED DOWNSTREAM OF THE CHECK THAT WOULD HAVE CAUGHT
+        # IT. `payload.authority` is validated against rules.VALID_AUTHORITIES above; the
+        # f-string then appended prose to the already-validated value, so validation
+        # passed and the column still received 60+ characters. A guard that only checks
+        # the input cannot see a field the code lengthens afterwards.
+        #
+        # Rick's third requirement is UNCHANGED and still met: a keypress, a timed-out
+        # default and a self-promotion remain distinguishable on the row. They are simply
+        # recorded in the field that is meant to carry a sentence.
         transition_authority = payload.authority
+        transition_reason    = payload.reason
         if promotion_approval is not None and promotion_approval.allowed:
-            transition_authority = f"{payload.authority} · {promotion_approval.authority_suffix()}"
+            # APPENDED, never assigned over. A caller-supplied reason is the operator's
+            # own words; dropping them to make room for ours would trade one attribution
+            # defect for another.
+            note              = promotion_approval.authority_suffix()
+            transition_reason = f"{payload.reason} · {note}" if payload.reason else note
 
         event = repo.apply_transition(
             item          = item,
             to_status     = payload.to_status,
-            actor         = payload.actor,
+            # THE GATE READ THE TOKEN; THE LEDGER DID NOT. Door 1 (row 9d3a975e) let
+            # Rick through on his authenticated account and then recorded the click
+            # under "operator foolish goat" — the very string the gate had just
+            # declined to trust. The same helper the edit door uses closes it.
+            #
+            # 🔴 MERGE RESOLUTION, 2026-09-04: the two sides of this conflict changed
+            # DIFFERENT FIELDS and neither was reverting the other, so "both" is the
+            # only correct answer rather than a compromise between two.
+            #   HEAD  changed `authority` -> transition_authority, so a keypress and a
+            #         timed-out default stop looking identical on the row (Rick's third
+            #         requirement on the promotion gate).
+            #   door1 changed `actor` -> recorded_actor(), so the ledger names the
+            #         login account instead of a per-session "operator <adjective noun>".
+            # door 1's `authority = payload.authority` is NOT a deliberate revert: its
+            # branch is ~90 commits behind and `transition_authority` does not exist
+            # there. Taking that side verbatim would have silently un-shipped the
+            # keypress-vs-default distinction — a merge that compiles, passes, and
+            # quietly returns a landed behaviour to the state it was fixed from.
+            #
+            # ⚠️ AUTHORIZATION IS UNAFFECTED BY THIS LINE, and that separation is the
+            # whole point of door 1 (Mr Radio's ruling, 2026-09-04): the LOGIN ACCOUNT
+            # off the validated token is the only trusted source for the gate above,
+            # and `actor` is ATTRIBUTION ONLY. This is the ledger, downstream of every
+            # decision — nothing here can widen who may pass.
+            actor         = recorded_actor( payload.actor, account_email ),
             authority     = transition_authority,
             receipt_refs  = payload.receipt_refs,
             next_chase_ts = payload.next_chase_ts,
             blocked_by    = blocked_by,
-            reason        = payload.reason,
+            reason        = transition_reason,
             park_reason   = payload.park_reason,
         )
         return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
@@ -1119,7 +1187,11 @@ def transition_task(
 def correlate_task(
     task_id: uuid.UUID,
     payload: TaskCorrelateIn,
-    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # ATTRIBUTION (row: authenticated_user_id bound 12x, read 0x). This door WRITES,
+    # so the ledger has to name whoever actually stood at it. Same helper as the other
+    # write doors — one mechanism, never a second identity scheme.
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
 ):
     """
     Re-stamp an item's correlation_key (audited).
@@ -1155,7 +1227,7 @@ def correlate_task(
         event = repo.apply_correlation(
             item            = item,
             correlation_key = payload.correlation_key,
-            actor           = payload.actor,
+            actor           = recorded_actor( payload.actor, account_email ),
             authority       = payload.authority,
         )
         return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
@@ -1177,7 +1249,11 @@ def correlate_task(
 def amend_task(
     task_id: uuid.UUID,
     payload: TaskAmendIn,
-    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # ATTRIBUTION (row: authenticated_user_id bound 12x, read 0x). This door WRITES,
+    # so the ledger has to name whoever actually stood at it. Same helper as the other
+    # write doors — one mechanism, never a second identity scheme.
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
 ):
     """
     Append an amendment to an item's body (audited).
@@ -1240,7 +1316,7 @@ def amend_task(
         event = repo.apply_amendment(
             item      = item,
             note      = payload.note,
-            actor     = payload.actor,
+            actor     = recorded_actor( payload.actor, account_email ),
             authority = payload.authority,
             now       = datetime.now( timezone.utc ),
             reason    = payload.reason,
@@ -1261,7 +1337,11 @@ def amend_task(
 def patch_task(
     task_id: uuid.UUID,
     payload: TaskPatchIn,
-    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # ATTRIBUTION ONLY — this door still refuses nobody (row 77f4e1d3, María's ruling
+    # 2026-09-04: "correct the attribution … leave the 404 behaviour exactly as it is").
+    # The edit door's ONLY HTTPException is the 404 below, and that is unchanged.
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
 ):
     """
     Edit an item's mutable fields (audited).
@@ -1385,7 +1465,7 @@ def patch_task(
             fields[ "title_trimmed" ] = False
 
         event = repo.apply_patch(
-            item, fields, actor=payload.actor, authority=payload.authority,
+            item, fields, actor=recorded_actor( payload.actor, account_email ), authority=payload.authority,
             reason=payload.reason, flag_suffix=flag_marker,
         )
         return {

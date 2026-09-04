@@ -154,10 +154,39 @@ tbody.epic-group.collapsed .epic-story-row {
 /* ---- Highlight accents -----------------------------------------------------
    Waiting-on-Rick leads the board and Drift closes it; both get a left edge so
    they read as different in KIND from the epics between them, not merely as
-   two more epics with odd names. */
+   two more epics with odd names.
+
+   🔴 DRAWN WITH `box-shadow: inset`, NEVER `border-left`, AND THAT IS A LAYOUT
+   DECISION RATHER THAN A STYLE ONE. A border PARTICIPATES IN LAYOUT; under
+   `border-collapse: collapse` the table resolves ONE collapsed border per edge
+   across every row, so a single 3px `border-left` ANYWHERE in this table puts
+   half of it (1.5px) inside the table's own border box — insetting `<thead>`,
+   `<tbody>`, every row and EVERY COLUMN.
+
+   MEASURED at 23bb0124, pane 916px, one drift group on screen:
+
+       pane            header cells SUM   table w   delta
+       task list             916.00        916.00    0.00
+       holding area          916.00        916.00    0.00
+       epic board            914.51        916.00    1.49   <- this
+
+   Every one of the six epic columns came out narrower than the same column in
+   the other two panes — id 77.91 vs 78.03, title 540.11 vs 541.02, class 61.91
+   vs 62.00, status 103.78 vs 103.95, priority 79.83 vs 79.95, disclose 50.97 vs
+   51.05 — and line 3's left inset read 19.5px against 18.0px elsewhere. That is
+   Rick's "the six columns are ONE SCHEMA" requirement failing by 1.5px.
+
+   ⚠️ IT WAS DATA-DEPENDENT, WHICH IS WHY NOBODY CAUGHT IT. These two classes are
+   conditional: no drift or on-rick group rendered, no offset. So the columns
+   guard passed on every board that happened not to have one.
+
+   `task-list.css:527` has always drawn the row accent this way
+   (`box-shadow: inset 3px 0 0 var( --row-accent, transparent )`) — the same 3px
+   edge with no layout effect. This is the epic board catching up to it, not a
+   new idea. ⇒ NEVER reintroduce a `border-left` on a cell in this table. */
 .epic-group-on-rick-header td {
     background: #fff8e1;
-    border-left: 3px solid var( --task-queued, #f57f17 );
+    box-shadow: inset 3px 0 0 var( --task-queued, #f57f17 );
     color: #7a5c00;
 }
 
@@ -167,7 +196,7 @@ tbody.epic-group.collapsed .epic-story-row {
 
 .epic-group-drift-header td {
     background: #fdf2f2;
-    border-left: 3px solid var( --task-blocked, #c62828 );
+    box-shadow: inset 3px 0 0 var( --task-blocked, #c62828 );
     color: #8a2222;
 }
 
@@ -179,7 +208,7 @@ tbody.epic-group.collapsed .epic-story-row {
    and must not look like the alarm it replaces. */
 tbody.epic-group-drift:not(:has(.epic-row)) .epic-group-drift-header td {
     background: #f1f8f2;
-    border-left-color: var( --task-active, #2e7d32 );
+    box-shadow: inset 3px 0 0 var( --task-active, #2e7d32 );
     color: #2e5c33;
 }
 

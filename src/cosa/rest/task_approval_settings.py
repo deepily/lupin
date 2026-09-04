@@ -57,6 +57,29 @@ OVERRIDE_FILENAME = "task-approval-settings.json"
 INI_KEY_APPROVERS   = "task approval approver personas"
 INI_KEY_ENFORCEMENT = "task approval enforcement active"
 
+# 🔨 THE BROWSER'S DOOR (Rick, 2026-09-04, row 9d3a975e): "clear the bug that I can't
+# approve a ticket sitting in the holding area."
+#
+# WHY A SECOND KEY AND NOT A LONGER ALLOWLIST. The allowlist above is checked against
+# `payload.actor`, and the browser's actor is generated PER WEBSOCKET SESSION —
+# measured live 2026-09-04 as "operator foolish goat", where the same page had said
+# "operator wise penguin" a day earlier. No fixed entry can ever match a string that
+# is re-minted every session, so adding one would fix the click that produced it and
+# nothing else.
+#
+# ⇒ This key maps a LOGIN ACCOUNT to an approver persona, and the account arrives on
+# the JWT the browser already sends. Format: comma-separated `email = persona` pairs.
+#
+#     task approval approver accounts = ricardo.felipe.ruiz@gmail.com = rick
+#
+# 🔴 AND THIS PATH IS STRONGER THAN THE ACTOR PATH, WHICH IS THE POINT. The module
+# docstring's honest limit — "the actor is caller-DECLARED, so this is a policy
+# control, not a security boundary" — still describes `is_approver`. It does NOT
+# describe this: the email is read off a signature-validated access token, so a caller
+# cannot type its way past it. Two doors of different strength, deliberately, and the
+# refusal message names both so nobody has to read this file to find the second.
+INI_KEY_APPROVER_ACCOUNTS = "task approval approver accounts"
+
 # ⚠️ FALLBACK IS False, DELIBERATELY — the same direction of safety flow_ratio_settings
 # chose and for the same reason. An absent or unreadable config must not silently start
 # refusing every admission out of the holding area. Turning enforcement ON is an explicit
@@ -71,7 +94,8 @@ FALLBACK_ENFORCEMENT_ACTIVE = False
 UNCONDITIONAL_APPROVERS = ( "rick", )
 
 # mtime-guarded cache: a read is a stat, not a parse.
-_cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None }
+_cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None,
+                 "approver_accounts": None }
 _cache_mtime = None
 
 
@@ -112,7 +136,8 @@ def _read_overrides():
         mtime = os.path.getmtime( path )
     except OSError:
         _cache_mtime = None
-        _cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None }
+        _cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None,
+                         "approver_accounts": None }
         return _cache
 
     if mtime == _cache_mtime:
@@ -127,11 +152,13 @@ def _read_overrides():
             "approvers"          : body.get( "approvers" ),
             "enforcement_active" : body.get( "enforcement_active" ),
             "default_to_holding" : body.get( "default_to_holding" ),
+            "approver_accounts"  : body.get( "approver_accounts" ),
         }
         _cache_mtime = mtime
     except Exception as error:
         print( f"[task-approval] override file {path} unusable ({error}) — falling back to config" )
-        _cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None }
+        _cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None,
+                         "approver_accounts": None }
         _cache_mtime = mtime
 
     return _cache
@@ -201,6 +228,76 @@ def get_enforcement_active():
     return bool( raw )
 
 
+def get_approver_accounts():
+    """
+    The login-account -> approver-persona map, canonicalized on both sides.
+
+    THE SHAPE, AND WHY IT IS A MAP RATHER THAN A LIST OF EMAILS. The refusal message
+    and the audit trail both speak in personas; an account that grants approval has to
+    say WHICH approver it is, or a reader of either would have to guess. A bare list
+    would also make the two configs disagree in a way nobody could see: an email in the
+    list whose persona is not in `task approval approver personas` would silently grant
+    more than the allowlist does.
+
+    Requires:
+        - nothing
+
+    Ensures:
+        - returns a dict { lowercased-email : canonical persona key }
+        - override file key `approver_accounts` (an object) wins over the INI key
+        - INI form is comma-separated `email = persona` pairs; an entry missing its
+          `=`, or blank on either side, is SKIPPED rather than raising — a typo in one
+          pair must not take the whole map, and with it the browser's door, down
+        - returns {} when unconfigured, which is today's behaviour written down
+        - never raises
+    """
+    # `.get`, not `[ ]`: `_cache` is a module global that tests monkeypatch with a
+    # dict of their own, and several existing files build it with only the keys they
+    # care about. A KeyError here would fail those files for a key they never asked
+    # about — the new reader breaking old callers, which is the defect this whole row
+    # is about, one level down.
+    raw = _read_overrides().get( "approver_accounts" )
+    pairs = [ ]
+    if isinstance( raw, dict ):
+        pairs = list( raw.items() )
+    else:
+        ini = _ini_value( INI_KEY_APPROVER_ACCOUNTS, "string", "" )
+        for part in str( ini ).split( "," ):
+            if "=" not in part: continue
+            email, persona = part.split( "=", 1 )
+            pairs.append( ( email, persona ) )
+
+    accounts = { }
+    for email, persona in pairs:
+        if not isinstance( email, str ) or not isinstance( persona, str ): continue
+        email, persona = email.strip().lower(), persona.strip()
+        if not email or not persona: continue
+        accounts[ email ] = canonical_persona_key( persona )
+    return accounts
+
+
+def approver_persona_for_account( account_email ):
+    """
+    The approver persona a logged-in account speaks as, or None.
+
+    Requires:
+        - account_email is the email on a VALIDATED access token, or None
+
+    Ensures:
+        - returns None for None/blank/non-string, and for an unmapped account
+        - returns None when the mapped persona is NOT currently an approver — the
+          allowlist stays the single place that says who approves, so revoking a
+          persona there revokes its accounts too, with no second edit to remember
+        - matching is case-insensitive on the email
+        - never raises
+    """
+    if not isinstance( account_email, str ) or not account_email.strip(): return None
+    persona = get_approver_accounts().get( account_email.strip().lower() )
+    if persona is None:                     return None
+    if persona not in get_approvers():      return None
+    return persona
+
+
 def is_approver( actor ):
     """
     Whether `actor` may admit a row out of the holding area.
@@ -226,7 +323,7 @@ def is_approver( actor ):
     return False
 
 
-def refusal_for_admission( from_status, to_status, actor ):
+def refusal_for_admission( from_status, to_status, actor, account_email=None ):
     """
     The gate's whole decision, as a pure function: the refusal detail, or None.
 
@@ -241,6 +338,8 @@ def refusal_for_admission( from_status, to_status, actor ):
     Requires:
         - from_status / to_status are status strings; actor is the caller-declared
           "persona + session id" string, or None
+        - account_email is the email on the caller's VALIDATED access token, or None
+          when the caller authenticated by API key (which carries no account)
 
     Ensures:
         - returns None when the transition is NOT an admission out of the holding
@@ -248,9 +347,11 @@ def refusal_for_admission( from_status, to_status, actor ):
         - returns None when enforcement is off — the config is read at CALL time, so
           an operator's edit lands on the next request rather than the next deploy
         - returns None when the actor is an approver
-        - otherwise returns a non-empty detail string naming the actor, the current
-          allowlist, and BOTH ways to change it — a refusal that does not say how to
-          proceed is a dead end wearing a 403
+        - returns None when the AUTHENTICATED ACCOUNT maps to a current approver —
+          the browser's door, and the one a per-session actor string cannot open
+        - otherwise returns a non-empty detail string naming the actor, the account it
+          was authenticated as, the current allowlist, and BOTH ways to change each —
+          a refusal that does not say how to proceed is a dead end wearing a 403
         - never raises
     """
     # TWO approver-only moves, not one.
@@ -275,10 +376,26 @@ def refusal_for_admission( from_status, to_status, actor ):
 
     if not get_enforcement_active(): return None
     if is_approver( actor ):         return None
+
+    # THE BROWSER'S DOOR (row 9d3a975e). Checked SECOND, and its absence is why Rick
+    # could not approve his own board: the transition endpoint has always resolved an
+    # authenticated caller, and the gate had never been shown it. This reads an email
+    # off a signature-validated token, so unlike the actor above it is not something a
+    # caller can type.
+    if approver_persona_for_account( account_email ) is not None: return None
+
+    # NAME THE ACCOUNT, NOT ONLY THE ACTOR. The refusal Rick actually got named a
+    # string he had never chosen and could not change, and listed personas he could not
+    # become — so it read as a dead end. Whoever hits this next is told the one fact
+    # that lets them act: which account the server believes they are.
+    seen_as = account_email if account_email else "no login account (API-key caller)"
     return (
         f"'{actor}' is not an approver — {move} is limited to "
         f"{sorted( get_approvers() )}. The list is configuration, not code: edit "
-        f"`{INI_KEY_APPROVERS}`, or the override file at {override_path()}."
+        f"`{INI_KEY_APPROVERS}`, or the override file at {override_path()}. "
+        f"You were authenticated as {seen_as}; a login account approves when "
+        f"`{INI_KEY_APPROVER_ACCOUNTS}` maps it to one of those personas "
+        f"(`<email> = <persona>`, comma-separated)."
     )
 
 

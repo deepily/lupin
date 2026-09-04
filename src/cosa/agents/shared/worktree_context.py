@@ -35,6 +35,7 @@ from typing import Optional
 import cosa.utils.util as cu
 from cosa.agents.shared.worktree_reaper import drain_then_remove
 from cosa.utils.worktree_venv import provision_worktree_venv
+from cosa.utils.worktree_artifacts import provision_worktree_artifacts
 
 
 logger = logging.getLogger( __name__ )
@@ -174,6 +175,17 @@ class WorktreeContext:
         # the same reason `__aexit__` does with the reaper.
         venv_result = await asyncio.to_thread( provision_worktree_venv, target_path, self.debug )
         if self.debug: print( f"[WorktreeContext] venv: {venv_result[ 'status' ]} - {venv_result[ 'detail' ]}" )
+
+        # ── And the rest of the untracked tree (row dde8b87a) ─────────────────────
+        #
+        # 🔴 `INTERPRETER OK` AND A TIER-CAPABLE TREE ARE DIFFERENT CLAIMS. The line
+        # above gives this sandbox a `.venv`; it gives it nothing else, so a BFE/TFE job
+        # sent to fix a `.test.ts` in here would watch every one of them die with
+        # `Cannot find package 'tsx'` — a failure naming a PACKAGE rather than a tree,
+        # which reads as the code being broken rather than the sandbox being unfinished.
+        # Same fail-open, same `to_thread`, same reason as the venv call.
+        artifacts_result = await asyncio.to_thread( provision_worktree_artifacts, target_path, self.debug )
+        if self.debug: print( f"[WorktreeContext] artifacts: {artifacts_result[ 'status' ]} - {artifacts_result[ 'artifacts' ]}" )
 
         if self.debug: print( f"[WorktreeContext] Created: {target_path} @ {effective_ref}" )
         return self
