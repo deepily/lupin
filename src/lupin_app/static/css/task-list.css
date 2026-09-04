@@ -204,11 +204,24 @@ tbody.task-group.collapsed .task-row {
     white-space   : normal;
     overflow-wrap : anywhere;
 
-    display             : -webkit-box;
-    -webkit-line-clamp  : 2;
-    line-clamp          : 2;
-    -webkit-box-orient  : vertical;
-    overflow            : hidden;
+    /* 🔴 THE FIRST CUT USED `-webkit-line-clamp` AND IT WAS INERT — measured in the
+       live browser by Maya and reproduced here. The property needs
+       `display: -webkit-box`, and a TABLE CELL IN THIS TABLE COERCES THAT BACK TO
+       `flow-root`: the declaration is present, the computed value is not, and
+       nothing in the CSS says so. Forcing it at higher specificity does not help.
+
+       ⚠️ AND IT FAILED IN THE DANGEROUS DIRECTION. `overflow: hidden` was still
+       live, so a long title WAS clipped — just at whatever height the row happened
+       to be (51px, about two and a half lines) rather than at a deliberate two.
+       Measured: a four-line title reported clientHeight 51 against scrollHeight 71.
+       An accidental bound looks exactly like an intended one until you measure it.
+
+       `max-height` is the bound a table cell actually honours. 39px is 2 x the
+       19.5px line-height, content-box — so a long title fills two lines and is cut
+       cleanly, instead of showing a sliced third. */
+    line-height : 19.5px;
+    max-height  : 39px;
+    overflow    : hidden;
 }
 
 /* ---- Detail column (design 2026.06.29 row redesign — rightmost 📄) ---- */
@@ -925,11 +938,26 @@ tbody.task-group.collapsed .task-row {
        column       %        px at 916    natural before (task list / holding)
        ---------------------------------------------------------------------
        id           8.52      78.0        77.8
-       title       60.92     558.0       216.8   <- the whole point of the change
+       title       59.06     541.0       216.8   <- the whole point of the change
        class        6.77      62.0        58.4
        status      11.35     104.0        87.4 / 100.4  <- panes DISAGREED
        priority     8.73      80.0        75.0
-       disclose     3.71      34.0        (did not exist)
+       disclose     5.57      51.0        (did not exist)
+
+   🔴 DISCLOSE WAS 3.71% (34px) AND THE ⋯ RENDERED 7px OUTSIDE THE PANE, adding a
+   horizontal scrollbar — paneScrollWidth 923 against clientWidth 916, measured by
+   Maya on a plain reload. The cell needs 10 + 31 + 10 = 51px: its own left and
+   right padding either side of a 31px button. 34px is 17px short, and 7px of the
+   shortfall escaped the pane.
+
+   ⚠️ SAME SHAPE AS THE 108px DEFECT EARLIER TONIGHT — a control rendering outside
+   the pane it belongs to, in the same column. Narrower, and NOT the same severity:
+   the button stayed clickable once scrolled to, so this breached the edge rather
+   than being unreachable. Said exactly, because overstating it would be the mirror
+   of the mistake that cost us the evening.
+
+   The 1.86% comes off the title, which lands at 541px — still 2.5x its 216.8
+   baseline, so the change that matters to Rick is untouched.
        ---------------------------------------------------------------------
                   100.00     916.0
 
@@ -945,16 +973,33 @@ tbody.task-group.collapsed .task-row {
    there is 2.6x the room per column. Verified, not assumed: see the header
    legibility check in the commit that landed this.                          */
 
-.task-list-table {
+/* 🔴 THE EPIC BOARD'S TABLE IS `.epic-board-table`, NOT `.task-list-table`, so the
+   first cut reached two panes out of three. It fitted 916px anyway — by its own
+   `table-layout: auto` negotiation, which is a coincidence and not the schema —
+   and four of six columns disagreed with the other panes: id 70.6 vs 78, class
+   58.4 vs 62, status 101.3 vs 104, disclose 51 vs 34.
+
+   That is a partial miss on Rick's ACTUAL requirement. The reason the scope was
+   reversed to all three panes is that a reader must never re-parse the layout when
+   switching views, and four columns moving between views is exactly that re-parse.
+   Fitting the pane was never the requirement; being IDENTICAL was.                */
+.task-list-table,
+.epic-board-table {
     table-layout: fixed;
 }
 
-.task-list-table thead th.task-col-id       { width:  8.52%; }
-.task-list-table thead th.task-col-title    { width: 60.92%; }
-.task-list-table thead th.task-col-class    { width:  6.77%; }
-.task-list-table thead th.task-col-status   { width: 11.35%; }
-.task-list-table thead th.task-col-priority { width:  8.73%; }
-.task-list-table thead th.task-col-disclose { width:  3.71%; }
+.task-list-table thead th.task-col-id,
+.epic-board-table thead th.task-col-id       { width:  8.52%; }
+.task-list-table thead th.task-col-title,
+.epic-board-table thead th.task-col-title    { width: 59.06%; }
+.task-list-table thead th.task-col-class,
+.epic-board-table thead th.task-col-class    { width:  6.77%; }
+.task-list-table thead th.task-col-status,
+.epic-board-table thead th.task-col-status   { width: 11.35%; }
+.task-list-table thead th.task-col-priority,
+.epic-board-table thead th.task-col-priority { width:  8.73%; }
+.task-list-table thead th.task-col-disclose,
+.epic-board-table thead th.task-col-disclose { width:  5.57%; }
 
 /* ---- The ⋯ control column -------------------------------------------------
    A CONTROL, NOT A FIELD. It gets its own cell rather than riding inside the
@@ -962,7 +1007,9 @@ tbody.task-group.collapsed .task-row {
    styled for either — and because the toggle must not live behind the
    disclosure it opens.                                                      */
 .task-list-table .task-col-disclose,
-.task-list-table th.task-col-disclose {
+.task-list-table th.task-col-disclose,
+.epic-board-table .task-col-disclose,
+.epic-board-table th.task-col-disclose {
     text-align  : right;
     white-space : nowrap;
     padding-right: 10px;
@@ -976,7 +1023,9 @@ tbody.task-group.collapsed .task-row {
    read as two misaligned halves. Top-aligning puts every line-1 cell on the
    title's FIRST line, which is where Rick's spec puts the ⋯.               */
 .task-list-table tbody tr.task-row > td,
-.task-list-table tbody tr.epic-row > td {
+.task-list-table tbody tr.epic-row > td,
+.epic-board-table tbody tr.task-row > td,
+.epic-board-table tbody tr.epic-row > td {
     vertical-align: top;
 }
 
