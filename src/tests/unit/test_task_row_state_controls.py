@@ -667,12 +667,22 @@ def test_terminal_rows_offer_no_controls_at_all( client_src, client_code, action
     assert 'disabled aria-disabled="true"' in actions_cell, (
         "the terminal controls are disabled for the mouse and not for a screen reader"
     )
-    # ...and `off` has to be INTERPOLATED into all three controls, not merely computed.
+    # ...and `off` has to be INTERPOLATED into all FOUR controls, not merely computed.
     # Counted, because "off appears in the markup" is true of one control as easily as
-    # of three, and one live Submit on an append-only row is the whole defect.
-    assert actions_markup.count( "${off}" ) == 3, (
-        f"the terminal-disable flag reaches {actions_markup.count( '${off}' )} of 3 "
-        f"controls — the rest stay live on a row the server refuses outright"
+    # of four, and one live Submit on an append-only row is the whole defect.
+    #
+    # ⚠️ 3 -> 4 AT b2b2b7e4, and the number is not the interesting part. The cell
+    # gained a MIC (`.task-reason-stt`, row 35404747) that dictates into the reason box,
+    # and a terminal row takes no transitions — so there is nothing to dictate a reason
+    # FOR, and it has to be disabled with the other three. The count caught that the
+    # moment the control landed, which is the count doing its job rather than being in
+    # the way: a fourth control that did NOT carry `${off}` would have read as 3 and
+    # passed. Raise this WITH the cell, never to green a red.
+    EXPECTED_OFF_CONTROLS = 4   # select, mic, reason box, Submit
+    assert actions_markup.count( "${off}" ) == EXPECTED_OFF_CONTROLS, (
+        f"the terminal-disable flag reaches {actions_markup.count( '${off}' )} of "
+        f"{EXPECTED_OFF_CONTROLS} controls — the rest stay live on a row the server "
+        f"refuses outright"
     )
 
 
