@@ -2908,6 +2908,17 @@ single well-isolated comparison is routinely read as evidence for both.**
 ⚠️ Say both halves. *"Still n=1"* alone tells a later reader the pair added nothing; *"mechanism
 isolated"* alone reads as the rule being established.
 
+🔴 **AND THE CONSEQUENCE FOR *THIS* RULE, WHICH IS SHARPER THAN THE CAVEAT ABOVE** (hers, closing on
+it): if a controlled pair licenses the **variable** and not the **remedy**, then the pair supports
+*"presence-versus-absence framing changes the outcome"* and supports **nothing about the specific
+instruction.** *Describe what is present* is one candidate remedy. **"Quote the tail verbatim" is
+another, and the pair does not choose between them** — it varied **how the claim was framed**, not
+**how the writing is done.**
+
+⇒ **So the remedy owes its own test, separately from the mechanism now being isolated.** Two things
+are outstanding here, not one: his killer for the rule, and a comparison that actually varies the
+practice.
+
 ⇒ **The family it belongs to** — § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE*,
 § *A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED*, § *`run-span=unmoved` KEYS ON THE SHA*. **Each is
 a failure silent about its own extent**; this one arrives on a message rather than a tool.
