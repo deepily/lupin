@@ -889,6 +889,13 @@ _LINE3_RIGHT_EDGE_JS = """
 """
 
 
+# The widest right-hand gutter line 3 may leave against the TABLE's own box. A LITERAL on
+# purpose: its provenance has to be independent of every stylesheet value this arm measures,
+# and 24 leaves headroom for an ordinary padding tweak while sitting far below the 88-125px
+# the defect actually measured. Measured today: 18.0px in all three panes.
+_LINE3_MAX_RIGHT_GUTTER_PX = 24
+
+
 class TestLine3ReachesTheRowsRightEdge:
     """
     Rick's P1, row 5f982bbd — "not expanding fully to the rightmost edge of the
@@ -941,9 +948,19 @@ class TestLine3ReachesTheRowsRightEdge:
                                  f"the table's {r[ 'tableRight' ]}" )
 
             # Both insets are measured from the TABLE's box, never from the line's.
-            # Anchoring to the line alone leaves the RULER unasserted: a colspan or
-            # padding drift moves the line box and its content together and this arm
-            # stays green over a table that has stopped spanning.
+            #
+            # 🔴 CORRECTED 2026-09-04 (Rachel 🕊️, reviewing). The first cut of this comment
+            # claimed table-anchoring defeats "a colspan or padding drift". THE COLSPAN HALF
+            # IS TRUE and is carried by the two explicit clauses above — `colspan ==
+            # headerCells` and `tdRight ~= tableRight`. THE PADDING HALF WAS FALSE, and the
+            # clause below is what closes it.
+            #
+            # MEASURED, arm MPAD: `.task-disclosed` padding 10px -> 40px. Line 3 then ends at
+            # 1050 instead of 1080 — 48px short of the table's 1098, in ALL THREE PANES, which
+            # is Rick's own reported symptom — and this file reported 10 passed. The symmetry
+            # comparison below asks whether the two insets AGREE WITH EACH OTHER and never
+            # whether either has a PARTICULAR VALUE, so anything moving both edges inward
+            # equally is invisible to it: two sides that move together cannot disagree.
             leftInset  = r[ "firstFieldL" ] - r[ "tableLeft" ]
             rightInset = r[ "tableRight" ]  - r[ "lastFieldR" ]
 
@@ -952,6 +969,29 @@ class TestLine3ReachesTheRowsRightEdge:
                                  f"table's left and {rightInset:.1f}px from its right — it stops "
                                  f"{rightInset - leftInset:.1f}px short of where its own left edge "
                                  f"says it should reach. Rick's report" )
+
+            # 🔴 THE CLAUSE THAT SURVIVES A PADDING DRIFT. One side of this comparison must
+            # come from somewhere the stylesheet cannot reach, or the two move together and
+            # the assertion is an identity wearing an assertion's clothes.
+            #
+            # ⚠️ AND `getComputedStyle` IS NOT THAT SOMEWHERE — this is the version I wrote
+            # first and threw away. Deriving the expectation from the td's and
+            # `.task-disclosed`'s own computed padding gives `8 + 40 == 48` under MPAD and
+            # passes exactly as before, because the expectation drifts with the thing it is
+            # meant to catch. It reads like two provenances and is one.
+            #
+            # ⚠️ IT IS A CEILING, NOT AN EQUALITY, and deliberately so. Pinning the exact
+            # padding would redden this arm for a design tweak that is not the defect — which
+            # is the objection the original comment correctly raised against a literal. A
+            # ceiling states the REQUIREMENT instead: line 3 must REACH the row's right edge,
+            # and a gutter wider than this is not a gutter, it is the defect. Today's inset is
+            # 18.0px in all three panes; 108 / 125 / 107 is what the defect measured.
+            if rightInset > _LINE3_MAX_RIGHT_GUTTER_PX:
+                problems.append( f"{name}: line 3 stops {rightInset:.1f}px short of the table's right "
+                                 f"edge, past the {_LINE3_MAX_RIGHT_GUTTER_PX}px this row allows. It "
+                                 f"does not reach the edge — Rick's report, row 5f982bbd. A drift that "
+                                 f"moves BOTH insets equally satisfies the symmetry check above and is "
+                                 f"caught only here (left inset {leftInset:.1f}px)" )
 
             if r[ "stripR" ] is None:
                 problems.append( f"{name}: no .task-actions strip on line 3 — nothing to measure" )
