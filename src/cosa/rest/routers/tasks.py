@@ -889,6 +889,31 @@ def create_task(
                 f"{payload.item_class} '{payload.title[ :60 ]}' "
                 f"(window created={ratio_counts[ 'created' ]} closed={ratio_counts[ 'closed' ]})"
             )
+        elif not ( payload.correlation_key or "" ).strip().startswith( rules.MIRROR_KEY_PREFIX ):
+            # 🔴 THE PERMISSIVE PATH NOW REPORTS ITS READING (row aba30387, defect 1).
+            # It printed NOTHING here, while created / closed / ratio / threshold all sat
+            # in hand a dozen lines up. So a permit was indistinguishable from an absent
+            # gate, which is exactly how this row came to say the gate was "armed and
+            # inert" — the permits were correct and left no trace to prove it.
+            #
+            # Measured cost: settling that needed the ratio AT THE TIME of three permits,
+            # and nothing had recorded it. Mr Radio reconstructed what he could and
+            # reported the deciding value "remains INFERRED, NOT MEASURED". Unrecoverable.
+            #
+            # The P0-exemption branch directly above has printed its counts since Rick's
+            # Q4 ruling — "an unlogged escape hatch is just a hole." This is the same
+            # argument one branch over: an unlogged PERMIT is an unfalsifiable gate.
+            #
+            # ⚠️ THE MIRROR LANE IS CARVED OUT DELIBERATELY. `cc-task:` is harness traffic
+            # writing where no human is present; it is already exempt from the gate itself
+            # a few lines up, and it is the one path whose volume would drown the signal
+            # this line exists to create. Every other permit reports.
+            print( rules.ratio_gate_reading(
+                created     = ratio_counts[ "created" ],
+                closed      = ratio_counts[ "closed" ],
+                allow_below = frs.get_allow_below(),
+                verdict     = "allow",
+            ) )
 
         # A blocked MINT can be born stranded exactly like a transition (row 00a6bde2).
         # Inside the transaction, and BEFORE create_item, so a rejected mint writes

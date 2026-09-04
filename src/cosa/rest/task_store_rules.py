@@ -2302,12 +2302,91 @@ def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, a
     # Generalises the old `created - closed + 1`: at allow_below = 1.0 the two agree
     # exactly, and this one is also correct for every other threshold.
     import math
-    need = max( 1, math.floor( created / allow_below ) + 1 - closed )
+    # 🔴 DERIVED FROM THE GATE'S OWN COMPARISON, NOT FROM ARITHMETIC THAT HAS TO AGREE WITH
+    # IT (row aba30387, defect 3, measured 2026-09-04). The line below used to be
+    # `max( 1, math.floor( created / allow_below ) + 1 - closed )`, and it was WRONG at
+    # every exact boundary once the operator dial moved off 1.0:
+    #
+    #     created=209  closed=184  allow_below=1.10  ->  "close 6 more", i.e. reach 190
+    #     at closed=190 the ratio is 1.100000 and the gate STILL REFUSES; 191 is the answer
+    #
+    # `209/1.10` is exactly 190.0 in real arithmetic and 189.99999999999997 in IEEE double,
+    # so floor() returned one low and the `+1` — which exists precisely to clear the
+    # boundary — only got back TO the boundary. The gate opens STRICTLY below.
+    #
+    # ⚠️ THE OLD FORM WAS UNTESTABLE-IF-WRONG, WHICH IS WHY IT SURVIVED. The guard written
+    # for exactly this hazard runs created=14, closed=3 at threshold 1.0, where `14/1.0` is
+    # exact and the error cannot appear. Swept exact-boundary pairs across six thresholds:
+    # 18 cases where the prescribed target still refused.
+    #
+    # The fix is not better arithmetic — it is to stop deriving the target arithmetically
+    # at all and ASK THE SAME COMPARISON THE GATE USES. The message can no longer disagree
+    # with the gate, because it is now reading the gate. Both loops are bounded by the
+    # float error, so they step at most once or twice.
+    target = max( closed + 1, math.floor( created / allow_below ) )
+    while created / target >= allow_below:                                 # not open yet
+        target += 1
+    while target - 1 > closed and created / ( target - 1 ) < allow_below:  # overshot
+        target -= 1
+    need = target - closed
+    # 🔴 THE REMEDY MUST BE ONE THE CALLER CAN PERFORM (row aba30387, defect 2, maria's
+    # finding). This used to say only "Close or finish N more rows before filing this one."
+    # The count is FLEET-WIDE, and a worker who owns no open rows cannot close any — the
+    # instruction sounded entirely actionable and was impossible for them to carry out.
+    # Measured 2026-09-04: john was told to close 6 while holding zero open rows.
+    #
+    # So it now says whose number it is, and names the tier-1 fallback from
+    # session-end.md — amending onto a related existing row — which a refused caller can
+    # ALWAYS do. The finding gets routed instead of waiting on other people's work.
     return (
-        f"New tickets are gated: in the last window the fleet created {created} and closed "
-        f"{closed} (ratio {ratio:.2f} — the gate opens below {allow_below:.2f}). Close or finish {need} "
-        f"more row{'s' if need != 1 else ''} before filing this one. "
+        f"New tickets are gated: in the last window THE FLEET created {created} and closed "
+        f"{closed} (ratio {ratio:.2f} — the gate opens below {allow_below:.2f}). "
+        f"Close or finish {need} more row{'s' if need != 1 else ''} before filing this one. "
+        f"⚠️ THAT IS A FLEET-WIDE COUNT, NOT YOURS — you may own none of those rows, so "
+        f"do not wait on it. Route the finding instead: amend it onto a related existing "
+        f"row (task_amend), the tier-1 fallback in session-end.md, which is always "
+        f"available to you. "
         f"(A P0 is exempt if this genuinely cannot wait.)"
+    )
+
+
+def ratio_gate_reading( created, closed, allow_below, verdict ):
+    """
+    The gate's reading, for the paths that do NOT refuse — row aba30387, defect 1.
+
+    PURE. Returns the line the caller should log; the caller decides where it goes.
+
+    🔴 WHY THIS EXISTS. `ratio_gate_advisory` returns None on an allow, and the router
+    discarded created / closed / ratio / threshold with all four in hand. So a PERMIT
+    produced no reading at all, and a working gate was indistinguishable from an absent
+    one from outside. Measured cost, 2026-09-04: Tiffany's three creates were permitted,
+    the row filed against them said the gate was "ARMED AND INERT", and settling that
+    needed the ratio AT THE TIME of each permit — which nothing had recorded. Mr Radio
+    reconstructed what he could and reported that the deciding value "remains INFERRED,
+    NOT MEASURED." It is unrecoverable now.
+
+    ⚠️ THIS REVERSES A DELIBERATE PRIOR DECISION, and the reasoning is worth keeping
+    rather than deleting: "SUCCESS IS SILENT. A confirmation on every ordinary create is
+    noise, and the success signal is the number already sitting in the board header."
+    That was not wrong about noise. It was wrong that the header substitutes — the header
+    is a LIVE number read at page time, while a verdict is a reading taken AT REQUEST TIME
+    over a specific window. When the two differ, the header cannot say what the gate saw.
+
+    Requires:
+        - created / closed are the non-negative ints the verdict was computed from
+        - allow_below is the threshold in force at that moment
+        - verdict is a short tag for the path taken, e.g. "allow" or "exempt-p0"
+
+    Ensures:
+        - returns a single line naming the verdict, both counts, the threshold, and the
+          ratio — or "n/a" for the ratio when closed is 0, since printing one without a
+          denominator would be inventing a reading
+        - never raises
+    """
+    ratio = f"{created / closed:.2f}" if closed else "n/a (nothing closed)"
+    return (
+        f"[task INFO] ratio gate {verdict}: created={created} closed={closed} "
+        f"ratio={ratio} threshold={allow_below:.2f}"
     )
 
 
