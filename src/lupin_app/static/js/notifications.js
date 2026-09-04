@@ -1227,6 +1227,31 @@ class NotificationsUI {
             const elapsed = ( performance.now() - startTime ).toFixed( 1 );
             this.log( `✓ Token valid (checked in ${elapsed}ms)` );
         }
+
+        // 🔴 ONE TOKEN OF RECORD FOR THE PAGE. Row 20775ec5, and this is the SOURCE of
+        // the broadcast 401 rather than its symptom.
+        //
+        // This method decides on `this.authToken`, an IN-MEMORY field, and only ever
+        // touched localStorage as a side effect of an actual refresh. So the fast path
+        // above — the common one — could return happily while the stored token said
+        // something else entirely, and nothing on the page would ever reconcile them.
+        //
+        // MEASURED 2026-09-04 in Rick's own browser: with the stored token blanked and
+        // the in-memory one still live, `authedFetch` returned 200 and left
+        // `localStorage.lupin_access_token` at length 0. Every OTHER reader of that key
+        // — the broadcast panel, `lupin-nav.js`'s logged-in indicator — then reads a
+        // value the page itself has already superseded, and Rick sees "logged in" and a
+        // 401 at the same instant, both readings truthful about different tokens.
+        //
+        // ⚠️ THE PANEL'S OWN FIX IS NOT THIS FIX. Routing the broadcast panel through
+        // `authedFetch` (broadcast-panel.js, row 20775ec5) removes THAT panel as an
+        // independent reader. It does nothing for the next one somebody writes, which
+        // is why this row's DONE MEANS calls a panel-only change "the symptom".
+        // Reconciling here makes the store authoritative for everyone.
+        if ( this.authToken && localStorage.getItem( "lupin_access_token" ) !== this.authToken ) {
+            localStorage.setItem( "lupin_access_token", this.authToken );
+            this.log( "Reconciled stored access token with the in-memory one (row 20775ec5)" );
+        }
     }
 
     async authedFetch( url, options = {} ) {
