@@ -1264,8 +1264,20 @@
     <script type="module" src="/static/js/shared/task-list-query.js?v=20260902a"></script>
     <script type="module" src="/static/js/shared/agent-select.js?v=20260829a"></script>
     <script type="module" src="/static/js/shared/arg-interview.js?v=20260829a"></script>
-    <script src="/static/js/notifications.js?v=20260904c"></script>
-    <script src="/static/js/broadcast-panel.js?v=20260619a"></script>
+    <!-- 🔴 CACHE TOKENS PICKED BY THE MERGER, BY HAND, 2026-09-04 — per the standing
+         ruling in 0da963f4: this value belongs to whoever merges, not to either author,
+         because two authors both bumping it is what produced that ruling. Neither side
+         of this conflict was correct to take verbatim:
+           HEAD  notifications.js 20260904c · broadcast-panel.js 20260619a
+           door2 notifications.js 20260904a · broadcast-panel.js 20260904a
+         THIS MERGE CHANGES BOTH FILES (+25 and +55 lines), so both tokens must move,
+         and a bump must beat MAIN rather than your own base.
+         ⚠️ HEAD's broadcast-panel token was the dangerous one: 20260619a against a
+         file whose last commit is 20260904. Taking HEAD verbatim would have shipped
+         the broadcast-401 fix behind an unmoved cache key — landed in git, absent on
+         screen — which is the exact failure john reproduced and fixed at 48d16579. -->
+    <script src="/static/js/notifications.js?v=20260904d"></script>
+    <script src="/static/js/broadcast-panel.js?v=20260904d"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.
         // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
